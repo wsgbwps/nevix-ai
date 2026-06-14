@@ -1,0 +1,34 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nevix/desktop build:${{ matrix.platform }}
+
+      - uses: manyuanrong/setup-ossutil@v3.0
+        with:
+          access-key-id: ${{ secrets.OSS_KEY_ID }}
+          access-key-secret: ${{ secrets.OSS_KEY_SECRET }}
+          endpoint: oss-cn-hangzhou.aliyuncs.com
+      - run: ossutil cp -r apps/desktop/dist/ oss://${{ secrets.OSS_BUCKET }}/releases/${{ github.ref_name }}/ --update

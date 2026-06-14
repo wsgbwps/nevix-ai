@@ -1,0 +1,6 @@
+openapi: 3.1.0
+info:
+  title: Nevix AI API
+  version: 0.1.0
+  description: API contract between desktop client and backend server
+paths: {}
