@@ -62,11 +62,11 @@ nevix-ai/
 
 ```
 src/main/
-├── index.ts                      # 入口：app 生命周期，组装各模块
+├── index.ts                      # 入口：app 生命周期，组装各模块（纯组装器，不含业务逻辑）
 ├── window/
 │   └── main-window.ts            # 窗口创建与管理
 ├── ipc/
-│   ├── types.ts                  # 类型安全 IPC 基础设施（typed wrapper）
+│   ├── types.ts                  # ★ IPC 类型合约（Main ↔ Renderer 的唯一 seam）
 │   ├── register.ts               # 统一注册所有 domain 的 handlers/listeners
 │   ├── system/                   # 系统级 IPC（窗口操作、文件对话框等）
 │   │   ├── index.ts              # 导出类型 + 注册函数 + API 对象
@@ -103,12 +103,13 @@ src/main/
 
 1. **按 domain 拆目录**：`ipc/video-generation/`、`ipc/image-editing/`，和 renderer `features/` 一一对应
 2. **每个 handler 一个文件**：`generate-video.ts`、`get-progress.ts`，避免单文件无限膨胀
-3. **类型安全**：使用 `@electron-toolkit/typed-ipc` 或等效 typed wrapper，channel 名称和参数全程类型检查
+3. **类型安全（核心）**：`ipc/types.ts` 定义所有 channel 的请求/响应类型映射，是 Main ↔ Renderer 的唯一类型合约。Main handler、Preload bridge、Renderer 调用点三方共用此合约，channel 名拼错或参数类型不匹配在 `tsc` 阶段即被捕获。可基于 `@electron-toolkit/typed-ipc` 或等效 typed wrapper 实现
 4. **每个 domain 的 `index.ts` 导出三样东西**：
    - **类型映射**（handler types、listener types、main-to-renderer event types）
    - **API 对象**（供 preload 暴露给 renderer）
    - **注册函数**（`registerXxxHandlers()`，在 `register.ts` 中统一调用）
 5. **`register.ts`** 在 `app.whenReady()` 时统一注册所有 domain
+6. **`index.ts` 是纯组装器**：只负责导入模块并调用注册函数，不包含任何业务逻辑
 
 这样每个 feature 开发者只在自己的 `ipc/<domain>/` 下增删 handler 文件，不会和其他人冲突。
 
@@ -126,9 +127,12 @@ src/main/
 
 ```
 src/renderer/src/
-├── app/                          # 应用层
+├── main.tsx                      # 入口（仅 import globals.css + render App）
+├── app/                          # 应用层（全局 shell）
+│   ├── globals.css               # 全局样式（Tailwind + shadcn 主题 + 设计 tokens + base）
+│   ├── App.tsx                   # 根组件
 │   ├── routes/                   # TanStack Router 文件路由
-│   └── providers.tsx             # 全局 providers
+│   └── providers.tsx             # 全局 providers（QueryClient, ThemeProvider 等）
 ├── features/                     # ★ 功能模块（每人一个目录，互不侵入）
 │   ├── video-generation/         # 开发者 A
 │   │   ├── components/
@@ -148,9 +152,10 @@ src/renderer/src/
 │       └── index.ts
 ├── components/                   # 共享 UI 层
 │   └── ui/                       # shadcn/ui 组件（button, dialog, input...）
+├── assets/                       # 静态资源（图片、SVG、字体文件，不放样式文件）
 ├── lib/                          # 共享工具函数（含 shadcn 的 utils）
 ├── hooks/                        # 共享 hooks
-└── main.tsx
+└── env.d.ts                      # Vite 类型声明
 ```
 
 **关键规则：**
@@ -159,6 +164,9 @@ src/renderer/src/
 - feature 之间需要通信时，走 `lib/` 或事件机制
 - 每个 feature 的 `index.ts` 是唯一的公共导出
 - `components/ui/` 是 shadcn 默认生成路径，保持不变，视为 shared 层
+- `app/globals.css` 是全局样式的唯一归属地（Tailwind 配置 + shadcn 主题 + 设计 tokens + base 样式）
+- `assets/` **仅存放**静态资源（图片、SVG、字体文件），**禁止**放置 CSS 或其他应用配置文件
+- `shadcn` CLI 包属于 devDependencies（代码生成工具，非运行时依赖）
 
 ---
 
@@ -227,13 +235,19 @@ contracts/
 pnpm dev          # 启动 Electron 开发模式
 pnpm build        # 构建前端
 pnpm lint         # 运行 lint
-cd server && go run .  # 启动后端
+cd server && go run ./cmd/server  # 启动后端
 
 make dev          # 同 pnpm dev
 make server       # 启动 Go 后端
 make build        # 构建所有
 make lint         # lint 所有
 ```
+
+## 打包与应用身份
+
+- **App ID**：`com.nevix.ai`（electron-builder.yml + main 进程 `setAppUserModelId`）
+- **Product Name**：`Nevix AI`
+- App ID 一旦发布后变更，已安装用户会丢失数据和配置，必须在首次发布前确定
 
 ## 分支与 PR 规范
 
