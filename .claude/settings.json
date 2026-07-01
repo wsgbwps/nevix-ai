@@ -1,0 +1,38 @@
+{
+  "enabledPlugins": {
+    "claude-code-setup@claude-plugins-official": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *pnpm-lock.yaml|*.env|*.env.*) echo 'BLOCKED: do not edit lock files or .env files directly' >&2; exit 2;; esac"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *.ts|*.tsx|*.js|*.jsx|*.json|*.css|*.yaml) npx prettier --write \"$fp\" 2>/dev/null || true;; esac"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *.go) gofmt -w \"$fp\" 2>/dev/null || true;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -6,10 +6,7 @@ interface TypedApi {
     ...args: IpcChannelMap[K] extends { request: infer Req } ? [Req] : []
   ): Promise<IpcChannelMap[K] extends { response: infer Res } ? Res : void>
 
-  on<K extends keyof IpcEventMap>(
-    channel: K,
-    listener: (data: IpcEventMap[K]) => void
-  ): () => void
+  on<K extends keyof IpcEventMap>(channel: K, listener: (data: IpcEventMap[K]) => void): () => void
 }
 
 declare global {

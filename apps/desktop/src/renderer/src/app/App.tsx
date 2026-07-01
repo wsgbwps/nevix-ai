@@ -1,7 +1,7 @@
 function App(): React.JSX.Element {
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
-      <h1 className="text-2xl font-semibold text-foreground">Nevix AI</h1>
+    <div className="bg-background flex h-screen items-center justify-center">
+      <h1 className="text-foreground text-2xl font-semibold">Nevix AI</h1>
     </div>
   )
 }
