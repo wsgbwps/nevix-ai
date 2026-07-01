@@ -4,10 +4,23 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint"
+    "lint": "turbo run lint",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "prettier": "^3.8.4",
+    "prettier-plugin-tailwindcss": "^0.8.0",
     "turbo": "^2.5.0"
   },
-  "packageManager": "pnpm@11.0.9"
+  "packageManager": "pnpm@11.0.9",
+  "lint-staged": {
+    "apps/desktop/**/*.{ts,tsx,js,jsx,json,css,yaml}": [
+      "prettier --write --config apps/desktop/.prettierrc.yaml"
+    ],
+    "server/**/*.go": [
+      "bash -c '\"$(go env GOPATH)/bin/goimports\" -w \"$@\"' --"
+    ]
+  }
 }

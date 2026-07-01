@@ -11,15 +11,9 @@
     "composite": true,
     "jsx": "react-jsx",
     "paths": {
-      "@renderer/*": [
-        "./src/renderer/src/*"
-      ],
-      "@/*": [
-        "./src/renderer/src/*"
-      ],
-      "@ipc/channels": [
-        "./src/shared/ipc/channels.ts"
-      ]
+      "@renderer/*": ["./src/renderer/src/*"],
+      "@/*": ["./src/renderer/src/*"],
+      "@ipc/channels": ["./src/shared/ipc/channels.ts"]
     }
   }
 }

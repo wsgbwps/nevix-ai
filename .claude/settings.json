@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *.go) gofmt -w \"$fp\" 2>/dev/null || true;; esac"
+            "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *.go) $(go env GOPATH)/bin/goimports -w \"$fp\" 2>/dev/null || true;; esac"
           }
         ]
       }
