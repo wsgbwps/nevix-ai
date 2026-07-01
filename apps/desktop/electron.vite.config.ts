@@ -11,7 +11,13 @@ export default defineConfig({
       }
     }
   },
-  preload: {},
+  preload: {
+    resolve: {
+      alias: {
+        '@ipc/channels': resolve('src/shared/ipc/channels.ts')
+      }
+    }
+  },
   renderer: {
     resolve: {
       alias: {

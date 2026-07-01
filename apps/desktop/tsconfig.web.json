@@ -16,6 +16,9 @@
       ],
       "@/*": [
         "./src/renderer/src/*"
+      ],
+      "@ipc/channels": [
+        "./src/shared/ipc/channels.ts"
       ]
     }
   }
