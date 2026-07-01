@@ -10,4 +10,4 @@ lint:
 	pnpm lint
 
 server:
-	cd server && go run .
+	cd server && go run ./cmd/server
