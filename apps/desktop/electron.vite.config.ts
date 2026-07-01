@@ -4,13 +4,20 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  main: {},
+  main: {
+    resolve: {
+      alias: {
+        '@ipc/channels': resolve('src/shared/ipc/channels.ts')
+      }
+    }
+  },
   preload: {},
   renderer: {
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src'),
-        '@': resolve('src/renderer/src')
+        '@': resolve('src/renderer/src'),
+        '@ipc/channels': resolve('src/shared/ipc/channels.ts')
       }
     },
     plugins: [react(), tailwindcss()]
