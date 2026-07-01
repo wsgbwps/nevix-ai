@@ -22,8 +22,14 @@ AI 媒体创作 SaaS 桌面应用。
 ```
 nevix-ai/
 ├── apps/desktop/          # Electron + React 桌面客户端
+│   └── src/
+│       ├── shared/ipc/    # ★ IPC 类型声明（declaration merging，各 domain 独立扩展）
+│       ├── main/          # 主进程（handler 注册 + import.meta.glob 自动发现）
+│       ├── preload/       # 预加载（通用 typedInvoke / typedOn）
+│       └── renderer/      # 渲染进程（React + Feature-Sliced）
 ├── server/                # Go 后端（独立于 Node workspace）
 ├── contracts/             # 前后端共享的 API 契约（OpenAPI）
+├── docs/adr/              # 架构决策记录
 ├── scripts/               # 构建和部署脚本
 ├── .github/workflows/     # CI/CD
 ├── turbo.json
@@ -58,23 +64,34 @@ nevix-ai/
 
 ---
 
+### IPC 共享类型 (`apps/desktop/src/shared/ipc/`)
+
+```
+src/shared/ipc/
+├── channels.ts                   # ★ IPC 类型基座（空 interface，不需要编辑）
+│                                 #   export interface IpcChannelMap {}   — request/response
+│                                 #   export interface IpcEventMap {}     — main → renderer push
+├── video-generation/
+│   └── types.ts                  # declare module '@ipc/channels' 扩展 + 具名 req/res 类型
+├── image-editing/
+│   └── types.ts
+└── project-management/
+    └── types.ts
+```
+
+各 domain 通过 TypeScript **declaration merging** 在自己的 `types.ts` 里扩展 `IpcChannelMap` / `IpcEventMap`，用 path alias `@ipc/channels` 而非相对路径。`tsconfig` 的 `include` glob 覆盖 `shared/**/*.ts`，tsc 自动合并所有 augmentation——无需 barrel 文件。详见 [ADR-0001](docs/adr/0001-ipc-self-registration.md)。
+
 ### Electron 主进程 (`apps/desktop/src/main/`)
 
 ```
 src/main/
-├── index.ts                      # 入口：app 生命周期，组装各模块（纯组装器，不含业务逻辑）
+├── index.ts                      # 入口：app 生命周期 + import.meta.glob 自动注册 IPC handlers
 ├── window/
 │   └── main-window.ts            # 窗口创建与管理
 ├── ipc/
-│   ├── types.ts                  # ★ IPC 类型合约（Main ↔ Renderer 的唯一 seam）
-│   ├── register.ts               # 统一注册所有 domain 的 handlers/listeners
-│   ├── system/                   # 系统级 IPC（窗口操作、文件对话框等）
-│   │   ├── index.ts              # 导出类型 + 注册函数 + API 对象
-│   │   ├── open-file-dialog.ts   # 单个 handler
-│   │   └── get-app-version.ts
 │   ├── video-generation/         # 视频生成（开发者 A）
-│   │   ├── index.ts
-│   │   ├── generate-video.ts
+│   │   ├── index.ts              # export function register() — handler 注册
+│   │   ├── generate-video.ts     # 单个 handler
 │   │   └── get-progress.ts
 │   ├── image-editing/            # 图片编辑（开发者 B）
 │   │   ├── index.ts
@@ -93,31 +110,29 @@ src/main/
 | 目录 | 职责 | 时机 |
 |------|------|------|
 | `window/` | BrowserWindow 创建、多窗口管理、窗口状态持久化 | 初始化即有 |
-| `ipc/` | 类型安全的 IPC 层，按 domain 拆目录，每个 handler 独立文件 | 初始化即有 |
+| `ipc/` | handler 运行时逻辑，按 domain 拆目录，每个 handler 独立文件 | 初始化即有 |
 | `updater/` | 自动更新检查、下载、安装提示 | 接入阿里云 OSS 时 |
 | `tray/` | 系统托盘图标和菜单 | 产品需要后台常驻时 |
 
 **IPC 架构说明：**
 
-采用业界推荐的 **Domain-based + Type-safe IPC** 模式（参考 [Orbit](https://heckmann.app/en/blog/electron-ipc-architecture)、[Ray 3.0](https://myray.app/blog/ray-architecture) 等成熟 Electron 应用），核心要点：
+采用 **Domain-based + Type-safe IPC + 自注册** 模式，核心要点：
 
-1. **按 domain 拆目录**：`ipc/video-generation/`、`ipc/image-editing/`，和 renderer `features/` 一一对应
-2. **每个 handler 一个文件**：`generate-video.ts`、`get-progress.ts`，避免单文件无限膨胀
-3. **类型安全（核心）**：`ipc/types.ts` 定义所有 channel 的请求/响应类型映射，是 Main ↔ Renderer 的唯一类型合约。Main handler、Preload bridge、Renderer 调用点三方共用此合约，channel 名拼错或参数类型不匹配在 `tsc` 阶段即被捕获。可基于 `@electron-toolkit/typed-ipc` 或等效 typed wrapper 实现
-4. **每个 domain 的 `index.ts` 导出三样东西**：
-   - **类型映射**（handler types、listener types、main-to-renderer event types）
-   - **API 对象**（供 preload 暴露给 renderer）
-   - **注册函数**（`registerXxxHandlers()`，在 `register.ts` 中统一调用）
-5. **`register.ts`** 在 `app.whenReady()` 时统一注册所有 domain
-6. **`index.ts` 是纯组装器**：只负责导入模块并调用注册函数，不包含任何业务逻辑
+1. **类型与运行时分离**：类型声明在 `shared/ipc/`（tsc 负责聚合），handler 注册在 `main/ipc/`（Vite 负责发现）——两条独立管线
+2. **按 domain 拆目录**：`ipc/video-generation/`、`ipc/image-editing/`，和 renderer `features/` 一一对应
+3. **每个 handler 一个文件**：`generate-video.ts`、`get-progress.ts`，避免单文件无限膨胀
+4. **类型安全（核心）**：各 domain 在自己的 `shared/ipc/<domain>/types.ts` 里通过 `declare module '@ipc/channels'` 扩展 `IpcChannelMap` / `IpcEventMap`。channel 名拼错或参数类型不匹配在 `tsc` 阶段即被捕获。每个 domain 独立导出具名的 request/response 类型（如 `GenerateVideoReq`），renderer 可直接 import
+5. **自动注册（核心）**：`main/index.ts` 通过 `import.meta.glob('./ipc/*/index.ts', { eager: true })` 在构建时自动发现并注册所有 domain 的 handler。加新 domain 只需创建目录，不需要编辑任何共享文件
+6. **Preload 通用化**：preload 只暴露 `typedInvoke`（request/response）和 `typedOn`（push events）两个泛型函数，类型从 `IpcChannelMap` / `IpcEventMap` 推导。加新 domain 不需要编辑 preload
+7. **`index.ts` 是纯组装器**：只负责 app 生命周期和自动注册，不包含任何业务逻辑
 
-这样每个 feature 开发者只在自己的 `ipc/<domain>/` 下增删 handler 文件，不会和其他人冲突。
+**加一个 handler 只改自己 domain 下的两个文件**（`shared/ipc/<domain>/types.ts` + `main/ipc/<domain>/index.ts`），不碰任何共享文件。
 
 ---
 
 ### Electron 预加载 (`apps/desktop/src/preload/`)
 
-保持 electron-vite 模板默认结构，不做额外规划。preload 是固定的桥接层，通过 `contextBridge` 暴露 API 给 renderer。
+preload 是固定的桥接层，通过 `contextBridge` 暴露通用的 `typedInvoke` / `typedOn` 给 renderer。不含 per-domain 代码，加新 domain 不需要编辑。
 
 ---
 
@@ -170,37 +185,41 @@ src/renderer/src/
 
 ---
 
-### Go 后端 (`server/`) — 完整 DDD
+### Go 后端 (`server/`) — 按复杂度分层
 
 ```
 server/
 ├── cmd/server/
-│   └── main.go                   # 入口：组装所有模块，注册路由
+│   └── main.go                   # 入口：显式调用各 module 的 Register()
 ├── internal/                     # ★ 业务模块（每人一个目录）
-│   └── <module>/
-│       ├── domain/
-│       │   ├── entity.go         # 实体、聚合根
-│       │   ├── value.go          # 值对象
-│       │   ├── event.go          # 领域事件定义
-│       │   └── repository.go     # Repository 接口（不是实现）
-│       ├── application/
-│       │   ├── service.go        # 应用服务 / 用例编排
-│       │   ├── command.go        # 命令（写操作）
-│       │   └── query.go          # 查询（读操作）
-│       ├── infrastructure/
-│       │   ├── postgres_repo.go  # Repository 实现
-│       │   └── adapter.go        # 外部服务适配器
-│       └── interface/
-│           └── http.go           # HTTP handler，暴露 RegisterRoutes()
+│   ├── videogen/                 # 复杂模块 — 完整 DDD 分层
+│   │   ├── domain/
+│   │   │   ├── entity.go         # 实体、聚合根
+│   │   │   ├── value.go          # 值对象
+│   │   │   ├── event.go          # 领域事件定义
+│   │   │   └── repository.go     # Repository 接口（不是实现）
+│   │   ├── application/
+│   │   │   ├── service.go        # 应用服务 / 用例编排
+│   │   │   ├── command.go        # 命令（写操作）
+│   │   │   └── query.go          # 查询（读操作）
+│   │   ├── infrastructure/
+│   │   │   ├── postgres_repo.go  # Repository 实现
+│   │   │   └── adapter.go        # 外部服务适配器
+│   │   └── interface/
+│   │       └── http.go           # Register(r chi.Router, bus event.Bus)
+│   └── projmgmt/                 # 简单模块 — 单文件，等出现第二个 adapter 再拆
+│       └── module.go             # handler + storage 内联
 ├── pkg/                          # 跨模块共享
 │   ├── middleware/                # HTTP 中间件
 │   ├── auth/                     # 认证
 │   ├── database/                 # 数据库连接
-│   └── event/                    # 事件总线
+│   └── event/                    # 事件总线（types.go 定义事件类型，bus.go 定义接口）
 └── go.mod
 ```
 
-**DDD 分层职责：**
+**DDD 分层仅用于确有复杂度的模块**（如 videogen：异步编排、外部 AI 供应商适配、状态机）。简单 CRUD 模块（如 projmgmt）使用单文件，等真正出现第二个 adapter 时再拆出 repository 接口。
+
+**复杂模块的分层职责：**
 
 | 层 | 职责 | 依赖方向 |
 |---|---|---|
@@ -209,11 +228,14 @@ server/
 | `infrastructure/` | Repository 实现、外部服务适配 | 依赖 domain（实现接口） |
 | `interface/` | HTTP handler，调用 application | 依赖 application |
 
+**注册方式：**
+
+每个 module 导出 `Register(r chi.Router, bus event.Bus)`，在 `main.go` 中显式调用。路由和事件订阅在同一个函数中完成。不使用 `init()` + blank import——保留所有注册的可见性。详见 [ADR-0001](docs/adr/0001-ipc-self-registration.md)。
+
 **关键规则：**
 
-- `internal/videogen/` **禁止** import `internal/imageedit/`
-- 模块间通信通过 `pkg/event/` 事件总线
-- 每个模块通过 `interface/http.go` 暴露 `RegisterRoutes(r chi.Router)`，在 `cmd/server/main.go` 中统一注册
+- `internal/videogen/` **禁止** import `internal/projmgmt/`
+- 模块间通信通过 `pkg/event/` 事件总线，事件类型集中定义在 `pkg/event/types.go`
 
 ---
 
