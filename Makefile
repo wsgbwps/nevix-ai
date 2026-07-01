@@ -1,4 +1,4 @@
-.PHONY: dev build lint server
+.PHONY: dev build lint server setup
 
 dev:
 	pnpm dev
@@ -11,3 +11,10 @@ lint:
 
 server:
 	cd server && go run ./cmd/server
+
+setup:
+	pnpm install
+	go install golang.org/x/tools/cmd/goimports@latest
+	go install golang.org/x/tools/gopls@latest
+	mkdir -p ~/.config/husky
+	test -f ~/.config/husky/init.sh || echo 'export PATH="/usr/local/bin:/opt/homebrew/bin:$$HOME/go/bin:$$PATH"' > ~/.config/husky/init.sh

@@ -1,0 +1,13 @@
+msg=$(head -1 "$1")
+
+# Pattern: <emoji> <type>(<scope>): <desc>  or  <emoji> <type>: <desc>
+if ! echo "$msg" | grep -qE '^.+ (feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .+'; then
+  echo "❌ 提交信息格式错误"
+  echo ""
+  echo "正确格式: <emoji> <type>(<scope>): <description>"
+  echo "示例:     ✨ feat(ipc): 添加新的 IPC 通道"
+  echo "          🐛 fix: 修复启动崩溃问题"
+  echo ""
+  echo "允许的 type: feat fix docs style refactor perf test build ci chore revert"
+  exit 1
+fi
