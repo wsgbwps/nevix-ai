@@ -17,10 +17,16 @@
 - Each module exports `Register(r chi.Router, bus event.Bus)`, which is called explicitly in `main.go`; do not use `init()` with a blank import
 - Keep simple modules in a single file; extract a repository interface only when a second adapter is introduced
 
+### Supabase and Go architecture
+
+- Before planning, implementing, or reviewing changes involving Supabase, Go trusted operations, Storage, Realtime, Webhooks, PostgreSQL access, or AI providers, read and follow [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md)
+- Do not change the Supabase-to-Go responsibility seam inside a feature PR; create a separate architecture ticket and update ADR-0004 first
+
 ### Shared areas
 
 - `components/ui/`, `lib/`, and `pkg/` are shared areas; changes require additional review
-- A single PR may change only `features/<name>/`, `ipc/<name>/`, `internal/<name>/`, and `contracts/<name>.yaml`
+- A single implementation PR may change only `features/<name>/`, `ipc/<name>/`, `internal/<name>/`, and `contracts/<name>.yaml`
+- A documentation-only architecture PR may instead change project guidance, Context documents, ADRs, README, and its local issue; it must not include schema, API, Electron, Go, cloud-resource, or provider-adapter implementation
 
 ## Agent skills
 

@@ -12,6 +12,7 @@ AI 媒体创作 SaaS 桌面应用。
 | 数据获取 | TanStack Query |
 | UI 状态 | Zustand |
 | 样式 & 组件 | Tailwind CSS v4 + shadcn/ui |
+| 身份、数据与对象存储 | Supabase (Auth / PostgreSQL / Storage / Realtime) |
 | 后端 | Go — API 服务 / Agent 编排 |
 | Monorepo | Turborepo + pnpm Workspaces |
 | 打包 | electron-builder |
@@ -43,7 +44,9 @@ nevix-ai/
 
 采用 Feature-Sliced + Vertical Slice + DDD，3 人按功能垂直切分，代码物理隔离。详见 [ADR-0002](docs/adr/0002-feature-sliced-vertical-slice.md)。
 
-领域术语详见 `CONTEXT-MAP.md` → 各子 context 的 `CONTEXT.md`；代码隔离规则详见 `CLAUDE.md`。
+数据平面默认由 Desktop 使用用户 JWT 直连受策略保护的 Supabase；只有密钥、额度/支付、Webhook、管理员权限、事务或异步编排需要跨入 Go 的可信执行 seam。Go 不是 Supabase 的通用代理层；完整决策见 [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md)。
+
+领域术语详见 `CONTEXT-MAP.md` → 各子 context 的 `CONTEXT.md`；Codex 的持久开发与评审规则详见 [`AGENTS.md`](AGENTS.md)。
 
 ---
 
