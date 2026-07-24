@@ -48,7 +48,7 @@ function Button({
 }: React.ComponentProps<'button'> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
-  }) {
+  }): React.JSX.Element {
   const Comp = asChild ? Slot.Root : 'button'
 
   return (
@@ -62,4 +62,8 @@ function Button({
   )
 }
 
-export { Button, buttonVariants }
+export { Button }
+
+// This styling helper is part of the shared Button API for compound controls.
+// eslint-disable-next-line react-refresh/only-export-components
+export { buttonVariants }

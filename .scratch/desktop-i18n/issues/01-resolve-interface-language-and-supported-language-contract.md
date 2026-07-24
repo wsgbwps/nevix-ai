@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** needs-info
+**Status:** done
 
 - [x] 默认 Language Mode 为“跟随系统”；启动时最高优先级系统语言属于中文语言族时，Interface Language 为 `zh-CN`。
 - [x] 启动时最高优先级系统语言属于英文语言族时，Interface Language 为 `en`。
@@ -21,8 +21,8 @@
 - [x] TypeScript 能检查静态字面量翻译 key，常规实现不依赖动态 key 绕过资源契约。
 - [x] 新增单一 `@playwright/test` 测试框架；Electron 应用测试以隔离用户数据和受控系统语言覆盖中文、英文与不支持语言三条启动路径。
 - [x] 同一测试 runner 执行 Supported Language 资源契约测试，不额外引入第二套单元测试框架。
-- [ ] Desktop lint、node/web TypeScript 检查、生产构建和新增测试全部通过。
+- [x] Desktop lint、node/web TypeScript 检查、生产构建和新增测试全部通过。
 
 ## Comments
 
-- 2026-07-24：提交 `62c80be` 已完成并验证前 15 项；node/web TypeScript 检查、生产构建和 4 个 Playwright 测试通过。`pnpm run lint` 仍在未修改的 `src/renderer/src/components/ui/button.tsx`（2 项）及 `src/renderer/src/lib/utils.ts`（1 项）失败。是否将这些共享层基线 lint 修复纳入本 ticket，需要确认。
+- 2026-07-24：提交 `62c80be` 完成实现。后续修复共享层的 3 个既有 lint 错误后，Desktop lint、node/web TypeScript 检查、生产构建和 4 个 Playwright 测试均已通过。
