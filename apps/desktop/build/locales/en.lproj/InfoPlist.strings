@@ -1,0 +1,4 @@
+"NSCameraUsageDescription" = "Nevix AI requests access to your camera.";
+"NSMicrophoneUsageDescription" = "Nevix AI requests access to your microphone.";
+"NSDocumentsFolderUsageDescription" = "Nevix AI requests access to your Documents folder.";
+"NSDownloadsFolderUsageDescription" = "Nevix AI requests access to your Downloads folder.";

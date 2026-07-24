@@ -18,8 +18,9 @@
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux"
+    "build:mac": "npm run build && electron-builder --mac && npm run verify:package-localization",
+    "build:linux": "electron-vite build && electron-builder --linux",
+    "verify:package-localization": "node scripts/verify-packaged-localized-surfaces.mjs"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",

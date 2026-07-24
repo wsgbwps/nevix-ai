@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import i18next from 'i18next'
+import {
+  macOSLocalizationPaths,
+  missingMacOSPermissionKeys,
+  nsisInstallerLanguages
+} from '../../scripts/packaged-localization-contract.mjs'
 import { createI18nOptions } from '../../src/shared/i18n/i18next-options'
 import { DEFAULT_LANGUAGE_MODE } from '../../src/shared/i18n/language-mode'
 import {
@@ -29,6 +36,28 @@ test('an incomplete unregistered language does not become a Supported Language',
 
   expect(validateSupportedLanguageResources([ownerWithCandidate])).toEqual([])
   expect(SUPPORTED_LANGUAGES).not.toContain('fr')
+})
+
+test('each Supported Language has complete non-empty macOS permission explanations', async () => {
+  expect(Object.keys(macOSLocalizationPaths).sort()).toEqual([...SUPPORTED_LANGUAGES].sort())
+
+  for (const localizationPath of Object.values(macOSLocalizationPaths)) {
+    const localization = await readFile(
+      join(__dirname, '../../build/locales', localizationPath),
+      'utf8'
+    )
+    expect(missingMacOSPermissionKeys(localization)).toEqual([])
+  }
+})
+
+test('the NSIS installer enables every Supported Language', async () => {
+  const builderConfig = await readFile(join(__dirname, '../../electron-builder.yml'), 'utf8')
+  const installerLanguages = nsisInstallerLanguages
+    .map((language) => `    - ${language}`)
+    .join('\n')
+
+  expect(nsisInstallerLanguages).toEqual(['en_US', 'zh_CN'])
+  expect(builderConfig).toContain(`  installerLanguages:\n${installerLanguages}`)
 })
 
 test('a missing formal translation falls back only in production and reports in test', async () => {
