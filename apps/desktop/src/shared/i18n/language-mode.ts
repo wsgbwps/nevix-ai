@@ -6,6 +6,10 @@ export type LanguageMode = (typeof LANGUAGE_MODES)[number]
 
 export const DEFAULT_LANGUAGE_MODE: LanguageMode = 'follow-system'
 
+export function isLanguageMode(value: unknown): value is LanguageMode {
+  return typeof value === 'string' && LANGUAGE_MODES.includes(value as LanguageMode)
+}
+
 export function interfaceLanguageForMode(
   languageMode: LanguageMode,
   systemLanguages: readonly string[]

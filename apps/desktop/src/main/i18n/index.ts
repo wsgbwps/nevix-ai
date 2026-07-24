@@ -1,16 +1,29 @@
 import { app } from 'electron'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import i18next from 'i18next'
 import { createI18nOptions, type I18nEnvironment } from '../../shared/i18n/i18next-options'
-import { DEFAULT_LANGUAGE_MODE, interfaceLanguageForMode } from '../../shared/i18n/language-mode'
+import {
+  DEFAULT_LANGUAGE_MODE,
+  interfaceLanguageForMode,
+  isLanguageMode,
+  type LanguageMode
+} from '../../shared/i18n/language-mode'
 import type { SupportedLanguage } from '../../shared/i18n/resource-contract'
 import { windowResources } from './resources'
 
+const LANGUAGE_MODE_FILE_NAME = 'language-mode.json'
+
 export const mainI18n = i18next.createInstance()
 
+let languageMode: LanguageMode = DEFAULT_LANGUAGE_MODE
 let interfaceLanguage: SupportedLanguage | undefined
+let systemLanguagesAtStartup: readonly string[] | undefined
 
 export async function initializeMainI18n(): Promise<SupportedLanguage> {
-  interfaceLanguage = interfaceLanguageForMode(DEFAULT_LANGUAGE_MODE, getSystemLanguagesAtStartup())
+  languageMode = await readPersistedLanguageMode()
+  systemLanguagesAtStartup = getSystemLanguagesAtStartup()
+  interfaceLanguage = interfaceLanguageForMode(languageMode, systemLanguagesAtStartup)
   await mainI18n.init(
     createI18nOptions({
       language: interfaceLanguage,
@@ -29,6 +42,21 @@ export function getInterfaceLanguage(): SupportedLanguage {
   return interfaceLanguage
 }
 
+export function getLanguageMode(): LanguageMode {
+  return languageMode
+}
+
+export async function setLanguageMode(nextLanguageMode: unknown): Promise<void> {
+  if (!isLanguageMode(nextLanguageMode)) {
+    throw new Error('Invalid Language Mode')
+  }
+
+  await persistLanguageMode(nextLanguageMode)
+  languageMode = nextLanguageMode
+  interfaceLanguage = interfaceLanguageForMode(nextLanguageMode, getSystemLanguagesAtStartupValue())
+  await mainI18n.changeLanguage(interfaceLanguage)
+}
+
 export function getMainWindowTitle(): string {
   return mainI18n.t('title', { ns: 'window' })
 }
@@ -42,6 +70,42 @@ function getSystemLanguagesAtStartup(): readonly string[] {
   }
 
   return app.getPreferredSystemLanguages()
+}
+
+function getSystemLanguagesAtStartupValue(): readonly string[] {
+  if (!systemLanguagesAtStartup) {
+    throw new Error('Main i18n has not been initialized')
+  }
+  return systemLanguagesAtStartup
+}
+
+async function readPersistedLanguageMode(): Promise<LanguageMode> {
+  try {
+    const contents = await readFile(getLanguageModePath(), 'utf8')
+    const storedValue: unknown = JSON.parse(contents)
+    if (
+      typeof storedValue === 'object' &&
+      storedValue !== null &&
+      'languageMode' in storedValue &&
+      isLanguageMode(storedValue.languageMode)
+    ) {
+      return storedValue.languageMode
+    }
+  } catch {
+    // A missing or invalid local setting intentionally falls back to the default.
+  }
+
+  return DEFAULT_LANGUAGE_MODE
+}
+
+async function persistLanguageMode(nextLanguageMode: LanguageMode): Promise<void> {
+  const languageModePath = getLanguageModePath()
+  await mkdir(dirname(languageModePath), { recursive: true })
+  await writeFile(languageModePath, JSON.stringify({ languageMode: nextLanguageMode }), 'utf8')
+}
+
+function getLanguageModePath(): string {
+  return join(app.getPath('userData'), LANGUAGE_MODE_FILE_NAME)
 }
 
 export function getMainI18nEnvironment(): I18nEnvironment {

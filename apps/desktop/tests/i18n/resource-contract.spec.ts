@@ -8,8 +8,9 @@ import {
 } from '../../src/shared/i18n/resource-contract'
 import { windowResourceOwner } from '../../src/main/i18n/resources'
 import { appResourceOwner } from '../../src/renderer/src/app/i18n'
+import { settingsResourceOwner } from '../../src/renderer/src/features/settings'
 
-const resourceOwners = [windowResourceOwner, appResourceOwner]
+const resourceOwners = [windowResourceOwner, appResourceOwner, settingsResourceOwner]
 
 test('each Supported Language has complete non-empty resources for every namespace', () => {
   expect(SUPPORTED_LANGUAGES).toEqual(['zh-CN', 'en'])
