@@ -26,9 +26,9 @@
 
 - `components/ui/`, `lib/`, and `pkg/` are shared areas; changes require additional review
 - By default, one implementation PR delivers one cohesive vertical slice for one primary Domain
-- A vertical slice may include its renderer Feature, domain-local IPC contracts and Handlers, main-process Implementation, and necessary composition-root wiring
-- Necessary shared infrastructure, tests, dependencies, and build or packaging configuration are allowed exceptions only when the PRD or ticket names each exceptional area, explains why it is required, and requests additional review
-- If a change reassigns a Domain responsibility or moves or changes an existing architecture seam, create a separate architecture ticket, update the relevant ADR, and land a documentation-only architecture PR before implementation
+- A vertical slice may include its renderer Feature, domain-local IPC contracts and Handlers, and domain-local implementation under `main/ipc/<domain>/`
+- Necessary composition-root wiring, shared infrastructure, tests, dependencies, and build or packaging configuration are allowed exceptions only when the PRD or ticket names each exceptional area, explains why it is required, and the implementation PR requires and receives additional review before merge
+- If an implementation changes a Domain responsibility or moves or changes an existing architecture seam, create a separate architecture ticket, update the relevant ADR, and land a documentation-only architecture PR before implementation
 - Split work into multiple PRs only when each resulting PR can independently build, test, merge, and roll back without incomplete behaviour or temporary compatibility scaffolding
 - A documentation-only architecture PR may instead change project guidance, Context documents, ADRs, README, and its local issue; it must not include schema, API, Electron, Go, cloud-resource, or provider-adapter implementation
 
