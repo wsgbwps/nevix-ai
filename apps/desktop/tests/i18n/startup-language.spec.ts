@@ -1,37 +1,25 @@
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { _electron as electron } from 'playwright'
+import { expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-
-const desktopRoot = join(__dirname, '../..')
-const appEntry = join(desktopRoot, 'out/main/index.js')
+import { expectWindowTitle, launchTestApp } from '../helpers/electron-app'
 
 async function launchForSystemLanguages(
   systemLanguages: readonly string[]
-): Promise<{ electronApp: ElectronApplication; page: Page; userDataDir: string }> {
+): Promise<Awaited<ReturnType<typeof launchTestApp>> & { userDataDir: string }> {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-i18n-'))
-  const electronApp = await electron.launch({
-    args: [appEntry, `--user-data-dir=${userDataDir}`],
-    cwd: desktopRoot,
-    env: {
-      ...process.env,
-      NEVIX_E2E: '1',
-      NEVIX_TEST_SYSTEM_LANGUAGES: systemLanguages.join(','),
-      NEVIX_TEST_USER_DATA_DIR: userDataDir
-    }
+  const launched = await launchTestApp({
+    userDataDir,
+    systemLanguages
   })
 
-  return { electronApp, page: await electronApp.firstWindow(), userDataDir }
+  return { ...launched, userDataDir }
 }
 
 async function close({
   electronApp,
   userDataDir
-}: {
-  electronApp: ElectronApplication
-  userDataDir: string
-}): Promise<void> {
+}: Awaited<ReturnType<typeof launchForSystemLanguages>>): Promise<void> {
   await electronApp.close()
   await rm(userDataDir, { recursive: true, force: true })
 }
@@ -72,13 +60,7 @@ test('startup selects a matching Interface Language for the highest-priority sys
     const launched = await launchForSystemLanguages(expected.systemLanguages)
     try {
       await expect(launched.page.getByRole('heading', { name: expected.heading })).toBeVisible()
-      await expect
-        .poll(() =>
-          launched.electronApp.evaluate(({ BrowserWindow }) => {
-            return BrowserWindow.getAllWindows()[0]?.getTitle()
-          })
-        )
-        .toBe(expected.title)
+      await expectWindowTitle(launched.electronApp, expected.title)
     } finally {
       await close(launched)
     }

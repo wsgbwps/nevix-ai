@@ -1,50 +1,18 @@
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { _electron as electron } from 'playwright'
+import { expect, test } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-
-const desktopRoot = join(__dirname, '../..')
-const appEntry = join(desktopRoot, 'out/main/index.js')
+import { expectWindowTitle, launchTestApp } from '../helpers/electron-app'
 
 async function launchForSystemLanguages(
   userDataDir: string,
   systemLanguages: readonly string[]
-): Promise<{ electronApp: ElectronApplication; page: Page }> {
-  const electronApp = await electron.launch({
-    args: [appEntry, `--user-data-dir=${userDataDir}`],
-    cwd: desktopRoot,
-    env: {
-      ...process.env,
-      NEVIX_E2E: '1',
-      NEVIX_TEST_SYSTEM_LANGUAGES: systemLanguages.join(','),
-      NEVIX_TEST_USER_DATA_DIR: userDataDir
-    }
+): ReturnType<typeof launchTestApp> {
+  return launchTestApp({
+    userDataDir,
+    systemLanguages,
+    offline: true
   })
-
-  const page = await electronApp.firstWindow()
-  await electronApp.evaluate(({ BrowserWindow }) => {
-    const mainWindow = BrowserWindow.getAllWindows()[0]
-    if (!mainWindow) throw new Error('Main window was not created')
-    mainWindow.webContents.session.enableNetworkEmulation({ offline: true })
-  })
-  await page.reload()
-  return { electronApp, page }
-}
-
-async function close(electronApp: ElectronApplication): Promise<void> {
-  await electronApp.close()
-}
-
-async function expectWindowTitle(
-  electronApp: ElectronApplication,
-  expectedTitle: string
-): Promise<void> {
-  await expect
-    .poll(() =>
-      electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle())
-    )
-    .toBe(expectedTitle)
 }
 
 test('a corrupt or unknown saved Language Mode falls back to follow-system', async () => {
@@ -79,7 +47,7 @@ test('a corrupt or unknown saved Language Mode falls back to follow-system', asy
             .getByRole('radio', { name: expected.followSystem })
         ).toHaveAttribute('aria-checked', 'true')
       } finally {
-        await close(launched.electronApp)
+        await launched.electronApp.close()
       }
     } finally {
       await rm(userDataDir, { recursive: true, force: true })
@@ -139,7 +107,7 @@ test('Language Mode is available offline without an account, updates immediately
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
     } finally {
-      await close(launched.electronApp)
+      await launched.electronApp.close()
     }
 
     launched = await launchForSystemLanguages(userDataDir, ['zh-CN'])
@@ -153,7 +121,7 @@ test('Language Mode is available offline without an account, updates immediately
       await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
       await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')
     } finally {
-      await close(launched.electronApp)
+      await launched.electronApp.close()
     }
 
     launched = await launchForSystemLanguages(userDataDir, ['en-US'])
@@ -163,7 +131,7 @@ test('Language Mode is available offline without an account, updates immediately
       ).toBeVisible()
       await expectWindowTitle(launched.electronApp, 'Nevix AI — Desktop')
     } finally {
-      await close(launched.electronApp)
+      await launched.electronApp.close()
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })

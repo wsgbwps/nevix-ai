@@ -1,6 +1,6 @@
-import type { SupportedLanguage } from './resource-contract'
+import { SUPPORTED_LANGUAGES, type SupportedLanguage } from './resource-contract'
 
-export const LANGUAGE_MODES = ['follow-system', 'zh-CN', 'en'] as const
+export const LANGUAGE_MODES = ['follow-system', ...SUPPORTED_LANGUAGES] as const
 
 export type LanguageMode = (typeof LANGUAGE_MODES)[number]
 

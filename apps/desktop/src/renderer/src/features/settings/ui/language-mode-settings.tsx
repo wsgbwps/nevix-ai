@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { LanguageMode } from '../../../../../shared/i18n/language-mode'
+import { LANGUAGE_MODES, type LanguageMode } from '../../../../../shared/i18n/language-mode'
 
-const languageModeOptions = [
-  { value: 'follow-system', translationKey: 'followSystem' },
-  { value: 'zh-CN', translationKey: 'zhCN' },
-  { value: 'en', translationKey: 'en' }
-] as const
+const languageModeTranslationKeys = {
+  'follow-system': 'followSystem',
+  'zh-CN': 'zhCN',
+  en: 'en'
+} as const satisfies Record<LanguageMode, string>
 
 export function LanguageModeSettings(): React.JSX.Element {
   const { t } = useTranslation('settings')
@@ -48,7 +48,7 @@ export function LanguageModeSettings(): React.JSX.Element {
         {t('heading')}
       </h2>
       <div role="radiogroup" aria-label={t('heading')} className="mt-4 grid gap-2">
-        {languageModeOptions.map(({ value, translationKey }) => {
+        {LANGUAGE_MODES.map((value) => {
           const isSelected = languageMode === value
 
           return (
@@ -63,7 +63,7 @@ export function LanguageModeSettings(): React.JSX.Element {
                 isSelected ? 'border-primary bg-accent ring-primary/30 ring-2' : 'border-input'
               }`}
             >
-              {t(translationKey)}
+              {t(languageModeTranslationKeys[value])}
               {isSelected ? <span aria-hidden="true">✓</span> : null}
             </button>
           )

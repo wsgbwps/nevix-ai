@@ -8,7 +8,7 @@ import {
   nsisInstallerLanguages
 } from '../../scripts/packaged-localization-contract.mjs'
 import { createI18nOptions } from '../../src/shared/i18n/i18next-options'
-import { DEFAULT_LANGUAGE_MODE } from '../../src/shared/i18n/language-mode'
+import { DEFAULT_LANGUAGE_MODE, LANGUAGE_MODES } from '../../src/shared/i18n/language-mode'
 import {
   SUPPORTED_LANGUAGES,
   validateSupportedLanguageResources
@@ -22,6 +22,7 @@ const resourceOwners = [windowResourceOwner, appResourceOwner, settingsResourceO
 test('each Supported Language has complete non-empty resources for every namespace', () => {
   expect(SUPPORTED_LANGUAGES).toEqual(['zh-CN', 'en'])
   expect(DEFAULT_LANGUAGE_MODE).toBe('follow-system')
+  expect(LANGUAGE_MODES).toEqual([DEFAULT_LANGUAGE_MODE, ...SUPPORTED_LANGUAGES])
   expect(validateSupportedLanguageResources(resourceOwners)).toEqual([])
 })
 
