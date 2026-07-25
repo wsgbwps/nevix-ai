@@ -36,6 +36,19 @@ async function close({
   await rm(userDataDir, { recursive: true, force: true })
 }
 
+test('the app does not expose an unmanaged native menu', async () => {
+  const launched = await launchForSystemLanguages(['en-US'])
+
+  try {
+    const hasApplicationMenu = await launched.electronApp.evaluate(
+      ({ Menu }) => Menu.getApplicationMenu() !== null
+    )
+    expect(hasApplicationMenu).toBe(false)
+  } finally {
+    await close(launched)
+  }
+})
+
 test('startup selects a matching Interface Language for the highest-priority system language', async () => {
   const cases = [
     {

@@ -1,7 +1,9 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, Menu } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { initializeMainI18n } from './i18n'
 import { createWindow } from './window/main-window'
+
+Menu.setApplicationMenu(null)
 
 const ipcModules = import.meta.glob('./ipc/*/index.ts', { eager: true })
 

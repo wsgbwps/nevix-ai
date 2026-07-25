@@ -22,7 +22,14 @@ async function launchForSystemLanguages(
     }
   })
 
-  return { electronApp, page: await electronApp.firstWindow() }
+  const page = await electronApp.firstWindow()
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    const mainWindow = BrowserWindow.getAllWindows()[0]
+    if (!mainWindow) throw new Error('Main window was not created')
+    mainWindow.webContents.session.enableNetworkEmulation({ offline: true })
+  })
+  await page.reload()
+  return { electronApp, page }
 }
 
 async function close(electronApp: ElectronApplication): Promise<void> {
@@ -80,7 +87,7 @@ test('a corrupt or unknown saved Language Mode falls back to follow-system', asy
   }
 })
 
-test('Language Mode is available without an account, updates immediately, and persists per device', async () => {
+test('Language Mode is available offline without an account, updates immediately, and persists per device', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-language-mode-'))
 
   try {
