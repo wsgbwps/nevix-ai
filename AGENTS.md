@@ -7,8 +7,8 @@
 - `components/ui/` is the default shadcn path and is treated as a shared layer; changes require additional review
 - `app/globals.css` is the only location for global styles
 - `assets/` contains static resources only (images, SVGs, and fonts); do not place CSS or configuration files there
-- When adding an IPC handler, change only the two files under its domain: `shared/ipc/<domain>/types.ts` and `main/ipc/<domain>/index.ts`; do not modify shared files
-- The preload layer contains no per-domain code, so adding a domain does not require editing it
+- Keep IPC changes domain-local: define Channel contracts in `shared/ipc/<domain>/types.ts`, register Channels in `main/ipc/<domain>/index.ts`, and place each Handler in its own file under `main/ipc/<domain>/handlers/`
+- Do not add per-domain code to the preload layer or edit a central IPC registry for a domain-specific change
 
 ### Backend (server/)
 
@@ -25,7 +25,11 @@
 ### Shared areas
 
 - `components/ui/`, `lib/`, and `pkg/` are shared areas; changes require additional review
-- A single implementation PR may change only `features/<name>/`, `ipc/<name>/`, `internal/<name>/`, and `contracts/<name>.yaml`
+- By default, one implementation PR delivers one cohesive vertical slice for one primary Domain
+- A vertical slice may include its renderer Feature, domain-local IPC contracts and Handlers, and domain-local implementation under `main/ipc/<domain>/`
+- Necessary composition-root wiring, shared infrastructure, tests, dependencies, and build or packaging configuration are allowed exceptions only when the PRD or ticket names each exceptional area, explains why it is required, and the implementation PR requires and receives additional review before merge
+- If an implementation changes a Domain responsibility or moves or changes an existing architecture seam, create a separate architecture ticket, update the relevant ADR, and land a documentation-only architecture PR before implementation
+- Split work into multiple PRs only when each resulting PR can independently build, test, merge, and roll back without incomplete behaviour or temporary compatibility scaffolding
 - A documentation-only architecture PR may instead change project guidance, Context documents, ADRs, README, and its local issue; it must not include schema, API, Electron, Go, cloud-resource, or provider-adapter implementation
 
 ## Agent skills
