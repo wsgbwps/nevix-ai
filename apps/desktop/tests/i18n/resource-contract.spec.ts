@@ -50,6 +50,17 @@ test('each Supported Language has complete non-empty macOS permission explanatio
   }
 })
 
+test('the macOS permission contract rejects whitespace-only explanations', () => {
+  const localization = [
+    '"NSCameraUsageDescription" = "   ";',
+    '"NSMicrophoneUsageDescription" = "Microphone access";',
+    '"NSDocumentsFolderUsageDescription" = "Documents access";',
+    '"NSDownloadsFolderUsageDescription" = "Downloads access";'
+  ].join('\n')
+
+  expect(missingMacOSPermissionKeys(localization)).toEqual(['NSCameraUsageDescription'])
+})
+
 test('the NSIS installer enables every Supported Language', async () => {
   const builderConfig = await readFile(join(__dirname, '../../electron-builder.yml'), 'utf8')
   const installerLanguages = nsisInstallerLanguages

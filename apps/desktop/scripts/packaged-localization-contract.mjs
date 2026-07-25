@@ -15,7 +15,8 @@ const requiredMacOSPermissionKeys = [
 // This verifier contract is consumed directly by Node and Playwright without a TypeScript runtime.
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function missingMacOSPermissionKeys(localization) {
-  return requiredMacOSPermissionKeys.filter(
-    (key) => !new RegExp(`"${key}"\\s*=\\s*".+?";`).test(localization)
-  )
+  return requiredMacOSPermissionKeys.filter((key) => {
+    const match = new RegExp(`"${key}"\\s*=\\s*"([^"]*)";`).exec(localization)
+    return !match || match[1].trim().length === 0
+  })
 }

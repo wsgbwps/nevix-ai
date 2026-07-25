@@ -1,6 +1,6 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { _electron as electron } from 'playwright'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -39,6 +39,46 @@ async function expectWindowTitle(
     )
     .toBe(expectedTitle)
 }
+
+test('a corrupt or unknown saved Language Mode falls back to follow-system', async () => {
+  const cases = [
+    {
+      storedValue: '{',
+      systemLanguages: ['en-US'],
+      heading: 'Create with Nevix AI',
+      languageGroup: 'Interface language',
+      followSystem: 'Follow system'
+    },
+    {
+      storedValue: JSON.stringify({ languageMode: 'fr' }),
+      systemLanguages: ['zh-CN'],
+      heading: '使用 Nevix AI 创作',
+      languageGroup: '界面语言',
+      followSystem: '跟随系统'
+    }
+  ] as const
+
+  for (const expected of cases) {
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-invalid-language-mode-'))
+    await writeFile(join(userDataDir, 'language-mode.json'), expected.storedValue, 'utf8')
+
+    try {
+      const launched = await launchForSystemLanguages(userDataDir, expected.systemLanguages)
+      try {
+        await expect(launched.page.getByRole('heading', { name: expected.heading })).toBeVisible()
+        await expect(
+          launched.page
+            .getByRole('radiogroup', { name: expected.languageGroup })
+            .getByRole('radio', { name: expected.followSystem })
+        ).toHaveAttribute('aria-checked', 'true')
+      } finally {
+        await close(launched.electronApp)
+      }
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true })
+    }
+  }
+})
 
 test('Language Mode is available without an account, updates immediately, and persists per device', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-language-mode-'))
