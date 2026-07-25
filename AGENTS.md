@@ -28,7 +28,9 @@
 - By default, one implementation PR delivers one cohesive vertical slice for one primary Domain
 - A vertical slice may include its renderer Feature, domain-local IPC contracts and Handlers, and domain-local implementation under `main/ipc/<domain>/`
 - Necessary composition-root wiring, shared infrastructure, tests, dependencies, and build or packaging configuration are allowed exceptions only when the PRD or ticket names each exceptional area, explains why it is required, and the implementation PR requires and receives additional review before merge
-- If an implementation changes a Domain responsibility or moves or changes an existing architecture seam, create a separate architecture ticket, update the relevant ADR, and land a documentation-only architecture PR before implementation
+- An implementation PR may include its `.scratch/<feature-slug>/` PRD and local issue updates, plus feature-local documentation that describes the slice's implemented behavior
+- An implementation PR may update an ADR or `CONTEXT.md` only to record implemented behavior within already approved responsibilities and boundaries; it must not introduce or revise a responsibility or boundary
+- A separate architecture ticket and documentation-only architecture PR are required before implementation only when a change alters responsibilities across contexts or modules, changes an established trusted-execution seam such as Supabase-to-Go, modifies repository-wide architecture constraints or development rules, or introduces a new architectural decision through an ADR or `CONTEXT.md`
 - Split work into multiple PRs only when each resulting PR can independently build, test, merge, and roll back without incomplete behaviour or temporary compatibility scaffolding
 - A documentation-only architecture PR may instead change project guidance, Context documents, ADRs, README, and its local issue; it must not include schema, API, Electron, Go, cloud-resource, or provider-adapter implementation
 
