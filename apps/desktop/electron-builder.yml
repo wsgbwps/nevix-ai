@@ -1,5 +1,5 @@
 appId: com.electron.app
-productName: react-ts
+productName: Nevix AI
 directories:
   buildResources: build
 files:
@@ -9,25 +9,31 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+extraResources:
+  - from: build/locales
+    to: .
 asarUnpack:
   - resources/**
 win:
-  executableName: react-ts
+  executableName: Nevix AI
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: Nevix-AI-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  installerLanguages:
+    - en_US
+    - zh_CN
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    NSCameraUsageDescription: Nevix AI requests access to your camera.
+    NSMicrophoneUsageDescription: Nevix AI requests access to your microphone.
+    NSDocumentsFolderUsageDescription: Nevix AI requests access to your Documents folder.
+    NSDownloadsFolderUsageDescription: Nevix AI requests access to your Downloads folder.
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: Nevix-AI-${version}.${ext}
 linux:
   target:
     - AppImage
@@ -36,7 +42,7 @@ linux:
   maintainer: electronjs.org
   category: Utility
 appImage:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: Nevix-AI-${version}.${ext}
 npmRebuild: false
 publish:
   provider: generic

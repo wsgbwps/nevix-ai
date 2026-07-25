@@ -1,11 +1,19 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, Menu } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
+import { initializeMainI18n } from './i18n'
 import { createWindow } from './window/main-window'
+
+Menu.setApplicationMenu(null)
 
 const ipcModules = import.meta.glob('./ipc/*/index.ts', { eager: true })
 
-app.whenReady().then(() => {
+if (process.env.NEVIX_E2E === '1' && !app.isPackaged && process.env.NEVIX_TEST_USER_DATA_DIR) {
+  app.setPath('userData', process.env.NEVIX_TEST_USER_DATA_DIR)
+}
+
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.nevix.ai')
+  await initializeMainI18n()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
