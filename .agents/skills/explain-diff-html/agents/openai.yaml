@@ -1,0 +1,5 @@
+interface:
+  display_name: "Explain Diff HTML"
+  short_description: "Explain a code change, diff, branch, or pull request in a rich, self-contained interactive HTML format."
+policy:
+  allow_implicit_invocation: false
