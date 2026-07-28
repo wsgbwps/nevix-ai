@@ -6,6 +6,10 @@
 
 ## Repository-wide code rules
 
+### Mandatory development guidelines
+
+- Before planning or performing development work, AI agents must read and follow the `/karpathy-guidelines` skill throughout the task.
+
 ### Supabase and Go architecture
 
 - Treat [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md) as mandatory context for changes involving Supabase, Go trusted operations, Storage, Realtime, Webhooks, PostgreSQL access, or AI providers; changes to its responsibility seam follow the architecture-change rules under **Shared areas and change approval**
