@@ -21,10 +21,12 @@ Label: wayfinder:map
 ## Decisions so far
 
 - [Reframe Identity Delivery as Just-in-Time Vertical Slices](./issues/01-reframe-identity-delivery.md) — Identity 按可运行、可验证、可合并的阶段推进，当前只规划 Authentication Foundation。
+- [Prototype the Desktop Authentication Loop](./issues/02-prototype-desktop-authentication-loop.md) — Desktop Auth 采用单一低保真状态流，明确区分认证边界、Session 恢复终止/暂时失败、存在性中立的注册与恢复、六位 code 状态和当前设备退出。
+- [Assemble the Authentication Foundation Handoff](./issues/03-assemble-authentication-foundation-handoff.md) — 已发布 ready-for-agent 的 Authentication Foundation build spec，固定 Desktop/Supabase Auth/加密 Session seam、真实 Electron 测试与后续阶段范围边界。
 
 ## Not yet specified
 
-无。当前唯一尚未解决的问题已明确成为 frontier ticket。
+无。Authentication Foundation handoff 已完成，没有剩余 frontier ticket。
 
 ## Out of scope
 
