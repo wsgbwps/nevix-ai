@@ -4,6 +4,86 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 
 ## Language
 
+**Organization**:
+企业租户，也是业务数据、文件、额度和订阅的归属边界；即使只有一名 User，业务资源也归 Organization 而非个人所有。
+_Avoid_: Team, Workspace, Account
+
+**User**:
+使用产品的自然人，可以通过 Membership 加入多个 Organization；其业务身份独立于登录凭据，即使凭据删除，必要的历史归属仍指向不具备登录能力的身份记录。
+_Avoid_: Account
+
+**Profile**:
+User 在所有 Organization 中共享的公开资料，V1 仅包含必填显示名称和可选头像；登录邮箱不属于 Profile。
+_Avoid_: Organization Profile, Account
+
+**Membership**:
+User 与 Organization 之间的关系，承载该用户在该组织中的角色和成员状态。
+_Avoid_: Team Member, User Role
+
+**Organization Invitation**:
+由 Owner 或 Admin 向指定邮箱发出的一次性 Organization 加入凭证，有效期七天，且只能由已验证同一邮箱的 User 接受并成为 Member；待处理期间重发会保留同一 Invitation、重置七日期限并使旧凭证失效。
+_Avoid_: Shareable Invite Link, Team Invitation
+
+**Owner**:
+Organization 唯一的最终控制者角色；创建者默认成为首任 Owner，且 Owner 只能通过 Ownership Transfer 更换。
+_Avoid_: Super Admin, Primary Admin
+
+**Admin**:
+可管理邀请、普通 Member 和组织设置的 Organization 角色，但不能提升、降级或移除其他 Admin，也不能操作 Owner、转移所有权或删除 Organization。
+_Avoid_: Administrator, Manager
+
+**Member**:
+仅使用 Organization 业务功能、不管理成员或组织设置的基础角色。
+_Avoid_: User, Regular User
+
+**Former Member**:
+Membership 已结束、因此不再拥有 Organization 访问权限的 User；其历史操作和所创建资源仍保留原始归属记录。
+_Avoid_: Deactivated User, Deleted Member
+
+**User Deletion**:
+User 在重新认证且不再拥有任何 Organization 后发起的账号终止过程；它会结束全部 Membership、撤销待处理邀请，并在七天撤销期后删除登录凭证和个人资料。撤销删除只恢复账号使用资格，不恢复已结束的 Membership 或已撤销的 Invitation。
+_Avoid_: Immediate Account Delete, Member Removal
+
+**Pending User Deletion**:
+User Deletion 发起后的七天可恢复状态，User 不能正常登录，只能通过已验证邮箱撤销删除；它与 Email Change 和 Security Lock 互斥。
+_Avoid_: Deleted User, Suspended User
+
+**Email Change**:
+正常状态的 User 在重新认证后更换登录邮箱的过程，新邮箱必须在 24 小时内完成验证；变更不改变 User、Membership、角色或 Ownership。
+_Avoid_: New User, Profile Email
+
+**Security Lock**:
+旧邮箱接收者明确确认 Email Change 并非本人操作后触发的保护状态；它结束全部 Session，并阻止账号使用，直到旧邮箱完成验证、密码重设且邮箱变更被撤销。
+_Avoid_: Membership Suspension, User Deletion
+
+**Ownership Transfer**:
+当前 Owner 在重新认证后向一名 Admin 发起的唯一 Owner 身份移交；目标 Admin 必须在 24 小时内接受，完成后原 Owner 成为 Admin。
+_Avoid_: Owner Downgrade, Ownership Assignment
+
+**Pending Ownership Transfer**:
+Ownership Transfer 发起后、目标 Admin 接受前的状态；当前 Owner 仍是唯一 Owner，可以撤销转移，且同一 Organization 只能存在一个待处理转移。
+_Avoid_: Transferred Ownership, Co-Owner
+
+**Organization Deletion**:
+由 Owner 在重新认证后发起的组织终止过程；所有成员都会收到通知，并在七天撤销期结束后才永久生效。
+_Avoid_: Immediate Delete, Organization Disable
+
+**Pending Deletion**:
+Organization Deletion 发起后的七天可撤销状态；成员只能读取或导出数据，不能新建任务、邀请成员、修改角色、转移所有权或变更订阅。进入时会终止全部待处理 Invitation 和 Ownership Transfer，取消删除后不恢复这些流程。
+_Avoid_: Deleted, Disabled
+
+**Active Organization**:
+User 当前正在使用的唯一 Organization，决定界面中业务数据、文件、任务和额度的范围；设备记住的上次选择不构成访问权限。
+_Avoid_: Default Organization, Current Team
+
+**Session**:
+User 在单台设备上的已认证使用状态，独立于任何 Organization；V1 只允许 User 登录或退出当前设备，不提供其他设备的查看或撤销。
+_Avoid_: Organization Session, Membership Session
+
+**Organization Audit Log**:
+Organization 内不可由成员修改或删除、滚动保留 365 天的安全事件记录，覆盖邀请、Membership、角色、Ownership Transfer 和 Organization Deletion；仅 Owner 与 Admin 可查看或导出。
+_Avoid_: Activity Feed, Analytics Log
+
 **Feature**:
 一个完整的垂直功能切片，包含 UI 组件、hooks、API 层和可选的状态管理。对应 `renderer/src/features/<name>/` 目录。
 _Avoid_: module, component, page
