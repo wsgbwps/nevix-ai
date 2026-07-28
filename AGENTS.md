@@ -1,37 +1,25 @@
-## Code rules
+## Instruction routing
 
-### Frontend (apps/desktop/)
+- Before planning or changing files under `apps/desktop/`, read `apps/desktop/AGENTS.md`
+- Before planning or changing files under `server/`, read `server/AGENTS.md`
+- For work spanning both areas, read both files before planning the change
 
-- `features/A/` must not directly import internal files from `features/B/`; features communicate through `lib/` or events
-- Each feature's `index.ts` is its only public export
-- `components/ui/` is the default shadcn path and is treated as a shared layer; changes require additional review
-- `app/globals.css` is the only location for global styles
-- `assets/` contains static resources only (images, SVGs, and fonts); do not place CSS or configuration files there
-- Keep IPC changes domain-local: define Channel contracts in `shared/ipc/<domain>/types.ts`, register Channels in `main/ipc/<domain>/index.ts`, and place each Handler in its own file under `main/ipc/<domain>/handlers/`
-- Do not add per-domain code to the preload layer or edit a central IPC registry for a domain-specific change
-
-### Backend (server/)
-
-- `internal/A/` must not import `internal/B/`; modules communicate through the `pkg/event/` event bus
-- Define all event types centrally in `pkg/event/types.go`
-- Each module exports `Register(r chi.Router, bus event.Bus)`, which is called explicitly in `main.go`; do not use `init()` with a blank import
-- Keep simple modules in a single file; extract a repository interface only when a second adapter is introduced
+## Repository-wide code rules
 
 ### Supabase and Go architecture
 
-- Treat [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md) as mandatory context for changes involving Supabase, Go trusted operations, Storage, Realtime, Webhooks, PostgreSQL access, or AI providers; changes to its responsibility seam follow the architecture-change rules under **Shared areas**
+- Treat [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md) as mandatory context for changes involving Supabase, Go trusted operations, Storage, Realtime, Webhooks, PostgreSQL access, or AI providers; changes to its responsibility seam follow the architecture-change rules under **Shared areas and change approval**
 
-### Shared areas
+### Shared areas and change approval
 
-- `components/ui/`, `lib/`, and `pkg/` are shared areas; changes require additional review
+- `components/ui/`, `lib/`, and `pkg/` are shared areas. Their changes must be called out with impact and tests, and require repository-maintainer approval before merge; for maintainer-authored work, deliberate self-review is sufficient
+- Contributors and AI agents may work autonomously inside the task's primary Domain while preserving documented boundaries. They must not perform unrelated cleanup or generalized refactors, or change a public API without an approved plan
 - By default, one implementation PR delivers one cohesive vertical slice for one primary Domain
-- A vertical slice may include its renderer Feature, domain-local IPC contracts and Handlers, and domain-local implementation under `main/ipc/<domain>/`
-- Necessary composition-root wiring, shared infrastructure, tests, dependencies, and build or packaging configuration are allowed exceptions only when the spec or ticket names each exceptional area, explains why it is required, and the implementation PR requires and receives additional review before merge
-- An implementation PR may include its `.scratch/<feature-slug>/` spec and local issue updates, plus feature-local documentation that describes the slice's implemented behavior
-- An implementation PR may update an ADR or `CONTEXT.md` only to record implemented behavior within already approved responsibilities and boundaries; it must not introduce or revise a responsibility or boundary
-- A separate architecture ticket and documentation-only architecture PR are required before implementation only when a change alters responsibilities across contexts or modules, changes an established trusted-execution seam such as Supabase-to-Go, modifies repository-wide architecture constraints or development rules, or introduces a new architectural decision through an ADR or `CONTEXT.md`
-- Split work into multiple PRs only when each resulting PR can independently build, test, merge, and roll back without incomplete behaviour or temporary compatibility scaffolding
-- A documentation-only architecture PR may instead change project guidance, Context documents, ADRs, README, and its local issue; it must not include schema, API, Electron, Go, cloud-resource, or provider-adapter implementation
+- A vertical slice may include its renderer Feature, domain-local IPC contracts and Handlers, domain-local implementation, and narrowly scoped supporting changes such as composition-root wiring, tests, dependencies, or build configuration
+- Small, backward-compatible shared changes may ship with the vertical slice. Changes to public contracts, authentication or authorization, persistent data, security boundaries, or multiple Domains require a written plan and repository-maintainer approval before implementation
+- An implementation PR may update its local issue and documentation to record implemented behavior within already approved responsibilities, but must not introduce or revise an architectural responsibility or boundary
+- Changes to responsibilities across contexts or modules, trusted-execution seams such as Supabase-to-Go, repository-wide architecture rules, or architectural decisions require a separate architecture task and repository-maintainer approval before implementation; a separate documentation PR is optional
+- Split work into multiple PRs only when each PR can independently build, test, merge, and roll back without incomplete behavior or temporary compatibility scaffolding
 
 ## Agent skills
 
