@@ -18,19 +18,18 @@
 
 ## Acceptance criteria
 
-- [ ] The Supabase JavaScript client is pinned to a reviewed exact version and the lockfile is committed.
-- [ ] Desktop accepts only the configured Supabase API URL and publishable key; missing or invalid public configuration fails explicitly without rendering an apparently usable app.
-- [ ] No secret/service-role key, PostgreSQL credential, JWT private key or SMTP credential enters the Desktop build, renderer environment, logs, traces or screenshots.
-- [ ] A documented, bounded command starts a version-pinned disposable local Supabase Auth stack with Mailpit, builds Desktop, runs the Auth Playwright scope with one worker, and always cleans up local services and test data.
-- [ ] The test fixture creates or seeds a login-capable User outside the Desktop process; the built Desktop then signs in through the public Auth interface with email and password.
-- [ ] Startup renders a blocking authentication initialization state before selecting the unauthenticated boundary; the existing app content is reachable only after successful sign-in.
-- [ ] Unknown email, unverified email and wrong password produce the same localized “email or password is incorrect” outcome, while request submission disables duplicate actions.
-- [ ] Successful sign-in creates only an in-memory Session for this ticket and enters the minimal authenticated app shell; closing and reopening Desktop intentionally returns to login until ticket 03 is complete.
-- [ ] Current-runtime sign-out explicitly uses current-session/local scope, clears the in-memory Session and returns to the unauthenticated boundary.
-- [ ] BrowserWindow explicitly enables sandbox, context isolation and web security, disables Node integration, and exposes no Authentication-specific preload API.
-- [ ] CSP allows only the exact configured Supabase Auth HTTP/HTTPS origin needed by this slice; wildcard, generic schemes and unused WS/WSS origins are absent.
-- [ ] Top-level navigation, new windows, arbitrary external opening and renderer permission requests are denied by default.
-- [ ] Playwright verifies the final BrowserWindow preferences, allowed and blocked CSP connections, navigation/window/permission denial, login, app-shell gating and current-runtime sign-out through the built Electron app.
-- [ ] Authentication copy and resource-contract coverage pass in both Simplified Chinese and English, including live Interface Language changes supported by the existing app.
-- [ ] Lint, node/web typecheck, build and the ticket's Electron Playwright tests pass without introducing Profile, Organization, business schema, RLS, Go Identity code, a shared Auth package or unrelated refactoring.
-
+- [x] The Supabase JavaScript client is pinned to a reviewed exact version and the lockfile is committed.
+- [x] Desktop accepts only the configured Supabase API URL and publishable key; missing or invalid public configuration fails explicitly without rendering an apparently usable app.
+- [x] No secret/service-role key, PostgreSQL credential, JWT private key or SMTP credential enters the Desktop build, renderer environment, logs, traces or screenshots.
+- [x] A documented, bounded command starts a version-pinned disposable local Supabase Auth stack with Mailpit, builds Desktop, runs the Auth Playwright scope with one worker, and always cleans up local services and test data.
+- [x] The test fixture creates or seeds a login-capable User outside the Desktop process; the built Desktop then signs in through the public Auth interface with email and password.
+- [x] Startup renders a blocking authentication initialization state before selecting the unauthenticated boundary; the existing app content is reachable only after successful sign-in.
+- [x] Unknown email, unverified email and wrong password produce the same localized “email or password is incorrect” outcome, while request submission disables duplicate actions.
+- [x] Successful sign-in creates only an in-memory Session for this ticket and enters the minimal authenticated app shell; closing and reopening Desktop intentionally returns to login until ticket 03 is complete.
+- [x] Current-runtime sign-out explicitly uses current-session/local scope, clears the in-memory Session and returns to the unauthenticated boundary.
+- [x] BrowserWindow explicitly enables sandbox, context isolation and web security, disables Node integration, and exposes no Authentication-specific preload API.
+- [x] CSP allows only the exact configured Supabase Auth HTTP/HTTPS origin needed by this slice; wildcard, generic schemes and unused WS/WSS origins are absent.
+- [x] Top-level navigation, new windows, arbitrary external opening and renderer permission requests are denied by default.
+- [x] Playwright verifies the final BrowserWindow preferences, allowed and blocked CSP connections, navigation/window/permission denial, login, app-shell gating and current-runtime sign-out through the built Electron app.
+- [x] Authentication copy and resource-contract coverage pass in both Simplified Chinese and English, including live Interface Language changes supported by the existing app.
+- [x] Lint, node/web typecheck, build and the ticket's Electron Playwright tests pass without introducing Profile, Organization, business schema, RLS, Go Identity code, a shared Auth package or unrelated refactoring.

@@ -20,14 +20,14 @@ test('a corrupt or unknown saved Language Mode falls back to follow-system', asy
     {
       storedValue: '{',
       systemLanguages: ['en-US'],
-      heading: 'Create with Nevix AI',
+      heading: 'Sign in to Nevix AI',
       languageGroup: 'Interface language',
       followSystem: 'Follow system'
     },
     {
       storedValue: JSON.stringify({ languageMode: 'fr' }),
       systemLanguages: ['zh-CN'],
-      heading: '使用 Nevix AI 创作',
+      heading: '登录 Nevix AI',
       languageGroup: '界面语言',
       followSystem: '跟随系统'
     }
@@ -61,7 +61,7 @@ test('Language Mode is available offline without an account, updates immediately
   try {
     let launched = await launchForSystemLanguages(userDataDir, ['zh-CN'])
     try {
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       const languageModeGroup = launched.page.getByRole('radiogroup', { name: '界面语言' })
       await expect(languageModeGroup).toBeVisible()
       await expect(languageModeGroup.getByRole('radio')).toHaveCount(3)
@@ -81,7 +81,7 @@ test('Language Mode is available offline without an account, updates immediately
       await launched.page.getByRole('radio', { name: 'English' }).click()
 
       await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
       await expect(
         launched.page.getByRole('radiogroup', { name: 'Interface language' })
@@ -99,12 +99,12 @@ test('Language Mode is available offline without an account, updates immediately
       expect(navigationCount).toBe(0)
 
       await launched.page.getByRole('radio', { name: 'Simplified Chinese' }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')
 
       await launched.page.getByRole('radio', { name: 'English' }).click()
       await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
     } finally {
       await launched.electronApp.close()
@@ -113,12 +113,12 @@ test('Language Mode is available offline without an account, updates immediately
     launched = await launchForSystemLanguages(userDataDir, ['zh-CN'])
     try {
       await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
       await expectWindowTitle(launched.electronApp, 'Nevix AI — Desktop')
 
       await launched.page.getByRole('radio', { name: 'Follow system' }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')
     } finally {
       await launched.electronApp.close()
@@ -127,7 +127,7 @@ test('Language Mode is available offline without an account, updates immediately
     launched = await launchForSystemLanguages(userDataDir, ['en-US'])
     try {
       await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
       await expectWindowTitle(launched.electronApp, 'Nevix AI — Desktop')
     } finally {

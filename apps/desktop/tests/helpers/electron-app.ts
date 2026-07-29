@@ -11,6 +11,26 @@ interface LaunchTestAppOptions {
   readonly offline?: boolean
 }
 
+const FORBIDDEN_CHILD_ENVIRONMENT_KEYS = [
+  'DATABASE_URL',
+  'DB_URL',
+  'JWT_SECRET',
+  'NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY',
+  'POSTGRES_PASSWORD',
+  'POSTGRES_URL',
+  'SERVICE_ROLE_KEY',
+  'SMTP_PASS',
+  'SUPABASE_DB_URL',
+  'SUPABASE_SECRET_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY'
+] as const
+
+function desktopProcessEnvironment(): NodeJS.ProcessEnv {
+  const environment = { ...process.env }
+  for (const key of FORBIDDEN_CHILD_ENVIRONMENT_KEYS) delete environment[key]
+  return environment
+}
+
 export async function launchTestApp({
   userDataDir,
   systemLanguages,
@@ -20,7 +40,7 @@ export async function launchTestApp({
     args: [appEntry, `--user-data-dir=${userDataDir}`],
     cwd: desktopRoot,
     env: {
-      ...process.env,
+      ...desktopProcessEnvironment(),
       NEVIX_E2E: '1',
       NEVIX_TEST_SYSTEM_LANGUAGES: systemLanguages.join(','),
       NEVIX_TEST_USER_DATA_DIR: userDataDir
