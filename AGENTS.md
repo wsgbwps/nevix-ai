@@ -12,11 +12,11 @@
 
 ### Directory architecture gate
 
-- Treat the directory structure and layer descriptions in `README.md` as the canonical file-placement contract; also follow `docs/agents/domain.md` to read the relevant Context and ADRs, then apply the relevant nested `AGENTS.md`
-- Before proposing or implementing a change, name its primary Domain and map every new or moved source file to an existing canonical directory from `README.md`
-- Put code in the narrowest existing directory that owns the responsibility. Do not introduce synonymous directories, wrapper layers, or new top-level source directories to mirror a personal convention
+- Treat the ownership boundaries and layer descriptions in `README.md` as the canonical file-placement contract; its Domain-local leaf directories are representative rather than exhaustive. Also follow `docs/agents/domain.md` to read the relevant Context and ADRs, then apply the relevant nested `AGENTS.md`
+- Before proposing or implementing a change, name its primary Domain and identify the narrowest owning boundary for every new or moved source file
+- Inside that boundary, choose or create a responsibility-named local directory when it keeps a distinct concern cohesive. Do not introduce synonymous wrappers, new shared layers, or new top-level source directories to mirror a personal convention
 - Keep composition roots limited to wiring. Business logic does not belong in `apps/desktop/src/main/index.ts`, renderer `app/`, or `server/cmd/server/main.go`
-- If a responsibility has no canonical location, or the current tree conflicts with `README.md` or an ADR, stop implementation and surface the conflict. Resolve the documentation through an approved architecture task before adding another convention
+- If a responsibility has no canonical owner, or its placement would change a documented boundary or ADR, stop implementation and surface the conflict. Resolve it through an approved architecture task before adding another convention
 - Before completing development work, inspect `git diff --name-status` and verify that every changed path still matches the declared Domain and canonical directory. Call out required shared-area or composition-root changes with their impact and tests
 
 ### Supabase and Go architecture

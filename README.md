@@ -48,16 +48,15 @@ nevix-ai/
 
 领域术语详见 `CONTEXT-MAP.md` → 各子 context 的 `CONTEXT.md`；Codex 的持久开发与评审规则详见 [`AGENTS.md`](AGENTS.md)。
 
-### 目录结构是架构契约
+### 目录边界是架构契约
 
-本 README 的目录树和下方各层说明是代码落点的规范，不是可自由替换的示例。开发时遵循以下规则：
+本 README 的目录树和下方各层说明定义代码的归属边界；Domain、Feature、共享层和 composition root 是稳定约束，Feature 或 Module 内展示的职责子目录是参考而非穷举清单。开发时遵循以下规则：
 
-1. 计划实现前先确定一个主要 Domain，并把每个新增或移动的源代码文件映射到下方已有目录；代码放入职责最窄的现有目录
-2. 不使用同义目录或额外包装层替代既定结构，例如 renderer Feature 使用 `components/` 而不是另建 `ui/`，IPC Handler 直接位于 `main/ipc/<domain>/` 而不是另建 `handlers/`
-3. Feature 根目录只保留公共出口 `index.ts`；实现分别进入 `components/`、`hooks/`、`api/` 和按需存在的 `store/`
+1. 计划实现前先确定一个主要 Domain，并为每个新增或移动的源代码文件确定最窄的归属边界
+2. 在所属 Feature 或 Module 内按实际职责组织代码；可以为独立职责创建语义清晰的本地子目录，不要因为现有示例没有列出就把文件塞进职责不符的目录
+3. 不使用同义目录或额外包装层改变既定边界；新增共享层、顶层目录或跨 Domain seam 属于架构变更
 4. `app/`、`main/index.ts`、`cmd/server/main.go` 等 composition root 只负责组装；业务逻辑留在对应 Domain/Feature/Module
-5. 如果新职责无法映射到现有目录，或现有代码与本 README、ADR 不一致，不要复制偏差；先通过架构任务更新约定，再实现代码
-6. 完成前根据 `git diff --name-status` 复核全部变更路径；共享目录、公共契约、安全边界或跨 Domain 变更仍须遵守 [`AGENTS.md`](AGENTS.md) 的审批规则
+5. 完成前根据 `git diff --name-status` 复核全部变更路径；共享目录、公共契约、安全边界或跨 Domain 变更仍须遵守 [`AGENTS.md`](AGENTS.md) 的审批规则
 
 ---
 
@@ -148,6 +147,8 @@ src/renderer/src/
 │   │   ├── components/
 │   │   ├── hooks/
 │   │   ├── api/                  # TanStack Query hooks
+│   │   ├── i18n/
+│   │   │   └── resources.ts      # Feature 自有的本地化资源
 │   │   ├── store/                # Zustand slice
 │   │   └── index.ts              # 公共导出（唯一对外接口）
 │   ├── image-editing/            # 开发者 B
