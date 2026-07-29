@@ -10,13 +10,22 @@
 
 - Before planning or performing development work, AI agents must read and follow the `/karpathy-guidelines` skill throughout the task.
 
+### Directory architecture gate
+
+- Treat the directory structure and layer descriptions in `README.md` as the canonical file-placement contract; also follow `docs/agents/domain.md` to read the relevant Context and ADRs, then apply the relevant nested `AGENTS.md`
+- Before proposing or implementing a change, name its primary Domain and map every new or moved source file to an existing canonical directory from `README.md`
+- Put code in the narrowest existing directory that owns the responsibility. Do not introduce synonymous directories, wrapper layers, or new top-level source directories to mirror a personal convention
+- Keep composition roots limited to wiring. Business logic does not belong in `apps/desktop/src/main/index.ts`, renderer `app/`, or `server/cmd/server/main.go`
+- If a responsibility has no canonical location, or the current tree conflicts with `README.md` or an ADR, stop implementation and surface the conflict. Resolve the documentation through an approved architecture task before adding another convention
+- Before completing development work, inspect `git diff --name-status` and verify that every changed path still matches the declared Domain and canonical directory. Call out required shared-area or composition-root changes with their impact and tests
+
 ### Supabase and Go architecture
 
 - Treat [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md) as mandatory context for changes involving Supabase, Go trusted operations, Storage, Realtime, Webhooks, PostgreSQL access, or AI providers; changes to its responsibility seam follow the architecture-change rules under **Shared areas and change approval**
 
 ### Shared areas and change approval
 
-- `components/ui/`, `lib/`, and `pkg/` are shared areas. Their changes must be called out with impact and tests, and require repository-maintainer approval before merge; for maintainer-authored work, deliberate self-review is sufficient
+- `apps/desktop/src/renderer/src/components/ui/`, `apps/desktop/src/renderer/src/lib/`, `apps/desktop/src/renderer/src/hooks/`, `server/pkg/`, and root `contracts/` are shared areas. Their changes must be called out with impact and tests, and require repository-maintainer approval before merge; for maintainer-authored work, deliberate self-review is sufficient
 - Contributors and AI agents may work autonomously inside the task's primary Domain while preserving documented boundaries. They must not perform unrelated cleanup or generalized refactors, or change a public API without an approved plan
 - By default, one implementation PR delivers one cohesive vertical slice for one primary Domain
 - A vertical slice may include its renderer Feature, domain-local IPC contracts and Handlers, domain-local implementation, and narrowly scoped supporting changes such as composition-root wiring, tests, dependencies, or build configuration

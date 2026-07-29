@@ -48,6 +48,17 @@ nevix-ai/
 
 领域术语详见 `CONTEXT-MAP.md` → 各子 context 的 `CONTEXT.md`；Codex 的持久开发与评审规则详见 [`AGENTS.md`](AGENTS.md)。
 
+### 目录结构是架构契约
+
+本 README 的目录树和下方各层说明是代码落点的规范，不是可自由替换的示例。开发时遵循以下规则：
+
+1. 计划实现前先确定一个主要 Domain，并把每个新增或移动的源代码文件映射到下方已有目录；代码放入职责最窄的现有目录
+2. 不使用同义目录或额外包装层替代既定结构，例如 renderer Feature 使用 `components/` 而不是另建 `ui/`，IPC Handler 直接位于 `main/ipc/<domain>/` 而不是另建 `handlers/`
+3. Feature 根目录只保留公共出口 `index.ts`；实现分别进入 `components/`、`hooks/`、`api/` 和按需存在的 `store/`
+4. `app/`、`main/index.ts`、`cmd/server/main.go` 等 composition root 只负责组装；业务逻辑留在对应 Domain/Feature/Module
+5. 如果新职责无法映射到现有目录，或现有代码与本 README、ADR 不一致，不要复制偏差；先通过架构任务更新约定，再实现代码
+6. 完成前根据 `git diff --name-status` 复核全部变更路径；共享目录、公共契约、安全边界或跨 Domain 变更仍须遵守 [`AGENTS.md`](AGENTS.md) 的审批规则
+
 ---
 
 ### IPC 共享类型 (`apps/desktop/src/shared/ipc/`)
@@ -112,7 +123,7 @@ src/main/
 6. **Preload 通用化**：preload 只暴露 `typedInvoke`（request/response）和 `typedOn`（push events）两个泛型函数，类型从 `IpcChannelMap` / `IpcEventMap` 推导。加新 domain 不需要编辑 preload
 7. **`index.ts` 是纯组装器**：只负责 app 生命周期和自动注册，不包含任何业务逻辑
 
-加一个 handler 只改自己 domain 下的两个文件（`shared/ipc/<domain>/types.ts` + `main/ipc/<domain>/index.ts`），不碰任何共享文件。
+加一个 handler 只改自己 domain 下的三个文件（`shared/ipc/<domain>/types.ts` + `main/ipc/<domain>/<handler>.ts` + `main/ipc/<domain>/index.ts`），不碰任何共享文件。
 
 ---
 
@@ -164,7 +175,6 @@ server/
 │   │   ├── domain/
 │   │   │   ├── entity.go         # 实体、聚合根
 │   │   │   ├── value.go          # 值对象
-│   │   │   ├── event.go          # 领域事件定义
 │   │   │   └── repository.go     # Repository 接口（不是实现）
 │   │   ├── application/
 │   │   │   ├── service.go        # 应用服务 / 用例编排
@@ -187,10 +197,12 @@ server/
 
 | 层 | 职责 | 依赖方向 |
 |---|---|---|
-| `domain/` | 实体、值对象、领域事件、Repository 接口 | 不依赖任何其他层 |
+| `domain/` | 实体、值对象、Repository 接口 | 不依赖任何其他层 |
 | `application/` | 用例编排，调用 domain 接口 | 依赖 domain |
 | `infrastructure/` | Repository 实现、外部服务适配 | 依赖 domain（实现接口） |
 | `interface/` | HTTP handler，调用 application | 依赖 application |
+
+跨 Module 的 Domain Event 类型统一定义在 `pkg/event/types.go`，Module 内不另建同名事件类型目录或文件。
 
 ---
 
