@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { AuthenticationScreen, useAuthentication } from '../features/authentication'
-import { LanguageModeSettings } from '../features/settings'
+import { LanguageModeSettings } from '../features/language'
 
 function App(): React.JSX.Element {
   const { t } = useTranslation('app')

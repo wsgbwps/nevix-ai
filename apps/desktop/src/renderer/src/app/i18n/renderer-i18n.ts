@@ -3,7 +3,7 @@ import { initReactI18next } from 'react-i18next'
 import { createI18nOptions, type I18nEnvironment } from '../../../../shared/i18n/i18next-options'
 import type { SupportedLanguage } from '../../../../shared/i18n/resource-contract'
 import { authenticationResources } from '../../features/authentication'
-import { settingsResources } from '../../features/settings'
+import { languageResources } from '../../features/language'
 import { appResources } from '.'
 
 export const rendererI18n = i18next.createInstance()
@@ -12,9 +12,9 @@ export const rendererResources = {
   'zh-CN': {
     ...appResources['zh-CN'],
     ...authenticationResources['zh-CN'],
-    ...settingsResources['zh-CN']
+    ...languageResources['zh-CN']
   },
-  en: { ...appResources.en, ...authenticationResources.en, ...settingsResources.en }
+  en: { ...appResources.en, ...authenticationResources.en, ...languageResources.en }
 } as const
 
 export async function initializeRendererI18n(

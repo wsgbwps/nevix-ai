@@ -8,7 +8,7 @@ import {
   type LanguageMode
 } from '../../shared/i18n/language-mode'
 import type { SupportedLanguage } from '../../shared/i18n/resource-contract'
-import { loadLanguageMode, saveLanguageMode } from '../settings/language-mode-store'
+import { loadLanguageMode, saveLanguageMode } from './language-mode-store'
 import { windowResources } from './resources'
 
 export const mainI18n = i18next.createInstance()

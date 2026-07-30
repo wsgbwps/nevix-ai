@@ -1,4 +1,4 @@
-import { clearPersistedSession } from '../../authentication/session-store'
+import { clearPersistedSession } from '../session-store'
 import { requireTrustedRendererSender } from './trusted-sender'
 
 export async function clearSessionHandler(

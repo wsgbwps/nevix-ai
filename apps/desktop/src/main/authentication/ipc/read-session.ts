@@ -1,4 +1,4 @@
-import { readPersistedSession } from '../../authentication/session-store'
+import { readPersistedSession } from '../session-store'
 import { requireTrustedRendererSender } from './trusted-sender'
 import type { PersistedSessionRead } from '../../../shared/ipc/authentication/types'
 

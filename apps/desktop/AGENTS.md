@@ -33,8 +33,8 @@
 
 ## Migration and enforcement
 
-- Main Domain-first placement, Language Domain consolidation, Channel renaming, and the `./*/ipc/index.ts` glob form one atomic architecture migration. Do not add compatibility Channel aliases, a second glob, or another Adapter-first path
+- Main Domain-first placement, Language Domain consolidation, Channel renaming, and the `./*/ipc/index.ts` glob landed as one atomic architecture migration. Do not add compatibility Channel aliases, a second glob, or another Adapter-first path
 - Legacy Feature segment names migrate opportunistically when their responsibility is already changing; do not perform mechanical bulk renames. Existing legacy paths may receive necessary behavior fixes but must not become templates for new directories
-- Until the atomic migration lands, `main/ipc/`, `main/settings/`, `main/i18n/`, `renderer/src/features/authentication/components/`, `renderer/src/features/authentication/hooks/`, and `renderer/src/features/settings/i18n.ts` are explicit migration debt. Do not add new architecture conventions around them
+- `renderer/src/features/authentication/components/` and `renderer/src/features/authentication/hooks/` remain explicit migration debt. Do not add new architecture conventions around them
 - Automate deterministic path, import, public-index, registration-export, Channel-prefix, and generic-preload rules. Keep responsibility placement, interface depth, deletion tests, and migration scope as deliberate review decisions
 - Any legacy allowlist must use exact paths, record a reason and removal trigger, and only shrink. A new exception to a stable seam, dependency direction, or canonical vocabulary requires an architecture task and repository-maintainer approval rather than a lint disable

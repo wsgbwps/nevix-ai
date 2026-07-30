@@ -9,18 +9,18 @@ const languageModeTranslationKeys = {
 } as const satisfies Record<LanguageMode, string>
 
 export function LanguageModeSettings(): React.JSX.Element {
-  const { t } = useTranslation('settings')
+  const { t } = useTranslation('language')
   const [languageMode, setLanguageMode] = useState<LanguageMode | undefined>()
   const [isUpdating, setIsUpdating] = useState(false)
 
   useEffect(() => {
     let isMounted = true
-    const unsubscribe = window.api.on('settings:language-mode-changed', (settings) => {
-      if (isMounted) setLanguageMode(settings.languageMode)
+    const unsubscribe = window.api.on('language:language-mode-changed', (state) => {
+      if (isMounted) setLanguageMode(state.languageMode)
     })
 
-    void window.api.invoke('settings:get-language-mode').then((settings) => {
-      if (isMounted) setLanguageMode(settings.languageMode)
+    void window.api.invoke('language:get-language-mode').then((state) => {
+      if (isMounted) setLanguageMode(state.languageMode)
     })
 
     return () => {
@@ -34,8 +34,8 @@ export function LanguageModeSettings(): React.JSX.Element {
 
     setIsUpdating(true)
     void window.api
-      .invoke('settings:set-language-mode', { languageMode: nextLanguageMode })
-      .then((settings) => setLanguageMode(settings.languageMode))
+      .invoke('language:set-language-mode', { languageMode: nextLanguageMode })
+      .then((state) => setLanguageMode(state.languageMode))
       .finally(() => setIsUpdating(false))
   }
 

@@ -1,4 +1,4 @@
-import { replacePersistedSession } from '../../authentication/session-store'
+import { replacePersistedSession } from '../session-store'
 import { requireTrustedRendererSender } from './trusted-sender'
 import type { PersistedSessionWrite } from '../../../shared/ipc/authentication/types'
 

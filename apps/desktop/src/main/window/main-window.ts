@@ -3,7 +3,7 @@ import { join } from 'path'
 import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../../resources/icon.png?asset'
-import { getMainWindowTitle } from '../i18n'
+import { getMainWindowTitle } from '../language'
 
 /** The only document this application loads, and therefore the only trusted IPC sender URL. */
 export function rendererEntryUrl(): string {
