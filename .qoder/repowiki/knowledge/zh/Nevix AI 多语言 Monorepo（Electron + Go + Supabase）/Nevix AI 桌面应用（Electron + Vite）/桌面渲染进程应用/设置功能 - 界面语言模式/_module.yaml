@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: desktop_app/renderer_app/settings_feature
+title: 设置功能 - 界面语言模式
+scope:
+    - apps/desktop/src/renderer/src/features/settings/
+source_files: []
+depends_on: []
+related_to:
+    - path: desktop_app/main_process
+    - path: desktop_app/renderer_app/app_shell
+    - path: desktop_app/shared_code

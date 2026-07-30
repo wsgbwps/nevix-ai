@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: desktop_app/renderer_app/app_shell
+title: 渲染进程应用外壳与初始化
+scope:
+    - apps/desktop/src/renderer/src/app/
+    - apps/desktop/src/renderer/src/main.tsx
+    - apps/desktop/src/renderer/index.html
+source_files: []
+depends_on: []
+related_to:
+    - path: desktop_app/renderer_app/authentication_feature
+    - path: desktop_app/renderer_app/settings_feature

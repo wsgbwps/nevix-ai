@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: desktop_app/renderer_app
+title: 桌面渲染进程应用
+scope:
+    - apps/desktop/src/renderer/
+source_files: []
+depends_on: []
+related_to: []

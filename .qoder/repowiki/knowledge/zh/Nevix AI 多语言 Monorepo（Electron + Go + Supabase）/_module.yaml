@@ -1,0 +1,19 @@
+schema_version: 1
+module_path: ""
+title: Nevix AI 多语言 Monorepo（Electron + Go + Supabase）
+scope:
+    - README.md
+    - CLAUDE.md
+    - CONTEXT-MAP.md
+    - AGENTS.md
+    - Makefile
+    - go.work
+    - package.json
+    - pnpm-workspace.yaml
+    - turbo.json
+    - .gitignore
+    - pnpm-lock.yaml
+    - skills-lock.json
+source_files: []
+depends_on: []
+related_to: []

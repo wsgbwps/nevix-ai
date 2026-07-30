@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: agent_skills
+title: Agent Skills 库（.agents/skills）
+scope:
+    - .agents/skills/
+source_files: []
+depends_on: []
+related_to: []

@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: backend_server
+title: Go 后端服务骨架与事件总线
+scope:
+    - server/
+source_files: []
+depends_on: []
+related_to: []
