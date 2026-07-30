@@ -1,9 +1,9 @@
 export { authenticationResourceOwner, authenticationResources } from './i18n/resources'
-export { AuthenticationScreen } from './components/authentication-screen'
+export { AuthenticationScreen } from './ui/authentication-screen'
 export {
   useAuthentication,
   type AuthenticationError,
   type AuthenticationFlow,
   type AuthenticationNotice,
   type AuthenticationStatus
-} from './hooks/use-authentication'
+} from './model/use-authentication'

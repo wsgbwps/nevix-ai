@@ -5,7 +5,7 @@ import type {
   AuthenticationError,
   AuthenticationFlow,
   AuthenticationNotice
-} from '../hooks/use-authentication'
+} from '../model/use-authentication'
 import { isPasswordByteLengthValid, passwordByteLength } from '../policy/password'
 
 interface AuthenticationScreenProps {
