@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AuthApiError, type AuthError, type SupabaseClient } from '@supabase/supabase-js'
-import { createAuthenticationClient } from '../api/client'
+import { createAuthenticationClient, createRecoveryClient } from '../api/client'
 import { readSupabasePublicConfig } from '../api/environment'
 import { isPasswordByteLengthValid } from '../policy/password'
 import {
@@ -17,15 +17,26 @@ export type AuthenticationStatus =
   | 'unauthenticated'
   | 'authenticated'
 
-export type AuthenticationFlow = 'login' | 'signup' | 'signup-verification'
+export type AuthenticationFlow =
+  | 'login'
+  | 'signup'
+  | 'signup-verification'
+  | 'recovery-request'
+  | 'recovery-verification'
+  | 'recovery-new-password'
 
 export type AuthenticationError =
   | 'invalid-credentials'
   | 'invalid-verification-code'
+  | 'same-password'
   | 'rate-limited'
   | 'service-unavailable'
 
-export type AuthenticationNotice = 'session-expired' | 'remote-sign-out-delayed'
+export type AuthenticationNotice =
+  | 'session-expired'
+  | 'remote-sign-out-delayed'
+  | 'password-updated'
+  | 'password-updated-revocation-delayed'
 
 interface Authentication {
   readonly status: AuthenticationStatus
@@ -39,11 +50,15 @@ interface Authentication {
   readonly didResend: boolean
   readonly showLogin: () => void
   readonly showSignUp: () => void
+  readonly showRecovery: () => void
   readonly retryRestore: () => Promise<void>
   readonly signIn: (email: string, password: string) => Promise<void>
   readonly signUp: (email: string, password: string) => Promise<void>
   readonly verifySignUp: (code: string) => Promise<void>
   readonly resendSignUp: () => Promise<void>
+  readonly requestRecovery: (email: string) => Promise<void>
+  readonly verifyRecovery: (code: string) => Promise<void>
+  readonly completeRecovery: (newPassword: string) => Promise<void>
   readonly signOut: () => Promise<void>
 }
 
@@ -85,6 +100,15 @@ export function useAuthentication(): Authentication {
   const hasInitializedRef = useRef(false)
   const restoreInProgressRef = useRef(false)
   const signOutInProgressRef = useRef(false)
+  // The recovery subflow keeps its isolated client and email out of React state so the temporary
+  // recovery Session can never leak into a render or the top-level authenticated gate.
+  const recoveryClientRef = useRef<SupabaseClient | null>(null)
+  const recoveryEmailRef = useRef<string | undefined>(undefined)
+
+  const discardRecovery = useCallback((): void => {
+    recoveryClientRef.current = null
+    recoveryEmailRef.current = undefined
+  }, [])
 
   const resetSignUpVerification = useCallback((): void => {
     setVerificationEmail(undefined)
@@ -105,8 +129,9 @@ export function useAuthentication(): Authentication {
         setStatus('unauthenticated')
         setFlow('login')
         resetSignUpVerification()
+        discardRecovery()
       })
-  }, [resetSignUpVerification])
+  }, [discardRecovery, resetSignUpVerification])
 
   const enterAuthenticatedShell = useCallback((): void => {
     setPersistenceUnavailable(isSessionPersistenceUnavailable())
@@ -202,14 +227,24 @@ export function useAuthentication(): Authentication {
     setFlow('login')
     setError(undefined)
     resetSignUpVerification()
-  }, [resetSignUpVerification])
+    discardRecovery()
+  }, [discardRecovery, resetSignUpVerification])
 
   const showSignUp = useCallback((): void => {
     setFlow('signup')
     setError(undefined)
     setNotice(undefined)
     resetSignUpVerification()
-  }, [resetSignUpVerification])
+    discardRecovery()
+  }, [discardRecovery, resetSignUpVerification])
+
+  const showRecovery = useCallback((): void => {
+    setFlow('recovery-request')
+    setError(undefined)
+    setNotice(undefined)
+    resetSignUpVerification()
+    discardRecovery()
+  }, [discardRecovery, resetSignUpVerification])
 
   const signIn = useCallback(
     async (email: string, password: string): Promise<void> => {
@@ -363,6 +398,123 @@ export function useAuthentication(): Authentication {
     }
   }, [resendSecondsRemaining, verificationEmail])
 
+  const requestRecovery = useCallback(async (email: string): Promise<void> => {
+    if (submissionRef.current) return
+    const publicConfig = readSupabasePublicConfig()
+    if (!publicConfig) return
+
+    submissionRef.current = true
+    setIsSubmitting(true)
+    setError(undefined)
+
+    try {
+      const client = createRecoveryClient(publicConfig)
+      const { error: recoveryError } = await client.auth.resetPasswordForEmail(email)
+
+      if (recoveryError) {
+        setError(isRateLimited(recoveryError) ? 'rate-limited' : 'service-unavailable')
+        return
+      }
+
+      // Success is existence-neutral: the same code state appears whether or not the email exists.
+      recoveryClientRef.current = client
+      recoveryEmailRef.current = email
+      setFlow('recovery-verification')
+    } catch {
+      setError('service-unavailable')
+    } finally {
+      submissionRef.current = false
+      setIsSubmitting(false)
+    }
+  }, [])
+
+  const verifyRecovery = useCallback(async (code: string): Promise<void> => {
+    const client = recoveryClientRef.current
+    const email = recoveryEmailRef.current
+    if (!client || !email || submissionRef.current || !/^\d{6}$/.test(code)) return
+
+    submissionRef.current = true
+    setIsSubmitting(true)
+    setError(undefined)
+
+    try {
+      const { data, error: verificationError } = await client.auth.verifyOtp({
+        email,
+        token: code,
+        type: 'recovery'
+      })
+
+      if (verificationError || !data.session) {
+        if (isRateLimited(verificationError)) {
+          setError('rate-limited')
+        } else if (
+          verificationError instanceof AuthApiError &&
+          verificationError.code !== undefined &&
+          INVALID_VERIFICATION_CODES.has(verificationError.code)
+        ) {
+          setError('invalid-verification-code')
+        } else {
+          setError('service-unavailable')
+        }
+        return
+      }
+
+      // The recovery Session stays inside the isolated client; only the flow state advances.
+      setFlow('recovery-new-password')
+    } catch {
+      setError('service-unavailable')
+    } finally {
+      submissionRef.current = false
+      setIsSubmitting(false)
+    }
+  }, [])
+
+  const completeRecovery = useCallback(
+    async (newPassword: string): Promise<void> => {
+      const client = recoveryClientRef.current
+      if (!client || submissionRef.current || !isPasswordByteLengthValid(newPassword)) return
+
+      submissionRef.current = true
+      setIsSubmitting(true)
+      setError(undefined)
+
+      try {
+        const { error: updateError } = await client.auth.updateUser({ password: newPassword })
+
+        if (updateError) {
+          if (updateError instanceof AuthApiError && updateError.code === 'same_password') {
+            setError('same-password')
+          } else {
+            setError(isRateLimited(updateError) ? 'rate-limited' : 'service-unavailable')
+          }
+          return
+        }
+
+        let remoteRevocationConfirmed = false
+        try {
+          const { error: revocationError } = await client.auth.signOut({ scope: 'global' })
+          remoteRevocationConfirmed = revocationError === null
+        } catch {
+          remoteRevocationConfirmed = false
+        }
+
+        // Whatever the revocation outcome, the recovery Session is discarded and never promoted;
+        // the user always returns to login and signs in with the new password.
+        discardRecovery()
+        setNotice(
+          remoteRevocationConfirmed ? 'password-updated' : 'password-updated-revocation-delayed'
+        )
+        setFlow('login')
+      } catch {
+        setError('service-unavailable')
+      } finally {
+        submissionRef.current = false
+        setIsSubmitting(false)
+      }
+    },
+    [discardRecovery]
+  )
+
   const signOut = useCallback(async (): Promise<void> => {
     const client = clientRef.current
     if (!client || submissionRef.current) return
@@ -385,11 +537,12 @@ export function useAuthentication(): Authentication {
       setStatus('unauthenticated')
       setFlow('login')
       resetSignUpVerification()
+      discardRecovery()
       submissionRef.current = false
       signOutInProgressRef.current = false
       setIsSubmitting(false)
     }
-  }, [resetSignUpVerification])
+  }, [discardRecovery, resetSignUpVerification])
 
   return {
     status,
@@ -403,11 +556,15 @@ export function useAuthentication(): Authentication {
     didResend,
     showLogin,
     showSignUp,
+    showRecovery,
     retryRestore: restore,
     signIn,
     signUp,
     verifySignUp,
     resendSignUp,
+    requestRecovery,
+    verifyRecovery,
+    completeRecovery,
     signOut
   }
 }

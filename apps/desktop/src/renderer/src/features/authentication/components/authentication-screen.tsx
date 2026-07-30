@@ -20,10 +20,14 @@ interface AuthenticationScreenProps {
   readonly didResend: boolean
   readonly onShowLogin: () => void
   readonly onShowSignUp: () => void
+  readonly onShowRecovery: () => void
   readonly onSignIn: (email: string, password: string) => Promise<void>
   readonly onSignUp: (email: string, password: string) => Promise<void>
   readonly onVerifySignUp: (code: string) => Promise<void>
   readonly onResendSignUp: () => Promise<void>
+  readonly onRequestRecovery: (email: string) => Promise<void>
+  readonly onVerifyRecovery: (code: string) => Promise<void>
+  readonly onCompleteRecovery: (newPassword: string) => Promise<void>
   readonly secondaryContent?: React.ReactNode
 }
 
@@ -39,10 +43,14 @@ export function AuthenticationScreen({
   onRetryRestore,
   onShowLogin,
   onShowSignUp,
+  onShowRecovery,
   onSignIn,
   onSignUp,
   onVerifySignUp,
   onResendSignUp,
+  onRequestRecovery,
+  onVerifyRecovery,
+  onCompleteRecovery,
   secondaryContent
 }: AuthenticationScreenProps): React.JSX.Element {
   const { t } = useTranslation('authentication')
@@ -87,6 +95,7 @@ export function AuthenticationScreen({
               isSubmitting={isSubmitting}
               onSignIn={onSignIn}
               onShowSignUp={onShowSignUp}
+              onShowRecovery={onShowRecovery}
             />
           ) : flow === 'signup' ? (
             <SignupForm
@@ -95,7 +104,7 @@ export function AuthenticationScreen({
               onSignUp={onSignUp}
               onShowLogin={onShowLogin}
             />
-          ) : (
+          ) : flow === 'signup-verification' ? (
             <SignupVerificationForm
               key={resendGeneration}
               error={error}
@@ -104,6 +113,28 @@ export function AuthenticationScreen({
               didResend={didResend}
               onVerify={onVerifySignUp}
               onResend={onResendSignUp}
+              onShowLogin={onShowLogin}
+              onShowRecovery={onShowRecovery}
+            />
+          ) : flow === 'recovery-request' ? (
+            <RecoveryRequestForm
+              error={error}
+              isSubmitting={isSubmitting}
+              onRequestRecovery={onRequestRecovery}
+              onShowLogin={onShowLogin}
+            />
+          ) : flow === 'recovery-verification' ? (
+            <RecoveryVerificationForm
+              error={error}
+              isSubmitting={isSubmitting}
+              onVerify={onVerifyRecovery}
+              onShowLogin={onShowLogin}
+            />
+          ) : (
+            <RecoveryNewPasswordForm
+              error={error}
+              isSubmitting={isSubmitting}
+              onCompleteRecovery={onCompleteRecovery}
               onShowLogin={onShowLogin}
             />
           )}
@@ -114,18 +145,27 @@ export function AuthenticationScreen({
   )
 }
 
+const LOGIN_NOTICE_KEYS = {
+  'session-expired': 'login.sessionExpired',
+  'remote-sign-out-delayed': 'login.remoteSignOutDelayed',
+  'password-updated': 'login.passwordUpdated',
+  'password-updated-revocation-delayed': 'login.passwordUpdatedRevocationDelayed'
+} as const
+
 function LoginForm({
   error,
   notice,
   isSubmitting,
   onSignIn,
-  onShowSignUp
+  onShowSignUp,
+  onShowRecovery
 }: {
   readonly error?: AuthenticationError
   readonly notice?: AuthenticationNotice
   readonly isSubmitting: boolean
   readonly onSignIn: (email: string, password: string) => Promise<void>
   readonly onShowSignUp: () => void
+  readonly onShowRecovery: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
 
@@ -143,9 +183,7 @@ function LoginForm({
       <div className="flex flex-col gap-6">
         {notice ? (
           <p role="status" className="text-muted-foreground text-sm">
-            {t(
-              notice === 'session-expired' ? 'login.sessionExpired' : 'login.remoteSignOutDelayed'
-            )}
+            {t(LOGIN_NOTICE_KEYS[notice])}
           </p>
         ) : null}
         <CredentialFields passwordAutoComplete="current-password" disabled={isSubmitting} />
@@ -153,6 +191,16 @@ function LoginForm({
         <Button type="submit" disabled={isSubmitting}>
           {t(isSubmitting ? 'login.submitting' : 'login.submit')}
         </Button>
+        <div className="flex justify-center text-sm">
+          <button
+            type="button"
+            className="text-foreground font-medium underline underline-offset-4"
+            disabled={isSubmitting}
+            onClick={onShowRecovery}
+          >
+            {t('login.forgotPassword')}
+          </button>
+        </div>
         <p className="text-muted-foreground text-center text-sm">
           {t('login.noAccount')}{' '}
           <button
@@ -235,7 +283,8 @@ function SignupVerificationForm({
   didResend,
   onVerify,
   onResend,
-  onShowLogin
+  onShowLogin,
+  onShowRecovery
 }: {
   readonly error?: AuthenticationError
   readonly isSubmitting: boolean
@@ -244,6 +293,7 @@ function SignupVerificationForm({
   readonly onVerify: (code: string) => Promise<void>
   readonly onResend: () => Promise<void>
   readonly onShowLogin: () => void
+  readonly onShowRecovery: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
   const [code, setCode] = useState('')
@@ -296,7 +346,7 @@ function SignupVerificationForm({
             ? t('verification.resendCountdown', { count: resendSecondsRemaining })
             : t('verification.resend')}
         </Button>
-        <div className="flex justify-center text-sm">
+        <div className="flex justify-center gap-6 text-sm">
           <button
             type="button"
             className="font-medium underline underline-offset-4"
@@ -304,6 +354,210 @@ function SignupVerificationForm({
             onClick={onShowLogin}
           >
             {t('verification.signIn')}
+          </button>
+          <button
+            type="button"
+            className="font-medium underline underline-offset-4"
+            disabled={isSubmitting}
+            onClick={onShowRecovery}
+          >
+            {t('login.forgotPassword')}
+          </button>
+        </div>
+      </div>
+    </form>
+  )
+}
+
+function RecoveryRequestForm({
+  error,
+  isSubmitting,
+  onRequestRecovery,
+  onShowLogin
+}: {
+  readonly error?: AuthenticationError
+  readonly isSubmitting: boolean
+  readonly onRequestRecovery: (email: string) => Promise<void>
+  readonly onShowLogin: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation('authentication')
+
+  function submit(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+    if (isSubmitting) return
+
+    const email = new FormData(event.currentTarget).get('email')
+    if (typeof email === 'string') void onRequestRecovery(email)
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <FormHeader
+        heading={t('recovery.request.heading')}
+        description={t('recovery.request.description')}
+      />
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-3">
+          <label htmlFor="authentication-recovery-email" className="text-sm font-medium">
+            {t('login.email')}
+          </label>
+          <input
+            id="authentication-recovery-email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            disabled={isSubmitting}
+            className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/30 h-10 w-full rounded-xl border px-3 text-sm outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </div>
+        {error ? <AuthenticationErrorMessage error={error} context="recovery-request" /> : null}
+        <Button type="submit" disabled={isSubmitting}>
+          {t(isSubmitting ? 'recovery.request.submitting' : 'recovery.request.submit')}
+        </Button>
+        <div className="flex justify-center text-sm">
+          <button
+            type="button"
+            className="font-medium underline underline-offset-4"
+            disabled={isSubmitting}
+            onClick={onShowLogin}
+          >
+            {t('recovery.request.backToLogin')}
+          </button>
+        </div>
+      </div>
+    </form>
+  )
+}
+
+function RecoveryVerificationForm({
+  error,
+  isSubmitting,
+  onVerify,
+  onShowLogin
+}: {
+  readonly error?: AuthenticationError
+  readonly isSubmitting: boolean
+  readonly onVerify: (code: string) => Promise<void>
+  readonly onShowLogin: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation('authentication')
+  const [code, setCode] = useState('')
+  const isComplete = /^\d{6}$/.test(code)
+
+  function submit(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+    if (!isSubmitting && isComplete) void onVerify(code)
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <FormHeader
+        heading={t('recovery.verification.heading')}
+        description={t('recovery.verification.description')}
+      />
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-3">
+          <label htmlFor="authentication-recovery-code" className="text-sm font-medium">
+            {t('recovery.verification.code')}
+          </label>
+          <input
+            id="authentication-recovery-code"
+            name="code"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            value={code}
+            disabled={isSubmitting}
+            onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+            className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/30 h-12 w-full rounded-xl border px-3 text-center text-lg tracking-[0.45em] outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+          <p className="text-muted-foreground text-sm">{t('recovery.verification.codeHint')}</p>
+        </div>
+        {error ? (
+          <AuthenticationErrorMessage error={error} context="recovery-verification" />
+        ) : null}
+        <Button type="submit" disabled={isSubmitting || !isComplete}>
+          {t(isSubmitting ? 'recovery.verification.verifying' : 'recovery.verification.verify')}
+        </Button>
+        <div className="flex justify-center text-sm">
+          <button
+            type="button"
+            className="font-medium underline underline-offset-4"
+            disabled={isSubmitting}
+            onClick={onShowLogin}
+          >
+            {t('recovery.verification.backToLogin')}
+          </button>
+        </div>
+      </div>
+    </form>
+  )
+}
+
+function RecoveryNewPasswordForm({
+  error,
+  isSubmitting,
+  onCompleteRecovery,
+  onShowLogin
+}: {
+  readonly error?: AuthenticationError
+  readonly isSubmitting: boolean
+  readonly onCompleteRecovery: (newPassword: string) => Promise<void>
+  readonly onShowLogin: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation('authentication')
+  const [password, setPassword] = useState('')
+  const byteLength = passwordByteLength(password)
+  const isPasswordValid = isPasswordByteLengthValid(password)
+
+  function submit(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+    if (!isSubmitting && isPasswordValid) void onCompleteRecovery(password)
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <FormHeader
+        heading={t('recovery.newPassword.heading')}
+        description={t('recovery.newPassword.description')}
+      />
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-3">
+          <label htmlFor="authentication-recovery-new-password" className="text-sm font-medium">
+            {t('recovery.newPassword.password')}
+          </label>
+          <input
+            id="authentication-recovery-new-password"
+            name="password"
+            type="password"
+            autoComplete="new-password"
+            required
+            disabled={isSubmitting}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/30 h-10 w-full rounded-xl border px-3 text-sm outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </div>
+        <p
+          className={isPasswordValid ? 'text-muted-foreground text-sm' : 'text-destructive text-sm'}
+        >
+          {t('recovery.newPassword.passwordBytes', { count: byteLength })}
+        </p>
+        {error ? <AuthenticationErrorMessage error={error} context="recovery-password" /> : null}
+        <Button type="submit" disabled={isSubmitting || !isPasswordValid}>
+          {t(isSubmitting ? 'recovery.newPassword.submitting' : 'recovery.newPassword.submit')}
+        </Button>
+        <div className="flex justify-center text-sm">
+          <button
+            type="button"
+            className="font-medium underline underline-offset-4"
+            disabled={isSubmitting}
+            onClick={onShowLogin}
+          >
+            {t('recovery.verification.backToLogin')}
           </button>
         </div>
       </div>
@@ -375,12 +629,38 @@ function FormHeader({
   )
 }
 
+type AuthenticationErrorContext =
+  | 'login'
+  | 'signup'
+  | 'verification'
+  | 'recovery-request'
+  | 'recovery-verification'
+  | 'recovery-password'
+
+const RATE_LIMITED_KEYS = {
+  login: 'login.rateLimited',
+  signup: 'signup.rateLimited',
+  verification: 'verification.rateLimited',
+  'recovery-request': 'recovery.request.rateLimited',
+  'recovery-verification': 'recovery.verification.rateLimited',
+  'recovery-password': 'recovery.newPassword.rateLimited'
+} as const satisfies Record<AuthenticationErrorContext, string>
+
+const SERVICE_ERROR_KEYS = {
+  login: 'login.serviceError',
+  signup: 'signup.serviceError',
+  verification: 'verification.serviceError',
+  'recovery-request': 'recovery.request.serviceError',
+  'recovery-verification': 'recovery.verification.serviceError',
+  'recovery-password': 'recovery.newPassword.serviceError'
+} as const satisfies Record<AuthenticationErrorContext, string>
+
 function AuthenticationErrorMessage({
   error,
   context
 }: {
   readonly error: AuthenticationError
-  readonly context: 'login' | 'signup' | 'verification'
+  readonly context: AuthenticationErrorContext
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
   let message: string
@@ -388,21 +668,16 @@ function AuthenticationErrorMessage({
   if (error === 'invalid-credentials') {
     message = t('login.invalidCredentials')
   } else if (error === 'invalid-verification-code') {
-    message = t('verification.invalidCode')
+    message =
+      context === 'recovery-verification'
+        ? t('recovery.verification.invalidCode')
+        : t('verification.invalidCode')
+  } else if (error === 'same-password') {
+    message = t('recovery.newPassword.samePassword')
   } else if (error === 'rate-limited') {
-    message =
-      context === 'login'
-        ? t('login.rateLimited')
-        : context === 'signup'
-          ? t('signup.rateLimited')
-          : t('verification.rateLimited')
+    message = t(RATE_LIMITED_KEYS[context])
   } else {
-    message =
-      context === 'login'
-        ? t('login.serviceError')
-        : context === 'signup'
-          ? t('signup.serviceError')
-          : t('verification.serviceError')
+    message = t(SERVICE_ERROR_KEYS[context])
   }
 
   return (

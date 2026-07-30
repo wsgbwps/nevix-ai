@@ -21,10 +21,14 @@ function App(): React.JSX.Element {
         onRetryRestore={authentication.retryRestore}
         onShowLogin={authentication.showLogin}
         onShowSignUp={authentication.showSignUp}
+        onShowRecovery={authentication.showRecovery}
         onSignIn={authentication.signIn}
         onSignUp={authentication.signUp}
         onVerifySignUp={authentication.verifySignUp}
         onResendSignUp={authentication.resendSignUp}
+        onRequestRecovery={authentication.requestRecovery}
+        onVerifyRecovery={authentication.verifyRecovery}
+        onCompleteRecovery={authentication.completeRecovery}
         secondaryContent={
           authentication.status === 'unauthenticated' ? <LanguageModeSettings /> : undefined
         }

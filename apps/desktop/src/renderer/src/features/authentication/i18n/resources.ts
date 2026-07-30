@@ -26,12 +26,15 @@ export const authenticationTranslations = defineResourceTranslations({
       description: '使用已验证的邮箱继续。',
       sessionExpired: '登录状态已失效，请重新登录。',
       remoteSignOutDelayed: '此设备已退出登录。服务端撤销可能延迟，稍后会自动生效。',
+      passwordUpdated: '密码已更新，请使用新密码登录。',
+      passwordUpdatedRevocationDelayed: '密码已更新，但其他设备的退出可能延迟。请使用新密码登录。',
       email: '邮箱',
       password: '密码',
       submit: '登录',
       submitting: '正在登录…',
       noAccount: '还没有账号？',
       createAccount: '创建账号',
+      forgotPassword: '忘记密码？',
       invalidCredentials: '邮箱或密码错误',
       rateLimited: '请求过于频繁，请稍后重试。',
       serviceError: '暂时无法登录，请稍后重试。'
@@ -61,6 +64,40 @@ export const authenticationTranslations = defineResourceTranslations({
       signIn: '返回登录',
       rateLimited: '请求过于频繁，请稍后再试。',
       serviceError: '暂时无法验证，请稍后重试。'
+    },
+    recovery: {
+      request: {
+        heading: '重置密码',
+        description: '输入你的邮箱，我们将发送六位恢复验证码。',
+        submit: '发送恢复验证码',
+        submitting: '正在发送…',
+        backToLogin: '返回登录',
+        rateLimited: '请求过于频繁，请稍后再试。',
+        serviceError: '暂时无法发送恢复验证码，请稍后重试。'
+      },
+      verification: {
+        heading: '输入恢复验证码',
+        description: '如果该邮箱已注册，我们已发送六位恢复验证码。',
+        code: '恢复验证码',
+        codeHint: '请输入六位恢复验证码；验证码有效期为一小时。',
+        verify: '验证',
+        verifying: '正在验证…',
+        invalidCode: '验证码无效或已过期',
+        backToLogin: '返回登录',
+        rateLimited: '请求过于频繁，请稍后再试。',
+        serviceError: '暂时无法验证，请稍后重试。'
+      },
+      newPassword: {
+        heading: '设置新密码',
+        description: '为你的账号设置新密码，之后需要使用新密码重新登录。',
+        password: '新密码',
+        passwordBytes: '{{count}} / 12–72 UTF-8 字节',
+        submit: '更新密码',
+        submitting: '正在更新…',
+        samePassword: '新密码不能与旧密码相同',
+        rateLimited: '请求过于频繁，请稍后再试。',
+        serviceError: '暂时无法更新密码，请稍后重试。'
+      }
     },
     logout: {
       submit: '退出当前设备',
@@ -92,12 +129,16 @@ export const authenticationTranslations = defineResourceTranslations({
       sessionExpired: 'Your session is no longer valid. Sign in again.',
       remoteSignOutDelayed:
         'This device is signed out. Revoking the session on the server may be delayed.',
+      passwordUpdated: 'Your password was updated. Sign in with your new password.',
+      passwordUpdatedRevocationDelayed:
+        'Your password was updated, but signing out other devices may be delayed. Sign in with your new password.',
       email: 'Email',
       password: 'Password',
       submit: 'Sign in',
       submitting: 'Signing in…',
       noAccount: 'New to Nevix AI?',
       createAccount: 'Create account',
+      forgotPassword: 'Forgot password?',
       invalidCredentials: 'Email or password is incorrect',
       rateLimited: 'Too many requests. Try again later.',
       serviceError: 'Sign-in is temporarily unavailable. Try again later.'
@@ -127,6 +168,41 @@ export const authenticationTranslations = defineResourceTranslations({
       signIn: 'Go to sign in',
       rateLimited: 'Too many requests. Try again later.',
       serviceError: 'Verification is temporarily unavailable. Try again later.'
+    },
+    recovery: {
+      request: {
+        heading: 'Reset your password',
+        description: 'Enter your email and we will send a six-digit recovery code.',
+        submit: 'Send recovery code',
+        submitting: 'Sending…',
+        backToLogin: 'Back to sign in',
+        rateLimited: 'Too many requests. Try again later.',
+        serviceError: 'The recovery code cannot be sent right now. Try again later.'
+      },
+      verification: {
+        heading: 'Enter your recovery code',
+        description: 'If this email is registered, we sent a six-digit recovery code.',
+        code: 'Recovery code',
+        codeHint: 'Enter the six-digit recovery code. It expires in one hour.',
+        verify: 'Verify code',
+        verifying: 'Verifying…',
+        invalidCode: 'Recovery code is invalid or expired',
+        backToLogin: 'Back to sign in',
+        rateLimited: 'Too many requests. Try again later.',
+        serviceError: 'Verification is temporarily unavailable. Try again later.'
+      },
+      newPassword: {
+        heading: 'Set a new password',
+        description:
+          'Choose a new password for your account, then sign in again with the new password.',
+        password: 'New password',
+        passwordBytes: '{{count}} of 12–72 UTF-8 bytes',
+        submit: 'Update password',
+        submitting: 'Updating…',
+        samePassword: 'New password must be different from your old password',
+        rateLimited: 'Too many requests. Try again later.',
+        serviceError: 'The password cannot be updated right now. Try again later.'
+      }
     },
     logout: {
       submit: 'Sign out of this device',

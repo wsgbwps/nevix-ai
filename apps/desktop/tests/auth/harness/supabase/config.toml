@@ -78,6 +78,15 @@ otp_expiry = 3600
 subject = "Nevix AI verification code / Nevix AI 验证码"
 content_path = "./supabase/templates/confirmation.html"
 
+[auth.email.template.recovery]
+subject = "Nevix AI password recovery code / Nevix AI 密码恢复验证码"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.notification.password_changed]
+enabled = true
+subject = "Nevix AI password changed / Nevix AI 密码已修改"
+content_path = "./templates/password-changed-notification.html"
+
 [auth.sms]
 enable_signup = false
 enable_confirmations = false

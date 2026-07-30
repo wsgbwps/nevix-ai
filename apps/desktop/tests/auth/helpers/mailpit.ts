@@ -8,6 +8,11 @@ interface RegistrationMessage {
   readonly body: string
 }
 
+interface NotificationMessage {
+  readonly id: string
+  readonly body: string
+}
+
 const REGISTRATION_CODE_PATTERN = /\b\d{6}\b/
 const POLL_INTERVAL_MS = 200
 const POLL_TIMEOUT_MS = 10_000
@@ -50,6 +55,28 @@ export async function waitForRegistrationMessage(
   throw new Error(
     `Registration email was not captured before the bounded deadline (mailbox=${sawAnyMessage ? 'non-empty' : 'empty'}, new-message=${sawNewMessage ? 'missing-code' : 'missing'})`
   )
+}
+
+export async function waitForNotificationMessage(
+  config: MailpitHarnessConfig,
+  excludedMessageIds: readonly string[]
+): Promise<NotificationMessage> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS
+  const excludedIds = new Set(excludedMessageIds)
+
+  while (Date.now() < deadline) {
+    const summaries = await listMessages(config)
+    const summary = summaries.find((candidate) => !excludedIds.has(candidate.id))
+
+    if (summary) {
+      const body = await readMessageBody(config, summary.id)
+      return { id: summary.id, body }
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+  }
+
+  throw new Error('Notification email was not captured before the bounded deadline')
 }
 
 async function listMessages(config: MailpitHarnessConfig): Promise<readonly { id: string }[]> {
