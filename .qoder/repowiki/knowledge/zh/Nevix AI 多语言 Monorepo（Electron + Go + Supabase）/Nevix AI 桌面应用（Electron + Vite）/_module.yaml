@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: desktop_app
-title: Nevix AI 桌面应用（Electron + Vite）
-scope:
-    - apps/desktop/
-source_files: []
-depends_on: []
-related_to: []
