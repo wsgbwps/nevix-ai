@@ -11,9 +11,18 @@ function App(): React.JSX.Element {
     return (
       <AuthenticationScreen
         status={authentication.status}
+        flow={authentication.flow}
         error={authentication.error}
         isSubmitting={authentication.isSubmitting}
+        resendSecondsRemaining={authentication.resendSecondsRemaining}
+        resendGeneration={authentication.resendGeneration}
+        didResend={authentication.didResend}
+        onShowLogin={authentication.showLogin}
+        onShowSignUp={authentication.showSignUp}
         onSignIn={authentication.signIn}
+        onSignUp={authentication.signUp}
+        onVerifySignUp={authentication.verifySignUp}
+        onResendSignUp={authentication.resendSignUp}
         secondaryContent={
           authentication.status === 'unauthenticated' ? <LanguageModeSettings /> : undefined
         }

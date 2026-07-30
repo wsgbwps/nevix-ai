@@ -44,6 +44,7 @@ status_json="$(pnpm exec supabase --workdir tests/auth/harness status -o json)"
 api_url="$(json_value "$status_json" API_URL)"
 publishable_key="$(json_value "$status_json" PUBLISHABLE_KEY)"
 service_role_key="$(json_value "$status_json" SERVICE_ROLE_KEY)"
+mailpit_url="$(json_value "$status_json" INBUCKET_URL)"
 
 VITE_SUPABASE_URL=http://192.168.1.50:8000 \
   VITE_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
@@ -58,6 +59,7 @@ VITE_SUPABASE_URL="$api_url" \
 NEVIX_TEST_SUPABASE_URL="$api_url" \
   NEVIX_TEST_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
   NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
+  NEVIX_TEST_MAILPIT_URL="$mailpit_url" \
   pnpm exec playwright test --workers=1
 
 NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \

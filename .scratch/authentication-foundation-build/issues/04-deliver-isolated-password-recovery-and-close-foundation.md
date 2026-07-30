@@ -12,11 +12,13 @@
 - Use the [Supabase React Password-Based Authentication Block](https://supabase.com/ui/docs/react/password-based-auth) only to cross-check reset request, loading/submission state, password update interaction and relevant error cases.
 - Explicitly reject the reference Block's SPA routes, location redirects, redirect-based recovery link, Magic Link behavior, standalone normal Supabase client and raw provider error display.
 - Recovery must remain the spec-defined six-digit code flow. Its Supabase client is deliberately separate from the normal authenticated Session owner, disables persistence and auto-refresh, and exists only for the recovery subflow.
+- Add localized forgot-password entry points to the login and post-registration neutral states and wire them directly into the recovery request flow; do not ship an inert or coming-soon control.
 - Any newly discovered shared UI primitive change must declare impact and tests and receive deliberate self-review and required maintainer approval; do not overwrite existing primitives.
 - Move every recovery, code, password, success, warning and error string into Simplified Chinese and English i18n resources.
 
 ## Acceptance criteria
 
+- [ ] Localized forgot-password entry points are available from login and the post-registration neutral state and enter the functional recovery request flow without a router, deep link or dead-end control.
 - [ ] Forgot-password submission always enters the same existence-neutral recovery-code state regardless of whether the email is registered.
 - [ ] Supabase Auth recovery email uses a fixed bilingual Simplified Chinese/English template containing a six-digit code and one-hour validity statement, with no reset link, redirect URL or Desktop protocol.
 - [ ] Mailpit supplies the real recovery code through bounded polling without exposing the email, code or token in logs, traces or screenshots.
@@ -35,4 +37,3 @@
 - [ ] Lint, node/web typecheck, build, the complete Authentication Playwright suite and resource-contract coverage pass.
 - [ ] The completed change contains no Profile, Organization, Membership, business schema, RLS, Go Identity module, custom abuse counter, router, deep link, Magic Link, shared Auth package or unrelated refactor.
 - [ ] Native credential-backend support claims are limited to platforms with recorded smoke evidence; missing Windows or Linux Secret Service evidence does not block the Ubuntu merge gate and is not represented as completed support.
-

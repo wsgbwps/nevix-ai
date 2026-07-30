@@ -3,5 +3,6 @@ export { AuthenticationScreen } from './components/authentication-screen'
 export {
   useAuthentication,
   type AuthenticationError,
+  type AuthenticationFlow,
   type AuthenticationStatus
 } from './hooks/use-authentication'
