@@ -1,6 +1,6 @@
 ---
-trigger: always_on
-alwaysApply: true
+trigger: manual
+alwaysApply: false
 ---
 Protect the main context window from large, unpredictable output. Choose inline or agent based on whether the output is bounded.
 
