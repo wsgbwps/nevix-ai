@@ -58,7 +58,7 @@ test('a verified User signs in once and enters the authenticated app shell', asy
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-login-'))
 
   try {
-    let launched = await launchTestApp({
+    const launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US']
     })
@@ -107,21 +107,6 @@ test('a verified User signs in once and enters the authenticated app shell', asy
         localStorageKeys: [],
         indexedDatabaseNames: []
       })
-    } finally {
-      await launched.electronApp.close()
-    }
-
-    launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US']
-    })
-    try {
-      await expect(
-        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
-      ).toBeVisible()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
     } finally {
       await launched.electronApp.close()
     }

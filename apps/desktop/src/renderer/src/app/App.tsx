@@ -13,10 +13,12 @@ function App(): React.JSX.Element {
         status={authentication.status}
         flow={authentication.flow}
         error={authentication.error}
+        notice={authentication.notice}
         isSubmitting={authentication.isSubmitting}
         resendSecondsRemaining={authentication.resendSecondsRemaining}
         resendGeneration={authentication.resendGeneration}
         didResend={authentication.didResend}
+        onRetryRestore={authentication.retryRestore}
         onShowLogin={authentication.showLogin}
         onShowSignUp={authentication.showSignUp}
         onSignIn={authentication.signIn}
@@ -33,6 +35,11 @@ function App(): React.JSX.Element {
   return (
     <div className="bg-background flex h-screen flex-col items-center justify-center gap-8 px-6">
       <h1 className="text-foreground text-2xl font-semibold">{t('heading')}</h1>
+      {authentication.isSessionPersistenceUnavailable ? (
+        <p role="status" className="text-muted-foreground max-w-md text-center text-sm">
+          {authenticationT('sessionPersistence.unavailable')}
+        </p>
+      ) : null}
       <LanguageModeSettings />
       <button
         type="button"

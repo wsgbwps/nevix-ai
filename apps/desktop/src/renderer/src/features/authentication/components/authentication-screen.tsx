@@ -1,14 +1,20 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../../components/ui/button'
-import type { AuthenticationError, AuthenticationFlow } from '../hooks/use-authentication'
+import type {
+  AuthenticationError,
+  AuthenticationFlow,
+  AuthenticationNotice
+} from '../hooks/use-authentication'
 import { isPasswordByteLengthValid, passwordByteLength } from '../policy/password'
 
 interface AuthenticationScreenProps {
-  readonly status: 'configuration-error' | 'restoring' | 'unauthenticated'
+  readonly status: 'configuration-error' | 'restoring' | 'restore-failure' | 'unauthenticated'
   readonly flow: AuthenticationFlow
   readonly error?: AuthenticationError
+  readonly notice?: AuthenticationNotice
   readonly isSubmitting?: boolean
+  readonly onRetryRestore: () => Promise<void>
   readonly resendSecondsRemaining: number
   readonly resendGeneration: number
   readonly didResend: boolean
@@ -25,10 +31,12 @@ export function AuthenticationScreen({
   status,
   flow,
   error,
+  notice,
   isSubmitting = false,
   resendSecondsRemaining,
   resendGeneration,
   didResend,
+  onRetryRestore,
   onShowLogin,
   onShowSignUp,
   onSignIn,
@@ -40,13 +48,23 @@ export function AuthenticationScreen({
   const { t } = useTranslation('authentication')
 
   if (status !== 'unauthenticated') {
-    const translationKey = status === 'restoring' ? 'restoring' : 'configurationError'
+    const translationKey =
+      status === 'restoring'
+        ? 'restoring'
+        : status === 'restore-failure'
+          ? 'restoreFailure'
+          : 'configurationError'
 
     return (
       <main className="bg-background flex h-screen items-center justify-center px-6">
         <section className="bg-card w-full max-w-md rounded-2xl border p-8 text-center shadow-sm">
           <h1 className="text-2xl font-semibold">{t(`${translationKey}.heading`)}</h1>
           <p className="text-muted-foreground mt-3 text-sm">{t(`${translationKey}.description`)}</p>
+          {status === 'restore-failure' ? (
+            <Button className="mt-6" onClick={() => void onRetryRestore()}>
+              {t('restoreFailure.retry')}
+            </Button>
+          ) : null}
         </section>
       </main>
     )
@@ -65,6 +83,7 @@ export function AuthenticationScreen({
           {flow === 'login' ? (
             <LoginForm
               error={error}
+              notice={notice}
               isSubmitting={isSubmitting}
               onSignIn={onSignIn}
               onShowSignUp={onShowSignUp}
@@ -97,11 +116,13 @@ export function AuthenticationScreen({
 
 function LoginForm({
   error,
+  notice,
   isSubmitting,
   onSignIn,
   onShowSignUp
 }: {
   readonly error?: AuthenticationError
+  readonly notice?: AuthenticationNotice
   readonly isSubmitting: boolean
   readonly onSignIn: (email: string, password: string) => Promise<void>
   readonly onShowSignUp: () => void
@@ -120,6 +141,13 @@ function LoginForm({
     <form onSubmit={submit}>
       <FormHeader heading={t('login.heading')} description={t('login.description')} />
       <div className="flex flex-col gap-6">
+        {notice ? (
+          <p role="status" className="text-muted-foreground text-sm">
+            {t(
+              notice === 'session-expired' ? 'login.sessionExpired' : 'login.remoteSignOutDelayed'
+            )}
+          </p>
+        ) : null}
         <CredentialFields passwordAutoComplete="current-password" disabled={isSubmitting} />
         {error ? <AuthenticationErrorMessage error={error} context="login" /> : null}
         <Button type="submit" disabled={isSubmitting}>

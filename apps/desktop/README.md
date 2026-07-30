@@ -59,3 +59,7 @@ Only the public URL and publishable key are configured:
 VITE_SUPABASE_URL=http://192.168.1.50:8000
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxx
 ```
+
+Platform-native Session persistence must also pass the
+[native credential-backend smoke](docs/authentication-session-native-smoke.md) before support is
+claimed for that backend.

@@ -4,5 +4,6 @@ export {
   useAuthentication,
   type AuthenticationError,
   type AuthenticationFlow,
+  type AuthenticationNotice,
   type AuthenticationStatus
 } from './hooks/use-authentication'

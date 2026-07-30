@@ -81,3 +81,12 @@ export async function refreshOutsideDesktop(
   }
   return data.session
 }
+
+export async function revokeSessionOutsideDesktop(
+  config: AuthHarnessConfig,
+  accessToken: string
+): Promise<void> {
+  const client = createHarnessClient(config, config.publishableKey)
+  const { error } = await client.auth.admin.signOut(accessToken, 'local')
+  if (error) throw new Error(`Unable to revoke Auth test Session: ${error.code}`)
+}

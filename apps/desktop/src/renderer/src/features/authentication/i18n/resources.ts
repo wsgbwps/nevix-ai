@@ -13,9 +13,19 @@ export const authenticationTranslations = defineResourceTranslations({
       heading: '正在初始化认证',
       description: '确认登录状态前不会显示应用内容。'
     },
+    restoreFailure: {
+      heading: '暂时无法恢复登录状态',
+      description: '网络或认证服务暂时不可用。本机登录状态已保留，可稍后重试。',
+      retry: '重试'
+    },
+    sessionPersistence: {
+      unavailable: '此设备无法安全保存登录状态，关闭应用后需要重新登录。'
+    },
     login: {
       heading: '登录 Nevix AI',
       description: '使用已验证的邮箱继续。',
+      sessionExpired: '登录状态已失效，请重新登录。',
+      remoteSignOutDelayed: '此设备已退出登录。服务端撤销可能延迟，稍后会自动生效。',
       email: '邮箱',
       password: '密码',
       submit: '登录',
@@ -66,9 +76,22 @@ export const authenticationTranslations = defineResourceTranslations({
       heading: 'Initializing authentication',
       description: 'Application content stays hidden until your session is checked.'
     },
+    restoreFailure: {
+      heading: 'Your session could not be restored yet',
+      description:
+        'The network or the authentication service is temporarily unavailable. Your session is still stored on this device.',
+      retry: 'Try again'
+    },
+    sessionPersistence: {
+      unavailable:
+        'This device cannot store your session securely, so you will sign in again after closing the application.'
+    },
     login: {
       heading: 'Sign in to Nevix AI',
       description: 'Continue with your verified email address.',
+      sessionExpired: 'Your session is no longer valid. Sign in again.',
+      remoteSignOutDelayed:
+        'This device is signed out. Revoking the session on the server may be delayed.',
       email: 'Email',
       password: 'Password',
       submit: 'Sign in',
