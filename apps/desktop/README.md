@@ -63,3 +63,21 @@ VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxx
 Platform-native Session persistence must also pass the
 [native credential-backend smoke](docs/authentication-session-native-smoke.md) before support is
 claimed for that backend.
+
+### Architecture verification
+
+One deterministic command checks the accepted Domain-first Desktop architecture rules — Main
+adapter placement and registration discovery, cross-process Channel naming, the generic preload
+bridge, and renderer Feature interfaces — and is the single architecture acceptance entry for both
+local work and CI:
+
+```bash
+$ pnpm verify:architecture
+```
+
+It first runs the verifier's fixture-driven contract tests
+(`scripts/architecture/verifier.test.mjs`), then verifies the real `src/` tree and exits non-zero
+on any violation. Documented pre-migration debt is carried only by the exact-path entries in
+`scripts/architecture/migration-debt-allowlist.mjs`; each entry records a reason and a removal
+trigger, and unused entries fail so the documented debt list can only shrink. Responsibility
+placement, interface depth, and deletion tests stay review decisions and are not automated.

@@ -13,6 +13,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "playwright test",
     "test:auth": "bash scripts/run-auth-e2e.sh",
+    "verify:architecture": "node --test scripts/architecture/verifier.test.mjs && node scripts/verify-desktop-architecture.mjs",
     "verify:auth-artifacts": "node scripts/verify-auth-artifacts.mjs",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
