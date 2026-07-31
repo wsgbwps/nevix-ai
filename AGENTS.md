@@ -48,27 +48,3 @@ Default label vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-h
 ### Domain docs
 
 Multi-context — `CONTEXT-MAP.md` at root points to per-context `CONTEXT.md` files in `apps/desktop/` and `server/`. See `docs/agents/domain.md`.
-
-## Context protection
-
-Protect the primary agent's context from large or unpredictable output. Delegate noisy,
-read-heavy exploration to the built-in `explorer` agent or another suitable read-only
-subagent, and ask it to return a concise summary with relevant file references.
-
-### Delegate to a subagent
-
-- Broad or recursive searches without a file-type, result-count, or directory bound
-- `find` over large directories without `-maxdepth`
-- `git log` without `-n`, `--max-count`, or `--oneline` limits
-- Web searches, page fetches, or commands whose output size is unpredictable
-- Exploratory searches where the target is not yet known
-
-### Safe to run in the primary agent
-
-- Read a file at a known path
-- Run build, test, lint, or typecheck commands
-- Run a targeted search with a narrow directory, file glob, result-count, or files-only output
-- Run `git log` with an explicit limit
-- Run `git diff --stat` or `git show --stat`
-- Run `find` with `-maxdepth` or within a narrow directory
-- Run a command whose output is confidently bounded to roughly 30 lines

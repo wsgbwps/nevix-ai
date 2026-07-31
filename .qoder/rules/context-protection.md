@@ -1,16 +1,30 @@
 ---
-trigger: manual
-alwaysApply: false
+trigger: always_on
+alwaysApply: true
 ---
-Protect the main context window from large, unpredictable output. Choose inline or agent based on whether the output is bounded.
+Protect the main context window from large, unpredictable output. Choose inline or subagent based on whether the output is bounded. When delegating, invoke the Agent tool with `subagent_type="explorer"` or `subagent_type="researcher"` — never run the noisy commands in the primary context yourself.
 
-## Must use Agent (subagent_type="Explore" or general-purpose)
+## Must delegate to Agent (subagent_type="explorer")
+
+Use the read-only `explorer` subagent for throwaway lookups whose result is only needed to continue the current conversation. It returns a concise summary with file references instead of raw output.
 
 - Broad/recursive grep without `--include` or `-l` flags
 - `find` over large directories without `-maxdepth` constraint
 - `git log` without `-n` / `--oneline` limit
-- WebFetch, WebSearch, or any command whose output size is unpredictable
-- Any exploratory search where you don't know what you're looking for
+- One-off WebFetch, WebSearch, or any command whose output size is unpredictable
+- Any exploratory codebase search where you don't know what you're looking for
+- Understanding an unfamiliar module, feature, or Domain boundary before changing it
+
+## Must delegate to Agent (subagent_type="researcher")
+
+Use the `researcher` subagent only when findings must be archived as a persistent, citable asset — output lands as a citation-backed Markdown file under `docs/research/`.
+
+- The user explicitly asks to "research" a topic or requests a research report/document
+- Deep external investigation with version-sensitive facts worth archiving
+- Formal conclusions that need source citations
+- When the `explorer` agent reports the question deserves a persistent research document
+
+Do NOT use `researcher` for quick doc checks, code searches, or verifying a single fact — use `explorer` for those.
 
 ## OK to run inline
 
