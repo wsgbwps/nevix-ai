@@ -98,12 +98,27 @@ function canonicalTree() {
     'src/preload/index.ts': [
       "import { contextBridge, ipcRenderer } from 'electron'",
       "import type { IpcChannelMap } from '@ipc/channels'",
+      "import { INVOKE_CHANNEL_ALLOWLIST } from '../shared/ipc/channel-allowlist'",
       '',
       'function typedInvoke<K extends keyof IpcChannelMap>(channel: K): Promise<unknown> {',
+      '  if (!INVOKE_CHANNEL_ALLOWLIST.has(channel as string)) throw new Error(channel as string)',
       '  return ipcRenderer.invoke(channel as string)',
       '}',
       '',
       "contextBridge.exposeInMainWorld('api', { invoke: typedInvoke })",
+      ''
+    ].join('\n'),
+    'src/shared/ipc/channel-allowlist.ts': [
+      "import type { IpcChannelMap } from '@ipc/channels'",
+      '',
+      'const invokeChannels = {',
+      "  'authentication:read-session': true,",
+      "  'language:get-bootstrap': true",
+      '} satisfies Record<keyof IpcChannelMap, true>',
+      '',
+      'export const INVOKE_CHANNEL_ALLOWLIST: ReadonlySet<string> = new Set(',
+      '  Object.keys(invokeChannels)',
+      ')',
       ''
     ].join('\n'),
     'src/shared/ipc/channels.ts':

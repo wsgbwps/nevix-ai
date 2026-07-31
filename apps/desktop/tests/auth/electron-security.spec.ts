@@ -69,6 +69,75 @@ test('the real Authentication BrowserWindow has hardened web preferences', async
   }
 })
 
+test('the preload bridge rejects IPC channels outside the runtime allowlist', async () => {
+  test.skip(
+    !process.env.NEVIX_TEST_SUPABASE_URL,
+    'requires the configured build produced by the Auth test command'
+  )
+
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-allowlist-'))
+
+  try {
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US']
+    })
+
+    try {
+      await launched.electronApp.evaluate(({ ipcMain }) => {
+        const probe = globalThis as { __nevixUnlistedProbeCalls?: number }
+        probe.__nevixUnlistedProbeCalls = 0
+        ipcMain.handle('probe:unlisted-invoke', () => {
+          probe.__nevixUnlistedProbeCalls = (probe.__nevixUnlistedProbeCalls ?? 0) + 1
+          return 'reached-main'
+        })
+      })
+
+      const invokeRejection = await launched.page.evaluate(async () => {
+        const invoke = window.api.invoke as unknown as (channel: string) => Promise<unknown>
+        try {
+          await invoke('probe:unlisted-invoke')
+          return { threw: false, message: '' }
+        } catch (error) {
+          return { threw: true, message: error instanceof Error ? error.message : String(error) }
+        }
+      })
+      expect(invokeRejection.threw).toBe(true)
+      expect(invokeRejection.message).toContain('probe:unlisted-invoke')
+
+      const onRejection = await launched.page.evaluate(() => {
+        const on = window.api.on as unknown as (channel: string, listener: () => void) => () => void
+        try {
+          on('probe:unlisted-event', () => {})
+          return { threw: false, message: '' }
+        } catch (error) {
+          return { threw: true, message: error instanceof Error ? error.message : String(error) }
+        }
+      })
+      expect(onRejection.threw).toBe(true)
+      expect(onRejection.message).toContain('probe:unlisted-event')
+
+      expect(
+        await launched.electronApp.evaluate(
+          () => (globalThis as { __nevixUnlistedProbeCalls?: number }).__nevixUnlistedProbeCalls
+        )
+      ).toBe(0)
+
+      const languageMode = await launched.page.evaluate(() =>
+        window.api.invoke('language:get-language-mode')
+      )
+      expect(languageMode).toMatchObject({
+        languageMode: expect.any(String),
+        interfaceLanguage: expect.any(String)
+      })
+    } finally {
+      await launched.electronApp.close()
+    }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
 test('CSP allows only this build Supabase origin and blocks a sentinel origin', async () => {
   const supabaseUrl = process.env.NEVIX_TEST_SUPABASE_URL
   test.skip(!supabaseUrl, 'requires the disposable Supabase Auth harness')

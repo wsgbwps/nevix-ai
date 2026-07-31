@@ -14,7 +14,11 @@ const PLATFORM_OWNERS = new Set(['window', 'updater', 'tray'])
 const LEGACY_DOMAIN_NAMES = new Set(['settings', 'i18n'])
 const FORBIDDEN_SEGMENTS = new Set(['components', 'hooks', 'store', 'types'])
 const CANONICAL_DISCOVERY_GLOB = './*/ipc/index.ts'
-const PRELOAD_ALLOWED_IMPORTS = new Set(['electron', '@ipc/channels'])
+const PRELOAD_ALLOWED_IMPORTS = new Set([
+  'electron',
+  '@ipc/channels',
+  '../shared/ipc/channel-allowlist'
+])
 const SOURCE_FILE = /\.(ts|tsx|mts|cts)$/
 const CHANNEL_KEY = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/
 const CHANNEL_LITERAL = /'([a-z][a-z0-9-]*:[a-z][a-z0-9-]*)'/g
@@ -552,7 +556,7 @@ function checkPreload(files, collector) {
           'preload/generic-bridge',
           path,
           `Preload imports "${spec}".`,
-          'Preload stays a generic typed bridge importing only electron and @ipc/channels; no per-Domain code or registry.',
+          'Preload stays a generic typed bridge importing only electron, @ipc/channels, and the shared Channel allowlist; no per-Domain code or registry.',
           line
         )
       }
