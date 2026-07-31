@@ -18,6 +18,15 @@ Create a new file under `.scratch/<feature-slug>/` (creating the directory if ne
 
 Read the file at the referenced path. The user will normally pass the path or the issue number directly.
 
+## Branch wrap-up checklist
+
+When implementation on a branch is complete, close it out in this order. Merging, pushing, and deleting remote branches are external write operations — each one still requires explicit user authorization every time; this checklist only fixes the steps and where the acceptance record lives.
+
+1. **Confirm CI is green** — the Desktop CI workflow (`.github/workflows/desktop-ci.yml`) must pass on the PR before merging.
+2. **Merge per the repo's delivery rules** — high-risk changes land through a branch and PR gated by CI and diff review; all other work may go directly to `main` (see the delivery workflow in the root `AGENTS.md`).
+3. **Delete the merged branch** — remove the local branch (`git branch -d <branch>`) and, with authorization, the remote branch.
+4. **Resolve the ticket** — in the `.scratch/<feature-slug>/issues/<NN>-<slug>.md` file, set `Status: resolved` and append the acceptance conclusion (what was verified and how, e.g. CI run, tests, review outcome) under the `## Comments` heading.
+
 ## Wayfinding operations
 
 Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.

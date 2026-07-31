@@ -27,10 +27,10 @@
 
 - `apps/desktop/src/renderer/src/components/ui/`, `apps/desktop/src/renderer/src/lib/`, `apps/desktop/src/renderer/src/hooks/`, `server/pkg/`, and root `contracts/` are shared areas. Call out their changes with impact and tests in the commit or PR description; no separate approval is required
 - Contributors and AI agents may work autonomously inside the task's primary Domain while preserving documented boundaries. They must not perform unrelated cleanup or generalized refactors, or change a public API without a written plan
-- One task delivers one cohesive vertical slice for one primary Domain, whether it lands as direct commits to `main` or through a PR
+- One task delivers one cohesive vertical slice for one primary Domain, landing through a feature branch and PR
 - A vertical slice may include its renderer Feature, domain-local IPC contracts and Handlers, domain-local implementation, and narrowly scoped supporting changes such as composition-root wiring, tests, dependencies, or build configuration
 - High-risk changes — authentication or authorization, security boundaries, public contracts such as root `contracts/`, and persistent data or migrations — require a short written plan under `.scratch/` before implementation, and must land through a branch and PR so CI and diff review gate the merge
-- All other work may be committed and pushed directly to `main`; no branch, PR, or written plan is required
+- All other work also lands through a feature branch and PR, but requires no written plan; direct commits to `main` are not allowed and are blocked by the repository PreToolUse hook
 - A task may update its local issue and documentation to record implemented behavior within documented responsibilities, but must not introduce or revise an architectural responsibility or boundary without the documentation below
 - Changes to responsibilities across contexts or modules, trusted-execution seams such as Supabase-to-Go, repository-wide architecture rules, or architectural decisions require a written plan and updated documentation (ADR where warranted) before implementation
 - When high-risk work is split into multiple PRs, each PR must independently build, test, merge, and roll back without incomplete behavior or temporary compatibility scaffolding
