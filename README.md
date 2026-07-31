@@ -30,6 +30,7 @@ nevix-ai/
 │       └── renderer/      # 渲染进程（React + Feature-Sliced）
 ├── server/                # Go 后端（独立于 Node workspace）
 ├── contracts/             # 前后端共享的 API 契约（OpenAPI）
+├── supabase/              # 版本钉定的本地/CI Supabase 栈定义（config、migrations、seed）
 ├── docs/adr/              # 架构决策记录
 ├── scripts/               # 构建和部署脚本
 ├── .github/workflows/     # CI/CD

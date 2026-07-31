@@ -1,0 +1,50 @@
+name: Mail Smoke CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "supabase/**"
+      - "server/**"
+      - "scripts/test-mail-smoke.sh"
+      - ".github/workflows/mail-smoke-ci.yml"
+      - "package.json"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "supabase/**"
+      - "server/**"
+      - "scripts/test-mail-smoke.sh"
+      - ".github/workflows/mail-smoke-ci.yml"
+      - "package.json"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mail-smoke:
+    name: Supabase stack + GoTrue mail smoke
+    # Pinned runner image so an unannounced runner switch cannot change the stack.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/test-mail-smoke.sh
+      # Backstop for the script's own EXIT trap: if the runner kills the script,
+      # the trap never fires, so tear the stack down here as well.
+      - name: Tear down Supabase stack
+        if: always()
+        run: pnpm exec supabase stop --no-backup || true
