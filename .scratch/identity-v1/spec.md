@@ -360,12 +360,17 @@ Go configuration keeps Auth issuer/JWKS, any concrete Supabase secret, and each 
 - `internal/identity` persists Invitation, Ownership Transfer, security, and Organization Deletion messages in a transactional Outbox.
 - Domain state, Audit Log, and Outbox row commit in the same database transaction.
 - A Go worker sends and retries. Temporary SMTP failure does not roll back a completed governance command.
+- The worker retries with exponential backoff at 1m, 5m, 15m, 1h, and 6h, for at most five attempts per message.
+- A message carrying a one-time code is never retried beyond the code's remaining validity; an invalidated or expired code makes the message terminal immediately.
+- After retries are exhausted the Outbox row is marked failed and retained, not deleted; failed rows are V1's only operational visibility, with no alerting or redelivery tooling.
+- Rate limiting, cooldown, and code invalidation are enforced synchronously at command handling before an Outbox row is written; the worker contains no business rules.
+- GoTrue and `internal/identity` rate-limit email sending independently; neither reads the other's counters.
 - Local and CI environments use a captured mailbox.
 - Production provider is selected through deployment configuration.
 - V1 implements the standard SMTP path directly and does not create a hypothetical provider adapter interface.
 - GoTrue templates and identity templates live with their owner while sharing the product's localized brand language.
 
-Exact retry schedule, terminal-failure behavior, template inventory, and operational visibility remain open.
+Template inventory and operational visibility beyond retained failed rows remain open.
 
 ## Desktop implementation constraints
 
@@ -452,7 +457,7 @@ The following are intentionally unresolved and must not be guessed during implem
 - exact GRANT and RLS policy matrix;
 - trusted-command request/result/error/idempotency/concurrency interface;
 - Desktop state model and concrete UI behavior;
-- Outbox retry policy, terminal failure, template inventory, and operational visibility;
+- Outbox template inventory and operational visibility beyond retained failed rows;
 - exact CI harness and native-platform acceptance split;
 - ADR and architecture-ticket set;
 - slice-level acceptance, rollback, and additional-review gates;
