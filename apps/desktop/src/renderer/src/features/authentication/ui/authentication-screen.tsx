@@ -28,7 +28,6 @@ interface AuthenticationScreenProps {
   readonly onRequestRecovery: (email: string) => Promise<void>
   readonly onVerifyRecovery: (code: string) => Promise<void>
   readonly onCompleteRecovery: (newPassword: string) => Promise<void>
-  readonly secondaryContent?: React.ReactNode
 }
 
 export function AuthenticationScreen({
@@ -50,8 +49,7 @@ export function AuthenticationScreen({
   onResendSignUp,
   onRequestRecovery,
   onVerifyRecovery,
-  onCompleteRecovery,
-  secondaryContent
+  onCompleteRecovery
 }: AuthenticationScreenProps): React.JSX.Element {
   const { t } = useTranslation('authentication')
 
@@ -138,7 +136,6 @@ export function AuthenticationScreen({
               onShowLogin={onShowLogin}
             />
           )}
-          {secondaryContent ? <div className="mt-7">{secondaryContent}</div> : null}
         </div>
       </section>
     </main>

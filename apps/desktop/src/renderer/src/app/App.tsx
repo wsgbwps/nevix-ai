@@ -29,9 +29,6 @@ function App(): React.JSX.Element {
         onRequestRecovery={authentication.requestRecovery}
         onVerifyRecovery={authentication.verifyRecovery}
         onCompleteRecovery={authentication.completeRecovery}
-        secondaryContent={
-          authentication.status === 'unauthenticated' ? <LanguageModeSettings /> : undefined
-        }
       />
     )
   }
