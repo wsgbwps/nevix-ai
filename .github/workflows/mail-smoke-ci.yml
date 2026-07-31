@@ -31,6 +31,8 @@ jobs:
           go-version-file: server/go.mod
       - run: pnpm install --frozen-lockfile
       - run: ./scripts/test-mail-smoke.sh
+      # Backstop for the script's own EXIT trap: if the runner kills the script,
+      # the trap never fires, so tear the stack down here as well.
       - name: Tear down Supabase stack
         if: always()
         run: pnpm exec supabase stop --no-backup || true

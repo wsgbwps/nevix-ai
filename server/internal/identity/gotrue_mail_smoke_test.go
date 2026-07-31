@@ -74,7 +74,11 @@ func TestGoTrueSignupDeliversConfirmationEmailToMailpit(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("expected exactly 1 captured email for %s, got %d", recipient, len(messages))
 	}
-	if messages[0].Subject == "" {
+	message := messages[0]
+	if len(message.To) != 1 || message.To[0].Address != recipient {
+		t.Fatalf("captured email addressed to %+v, want exactly [%s]", message.To, recipient)
+	}
+	if message.Subject == "" {
 		t.Fatalf("captured email for %s has an empty subject", recipient)
 	}
 }

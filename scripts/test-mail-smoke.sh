@@ -22,6 +22,9 @@ pnpm exec supabase --version
 echo "==> Starting pinned local Supabase stack"
 pnpm exec supabase start
 
+echo "==> Stack service versions"
+pnpm exec supabase services
+
 echo "==> Resetting database from committed migrations"
 pnpm exec supabase db reset --local
 

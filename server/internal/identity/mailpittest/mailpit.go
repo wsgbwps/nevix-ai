@@ -36,7 +36,6 @@ type Address struct {
 
 // MessageSummary is the subset of Mailpit's message summary that tests assert on.
 type MessageSummary struct {
-	ID      string    `json:"ID"`
 	Subject string    `json:"Subject"`
 	To      []Address `json:"To"`
 }

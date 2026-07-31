@@ -6,8 +6,12 @@
 
 **Status:** ready-for-agent
 
-- [x] 本地与 CI 均能从空库拉起版本钉定的 Supabase 栈，Mailpit 随栈可用（`scripts/test-mail-smoke.sh` 为本地与 CI 共用入口）
+- [x] 本地能从空库拉起版本钉定的 Supabase 栈，Mailpit 随栈可用（`scripts/test-mail-smoke.sh` 为本地与 CI 共用入口；CI 侧待 PR 实跑确认）
 - [x] Go 测试可通过 Mailpit HTTP API 查询收件箱内容（`server/internal/identity/mailpittest`）
-- [x] 冒烟测试：触发 GoTrue 注册验证，断言邮件出现在 Mailpit（`server/internal/identity/gotrue_mail_smoke_test.go`）
+- [x] 冒烟测试：触发 GoTrue 注册验证，断言邮件出现在 Mailpit（`server/internal/identity/gotrue_mail_smoke_test.go`，断言收件人与主题）
 - [ ] CI 中该冒烟稳定绿，不外发任何真实邮件（workflow `mail-smoke-ci.yml` 已提交，待 PR CI 实跑确认）
-- [x] 栈与工具版本钉定并随仓库提交，两次运行结果一致（Supabase CLI 2.110.0 精确锁定于根 devDependencies；本地连续两次全新运行均绿）
+- [x] 栈与工具版本钉定并随仓库提交，两次运行结果一致（Supabase CLI 2.110.0 精确锁定于根 devDependencies；harness 脚本输出 `supabase services` 版本清单；实现者本地连续两次全新运行均绿，证据见 PR 描述）
+
+实现备注：
+
+- GitHub Actions 沿用仓库既有 `desktop-ci.yml` 的 tag 引用风格，未按票 09 研究建议改为 commit SHA 钉定；如需收紧，应对两个 workflow 一并处理，归独立任务。
