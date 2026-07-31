@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] 本地与 CI 均能从空库拉起版本钉定的 Supabase 栈，Mailpit 随栈可用
-- [ ] Go 测试可通过 Mailpit HTTP API 查询收件箱内容
-- [ ] 冒烟测试：触发 GoTrue 注册验证，断言邮件出现在 Mailpit
-- [ ] CI 中该冒烟稳定绿，不外发任何真实邮件
-- [ ] 栈与工具版本钉定并随仓库提交，两次运行结果一致
+- [x] 本地与 CI 均能从空库拉起版本钉定的 Supabase 栈，Mailpit 随栈可用（`scripts/test-mail-smoke.sh` 为本地与 CI 共用入口）
+- [x] Go 测试可通过 Mailpit HTTP API 查询收件箱内容（`server/internal/identity/mailpittest`）
+- [x] 冒烟测试：触发 GoTrue 注册验证，断言邮件出现在 Mailpit（`server/internal/identity/gotrue_mail_smoke_test.go`）
+- [ ] CI 中该冒烟稳定绿，不外发任何真实邮件（workflow `mail-smoke-ci.yml` 已提交，待 PR CI 实跑确认）
+- [x] 栈与工具版本钉定并随仓库提交，两次运行结果一致（Supabase CLI 2.110.0 精确锁定于根 devDependencies；本地连续两次全新运行均绿）
