@@ -4,5 +4,10 @@ export default defineConfig({
   testDir: './tests',
   timeout: 30_000,
   fullyParallel: false,
-  reporter: 'list'
+  reporter: 'list',
+  use: {
+    screenshot: 'off',
+    trace: 'off',
+    video: 'off'
+  }
 })

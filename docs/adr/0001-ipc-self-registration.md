@@ -4,6 +4,8 @@
 
 已接受 — 2026-07-01
 
+TypeScript runtime registration 的物理路径与 glob 于 2026-07-30 被 [Desktop ADR-0003](../../apps/desktop/docs/adr/0003-main-domain-first-ipc-adapters.md) 部分取代。下文第 2 项及效果表中的 `main/ipc/<domain>/` 路径保留为原始决策记录；分散类型声明、declaration merging、generic preload、自注册原则和 Go 显式注册决定继续有效。
+
 ## 背景
 
 项目采用 3 人团队 vertical-slice 开发，每人负责一个 feature domain（video-generation、image-editing、project-management）。初始架构设计中有三个共享文件会被所有开发者频繁编辑：

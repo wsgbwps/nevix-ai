@@ -13,11 +13,17 @@ import {
   SUPPORTED_LANGUAGES,
   validateSupportedLanguageResources
 } from '../../src/shared/i18n/resource-contract'
-import { windowResourceOwner } from '../../src/main/i18n/resources'
+import { windowResourceOwner } from '../../src/main/language/resources'
 import { appResourceOwner } from '../../src/renderer/src/app/i18n'
-import { settingsResourceOwner } from '../../src/renderer/src/features/settings'
+import { authenticationResourceOwner } from '../../src/renderer/src/features/authentication'
+import { languageResourceOwner } from '../../src/renderer/src/features/language'
 
-const resourceOwners = [windowResourceOwner, appResourceOwner, settingsResourceOwner]
+const resourceOwners = [
+  windowResourceOwner,
+  appResourceOwner,
+  authenticationResourceOwner,
+  languageResourceOwner
+]
 
 test('each Supported Language has complete non-empty resources for every namespace', () => {
   expect(SUPPORTED_LANGUAGES).toEqual(['zh-CN', 'en'])

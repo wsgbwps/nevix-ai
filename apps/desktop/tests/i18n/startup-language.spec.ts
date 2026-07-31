@@ -41,17 +41,17 @@ test('startup selects a matching Interface Language for the highest-priority sys
   const cases = [
     {
       systemLanguages: ['zh-Hant-TW', 'en-US'],
-      heading: '使用 Nevix AI 创作',
+      heading: '登录 Nevix AI',
       title: 'Nevix AI — 桌面端'
     },
     {
       systemLanguages: ['en-GB', 'zh-CN'],
-      heading: 'Create with Nevix AI',
+      heading: 'Sign in to Nevix AI',
       title: 'Nevix AI — Desktop'
     },
     {
       systemLanguages: ['fr-FR', 'en-US'],
-      heading: '使用 Nevix AI 创作',
+      heading: '登录 Nevix AI',
       title: 'Nevix AI — 桌面端'
     }
   ]

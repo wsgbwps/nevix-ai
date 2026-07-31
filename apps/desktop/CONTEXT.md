@@ -85,7 +85,7 @@ Organization 内不可由成员修改或删除、滚动保留 365 天的安全�
 _Avoid_: Activity Feed, Analytics Log
 
 **Feature**:
-一个完整的垂直功能切片，包含 UI 组件、hooks、API 层和可选的状态管理。对应 `renderer/src/features/<name>/` 目录。
+一个拥有单一 public interface 的完整 Desktop 垂直功能切片；内部责任受控演化，peer Feature 彼此隔离。
 _Avoid_: module, component, page
 
 **Channel**:
@@ -97,8 +97,16 @@ _Avoid_: event（与 push event 混淆）, message, route
 _Avoid_: controller, listener
 
 **Domain**:
-按业务功能划分的代码组织单元（如 video-generation、image-editing），贯穿 shared/ipc、main/ipc 和 renderer/features 三层。
+Desktop 中拥有一组内聚业务责任与术语的组织范围；Domain 只出现在实际需要的进程与 interface 中，不由目录对称性定义。
 _Avoid_: module（与 Go 侧混淆）, service
+
+**Authentication Domain**:
+以凭据验证和当前设备 Session 生命周期为范围的 Desktop Domain，不包含 User、Profile 或 Membership 管理。
+_Avoid_: Identity Domain, Account Domain
+
+**Language Domain**:
+包含设备 Language Mode 及其解析出的 Interface Language 的 Desktop Domain；各 Feature 的本地化资源仍归所属 Feature。
+_Avoid_: Settings Domain, i18n Domain
 
 **Localized Surface**:
 Desktop 拥有的全部用户可见文案，包括渲染界面、窗口、原生桌面交互、安装流程和系统权限说明；不包括品牌名、用户内容、服务端日志或第三方原文。

@@ -9,32 +9,65 @@ interface LaunchTestAppOptions {
   readonly userDataDir: string
   readonly systemLanguages: readonly string[]
   readonly offline?: boolean
+  readonly environment?: Readonly<Record<string, string>>
+}
+
+const FORBIDDEN_CHILD_ENVIRONMENT_KEYS = [
+  'DATABASE_URL',
+  'DB_URL',
+  'JWT_SECRET',
+  'NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY',
+  'POSTGRES_PASSWORD',
+  'POSTGRES_URL',
+  'SERVICE_ROLE_KEY',
+  'SMTP_PASS',
+  'SUPABASE_DB_URL',
+  'SUPABASE_SECRET_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY'
+] as const
+
+function desktopProcessEnvironment(): NodeJS.ProcessEnv {
+  const environment = { ...process.env }
+  for (const key of FORBIDDEN_CHILD_ENVIRONMENT_KEYS) delete environment[key]
+  return environment
 }
 
 export async function launchTestApp({
   userDataDir,
   systemLanguages,
-  offline = false
+  offline = false,
+  environment = {}
 }: LaunchTestAppOptions): Promise<{ electronApp: ElectronApplication; page: Page }> {
+  const testEnvironment = { ...environment }
+  for (const key of FORBIDDEN_CHILD_ENVIRONMENT_KEYS) delete testEnvironment[key]
+
   const electronApp = await electron.launch({
     args: [appEntry, `--user-data-dir=${userDataDir}`],
     cwd: desktopRoot,
     env: {
-      ...process.env,
+      ...desktopProcessEnvironment(),
+      ...testEnvironment,
       NEVIX_E2E: '1',
       NEVIX_TEST_SYSTEM_LANGUAGES: systemLanguages.join(','),
       NEVIX_TEST_USER_DATA_DIR: userDataDir
     }
   })
 
+  if (offline) {
+    await electronApp.evaluate(({ session }) => {
+      session.defaultSession.enableNetworkEmulation({ offline: true })
+    })
+  }
+
   const page = await electronApp.firstWindow()
   if (offline) {
-    await electronApp.evaluate(({ BrowserWindow }) => {
+    await page.waitForLoadState('domcontentloaded')
+    await page.route(/^https?:\/\//, (route) => route.abort('internetdisconnected'))
+    await electronApp.evaluate(async ({ BrowserWindow }) => {
       const mainWindow = BrowserWindow.getAllWindows()[0]
       if (!mainWindow) throw new Error('Main window was not created')
-      mainWindow.webContents.session.enableNetworkEmulation({ offline: true })
+      await mainWindow.loadURL(mainWindow.webContents.getURL())
     })
-    await page.reload()
   }
 
   return { electronApp, page }

@@ -30,8 +30,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes xvfb
       - run: pnpm --filter @nevix/desktop lint
-      - run: pnpm --filter @nevix/desktop build
-      - run: xvfb-run --auto-servernum pnpm --filter @nevix/desktop test
+      - run: pnpm --filter @nevix/desktop verify:architecture
+      - run: xvfb-run --auto-servernum pnpm --filter @nevix/desktop test:auth
 
   package:
     name: Package (${{ matrix.os }})
@@ -57,3 +57,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @nevix/desktop ${{ matrix.script }}
+        env:
+          VITE_SUPABASE_URL: ${{ vars.NEVIX_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEVIX_SUPABASE_PUBLISHABLE_KEY }}

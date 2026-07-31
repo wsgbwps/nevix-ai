@@ -25,7 +25,7 @@ nevix-ai/
 ├── apps/desktop/          # Electron + React 桌面客户端
 │   └── src/
 │       ├── shared/ipc/    # ★ IPC 类型声明（declaration merging，各 domain 独立扩展）
-│       ├── main/          # 主进程（handler 注册 + import.meta.glob 自动发现）
+│       ├── main/          # 主进程（Domain-first implementation + domain-local IPC adapter）
 │       ├── preload/       # 预加载（通用 typedInvoke / typedOn）
 │       └── renderer/      # 渲染进程（React + Feature-Sliced）
 ├── server/                # Go 后端（独立于 Node workspace）
@@ -47,6 +47,17 @@ nevix-ai/
 数据平面默认由 Desktop 使用用户 JWT 直连受策略保护的 Supabase；只有密钥、额度/支付、Webhook、管理员权限、事务或异步编排需要跨入 Go 的可信执行 seam。Go 不是 Supabase 的通用代理层；完整决策见 [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md)。
 
 领域术语详见 `CONTEXT-MAP.md` → 各子 context 的 `CONTEXT.md`；Codex 的持久开发与评审规则详见 [`AGENTS.md`](AGENTS.md)。
+
+### 目录边界是架构契约
+
+本 README 的目录树和下方各层说明定义代码的归属边界；Domain、Feature、共享层和 composition root 是稳定约束，Feature 或 Module 内展示的职责子目录是参考而非穷举清单。开发时遵循以下规则：
+
+1. 计划实现前先确定一个主要 Domain，并为每个新增或移动的源代码文件确定最窄的归属边界
+2. 固定 public seam、依赖方向和目录词汇；Feature 内部按实际职责受控演化，不要求不同 Feature 复制相同目录
+3. Renderer Feature 的通用 segment 使用 `ui/api/model/lib/config`；自定义责任目录必须能说明标准 segment 为何会损害 locality，并通过 deletion test 或具有 ADR、安全要求、cross-runtime seam 明确的 owner
+4. 不使用同义目录或额外包装层改变既定边界；新增共享层、顶层目录或跨 Domain seam 属于架构变更
+5. `app/`、`main/index.ts`、`cmd/server/main.go` 等 composition root 只负责组装；业务逻辑留在对应 Domain/Feature/Module
+6. 完成前根据 `git diff --name-status` 复核全部变更路径；共享目录、公共契约、安全边界或跨 Domain 变更仍须遵守 [`AGENTS.md`](AGENTS.md) 的审批规则
 
 ---
 
@@ -71,48 +82,52 @@ src/shared/ipc/
 
 ```
 src/main/
-├── index.ts                      # 入口：app 生命周期 + import.meta.glob 自动注册 IPC handlers
-├── window/
-│   └── main-window.ts            # 窗口创建与管理
-├── ipc/
-│   ├── video-generation/         # 视频生成（开发者 A）
-│   │   ├── index.ts              # export function register() — handler 注册
-│   │   ├── generate-video.ts     # 单个 handler
-│   │   └── get-progress.ts
-│   ├── image-editing/            # 图片编辑（开发者 B）
+├── index.ts                      # composition root：Domain 初始化 + 自动注册 IPC adapters
+├── authentication/               # Authentication Domain
+│   ├── ipc/
+│   │   ├── index.ts              # export function register()，只负责 Channel 注册
+│   │   ├── read-session.ts       # 每个 Channel 一个 Handler 文件
+│   │   ├── replace-session.ts
+│   │   └── clear-session.ts
+│   └── session-store.ts          # Domain implementation，不依赖 IPC
+├── language/                     # Language Domain
+│   ├── index.ts                  # 有外部 Main caller 时才创建的 public interface
+│   ├── ipc/
 │   │   ├── index.ts
-│   │   ├── apply-filter.ts
-│   │   └── export-image.ts
-│   └── project-management/       # 项目管理（开发者 C）
-│       ├── index.ts
-│       ├── create-project.ts
-│       └── list-projects.ts
+│   │   └── <action>.ts
+│   └── <language implementation>
+├── window/
+│   └── main-window.ts            # 非 Domain 的平台职责
 ├── updater/
-│   └── auto-updater.ts           # electron-updater 自动更新逻辑
+│   └── auto-updater.ts           # 非 Domain 的平台职责
 └── tray/
-    └── tray.ts                   # 系统托盘（需要时添加）
+    └── tray.ts                   # 非 Domain 的平台职责
 ```
 
 | 目录 | 职责 | 时机 |
 |------|------|------|
+| `<domain>/` | Domain implementation、可选 public interface 与 domain-local adapters | Domain 实际需要时 |
+| `<domain>/ipc/` | IPC registration 与每 Channel 一个 Handler | Domain 拥有 IPC 时 |
 | `window/` | BrowserWindow 创建、多窗口管理、窗口状态持久化 | 初始化即有 |
-| `ipc/` | handler 运行时逻辑，按 domain 拆目录，每个 handler 独立文件 | 初始化即有 |
 | `updater/` | 自动更新检查、下载、安装提示 | 接入阿里云 OSS 时 |
 | `tray/` | 系统托盘图标和菜单 | 产品需要后台常驻时 |
 
 **IPC 架构说明：**
 
-采用 **Domain-based + Type-safe IPC + 自注册** 模式，核心要点：
+采用 **Domain-first + Type-safe IPC + 自注册** 模式；完整取舍见 [Desktop ADR-0003](apps/desktop/docs/adr/0003-main-domain-first-ipc-adapters.md)：
 
-1. **类型与运行时分离**：类型声明在 `shared/ipc/`（tsc 负责聚合），handler 注册在 `main/ipc/`（Vite 负责发现）——两条独立管线
-2. **按 domain 拆目录**：`ipc/video-generation/`、`ipc/image-editing/`，和 renderer `features/` 一一对应
-3. **每个 handler 一个文件**：`generate-video.ts`、`get-progress.ts`，避免单文件无限膨胀
-4. **类型安全**：各 domain 在自己的 `shared/ipc/<domain>/types.ts` 里通过 `declare module '@ipc/channels'` 扩展 `IpcChannelMap` / `IpcEventMap`。channel 名拼错或参数类型不匹配在 `tsc` 阶段即被捕获。每个 domain 独立导出具名的 request/response 类型（如 `GenerateVideoReq`），renderer 可直接 import
-5. **自动注册**：`main/index.ts` 通过 `import.meta.glob('./ipc/*/index.ts', { eager: true })` 在构建时自动发现并注册所有 domain 的 handler。加新 domain 只需创建目录，不需要编辑任何共享文件
-6. **Preload 通用化**：preload 只暴露 `typedInvoke`（request/response）和 `typedOn`（push events）两个泛型函数，类型从 `IpcChannelMap` / `IpcEventMap` 推导。加新 domain 不需要编辑 preload
-7. **`index.ts` 是纯组装器**：只负责 app 生命周期和自动注册，不包含任何业务逻辑
+1. **Domain locality**：Domain-owned IPC adapter 位于 `main/<domain>/ipc/`，依赖同 Domain implementation；implementation 不反向依赖 IPC
+2. **类型与运行时分离**：cross-process interface 位于 `shared/ipc/<domain>/`，运行时 adapter 位于 Main Domain；两者使用同一 canonical Domain 名与 `<domain>:<action>` Channel prefix
+3. **每个 Handler 一个文件**：Handler 直接位于 `ipc/`，不增加 `handlers/`；复杂行为留在 Domain implementation
+4. **类型安全**：各 Domain 在自己的 `shared/ipc/<domain>/types.ts` 里通过 `declare module '@ipc/channels'` 扩展 `IpcChannelMap` / `IpcEventMap`，并导出具名 request/response 类型
+5. **纯 registration module**：`main/<domain>/ipc/index.ts` 加载无副作用，只导出同步且顺序无关的 `register(): void`
+6. **自动注册**：`main/index.ts` 通过 `import.meta.glob('./*/ipc/index.ts', { eager: true })` 发现所有 Domain registration module；Domain 初始化仍由 composition root 显式编排
+7. **Preload 通用化**：preload 只暴露 `typedInvoke` 与 `typedOn`，不增加 per-Domain implementation 或中央 Domain registry
+8. **按需创建 seam**：Domain 不需要 IPC、Main public interface 或 renderer Feature 时，不创建空镜像目录；`window/updater/tray` 等平台职责也不伪装成 Domain
 
-加一个 handler 只改自己 domain 下的两个文件（`shared/ipc/<domain>/types.ts` + `main/ipc/<domain>/index.ts`），不碰任何共享文件。
+加一个 Handler 只改自己 Domain 下的三个文件（`shared/ipc/<domain>/types.ts` + `main/<domain>/ipc/<action>.ts` + `main/<domain>/ipc/index.ts`），不碰中央共享注册文件。
+
+> **Migration note:** 当前 `main/ipc/`、`main/settings/` 与 `main/i18n/` 是已接受架构决定落地前的 migration debt。Domain-first Main、Language Domain 合并、Channel rename 与新 glob 必须原子迁移，不长期保留两套结构或兼容 alias。
 
 ---
 
@@ -134,11 +149,14 @@ src/renderer/src/
 │   └── providers.tsx             # 全局 providers（QueryClient, ThemeProvider 等）
 ├── features/                     # ★ 功能模块（每人一个目录，互不侵入）
 │   ├── video-generation/         # 开发者 A
-│   │   ├── components/
-│   │   ├── hooks/
-│   │   ├── api/                  # TanStack Query hooks
-│   │   ├── store/                # Zustand slice
-│   │   └── index.ts              # 公共导出（唯一对外接口）
+│   │   ├── ui/                   # 展示与交互责任
+│   │   ├── model/                # 业务状态、规则与流程编排
+│   │   ├── api/                  # 后端 queries / mutations
+│   │   ├── lib/                  # Feature-local 技术能力
+│   │   ├── config/               # 静态配置
+│   │   ├── i18n/                 # 满足准入门槛的自定义责任 segment
+│   │   │   └── resources.ts      # Feature 自有的本地化资源
+│   │   └── index.ts              # 唯一 public interface，显式 named exports
 │   ├── image-editing/            # 开发者 B
 │   └── project-management/       # 开发者 C
 ├── components/
@@ -148,6 +166,15 @@ src/renderer/src/
 ├── hooks/                        # 共享 hooks
 └── env.d.ts                      # Vite 类型声明
 ```
+
+Feature 目录遵循以下受控演化规则；segment 词汇与 public interface 原则分别以 FSD 的 [Slices and segments](https://fsd.how/docs/reference/slices-segments/) 与 [Public API](https://fsd.how/docs/reference/public-api/) 为依据：
+
+1. Feature 根目录唯一允许的 TypeScript 源文件是 public `index.ts`；它不包含 implementation、初始化副作用或 `export *`
+2. 新通用 segment 使用 Feature-Sliced 的 `ui/api/model/lib/config` 词汇，不新增按代码形式命名的 `components/hooks/store/types`
+3. custom hook 按实际责任进入 `ui`、`model`、`api` 或 `lib`，不机械归入 `model`
+4. `session/policy/i18n` 等自定义责任 segment 必须描述稳定用途；标准 segment 会拆散其 invariant、生命周期或知识；并且通过 deletion test，或具有 ADR、安全要求、cross-runtime seam 明确的 owner
+5. Feature 内部直接相对 import，不经过自己的 public index；peer Feature 之间禁止互相 import，包括对方 public index，跨 Feature composition 放在 `app/`
+6. 旧 `components/hooks/store` 机会式迁移，不因统一外观进行机械批量改名
 
 ---
 
@@ -164,7 +191,6 @@ server/
 │   │   ├── domain/
 │   │   │   ├── entity.go         # 实体、聚合根
 │   │   │   ├── value.go          # 值对象
-│   │   │   ├── event.go          # 领域事件定义
 │   │   │   └── repository.go     # Repository 接口（不是实现）
 │   │   ├── application/
 │   │   │   ├── service.go        # 应用服务 / 用例编排
@@ -187,10 +213,12 @@ server/
 
 | 层 | 职责 | 依赖方向 |
 |---|---|---|
-| `domain/` | 实体、值对象、领域事件、Repository 接口 | 不依赖任何其他层 |
+| `domain/` | 实体、值对象、Repository 接口 | 不依赖任何其他层 |
 | `application/` | 用例编排，调用 domain 接口 | 依赖 domain |
 | `infrastructure/` | Repository 实现、外部服务适配 | 依赖 domain（实现接口） |
 | `interface/` | HTTP handler，调用 application | 依赖 application |
+
+跨 Module 的 Domain Event 类型统一定义在 `pkg/event/types.go`，Module 内不另建同名事件类型目录或文件。
 
 ---
 
