@@ -23,7 +23,11 @@ export async function readPersistedSession(): Promise<PersistedSessionRead> {
   if (envelope.length > MAXIMUM_ENVELOPE_LENGTH) return { outcome: 'unreadable' }
 
   const ciphertext = readEnvelopeCiphertext(envelope)
-  if (!ciphertext || !canPersistSecurely()) return { outcome: 'unreadable' }
+  if (!ciphertext) return { outcome: 'unreadable' }
+
+  // A structurally valid envelope may hold intact ciphertext, so an unavailable backend is
+  // recoverable; only structural corruption above is terminal even during an outage.
+  if (!canPersistSecurely()) return { outcome: 'storage-unavailable' }
 
   try {
     const session = safeStorage.decryptString(ciphertext)
