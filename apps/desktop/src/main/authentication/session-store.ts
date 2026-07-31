@@ -53,9 +53,10 @@ export async function replacePersistedSession(session: string): Promise<Persiste
     await rename(pendingPath, path)
     return { outcome: 'persisted' }
   } catch {
-    // A credential service that fails mid-write must never downgrade to plaintext persistence.
+    // The atomic rename means a failed write never corrupts the existing envelope, so only the
+    // pending file is removed: the last good ciphertext keeps restoring, and nothing downgrades
+    // to plaintext persistence.
     await rm(pendingPath, { force: true }).catch(() => undefined)
-    await rm(path, { force: true }).catch(() => undefined)
     return { outcome: 'unavailable' }
   }
 }

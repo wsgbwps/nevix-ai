@@ -204,6 +204,62 @@ test('corrupt, unknown, random, and malformed encrypted Session envelopes are te
   }
 })
 
+test('a failed Session replace preserves the previous envelope and clear removes pending state', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-write-failure-'))
+  const sessionPath = join(userDataDir, SESSION_FILE_NAME)
+  const pendingPath = `${sessionPath}.pending`
+  const firstSession = JSON.stringify({
+    access_token: 'first-access-token',
+    refresh_token: 'first-refresh-token',
+    token_type: 'bearer',
+    expires_at: 4_102_444_800,
+    user: { id: 'write-failure-test-user' }
+  })
+  const secondSession = firstSession.replaceAll('first-', 'second-')
+
+  try {
+    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    try {
+      test.skip(
+        !(await hasSecurePersistenceBackend(launched.electronApp)),
+        'requires a native Keychain, DPAPI, or Secret Service backend'
+      )
+
+      const written = await invokeAuthenticationChannel(
+        launched.page,
+        'authentication:replace-session',
+        { session: firstSession }
+      )
+      expect(written).toEqual({ outcome: 'persisted' })
+      const originalEnvelope = await readFile(sessionPath, 'utf8')
+
+      // A directory at the pending path makes the next envelope write fail before the atomic rename.
+      await mkdir(pendingPath)
+      const failed = await invokeAuthenticationChannel(
+        launched.page,
+        'authentication:replace-session',
+        { session: secondSession }
+      )
+      expect(failed).toEqual({ outcome: 'unavailable' })
+
+      expect(await readFile(sessionPath, 'utf8')).toBe(originalEnvelope)
+      expect(
+        await invokeAuthenticationChannel(launched.page, 'authentication:read-session')
+      ).toEqual({ outcome: 'session', session: firstSession })
+
+      await rm(pendingPath, { recursive: true, force: true })
+      await writeFile(pendingPath, 'stale-pending-envelope', 'utf8')
+      await invokeAuthenticationChannel(launched.page, 'authentication:clear-session')
+      await expectFileMissing(sessionPath)
+      await expectFileMissing(pendingPath)
+    } finally {
+      await launched.electronApp.close()
+    }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
 test('unavailable secure storage keeps only the runtime Session and offline logout still ends local access', async () => {
   test.setTimeout(60_000)
   test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
@@ -327,6 +383,24 @@ async function signInAndReadSession(
   const session = (await response.json()) as Session
   await expect(page.getByRole('heading', { name: 'Create with Nevix AI' })).toBeVisible()
   return session
+}
+
+async function invokeAuthenticationChannel(
+  page: Page,
+  channel: string,
+  request?: unknown
+): Promise<unknown> {
+  return page.evaluate(
+    ({ channel, request }) => {
+      const bridge = window as unknown as {
+        api: { invoke: (channel: string, request?: unknown) => Promise<unknown> }
+      }
+      return request === undefined
+        ? bridge.api.invoke(channel)
+        : bridge.api.invoke(channel, request)
+    },
+    { channel, request }
+  )
 }
 
 async function hasSecurePersistenceBackend(electronApp: ElectronApplication): Promise<boolean> {

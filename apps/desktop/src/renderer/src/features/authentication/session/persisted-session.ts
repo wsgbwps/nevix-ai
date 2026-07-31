@@ -4,11 +4,25 @@ import type { PersistedSessionRead } from '../../../../../shared/ipc/authenticat
 /** The single Session slot the main process owns; the adapter never lets Supabase pick a location. */
 export const AUTHENTICATION_STORAGE_KEY = 'nevix-authentication-session'
 
+/** supabase-js only needs a handful of live PKCE verifiers, so a small cap stops unbounded growth. */
+export const MAXIMUM_TRANSIENT_KEYS = 16
+
 let persistenceUnavailable = false
 let sessionInMemory: string | null | undefined
 
 /** Keys other than the Session slot stay in memory so they can never overwrite the Session. */
 const transientValues = new Map<string, string>()
+
+function rememberTransientValue(key: string, value: string): void {
+  // Re-inserting refreshes recency, then the oldest entries fall off past the cap.
+  transientValues.delete(key)
+  transientValues.set(key, value)
+  while (transientValues.size > MAXIMUM_TRANSIENT_KEYS) {
+    const oldestKey = transientValues.keys().next().value
+    if (oldestKey === undefined) break
+    transientValues.delete(oldestKey)
+  }
+}
 
 export async function readPersistedSession(): Promise<PersistedSessionRead> {
   const stored = await window.api.invoke('authentication:read-session')
@@ -37,7 +51,7 @@ export const persistedSessionStorage: SupportedStorage = {
 
   async setItem(key, value) {
     if (key !== AUTHENTICATION_STORAGE_KEY) {
-      transientValues.set(key, value)
+      rememberTransientValue(key, value)
       return
     }
 
