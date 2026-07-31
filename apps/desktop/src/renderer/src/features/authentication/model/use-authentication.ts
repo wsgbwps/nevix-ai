@@ -154,6 +154,14 @@ export function useAuthentication(): Authentication {
       }
 
       const stored = await readPersistedSession()
+
+      // The envelope may still hold a valid Session, so nothing is deleted; the retry boundary
+      // re-reads the store once the secure-storage backend recovers.
+      if (stored.outcome === 'storage-unavailable') {
+        setStatus('restore-failure')
+        return
+      }
+
       const isUnusable = stored.outcome === 'unreadable'
       if (isUnusable) await clearPersistedSession()
 
