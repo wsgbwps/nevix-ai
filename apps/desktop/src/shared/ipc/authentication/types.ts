@@ -1,6 +1,7 @@
 export type PersistedSessionRead =
   | { readonly outcome: 'session'; readonly session: string }
   | { readonly outcome: 'empty' }
+  | { readonly outcome: 'storage-unavailable' }
   | { readonly outcome: 'unreadable' }
 
 export interface PersistedSessionWrite {
