@@ -173,12 +173,17 @@ test('corrupt, unknown, random, and malformed encrypted Session envelopes are te
       await launched.electronApp.close()
     }
 
+    // Structurally valid envelopes are only terminal when a secure backend can attempt
+    // decryption; without one the store reports storage-unavailable and keeps the file, so
+    // those cases run only alongside the backend-encrypted malformed Session (Issue 06).
     const cases = [
       '{"version":1,"ciphertext":',
-      JSON.stringify({ version: 1, ciphertext: 'bm90LWEtc2FmZS1zdG9yYWdlLXBheWxvYWQ=' }),
       JSON.stringify({ version: 999, ciphertext: 'dW5rbm93bi12ZXJzaW9u' }),
       ...(encryptedMalformedSession
-        ? [JSON.stringify({ version: 1, ciphertext: encryptedMalformedSession })]
+        ? [
+            JSON.stringify({ version: 1, ciphertext: 'bm90LWEtc2FmZS1zdG9yYWdlLXBheWxvYWQ=' }),
+            JSON.stringify({ version: 1, ciphertext: encryptedMalformedSession })
+          ]
         : [])
     ]
 
