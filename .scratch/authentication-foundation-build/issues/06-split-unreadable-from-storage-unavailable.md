@@ -4,7 +4,7 @@
 
 **Blocked by:** None, but requires an approved written plan before implementation — this adds a new outcome to `PersistedSessionRead` in `apps/desktop/src/shared/ipc/authentication/types.ts`, which is a public IPC contract change.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## Proposed direction
 
@@ -20,6 +20,7 @@
 ## Comments
 
 - Raised by the PR #5 security review (medium severity): `unreadable` conflates corruption with transient unavailability, making a destructive clear reachable from a recoverable state.
+- Resolved on branch `fix/session-read-storage-unavailable`, merged to `main` as `0aaaa64` (rollback: `git revert -m 1 0aaaa64`). Implemented per the approved plan: `PersistedSessionRead` gains `storage-unavailable`; `readPersistedSession` validates the envelope structurally before `canPersistSecurely()`, so a corrupt envelope stays terminal `unreadable` even during an outage; `restore()` routes `storage-unavailable` to the retryable `restore-failure` boundary with no file deletion, notice, or Supabase work. Verified: full auth E2E suite (`pnpm test:auth`) 38 passed / 3 skipped / 0 failed — including the two new cases (outage keeps envelope then restores after recovery; corrupt-envelope-during-outage stays terminal) and all pre-existing corrupt/unavailable cases unchanged; `pnpm typecheck`, `lint`, `test:unit`, `verify:architecture`, and `verify:auth-artifacts` all green; two-axis `/code-review` passed (no hard standards violations, spec faithful — one noted follow-up: exhaustiveness is met but unenforced by the compiler).
 
 ---
 
