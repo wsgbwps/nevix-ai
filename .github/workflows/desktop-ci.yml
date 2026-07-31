@@ -6,9 +6,21 @@ on:
       - main
     tags:
       - "v*"
+    paths:
+      - "apps/desktop/**"
+      - ".github/workflows/desktop-ci.yml"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
   pull_request:
     branches:
       - main
+    paths:
+      - "apps/desktop/**"
+      - ".github/workflows/desktop-ci.yml"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,7 +28,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Lint, build, and test
+    name: Lint and unit test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -28,14 +40,28 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes xvfb
       - run: pnpm --filter @nevix/desktop lint
       - run: pnpm --filter @nevix/desktop verify:architecture
-      - run: xvfb-run --auto-servernum pnpm --filter @nevix/desktop test:auth
+      - run: pnpm --filter @nevix/desktop test:unit
+
+  build:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nevix/desktop build
 
   package:
     name: Package (${{ matrix.os }})
-    needs: quality
+    needs: [quality, build]
     if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
