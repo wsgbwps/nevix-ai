@@ -327,6 +327,99 @@ test('unavailable secure storage keeps only the runtime Session and offline logo
   }
 })
 
+test('a secure-storage outage keeps the encrypted Session envelope and restore succeeds after recovery', async () => {
+  test.setTimeout(90_000)
+  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+  if (!authHarness) return
+
+  const identity = uniqueAuthIdentity('storage-outage')
+  const userId = await createAuthUser(authHarness, identity, true)
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-outage-'))
+  const sessionPath = join(userDataDir, SESSION_FILE_NAME)
+
+  try {
+    let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    try {
+      test.skip(
+        !(await hasSecurePersistenceBackend(launched.electronApp)),
+        'requires a native Keychain, DPAPI, or Secret Service backend'
+      )
+      await signInAndReadSession(launched.page, identity)
+      await expect.poll(() => fileExists(sessionPath)).toBe(true)
+    } finally {
+      await launched.electronApp.close()
+    }
+
+    const envelopeBeforeOutage = await readFile(sessionPath, 'utf8')
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      environment: { NEVIX_TEST_UNAVAILABLE_SECURE_STORAGE: '1' }
+    })
+    try {
+      await expect(
+        launched.page.getByRole('heading', { name: 'Your session could not be restored yet' })
+      ).toBeVisible()
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toHaveCount(0)
+      expect(await readFile(sessionPath, 'utf8')).toBe(envelopeBeforeOutage)
+    } finally {
+      await launched.electronApp.close()
+    }
+
+    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    try {
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible({ timeout: 35_000 })
+    } finally {
+      await launched.electronApp.close()
+    }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
+    await deleteAuthUser(authHarness, userId)
+  }
+})
+
+test('a corrupt envelope stays terminal and deleted even while secure storage is unavailable', async () => {
+  test.skip(
+    !process.env.NEVIX_TEST_SUPABASE_URL,
+    'requires the configured build produced by the Auth test command'
+  )
+
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-corrupt-outage-'))
+  const sessionPath = join(userDataDir, SESSION_FILE_NAME)
+
+  try {
+    await mkdir(dirname(sessionPath), { recursive: true })
+    await writeFile(
+      sessionPath,
+      JSON.stringify({ version: 999, ciphertext: 'dW5rbm93bi12ZXJzaW9u' }),
+      'utf8'
+    )
+
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      environment: { NEVIX_TEST_UNAVAILABLE_SECURE_STORAGE: '1' }
+    })
+    try {
+      await expect(
+        launched.page.getByText('Your session is no longer valid. Sign in again.')
+      ).toBeVisible()
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toHaveCount(0)
+      await expectFileMissing(sessionPath)
+    } finally {
+      await launched.electronApp.close()
+    }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
 test('Linux basic_text is treated as unavailable and never creates a Session file', async () => {
   test.setTimeout(60_000)
   test.skip(process.platform !== 'linux', 'Electron basic_text exists only on Linux')
