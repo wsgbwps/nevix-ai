@@ -286,7 +286,6 @@ export function useAuthentication(): Authentication {
     if (!client || submissionRef.current || !isPasswordByteLengthValid(password)) return
 
     submissionRef.current = true
-    signOutInProgressRef.current = true
     setIsSubmitting(true)
     setError(undefined)
 
@@ -520,6 +519,9 @@ export function useAuthentication(): Authentication {
     if (!client || submissionRef.current) return
 
     submissionRef.current = true
+    // Suppresses the provider's own SIGNED_OUT emission so this deliberate sign-out cannot race
+    // handleProviderSignedOut into a misleading session-expired notice.
+    signOutInProgressRef.current = true
     setIsSubmitting(true)
     let remoteRevocationConfirmed = false
 
