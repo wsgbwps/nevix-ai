@@ -4,9 +4,21 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "supabase/**"
+      - "server/**"
+      - "scripts/test-mail-smoke.sh"
+      - ".github/workflows/mail-smoke-ci.yml"
+      - "package.json"
   pull_request:
     branches:
       - main
+    paths:
+      - "supabase/**"
+      - "server/**"
+      - "scripts/test-mail-smoke.sh"
+      - ".github/workflows/mail-smoke-ci.yml"
+      - "package.json"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
