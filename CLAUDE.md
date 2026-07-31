@@ -16,23 +16,24 @@
 - Before proposing or implementing a change, name its primary Domain and identify the narrowest owning boundary for every new or moved source file
 - Inside that boundary, choose or create a responsibility-named local directory when it keeps a distinct concern cohesive. Do not introduce synonymous wrappers, new shared layers, or new top-level source directories to mirror a personal convention
 - Keep composition roots limited to wiring. Business logic does not belong in `apps/desktop/src/main/index.ts`, renderer `app/`, or `server/cmd/server/main.go`
-- If a responsibility has no canonical owner, or its placement would change a documented boundary or ADR, stop implementation and surface the conflict. Resolve it through an approved architecture task before adding another convention
+- If a responsibility has no canonical owner, or its placement would change a documented boundary or ADR, stop implementation and surface the conflict. Resolve it through a dedicated architecture task before adding another convention
 - Before completing development work, inspect `git diff --name-status` and verify that every changed path still matches the declared Domain and canonical directory. Call out required shared-area or composition-root changes with their impact and tests
 
 ### Supabase and Go architecture
 
-- Treat [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md) as mandatory context for changes involving Supabase, Go trusted operations, Storage, Realtime, Webhooks, PostgreSQL access, or AI providers; changes to its responsibility seam follow the architecture-change rules under **Shared areas and change approval**
+- Treat [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md) as mandatory context for changes involving Supabase, Go trusted operations, Storage, Realtime, Webhooks, PostgreSQL access, or AI providers; changes to its responsibility seam follow the architecture-change rules under **Shared areas and delivery workflow**
 
-### Shared areas and change approval
+### Shared areas and delivery workflow
 
-- `apps/desktop/src/renderer/src/components/ui/`, `apps/desktop/src/renderer/src/lib/`, `apps/desktop/src/renderer/src/hooks/`, `server/pkg/`, and root `contracts/` are shared areas. Their changes must be called out with impact and tests, and require repository-maintainer approval before merge; for maintainer-authored work, deliberate self-review is sufficient
-- Contributors and AI agents may work autonomously inside the task's primary Domain while preserving documented boundaries. They must not perform unrelated cleanup or generalized refactors, or change a public API without an approved plan
-- By default, one implementation PR delivers one cohesive vertical slice for one primary Domain
+- `apps/desktop/src/renderer/src/components/ui/`, `apps/desktop/src/renderer/src/lib/`, `apps/desktop/src/renderer/src/hooks/`, `server/pkg/`, and root `contracts/` are shared areas. Call out their changes with impact and tests in the commit or PR description; no separate approval is required
+- Contributors and AI agents may work autonomously inside the task's primary Domain while preserving documented boundaries. They must not perform unrelated cleanup or generalized refactors, or change a public API without a written plan
+- One task delivers one cohesive vertical slice for one primary Domain, whether it lands as direct commits to `main` or through a PR
 - A vertical slice may include its renderer Feature, domain-local IPC contracts and Handlers, domain-local implementation, and narrowly scoped supporting changes such as composition-root wiring, tests, dependencies, or build configuration
-- Small, backward-compatible shared changes may ship with the vertical slice. Changes to public contracts, authentication or authorization, persistent data, security boundaries, or multiple Domains require a written plan and repository-maintainer approval before implementation
-- An implementation PR may update its local issue and documentation to record implemented behavior within already approved responsibilities, but must not introduce or revise an architectural responsibility or boundary
-- Changes to responsibilities across contexts or modules, trusted-execution seams such as Supabase-to-Go, repository-wide architecture rules, or architectural decisions require a separate architecture task and repository-maintainer approval before implementation; a separate documentation PR is optional
-- Split work into multiple PRs only when each PR can independently build, test, merge, and roll back without incomplete behavior or temporary compatibility scaffolding
+- High-risk changes — authentication or authorization, security boundaries, public contracts such as root `contracts/`, and persistent data or migrations — require a short written plan under `.scratch/` before implementation, and must land through a branch and PR so CI and diff review gate the merge
+- All other work may be committed and pushed directly to `main`; no branch, PR, or written plan is required
+- A task may update its local issue and documentation to record implemented behavior within documented responsibilities, but must not introduce or revise an architectural responsibility or boundary without the documentation below
+- Changes to responsibilities across contexts or modules, trusted-execution seams such as Supabase-to-Go, repository-wide architecture rules, or architectural decisions require a written plan and updated documentation (ADR where warranted) before implementation
+- When high-risk work is split into multiple PRs, each PR must independently build, test, merge, and roll back without incomplete behavior or temporary compatibility scaffolding
 
 ## Agent skills
 
