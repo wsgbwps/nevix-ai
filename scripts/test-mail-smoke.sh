@@ -42,15 +42,24 @@ echo "==> Reading local stack endpoints"
 status_json="$(pnpm exec supabase status -o json)"
 supabase_url="$(node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(s.API_URL??"")' <<<"${status_json}")"
 publishable_key="$(node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(s.PUBLISHABLE_KEY??s.ANON_KEY??"")' <<<"${status_json}")"
-if [[ -z "${supabase_url}" || -z "${publishable_key}" ]]; then
-  echo "error: could not read API_URL or publishable key from 'supabase status -o json'" >&2
+database_url="$(node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(s.DB_URL??"")' <<<"${status_json}")"
+if [[ -z "${supabase_url}" || -z "${publishable_key}" || -z "${database_url}" ]]; then
+  echo "error: could not read API_URL, publishable key, or DB_URL from 'supabase status -o json'" >&2
   exit 1
 fi
 
 echo "==> Running Go mail smoke tests"
+# SMTP host port 54325 maps to the stack's Mailpit ([local_smtp].smtp_port), so
+# the identity Outbox Worker delivers into the same captured mailbox as GoTrue.
+# Mailpit ignores credentials; the values only satisfy the four-variable contract.
 NEVIX_SUPABASE_URL="${supabase_url}" \
 NEVIX_SUPABASE_PUBLISHABLE_KEY="${publishable_key}" \
 NEVIX_MAILPIT_URL="${mailpit_url}" \
+NEVIX_DATABASE_URL="${database_url}" \
+NEVIX_SMTP_HOST="127.0.0.1" \
+NEVIX_SMTP_PORT="54325" \
+NEVIX_SMTP_USER="mailpit" \
+NEVIX_SMTP_PASSWORD="mailpit" \
   go test -C server -race -count=1 -v ./internal/identity/...
 
 echo "==> Mail smoke tests passed"
