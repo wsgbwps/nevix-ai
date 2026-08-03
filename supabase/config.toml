@@ -199,7 +199,10 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# Local dev headroom: production-equivalent deployment config is 5/hour per the
+# resend-email-delivery spec; the e2e harness uses 100. 10 keeps manual testing
+# from tripping the limit while still exercising it.
+email_sent = 10
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -236,6 +239,16 @@ max_frequency = "1s"
 otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
+
+# Code-based templates: the Desktop flows verify six-digit OTPs entered in-app,
+# so local/CI mail must render {{ .Token }} instead of the default confirmation link.
+[auth.email.template.confirmation]
+subject = "Nevix AI verification code / Nevix AI 验证码"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "Nevix AI password recovery code / Nevix AI 密码恢复验证码"
+content_path = "./supabase/templates/recovery.html"
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]
