@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — 重试与终态失败；04 — 验证码签发命令与命令层限流
 
-**Status:** ready-for-agent
+**Status:** resolved — [PR #12](https://github.com/wsgbwps/nevix-ai/pull/12) 经 mail-smoke CI（4m24s 全绿）把关并于 2026-08-03 合并入 main
 
 - [x] SMTP 故障期间用户重发获得新码后，携旧码的邮件不再重试并进入终态（`TestSupersededCodeEmailStopsRetrying`：停 Mailpit 重试中重发，签发事务同事态将旧邮件置 `cancelled`；恢复后仅新码邮件送达且其哈希与唯一 active 码行互证，旧行保持 `cancelled`、新行 `delivered`）
 - [x] 码自然过期后，其未送达邮件立即终态，不再占用重试（`TestExpiredCodeEmailGoesTerminal`：有效期经写入缝回填至 2.5 秒后，跨一次地平线内重试命中调度截断；终态 `cancelled` 后 attempts 冻结，恢复 Mailpit 零送达）
