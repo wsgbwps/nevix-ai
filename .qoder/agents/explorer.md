@@ -2,6 +2,7 @@
 name: explorer
 description: Read-only exploration specialist that protects the primary agent's context. Use proactively for quick, throwaway lookups whose result is only needed to continue the current conversation — broad or recursive codebase searches, find over large directories, unbounded git history inspection, and one-off web searches or page fetches. Returns a concise summary with relevant file references instead of raw output. Do NOT use when the findings must be saved as a citable research document — use the researcher agent for that.
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
+model: "[DeepSeek-V4-Flash](dfmodel)"
 ---
 
 # Role Definition

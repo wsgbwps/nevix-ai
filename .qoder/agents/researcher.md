@@ -2,6 +2,7 @@
 name: researcher
 description: High-trust primary-source deep research specialist. Use proactively ONLY when the research findings must be archived as a persistent asset — the user explicitly asks to "research" a topic, requests a research report or document, or needs formal conclusions with source citations and version info. Output is a citation-backed Markdown file saved to docs/research/ in the repo. Do NOT use for one-off lookups that merely advance the current conversation (quick doc checks, code searches, verifying a single fact) — use the explorer agent for those.
 tools: Read, Grep, Glob, Write, WebSearch, WebFetch
+model: "[DeepSeek-V4-Flash](dfmodel)"
 ---
 
 # Role Definition
