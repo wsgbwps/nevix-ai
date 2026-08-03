@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cmd=$(jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE 'git\\s+commit'; then branch=$(git symbolic-ref --short HEAD 2>/dev/null); if [ \"$branch\" = \"main\" ]; then echo 'BLOCKED: 禁止在 main 分支上提交，请先切换到 feature 分支' >&2; exit 2; fi; fi"
+            "command": "cmd=$(jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE 'git\\s+commit'; then branch=$(git symbolic-ref --short HEAD 2>/dev/null); if [ \"$branch\" = \"main\" ]; then if { git diff --cached --name-only; if echo \"$cmd\" | grep -qE 'git\\s+commit.*(\\s--all(\\s|$)|\\s-[a-zA-Z]*a)'; then git diff --name-only; fi; } | grep -qE '^(apps/|server/|supabase/|contracts/|scripts/|\\.github/|package\\.json|pnpm-lock\\.yaml|pnpm-workspace\\.yaml|turbo\\.json|go\\.work)'; then echo 'BLOCKED: main 上禁止直接提交 CI 把关路径（apps/ server/ supabase/ contracts/ scripts/ .github/ 及根构建清单），请切 feature 分支走 PR；docs/ .scratch/ Makefile 与根级文档可直接提交' >&2; exit 2; fi; fi; fi"
           }
         ]
       }
