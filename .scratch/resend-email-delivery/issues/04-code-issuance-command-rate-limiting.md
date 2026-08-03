@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — 行走骨架：Outbox 行 → Worker → Mailpit
 
-**Status:** ready-for-agent
+**Status:** resolved — [PR #11](https://github.com/wsgbwps/nevix-ai/pull/11) 经 mail-smoke CI（4m35s 全绿）把关并于 2026-08-03 合并入 main
 
 - [x] 经外部命令签发验证码后，携六位码的邮件出现在 Mailpit（`TestIssuedCodeEmailArrivesInMailpit`：202 后经 Worker 投递，正文提取六位码与库中 active 行哈希互证）
 - [x] 服务端只存码的哈希，日志与响应中不出现明文码（库中 `code_hash` 断言等于邮件码的 HMAC；响应体断言不含明文码；明文只存在于 Outbox 行 body，代码路径不记日志）
