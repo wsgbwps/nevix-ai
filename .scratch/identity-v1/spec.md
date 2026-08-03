@@ -360,7 +360,7 @@ Go configuration keeps Auth issuer/JWKS, any concrete Supabase secret, and each 
 - `internal/identity` persists Invitation, Ownership Transfer, security, and Organization Deletion messages in a transactional Outbox.
 - Domain state, Audit Log, and Outbox row commit in the same database transaction.
 - A Go worker sends and retries. Temporary SMTP failure does not roll back a completed governance command.
-- The worker retries with exponential backoff at 1m, 5m, 15m, 1h, and 6h, for at most five attempts per message.
+- The worker retries with exponential backoff at 1m, 5m, 15m, 1h, and 6h: one initial attempt plus at most five retries per message — one retry per backoff interval.
 - A message carrying a one-time code is never retried beyond the code's remaining validity; an invalidated or expired code makes the message terminal immediately.
 - After retries are exhausted the Outbox row is marked failed and retained, not deleted; failed rows are V1's only operational visibility, with no alerting or redelivery tooling.
 - Rate limiting, cooldown, and code invalidation are enforced synchronously at command handling before an Outbox row is written; the worker contains no business rules.
