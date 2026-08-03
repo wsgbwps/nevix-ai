@@ -10,7 +10,7 @@ lint:
 	pnpm lint
 
 server:
-	cd server && go run ./cmd/server
+	cd server && if [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi; go run ./cmd/server
 
 setup:
 	pnpm install
