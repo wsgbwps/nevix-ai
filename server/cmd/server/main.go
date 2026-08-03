@@ -30,6 +30,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	retryDelays, err := identity.LoadRetryDelays(os.Getenv)
+	if err != nil {
+		return err
+	}
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("missing required deployment variable: DATABASE_URL")
@@ -44,7 +48,7 @@ func run() error {
 	}
 	defer pool.Close()
 
-	worker, err := identity.NewOutboxWorker(pool, smtpConfig)
+	worker, err := identity.NewOutboxWorker(pool, smtpConfig, retryDelays)
 	if err != nil {
 		return err
 	}
