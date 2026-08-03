@@ -22,8 +22,11 @@ const pollInterval = time.Second
 // OutboxWorker is a pure deliverer: it claims due pending
 // identity.outbox_messages rows with FOR UPDATE SKIP LOCKED and sends them
 // over standard SMTP, retrying on the configured backoff schedule until the
-// row is delivered or goes to its failed terminal state. It holds no business
-// rules; rate limiting and cooldowns live in the command layer.
+// row is delivered or goes to its failed terminal state. A row carrying a
+// one-time code is retried only while the code remains usable: once the code
+// is superseded or expired the row takes its cancelled terminal state instead
+// of being delivered (ticket 05). It holds no other business rules; rate
+// limiting and cooldowns live in the command layer.
 type OutboxWorker struct {
 	pool        *pgxpool.Pool
 	client      *mail.Client
@@ -139,20 +142,46 @@ func (w *OutboxWorker) deliverNext(ctx context.Context) (claimed bool, err error
 		id                               string
 		sender, recipient, subject, body string
 		attempts                         int
+		// deliverable is true for codeless rows and for rows whose code is
+		// still usable; codeExpiresAt is nil for codeless rows. Both use the
+		// database clock (selected alongside) so the retry horizon never
+		// depends on the process clock.
+		deliverable   bool
+		codeExpiresAt *time.Time
+		dbNow         time.Time
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT id, sender, recipient, subject, body, attempts
-		 FROM identity.outbox_messages
-		 WHERE status = 'pending' AND next_attempt_at <= now()
-		 ORDER BY next_attempt_at, created_at
+		`SELECT m.id, m.sender, m.recipient, m.subject, m.body, m.attempts,
+		        c.id IS NULL OR (c.status = 'active' AND now() <= c.expires_at),
+		        c.expires_at, now()
+		 FROM identity.outbox_messages m
+		 LEFT JOIN identity.verification_codes c ON c.id = m.verification_code_id
+		 WHERE m.status = 'pending' AND m.next_attempt_at <= now()
+		 ORDER BY m.next_attempt_at, m.created_at
 		 LIMIT 1
-		 FOR UPDATE SKIP LOCKED`,
-	).Scan(&id, &sender, &recipient, &subject, &body, &attempts)
+		 FOR UPDATE OF m SKIP LOCKED`,
+	).Scan(&id, &sender, &recipient, &subject, &body, &attempts, &deliverable, &codeExpiresAt, &dbNow)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("identity: claim outbox row: %w", err)
+	}
+
+	if !deliverable {
+		// The carried code was superseded or has expired: the row takes its
+		// cancelled terminal state without a delivery attempt, so the user
+		// never receives an already-invalid code and no retry budget is spent.
+		commitCtx := context.WithoutCancel(ctx)
+		if _, err := tx.Exec(commitCtx,
+			`UPDATE identity.outbox_messages SET status = 'cancelled' WHERE id = $1`, id,
+		); err != nil {
+			return true, fmt.Errorf("identity: cancel outbox row %s with invalidated code: %w", id, err)
+		}
+		if err := tx.Commit(commitCtx); err != nil {
+			return true, fmt.Errorf("identity: commit outbox row %s cancellation: %w", id, err)
+		}
+		return true, nil
 	}
 
 	msg := mail.NewMsg()
@@ -172,7 +201,7 @@ func (w *OutboxWorker) deliverNext(ctx context.Context) (claimed bool, err error
 			// budget on an attempt that never reached the wire.
 			return true, fmt.Errorf("identity: deliver outbox row %s: %w", id, err)
 		}
-		return true, w.recordFailure(ctx, tx, id, attempts, err)
+		return true, w.recordFailure(ctx, tx, id, attempts, codeExpiresAt, dbNow, err)
 	}
 
 	// The mail is on the wire: finish the bookkeeping even if shutdown began
@@ -193,18 +222,29 @@ func (w *OutboxWorker) deliverNext(ctx context.Context) (claimed bool, err error
 // recordFailure commits the bookkeeping for a genuinely failed attempt: the
 // next retry is scheduled from the backoff table, or — once the retry budget
 // (the schedule's length) is spent — the row takes its failed terminal state
-// and stays in the table as the only operational visibility. The mail never
-// reached the wire, so committing cannot duplicate a delivery.
-func (w *OutboxWorker) recordFailure(ctx context.Context, tx pgx.Tx, id string, attempts int, sendErr error) error {
+// and stays in the table as the only operational visibility. For a
+// code-carrying row whose next retry would land beyond the code's remaining
+// validity, the retry horizon ends here instead: the row takes its cancelled
+// terminal state immediately rather than waiting out a backoff that can never
+// deliver a valid code. The mail never reached the wire, so committing cannot
+// duplicate a delivery.
+func (w *OutboxWorker) recordFailure(ctx context.Context, tx pgx.Tx, id string, attempts int, codeExpiresAt *time.Time, dbNow time.Time, sendErr error) error {
 	commitCtx := context.WithoutCancel(ctx)
 	attempts++
-	if attempts > len(w.retryDelays) {
+	switch {
+	case attempts > len(w.retryDelays):
 		if _, err := tx.Exec(commitCtx,
 			`UPDATE identity.outbox_messages SET status = 'failed', attempts = $2 WHERE id = $1`, id, attempts,
 		); err != nil {
 			return fmt.Errorf("identity: mark outbox row %s failed: %w", id, err)
 		}
-	} else {
+	case codeExpiresAt != nil && dbNow.Add(w.retryDelays[attempts-1]).After(*codeExpiresAt):
+		if _, err := tx.Exec(commitCtx,
+			`UPDATE identity.outbox_messages SET status = 'cancelled', attempts = $2 WHERE id = $1`, id, attempts,
+		); err != nil {
+			return fmt.Errorf("identity: mark outbox row %s cancelled at the code's retry horizon: %w", id, err)
+		}
+	default:
 		if _, err := tx.Exec(commitCtx,
 			`UPDATE identity.outbox_messages
 			 SET attempts = $2, next_attempt_at = now() + make_interval(secs => $3)

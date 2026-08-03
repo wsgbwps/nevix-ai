@@ -25,12 +25,16 @@ import (
 // email-hour cap are fixed by the resend-email-delivery spec; the per-IP
 // hourly cap's value was left open there and confirmed with the spec author
 // as 20. The command layer enforces all three synchronously: a rejected
-// command writes no domain state and no Outbox row.
+// command writes no domain state and no Outbox row. codeValidity bounds a
+// code's natural lifetime — and thereby the retry horizon of the email
+// carrying it (ticket 05); its value was likewise confirmed with the spec
+// author.
 const (
 	resendCooldown   = time.Minute
 	rateLimitWindow  = time.Hour
 	emailHourlyLimit = 5
 	ipHourlyLimit    = 20
+	codeValidity     = 10 * time.Minute
 )
 
 // Synchronous rejection reasons of the issuance command.
@@ -153,6 +157,19 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) (retryAfter in
 		return 0, fmt.Errorf("identity: generate code: %w", err)
 	}
 
+	// Superseding the previous code terminally cancels its undelivered email
+	// in the same transaction: the user must never receive an already-invalid
+	// code (ticket 05). The cancel runs while the old code is still active so
+	// its subquery can find it.
+	if _, err := tx.Exec(ctx,
+		`UPDATE identity.outbox_messages
+		 SET status = 'cancelled'
+		 WHERE status = 'pending' AND verification_code_id IN (
+		     SELECT id FROM identity.verification_codes
+		     WHERE email = $1 AND status = 'active')`, email,
+	); err != nil {
+		return 0, fmt.Errorf("identity: cancel superseded code email: %w", err)
+	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE identity.verification_codes
 		 SET status = 'superseded', superseded_at = now()
@@ -160,19 +177,22 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) (retryAfter in
 	); err != nil {
 		return 0, fmt.Errorf("identity: supersede previous code: %w", err)
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO identity.verification_codes (email, code_hash, request_ip)
-		 VALUES ($1, $2, $3)`, email, hashCode(i.cfg.HashKey, code), ip,
-	); err != nil {
+	var codeID string
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO identity.verification_codes (email, code_hash, request_ip, expires_at)
+		 VALUES ($1, $2, $3, now() + make_interval(secs => $4))
+		 RETURNING id`, email, hashCode(i.cfg.HashKey, code), ip, codeValidity.Seconds(),
+	).Scan(&codeID); err != nil {
 		return 0, fmt.Errorf("identity: store code hash: %w", err)
 	}
 	// The plaintext code exists only here, in the Outbox payload of the email
-	// that must carry it; it is never logged or returned to the caller.
+	// that must carry it; it is never logged or returned to the caller. The
+	// row is bound to the code it carries, bounding its retry horizon.
 	body := fmt.Sprintf("Your verification code is: %s\n\nIf you did not request this code, you can ignore this email.\n", code)
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO identity.outbox_messages (sender, recipient, subject, body)
-		 VALUES ($1, $2, $3, $4)`,
-		i.cfg.From, email, "Your Nevix verification code", body,
+		`INSERT INTO identity.outbox_messages (sender, recipient, subject, body, verification_code_id)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		i.cfg.From, email, "Your Nevix verification code", body, codeID,
 	); err != nil {
 		return 0, fmt.Errorf("identity: queue code email: %w", err)
 	}

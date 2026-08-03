@@ -25,7 +25,7 @@ _Avoid_: store, DAO, data layer
 _Avoid_: message queue, mail queue, 待发送表
 
 **Outbox Worker**:
-轮询 Outbox 并执行投递与重试的纯投递器，不包含限流、冷却等任何业务规则。
+轮询 Outbox 并执行投递与重试的纯投递器，不包含限流、冷却等任何业务规则。携码邮件的重试地平线属投递语义：码被作废或过期时停止投递并将行置为终态（cancelled），由 Worker 在认领与重试调度时执行。
 _Avoid_: mailer service, sender, dispatcher
 
 **Resend（服务商）**:
