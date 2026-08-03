@@ -78,8 +78,8 @@ func extractCode(t *testing.T, body string) string {
 func (h *harness) seedIssuance(t *testing.T, ctx context.Context, email, ip string, ageSeconds int) {
 	t.Helper()
 	if _, err := h.pool.Exec(ctx,
-		`INSERT INTO identity.verification_codes (email, code_hash, request_ip, created_at)
-		 VALUES ($1, $2, $3, now() - make_interval(secs => $4))`,
+		`INSERT INTO identity.verification_codes (email, code_hash, request_ip, created_at, expires_at)
+		 VALUES ($1, $2, $3, now() - make_interval(secs => $4), now())`,
 		email, "seeded", ip, ageSeconds,
 	); err != nil {
 		t.Fatalf("seed issuance history: %v", err)

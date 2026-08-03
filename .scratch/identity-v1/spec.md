@@ -107,6 +107,7 @@ V1 excludes custom roles, fine-grained permissions, and Suspended Membership.
 - Codes contain six numeric digits.
 - Each code is bound to the User/email, action type, and target object.
 - Each code permits at most five attempts.
+- Each code expires ten minutes after issuance.
 - Resend cooldown is 60 seconds; a new code invalidates the previous one.
 - The same email may receive at most five codes per hour, with an additional IP-level limit of twenty codes per hour.
 - The server stores only a hash and never logs or returns plaintext.
@@ -361,7 +362,7 @@ Go configuration keeps Auth issuer/JWKS, any concrete Supabase secret, and each 
 - Domain state, Audit Log, and Outbox row commit in the same database transaction.
 - A Go worker sends and retries. Temporary SMTP failure does not roll back a completed governance command.
 - The worker retries with exponential backoff at 1m, 5m, 15m, 1h, and 6h: one initial attempt plus at most five retries per message — one retry per backoff interval.
-- A message carrying a one-time code is never retried beyond the code's remaining validity; an invalidated or expired code makes the message terminal immediately.
+- A message carrying a one-time code is never retried beyond the code's remaining validity; an invalidated or expired code makes the message terminal immediately, marked `cancelled` — distinct from `failed`, so the two terminal causes are distinguishable on the row.
 - After retries are exhausted the Outbox row is marked failed and retained, not deleted; failed rows are V1's only operational visibility, with no alerting or redelivery tooling.
 - Rate limiting, cooldown, and code invalidation are enforced synchronously at command handling before an Outbox row is written; the worker contains no business rules.
 - GoTrue and `internal/identity` rate-limit email sending independently; neither reads the other's counters.

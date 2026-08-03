@@ -42,7 +42,7 @@ Identity V1 的邮件行为目前只对 captured mailbox 成立：本地和 CI �
 - **限流边界**：两个独立限流池。GoTrue 系（注册/找回/换邮箱）由 GoTrue 内建限流部署配置兜底（等效 5 条/小时 + 冷却）；identity 系（Invitation 接受、Ownership Transfer 接受）由 `internal/identity` 自行强制：60 秒重发冷却、每邮箱每小时 5 条、每 IP 每小时 20 条（票 04 落地时拍板数值）。两池互不读取对方计数。
 - **限流位置**：全部限流、冷却与新码作废旧码在 `internal/identity` 命令处理层**同步**判定；超限则拒绝命令，不写领域状态、不写 Outbox 行，用户即时收到明确错误。
 - **Outbox Worker**：`internal/identity` module 内部的后台 goroutine，组合根只做拉起与优雅关闭；用 `SELECT ... FOR UPDATE SKIP LOCKED` 轮询认领，天然支持未来多副本。纯投递器，不含任何业务规则。
-- **重试与终态**：指数退避 1m → 5m → 15m → 1h → 6h，每条消息最多 5 次。携带一次性验证码的邮件，重试地平线不超过码的剩余有效期；码作废或过期即刻终态。耗尽后行状态置 `failed` 留表不删；不建告警或重发后台。
+- **重试与终态**：指数退避 1m → 5m → 15m → 1h → 6h，每条消息最多 5 次。携带一次性验证码的邮件，重试地平线不超过码的剩余有效期（码有效期 10 分钟，票 05 落地时拍板）；码作废或过期即刻终态，行状态置 `cancelled`（票 05 落地时拍板命名），与重试耗尽的 `failed` 区分。耗尽后行状态置 `failed` 留表不删；不建告警或重发后台。
 - **不回滚原则**：SMTP 临时失败不回滚已完成的治理命令；领域状态、Audit Log、Outbox 行仍在同一事务提交（维持既有契约）。
 - **SMTP 客户端**：Worker 使用 `wneessen/go-mail`（标库 `net/smtp` 已冻结，缺 context 取消与隐式 TLS 支持），直接调用、不包自建接口。
 - **捕获邮箱**：本地与 CI 均使用 Supabase 栈自带 Mailpit；GoTrue 默认已接入，identity Worker 的 SMTP 配置指向同一实例，两条路径在同一收件箱断言。
