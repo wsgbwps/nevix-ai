@@ -39,7 +39,7 @@ Identity V1 的邮件行为目前只对 captured mailbox 成立：本地和 CI �
 
 - **接入方式**：Resend（服务商）仅通过标准 SMTP 端点（`smtp.resend.com`，用户名 `resend`，密码即 API Key）接入。不引入 resend-go SDK，不建 provider 适配器接口（维持 identity-v1 spec 第 365 行）。不获取 message ID，不接送达 webhook。
 - **单一路径**：GoTrue 与 Outbox Worker 走同一条标准 SMTP 路径；环境差异 = `SMTP_HOST/PORT/USER/PASSWORD` 四个部署变量，代码零分支。
-- **限流边界**：两个独立限流池。GoTrue 系（注册/找回/换邮箱）由 GoTrue 内建限流部署配置兜底（等效 5 条/小时 + 冷却）；identity 系（Invitation 接受、Ownership Transfer 接受）由 `internal/identity` 自行强制：60 秒重发冷却、每邮箱每小时 5 条、IP 级限制。两池互不读取对方计数。
+- **限流边界**：两个独立限流池。GoTrue 系（注册/找回/换邮箱）由 GoTrue 内建限流部署配置兜底（等效 5 条/小时 + 冷却）；identity 系（Invitation 接受、Ownership Transfer 接受）由 `internal/identity` 自行强制：60 秒重发冷却、每邮箱每小时 5 条、每 IP 每小时 20 条（票 04 落地时拍板数值）。两池互不读取对方计数。
 - **限流位置**：全部限流、冷却与新码作废旧码在 `internal/identity` 命令处理层**同步**判定；超限则拒绝命令，不写领域状态、不写 Outbox 行，用户即时收到明确错误。
 - **Outbox Worker**：`internal/identity` module 内部的后台 goroutine，组合根只做拉起与优雅关闭；用 `SELECT ... FOR UPDATE SKIP LOCKED` 轮询认领，天然支持未来多副本。纯投递器，不含任何业务规则。
 - **重试与终态**：指数退避 1m → 5m → 15m → 1h → 6h，每条消息最多 5 次。携带一次性验证码的邮件，重试地平线不超过码的剩余有效期；码作废或过期即刻终态。耗尽后行状态置 `failed` 留表不删；不建告警或重发后台。

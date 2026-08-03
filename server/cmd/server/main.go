@@ -14,9 +14,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/identity"
+	"github.com/nevix-ai/server/pkg/event"
 )
 
 func main() {
@@ -31,6 +33,10 @@ func run() error {
 		return err
 	}
 	retryDelays, err := identity.LoadRetryDelays(os.Getenv)
+	if err != nil {
+		return err
+	}
+	codeConfig, err := identity.LoadCodeIssuanceConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -55,12 +61,14 @@ func run() error {
 	workerDone := make(chan error, 1)
 	go func() { workerDone <- worker.Run(ctx) }()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	bus := event.NewInMemoryBus()
+	router := chi.NewRouter()
+	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
-	server := &http.Server{Addr: ":8080", Handler: mux}
+	identity.NewModule(pool, codeConfig).Register(router, bus)
+	server := &http.Server{Addr: ":8080", Handler: router}
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- server.ListenAndServe() }()
 	log.Println("server listening on :8080")

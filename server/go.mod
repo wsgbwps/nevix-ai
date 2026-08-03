@@ -3,6 +3,7 @@ module github.com/nevix-ai/server
 go 1.26.3
 
 require (
+	github.com/go-chi/chi/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/wneessen/go-mail v0.8.1
 )

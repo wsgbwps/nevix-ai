@@ -65,6 +65,8 @@ echo "==> Running Go mail smoke tests"
 # Mailpit ignores credentials; the values only satisfy the four-variable contract.
 # NEVIX_OUTBOX_RETRY_DELAYS compresses the production backoff schedule
 # (1m,5m,15m,1h,6h) so retry and terminal-failure tests finish in seconds.
+# NEVIX_VERIFICATION_CODE_HASH_KEY / NEVIX_SMTP_FROM satisfy the code
+# issuance contract; the hash key is a throwaway value for captured mail only.
 NEVIX_SUPABASE_URL="${supabase_url}" \
 NEVIX_SUPABASE_PUBLISHABLE_KEY="${publishable_key}" \
 NEVIX_MAILPIT_URL="${mailpit_url}" \
@@ -75,6 +77,8 @@ NEVIX_SMTP_USER="mailpit" \
 NEVIX_SMTP_PASSWORD="mailpit" \
 NEVIX_OUTBOX_RETRY_DELAYS="1s,2s,3s,4s,5s" \
 NEVIX_MAILPIT_CONTAINER="${mailpit_container}" \
+NEVIX_VERIFICATION_CODE_HASH_KEY="mail-smoke-test-hash-key" \
+NEVIX_SMTP_FROM="identity@nevix.test" \
   go test -C server -race -count=1 -v ./internal/identity/...
 
 echo "==> Mail smoke tests passed"
