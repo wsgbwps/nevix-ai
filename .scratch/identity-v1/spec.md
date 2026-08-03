@@ -108,7 +108,7 @@ V1 excludes custom roles, fine-grained permissions, and Suspended Membership.
 - Each code is bound to the User/email, action type, and target object.
 - Each code permits at most five attempts.
 - Resend cooldown is 60 seconds; a new code invalidates the previous one.
-- The same email may receive at most five codes per hour, with an additional IP-level limit.
+- The same email may receive at most five codes per hour, with an additional IP-level limit of twenty codes per hour.
 - The server stores only a hash and never logs or returns plaintext.
 - Pre-login errors do not reveal whether an email is registered.
 - The sole link-based exception is the old-email “not me” Security Lock flow, served by a minimal Go HTTPS confirmation page.
