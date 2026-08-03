@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — 行走骨架：Outbox 行 → Worker → Mailpit
 
-**Status:** implemented — 本地 harness 全绿、db lint 无错误，待 PR 经 CI 把关后标 resolved
+**Status:** resolved — [PR #10](https://github.com/wsgbwps/nevix-ai/pull/10) 已经 mail-smoke CI（4m32s 全绿）把关并于 2026-08-03 合并入 main
 
 - [x] Mailpit 关停期间写入的 Outbox 行，在 Mailpit 恢复后经重试最终送达（`TestOutboxRowDeliveredAfterMailpitRecovery`：关停期间断言已提交行保持 `pending` 且 `attempts >= 1`，恢复后经重试送达且 `attempts >= 2`）
 - [x] 重试次数上限 5 次、间隔符合退避计划表（生产配置为 1m/5m/15m/1h/6h）（判读：初次投递 + 最多 5 次重试 = 6 次投递尝试，5 个退避间隔一一对应 5 次重试前的等待；`TestLoadRetryDelaysDefaultsToProductionSchedule` 钉住生产曲线，`TestRetryExhaustionMarksRowFailedTerminally` 断言 `attempts == 1 + len(delays)` 且每次重试不早于其计划间隔）
