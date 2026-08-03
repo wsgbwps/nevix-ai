@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 邮件测试 harness 与 GoTrue SMTP 冒烟
 
-**Status:** ready-for-human — 实现完成、本地 harness 全绿、code review 修正已落；待开 PR 经 CI 把关合并后标 resolved（对齐票 01 先例）
+**Status:** resolved — PR #9 经 CI 把关合并；合并后完成真实 Resend 端到端手动冒烟（证据见文末补记）
 
 - [x] 最小 outbox 声明式 schema 与 migration 从空库应用通过，advisors 与 migration-history 检查绿（`supabase/schemas/identity.sql` → `supabase/migrations/20260731101206_outbox_walking_skeleton.sql`；`db reset` 从空库应用、`db lint --level warning` 无错误、`migration list` 本地/历史一致）
 - [x] 在同一数据库事务中写入 Outbox 行并提交后，邮件出现在 Mailpit（`TestCommittedOutboxRowIsDeliveredToMailpit`）
@@ -15,6 +15,8 @@
 - [x] 测试只经事务写入缝与 Mailpit 断言，不触碰 Worker 私有实现、不 mock SMTP（测试仅使用导出的 `NewOutboxWorker`/`Run` 组合根表面、SQL 写入缝、Mailpit HTTP API 与行终态）
 
 **实现注记：** go-mail 在配置了 auth 但服务器未通告 AUTH 时硬失败（v0.8.1 client.go:1493），而 Supabase 栈内 Mailpit 不通告 AUTH 且无配置开关；为保持生产切 Resend 零分支，Worker 构造时对端点做一次机会式探测（带 10s 超时的 EHLO → 如通告则 STARTTLS → 检查 AUTH），仅当服务器通告 AUTH 时启用 `SMTPAuthPlain`（拒绝在明文信道发送凭据，Resend API Key 不会泄露）——与 `TLSOpportunistic` 同一协商哲学，环境差异仍只是四个部署变量；端点不可达则构造失败、进程显式启动失败。
+
+**合并后补记（2026-08-03）：** 真实 Resend 端到端冒烟通过——`SMTP_HOST=smtp.resend.com`、`SMTP_PORT=587`、`SMTP_USER=resend`、API Key 经 `server/.env.local` 注入（`make server` 自动加载）；sender 用 `onboarding@resend.dev` 发到账号注册邮箱。SQL 插入 Outbox 行后约 3 秒内行状态置 `delivered`，真实邮箱收件成功。这是 probe 的 STARTTLS + AUTH PLAIN 路径首个真实环境证据（Mailpit 不通告 AUTH，该路径此前无覆盖），印证「生产切 Resend 零分支」的设计承诺。
 
 **遗留事项：**
 
