@@ -25,9 +25,10 @@ import (
 
 // harness wires one test to the running local stack, or skips.
 type harness struct {
-	pool    *pgxpool.Pool
-	mailpit *mailpittest.Client
-	smtp    identity.SMTPConfig
+	pool        *pgxpool.Pool
+	mailpit     *mailpittest.Client
+	smtp        identity.SMTPConfig
+	retryDelays []time.Duration
 }
 
 func newHarness(t *testing.T, ctx context.Context) *harness {
@@ -41,12 +42,16 @@ func newHarness(t *testing.T, ctx context.Context) *harness {
 	if err != nil {
 		t.Fatalf("load SMTP config from NEVIX_-prefixed environment: %v", err)
 	}
+	retryDelays, err := identity.LoadRetryDelays(func(key string) string { return os.Getenv("NEVIX_" + key) })
+	if err != nil {
+		t.Fatalf("load outbox retry delays from NEVIX_-prefixed environment: %v", err)
+	}
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		t.Fatalf("connect to database: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	return &harness{pool: pool, mailpit: mailpittest.NewClient(mailpitURL), smtp: smtp}
+	return &harness{pool: pool, mailpit: mailpittest.NewClient(mailpitURL), smtp: smtp, retryDelays: retryDelays}
 }
 
 // insertOutboxRowCommitted writes one Outbox row inside its own database
@@ -74,7 +79,7 @@ func (h *harness) insertOutboxRowCommitted(t *testing.T, ctx context.Context, re
 // a stop function that cancels it and asserts it exits gracefully.
 func (h *harness) startWorker(t *testing.T) (stop func()) {
 	t.Helper()
-	worker, err := identity.NewOutboxWorker(h.pool, h.smtp)
+	worker, err := identity.NewOutboxWorker(h.pool, h.smtp, h.retryDelays)
 	if err != nil {
 		t.Fatalf("construct outbox worker: %v", err)
 	}

@@ -19,12 +19,15 @@ import (
 // is drained before polling again.
 const pollInterval = time.Second
 
-// OutboxWorker is a pure deliverer: it claims pending identity.outbox_messages
-// rows with FOR UPDATE SKIP LOCKED and sends them over standard SMTP. It holds
-// no business rules; rate limiting and cooldowns live in the command layer.
+// OutboxWorker is a pure deliverer: it claims due pending
+// identity.outbox_messages rows with FOR UPDATE SKIP LOCKED and sends them
+// over standard SMTP, retrying on the configured backoff schedule until the
+// row is delivered or goes to its failed terminal state. It holds no business
+// rules; rate limiting and cooldowns live in the command layer.
 type OutboxWorker struct {
-	pool   *pgxpool.Pool
-	client *mail.Client
+	pool        *pgxpool.Pool
+	client      *mail.Client
+	retryDelays []time.Duration
 }
 
 // NewOutboxWorker builds a worker delivering through the given SMTP endpoint.
@@ -32,8 +35,12 @@ type OutboxWorker struct {
 // AUTH are negotiated from what the server advertises (see probeAuthSupport),
 // so switching environments changes only the four SMTP deployment variables.
 // An unreachable endpoint fails construction — and therefore startup —
-// explicitly.
-func NewOutboxWorker(pool *pgxpool.Pool, cfg SMTPConfig) (*OutboxWorker, error) {
+// explicitly. retryDelays is the backoff schedule between delivery attempts;
+// its length is the retry budget (see LoadRetryDelays).
+func NewOutboxWorker(pool *pgxpool.Pool, cfg SMTPConfig, retryDelays []time.Duration) (*OutboxWorker, error) {
+	if len(retryDelays) == 0 {
+		return nil, errors.New("identity: outbox retry schedule is empty")
+	}
 	opts := []mail.Option{
 		mail.WithPort(cfg.Port),
 		mail.WithTLSPolicy(mail.TLSOpportunistic),
@@ -56,7 +63,7 @@ func NewOutboxWorker(pool *pgxpool.Pool, cfg SMTPConfig) (*OutboxWorker, error) 
 	if err != nil {
 		return nil, fmt.Errorf("identity: build SMTP client: %w", err)
 	}
-	return &OutboxWorker{pool: pool, client: client}, nil
+	return &OutboxWorker{pool: pool, client: client, retryDelays: retryDelays}, nil
 }
 
 // probeAuthSupport asks the SMTP server whether it advertises AUTH, upgrading
@@ -116,9 +123,11 @@ func (w *OutboxWorker) Run(ctx context.Context) error {
 	}
 }
 
-// deliverNext claims at most one pending row and delivers it. The claim
+// deliverNext claims at most one due pending row and delivers it. The claim
 // transaction stays open across the SMTP send: SKIP LOCKED keeps concurrent
-// pollers off the row, and any failure rolls back to pending.
+// pollers off the row. A genuinely failed send commits the retry bookkeeping
+// (next attempt scheduled, or failed terminal state once the budget is
+// spent); a send canceled by shutdown rolls back untouched.
 func (w *OutboxWorker) deliverNext(ctx context.Context) (claimed bool, err error) {
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
@@ -129,15 +138,16 @@ func (w *OutboxWorker) deliverNext(ctx context.Context) (claimed bool, err error
 	var (
 		id                               string
 		sender, recipient, subject, body string
+		attempts                         int
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT id, sender, recipient, subject, body
+		`SELECT id, sender, recipient, subject, body, attempts
 		 FROM identity.outbox_messages
-		 WHERE status = 'pending'
-		 ORDER BY created_at
+		 WHERE status = 'pending' AND next_attempt_at <= now()
+		 ORDER BY next_attempt_at, created_at
 		 LIMIT 1
 		 FOR UPDATE SKIP LOCKED`,
-	).Scan(&id, &sender, &recipient, &subject, &body)
+	).Scan(&id, &sender, &recipient, &subject, &body, &attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -156,7 +166,13 @@ func (w *OutboxWorker) deliverNext(ctx context.Context) (claimed bool, err error
 	msg.SetBodyString(mail.TypeTextPlain, body)
 
 	if err := w.client.DialAndSendWithContext(ctx, msg); err != nil {
-		return true, fmt.Errorf("identity: deliver outbox row %s: %w", id, err)
+		if ctx.Err() != nil {
+			// Shutdown canceled the send: the deferred rollback returns the
+			// row to pending untouched, so a restart never spends retry
+			// budget on an attempt that never reached the wire.
+			return true, fmt.Errorf("identity: deliver outbox row %s: %w", id, err)
+		}
+		return true, w.recordFailure(ctx, tx, id, attempts, err)
 	}
 
 	// The mail is on the wire: finish the bookkeeping even if shutdown began
@@ -164,7 +180,7 @@ func (w *OutboxWorker) deliverNext(ctx context.Context) (claimed bool, err error
 	// a second time on restart.
 	commitCtx := context.WithoutCancel(ctx)
 	if _, err := tx.Exec(commitCtx,
-		`UPDATE identity.outbox_messages SET status = 'delivered' WHERE id = $1`, id,
+		`UPDATE identity.outbox_messages SET status = 'delivered', attempts = $2 WHERE id = $1`, id, attempts+1,
 	); err != nil {
 		return true, fmt.Errorf("identity: mark outbox row %s delivered: %w", id, err)
 	}
@@ -172,4 +188,33 @@ func (w *OutboxWorker) deliverNext(ctx context.Context) (claimed bool, err error
 		return true, fmt.Errorf("identity: commit outbox row %s: %w", id, err)
 	}
 	return true, nil
+}
+
+// recordFailure commits the bookkeeping for a genuinely failed attempt: the
+// next retry is scheduled from the backoff table, or — once the retry budget
+// (the schedule's length) is spent — the row takes its failed terminal state
+// and stays in the table as the only operational visibility. The mail never
+// reached the wire, so committing cannot duplicate a delivery.
+func (w *OutboxWorker) recordFailure(ctx context.Context, tx pgx.Tx, id string, attempts int, sendErr error) error {
+	commitCtx := context.WithoutCancel(ctx)
+	attempts++
+	if attempts > len(w.retryDelays) {
+		if _, err := tx.Exec(commitCtx,
+			`UPDATE identity.outbox_messages SET status = 'failed', attempts = $2 WHERE id = $1`, id, attempts,
+		); err != nil {
+			return fmt.Errorf("identity: mark outbox row %s failed: %w", id, err)
+		}
+	} else {
+		if _, err := tx.Exec(commitCtx,
+			`UPDATE identity.outbox_messages
+			 SET attempts = $2, next_attempt_at = now() + make_interval(secs => $3)
+			 WHERE id = $1`, id, attempts, w.retryDelays[attempts-1].Seconds(),
+		); err != nil {
+			return fmt.Errorf("identity: schedule outbox row %s retry: %w", id, err)
+		}
+	}
+	if err := tx.Commit(commitCtx); err != nil {
+		return fmt.Errorf("identity: commit outbox row %s retry bookkeeping: %w", id, err)
+	}
+	return fmt.Errorf("identity: deliver outbox row %s: %w", id, sendErr)
 }

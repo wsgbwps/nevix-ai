@@ -48,10 +48,23 @@ if [[ -z "${supabase_url}" || -z "${publishable_key}" || -z "${database_url}" ]]
   exit 1
 fi
 
+echo "==> Discovering Mailpit container"
+# Retry tests manipulate real SMTP availability by stopping and starting the
+# captured-mailbox container; docker is present wherever the stack runs.
+# Match by image: the CLI names the container supabase_inbucket_<project> even
+# though it runs the supabase/mailpit image.
+mailpit_container="$(docker ps --format '{{.Names}} {{.Image}}' | awk '$2 ~ /mailpit/ {print $1}' | head -n 1)"
+if [[ -z "${mailpit_container}" ]]; then
+  echo "error: could not find a running Mailpit container" >&2
+  exit 1
+fi
+
 echo "==> Running Go mail smoke tests"
 # SMTP host port 54325 maps to the stack's Mailpit ([local_smtp].smtp_port), so
 # the identity Outbox Worker delivers into the same captured mailbox as GoTrue.
 # Mailpit ignores credentials; the values only satisfy the four-variable contract.
+# NEVIX_OUTBOX_RETRY_DELAYS compresses the production backoff schedule
+# (1m,5m,15m,1h,6h) so retry and terminal-failure tests finish in seconds.
 NEVIX_SUPABASE_URL="${supabase_url}" \
 NEVIX_SUPABASE_PUBLISHABLE_KEY="${publishable_key}" \
 NEVIX_MAILPIT_URL="${mailpit_url}" \
@@ -60,6 +73,8 @@ NEVIX_SMTP_HOST="127.0.0.1" \
 NEVIX_SMTP_PORT="54325" \
 NEVIX_SMTP_USER="mailpit" \
 NEVIX_SMTP_PASSWORD="mailpit" \
+NEVIX_OUTBOX_RETRY_DELAYS="1s,2s,3s,4s,5s" \
+NEVIX_MAILPIT_CONTAINER="${mailpit_container}" \
   go test -C server -race -count=1 -v ./internal/identity/...
 
 echo "==> Mail smoke tests passed"
