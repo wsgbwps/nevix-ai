@@ -1,7 +1,3 @@
-// Package identity is the identity Module. This slice holds the Outbox
-// Worker: SMTP deployment configuration, the retry backoff schedule, and the
-// pure deliverer that polls identity.outbox_messages and sends over standard
-// SMTP.
 package identity
 
 import (

@@ -29,13 +29,17 @@ type harness struct {
 	mailpit     *mailpittest.Client
 	smtp        identity.SMTPConfig
 	retryDelays []time.Duration
+	codeConfig  identity.CodeIssuanceConfig
 }
 
 func newHarness(t *testing.T, ctx context.Context) *harness {
 	t.Helper()
 	databaseURL := requireEnv(t, "NEVIX_DATABASE_URL")
 	mailpitURL := requireEnv(t, "NEVIX_MAILPIT_URL")
-	for _, key := range []string{"NEVIX_SMTP_HOST", "NEVIX_SMTP_PORT", "NEVIX_SMTP_USER", "NEVIX_SMTP_PASSWORD"} {
+	for _, key := range []string{
+		"NEVIX_SMTP_HOST", "NEVIX_SMTP_PORT", "NEVIX_SMTP_USER", "NEVIX_SMTP_PASSWORD",
+		"NEVIX_VERIFICATION_CODE_HASH_KEY", "NEVIX_SMTP_FROM",
+	} {
 		requireEnv(t, key)
 	}
 	smtp, err := identity.LoadSMTPConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
@@ -46,12 +50,16 @@ func newHarness(t *testing.T, ctx context.Context) *harness {
 	if err != nil {
 		t.Fatalf("load outbox retry delays from NEVIX_-prefixed environment: %v", err)
 	}
+	codeConfig, err := identity.LoadCodeIssuanceConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
+	if err != nil {
+		t.Fatalf("load code issuance config from NEVIX_-prefixed environment: %v", err)
+	}
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		t.Fatalf("connect to database: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	return &harness{pool: pool, mailpit: mailpittest.NewClient(mailpitURL), smtp: smtp, retryDelays: retryDelays}
+	return &harness{pool: pool, mailpit: mailpittest.NewClient(mailpitURL), smtp: smtp, retryDelays: retryDelays, codeConfig: codeConfig}
 }
 
 // insertOutboxRowCommitted writes one Outbox row inside its own database

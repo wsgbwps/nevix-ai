@@ -36,12 +36,42 @@ type Address struct {
 
 // MessageSummary is the subset of Mailpit's message summary that tests assert on.
 type MessageSummary struct {
+	ID      string    `json:"ID"`
 	Subject string    `json:"Subject"`
 	To      []Address `json:"To"`
 }
 
+// Message is the subset of Mailpit's message detail that tests assert on:
+// Text carries the decoded plain-text body.
+type Message struct {
+	Subject string `json:"Subject"`
+	Text    string `json:"Text"`
+}
+
 type searchResult struct {
 	Messages []MessageSummary `json:"messages"`
+}
+
+// Message fetches the full detail of one captured message by ID, including
+// its body text.
+func (c *Client) Message(ctx context.Context, id string) (*Message, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/message/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mailpit message %s: unexpected status %s", id, resp.Status)
+	}
+	var message Message
+	if err := json.NewDecoder(resp.Body).Decode(&message); err != nil {
+		return nil, fmt.Errorf("mailpit message %s: decode response: %w", id, err)
+	}
+	return &message, nil
 }
 
 // Search returns captured messages matching a Mailpit search query,
