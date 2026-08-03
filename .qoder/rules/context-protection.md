@@ -4,6 +4,10 @@ alwaysApply: true
 ---
 Protect the main context window from large, unpredictable output. Choose inline or subagent based on whether the output is bounded. When delegating, invoke the Agent tool with `subagent_type="explorer"` or `subagent_type="researcher"` — never run the noisy commands in the primary context yourself.
 
+## Mandatory pre-action gate
+
+Before running ANY search or exploration command — Grep, Glob, find, git log, WebFetch, WebSearch, or any codebase question you cannot answer from known paths — explicitly classify it as delegate vs. inline first, then act. Never skip the gate with "just one quick command" reasoning: the failure mode this rule exists to prevent is a chain of individually small inline searches, not one big one.
+
 ## Must delegate to Agent (subagent_type="explorer")
 
 Use the read-only `explorer` subagent for throwaway lookups whose result is only needed to continue the current conversation. It returns a concise summary with file references instead of raw output.
