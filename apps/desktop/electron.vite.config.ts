@@ -2,6 +2,7 @@ import { resolve } from 'path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { tanstackRouter } from '@tanstack/router-plugin/vite'
 import { loadEnv, type Plugin } from 'vite'
 import {
   parseSupabasePublicConfig,
@@ -62,7 +63,16 @@ export default defineConfig(({ mode }) => {
           '@ipc/channels': resolve('src/shared/ipc/channels.ts')
         }
       },
-      plugins: [react(), tailwindcss(), supabaseCspPlugin(publicConfig)]
+      plugins: [
+        tanstackRouter({
+          target: 'react',
+          routesDirectory: resolve('src/renderer/src/app/routes'),
+          generatedRouteTree: resolve('src/renderer/src/app/routeTree.gen.ts')
+        }),
+        react(),
+        tailwindcss(),
+        supabaseCspPlugin(publicConfig)
+      ]
     }
   }
 })

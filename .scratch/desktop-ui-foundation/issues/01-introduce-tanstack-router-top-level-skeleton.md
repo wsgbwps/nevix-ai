@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] TanStack Router 以文件路由方式接入 renderer 构建链（路由树生成纳入开发/构建流程，生成物不入手维护）
-- [ ] history 为 memory history；不出现 URL 同步依赖
-- [ ] routes 声明集中在 app 组合层；顶层视图为认证区与已认证区两个，认证 flow 无路由
-- [ ] 现有认证区与已认证占位页的视觉与行为逐像素/逐行为保持；占位页仍含 Language Mode 控件与退出登录
-- [ ] 既有全部 e2e（认证、i18n）保持绿色，不新增测试框架
-- [ ] 架构校验通过：routes 归属 app 组合层，Feature 边界无违规
-- [ ] 未引入 TanStack Query、Zustand 或任何本 slice 不需要的依赖
+- [x] TanStack Router 以文件路由方式接入 renderer 构建链（路由树生成纳入开发/构建流程，生成物不入手维护）
+- [x] history 为 memory history；不出现 URL 同步依赖
+- [x] routes 声明集中在 app 组合层；顶层视图为认证区与已认证区两个，认证 flow 无路由
+- [x] 现有认证区与已认证占位页的视觉与行为逐像素/逐行为保持；占位页仍含 Language Mode 控件与退出登录
+- [x] 既有全部 e2e（认证、i18n）保持绿色，不新增测试框架
+- [x] 架构校验通过：routes 归属 app 组合层，Feature 边界无违规
+- [x] 未引入 TanStack Query、Zustand 或任何本 slice 不需要的依赖
