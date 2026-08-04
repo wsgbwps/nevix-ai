@@ -38,8 +38,12 @@ var codePattern = regexp.MustCompile(`\b\d{6}\b`)
 // composition root does, so tests assert only the HTTP contract.
 func (h *harness) commandRouter(t *testing.T) http.Handler {
 	t.Helper()
+	m, err := identity.NewModule(h.pool, h.cfg)
+	if err != nil {
+		t.Fatalf("construct identity module: %v", err)
+	}
 	router := chi.NewRouter()
-	identity.NewModule(h.pool, h.codeConfig).Register(router, event.NewInMemoryBus())
+	m.Register(router, event.NewInMemoryBus())
 	return router
 }
 
@@ -58,7 +62,7 @@ func issueCode(t *testing.T, handler http.Handler, ip, email string) (int, strin
 // codeHash recomputes the stored form of a code with the harness hash key,
 // so tests can assert that only the hash — never the plaintext — is stored.
 func (h *harness) codeHash(code string) string {
-	mac := hmac.New(sha256.New, h.codeConfig.HashKey)
+	mac := hmac.New(sha256.New, h.cfg.CodeIssuance.HashKey)
 	mac.Write([]byte(code))
 	return hex.EncodeToString(mac.Sum(nil))
 }
@@ -171,8 +175,8 @@ func TestIssuedCodeEmailArrivesInMailpit(t *testing.T) {
 	).Scan(&sender); err != nil {
 		t.Fatalf("read outbox row: %v", err)
 	}
-	if sender != h.codeConfig.From {
-		t.Fatalf("outbox sender = %q, want %q", sender, h.codeConfig.From)
+	if sender != h.cfg.CodeIssuance.From {
+		t.Fatalf("outbox sender = %q, want %q", sender, h.cfg.CodeIssuance.From)
 	}
 }
 

@@ -19,8 +19,6 @@ import (
 
 	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity"
-	"github.com/nevix-ai/server/internal/identity/outbox"
-	"github.com/nevix-ai/server/internal/identity/verification"
 )
 
 func main() {
@@ -30,15 +28,9 @@ func main() {
 }
 
 func run() error {
-	smtpConfig, err := outbox.LoadSMTPConfig(os.Getenv)
-	if err != nil {
-		return err
-	}
-	retryDelays, err := outbox.LoadRetryDelays(os.Getenv)
-	if err != nil {
-		return err
-	}
-	codeConfig, err := verification.LoadCodeIssuanceConfig(os.Getenv)
+	// Module configuration loads before the database pool opens, so a
+	// misconfigured process fails before touching infrastructure.
+	identityConfig, err := identity.LoadConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -56,12 +48,12 @@ func run() error {
 	}
 	defer pool.Close()
 
-	worker, err := outbox.NewOutboxWorker(pool, smtpConfig, retryDelays)
+	identityModule, err := identity.NewModule(pool, identityConfig)
 	if err != nil {
 		return err
 	}
 	workerDone := make(chan error, 1)
-	go func() { workerDone <- worker.Run(ctx) }()
+	go func() { workerDone <- identityModule.RunWorkers(ctx) }()
 
 	bus := event.NewInMemoryBus()
 	router := chi.NewRouter()
@@ -69,7 +61,7 @@ func run() error {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
-	identity.NewModule(pool, codeConfig).Register(router, bus)
+	identityModule.Register(router, bus)
 	server := &http.Server{Addr: ":8080", Handler: router}
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- server.ListenAndServe() }()

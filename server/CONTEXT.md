@@ -5,7 +5,7 @@ Go 后端服务，按业务复杂度决定分层深度。
 ## Language
 
 **Module**:
-`internal/` 下的独立业务单元，导出 `Register(r chi.Router, bus event.Bus)` 完成路由和事件订阅注册。
+`internal/` 下的独立业务单元，组合根与测试只见 Module 包本身。统一 contract：`LoadConfig(getenv)` 加载部署配置、`NewModule` 构造依赖、`Register(r chi.Router, bus event.Bus)` 完成路由和事件订阅注册、`RunWorkers(ctx) error` 运行后台 Worker 直到 ctx 取消（无 Worker 的 Module 空转）。
 _Avoid_: service, package, domain
 
 **Aggregate Root**:
