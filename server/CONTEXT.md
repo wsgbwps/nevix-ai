@@ -13,7 +13,7 @@ _Avoid_: service, package, domain
 _Avoid_: model, record
 
 **Domain Event**:
-module 间异步通信的载体，类型集中定义在 `pkg/event/types.go`，通过事件总线分发。
+module 间异步通信的载体，类型集中定义在 `internal/event/types.go`，通过事件总线分发。
 _Avoid_: message, notification, signal
 
 **Repository**:

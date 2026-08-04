@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity/verification"
-	"github.com/nevix-ai/server/pkg/event"
 )
 
 // Module is the identity Module's composition surface: it owns the command
