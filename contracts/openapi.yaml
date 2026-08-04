@@ -1,6 +1,109 @@
 openapi: 3.1.0
 info:
   title: Nevix AI API
-  version: 0.1.0
-  description: API contract between desktop client and backend server
-paths: {}
+  version: 0.2.0
+  description: |-
+    API contract between desktop client and backend server.
+
+    本文件是 Desktop ↔ Server 受信命令 seam 的单一事实源（见根目录 CONTEXT-MAP.md 与 docs/adr/0004-supabase-go-trusted-execution-seam.md）。关于本文件的约定：
+
+    - **错误信封**：所有受信命令的错误响应统一使用 components/schemas/Error —— error 为 snake_case 机器码，是客户端分支处理的唯一依据；message 为人类可读文案，不作为程序判断依据。
+    - **限流数值为信息性**：description 中出现的限流数值（如 60 秒冷却、每小时上限）是当前部署策略，调整不算契约变更；客户端应依赖错误码与 Retry-After 响应头，而非硬编码数值。
+    - **演进纪律**：只增不改 —— 新增命令加路径、响应只加字段，不改既有字段与错误码语义；不引入 /v1 版本前缀，直到出现真实的 breaking 需求。
+    - **漂移防线**：当前以人工纪律与 PR review 保持实现与本文件一致；当受信命令超过一条或首次漂移发生时，引入响应级对照校验（测试断言实现符合本文件）。
+paths:
+  /identity/verification-codes:
+    post:
+      operationId: issueVerificationCode
+      summary: 签发一次性验证码
+      description: |-
+        为给定邮箱签发六位一次性验证码，携码邮件经 Outbox 异步投递。202 仅确认邮件已入队，响应永不携带明文验证码。
+
+        同步限流（数值为信息性，见顶部约定）：同一邮箱 60 秒重发冷却、每邮箱每小时 5 条、每 IP 每小时 20 条。被拒绝的命令不写入任何状态。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 裸 RFC 5322 地址（如 user@example.com）；display-name 形式被拒绝，服务端统一按小写处理。
+      responses:
+        "202":
+          description: 命令已受理，携码邮件已进入 Outbox 队列。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - issued
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体不是含 email 字段的 JSON；invalid_email 指 email 不是裸地址。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_email
+        "429":
+          description: |-
+            命中同步限流，三种原因仅凭 error 机器码区分：cooldown_active 为同一邮箱的重发冷却（仅此原因携带 Retry-After 响应头）；email_rate_limited 为该邮箱的每小时上限；ip_rate_limited 为该 IP 的每小时上限。
+          headers:
+            Retry-After:
+              description: 距允许再次请求的剩余秒数（整数）；仅随 cooldown_active 出现。
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - cooldown_active
+                          - email_rate_limited
+                          - ip_rate_limited
+        "500":
+          description: 服务端内部错误，验证码未能签发。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+components:
+  schemas:
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: snake_case 机器码，客户端分支处理的唯一依据；所有受信命令复用本信封。
+        message:
+          type: string
+          description: 人类可读文案，供展示或日志使用，不作为程序判断依据。
