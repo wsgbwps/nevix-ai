@@ -124,3 +124,11 @@ _Avoid_: Language Mode, app language
 **Supported Language**:
 翻译资源已覆盖全部 Localized Surface、由发布检查持续保证完整性、并向正式版用户开放选择的 Interface Language；当前为简体中文和英文。
 _Avoid_: available language（未表达完整性承诺）, translation file
+
+**App Shell**:
+Session 建立后 Desktop 呈现的整体界面框架，由侧边导航与内容区组成；各业务 Feature 的界面在内容区中渲染，设置页以外的已登录界面都在其中呈现。
+_Avoid_: Dashboard, Home Screen, Main Window
+
+**Settings Page**:
+承载设备级设置项（当前仅有 Language Mode）的独立全屏界面，在 App Shell 之外呈现；它只是各 Feature 所提供设置项的组合面，本身不构成 Domain、不拥有任何行为。
+_Avoid_: Settings Domain, Preferences Center, Settings Dialog
