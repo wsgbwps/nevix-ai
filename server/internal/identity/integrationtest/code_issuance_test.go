@@ -10,7 +10,7 @@
 //
 // Opt-in like the rest of the suite: requires the harness
 // (scripts/test-mail-smoke.sh) to export the NEVIX_* variables.
-package identity_test
+package integrationtest
 
 import (
 	"context"

@@ -7,7 +7,7 @@
 //
 // Opt-in like the GoTrue smoke: requires the harness (scripts/test-mail-smoke.sh)
 // to export NEVIX_DATABASE_URL, NEVIX_MAILPIT_URL, and NEVIX_SMTP_* variables.
-package identity_test
+package integrationtest
 
 import (
 	"context"

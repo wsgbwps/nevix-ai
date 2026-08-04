@@ -6,7 +6,7 @@
 // locally and in CI) exports NEVIX_SUPABASE_URL, NEVIX_SUPABASE_PUBLISHABLE_KEY,
 // and NEVIX_MAILPIT_URL. Without them it skips, so plain `go test ./...` stays
 // green with no stack running.
-package identity_test
+package integrationtest
 
 import (
 	"bytes"
