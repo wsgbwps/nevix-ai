@@ -60,7 +60,7 @@ export function AuthenticationScreen({
   onCompleteRecovery
 }: AuthenticationScreenProps): React.JSX.Element {
   return (
-    <main className="grid h-svh lg:grid-cols-2">
+    <main className="bg-card grid h-svh lg:grid-cols-2">
       <div className="flex flex-col gap-4 overflow-y-auto p-6 md:p-10">
         <div className="flex justify-center md:justify-start">
           <div className="flex items-center gap-2 font-medium">
@@ -211,21 +211,15 @@ function LoginForm({
             {t(LOGIN_NOTICE_KEYS[notice])}
           </p>
         ) : null}
-        <CredentialFields passwordAutoComplete="current-password" disabled={isSubmitting} />
+        <CredentialFields
+          passwordAutoComplete="current-password"
+          disabled={isSubmitting}
+          onForgotPassword={onShowRecovery}
+        />
         {error ? <AuthenticationErrorMessage error={error} context="login" /> : null}
         <Button type="submit" disabled={isSubmitting}>
           {t(isSubmitting ? 'login.submitting' : 'login.submit')}
         </Button>
-        <div className="flex justify-center text-sm">
-          <button
-            type="button"
-            className="text-foreground font-medium underline underline-offset-4"
-            disabled={isSubmitting}
-            onClick={onShowRecovery}
-          >
-            {t('login.forgotPassword')}
-          </button>
-        </div>
         <p className="text-muted-foreground text-center text-sm">
           {t('login.noAccount')}{' '}
           <button
@@ -611,12 +605,14 @@ function CredentialFields({
   disabled,
   passwordAutoComplete,
   password,
-  onPasswordChange
+  onPasswordChange,
+  onForgotPassword
 }: {
   readonly disabled: boolean
   readonly passwordAutoComplete: 'current-password' | 'new-password'
   readonly password?: string
   readonly onPasswordChange?: (password: string) => void
+  readonly onForgotPassword?: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
 
@@ -634,7 +630,19 @@ function CredentialFields({
         />
       </Field>
       <Field>
-        <FieldLabel htmlFor="authentication-password">{t('login.password')}</FieldLabel>
+        <div className="flex items-center">
+          <FieldLabel htmlFor="authentication-password">{t('login.password')}</FieldLabel>
+          {onForgotPassword ? (
+            <button
+              type="button"
+              className="ml-auto text-sm underline-offset-4 hover:underline"
+              disabled={disabled}
+              onClick={onForgotPassword}
+            >
+              {t('login.forgotPassword')}
+            </button>
+          ) : null}
+        </div>
         <Input
           id="authentication-password"
           name="password"

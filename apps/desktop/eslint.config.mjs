@@ -35,5 +35,14 @@ export default defineConfig(
       'react-refresh/only-export-components': 'off'
     }
   },
+  {
+    // shadcn CLI rewrites these files in upstream style on add/apply; keep them
+    // diff-free from upstream rather than re-adding annotations after every update.
+    files: ['src/renderer/src/components/ui/**/*.{ts,tsx}', 'src/renderer/src/lib/utils.ts'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off',
+      'react-refresh/only-export-components': 'off'
+    }
+  },
   eslintConfigPrettier
 )
