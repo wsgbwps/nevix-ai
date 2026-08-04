@@ -2,7 +2,7 @@
 trigger: always_on
 alwaysApply: true
 ---
-Protect the main context window from large, unpredictable output. Choose inline or subagent based on whether the output is bounded. When delegating, invoke the Agent tool with `subagent_type="explorer"` or `subagent_type="researcher"` — never run the noisy commands in the primary context yourself.
+Protect the main context window from large, unpredictable output. Choose inline or subagent based on whether the output is bounded. When delegating, invoke the Agent tool with `subagent_type="explorer"` — never run the noisy commands in the primary context yourself.
 
 ## Mandatory pre-action gate
 
@@ -19,16 +19,16 @@ Use the read-only `explorer` subagent for throwaway lookups whose result is only
 - Any exploratory codebase search where you don't know what you're looking for
 - Understanding an unfamiliar module, feature, or Domain boundary before changing it
 
-## Must delegate to Agent (subagent_type="researcher")
+## Research documents also go to Agent (subagent_type="explorer")
 
-Use the `researcher` subagent only when findings must be archived as a persistent, citable asset — output lands as a citation-backed Markdown file under `docs/research/`.
+Delegate to `explorer` as well when findings must be archived as a persistent, citable asset — the dispatch prompt alone decides whether the agent writes a citation-backed Markdown file under `docs/research/`:
 
 - The user explicitly asks to "research" a topic or requests a research report/document
 - Deep external investigation with version-sensitive facts worth archiving
 - Formal conclusions that need source citations
-- When the `explorer` agent reports the question deserves a persistent research document
+- When a previous `explorer` report says the question deserves a persistent research document
 
-Do NOT use `researcher` for quick doc checks, code searches, or verifying a single fact — use `explorer` for those.
+For these, state explicitly in the dispatch prompt that a research document must be written to `docs/research/`. Without that instruction the agent stays read-only and returns an in-conversation summary.
 
 ## OK to run inline
 
