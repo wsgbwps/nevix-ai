@@ -3,7 +3,7 @@ package event_test
 import (
 	"testing"
 
-	"github.com/nevix-ai/server/pkg/event"
+	"github.com/nevix-ai/server/internal/event"
 )
 
 func TestInMemoryBusDeliversToSubscribersOfTheEventType(t *testing.T) {

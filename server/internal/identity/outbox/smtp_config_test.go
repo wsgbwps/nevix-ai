@@ -1,10 +1,10 @@
-package identity_test
+package outbox_test
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/nevix-ai/server/internal/identity"
+	"github.com/nevix-ai/server/internal/identity/outbox"
 )
 
 func fakeGetenv(vars map[string]string) func(string) string {
@@ -21,7 +21,7 @@ func validSMTPEnv() map[string]string {
 }
 
 func TestLoadSMTPConfigReadsAllFourDeploymentVariables(t *testing.T) {
-	cfg, err := identity.LoadSMTPConfig(fakeGetenv(validSMTPEnv()))
+	cfg, err := outbox.LoadSMTPConfig(fakeGetenv(validSMTPEnv()))
 	if err != nil {
 		t.Fatalf("LoadSMTPConfig with all variables set: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestLoadSMTPConfigFailsNamingEachMissingVariable(t *testing.T) {
 		t.Run(missing, func(t *testing.T) {
 			vars := validSMTPEnv()
 			delete(vars, missing)
-			_, err := identity.LoadSMTPConfig(fakeGetenv(vars))
+			_, err := outbox.LoadSMTPConfig(fakeGetenv(vars))
 			if err == nil {
 				t.Fatalf("LoadSMTPConfig succeeded with %s unset, want error", missing)
 			}
@@ -49,7 +49,7 @@ func TestLoadSMTPConfigFailsNamingEachMissingVariable(t *testing.T) {
 func TestLoadSMTPConfigRejectsNonNumericPort(t *testing.T) {
 	vars := validSMTPEnv()
 	vars["SMTP_PORT"] = "not-a-port"
-	_, err := identity.LoadSMTPConfig(fakeGetenv(vars))
+	_, err := outbox.LoadSMTPConfig(fakeGetenv(vars))
 	if err == nil || !strings.Contains(err.Error(), "SMTP_PORT") {
 		t.Fatalf("LoadSMTPConfig with invalid port returned %v, want error naming SMTP_PORT", err)
 	}

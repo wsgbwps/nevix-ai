@@ -1,4 +1,7 @@
-package identity
+// Package verification is the identity Module's command layer: one-time
+// verification code issuance with synchronous rate limiting. A rejected
+// command writes no domain state and no Outbox row.
+package verification
 
 import (
 	"context"

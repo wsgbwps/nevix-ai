@@ -14,7 +14,7 @@
 // Opt-in like the retry tests: requires the harness
 // (scripts/test-mail-smoke.sh) to export NEVIX_OUTBOX_RETRY_DELAYS (a
 // compressed schedule) and NEVIX_MAILPIT_CONTAINER.
-package identity_test
+package integrationtest
 
 import (
 	"context"

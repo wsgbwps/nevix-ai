@@ -10,7 +10,7 @@
 //
 // Opt-in like the rest of the suite: requires the harness
 // (scripts/test-mail-smoke.sh) to export the NEVIX_* variables.
-package identity_test
+package integrationtest
 
 import (
 	"context"
@@ -27,9 +27,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity"
 	"github.com/nevix-ai/server/internal/identity/mailpittest"
-	"github.com/nevix-ai/server/pkg/event"
 )
 
 var codePattern = regexp.MustCompile(`\b\d{6}\b`)

@@ -187,7 +187,8 @@ Feature 目录遵循以下受控演化规则；segment 词汇与 public interfac
 server/
 ├── cmd/server/
 │   └── main.go                   # 入口：显式调用各 module 的 Register()
-├── internal/                     # ★ 业务模块（每人一个目录）
+├── internal/                     # ★ 业务模块（每人一个目录）+ 跨 Module 共享子包
+│   ├── event/                    # 事件总线（types.go 定义事件类型，bus.go 定义接口）
 │   ├── videogen/                 # 复杂模块 — 完整 DDD 分层
 │   │   ├── domain/
 │   │   │   ├── entity.go         # 实体、聚合根
@@ -204,11 +205,6 @@ server/
 │   │       └── http.go           # Register(r chi.Router, bus event.Bus)
 │   └── projmgmt/                 # 简单模块 — 单文件
 │       └── module.go             # handler + storage 内联
-├── pkg/                          # 跨模块共享
-│   ├── middleware/                # HTTP 中间件
-│   ├── auth/                     # 认证
-│   ├── database/                 # 数据库连接
-│   └── event/                    # 事件总线（types.go 定义事件类型，bus.go 定义接口）
 └── go.mod
 ```
 
@@ -219,7 +215,7 @@ server/
 | `infrastructure/` | Repository 实现、外部服务适配 | 依赖 domain（实现接口） |
 | `interface/` | HTTP handler，调用 application | 依赖 application |
 
-跨 Module 的 Domain Event 类型统一定义在 `pkg/event/types.go`，Module 内不另建同名事件类型目录或文件。
+跨 Module 的 Domain Event 类型统一定义在 `internal/event/types.go`，Module 内不另建同名事件类型目录或文件。
 
 ---
 

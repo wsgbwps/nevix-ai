@@ -17,8 +17,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity"
-	"github.com/nevix-ai/server/pkg/event"
+	"github.com/nevix-ai/server/internal/identity/outbox"
+	"github.com/nevix-ai/server/internal/identity/verification"
 )
 
 func main() {
@@ -28,15 +30,15 @@ func main() {
 }
 
 func run() error {
-	smtpConfig, err := identity.LoadSMTPConfig(os.Getenv)
+	smtpConfig, err := outbox.LoadSMTPConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
-	retryDelays, err := identity.LoadRetryDelays(os.Getenv)
+	retryDelays, err := outbox.LoadRetryDelays(os.Getenv)
 	if err != nil {
 		return err
 	}
-	codeConfig, err := identity.LoadCodeIssuanceConfig(os.Getenv)
+	codeConfig, err := verification.LoadCodeIssuanceConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -54,7 +56,7 @@ func run() error {
 	}
 	defer pool.Close()
 
-	worker, err := identity.NewOutboxWorker(pool, smtpConfig, retryDelays)
+	worker, err := outbox.NewOutboxWorker(pool, smtpConfig, retryDelays)
 	if err != nil {
 		return err
 	}

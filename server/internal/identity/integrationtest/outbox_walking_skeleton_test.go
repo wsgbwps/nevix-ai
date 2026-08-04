@@ -7,7 +7,7 @@
 //
 // Opt-in like the GoTrue smoke: requires the harness (scripts/test-mail-smoke.sh)
 // to export NEVIX_DATABASE_URL, NEVIX_MAILPIT_URL, and NEVIX_SMTP_* variables.
-package identity_test
+package integrationtest
 
 import (
 	"context"
@@ -19,17 +19,18 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/nevix-ai/server/internal/identity"
 	"github.com/nevix-ai/server/internal/identity/mailpittest"
+	"github.com/nevix-ai/server/internal/identity/outbox"
+	"github.com/nevix-ai/server/internal/identity/verification"
 )
 
 // harness wires one test to the running local stack, or skips.
 type harness struct {
 	pool        *pgxpool.Pool
 	mailpit     *mailpittest.Client
-	smtp        identity.SMTPConfig
+	smtp        outbox.SMTPConfig
 	retryDelays []time.Duration
-	codeConfig  identity.CodeIssuanceConfig
+	codeConfig  verification.CodeIssuanceConfig
 }
 
 func newHarness(t *testing.T, ctx context.Context) *harness {
@@ -42,15 +43,15 @@ func newHarness(t *testing.T, ctx context.Context) *harness {
 	} {
 		requireEnv(t, key)
 	}
-	smtp, err := identity.LoadSMTPConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
+	smtp, err := outbox.LoadSMTPConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
 	if err != nil {
 		t.Fatalf("load SMTP config from NEVIX_-prefixed environment: %v", err)
 	}
-	retryDelays, err := identity.LoadRetryDelays(func(key string) string { return os.Getenv("NEVIX_" + key) })
+	retryDelays, err := outbox.LoadRetryDelays(func(key string) string { return os.Getenv("NEVIX_" + key) })
 	if err != nil {
 		t.Fatalf("load outbox retry delays from NEVIX_-prefixed environment: %v", err)
 	}
-	codeConfig, err := identity.LoadCodeIssuanceConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
+	codeConfig, err := verification.LoadCodeIssuanceConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
 	if err != nil {
 		t.Fatalf("load code issuance config from NEVIX_-prefixed environment: %v", err)
 	}
@@ -87,7 +88,7 @@ func (h *harness) insertOutboxRowCommitted(t *testing.T, ctx context.Context, re
 // a stop function that cancels it and asserts it exits gracefully.
 func (h *harness) startWorker(t *testing.T) (stop func()) {
 	t.Helper()
-	worker, err := identity.NewOutboxWorker(h.pool, h.smtp, h.retryDelays)
+	worker, err := outbox.NewOutboxWorker(h.pool, h.smtp, h.retryDelays)
 	if err != nil {
 		t.Fatalf("construct outbox worker: %v", err)
 	}
