@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ModeToggle } from '../../../components/mode-toggle'
+import { useTheme } from '../../../hooks/use-theme'
 import { Button } from '../../../components/ui/button'
 import {
   Field,
@@ -59,8 +61,11 @@ export function AuthenticationScreen({
   onVerifyRecovery,
   onCompleteRecovery
 }: AuthenticationScreenProps): React.JSX.Element {
+  const { t } = useTranslation('authentication')
+  const { theme } = useTheme()
+
   return (
-    <main className="bg-card grid h-svh lg:grid-cols-2">
+    <main className="bg-card relative grid h-svh lg:grid-cols-2">
       <div className="flex flex-col gap-4 overflow-y-auto p-6 md:p-10">
         <div className="flex justify-center md:justify-start">
           <div className="flex items-center gap-2 font-medium">
@@ -138,6 +143,9 @@ export function AuthenticationScreen({
           Nevix AI
         </div>
       </aside>
+      <div className="absolute top-4 right-4 z-10">
+        <ModeToggle label={t(theme === 'dark' ? 'theme.switchToLight' : 'theme.switchToDark')} />
+      </div>
     </main>
   )
 }

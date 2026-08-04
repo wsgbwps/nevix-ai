@@ -104,6 +104,10 @@ export const authenticationTranslations = defineResourceTranslations({
     logout: {
       submit: '退出当前设备',
       submitting: '正在退出…'
+    },
+    theme: {
+      switchToLight: '切换到浅色主题',
+      switchToDark: '切换到深色主题'
     }
   },
   en: {
@@ -211,6 +215,10 @@ export const authenticationTranslations = defineResourceTranslations({
     logout: {
       submit: 'Sign out of this device',
       submitting: 'Signing out…'
+    },
+    theme: {
+      switchToLight: 'Switch to light theme',
+      switchToDark: 'Switch to dark theme'
     }
   }
 })
