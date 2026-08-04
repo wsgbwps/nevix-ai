@@ -19,18 +19,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nevix-ai/server/internal/identity"
 	"github.com/nevix-ai/server/internal/identity/mailpittest"
-	"github.com/nevix-ai/server/internal/identity/outbox"
-	"github.com/nevix-ai/server/internal/identity/verification"
 )
 
 // harness wires one test to the running local stack, or skips.
 type harness struct {
-	pool        *pgxpool.Pool
-	mailpit     *mailpittest.Client
-	smtp        outbox.SMTPConfig
-	retryDelays []time.Duration
-	codeConfig  verification.CodeIssuanceConfig
+	pool    *pgxpool.Pool
+	mailpit *mailpittest.Client
+	cfg     identity.Config
 }
 
 func newHarness(t *testing.T, ctx context.Context) *harness {
@@ -43,24 +40,18 @@ func newHarness(t *testing.T, ctx context.Context) *harness {
 	} {
 		requireEnv(t, key)
 	}
-	smtp, err := outbox.LoadSMTPConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
+	// The harness assembles the Module through the same seam as the
+	// composition root: LoadConfig + NewModule + Register/RunWorkers.
+	cfg, err := identity.LoadConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
 	if err != nil {
-		t.Fatalf("load SMTP config from NEVIX_-prefixed environment: %v", err)
-	}
-	retryDelays, err := outbox.LoadRetryDelays(func(key string) string { return os.Getenv("NEVIX_" + key) })
-	if err != nil {
-		t.Fatalf("load outbox retry delays from NEVIX_-prefixed environment: %v", err)
-	}
-	codeConfig, err := verification.LoadCodeIssuanceConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
-	if err != nil {
-		t.Fatalf("load code issuance config from NEVIX_-prefixed environment: %v", err)
+		t.Fatalf("load identity module config from NEVIX_-prefixed environment: %v", err)
 	}
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		t.Fatalf("connect to database: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	return &harness{pool: pool, mailpit: mailpittest.NewClient(mailpitURL), smtp: smtp, retryDelays: retryDelays, codeConfig: codeConfig}
+	return &harness{pool: pool, mailpit: mailpittest.NewClient(mailpitURL), cfg: cfg}
 }
 
 // insertOutboxRowCommitted writes one Outbox row inside its own database
@@ -84,17 +75,18 @@ func (h *harness) insertOutboxRowCommitted(t *testing.T, ctx context.Context, re
 	}
 }
 
-// startWorker runs one Outbox Worker for the duration of the test and returns
-// a stop function that cancels it and asserts it exits gracefully.
+// startWorker runs one Module's background workers for the duration of the
+// test and returns a stop function that cancels them and asserts they exit
+// gracefully.
 func (h *harness) startWorker(t *testing.T) (stop func()) {
 	t.Helper()
-	worker, err := outbox.NewOutboxWorker(h.pool, h.smtp, h.retryDelays)
+	m, err := identity.NewModule(h.pool, h.cfg)
 	if err != nil {
-		t.Fatalf("construct outbox worker: %v", err)
+		t.Fatalf("construct identity module: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- worker.Run(ctx) }()
+	go func() { done <- m.RunWorkers(ctx) }()
 	var once sync.Once
 	stop = func() {
 		once.Do(func() {
