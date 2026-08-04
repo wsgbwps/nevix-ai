@@ -1,4 +1,4 @@
-.PHONY: dev build lint server setup
+.PHONY: dev build lint server supabase setup
 
 dev:
 	pnpm dev
@@ -11,6 +11,9 @@ lint:
 
 server:
 	cd server && if [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi; go run ./cmd/server
+
+supabase:
+	pnpm exec supabase start
 
 setup:
 	pnpm install
