@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../../components/ui/button'
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel
+} from '../../../components/ui/field'
+import { Input } from '../../../components/ui/input'
 import type {
   AuthenticationError,
   AuthenticationFlow,
@@ -51,94 +59,114 @@ export function AuthenticationScreen({
   onVerifyRecovery,
   onCompleteRecovery
 }: AuthenticationScreenProps): React.JSX.Element {
+  return (
+    <main className="grid h-svh lg:grid-cols-2">
+      <div className="flex flex-col gap-4 overflow-y-auto p-6 md:p-10">
+        <div className="flex justify-center md:justify-start">
+          <div className="flex items-center gap-2 font-medium">
+            <div className="bg-primary text-primary-foreground grid size-6 place-items-center rounded-md text-xs font-bold">
+              N
+            </div>
+            Nevix AI
+          </div>
+        </div>
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-xs">
+            {status !== 'unauthenticated' ? (
+              <StatusPanel status={status} onRetryRestore={onRetryRestore} />
+            ) : flow === 'login' ? (
+              <LoginForm
+                error={error}
+                notice={notice}
+                isSubmitting={isSubmitting}
+                onSignIn={onSignIn}
+                onShowSignUp={onShowSignUp}
+                onShowRecovery={onShowRecovery}
+              />
+            ) : flow === 'signup' ? (
+              <SignupForm
+                error={error}
+                isSubmitting={isSubmitting}
+                onSignUp={onSignUp}
+                onShowLogin={onShowLogin}
+              />
+            ) : flow === 'signup-verification' ? (
+              <SignupVerificationForm
+                key={resendGeneration}
+                error={error}
+                isSubmitting={isSubmitting}
+                resendSecondsRemaining={resendSecondsRemaining}
+                didResend={didResend}
+                onVerify={onVerifySignUp}
+                onResend={onResendSignUp}
+                onShowLogin={onShowLogin}
+                onShowRecovery={onShowRecovery}
+              />
+            ) : flow === 'recovery-request' ? (
+              <RecoveryRequestForm
+                error={error}
+                isSubmitting={isSubmitting}
+                onRequestRecovery={onRequestRecovery}
+                onShowLogin={onShowLogin}
+              />
+            ) : flow === 'recovery-verification' ? (
+              <RecoveryVerificationForm
+                error={error}
+                isSubmitting={isSubmitting}
+                onVerify={onVerifyRecovery}
+                onShowLogin={onShowLogin}
+              />
+            ) : (
+              <RecoveryNewPasswordForm
+                error={error}
+                isSubmitting={isSubmitting}
+                onCompleteRecovery={onCompleteRecovery}
+                onShowLogin={onShowLogin}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+      <aside
+        aria-hidden="true"
+        className="from-primary/70 via-primary/30 to-background relative hidden bg-linear-to-br lg:block"
+      >
+        <div className="absolute inset-x-10 bottom-10 flex items-center gap-2 text-lg font-medium">
+          <div className="bg-primary-foreground text-primary grid size-7 place-items-center rounded-md text-sm font-bold">
+            N
+          </div>
+          Nevix AI
+        </div>
+      </aside>
+    </main>
+  )
+}
+
+function StatusPanel({
+  status,
+  onRetryRestore
+}: {
+  readonly status: 'configuration-error' | 'restoring' | 'restore-failure'
+  readonly onRetryRestore: () => Promise<void>
+}): React.JSX.Element {
   const { t } = useTranslation('authentication')
-
-  if (status !== 'unauthenticated') {
-    const translationKey =
-      status === 'restoring'
-        ? 'restoring'
-        : status === 'restore-failure'
-          ? 'restoreFailure'
-          : 'configurationError'
-
-    return (
-      <main className="bg-background flex h-screen items-center justify-center px-6">
-        <section className="bg-card w-full max-w-md rounded-2xl border p-8 text-center shadow-sm">
-          <h1 className="text-2xl font-semibold">{t(`${translationKey}.heading`)}</h1>
-          <p className="text-muted-foreground mt-3 text-sm">{t(`${translationKey}.description`)}</p>
-          {status === 'restore-failure' ? (
-            <Button className="mt-6" onClick={() => void onRetryRestore()}>
-              {t('restoreFailure.retry')}
-            </Button>
-          ) : null}
-        </section>
-      </main>
-    )
-  }
+  const translationKey =
+    status === 'restoring'
+      ? 'restoring'
+      : status === 'restore-failure'
+        ? 'restoreFailure'
+        : 'configurationError'
 
   return (
-    <main className="bg-muted/30 grid h-screen lg:grid-cols-[minmax(18rem,0.8fr)_minmax(28rem,1.2fr)]">
-      <aside className="from-primary/10 to-background hidden border-r bg-linear-to-br p-10 lg:flex lg:flex-col lg:justify-between">
-        <div className="border-primary text-primary grid size-11 place-items-center rounded-xl border-2 text-lg font-bold">
-          N
-        </div>
-        <p className="text-muted-foreground max-w-xs text-sm leading-6">Nevix AI</p>
-      </aside>
-      <section className="flex items-center justify-center overflow-y-auto p-6">
-        <div className="bg-card w-full max-w-sm rounded-2xl border p-7 shadow-sm">
-          {flow === 'login' ? (
-            <LoginForm
-              error={error}
-              notice={notice}
-              isSubmitting={isSubmitting}
-              onSignIn={onSignIn}
-              onShowSignUp={onShowSignUp}
-              onShowRecovery={onShowRecovery}
-            />
-          ) : flow === 'signup' ? (
-            <SignupForm
-              error={error}
-              isSubmitting={isSubmitting}
-              onSignUp={onSignUp}
-              onShowLogin={onShowLogin}
-            />
-          ) : flow === 'signup-verification' ? (
-            <SignupVerificationForm
-              key={resendGeneration}
-              error={error}
-              isSubmitting={isSubmitting}
-              resendSecondsRemaining={resendSecondsRemaining}
-              didResend={didResend}
-              onVerify={onVerifySignUp}
-              onResend={onResendSignUp}
-              onShowLogin={onShowLogin}
-              onShowRecovery={onShowRecovery}
-            />
-          ) : flow === 'recovery-request' ? (
-            <RecoveryRequestForm
-              error={error}
-              isSubmitting={isSubmitting}
-              onRequestRecovery={onRequestRecovery}
-              onShowLogin={onShowLogin}
-            />
-          ) : flow === 'recovery-verification' ? (
-            <RecoveryVerificationForm
-              error={error}
-              isSubmitting={isSubmitting}
-              onVerify={onVerifyRecovery}
-              onShowLogin={onShowLogin}
-            />
-          ) : (
-            <RecoveryNewPasswordForm
-              error={error}
-              isSubmitting={isSubmitting}
-              onCompleteRecovery={onCompleteRecovery}
-              onShowLogin={onShowLogin}
-            />
-          )}
-        </div>
-      </section>
-    </main>
+    <div className="text-center">
+      <h1 className="text-2xl font-bold">{t(`${translationKey}.heading`)}</h1>
+      <p className="text-muted-foreground mt-2 text-sm">{t(`${translationKey}.description`)}</p>
+      {status === 'restore-failure' ? (
+        <Button className="mt-6" onClick={() => void onRetryRestore()}>
+          {t('restoreFailure.retry')}
+        </Button>
+      ) : null}
+    </div>
   )
 }
 
@@ -177,7 +205,7 @@ function LoginForm({
   return (
     <form onSubmit={submit}>
       <FormHeader heading={t('login.heading')} description={t('login.description')} />
-      <div className="flex flex-col gap-6">
+      <FieldGroup>
         {notice ? (
           <p role="status" className="text-muted-foreground text-sm">
             {t(LOGIN_NOTICE_KEYS[notice])}
@@ -209,7 +237,7 @@ function LoginForm({
             {t('login.createAccount')}
           </button>
         </p>
-      </div>
+      </FieldGroup>
     </form>
   )
 }
@@ -227,12 +255,15 @@ function SignupForm({
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const byteLength = passwordByteLength(password)
   const isPasswordValid = isPasswordByteLengthValid(password)
+  const isConfirmMismatch = confirmPassword !== '' && confirmPassword !== password
+  const canSubmit = isPasswordValid && confirmPassword === password
 
   function submit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault()
-    if (isSubmitting || !isPasswordValid) return
+    if (isSubmitting || !canSubmit) return
 
     const credentials = readCredentials(event.currentTarget)
     if (credentials) void onSignUp(credentials.email, credentials.password)
@@ -241,7 +272,7 @@ function SignupForm({
   return (
     <form onSubmit={submit}>
       <FormHeader heading={t('signup.heading')} description={t('signup.description')} />
-      <div className="flex flex-col gap-6">
+      <FieldGroup>
         <CredentialFields
           passwordAutoComplete="new-password"
           password={password}
@@ -253,8 +284,26 @@ function SignupForm({
         >
           {t('signup.passwordBytes', { count: byteLength })}
         </p>
+        <Field>
+          <FieldLabel htmlFor="authentication-confirm-password">
+            {t('signup.confirmPassword')}
+          </FieldLabel>
+          <Input
+            id="authentication-confirm-password"
+            name="confirmPassword"
+            type="password"
+            autoComplete="new-password"
+            disabled={isSubmitting}
+            aria-invalid={isConfirmMismatch || undefined}
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+          />
+          {isConfirmMismatch ? (
+            <FieldError>{t('signup.confirmPasswordMismatch')}</FieldError>
+          ) : null}
+        </Field>
         {error ? <AuthenticationErrorMessage error={error} context="signup" /> : null}
-        <Button type="submit" disabled={isSubmitting || !isPasswordValid}>
+        <Button type="submit" disabled={isSubmitting || !canSubmit}>
           {t(isSubmitting ? 'signup.submitting' : 'signup.submit')}
         </Button>
         <p className="text-muted-foreground text-center text-sm">
@@ -268,7 +317,7 @@ function SignupForm({
             {t('signup.signIn')}
           </button>
         </p>
-      </div>
+      </FieldGroup>
     </form>
   )
 }
@@ -304,12 +353,12 @@ function SignupVerificationForm({
   return (
     <form onSubmit={submit}>
       <FormHeader heading={t('verification.heading')} description={t('verification.description')} />
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-3">
-          <label htmlFor="authentication-verification-code" className="text-sm font-medium">
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="authentication-verification-code">
             {t('verification.code')}
-          </label>
-          <input
+          </FieldLabel>
+          <Input
             id="authentication-verification-code"
             name="code"
             type="text"
@@ -320,10 +369,10 @@ function SignupVerificationForm({
             value={code}
             disabled={isSubmitting}
             onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-            className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/30 h-12 w-full rounded-xl border px-3 text-center text-lg tracking-[0.45em] outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-12 text-center text-lg tracking-[0.45em]"
           />
-          <p className="text-muted-foreground text-sm">{t('verification.codeHint')}</p>
-        </div>
+          <FieldDescription>{t('verification.codeHint')}</FieldDescription>
+        </Field>
         {didResend ? (
           <p role="status" className="text-sm">
             {t('verification.resent')}
@@ -361,7 +410,7 @@ function SignupVerificationForm({
             {t('login.forgotPassword')}
           </button>
         </div>
-      </div>
+      </FieldGroup>
     </form>
   )
 }
@@ -393,21 +442,18 @@ function RecoveryRequestForm({
         heading={t('recovery.request.heading')}
         description={t('recovery.request.description')}
       />
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-3">
-          <label htmlFor="authentication-recovery-email" className="text-sm font-medium">
-            {t('login.email')}
-          </label>
-          <input
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="authentication-recovery-email">{t('login.email')}</FieldLabel>
+          <Input
             id="authentication-recovery-email"
             name="email"
             type="email"
             autoComplete="email"
             required
             disabled={isSubmitting}
-            className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/30 h-10 w-full rounded-xl border px-3 text-sm outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50"
           />
-        </div>
+        </Field>
         {error ? <AuthenticationErrorMessage error={error} context="recovery-request" /> : null}
         <Button type="submit" disabled={isSubmitting}>
           {t(isSubmitting ? 'recovery.request.submitting' : 'recovery.request.submit')}
@@ -422,7 +468,7 @@ function RecoveryRequestForm({
             {t('recovery.request.backToLogin')}
           </button>
         </div>
-      </div>
+      </FieldGroup>
     </form>
   )
 }
@@ -453,12 +499,12 @@ function RecoveryVerificationForm({
         heading={t('recovery.verification.heading')}
         description={t('recovery.verification.description')}
       />
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-3">
-          <label htmlFor="authentication-recovery-code" className="text-sm font-medium">
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="authentication-recovery-code">
             {t('recovery.verification.code')}
-          </label>
-          <input
+          </FieldLabel>
+          <Input
             id="authentication-recovery-code"
             name="code"
             type="text"
@@ -469,10 +515,10 @@ function RecoveryVerificationForm({
             value={code}
             disabled={isSubmitting}
             onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-            className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/30 h-12 w-full rounded-xl border px-3 text-center text-lg tracking-[0.45em] outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-12 text-center text-lg tracking-[0.45em]"
           />
-          <p className="text-muted-foreground text-sm">{t('recovery.verification.codeHint')}</p>
-        </div>
+          <FieldDescription>{t('recovery.verification.codeHint')}</FieldDescription>
+        </Field>
         {error ? (
           <AuthenticationErrorMessage error={error} context="recovery-verification" />
         ) : null}
@@ -489,7 +535,7 @@ function RecoveryVerificationForm({
             {t('recovery.verification.backToLogin')}
           </button>
         </div>
-      </div>
+      </FieldGroup>
     </form>
   )
 }
@@ -521,12 +567,12 @@ function RecoveryNewPasswordForm({
         heading={t('recovery.newPassword.heading')}
         description={t('recovery.newPassword.description')}
       />
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-3">
-          <label htmlFor="authentication-recovery-new-password" className="text-sm font-medium">
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="authentication-recovery-new-password">
             {t('recovery.newPassword.password')}
-          </label>
-          <input
+          </FieldLabel>
+          <Input
             id="authentication-recovery-new-password"
             name="password"
             type="password"
@@ -535,9 +581,8 @@ function RecoveryNewPasswordForm({
             disabled={isSubmitting}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/30 h-10 w-full rounded-xl border px-3 text-sm outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50"
           />
-        </div>
+        </Field>
         <p
           className={isPasswordValid ? 'text-muted-foreground text-sm' : 'text-destructive text-sm'}
         >
@@ -557,7 +602,7 @@ function RecoveryNewPasswordForm({
             {t('recovery.verification.backToLogin')}
           </button>
         </div>
-      </div>
+      </FieldGroup>
     </form>
   )
 }
@@ -577,25 +622,20 @@ function CredentialFields({
 
   return (
     <>
-      <div className="flex flex-col gap-3">
-        <label htmlFor="authentication-email" className="text-sm font-medium">
-          {t('login.email')}
-        </label>
-        <input
+      <Field>
+        <FieldLabel htmlFor="authentication-email">{t('login.email')}</FieldLabel>
+        <Input
           id="authentication-email"
           name="email"
           type="email"
           autoComplete="email"
           required
           disabled={disabled}
-          className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/30 h-10 w-full rounded-xl border px-3 text-sm outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50"
         />
-      </div>
-      <div className="flex flex-col gap-3">
-        <label htmlFor="authentication-password" className="text-sm font-medium">
-          {t('login.password')}
-        </label>
-        <input
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="authentication-password">{t('login.password')}</FieldLabel>
+        <Input
           id="authentication-password"
           name="password"
           type="password"
@@ -604,9 +644,8 @@ function CredentialFields({
           disabled={disabled}
           value={password}
           onChange={onPasswordChange ? (event) => onPasswordChange(event.target.value) : undefined}
-          className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/30 h-10 w-full rounded-xl border px-3 text-sm outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50"
         />
-      </div>
+      </Field>
     </>
   )
 }

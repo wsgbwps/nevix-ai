@@ -38,7 +38,8 @@ test('a Session revoked at runtime after a sign-up attempt still returns to the 
       ).toBeVisible()
       await launched.page.getByRole('button', { name: 'Create account' }).click()
       await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
+      await launched.page.getByLabel('Confirm password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Create account' }).click()
       await expect(launched.page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
 

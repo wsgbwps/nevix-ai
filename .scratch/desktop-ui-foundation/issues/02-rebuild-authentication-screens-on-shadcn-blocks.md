@@ -4,14 +4,14 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 六个认证 flow 界面与三个状态界面共享同一两栏外壳；小窗口下封面面板隐藏、表单保持可用
-- [ ] 全部输入控件迁移到 shadcn Input/Label/Field（共享 UI 层新增，PR 描述说明影响与测试）；无残留手写原生 input 样式
-- [ ] 注册表单含 Email / Password / Confirm Password；不一致时显示本地化错误且禁止提交；confirm 值不进入注册请求，signUp 契约不变
-- [ ] 登录保留"忘记密码"与"创建账号"入口；无社交登录按钮及其分隔符；无 Full Name 字段
-- [ ] 现有行为零回归：12–72 UTF-8 字节提示、存在性中立提示、登录/注册/验证/恢复错误映射、重发 60 秒冷却、提交中防重复、六位验证码过滤交互、全部 notice 文案
-- [ ] 认证 flow 仍由 Authentication Feature 状态机驱动，无路由化
-- [ ] 新增/调整文案在 authentication namespace 下双语（zh-CN/en）齐全，通过 i18n 资源契约
-- [ ] 认证 e2e 按新 DOM 更新并全部通过；不锁定组件内部实现
-- [ ] 架构校验通过：改动不越出 Authentication Feature 与共享 UI 层
+- [x] 六个认证 flow 界面与三个状态界面共享同一两栏外壳；小窗口下封面面板隐藏、表单保持可用
+- [x] 全部输入控件迁移到 shadcn Input/Label/Field（共享 UI 层新增，PR 描述说明影响与测试）；无残留手写原生 input 样式
+- [x] 注册表单含 Email / Password / Confirm Password；不一致时显示本地化错误且禁止提交；confirm 值不进入注册请求，signUp 契约不变
+- [x] 登录保留"忘记密码"与"创建账号"入口；无社交登录按钮及其分隔符；无 Full Name 字段
+- [x] 现有行为零回归：12–72 UTF-8 字节提示、存在性中立提示、登录/注册/验证/恢复错误映射、重发 60 秒冷却、提交中防重复、六位验证码过滤交互、全部 notice 文案
+- [x] 认证 flow 仍由 Authentication Feature 状态机驱动，无路由化
+- [x] 新增/调整文案在 authentication namespace 下双语（zh-CN/en）齐全，通过 i18n 资源契约
+- [x] 认证 e2e 按新 DOM 更新并全部通过；不锁定组件内部实现
+- [x] 架构校验通过：改动不越出 Authentication Feature 与共享 UI 层

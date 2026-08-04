@@ -38,6 +38,15 @@ test('a configured build starts at the localized unauthenticated boundary', asyn
       await expect(launched.page.getByLabel('Email')).toBeVisible()
       await expect(launched.page.getByLabel('Password')).toBeVisible()
       await expect(launched.page.getByRole('button', { name: 'Sign in' })).toBeEnabled()
+
+      // The brand cover panel only renders at wide widths; the form stays usable when narrow.
+      await expect(launched.page.locator('aside')).toBeHidden()
+      await launched.page.setViewportSize({ width: 1280, height: 800 })
+      await expect(launched.page.locator('aside')).toBeVisible()
+      await expect(launched.page.getByLabel('Email')).toBeVisible()
+      await launched.page.setViewportSize({ width: 900, height: 670 })
+      await expect(launched.page.locator('aside')).toBeHidden()
+
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toHaveCount(0)
