@@ -42,15 +42,20 @@ test('a new User signs up with the original password and verifies a resent six-d
 
       const password = '  密码Secret42  '
       await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password').fill('12345678901')
+      await launched.page.getByLabel('Password', { exact: true }).fill('12345678901')
       await expect(launched.page.getByText('11 of 12–72 UTF-8 bytes')).toBeVisible()
       await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
-      await launched.page.getByLabel('Password').fill('x'.repeat(73))
+      await launched.page.getByLabel('Password', { exact: true }).fill('x'.repeat(73))
       await expect(launched.page.getByText('73 of 12–72 UTF-8 bytes')).toBeVisible()
       await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
 
-      await launched.page.getByLabel('Password').fill(password)
+      await launched.page.getByLabel('Password', { exact: true }).fill(password)
       await expect(launched.page.getByText('18 of 12–72 UTF-8 bytes')).toBeVisible()
+      await launched.page.getByLabel('Confirm password').fill('a mismatched confirmation')
+      await expect(launched.page.getByText('Passwords do not match')).toBeVisible()
+      await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
+      await launched.page.getByLabel('Confirm password').fill(password)
+      await expect(launched.page.getByText('Passwords do not match')).toHaveCount(0)
       const messagesBeforeSignup = await readMailpitMessageIds(mailpitHarness)
       const signupResponsePromise = launched.page.waitForResponse(
         (response) =>
@@ -62,11 +67,13 @@ test('a new User signs up with the original password and verifies a resent six-d
       expect({
         status: signupResponse.status(),
         submittedEmail: signupPayload?.includes(identity.email),
-        submittedOriginalPassword: signupPayload?.includes(password)
+        submittedOriginalPassword: signupPayload?.includes(password),
+        submittedNoConfirmField: signupPayload ? !signupPayload.includes('confirmPassword') : false
       }).toEqual({
         status: 200,
         submittedEmail: true,
-        submittedOriginalPassword: true
+        submittedOriginalPassword: true,
+        submittedNoConfirmField: true
       })
       await expect
         .poll(async () => (await readMailpitMessageIds(mailpitHarness)).length)
@@ -132,7 +139,8 @@ test('a new User signs up with the original password and verifies a resent six-d
       await launched.page.getByRole('button', { name: 'Sign out of this device' }).click()
       await launched.page.getByRole('button', { name: 'Create account' }).click()
       await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password').fill(password)
+      await launched.page.getByLabel('Password', { exact: true }).fill(password)
+      await launched.page.getByLabel('Confirm password').fill(password)
       await launched.page.getByRole('button', { name: 'Create account' }).click()
       await codeInput.fill(secondMessage.code)
       await launched.page.getByRole('button', { name: 'Verify email' }).click()
@@ -174,7 +182,8 @@ test('verified and unverified repeat registrations share the neutral visible out
       for (const { identity } of identities) {
         await launched.page.getByRole('button', { name: 'Create account' }).click()
         await launched.page.getByLabel('Email').fill(identity.email)
-        await launched.page.getByLabel('Password').fill(identity.password)
+        await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
+        await launched.page.getByLabel('Confirm password').fill(identity.password)
         await launched.page.getByRole('button', { name: 'Create account' }).click()
 
         await expect(launched.page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
@@ -211,7 +220,8 @@ test('signup network and rate-limit failures stay localized and existence-neutra
     try {
       await launched.page.getByRole('button', { name: 'Create account' }).click()
       await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
+      await launched.page.getByLabel('Confirm password').fill(identity.password)
 
       await launched.page.route('**/auth/v1/signup', (route) => route.abort('failed'))
       await launched.page.getByRole('button', { name: 'Create account' }).click()

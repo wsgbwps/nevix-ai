@@ -208,7 +208,8 @@ test('recovery entry points stay existence-neutral and failures map to safe loca
 
       await launched.page.getByRole('button', { name: 'Create account' }).click()
       await launched.page.getByLabel('Email').fill(signupIdentity.email)
-      await launched.page.getByLabel('Password').fill(signupIdentity.password)
+      await launched.page.getByLabel('Password', { exact: true }).fill(signupIdentity.password)
+      await launched.page.getByLabel('Confirm password').fill(signupIdentity.password)
       await launched.page.getByRole('button', { name: 'Create account' }).click()
       await expect(launched.page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
       await launched.page.getByRole('button', { name: 'Forgot password?' }).click()
