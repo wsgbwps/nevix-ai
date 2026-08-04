@@ -1,11 +1,15 @@
-package identity_test
+package verification_test
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/nevix-ai/server/internal/identity"
+	"github.com/nevix-ai/server/internal/identity/verification"
 )
+
+func fakeGetenv(vars map[string]string) func(string) string {
+	return func(key string) string { return vars[key] }
+}
 
 func validCodeIssuanceEnv() map[string]string {
 	return map[string]string{
@@ -15,7 +19,7 @@ func validCodeIssuanceEnv() map[string]string {
 }
 
 func TestLoadCodeIssuanceConfigReadsDeploymentVariables(t *testing.T) {
-	cfg, err := identity.LoadCodeIssuanceConfig(fakeGetenv(validCodeIssuanceEnv()))
+	cfg, err := verification.LoadCodeIssuanceConfig(fakeGetenv(validCodeIssuanceEnv()))
 	if err != nil {
 		t.Fatalf("LoadCodeIssuanceConfig with all variables set: %v", err)
 	}
@@ -29,7 +33,7 @@ func TestLoadCodeIssuanceConfigFailsNamingEachMissingVariable(t *testing.T) {
 		t.Run(missing, func(t *testing.T) {
 			vars := validCodeIssuanceEnv()
 			delete(vars, missing)
-			_, err := identity.LoadCodeIssuanceConfig(fakeGetenv(vars))
+			_, err := verification.LoadCodeIssuanceConfig(fakeGetenv(vars))
 			if err == nil {
 				t.Fatalf("LoadCodeIssuanceConfig succeeded with %s unset, want error", missing)
 			}

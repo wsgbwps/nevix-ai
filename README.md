@@ -204,10 +204,7 @@ server/
 │   │       └── http.go           # Register(r chi.Router, bus event.Bus)
 │   └── projmgmt/                 # 简单模块 — 单文件
 │       └── module.go             # handler + storage 内联
-├── pkg/                          # 跨模块共享
-│   ├── middleware/                # HTTP 中间件
-│   ├── auth/                     # 认证
-│   ├── database/                 # 数据库连接
+├── pkg/                          # 跨模块共享（按需创建，目前仅 event）
 │   └── event/                    # 事件总线（types.go 定义事件类型，bus.go 定义接口）
 └── go.mod
 ```

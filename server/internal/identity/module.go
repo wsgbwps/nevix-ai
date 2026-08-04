@@ -1,14 +1,16 @@
-// Package identity is the identity Module: the command layer (one-time
-// verification code issuance with synchronous rate limiting) and the Outbox
-// Worker (SMTP deployment configuration, the retry backoff schedule, and the
-// pure deliverer that polls identity.outbox_messages and sends over standard
-// SMTP).
+// Package identity is the identity Module's composition surface. The command
+// layer (one-time verification code issuance with synchronous rate limiting)
+// lives in the verification sub-package; the Outbox Worker (SMTP deployment
+// configuration, the retry backoff schedule, and the pure deliverer that
+// polls identity.outbox_messages and sends over standard SMTP) lives in the
+// outbox sub-package.
 package identity
 
 import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nevix-ai/server/internal/identity/verification"
 	"github.com/nevix-ai/server/pkg/event"
 )
 
@@ -17,11 +19,11 @@ import (
 // Worker is wired separately in the composition root — it is a background
 // goroutine, not an HTTP handler.
 type Module struct {
-	issuer *CodeIssuer
+	issuer *verification.CodeIssuer
 }
 
-func NewModule(pool *pgxpool.Pool, cfg CodeIssuanceConfig) *Module {
-	return &Module{issuer: NewCodeIssuer(pool, cfg)}
+func NewModule(pool *pgxpool.Pool, cfg verification.CodeIssuanceConfig) *Module {
+	return &Module{issuer: verification.NewCodeIssuer(pool, cfg)}
 }
 
 // Register mounts the identity Module's external commands. The Module

@@ -1,4 +1,9 @@
-package identity
+// Package outbox is the identity Module's pure deliverer: it polls
+// identity.outbox_messages and sends due rows over standard SMTP, retrying
+// on the configured backoff schedule until each row is delivered or reaches
+// its terminal state. It holds no business rules; rate limiting and
+// cooldowns live in the command layer.
+package outbox
 
 import (
 	"context"

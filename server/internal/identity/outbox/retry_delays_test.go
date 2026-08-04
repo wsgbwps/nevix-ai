@@ -1,4 +1,4 @@
-package identity_test
+package outbox_test
 
 import (
 	"slices"
@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nevix-ai/server/internal/identity"
+	"github.com/nevix-ai/server/internal/identity/outbox"
 )
 
 func TestLoadRetryDelaysDefaultsToProductionSchedule(t *testing.T) {
-	delays, err := identity.LoadRetryDelays(fakeGetenv(map[string]string{}))
+	delays, err := outbox.LoadRetryDelays(fakeGetenv(map[string]string{}))
 	if err != nil {
 		t.Fatalf("LoadRetryDelays with variable unset: %v", err)
 	}
@@ -21,7 +21,7 @@ func TestLoadRetryDelaysDefaultsToProductionSchedule(t *testing.T) {
 }
 
 func TestLoadRetryDelaysReadsDeploymentOverride(t *testing.T) {
-	delays, err := identity.LoadRetryDelays(fakeGetenv(map[string]string{
+	delays, err := outbox.LoadRetryDelays(fakeGetenv(map[string]string{
 		"OUTBOX_RETRY_DELAYS": "1s, 2s,3s",
 	}))
 	if err != nil {
@@ -36,7 +36,7 @@ func TestLoadRetryDelaysReadsDeploymentOverride(t *testing.T) {
 func TestLoadRetryDelaysRejectsInvalidEntries(t *testing.T) {
 	for _, raw := range []string{"not-a-duration", "1s,later", "1s,,3s", "0s", "-1s"} {
 		t.Run(raw, func(t *testing.T) {
-			_, err := identity.LoadRetryDelays(fakeGetenv(map[string]string{
+			_, err := outbox.LoadRetryDelays(fakeGetenv(map[string]string{
 				"OUTBOX_RETRY_DELAYS": raw,
 			}))
 			if err == nil || !strings.Contains(err.Error(), "OUTBOX_RETRY_DELAYS") {
