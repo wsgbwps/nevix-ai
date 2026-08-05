@@ -1,8 +1,8 @@
 import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeftIcon, LanguagesIcon } from 'lucide-react'
-import { LanguageModeSettings } from '../features/language'
-import { useAuthenticationState } from './authentication-state'
+import { LanguageModeSettings } from '../../features/language'
+import { useAuthenticationState } from '../authentication-state'
 
 export function SettingsPage(): React.JSX.Element | null {
   const { t } = useTranslation('app')
