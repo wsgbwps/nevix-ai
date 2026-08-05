@@ -1,6 +1,6 @@
 # 01 CI 分层 E2E 门禁
 
-Status: ready-for-agent
+Status: done — PR #23 经 CI 把关合并入 main（9834e29）
 
 新建 `desktop-e2e-ci.yml`：`e2e-smoke` job 仅在 PR 触发（`--grep @smoke`，一次 test 模式构
 建，预算 ≤10 分钟），`e2e-full` job 仅在 main push 与 workflow_dispatch 触发（配置失败构
