@@ -45,6 +45,7 @@ interface Authentication {
   readonly notice: AuthenticationNotice | undefined
   readonly isSubmitting: boolean
   readonly isSessionPersistenceUnavailable: boolean
+  readonly userEmail: string | undefined
   readonly resendSecondsRemaining: number
   readonly resendGeneration: number
   readonly didResend: boolean
@@ -89,6 +90,7 @@ export function useAuthentication(): Authentication {
   const [notice, setNotice] = useState<AuthenticationNotice>()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [persistenceUnavailable, setPersistenceUnavailable] = useState(false)
+  const [userEmail, setUserEmail] = useState<string | undefined>()
   const [verificationEmail, setVerificationEmail] = useState<string>()
   const [resendAvailableAt, setResendAvailableAt] = useState<number>()
   const [resendSecondsRemaining, setResendSecondsRemaining] = useState(0)
@@ -126,6 +128,7 @@ export function useAuthentication(): Authentication {
         setError(undefined)
         setNotice('session-expired')
         setPersistenceUnavailable(false)
+        setUserEmail(undefined)
         setStatus('unauthenticated')
         setFlow('login')
         resetSignUpVerification()
@@ -133,9 +136,10 @@ export function useAuthentication(): Authentication {
       })
   }, [discardRecovery, resetSignUpVerification])
 
-  const enterAuthenticatedShell = useCallback((): void => {
+  const enterAuthenticatedShell = useCallback((email: string | undefined): void => {
     setPersistenceUnavailable(isSessionPersistenceUnavailable())
     setNotice(undefined)
+    setUserEmail(email)
     setStatus('authenticated')
   }, [])
 
@@ -182,7 +186,7 @@ export function useAuthentication(): Authentication {
 
       const { data, error: refreshError } = await client.auth.refreshSession()
       if (data.session) {
-        enterAuthenticatedShell()
+        enterAuthenticatedShell(data.session.user.email)
         return
       }
 
@@ -278,7 +282,7 @@ export function useAuthentication(): Authentication {
           return
         }
 
-        enterAuthenticatedShell()
+        enterAuthenticatedShell(data.session.user.email)
       } catch {
         setError('service-unavailable')
       } finally {
@@ -359,7 +363,7 @@ export function useAuthentication(): Authentication {
           return
         }
 
-        enterAuthenticatedShell()
+        enterAuthenticatedShell(data.session.user.email)
         setFlow('login')
         resetSignUpVerification()
       } catch {
@@ -544,6 +548,7 @@ export function useAuthentication(): Authentication {
       setError(undefined)
       setNotice(remoteRevocationConfirmed ? undefined : 'remote-sign-out-delayed')
       setPersistenceUnavailable(false)
+      setUserEmail(undefined)
       setStatus('unauthenticated')
       setFlow('login')
       resetSignUpVerification()
@@ -561,6 +566,7 @@ export function useAuthentication(): Authentication {
     notice,
     isSubmitting,
     isSessionPersistenceUnavailable: persistenceUnavailable,
+    userEmail,
     resendSecondsRemaining,
     resendGeneration,
     didResend,

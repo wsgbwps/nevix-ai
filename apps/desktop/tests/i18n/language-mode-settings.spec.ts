@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expectWindowTitle, launchTestApp } from '../helpers/electron-app'
+import { expectWindowTitle, launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
 import {
   createAuthUser,
   deleteAuthUser,
@@ -174,7 +174,7 @@ test('Language Mode lives in the authenticated app shell, applies immediately, a
       ).toBeVisible()
       expect(navigationCount).toBe(0)
 
-      await launched.page.getByRole('button', { name: 'Sign out of this device' }).click()
+      await signOutFromUserMenu(launched.page)
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()

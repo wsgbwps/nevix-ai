@@ -83,3 +83,18 @@ export async function expectWindowTitle(
     )
     .toBe(expectedTitle)
 }
+
+/**
+ * Signs the current Session out through the App Shell user menu: opens the NavUser menu and
+ * activates its sign-out item. The shell renders both the menu trigger and the item through the
+ * Interface Language, so both names are matched in the two Supported Languages. When the menu is
+ * already open, the trigger is excluded from the accessibility tree (Radix modal menu), so only
+ * the sign-out item is activated.
+ */
+export async function signOutFromUserMenu(page: Page): Promise<void> {
+  const menu = page.getByRole('menu')
+  if ((await menu.count()) === 0) {
+    await page.getByRole('button', { name: /user menu|用户菜单/i }).click()
+  }
+  await page.getByRole('menuitem', { name: /sign out of this device|退出当前设备/i }).click()
+}
