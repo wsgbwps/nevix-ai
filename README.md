@@ -143,10 +143,12 @@ preload 是固定的桥接层，通过 `contextBridge` 暴露通用的 `typedInv
 ```
 src/renderer/src/
 ├── main.tsx                      # 入口
-├── app/                          # 应用层（全局 shell）
+├── app/                          # 应用层（composition root + 全局 shell）
 │   ├── globals.css               # 全局样式（Tailwind + shadcn 主题 + 设计 tokens + base）
 │   ├── App.tsx                   # 根组件
-│   ├── routes/                   # TanStack Router 文件路由
+│   ├── routes/                   # TanStack Router 文件路由（thin）
+│   ├── pages/                    # 跨 Feature 聚合页 / 无 Domain owner 页面（Settings、Home 占位页）
+│   ├── shell/                    # App Shell（已认证布局外壳）
 │   └── providers.tsx             # 全局 providers（QueryClient, ThemeProvider 等）
 ├── features/                     # ★ 功能模块（每人一个目录，互不侵入）
 │   ├── video-generation/         # 开发者 A
