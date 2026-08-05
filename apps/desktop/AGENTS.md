@@ -18,6 +18,15 @@
 - Code outside a Feature imports it only through its public `index.ts`. Peer Features must not import one another, including through public indexes; compose Features in `app/`, and promote genuinely shared implementation only to an approved shared owner
 - Within one Feature, implementation uses direct relative imports and does not import through its own public index. Do not impose a dependency order among sibling segments
 
+## Renderer page ownership
+
+- Keep `renderer/src/app/routes/` thin: a route file only creates its file route and assembles its page component, with no page implementation
+- Put a page owned by a business Domain in `renderer/src/features/<domain>/`, exported through that Feature's public `index.ts`, and assembled by a thin route; per ADR-0004, its authenticated views render in the App Shell content area
+- Put cross-Feature aggregation pages and pages without a Domain owner in `renderer/src/app/pages/`; the Settings page and the Home placeholder page live there today
+- Keep App Shell internals in `renderer/src/app/shell/`
+- Never add page files at the `renderer/src/app/` root
+- Do not create a Feature named `settings`: settings is not a Domain name, and the Settings page is owned by `app/pages/`
+
 ## Renderer Feature segments
 
 - Fix the public seam, dependency direction, and vocabulary; let internal directories evolve under review according to actual responsibility rather than structural symmetry

@@ -14,119 +14,127 @@ import {
 
 const authHarness = readAuthHarnessConfig()
 
-test('a configured build starts at the localized unauthenticated boundary', async () => {
-  test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
-  )
+test(
+  'a configured build starts at the localized unauthenticated boundary',
+  { tag: '@smoke' },
+  async () => {
+    test.skip(
+      !process.env.NEVIX_TEST_SUPABASE_URL,
+      'requires the configured build produced by the Auth test command'
+    )
 
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-boundary-'))
-
-  try {
-    const launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US']
-    })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-boundary-'))
 
     try {
-      await expect(
-        launched.page.getByRole('heading', { name: 'Initializing authentication' })
-      ).toBeVisible()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
-      ).toBeVisible()
-      await expect(launched.page.getByLabel('Email')).toBeVisible()
-      await expect(launched.page.getByLabel('Password')).toBeVisible()
-      await expect(launched.page.getByRole('button', { name: 'Sign in' })).toBeEnabled()
+      const launched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['en-US']
+      })
 
-      // The brand cover panel only renders at wide widths; the form stays usable when narrow.
-      // The default window is wide enough to show the panel, so the narrow assertion pins the
-      // viewport explicitly instead of depending on the window's default bounds.
-      await launched.page.setViewportSize({ width: 900, height: 670 })
-      await expect(launched.page.locator('aside')).toBeHidden()
-      await launched.page.setViewportSize({ width: 1280, height: 800 })
-      await expect(launched.page.locator('aside')).toBeVisible()
-      await expect(launched.page.getByLabel('Email')).toBeVisible()
-      await launched.page.setViewportSize({ width: 900, height: 670 })
-      await expect(launched.page.locator('aside')).toBeHidden()
+      try {
+        await expect(
+          launched.page.getByRole('heading', { name: 'Initializing authentication' })
+        ).toBeVisible()
+        await expect(
+          launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
+        ).toBeVisible()
+        await expect(launched.page.getByLabel('Email')).toBeVisible()
+        await expect(launched.page.getByLabel('Password')).toBeVisible()
+        await expect(launched.page.getByRole('button', { name: 'Sign in' })).toBeEnabled()
 
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
+        // The brand cover panel only renders at wide widths; the form stays usable when narrow.
+        // The default window is wide enough to show the panel, so the narrow assertion pins the
+        // viewport explicitly instead of depending on the window's default bounds.
+        await launched.page.setViewportSize({ width: 900, height: 670 })
+        await expect(launched.page.locator('aside')).toBeHidden()
+        await launched.page.setViewportSize({ width: 1280, height: 800 })
+        await expect(launched.page.locator('aside')).toBeVisible()
+        await expect(launched.page.getByLabel('Email')).toBeVisible()
+        await launched.page.setViewportSize({ width: 900, height: 670 })
+        await expect(launched.page.locator('aside')).toBeHidden()
+
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        ).toHaveCount(0)
+      } finally {
+        await launched.electronApp.close()
+      }
     } finally {
-      await launched.electronApp.close()
+      await rm(userDataDir, { recursive: true, force: true })
     }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
   }
-})
+)
 
-test('a verified User signs in once and enters the authenticated app shell', async () => {
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+test(
+  'a verified User signs in once and enters the authenticated app shell',
+  { tag: '@smoke' },
+  async () => {
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
 
-  const identity = uniqueAuthIdentity('verified-login')
-  const userId = await createAuthUser(authHarness, identity, true)
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-login-'))
-
-  try {
-    const launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US']
-    })
+    const identity = uniqueAuthIdentity('verified-login')
+    const userId = await createAuthUser(authHarness, identity, true)
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-login-'))
 
     try {
-      let releaseRequest: (() => void) | undefined
-      const requestMayContinue = new Promise<void>((resolve) => {
-        releaseRequest = resolve
-      })
-      let observeRequest: (() => void) | undefined
-      const requestObserved = new Promise<void>((resolve) => {
-        observeRequest = resolve
-      })
-      let passwordRequestCount = 0
-
-      await launched.page.route('**/auth/v1/token?grant_type=password', async (route) => {
-        passwordRequestCount += 1
-        observeRequest?.()
-        await requestMayContinue
-        await route.continue()
+      const launched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['en-US']
       })
 
-      await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password').fill(identity.password)
-      await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await requestObserved
+      try {
+        let releaseRequest: (() => void) | undefined
+        const requestMayContinue = new Promise<void>((resolve) => {
+          releaseRequest = resolve
+        })
+        let observeRequest: (() => void) | undefined
+        const requestObserved = new Promise<void>((resolve) => {
+          observeRequest = resolve
+        })
+        let passwordRequestCount = 0
 
-      await expect(launched.page.getByRole('button', { name: 'Signing in…' })).toBeDisabled()
-      expect(passwordRequestCount).toBe(1)
+        await launched.page.route('**/auth/v1/token?grant_type=password', async (route) => {
+          passwordRequestCount += 1
+          observeRequest?.()
+          await requestMayContinue
+          await route.continue()
+        })
 
-      releaseRequest?.()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
-      await expect(launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })).toHaveCount(
-        0
-      )
-      expect(
-        await launched.page.evaluate(async () => ({
-          localStorageKeys: Object.keys(localStorage),
-          indexedDatabaseNames: (await indexedDB.databases())
-            .map((database) => database.name)
-            .filter((name): name is string => name !== undefined)
-        }))
-      ).toEqual({
-        localStorageKeys: [],
-        indexedDatabaseNames: []
-      })
+        await launched.page.getByLabel('Email').fill(identity.email)
+        await launched.page.getByLabel('Password').fill(identity.password)
+        await launched.page.getByRole('button', { name: 'Sign in' }).click()
+        await requestObserved
+
+        await expect(launched.page.getByRole('button', { name: 'Signing in…' })).toBeDisabled()
+        expect(passwordRequestCount).toBe(1)
+
+        releaseRequest?.()
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        ).toBeVisible()
+        await expect(
+          launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
+        ).toHaveCount(0)
+        expect(
+          await launched.page.evaluate(async () => ({
+            localStorageKeys: Object.keys(localStorage),
+            indexedDatabaseNames: (await indexedDB.databases())
+              .map((database) => database.name)
+              .filter((name): name is string => name !== undefined)
+          }))
+        ).toEqual({
+          localStorageKeys: [],
+          indexedDatabaseNames: []
+        })
+      } finally {
+        await launched.electronApp.close()
+      }
     } finally {
-      await launched.electronApp.close()
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
     }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
-})
+)
 
 test('unknown, unverified, and incorrect credentials share one safe error', async () => {
   test.skip(!authHarness, 'requires the disposable Supabase Auth harness')

@@ -18,144 +18,150 @@ import {
 const authHarness = readAuthHarnessConfig()
 const mailpitHarness = readMailpitHarnessConfig()
 
-test('a new User signs up with the original password and verifies a resent six-digit code', async () => {
-  test.skip(!authHarness || !mailpitHarness, 'requires disposable Supabase Auth and Mailpit')
-  if (!authHarness || !mailpitHarness) return
+test(
+  'a new User signs up with the original password and verifies a resent six-digit code',
+  { tag: '@smoke' },
+  async () => {
+    test.skip(!authHarness || !mailpitHarness, 'requires disposable Supabase Auth and Mailpit')
+    if (!authHarness || !mailpitHarness) return
 
-  const identity = uniqueAuthIdentity('signup')
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-signup-'))
-
-  try {
-    const launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US']
-    })
+    const identity = uniqueAuthIdentity('signup')
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-signup-'))
 
     try {
-      await expect(
-        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
-      ).toBeVisible()
-      await launched.page.getByRole('button', { name: 'Create account' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create your Nevix AI account' })
-      ).toBeVisible()
-
-      const password = '  密码Secret42  '
-      await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password', { exact: true }).fill('12345678901')
-      await expect(launched.page.getByText('11 of 12–72 UTF-8 bytes')).toBeVisible()
-      await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
-      await launched.page.getByLabel('Password', { exact: true }).fill('x'.repeat(73))
-      await expect(launched.page.getByText('73 of 12–72 UTF-8 bytes')).toBeVisible()
-      await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
-
-      await launched.page.getByLabel('Password', { exact: true }).fill(password)
-      await expect(launched.page.getByText('18 of 12–72 UTF-8 bytes')).toBeVisible()
-      await launched.page.getByLabel('Confirm password').fill('a mismatched confirmation')
-      await expect(launched.page.getByText('Passwords do not match')).toBeVisible()
-      await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
-      await launched.page.getByLabel('Confirm password').fill(password)
-      await expect(launched.page.getByText('Passwords do not match')).toHaveCount(0)
-      const messagesBeforeSignup = await readMailpitMessageIds(mailpitHarness)
-      const signupResponsePromise = launched.page.waitForResponse(
-        (response) =>
-          response.request().method() === 'POST' && response.url().includes('/auth/v1/signup')
-      )
-      await launched.page.getByRole('button', { name: 'Create account' }).click()
-      const signupResponse = await signupResponsePromise
-      const signupPayload = signupResponse.request().postData()
-      expect({
-        status: signupResponse.status(),
-        submittedEmail: signupPayload?.includes(identity.email),
-        submittedOriginalPassword: signupPayload?.includes(password),
-        submittedNoConfirmField: signupPayload ? !signupPayload.includes('confirmPassword') : false
-      }).toEqual({
-        status: 200,
-        submittedEmail: true,
-        submittedOriginalPassword: true,
-        submittedNoConfirmField: true
+      const launched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['en-US']
       })
-      await expect
-        .poll(async () => (await readMailpitMessageIds(mailpitHarness)).length)
-        .toBeGreaterThan(messagesBeforeSignup.length)
 
-      await expect(launched.page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
-      await expect(
-        launched.page.getByText(
-          'If this email can be used to sign up, we sent a six-digit verification code.'
+      try {
+        await expect(
+          launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
+        ).toBeVisible()
+        await launched.page.getByRole('button', { name: 'Create account' }).click()
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create your Nevix AI account' })
+        ).toBeVisible()
+
+        const password = '  密码Secret42  '
+        await launched.page.getByLabel('Email').fill(identity.email)
+        await launched.page.getByLabel('Password', { exact: true }).fill('12345678901')
+        await expect(launched.page.getByText('11 of 12–72 UTF-8 bytes')).toBeVisible()
+        await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
+        await launched.page.getByLabel('Password', { exact: true }).fill('x'.repeat(73))
+        await expect(launched.page.getByText('73 of 12–72 UTF-8 bytes')).toBeVisible()
+        await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
+
+        await launched.page.getByLabel('Password', { exact: true }).fill(password)
+        await expect(launched.page.getByText('18 of 12–72 UTF-8 bytes')).toBeVisible()
+        await launched.page.getByLabel('Confirm password').fill('a mismatched confirmation')
+        await expect(launched.page.getByText('Passwords do not match')).toBeVisible()
+        await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
+        await launched.page.getByLabel('Confirm password').fill(password)
+        await expect(launched.page.getByText('Passwords do not match')).toHaveCount(0)
+        const messagesBeforeSignup = await readMailpitMessageIds(mailpitHarness)
+        const signupResponsePromise = launched.page.waitForResponse(
+          (response) =>
+            response.request().method() === 'POST' && response.url().includes('/auth/v1/signup')
         )
-      ).toBeVisible()
-
-      const firstMessage = await waitForRegistrationMessage(mailpitHarness, messagesBeforeSignup)
-      expect(firstMessage.body).toContain('验证码有效期为一小时')
-      expect(firstMessage.body).toContain('valid for one hour')
-      expect(firstMessage.body).not.toContain('http://')
-      expect(firstMessage.body).not.toContain('https://')
-
-      const codeInput = launched.page.getByLabel('Verification code')
-      await codeInput.fill(firstMessage.code.slice(0, 5))
-      await expect(launched.page.getByRole('button', { name: 'Verify email' })).toBeDisabled()
-
-      const incorrectCode = firstMessage.code === '000000' ? '111111' : '000000'
-      await codeInput.fill(incorrectCode)
-      await launched.page.getByRole('button', { name: 'Verify email' }).click()
-      await expect(
-        launched.page.getByRole('alert').filter({
-          hasText: 'Verification code is invalid or expired'
+        await launched.page.getByRole('button', { name: 'Create account' }).click()
+        const signupResponse = await signupResponsePromise
+        const signupPayload = signupResponse.request().postData()
+        expect({
+          status: signupResponse.status(),
+          submittedEmail: signupPayload?.includes(identity.email),
+          submittedOriginalPassword: signupPayload?.includes(password),
+          submittedNoConfirmField: signupPayload
+            ? !signupPayload.includes('confirmPassword')
+            : false
+        }).toEqual({
+          status: 200,
+          submittedEmail: true,
+          submittedOriginalPassword: true,
+          submittedNoConfirmField: true
         })
-      ).toBeVisible()
-      await expect(codeInput).toHaveValue(incorrectCode)
+        await expect
+          .poll(async () => (await readMailpitMessageIds(mailpitHarness)).length)
+          .toBeGreaterThan(messagesBeforeSignup.length)
 
-      const resendButton = launched.page.getByRole('button', { name: /Resend in \d+s/ })
-      await expect(resendButton).toBeDisabled()
-      await launched.page.clock.install()
-      await launched.page.clock.fastForward(60_000)
-      await expect(launched.page.getByRole('button', { name: 'Resend code' })).toBeEnabled()
-      await launched.page.clock.resume()
-      await launched.page.getByRole('button', { name: 'Resend code' }).click()
-      await expect(
-        launched.page.getByText('A new code was sent. Your previous code is no longer valid.')
-      ).toBeVisible()
+        await expect(launched.page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
+        await expect(
+          launched.page.getByText(
+            'If this email can be used to sign up, we sent a six-digit verification code.'
+          )
+        ).toBeVisible()
 
-      const secondMessage = await waitForRegistrationMessage(mailpitHarness, [
-        ...messagesBeforeSignup,
-        firstMessage.id
-      ])
+        const firstMessage = await waitForRegistrationMessage(mailpitHarness, messagesBeforeSignup)
+        expect(firstMessage.body).toContain('验证码有效期为一小时')
+        expect(firstMessage.body).toContain('valid for one hour')
+        expect(firstMessage.body).not.toContain('http://')
+        expect(firstMessage.body).not.toContain('https://')
 
-      await codeInput.fill(firstMessage.code)
-      await launched.page.getByRole('button', { name: 'Verify email' }).click()
-      await expect(
-        launched.page.getByRole('alert').filter({
-          hasText: 'Verification code is invalid or expired'
-        })
-      ).toBeVisible()
+        const codeInput = launched.page.getByLabel('Verification code')
+        await codeInput.fill(firstMessage.code.slice(0, 5))
+        await expect(launched.page.getByRole('button', { name: 'Verify email' })).toBeDisabled()
 
-      await codeInput.fill(secondMessage.code)
-      await launched.page.getByRole('button', { name: 'Verify email' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+        const incorrectCode = firstMessage.code === '000000' ? '111111' : '000000'
+        await codeInput.fill(incorrectCode)
+        await launched.page.getByRole('button', { name: 'Verify email' }).click()
+        await expect(
+          launched.page.getByRole('alert').filter({
+            hasText: 'Verification code is invalid or expired'
+          })
+        ).toBeVisible()
+        await expect(codeInput).toHaveValue(incorrectCode)
 
-      await signOutFromUserMenu(launched.page)
-      await launched.page.getByRole('button', { name: 'Create account' }).click()
-      await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password', { exact: true }).fill(password)
-      await launched.page.getByLabel('Confirm password').fill(password)
-      await launched.page.getByRole('button', { name: 'Create account' }).click()
-      await codeInput.fill(secondMessage.code)
-      await launched.page.getByRole('button', { name: 'Verify email' }).click()
-      await expect(
-        launched.page.getByRole('alert').filter({
-          hasText: 'Verification code is invalid or expired'
-        })
-      ).toBeVisible()
+        const resendButton = launched.page.getByRole('button', { name: /Resend in \d+s/ })
+        await expect(resendButton).toBeDisabled()
+        await launched.page.clock.install()
+        await launched.page.clock.fastForward(60_000)
+        await expect(launched.page.getByRole('button', { name: 'Resend code' })).toBeEnabled()
+        await launched.page.clock.resume()
+        await launched.page.getByRole('button', { name: 'Resend code' }).click()
+        await expect(
+          launched.page.getByText('A new code was sent. Your previous code is no longer valid.')
+        ).toBeVisible()
+
+        const secondMessage = await waitForRegistrationMessage(mailpitHarness, [
+          ...messagesBeforeSignup,
+          firstMessage.id
+        ])
+
+        await codeInput.fill(firstMessage.code)
+        await launched.page.getByRole('button', { name: 'Verify email' }).click()
+        await expect(
+          launched.page.getByRole('alert').filter({
+            hasText: 'Verification code is invalid or expired'
+          })
+        ).toBeVisible()
+
+        await codeInput.fill(secondMessage.code)
+        await launched.page.getByRole('button', { name: 'Verify email' }).click()
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        ).toBeVisible()
+
+        await signOutFromUserMenu(launched.page)
+        await launched.page.getByRole('button', { name: 'Create account' }).click()
+        await launched.page.getByLabel('Email').fill(identity.email)
+        await launched.page.getByLabel('Password', { exact: true }).fill(password)
+        await launched.page.getByLabel('Confirm password').fill(password)
+        await launched.page.getByRole('button', { name: 'Create account' }).click()
+        await codeInput.fill(secondMessage.code)
+        await launched.page.getByRole('button', { name: 'Verify email' }).click()
+        await expect(
+          launched.page.getByRole('alert').filter({
+            hasText: 'Verification code is invalid or expired'
+          })
+        ).toBeVisible()
+      } finally {
+        await launched.electronApp.close()
+      }
     } finally {
-      await launched.electronApp.close()
+      await rm(userDataDir, { recursive: true, force: true })
     }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
   }
-})
+)
 
 test('verified and unverified repeat registrations share the neutral visible outcome', async () => {
   test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
