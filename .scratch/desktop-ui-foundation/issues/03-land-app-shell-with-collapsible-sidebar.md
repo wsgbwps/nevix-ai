@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 引入 TanStack Router 顶层路由骨架（侧边导航与 Breadcrumb 是路由感知的，需要路由骨架就位）
 
-**Status:** ready-for-review
+**Status:** done — PR #19 经 CI 把关合并入 main（a7544e9）
 
 - [x] 已认证视图渲染 App Shell：侧边栏 + 内容区头部（SidebarTrigger + Breadcrumb）+ 占位首页
 - [x] 侧边栏可折叠为图标并可展开，带 rail；折叠状态交互符合 sidebar-07 行为
