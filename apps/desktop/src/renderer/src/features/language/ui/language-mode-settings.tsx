@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LANGUAGE_MODES, type LanguageMode } from '../../../../../shared/i18n/language-mode'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '../../../components/ui/select'
 
 const languageModeTranslationKeys = {
   'follow-system': 'followSystem',
@@ -40,35 +47,26 @@ export function LanguageModeSettings(): React.JSX.Element {
   }
 
   return (
-    <section
-      aria-labelledby="interface-language-heading"
-      className="w-full max-w-sm rounded-lg border p-5"
-    >
+    <section aria-labelledby="interface-language-heading" className="w-full rounded-lg border p-5">
       <h2 id="interface-language-heading" className="text-lg font-medium">
         {t('heading')}
       </h2>
-      <div role="radiogroup" aria-label={t('heading')} className="mt-4 grid gap-2">
-        {LANGUAGE_MODES.map((value) => {
-          const isSelected = languageMode === value
-
-          return (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={isSelected}
-              disabled={languageMode === undefined || isUpdating}
-              onClick={() => selectLanguageMode(value)}
-              className={`text-foreground enabled:hover:bg-accent flex items-center justify-between rounded-md border px-3 py-2 text-left disabled:cursor-wait disabled:opacity-60 ${
-                isSelected ? 'border-primary bg-accent ring-primary/30 ring-2' : 'border-input'
-              }`}
-            >
+      <Select
+        value={languageMode}
+        onValueChange={(value) => selectLanguageMode(value as LanguageMode)}
+        disabled={languageMode === undefined || isUpdating}
+      >
+        <SelectTrigger aria-label={t('heading')} className="mt-4 w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {LANGUAGE_MODES.map((value) => (
+            <SelectItem key={value} value={value}>
               {t(languageModeTranslationKeys[value])}
-              {isSelected ? <span aria-hidden="true">✓</span> : null}
-            </button>
-          )
-        })}
-      </div>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </section>
   )
 }

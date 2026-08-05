@@ -40,6 +40,9 @@ test('a configured build starts at the localized unauthenticated boundary', asyn
       await expect(launched.page.getByRole('button', { name: 'Sign in' })).toBeEnabled()
 
       // The brand cover panel only renders at wide widths; the form stays usable when narrow.
+      // The default window is wide enough to show the panel, so the narrow assertion pins the
+      // viewport explicitly instead of depending on the window's default bounds.
+      await launched.page.setViewportSize({ width: 900, height: 670 })
       await expect(launched.page.locator('aside')).toBeHidden()
       await launched.page.setViewportSize({ width: 1280, height: 800 })
       await expect(launched.page.locator('aside')).toBeVisible()
