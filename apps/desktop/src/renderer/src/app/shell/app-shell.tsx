@@ -1,14 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from '@tanstack/react-router'
 import { ChevronsUpDownIcon, HomeIcon, LogOutIcon, SettingsIcon } from 'lucide-react'
-import { useAuthenticationState } from './authentication-state'
-import { Avatar, AvatarFallback } from '../components/ui/avatar'
+import { useAuthenticationState } from '../authentication-state'
+import { Avatar, AvatarFallback } from '../../components/ui/avatar'
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbList,
   BreadcrumbPage
-} from '../components/ui/breadcrumb'
+} from '../../components/ui/breadcrumb'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,8 +16,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger
-} from '../components/ui/dropdown-menu'
-import { Separator } from '../components/ui/separator'
+} from '../../components/ui/dropdown-menu'
+import { Separator } from '../../components/ui/separator'
 import {
   Sidebar,
   SidebarContent,
@@ -32,8 +32,8 @@ import {
   SidebarProvider,
   SidebarRail,
   SidebarTrigger
-} from '../components/ui/sidebar'
-import { TooltipProvider } from '../components/ui/tooltip'
+} from '../../components/ui/sidebar'
+import { TooltipProvider } from '../../components/ui/tooltip'
 
 function BrandMark({
   className = 'size-8 rounded-lg text-sm'
