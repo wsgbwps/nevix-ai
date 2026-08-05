@@ -4,6 +4,12 @@ import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../../resources/icon.png?asset'
 import { getMainWindowTitle } from '../language'
+import {
+  loadWindowState,
+  trackWindowState,
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH
+} from './window-state'
 
 /** The only document this application loads, and therefore the only trusted IPC sender URL. */
 export function rendererEntryUrl(): string {
@@ -14,9 +20,13 @@ export function rendererEntryUrl(): string {
 }
 
 export function createWindow(): void {
+  const state = loadWindowState()
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    ...(state.x !== undefined && state.y !== undefined ? { x: state.x, y: state.y } : {}),
+    width: state.width,
+    height: state.height,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     title: getMainWindowTitle(),
     show: false,
     autoHideMenuBar: true,
@@ -30,12 +40,15 @@ export function createWindow(): void {
     }
   })
 
+  trackWindowState(mainWindow)
+
   mainWindow.webContents.session.setPermissionCheckHandler(() => false)
   mainWindow.webContents.session.setPermissionRequestHandler((_, __, callback) => {
     callback(false)
   })
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+    if (state.isMaximized) mainWindow.maximize()
   })
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
