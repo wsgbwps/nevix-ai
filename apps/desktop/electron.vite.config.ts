@@ -3,6 +3,7 @@ import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
+import { inspectorServer } from '@react-dev-inspector/vite-plugin'
 import { loadEnv, type Plugin } from 'vite'
 import {
   parseSupabasePublicConfig,
@@ -12,8 +13,14 @@ import {
 
 const CSP_CONNECT_SOURCE = '__NEVIX_SUPABASE_CONNECT_SOURCE__'
 
-function supabaseCspPlugin(config: SupabasePublicConfig | undefined): Plugin {
-  const connectSource = config?.url ?? "'none'"
+function supabaseCspPlugin(
+  config: SupabasePublicConfig | undefined,
+  devInspector: boolean
+): Plugin {
+  // dev-only: allow same-origin requests for the react-dev-inspector launch-editor endpoint
+  const connectSource = devInspector
+    ? [config?.url, "'self'"].filter(Boolean).join(' ')
+    : (config?.url ?? "'none'")
 
   return {
     name: 'nevix-supabase-csp',
@@ -23,7 +30,8 @@ function supabaseCspPlugin(config: SupabasePublicConfig | undefined): Plugin {
   }
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
+  const devInspector = command === 'serve'
   const fileEnvironment = loadEnv(mode, process.cwd(), '')
   const configuredUrl = process.env.VITE_SUPABASE_URL ?? fileEnvironment.VITE_SUPABASE_URL
   const configuredKey =
@@ -69,9 +77,14 @@ export default defineConfig(({ mode }) => {
           routesDirectory: resolve('src/renderer/src/app/routes'),
           generatedRouteTree: resolve('src/renderer/src/app/routeTree.gen.ts')
         }),
-        react(),
+        ...(devInspector
+          ? [
+              inspectorServer(),
+              react({ babel: { plugins: ['@react-dev-inspector/babel-plugin'] } })
+            ]
+          : [react()]),
         tailwindcss(),
-        supabaseCspPlugin(publicConfig)
+        supabaseCspPlugin(publicConfig, devInspector)
       ]
     }
   }
