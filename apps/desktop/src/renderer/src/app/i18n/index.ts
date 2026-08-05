@@ -10,7 +10,13 @@ export const appTranslations = defineResourceTranslations({
       home: '首页',
       toggleSidebar: '切换侧边栏',
       organizationSwitcher: '组织切换器',
-      userMenu: '用户菜单'
+      userMenu: '用户菜单',
+      settings: '设置'
+    },
+    settings: {
+      title: '设置',
+      back: '返回',
+      language: '语言'
     }
   },
   en: {
@@ -19,7 +25,13 @@ export const appTranslations = defineResourceTranslations({
       home: 'Home',
       toggleSidebar: 'Toggle sidebar',
       organizationSwitcher: 'Organization switcher',
-      userMenu: 'User menu'
+      userMenu: 'User menu',
+      settings: 'Settings'
+    },
+    settings: {
+      title: 'Settings',
+      back: 'Back',
+      language: 'Language'
     }
   }
 })

@@ -2,7 +2,12 @@ import { expect, test, type Page } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expectWindowTitle, launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
+import {
+  expectWindowTitle,
+  launchTestApp,
+  openSettingsFromUserMenu,
+  signOutFromUserMenu
+} from '../helpers/electron-app'
 import {
   createAuthUser,
   deleteAuthUser,
@@ -27,9 +32,8 @@ async function launchForSystemLanguages(
 
 async function expectNoLanguageSwitchControl(page: Page): Promise<void> {
   for (const name of languageGroupNames) {
-    await expect(page.getByRole('radiogroup', { name })).toHaveCount(0)
+    await expect(page.getByRole('combobox', { name })).toHaveCount(0)
   }
-  await expect(page.getByRole('radio')).toHaveCount(0)
 }
 
 test('no language switch control is rendered anywhere on the unauthenticated boundary', async () => {
@@ -118,12 +122,12 @@ test('a saved per-device Language Mode still resolves the login screen it cannot
   }
 })
 
-test('Language Mode lives in the authenticated app shell, applies immediately, and persists per device', async () => {
+test('Language Mode lives in the Settings Page, applies immediately, and persists per device', async () => {
   test.setTimeout(60_000)
   test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
   if (!authHarness) return
 
-  const identity = uniqueAuthIdentity('shell-language-mode')
+  const identity = uniqueAuthIdentity('settings-language-mode')
   const userId = await createAuthUser(authHarness, identity, true)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-language-mode-'))
 
@@ -137,47 +141,54 @@ test('Language Mode lives in the authenticated app shell, applies immediately, a
       await launched.page.getByLabel('密码').fill(identity.password)
       await launched.page.getByRole('button', { name: '登录', exact: true }).click()
       await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expectNoLanguageSwitchControl(launched.page)
 
-      const languageModeGroup = launched.page.getByRole('radiogroup', { name: '界面语言' })
-      await expect(languageModeGroup).toBeVisible()
-      await expect(languageModeGroup.getByRole('radio')).toHaveCount(3)
-      await expect(languageModeGroup.getByRole('radio', { name: '跟随系统' })).toHaveAttribute(
-        'aria-checked',
-        'true'
-      )
-      await expect(languageModeGroup.getByRole('radio', { name: '简体中文' })).toHaveCount(1)
-      await expect(languageModeGroup.getByRole('radio', { name: 'English' })).toHaveCount(1)
-      await expect(languageModeGroup.getByText('✓', { exact: true })).toBeVisible()
+      await openSettingsFromUserMenu(launched.page)
+      await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
+
+      const languageModeSelect = launched.page.getByRole('combobox', { name: '界面语言' })
+      await expect(languageModeSelect).toBeVisible()
+      await expect(languageModeSelect).toContainText('跟随系统')
+
+      await languageModeSelect.click()
+      const languageModeOptions = launched.page.getByRole('option')
+      await expect(languageModeOptions).toHaveCount(3)
+      await expect(launched.page.getByRole('option', { name: '简体中文' })).toHaveCount(1)
+      await expect(launched.page.getByRole('option', { name: 'English' })).toHaveCount(1)
 
       let navigationCount = 0
       launched.page.on('framenavigated', (frame) => {
         if (frame === launched.page.mainFrame()) navigationCount += 1
       })
 
-      await launched.page.getByRole('radio', { name: 'English' }).click()
+      await launched.page.getByRole('option', { name: 'English' }).click()
+      await expect(launched.page.getByRole('heading', { name: 'Settings' })).toBeVisible()
       await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
-      await expect(launched.page.getByRole('radio', { name: 'English' })).toHaveAttribute(
-        'aria-checked',
-        'true'
-      )
+        launched.page.getByRole('combobox', { name: 'Interface language' })
+      ).toContainText('English')
       await expectWindowTitle(launched.electronApp, 'Nevix AI — Desktop')
 
-      await launched.page.getByRole('radio', { name: 'Simplified Chinese' }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
-      await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')
-
-      await launched.page.getByRole('radio', { name: 'English' }).click()
+      await launched.page.getByRole('link', { name: 'Back' }).click()
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
+
+      await openSettingsFromUserMenu(launched.page)
+      await expect(launched.page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+      await launched.page.getByRole('combobox', { name: 'Interface language' }).click()
+      await launched.page.getByRole('option', { name: 'Simplified Chinese' }).click()
+      await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
+      await expect(launched.page.getByRole('combobox', { name: '界面语言' })).toContainText(
+        '简体中文'
+      )
+      await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')
+
+      await launched.page.getByRole('link', { name: '返回' }).click()
+      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
       expect(navigationCount).toBe(0)
 
       await signOutFromUserMenu(launched.page)
-      await expect(
-        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await expectNoLanguageSwitchControl(launched.page)
     } finally {
       await launched.electronApp.close()
@@ -185,10 +196,8 @@ test('Language Mode lives in the authenticated app shell, applies immediately, a
 
     launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
     try {
-      await expect(
-        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
-      ).toBeVisible()
-      await expectWindowTitle(launched.electronApp, 'Nevix AI — Desktop')
+      await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
+      await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')
       await expectNoLanguageSwitchControl(launched.page)
     } finally {
       await launched.electronApp.close()

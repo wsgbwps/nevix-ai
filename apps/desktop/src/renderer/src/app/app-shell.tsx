@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from '@tanstack/react-router'
-import { ChevronsUpDownIcon, HomeIcon, LogOutIcon } from 'lucide-react'
+import { ChevronsUpDownIcon, HomeIcon, LogOutIcon, SettingsIcon } from 'lucide-react'
 import { useAuthenticationState } from './authentication-state'
 import { Avatar, AvatarFallback } from '../components/ui/avatar'
 import {
@@ -156,6 +156,12 @@ export function AppShell({
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link to="/settings">
+                        <SettingsIcon />
+                        {t('shell.settings')}
+                      </Link>
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                       disabled={authentication.isSubmitting}
                       onClick={() => void authentication.signOut()}

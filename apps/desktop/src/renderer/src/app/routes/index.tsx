@@ -1,7 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { AppShell } from '../app-shell'
-import { LanguageModeSettings } from '../../features/language'
 import { useAuthenticationState } from '../authentication-state'
 
 function HomeView(): React.JSX.Element {
@@ -18,7 +17,6 @@ function HomeView(): React.JSX.Element {
             {authenticationT('sessionPersistence.unavailable')}
           </p>
         ) : null}
-        <LanguageModeSettings />
       </div>
     </AppShell>
   )
