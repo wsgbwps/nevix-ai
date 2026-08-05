@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchTestApp } from '../helpers/electron-app'
+import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
 import {
   createAuthUser,
   deleteAuthUser,
@@ -200,7 +200,7 @@ test('sign-out revokes only the Desktop Session and reopening stays signed out',
           request.url().includes('/auth/v1/logout') &&
           request.url().includes('scope=local')
       )
-      await launched.page.getByRole('button', { name: 'Sign out of this device' }).click()
+      await signOutFromUserMenu(launched.page)
       await localLogoutRequest
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })

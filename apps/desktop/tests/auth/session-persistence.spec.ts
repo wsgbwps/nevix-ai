@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Session } from '@supabase/supabase-js'
-import { launchTestApp } from '../helpers/electron-app'
+import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
 import {
   createAuthUser,
   deleteAuthUser,
@@ -80,7 +80,7 @@ test('a securely persisted Session refreshes before restore, survives an outage,
           request.url().includes('/auth/v1/logout') &&
           request.url().includes('scope=local')
       )
-      await launched.page.getByRole('button', { name: 'Sign out of this device' }).click()
+      await signOutFromUserMenu(launched.page)
       await localLogoutRequest
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
@@ -297,7 +297,7 @@ test('unavailable secure storage keeps only the runtime Session and offline logo
       await launched.page.route('**/auth/v1/logout?scope=local', (route) =>
         route.abort('internetdisconnected')
       )
-      await launched.page.getByRole('button', { name: 'Sign out of this device' }).click()
+      await signOutFromUserMenu(launched.page)
       await expect(
         launched.page.getByText(
           'This device is signed out. Revoking the session on the server may be delayed.'

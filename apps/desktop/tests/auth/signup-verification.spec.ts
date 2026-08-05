@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchTestApp } from '../helpers/electron-app'
+import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
 import {
   createAuthUser,
   deleteAuthUser,
@@ -136,7 +136,7 @@ test('a new User signs up with the original password and verifies a resent six-d
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
 
-      await launched.page.getByRole('button', { name: 'Sign out of this device' }).click()
+      await signOutFromUserMenu(launched.page)
       await launched.page.getByRole('button', { name: 'Create account' }).click()
       await launched.page.getByLabel('Email').fill(identity.email)
       await launched.page.getByLabel('Password', { exact: true }).fill(password)
