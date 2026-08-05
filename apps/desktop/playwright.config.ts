@@ -6,6 +6,7 @@ export default defineConfig({
   testMatch: '**/*.spec.ts',
   timeout: 30_000,
   fullyParallel: false,
+  workers: 2,
   reporter: 'list',
   use: {
     screenshot: 'off',

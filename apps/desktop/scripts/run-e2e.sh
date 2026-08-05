@@ -71,7 +71,7 @@ VITE_SUPABASE_URL="$api_url" \
   VITE_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
   pnpm exec electron-vite build --mode test
 
-playwright_args=(--workers=1)
+playwright_args=(--workers=2)
 if [[ "$mode" == "smoke" ]]; then
   playwright_args+=(--grep '@smoke')
 fi
