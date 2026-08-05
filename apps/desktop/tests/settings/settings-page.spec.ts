@@ -36,8 +36,8 @@ test('signed-in users reach the standalone Settings Page from the user menu and 
       await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
       await expect(launched.page.getByRole('button', { name: '切换侧边栏' })).toHaveCount(0)
 
-      // 左侧设置导航：顶部返回按钮 + 仅"语言"一项。
-      await expect(launched.page.getByRole('link', { name: '返回' })).toBeVisible()
+      // 左侧设置导航：顶部"返回应用"链接 + 仅"语言"一项。
+      await expect(launched.page.getByRole('link', { name: '返回应用' })).toBeVisible()
       const settingsNav = launched.page.getByRole('navigation', { name: '设置' })
       await expect(settingsNav).toHaveText('语言')
 
@@ -46,8 +46,8 @@ test('signed-in users reach the standalone Settings Page from the user menu and 
       await expect(languageModeSelect).toBeVisible()
       await expect(languageModeSelect).toContainText('跟随系统')
 
-      // 返回按钮回到 App Shell。
-      await launched.page.getByRole('link', { name: '返回' }).click()
+      // "返回应用"链接回到 App Shell。
+      await launched.page.getByRole('link', { name: '返回应用' }).click()
       await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
       await expect(launched.page.getByRole('heading', { name: '设置' })).toHaveCount(0)
       await expect(
@@ -92,7 +92,7 @@ test('the Settings Page Select switches the Interface Language without reloading
 
       // 设置页全部 Localized Surface 立即以新 Interface Language 呈现。
       await expect(launched.page.getByRole('heading', { name: 'Settings' })).toBeVisible()
-      await expect(launched.page.getByRole('link', { name: 'Back' })).toBeVisible()
+      await expect(launched.page.getByRole('link', { name: 'Back to app' })).toBeVisible()
       await expect(launched.page.getByRole('navigation', { name: 'Settings' })).toHaveText(
         'Language'
       )
@@ -101,7 +101,7 @@ test('the Settings Page Select switches the Interface Language without reloading
       ).toContainText('English')
 
       // 返回 App Shell 后首页文案同样即时切换。
-      await launched.page.getByRole('link', { name: 'Back' }).click()
+      await launched.page.getByRole('link', { name: 'Back to app' }).click()
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()

@@ -15,7 +15,7 @@ export const appTranslations = defineResourceTranslations({
     },
     settings: {
       title: '设置',
-      back: '返回',
+      back: '返回应用',
       language: '语言'
     }
   },
@@ -30,7 +30,7 @@ export const appTranslations = defineResourceTranslations({
     },
     settings: {
       title: 'Settings',
-      back: 'Back',
+      back: 'Back to app',
       language: 'Language'
     }
   }

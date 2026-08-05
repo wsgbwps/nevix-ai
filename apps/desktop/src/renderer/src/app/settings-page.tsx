@@ -1,8 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeftIcon } from 'lucide-react'
-import { Button } from '../components/ui/button'
-import { Separator } from '../components/ui/separator'
+import { ArrowLeftIcon, LanguagesIcon } from 'lucide-react'
 import { LanguageModeSettings } from '../features/language'
 import { useAuthenticationState } from './authentication-state'
 
@@ -18,34 +16,39 @@ export function SettingsPage(): React.JSX.Element | null {
 
   return (
     <div className="flex min-h-svh w-full">
-      <div className="bg-muted/40 flex min-h-svh w-full flex-col">
-        <div className="flex flex-col gap-4 py-4 md:py-8 md:pl-8">
-          <div className="mx-auto flex w-full max-w-6xl items-center gap-4 md:ml-4">
-            <header className="flex items-center gap-4">
-              <Button variant="outline" size="icon" aria-label={t('settings.back')} asChild>
-                <Link to="/">
-                  <ArrowLeftIcon />
-                </Link>
-              </Button>
-              <Separator orientation="vertical" className="h-4" />
-              <h1 className="text-lg font-semibold">{t('settings.title')}</h1>
-            </header>
-          </div>
-          <div className="mx-auto grid w-full max-w-6xl items-start gap-4 md:grid-cols-[180px_1fr] lg:grid-cols-[250px_1fr]">
-            <nav
-              aria-label={t('settings.title')}
-              className="text-muted-foreground grid gap-4 text-sm"
-            >
-              {/* The Language Mode item is the only real setting today; it stays selected until
-                another Feature contributes its own settings section. */}
-              <span className="text-primary font-semibold">{t('settings.language')}</span>
-            </nav>
-            <div className="grid gap-4">
+      <aside className="bg-sidebar text-sidebar-foreground flex w-64 shrink-0 flex-col gap-6 border-r p-4">
+        <Link
+          to="/"
+          className="text-muted-foreground hover:text-foreground flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors"
+        >
+          <ArrowLeftIcon className="size-4" />
+          {t('settings.back')}
+        </Link>
+        <nav aria-label={t('settings.title')} className="grid gap-1">
+          {/* The Language Mode item is the only real setting today; it stays selected until
+            another Feature contributes its own settings section. */}
+          <span
+            aria-current="page"
+            className="bg-sidebar-accent text-sidebar-accent-foreground flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium"
+          >
+            <LanguagesIcon className="size-4" />
+            {t('settings.language')}
+          </span>
+        </nav>
+      </aside>
+      <main className="max-h-svh flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-8 py-10">
+          <h1 className="text-2xl font-semibold tracking-tight">{t('settings.title')}</h1>
+          <section aria-labelledby="settings-language-heading" className="grid gap-3">
+            <h2 id="settings-language-heading" className="text-base font-semibold">
+              {t('settings.language')}
+            </h2>
+            <div className="bg-card rounded-lg border">
               <LanguageModeSettings />
             </div>
-          </div>
+          </section>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

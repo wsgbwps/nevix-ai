@@ -168,7 +168,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       ).toContainText('English')
       await expectWindowTitle(launched.electronApp, 'Nevix AI — Desktop')
 
-      await launched.page.getByRole('link', { name: 'Back' }).click()
+      await launched.page.getByRole('link', { name: 'Back to app' }).click()
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
@@ -183,7 +183,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       )
       await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')
 
-      await launched.page.getByRole('link', { name: '返回' }).click()
+      await launched.page.getByRole('link', { name: '返回应用' }).click()
       await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
       expect(navigationCount).toBe(0)
 

@@ -47,16 +47,17 @@ export function LanguageModeSettings(): React.JSX.Element {
   }
 
   return (
-    <section aria-labelledby="interface-language-heading" className="w-full rounded-lg border p-5">
-      <h2 id="interface-language-heading" className="text-lg font-medium">
-        {t('heading')}
-      </h2>
+    <div className="flex items-center justify-between gap-6 px-5 py-4">
+      <div className="grid gap-0.5">
+        <p className="text-sm font-medium">{t('heading')}</p>
+        <p className="text-muted-foreground text-sm">{t('description')}</p>
+      </div>
       <Select
         value={languageMode}
         onValueChange={(value) => selectLanguageMode(value as LanguageMode)}
         disabled={languageMode === undefined || isUpdating}
       >
-        <SelectTrigger aria-label={t('heading')} className="mt-4 w-full">
+        <SelectTrigger aria-label={t('heading')} className="w-44">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -67,6 +68,6 @@ export function LanguageModeSettings(): React.JSX.Element {
           ))}
         </SelectContent>
       </Select>
-    </section>
+    </div>
   )
 }
