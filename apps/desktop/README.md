@@ -33,20 +33,22 @@ $ pnpm build:mac
 $ pnpm build:linux
 ```
 
-### Authentication integration tests
+### E2E tests
 
-The Authentication suite uses the pinned Supabase CLI to start a disposable loopback-only Auth
-stack with Mailpit, builds the Desktop app with only the generated local publishable key, and runs
-the Electron Playwright suite with one worker. Docker must be running.
+The E2E Suite uses the pinned Supabase CLI to start a disposable loopback-only Auth stack (the Auth
+Harness) with Mailpit, builds the Desktop app with only the generated local publishable key, and
+runs the Electron Playwright suite with one worker. Docker must be running.
 
 ```bash
-$ pnpm test:auth
+$ pnpm test:e2e        # Full E2E Suite: configuration-failure builds plus every spec
+$ pnpm test:e2e:smoke  # Smoke Suite: one test-mode build, only specs tagged @smoke
 ```
 
-The command first verifies that missing and invalid public configuration block the app. It always
-stops the local stack with `--no-backup`, including when the build or tests fail. The local admin
-credential exists only in the Playwright process; the Electron launcher removes it from the Desktop
-process environment.
+The full command first verifies that missing and invalid public configuration block the app; the
+smoke command skips those phases and the typecheck that Desktop CI already covers. Both commands
+always stop the local stack with `--no-backup`, including when the build or tests fail. The local
+admin credential exists only in the Playwright process; the Electron launcher removes it from the
+Desktop process environment.
 
 Development and test builds accept a Supabase HTTP Origin only when its host is `localhost`, an
 exact loopback address, or an RFC1918 private IPv4 address. Production builds require HTTPS. The

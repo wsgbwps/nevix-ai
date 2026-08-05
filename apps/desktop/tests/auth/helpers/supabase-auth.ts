@@ -11,8 +11,13 @@ export function readAuthHarnessConfig(): AuthHarnessConfig | undefined {
   const publishableKey = process.env.NEVIX_TEST_SUPABASE_PUBLISHABLE_KEY
   const serviceRoleKey = process.env.NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY
 
-  if (!url || !publishableKey || !serviceRoleKey) return undefined
-  return { url, publishableKey, serviceRoleKey }
+  if (url && publishableKey && serviceRoleKey) return { url, publishableKey, serviceRoleKey }
+  if (process.env.CI) {
+    throw new Error(
+      'The Auth harness environment is incomplete in CI; fail the E2E Suite instead of silently skipping it'
+    )
+  }
+  return undefined
 }
 
 export function uniqueAuthIdentity(label: string): {

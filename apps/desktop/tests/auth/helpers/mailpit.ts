@@ -19,7 +19,13 @@ const POLL_TIMEOUT_MS = 10_000
 
 export function readMailpitHarnessConfig(): MailpitHarnessConfig | undefined {
   const url = process.env.NEVIX_TEST_MAILPIT_URL
-  return url ? { url } : undefined
+  if (url) return { url }
+  if (process.env.CI) {
+    throw new Error(
+      'The Mailpit harness environment is missing in CI; fail the E2E Suite instead of silently skipping it'
+    )
+  }
+  return undefined
 }
 
 export async function readMailpitMessageIds(
