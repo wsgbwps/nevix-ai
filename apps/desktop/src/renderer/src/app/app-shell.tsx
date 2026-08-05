@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from '@tanstack/react-router'
-import { ChevronsUpDownIcon, LogOutIcon } from 'lucide-react'
+import { ChevronsUpDownIcon, HomeIcon, LogOutIcon } from 'lucide-react'
 import { useAuthenticationState } from './authentication-state'
 import { Avatar, AvatarFallback } from '../components/ui/avatar'
 import {
@@ -110,6 +110,7 @@ export function AppShell({
                       tooltip={t('shell.home')}
                     >
                       <Link to="/">
+                        <HomeIcon />
                         <span className="group-data-[collapsible=icon]:hidden">
                           {t('shell.home')}
                         </span>
@@ -169,7 +170,7 @@ export function AppShell({
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarFooter>
-          <SidebarRail />
+          <SidebarRail aria-label={t('shell.toggleSidebar')} title={t('shell.toggleSidebar')} />
         </Sidebar>
         <SidebarInset>
           <header className="flex h-16 shrink-0 items-center gap-2 px-4">

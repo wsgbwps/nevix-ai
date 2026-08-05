@@ -44,7 +44,9 @@ test('signed-in users land in the App Shell with the organization switcher slot 
       await expect(sidebar.getByRole('link', { name: '首页', current: 'page' })).toHaveCount(1)
 
       // 内容区头部：SidebarTrigger 与反映当前路由位置的 Breadcrumb。
-      await expect(launched.page.getByRole('button', { name: '切换侧边栏' })).toBeVisible()
+      await expect(
+        launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
+      ).toBeVisible()
       await expect(
         launched.page.getByLabel('breadcrumb').getByRole('link', { name: '首页', current: 'page' })
       ).toBeVisible()
@@ -82,7 +84,7 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
       await launched.page.getByRole('button', { name: '登录', exact: true }).click()
       await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
 
-      const toggle = launched.page.getByRole('button', { name: '切换侧边栏' })
+      const toggle = launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
       const sidebar = launched.page.locator('[data-slot="sidebar"]')
       const homeEntry = sidebar.getByRole('link', { name: '首页' })
       const organizationSwitcher = launched.page.getByRole('button', { name: '组织切换器' })
