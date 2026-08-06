@@ -5,9 +5,25 @@
 //   4. PostToolUse Edit|Write -> tool_result: prettier --write (ts/js/json/css/yaml)
 //   5. PostToolUse Edit|Write -> tool_result: goimports -w (go)
 // 修改后 /reload 生效。
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isEditToolResult, isToolCallEventType, isWriteToolResult } from "@earendil-works/pi-coding-agent";
+// 安全边界:本扩展只用于减少误操作，是 guardrail，不是 sandbox 或授权系统；
+// bash、其他工具、符号链接等仍可能绕过检查。无人值守/不可信任务必须使用 OS、VM 或容器隔离。
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  isEditToolResult,
+  isToolCallEventType,
+  isWriteToolResult,
+} from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+import {
+  canonicalizeRepoPath,
+  classifyGitCommitCommands,
+  dangerousCommandDecision,
+  hasGatedPath,
+  isProtectedBranch,
+  isProtectedEditPath,
+  resolveGitCommitCwd,
+} from "./repo-hooks/policy.mts";
 
 /** 执行命令并通过 stdin 传入数据(codegraph prompt-hook 需要),返回 stdout */
 function runWithInput(
@@ -17,7 +33,10 @@ function runWithInput(
   opts: { cwd: string; timeoutMs: number },
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
@@ -66,49 +85,88 @@ export default function (pi: ExtensionAPI) {
       );
       if (!context.trim()) return { action: "continue" };
       // 与 Claude UserPromptSubmit 语义一致:上下文拼进用户 prompt
-      return { action: "transform", text: event.text + "\n\n" + context.trim() };
+      return {
+        action: "transform",
+        text: event.text + "\n\n" + context.trim(),
+      };
     } catch {
       return { action: "continue" }; // 失败静默降级,不阻塞用户输入
     }
   });
 
   // ---------- 2/3. PreToolUse ----------
-  const GATED_PATHS =
-    /^(apps\/|server\/|supabase\/|contracts\/|scripts\/|\.github\/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|go\.work)/;
-
   pi.on("tool_call", async (event, ctx) => {
     // PreToolUse Edit|Write: 禁止改锁文件和 .env
-    if (isToolCallEventType("edit", event) || isToolCallEventType("write", event)) {
-      const fp = event.input.path;
-      if (/(^|\/)pnpm-lock\.yaml$/.test(fp) || /(^|\/)\.env($|\.)/.test(fp)) {
-        return { block: true, reason: "BLOCKED: 禁止直接编辑 pnpm-lock.yaml 或 .env 文件" };
+    if (
+      isToolCallEventType("edit", event) ||
+      isToolCallEventType("write", event)
+    ) {
+      const repoRoot = await repositoryRoot(pi, ctx.cwd);
+      if (isProtectedEditPath(event.input.path, repoRoot)) {
+        return {
+          block: true,
+          reason: "BLOCKED: 禁止直接编辑 pnpm-lock.yaml 或 .env 文件",
+        };
       }
       return;
     }
 
+    if (!isToolCallEventType("bash", event)) return;
+
+    const command = event.input.command;
+    const dangerousDecision = dangerousCommandDecision(command, ctx.mode);
+    if (dangerousDecision === "block") {
+      return {
+        block: true,
+        reason: "BLOCKED: non-TUI 模式默认拒绝需要人工确认的危险命令",
+      };
+    }
+    if (dangerousDecision === "confirm") {
+      const confirmed = await ctx.ui.confirm(
+        "危险命令",
+        `${command}\n\nrepo-hooks 只是 guardrail；确认执行？`,
+      );
+      if (!confirmed)
+        return { block: true, reason: "BLOCKED: 用户拒绝危险命令" };
+    }
+
     // PreToolUse Bash: main 分支禁止提交 CI 把关路径
-    if (isToolCallEventType("bash", event)) {
-      const cmd = event.input.command;
-      if (!/\bgit\s+commit\b/.test(cmd)) return;
+    for (const commit of classifyGitCommitCommands(command)) {
+      const gitCwd = resolveGitCommitCwd(ctx.cwd, commit);
+      const repoRoot = await repositoryRoot(pi, gitCwd);
+      const branchResult = await pi.exec(
+        "git",
+        ["symbolic-ref", "--short", "HEAD"],
+        {
+          cwd: gitCwd,
+        },
+      );
+      if (!isProtectedBranch(branchResult.stdout.trim())) continue;
 
-      const branch = (await pi.exec("git", ["symbolic-ref", "--short", "HEAD"], { cwd: ctx.cwd })).stdout.trim();
-      if (branch !== "main") return;
-
-      const isAll = /(\s--all(\s|$)|(\s-[a-zA-Z]*a))/.test(cmd);
-      const { stdout: staged } = await pi.exec("git", ["diff", "--cached", "--name-only"], { cwd: ctx.cwd });
-      let files = staged;
-      if (isAll) {
-        const { stdout: worktree } = await pi.exec("git", ["diff", "--name-only"], { cwd: ctx.cwd });
-        files += "\n" + worktree;
+      // --no-renames 让 rename 的旧/新端点各占一行，避免只检查目标路径。
+      const staged = await pi.exec(
+        "git",
+        ["diff", "--cached", "--name-only", "--no-renames"],
+        { cwd: gitCwd },
+      );
+      let changedPaths = staged.stdout;
+      if (commit.stagesAll || commit.includesPathspec) {
+        const worktree = await pi.exec(
+          "git",
+          ["diff", "--name-only", "--no-renames"],
+          {
+            cwd: gitCwd,
+          },
+        );
+        changedPaths += `\n${worktree.stdout}`;
       }
-      if (GATED_PATHS.test(files)) {
+      if (hasGatedPath(changedPaths, repoRoot)) {
         return {
           block: true,
           reason:
             "BLOCKED: main 上禁止直接提交 CI 把关路径(apps/ server/ supabase/ contracts/ scripts/ .github/ 及根构建清单),请切 feature 分支走 PR;docs/ .scratch/ Makefile 与根级文档可直接提交",
         };
       }
-      return;
     }
   });
 
@@ -118,19 +176,72 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_result", async (event, ctx) => {
     if (!isEditToolResult(event) && !isWriteToolResult(event)) return;
     const fp = String(event.input.path ?? "");
+    if (!PRETTIER_EXTS.test(fp) && !fp.endsWith(".go")) return;
+
+    const repoRoot = await repositoryRoot(pi, ctx.cwd);
+    const repoPath = canonicalizeRepoPath(fp, repoRoot);
+    const absolutePath = resolve(ctx.cwd, fp);
+
     if (PRETTIER_EXTS.test(fp)) {
-      try {
-        await pi.exec("npx", ["prettier", "--write", fp], { cwd: ctx.cwd, timeout: 60_000 });
-      } catch {
-        // 与原来 || true 一致:格式化失败不阻断
+      const result = await pi.exec(
+        "pnpm",
+        ["exec", "prettier", "--write", absolutePath],
+        {
+          cwd: repoRoot,
+          timeout: 60_000,
+        },
+      );
+      if (result.code !== 0 || result.killed) {
+        return visibleFormatterFailure(
+          event.content,
+          `pnpm exec prettier --write ${repoPath ?? fp}`,
+          result,
+        );
       }
-    } else if (fp.endsWith(".go")) {
-      try {
-        const gopath = (await pi.exec("go", ["env", "GOPATH"], { cwd: ctx.cwd })).stdout.trim();
-        await pi.exec(`${gopath}/bin/goimports`, ["-w", fp], { cwd: ctx.cwd, timeout: 30_000 });
-      } catch {
-        // goimports 未安装时静默
+    } else {
+      const goEnv = await pi.exec("go", ["env", "GOPATH"], { cwd: repoRoot });
+      if (goEnv.code !== 0 || goEnv.killed) {
+        return visibleFormatterFailure(event.content, "go env GOPATH", goEnv);
+      }
+      const goimports = resolve(goEnv.stdout.trim(), "bin", "goimports");
+      const result = await pi.exec(goimports, ["-w", absolutePath], {
+        cwd: repoRoot,
+        timeout: 30_000,
+      });
+      if (result.code !== 0 || result.killed) {
+        return visibleFormatterFailure(
+          event.content,
+          `${goimports} -w ${repoPath ?? fp}`,
+          result,
+        );
       }
     }
   });
+}
+
+async function repositoryRoot(pi: ExtensionAPI, cwd: string): Promise<string> {
+  const result = await pi.exec("git", ["rev-parse", "--show-toplevel"], {
+    cwd,
+  });
+  return result.code === 0 && result.stdout.trim() ? result.stdout.trim() : cwd;
+}
+
+function visibleFormatterFailure<T extends { type: string }>(
+  content: T[],
+  command: string,
+  result: { code: number; killed: boolean; stdout: string; stderr: string },
+) {
+  const detail = (result.stderr || result.stdout || "no output")
+    .trim()
+    .slice(0, 500);
+  const status = result.killed ? "killed" : `exit ${result.code}`;
+  return {
+    content: [
+      ...content,
+      {
+        type: "text" as const,
+        text: `repo-hooks formatter failed (${status}): ${command}\n${detail}`,
+      },
+    ],
+  };
 }
