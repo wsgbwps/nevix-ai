@@ -7,13 +7,13 @@
 - Put IPC declarations and named request/response types in `shared/ipc/<domain>/types.ts`. Keep `preload/` generic: expose typed bridge primitives, but do not add per-Domain code or a central Domain registry
 - Put each Domain-owned IPC adapter in `main/<domain>/ipc/`. Its `index.ts` only exports a synchronous `register(): void`; loading it has no side effects, registration is order-independent, and each Channel Handler lives in a directly nested `<action>.ts` file. Do not add a `handlers/` directory
 - A Domain IPC adapter may depend on implementation from the same Domain; Domain implementation must not depend on IPC. Registration must not initialize storage, run migrations, perform network work, or initialize the Domain
-- `main/index.ts` is a composition root. It explicitly initializes Domains through their public interfaces, auto-discovers registration modules with `./*/ipc/index.ts`, and contains no Domain logic. If registration ever requires ordering, replace auto-discovery with explicit wiring rather than relying on file order
+- `main/index.ts` is a composition root. It explicitly initializes Domains through their public interfaces and auto-discovers registration modules with `./*/ipc/index.ts`. If registration ever requires ordering, replace auto-discovery with explicit wiring rather than relying on file order
 - Create `main/<domain>/index.ts` only when callers outside that Domain need a public interface. External Main callers must use it instead of deep-importing implementation; the Domain's own IPC adapter uses relative internal imports. Cross-Domain dependencies must use public interfaces and remain acyclic
 - Keep platform responsibilities such as `window/`, `updater/`, and `tray/` as explicit non-Domain owners. Do not invent a Domain merely to make the Main tree symmetrical
 
 ## Renderer Feature interface and dependencies
 
-- Put renderer composition, routes, providers, and `app/globals.css` in `renderer/src/app/`; it is the only global stylesheet location and contains no Feature business logic
+- Put renderer composition, routes, providers, and `app/globals.css` in `renderer/src/app/`; `app/globals.css` is the only global stylesheet location
 - Keep Domain-specific renderer code under `renderer/src/features/<domain>/`. The only TypeScript source file at a Feature root is its public `index.ts`; it contains explicit named re-exports only, with no `export *`, implementation, or initialization side effects
 - Code outside a Feature imports it only through its public `index.ts`. Peer Features must not import one another, including through public indexes; compose Features in `app/`, and promote genuinely shared implementation only to an approved shared owner
 - Within one Feature, implementation uses direct relative imports and does not import through its own public index. Do not impose a dependency order among sibling segments
@@ -21,11 +21,11 @@
 ## Renderer page ownership
 
 - Keep `renderer/src/app/routes/` thin: a route file only creates its file route and assembles its page component, with no page implementation
-- Put a page owned by a business Domain in `renderer/src/features/<domain>/`, exported through that Feature's public `index.ts`, and assembled by a thin route; per ADR-0004, its authenticated views render in the App Shell content area
-- Put cross-Feature aggregation pages and pages without a Domain owner in `renderer/src/app/pages/`; the Settings page and the Home placeholder page live there today
+- Put a page owned by a business Domain in `renderer/src/features/<domain>/`, exported through that Feature's public `index.ts`, and assembled by a thin route; per [ADR-0004](docs/adr/0004-renderer-routing-topology.md), its authenticated views render in the App Shell content area
+- Put cross-Feature aggregation pages and pages without a Domain owner in `renderer/src/app/pages/` (e.g. the Settings page)
 - Keep App Shell internals in `renderer/src/app/shell/`
 - Never add page files at the `renderer/src/app/` root
-- Do not create a Feature named `settings`: settings is not a Domain name, and the Settings page is owned by `app/pages/`
+- Do not create a Feature named `settings` — the Settings page is owned by `app/pages/`
 
 ## Renderer Feature segments
 
@@ -38,11 +38,11 @@
 ## Shared renderer owners
 
 - Put reusable shadcn UI in `renderer/src/components/ui/`, shared utilities in `renderer/src/lib/`, shared hooks in `renderer/src/hooks/`, and only static images, SVGs, or fonts in `renderer/src/assets/`
-- Promote code into a shared renderer owner only when it is genuinely cross-Feature and the repository shared-area approval rule is satisfied
+- Promote code into a shared renderer owner only when it is genuinely cross-Feature, and call the change out with impact and tests per the repository shared-area rule
 
 ## Migration and enforcement
 
-- Main Domain-first placement, Language Domain consolidation, Channel renaming, and the `./*/ipc/index.ts` glob landed as one atomic architecture migration. Do not add compatibility Channel aliases, a second glob, or another Adapter-first path
+- Main Domain-first placement, Language Domain consolidation, Channel renaming, and the `./*/ipc/index.ts` glob landed as one atomic migration: no compatibility Channel aliases, second glob, or Adapter-first path
 - Legacy Feature segment names migrate opportunistically when their responsibility is already changing; do not perform mechanical bulk renames. Existing legacy paths may receive necessary behavior fixes but must not become templates for new directories
 - Automate deterministic path, import, public-index, registration-export, Channel-prefix, and generic-preload rules. Keep responsibility placement, interface depth, deletion tests, and migration scope as deliberate review decisions
 - Any legacy allowlist must use exact paths, record a reason and removal trigger, and only shrink. A new exception to a stable seam, dependency direction, or canonical vocabulary requires a dedicated architecture task with a written plan rather than a lint disable
