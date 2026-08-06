@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved — [PR #18](https://github.com/wsgbwps/nevix-ai/pull/18) 经 CI 把关并于 2026-08-04 合并入 main
 
 - [x] TanStack Router 以文件路由方式接入 renderer 构建链（路由树生成纳入开发/构建流程，生成物不入手维护）
 - [x] history 为 memory history；不出现 URL 同步依赖

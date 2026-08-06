@@ -1,7 +1,7 @@
 # Assemble the Identity V1 Handoff Spec
 
 Type: task
-Status: open
+Status: wontfix — superseded：开发入口已迁移，不再领取或推进（见 ../map.md）
 Blocked by: 03, 04, 05, 06, 07, 08, 09, 10, 11, 12
 
 ## Question

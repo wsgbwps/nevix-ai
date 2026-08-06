@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved — [PR #22](https://github.com/wsgbwps/nevix-ai/pull/22) 经 CI 把关合并入 main（merge commit a3c2ecc）
 
 - [x] SettingsPage 实现位于 `app/pages/` 下，`app/` 根不再有任何页面实现文件
 - [x] HomePage 从路由文件中抽出到 `app/pages/`，首页路由文件只做声明与组装

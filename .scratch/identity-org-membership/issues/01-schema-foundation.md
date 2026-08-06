@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** in-review — [PR #24](https://github.com/wsgbwps/nevix-ai/pull/24) 经 mail-smoke CI 门禁（覆盖 `supabase/**` 与 `server/**`）
+**Status:** resolved — [PR #24](https://github.com/wsgbwps/nevix-ai/pull/24) 经 mail-smoke CI 门禁（覆盖 `supabase/**` 与 `server/**`）把关并于 2026-08-06 合并入 main
 
 - [x] 声明式 schema 更新并生成 migration，过 advisors 与 migration-history 检查（`db lint --level warning` 无错误、`migration list` 一致、二次 `db diff` 零漂移）
 - [x] 三表、三 helper、identity_app 角色、identity.directory 视图与全部 GRANT/RLS 策略按 spec 与 ADR-0008 落地（helper EXECUTE 实施澄清已回写 ADR-0008；平台默认权限残留已显式 REVOKE）

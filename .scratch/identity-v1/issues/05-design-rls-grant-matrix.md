@@ -1,7 +1,7 @@
 # Design the RLS and GRANT Matrix
 
 Type: grilling
-Status: open
+Status: wontfix — superseded：开发入口已迁移，不再领取或推进（见 ../map.md）
 Blocked by: 04
 
 ## Question

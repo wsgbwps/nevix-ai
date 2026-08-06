@@ -1,7 +1,7 @@
 # Design the Identity Trusted Command Interface
 
 Type: grilling
-Status: open
+Status: wontfix — superseded：开发入口已迁移，不再领取或推进（见 ../map.md）
 Blocked by: 01, 03, 04
 
 ## Question

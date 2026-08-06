@@ -1,7 +1,7 @@
 # Define the Vertical Slice Acceptance Gates
 
 Type: grilling
-Status: open
+Status: wontfix — superseded：开发入口已迁移，不再领取或推进（见 ../map.md）
 Blocked by: 03, 05, 06, 07, 08, 09
 
 ## Question

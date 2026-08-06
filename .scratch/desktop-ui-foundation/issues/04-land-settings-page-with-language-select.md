@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — App Shell 落地（设置入口位于 NavUser 菜单，且首页语言控件的移除依赖设置页就位）
 
-**Status:** ready-for-agent
+**Status:** resolved — [PR #21](https://github.com/wsgbwps/nevix-ai/pull/21) 经 CI 把关并于 2026-08-05 合并入 main
 
 - [ ] NavUser 菜单新增 Settings Page 入口并可导航到达；Settings Page 拥有自己的顶层路由，在 App Shell 之外全屏呈现
 - [ ] 页内为"左侧设置导航 + 右侧内容"两栏结构（sidebar-13 页面布局，非 dialog）；导航顶部返回按钮可回到 App Shell

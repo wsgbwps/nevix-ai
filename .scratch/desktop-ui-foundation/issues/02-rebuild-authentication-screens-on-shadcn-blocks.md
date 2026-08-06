@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** done
+**Status:** resolved — [PR #17](https://github.com/wsgbwps/nevix-ai/pull/17) 经 CI 把关合并入 main（merge commit b8cd9d3）
 
 - [x] 六个认证 flow 界面与三个状态界面共享同一两栏外壳；小窗口下封面面板隐藏、表单保持可用
 - [x] 全部输入控件迁移到 shadcn Input/Label/Field（共享 UI 层新增，PR 描述说明影响与测试）；无残留手写原生 input 样式

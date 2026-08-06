@@ -13,3 +13,12 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
+
+## Local state extensions
+
+The five canonical state roles do not cover the full lifecycle of a local-markdown ticket. This repo additionally uses:
+
+- `in-review` — implementation is complete and a PR is open awaiting merge. When the PR merges, the ticket MUST be normalized to `resolved` with the PR link and merge evidence preserved in the `Status:` line. Never close merged work as `done` or `merged`.
+- `resolved` — terminal state for merged work, per the branch wrap-up checklist in `issue-tracker.md`.
+- Wayfinding states `open` / `claimed` / `resolved` — only on `/wayfinder` map tickets, per `issue-tracker.md`.
+- Superseded tickets — label `wontfix` and record the superseding decision directly in the `Status:` line.

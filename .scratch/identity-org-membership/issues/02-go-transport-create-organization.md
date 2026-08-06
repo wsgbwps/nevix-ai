@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Schema 基座：profiles / organizations / memberships + RLS/GRANT
 
-**Status:** merged — [PR #25](https://github.com/wsgbwps/nevix-ai/pull/25) 经 mail-smoke CI 门禁（覆盖 `server/**` 与 `contracts/**`），merge commit 8548843
+**Status:** resolved — [PR #25](https://github.com/wsgbwps/nevix-ai/pull/25) 经 mail-smoke CI 门禁（覆盖 `server/**` 与 `contracts/**`）把关并于 2026-08-06 合并入 main（merge commit 8548843）
 
 - [x] JWKS 验证（ES256/P-256/kid 缓存）集成测试通过，失效 JWT 返 401
 - [x] CreateOrganization 集成测试：客户端 id 幂等（重试返回既有组织）、org + 首任 Owner 原子性
