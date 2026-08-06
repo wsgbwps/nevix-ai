@@ -25,6 +25,7 @@ Organization Membership 切片首次让 Desktop client 直读五张共享表（p
 ### RLS helper 词汇
 
 - 授权判断收敛为三个 security definer helper：`is_active_member(org_id)`、`has_org_role(org_id, roles[])`、`shares_active_org(user_id)`，放 identity schema、`search_path=''`、函数体内 `(select auth.uid())`，对 PUBLIC/anon/authenticated 撤销 EXECUTE。
+  - 实施澄清（2026-08-06，ticket 01 落地时确认）：PostgreSQL 以**评估策略的调用角色**检查函数 EXECUTE 权限，`authenticated` 必须持有 EXECUTE 否则 RLS 策略无法求值，故对 `authenticated`（与 `identity_app`）授 EXECUTE、对 PUBLIC/anon 显式撤销——撤销意图不变，唯一调整是 authenticated 的 EXECUTE 为策略求值所必需。helper 不暴露为 Data API RPC（identity schema 不在 api.schemas），authenticated 直调 helper 仅能查询自身授权布尔值，无越权面。
 - 策略结构：profiles 本人或活跃同组织成员可见；organizations 活跃成员可见；memberships 本人行（含已结束）+ 本组织活跃行；invitations Owner/Admin 或 `email = jwt email` 的 pending 行；audit_logs Owner/Admin 只读。即时失权由"只读活行"天然满足。
 
 ## Considered Options
