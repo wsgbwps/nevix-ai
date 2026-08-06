@@ -67,6 +67,9 @@ echo "==> Running Go mail smoke tests"
 # (1m,5m,15m,1h,6h) so retry and terminal-failure tests finish in seconds.
 # NEVIX_VERIFICATION_CODE_HASH_KEY / NEVIX_SMTP_FROM satisfy the code
 # issuance contract; the hash key is a throwaway value for captured mail only.
+# NEVIX_AUTH_JWKS_URL / NEVIX_CORS_ALLOWED_ORIGINS satisfy the Bearer JWT
+# transport contract; the Bearer command tests mint their own ES256 sessions
+# against a test key set, so the stack's JWKS URL only needs to be well-formed.
 NEVIX_SUPABASE_URL="${supabase_url}" \
 NEVIX_SUPABASE_PUBLISHABLE_KEY="${publishable_key}" \
 NEVIX_MAILPIT_URL="${mailpit_url}" \
@@ -79,6 +82,8 @@ NEVIX_OUTBOX_RETRY_DELAYS="1s,2s,3s,4s,5s" \
 NEVIX_MAILPIT_CONTAINER="${mailpit_container}" \
 NEVIX_VERIFICATION_CODE_HASH_KEY="mail-smoke-test-hash-key" \
 NEVIX_SMTP_FROM="identity@nevix.test" \
+NEVIX_AUTH_JWKS_URL="${supabase_url}/auth/v1/.well-known/jwks.json" \
+NEVIX_CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
   go test -C server -race -count=1 -v ./internal/identity/...
 
 echo "==> Mail smoke tests passed"
