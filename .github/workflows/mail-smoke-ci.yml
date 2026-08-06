@@ -7,6 +7,7 @@ on:
     paths:
       - "supabase/**"
       - "server/**"
+      - "contracts/**"
       - "scripts/test-mail-smoke.sh"
       - ".github/workflows/mail-smoke-ci.yml"
       - "package.json"
@@ -16,6 +17,7 @@ on:
     paths:
       - "supabase/**"
       - "server/**"
+      - "contracts/**"
       - "scripts/test-mail-smoke.sh"
       - ".github/workflows/mail-smoke-ci.yml"
       - "package.json"

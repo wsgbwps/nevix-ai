@@ -37,6 +37,7 @@ func newHarness(t *testing.T, ctx context.Context) *harness {
 	for _, key := range []string{
 		"NEVIX_SMTP_HOST", "NEVIX_SMTP_PORT", "NEVIX_SMTP_USER", "NEVIX_SMTP_PASSWORD",
 		"NEVIX_VERIFICATION_CODE_HASH_KEY", "NEVIX_SMTP_FROM",
+		"NEVIX_AUTH_JWKS_URL", "NEVIX_CORS_ALLOWED_ORIGINS",
 	} {
 		requireEnv(t, key)
 	}

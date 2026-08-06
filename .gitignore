@@ -25,6 +25,7 @@ server/bin/
 # IDE
 .vscode/
 .idea/
+.pi/
 *.swp
 *.swo
 
