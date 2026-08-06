@@ -1,6 +1,6 @@
 # Identity Organization Membership Spec
 
-Status: ready-for-agent（Desktop 交互细节标注"以 prototype 输出回填"，回填后定稿并进入 to-tickets）
+Status: ready-for-agent（已定稿：prototype 6/6 变体裁决、页面归属指令与共享原语例外已回填，进入 to-tickets）
 
 本 spec 是 Identity V1 第二个交付切片（Organization Membership）及其前置小切片（Identity Foundation 收尾）的实现规格。17 项决策已在 grill-with-docs 会话中锁定，本文档为综合记录，不重开任何已定决策。
 
@@ -139,7 +139,19 @@ Authoritative context:
 - 会话中失权为 error-driven：403/404 或直读突变 → 重拉确认 → 退出 org context 并告知；V1 不上 Realtime。
 - 邀请自动浮现（RLS email 策略使被邀请人可见 pending 行）+ 点选输码，不做纯手动入口。
 - 全部新 Localized Surface 中英双语，过既有 localization 发布检查。
-- Desktop 交互细节（onboarding 表单流、成员/邀请管理界面、审计查看/导出界面、选择界面）**以 prototype 输出回填**。
+#### Desktop 交互细节（prototype 定稿，2026-08-06）
+
+以下变体裁决与页面归属经用户逐项评判锁定，实现时不得重开；文案以原型 i18n.ts 为基线（全部 Localized Surface 中英双语），字段规则以原型 validation.ts 为基线：
+
+- **页面归属（方向指令）**：成员 / 审计日志 / 个人资料归入设置页；App Shell 侧栏只放软件功能（首页等未来业务 Feature）。设置页从 App Shell 用户菜单「设置」进入，「返回应用」回首页；左导航分两组——**账户**（个人资料、语言）/ **组织**（成员、审计日志，Member 角色不显示审计入口）；侧栏顶部为当前组织上下文卡（组织标 + 组织名 + 角色）。
+- **落点**：onboarding 完成、选择组织、接受邀请后 → 首页。
+- **Onboarding（B 两步向导）**：第 1 步显示名（trim 后 1–50 字符、拒纯空白），第 2 步组织名（trim 非空）；进度点 + "第 x/2 步"标签；第 2 步可返回上一步；完成即建组织。
+- **组织选择（A 居中列表）**：邀请区在组织列表上方；点选邀请浮出 6 位码输入（5 次尝试上限）；含"创建组织"入口进 onboarding。
+- **成员与邀请管理（B 标签页）**：两个标签页——成员 / 待定邀请（带计数徽标）；邀请创建/重发/撤销走对话框；角色变更用 Select；移除成员与退出组织均需确认对话框；Member 角色只读、无邀请按钮；成员行只显示显示名与角色（Profile 不含邮箱，RLS 下他人邮箱不可见）。
+- **审计日志（B 时间线）**：按天分组叙事时间线（"林晓 移除成员 → 李其 · 11:48"式行，与 ADR-0009 写入时快照模型一致）；动作过滤 Select；CSV 导出按钮 + 导出反馈（对应 Desktop 本地写文件）。
+- **个人资料（A 设置页区块）**：头像占位 + 显示名字段 + 保存/取消（脏检查）+ 已保存反馈。
+- **失权告知（A 阻断对话框）**：会话中失权 → 阻断式对话框（标题含失去的组织名 + 说明 + "知道了"）；确认时组织已从列表移除；落点：仍有余组织 → 选择界面，无组织 → onboarding。
+- **共享原语例外登记**：`dialog`、`tabs`、`badge` 三个 shadcn 原语加入 `components/ui/`（用户已裁决登记）；实现 ticket 须显式声明该例外并接受附加审查。
 
 ### 前置切片 mini-spec（Identity Foundation 收尾）
 
@@ -159,7 +171,7 @@ Authoritative context:
 - schema 不变式、RLS/GRANT 矩阵、受信命令接口（请求/结果/错误/幂等/并发）、Outbox 模板清单、Desktop 状态模型骨架、切片验收/回滚/附加审查门禁、ADR 集合 —— **由本会话关闭**（本文与 ADR-0008/0009）。
 - 密码策略与 CI harness 基线 —— 由阶段 1 关闭（ticket 03/09），本 spec 引述确认。
 - User Deletion 撤销语义 —— 归 Governance 切片，不在本 spec。
-- Desktop 具体 UI 行为 —— 由 prototype 回填后关闭。
+- Desktop 具体 UI 行为 —— **已关闭**（prototype 6/6 变体裁决与页面归属指令已回填，见 Desktop 架构与状态模型节）。
 
 ## Testing Decisions
 
@@ -187,7 +199,7 @@ Prior art：阶段 1 Auth Harness（临时 Supabase 栈 + Mailpit）、mail-smok
 
 ## Further Notes
 
-- 既定顺序：本 spec → `/handoff` 桥接 prototype session（prototype 一次覆盖两切片全部新界面，onboarding 为重点，成员/邀请/审计为草样）→ 结论回填本 spec → `/to-tickets` 出 tracer-bullet tickets（标前置切片 blocking 边）。
+- 顺序状态：prototype 已完成并回填本 spec（2026-08-06：6/6 变体裁决 + 页面归属指令 + dialog/tabs/badge 原语例外）；下一步 `/to-tickets` 出 tracer-bullet tickets（标前置切片 blocking 边）。原型目录（`.scratch/identity-org-membership/prototype/`）与 runner 痕迹（`vite.prototype.config.ts`、`package.json` 的 `prototype` 脚本）在 spec 定稿后按仓库规则清理：`.scratch/` 直提 main，`apps/desktop/` 走 feature branch + PR。
 - ADR-0008 / ADR-0009 已落盘 `docs/adr/`；Desktop 双新域不独立立 ADR（词条在 `apps/desktop/CONTEXT.md`，Feature 内部责任受控演化）。
-- `apps/desktop/CONTEXT.md` 的两个新词条（Organization Domain、Profile Domain）当前为未提交改动，随本 spec 一并提交或按用户决定处理。
+- `apps/desktop/CONTEXT.md` 的两个新词条（Organization Domain、Profile Domain）已随 1f045e2 提交。页面归属指令使 Settings Page 词条（"承载设备级设置项（当前仅有 Language Mode）"）过时——设置页现承载账户（个人资料、语言）与组织（成员、审计日志）两组导航，词条措辞更新随原型清理分支一并走 feature branch + PR。
 - 实施前请重读根 `AGENTS.md` 的目录架构门禁与高风险变更流程（本切片涉及 migration 与公共契约，须走 feature branch + PR）。
