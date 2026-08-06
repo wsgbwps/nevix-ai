@@ -141,7 +141,7 @@ Authoritative context:
 - 全部新 Localized Surface 中英双语，过既有 localization 发布检查。
 #### Desktop 交互细节（prototype 定稿，2026-08-06）
 
-以下变体裁决与页面归属经用户逐项评判锁定，实现时不得重开；文案以原型 i18n.ts 为基线（全部 Localized Surface 中英双语），字段规则以原型 validation.ts 为基线：
+以下变体裁决与页面归属经用户逐项评判锁定，实现时不得重开；文案与字段规则以 [copy-and-validation-baseline.md](copy-and-validation-baseline.md) 为基线（原型 i18n.ts / validation.ts 的定稿提炼，全部 Localized Surface 中英双语）：
 
 - **页面归属（方向指令）**：成员 / 审计日志 / 个人资料归入设置页；App Shell 侧栏只放软件功能（首页等未来业务 Feature）。设置页从 App Shell 用户菜单「设置」进入，「返回应用」回首页；左导航分两组——**账户**（个人资料、语言）/ **组织**（成员、审计日志，Member 角色不显示审计入口）；侧栏顶部为当前组织上下文卡（组织标 + 组织名 + 角色）。
 - **落点**：onboarding 完成、选择组织、接受邀请后 → 首页。
@@ -199,7 +199,7 @@ Prior art：阶段 1 Auth Harness（临时 Supabase 栈 + Mailpit）、mail-smok
 
 ## Further Notes
 
-- 顺序状态：prototype 已完成并回填本 spec（2026-08-06：6/6 变体裁决 + 页面归属指令 + dialog/tabs/badge 原语例外）；下一步 `/to-tickets` 出 tracer-bullet tickets（标前置切片 blocking 边）。原型目录（`.scratch/identity-org-membership/prototype/`）与 runner 痕迹（`vite.prototype.config.ts`、`package.json` 的 `prototype` 脚本）在 spec 定稿后按仓库规则清理：`.scratch/` 直提 main，`apps/desktop/` 走 feature branch + PR。
+- 顺序状态：prototype 已完成并回填本 spec（2026-08-06：6/6 变体裁决 + 页面归属指令 + dialog/tabs/badge 原语例外）；`/to-tickets` 已出 11 张 tracer-bullet tickets（`issues/01`–`issues/11`，前置切片 01–04、Membership 切片 05–11，blocking 边随票声明，全部 ready-for-agent）。原型目录（`.scratch/identity-org-membership/prototype/`）与 runner 痕迹（`vite.prototype.config.ts`、`package.json` 的 `prototype` 脚本）在 spec 定稿后按仓库规则清理：`.scratch/` 直提 main，`apps/desktop/` 走 feature branch + PR。
 - ADR-0008 / ADR-0009 已落盘 `docs/adr/`；Desktop 双新域不独立立 ADR（词条在 `apps/desktop/CONTEXT.md`，Feature 内部责任受控演化）。
 - `apps/desktop/CONTEXT.md` 的两个新词条（Organization Domain、Profile Domain）已随 1f045e2 提交。页面归属指令使 Settings Page 词条（"承载设备级设置项（当前仅有 Language Mode）"）过时——设置页现承载账户（个人资料、语言）与组织（成员、审计日志）两组导航，词条措辞更新随原型清理分支一并走 feature branch + PR。
 - 实施前请重读根 `AGENTS.md` 的目录架构门禁与高风险变更流程（本切片涉及 migration 与公共契约，须走 feature branch + PR）。
