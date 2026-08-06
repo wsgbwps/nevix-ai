@@ -104,6 +104,14 @@ _Avoid_: module（与 Go 侧混淆）, service
 以凭据验证和当前设备 Session 生命周期为范围的 Desktop Domain，不包含 User、Profile 或 Membership 管理。
 _Avoid_: Identity Domain, Account Domain
 
+**Organization Domain**:
+拥有 Membership 直读、Active Organization 状态及其设备记忆、组织切换、组织 onboarding、成员与邀请管理、组织设置和 Organization Audit Log 查看界面的 Desktop Domain；不拥有凭据、Session 或全局 Profile。
+_Avoid_: Identity Domain, Team Domain, Workspace Domain
+
+**Profile Domain**:
+仅拥有全局 Profile 读写与显示名称编辑的窄 Desktop Domain；Profile 跨 Organization 共享，不归属任何 Organization 上下文；不承担凭据、Session 或账号安全职责。
+_Avoid_: Account Domain, Identity Domain, User Domain
+
 **Language Domain**:
 包含设备 Language Mode 及其解析出的 Interface Language 的 Desktop Domain；各 Feature 的本地化资源仍归所属 Feature。
 _Avoid_: Settings Domain, i18n Domain
