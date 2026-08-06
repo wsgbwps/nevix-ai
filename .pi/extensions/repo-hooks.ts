@@ -1,11 +1,12 @@
 // 移植自 .qoder/settings.json 的 Claude hooks,映射为 Pi 原生扩展事件:
-//   1. UserPromptSubmit  -> input (transform): 运行 codegraph prompt-hook,注入结构化上下文
+//   1. UserPromptSubmit  -> input (transform): codegraph prompt-hook 注入已默认关闭(P0.4),
+//      仅当 CODEGRAPH_PROMPT_INJECT=1 且满足全部护栏时运行,详见 repo-hooks/prompt-inject.mts
 //   2. PreToolUse Edit|Write -> tool_call: 禁止直接编辑 pnpm-lock.yaml / .env*
 //   3. PreToolUse Bash       -> tool_call: main 分支禁止 git commit CI 把关路径
 //   4. PostToolUse Edit|Write -> tool_result: prettier --write (ts/js/json/css/yaml)
 //   5. PostToolUse Edit|Write -> tool_result: goimports -w (go)
 // 修改后 /reload 生效。
-// 安全边界:本扩展只用于减少误操作，是 guardrail，不是 sandbox 或授权系统；
+// 安全边界:本扩展只用于减少误操作,是 guardrail,不是 sandbox 或授权系统;
 // bash、其他工具、符号链接等仍可能绕过检查。无人值守/不可信任务必须使用 OS、VM 或容器隔离。
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -16,6 +17,13 @@ import {
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import {
+  DEFAULT_MAX_INJECT_BYTES,
+  applyByteLimit,
+  appendInjectLog,
+  classifyHookOutput,
+  shouldRunHook,
+} from "./repo-hooks/prompt-inject.mts";
+import {
   canonicalizeRepoPath,
   classifyGitCommitCommands,
   dangerousCommandDecision,
@@ -24,6 +32,14 @@ import {
   isProtectedEditPath,
   resolveGitCommitCwd,
 } from "./repo-hooks/policy.mts";
+
+// P0.4 降低无关上下文:codegraph prompt-hook 无条件输入注入默认关闭,保留
+// on-demand codegraph_explore 工具(.mcp.json 已配置)。显式开启:
+//   CODEGRAPH_PROMPT_INJECT=1 [CODEGRAPH_PROMPT_INJECT_MAX_BYTES=8000]
+const codegraphInjectEnabled = process.env.CODEGRAPH_PROMPT_INJECT === "1";
+const codegraphInjectMaxBytes = Number(
+  process.env.CODEGRAPH_PROMPT_INJECT_MAX_BYTES ?? DEFAULT_MAX_INJECT_BYTES,
+);
 
 /** 执行命令并通过 stdin 传入数据(codegraph prompt-hook 需要),返回 stdout */
 function runWithInput(
@@ -70,12 +86,32 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ---------- 1. UserPromptSubmit -> codegraph prompt-hook ----------
+  // ---------- 1. UserPromptSubmit -> codegraph prompt-hook(默认关闭,P0.4) ----------
   pi.on("input", async (event, ctx) => {
-    // 跳过扩展注入的消息和斜杠命令(/reload、/skill:...),避免污染
-    if (event.source === "extension") return { action: "continue" };
-    if (event.text.startsWith("/")) return { action: "continue" };
+    // 默认关闭无条件注入;开启时也仅处理 idle 初始 prompt,护栏见 prompt-inject.mts
+    if (!codegraphInjectEnabled) return { action: "continue" };
 
+    const logPath = resolve(ctx.cwd, ".pi", "logs", "codegraph-inject.jsonl");
+    const sessionId = ctx.sessionManager.getSessionId();
+    const entries = ctx.sessionManager.getEntries();
+    // 只处理 idle 初始 prompt:会话中尚无任何 message 条目
+    const gate = shouldRunHook({
+      source: event.source,
+      text: event.text,
+      streamingBehavior: event.streamingBehavior,
+      isFirstUserMessage: !entries.some((entry) => entry.type === "message"),
+    });
+    if (!gate.run) {
+      void appendInjectLog(logPath, {
+        ts: new Date().toISOString(),
+        sessionId,
+        gate: "skipped",
+        skipReasons: gate.skipReasons,
+      });
+      return { action: "continue" };
+    }
+
+    const started = performance.now();
     try {
       const context = await runWithInput(
         "codegraph",
@@ -83,13 +119,47 @@ export default function (pi: ExtensionAPI) {
         JSON.stringify({ prompt: event.text, cwd: ctx.cwd }),
         { cwd: ctx.cwd, timeoutMs: 15_000 },
       );
-      if (!context.trim()) return { action: "continue" };
+      const elapsedMs = Math.round(performance.now() - started);
+      const outcome = classifyHookOutput(context);
+      const bytes = Buffer.byteLength(context, "utf8");
+      // 无高置信 relevance 不注入:只有真实返回源码的 high 结果才拼进 prompt;
+      // 符号列表(medium)/子项目提示(nudge)/空结果(empty)一律跳过
+      if (outcome !== "high") {
+        void appendInjectLog(logPath, {
+          ts: new Date().toISOString(),
+          sessionId,
+          gate: "ran",
+          outcome,
+          bytes,
+          elapsedMs,
+        });
+        return { action: "continue" };
+      }
+      const limited = applyByteLimit(context, codegraphInjectMaxBytes);
+      void appendInjectLog(logPath, {
+        ts: new Date().toISOString(),
+        sessionId,
+        gate: "ran",
+        outcome,
+        bytes,
+        injectedBytes: Buffer.byteLength(limited.text, "utf8"),
+        truncated: limited.truncated,
+        elapsedMs,
+      });
       // 与 Claude UserPromptSubmit 语义一致:上下文拼进用户 prompt
       return {
         action: "transform",
-        text: event.text + "\n\n" + context.trim(),
+        text: event.text + "\n\n" + limited.text.trim(),
       };
-    } catch {
+    } catch (error) {
+      void appendInjectLog(logPath, {
+        ts: new Date().toISOString(),
+        sessionId,
+        gate: "ran",
+        outcome: "error",
+        error: error instanceof Error ? error.message : String(error),
+        elapsedMs: Math.round(performance.now() - started),
+      });
       return { action: "continue" }; // 失败静默降级,不阻塞用户输入
     }
   });
