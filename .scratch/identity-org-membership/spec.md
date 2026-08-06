@@ -97,7 +97,7 @@ Authoritative context:
 ### 写边界、RLS 与 GRANT（ADR-0008）
 
 - 任何需写 Audit Log 或 Outbox 的写操作一律为 Go trusted command；memberships/organizations/invitations/audit_logs 对 client SELECT-only；唯一例外是 profiles（client 可 INSERT/UPDATE 本人行）。该边界由 RLS/GRANT 强制执行。
-- 五表全部 ENABLE RLS。授权判断收敛为三个 security definer helper：`is_active_member(org_id)`、`has_org_role(org_id, roles[])`、`shares_active_org(user_id)`——放 identity schema、`search_path=''`、函数体内 `(select auth.uid())`、对 PUBLIC/anon/authenticated 撤销 EXECUTE。
+- 五表全部 ENABLE RLS。授权判断收敛为三个 security definer helper：`is_active_member(org_id)`、`has_org_role(org_id, roles[])`、`shares_active_org(user_id)`——放 identity schema、`search_path=''`、函数体内 `(select auth.uid())`；EXECUTE 对 PUBLIC/anon 显式撤销、对 authenticated（与 identity_app）授予——PostgreSQL 以评估策略的调用角色检查 EXECUTE，authenticated 缺权则 RLS 策略无法求值（见 ADR-0008 实施澄清）。
 - 策略结构：profiles 本人或活跃同组织成员可见；organizations 活跃成员可见；memberships 本人行（含已结束）+ 本组织活跃行；invitations Owner/Admin 或 `email = jwt email` 的 pending 行；audit_logs Owner/Admin 只读。即时失权由"只读活行"天然满足，不依赖额外失效机制。
 - Go 使用单一 `identity_app` LOGIN 角色承载命令、Outbox Worker 与 retention sweep（不拆角色、无 BYPASSRLS）；五张 public 表对 identity_app 加 permissive policy（USING true）。grants：profiles SELECT；organizations/memberships/invitations SELECT,INSERT,UPDATE；audit_logs SELECT,INSERT,DELETE（无 UPDATE）；identity 两表 SELECT,INSERT,UPDATE。organizations/memberships 的 DELETE 留给 Governance。
 - 邮箱解析经 `identity.directory (id, email)` security definer 只读视图引用 auth.users，GRANT SELECT 仅 identity_app。
