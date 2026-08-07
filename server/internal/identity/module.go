@@ -1,6 +1,8 @@
 // Package identity is the identity Module's composition surface. The command
-// layer (one-time verification code issuance with synchronous rate limiting)
-// lives in the verification sub-package; the Outbox Worker (SMTP deployment
+// skeleton (unified error envelope, decode-validate-map pipeline, and the
+// route table machinery) lives in the command sub-package; the one-time
+// verification code issuance with synchronous rate limiting lives in the
+// verification sub-package; the Outbox Worker (SMTP deployment
 // configuration, the retry backoff schedule, and the pure deliverer that
 // polls identity.outbox_messages and sends over standard SMTP) lives in the
 // outbox sub-package; the Bearer JWT transport guard (JWKS verification) lives
@@ -14,7 +16,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity/authjwt"
+	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/organizations"
 	"github.com/nevix-ai/server/internal/identity/outbox"
 	"github.com/nevix-ai/server/internal/identity/verification"
@@ -100,11 +102,11 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 // layers', the transport guard's, and the Outbox Worker's dependencies and
 // registers the Module's HTTP routes.
 type Module struct {
-	issuer   *verification.CodeIssuer
-	worker   *outbox.OutboxWorker
-	verifier *authjwt.Verifier
-	orgs     *organizations.Creator
-	cors     func(http.Handler) http.Handler
+	issuer      *verification.CodeIssuer
+	worker      *outbox.OutboxWorker
+	verifier    *authjwt.Verifier
+	orgs        *organizations.Creator
+	corsOrigins []string
 }
 
 // NewModule constructs the command layers, the transport guard, and the
@@ -116,26 +118,23 @@ func NewModule(pool *pgxpool.Pool, cfg Config) (*Module, error) {
 		return nil, err
 	}
 	return &Module{
-		issuer:   verification.NewCodeIssuer(pool, cfg.CodeIssuance),
-		worker:   worker,
-		verifier: authjwt.NewVerifier(cfg.JWKSURL),
-		orgs:     organizations.NewCreator(pool),
-		cors:     corsMiddleware(cfg.CORSAllowedOrigins),
+		issuer:      verification.NewCodeIssuer(pool, cfg.CodeIssuance),
+		worker:      worker,
+		verifier:    authjwt.NewVerifier(cfg.JWKSURL),
+		orgs:        organizations.NewCreator(pool),
+		corsOrigins: cfg.CORSAllowedOrigins,
 	}, nil
 }
 
-// Register mounts the identity Module's external commands behind the CORS
-// whitelist; Bearer JWT commands additionally pass the transport guard. The
-// explicit OPTIONS routes keep browser preflights reachable when the Module
-// is mounted inside a chi Group, where route-scoped middleware never runs
-// for unmatched methods. The Module publishes no Domain Events yet; the bus
-// is part of the Module contract.
+// Register mounts the Module's trusted commands from the static route table:
+// the CORS whitelist gates the Module surface, every path's OPTIONS preflight
+// twin and Allow-Methods value derive from the same table, and routes that do
+// not declare Public mount behind the Bearer JWT guard. The Module publishes
+// no Domain Events yet; the bus is part of the Module contract.
 func (m *Module) Register(r chi.Router, _ event.Bus) {
-	r.Use(m.cors)
-	r.Options("/identity/verification-codes", preflightEndpoint)
-	r.Options("/identity/organizations", preflightEndpoint)
-	r.Post("/identity/verification-codes", m.issuer.ServeHTTP)
-	r.With(m.verifier.Middleware).Post("/identity/organizations", m.orgs.ServeHTTP)
+	routes := m.routes()
+	r.Use(corsMiddleware(m.corsOrigins, command.MethodsByPath(routes)))
+	command.Mount(r, routes, m.verifier.Middleware)
 }
 
 // RunWorkers runs the Module's background workers until ctx is canceled, then
