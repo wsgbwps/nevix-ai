@@ -4,11 +4,15 @@
 
 **Blocked by:** 02 — Go 传输基座 + CreateOrganization
 
-**Status:** ready-for-agent
+**Status:** in-review
 
-- [ ] VITE_SERVER_URL 缺失时启动显式失败；CSP connect-src 按环境精确 origin
-- [ ] e2e：注册 → 显示名 → 建组织 → 进入 App Shell（含字段校验与两步导航、上一步返回）
-- [ ] 设置页个人资料区块可编辑显示名，脏检查与已保存反馈符合定稿行为
-- [ ] 创建组织失败重试不产生重复组织（幂等键经命令保证）
-- [ ] 全部新 Localized Surface 过既有 localization 发布检查；e2e 新用例归入既有 tier
-- [ ] apps/ 属 CI 门禁路径，走 feature branch + PR
+- [x] VITE_SERVER_URL 缺失时启动显式失败；CSP connect-src 按环境精确 origin
+- [x] e2e：注册 → 显示名 → 建组织 → 进入 App Shell（含字段校验与两步导航、上一步返回）
+- [x] 设置页个人资料区块可编辑显示名，脏检查与已保存反馈符合定稿行为
+- [x] 创建组织失败重试不产生重复组织（幂等键经命令保证）
+- [x] 全部新 Localized Surface 过既有 localization 发布检查；e2e 新用例归入既有 tier
+- [x] apps/ 属 CI 门禁路径，走 feature branch + PR
+
+## Comments
+
+- 2026-08-07：实现已提交为 `f8350e5`，PR [#26](https://github.com/wsgbwps/nevix-ai/pull/26) 已创建并等待审查。已通过 Desktop 全量 E2E（49 passed、4 skipped）、unit、typecheck、lint、architecture/localization checks 与 `go test -C server ./...`；最终双轴代码审查无遗留问题。
