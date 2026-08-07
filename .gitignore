@@ -25,9 +25,7 @@ server/bin/
 # IDE
 .vscode/
 .idea/
-.pi/*
-!.pi/extensions/
-!.pi/prompts/
+.pi/tasks
 *.swp
 *.swo
 
