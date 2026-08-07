@@ -9,11 +9,12 @@ import {
   readAuthHarnessConfig,
   uniqueAuthIdentity
 } from '../auth/helpers/supabase-auth'
+import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
 
 test(
-  'signed-in users land in the App Shell with the organization switcher slot and the home entry',
+  'signed-in users land in the App Shell with the organization context card and the home entry',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(60_000)
@@ -22,6 +23,9 @@ test(
 
     const identity = uniqueAuthIdentity('app-shell-presentation')
     const userId = await createAuthUser(authHarness, identity, true)
+    const organization = await seedOrganizationWithMembership(userId, {
+      name: 'Nebula Design'
+    })
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-presentation-'))
 
     try {
@@ -35,11 +39,11 @@ test(
           launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })
         ).toBeVisible()
 
-        // 组织切换器槽位：产品标识占位、不可切换，且不出现下拉死入口。
-        const organizationSwitcher = launched.page.getByRole('button', { name: '组织切换器' })
+        // 组织上下文卡：显示已进入的组织名与角色，链接到组织选择界面，不出现下拉死入口。
+        const organizationSwitcher = launched.page.getByRole('link', { name: '组织切换器' })
         await expect(organizationSwitcher).toBeVisible()
-        await expect(organizationSwitcher).toContainText('Nevix AI')
-        await expect(organizationSwitcher).toBeDisabled()
+        await expect(organizationSwitcher).toContainText(organization.name)
+        await expect(organizationSwitcher).toContainText('拥有者')
         await expect(launched.page.getByRole('menu')).toHaveCount(0)
 
         // NavMain 仅"首页"一个真实入口，位于当前路由位置。
@@ -81,6 +85,9 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
 
   const identity = uniqueAuthIdentity('app-shell-collapse')
   const userId = await createAuthUser(authHarness, identity, true)
+  const organization = await seedOrganizationWithMembership(userId, {
+    name: 'Nebula Collapse'
+  })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-collapse-'))
 
   try {
@@ -95,19 +102,19 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
       const toggle = launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
       const sidebar = launched.page.locator('[data-slot="sidebar"]')
       const homeEntry = sidebar.getByRole('link', { name: '首页' })
-      const organizationSwitcher = launched.page.getByRole('button', { name: '组织切换器' })
+      const organizationSwitcher = launched.page.getByRole('link', { name: '组织切换器' })
       await expect(homeEntry).toBeVisible()
-      await expect(organizationSwitcher).toContainText('Nevix AI')
+      await expect(organizationSwitcher).toContainText(organization.name)
 
       // 折叠为图标形态：文本入口隐藏，仅图标保留。
       await toggle.click()
       await expect(homeEntry).toHaveCount(0)
-      await expect(organizationSwitcher.getByText('Nevix AI', { exact: true })).toBeHidden()
+      await expect(organizationSwitcher.getByText(organization.name, { exact: true })).toBeHidden()
 
       // 再次展开后全部恢复。
       await toggle.click()
       await expect(homeEntry).toBeVisible()
-      await expect(organizationSwitcher).toContainText('Nevix AI')
+      await expect(organizationSwitcher).toContainText(organization.name)
     } finally {
       await launched.electronApp.close()
     }
@@ -124,6 +131,7 @@ test('the user menu shows the signed-in email and signs out of this device', asy
 
   const identity = uniqueAuthIdentity('app-shell-user-menu')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: 'Nebula User Menu' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-user-menu-'))
 
   try {

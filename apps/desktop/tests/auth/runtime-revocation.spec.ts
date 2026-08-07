@@ -9,6 +9,7 @@ import {
   readAuthHarnessConfig,
   uniqueAuthIdentity
 } from './helpers/supabase-auth'
+import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
 const SESSION_FILE_NAME = 'authentication-session.enc'
@@ -26,6 +27,8 @@ test('a Session revoked at runtime after a sign-up attempt still returns to the 
 
   const identity = uniqueAuthIdentity('runtime-revocation')
   const userId = await createAuthUser(authHarness, identity, true)
+  // Sign-in must reach the App Shell before the runtime revocation arrives.
+  await seedOrganizationWithMembership(userId, { name: 'Runtime Revocation Org' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-runtime-revocation-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 

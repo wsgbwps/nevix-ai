@@ -11,6 +11,7 @@ import {
   revokeSessionOutsideDesktop,
   uniqueAuthIdentity
 } from './helpers/supabase-auth'
+import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
 const SESSION_FILE_NAME = 'authentication-session.enc'
@@ -22,6 +23,8 @@ test('a securely persisted Session refreshes before restore, survives an outage,
 
   const identity = uniqueAuthIdentity('session-restore')
   const userId = await createAuthUser(authHarness, identity, true)
+  // Signing in must reach the App Shell, so the User needs an Organization to auto-enter.
+  await seedOrganizationWithMembership(userId, { name: 'Session Restore Org' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-restore-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
@@ -114,6 +117,7 @@ test('a revoked refresh Session is cleared and returns to the localized login bo
 
   const identity = uniqueAuthIdentity('revoked-restore')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: 'Revoked Restore Org' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-revoked-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
@@ -272,6 +276,7 @@ test('unavailable secure storage keeps only the runtime Session and offline logo
 
   const identity = uniqueAuthIdentity('unavailable-storage')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: 'Unavailable Storage Org' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-unavailable-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
   const environment = { NEVIX_TEST_UNAVAILABLE_SECURE_STORAGE: '1' }
@@ -339,6 +344,7 @@ test('a secure-storage outage keeps the encrypted Session envelope and restore s
 
   const identity = uniqueAuthIdentity('storage-outage')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: 'Storage Outage Org' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-outage-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
@@ -433,6 +439,7 @@ test('Linux basic_text is treated as unavailable and never creates a Session fil
 
   const identity = uniqueAuthIdentity('basic-text-storage')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: 'Basic Text Org' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-basic-text-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 

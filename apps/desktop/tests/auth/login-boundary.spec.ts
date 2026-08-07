@@ -11,6 +11,7 @@ import {
   signInOutsideDesktop,
   uniqueAuthIdentity
 } from './helpers/supabase-auth'
+import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
 
@@ -74,6 +75,8 @@ test(
 
     const identity = uniqueAuthIdentity('verified-login')
     const userId = await createAuthUser(authHarness, identity, true)
+    // A verified User with a single Organization auto-enters it at startup, landing in the shell.
+    await seedOrganizationWithMembership(userId, { name: 'Verified Login Org' })
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-login-'))
 
     try {
@@ -188,6 +191,7 @@ test('sign-out revokes only the Desktop Session and reopening stays signed out',
 
   const identity = uniqueAuthIdentity('local-signout')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: 'Local Signout Org' })
   const otherSession = await signInOutsideDesktop(authHarness, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-signout-'))
 

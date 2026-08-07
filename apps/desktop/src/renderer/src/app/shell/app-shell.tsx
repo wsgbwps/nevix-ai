@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from '@tanstack/react-router'
 import { ChevronsUpDownIcon, HomeIcon, LogOutIcon, SettingsIcon } from 'lucide-react'
+import { useActiveOrganization } from '../../features/organization'
 import { useAuthenticationState } from '../authentication-state'
 import { Avatar, AvatarFallback } from '../../components/ui/avatar'
 import {
@@ -36,15 +37,17 @@ import {
 import { TooltipProvider } from '../../components/ui/tooltip'
 
 function BrandMark({
+  children = 'N',
   className = 'size-8 rounded-lg text-sm'
 }: {
+  readonly children?: React.ReactNode
   className?: string
 }): React.JSX.Element {
   return (
     <div
       className={`bg-primary text-primary-foreground grid shrink-0 place-items-center font-bold ${className}`}
     >
-      N
+      {children}
     </div>
   )
 }
@@ -60,14 +63,24 @@ export function AppShell({
 }): React.JSX.Element | null {
   const { t } = useTranslation('app')
   const { t: authenticationT } = useTranslation('authentication')
+  const { t: organizationT } = useTranslation('organization')
   const authentication = useAuthenticationState()
   const location = useLocation()
+  const organization = useActiveOrganization()
 
   if (authentication.status !== 'authenticated') {
     // The root route is already navigating to the authentication view; render nothing on the
     // transient frame so the App Shell never shows for a signed-out user.
     return null
   }
+
+  if (!organization.activeOrganization) {
+    // No entered Organization context: the root route is navigating to the startup branches, so
+    // the App Shell never renders Organization data the Session is not entitled to.
+    return null
+  }
+
+  const activeOrganization = organization.activeOrganization
 
   const userInitial = initialOf(authentication.userEmail)
   // The App Shell currently hosts a single real entry; future business Features gain routes in
@@ -81,20 +94,23 @@ export function AppShell({
           <SidebarHeader>
             <SidebarMenu>
               <SidebarMenuItem>
-                {/* Organization switcher slot: the form stays, the behavior is empty until the
-                  Organization UI lands; it shows the product mark placeholder and no fictional
-                  organization name. */}
-                <SidebarMenuButton
-                  size="lg"
-                  disabled
-                  aria-label={t('shell.organizationSwitcher')}
-                  className="disabled:opacity-100"
-                >
-                  <BrandMark />
-                  <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate font-medium">Nevix AI</span>
-                  </div>
-                  <ChevronsUpDownIcon className="ml-auto size-4" />
+                {/* Organization context card: the entered Organization with the User's role; it
+                  links to the Organization picker so the User can switch or create. */}
+                <SidebarMenuButton size="lg" asChild aria-label={t('shell.organizationSwitcher')}>
+                  <Link to="/select-organization">
+                    <BrandMark>
+                      {activeOrganization.organizationName.charAt(0).toUpperCase()}
+                    </BrandMark>
+                    <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+                      <span className="truncate font-medium">
+                        {activeOrganization.organizationName}
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        {organizationT(`roles.${activeOrganization.role}`)}
+                      </span>
+                    </div>
+                    <ChevronsUpDownIcon className="ml-auto size-4" />
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

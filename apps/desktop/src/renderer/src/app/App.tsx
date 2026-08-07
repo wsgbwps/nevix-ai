@@ -1,7 +1,11 @@
 import { useEffect, useMemo } from 'react'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
 import { useAuthentication } from '../features/authentication'
-import { OrganizationOnboardingProvider, useOrganizationOnboarding } from '../features/organization'
+import {
+  ActiveOrganizationProvider,
+  OrganizationOnboardingProvider,
+  useOrganizationOnboarding
+} from '../features/organization'
 import { AuthenticationStateContext, useAuthenticationState } from './authentication-state'
 import { routeTree } from './routeTree.gen'
 
@@ -19,8 +23,16 @@ function App(): React.JSX.Element {
   return (
     <AuthenticationStateContext.Provider value={authentication}>
       <OrganizationOnboardingProvider>
-        <ResetOnboardingAfterAuthenticationEnds />
-        <RouterProvider router={router} />
+        <ActiveOrganizationProvider
+          // Remounting on the authentication transition resets the Organization state, so the
+          // next Session never renders data the previous Session was entitled to.
+          key={authentication.status === 'authenticated' ? 'authenticated' : 'signed-out'}
+          isAuthenticated={authentication.status === 'authenticated'}
+          getSession={authentication.getSession}
+        >
+          <ResetOnboardingAfterAuthenticationEnds />
+          <RouterProvider router={router} />
+        </ActiveOrganizationProvider>
       </OrganizationOnboardingProvider>
     </AuthenticationStateContext.Provider>
   )
