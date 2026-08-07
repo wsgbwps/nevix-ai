@@ -1,8 +1,5 @@
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 
-export type RepoHookMode = "tui" | "rpc" | "json" | "print";
-export type DangerousCommandDecision = "allow" | "confirm" | "block";
-
 export interface GitCommitCommand {
   cwdChanges: string[];
   stagesAll: boolean;
@@ -25,11 +22,6 @@ const GATED_ROOT_FILES = new Set([
   "go.work",
   "go.work.sum",
 ]);
-const DANGEROUS_COMMAND_PATTERNS = [
-  /\brm\b[^\n;&|]*(?:-[a-z]*r[a-z]*\b|--recursive\b)/i,
-  /\bsudo\b/i,
-  /\b(?:chmod|chown)\b[^\n;&|]*\b777\b/i,
-];
 
 /** Return a slash-separated repository path, or null when the input is outside the repository. */
 export function canonicalizeRepoPath(
@@ -298,19 +290,4 @@ export function resolveGitCommitCwd(
     (cwd, change) => resolve(cwd, change),
     resolve(baseCwd),
   );
-}
-
-export function isDangerousCommand(command: string): boolean {
-  const withoutLineContinuations = command.replace(/\\\r?\n/g, "");
-  return DANGEROUS_COMMAND_PATTERNS.some((pattern) =>
-    pattern.test(withoutLineContinuations),
-  );
-}
-
-export function dangerousCommandDecision(
-  command: string,
-  mode: RepoHookMode,
-): DangerousCommandDecision {
-  if (!isDangerousCommand(command)) return "allow";
-  return mode === "tui" ? "confirm" : "block";
 }

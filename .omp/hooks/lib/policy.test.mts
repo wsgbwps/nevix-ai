@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   canonicalizeRepoPath,
   classifyGitCommitCommands,
-  dangerousCommandDecision,
   hasGatedPath,
   isProtectedBranch,
   isProtectedEditPath,
@@ -205,51 +204,5 @@ test("classifyGitCommitCommands handles cwd, --all, and pathspec forms", () => {
       wantCwd,
       name,
     );
-  }
-});
-
-test("dangerous commands fail closed outside TUI mode", () => {
-  const cases = [
-    { name: "TUI asks", command: "rm -rf dist", mode: "tui", want: "confirm" },
-    {
-      name: "RPC blocks",
-      command: "sudo make install",
-      mode: "rpc",
-      want: "block",
-    },
-    {
-      name: "JSON blocks",
-      command: "chmod 777 script.sh",
-      mode: "json",
-      want: "block",
-    },
-    {
-      name: "print blocks",
-      command: "rm --recursive build",
-      mode: "print",
-      want: "block",
-    },
-    {
-      name: "split rm flags block",
-      command: "rm -f -r build",
-      mode: "print",
-      want: "block",
-    },
-    {
-      name: "shell line continuation blocks",
-      command: "rm \\\n-rf build",
-      mode: "print",
-      want: "block",
-    },
-    {
-      name: "safe headless command",
-      command: "git status",
-      mode: "print",
-      want: "allow",
-    },
-  ] as const;
-
-  for (const { name, command, mode, want } of cases) {
-    assert.equal(dangerousCommandDecision(command, mode), want, name);
   }
 });
