@@ -126,10 +126,14 @@ func NewModule(pool *pgxpool.Pool, cfg Config) (*Module, error) {
 
 // Register mounts the identity Module's external commands behind the CORS
 // whitelist; Bearer JWT commands additionally pass the transport guard. The
-// Module publishes no Domain Events yet; the bus is part of the Module
-// contract.
+// explicit OPTIONS routes keep browser preflights reachable when the Module
+// is mounted inside a chi Group, where route-scoped middleware never runs
+// for unmatched methods. The Module publishes no Domain Events yet; the bus
+// is part of the Module contract.
 func (m *Module) Register(r chi.Router, _ event.Bus) {
 	r.Use(m.cors)
+	r.Options("/identity/verification-codes", preflightEndpoint)
+	r.Options("/identity/organizations", preflightEndpoint)
 	r.Post("/identity/verification-codes", m.issuer.ServeHTTP)
 	r.With(m.verifier.Middleware).Post("/identity/organizations", m.orgs.ServeHTTP)
 }

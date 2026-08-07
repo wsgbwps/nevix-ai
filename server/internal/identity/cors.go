@@ -38,3 +38,10 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// preflightEndpoint answers preflights the middleware passed through — the
+// origin is outside the whitelist, so the response carries no CORS headers
+// and the browser still enforces the denial.
+func preflightEndpoint(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
