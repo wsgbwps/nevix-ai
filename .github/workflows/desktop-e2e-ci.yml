@@ -63,6 +63,15 @@ jobs:
         run: xvfb-run -a pnpm --filter @nevix/desktop test:e2e:smoke
         env:
           NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: "1"
+      # Failures are undiagnosable without the page snapshot Playwright writes on failure.
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-smoke-test-results
+          path: apps/desktop/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
       # Backstop for the script's own EXIT trap: if the runner kills the script,
       # the trap never fires, so tear the stack down here as well.
       - name: Tear down Supabase stack
@@ -100,6 +109,15 @@ jobs:
         run: xvfb-run -a pnpm --filter @nevix/desktop test:e2e
         env:
           NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: "1"
+      # Failures are undiagnosable without the page snapshot Playwright writes on failure.
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-full-test-results
+          path: apps/desktop/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
       # Backstop for the script's own EXIT trap: if the runner kills the script,
       # the trap never fires, so tear the stack down here as well.
       - name: Tear down Supabase stack
