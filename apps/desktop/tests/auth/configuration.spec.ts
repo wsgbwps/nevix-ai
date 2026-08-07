@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp } from '../helpers/electron-app'
 
-async function expectAuthenticationUnavailable(): Promise<void> {
+async function expectAuthenticationUnavailable(expectedConnectSource: string): Promise<void> {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-config-'))
 
   try {
@@ -18,7 +18,9 @@ async function expectAuthenticationUnavailable(): Promise<void> {
         launched.page.getByRole('heading', { name: 'Authentication is unavailable' })
       ).toBeVisible()
       await expect(
-        launched.page.getByText('This build is missing valid public Supabase configuration.')
+        launched.page.getByText(
+          'This build is missing valid public Supabase or server configuration.'
+        )
       ).toBeVisible()
       await expect(launched.page.getByRole('button', { name: 'Sign in' })).toHaveCount(0)
       await expect(
@@ -27,7 +29,7 @@ async function expectAuthenticationUnavailable(): Promise<void> {
       const policy = await launched.page
         .locator('meta[http-equiv="Content-Security-Policy"]')
         .getAttribute('content')
-      expect(policy).toContain("connect-src 'none'")
+      expect(policy).toContain(`connect-src ${expectedConnectSource}`)
     } finally {
       await launched.electronApp.close()
     }
@@ -42,7 +44,16 @@ test('missing or invalid public Supabase configuration blocks the application', 
     'requires the configuration-failure build produced by the Auth test command'
   )
 
-  await expectAuthenticationUnavailable()
+  await expectAuthenticationUnavailable("'none'")
+})
+
+test('missing VITE_SERVER_URL blocks the application at startup', async () => {
+  test.skip(
+    process.env.NEVIX_EXPECT_INVALID_SERVER_CONFIG !== '1',
+    'requires the configuration-failure build produced by the Auth test command'
+  )
+
+  await expectAuthenticationUnavailable('https://example.supabase.co')
 })
 
 test('production rejects a private HTTP Supabase origin at the Authentication boundary', async () => {
@@ -51,5 +62,5 @@ test('production rejects a private HTTP Supabase origin at the Authentication bo
     'requires the production private-HTTP build produced by the Auth test command'
   )
 
-  await expectAuthenticationUnavailable()
+  await expectAuthenticationUnavailable("'none'")
 })

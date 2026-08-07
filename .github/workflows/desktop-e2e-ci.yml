@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - "apps/desktop/**"
+      - "server/**"
+      - "supabase/**"
+      - "scripts/**"
       - ".github/workflows/desktop-e2e-ci.yml"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -15,6 +18,9 @@ on:
       - main
     paths:
       - "apps/desktop/**"
+      - "server/**"
+      - "supabase/**"
+      - "scripts/**"
       - ".github/workflows/desktop-e2e-ci.yml"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -31,7 +37,7 @@ jobs:
     if: github.event_name == 'pull_request'
     # Pinned runner image so an unannounced runner switch cannot change the stack.
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
@@ -41,6 +47,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - name: Install Electron runtime dependencies
         run: >-
           sudo apt-get update &&
@@ -57,7 +67,7 @@ jobs:
       # the trap never fires, so tear the stack down here as well.
       - name: Tear down Supabase stack
         if: always()
-        run: pnpm --filter @nevix/desktop exec supabase --workdir tests/auth/harness stop --no-backup || true
+        run: pnpm exec supabase stop --no-backup || true
 
   e2e-full:
     name: Full E2E Suite
@@ -74,6 +84,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - name: Install Electron runtime dependencies
         run: >-
           sudo apt-get update &&
@@ -90,4 +104,4 @@ jobs:
       # the trap never fires, so tear the stack down here as well.
       - name: Tear down Supabase stack
         if: always()
-        run: pnpm --filter @nevix/desktop exec supabase --workdir tests/auth/harness stop --no-backup || true
+        run: pnpm exec supabase stop --no-backup || true

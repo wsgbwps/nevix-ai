@@ -6,14 +6,14 @@ import {
 export const languageTranslations = defineResourceTranslations({
   'zh-CN': {
     heading: '界面语言',
-    description: '应用界面的显示语言',
+    description: '选择 Desktop 界面的显示语言。',
     followSystem: '跟随系统',
     zhCN: '简体中文',
     en: 'English'
   },
   en: {
     heading: 'Interface language',
-    description: 'The display language of the app interface',
+    description: 'Choose the language used in the Desktop interface.',
     followSystem: 'Follow system',
     zhCN: 'Simplified Chinese',
     en: 'English'

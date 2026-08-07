@@ -7,7 +7,7 @@ export const authenticationTranslations = defineResourceTranslations({
   'zh-CN': {
     configurationError: {
       heading: '认证暂不可用',
-      description: '此构建缺少有效的 Supabase 公开配置。'
+      description: '此构建缺少有效的 Supabase 或服务端公开配置。'
     },
     restoring: {
       heading: '正在初始化认证',
@@ -113,7 +113,7 @@ export const authenticationTranslations = defineResourceTranslations({
   en: {
     configurationError: {
       heading: 'Authentication is unavailable',
-      description: 'This build is missing valid public Supabase configuration.'
+      description: 'This build is missing valid public Supabase or server configuration.'
     },
     restoring: {
       heading: 'Initializing authentication',

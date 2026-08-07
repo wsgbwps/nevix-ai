@@ -1,7 +1,8 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
 import { useAuthentication } from '../features/authentication'
-import { AuthenticationStateContext } from './authentication-state'
+import { OrganizationOnboardingProvider, useOrganizationOnboarding } from '../features/organization'
+import { AuthenticationStateContext, useAuthenticationState } from './authentication-state'
 import { routeTree } from './routeTree.gen'
 
 function App(): React.JSX.Element {
@@ -17,9 +18,25 @@ function App(): React.JSX.Element {
 
   return (
     <AuthenticationStateContext.Provider value={authentication}>
-      <RouterProvider router={router} />
+      <OrganizationOnboardingProvider>
+        <ResetOnboardingAfterAuthenticationEnds />
+        <RouterProvider router={router} />
+      </OrganizationOnboardingProvider>
     </AuthenticationStateContext.Provider>
   )
+}
+
+function ResetOnboardingAfterAuthenticationEnds(): null {
+  const { status } = useAuthenticationState()
+  const onboarding = useOrganizationOnboarding()
+
+  useEffect(() => {
+    if (status !== 'authenticated' && onboarding.isEligible) {
+      onboarding.completeOnboarding()
+    }
+  }, [onboarding, status])
+
+  return null
 }
 
 export default App

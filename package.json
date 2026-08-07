@@ -18,7 +18,7 @@
   "packageManager": "pnpm@11.0.9",
   "lint-staged": {
     "apps/desktop/**/*.{ts,tsx,js,jsx,json,css,yaml}": [
-      "prettier --write --config apps/desktop/.prettierrc.yaml"
+      "prettier --write --config apps/desktop/.prettierrc.yaml --ignore-path apps/desktop/.prettierignore"
     ],
     "server/**/*.go": [
       "bash -c '\"$(go env GOPATH)/bin/goimports\" -w \"$@\"' --"

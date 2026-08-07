@@ -1,9 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { AuthenticationScreen } from '../../features/authentication'
+import { useOrganizationOnboarding } from '../../features/organization'
 import { useAuthenticationState } from '../authentication-state'
 
 function AuthenticationView(): React.JSX.Element | null {
   const authentication = useAuthenticationState()
+  const onboarding = useOrganizationOnboarding()
 
   if (authentication.status === 'authenticated') {
     // The root route is already navigating to the authenticated view; render nothing on the
@@ -27,7 +29,9 @@ function AuthenticationView(): React.JSX.Element | null {
       onShowRecovery={authentication.showRecovery}
       onSignIn={authentication.signIn}
       onSignUp={authentication.signUp}
-      onVerifySignUp={authentication.verifySignUp}
+      onVerifySignUp={async (code) => {
+        if (await authentication.verifySignUp(code)) onboarding.beginOnboarding()
+      }}
       onResendSignUp={authentication.resendSignUp}
       onRequestRecovery={authentication.requestRecovery}
       onVerifyRecovery={authentication.verifyRecovery}

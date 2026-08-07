@@ -1,0 +1,13 @@
+[
+  {
+    "kty": "EC",
+    "x": "80OJsTP1PLUl6HnC5K8k3TtuoBTeXfUT68qhbA3JvHE",
+    "y": "buWbCZmPExZZW47SwnCjl0_ZKBcz6O1JtKfo5l9oIrw",
+    "crv": "P-256",
+    "d": "ixEfaRnjnvhsuTnTQd46ClTJpMxTVURJLFb0ntsS4no",
+    "kid": "nevix-local-development-es256",
+    "alg": "ES256",
+    "key_ops": ["sign"],
+    "use": "sig"
+  }
+]

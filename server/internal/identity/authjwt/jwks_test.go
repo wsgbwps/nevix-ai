@@ -8,6 +8,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -82,7 +83,8 @@ func signES256(t *testing.T, key *ecdsa.PrivateKey, kid, sub string, exp time.Ti
 		t.Fatalf("marshal claims: %v", err)
 	}
 	signingInput := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
-	r, s, err := ecdsa.Sign(rand.Reader, key, []byte(signingInput))
+	digest := sha256.Sum256([]byte(signingInput))
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
 	}

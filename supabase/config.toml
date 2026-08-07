@@ -168,8 +168,11 @@ additional_redirect_urls = ["https://127.0.0.1:3000"]
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
 # jwt_issuer = ""
-# Path to JWT signing key. DO NOT commit your signing keys file to git.
-# signing_keys_path = "./signing_keys.json"
+# This committed private JWK is deliberately restricted to the disposable local
+# development/CI stack. Production supplies its own signing keys and never reads
+# this repository fixture; local ES256 issuance keeps the Desktop's real Go
+# JWKS-verification path representative of production.
+signing_keys_path = "./local-development-es256.jwk.json"
 # If disabled, the refresh token will never expire.
 enable_refresh_token_rotation = true
 # Allows refresh tokens to be reused after expiry, up to the specified interval in seconds.
@@ -265,11 +268,10 @@ content_path = "./supabase/templates/recovery.html"
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
 
-# Uncomment to customize notification email template
-# [auth.email.notification.password_changed]
-# enabled = true
-# subject = "Your password has been changed"
-# content_path = "./templates/password_changed_notification.html"
+[auth.email.notification.password_changed]
+enabled = true
+subject = "Nevix AI password changed / Nevix AI 密码已修改"
+content_path = "./templates/password-changed-notification.html"
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.

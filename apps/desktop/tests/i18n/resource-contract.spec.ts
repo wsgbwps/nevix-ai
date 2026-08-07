@@ -17,12 +17,16 @@ import { windowResourceOwner } from '../../src/main/language/resources'
 import { appResourceOwner } from '../../src/renderer/src/app/i18n'
 import { authenticationResourceOwner } from '../../src/renderer/src/features/authentication'
 import { languageResourceOwner } from '../../src/renderer/src/features/language'
+import { organizationResourceOwner } from '../../src/renderer/src/features/organization'
+import { profileResourceOwner } from '../../src/renderer/src/features/profile'
 
 const resourceOwners = [
   windowResourceOwner,
   appResourceOwner,
   authenticationResourceOwner,
-  languageResourceOwner
+  languageResourceOwner,
+  organizationResourceOwner,
+  profileResourceOwner
 ]
 
 test('each Supported Language has complete non-empty resources for every namespace', () => {
