@@ -1,5 +1,5 @@
 ---
-description: Independent code reviewer — reviews a branch/PR/diff against the repo's two axes (Standards: documented conventions; Spec: the originating issue) with independent judgment. Read-only.
+description: "Independent code reviewer — reviews a branch/PR/diff against the repo's two axes (Standards: documented conventions; Spec: the originating issue) with independent judgment. Read-only."
 tools: "read, bash, ls, ext:pi-fff/ffgrep, ext:pi-fff/fffind"
 model: openai-codex/gpt-5.6-sol
 thinking: xhigh
