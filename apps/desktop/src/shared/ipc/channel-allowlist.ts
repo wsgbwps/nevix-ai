@@ -11,7 +11,9 @@ const invokeChannels = {
   'authentication:replace-session': true,
   'language:get-bootstrap': true,
   'language:get-language-mode': true,
-  'language:set-language-mode': true
+  'language:set-language-mode': true,
+  'organization:get-remembered-active-organization': true,
+  'organization:set-remembered-active-organization': true
 } satisfies Record<keyof IpcChannelMap, true>
 
 const eventChannels = {

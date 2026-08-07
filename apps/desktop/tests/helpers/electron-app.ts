@@ -16,6 +16,7 @@ const FORBIDDEN_CHILD_ENVIRONMENT_KEYS = [
   'DATABASE_URL',
   'DB_URL',
   'JWT_SECRET',
+  'NEVIX_TEST_DATABASE_URL',
   'NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY',
   'POSTGRES_PASSWORD',
   'POSTGRES_URL',
@@ -71,6 +72,20 @@ export async function launchTestApp({
   }
 
   return { electronApp, page }
+}
+
+/**
+ * Reports whether the current platform offers a secure persistence backend for the Session:
+ * a native Keychain, DPAPI, or Secret Service. Linux's basic_text fallback stores plaintext
+ * and is treated as unavailable, so no Session is persisted there by design.
+ */
+export async function hasSecurePersistenceBackend(
+  electronApp: ElectronApplication
+): Promise<boolean> {
+  return electronApp.evaluate(({ safeStorage }) => {
+    if (!safeStorage.isEncryptionAvailable()) return false
+    return process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'
+  })
 }
 
 export async function expectWindowTitle(

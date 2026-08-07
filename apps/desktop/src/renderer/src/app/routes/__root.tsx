@@ -1,6 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { createRootRoute, Outlet, useLocation, useRouter } from '@tanstack/react-router'
-import { useOrganizationOnboarding } from '../../features/organization'
+import {
+  StartupRestoringView,
+  useActiveOrganization,
+  useOrganizationOnboarding
+} from '../../features/organization'
 import { useAuthenticationState } from '../authentication-state'
 
 function RootView(): React.JSX.Element {
@@ -8,27 +12,44 @@ function RootView(): React.JSX.Element {
   const location = useLocation()
   const { status } = useAuthenticationState()
   const { isEligible } = useOrganizationOnboarding()
-  const didRedirectOnboarding = useRef(false)
+  const organization = useActiveOrganization()
 
   useEffect(() => {
     if (status !== 'authenticated') {
-      didRedirectOnboarding.current = false
       void router.navigate({ to: '/auth' })
       return
     }
 
-    if (isEligible && !didRedirectOnboarding.current) {
-      didRedirectOnboarding.current = true
-      void router.navigate({ to: '/onboarding' })
+    // Onboarding owns the screen for as long as it is eligible, so this branch must return
+    // instead of falling through to the Organization branches below.
+    if (isEligible) {
+      if (location.pathname !== '/onboarding') {
+        void router.navigate({ to: '/onboarding' })
+      }
       return
     }
 
-    if (location.pathname === '/auth') {
+    // The startup verification has not taken a branch yet; the restoring view renders instead.
+    if (organization.startupPhase !== 'ready') return
+
+    if (!organization.activeOrganization) {
+      // Zero Organizations already begins onboarding above, so here at least one Membership
+      // exists and the User must pick one (multiple Organizations, or a stale device memory).
+      if (location.pathname !== '/select-organization') {
+        void router.navigate({ to: '/select-organization' })
+      }
+      return
+    }
+
+    if (location.pathname === '/auth' || location.pathname === '/select-organization') {
       void router.navigate({ to: '/' })
     }
-  }, [isEligible, location.pathname, router, status])
+  }, [isEligible, location.pathname, organization, router, status])
 
-  return <Outlet />
+  const isRestoringOrganizationContext =
+    status === 'authenticated' && !isEligible && organization.startupPhase !== 'ready'
+
+  return isRestoringOrganizationContext ? <StartupRestoringView /> : <Outlet />
 }
 
 export const Route = createRootRoute({

@@ -7,7 +7,7 @@ import {
   validateDisplayName,
   type DisplayNameValidation
 } from '../../../lib/display-name-validation'
-import { createOrganization } from '../api/create-organization'
+import { createOrganization, type Organization } from '../api/create-organization'
 
 type OnboardingStep = 1 | 2
 type OrganizationNameValidation = 'required' | undefined
@@ -20,7 +20,7 @@ interface AuthenticatedSession {
 interface OnboardingPageProps {
   readonly getSession: () => Promise<AuthenticatedSession | undefined>
   readonly saveDisplayName: (session: AuthenticatedSession, displayName: string) => Promise<unknown>
-  readonly onComplete: () => void
+  readonly onComplete: (organization: Organization) => void
 }
 
 export function OnboardingPage({
@@ -80,12 +80,12 @@ export function OnboardingPage({
 
       const id = organizationIdRef.current ?? crypto.randomUUID()
       organizationIdRef.current = id
-      await createOrganization({
+      const organization = await createOrganization({
         accessToken: session.accessToken,
         id,
         name: organizationName.trim()
       })
-      onComplete()
+      onComplete(organization)
     } catch {
       // Keep the values and generated client ID untouched so retry remains idempotent.
     } finally {

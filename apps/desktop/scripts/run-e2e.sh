@@ -180,6 +180,7 @@ fi
 NEVIX_TEST_SUPABASE_URL="$api_url" \
   NEVIX_TEST_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
   NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
+  NEVIX_TEST_DATABASE_URL="$database_url" \
   NEVIX_TEST_MAILPIT_URL="$mailpit_url" \
   NEVIX_TEST_SERVER_URL="$server_url" \
   pnpm exec playwright test "${playwright_args[@]}"

@@ -14,6 +14,7 @@ import {
   readAuthHarnessConfig,
   uniqueAuthIdentity
 } from '../auth/helpers/supabase-auth'
+import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
 const LANGUAGE_MODE_FILE_NAME = 'language-mode.json'
@@ -129,6 +130,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
 
   const identity = uniqueAuthIdentity('settings-language-mode')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: '语言模式组织' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-language-mode-'))
 
   try {

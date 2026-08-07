@@ -1,6 +1,6 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
 
-interface AuthHarnessConfig {
+export interface AuthHarnessConfig {
   readonly url: string
   readonly publishableKey: string
   readonly serviceRoleKey: string

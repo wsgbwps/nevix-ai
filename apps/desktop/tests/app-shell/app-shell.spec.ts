@@ -9,6 +9,7 @@ import {
   readAuthHarnessConfig,
   uniqueAuthIdentity
 } from '../auth/helpers/supabase-auth'
+import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
 
@@ -22,6 +23,7 @@ test(
 
     const identity = uniqueAuthIdentity('app-shell-presentation')
     const userId = await createAuthUser(authHarness, identity, true)
+    await seedOrganizationWithMembership(userId, { name: 'Nebula Design' })
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-presentation-'))
 
     try {
@@ -81,6 +83,7 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
 
   const identity = uniqueAuthIdentity('app-shell-collapse')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: 'Nebula Collapse' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-collapse-'))
 
   try {
@@ -124,6 +127,7 @@ test('the user menu shows the signed-in email and signs out of this device', asy
 
   const identity = uniqueAuthIdentity('app-shell-user-menu')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: 'Nebula User Menu' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-user-menu-'))
 
   try {

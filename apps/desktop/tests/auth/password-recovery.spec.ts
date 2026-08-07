@@ -17,6 +17,7 @@ import {
   waitForNotificationMessage,
   waitForRegistrationMessage
 } from './helpers/mailpit'
+import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
 const mailpitHarness = readMailpitHarnessConfig()
@@ -32,6 +33,9 @@ test('the full recovery loop rotates the password, revokes old Sessions, and nev
   // Leading/trailing spaces and multi-byte characters prove the original-bytes contract end to end.
   const newPassword = '  新密码Rotated42  '
   const userId = await createAuthUser(authHarness, identity, true)
+  // The final sign-in with the rotated password must reach the App Shell, which requires an
+  // Organization to auto-enter.
+  await seedOrganizationWithMembership(userId, { name: 'Recovery Org' })
   const oldSession = await signInOutsideDesktop(authHarness, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-recovery-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)

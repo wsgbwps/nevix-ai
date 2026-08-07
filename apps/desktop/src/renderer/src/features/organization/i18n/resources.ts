@@ -5,6 +5,17 @@ import {
 
 export const organizationTranslations = defineResourceTranslations({
   'zh-CN': {
+    startup: {
+      restoring: '正在恢复你的工作区…'
+    },
+    picker: {
+      heading: '选择组织',
+      subheading: '选择一个组织进入工作区，设备会记住你上次的选择。',
+      signedInAs: '已登录 {{email}}',
+      createOrg: '创建新组织',
+      signOut: '退出登录',
+      lastUsed: '上次使用'
+    },
     onboarding: {
       stepLabel: '第 {{current}} 步，共 {{total}} 步',
       profileHeading: '你怎么称呼？',
@@ -26,6 +37,17 @@ export const organizationTranslations = defineResourceTranslations({
     }
   },
   en: {
+    startup: {
+      restoring: 'Restoring your workspace…'
+    },
+    picker: {
+      heading: 'Select an organization',
+      subheading: 'Pick an organization to enter. This device remembers your last choice.',
+      signedInAs: 'Signed in as {{email}}',
+      createOrg: 'Create new organization',
+      signOut: 'Sign out',
+      lastUsed: 'Last used'
+    },
     onboarding: {
       stepLabel: 'Step {{current}} of {{total}}',
       profileHeading: 'What should we call you?',

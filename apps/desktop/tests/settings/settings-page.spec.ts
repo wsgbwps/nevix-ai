@@ -9,6 +9,7 @@ import {
   readAuthHarnessConfig,
   uniqueAuthIdentity
 } from '../auth/helpers/supabase-auth'
+import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
 
@@ -19,6 +20,7 @@ test('signed-in users reach the standalone Settings Page from the user menu and 
 
   const identity = uniqueAuthIdentity('settings-page-presentation')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: '设置页组织' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-page-presentation-'))
 
   try {
@@ -71,6 +73,7 @@ test('the Settings Page Select switches the Interface Language without reloading
 
   const identity = uniqueAuthIdentity('settings-page-language')
   const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: '语言切换组织' })
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-page-language-'))
 
   try {
