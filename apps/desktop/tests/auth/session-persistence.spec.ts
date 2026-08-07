@@ -1,9 +1,13 @@
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Session } from '@supabase/supabase-js'
-import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
+import {
+  hasSecurePersistenceBackend,
+  launchTestApp,
+  signOutFromUserMenu
+} from '../helpers/electron-app'
 import {
   createAuthUser,
   deleteAuthUser,
@@ -506,13 +510,6 @@ async function invokeAuthenticationChannel(
     },
     { channel, request }
   )
-}
-
-async function hasSecurePersistenceBackend(electronApp: ElectronApplication): Promise<boolean> {
-  return electronApp.evaluate(({ safeStorage }) => {
-    if (!safeStorage.isEncryptionAvailable()) return false
-    return process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'
-  })
 }
 
 function expectEncryptedEnvelope(envelope: string, email: string, session?: Session): void {

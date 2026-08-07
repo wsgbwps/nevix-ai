@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchTestApp } from '../helpers/electron-app'
+import { hasSecurePersistenceBackend, launchTestApp } from '../helpers/electron-app'
 import {
   createAuthUser,
   readAuthHarnessConfig,
@@ -55,6 +55,12 @@ test(
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-active-organization-restart-'))
     try {
       const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      // The restart scenario needs the Session to survive closing the app: where secure
+      // storage is unavailable (Linux basic_text on CI) no Session is persisted by design,
+      // and the second launch would land on the sign-in boundary instead.
+      const hasSecureBackend = await hasSecurePersistenceBackend(launched.electronApp)
+      if (!hasSecureBackend) await launched.electronApp.close()
+      test.skip(!hasSecureBackend, 'requires a native Keychain, DPAPI, or Secret Service backend')
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
@@ -89,8 +95,7 @@ test(
       const restarted = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
       try {
         // The restarted launch re-runs the full restore chain (session refresh, memberships
-        // fetch, memory read) on a cold Electron instance; allow it longer than the 5s expect
-        // default, which shared CI runners cannot meet.
+        // fetch, memory read); allow it longer than the 5s expect default.
         await expect(restarted.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible({
           timeout: 15_000
         })

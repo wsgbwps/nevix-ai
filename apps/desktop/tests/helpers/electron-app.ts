@@ -74,6 +74,20 @@ export async function launchTestApp({
   return { electronApp, page }
 }
 
+/**
+ * Reports whether the current platform offers a secure persistence backend for the Session:
+ * a native Keychain, DPAPI, or Secret Service. Linux's basic_text fallback stores plaintext
+ * and is treated as unavailable, so no Session is persisted there by design.
+ */
+export async function hasSecurePersistenceBackend(
+  electronApp: ElectronApplication
+): Promise<boolean> {
+  return electronApp.evaluate(({ safeStorage }) => {
+    if (!safeStorage.isEncryptionAvailable()) return false
+    return process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'
+  })
+}
+
 export async function expectWindowTitle(
   electronApp: ElectronApplication,
   expectedTitle: string
