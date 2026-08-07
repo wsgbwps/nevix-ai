@@ -4,11 +4,11 @@
 
 **Blocked by:** 03 — Onboarding 向导 + Profile 读写 + Desktop 直连通道
 
-**Status:** ready-for-agent
+**Status:** in-review — PR #27（feat/active-organization-startup）
 
-- [ ] e2e：重启后 active org 记忆恢复，直接进入组织上下文
-- [ ] e2e：启动验证三分支（0 组织→onboarding / 1 组织→自动选中 / N 组织→选择界面）
-- [ ] 记忆的 Membership 已结束时回到选择流程，不渲染失权数据
-- [ ] remembered org id 不经 localStorage，持久化走主进程 + domain IPC
-- [ ] 全部新 Localized Surface 双语过发布检查；e2e 用例归入既有 tier
-- [ ] apps/ 属 CI 门禁路径，走 feature branch + PR
+- [x] e2e：重启后 active org 记忆恢复，直接进入组织上下文
+- [x] e2e：启动验证三分支（0 组织→onboarding / 1 组织→自动选中 / N 组织→选择界面）
+- [x] 记忆的 Membership 已结束时回到选择流程，不渲染失权数据
+- [x] remembered org id 不经 localStorage，持久化走主进程 + domain IPC
+- [x] 全部新 Localized Surface 双语过发布检查；e2e 用例归入既有 tier
+- [x] apps/ 属 CI 门禁路径，走 feature branch + PR
