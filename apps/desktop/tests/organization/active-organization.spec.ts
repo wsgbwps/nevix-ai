@@ -88,7 +88,12 @@ test(
       // Restart on the same device: the remembered Membership enters directly, no picker.
       const restarted = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
       try {
-        await expect(restarted.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible()
+        // The restarted launch re-runs the full restore chain (session refresh, memberships
+        // fetch, memory read) on a cold Electron instance; allow it longer than the 5s expect
+        // default, which shared CI runners cannot meet.
+        await expect(restarted.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible({
+          timeout: 15_000
+        })
         await expect(restarted.page.getByRole('heading', { name: PICKER_HEADING })).toHaveCount(0)
         // The App Shell renders no Organization data; the restored context is proven by the
         // untouched device memory.
