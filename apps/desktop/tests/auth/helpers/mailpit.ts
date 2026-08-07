@@ -36,7 +36,8 @@ export async function readMailpitMessageIds(
 
 export async function waitForRegistrationMessage(
   config: MailpitHarnessConfig,
-  excludedMessageIds: readonly string[]
+  excludedMessageIds: readonly string[],
+  recipient?: string
 ): Promise<RegistrationMessage> {
   const deadline = Date.now() + POLL_TIMEOUT_MS
   let sawAnyMessage = false
@@ -44,7 +45,7 @@ export async function waitForRegistrationMessage(
   const excludedIds = new Set(excludedMessageIds)
 
   while (Date.now() < deadline) {
-    const summaries = await listMessages(config)
+    const summaries = await listMessages(config, recipient)
     sawAnyMessage ||= summaries.length > 0
     const summary = summaries.find((candidate) => !excludedIds.has(candidate.id))
 
@@ -85,11 +86,14 @@ export async function waitForNotificationMessage(
   throw new Error('Notification email was not captured before the bounded deadline')
 }
 
-async function listMessages(config: MailpitHarnessConfig): Promise<readonly { id: string }[]> {
-  const response = await fetch(
-    `${config.url}/api/v1/messages?start=0&limit=50&request=${Date.now()}`,
-    { cache: 'no-store' }
-  )
+async function listMessages(
+  config: MailpitHarnessConfig,
+  recipient?: string
+): Promise<readonly { id: string }[]> {
+  const endpoint = recipient
+    ? `${config.url}/api/v1/search?query=${encodeURIComponent(`to:"${recipient}"`)}`
+    : `${config.url}/api/v1/messages?start=0&limit=50&request=${Date.now()}`
+  const response = await fetch(endpoint, { cache: 'no-store' })
   if (!response.ok) throw new Error('Unable to query the Mailpit test mailbox')
 
   const payload: unknown = await response.json()

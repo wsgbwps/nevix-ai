@@ -36,10 +36,12 @@ test('signed-in users reach the standalone Settings Page from the user menu and 
       await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
       await expect(launched.page.getByRole('button', { name: '切换侧边栏' })).toHaveCount(0)
 
-      // 左侧设置导航：顶部"返回应用"链接 + 仅"语言"一项。
+      // 左侧设置导航：顶部"返回应用"链接 + 账户组中的个人资料和语言。
       await expect(launched.page.getByRole('link', { name: '返回应用' })).toBeVisible()
       const settingsNav = launched.page.getByRole('navigation', { name: '设置' })
-      await expect(settingsNav).toHaveText('语言')
+      await expect(settingsNav.getByText('账户')).toBeVisible()
+      await expect(settingsNav.getByRole('link', { name: '个人资料' })).toBeVisible()
+      await expect(settingsNav.getByRole('link', { name: '语言' })).toBeVisible()
 
       // 右侧内容区呈现语言设置 section，Language Mode 控件为下拉。
       const languageModeSelect = launched.page.getByRole('combobox', { name: '界面语言' })
@@ -93,9 +95,10 @@ test('the Settings Page Select switches the Interface Language without reloading
       // 设置页全部 Localized Surface 立即以新 Interface Language 呈现。
       await expect(launched.page.getByRole('heading', { name: 'Settings' })).toBeVisible()
       await expect(launched.page.getByRole('link', { name: 'Back to app' })).toBeVisible()
-      await expect(launched.page.getByRole('navigation', { name: 'Settings' })).toHaveText(
-        'Language'
-      )
+      const settingsNav = launched.page.getByRole('navigation', { name: 'Settings' })
+      await expect(settingsNav.getByText('Account')).toBeVisible()
+      await expect(settingsNav.getByRole('link', { name: 'Profile' })).toBeVisible()
+      await expect(settingsNav.getByRole('link', { name: 'Language' })).toBeVisible()
       await expect(
         launched.page.getByRole('combobox', { name: 'Interface language' })
       ).toContainText('English')

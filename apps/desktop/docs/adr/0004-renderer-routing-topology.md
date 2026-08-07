@@ -6,7 +6,7 @@
 
 ## 决策
 
-Renderer 引入 TanStack Router（文件路由，memory history），routes 声明集中在 `renderer/src/app/`。路由粒度只覆盖顶层视图：认证区、App Shell（主界面）与 Settings Page（设置页）；App Shell 内各业务 Feature 界面在内容区中拥有各自路由。认证流程内部的 login / signup / signup-verification / recovery 等界面不路由化，继续由 Authentication Feature 的 flow 状态机驱动。
+Renderer 引入 TanStack Router（文件路由，memory history），routes 声明集中在 `renderer/src/app/`。路由粒度只覆盖顶层视图：认证区、Organization 的 pre-shell onboarding、App Shell（主界面）与 Settings Page（设置页）；App Shell 内各业务 Feature 界面在内容区中拥有各自路由。Onboarding 是唯一的 authenticated 全屏例外：仅在 User 刚验证且尚未进入 Organization 上下文时渲染，页面和状态仍归 Organization Feature 所有；成功完成后清除该资格并进入 App Shell。认证流程内部的 login / signup / signup-verification / recovery 等界面不路由化，继续由 Authentication Feature 的 flow 状态机驱动。
 
 ## 取舍
 
@@ -14,4 +14,4 @@ react-router 是 Electron 生态更常见的选择，但全栈技术选型已固
 
 ## 后果
 
-新增已登录界面默认在 App Shell 内容区内获得路由；认证 flow 界面永远不拥有路由，导航只能通过状态机迁移。路由库的更换成本随路由数量增长，本决定应当被视为长期约束。
+新增已登录界面默认在 App Shell 内容区内获得路由；Organization pre-shell onboarding 是唯一例外，不能承载 App Shell 导航或任何已选 Organization 数据。认证 flow 界面永远不拥有路由，导航只能通过状态机迁移。路由库的更换成本随路由数量增长，本决定应当被视为长期约束。

@@ -138,10 +138,11 @@ test('the preload bridge rejects IPC channels outside the runtime allowlist', as
   }
 })
 
-test('CSP allows only this build Supabase origin and blocks a sentinel origin', async () => {
+test('CSP allows only this build Supabase and server origins and blocks a sentinel origin', async () => {
   const supabaseUrl = process.env.NEVIX_TEST_SUPABASE_URL
-  test.skip(!supabaseUrl, 'requires the disposable Supabase Auth harness')
-  if (!supabaseUrl) return
+  const serverUrl = process.env.NEVIX_TEST_SERVER_URL
+  test.skip(!supabaseUrl || !serverUrl, 'requires configured Supabase and server origins')
+  if (!supabaseUrl || !serverUrl) return
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-csp-'))
 
@@ -197,7 +198,9 @@ test('CSP allows only this build Supabase origin and blocks a sentinel origin', 
         .split(';')
         .map((directive) => directive.trim())
         .find((directive) => directive.startsWith('connect-src '))
-      expect(connectSource).toBe(`connect-src ${new URL(supabaseUrl).origin}`)
+      expect(connectSource).toBe(
+        `connect-src ${new URL(supabaseUrl).origin} ${new URL(serverUrl).origin}`
+      )
       expect(connectSource).not.toContain('*')
       expect(connectSource).not.toMatch(/(?:^|\s)(?:http:|https:|ws:|wss:)(?:\s|$)/)
     } finally {

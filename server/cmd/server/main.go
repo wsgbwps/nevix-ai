@@ -61,7 +61,9 @@ func run() error {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
-	identityModule.Register(router, bus)
+	router.Group(func(r chi.Router) {
+		identityModule.Register(r, bus)
+	})
 	server := &http.Server{Addr: ":8080", Handler: router}
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- server.ListenAndServe() }()

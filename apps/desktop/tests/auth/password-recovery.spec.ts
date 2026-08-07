@@ -61,7 +61,8 @@ test('the full recovery loop rotates the password, revokes old Sessions, and nev
 
       const recoveryMessage = await waitForRegistrationMessage(
         mailpitHarness,
-        messagesBeforeRequest
+        messagesBeforeRequest,
+        identity.email
       )
       expect(recoveryMessage.body).toContain('验证码有效期为一小时')
       expect(recoveryMessage.body).toContain('valid for one hour')
@@ -90,10 +91,13 @@ test('the full recovery loop rotates the password, revokes old Sessions, and nev
       await launched.page.getByRole('button', { name: 'Forgot password?' }).click()
       const messagesBeforeSecondRequest = await readMailpitMessageIds(mailpitHarness)
       await launched.page.getByLabel('Email').fill(identity.email)
+      // GoTrue's root-stack mailer cadence uses wall time, unlike the auth-only harness.
+      await launched.page.waitForTimeout(1_100)
       await launched.page.getByRole('button', { name: 'Send recovery code' }).click()
       const secondRecoveryMessage = await waitForRegistrationMessage(
         mailpitHarness,
-        messagesBeforeSecondRequest
+        messagesBeforeSecondRequest,
+        identity.email
       )
       await codeInput.fill(recoveryMessage.code)
       await launched.page.getByRole('button', { name: 'Verify code' }).click()
@@ -342,7 +346,8 @@ test('a failed global revocation still discards the recovery Session and reports
 
       const recoveryMessage = await waitForRegistrationMessage(
         mailpitHarness,
-        messagesBeforeRequest
+        messagesBeforeRequest,
+        identity.email
       )
       await launched.page.getByLabel('Recovery code').fill(recoveryMessage.code)
       await launched.page.getByRole('button', { name: 'Verify code' }).click()

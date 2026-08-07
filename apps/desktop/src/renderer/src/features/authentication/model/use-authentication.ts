@@ -3,6 +3,7 @@ import { AuthApiError, type AuthError, type SupabaseClient } from '@supabase/sup
 import { createAuthenticationClient, createRecoveryClient } from '../api/client'
 import { readSupabasePublicConfig } from '../api/environment'
 import { isPasswordByteLengthValid } from '../policy/password'
+import { readServerPublicConfig } from '../../../lib/server-public-config'
 import {
   clearPersistedSession,
   isSessionPersistenceUnavailable,
@@ -38,6 +39,11 @@ export type AuthenticationNotice =
   | 'password-updated'
   | 'password-updated-revocation-delayed'
 
+interface AuthenticatedSession {
+  readonly accessToken: string
+  readonly userId: string
+}
+
 interface Authentication {
   readonly status: AuthenticationStatus
   readonly flow: AuthenticationFlow
@@ -49,13 +55,14 @@ interface Authentication {
   readonly resendSecondsRemaining: number
   readonly resendGeneration: number
   readonly didResend: boolean
+  readonly getSession: () => Promise<AuthenticatedSession | undefined>
   readonly showLogin: () => void
   readonly showSignUp: () => void
   readonly showRecovery: () => void
   readonly retryRestore: () => Promise<void>
   readonly signIn: (email: string, password: string) => Promise<void>
   readonly signUp: (email: string, password: string) => Promise<void>
-  readonly verifySignUp: (code: string) => Promise<void>
+  readonly verifySignUp: (code: string) => Promise<boolean>
   readonly resendSignUp: () => Promise<void>
   readonly requestRecovery: (email: string) => Promise<void>
   readonly verifyRecovery: (code: string) => Promise<void>
@@ -143,6 +150,22 @@ export function useAuthentication(): Authentication {
     setStatus('authenticated')
   }, [])
 
+  const getSession = useCallback(async (): Promise<AuthenticatedSession | undefined> => {
+    const client = clientRef.current
+    if (!client) return undefined
+
+    const {
+      data: { session },
+      error: sessionError
+    } = await client.auth.getSession()
+    if (sessionError || !session) return undefined
+
+    return {
+      accessToken: session.access_token,
+      userId: session.user.id
+    }
+  }, [])
+
   const restore = useCallback(async (): Promise<void> => {
     if (restoreInProgressRef.current) return
     restoreInProgressRef.current = true
@@ -152,7 +175,8 @@ export function useAuthentication(): Authentication {
 
     try {
       const publicConfig = readSupabasePublicConfig()
-      if (!publicConfig) {
+      const serverConfig = readServerPublicConfig()
+      if (!publicConfig || !serverConfig) {
         setStatus('configuration-error')
         return
       }
@@ -331,10 +355,10 @@ export function useAuthentication(): Authentication {
   }, [])
 
   const verifySignUp = useCallback(
-    async (code: string): Promise<void> => {
+    async (code: string): Promise<boolean> => {
       const client = clientRef.current
       if (!client || !verificationEmail || submissionRef.current || !/^\d{6}$/.test(code)) {
-        return
+        return false
       }
 
       submissionRef.current = true
@@ -360,14 +384,16 @@ export function useAuthentication(): Authentication {
           } else {
             setError('service-unavailable')
           }
-          return
+          return false
         }
 
         enterAuthenticatedShell(data.session.user.email)
         setFlow('login')
         resetSignUpVerification()
+        return true
       } catch {
         setError('service-unavailable')
+        return false
       } finally {
         submissionRef.current = false
         setIsSubmitting(false)
@@ -570,6 +596,7 @@ export function useAuthentication(): Authentication {
     resendSecondsRemaining,
     resendGeneration,
     didResend,
+    getSession,
     showLogin,
     showSignUp,
     showRecovery,

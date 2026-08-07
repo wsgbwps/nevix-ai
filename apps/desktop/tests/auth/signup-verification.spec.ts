@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
+import { launchTestApp } from '../helpers/electron-app'
 import {
   createAuthUser,
   deleteAuthUser,
@@ -91,7 +91,11 @@ test(
           )
         ).toBeVisible()
 
-        const firstMessage = await waitForRegistrationMessage(mailpitHarness, messagesBeforeSignup)
+        const firstMessage = await waitForRegistrationMessage(
+          mailpitHarness,
+          messagesBeforeSignup,
+          identity.email
+        )
         expect(firstMessage.body).toContain('验证码有效期为一小时')
         expect(firstMessage.body).toContain('valid for one hour')
         expect(firstMessage.body).not.toContain('http://')
@@ -117,15 +121,19 @@ test(
         await launched.page.clock.fastForward(60_000)
         await expect(launched.page.getByRole('button', { name: 'Resend code' })).toBeEnabled()
         await launched.page.clock.resume()
+        // The test clock drives the client cooldown; GoTrue still enforces its configured
+        // one-second SMTP cadence against wall time in the root Supabase integration stack.
+        await launched.page.waitForTimeout(1_100)
         await launched.page.getByRole('button', { name: 'Resend code' }).click()
         await expect(
           launched.page.getByText('A new code was sent. Your previous code is no longer valid.')
         ).toBeVisible()
 
-        const secondMessage = await waitForRegistrationMessage(mailpitHarness, [
-          ...messagesBeforeSignup,
-          firstMessage.id
-        ])
+        const secondMessage = await waitForRegistrationMessage(
+          mailpitHarness,
+          [...messagesBeforeSignup, firstMessage.id],
+          identity.email
+        )
 
         await codeInput.fill(firstMessage.code)
         await launched.page.getByRole('button', { name: 'Verify email' }).click()
@@ -138,21 +146,7 @@ test(
         await codeInput.fill(secondMessage.code)
         await launched.page.getByRole('button', { name: 'Verify email' }).click()
         await expect(
-          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-        ).toBeVisible()
-
-        await signOutFromUserMenu(launched.page)
-        await launched.page.getByRole('button', { name: 'Create account' }).click()
-        await launched.page.getByLabel('Email').fill(identity.email)
-        await launched.page.getByLabel('Password', { exact: true }).fill(password)
-        await launched.page.getByLabel('Confirm password').fill(password)
-        await launched.page.getByRole('button', { name: 'Create account' }).click()
-        await codeInput.fill(secondMessage.code)
-        await launched.page.getByRole('button', { name: 'Verify email' }).click()
-        await expect(
-          launched.page.getByRole('alert').filter({
-            hasText: 'Verification code is invalid or expired'
-          })
+          launched.page.getByRole('heading', { name: 'What should we call you?' })
         ).toBeVisible()
       } finally {
         await launched.electronApp.close()

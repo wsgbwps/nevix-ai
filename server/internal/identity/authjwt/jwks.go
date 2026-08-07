@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -112,7 +113,9 @@ func (v *Verifier) VerifyToken(ctx context.Context, token string) (string, error
 	}
 	r := new(big.Int).SetBytes(signature[:32])
 	s := new(big.Int).SetBytes(signature[32:])
-	if !ecdsa.Verify(key, []byte(parts[0]+"."+parts[1]), r, s) {
+	signingInput := parts[0] + "." + parts[1]
+	digest := sha256.Sum256([]byte(signingInput))
+	if !ecdsa.Verify(key, digest[:], r, s) {
 		return "", ErrUnauthorized
 	}
 

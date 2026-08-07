@@ -4,6 +4,10 @@ import {
   parseSupabasePublicConfig,
   supabasePublicConfigPolicyForMode
 } from '../../src/shared/config/supabase-public-config'
+import {
+  parseServerPublicConfig,
+  serverPublicConfigPolicyForMode
+} from '../../src/shared/config/server-public-config'
 
 const VALID_PUBLISHABLE_KEY = `sb_publishable_${'x'.repeat(20)}`
 
@@ -110,4 +114,39 @@ test('HTTPS remains valid in production while unsafe URL shapes and keys are rej
   expect(parseUrl('https://supabase.example.com', 'production', 'sb_publishable_invalid')).toBe(
     undefined
   )
+})
+
+test('server public config accepts only an exact HTTPS or development private-network origin', () => {
+  expect(serverPublicConfigPolicyForMode('development')).toBe('private-network-http')
+  expect(serverPublicConfigPolicyForMode('test')).toBe('private-network-http')
+  expect(serverPublicConfigPolicyForMode('production')).toBe('https-only')
+
+  expect(
+    parseServerPublicConfig({
+      url: 'https://api.nevix.example:8443',
+      policy: serverPublicConfigPolicyForMode('production')
+    })
+  ).toEqual({ url: 'https://api.nevix.example:8443' })
+  expect(
+    parseServerPublicConfig({
+      url: 'http://127.0.0.1:8080',
+      policy: serverPublicConfigPolicyForMode('test')
+    })
+  ).toEqual({ url: 'http://127.0.0.1:8080' })
+
+  for (const url of [
+    undefined,
+    'http://127.0.0.1:8080',
+    'https://api.nevix.example/identity',
+    'https://user:password@api.nevix.example',
+    'https://api.nevix.example?debug=true'
+  ]) {
+    expect(
+      parseServerPublicConfig({
+        url,
+        policy: serverPublicConfigPolicyForMode('production')
+      }),
+      String(url)
+    ).toBeUndefined()
+  }
 })
