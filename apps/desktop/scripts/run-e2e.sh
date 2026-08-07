@@ -157,6 +157,16 @@ server_url="http://127.0.0.1:8080"
 
 start_identity_server "$database_url" "$api_url"
 
+if [[ "$mode" == "full" ]]; then
+  env \
+    -u VITE_SERVER_URL \
+    VITE_SUPABASE_URL=http://192.168.1.50:8000 \
+    VITE_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
+    pnpm exec electron-vite build --mode production
+  NEVIX_EXPECT_PRODUCTION_PRIVATE_HTTP_BLOCK=1 \
+    pnpm exec playwright test tests/auth/configuration.spec.ts --workers=1
+fi
+
 VITE_SUPABASE_URL="$api_url" \
   VITE_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
   VITE_SERVER_URL="$server_url" \

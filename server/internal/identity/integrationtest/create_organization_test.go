@@ -20,6 +20,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -74,7 +75,10 @@ func (ks *es256KeyServer) signToken(t *testing.T, sub string, exp time.Time) str
 		t.Fatalf("marshal jwt claims: %v", err)
 	}
 	signingInput := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
-	r, s, err := ecdsa.Sign(rand.Reader, ks.key, []byte(signingInput))
+	// ES256 signs the SHA-256 digest of the signing input, matching GoTrue's
+	// issuance and the verifier in authjwt; ecdsa.Sign does not hash itself.
+	digest := sha256.Sum256([]byte(signingInput))
+	r, s, err := ecdsa.Sign(rand.Reader, ks.key, digest[:])
 	if err != nil {
 		t.Fatalf("sign jwt: %v", err)
 	}
