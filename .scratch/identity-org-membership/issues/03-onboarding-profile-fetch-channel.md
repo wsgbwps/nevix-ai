@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Go 传输基座 + CreateOrganization
 
-**Status:** in-review
+**Status:** resolved — [PR #26](https://github.com/wsgbwps/nevix-ai/pull/26) 经 Desktop CI、Desktop E2E CI(smoke)与 Mail Smoke CI 全部门禁,merge commit e8ef3b3
 
 - [x] VITE_SERVER_URL 缺失时启动显式失败；CSP connect-src 按环境精确 origin
 - [x] e2e：注册 → 显示名 → 建组织 → 进入 App Shell（含字段校验与两步导航、上一步返回）
@@ -16,3 +16,4 @@
 ## Comments
 
 - 2026-08-07：实现已提交为 `f8350e5`，PR [#26](https://github.com/wsgbwps/nevix-ai/pull/26) 已创建并等待审查。已通过 Desktop 全量 E2E（49 passed、4 skipped）、unit、typecheck、lint、architecture/localization checks 与 `go test -C server ./...`；最终双轴代码审查无遗留问题。
+- 2026-08-07：审查发现两项阻塞问题并评论 — (1) `integrationtest/create_organization_test.go` 的 `signToken` 未随 jwks.go 的 ES256 标准验证同步加 SHA-256 摘要（Mail Smoke 稳定 401）；(2) `run-e2e.sh` 删除 `NEVIX_EXPECT_PRODUCTION_PRIVATE_HTTP_BLOCK` 构建块致 configuration.spec.ts 私网用例永久静默 skip（违反 ADR-0007）。修复提交 `85913e2` 后 CI 全绿,合并至 main(e8ef3b3)。非阻塞发现(ADR-0007 词汇漂移、Session 类型三处重复、e2e 超时压缩无出处等)留作后续票跟进。
