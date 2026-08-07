@@ -81,7 +81,7 @@ test(
       await expect(launched.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible()
 
       // Device memory lives in a main-process file, never in renderer localStorage.
-      expect(await readRememberedOrganizationId(userDataDir)).toBeTruthy()
+      const rememberedOrganizationId = await readRememberedOrganizationId(userDataDir)
       expect(await launched.page.evaluate(() => localStorage.length)).toBe(0)
       await launched.electronApp.close()
 
@@ -90,7 +90,9 @@ test(
       try {
         await expect(restarted.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible()
         await expect(restarted.page.getByRole('heading', { name: PICKER_HEADING })).toHaveCount(0)
-        await expect(restarted.page.getByText('Nebula Design')).toBeVisible()
+        // The App Shell renders no Organization data; the restored context is proven by the
+        // untouched device memory.
+        expect(await readRememberedOrganizationId(userDataDir)).toBe(rememberedOrganizationId)
       } finally {
         await restarted.electronApp.close()
       }
@@ -130,7 +132,7 @@ test(
     // One Organization without device memory: startup auto-selects it.
     const singleIdentity = uniqueAuthIdentity('active-organization-single')
     const singleUserId = await createAuthUser(authHarness, singleIdentity, true)
-    await seedOrganizationWithMembership(singleUserId, {
+    const singleOrganization = await seedOrganizationWithMembership(singleUserId, {
       name: 'Aurora Labs'
     })
     const singleUserDataDir = await mkdtemp(join(tmpdir(), 'nevix-active-organization-single-'))
@@ -143,7 +145,9 @@ test(
         await signIn(launched.page, singleIdentity)
         await expect(launched.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible()
         await expect(launched.page.getByRole('heading', { name: PICKER_HEADING })).toHaveCount(0)
-        await expect(launched.page.getByText('Aurora Labs')).toBeVisible()
+        // The App Shell renders no Organization data; auto-selection is proven by the written
+        // device memory.
+        expect(await readRememberedOrganizationId(singleUserDataDir)).toBe(singleOrganization.id)
       } finally {
         await launched.electronApp.close()
       }
@@ -185,45 +189,49 @@ test(
   }
 )
 
-test('an ended remembered Membership returns to the picker without entitled data', async () => {
-  test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the Desktop onboarding integration harness')
-  if (!authHarness) return
+test(
+  'an ended remembered Membership returns to the picker without entitled data',
+  { tag: '@smoke' },
+  async () => {
+    test.setTimeout(90_000)
+    test.skip(!authHarness, 'requires the Desktop onboarding integration harness')
+    if (!authHarness) return
 
-  const identity = uniqueAuthIdentity('active-organization-ended')
-  const userId = await createAuthUser(authHarness, identity, true)
-  const endedOrganization = await seedOrganizationWithMembership(userId, {
-    name: 'Aurora Labs'
-  })
-  await seedOrganizationWithMembership(userId, { name: 'Beta Studio' })
-  await endMembership(userId, endedOrganization.id)
+    const identity = uniqueAuthIdentity('active-organization-ended')
+    const userId = await createAuthUser(authHarness, identity, true)
+    const endedOrganization = await seedOrganizationWithMembership(userId, {
+      name: 'Aurora Labs'
+    })
+    await seedOrganizationWithMembership(userId, { name: 'Beta Studio' })
+    await endMembership(userId, endedOrganization.id)
 
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-active-organization-ended-'))
-  try {
-    // Device memory points at the ended Membership before the app launches.
-    await writeFile(
-      join(userDataDir, 'active-organization.json'),
-      JSON.stringify({ organizationId: endedOrganization.id }),
-      'utf8'
-    )
-
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-active-organization-ended-'))
     try {
-      await signIn(launched.page, identity)
-      // The stale memory never auto-enters: the picker renders, and the ended Organization is
-      // invisible because the RLS direct read is the single source of truth.
-      await expect(launched.page.getByRole('heading', { name: PICKER_HEADING })).toBeVisible()
-      await expect(launched.page.getByText('Beta Studio')).toBeVisible()
-      await expect(launched.page.getByText('Aurora Labs')).toHaveCount(0)
-      await expect(launched.page.getByRole('heading', { name: HOME_HEADING })).toHaveCount(0)
+      // Device memory points at the ended Membership before the app launches.
+      await writeFile(
+        join(userDataDir, 'active-organization.json'),
+        JSON.stringify({ organizationId: endedOrganization.id }),
+        'utf8'
+      )
 
-      await launched.page.getByRole('button', { name: 'Beta Studio' }).click()
-      await expect(launched.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible()
-      await expect(launched.page.getByText('Aurora Labs')).toHaveCount(0)
+      const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      try {
+        await signIn(launched.page, identity)
+        // The stale memory never auto-enters: the picker renders, and the ended Organization is
+        // invisible because the RLS direct read is the single source of truth.
+        await expect(launched.page.getByRole('heading', { name: PICKER_HEADING })).toBeVisible()
+        await expect(launched.page.getByText('Beta Studio')).toBeVisible()
+        await expect(launched.page.getByText('Aurora Labs')).toHaveCount(0)
+        await expect(launched.page.getByRole('heading', { name: HOME_HEADING })).toHaveCount(0)
+
+        await launched.page.getByRole('button', { name: 'Beta Studio' }).click()
+        await expect(launched.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible()
+        await expect(launched.page.getByText('Aurora Labs')).toHaveCount(0)
+      } finally {
+        await launched.electronApp.close()
+      }
     } finally {
-      await launched.electronApp.close()
+      await rm(userDataDir, { recursive: true, force: true })
     }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
   }
-})
+)

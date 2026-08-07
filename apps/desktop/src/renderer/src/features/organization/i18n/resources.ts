@@ -16,11 +16,6 @@ export const organizationTranslations = defineResourceTranslations({
       signOut: '退出登录',
       lastUsed: '上次使用'
     },
-    roles: {
-      owner: '拥有者',
-      admin: '管理员',
-      member: '成员'
-    },
     onboarding: {
       stepLabel: '第 {{current}} 步，共 {{total}} 步',
       profileHeading: '你怎么称呼？',
@@ -52,11 +47,6 @@ export const organizationTranslations = defineResourceTranslations({
       createOrg: 'Create new organization',
       signOut: 'Sign out',
       lastUsed: 'Last used'
-    },
-    roles: {
-      owner: 'Owner',
-      admin: 'Admin',
-      member: 'Member'
     },
     onboarding: {
       stepLabel: 'Step {{current}} of {{total}}',
