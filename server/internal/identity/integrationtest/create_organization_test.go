@@ -99,8 +99,11 @@ func newTransportHandler(t *testing.T, h *harness, jwksURL string, origins []str
 	if err != nil {
 		t.Fatalf("construct identity module: %v", err)
 	}
+	// Mount through a chi Group exactly like the composition root: group-scoped
+	// middleware runs only on matched routes, so mounting directly on the root
+	// mux would hide preflight regressions production actually hits.
 	router := chi.NewRouter()
-	m.Register(router, event.NewInMemoryBus())
+	router.Group(func(r chi.Router) { m.Register(r, event.NewInMemoryBus()) })
 	return router
 }
 
@@ -273,5 +276,24 @@ func TestCreateOrganizationCORSWhitelist(t *testing.T) {
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(got, "Authorization") {
 		t.Fatalf("allowed preflight: Allow-Headers %q, want Authorization for the Bearer scheme", got)
+	}
+
+	// Unknown-origin preflight: answered without CORS headers, so the browser
+	// still enforces the denial.
+	req = httptest.NewRequest(http.MethodOptions, "/identity/organizations", bytes.NewReader(nil))
+	req.Header.Set("Origin", "https://evil.example")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("unknown preflight got Allow-Origin %q, want no CORS headers", got)
+	}
+
+	// The verification-code command exposes the same preflight surface.
+	req = httptest.NewRequest(http.MethodOptions, "/identity/verification-codes", bytes.NewReader(nil))
+	req.Header.Set("Origin", whitelistedOrigin)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("verification-code preflight: status %d, want 204", rec.Code)
 	}
 }
