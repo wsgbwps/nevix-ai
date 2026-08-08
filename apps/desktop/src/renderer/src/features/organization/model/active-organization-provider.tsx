@@ -5,6 +5,7 @@ import {
   type ActiveOrganizationState,
   type OrganizationStartupPhase
 } from './active-organization-state'
+import { resolveStartupBranch } from './startup-resolution'
 import { useOrganizationOnboarding } from './onboarding-state'
 
 interface ActiveOrganizationProviderProps {
@@ -83,17 +84,14 @@ export function ActiveOrganizationProvider({
         const rememberedId = remembered.organizationId ?? undefined
         setRememberedOrganizationId(rememberedId)
 
-        const rememberedMembership = memberships.find(
-          (membership) => membership.organizationId === rememberedId
-        )
-        if (rememberedMembership) {
-          enterOrganization(rememberedMembership)
-        } else if (rememberedId === undefined && memberships.length === 1) {
-          enterOrganization(memberships[0])
-        } else {
-          setStartupPhase('ready')
-          if (memberships.length === 0) onboarding.beginOnboarding()
+        const branch = resolveStartupBranch(memberships, rememberedId)
+        if (branch.kind === 'enter') {
+          enterOrganization(branch.membership)
+          return
         }
+
+        setStartupPhase('ready')
+        if (branch.kind === 'onboarding') onboarding.beginOnboarding()
       } catch {
         resolutionRef.current = 'failed'
       }
