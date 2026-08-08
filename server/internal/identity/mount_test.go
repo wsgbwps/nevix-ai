@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/nevix-ai/server/internal/identity/authjwt"
+	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/organizations"
 	"github.com/nevix-ai/server/internal/identity/verification"
 )
@@ -73,6 +74,36 @@ func TestRegisterDerivesPreflightSurfaceFromRouteTable(t *testing.T) {
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("unknown-origin preflight got Allow-Origin %q, want none", got)
+	}
+}
+
+func TestDerivedPreflightMatchesParameterizedRoutePattern(t *testing.T) {
+	const whitelistedOrigin = "https://app.nevix.test"
+	routes := []command.Route{
+		{Method: http.MethodPost, Path: "/identity/organizations/{organizationID}", Public: true, Handler: func(http.ResponseWriter, *http.Request) {}},
+		{Method: http.MethodDelete, Path: "/identity/organizations/{organizationID}", Public: true, Handler: func(http.ResponseWriter, *http.Request) {}},
+	}
+	router := chi.NewRouter()
+	router.Group(func(r chi.Router) {
+		r.Use(corsMiddleware([]string{whitelistedOrigin}, command.MethodsByPath(routes)))
+		command.Mount(r, routes, func(next http.Handler) http.Handler { return next })
+	})
+
+	rec := doMountedRequest(
+		router,
+		http.MethodOptions,
+		"/identity/organizations/01K1ABCDEF",
+		whitelistedOrigin,
+	)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("parameterized preflight: status %d, want 204", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); got != "POST, DELETE, OPTIONS" {
+		t.Fatalf(
+			"parameterized preflight: Allow-Methods %q, want %q",
+			got,
+			"POST, DELETE, OPTIONS",
+		)
 	}
 }
 
