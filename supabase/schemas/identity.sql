@@ -24,13 +24,16 @@ CREATE SCHEMA IF NOT EXISTS identity;
 CREATE TABLE identity.verification_codes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email text NOT NULL,
+  action_type text,
+  target_id uuid,
   code_hash text NOT NULL,
   request_ip text NOT NULL,
   status text NOT NULL DEFAULT 'active'
-    CHECK (status IN ('active', 'superseded')),
+    CHECK (status IN ('active', 'superseded', 'consumed')),
   created_at timestamptz NOT NULL DEFAULT now(),
   superseded_at timestamptz,
-  expires_at timestamptz NOT NULL
+  expires_at timestamptz NOT NULL,
+  failed_attempts integer NOT NULL DEFAULT 0
 );
 
 -- The rate-limit and cooldown checks count recent rows per email and per
