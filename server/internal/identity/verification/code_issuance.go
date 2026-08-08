@@ -9,19 +9,19 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"math/big"
-	"net"
 	"net/http"
 	"net/mail"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/nevix-ai/server/internal/identity/command"
 )
 
 // Rate-limit policy. The 60-second resend cooldown and the five-codes-per-
@@ -40,9 +40,18 @@ const (
 	codeValidity     = 10 * time.Minute
 )
 
+// cooldownActiveError carries the seconds a caller must wait before another
+// issuance. MapError turns that domain value into the Retry-After header.
+type cooldownActiveError struct {
+	retryAfter int
+}
+
+func (e *cooldownActiveError) Error() string {
+	return "identity: resend cooldown active"
+}
+
 // Synchronous rejection reasons of the issuance command.
 var (
-	errCooldownActive   = errors.New("identity: resend cooldown active")
 	errEmailRateLimited = errors.New("identity: email hourly limit reached")
 	errIPRateLimited    = errors.New("identity: IP hourly limit reached")
 )
@@ -60,51 +69,68 @@ func NewCodeIssuer(pool *pgxpool.Pool, cfg CodeIssuanceConfig) *CodeIssuer {
 	return &CodeIssuer{pool: pool, cfg: cfg}
 }
 
-type issueCodeRequest struct {
-	Email string `json:"email"`
+// IssueVerificationCodeRequest is the IssueVerificationCode command input.
+// ClientIP is supplied by the transport adapter and never decoded from JSON.
+type IssueVerificationCodeRequest struct {
+	Email    string `json:"email"`
+	ClientIP string `json:"-"`
 }
 
-// ServeHTTP is the external issuance command. The response never carries the
-// plaintext code: acceptance only acknowledges that the email was queued.
-func (i *CodeIssuer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var req issueCodeRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeIssueError(w, http.StatusBadRequest, "invalid_request", "Request body must be JSON with an email field.")
-		return
-	}
-	email, err := normalizeEmail(req.Email)
+// Validate normalizes a bare email address before the command can use it.
+func (r *IssueVerificationCodeRequest) Validate() *command.Error {
+	r.Email = strings.ToLower(strings.TrimSpace(r.Email))
+	normalized, err := normalizeEmail(r.Email)
 	if err != nil {
-		writeIssueError(w, http.StatusBadRequest, "invalid_email", "email must be a bare address like user@example.com.")
-		return
+		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_email", Message: "email must be a bare address like user@example.com."}
 	}
+	r.Email = normalized
+	return nil
+}
 
-	retryAfter, err := i.issue(r.Context(), email, clientIP(r))
+// IssueVerificationCodeResponse acknowledges that a code-carrying email was
+// queued without exposing the plaintext code.
+type IssueVerificationCodeResponse struct {
+	Status string `json:"status"`
+}
+
+// IssueVerificationCode runs the trusted command after the shared skeleton
+// has decoded and validated its request.
+func (i *CodeIssuer) IssueVerificationCode(ctx context.Context, req IssueVerificationCodeRequest) (IssueVerificationCodeResponse, error) {
+	if err := i.issue(ctx, req.Email, req.ClientIP); err != nil {
+		return IssueVerificationCodeResponse{}, err
+	}
+	return IssueVerificationCodeResponse{Status: "issued"}, nil
+}
+
+// MapError translates issuance-domain errors to the trusted-command contract.
+// Unrecognized failures are logged and mapped to 500 by command.
+func MapError(err error) *command.Error {
+	var cooldown *cooldownActiveError
 	switch {
-	case errors.Is(err, errCooldownActive):
-		w.Header().Set("Retry-After", fmt.Sprint(retryAfter))
-		writeIssueError(w, http.StatusTooManyRequests, "cooldown_active", "A code was sent less than 60 seconds ago; wait for it before resending.")
+	case errors.As(err, &cooldown):
+		return &command.Error{
+			Status:  http.StatusTooManyRequests,
+			Code:    "cooldown_active",
+			Message: "A code was sent less than 60 seconds ago; wait for it before resending.",
+			Headers: map[string]string{"Retry-After": strconv.Itoa(cooldown.retryAfter)},
+		}
 	case errors.Is(err, errEmailRateLimited):
-		writeIssueError(w, http.StatusTooManyRequests, "email_rate_limited", "This email reached the limit of 5 codes per hour; try again later.")
+		return &command.Error{Status: http.StatusTooManyRequests, Code: "email_rate_limited", Message: "This email reached the limit of 5 codes per hour; try again later."}
 	case errors.Is(err, errIPRateLimited):
-		writeIssueError(w, http.StatusTooManyRequests, "ip_rate_limited", "Too many code requests from this network; try again later.")
-	case err != nil:
-		slog.Error("identity: issue verification code", "email", email, "error", err)
-		writeIssueError(w, http.StatusInternalServerError, "internal_error", "The code could not be issued.")
+		return &command.Error{Status: http.StatusTooManyRequests, Code: "ip_rate_limited", Message: "Too many code requests from this network; try again later."}
 	default:
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		fmt.Fprint(w, `{"status":"issued"}`)
+		return nil
 	}
 }
 
 // issue runs the synchronous command transaction: enforce cooldown and rate
 // limits, supersede the previous code, store the new code's hash, and queue
 // the code-carrying email in the same Outbox transaction. A rejected command
-// writes nothing. retryAfter is meaningful only with errCooldownActive.
-func (i *CodeIssuer) issue(ctx context.Context, email, ip string) (retryAfter int, err error) {
+// writes nothing. A cooldown error carries its retry-after seconds.
+func (i *CodeIssuer) issue(ctx context.Context, email, ip string) error {
 	tx, err := i.pool.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("identity: begin code issuance: %w", err)
+		return fmt.Errorf("identity: begin code issuance: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 
@@ -113,10 +139,10 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) (retryAfter in
 	// cooldown and limit checks before either writes. Every transaction
 	// locks email first, then IP, so lock ordering cannot deadlock.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, email); err != nil {
-		return 0, fmt.Errorf("identity: lock issuance for email: %w", err)
+		return fmt.Errorf("identity: lock issuance for email: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, ip); err != nil {
-		return 0, fmt.Errorf("identity: lock issuance for IP: %w", err)
+		return fmt.Errorf("identity: lock issuance for IP: %w", err)
 	}
 
 	var (
@@ -132,15 +158,15 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) (retryAfter in
 		 WHERE email = $1`, email, rateLimitWindow.Seconds(),
 	).Scan(&dbNow, &emailCount, &lastIssued)
 	if err != nil {
-		return 0, fmt.Errorf("identity: read issuance history: %w", err)
+		return fmt.Errorf("identity: read issuance history: %w", err)
 	}
 	if lastIssued != nil {
 		if remaining := resendCooldown - dbNow.Sub(*lastIssued); remaining > 0 {
-			return int(math.Ceil(remaining.Seconds())), errCooldownActive
+			return &cooldownActiveError{retryAfter: int(math.Ceil(remaining.Seconds()))}
 		}
 	}
 	if emailCount >= emailHourlyLimit {
-		return 0, errEmailRateLimited
+		return errEmailRateLimited
 	}
 
 	var ipCount int
@@ -149,15 +175,15 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) (retryAfter in
 		 WHERE request_ip = $1 AND created_at > now() - make_interval(secs => $2)`, ip, rateLimitWindow.Seconds(),
 	).Scan(&ipCount)
 	if err != nil {
-		return 0, fmt.Errorf("identity: read IP issuance history: %w", err)
+		return fmt.Errorf("identity: read IP issuance history: %w", err)
 	}
 	if ipCount >= ipHourlyLimit {
-		return 0, errIPRateLimited
+		return errIPRateLimited
 	}
 
 	code, err := newSixDigitCode()
 	if err != nil {
-		return 0, fmt.Errorf("identity: generate code: %w", err)
+		return fmt.Errorf("identity: generate code: %w", err)
 	}
 
 	// Superseding the previous code terminally cancels its undelivered email
@@ -171,14 +197,14 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) (retryAfter in
 		     SELECT id FROM identity.verification_codes
 		     WHERE email = $1 AND status = 'active')`, email,
 	); err != nil {
-		return 0, fmt.Errorf("identity: cancel superseded code email: %w", err)
+		return fmt.Errorf("identity: cancel superseded code email: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE identity.verification_codes
 		 SET status = 'superseded', superseded_at = now()
 		 WHERE email = $1 AND status = 'active'`, email,
 	); err != nil {
-		return 0, fmt.Errorf("identity: supersede previous code: %w", err)
+		return fmt.Errorf("identity: supersede previous code: %w", err)
 	}
 	var codeID string
 	if err := tx.QueryRow(ctx,
@@ -186,7 +212,7 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) (retryAfter in
 		 VALUES ($1, $2, $3, now() + make_interval(secs => $4))
 		 RETURNING id`, email, hashCode(i.cfg.HashKey, code), ip, codeValidity.Seconds(),
 	).Scan(&codeID); err != nil {
-		return 0, fmt.Errorf("identity: store code hash: %w", err)
+		return fmt.Errorf("identity: store code hash: %w", err)
 	}
 	// The plaintext code exists only here, in the Outbox payload of the email
 	// that must carry it; it is never logged or returned to the caller. The
@@ -197,13 +223,13 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) (retryAfter in
 		 VALUES ($1, $2, $3, $4, $5)`,
 		i.cfg.From, email, "Your Nevix verification code", body, codeID,
 	); err != nil {
-		return 0, fmt.Errorf("identity: queue code email: %w", err)
+		return fmt.Errorf("identity: queue code email: %w", err)
 	}
 
 	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return 0, fmt.Errorf("identity: commit code issuance: %w", err)
+		return fmt.Errorf("identity: commit code issuance: %w", err)
 	}
-	return 0, nil
+	return nil
 }
 
 // normalizeEmail accepts a bare RFC 5322 address and returns it lowercased;
@@ -214,17 +240,6 @@ func normalizeEmail(raw string) (string, error) {
 		return "", errors.New("identity: not a bare email address")
 	}
 	return strings.ToLower(addr.Address), nil
-}
-
-// clientIP takes the peer address of the connection. V1 has no trusted
-// reverse proxy in front of the Go server, so forwarding headers are
-// attacker-controlled and deliberately not consulted.
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 func newSixDigitCode() (string, error) {
@@ -241,10 +256,4 @@ func hashCode(key []byte, code string) string {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(code))
 	return hex.EncodeToString(mac.Sum(nil))
-}
-
-func writeIssueError(w http.ResponseWriter, status int, errCode, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"error":%q,"message":%q}`, errCode, message)
 }

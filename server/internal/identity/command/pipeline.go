@@ -1,9 +1,8 @@
 // The shared command pipeline: one decode/validate/map/encode choke point
-// behind the two public entry points. Handle serves commands that only need
-// the context; HandleWithRequest additionally hands the *http.Request to the
-// business function for commands that need per-request values (such as the
-// client IP) at run time. The request is bound per invocation, never captured
-// at registration time.
+// behind two public entry points. Handle serves pure domain functions;
+// HandleWithRequest lets a route adapter derive per-request transport values
+// before calling one. The request is bound per invocation, never captured at
+// registration time.
 package command
 
 import (
@@ -29,8 +28,8 @@ func Handle[Req, Resp any](fn func(context.Context, Req) (Resp, error), mapError
 	}
 }
 
-// HandleWithRequest is Handle for commands whose business function needs the
-// per-request *http.Request (for example the client IP). The request is bound
+// HandleWithRequest is Handle for route adapters that must derive values from
+// the request before invoking a pure domain function. The request is bound
 // when the handler runs, not at registration time.
 func HandleWithRequest[Req, Resp any](fn func(context.Context, *http.Request, Req) (Resp, error), mapError func(error) *Error, successStatus int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
