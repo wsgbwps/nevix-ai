@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,12 +54,18 @@ func (h *harness) commandRouter(t *testing.T) http.Handler {
 // the given client IP and returns the status code and raw response body.
 func issueCode(t *testing.T, handler http.Handler, ip, email string) (int, string) {
 	t.Helper()
+	status, body, _ := issueCodeWithHeaders(t, handler, ip, email)
+	return status, body
+}
+
+func issueCodeWithHeaders(t *testing.T, handler http.Handler, ip, email string) (int, string, http.Header) {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/identity/verification-codes",
 		strings.NewReader(fmt.Sprintf(`{"email":%q}`, email)))
 	req.RemoteAddr = ip + ":43210"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	return rec.Code, rec.Body.String()
+	return rec.Code, rec.Body.String(), rec.Header()
 }
 
 // codeHash recomputes the stored form of a code with the harness hash key,
@@ -208,6 +215,29 @@ func TestResendWithinCooldownIsRejected(t *testing.T) {
 	// no second email can ever arrive: the Worker only delivers Outbox rows.
 	h.assertIssuedRows(t, ctx, email, 1, 1)
 	waitForMessageCount(t, ctx, h.mailpit, fmt.Sprintf("to:%q", email), 1)
+}
+
+func TestCooldownResponseCarriesRetryAfter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	h := newHarness(t, ctx)
+	h.startWorker(t)
+	handler := h.commandRouter(t)
+
+	email := fmt.Sprintf("cooldown-header-%d@nevix.test", time.Now().UnixNano())
+	ip := "203.0.113.21"
+	if status, body := issueCode(t, handler, ip, email); status != http.StatusAccepted {
+		t.Fatalf("first issuance status = %d, want %d (body %q)", status, http.StatusAccepted, body)
+	}
+
+	status, body, header := issueCodeWithHeaders(t, handler, ip, email)
+	if status != http.StatusTooManyRequests || !strings.Contains(body, "cooldown_active") {
+		t.Fatalf("cooldown response = (%d, %q), want 429 cooldown_active", status, body)
+	}
+	retryAfter, err := strconv.Atoi(header.Get("Retry-After"))
+	if err != nil || retryAfter < 1 || retryAfter > 60 {
+		t.Fatalf("Retry-After %q, want a remaining cooldown duration between 1 and 60 seconds", header.Get("Retry-After"))
+	}
 }
 
 func TestSixthCodeRequestWithinHourIsRejected(t *testing.T) {

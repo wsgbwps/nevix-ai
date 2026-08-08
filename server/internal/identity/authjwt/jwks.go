@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nevix-ai/server/internal/identity/command"
 )
 
 // cacheTTL bounds how long JWKS keys are trusted before a proactive refresh,
@@ -59,9 +61,11 @@ func (v *Verifier) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, err := v.VerifyToken(r.Context(), bearerToken(r))
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprint(w, `{"error":"unauthorized","message":"The session is missing, invalid, or expired."}`)
+			command.WriteError(w, &command.Error{
+				Status:  http.StatusUnauthorized,
+				Code:    "unauthorized",
+				Message: "The session is missing, invalid, or expired.",
+			})
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDKey{}, userID)))
