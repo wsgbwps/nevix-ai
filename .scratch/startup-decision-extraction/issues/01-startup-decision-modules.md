@@ -15,11 +15,16 @@ resolveStartupSurface({ status, isEligible, phase, hasActiveOrganization, pathna
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** in-review
 
-- [ ] 决策矩阵 node:test 单测全绿：branch 侧 5 条（记忆命中 / 记忆失权 / 无记忆单组织自动选 / 无记忆多组织选择器 / 零组织 onboarding），含「记忆失权 + 单组织 → 选择器」显式断言；surface 侧按 status × isEligible × phase × activeOrganization × pathname 组合穷举（含已在目标路由不重复导航、内容区路由不打扰）
-- [ ] 两个决策 module 仅 type-only 导入（无 React / supabase client / runtime 依赖），node --test 可直接加载
-- [ ] provider effect 与 `__root.tsx` 退化为执行器；render 与 effect 共享同一 useMemo 决策快照，`isRestoringOrganizationContext` 双写消除
-- [ ] 行为保持红线：`OrganizationStartupPhase` 三态、failed 停留 restoring 语义、`isEligible` 状态机、`enterOrganization` 副作用（含 IPC 写设备记忆）全部不变；4 个顶层路由字面量集中为常量
-- [ ] e2e 全部既有 spec 不动作回归网：`test:unit`、`run-e2e.sh` 全量、typecheck、lint、architecture 检查全绿
-- [ ] apps/ 属 CI 门禁路径，走 feature branch + PR
+- [x] 决策矩阵 node:test 单测全绿：branch 侧 5 条（记忆命中 / 记忆失权 / 无记忆单组织自动选 / 无记忆多组织选择器 / 零组织 onboarding），含「记忆失权 + 单组织 → 选择器（不自动进入）」显式断言；surface 侧按 status × isEligible × phase × activeOrganization × pathname 组合穷举（含已在目标路由不重复导航、内容区路由不打扰）
+- [x] 两个决策 module 仅 type-only 导入（无 React / supabase client / runtime 依赖），node --test 可直接加载
+- [x] provider effect 与 `__root.tsx` 退化为执行器；render 与 effect 共享同一 useMemo 决策快照，`isRestoringOrganizationContext` 双写消除
+- [x] 行为保持红线：`OrganizationStartupPhase` 三态、failed 停留 restoring 语义、`isEligible` 状态机、`enterOrganization` 副作用（含 IPC 写设备记忆）全部不变；4 个顶层路由字面量集中为常量
+- [x] e2e 全部既有 spec 不动作回归网：`test:unit`、`run-e2e.sh` 全量、typecheck、lint、architecture 检查全绿
+- [x] apps/ 属 CI 门禁路径，走 feature branch + PR
+
+## Comments
+
+- 2026-08-08：已在 PR #33（https://github.com/wsgbwps/nevix-ai/pull/33）交付，等待 CI 与评审。
+- 本地验收：`pnpm --filter desktop test:unit`、typecheck、lint、architecture、Prettier 全绿；`bash apps/desktop/scripts/run-e2e.sh` 为 53 passed / 4 skipped。双轴代码评审（标准、spec）均无发现。
