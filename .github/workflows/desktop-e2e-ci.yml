@@ -35,9 +35,6 @@ on:
       - "package.json"
       - "go.work"
       - "go.work.sum"
-  schedule:
-    # 02:00 Asia/Shanghai, after the previous UTC day has settled.
-    - cron: "0 18 * * *"
   workflow_dispatch:
 
 concurrency:
