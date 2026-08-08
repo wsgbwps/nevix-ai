@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — command 骨架与表驱动注册（CORS 同源派生）
 
-**Status:** ready-for-agent
+**Status:** in-review — [PR #32](https://github.com/wsgbwps/nevix-ai/pull/32)
 
 - [ ] grep 不到 `writeCreateError` / `writeIssueError`；信封实现全 Module 唯一（骨架私有 writer）
 - [ ] 现有六条字段校验规则（id/name 非空、UUID 形态、name 非 blank、email 归一化与形态）行为与原实现逐条一致，且 normalize 先于校验
@@ -14,3 +14,4 @@
 - [ ] 迁移演示：向评审者展示「新增一个假设命令」只需一行表 entry + 业务函数 + 请求类型，无 CORS/OPTIONS/信封代码
 
 ## Comments
+- 2026-08-08：实现完成，等待 PR #32 审查与 CI。`cd server && go vet ./... && go test ./...` 通过；live mail-smoke 已跑过变更命令（签发、冷却含 `Retry-After`、组织 Bearer/CORS 与契约）并通过。该次套件随后因本地 Supabase 数据库在无关 Outbox/RLS 用例期间消失而失败；后续干净启动又受 Supabase CLI/Realtime `DB_HOST nxdomain` 阻断，保留 CI 作为 live 套件门禁。
