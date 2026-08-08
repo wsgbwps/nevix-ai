@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"net"
 	"net/http"
 	"net/mail"
 	"strconv"
@@ -241,17 +240,6 @@ func normalizeEmail(raw string) (string, error) {
 		return "", errors.New("identity: not a bare email address")
 	}
 	return strings.ToLower(addr.Address), nil
-}
-
-// ClientIP takes the peer address of the connection. V1 has no trusted
-// reverse proxy in front of the Go server, so forwarding headers are
-// attacker-controlled and deliberately not consulted.
-func ClientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 func newSixDigitCode() (string, error) {

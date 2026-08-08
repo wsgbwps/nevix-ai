@@ -20,7 +20,7 @@ func (m *Module) routes() []command.Route {
 			Path:   "/identity/verification-codes",
 			Public: true,
 			Handler: command.HandleWithRequest(func(ctx context.Context, r *http.Request, req verification.IssueVerificationCodeRequest) (verification.IssueVerificationCodeResponse, error) {
-				req.ClientIP = verification.ClientIP(r)
+				req.ClientIP = command.ClientIP(r)
 				return m.issuer.IssueVerificationCode(ctx, req)
 			}, verification.MapError, http.StatusAccepted),
 		},
