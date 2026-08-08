@@ -6,21 +6,33 @@ on:
       - main
     paths:
       - "supabase/**"
-      - "server/**"
+      - "server/internal/identity/**"
+      - "server/go.mod"
+      - "server/go.sum"
       - "contracts/**"
       - "scripts/test-mail-smoke.sh"
       - ".github/workflows/mail-smoke-ci.yml"
       - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "go.work"
+      - "go.work.sum"
   pull_request:
     branches:
       - main
     paths:
       - "supabase/**"
-      - "server/**"
+      - "server/internal/identity/**"
+      - "server/go.mod"
+      - "server/go.sum"
       - "contracts/**"
       - "scripts/test-mail-smoke.sh"
       - ".github/workflows/mail-smoke-ci.yml"
       - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "go.work"
+      - "go.work.sum"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
