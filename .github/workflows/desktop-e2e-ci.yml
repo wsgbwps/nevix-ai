@@ -6,25 +6,35 @@ on:
       - main
     paths:
       - "apps/desktop/**"
-      - "server/**"
+      - "server/internal/identity/**"
+      - "server/cmd/server/**"
+      - "server/go.mod"
+      - "server/go.sum"
+      - "contracts/**"
       - "supabase/**"
-      - "scripts/**"
       - ".github/workflows/desktop-e2e-ci.yml"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
+      - "go.work"
+      - "go.work.sum"
   pull_request:
     branches:
       - main
     paths:
       - "apps/desktop/**"
-      - "server/**"
+      - "server/internal/identity/**"
+      - "server/cmd/server/**"
+      - "server/go.mod"
+      - "server/go.sum"
+      - "contracts/**"
       - "supabase/**"
-      - "scripts/**"
       - ".github/workflows/desktop-e2e-ci.yml"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
+      - "go.work"
+      - "go.work.sum"
   workflow_dispatch:
 
 concurrency:
@@ -63,7 +73,7 @@ jobs:
         run: xvfb-run -a pnpm --filter @nevix/desktop test:e2e:smoke
         env:
           NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: "1"
-      # Failures are undiagnosable without the page snapshot Playwright writes on failure.
+      # The Electron helper writes renderer readiness screenshots and process/page errors here.
       - name: Upload E2E failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
@@ -109,7 +119,7 @@ jobs:
         run: xvfb-run -a pnpm --filter @nevix/desktop test:e2e
         env:
           NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: "1"
-      # Failures are undiagnosable without the page snapshot Playwright writes on failure.
+      # The Electron helper writes renderer readiness screenshots and process/page errors here.
       - name: Upload E2E failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

@@ -1,6 +1,7 @@
-import { expect, type ElectronApplication, type Page } from '@playwright/test'
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { _electron as electron } from 'playwright'
-import { join } from 'node:path'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 const desktopRoot = join(__dirname, '../..')
 const appEntry = join(desktopRoot, 'out/main/index.js')
@@ -33,6 +34,77 @@ function desktopProcessEnvironment(): NodeJS.ProcessEnv {
   return environment
 }
 
+interface TestDiagnostics {
+  readonly record: (source: string, message: string) => void
+  readonly captureScreenshot: (page: Page, name: string) => Promise<void>
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? (error.stack ?? error.message) : String(error)
+}
+
+function createTestDiagnostics(): TestDiagnostics {
+  const testInfo = test.info()
+  const diagnosticsPath = testInfo.outputPath('electron.log')
+  mkdirSync(dirname(diagnosticsPath), { recursive: true })
+
+  const record = (source: string, message: string): void => {
+    const line = `${new Date().toISOString()} [${source}] ${message}\n`
+    try {
+      appendFileSync(diagnosticsPath, line, 'utf8')
+    } catch {
+      process.stderr.write(line)
+    }
+  }
+
+  return {
+    record,
+    async captureScreenshot(page, name): Promise<void> {
+      const screenshotPath = testInfo.outputPath(name)
+      try {
+        await page.screenshot({ path: screenshotPath, fullPage: true })
+        record('artifact', `captured ${screenshotPath}`)
+      } catch (error) {
+        record('artifact', `screenshot failed: ${errorMessage(error)}`)
+      }
+    }
+  }
+}
+
+function observeElectronApp(electronApp: ElectronApplication, diagnostics: TestDiagnostics): void {
+  electronApp.on('console', (message) => {
+    diagnostics.record(`main:console:${message.type()}`, message.text())
+  })
+  electronApp.process().stderr?.on('data', (data) => {
+    diagnostics.record('main:stderr', String(data).trimEnd())
+  })
+}
+
+function observeRenderer(page: Page, diagnostics: TestDiagnostics): void {
+  page.on('console', (message) => {
+    diagnostics.record(`renderer:console:${message.type()}`, message.text())
+  })
+  page.on('pageerror', (error) => {
+    diagnostics.record('renderer:pageerror', errorMessage(error))
+    void diagnostics.captureScreenshot(page, 'renderer-pageerror.png')
+  })
+  page.on('crash', () => {
+    diagnostics.record('renderer:crash', `renderer crashed at ${page.url()}`)
+  })
+}
+
+async function waitForRendererReady(page: Page, diagnostics: TestDiagnostics): Promise<void> {
+  try {
+    await page.waitForLoadState('domcontentloaded')
+    await page.locator('#root > *').first().waitFor({ state: 'attached' })
+    diagnostics.record('renderer:ready', page.url())
+  } catch (error) {
+    diagnostics.record('renderer:readiness', errorMessage(error))
+    await diagnostics.captureScreenshot(page, 'renderer-readiness-failure.png')
+    throw error
+  }
+}
+
 export async function launchTestApp({
   userDataDir,
   systemLanguages,
@@ -41,6 +113,7 @@ export async function launchTestApp({
 }: LaunchTestAppOptions): Promise<{ electronApp: ElectronApplication; page: Page }> {
   const testEnvironment = { ...environment }
   for (const key of FORBIDDEN_CHILD_ENVIRONMENT_KEYS) delete testEnvironment[key]
+  const diagnostics = createTestDiagnostics()
 
   const electronApp = await electron.launch({
     args: [appEntry, `--user-data-dir=${userDataDir}`],
@@ -53,6 +126,7 @@ export async function launchTestApp({
       NEVIX_TEST_USER_DATA_DIR: userDataDir
     }
   })
+  observeElectronApp(electronApp, diagnostics)
 
   if (offline) {
     await electronApp.evaluate(({ session }) => {
@@ -61,6 +135,7 @@ export async function launchTestApp({
   }
 
   const page = await electronApp.firstWindow()
+  observeRenderer(page, diagnostics)
   if (offline) {
     await page.waitForLoadState('domcontentloaded')
     await page.route(/^https?:\/\//, (route) => route.abort('internetdisconnected'))
@@ -70,6 +145,8 @@ export async function launchTestApp({
       await mainWindow.loadURL(mainWindow.webContents.getURL())
     })
   }
+
+  await waitForRendererReady(page, diagnostics)
 
   return { electronApp, page }
 }

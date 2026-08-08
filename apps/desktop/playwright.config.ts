@@ -9,7 +9,7 @@ export default defineConfig({
   workers: 2,
   reporter: 'list',
   use: {
-    screenshot: 'off',
+    screenshot: 'only-on-failure',
     trace: 'off',
     video: 'off'
   }
