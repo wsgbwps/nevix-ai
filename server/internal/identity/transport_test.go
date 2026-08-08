@@ -11,8 +11,8 @@ import (
 	"testing"
 )
 
-func corsHandler(origins []string) http.Handler {
-	return corsMiddleware(origins)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func corsHandler(origins []string, methodsByPath map[string][]string) http.Handler {
+	return corsMiddleware(origins, methodsByPath)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 }
@@ -28,7 +28,7 @@ func doCORS(handler http.Handler, method, origin string) *httptest.ResponseRecor
 }
 
 func TestCORSWhitelistEchoesAllowedOriginsExactly(t *testing.T) {
-	handler := corsHandler([]string{"https://app.nevix.test", "http://127.0.0.1:5173"})
+	handler := corsHandler([]string{"https://app.nevix.test", "http://127.0.0.1:5173"}, nil)
 
 	rec := doCORS(handler, http.MethodPost, "https://app.nevix.test")
 	if rec.Code != http.StatusOK {
@@ -40,7 +40,7 @@ func TestCORSWhitelistEchoesAllowedOriginsExactly(t *testing.T) {
 }
 
 func TestCORSRejectsUnknownOriginsWithoutHeaders(t *testing.T) {
-	handler := corsHandler([]string{"https://app.nevix.test"})
+	handler := corsHandler([]string{"https://app.nevix.test"}, nil)
 
 	rec := doCORS(handler, http.MethodPost, "https://evil.example")
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
@@ -49,7 +49,7 @@ func TestCORSRejectsUnknownOriginsWithoutHeaders(t *testing.T) {
 }
 
 func TestCORSPassesRequestsWithoutOrigin(t *testing.T) {
-	handler := corsHandler([]string{"https://app.nevix.test"})
+	handler := corsHandler([]string{"https://app.nevix.test"}, nil)
 
 	rec := doCORS(handler, http.MethodPost, "")
 	if rec.Code != http.StatusOK {
@@ -61,7 +61,7 @@ func TestCORSPassesRequestsWithoutOrigin(t *testing.T) {
 }
 
 func TestCORSPreflightServesAllowedOriginsOnly(t *testing.T) {
-	handler := corsHandler([]string{"https://app.nevix.test"})
+	handler := corsHandler([]string{"https://app.nevix.test"}, map[string][]string{"/identity/organizations": {http.MethodPost}})
 
 	rec := doCORS(handler, http.MethodOptions, "https://app.nevix.test")
 	if rec.Code != http.StatusNoContent {

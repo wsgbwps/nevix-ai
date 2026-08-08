@@ -34,8 +34,10 @@ import (
 
 var codePattern = regexp.MustCompile(`\b\d{6}\b`)
 
-// commandRouter mounts the Module's external commands exactly as the
-// composition root does, so tests assert only the HTTP contract.
+// commandRouter mounts the Module's external commands through a chi Group
+// exactly as the composition root does, so tests assert only the HTTP
+// contract (group-scoped middleware runs only on matched routes, so the
+// derived preflight twins behave as in production).
 func (h *harness) commandRouter(t *testing.T) http.Handler {
 	t.Helper()
 	m, err := identity.NewModule(h.pool, h.cfg)
@@ -43,7 +45,7 @@ func (h *harness) commandRouter(t *testing.T) http.Handler {
 		t.Fatalf("construct identity module: %v", err)
 	}
 	router := chi.NewRouter()
-	m.Register(router, event.NewInMemoryBus())
+	router.Group(func(r chi.Router) { m.Register(r, event.NewInMemoryBus()) })
 	return router
 }
 
