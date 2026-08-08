@@ -238,6 +238,24 @@ func (s *rlsStack) seedAsIdentityApp(t *testing.T, ctx context.Context, orgIDs [
 	}
 }
 
+// assertIdentityAppDenied proves one edge excluded from identity_app's
+// least-privilege GRANT matrix. Each statement needs its own transaction
+// because PostgreSQL aborts a transaction after the expected permission error.
+func (s *rlsStack) assertIdentityAppDenied(t *testing.T, ctx context.Context, operation, statement string, args ...any) {
+	t.Helper()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin identity_app %s denial transaction: %v", operation, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SET LOCAL ROLE identity_app"); err != nil {
+		t.Fatalf("switch to identity_app for %s denial: %v", operation, err)
+	}
+	if _, err := tx.Exec(ctx, statement, args...); err == nil {
+		t.Fatalf("identity_app must not %s, but the statement succeeded", operation)
+	}
+}
+
 func userIDOf(rows []map[string]any) []string {
 	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -393,6 +411,7 @@ func TestRLSClientWriteBoundary(t *testing.T) {
 		{http.MethodPatch, "/organizations?id=eq." + orgID, map[string]string{"name": "Renamed"}},
 		{http.MethodPost, "/memberships", map[string]string{"organization_id": orgID, "user_id": other.ID, "role": "admin", "status": "active"}},
 		{http.MethodPatch, "/memberships?user_id=eq." + other.ID, map[string]string{"role": "admin"}},
+		{http.MethodDelete, "/organizations?id=eq." + orgID, nil},
 		{http.MethodDelete, "/memberships?user_id=eq." + other.ID, nil},
 		{http.MethodPost, "/invitations", map[string]any{"organization_id": orgID, "email": "client@example.test", "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}},
 		{http.MethodPatch, "/invitations?organization_id=eq." + orgID, map[string]string{"status": "revoked"}},
@@ -486,25 +505,22 @@ func TestRLSClientWriteBoundary(t *testing.T) {
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit identity_app transaction: %v", err)
 	}
-	// Audit logs are immutable to identity_app even though that role can insert,
-	// select, and delete them for commands and retention.
-	auditUpdateTx, err := stack.pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin audit update denial transaction: %v", err)
-	}
-	if _, err := auditUpdateTx.Exec(ctx, "SET LOCAL ROLE identity_app"); err != nil {
-		_ = auditUpdateTx.Rollback(ctx)
-		t.Fatalf("switch to identity_app for audit update denial: %v", err)
-	}
-	if _, err := auditUpdateTx.Exec(ctx,
-		"UPDATE public.audit_logs SET action = 'rewritten' WHERE id = $1", auditLogID,
-	); err == nil {
-		_ = auditUpdateTx.Rollback(ctx)
-		t.Fatal("identity_app must not update audit logs, but the update succeeded")
-	}
-	if err := auditUpdateTx.Rollback(ctx); err != nil {
-		t.Fatalf("rollback audit update denial transaction: %v", err)
-	}
+	// The positive command and retention grants above must not leak into the
+	// restricted edges of the ADR-0008/0009 matrix.
+	stack.assertIdentityAppDenied(t, ctx, "update audit logs",
+		"UPDATE public.audit_logs SET action = 'rewritten' WHERE id = $1", auditLogID)
+	stack.assertIdentityAppDenied(t, ctx, "insert profiles",
+		"INSERT INTO public.profiles (user_id, display_name) VALUES ($1, 'Server Written')", other.ID)
+	stack.assertIdentityAppDenied(t, ctx, "update profiles",
+		"UPDATE public.profiles SET display_name = 'Server Rewritten' WHERE user_id = $1", other.ID)
+	stack.assertIdentityAppDenied(t, ctx, "delete profiles",
+		"DELETE FROM public.profiles WHERE user_id = $1", other.ID)
+	stack.assertIdentityAppDenied(t, ctx, "delete organizations",
+		"DELETE FROM public.organizations WHERE id = $1", orgID)
+	stack.assertIdentityAppDenied(t, ctx, "delete memberships",
+		"DELETE FROM public.memberships WHERE organization_id = $1 AND user_id = $2", orgID, other.ID)
+	stack.assertIdentityAppDenied(t, ctx, "delete invitations",
+		"DELETE FROM public.invitations WHERE id = $1", invitationID)
 
 	retentionTx, err := stack.pool.Begin(ctx)
 	if err != nil {
@@ -523,22 +539,6 @@ func TestRLSClientWriteBoundary(t *testing.T) {
 	}
 	if err := retentionTx.Commit(ctx); err != nil {
 		t.Fatalf("commit audit retention transaction: %v", err)
-	}
-
-	// The profiles write denial must be checked in its own transaction: a
-	// failed statement aborts the surrounding transaction.
-	deniedTx, err := stack.pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin identity_app denial transaction: %v", err)
-	}
-	defer func() { _ = deniedTx.Rollback(ctx) }()
-	if _, err := deniedTx.Exec(ctx, "SET LOCAL ROLE identity_app"); err != nil {
-		t.Fatalf("switch to identity_app: %v", err)
-	}
-	if _, err := deniedTx.Exec(ctx,
-		"INSERT INTO public.profiles (user_id, display_name) VALUES ($1, 'Server Written')",
-		other.ID); err == nil {
-		t.Fatal("identity_app must not write profiles, but the insert succeeded")
 	}
 
 	// The role change above must not have leaked: the client still sees the
@@ -599,6 +599,13 @@ func TestRLSInvitationAndAuditLogVisibility(t *testing.T) {
 		}
 	}
 	if _, err := seedTx.Exec(ctx,
+		`INSERT INTO public.invitations (organization_id, email, status, expires_at)
+		 VALUES ($1, 'other-invitee@nevix.test', 'pending', now() + interval '7 days')`,
+		orgID,
+	); err != nil {
+		t.Fatalf("seed other-email pending invitation: %v", err)
+	}
+	if _, err := seedTx.Exec(ctx,
 		`INSERT INTO public.audit_logs (
 		   organization_id, actor_user_id, actor_display_name,
 		   target_user_id, target_display_name, action, metadata
@@ -615,8 +622,8 @@ func TestRLSInvitationAndAuditLogVisibility(t *testing.T) {
 	for _, administrator := range []rlsUser{owner, admin} {
 		invitations := stack.restRows(t, ctx,
 			"/invitations?select=id,status&organization_id=eq."+orgID, administrator.Token)
-		if len(invitations) != 3 {
-			t.Fatalf("%s sees invitations %v, want all three organization rows", administrator.Email, invitations)
+		if len(invitations) != 4 {
+			t.Fatalf("%s sees invitations %v, want all four organization rows", administrator.Email, invitations)
 		}
 		auditLogs := stack.restRows(t, ctx,
 			"/audit_logs?select=id&organization_id=eq."+orgID, administrator.Token)
