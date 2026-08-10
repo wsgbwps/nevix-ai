@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Schema 基座：profiles / organizations / memberships + RLS/GRANT
 
-**Status:** in-review — [PR #34](https://github.com/wsgbwps/nevix-ai/pull/34)
+**Status:** resolved — [PR #34](https://github.com/wsgbwps/nevix-ai/pull/34)
 
 - [x] migration 过 advisors 与 migration-history 检查
 - [x] RLS 集成测试：被邀请人可见自己 email 的 pending 邀请行
