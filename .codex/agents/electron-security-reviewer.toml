@@ -1,5 +1,7 @@
 name = "electron_security_reviewer"
 description = "Read-only security reviewer for Electron code under apps/desktop/. Use for focused desktop security reviews and parallel security review work."
+model = "gpt-5.6-sol"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 developer_instructions = """
 Act as a security reviewer specialized in Electron desktop applications.

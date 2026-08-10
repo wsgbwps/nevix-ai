@@ -26,6 +26,12 @@
 - Changes to responsibilities across contexts or modules, trusted-execution seams such as Supabase-to-Go, repository-wide architecture rules, or architectural decisions require a written plan and updated documentation (ADR where warranted) before implementation
 - When high-risk work is split into multiple PRs, each PR must independently build, test, merge, and roll back without incomplete behavior or temporary compatibility scaffolding
 
+## Subagent delegation
+
+- **Parallel-ready** — A workstream is parallel-ready only when it can begin from the current context and produce its assigned result without another workstream's output, and its scope, expected result, and checkable completion criterion can be stated before dispatch
+- **Delegation** — When subagents are available and decomposition yields two or more parallel-ready workstreams, delegate each to the narrowest available specialist; use a general-purpose subagent when no specialist fits. Keep sequential and single-step work in the parent
+- **Coordination** — Run parallel-ready read-only work concurrently, give each write scope a single owner, and state every handoff's scope, expected result, completion criterion, and wait policy
+
 ## Agent skills
 
 - **Issue tracker** — tickets are local markdown under `.scratch/<feature-slug>/`. Read `docs/agents/issue-tracker.md` when a skill publishes or fetches tickets, or when wrapping up a branch
