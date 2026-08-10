@@ -1,0 +1,14 @@
+您好：
+
+您已受邀加入「{{.OrganizationName}}」。
+邀请码：{{.Code}}
+此邀请码将在 7 天后失效。请在 Nevix Desktop 输入此六位邀请码加入组织。
+
+Hello:
+
+You are invited to join "{{.OrganizationName}}".
+Invitation code: {{.Code}}
+This six-digit invitation code expires in 7 days. Enter it in Nevix Desktop to join the organization.
+
+如果这不是您所期待的邀请，您可以忽略此邮件。
+If you did not expect this invitation, you can ignore this email.

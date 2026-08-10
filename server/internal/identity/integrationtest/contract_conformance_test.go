@@ -23,6 +23,8 @@ import (
 var (
 	contractOnce    sync.Once
 	contractSpec    map[string]any
+	contractDir     string
+	contractModules map[string]map[string]any
 	contractLoadErr error
 )
 
@@ -32,6 +34,8 @@ func loadContractSpec(t *testing.T) map[string]any {
 	contractOnce.Do(func() {
 		_, thisFile, _, _ := runtime.Caller(0)
 		path := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..", "contracts", "openapi.yaml")
+		contractDir = filepath.Dir(path)
+		contractModules = make(map[string]map[string]any)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			contractLoadErr = err
@@ -53,7 +57,7 @@ func assertContractResponse(t *testing.T, method, path string, status int, body 
 	spec := loadContractSpec(t)
 
 	paths, _ := spec["paths"].(map[string]any)
-	entry, _ := paths[path].(map[string]any)
+	entry := contractPathEntry(t, paths, path)
 	operation, _ := entry[strings.ToLower(method)].(map[string]any)
 	if operation == nil {
 		t.Fatalf("contract gap: %s %s has no entry in contracts/openapi.yaml", strings.ToUpper(method), path)
@@ -80,6 +84,79 @@ func assertContractResponse(t *testing.T, method, path string, status int, body 
 		}
 	}
 	assertMatchesSchema(t, spec, schema, decoded, fmt.Sprintf("%s %s %d", strings.ToUpper(method), path, status))
+}
+
+// contractPathEntry resolves an observed path to its OpenAPI Path Item. Exact
+// paths win; parameter segments then match exactly one path segment. A master
+// contract may delegate the item to its owning module through an external $ref.
+func contractPathEntry(t *testing.T, paths map[string]any, observedPath string) map[string]any {
+	t.Helper()
+	if exact, _ := paths[observedPath].(map[string]any); exact != nil {
+		return resolveContractPathItem(t, exact)
+	}
+	observed := strings.Split(strings.Trim(observedPath, "/"), "/")
+	for contractPath, rawEntry := range paths {
+		contract := strings.Split(strings.Trim(contractPath, "/"), "/")
+		if len(contract) != len(observed) {
+			continue
+		}
+		matches := true
+		for index, segment := range contract {
+			isParameter := strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}")
+			if !isParameter && segment != observed[index] {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			entry, _ := rawEntry.(map[string]any)
+			return resolveContractPathItem(t, entry)
+		}
+	}
+	return nil
+}
+
+func resolveContractPathItem(t *testing.T, entry map[string]any) map[string]any {
+	t.Helper()
+	ref, ok := entry["$ref"].(string)
+	if !ok {
+		return entry
+	}
+	module, pointer, ok := strings.Cut(ref, "#")
+	if !ok || module == "" || pointer == "" {
+		t.Fatalf("contract path reference %q must name a module and JSON pointer", ref)
+	}
+	spec := loadContractModule(t, module)
+	node := any(spec)
+	for _, segment := range strings.Split(strings.TrimPrefix(pointer, "/"), "/") {
+		mapping, ok := node.(map[string]any)
+		if !ok {
+			t.Fatalf("contract path reference %q has a non-object segment before %q", ref, segment)
+		}
+		node = mapping[strings.NewReplacer("~1", "/", "~0", "~").Replace(segment)]
+	}
+	resolved, ok := node.(map[string]any)
+	if !ok {
+		t.Fatalf("contract path reference %q does not resolve to an object", ref)
+	}
+	return resolved
+}
+
+func loadContractModule(t *testing.T, module string) map[string]any {
+	t.Helper()
+	if spec := contractModules[module]; spec != nil {
+		return spec
+	}
+	data, err := os.ReadFile(filepath.Join(contractDir, module))
+	if err != nil {
+		t.Fatalf("read contract module %q: %v", module, err)
+	}
+	var spec map[string]any
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse contract module %q: %v", module, err)
+	}
+	contractModules[module] = spec
+	return spec
 }
 
 // assertMatchesSchema checks one decoded body against one flattened schema:

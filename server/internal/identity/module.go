@@ -1,14 +1,10 @@
 // Package identity is the identity Module's composition surface. The command
-// skeleton (unified error envelope, decode-validate-map pipeline, and the
-// route table machinery) lives in the command sub-package; the one-time
-// verification code issuance with synchronous rate limiting lives in the
-// verification sub-package; the Outbox Worker (SMTP deployment
-// configuration, the retry backoff schedule, and the pure deliverer that
-// polls identity.outbox_messages and sends over standard SMTP) lives in the
-// outbox sub-package; the Bearer JWT transport guard (JWKS verification) lives
-// in the authjwt sub-package and the organization command layer in the
-// organizations sub-package. Callers outside the Module — the composition
-// root and the integration test harness — see only this package: LoadConfig,
+// skeleton (unified error envelope, decode-validate-map pipeline, and route
+// table machinery) lives in command; one-time verification-code issuance lives
+// in verification; the Outbox Worker lives in outbox; Bearer JWT verification
+// lives in authjwt; and Organization and Invitation command layers live in
+// their respective sub-packages. Callers outside the Module — the composition
+// root and integration test harness — see only this package: LoadConfig,
 // NewModule, Register, and RunWorkers.
 package identity
 
@@ -25,6 +21,7 @@ import (
 	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity/authjwt"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/invitations"
 	"github.com/nevix-ai/server/internal/identity/organizations"
 	"github.com/nevix-ai/server/internal/identity/outbox"
 	"github.com/nevix-ai/server/internal/identity/verification"
@@ -103,6 +100,7 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 // registers the Module's HTTP routes.
 type Module struct {
 	issuer      *verification.CodeIssuer
+	invitations *invitations.Creator
 	worker      *outbox.OutboxWorker
 	verifier    *authjwt.Verifier
 	orgs        *organizations.Creator
@@ -119,6 +117,7 @@ func NewModule(pool *pgxpool.Pool, cfg Config) (*Module, error) {
 	}
 	return &Module{
 		issuer:      verification.NewCodeIssuer(pool, cfg.CodeIssuance),
+		invitations: invitations.NewCreator(pool, cfg.CodeIssuance),
 		worker:      worker,
 		verifier:    authjwt.NewVerifier(cfg.JWKSURL),
 		orgs:        organizations.NewCreator(pool),
