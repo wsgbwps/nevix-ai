@@ -351,9 +351,15 @@ func TestRLSCrossOrganizationIsolation(t *testing.T) {
 	}
 
 	// anon: no table privileges, denied before RLS even evaluates.
-	status, _ := stack.rest(t, ctx, http.MethodGet, "/organizations?select=name", "", nil)
-	if status < 400 {
-		t.Fatalf("anon read organizations: status %d, want denial", status)
+	for _, path := range []string{
+		"/organizations?select=id",
+		"/invitations?select=id",
+		"/audit_logs?select=id",
+	} {
+		status, body := stack.rest(t, ctx, http.MethodGet, path, "", nil)
+		if status < 400 {
+			t.Fatalf("anon GET %s: status %d: %s, want denial", path, status, body)
+		}
 	}
 }
 
@@ -495,6 +501,34 @@ func TestRLSClientWriteBoundary(t *testing.T) {
 	); err != nil {
 		t.Fatalf("identity_app update verification code attempts: %v", err)
 	}
+
+	// The existing issuer omits the invitation-only columns, then binds the
+	// resulting code to its Outbox row. Keep that legacy insert shape valid
+	// under the deployed identity_app role.
+	var legacyCodeID string
+	var legacyActionTypeNull, legacyTargetIDNull bool
+	var legacyFailedAttempts int
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO identity.verification_codes (email, code_hash, request_ip, expires_at)
+		 VALUES ($1, 'legacy-code-hash', '127.0.0.2', now() + interval '10 minutes')
+		 RETURNING id, action_type IS NULL, target_id IS NULL, failed_attempts`,
+		owner.Email,
+	).Scan(&legacyCodeID, &legacyActionTypeNull, &legacyTargetIDNull, &legacyFailedAttempts); err != nil {
+		t.Fatalf("identity_app insert legacy verification code: %v", err)
+	}
+	if !legacyActionTypeNull || !legacyTargetIDNull || legacyFailedAttempts != 0 {
+		t.Fatalf(
+			"legacy verification code defaults: action_type NULL=%t target_id NULL=%t failed_attempts=%d, want true true 0",
+			legacyActionTypeNull, legacyTargetIDNull, legacyFailedAttempts,
+		)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO identity.outbox_messages (sender, recipient, subject, body, verification_code_id)
+		 VALUES ('identity@nevix.test', $1, 'Legacy verification code', 'Legacy code body', $2)`,
+		owner.Email, legacyCodeID,
+	); err != nil {
+		t.Fatalf("identity_app insert legacy verification code outbox row: %v", err)
+	}
 	var directoryRows int
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM identity.directory").Scan(&directoryRows); err != nil {
 		t.Fatalf("identity_app read identity.directory: %v", err)
@@ -571,14 +605,18 @@ func TestRLSInvitationAndAuditLogVisibility(t *testing.T) {
 	admin := stack.signUpConfirmedUser(t, ctx, "invitation-admin")
 	member := stack.signUpConfirmedUser(t, ctx, "invitation-member")
 	invitee := stack.signUpConfirmedUser(t, ctx, "invitation-invitee")
+	ownerB := stack.signUpConfirmedUser(t, ctx, "invitation-owner-b")
+	adminB := stack.signUpConfirmedUser(t, ctx, "invitation-admin-b")
 
-	orgID := newRLSOrgID(t)
+	orgID, orgBID := newRLSOrgID(t), newRLSOrgID(t)
 	stack.seedAsIdentityApp(t, ctx,
-		[]string{orgID}, []string{"RLS Invitations Org"},
+		[]string{orgID, orgBID}, []string{"RLS Invitations Org", "RLS Other Invitations Org"},
 		[]membershipSeed{
 			{orgID, owner.ID, "owner", "active"},
 			{orgID, admin.ID, "admin", "active"},
 			{orgID, member.ID, "member", "active"},
+			{orgBID, ownerB.ID, "owner", "active"},
+			{orgBID, adminB.ID, "admin", "active"},
 		})
 
 	seedTx, err := stack.pool.Begin(ctx)
@@ -606,6 +644,13 @@ func TestRLSInvitationAndAuditLogVisibility(t *testing.T) {
 		t.Fatalf("seed other-email pending invitation: %v", err)
 	}
 	if _, err := seedTx.Exec(ctx,
+		`INSERT INTO public.invitations (organization_id, email, status, expires_at)
+		 VALUES ($1, 'other-org-invitee@nevix.test', 'pending', now() + interval '7 days')`,
+		orgBID,
+	); err != nil {
+		t.Fatalf("seed other-organization invitation: %v", err)
+	}
+	if _, err := seedTx.Exec(ctx,
 		`INSERT INTO public.audit_logs (
 		   organization_id, actor_user_id, actor_display_name,
 		   target_user_id, target_display_name, action, metadata
@@ -614,6 +659,16 @@ func TestRLSInvitationAndAuditLogVisibility(t *testing.T) {
 		orgID, owner.ID, member.ID,
 	); err != nil {
 		t.Fatalf("seed audit log: %v", err)
+	}
+	if _, err := seedTx.Exec(ctx,
+		`INSERT INTO public.audit_logs (
+		   organization_id, actor_user_id, actor_display_name,
+		   target_user_id, target_display_name, action, metadata
+		 ) VALUES ($1, $2, 'Other Invitation Owner', $3, 'Other Invitation Admin',
+		   'member_invited', '{"source":"rls-other-org"}')`,
+		orgBID, ownerB.ID, adminB.ID,
+	); err != nil {
+		t.Fatalf("seed other-organization audit log: %v", err)
 	}
 	if err := seedTx.Commit(ctx); err != nil {
 		t.Fatalf("commit invitation seed transaction: %v", err)
@@ -629,6 +684,27 @@ func TestRLSInvitationAndAuditLogVisibility(t *testing.T) {
 			"/audit_logs?select=id&organization_id=eq."+orgID, administrator.Token)
 		if len(auditLogs) != 1 {
 			t.Fatalf("%s sees audit logs %v, want the organization row", administrator.Email, auditLogs)
+		}
+	}
+
+	for _, administrator := range []rlsUser{ownerB, adminB} {
+		ownInvitations := stack.restRows(t, ctx,
+			"/invitations?select=id&organization_id=eq."+orgBID, administrator.Token)
+		if len(ownInvitations) != 1 {
+			t.Fatalf("%s sees own invitations %v, want the other-organization row", administrator.Email, ownInvitations)
+		}
+		ownAuditLogs := stack.restRows(t, ctx,
+			"/audit_logs?select=id&organization_id=eq."+orgBID, administrator.Token)
+		if len(ownAuditLogs) != 1 {
+			t.Fatalf("%s sees own audit logs %v, want the other-organization row", administrator.Email, ownAuditLogs)
+		}
+		for _, path := range []string{
+			"/invitations?select=id&organization_id=eq." + orgID,
+			"/audit_logs?select=id&organization_id=eq." + orgID,
+		} {
+			if rows := stack.restRows(t, ctx, path, administrator.Token); len(rows) != 0 {
+				t.Fatalf("%s GET %s returns %v, want no first-organization rows", administrator.Email, path, rows)
+			}
 		}
 	}
 
