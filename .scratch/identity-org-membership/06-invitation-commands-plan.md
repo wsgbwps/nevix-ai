@@ -10,7 +10,8 @@ Status: implementation plan — 2026-08-10
 - `server/internal/identity/routes.go` and `module.go` remain wiring-only composition surfaces.
 - `server/internal/identity/integrationtest/` owns the HTTP + real PostgreSQL + Mailpit command seam tests.
 - `contracts/openapi.yaml` remains the OpenAPI master; `contracts/identity.yaml` owns the Identity path items it references.
-- `supabase/schemas/identity.sql` owns the declarative state for the two Go-only Identity tables. PR review exposed two missing read-path indexes, so this slice adds only those indexes and the generated expand-only migration; it does not change data shape, RLS, grants, or the Supabase-to-Go responsibility seam.
+- `server/internal/identity/verification/` owns the shared one-time-code issuance guard, including a single database-clock snapshot, parameterized rate-limit windows, and the package-internal real-PostgreSQL query-plan regression for its exact SQL.
+- `supabase/schemas/identity.sql` owns the declarative state for the two Go-only Identity tables. PR review exposed a foreign-key index whose predicate covered only pending Outbox rows, so this slice widens that one index to every non-null reference and amends the undeployed generated migration; it does not change data shape, RLS, grants, or the Supabase-to-Go responsibility seam.
 
 ## Public Contract
 
@@ -38,8 +39,9 @@ A caller with no active Membership in the Organization receives 404 `organizatio
 
 - Before either Create or Resend writes a new Invitation code or Outbox row, it reuses the Identity verification issuance guard: advisory locks are acquired in email-then-IP order, then the shared 60-second cooldown, five-codes-per-email-hour limit, and twenty-codes-per-IP-hour limit count every one-time code action. Rejections roll back the whole Invitation transaction and map to the existing 429 machine codes; only `cooldown_active` carries `Retry-After`.
 - Rate-limit accounting is shared across verification and Invitation actions, while invalidation remains action/target scoped: the verification flow supersedes only `action_type IS NULL AND target_id IS NULL` codes and Resend/Revoke supersede only `action_type = 'invitation'` rows for their `target_id`.
-- Add a partial composite index on `identity.verification_codes (target_id, created_at DESC)` for non-null action-bound codes and a partial index on `identity.outbox_messages (verification_code_id)` for pending code-carrying rows. These match the locked Accept/Resend/Revoke and pending-Outbox lookup predicates without indexing unrelated rows.
-- Generate the expand-only migration from the declarative schema with the repository-pinned Supabase CLI, review it for the two expected `CREATE INDEX` statements only, reset the local stack, and verify representative query plans plus database advisors.
+- Read `clock_timestamp()` once after the email/IP advisory locks are held, derive the hourly cutoff in Go, and pass it into the email/IP count queries. Both queries include `created_at > $cutoff` in their indexable `WHERE` clauses; the email query compares the newest row inside that bounded window against the same database-clock snapshot for cooldown.
+- Keep the partial composite index on `identity.verification_codes (target_id, created_at DESC)` for non-null action-bound codes. Widen the Outbox foreign-key index predicate from pending rows to `verification_code_id IS NOT NULL`, which still supports pending cancellation while covering every real FK reference.
+- Amend the undeployed generated expand-only migration to match the declarative schema, review it for the two expected `CREATE INDEX` statements only, reset the local stack, and verify zero declarative drift, database advisors, plus `EXPLAIN ANALYZE` plans whose email/IP `Index Cond` each contain both the subject column and `created_at` range.
 
 ## Test Seams
 
@@ -49,6 +51,6 @@ The pre-agreed seams from the spec are used directly:
 2. Transactional database rows validate state transitions, unique-index race protection, Audit Log snapshots, and the `verification_code_id` retry horizon.
 3. Mailpit validates the emitted single bilingual invitation email and its six-digit code without exposing plaintext through HTTP.
 
-Review regressions additionally cover Create/Resend cooldown, the shared email/IP hourly caps, `Retry-After`, rejected-command atomicity, and action/target-scoped invalidation. Query-plan verification seeds enough rows for the default planner to exercise both indexes under `EXPLAIN ANALYZE`; advisors provide the independent schema check.
+Review regressions additionally cover Create/Resend cooldown, the shared email/IP hourly caps, `Retry-After`, rejected-command atomicity, and action/target-scoped invalidation. Query-plan verification seeds enough historical rows for the default planner to exercise the email/IP composite indexes under `EXPLAIN ANALYZE` and asserts that both index conditions contain the time range. A catalog assertion verifies that the Outbox index predicate covers every non-null foreign-key reference; advisors remain an independent schema check.
 
 Rollback remains code-only: the two expand-only indexes may safely remain if this command code is reverted.

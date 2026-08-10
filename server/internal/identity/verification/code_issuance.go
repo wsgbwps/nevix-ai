@@ -203,18 +203,21 @@ func EnforceIssuanceLimits(ctx context.Context, tx pgx.Tx, email, ip string) err
 		return fmt.Errorf("identity: lock issuance for IP: %w", err)
 	}
 
+	var dbNow time.Time
+	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&dbNow); err != nil {
+		return fmt.Errorf("identity: read database clock: %w", err)
+	}
+	cutoff := dbNow.Add(-rateLimitWindow)
+
 	var (
-		dbNow      time.Time
 		emailCount int
 		lastIssued *time.Time
 	)
 	if err := tx.QueryRow(ctx,
-		`SELECT clock_timestamp(),
-		        count(*) FILTER (WHERE created_at > clock_timestamp() - make_interval(secs => $2)),
-		        max(created_at)
+		`SELECT count(*), max(created_at)
 		 FROM identity.verification_codes
-		 WHERE email = $1`, email, rateLimitWindow.Seconds(),
-	).Scan(&dbNow, &emailCount, &lastIssued); err != nil {
+		 WHERE email = $1 AND created_at > $2`, email, cutoff,
+	).Scan(&emailCount, &lastIssued); err != nil {
 		return fmt.Errorf("identity: read issuance history: %w", err)
 	}
 	if lastIssued != nil {
@@ -229,7 +232,7 @@ func EnforceIssuanceLimits(ctx context.Context, tx pgx.Tx, email, ip string) err
 	var ipCount int
 	if err := tx.QueryRow(ctx,
 		`SELECT count(*) FROM identity.verification_codes
-		 WHERE request_ip = $1 AND created_at > clock_timestamp() - make_interval(secs => $2)`, ip, rateLimitWindow.Seconds(),
+		 WHERE request_ip = $1 AND created_at > $2`, ip, cutoff,
 	).Scan(&ipCount); err != nil {
 		return fmt.Errorf("identity: read IP issuance history: %w", err)
 	}

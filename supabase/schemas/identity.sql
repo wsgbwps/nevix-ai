@@ -78,4 +78,4 @@ CREATE INDEX outbox_messages_pending_idx
 -- deliveries never participate in that reverse lookup.
 CREATE INDEX outbox_messages_pending_verification_code_idx
   ON identity.outbox_messages (verification_code_id)
-  WHERE status = 'pending' AND verification_code_id IS NOT NULL;
+  WHERE verification_code_id IS NOT NULL;
