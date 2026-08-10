@@ -105,6 +105,9 @@ func validateJSONObject(isObject bool) *command.Error {
 
 // MapError translates invitation-domain errors to the trusted-command contract.
 func MapError(err error) *command.Error {
+	if mapped := verification.MapError(err); mapped != nil {
+		return mapped
+	}
 	switch {
 	case errors.Is(err, errInvalidOrganizationID):
 		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_organization_id", Message: "organization_id must be a UUID."}
@@ -183,6 +186,9 @@ func (c *Creator) CreateInvitation(ctx context.Context, req CreateInvitationRequ
 		return InvitationResponse{}, fmt.Errorf("invitations: insert invitation: %w", err)
 	}
 
+	if err := verification.EnforceIssuanceLimits(ctx, tx, invitation.Email, req.ClientIP); err != nil {
+		return InvitationResponse{}, err
+	}
 	if err := c.issueInvitationCode(ctx, tx, invitation, req.ClientIP, organizationName); err != nil {
 		return InvitationResponse{}, err
 	}
@@ -305,8 +311,8 @@ func (c *Creator) issueInvitationCode(ctx context.Context, tx pgx.Tx, invitation
 	var codeID string
 	if err := tx.QueryRow(ctx,
 		`INSERT INTO identity.verification_codes (
-			email, action_type, target_id, code_hash, request_ip, expires_at
-		) VALUES ($1, 'invitation', $2, $3, $4, $5)
+			email, action_type, target_id, code_hash, request_ip, created_at, expires_at
+		) VALUES ($1, 'invitation', $2, $3, $4, clock_timestamp(), $5)
 		 RETURNING id`,
 		invitation.Email,
 		invitation.ID,

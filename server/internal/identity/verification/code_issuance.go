@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/identity/command"
@@ -133,51 +134,8 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) error {
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 
-	// Serialize concurrent issuance per email and per IP: without these
-	// transaction-scoped locks, simultaneous requests could both pass the
-	// cooldown and limit checks before either writes. Every transaction
-	// locks email first, then IP, so lock ordering cannot deadlock.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, email); err != nil {
-		return fmt.Errorf("identity: lock issuance for email: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, ip); err != nil {
-		return fmt.Errorf("identity: lock issuance for IP: %w", err)
-	}
-
-	var (
-		dbNow      time.Time
-		emailCount int
-		lastIssued *time.Time
-	)
-	err = tx.QueryRow(ctx,
-		`SELECT now(),
-		        count(*) FILTER (WHERE created_at > now() - make_interval(secs => $2)),
-		        max(created_at)
-		 FROM identity.verification_codes
-		 WHERE email = $1 AND action_type IS NULL`, email, rateLimitWindow.Seconds(),
-	).Scan(&dbNow, &emailCount, &lastIssued)
-	if err != nil {
-		return fmt.Errorf("identity: read issuance history: %w", err)
-	}
-	if lastIssued != nil {
-		if remaining := resendCooldown - dbNow.Sub(*lastIssued); remaining > 0 {
-			return &cooldownActiveError{retryAfter: int(math.Ceil(remaining.Seconds()))}
-		}
-	}
-	if emailCount >= emailHourlyLimit {
-		return errEmailRateLimited
-	}
-
-	var ipCount int
-	err = tx.QueryRow(ctx,
-		`SELECT count(*) FROM identity.verification_codes
-		 WHERE request_ip = $1 AND action_type IS NULL AND created_at > now() - make_interval(secs => $2)`, ip, rateLimitWindow.Seconds(),
-	).Scan(&ipCount)
-	if err != nil {
-		return fmt.Errorf("identity: read IP issuance history: %w", err)
-	}
-	if ipCount >= ipHourlyLimit {
-		return errIPRateLimited
+	if err := EnforceIssuanceLimits(ctx, tx, email, ip); err != nil {
+		return err
 	}
 
 	code, err := NewSixDigitCode()
@@ -188,27 +146,28 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) error {
 	// Superseding the previous code terminally cancels its undelivered email
 	// in the same transaction: the user must never receive an already-invalid
 	// code (ticket 05). The cancel runs while the old code is still active so
-	// its subquery can find it.
+	// its subquery can find it. Scope stays action-local even though rate-limit
+	// accounting includes every one-time code action.
 	if _, err := tx.Exec(ctx,
 		`UPDATE identity.outbox_messages
 		 SET status = 'cancelled'
 		 WHERE status = 'pending' AND verification_code_id IN (
 		     SELECT id FROM identity.verification_codes
-		     WHERE email = $1 AND action_type IS NULL AND status = 'active')`, email,
+		     WHERE email = $1 AND action_type IS NULL AND target_id IS NULL AND status = 'active')`, email,
 	); err != nil {
 		return fmt.Errorf("identity: cancel superseded code email: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE identity.verification_codes
 		 SET status = 'superseded', superseded_at = now()
-		 WHERE email = $1 AND action_type IS NULL AND status = 'active'`, email,
+		 WHERE email = $1 AND action_type IS NULL AND target_id IS NULL AND status = 'active'`, email,
 	); err != nil {
 		return fmt.Errorf("identity: supersede previous code: %w", err)
 	}
 	var codeID string
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO identity.verification_codes (email, code_hash, request_ip, expires_at)
-		 VALUES ($1, $2, $3, now() + make_interval(secs => $4))
+		`INSERT INTO identity.verification_codes (email, code_hash, request_ip, created_at, expires_at)
+		 VALUES ($1, $2, $3, clock_timestamp(), clock_timestamp() + make_interval(secs => $4))
 		 RETURNING id`, email, HashCode(i.cfg.HashKey, code), ip, codeValidity.Seconds(),
 	).Scan(&codeID); err != nil {
 		return fmt.Errorf("identity: store code hash: %w", err)
@@ -227,6 +186,55 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) error {
 
 	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
 		return fmt.Errorf("identity: commit code issuance: %w", err)
+	}
+	return nil
+}
+
+// EnforceIssuanceLimits applies the Identity-wide one-time-code policy inside
+// the caller's transaction. Accounting is shared across actions by email and
+// IP, while each action remains responsible for invalidating only its own
+// codes. Every caller acquires email then IP, preventing concurrent issuances
+// from both passing the checks.
+func EnforceIssuanceLimits(ctx context.Context, tx pgx.Tx, email, ip string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, email); err != nil {
+		return fmt.Errorf("identity: lock issuance for email: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, ip); err != nil {
+		return fmt.Errorf("identity: lock issuance for IP: %w", err)
+	}
+
+	var (
+		dbNow      time.Time
+		emailCount int
+		lastIssued *time.Time
+	)
+	if err := tx.QueryRow(ctx,
+		`SELECT clock_timestamp(),
+		        count(*) FILTER (WHERE created_at > clock_timestamp() - make_interval(secs => $2)),
+		        max(created_at)
+		 FROM identity.verification_codes
+		 WHERE email = $1`, email, rateLimitWindow.Seconds(),
+	).Scan(&dbNow, &emailCount, &lastIssued); err != nil {
+		return fmt.Errorf("identity: read issuance history: %w", err)
+	}
+	if lastIssued != nil {
+		if remaining := resendCooldown - dbNow.Sub(*lastIssued); remaining > 0 {
+			return &cooldownActiveError{retryAfter: int(math.Ceil(remaining.Seconds()))}
+		}
+	}
+	if emailCount >= emailHourlyLimit {
+		return errEmailRateLimited
+	}
+
+	var ipCount int
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM identity.verification_codes
+		 WHERE request_ip = $1 AND created_at > clock_timestamp() - make_interval(secs => $2)`, ip, rateLimitWindow.Seconds(),
+	).Scan(&ipCount); err != nil {
+		return fmt.Errorf("identity: read IP issuance history: %w", err)
+	}
+	if ipCount >= ipHourlyLimit {
+		return errIPRateLimited
 	}
 	return nil
 }

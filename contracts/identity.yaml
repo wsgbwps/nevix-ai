@@ -186,7 +186,7 @@ paths:
       description: |-
         Owner 或 Admin 向一个规范化邮箱创建七天有效的 Invitation。命令在同一事务中写入 Invitation、携码验证码、Audit Log 与已渲染的双语 Outbox 邮件；响应不携带明文验证码。
 
-        已有 active Membership 的邮箱被拒绝；已结束的 Membership 可以被再次邀请。每个 Organization + 邮箱至多有一个 pending Invitation。
+        已有 active Membership 的邮箱被拒绝；已结束的 Membership 可以被再次邀请。每个 Organization + 邮箱至多有一个 pending Invitation。签发携码邮件前同步执行共享的一次性码冷却、邮箱小时上限与 IP 小时上限；被限流的命令不写入任何 Invitation、验证码、Outbox 或 Audit Log 状态。
       security:
         - bearerAuth: []
       parameters:
@@ -307,6 +307,26 @@ paths:
                         enum:
                           - active_membership_exists
                           - pending_invitation_exists
+        "429":
+          description: |-
+            命中共享的一次性码同步限流，三种原因仅凭 error 机器码区分：cooldown_active 为同一邮箱的 60 秒冷却（仅此原因携带 Retry-After 响应头）；email_rate_limited 为该邮箱的每小时上限；ip_rate_limited 为该 IP 的每小时上限。
+          headers:
+            Retry-After:
+              description: 距允许再次签发一次性码的剩余秒数（整数）；仅随 cooldown_active 出现。
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - cooldown_active
+                          - email_rate_limited
+                          - ip_rate_limited
         "500":
           description: 服务端未能创建 Invitation，未提交部分状态。
           content:
@@ -324,7 +344,7 @@ paths:
       operationId: resendInvitation
       summary: 重发组织邀请
       description: |-
-        Owner 或 Admin 保留 pending Invitation 的同一行，重置其与新验证码的七天有效期，使旧码失效并取消旧码的未投递邮件。响应不携带新验证码；新的双语邮件待 Outbox Worker 投递。
+        Owner 或 Admin 保留 pending Invitation 的同一行，重置其与新验证码的七天有效期，使旧码失效并取消旧码的未投递邮件。响应不携带新验证码；新的双语邮件待 Outbox Worker 投递。新码写入前同步执行共享的一次性码冷却、邮箱小时上限与 IP 小时上限；限流时原 Invitation、旧码、Outbox 与 Audit Log 状态保持不变。
       security:
         - bearerAuth: []
       parameters:
@@ -444,6 +464,26 @@ paths:
                       error:
                         enum:
                           - invitation_not_pending
+        "429":
+          description: |-
+            命中共享的一次性码同步限流，三种原因仅凭 error 机器码区分：cooldown_active 为同一邮箱的 60 秒冷却（仅此原因携带 Retry-After 响应头）；email_rate_limited 为该邮箱的每小时上限；ip_rate_limited 为该 IP 的每小时上限。
+          headers:
+            Retry-After:
+              description: 距允许再次签发一次性码的剩余秒数（整数）；仅随 cooldown_active 出现。
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - cooldown_active
+                          - email_rate_limited
+                          - ip_rate_limited
         "500":
           description: 服务端未能重发 Invitation，未提交部分状态。
           content:

@@ -9,8 +9,10 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,18 +21,31 @@ import (
 // invitationCommand sends one JSON command over the mounted Module surface.
 func invitationCommand(t *testing.T, handler http.Handler, method, path, token string, payload any) (int, []byte) {
 	t.Helper()
+	status, body, _ := invitationCommandFromIP(t, handler, method, path, token, "", payload)
+	return status, body
+}
+
+func invitationCommandFromIP(t *testing.T, handler http.Handler, method, path, token, clientIP string, payload any) (int, []byte, http.Header) {
+	t.Helper()
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal %s %s request: %v", method, path, err)
 	}
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	if clientIP == "" {
+		hash := fnv.New32a()
+		_, _ = hash.Write([]byte(t.Name()))
+		sum := hash.Sum32()
+		clientIP = fmt.Sprintf("198.18.%d.%d", byte(sum>>8), byte(sum))
+	}
+	req.RemoteAddr = clientIP + ":43210"
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	return rec.Code, rec.Body.Bytes()
+	return rec.Code, rec.Body.Bytes(), rec.Header()
 }
 
 func assertInvitationError(t *testing.T, body []byte, want string) {
@@ -52,6 +67,168 @@ func seedProfile(t *testing.T, ctx context.Context, h *harness, userID, displayN
 		`INSERT INTO public.profiles (user_id, display_name) VALUES ($1, $2)`, userID, displayName,
 	); err != nil {
 		t.Fatalf("seed profile %s: %v", userID, err)
+	}
+}
+
+func ageActiveInvitationCodeBeyondCooldown(t *testing.T, ctx context.Context, h *harness, invitationID string) {
+	t.Helper()
+	result, err := h.pool.Exec(ctx,
+		`UPDATE identity.verification_codes
+		 SET created_at = clock_timestamp() - interval '2 minutes'
+		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
+	)
+	if err != nil {
+		t.Fatalf("age active invitation code: %v", err)
+	}
+	if result.RowsAffected() != 1 {
+		t.Fatalf("aged %d active invitation codes for %s, want 1", result.RowsAffected(), invitationID)
+	}
+}
+
+func TestCreateInvitationEnforcesSharedCodeCooldownAndEmailLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	stack := newRLSStack(t, ctx)
+	h := newHarness(t, ctx)
+	owner := stack.signUpConfirmedUser(t, ctx, "invitation-create-limit-owner")
+	seedProfile(t, ctx, h, owner.ID, "Invitation Limit Owner")
+
+	orgID := newRLSOrgID(t)
+	stack.seedAsIdentityApp(t, ctx,
+		[]string{orgID}, []string{"Invitation Create Limit Org"},
+		[]membershipSeed{{OrganizationID: orgID, UserID: owner.ID, Role: "owner", Status: "active"}},
+	)
+	keys := newES256KeyServer(t)
+	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
+	token := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
+	path := "/identity/organizations/" + orgID + "/invitations"
+
+	cooldownEmail := fmt.Sprintf("invitation-create-cooldown-%d@nevix.test", time.Now().UnixNano())
+	h.seedIssuance(t, ctx, cooldownEmail, "198.51.100.10", 10)
+	status, body, headers := invitationCommandFromIP(t, handler, http.MethodPost, path, token, "198.51.100.11", map[string]string{"email": cooldownEmail})
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("create invitation during shared cooldown: status %d body %s, want 429", status, body)
+	}
+	assertInvitationError(t, body, "cooldown_active")
+	assertContractResponse(t, http.MethodPost, path, status, body)
+	retryAfter, err := strconv.Atoi(headers.Get("Retry-After"))
+	if err != nil || retryAfter < 1 || retryAfter > 60 {
+		t.Fatalf("create invitation Retry-After %q, want 1..60 seconds", headers.Get("Retry-After"))
+	}
+
+	hourlyEmail := fmt.Sprintf("invitation-create-hourly-%d@nevix.test", time.Now().UnixNano())
+	for i, ageSeconds := range []int{350, 280, 210, 140, 70} {
+		h.seedIssuance(t, ctx, hourlyEmail, fmt.Sprintf("198.51.100.%d", 20+i), ageSeconds)
+	}
+	status, body, headers = invitationCommandFromIP(t, handler, http.MethodPost, path, token, "198.51.100.30", map[string]string{"email": hourlyEmail})
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("create invitation above shared email limit: status %d body %s, want 429", status, body)
+	}
+	assertInvitationError(t, body, "email_rate_limited")
+	assertContractResponse(t, http.MethodPost, path, status, body)
+	if got := headers.Get("Retry-After"); got != "" {
+		t.Fatalf("email-rate-limited create Retry-After = %q, want absent", got)
+	}
+
+	for _, email := range []string{cooldownEmail, hourlyEmail} {
+		var invitations, outboxRows, audits int
+		if err := h.pool.QueryRow(ctx,
+			`SELECT
+				(SELECT count(*) FROM public.invitations WHERE organization_id = $1 AND email = $2),
+				(SELECT count(*) FROM identity.outbox_messages WHERE recipient = $2),
+				(SELECT count(*) FROM public.audit_logs WHERE organization_id = $1 AND metadata->>'email' = $2)`,
+			orgID, email,
+		).Scan(&invitations, &outboxRows, &audits); err != nil {
+			t.Fatalf("read rejected create state for %s: %v", email, err)
+		}
+		if invitations != 0 || outboxRows != 0 || audits != 0 {
+			t.Fatalf("rejected create for %s wrote invitation:%d outbox:%d audit:%d, want all zero", email, invitations, outboxRows, audits)
+		}
+	}
+}
+
+func TestResendInvitationEnforcesCooldownAndIPLimitWithoutMutation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	stack := newRLSStack(t, ctx)
+	h := newHarness(t, ctx)
+	owner := stack.signUpConfirmedUser(t, ctx, "invitation-resend-limit-owner")
+	seedProfile(t, ctx, h, owner.ID, "Invitation Resend Limit Owner")
+
+	orgID := newRLSOrgID(t)
+	stack.seedAsIdentityApp(t, ctx,
+		[]string{orgID}, []string{"Invitation Resend Limit Org"},
+		[]membershipSeed{{OrganizationID: orgID, UserID: owner.ID, Role: "owner", Status: "active"}},
+	)
+	keys := newES256KeyServer(t)
+	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
+	token := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
+	createPath := "/identity/organizations/" + orgID + "/invitations"
+	email := fmt.Sprintf("invitation-resend-limit-%d@nevix.test", time.Now().UnixNano())
+	status, body, _ := invitationCommandFromIP(t, handler, http.MethodPost, createPath, token, "203.0.113.40", map[string]string{"email": email})
+	if status != http.StatusAccepted {
+		t.Fatalf("create invitation for resend limits: status %d body %s, want 202", status, body)
+	}
+
+	var invitationID, codeID string
+	var originalExpiresAt time.Time
+	if err := h.pool.QueryRow(ctx,
+		`SELECT i.id, i.expires_at, c.id
+		 FROM public.invitations i
+		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
+		 WHERE i.organization_id = $1 AND i.email = $2`, orgID, email,
+	).Scan(&invitationID, &originalExpiresAt, &codeID); err != nil {
+		t.Fatalf("read invitation for resend limits: %v", err)
+	}
+	resendPath := createPath + "/" + invitationID + "/resend"
+
+	status, body, headers := invitationCommandFromIP(t, handler, http.MethodPost, resendPath, token, "203.0.113.41", map[string]string{})
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("resend invitation during cooldown: status %d body %s, want 429", status, body)
+	}
+	assertInvitationError(t, body, "cooldown_active")
+	assertContractResponse(t, http.MethodPost, resendPath, status, body)
+	retryAfter, err := strconv.Atoi(headers.Get("Retry-After"))
+	if err != nil || retryAfter < 1 || retryAfter > 60 {
+		t.Fatalf("resend invitation Retry-After %q, want 1..60 seconds", headers.Get("Retry-After"))
+	}
+
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE identity.verification_codes SET created_at = now() - interval '2 minutes' WHERE id = $1`, codeID,
+	); err != nil {
+		t.Fatalf("age invitation code beyond cooldown: %v", err)
+	}
+	saturatedIP := "203.0.113.42"
+	for i := 0; i < 20; i++ {
+		h.seedIssuance(t, ctx, fmt.Sprintf("invitation-ip-seed-%d-%d@nevix.test", time.Now().UnixNano(), i), saturatedIP, 120+i)
+	}
+	status, body, headers = invitationCommandFromIP(t, handler, http.MethodPost, resendPath, token, saturatedIP, map[string]string{})
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("resend invitation above shared IP limit: status %d body %s, want 429", status, body)
+	}
+	assertInvitationError(t, body, "ip_rate_limited")
+	assertContractResponse(t, http.MethodPost, resendPath, status, body)
+	if got := headers.Get("Retry-After"); got != "" {
+		t.Fatalf("IP-rate-limited resend Retry-After = %q, want absent", got)
+	}
+
+	var currentExpiresAt time.Time
+	var codeStatus, outboxStatus string
+	var codeRows, outboxRows, auditRows int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT i.expires_at, c.status, o.status,
+			(SELECT count(*) FROM identity.verification_codes WHERE target_id = i.id AND action_type = 'invitation'),
+			(SELECT count(*) FROM identity.outbox_messages WHERE recipient = i.email),
+			(SELECT count(*) FROM public.audit_logs WHERE organization_id = i.organization_id AND metadata->>'invitation_id' = i.id::text)
+		 FROM public.invitations i
+		 JOIN identity.verification_codes c ON c.id = $2
+		 JOIN identity.outbox_messages o ON o.verification_code_id = c.id
+		 WHERE i.id = $1`, invitationID, codeID,
+	).Scan(&currentExpiresAt, &codeStatus, &outboxStatus, &codeRows, &outboxRows, &auditRows); err != nil {
+		t.Fatalf("read rejected resend state: %v", err)
+	}
+	if !currentExpiresAt.Equal(originalExpiresAt) || codeStatus != "active" || outboxStatus != "pending" || codeRows != 1 || outboxRows != 1 || auditRows != 1 {
+		t.Fatalf("rejected resends changed state: expires=%s code=%s outbox=%s rows=(%d,%d,%d)", currentExpiresAt, codeStatus, outboxStatus, codeRows, outboxRows, auditRows)
 	}
 }
 
@@ -410,6 +587,7 @@ func TestResendInvitationRefreshesCodeAndCancelsPriorUndeliveredMail(t *testing.
 		t.Fatalf("read initial invitation delivery state: %v", err)
 	}
 	originalCode := extractCode(t, originalBody)
+	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 
 	resendPath := createPath + "/" + invitationID + "/resend"
 	status, body = invitationCommand(t, handler, http.MethodPost, resendPath, token, map[string]string{})
@@ -527,12 +705,14 @@ func TestResendInvitationDoesNotRevalidateHistoricalCode(t *testing.T) {
 	initialCode := extractCode(t, initialBody)
 
 	resendPath := createPath + "/" + invitationID + "/resend"
+	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 	cryptorand.Reader = bytes.NewReader([]byte{0, 0, 1})
 	status, body = invitationCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
 	if status != http.StatusAccepted {
 		t.Fatalf("first resend for code history: status %d body %s, want 202", status, body)
 	}
 
+	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 	cryptorand.Reader = bytes.NewReader([]byte{0, 0, 0, 0, 0, 2})
 	status, body = invitationCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
 	cryptorand.Reader = originalReader
@@ -931,7 +1111,7 @@ func TestInvitationAdminCommandsPreserveAuthorizationAndContractSemantics(t *tes
 	assertContractResponse(t, http.MethodPost, invalidResendPath, status, body)
 }
 
-func TestPublicCodeIssuanceDoesNotSupersedePendingInvitation(t *testing.T) {
+func TestCodeIssuanceSharesLimitsWithoutSharingInvalidationScope(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	stack := newRLSStack(t, ctx)
@@ -954,13 +1134,13 @@ func TestPublicCodeIssuanceDoesNotSupersedePendingInvitation(t *testing.T) {
 		t.Fatalf("create invitation for issuance isolation: status %d body %s, want 202", status, body)
 	}
 
-	var invitationCodeID string
+	var invitationID, invitationCodeID string
 	if err := h.pool.QueryRow(ctx,
-		`SELECT c.id
+		`SELECT i.id, c.id
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
 		 WHERE i.organization_id = $1 AND i.email = $2`, orgID, invitee.Email,
-	).Scan(&invitationCodeID); err != nil {
+	).Scan(&invitationID, &invitationCodeID); err != nil {
 		t.Fatalf("read invitation code for issuance isolation: %v", err)
 	}
 	if _, err := h.pool.Exec(ctx,
@@ -986,6 +1166,41 @@ func TestPublicCodeIssuanceDoesNotSupersedePendingInvitation(t *testing.T) {
 	}
 	if invitationCodeStatus != "active" || invitationOutboxStatus != "pending" {
 		t.Fatalf("public issuance changed invitation code:%q outbox:%q, want active/pending", invitationCodeStatus, invitationOutboxStatus)
+	}
+
+	var publicCodeID string
+	if err := h.pool.QueryRow(ctx,
+		`SELECT id FROM identity.verification_codes
+		 WHERE email = $1 AND action_type IS NULL AND target_id IS NULL`, invitee.Email,
+	).Scan(&publicCodeID); err != nil {
+		t.Fatalf("read public code for invitation isolation: %v", err)
+	}
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE identity.verification_codes
+		 SET created_at = clock_timestamp() - interval '2 minutes'
+		 WHERE id = $1 OR id = $2`, invitationCodeID, publicCodeID,
+	); err != nil {
+		t.Fatalf("age shared-limit codes before invitation resend: %v", err)
+	}
+	resendPath := createPath + "/" + invitationID + "/resend"
+	status, body = invitationCommand(t, handler, http.MethodPost, resendPath,
+		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{})
+	if status != http.StatusAccepted {
+		t.Fatalf("resend invitation for public-code isolation: status %d body %s, want 202", status, body)
+	}
+	assertContractResponse(t, http.MethodPost, resendPath, status, body)
+
+	var publicCodeStatus, publicOutboxStatus string
+	if err := h.pool.QueryRow(ctx,
+		`SELECT c.status, o.status
+		 FROM identity.verification_codes c
+		 JOIN identity.outbox_messages o ON o.verification_code_id = c.id
+		 WHERE c.id = $1`, publicCodeID,
+	).Scan(&publicCodeStatus, &publicOutboxStatus); err != nil {
+		t.Fatalf("read public code after invitation resend: %v", err)
+	}
+	if publicCodeStatus != "active" || publicOutboxStatus != "pending" {
+		t.Fatalf("invitation resend changed public code:%q outbox:%q, want active/pending", publicCodeStatus, publicOutboxStatus)
 	}
 }
 
@@ -1379,6 +1594,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 		t.Fatalf("read created invitation deadline: %v", err)
 	}
 	assertFreshDeadline("created invitation", createReleasedAt, createdExpiresAt)
+	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 
 	resendBlocker, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -1455,6 +1671,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 	).Scan(&invitationID); err != nil {
 		t.Fatalf("read invitation for serialized resends: %v", err)
 	}
+	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 
 	blocker, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -1513,6 +1730,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 		t.Fatalf("admin resend while owner blocked: status %d body %s, want 202", status, body)
 	}
 	assertContractResponse(t, http.MethodPost, resendPath, status, body)
+	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 	if err := blocker.Commit(context.WithoutCancel(ctx)); err != nil {
 		t.Fatalf("release owner membership lock: %v", err)
 	}
@@ -1521,6 +1739,17 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 		t.Fatalf("owner resend after membership lock: status %d body %s, want 202", ownerResult.status, ownerResult.body)
 	}
 	assertContractResponse(t, http.MethodPost, resendPath, ownerResult.status, ownerResult.body)
+
+	// The issuance path now records the post-lock wall clock. Backdate only the
+	// active row through the test write seam to keep this regression focused on
+	// selecting by status rather than assuming timestamp order implies validity.
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE identity.verification_codes
+		 SET created_at = clock_timestamp() - interval '4 minutes'
+		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
+	); err != nil {
+		t.Fatalf("backdate active invitation code: %v", err)
+	}
 
 	var activeCreatedAt, latestSupersededCreatedAt time.Time
 	var activeBody string

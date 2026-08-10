@@ -9,7 +9,8 @@ Status: implementation plan — 2026-08-10
 - `server/internal/identity/audit/` owns reusable Audit Log snapshot writes; `server/internal/identity/outbox/` owns embedded, write-time rendered email templates.
 - `server/internal/identity/routes.go` and `module.go` remain wiring-only composition surfaces.
 - `server/internal/identity/integrationtest/` owns the HTTP + real PostgreSQL + Mailpit command seam tests.
-- `contracts/openapi.yaml` remains the OpenAPI master; `contracts/identity.yaml` owns the Identity path items it references. No migration changes: ticket 05 already supplies the required schema, RLS, grants, and retry-horizon foreign key.
+- `contracts/openapi.yaml` remains the OpenAPI master; `contracts/identity.yaml` owns the Identity path items it references.
+- `supabase/schemas/identity.sql` owns the declarative state for the two Go-only Identity tables. PR review exposed two missing read-path indexes, so this slice adds only those indexes and the generated expand-only migration; it does not change data shape, RLS, grants, or the Supabase-to-Go responsibility seam.
 
 ## Public Contract
 
@@ -33,6 +34,13 @@ A caller with no active Membership in the Organization receives 404 `organizatio
 - Accept verifies the caller's directory email before exposing state. It evaluates both expiry deadlines against the database clock; a wrong code atomically increments `failed_attempts`; the fifth failed attempt cancels any unsent mail and makes the code permanently unusable. A valid acceptance follows the required order: validate code → insert Member Membership → mark Invitation accepted → write Audit Log → mark code consumed.
 - Audit actor/target names are loaded from `profiles` in the command transaction, falling back to the verified directory email only when Profile setup is incomplete, and stored as immutable snapshots. The bilingual invitation email is rendered through an embedded Go text template before its Outbox row is inserted; the Worker remains a pure deliverer.
 
+## PR Review Remediation
+
+- Before either Create or Resend writes a new Invitation code or Outbox row, it reuses the Identity verification issuance guard: advisory locks are acquired in email-then-IP order, then the shared 60-second cooldown, five-codes-per-email-hour limit, and twenty-codes-per-IP-hour limit count every one-time code action. Rejections roll back the whole Invitation transaction and map to the existing 429 machine codes; only `cooldown_active` carries `Retry-After`.
+- Rate-limit accounting is shared across verification and Invitation actions, while invalidation remains action/target scoped: the verification flow supersedes only `action_type IS NULL AND target_id IS NULL` codes and Resend/Revoke supersede only `action_type = 'invitation'` rows for their `target_id`.
+- Add a partial composite index on `identity.verification_codes (target_id, created_at DESC)` for non-null action-bound codes and a partial index on `identity.outbox_messages (verification_code_id)` for pending code-carrying rows. These match the locked Accept/Resend/Revoke and pending-Outbox lookup predicates without indexing unrelated rows.
+- Generate the expand-only migration from the declarative schema with the repository-pinned Supabase CLI, review it for the two expected `CREATE INDEX` statements only, reset the local stack, and verify representative query plans plus database advisors.
+
 ## Test Seams
 
 The pre-agreed seams from the spec are used directly:
@@ -41,4 +49,6 @@ The pre-agreed seams from the spec are used directly:
 2. Transactional database rows validate state transitions, unique-index race protection, Audit Log snapshots, and the `verification_code_id` retry horizon.
 3. Mailpit validates the emitted single bilingual invitation email and its six-digit code without exposing plaintext through HTTP.
 
-Rollback is code-only: ticket 05's expand-only schema remains valid if this command code is reverted.
+Review regressions additionally cover Create/Resend cooldown, the shared email/IP hourly caps, `Retry-After`, rejected-command atomicity, and action/target-scoped invalidation. Query-plan verification seeds enough rows for the default planner to exercise both indexes under `EXPLAIN ANALYZE`; advisors provide the independent schema check.
+
+Rollback remains code-only: the two expand-only indexes may safely remain if this command code is reverted.

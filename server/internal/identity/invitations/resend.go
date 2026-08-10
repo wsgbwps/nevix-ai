@@ -7,6 +7,7 @@ import (
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/authjwt"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/verification"
 )
 
 // ResendInvitationRequest is supplied by the route adapter; ClientIP is used
@@ -61,6 +62,9 @@ func (c *Creator) ResendInvitation(ctx context.Context, req ResendInvitationRequ
 		return InvitationResponse{}, errInvitationNotPending
 	}
 
+	if err := verification.EnforceIssuanceLimits(ctx, tx, invitation.Email, req.ClientIP); err != nil {
+		return InvitationResponse{}, err
+	}
 	if err := cancelPendingInvitationOutbox(ctx, tx, invitation.ID); err != nil {
 		return InvitationResponse{}, err
 	}
