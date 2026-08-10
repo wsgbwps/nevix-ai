@@ -16,3 +16,4 @@
 ## Comments
 
 - 2026-08-10: Implemented on `feat/identity-invitation-commands` in `5fe0a3e`. Verified with `go vet ./...`, the repeated targeted race/validation suite, `scripts/test-mail-smoke.sh`, `go test -race -count=1 ./...`, `pnpm lint`, and a final two-axis review with no findings. Awaiting PR CI and merge.
+- 2026-08-10: PR [#35](https://github.com/wsgbwps/nevix-ai/pull/35) opened; awaiting CI and merge.
