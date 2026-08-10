@@ -1,9 +1,10 @@
 -- Organization Membership data foundation (identity-org-membership ticket 01).
 --
--- The three client-readable tables live in `public` (api.schemas) behind RLS;
+-- The five client-readable tables live in `public` (api.schemas) behind RLS;
 -- every write that needs an Audit Log or Outbox row stays a Go trusted
--- command, so organizations/memberships are client SELECT-only and the only
--- client-writable table is profiles (own row) — ADR-0008.
+-- command, so organizations, memberships, invitations, and audit_logs are
+-- client SELECT-only and the only client-writable table is profiles (own row)
+-- — ADR-0008.
 --
 -- Authorization vocabulary: the three security definer helpers in the
 -- `identity` schema are the only place membership authorization is expressed;
@@ -67,6 +68,55 @@ CREATE UNIQUE INDEX memberships_active_owner_idx
 CREATE INDEX memberships_user_id_idx ON public.memberships (user_id);
 CREATE INDEX memberships_organization_id_idx
   ON public.memberships (organization_id);
+
+-- Invitations bind a normalized email address to an Organization. Expiration
+-- is derived from expires_at rather than materialized as another state: resend
+-- keeps the row, resets this deadline, and supersedes its prior code.
+CREATE TABLE public.invitations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL
+    REFERENCES public.organizations (id) ON DELETE CASCADE,
+  email text NOT NULL,
+  status text NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'accepted', 'revoked')),
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- A pending address can be invited to an Organization once. Owner/Admin
+-- listings need the organization index across every state; invitee RLS
+-- resolves a pending address through the email index.
+CREATE UNIQUE INDEX invitations_pending_organization_email_idx
+  ON public.invitations (organization_id, email)
+  WHERE status = 'pending';
+CREATE INDEX invitations_organization_id_idx
+  ON public.invitations (organization_id);
+CREATE INDEX invitations_pending_email_idx
+  ON public.invitations (email)
+  WHERE status = 'pending';
+
+-- Audit Log values are immutable snapshots. actor/target identities
+-- intentionally have no foreign keys: profile changes or User deletion must
+-- not rewrite or erase history. target fields are nullable for actions that
+-- affect an Organization rather than a User.
+CREATE TABLE public.audit_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL
+    REFERENCES public.organizations (id) ON DELETE CASCADE,
+  actor_user_id uuid NOT NULL,
+  actor_display_name text NOT NULL,
+  target_user_id uuid,
+  target_display_name text,
+  action text NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- The organization prefix covers both the foreign-key/RLS lookup and the
+-- chronological Organization Audit Log read/export path.
+CREATE INDEX audit_logs_organization_id_created_at_idx
+  ON public.audit_logs (organization_id, created_at DESC);
 
 -- Authorization helpers: security definer so they read memberships regardless
 -- of the caller's own visibility, search_path pinned, uid resolved inside the
@@ -135,6 +185,9 @@ GRANT identity_app TO postgres;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.invitations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+
 
 -- profiles: visible to the owner and to active co-members; writable only by
 -- the owner.
@@ -162,6 +215,21 @@ CREATE POLICY memberships_select_own_or_active_org ON public.memberships
   USING (user_id = (select auth.uid())
     OR (status = 'active' AND identity.is_active_member(organization_id)));
 
+-- invitations: Owner/Admin see every state in their Organization; an invitee
+-- sees only their matching pending row. Email normalization belongs to the Go
+-- command, so this is an indexed exact comparison against the JWT claim.
+CREATE POLICY invitations_select_admin_or_invitee ON public.invitations
+  FOR SELECT TO authenticated
+  USING (
+    identity.has_org_role(organization_id, ARRAY['owner', 'admin'])
+    OR (status = 'pending' AND email = ((select auth.jwt()) ->> 'email'))
+  );
+
+-- audit_logs: audit visibility stays with Organization administrators.
+CREATE POLICY audit_logs_select_owner_or_admin ON public.audit_logs
+  FOR SELECT TO authenticated
+  USING (identity.has_org_role(organization_id, ARRAY['owner', 'admin']));
+
 -- Permissive access for the Go role; it is the only writer besides the
 -- profile owner.
 CREATE POLICY identity_app_all ON public.profiles
@@ -170,6 +238,11 @@ CREATE POLICY identity_app_all ON public.organizations
   FOR ALL TO identity_app USING (true) WITH CHECK (true);
 CREATE POLICY identity_app_all ON public.memberships
   FOR ALL TO identity_app USING (true) WITH CHECK (true);
+CREATE POLICY identity_app_all ON public.invitations
+  FOR ALL TO identity_app USING (true) WITH CHECK (true);
+CREATE POLICY identity_app_all ON public.audit_logs
+  FOR ALL TO identity_app USING (true) WITH CHECK (true);
+
 
 -- Client grants: profiles is the only client-writable table. The REVOKEs
 -- strip the platform default privileges (MAINTAIN/REFERENCES/TRIGGER/TRUNCATE)
@@ -180,9 +253,13 @@ CREATE POLICY identity_app_all ON public.memberships
 REVOKE ALL ON public.profiles FROM anon, authenticated;
 REVOKE ALL ON public.organizations FROM anon, authenticated;
 REVOKE ALL ON public.memberships FROM anon, authenticated;
+REVOKE ALL ON public.invitations FROM anon, authenticated;
+REVOKE ALL ON public.audit_logs FROM anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.profiles TO authenticated;
 GRANT SELECT ON public.organizations TO authenticated;
 GRANT SELECT ON public.memberships TO authenticated;
+GRANT SELECT ON public.invitations TO authenticated;
+GRANT SELECT ON public.audit_logs TO authenticated;
 
 -- Go role grants: profiles read-only; organizations/memberships read-write
 -- without DELETE (Governance owns deletion).
@@ -190,6 +267,10 @@ GRANT USAGE ON SCHEMA public TO identity_app;
 GRANT SELECT ON public.profiles TO identity_app;
 GRANT SELECT, INSERT, UPDATE ON public.organizations TO identity_app;
 GRANT SELECT, INSERT, UPDATE ON public.memberships TO identity_app;
+GRANT SELECT, INSERT, UPDATE ON public.invitations TO identity_app;
+GRANT SELECT, INSERT, DELETE ON public.audit_logs TO identity_app;
+GRANT SELECT, INSERT, UPDATE ON identity.verification_codes TO identity_app;
+GRANT SELECT, INSERT, UPDATE ON identity.outbox_messages TO identity_app;
 
 -- Helper reachability: authenticated needs EXECUTE to evaluate the policies
 -- (see deviation note above); identity_app needs it for future commands.
