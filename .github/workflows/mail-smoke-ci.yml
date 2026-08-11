@@ -19,12 +19,10 @@ on:
       - "pnpm-workspace.yaml"
       - "go.work"
       - "go.work.sum"
-  pull_request:
-    branches:
-      - main
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: mail-smoke-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
