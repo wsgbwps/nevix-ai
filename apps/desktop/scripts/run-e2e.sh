@@ -19,19 +19,13 @@ identity_server_pid=""
 identity_server_log=""
 identity_server_binary_dir=""
 
+source "$repo_root/scripts/lib/supabase-local-harness.sh"
+
 # Loopback traffic must never go through a developer HTTP proxy: the Supabase
 # CLI, the Go server health check, and Electron's local test traffic all need
 # to reach the pinned stack directly.
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
 export no_proxy="${NO_PROXY}"
-
-stop_legacy_auth_stack() {
-  pnpm --dir "$desktop_root" exec supabase --workdir tests/auth/harness stop --no-backup >/dev/null 2>&1 || true
-}
-
-stop_supabase_stack() {
-  pnpm --dir "$repo_root" exec supabase stop --no-backup >/dev/null 2>&1 || true
-}
 
 stop_identity_server() {
   if [[ -n "$identity_server_pid" ]] && kill -0 "$identity_server_pid" >/dev/null 2>&1; then
@@ -48,9 +42,10 @@ stop_identity_server() {
 }
 
 cleanup() {
+  local exit_status="$1"
+
   stop_identity_server
-  stop_supabase_stack
-  stop_legacy_auth_stack
+  nevix_supabase_harness_cleanup "$exit_status"
 }
 
 json_value() {
@@ -108,9 +103,13 @@ start_identity_server() {
   wait_for_identity_server
 }
 
-trap cleanup EXIT INT TERM
-stop_legacy_auth_stack
-stop_supabase_stack
+trap 'exit_status=$?; trap - EXIT; cleanup "$exit_status"; exit $?' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+nevix_supabase_harness_acquire "$repo_root" desktop-e2e
+nevix_supabase_harness_require_clean_projects nevix-ai nevix-authentication-e2e
+nevix_supabase_harness_require_free_tcp_ports 54320 54321 54322 54324 54325 8080
 
 cd "$desktop_root"
 
@@ -142,6 +141,7 @@ if [[ "$mode" == "full" ]]; then
     pnpm exec playwright test tests/auth/configuration.spec.ts --workers=1
 fi
 
+nevix_supabase_harness_claim_stack nevix-ai
 pnpm --dir "$repo_root" exec supabase start \
   -x realtime,storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor \
   >/dev/null
