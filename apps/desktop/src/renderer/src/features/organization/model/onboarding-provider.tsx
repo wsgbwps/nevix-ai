@@ -7,11 +7,28 @@ export function OrganizationOnboardingProvider({
   readonly children: React.ReactNode
 }): React.JSX.Element {
   const [isEligible, setIsEligible] = useState(false)
-  const beginOnboarding = useCallback((): void => setIsEligible(true), [])
+  const [shouldCreateOrganization, setShouldCreateOrganization] = useState(true)
+  const beginOnboarding = useCallback((): void => {
+    setShouldCreateOrganization(true)
+    setIsEligible(true)
+  }, [])
+  const skipOrganizationCreation = useCallback((): void => setShouldCreateOrganization(false), [])
   const completeOnboarding = useCallback((): void => setIsEligible(false), [])
   const value = useMemo<OrganizationOnboardingState>(
-    () => ({ isEligible, beginOnboarding, completeOnboarding }),
-    [beginOnboarding, completeOnboarding, isEligible]
+    () => ({
+      isEligible,
+      shouldCreateOrganization,
+      beginOnboarding,
+      skipOrganizationCreation,
+      completeOnboarding
+    }),
+    [
+      beginOnboarding,
+      completeOnboarding,
+      isEligible,
+      shouldCreateOrganization,
+      skipOrganizationCreation
+    ]
   )
 
   return (

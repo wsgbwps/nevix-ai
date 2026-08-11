@@ -28,6 +28,11 @@ function OnboardingView(): React.JSX.Element | null {
     <OnboardingPage
       getSession={authentication.getSession}
       saveDisplayName={saveProfile}
+      shouldCreateOrganization={onboarding.shouldCreateOrganization}
+      onProfileComplete={() => {
+        onboarding.completeOnboarding()
+        void navigate({ to: '/select-organization', replace: true })
+      }}
       onComplete={(organization: OnboardingCompletedOrganization) => {
         // The creator becomes the first Owner; entering also remembers the Organization on this
         // device before the landing navigation runs.

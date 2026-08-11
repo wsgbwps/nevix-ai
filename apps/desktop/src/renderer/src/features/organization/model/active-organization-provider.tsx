@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   acceptInvitation as acceptPendingInvitation,
+  InvitationAcceptanceError,
   readPendingInvitations,
+  type AcceptedInvitation,
   type PendingInvitation
 } from '../api/invitations'
 import type { AuthenticatedOrganizationSession } from '../api/client'
@@ -67,11 +69,21 @@ export function ActiveOrganizationProvider({
       const session = await getSession()
       if (!session) throw new Error('Invitation acceptance Session is unavailable.')
 
-      const accepted = await acceptPendingInvitation({
-        session,
-        invitationId: invitation.id,
-        code
-      })
+      let accepted: AcceptedInvitation
+      try {
+        accepted = await acceptPendingInvitation({
+          session,
+          invitationId: invitation.id,
+          code
+        })
+      } catch (error) {
+        if (error instanceof InvitationAcceptanceError && error.code === 'invitation_revoked') {
+          setPendingInvitations((invitations) =>
+            invitations.filter((candidate) => candidate.id !== invitation.id)
+          )
+        }
+        throw error
+      }
       // The command return is confirmation only. Re-read active Memberships under RLS so the
       // Data API remains the source of truth for the Organization the Desktop enters.
       const memberships = await readActiveMemberships(session)
@@ -125,10 +137,15 @@ export function ActiveOrganizationProvider({
           return
         }
 
-        // A fresh account gets a temporary onboarding eligibility signal after verification.
-        // Complete it once invitation-aware startup has found an entry path, so an existing
-        // pending invitation reaches the picker instead of being hidden behind onboarding.
-        onboarding.completeOnboarding()
+        if (pending.length > 0) {
+          // A fresh invitee still needs to finish the global Profile, but the pending Invitation
+          // supplies the Organization entry path. Keep registration eligibility while skipping
+          // only first-Organization creation; an existing User remains ineligible and sees the
+          // picker directly.
+          onboarding.skipOrganizationCreation()
+        } else {
+          onboarding.completeOnboarding()
+        }
         if (branch.kind === 'enter') {
           enterOrganization(branch.membership)
           return

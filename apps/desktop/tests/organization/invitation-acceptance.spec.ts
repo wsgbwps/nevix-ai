@@ -17,6 +17,7 @@ import {
 import {
   ageInvitationCodeBeyondCooldown,
   expireInvitation,
+  readInvitationAcceptanceState,
   seedOrganizationWithMembership
 } from './helpers/organization-seed'
 
@@ -134,7 +135,7 @@ async function readRememberedOrganizationId(userDataDir: string): Promise<string
 }
 
 test(
-  'a pending invitation is surfaced automatically, reports every attempt, and joins with a resent code',
+  'a fresh invited User saves their Profile and joins only the invited Organization with a resent code',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(150_000)
@@ -186,7 +187,21 @@ test(
         const messagesBeforeSignup = await readMailpitMessageIds(mailpitHarness)
         await signUpAndVerifyInvitationEmail(launched.page, invitee, messagesBeforeSignup)
 
+        await expect(
+          launched.page.getByRole('heading', { name: 'What should we call you?' })
+        ).toBeVisible()
+        await launched.page.getByLabel('Display name').fill('  Avery Invitee  ')
+        const profileResponse = launched.page.waitForResponse(
+          (response) =>
+            response.request().method() === 'POST' && response.url().includes('/rest/v1/profiles')
+        )
+        await launched.page.getByRole('button', { name: 'Continue' }).click()
+        expect((await profileResponse).status()).toBe(201)
+
         await expect(launched.page.getByRole('heading', { name: PICKER_HEADING })).toBeVisible()
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create your first organization' })
+        ).toHaveCount(0)
         await expect(launched.page.getByText('Pending invitations')).toBeVisible()
         await expect(
           launched.page.getByText(`${owner.email} invited you to join "Invited Studio"`)
@@ -229,6 +244,22 @@ test(
         await launched.page.getByRole('button', { name: 'Verify and join' }).click()
         await expect(launched.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible()
         await expect.poll(() => readRememberedOrganizationId(userDataDir)).toBe(organization.id)
+
+        const inviteeSession = await signInOutsideDesktop(authHarness, invitee)
+        await expect
+          .poll(() => readInvitationAcceptanceState(inviteeSession.user.id, invitationId))
+          .toEqual({
+            displayName: 'Avery Invitee',
+            invitationStatus: 'accepted',
+            organizations: [
+              {
+                id: organization.id,
+                name: 'Invited Studio',
+                role: 'member',
+                status: 'active'
+              }
+            ]
+          })
       } finally {
         await launched.electronApp.close()
       }
@@ -240,7 +271,7 @@ test(
 )
 
 test(
-  'expired and revoked invitations give the invitee clear resend guidance',
+  'expired guidance remains clear and a revoked invitation disappears after its open sheet closes',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(150_000)
@@ -316,6 +347,10 @@ test(
       try {
         await signIn(launched.page, revokedInvitee)
         await expect(launched.page.getByRole('heading', { name: PICKER_HEADING })).toBeVisible()
+        const revokedInvitationLine = launched.page.getByText(
+          `${owner.email} invited you to join "Expired Studio"`
+        )
+        await expect(revokedInvitationLine).toBeVisible()
         await launched.page.getByRole('button', { name: 'Accept' }).click()
         await expect(launched.page.getByRole('textbox', { name: 'Invitation code' })).toBeVisible()
 
@@ -329,6 +364,13 @@ test(
           launched.page
             .getByRole('alert')
             .filter({ hasText: 'This invitation has been revoked. Request a new invitation.' })
+        ).toBeVisible()
+
+        await launched.page.getByRole('button', { name: 'Cancel' }).click()
+        await expect(revokedInvitationLine).toHaveCount(0)
+        await expect(launched.page.getByText('Pending invitations')).toHaveCount(0)
+        await expect(
+          launched.page.getByRole('heading', { name: 'What should we call you?' })
         ).toBeVisible()
       } finally {
         await launched.electronApp.close()

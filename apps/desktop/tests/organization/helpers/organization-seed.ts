@@ -5,6 +5,17 @@ export interface SeededOrganization {
   readonly name: string
 }
 
+export interface InvitationAcceptanceState {
+  readonly displayName: string | undefined
+  readonly invitationStatus: string | undefined
+  readonly organizations: readonly {
+    readonly id: string
+    readonly name: string
+    readonly role: string
+    readonly status: string
+  }[]
+}
+
 /**
  * Seeds Organizations and Memberships through the stack's trusted `identity_app` role: clients
  * are SELECT-only on these tables by design (ADR-0008), so tests arrange startup fixtures with
@@ -86,5 +97,48 @@ export async function expireInvitation(invitationId: string): Promise<void> {
       [invitationId]
     )
     if (code.rowCount !== 1) throw new Error('Unable to expire the test invitation code')
+  })
+}
+
+export async function readInvitationAcceptanceState(
+  userId: string,
+  invitationId: string
+): Promise<InvitationAcceptanceState> {
+  return withIdentityAppClient(async (client) => {
+    const profile = await client.query<{ display_name: string }>(
+      'SELECT display_name FROM profiles WHERE user_id = $1',
+      [userId]
+    )
+    const invitation = await client.query<{ status: string }>(
+      'SELECT status FROM invitations WHERE id = $1',
+      [invitationId]
+    )
+    const organizations = await client.query<{
+      organization_id: string
+      organization_name: string
+      role: string
+      status: string
+    }>(
+      `SELECT organizations.id AS organization_id,
+              organizations.name AS organization_name,
+              memberships.role,
+              memberships.status
+       FROM memberships
+       JOIN organizations ON organizations.id = memberships.organization_id
+       WHERE memberships.user_id = $1
+       ORDER BY organizations.id`,
+      [userId]
+    )
+
+    return {
+      displayName: profile.rows[0]?.display_name,
+      invitationStatus: invitation.rows[0]?.status,
+      organizations: organizations.rows.map((row) => ({
+        id: row.organization_id,
+        name: row.organization_name,
+        role: row.role,
+        status: row.status
+      }))
+    }
   })
 }

@@ -16,6 +16,7 @@ import {
 import { InvitationAcceptanceError, type PendingInvitation } from '../api/invitations'
 import { useActiveOrganization } from '../model/active-organization-state'
 import { useOrganizationOnboarding } from '../model/onboarding-state'
+import { resolveStartupBranch } from '../model/startup-resolution'
 import type { ActiveMembership } from '../api/memberships'
 
 interface OrganizationPickerPageProps {
@@ -47,18 +48,35 @@ export function OrganizationPickerPage({
   const [code, setCode] = useState('')
   const [acceptanceError, setAcceptanceError] = useState<string>()
   const [isAccepting, setIsAccepting] = useState(false)
+  const [shouldResolveStartupOnClose, setShouldResolveStartupOnClose] = useState(false)
 
   function openInvitation(invitation: PendingInvitation): void {
     setSelectedInvitation(invitation)
     setCode('')
     setAcceptanceError(undefined)
+    setShouldResolveStartupOnClose(false)
   }
 
   function closeInvitation(): void {
     if (isAccepting) return
+    const shouldResolveStartup = shouldResolveStartupOnClose
     setSelectedInvitation(undefined)
     setCode('')
     setAcceptanceError(undefined)
+    setShouldResolveStartupOnClose(false)
+
+    if (!shouldResolveStartup) return
+
+    const branch = resolveStartupBranch(
+      availableOrganizations,
+      rememberedOrganizationId,
+      pendingInvitations.length > 0
+    )
+    if (branch.kind === 'onboarding') {
+      onboarding.beginOnboarding()
+    } else if (branch.kind === 'enter') {
+      enterOrganization(branch.membership)
+    }
   }
 
   async function submitInvitation(event: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -71,6 +89,9 @@ export function OrganizationPickerPage({
       await acceptInvitation(selectedInvitation, code)
     } catch (error) {
       setAcceptanceError(messageForInvitationError(error))
+      if (error instanceof InvitationAcceptanceError && error.code === 'invitation_revoked') {
+        setShouldResolveStartupOnClose(true)
+      }
     } finally {
       setIsAccepting(false)
     }
