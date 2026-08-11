@@ -72,38 +72,37 @@ func TestIssuanceRateLimitQueriesConstrainCompositeIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin query-plan transaction: %v", err)
 	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		_ = tx.Rollback(cleanupCtx)
+		if _, err := pool.Exec(cleanupCtx, `ANALYZE identity.verification_codes (email, request_ip, created_at)`); err != nil {
+			t.Errorf("restore verification-code planner statistics: %v", err)
+		}
+	}()
 
 	runID := time.Now().UnixNano()
 	email := fmt.Sprintf("query-plan-%d@nevix.test", runID)
 	ip := fmt.Sprintf("198.18.%d.%d", runID%250+1, runID/250%250+1)
+	historyPrefix := fmt.Sprintf("query-plan-history-%d", runID)
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO identity.verification_codes
 		     (email, code_hash, request_ip, created_at, expires_at)
-		 SELECT $1, 'historical-email', 'email-history-' || n,
+		 SELECT CASE WHEN n = 1 THEN $1 ELSE $3 || '-email-' || n || '@nevix.test' END,
+		        'historical',
+		        CASE WHEN n = 1 THEN $2 ELSE $3 || '-ip-' || n END,
 		        clock_timestamp() - interval '2 hours' - make_interval(secs => n),
 		        clock_timestamp() - interval '1 hour'
-		 FROM generate_series(1, $2) AS history(n)`,
-		email, historicalIssuanceRows,
+		 FROM generate_series(1, $4) AS history(n)`,
+		email, ip, historyPrefix, historicalIssuanceRows,
 	); err != nil {
-		t.Fatalf("seed historical email issuance rows: %v", err)
+		t.Fatalf("seed historical issuance rows: %v", err)
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO identity.verification_codes
-		     (email, code_hash, request_ip, created_at, expires_at)
-		 SELECT 'ip-history-' || n || '@nevix.test', 'historical-ip', $1,
-		        clock_timestamp() - interval '2 hours' - make_interval(secs => n),
-		        clock_timestamp() - interval '1 hour'
-		 FROM generate_series(1, $2) AS history(n)`,
-		ip, historicalIssuanceRows,
-	); err != nil {
-		t.Fatalf("seed historical IP issuance rows: %v", err)
-	}
-	// Keep the assertion deterministic even if unrelated local rows make a
-	// sequential scan look artificially cheap. The index scan still decides
-	// independently which predicates qualify as Index Cond entries.
-	if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan = off`); err != nil {
-		t.Fatalf("prefer index plans for regression assertion: %v", err)
+	// Give the default planner current statistics for the transactional fixture.
+	// Its high-cardinality subjects model a large shared issuance history without
+	// making one email or IP an unrealistic fraction of the whole table.
+	if _, err := tx.Exec(ctx, `ANALYZE identity.verification_codes (email, request_ip, created_at)`); err != nil {
+		t.Fatalf("analyze historical issuance rows: %v", err)
 	}
 
 	recorded := &queryCapturingTx{Tx: tx}

@@ -74,8 +74,8 @@ CREATE INDEX outbox_messages_pending_idx
   ON identity.outbox_messages (next_attempt_at)
   WHERE status = 'pending';
 
--- Resend/Revoke cancel pending mail through the code foreign key. Completed
--- deliveries never participate in that reverse lookup.
-CREATE INDEX outbox_messages_pending_verification_code_idx
+-- Resend/Revoke cancel pending mail through the code foreign key. Index every
+-- non-null reference so foreign-key checks remain efficient across all statuses.
+CREATE INDEX outbox_messages_verification_code_idx
   ON identity.outbox_messages (verification_code_id)
   WHERE verification_code_id IS NOT NULL;

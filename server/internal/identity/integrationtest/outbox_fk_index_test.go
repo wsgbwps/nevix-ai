@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const outboxVerificationCodeIndex = "outbox_messages_pending_verification_code_idx"
+const outboxVerificationCodeIndex = "outbox_messages_verification_code_idx"
 
 type outboxFKExplainDocument []struct {
 	Plan outboxFKExplainPlan `json:"Plan"`
