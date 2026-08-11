@@ -40,15 +40,78 @@ pnpm exec supabase services
 echo "==> Resetting database from committed migrations"
 pnpm exec supabase db reset --local
 
-echo "==> Waiting for Mailpit readiness"
 mailpit_url="http://127.0.0.1:54324"
-for _ in $(seq 1 30); do
-  if curl -fsS "${mailpit_url}/readyz" >/dev/null 2>&1; then
-    break
+mailpit_smtp_host="127.0.0.1"
+mailpit_smtp_port="54325"
+
+probe_smtp_endpoint() {
+  node - "$1" "$2" <<'NODE'
+const net = require("node:net")
+
+const [host, rawPort] = process.argv.slice(2)
+const port = Number(rawPort)
+if (!host || !Number.isInteger(port)) {
+  process.exit(1)
+}
+
+const socket = new net.Socket()
+let settled = false
+let timer
+let greeting = ""
+const finish = (exitCode) => {
+  if (settled) return
+  settled = true
+  clearTimeout(timer)
+  socket.destroy()
+  process.exitCode = exitCode
+}
+
+socket.setEncoding("utf8")
+socket.on("data", (chunk) => {
+  greeting += chunk
+  if (greeting.includes("\n")) {
+    finish(/^220(?:[ -])/.test(greeting) ? 0 : 1)
+  }
+})
+socket.once("error", () => finish(1))
+timer = setTimeout(() => finish(1), 1000)
+socket.connect(port, host)
+NODE
+}
+
+wait_for_mailpit() {
+  local http_ready=0
+  local smtp_ready=0
+  local attempt
+
+  for attempt in $(seq 1 30); do
+    http_ready=0
+    smtp_ready=0
+    if curl --connect-timeout 1 --max-time 2 -fsS "${mailpit_url}/readyz" >/dev/null 2>&1; then
+      http_ready=1
+    fi
+    if probe_smtp_endpoint "${mailpit_smtp_host}" "${mailpit_smtp_port}" >/dev/null 2>&1; then
+      smtp_ready=1
+    fi
+    if [[ "${http_ready}" -eq 1 && "${smtp_ready}" -eq 1 ]]; then
+      return 0
+    fi
+    if [[ "${attempt}" -lt 30 ]]; then
+      sleep 1
+    fi
+  done
+
+  if [[ "${http_ready}" -ne 1 ]]; then
+    echo "error: Mailpit HTTP API ${mailpit_url}/readyz was not ready after 30 attempts" >&2
   fi
-  sleep 1
-done
-curl -fsS "${mailpit_url}/readyz" >/dev/null
+  if [[ "${smtp_ready}" -ne 1 ]]; then
+    echo "error: Mailpit SMTP ${mailpit_smtp_host}:${mailpit_smtp_port} was not ready after 30 attempts" >&2
+  fi
+  return 1
+}
+
+echo "==> Waiting for Mailpit HTTP and SMTP readiness"
+wait_for_mailpit
 
 echo "==> Reading local stack endpoints"
 status_json="$(pnpm exec supabase status -o json)"
@@ -88,8 +151,8 @@ NEVIX_SUPABASE_URL="${supabase_url}" \
 NEVIX_SUPABASE_PUBLISHABLE_KEY="${publishable_key}" \
 NEVIX_MAILPIT_URL="${mailpit_url}" \
 NEVIX_DATABASE_URL="${database_url}" \
-NEVIX_SMTP_HOST="127.0.0.1" \
-NEVIX_SMTP_PORT="54325" \
+NEVIX_SMTP_HOST="${mailpit_smtp_host}" \
+NEVIX_SMTP_PORT="${mailpit_smtp_port}" \
 NEVIX_SMTP_USER="mailpit" \
 NEVIX_SMTP_PASSWORD="mailpit" \
 NEVIX_OUTBOX_RETRY_DELAYS="1s,2s,3s,4s,5s" \
