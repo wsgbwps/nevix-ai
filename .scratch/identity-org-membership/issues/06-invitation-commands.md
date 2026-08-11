@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Go 传输基座 + CreateOrganization；05 — Schema：invitations / audit_logs + verification_codes 扩展
 
-**Status:** in-review
+**Status:** resolved — PR [#35](https://github.com/wsgbwps/nevix-ai/pull/35) merged into `main` as `93928af` on 2026-08-11
 
 - [x] 四命令集成测试覆盖创建/重发/撤销/接受，含活跃成员邮箱拒绝与已结束成员邮箱允许
 - [x] 5 次尝试上限与过期/撤销码的明确拒绝经集成测试验证
@@ -15,6 +15,7 @@
 
 ## Comments
 
+- 2026-08-11: Accepted and resolved. PR [#35](https://github.com/wsgbwps/nevix-ai/pull/35) merged to `main` at `93928af`; its pre-merge checks are recorded below.
 - 2026-08-10: Implemented on `feat/identity-invitation-commands` in `5fe0a3e`. Verified with `go vet ./...`, the repeated targeted race/validation suite, `scripts/test-mail-smoke.sh`, `go test -race -count=1 ./...`, `pnpm lint`, and a final two-axis review with no findings. Awaiting PR CI and merge.
 - 2026-08-10: PR [#35](https://github.com/wsgbwps/nevix-ai/pull/35) opened; awaiting CI and merge.
 - 2026-08-10: Addressed PR review blockers: Invitation Create/Resend now share the Identity-wide cooldown and email/IP hourly limits while preserving action/target-scoped invalidation; the OpenAPI paths document 429 and `Retry-After`; the declarative schema and expand-only migration add the action-target and pending-Outbox lookup indexes. Verified migration reset/list/diff, performance advisors (no unindexed foreign key), 30,005-row `EXPLAIN ANALYZE` plans using both indexes, targeted race regressions, `go vet ./...`, `go test -race -count=1 ./...`, `pnpm lint`, and the full `scripts/test-mail-smoke.sh` suite.
