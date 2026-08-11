@@ -6,6 +6,11 @@
   `features/organization/` owns the pending-Invitation read, startup decision,
   acceptance workflow, and localized picker interaction. The thin
   `app/routes/select-organization.tsx` remains composition only.
+- **Profile follow-up seam:** `features/profile/` owns the RLS read and the
+  definition of whether the global Profile is complete. `renderer/src/app/`
+  injects that public capability into Organization startup; neither Feature
+  imports the other. Organization onboarding keeps Profile completion and
+  first-Organization creation as independent requirements.
 - **Supporting Identity data plane:**
   `supabase/schemas/organization_membership.sql` owns the two safe display
   snapshots on `public.invitations`; its generated expand-only migration owns
@@ -59,12 +64,13 @@ the required resend guidance.
 3. The exact five-attempt enforcement remains server-owned. A wrong code
    consumes one attempt, the fifth reports zero remaining, and a superseded
    historical code consumes none.
-4. A pending Invitation takes the authenticated startup path to the
-   Organization picker, even when remembered or sole Membership rules would
-   otherwise auto-enter; this is the only way the picker-bound automatic
-   invitation surface is guaranteed to appear. Registration's temporary
-   onboarding signal waits for this invitation-aware verification and is
-   cleared when an entry path already exists.
+4. Every authenticated startup reconstructs Profile completion from the
+   current User's RLS-visible `profiles` row; registration's temporary memory
+   signal is never authoritative across a restart or another device. A missing
+   Profile forces the Profile onboarding step before the picker or App Shell.
+   Independently, a pending Invitation suppresses only first-Organization
+   creation and takes the post-Profile path to the picker, even when remembered
+   or sole Membership rules would otherwise auto-enter.
 5. Successful acceptance rereads active Memberships under RLS before entering
    the Organization, so the name and current authorization come from the
    authoritative data plane rather than from the trusted-command response.
@@ -83,7 +89,10 @@ the required resend guidance.
 4. **Desktop Playwright e2e seam:** a real Go server, Supabase, and Mailpit
    prove pending visibility, six-digit interaction, exact failed-attempt
    feedback, expiration/revocation/invalidated guidance, and successful entry
-   into the App Shell. The happy path is `@smoke`.
+   into the App Shell. A verified User with no Profile closes the first launch,
+   signs in with a fresh device directory, must save `display_name`, accepts a
+   valid Invitation, and is proved to join only the invited Organization. The
+   happy paths and revoked-Invitation projection cleanup are `@smoke`.
 
 ## Delivery and verification
 

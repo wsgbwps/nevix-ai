@@ -2,11 +2,13 @@
 
 ## 状态
 
-已接受 — 2026-08-04（2026-08-07 修订：Organization pre-shell 例外扩展为 onboarding 与组织选择两个路由，记录 identity-org-membership 定稿 spec 的启动三分支决策；2026-08-11 修订：pending Invitation 优先于自动进入与注册后的临时 onboarding 信号）
+已接受 — 2026-08-04（2026-08-07 修订：Organization pre-shell 例外扩展为 onboarding 与组织选择两个路由，记录 identity-org-membership 定稿 spec 的启动三分支决策；2026-08-11 修订：pending Invitation 优先于自动进入，并从 RLS 数据恢复 Profile 完成状态）
 
 ## 决策
 
-Renderer 引入 TanStack Router（文件路由，memory history），routes 声明集中在 `renderer/src/app/`。路由粒度只覆盖顶层视图：认证区、Organization 的 pre-shell 路由（onboarding 与组织选择）、App Shell（主界面）与 Settings Page（设置页）；App Shell 内各业务 Feature 界面在内容区中拥有各自路由。Organization pre-shell 路由是仅有的 authenticated 全屏例外，仅在 User 已验证且尚未进入 Organization 上下文时渲染，页面和状态仍归 Organization Feature 所有：启动时先完成 Membership 与 pending Invitation 的 RLS 验证，再决定路由；pending Invitation 优先于记忆有效直接进入、sole Membership 自动进入和零 Membership onboarding，因而进入组织选择界面。注册验证后的临时 onboarding 信号在这次验证完成前只显示 restoring；若发现 Membership 或 pending Invitation 则清除该信号，若零 Membership 且没有 pending Invitation 才进入 onboarding。之后用户在组织选择界面主动选择“创建组织”仍照常进入 onboarding。组织选择在需要人工选择时渲染，选定后进入 App Shell。认证流程内部的 login / signup / signup-verification / recovery 等界面不路由化，继续由 Authentication Feature 的 flow 状态机驱动。
+Renderer 引入 TanStack Router（文件路由，memory history），routes 声明集中在 `renderer/src/app/`。路由粒度只覆盖顶层视图：认证区、Organization 的 pre-shell 路由（onboarding 与组织选择）、App Shell（主界面）与 Settings Page（设置页）；App Shell 内各业务 Feature 界面在内容区中拥有各自路由。Organization pre-shell 路由是仅有的 authenticated 全屏例外，仅在 User 已验证且尚未进入 Organization 上下文时渲染，页面和状态仍归 Organization Feature 所有。
+
+每个 authenticated 启动都并行读取当前 User 的 Profile、active Membership、pending Invitation 与设备记忆；Profile Domain 通过本人行的 RLS 可见性判定 Profile 是否完成，`app/` 只把该公开能力注入 Organization 启动组合，Organization Feature 不依赖 Profile Feature。Profile 未完成时，onboarding 的 Profile 步骤优先于组织选择与 App Shell，即使 User 已有 pending Invitation、sole/remembered Membership，或在另一设备完成登录；注册验证产生的内存信号只用于等待本次权威读取，不能证明 Profile 已完成。Profile 完成状态与首 Organization 创建资格分别保存：零 Membership 且无 pending Invitation 才需要创建首 Organization；pending Invitation 取消这个创建资格，并在 Profile 完成后优先进入组织选择界面，覆盖记忆有效直接进入与 sole Membership 自动进入。Profile 已完成的 User 主动选择“创建组织”时只进入 Organization 步骤。组织选择在需要人工选择时渲染，选定后进入 App Shell。认证流程内部的 login / signup / signup-verification / recovery 等界面不路由化，继续由 Authentication Feature 的 flow 状态机驱动。
 
 ## 取舍
 

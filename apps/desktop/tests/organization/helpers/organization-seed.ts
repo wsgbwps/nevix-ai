@@ -17,12 +17,18 @@ export interface InvitationAcceptanceState {
 }
 
 /**
- * Seeds Organizations and Memberships through the stack's trusted `identity_app` role: clients
- * are SELECT-only on these tables by design (ADR-0008), so tests arrange startup fixtures with
- * the same trusted seam the Go identity server writes through, reached over a direct database
- * connection supplied by the E2E runner.
+ * Seeds Organizations and Memberships through the stack's trusted `identity_app` role. Profile
+ * fixtures use the harness database owner because `identity_app` is SELECT-only on profiles by
+ * design; production Profile writes remain authenticated RLS client operations.
  */
 async function withIdentityAppClient<T>(run: (client: Client) => Promise<T>): Promise<T> {
+  return withDatabaseClient(async (client) => {
+    await client.query('SET ROLE identity_app')
+    return run(client)
+  })
+}
+
+async function withDatabaseClient<T>(run: (client: Client) => Promise<T>): Promise<T> {
   const databaseUrl = process.env.NEVIX_TEST_DATABASE_URL
   if (!databaseUrl) {
     throw new Error(
@@ -33,18 +39,31 @@ async function withIdentityAppClient<T>(run: (client: Client) => Promise<T>): Pr
   const client = new Client({ connectionString: databaseUrl })
   await client.connect()
   try {
-    await client.query('SET ROLE identity_app')
     return await run(client)
   } finally {
     await client.end()
   }
 }
 
+export async function seedProfile(userId: string, displayName = 'E2E User'): Promise<void> {
+  await withDatabaseClient(async (client) => {
+    await client.query(
+      'INSERT INTO profiles (user_id, display_name) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING',
+      [userId, displayName]
+    )
+  })
+}
+
 export async function seedOrganizationWithMembership(
   userId: string,
-  options: { readonly name: string; readonly role?: 'owner' | 'admin' | 'member' }
+  options: {
+    readonly name: string
+    readonly role?: 'owner' | 'admin' | 'member'
+    readonly profileDisplayName?: string
+  }
 ): Promise<SeededOrganization> {
   const id = crypto.randomUUID()
+  await seedProfile(userId, options.profileDisplayName)
 
   return withIdentityAppClient(async (client) => {
     await client.query('INSERT INTO organizations (id, name) VALUES ($1, $2)', [id, options.name])

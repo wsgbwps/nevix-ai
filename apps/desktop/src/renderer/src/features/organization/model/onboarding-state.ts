@@ -2,9 +2,14 @@ import { createContext, useContext } from 'react'
 
 export interface OrganizationOnboardingState {
   readonly isEligible: boolean
+  readonly shouldCompleteProfile: boolean
   readonly shouldCreateOrganization: boolean
   readonly beginOnboarding: () => void
-  readonly skipOrganizationCreation: () => void
+  readonly resolveOnboarding: (requirements: {
+    readonly shouldCompleteProfile: boolean
+    readonly shouldCreateOrganization: boolean
+  }) => void
+  readonly completeProfile: () => void
   readonly completeOnboarding: () => void
 }
 

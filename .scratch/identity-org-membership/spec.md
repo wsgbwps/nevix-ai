@@ -136,7 +136,8 @@ Authoritative context:
 
 - 新建 **Organization Domain**（`features/organization`）：memberships 直读、Active Organization 状态与设备记忆、组织切换、组织 onboarding、成员/邀请管理、组织设置、Organization Audit Log 查看。新建窄 **Profile Domain**（`features/profile`）：全局 Profile 读写与显示名编辑。两词条已入 `apps/desktop/CONTEXT.md`。
 - org 状态存 renderer 内存（organization feature model），RLS 直读为唯一来源，无缓存层。remembered active org id 走主进程持久化 + organization domain IPC（循 ADR-0002/0003 先例），不落 localStorage。
-- 启动验证：并行拉 memberships 与当前邮箱的 pending invitations；若有 pending Invitation，优先进入组织选择界面（覆盖记忆有效直接进入、1 组织自动选中与 0 组织 onboarding），否则走 memberships 的记忆有效直接进入 / 0 组织 onboarding / 1 组织自动选中 / N 组织选择界面。注册验证后的临时 onboarding 信号也等待此检查完成。onboarding 为第四个顶层视图（路由化，符合 desktop ADR-0004 路由拓扑）。
+- 启动验证：每次 authenticated 启动并行拉本人 RLS 可见的 Profile、memberships、当前邮箱的 pending invitations 与设备记忆。Profile Domain 拥有 Profile 读取和“是否完成”的判定，`app/` 经 public interface 将结果注入 Organization 启动组合；两个 peer Feature 不互相导入。缺 Profile 时必须先完成显示名步骤，注册验证后的临时内存信号不能替代这次权威读取，也不能跨重启/设备证明完成。
+- Profile 是否完成与是否需要创建首 Organization 是两个独立 requirement：零 Membership 且无 pending Invitation 才需要创建首 Organization；pending Invitation 只清除创建资格，并在 Profile 完成后优先进入组织选择界面（覆盖记忆有效直接进入和 1 组织自动选中）。无 pending Invitation 时仍走 memberships 的记忆有效直接进入 / 0 组织创建 / 1 组织自动选中 / N 组织选择界面。onboarding 为第四个顶层视图（路由化，符合 desktop ADR-0004 路由拓扑）。
 - 会话中失权为 error-driven：403/404 或直读突变 → 重拉确认 → 退出 org context 并告知；V1 不上 Realtime。
 - 邀请自动浮现（RLS email 策略使被邀请人可见 pending 行）+ 点选输码，不做纯手动入口。
 - 全部新 Localized Surface 中英双语，过既有 localization 发布检查。
@@ -146,7 +147,7 @@ Authoritative context:
 
 - **页面归属（方向指令）**：成员 / 审计日志 / 个人资料归入设置页；App Shell 侧栏只放软件功能（首页等未来业务 Feature）。设置页从 App Shell 用户菜单「设置」进入，「返回应用」回首页；左导航分两组——**账户**（个人资料、语言）/ **组织**（成员、审计日志，Member 角色不显示审计入口）；侧栏顶部为当前组织上下文卡（组织标 + 组织名 + 角色）。
 - **落点**：onboarding 完成、选择组织、接受邀请后 → 首页。
-- **Onboarding（B 两步向导）**：第 1 步显示名（trim 后 1–50 字符、拒纯空白），第 2 步组织名（trim 非空）；进度点 + "第 x/2 步"标签；第 2 步可返回上一步；完成即建组织。
+- **Onboarding（B 条件两步向导）**：缺 Profile 时先显示第 1 步显示名（trim 后 1–50 字符、拒纯空白）；同时需要首 Organization 时再显示第 2 步组织名（trim 非空），保留进度点、"第 x/2 步"标签与返回 Profile。Profile 已完成后主动创建 Organization 只显示组织步骤；有 pending Invitation 且缺 Profile 时只显示 Profile 步骤，保存后进入邀请 picker，不额外建组织。
 - **组织选择（A 居中列表）**：邀请区在组织列表上方；点选邀请浮出 6 位码输入（5 次尝试上限）；含"创建组织"入口进 onboarding。
 - **成员与邀请管理（B 标签页）**：两个标签页——成员 / 待定邀请（带计数徽标）；邀请创建/重发/撤销走对话框；角色变更用 Select；移除成员与退出组织均需确认对话框；Member 角色只读、无邀请按钮；成员行只显示显示名与角色（Profile 不含邮箱，RLS 下他人邮箱不可见）。
 - **审计日志（B 时间线）**：按天分组叙事时间线（"林晓 移除成员 → 李其 · 11:48"式行，与 ADR-0009 写入时快照模型一致）；动作过滤 Select；CSV 导出按钮 + 导出反馈（对应 Desktop 本地写文件）。
@@ -159,7 +160,7 @@ Authoritative context:
 - **范围**：profiles 读写与显示名编辑（Profile Domain）；CreateOrganization 命令 + 组织 onboarding 视图；Active Organization 状态、设备记忆与启动验证三分支；Go 私有 JWKS 验证；`VITE_SERVER_URL` 与直连 fetch 通道。
 - **Migration**：profiles/organizations/memberships 三表 + RLS 策略 + GRANT + 三个 helper + identity_app 角色 + identity.directory 视图。
 - **明确不含**：invitations/audit_logs/verification_codes 扩展、成员与邀请管理界面、审计界面、Outbox 模板（均归 Membership 切片）。
-- **验收门禁**：migration 过 advisors；RLS 集成测试（真实 anon/authenticated token）证跨组织隔离与 own-profile 写限制；Go 侧 JWKS 验证 + CreateOrganization 集成测试（含客户端 id 幂等、org + 首任 Owner 原子性）+ openapi 对照校验断言；Desktop e2e：onboarding（注册 → display name → 建组织 → App Shell）、重启后 active org 记忆恢复、启动验证三分支；全部新 Localized Surface 双语过发布检查。
+- **验收门禁**：migration 过 advisors；RLS 集成测试（真实 anon/authenticated token）证跨组织隔离与 own-profile 写限制；Go 侧 JWKS 验证 + CreateOrganization 集成测试（含客户端 id 幂等、org + 首任 Owner 原子性）+ openapi 对照校验断言；Desktop e2e：onboarding（注册 → display name → 建组织 → App Shell）、重启后 active org 记忆恢复、启动验证三分支，以及已验证无 Profile 的 invitee 跨重启/另设备仍须先保存 display_name、再接受有效 Invitation 且只加入受邀 Organization；全部新 Localized Surface 双语过发布检查。
 
 ### 与基线偏差
 
@@ -183,7 +184,7 @@ Authoritative context:
 1. **Migration 接缝**：声明式 schemas + 生成 migration，过 advisors 与 migration-history 检查。Membership 切片另含 invitations/audit_logs/verification_codes 扩展 migration。
 2. **RLS/Data API 接缝**：真实 anon/authenticated token 直连 PostgREST。前置切片证跨组织隔离与 own-profile 写限制；Membership 切片证被邀请人可见性、Member 读不到 audit_logs、Membership 终止后即时失权。
 3. **Go 命令 HTTP 接缝**：跨 `internal/identity` 外部 interface + 真实 DB。前置切片：JWKS 验证、CreateOrganization（幂等、原子性）；Membership 切片：8 条命令集成测试、审计行与通知矩阵逐事件核对、邀请并发接受竞态、携码邮件重试地平线。
-4. **Desktop Playwright e2e 接缝**：前置切片：onboarding、重启记忆恢复、启动三分支；Membership 切片：多组织切换、成员/邀请管理、接受邀请流、审计查看/导出、失权退出。新用例归入既有 tier（ADR-0007：PR 跑 Smoke Suite、main 跑 Full E2E Suite）。
+4. **Desktop Playwright e2e 接缝**：前置切片：onboarding、重启记忆恢复、启动三分支；Membership 切片：多组织切换、成员/邀请管理、接受邀请流（含缺 Profile 跨启动/另设备恢复与 revoked Invitation 关闭后消失）、审计查看/导出、失权退出。新用例归入既有 tier（ADR-0007：PR 跑 Smoke Suite、main 跑 Full E2E Suite）。
 5. **openapi 契约接缝**：响应级对照校验为测试断言。
 
 Prior art：阶段 1 Auth Harness（临时 Supabase 栈 + Mailpit）、mail-smoke-ci、desktop e2e 分层门禁、RLS 真实 token 测试、packaged localization 发布检查。

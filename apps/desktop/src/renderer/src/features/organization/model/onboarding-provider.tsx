@@ -6,28 +6,45 @@ export function OrganizationOnboardingProvider({
 }: {
   readonly children: React.ReactNode
 }): React.JSX.Element {
-  const [isEligible, setIsEligible] = useState(false)
-  const [shouldCreateOrganization, setShouldCreateOrganization] = useState(true)
+  const [shouldCompleteProfile, setShouldCompleteProfile] = useState(false)
+  const [shouldCreateOrganization, setShouldCreateOrganization] = useState(false)
   const beginOnboarding = useCallback((): void => {
     setShouldCreateOrganization(true)
-    setIsEligible(true)
   }, [])
-  const skipOrganizationCreation = useCallback((): void => setShouldCreateOrganization(false), [])
-  const completeOnboarding = useCallback((): void => setIsEligible(false), [])
+  const resolveOnboarding = useCallback(
+    (requirements: {
+      readonly shouldCompleteProfile: boolean
+      readonly shouldCreateOrganization: boolean
+    }): void => {
+      setShouldCompleteProfile(requirements.shouldCompleteProfile)
+      setShouldCreateOrganization(requirements.shouldCreateOrganization)
+    },
+    []
+  )
+  const completeProfile = useCallback((): void => setShouldCompleteProfile(false), [])
+  const completeOnboarding = useCallback((): void => {
+    setShouldCompleteProfile(false)
+    setShouldCreateOrganization(false)
+  }, [])
+  const isEligible = shouldCompleteProfile || shouldCreateOrganization
   const value = useMemo<OrganizationOnboardingState>(
     () => ({
       isEligible,
+      shouldCompleteProfile,
       shouldCreateOrganization,
       beginOnboarding,
-      skipOrganizationCreation,
+      resolveOnboarding,
+      completeProfile,
       completeOnboarding
     }),
     [
       beginOnboarding,
+      completeProfile,
       completeOnboarding,
       isEligible,
-      shouldCreateOrganization,
-      skipOrganizationCreation
+      resolveOnboarding,
+      shouldCompleteProfile,
+      shouldCreateOrganization
     ]
   )
 

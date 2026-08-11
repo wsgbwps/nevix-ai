@@ -18,6 +18,7 @@ import {
   ageInvitationCodeBeyondCooldown,
   expireInvitation,
   readInvitationAcceptanceState,
+  seedProfile,
   seedOrganizationWithMembership
 } from './helpers/organization-seed'
 
@@ -135,6 +136,118 @@ async function readRememberedOrganizationId(userDataDir: string): Promise<string
 }
 
 test(
+  'a verified invitee without a Profile must finish it after restarting on another device',
+  { tag: '@smoke' },
+  async () => {
+    test.setTimeout(150_000)
+    test.skip(
+      !authHarness || !mailpitHarness || !serverUrl,
+      'requires the Desktop invitation acceptance integration harness'
+    )
+    if (!authHarness || !mailpitHarness || !serverUrl) return
+
+    const owner = uniqueAuthIdentity('invitation-restart-owner')
+    const invitee = uniqueAuthIdentity('invitation-restart-invitee')
+    const ownerId = await createAuthUser(authHarness, owner, true)
+    const inviteeId = await createAuthUser(authHarness, invitee, true)
+    const organization = await seedOrganizationWithMembership(ownerId, {
+      name: 'Restarted Invite Studio'
+    })
+    const ownerSession = await signInOutsideDesktop(authHarness, owner)
+    const messagesBeforeInvitation = await readMailpitMessageIds(mailpitHarness)
+    const invitationId = await createInvitation(
+      organization.id,
+      ownerSession.access_token,
+      invitee.email
+    )
+    const invitationMessage = await waitForRegistrationMessage(
+      mailpitHarness,
+      messagesBeforeInvitation,
+      invitee.email
+    )
+    const firstDeviceUserDataDir = await mkdtemp(join(tmpdir(), 'nevix-invitation-first-device-'))
+    const secondDeviceUserDataDir = await mkdtemp(join(tmpdir(), 'nevix-invitation-second-device-'))
+
+    try {
+      const firstLaunch = await launchTestApp({
+        userDataDir: firstDeviceUserDataDir,
+        systemLanguages: ['en-US']
+      })
+      try {
+        await signIn(firstLaunch.page, invitee)
+        await expect(
+          firstLaunch.page.getByRole('heading', { name: 'What should we call you?' })
+        ).toBeVisible()
+        await expect(firstLaunch.page.getByRole('heading', { name: PICKER_HEADING })).toHaveCount(0)
+        await expect(firstLaunch.page.getByRole('heading', { name: HOME_HEADING })).toHaveCount(0)
+      } finally {
+        await firstLaunch.electronApp.close()
+      }
+
+      await expect
+        .poll(() => readInvitationAcceptanceState(inviteeId, invitationId))
+        .toEqual({
+          displayName: undefined,
+          invitationStatus: 'pending',
+          organizations: []
+        })
+
+      const secondLaunch = await launchTestApp({
+        userDataDir: secondDeviceUserDataDir,
+        systemLanguages: ['en-US']
+      })
+      try {
+        await signIn(secondLaunch.page, invitee)
+        await expect(
+          secondLaunch.page.getByRole('heading', { name: 'What should we call you?' })
+        ).toBeVisible()
+        await secondLaunch.page.getByLabel('Display name').fill('  Restarted Invitee  ')
+        const profileResponse = secondLaunch.page.waitForResponse(
+          (response) =>
+            response.request().method() === 'POST' && response.url().includes('/rest/v1/profiles')
+        )
+        await secondLaunch.page.getByRole('button', { name: 'Continue' }).click()
+        expect((await profileResponse).status()).toBe(201)
+
+        await expect(secondLaunch.page.getByRole('heading', { name: PICKER_HEADING })).toBeVisible()
+        await expect(
+          secondLaunch.page.getByRole('heading', { name: 'Create your first organization' })
+        ).toHaveCount(0)
+        await secondLaunch.page.getByRole('button', { name: 'Accept' }).click()
+        await secondLaunch.page
+          .getByRole('textbox', { name: 'Invitation code' })
+          .fill(invitationMessage.code)
+        await secondLaunch.page.getByRole('button', { name: 'Verify and join' }).click()
+        await expect(secondLaunch.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible()
+        await expect
+          .poll(() => readRememberedOrganizationId(secondDeviceUserDataDir))
+          .toBe(organization.id)
+      } finally {
+        await secondLaunch.electronApp.close()
+      }
+
+      await expect
+        .poll(() => readInvitationAcceptanceState(inviteeId, invitationId))
+        .toEqual({
+          displayName: 'Restarted Invitee',
+          invitationStatus: 'accepted',
+          organizations: [
+            {
+              id: organization.id,
+              name: 'Restarted Invite Studio',
+              role: 'member',
+              status: 'active'
+            }
+          ]
+        })
+    } finally {
+      await rm(firstDeviceUserDataDir, { recursive: true, force: true })
+      await rm(secondDeviceUserDataDir, { recursive: true, force: true })
+    }
+  }
+)
+
+test(
   'a fresh invited User saves their Profile and joins only the invited Organization with a resent code',
   { tag: '@smoke' },
   async () => {
@@ -149,7 +262,8 @@ test(
     const invitee = uniqueAuthIdentity('invitation-accept-invitee')
     const ownerId = await createAuthUser(authHarness, owner, true)
     const organization = await seedOrganizationWithMembership(ownerId, {
-      name: 'Invited Studio'
+      name: 'Invited Studio',
+      profileDisplayName: 'Invitation Owner'
     })
     const ownerSession = await signInOutsideDesktop(authHarness, owner)
 
@@ -204,7 +318,7 @@ test(
         ).toHaveCount(0)
         await expect(launched.page.getByText('Pending invitations')).toBeVisible()
         await expect(
-          launched.page.getByText(`${owner.email} invited you to join "Invited Studio"`)
+          launched.page.getByText('Invitation Owner invited you to join "Invited Studio"')
         ).toBeVisible()
         await expect(launched.page.getByRole('heading', { name: HOME_HEADING })).toHaveCount(0)
 
@@ -284,8 +398,12 @@ test(
     const owner = uniqueAuthIdentity('invitation-expired-owner')
     const invitee = uniqueAuthIdentity('invitation-expired-invitee')
     const ownerId = await createAuthUser(authHarness, owner, true)
-    await createAuthUser(authHarness, invitee, true)
-    const organization = await seedOrganizationWithMembership(ownerId, { name: 'Expired Studio' })
+    const inviteeId = await createAuthUser(authHarness, invitee, true)
+    await seedProfile(inviteeId, 'Expired Invitee')
+    const organization = await seedOrganizationWithMembership(ownerId, {
+      name: 'Expired Studio',
+      profileDisplayName: 'Expired Owner'
+    })
     const ownerSession = await signInOutsideDesktop(authHarness, owner)
 
     const messagesBeforeInvitation = await readMailpitMessageIds(mailpitHarness)
@@ -325,7 +443,8 @@ test(
     }
 
     const revokedInvitee = uniqueAuthIdentity('invitation-revoked-invitee')
-    await createAuthUser(authHarness, revokedInvitee, true)
+    const revokedInviteeId = await createAuthUser(authHarness, revokedInvitee, true)
+    await seedProfile(revokedInviteeId, 'Revoked Invitee')
     const messagesBeforeRevocation = await readMailpitMessageIds(mailpitHarness)
     const revokedInvitationId = await createInvitation(
       organization.id,
@@ -348,7 +467,7 @@ test(
         await signIn(launched.page, revokedInvitee)
         await expect(launched.page.getByRole('heading', { name: PICKER_HEADING })).toBeVisible()
         const revokedInvitationLine = launched.page.getByText(
-          `${owner.email} invited you to join "Expired Studio"`
+          'Expired Owner invited you to join "Expired Studio"'
         )
         await expect(revokedInvitationLine).toBeVisible()
         await launched.page.getByRole('button', { name: 'Accept' }).click()
@@ -370,7 +489,7 @@ test(
         await expect(revokedInvitationLine).toHaveCount(0)
         await expect(launched.page.getByText('Pending invitations')).toHaveCount(0)
         await expect(
-          launched.page.getByRole('heading', { name: 'What should we call you?' })
+          launched.page.getByRole('heading', { name: 'Create your first organization' })
         ).toBeVisible()
       } finally {
         await launched.electronApp.close()

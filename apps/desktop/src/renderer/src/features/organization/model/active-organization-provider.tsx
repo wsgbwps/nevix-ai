@@ -19,6 +19,7 @@ import { useOrganizationOnboarding } from './onboarding-state'
 interface ActiveOrganizationProviderProps {
   readonly isAuthenticated: boolean
   readonly getSession: () => Promise<AuthenticatedOrganizationSession | undefined>
+  readonly hasCompletedProfile: (session: AuthenticatedOrganizationSession) => Promise<boolean>
   readonly children: React.ReactNode
 }
 
@@ -36,6 +37,7 @@ interface ActiveOrganizationProviderProps {
 export function ActiveOrganizationProvider({
   isAuthenticated,
   getSession,
+  hasCompletedProfile,
   children
 }: ActiveOrganizationProviderProps): React.JSX.Element {
   const onboarding = useOrganizationOnboarding()
@@ -117,10 +119,11 @@ export function ActiveOrganizationProvider({
           return
         }
 
-        const [memberships, pending, remembered] = await Promise.all([
+        const [memberships, pending, remembered, profileCompleted] = await Promise.all([
           readActiveMemberships(session),
           readPendingInvitations(session),
-          window.api.invoke('organization:get-remembered-active-organization')
+          window.api.invoke('organization:get-remembered-active-organization'),
+          hasCompletedProfile(session)
         ])
         if (resolutionRef.current !== 'running') return
 
@@ -131,21 +134,10 @@ export function ActiveOrganizationProvider({
         setRememberedOrganizationId(rememberedId)
 
         const branch = resolveStartupBranch(memberships, rememberedId, pending.length > 0)
-        if (branch.kind === 'onboarding') {
-          setStartupPhase('ready')
-          onboarding.beginOnboarding()
-          return
-        }
-
-        if (pending.length > 0) {
-          // A fresh invitee still needs to finish the global Profile, but the pending Invitation
-          // supplies the Organization entry path. Keep registration eligibility while skipping
-          // only first-Organization creation; an existing User remains ineligible and sees the
-          // picker directly.
-          onboarding.skipOrganizationCreation()
-        } else {
-          onboarding.completeOnboarding()
-        }
+        onboarding.resolveOnboarding({
+          shouldCompleteProfile: !profileCompleted,
+          shouldCreateOrganization: branch.kind === 'onboarding'
+        })
         if (branch.kind === 'enter') {
           enterOrganization(branch.membership)
           return
@@ -156,7 +148,14 @@ export function ActiveOrganizationProvider({
         resolutionRef.current = 'failed'
       }
     })()
-  }, [isAuthenticated, onboarding, activeOrganization, getSession, enterOrganization])
+  }, [
+    isAuthenticated,
+    onboarding,
+    activeOrganization,
+    getSession,
+    hasCompletedProfile,
+    enterOrganization
+  ])
 
   const value = useMemo<ActiveOrganizationState>(
     () => ({

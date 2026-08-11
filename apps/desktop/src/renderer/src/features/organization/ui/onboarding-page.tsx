@@ -9,7 +9,7 @@ import {
 } from '../../../lib/display-name-validation'
 import { createOrganization, type Organization } from '../api/create-organization'
 
-type OnboardingStep = 1 | 2
+type OnboardingStep = 'profile' | 'organization'
 type OrganizationNameValidation = 'required' | undefined
 
 interface AuthenticatedSession {
@@ -20,6 +20,7 @@ interface AuthenticatedSession {
 interface OnboardingPageProps {
   readonly getSession: () => Promise<AuthenticatedSession | undefined>
   readonly saveDisplayName: (session: AuthenticatedSession, displayName: string) => Promise<unknown>
+  readonly shouldCompleteProfile: boolean
   readonly shouldCreateOrganization: boolean
   readonly onProfileComplete: () => void
   readonly onComplete: (organization: Organization) => void
@@ -28,12 +29,16 @@ interface OnboardingPageProps {
 export function OnboardingPage({
   getSession,
   saveDisplayName,
+  shouldCompleteProfile,
   shouldCreateOrganization,
   onProfileComplete,
   onComplete
 }: OnboardingPageProps): React.JSX.Element {
   const { t } = useTranslation('organization')
-  const [step, setStep] = useState<OnboardingStep>(1)
+  const [step, setStep] = useState<OnboardingStep>(
+    shouldCompleteProfile ? 'profile' : 'organization'
+  )
+  const [includedProfileStep] = useState(shouldCompleteProfile)
   const [displayName, setDisplayName] = useState('')
   const [organizationName, setOrganizationName] = useState('')
   const [displayNameValidation, setDisplayNameValidation] = useState<DisplayNameValidation>()
@@ -41,10 +46,11 @@ export function OnboardingPage({
     useState<OrganizationNameValidation>()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const organizationIdRef = useRef<string | undefined>(undefined)
-  const totalSteps = shouldCreateOrganization ? 2 : 1
+  const totalSteps = Number(includedProfileStep) + Number(shouldCreateOrganization)
+  const currentStep = step === 'profile' ? 1 : includedProfileStep ? 2 : 1
 
   const validationMessage =
-    step === 1
+    step === 'profile'
       ? displayNameValidation === 'required'
         ? t('onboarding.validation.displayNameRequired')
         : displayNameValidation === 'too-long'
@@ -65,10 +71,9 @@ export function OnboardingPage({
       if (!session) throw new Error('Onboarding Session is unavailable.')
 
       await saveDisplayName(session, displayName.trim())
+      onProfileComplete()
       if (shouldCreateOrganization) {
-        setStep(2)
-      } else {
-        onProfileComplete()
+        setStep('organization')
       }
     } catch {
       // Keep the values untouched so the User can retry after a transient request failure.
@@ -117,21 +122,21 @@ export function OnboardingPage({
       <section className="bg-card w-full max-w-md rounded-xl border p-6 shadow-sm">
         <div
           className="mb-8 flex items-center gap-3"
-          aria-label={t('onboarding.stepLabel', { current: step, total: totalSteps })}
+          aria-label={t('onboarding.stepLabel', { current: currentStep, total: totalSteps })}
         >
           <div className="flex gap-2" aria-hidden="true">
             {Array.from({ length: totalSteps }, (_, index) => index + 1).map((index) => (
               <span
                 key={index}
-                className={`size-2 rounded-full ${index <= step ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                className={`size-2 rounded-full ${index <= currentStep ? 'bg-primary' : 'bg-muted-foreground/30'}`}
               />
             ))}
           </div>
           <p className="text-muted-foreground text-sm">
-            {t('onboarding.stepLabel', { current: step, total: totalSteps })}
+            {t('onboarding.stepLabel', { current: currentStep, total: totalSteps })}
           </p>
         </div>
-        {step === 1 ? (
+        {step === 'profile' ? (
           <form onSubmit={(event) => void (event.preventDefault(), continueToOrganization())}>
             <FieldGroup>
               <div className="grid gap-2">
@@ -185,14 +190,18 @@ export function OnboardingPage({
                 <FieldError>{validationMessage}</FieldError>
               </Field>
               <div className="flex items-center justify-between gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={isSubmitting}
-                  onClick={() => setStep(1)}
-                >
-                  {t('onboarding.back')}
-                </Button>
+                {includedProfileStep ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isSubmitting}
+                    onClick={() => setStep('profile')}
+                  >
+                    {t('onboarding.back')}
+                  </Button>
+                ) : (
+                  <span />
+                )}
                 <Button type="submit" disabled={isSubmitting}>
                   {t('onboarding.submit')}
                 </Button>

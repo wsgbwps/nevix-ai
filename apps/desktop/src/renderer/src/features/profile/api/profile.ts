@@ -17,11 +17,16 @@ export async function readProfile(
     .from('profiles')
     .select('user_id, display_name')
     .eq('user_id', session.userId)
+    .maybeSingle()
 
   if (error) throw new Error('Profile request failed.')
-  if (data.length === 0) return undefined
+  if (data === null) return undefined
 
-  return toProfile(data[0], session.userId)
+  return toProfile(data, session.userId)
+}
+
+export async function hasCompletedProfile(session: AuthenticatedProfileSession): Promise<boolean> {
+  return (await readProfile(session)) !== undefined
 }
 
 export async function saveProfile(
