@@ -1,0 +1,10 @@
+您好，{{.AffectedName}}：
+
+{{.ActorName}} 已将您在「{{.OrganizationName}}」的权限调整为管理员；您的权限已提升。
+
+Hello, {{.AffectedName}}:
+
+{{.ActorName}} has promoted you to Admin in "{{.OrganizationName}}".
+
+如果这不是您预期的操作，请联系组织所有者。
+If you did not expect this change, please contact the organization owner.

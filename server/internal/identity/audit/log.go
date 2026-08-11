@@ -18,17 +18,29 @@ import (
 type Action string
 
 const (
-	InvitationCreated  Action = "invitation_created"
-	InvitationResent   Action = "invitation_resent"
-	InvitationRevoked  Action = "invitation_revoked"
-	InvitationAccepted Action = "invitation_accepted"
+	InvitationCreated           Action = "invitation_created"
+	InvitationResent            Action = "invitation_resent"
+	InvitationRevoked           Action = "invitation_revoked"
+	InvitationAccepted          Action = "invitation_accepted"
+	MembershipLeft              Action = "membership_left"
+	MemberRemoved               Action = "member_removed"
+	AdminPromoted               Action = "admin_promoted"
+	AdminDemoted                Action = "admin_demoted"
+	AdminRemoved                Action = "admin_removed"
+	OrganizationSettingsUpdated Action = "organization_settings_updated"
 )
 
 var validActions = map[Action]struct{}{
-	InvitationCreated:  {},
-	InvitationResent:   {},
-	InvitationRevoked:  {},
-	InvitationAccepted: {},
+	InvitationCreated:           {},
+	InvitationResent:            {},
+	InvitationRevoked:           {},
+	InvitationAccepted:          {},
+	MembershipLeft:              {},
+	MemberRemoved:               {},
+	AdminPromoted:               {},
+	AdminDemoted:                {},
+	AdminRemoved:                {},
+	OrganizationSettingsUpdated: {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry.

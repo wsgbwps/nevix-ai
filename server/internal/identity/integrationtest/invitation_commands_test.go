@@ -817,6 +817,16 @@ func TestAcceptInvitationCreatesMemberAndConsumesCode(t *testing.T) {
 	if activeMemberships != 1 || invitationStatus != "accepted" || codeStatus != "consumed" || actorID != invitee.ID || actorName != "Accept Invitee" || targetID != invitee.ID || targetName != "Accept Invitee" || action != "invitation_accepted" {
 		t.Fatalf("acceptance state = memberships:%d invitation:%q code:%q audit:(%q,%q,%q,%q,%q), want one active Member, accepted, consumed, and invitee snapshots", activeMemberships, invitationStatus, codeStatus, actorID, actorName, targetID, targetName, action)
 	}
+	var codelessOutboxMessages int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM identity.outbox_messages
+		 WHERE recipient = $1 AND verification_code_id IS NULL`, invitee.Email,
+	).Scan(&codelessOutboxMessages); err != nil {
+		t.Fatalf("count codeless acceptance notifications: %v", err)
+	}
+	if codelessOutboxMessages != 0 {
+		t.Fatalf("accepting an invitation queued %d codeless emails, want none", codelessOutboxMessages)
+	}
 	if _, err := h.pool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Accept Invitee Changed' WHERE user_id = $1`, invitee.ID); err != nil {
 		t.Fatalf("change accepting invitee profile after audit: %v", err)
 	}
