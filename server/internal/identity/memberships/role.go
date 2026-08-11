@@ -22,6 +22,38 @@ const (
 	removeAdmin   membershipRoleAction = "remove"
 )
 
+type membershipRoleActionDescriptor struct {
+	sourceRole         string
+	sourceRoleError    error
+	updateSQL          string
+	auditAction        audit.Action
+	renderNotification func(outbox.AdminRoleTemplateData) (string, string, error)
+}
+
+var membershipRoleActions = map[membershipRoleAction]membershipRoleActionDescriptor{
+	promoteMember: {
+		sourceRole:         "member",
+		sourceRoleError:    errTargetNotMember,
+		updateSQL:          `UPDATE public.memberships SET role = 'admin', updated_at = now() WHERE id = $1`,
+		auditAction:        audit.AdminPromoted,
+		renderNotification: outbox.RenderAdminPromoted,
+	},
+	demoteAdmin: {
+		sourceRole:         "admin",
+		sourceRoleError:    errTargetNotAdmin,
+		updateSQL:          `UPDATE public.memberships SET role = 'member', updated_at = now() WHERE id = $1`,
+		auditAction:        audit.AdminDemoted,
+		renderNotification: outbox.RenderAdminDemoted,
+	},
+	removeAdmin: {
+		sourceRole:         "admin",
+		sourceRoleError:    errTargetNotAdmin,
+		updateSQL:          `UPDATE public.memberships SET status = 'ended', updated_at = now() WHERE id = $1`,
+		auditAction:        audit.AdminRemoved,
+		renderNotification: outbox.RenderAdminRemoved,
+	},
+}
+
 // ChangeMemberRoleRequest carries the explicit Admin lifecycle operation. The
 // Organization and target Membership remain route-owned.
 type ChangeMemberRoleRequest struct {
@@ -35,12 +67,10 @@ func (r *ChangeMemberRoleRequest) Validate() *command.Error {
 		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_request", Message: "Request body must be JSON with an action field."}
 	}
 	*r.Action = strings.ToLower(strings.TrimSpace(*r.Action))
-	switch membershipRoleAction(*r.Action) {
-	case promoteMember, demoteAdmin, removeAdmin:
-		return nil
-	default:
+	if _, ok := membershipRoleActions[membershipRoleAction(*r.Action)]; !ok {
 		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_role_action", Message: "action must be promote, demote, or remove."}
 	}
+	return nil
 }
 
 // ChangeMemberRole gives the active Owner the three explicit Admin lifecycle
@@ -56,6 +86,10 @@ func (m *Manager) ChangeMemberRole(ctx context.Context, req ChangeMemberRoleRequ
 		return MembershipResponse{}, err
 	}
 	action := membershipRoleAction(*req.Action)
+	descriptor, ok := membershipRoleActions[action]
+	if !ok {
+		return MembershipResponse{}, errInvalidRoleAction
+	}
 
 	tx, err := m.begin(ctx)
 	if err != nil {
@@ -68,13 +102,10 @@ func (m *Manager) ChangeMemberRole(ctx context.Context, req ChangeMemberRoleRequ
 		return MembershipResponse{}, err
 	}
 	if actorMembership.Role != "owner" {
-		return MembershipResponse{}, errInsufficientRole
+		return MembershipResponse{}, errOwnerRoleRequired
 	}
-	if action == promoteMember && targetMembership.Role != "member" {
-		return MembershipResponse{}, errTargetNotMember
-	}
-	if (action == demoteAdmin || action == removeAdmin) && targetMembership.Role != "admin" {
-		return MembershipResponse{}, errTargetNotAdmin
+	if targetMembership.Role != descriptor.sourceRole {
+		return MembershipResponse{}, descriptor.sourceRoleError
 	}
 	actor, err := audit.SnapshotUser(ctx, tx, actorMembership.UserID)
 	if err != nil {
@@ -85,19 +116,18 @@ func (m *Manager) ChangeMemberRole(ctx context.Context, req ChangeMemberRoleRequ
 		return MembershipResponse{}, err
 	}
 
-	auditAction, err := applyAdminRoleAction(ctx, tx, action, &targetMembership)
-	if err != nil {
+	if err := applyAdminRoleAction(ctx, tx, action, descriptor, &targetMembership); err != nil {
 		return MembershipResponse{}, err
 	}
 	if err := audit.Write(ctx, tx, audit.Entry{
 		OrganizationID: organizationID,
 		Actor:          actor,
 		Target:         &target,
-		Action:         auditAction,
+		Action:         descriptor.auditAction,
 	}); err != nil {
 		return MembershipResponse{}, err
 	}
-	if err := m.queueAdminRoleNotifications(ctx, tx, action, organizationID, organizationName, actor, target); err != nil {
+	if err := m.queueAdminRoleNotifications(ctx, tx, action, descriptor, organizationID, organizationName, actor, target); err != nil {
 		return MembershipResponse{}, err
 	}
 	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
@@ -106,24 +136,9 @@ func (m *Manager) ChangeMemberRole(ctx context.Context, req ChangeMemberRoleRequ
 	return MembershipResponse{Membership: targetMembership}, nil
 }
 
-func applyAdminRoleAction(ctx context.Context, tx pgx.Tx, action membershipRoleAction, membership *Membership) (audit.Action, error) {
-	var query string
-	var auditAction audit.Action
-	switch action {
-	case promoteMember:
-		query = `UPDATE public.memberships SET role = 'admin', updated_at = now() WHERE id = $1`
-		auditAction = audit.AdminPromoted
-	case demoteAdmin:
-		query = `UPDATE public.memberships SET role = 'member', updated_at = now() WHERE id = $1`
-		auditAction = audit.AdminDemoted
-	case removeAdmin:
-		query = `UPDATE public.memberships SET status = 'ended', updated_at = now() WHERE id = $1`
-		auditAction = audit.AdminRemoved
-	default:
-		return "", errInvalidRoleAction
-	}
+func applyAdminRoleAction(ctx context.Context, tx pgx.Tx, action membershipRoleAction, descriptor membershipRoleActionDescriptor, membership *Membership) error {
 	if err := tx.QueryRow(ctx,
-		query+` RETURNING id, organization_id, user_id, role, status`, membership.ID,
+		descriptor.updateSQL+` RETURNING id, organization_id, user_id, role, status`, membership.ID,
 	).Scan(
 		&membership.ID,
 		&membership.OrganizationID,
@@ -131,12 +146,12 @@ func applyAdminRoleAction(ctx context.Context, tx pgx.Tx, action membershipRoleA
 		&membership.Role,
 		&membership.Status,
 	); err != nil {
-		return "", fmt.Errorf("memberships: apply %s action: %w", action, err)
+		return fmt.Errorf("memberships: apply %s action: %w", action, err)
 	}
-	return auditAction, nil
+	return nil
 }
 
-func (m *Manager) queueAdminRoleNotifications(ctx context.Context, tx pgx.Tx, action membershipRoleAction, organizationID, organizationName string, actor, target audit.Subject) error {
+func (m *Manager) queueAdminRoleNotifications(ctx context.Context, tx pgx.Tx, action membershipRoleAction, descriptor membershipRoleActionDescriptor, organizationID, organizationName string, actor, target audit.Subject) error {
 	targetRecipient, err := memberEmail(ctx, tx, target.UserID)
 	if err != nil {
 		return err
@@ -145,30 +160,26 @@ func (m *Manager) queueAdminRoleNotifications(ctx context.Context, tx pgx.Tx, ac
 	if err != nil {
 		return err
 	}
-	data := outbox.AdminRoleTemplateData{
-		OrganizationName: organizationName,
-		ActorName:        actor.DisplayName,
-		AffectedName:     target.DisplayName,
-	}
-	var subject, body string
-	switch action {
-	case promoteMember:
-		subject, body, err = outbox.RenderAdminPromoted(data)
-	case demoteAdmin:
-		subject, body, err = outbox.RenderAdminDemoted(data)
-	case removeAdmin:
-		subject, body, err = outbox.RenderAdminRemoved(data)
-	default:
-		return errInvalidRoleAction
-	}
-	if err != nil {
-		return err
-	}
-	for _, recipient := range []string{targetRecipient, ownerRecipient} {
+	for _, recipient := range []struct {
+		email string
+		name  string
+	}{
+		{email: targetRecipient, name: target.DisplayName},
+		{email: ownerRecipient, name: actor.DisplayName},
+	} {
+		subject, body, err := descriptor.renderNotification(outbox.AdminRoleTemplateData{
+			OrganizationName: organizationName,
+			ActorName:        actor.DisplayName,
+			AffectedName:     target.DisplayName,
+			RecipientName:    recipient.name,
+		})
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO identity.outbox_messages (sender, recipient, subject, body)
 			 VALUES ($1, $2, $3, $4)`,
-			m.sender, recipient, subject, body,
+			m.sender, recipient.email, subject, body,
 		); err != nil {
 			return fmt.Errorf("memberships: queue %s notification: %w", action, err)
 		}

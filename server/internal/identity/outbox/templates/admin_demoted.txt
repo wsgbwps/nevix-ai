@@ -1,10 +1,10 @@
-您好，{{.AffectedName}}：
+您好，{{.RecipientName}}：
 
-{{.ActorName}} 已将您在「{{.OrganizationName}}」的管理员权限调整为成员；您的权限已降级。
+{{.ActorName}} 已将 {{.AffectedName}} 在「{{.OrganizationName}}」的管理员权限调整为成员。
 
-Hello, {{.AffectedName}}:
+Hello, {{.RecipientName}}:
 
-{{.ActorName}} has demoted you from Admin to Member in "{{.OrganizationName}}".
+{{.ActorName}} has demoted {{.AffectedName}} from Admin to Member in "{{.OrganizationName}}".
 
-如果这不是您预期的操作，请联系组织所有者。
-If you did not expect this change, please contact the organization owner.
+如果该操作不符合预期，请联系组织所有者。
+If this change was unexpected, please contact the organization owner.

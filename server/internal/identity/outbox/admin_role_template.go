@@ -34,6 +34,7 @@ type AdminRoleTemplateData struct {
 	OrganizationName string
 	ActorName        string
 	AffectedName     string
+	RecipientName    string
 }
 
 // RenderAdminPromoted produces the bilingual Admin-promotion payload.

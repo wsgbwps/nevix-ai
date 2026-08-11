@@ -24,6 +24,7 @@ var (
 	errInvalidMembershipID   = errors.New("memberships: invalid membership id")
 	errOrganizationNotFound  = errors.New("memberships: organization not found")
 	errOwnerCannotLeave      = errors.New("memberships: owner cannot leave")
+	errOwnerRoleRequired     = errors.New("memberships: owner role required")
 	errInsufficientRole      = errors.New("memberships: insufficient organization role")
 	errMembershipNotFound    = errors.New("memberships: membership not found")
 	errTargetNotMember       = errors.New("memberships: target is not a member")
@@ -86,6 +87,8 @@ func MapError(err error) *command.Error {
 		return &command.Error{Status: http.StatusNotFound, Code: "organization_not_found", Message: "The organization was not found."}
 	case errors.Is(err, errMembershipNotFound):
 		return &command.Error{Status: http.StatusNotFound, Code: "membership_not_found", Message: "The active membership was not found."}
+	case errors.Is(err, errOwnerRoleRequired):
+		return &command.Error{Status: http.StatusForbidden, Code: "insufficient_organization_role", Message: "Owner role is required."}
 	case errors.Is(err, errInsufficientRole):
 		return &command.Error{Status: http.StatusForbidden, Code: "insufficient_organization_role", Message: "Owner or Admin role is required."}
 	case errors.Is(err, errOwnerCannotLeave):

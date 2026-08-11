@@ -5,6 +5,7 @@ package integrationtest
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -36,7 +37,7 @@ func TestLeaveOrganizationEndsMembershipWithoutEmail(t *testing.T) {
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	path := "/identity/organizations/" + orgID + "/leave"
 
-	status, body := invitationCommand(t, handler, http.MethodPost, path,
+	status, body := identityCommand(t, handler, http.MethodPost, path,
 		keys.signToken(t, member.ID, time.Now().Add(time.Hour)), map[string]string{})
 	if status != http.StatusOK {
 		t.Fatalf("leave organization: status %d body %s, want 200", status, body)
@@ -66,7 +67,7 @@ func TestLeaveOrganizationEndsMembershipWithoutEmail(t *testing.T) {
 		t.Fatalf("leave queued %d email rows, want none", outboxRows)
 	}
 
-	status, body = invitationCommand(t, handler, http.MethodPost, path,
+	status, body = identityCommand(t, handler, http.MethodPost, path,
 		keys.signToken(t, admin.ID, time.Now().Add(time.Hour)), map[string]string{})
 	if status != http.StatusOK {
 		t.Fatalf("admin leave organization: status %d body %s, want 200", status, body)
@@ -121,7 +122,7 @@ func TestRemoveMemberEndsAccessAndQueuesOnlyMemberNotification(t *testing.T) {
 	keys := newES256KeyServer(t)
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	path := "/identity/organizations/" + orgID + "/members/" + membershipID + "/remove"
-	status, body := invitationCommand(t, handler, http.MethodPost, path,
+	status, body := identityCommand(t, handler, http.MethodPost, path,
 		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{})
 	if status != http.StatusOK {
 		t.Fatalf("remove member: status %d body %s, want 200", status, body)
@@ -204,7 +205,7 @@ func TestAdminCanRemoveOrdinaryMember(t *testing.T) {
 	keys := newES256KeyServer(t)
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	path := "/identity/organizations/" + orgID + "/members/" + membershipID + "/remove"
-	status, body := invitationCommand(t, handler, http.MethodPost, path,
+	status, body := identityCommand(t, handler, http.MethodPost, path,
 		keys.signToken(t, admin.ID, time.Now().Add(time.Hour)), map[string]string{})
 	if status != http.StatusOK {
 		t.Fatalf("admin remove member: status %d body %s, want 200", status, body)
@@ -275,30 +276,43 @@ func TestChangeMemberRolePreservesOwnerAndQueuesAdminNotifications(t *testing.T)
 	ownerToken := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
 	memberPath := "/identity/organizations/" + orgID + "/members/" + memberID + "/role"
 
-	status, body := invitationCommand(t, handler, http.MethodPost, memberPath, ownerToken, map[string]string{"action": "promote"})
+	status, body := identityCommand(t, handler, http.MethodPost, memberPath, ownerToken, map[string]string{"action": "promote"})
 	if status != http.StatusOK {
 		t.Fatalf("promote member: status %d body %s, want 200", status, body)
 	}
 	assertContractResponse(t, http.MethodPost, memberPath, status, body)
 	assertRoleChangeState(t, ctx, h, memberID, "admin", "active", "admin_promoted", "Role Owner", "Role Member")
-	assertAdminNotification(t, ctx, h, member.Email, owner.Email, 1, "已提升", "promoted")
+	assertAdminNotification(t, ctx, h,
+		member.Email, "Role Member", owner.Email, "Role Owner", 1,
+		"Role Owner 已将 Role Member 在「Role Organization」的权限调整为管理员",
+		`Role Owner has promoted Role Member to Admin in "Role Organization".`,
+	)
 
-	status, body = invitationCommand(t, handler, http.MethodPost, memberPath, ownerToken, map[string]string{"action": "demote"})
+	status, body = identityCommand(t, handler, http.MethodPost, memberPath, ownerToken, map[string]string{"action": "demote"})
 	if status != http.StatusOK {
 		t.Fatalf("demote admin: status %d body %s, want 200", status, body)
 	}
 	assertContractResponse(t, http.MethodPost, memberPath, status, body)
 	assertRoleChangeState(t, ctx, h, memberID, "member", "active", "admin_demoted", "Role Owner", "Role Member")
-	assertAdminNotification(t, ctx, h, member.Email, owner.Email, 2, "已降级", "demoted")
+	assertAdminNotification(t, ctx, h,
+		member.Email, "Role Member", owner.Email, "Role Owner", 2,
+		"Role Owner 已将 Role Member 在「Role Organization」的管理员权限调整为成员",
+		`Role Owner has demoted Role Member from Admin to Member in "Role Organization".`,
+	)
 
 	adminPath := "/identity/organizations/" + orgID + "/members/" + adminID + "/role"
-	status, body = invitationCommand(t, handler, http.MethodPost, adminPath, ownerToken, map[string]string{"action": "remove"})
+	status, body = identityCommand(t, handler, http.MethodPost, adminPath, ownerToken, map[string]string{"action": "remove"})
 	if status != http.StatusOK {
 		t.Fatalf("remove admin: status %d body %s, want 200", status, body)
 	}
 	assertContractResponse(t, http.MethodPost, adminPath, status, body)
 	assertRoleChangeState(t, ctx, h, adminID, "admin", "ended", "admin_removed", "Role Owner", "Role Admin")
-	assertAdminNotification(t, ctx, h, admin.Email, owner.Email, 1, "已被移除", "removed")
+	assertAdminNotification(t, ctx, h,
+		admin.Email, "Role Admin", owner.Email, "Role Owner", 1,
+		"Role Admin 已被移除出「Role Organization」的管理员角色，操作人为 Role Owner",
+		`Role Owner has removed Role Admin from the Admin role in "Role Organization".`,
+		"Access for Role Admin ended immediately.",
+	)
 
 	var activeOwners, ownerNotificationRows int
 	if err := h.pool.QueryRow(ctx,
@@ -334,21 +348,49 @@ func assertRoleChangeState(t *testing.T, ctx context.Context, h *harness, member
 	}
 }
 
-func assertAdminNotification(t *testing.T, ctx context.Context, h *harness, affectedEmail, ownerEmail string, wantAffectedRows int, chinese, english string) {
+func assertAdminNotification(t *testing.T, ctx context.Context, h *harness, affectedEmail, affectedName, ownerEmail, ownerName string, wantAffectedRows int, bodyFragments ...string) {
 	t.Helper()
-	for _, recipient := range []string{affectedEmail, ownerEmail} {
+	for _, recipient := range []struct {
+		email string
+		name  string
+	}{
+		{email: affectedEmail, name: affectedName},
+		{email: ownerEmail, name: ownerName},
+	} {
 		var subject, body string
 		var carriesCode bool
 		if err := h.pool.QueryRow(ctx,
 			`SELECT subject, body, verification_code_id IS NOT NULL
 			 FROM identity.outbox_messages
 			 WHERE recipient = $1
-			 ORDER BY created_at DESC LIMIT 1`, recipient,
+			 ORDER BY created_at DESC LIMIT 1`, recipient.email,
 		).Scan(&subject, &body, &carriesCode); err != nil {
-			t.Fatalf("read %s notification for %s: %v", english, recipient, err)
+			t.Fatalf("read Admin role notification for %s: %v", recipient.email, err)
 		}
-		if carriesCode || !strings.Contains(subject+"\n"+body, chinese) || !strings.Contains(subject+"\n"+body, english) {
-			t.Fatalf("%s notification for %s = subject:%q body:%q carriesCode:%t, want bilingual codeless message", english, recipient, subject, body, carriesCode)
+		if carriesCode {
+			t.Fatalf("Admin role notification for %s carries a verification code", recipient.email)
+		}
+		for _, greeting := range []string{"您好，" + recipient.name + "：", "Hello, " + recipient.name + ":"} {
+			if !strings.Contains(body, greeting) {
+				t.Fatalf("Admin role notification for %s misses recipient greeting %q: subject=%q body=%q", recipient.email, greeting, subject, body)
+			}
+		}
+		for _, fragment := range bodyFragments {
+			if !strings.Contains(body, fragment) {
+				t.Fatalf("Admin role notification for %s misses event body fragment %q: subject=%q body=%q", recipient.email, fragment, subject, body)
+			}
+		}
+		if recipient.email == ownerEmail {
+			for _, fragment := range []string{
+				"您的权限已提升", "has promoted you",
+				"您的权限已降级", "has demoted you",
+				"您已被移除", "has removed you",
+				"您的组织访问权限已立即结束", "Your organization access ended immediately",
+			} {
+				if strings.Contains(body, fragment) {
+					t.Fatalf("Owner notification claims the affected User's change in the Owner's perspective via %q: body=%q", fragment, body)
+				}
+			}
 		}
 	}
 	var affectedRows int
@@ -401,24 +443,35 @@ func TestMembershipCommandsEnforceAuthorizationAndStateBoundaries(t *testing.T) 
 	missingRolePath := "/identity/organizations/" + orgID + "/members/" + newRLSOrgID(t) + "/role"
 
 	for _, check := range []struct {
-		name, method, path, token, wantError string
-		payload                              any
-		wantStatus                           int
+		name, method, path, token, wantError, wantMessage string
+		payload                                           any
+		wantStatus                                        int
 	}{
-		{"owner leave", http.MethodPost, leavePath, keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), "owner_cannot_leave", map[string]string{}, http.StatusConflict},
-		{"outsider role", http.MethodPost, memberRolePath, keys.signToken(t, outsider.ID, time.Now().Add(time.Hour)), "organization_not_found", map[string]string{"action": "promote"}, http.StatusNotFound},
-		{"admin role", http.MethodPost, memberRolePath, keys.signToken(t, admin.ID, time.Now().Add(time.Hour)), "insufficient_organization_role", map[string]string{"action": "promote"}, http.StatusForbidden},
-		{"member removal", http.MethodPost, removePath, keys.signToken(t, member.ID, time.Now().Add(time.Hour)), "insufficient_organization_role", map[string]string{}, http.StatusForbidden},
-		{"admin ordinary removal", http.MethodPost, adminRemovePath, keys.signToken(t, admin.ID, time.Now().Add(time.Hour)), "membership_not_member", map[string]string{}, http.StatusConflict},
-		{"owner demote member", http.MethodPost, memberRolePath, keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), "membership_not_admin", map[string]string{"action": "demote"}, http.StatusConflict},
-		{"owner missing membership", http.MethodPost, missingRolePath, keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), "membership_not_found", map[string]string{"action": "remove"}, http.StatusNotFound},
+		{"owner leave", http.MethodPost, leavePath, keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), "owner_cannot_leave", "", map[string]string{}, http.StatusConflict},
+		{"outsider role", http.MethodPost, memberRolePath, keys.signToken(t, outsider.ID, time.Now().Add(time.Hour)), "organization_not_found", "", map[string]string{"action": "promote"}, http.StatusNotFound},
+		{"admin role", http.MethodPost, memberRolePath, keys.signToken(t, admin.ID, time.Now().Add(time.Hour)), "insufficient_organization_role", "Owner role is required.", map[string]string{"action": "promote"}, http.StatusForbidden},
+		{"member removal", http.MethodPost, removePath, keys.signToken(t, member.ID, time.Now().Add(time.Hour)), "insufficient_organization_role", "Owner or Admin role is required.", map[string]string{}, http.StatusForbidden},
+		{"admin ordinary removal", http.MethodPost, adminRemovePath, keys.signToken(t, admin.ID, time.Now().Add(time.Hour)), "membership_not_member", "", map[string]string{}, http.StatusConflict},
+		{"owner demote member", http.MethodPost, memberRolePath, keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), "membership_not_admin", "", map[string]string{"action": "demote"}, http.StatusConflict},
+		{"owner missing membership", http.MethodPost, missingRolePath, keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), "membership_not_found", "", map[string]string{"action": "remove"}, http.StatusNotFound},
 	} {
-		status, body := invitationCommand(t, handler, check.method, check.path, check.token, check.payload)
+		status, body := identityCommand(t, handler, check.method, check.path, check.token, check.payload)
 		if status != check.wantStatus {
 			t.Errorf("%s: status %d body %s, want %d", check.name, status, body, check.wantStatus)
 			continue
 		}
-		assertInvitationError(t, body, check.wantError)
+		assertCommandError(t, body, check.wantError)
+		if check.wantMessage != "" {
+			var envelope struct {
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(body, &envelope); err != nil {
+				t.Fatalf("%s: decode command error message: %v", check.name, err)
+			}
+			if envelope.Message != check.wantMessage {
+				t.Fatalf("%s: command error message = %q, want %q; body %s", check.name, envelope.Message, check.wantMessage, body)
+			}
+		}
 		assertContractResponse(t, check.method, check.path, status, body)
 	}
 
@@ -473,7 +526,7 @@ func TestUpdateOrganizationSettingsAllowsAdministratorsWithoutEmail(t *testing.T
 	keys := newES256KeyServer(t)
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	path := "/identity/organizations/" + orgID + "/settings"
-	status, body := invitationCommand(t, handler, http.MethodPatch, path,
+	status, body := identityCommand(t, handler, http.MethodPatch, path,
 		keys.signToken(t, admin.ID, time.Now().Add(time.Hour)), map[string]string{"name": "  Settings by Admin  "})
 	if status != http.StatusOK {
 		t.Fatalf("admin update settings: status %d body %s, want 200", status, body)
@@ -481,7 +534,7 @@ func TestUpdateOrganizationSettingsAllowsAdministratorsWithoutEmail(t *testing.T
 	assertContractResponse(t, http.MethodPatch, path, status, body)
 	assertSettingsState(t, ctx, h, orgID, "Settings by Admin", "Settings Admin")
 
-	status, body = invitationCommand(t, handler, http.MethodPatch, path,
+	status, body = identityCommand(t, handler, http.MethodPatch, path,
 		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{"name": "Settings by Owner"})
 	if status != http.StatusOK {
 		t.Fatalf("owner update settings: status %d body %s, want 200", status, body)
@@ -489,20 +542,20 @@ func TestUpdateOrganizationSettingsAllowsAdministratorsWithoutEmail(t *testing.T
 	assertContractResponse(t, http.MethodPatch, path, status, body)
 	assertSettingsState(t, ctx, h, orgID, "Settings by Owner", "Settings Owner")
 
-	status, body = invitationCommand(t, handler, http.MethodPatch, path,
+	status, body = identityCommand(t, handler, http.MethodPatch, path,
 		keys.signToken(t, member.ID, time.Now().Add(time.Hour)), map[string]string{"name": "Member Cannot Rename"})
 	if status != http.StatusForbidden {
 		t.Fatalf("member update settings: status %d body %s, want 403", status, body)
 	}
-	assertInvitationError(t, body, "insufficient_organization_role")
+	assertCommandError(t, body, "insufficient_organization_role")
 	assertContractResponse(t, http.MethodPatch, path, status, body)
 
-	status, body = invitationCommand(t, handler, http.MethodPatch, path,
+	status, body = identityCommand(t, handler, http.MethodPatch, path,
 		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{"name": "   "})
 	if status != http.StatusBadRequest {
 		t.Fatalf("blank organization name: status %d body %s, want 400", status, body)
 	}
-	assertInvitationError(t, body, "invalid_organization_name")
+	assertCommandError(t, body, "invalid_organization_name")
 	assertContractResponse(t, http.MethodPatch, path, status, body)
 	assertSettingsState(t, ctx, h, orgID, "Settings by Owner", "Settings Owner")
 
