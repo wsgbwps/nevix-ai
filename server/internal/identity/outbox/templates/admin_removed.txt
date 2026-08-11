@@ -1,0 +1,10 @@
+您好，{{.RecipientName}}：
+
+{{.AffectedName}} 已被移除出「{{.OrganizationName}}」的管理员角色，操作人为 {{.ActorName}}；{{.AffectedName}} 的组织访问权限已立即结束。
+
+Hello, {{.RecipientName}}:
+
+{{.ActorName}} has removed {{.AffectedName}} from the Admin role in "{{.OrganizationName}}". Access for {{.AffectedName}} ended immediately.
+
+如果该操作不符合预期，请联系组织所有者。
+If this change was unexpected, please contact the organization owner.

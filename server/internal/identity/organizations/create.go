@@ -20,22 +20,27 @@ import (
 	"github.com/nevix-ai/server/internal/identity/command"
 )
 
-// errIDConflict means the client-generated id already belongs to an
-// organization whose active Owner is someone else: a retry must never
-// silently return another user's organization.
-var errIDConflict = errors.New("organizations: id belongs to another user's organization")
+var (
+	// errIDConflict means the client-generated id already belongs to an
+	// organization whose active Owner is someone else: a retry must never
+	// silently return another user's organization.
+	errIDConflict            = errors.New("organizations: id belongs to another user's organization")
+	errInvalidOrganizationID = errors.New("organizations: invalid organization id")
+	errOrganizationNotFound  = errors.New("organizations: organization not found")
+	errInsufficientRole      = errors.New("organizations: insufficient organization role")
+)
 
 // uuidPattern accepts the canonical lowercase-or-uppercase UUID text form the
 // client generates; the database column stays the source of truth.
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// Creator handles the CreateOrganization command.
-type Creator struct {
+// Manager handles Organization trusted commands through the identity_app role.
+type Manager struct {
 	pool *pgxpool.Pool
 }
 
-func NewCreator(pool *pgxpool.Pool) *Creator {
-	return &Creator{pool: pool}
+func NewManager(pool *pgxpool.Pool) *Manager {
+	return &Manager{pool: pool}
 }
 
 // CreateOrganizationRequest is the CreateOrganization command input. Validate
@@ -65,20 +70,24 @@ func (r *CreateOrganizationRequest) Validate() *command.Error {
 	return nil
 }
 
-// CreateOrganizationResponse is the minimal representation returned after a
-// successful create or same-user idempotent retry.
-type CreateOrganizationResponse struct {
+// OrganizationResponse is the minimal representation returned after an
+// Organization command.
+type OrganizationResponse struct {
 	Organization struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"organization"`
 }
 
+// CreateOrganizationResponse is retained as the explicit Create command
+// response name while sharing the Organization response representation.
+type CreateOrganizationResponse = OrganizationResponse
+
 // CreateOrganization runs the trusted command after the shared skeleton has
 // decoded and validated its request. The Bearer guard supplies the user id in
 // ctx before this function runs.
-func (c *Creator) CreateOrganization(ctx context.Context, req CreateOrganizationRequest) (CreateOrganizationResponse, error) {
-	storedName, err := c.create(ctx, authjwt.UserID(ctx), req.ID, req.Name)
+func (m *Manager) CreateOrganization(ctx context.Context, req CreateOrganizationRequest) (CreateOrganizationResponse, error) {
+	storedName, err := m.create(ctx, authjwt.UserID(ctx), req.ID, req.Name)
 	if err != nil {
 		return CreateOrganizationResponse{}, err
 	}
@@ -91,10 +100,18 @@ func (c *Creator) CreateOrganization(ctx context.Context, req CreateOrganization
 // MapError translates organization-domain errors to the trusted-command
 // contract. Unrecognized failures are logged and mapped to 500 by command.
 func MapError(err error) *command.Error {
-	if errors.Is(err, errIDConflict) {
+	switch {
+	case errors.Is(err, errIDConflict):
 		return &command.Error{Status: http.StatusConflict, Code: "organization_id_conflict", Message: "This organization id is already in use."}
+	case errors.Is(err, errInvalidOrganizationID):
+		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_organization_id", Message: "organization_id must be a UUID."}
+	case errors.Is(err, errOrganizationNotFound):
+		return &command.Error{Status: http.StatusNotFound, Code: "organization_not_found", Message: "The organization was not found."}
+	case errors.Is(err, errInsufficientRole):
+		return &command.Error{Status: http.StatusForbidden, Code: "insufficient_organization_role", Message: "Owner or Admin role is required."}
+	default:
+		return nil
 	}
-	return nil
 }
 
 // create runs the command transaction as identity_app. The client-generated
@@ -102,16 +119,12 @@ func MapError(err error) *command.Error {
 // a no-op that returns the existing organization, while a conflict owned by
 // anyone else is rejected. The FOR UPDATE read on the conflict path waits out
 // a concurrent winner, so a retry never observes a half-created organization.
-func (c *Creator) create(ctx context.Context, userID, id, name string) (string, error) {
-	tx, err := c.pool.Begin(ctx)
+func (m *Manager) create(ctx context.Context, userID, id, name string) (string, error) {
+	tx, err := m.begin(ctx)
 	if err != nil {
-		return "", fmt.Errorf("organizations: begin create: %w", err)
+		return "", err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
-
-	if _, err := tx.Exec(ctx, "SET LOCAL ROLE identity_app"); err != nil {
-		return "", fmt.Errorf("organizations: switch to identity_app: %w", err)
-	}
 
 	var insertedID string
 	err = tx.QueryRow(ctx,
@@ -162,4 +175,24 @@ func (c *Creator) create(ctx context.Context, userID, id, name string) (string, 
 		return "", fmt.Errorf("organizations: commit create: %w", err)
 	}
 	return name, nil
+}
+
+func (m *Manager) begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("organizations: begin command: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL ROLE identity_app"); err != nil {
+		tx.Rollback(context.WithoutCancel(ctx))
+		return nil, fmt.Errorf("organizations: switch to identity_app: %w", err)
+	}
+	return tx, nil
+}
+
+func normalizeOrganizationID(raw string) (string, error) {
+	organizationID := strings.ToLower(strings.TrimSpace(raw))
+	if !uuidPattern.MatchString(organizationID) {
+		return "", errInvalidOrganizationID
+	}
+	return organizationID, nil
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/nevix-ai/server/internal/identity/authjwt"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/invitations"
+	"github.com/nevix-ai/server/internal/identity/memberships"
 	"github.com/nevix-ai/server/internal/identity/organizations"
 	"github.com/nevix-ai/server/internal/identity/outbox"
 	"github.com/nevix-ai/server/internal/identity/verification"
@@ -101,9 +102,10 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 type Module struct {
 	issuer      *verification.CodeIssuer
 	invitations *invitations.Creator
+	memberships *memberships.Manager
 	worker      *outbox.OutboxWorker
 	verifier    *authjwt.Verifier
-	orgs        *organizations.Creator
+	orgs        *organizations.Manager
 	corsOrigins []string
 }
 
@@ -118,9 +120,10 @@ func NewModule(pool *pgxpool.Pool, cfg Config) (*Module, error) {
 	return &Module{
 		issuer:      verification.NewCodeIssuer(pool, cfg.CodeIssuance),
 		invitations: invitations.NewCreator(pool, cfg.CodeIssuance),
+		memberships: memberships.NewManager(pool, cfg.CodeIssuance.From),
 		worker:      worker,
 		verifier:    authjwt.NewVerifier(cfg.JWKSURL),
-		orgs:        organizations.NewCreator(pool),
+		orgs:        organizations.NewManager(pool),
 		corsOrigins: cfg.CORSAllowedOrigins,
 	}, nil
 }
