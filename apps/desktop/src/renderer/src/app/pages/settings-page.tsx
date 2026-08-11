@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeftIcon, LanguagesIcon, UserRoundIcon } from 'lucide-react'
 import { LanguageModeSettings } from '../../features/language'
+import { AuditLogSettings, AuditLogSettingsNavigation } from '../../features/organization'
 import { ProfileSettings } from '../../features/profile'
 import { useAuthenticationState } from '../authentication-state'
 
@@ -45,6 +46,7 @@ export function SettingsPage(): React.JSX.Element | null {
               {t('settings.language')}
             </a>
           </div>
+          <AuditLogSettingsNavigation />
         </nav>
       </aside>
       <main className="max-h-svh flex-1 overflow-y-auto">
@@ -61,6 +63,7 @@ export function SettingsPage(): React.JSX.Element | null {
               <LanguageModeSettings />
             </div>
           </section>
+          <AuditLogSettings getSession={authentication.getSession} />
         </div>
       </main>
     </div>

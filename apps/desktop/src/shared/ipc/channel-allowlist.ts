@@ -13,7 +13,8 @@ const invokeChannels = {
   'language:get-language-mode': true,
   'language:set-language-mode': true,
   'organization:get-remembered-active-organization': true,
-  'organization:set-remembered-active-organization': true
+  'organization:set-remembered-active-organization': true,
+  'organization:export-audit-log': true
 } satisfies Record<keyof IpcChannelMap, true>
 
 const eventChannels = {

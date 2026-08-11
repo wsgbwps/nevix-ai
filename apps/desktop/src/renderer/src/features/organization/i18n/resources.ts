@@ -34,6 +34,31 @@ export const organizationTranslations = defineResourceTranslations({
         displayNameTooLong: '显示名最长 50 个字符',
         orgNameRequired: '请输入组织名称'
       }
+    },
+    audit: {
+      title: '审计日志',
+      settingsGroup: '组织',
+      description: '组织安全事件，滚动保留 365 天，不可修改。',
+      filterAll: '全部事件',
+      export: '导出',
+      exported: '已导出 {{count}} 条记录。',
+      colTime: '时间',
+      colActor: '操作者',
+      colAction: '动作',
+      colTarget: '对象',
+      colDetail: '详情',
+      today: '今天',
+      yesterday: '昨天',
+      actions: {
+        orgCreated: '创建组织',
+        invitationCreated: '发出邀请',
+        invitationResent: '重发邀请',
+        invitationRevoked: '撤销邀请',
+        invitationAccepted: '接受邀请',
+        memberRemoved: '移除成员',
+        roleChanged: '变更角色',
+        settingsUpdated: '更新组织设置'
+      }
     }
   },
   en: {
@@ -66,6 +91,31 @@ export const organizationTranslations = defineResourceTranslations({
         displayNameRequired: 'Enter a display name (not whitespace only)',
         displayNameTooLong: 'Display name is 50 characters at most',
         orgNameRequired: 'Enter an organization name'
+      }
+    },
+    audit: {
+      title: 'Audit log',
+      settingsGroup: 'Organization',
+      description: 'Organization security events. Kept for 365 days, immutable.',
+      filterAll: 'All events',
+      export: 'Export',
+      exported: 'Exported {{count}} entries.',
+      colTime: 'Time',
+      colActor: 'Actor',
+      colAction: 'Action',
+      colTarget: 'Target',
+      colDetail: 'Detail',
+      today: 'Today',
+      yesterday: 'Yesterday',
+      actions: {
+        orgCreated: 'Organization created',
+        invitationCreated: 'Invitation created',
+        invitationResent: 'Invitation resent',
+        invitationRevoked: 'Invitation revoked',
+        invitationAccepted: 'Invitation accepted',
+        memberRemoved: 'Removed member',
+        roleChanged: 'Changed role',
+        settingsUpdated: 'Settings updated'
       }
     }
   }
