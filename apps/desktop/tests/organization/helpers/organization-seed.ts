@@ -56,3 +56,35 @@ export async function endMembership(userId: string, organizationId: string): Pro
     }
   })
 }
+
+export async function ageInvitationCodeBeyondCooldown(invitationId: string): Promise<void> {
+  await withIdentityAppClient(async (client) => {
+    const result = await client.query(
+      `UPDATE identity.verification_codes
+       SET created_at = clock_timestamp() - interval '2 minutes'
+       WHERE target_id = $1 AND action_type = 'invitation'`,
+      [invitationId]
+    )
+    if (result.rowCount !== 1) {
+      throw new Error('Unable to age the invitation code beyond the resend cooldown')
+    }
+  })
+}
+
+export async function expireInvitation(invitationId: string): Promise<void> {
+  await withIdentityAppClient(async (client) => {
+    const invitation = await client.query(
+      "UPDATE invitations SET expires_at = clock_timestamp() - interval '1 second' WHERE id = $1",
+      [invitationId]
+    )
+    if (invitation.rowCount !== 1) throw new Error('Unable to expire the test invitation')
+
+    const code = await client.query(
+      `UPDATE identity.verification_codes
+       SET expires_at = clock_timestamp() - interval '1 second'
+       WHERE target_id = $1 AND action_type = 'invitation'`,
+      [invitationId]
+    )
+    if (code.rowCount !== 1) throw new Error('Unable to expire the test invitation code')
+  })
+}

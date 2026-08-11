@@ -45,3 +45,15 @@ test('startup verification begins Organization onboarding without Memberships', 
     kind: 'onboarding'
   })
 })
+
+test('startup verification sends a pending invitee to the Organization picker', () => {
+  assert.deepEqual(resolveStartupBranch([], undefined, true), {
+    kind: 'picker'
+  })
+})
+
+test('a pending invitation overrides remembered and sole-Membership auto-entry', () => {
+  assert.deepEqual(resolveStartupBranch([alpha], alpha.organizationId, true), {
+    kind: 'picker'
+  })
+})

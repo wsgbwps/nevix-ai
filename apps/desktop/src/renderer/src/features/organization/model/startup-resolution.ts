@@ -7,8 +7,11 @@ export type StartupBranch =
 
 export function resolveStartupBranch(
   memberships: readonly ActiveMembership[],
-  rememberedOrganizationId: string | undefined
+  rememberedOrganizationId: string | undefined,
+  hasPendingInvitation = false
 ): StartupBranch {
+  if (hasPendingInvitation) return { kind: 'picker' }
+
   const rememberedMembership = memberships.find(
     (membership) => membership.organizationId === rememberedOrganizationId
   )

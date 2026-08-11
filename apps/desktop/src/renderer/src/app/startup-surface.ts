@@ -32,13 +32,13 @@ export function resolveStartupSurface({
       : { navigate: STARTUP_ROUTES.authentication }
   }
 
+  if (phase !== 'ready') return { render: 'restoring' }
+
   if (isEligible) {
     return pathname === STARTUP_ROUTES.onboarding
       ? { render: 'outlet' }
       : { navigate: STARTUP_ROUTES.onboarding }
   }
-
-  if (phase !== 'ready') return { render: 'restoring' }
 
   if (!hasActiveOrganization) {
     return pathname === STARTUP_ROUTES.organizationPicker

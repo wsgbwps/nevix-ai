@@ -90,7 +90,7 @@ Authoritative context:
 - profiles：`user_id` 主键（FK auth.users ON DELETE CASCADE）+ display_name（trim 后 1–50 字符、拒纯空白、不唯一）+ 时间戳。**不加 avatar_path 列、不建 avatar bucket**（见"与基线偏差"）。
 - organizations 极简：id / name / 时间戳；status 列留给 Governance。
 - memberships 不变式：role CHECK（owner/admin/member）、status CHECK（active/ended）；部分唯一索引 `UNIQUE(organization_id, user_id) WHERE status='active'` 与 `UNIQUE(organization_id) WHERE role='owner' AND status='active'`；"恰好一个 Owner"由命令事务保证；结束保留行、重新加入插新行；角色就地 UPDATE；不冗余 ended_by/end_reason。
-- invitations：status（pending/accepted/revoked），过期派生自 expires_at（不存 expired 态）；重发保留同行、重置 7 天、新码 supersede 旧码；`UNIQUE(organization_id, email) WHERE status='pending'`；邀请活跃成员邮箱 → 命令拒绝，已结束成员邮箱 → 允许。
+- invitations：status（pending/accepted/revoked），过期派生自 expires_at（不存 expired 态）；重发保留同行、重置 7 天、新码 supersede 旧码；`UNIQUE(organization_id, email) WHERE status='pending'`；邀请活跃成员邮箱 → 命令拒绝，已结束成员邮箱 → 允许。pending 行额外保存 `organization_name` 与 `inviter_display_name` 的写入时展示快照：invitee 已可经 email RLS 读取该行，但在接受前不能读 Organization/Profile；快照只满足邀请区展示，不扩大这两张表的 RLS 可见面。
 - verification_codes expand-only 扩展：+`action_type`、+`target_id`、status CHECK 增加 `'consumed'`、+`failed_attempts` 列（5 次尝试上限由命令层执行）。
 - 所有外键与 RLS 查找用列配齐索引（延续基线要求）。
 
@@ -120,6 +120,7 @@ Authoritative context:
 
 - 新命令一律 Bearer JWT；`/identity/verification-codes` 保持 `security: []`。
 - 防枚举语义：非成员目标 404、角色不足 403 带具体 snake_case 错误码、JWT 失效 401。
+- AcceptInvitation 对格式正确但错误的六码与耗尽状态通过 CORS 可见的 `X-Invitation-Code-Attempts-Remaining` 返回服务端权威的剩余次数；重发替换的历史码返回 `invitation_code_invalidated`，且不消耗当前有效码的次数。
 - 同步变更返 200 + 受影响资源最小表示；纯入队返 202。错误信封沿用 `{error, message}`。
 - Desktop renderer 直连 fetch（不经 IPC 代理）：新增 `VITE_SERVER_URL` 构建期配置（启动校验、缺失即显式失败）；CSP connect-src 按环境加精确 origin；CORS 按环境白名单、无 Origin 放行、永不通配。
 - openapi 响应级对照校验升级为测试断言（">1 条受信命令即引入"条件已触发）。
@@ -135,7 +136,7 @@ Authoritative context:
 
 - 新建 **Organization Domain**（`features/organization`）：memberships 直读、Active Organization 状态与设备记忆、组织切换、组织 onboarding、成员/邀请管理、组织设置、Organization Audit Log 查看。新建窄 **Profile Domain**（`features/profile`）：全局 Profile 读写与显示名编辑。两词条已入 `apps/desktop/CONTEXT.md`。
 - org 状态存 renderer 内存（organization feature model），RLS 直读为唯一来源，无缓存层。remembered active org id 走主进程持久化 + organization domain IPC（循 ADR-0002/0003 先例），不落 localStorage。
-- 启动验证：拉 memberships → 记忆有效直接进入 / 0 组织 onboarding / 1 组织自动选中 / N 组织选择界面。onboarding 为第四个顶层视图（路由化，符合 desktop ADR-0004 路由拓扑）。
+- 启动验证：并行拉 memberships 与当前邮箱的 pending invitations；若有 pending Invitation，优先进入组织选择界面（覆盖记忆有效直接进入、1 组织自动选中与 0 组织 onboarding），否则走 memberships 的记忆有效直接进入 / 0 组织 onboarding / 1 组织自动选中 / N 组织选择界面。注册验证后的临时 onboarding 信号也等待此检查完成。onboarding 为第四个顶层视图（路由化，符合 desktop ADR-0004 路由拓扑）。
 - 会话中失权为 error-driven：403/404 或直读突变 → 重拉确认 → 退出 org context 并告知；V1 不上 Realtime。
 - 邀请自动浮现（RLS email 策略使被邀请人可见 pending 行）+ 点选输码，不做纯手动入口。
 - 全部新 Localized Surface 中英双语，过既有 localization 发布检查。

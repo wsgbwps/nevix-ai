@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,18 +27,19 @@ const invitationValidity = 7 * 24 * time.Hour
 var (
 	uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-	errInvalidOrganizationID = errors.New("invitations: invalid organization id")
-	errInvalidInvitationID   = errors.New("invitations: invalid invitation id")
-	errOrganizationNotFound  = errors.New("invitations: organization not found")
-	errInvitationNotFound    = errors.New("invitations: invitation not found")
-	errInsufficientRole      = errors.New("invitations: insufficient organization role")
-	errActiveMembership      = errors.New("invitations: email already has active membership")
-	errPendingInvitation     = errors.New("invitations: pending invitation already exists")
-	errInvitationNotPending  = errors.New("invitations: invitation is not pending")
-	errInvitationRevoked     = errors.New("invitations: invitation is revoked")
-	errInvitationExpired     = errors.New("invitations: invitation is expired")
-	errInvalidInvitationCode = errors.New("invitations: invalid invitation code")
-	errCodeAttemptsExhausted = errors.New("invitations: invitation code attempts exhausted")
+	errInvalidOrganizationID     = errors.New("invitations: invalid organization id")
+	errInvalidInvitationID       = errors.New("invitations: invalid invitation id")
+	errOrganizationNotFound      = errors.New("invitations: organization not found")
+	errInvitationNotFound        = errors.New("invitations: invitation not found")
+	errInsufficientRole          = errors.New("invitations: insufficient organization role")
+	errActiveMembership          = errors.New("invitations: email already has active membership")
+	errPendingInvitation         = errors.New("invitations: pending invitation already exists")
+	errInvitationNotPending      = errors.New("invitations: invitation is not pending")
+	errInvitationRevoked         = errors.New("invitations: invitation is revoked")
+	errInvitationExpired         = errors.New("invitations: invitation is expired")
+	errInvalidInvitationCode     = errors.New("invitations: invalid invitation code")
+	errInvitationCodeInvalidated = errors.New("invitations: invitation code is invalidated")
+	errCodeAttemptsExhausted     = errors.New("invitations: invitation code attempts exhausted")
 )
 
 // Creator handles Invitation trusted commands with the deployment-scoped code
@@ -108,6 +110,13 @@ func MapError(err error) *command.Error {
 	if mapped := verification.MapError(err); mapped != nil {
 		return mapped
 	}
+	var attemptError *invitationCodeAttemptError
+	var headers map[string]string
+	if errors.As(err, &attemptError) {
+		headers = map[string]string{
+			invitationCodeAttemptsRemainingHeader: strconv.Itoa(attemptError.attemptsRemaining),
+		}
+	}
 	switch {
 	case errors.Is(err, errInvalidOrganizationID):
 		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_organization_id", Message: "organization_id must be a UUID."}
@@ -130,9 +139,11 @@ func MapError(err error) *command.Error {
 	case errors.Is(err, errInvitationExpired):
 		return &command.Error{Status: http.StatusConflict, Code: "invitation_expired", Message: "The invitation has expired."}
 	case errors.Is(err, errInvalidInvitationCode):
-		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_invitation_code", Message: "The invitation code is invalid."}
+		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_invitation_code", Message: "The invitation code is invalid.", Headers: headers}
+	case errors.Is(err, errInvitationCodeInvalidated):
+		return &command.Error{Status: http.StatusConflict, Code: "invitation_code_invalidated", Message: "This invitation code was invalidated. Request a resend."}
 	case errors.Is(err, errCodeAttemptsExhausted):
-		return &command.Error{Status: http.StatusConflict, Code: "code_attempts_exhausted", Message: "This invitation code has no attempts remaining."}
+		return &command.Error{Status: http.StatusConflict, Code: "code_attempts_exhausted", Message: "This invitation code has no attempts remaining.", Headers: headers}
 	default:
 		return nil
 	}
@@ -167,11 +178,12 @@ func (c *Creator) CreateInvitation(ctx context.Context, req CreateInvitationRequ
 
 	var invitation Invitation
 	err = tx.QueryRow(ctx,
-		`INSERT INTO public.invitations (organization_id, email, expires_at)
-		 VALUES ($1, $2, clock_timestamp() + make_interval(secs => $3))
+		`INSERT INTO public.invitations (
+		   organization_id, email, expires_at, organization_name, inviter_display_name
+		 ) VALUES ($1, $2, clock_timestamp() + make_interval(secs => $3), $4, $5)
 		 ON CONFLICT (organization_id, email) WHERE status = 'pending' DO NOTHING
 		 RETURNING id, organization_id, email, status, expires_at`,
-		organizationID, email, invitationValidity.Seconds(),
+		organizationID, email, invitationValidity.Seconds(), organizationName, actor.DisplayName,
 	).Scan(
 		&invitation.ID,
 		&invitation.OrganizationID,

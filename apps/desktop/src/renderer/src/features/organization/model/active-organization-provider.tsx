@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  acceptInvitation as acceptPendingInvitation,
+  readPendingInvitations,
+  type PendingInvitation
+} from '../api/invitations'
+import type { AuthenticatedOrganizationSession } from '../api/client'
 import { readActiveMemberships, type ActiveMembership } from '../api/memberships'
 import {
   ActiveOrganizationContext,
@@ -10,9 +16,7 @@ import { useOrganizationOnboarding } from './onboarding-state'
 
 interface ActiveOrganizationProviderProps {
   readonly isAuthenticated: boolean
-  readonly getSession: () => Promise<
-    { readonly accessToken: string; readonly userId: string } | undefined
-  >
+  readonly getSession: () => Promise<AuthenticatedOrganizationSession | undefined>
   readonly children: React.ReactNode
 }
 
@@ -38,6 +42,7 @@ export function ActiveOrganizationProvider({
   const [availableOrganizations, setAvailableOrganizations] = useState<readonly ActiveMembership[]>(
     []
   )
+  const [pendingInvitations, setPendingInvitations] = useState<readonly PendingInvitation[]>([])
   const [rememberedOrganizationId, setRememberedOrganizationId] = useState<string>()
   // The startup verification runs at most once per authenticated Session; a failed fetch stays
   // on the restoring view instead of retrying in a loop.
@@ -57,9 +62,36 @@ export function ActiveOrganizationProvider({
     })
   }, [])
 
+  const acceptInvitation = useCallback(
+    async (invitation: PendingInvitation, code: string): Promise<void> => {
+      const session = await getSession()
+      if (!session) throw new Error('Invitation acceptance Session is unavailable.')
+
+      const accepted = await acceptPendingInvitation({
+        session,
+        invitationId: invitation.id,
+        code
+      })
+      // The command return is confirmation only. Re-read active Memberships under RLS so the
+      // Data API remains the source of truth for the Organization the Desktop enters.
+      const memberships = await readActiveMemberships(session)
+      const membership = memberships.find(
+        (candidate) => candidate.organizationId === accepted.organizationId
+      )
+      if (!membership) throw new Error('Accepted Organization Membership is unavailable.')
+
+      setAvailableOrganizations(memberships)
+      setPendingInvitations((invitations) =>
+        invitations.filter((candidate) => candidate.id !== invitation.id)
+      )
+      enterOrganization(membership)
+    },
+    [getSession, enterOrganization]
+  )
+
   useEffect(() => {
     if (!isAuthenticated) return
-    if (onboarding.isEligible || activeOrganization) return
+    if (activeOrganization) return
     if (resolutionRef.current !== 'none') return
 
     resolutionRef.current = 'running'
@@ -73,25 +105,36 @@ export function ActiveOrganizationProvider({
           return
         }
 
-        const [memberships, remembered] = await Promise.all([
+        const [memberships, pending, remembered] = await Promise.all([
           readActiveMemberships(session),
+          readPendingInvitations(session),
           window.api.invoke('organization:get-remembered-active-organization')
         ])
         if (resolutionRef.current !== 'running') return
 
         resolutionRef.current = 'done'
         setAvailableOrganizations(memberships)
+        setPendingInvitations(pending)
         const rememberedId = remembered.organizationId ?? undefined
         setRememberedOrganizationId(rememberedId)
 
-        const branch = resolveStartupBranch(memberships, rememberedId)
+        const branch = resolveStartupBranch(memberships, rememberedId, pending.length > 0)
+        if (branch.kind === 'onboarding') {
+          setStartupPhase('ready')
+          onboarding.beginOnboarding()
+          return
+        }
+
+        // A fresh account gets a temporary onboarding eligibility signal after verification.
+        // Complete it once invitation-aware startup has found an entry path, so an existing
+        // pending invitation reaches the picker instead of being hidden behind onboarding.
+        onboarding.completeOnboarding()
         if (branch.kind === 'enter') {
           enterOrganization(branch.membership)
           return
         }
 
         setStartupPhase('ready')
-        if (branch.kind === 'onboarding') onboarding.beginOnboarding()
       } catch {
         resolutionRef.current = 'failed'
       }
@@ -103,15 +146,19 @@ export function ActiveOrganizationProvider({
       startupPhase,
       activeOrganization,
       availableOrganizations,
+      pendingInvitations,
       rememberedOrganizationId,
-      enterOrganization
+      enterOrganization,
+      acceptInvitation
     }),
     [
       startupPhase,
       activeOrganization,
       availableOrganizations,
+      pendingInvitations,
       rememberedOrganizationId,
-      enterOrganization
+      enterOrganization,
+      acceptInvitation
     ]
   )
 

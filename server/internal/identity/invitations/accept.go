@@ -19,6 +19,11 @@ import (
 
 const invitationCodeAttemptLimit = 5
 
+// invitationCodeAttemptsRemainingHeader lets the desktop render the exact
+// server-authoritative count after a failed validation attempt. It is exposed
+// through CORS only to configured desktop origins.
+const invitationCodeAttemptsRemainingHeader = "X-Invitation-Code-Attempts-Remaining"
+
 // Membership is the minimal active Membership representation returned when an
 // invitee joins an Organization.
 type Membership struct {
@@ -118,11 +123,22 @@ func (c *Creator) AcceptInvitation(ctx context.Context, req AcceptInvitationRequ
 	}
 	if code.Status != "active" {
 		if code.FailedAttempts >= invitationCodeAttemptLimit {
-			return AcceptInvitationResponse{}, errCodeAttemptsExhausted
+			return AcceptInvitationResponse{}, &invitationCodeAttemptError{
+				cause:             errCodeAttemptsExhausted,
+				attemptsRemaining: 0,
+			}
 		}
 		return AcceptInvitationResponse{}, errInvalidInvitationCode
 	}
-	if !hmac.Equal([]byte(code.Hash), []byte(verification.HashCode(c.cfg.HashKey, *req.Code))) {
+	submittedCodeHash := verification.HashCode(c.cfg.HashKey, *req.Code)
+	if !hmac.Equal([]byte(code.Hash), []byte(submittedCodeHash)) {
+		isHistorical, err := isHistoricalInvitationCode(ctx, tx, invitation.ID, submittedCodeHash)
+		if err != nil {
+			return AcceptInvitationResponse{}, err
+		}
+		if isHistorical {
+			return AcceptInvitationResponse{}, errInvitationCodeInvalidated
+		}
 		commandErr, err := c.recordFailedInvitationCode(ctx, tx, invitation.ID, code)
 		if err != nil {
 			return AcceptInvitationResponse{}, err
@@ -175,6 +191,21 @@ type invitationCode struct {
 	Status         string
 	ExpiresAt      time.Time
 	FailedAttempts int
+}
+
+// invitationCodeAttemptError keeps the domain cause while carrying the
+// committed, server-authoritative remaining count for the command adapter.
+type invitationCodeAttemptError struct {
+	cause             error
+	attemptsRemaining int
+}
+
+func (e *invitationCodeAttemptError) Error() string {
+	return e.cause.Error()
+}
+
+func (e *invitationCodeAttemptError) Unwrap() error {
+	return e.cause
 }
 
 func invitationUserEmail(ctx context.Context, tx pgx.Tx, userID string) (string, error) {
@@ -246,6 +277,26 @@ func lockLatestInvitationCode(ctx context.Context, tx pgx.Tx, invitationID strin
 	return code, nil
 }
 
+// isHistoricalInvitationCode distinguishes a superseded code issued for this
+// same invitation from an arbitrary wrong submission. The current active code
+// remains untouched so a stale email never spends its attempts.
+func isHistoricalInvitationCode(ctx context.Context, tx pgx.Tx, invitationID, codeHash string) (bool, error) {
+	var found bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM identity.verification_codes
+			WHERE target_id = $1
+			  AND action_type = 'invitation'
+			  AND code_hash = $2
+			  AND status = 'superseded'
+		)`, invitationID, codeHash,
+	).Scan(&found); err != nil {
+		return false, fmt.Errorf("invitations: check historical invitation code: %w", err)
+	}
+	return found, nil
+}
+
 // databaseCurrentTime keeps expiry decisions on the database clock that wrote
 // invitation and verification-code deadlines. clock_timestamp advances while a
 // command waits on row or advisory locks, unlike transaction-scoped now().
@@ -270,14 +321,20 @@ func (c *Creator) recordFailedInvitationCode(ctx context.Context, tx pgx.Tx, inv
 		if err := cancelPendingInvitationOutbox(ctx, tx, invitationID); err != nil {
 			return nil, err
 		}
-		return errCodeAttemptsExhausted, nil
+		return &invitationCodeAttemptError{
+			cause:             errCodeAttemptsExhausted,
+			attemptsRemaining: 0,
+		}, nil
 	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE identity.verification_codes SET failed_attempts = $2 WHERE id = $1`, code.ID, attempts,
 	); err != nil {
 		return nil, fmt.Errorf("invitations: record failed invitation code attempt: %w", err)
 	}
-	return errInvalidInvitationCode, nil
+	return &invitationCodeAttemptError{
+		cause:             errInvalidInvitationCode,
+		attemptsRemaining: invitationCodeAttemptLimit - attempts,
+	}, nil
 }
 
 func insertActiveMember(ctx context.Context, tx pgx.Tx, organizationID, userID string) (Membership, error) {
