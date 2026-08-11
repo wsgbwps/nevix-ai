@@ -39,6 +39,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/final-state-evidence.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking final-state evidence"
+          }
+        ]
+      }
     ]
   }
 }
