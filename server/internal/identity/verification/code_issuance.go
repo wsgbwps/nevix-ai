@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/identity/command"
@@ -78,8 +79,7 @@ type IssueVerificationCodeRequest struct {
 
 // Validate normalizes a bare email address before the command can use it.
 func (r *IssueVerificationCodeRequest) Validate() *command.Error {
-	r.Email = strings.ToLower(strings.TrimSpace(r.Email))
-	normalized, err := normalizeEmail(r.Email)
+	normalized, err := NormalizeEmail(r.Email)
 	if err != nil {
 		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_email", Message: "email must be a bare address like user@example.com."}
 	}
@@ -134,54 +134,11 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) error {
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 
-	// Serialize concurrent issuance per email and per IP: without these
-	// transaction-scoped locks, simultaneous requests could both pass the
-	// cooldown and limit checks before either writes. Every transaction
-	// locks email first, then IP, so lock ordering cannot deadlock.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, email); err != nil {
-		return fmt.Errorf("identity: lock issuance for email: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, ip); err != nil {
-		return fmt.Errorf("identity: lock issuance for IP: %w", err)
+	if err := EnforceIssuanceLimits(ctx, tx, email, ip); err != nil {
+		return err
 	}
 
-	var (
-		dbNow      time.Time
-		emailCount int
-		lastIssued *time.Time
-	)
-	err = tx.QueryRow(ctx,
-		`SELECT now(),
-		        count(*) FILTER (WHERE created_at > now() - make_interval(secs => $2)),
-		        max(created_at)
-		 FROM identity.verification_codes
-		 WHERE email = $1`, email, rateLimitWindow.Seconds(),
-	).Scan(&dbNow, &emailCount, &lastIssued)
-	if err != nil {
-		return fmt.Errorf("identity: read issuance history: %w", err)
-	}
-	if lastIssued != nil {
-		if remaining := resendCooldown - dbNow.Sub(*lastIssued); remaining > 0 {
-			return &cooldownActiveError{retryAfter: int(math.Ceil(remaining.Seconds()))}
-		}
-	}
-	if emailCount >= emailHourlyLimit {
-		return errEmailRateLimited
-	}
-
-	var ipCount int
-	err = tx.QueryRow(ctx,
-		`SELECT count(*) FROM identity.verification_codes
-		 WHERE request_ip = $1 AND created_at > now() - make_interval(secs => $2)`, ip, rateLimitWindow.Seconds(),
-	).Scan(&ipCount)
-	if err != nil {
-		return fmt.Errorf("identity: read IP issuance history: %w", err)
-	}
-	if ipCount >= ipHourlyLimit {
-		return errIPRateLimited
-	}
-
-	code, err := newSixDigitCode()
+	code, err := NewSixDigitCode()
 	if err != nil {
 		return fmt.Errorf("identity: generate code: %w", err)
 	}
@@ -189,28 +146,29 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) error {
 	// Superseding the previous code terminally cancels its undelivered email
 	// in the same transaction: the user must never receive an already-invalid
 	// code (ticket 05). The cancel runs while the old code is still active so
-	// its subquery can find it.
+	// its subquery can find it. Scope stays action-local even though rate-limit
+	// accounting includes every one-time code action.
 	if _, err := tx.Exec(ctx,
 		`UPDATE identity.outbox_messages
 		 SET status = 'cancelled'
 		 WHERE status = 'pending' AND verification_code_id IN (
 		     SELECT id FROM identity.verification_codes
-		     WHERE email = $1 AND status = 'active')`, email,
+		     WHERE email = $1 AND action_type IS NULL AND target_id IS NULL AND status = 'active')`, email,
 	); err != nil {
 		return fmt.Errorf("identity: cancel superseded code email: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE identity.verification_codes
 		 SET status = 'superseded', superseded_at = now()
-		 WHERE email = $1 AND status = 'active'`, email,
+		 WHERE email = $1 AND action_type IS NULL AND target_id IS NULL AND status = 'active'`, email,
 	); err != nil {
 		return fmt.Errorf("identity: supersede previous code: %w", err)
 	}
 	var codeID string
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO identity.verification_codes (email, code_hash, request_ip, expires_at)
-		 VALUES ($1, $2, $3, now() + make_interval(secs => $4))
-		 RETURNING id`, email, hashCode(i.cfg.HashKey, code), ip, codeValidity.Seconds(),
+		`INSERT INTO identity.verification_codes (email, code_hash, request_ip, created_at, expires_at)
+		 VALUES ($1, $2, $3, clock_timestamp(), clock_timestamp() + make_interval(secs => $4))
+		 RETURNING id`, email, HashCode(i.cfg.HashKey, code), ip, codeValidity.Seconds(),
 	).Scan(&codeID); err != nil {
 		return fmt.Errorf("identity: store code hash: %w", err)
 	}
@@ -232,9 +190,61 @@ func (i *CodeIssuer) issue(ctx context.Context, email, ip string) error {
 	return nil
 }
 
-// normalizeEmail accepts a bare RFC 5322 address and returns it lowercased;
+// EnforceIssuanceLimits applies the Identity-wide one-time-code policy inside
+// the caller's transaction. Accounting is shared across actions by email and
+// IP, while each action remains responsible for invalidating only its own
+// codes. Every caller acquires email then IP, preventing concurrent issuances
+// from both passing the checks.
+func EnforceIssuanceLimits(ctx context.Context, tx pgx.Tx, email, ip string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, email); err != nil {
+		return fmt.Errorf("identity: lock issuance for email: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, ip); err != nil {
+		return fmt.Errorf("identity: lock issuance for IP: %w", err)
+	}
+
+	var dbNow time.Time
+	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&dbNow); err != nil {
+		return fmt.Errorf("identity: read database clock: %w", err)
+	}
+	cutoff := dbNow.Add(-rateLimitWindow)
+
+	var (
+		emailCount int
+		lastIssued *time.Time
+	)
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*), max(created_at)
+		 FROM identity.verification_codes
+		 WHERE email = $1 AND created_at > $2`, email, cutoff,
+	).Scan(&emailCount, &lastIssued); err != nil {
+		return fmt.Errorf("identity: read issuance history: %w", err)
+	}
+	if lastIssued != nil {
+		if remaining := resendCooldown - dbNow.Sub(*lastIssued); remaining > 0 {
+			return &cooldownActiveError{retryAfter: int(math.Ceil(remaining.Seconds()))}
+		}
+	}
+	if emailCount >= emailHourlyLimit {
+		return errEmailRateLimited
+	}
+
+	var ipCount int
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM identity.verification_codes
+		 WHERE request_ip = $1 AND created_at > $2`, ip, cutoff,
+	).Scan(&ipCount); err != nil {
+		return fmt.Errorf("identity: read IP issuance history: %w", err)
+	}
+	if ipCount >= ipHourlyLimit {
+		return errIPRateLimited
+	}
+	return nil
+}
+
+// NormalizeEmail accepts a bare RFC 5322 address and returns it lowercased;
 // display-name forms and junk around the address are rejected.
-func normalizeEmail(raw string) (string, error) {
+func NormalizeEmail(raw string) (string, error) {
 	addr, err := mail.ParseAddress(strings.TrimSpace(raw))
 	if err != nil || addr.Name != "" || !strings.EqualFold(addr.Address, strings.TrimSpace(raw)) {
 		return "", errors.New("identity: not a bare email address")
@@ -242,7 +252,7 @@ func normalizeEmail(raw string) (string, error) {
 	return strings.ToLower(addr.Address), nil
 }
 
-func newSixDigitCode() (string, error) {
+func NewSixDigitCode() (string, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
 	if err != nil {
 		return "", err
@@ -250,9 +260,9 @@ func newSixDigitCode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
-// hashCode turns a six-digit code into its stored form: HMAC-SHA256 keyed by
+// HashCode turns a six-digit code into its stored form: HMAC-SHA256 keyed by
 // the deployment hash key, hex-encoded.
-func hashCode(key []byte, code string) string {
+func HashCode(key []byte, code string) string {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(code))
 	return hex.EncodeToString(mac.Sum(nil))

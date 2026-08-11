@@ -43,6 +43,12 @@ CREATE INDEX verification_codes_email_created_idx
 CREATE INDEX verification_codes_request_ip_created_idx
   ON identity.verification_codes (request_ip, created_at);
 
+-- Action-bound commands locate all codes for one target and Invitation Accept
+-- selects the newest one. Keep unbound verification codes out of this index.
+CREATE INDEX verification_codes_action_target_created_idx
+  ON identity.verification_codes (target_id, created_at DESC)
+  WHERE action_type IS NOT NULL;
+
 CREATE TABLE identity.outbox_messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   sender text NOT NULL,
@@ -67,3 +73,9 @@ CREATE TABLE identity.outbox_messages (
 CREATE INDEX outbox_messages_pending_idx
   ON identity.outbox_messages (next_attempt_at)
   WHERE status = 'pending';
+
+-- Resend/Revoke cancel pending mail through the code foreign key. Index every
+-- non-null reference so foreign-key checks remain efficient across all statuses.
+CREATE INDEX outbox_messages_verification_code_idx
+  ON identity.outbox_messages (verification_code_id)
+  WHERE verification_code_id IS NOT NULL;

@@ -4,11 +4,18 @@
 
 **Blocked by:** 02 — Go 传输基座 + CreateOrganization；05 — Schema：invitations / audit_logs + verification_codes 扩展
 
-**Status:** ready-for-agent
+**Status:** in-review
 
-- [ ] 四命令集成测试覆盖创建/重发/撤销/接受，含活跃成员邮箱拒绝与已结束成员邮箱允许
-- [ ] 5 次尝试上限与过期/撤销码的明确拒绝经集成测试验证
-- [ ] 邀请并发接受竞态测试通过（唯一索引兜底，不产生重复活跃 Membership）
-- [ ] 审计行快照内容与携码邮件（单封双语、重试地平线）逐事件核对
-- [ ] 防枚举 404/403 语义与错误码经测试断言；openapi 对照校验通过
-- [ ] server/ 与 contracts/ 属 CI 门禁路径，走 feature branch + PR
+- [x] 四命令集成测试覆盖创建/重发/撤销/接受，含活跃成员邮箱拒绝与已结束成员邮箱允许
+- [x] 5 次尝试上限与过期/撤销码的明确拒绝经集成测试验证
+- [x] 邀请并发接受竞态测试通过（唯一索引兜底，不产生重复活跃 Membership）
+- [x] 审计行快照内容与携码邮件（单封双语、重试地平线）逐事件核对
+- [x] 防枚举 404/403 语义与错误码经测试断言；openapi 对照校验通过
+- [x] server/ 与 contracts/ 属 CI 门禁路径，走 feature branch + PR
+
+## Comments
+
+- 2026-08-10: Implemented on `feat/identity-invitation-commands` in `5fe0a3e`. Verified with `go vet ./...`, the repeated targeted race/validation suite, `scripts/test-mail-smoke.sh`, `go test -race -count=1 ./...`, `pnpm lint`, and a final two-axis review with no findings. Awaiting PR CI and merge.
+- 2026-08-10: PR [#35](https://github.com/wsgbwps/nevix-ai/pull/35) opened; awaiting CI and merge.
+- 2026-08-10: Addressed PR review blockers: Invitation Create/Resend now share the Identity-wide cooldown and email/IP hourly limits while preserving action/target-scoped invalidation; the OpenAPI paths document 429 and `Retry-After`; the declarative schema and expand-only migration add the action-target and pending-Outbox lookup indexes. Verified migration reset/list/diff, performance advisors (no unindexed foreign key), 30,005-row `EXPLAIN ANALYZE` plans using both indexes, targeted race regressions, `go vet ./...`, `go test -race -count=1 ./...`, `pnpm lint`, and the full `scripts/test-mail-smoke.sh` suite.
+- 2026-08-10: Addressed the second PR review blockers: the shared issuance guard reads one database-clock snapshot after its advisory locks and passes a fixed hourly cutoff into both composite-index queries; the Outbox `verification_code_id` index now covers every non-null FK reference instead of only pending rows. Added real-PostgreSQL regressions for both `Index Cond` time ranges and the status-independent FK index predicate. Verified from an empty database with migration reset/list, zero declarative diff, schema lint, performance advisors, targeted race tests, `go vet ./...`, `go test -race -count=1 ./...`, `pnpm lint`, `git diff --check`, and the full `scripts/test-mail-smoke.sh`; an independent patch review's only test-seam finding was fixed by moving the issuance plan test into the owning `verification` package.
