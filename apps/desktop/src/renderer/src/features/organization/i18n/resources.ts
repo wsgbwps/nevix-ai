@@ -50,14 +50,16 @@ export const organizationTranslations = defineResourceTranslations({
       today: '今天',
       yesterday: '昨天',
       actions: {
-        orgCreated: '创建组织',
         invitationCreated: '发出邀请',
         invitationResent: '重发邀请',
         invitationRevoked: '撤销邀请',
         invitationAccepted: '接受邀请',
+        membershipLeft: '退出组织',
         memberRemoved: '移除成员',
-        roleChanged: '变更角色',
-        settingsUpdated: '更新组织设置'
+        adminPromoted: '晋升为管理员',
+        adminDemoted: '降级管理员',
+        adminRemoved: '移除管理员',
+        organizationSettingsUpdated: '更新组织设置'
       }
     }
   },
@@ -108,14 +110,16 @@ export const organizationTranslations = defineResourceTranslations({
       today: 'Today',
       yesterday: 'Yesterday',
       actions: {
-        orgCreated: 'Organization created',
         invitationCreated: 'Invitation created',
         invitationResent: 'Invitation resent',
         invitationRevoked: 'Invitation revoked',
         invitationAccepted: 'Invitation accepted',
+        membershipLeft: 'Left organization',
         memberRemoved: 'Removed member',
-        roleChanged: 'Changed role',
-        settingsUpdated: 'Settings updated'
+        adminPromoted: 'Promoted to admin',
+        adminDemoted: 'Demoted from admin',
+        adminRemoved: 'Removed admin',
+        organizationSettingsUpdated: 'Updated organization settings'
       }
     }
   }

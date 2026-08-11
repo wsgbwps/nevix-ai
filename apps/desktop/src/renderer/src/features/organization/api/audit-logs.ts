@@ -4,6 +4,11 @@ import type { AuthenticatedMembershipSession } from './memberships'
 
 const AUDIT_LOG_PAGE_SIZE = 100
 
+interface AuditLogCursor {
+  readonly createdAt: string
+  readonly id: string
+}
+
 export interface AuditLogEntry {
   readonly id: string
   readonly actorDisplayName: string
@@ -24,7 +29,7 @@ export async function readAuditLogEntries(
 ): Promise<readonly AuditLogEntry[]> {
   const entries: AuditLogEntry[] = []
   const client = auditLogClient(session)
-  let offset = 0
+  let cursor: AuditLogCursor | undefined
 
   while (true) {
     let query = client
@@ -32,10 +37,16 @@ export async function readAuditLogEntries(
       .select('id, actor_display_name, target_display_name, action, metadata, created_at')
       .eq('organization_id', organizationId)
     if (action) query = query.eq('action', action)
+    if (cursor) {
+      query = query.or(
+        `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`
+      )
+    }
 
     const { data, error } = await query
       .order('created_at', { ascending: false })
-      .range(offset, offset + AUDIT_LOG_PAGE_SIZE - 1)
+      .order('id', { ascending: false })
+      .limit(AUDIT_LOG_PAGE_SIZE)
 
     if (error) throw new Error('Audit Log request failed.')
     if (!Array.isArray(data)) throw new Error('Audit Log response is invalid.')
@@ -43,7 +54,10 @@ export async function readAuditLogEntries(
     const page = data.map(toAuditLogEntry)
     entries.push(...page)
     if (page.length < AUDIT_LOG_PAGE_SIZE) return entries
-    offset += page.length
+
+    const cursorEntry = page.at(-1)
+    if (!cursorEntry) return entries
+    cursor = { createdAt: cursorEntry.createdAt, id: cursorEntry.id }
   }
 }
 

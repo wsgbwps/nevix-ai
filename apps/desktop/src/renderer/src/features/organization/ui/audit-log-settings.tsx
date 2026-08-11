@@ -25,14 +25,16 @@ type GetSession = () => Promise<
 >
 
 const actionTranslationKeys = {
-  organization_created: 'audit.actions.orgCreated',
   invitation_created: 'audit.actions.invitationCreated',
   invitation_resent: 'audit.actions.invitationResent',
   invitation_revoked: 'audit.actions.invitationRevoked',
   invitation_accepted: 'audit.actions.invitationAccepted',
+  membership_left: 'audit.actions.membershipLeft',
   member_removed: 'audit.actions.memberRemoved',
-  role_changed: 'audit.actions.roleChanged',
-  settings_updated: 'audit.actions.settingsUpdated'
+  admin_promoted: 'audit.actions.adminPromoted',
+  admin_demoted: 'audit.actions.adminDemoted',
+  admin_removed: 'audit.actions.adminRemoved',
+  organization_settings_updated: 'audit.actions.organizationSettingsUpdated'
 } as const
 
 function actionTranslationKey(

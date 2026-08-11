@@ -101,10 +101,34 @@ test('an Admin filters the Organization Audit Log by action', { tag: '@smoke' },
   await seedAuditLogEntries(organization.id, [
     {
       actorUserId: userId,
-      actorDisplayName: 'Alex Park',
+      actorDisplayName: 'Member Leaver',
+      action: 'membership_left'
+    },
+    {
+      actorUserId: userId,
+      actorDisplayName: 'Owner Snapshot',
       targetUserId: crypto.randomUUID(),
-      targetDisplayName: 'Sam Wu',
-      action: 'member_removed'
+      targetDisplayName: 'Promoted Admin',
+      action: 'admin_promoted'
+    },
+    {
+      actorUserId: userId,
+      actorDisplayName: 'Owner Snapshot',
+      targetUserId: crypto.randomUUID(),
+      targetDisplayName: 'Demoted Admin',
+      action: 'admin_demoted'
+    },
+    {
+      actorUserId: userId,
+      actorDisplayName: 'Owner Snapshot',
+      targetUserId: crypto.randomUUID(),
+      targetDisplayName: 'Removed Admin',
+      action: 'admin_removed'
+    },
+    {
+      actorUserId: userId,
+      actorDisplayName: 'Settings Editor',
+      action: 'organization_settings_updated'
     },
     {
       actorUserId: userId,
@@ -130,9 +154,20 @@ test('an Admin filters the Organization Audit Log by action', { tag: '@smoke' },
         launched.page.getByRole('listitem').filter({ hasText: 'Invitation created' })
       ).toContainText('invitee@nevix.test')
       await launched.page.getByRole('combobox', { name: 'All events' }).click()
-      await launched.page.getByRole('option', { name: 'Removed member' }).click()
+      for (const action of [
+        'Left organization',
+        'Promoted to admin',
+        'Demoted from admin',
+        'Removed admin',
+        'Updated organization settings'
+      ]) {
+        await expect(launched.page.getByRole('option', { name: action })).toBeVisible()
+      }
+      await launched.page.getByRole('option', { name: 'Promoted to admin' }).click()
 
-      await expect(launched.page.getByText('Sam Wu')).toBeVisible()
+      await expect(launched.page.getByText('Promoted Admin')).toBeVisible()
+      await expect(launched.page.getByText('Demoted Admin')).toHaveCount(0)
+      await expect(launched.page.getByText('Removed Admin')).toHaveCount(0)
       await expect(launched.page.getByText('Invitation created')).toHaveCount(0)
     } finally {
       await launched.electronApp.close()
@@ -156,7 +191,7 @@ test(
     const organization = await seedOrganizationWithMembership(userId, {
       name: 'Audit Export Studio'
     })
-    const baseTimestamp = Date.now()
+    const sharedTimestamp = new Date(Date.now() - 60_000).toISOString()
     const entries = Array.from({ length: 101 }, (_, index) => ({
       actorUserId: userId,
       actorDisplayName: index === 0 ? '=CSV Actor 0' : `CSV Actor ${index}`,
@@ -164,7 +199,7 @@ test(
       targetDisplayName: index === 0 ? '@CSV Target 0' : `CSV Target ${index}`,
       action: 'member_removed',
       metadata: { row: index },
-      createdAt: new Date(baseTimestamp - index * 1000).toISOString()
+      createdAt: sharedTimestamp
     }))
     await seedAuditLogEntries(organization.id, entries)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-export-user-'))
@@ -185,10 +220,28 @@ test(
           .getByRole('link', { name: 'Audit log' })
           .click()
 
-        // Entry 100 comes from the second Data API page (the feature page size is 100).
-        await expect(launched.page.getByText('CSV Actor 100')).toBeVisible()
+        await expect(launched.page.getByRole('listitem')).toHaveCount(101)
+
+        let exportPageRequests = 0
+        await launched.page.route(/\/rest\/v1\/audit_logs\?/, async (route) => {
+          exportPageRequests += 1
+          const response = await route.fetch()
+          if (exportPageRequests === 1) {
+            await seedAuditLogEntries(organization.id, [
+              {
+                actorUserId: userId,
+                actorDisplayName: 'Inserted Between Pages',
+                action: 'member_removed',
+                createdAt: new Date(Date.parse(sharedTimestamp) + 1000).toISOString()
+              }
+            ])
+          }
+          await route.fulfill({ response })
+        })
+
         await launched.page.getByRole('button', { name: 'Export' }).click()
         await expect(launched.page.getByRole('status')).toHaveText('Exported 101 entries.')
+        expect(exportPageRequests).toBe(2)
       } finally {
         await launched.electronApp.close()
       }
@@ -197,11 +250,12 @@ test(
       const rows = csv.trimEnd().split('\r\n')
       expect(rows).toHaveLength(102)
       expect(rows[0]).toBe('Time,Actor,Action,Target,Detail')
-      expect(new Date(rows[1].split(',', 1)[0] ?? '').toISOString()).toBe(entries[0].createdAt)
-      expect(rows[1]).toContain("'=CSV Actor 0")
-      expect(rows[1]).toContain("'@CSV Target 0")
-      expect(new Date(rows[101].split(',', 1)[0] ?? '').toISOString()).toBe(entries[100].createdAt)
-      expect(rows[101]).toContain('CSV Actor 100')
+      const exportedActors = rows.slice(1).map((row) => row.split(',')[1])
+      expect(new Set(exportedActors).size).toBe(101)
+      expect(exportedActors).toContain("'=CSV Actor 0")
+      expect(exportedActors).toContain('CSV Actor 100')
+      expect(csv).toContain("'@CSV Target 0")
+      expect(csv).not.toContain('Inserted Between Pages')
     } finally {
       await rm(userDataDir, { recursive: true, force: true })
       await rm(exportDirectory, { recursive: true, force: true })

@@ -1,4 +1,4 @@
-import { dialog, BrowserWindow } from 'electron'
+import { app, dialog, BrowserWindow } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import type {
@@ -25,7 +25,7 @@ function validateRequest(request: unknown): AuditLogExportRequest {
 }
 
 function testOutputPath(): string | undefined {
-  if (process.env.NEVIX_E2E !== '1') return undefined
+  if (process.env.NEVIX_E2E !== '1' || app.isPackaged) return undefined
   const outputPath = process.env.NEVIX_TEST_AUDIT_LOG_EXPORT_PATH
   return outputPath && outputPath.length > 0 ? outputPath : undefined
 }
