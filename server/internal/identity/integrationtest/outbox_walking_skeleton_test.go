@@ -25,9 +25,10 @@ import (
 
 // harness wires one test to the running local stack, or skips.
 type harness struct {
-	pool    *pgxpool.Pool
-	mailpit *mailpittest.Client
-	cfg     identity.Config
+	pool       *pgxpool.Pool
+	mailpit    *mailpittest.Client
+	mailpitURL string
+	cfg        identity.Config
 }
 
 func newHarness(t *testing.T, ctx context.Context) *harness {
@@ -52,7 +53,12 @@ func newHarness(t *testing.T, ctx context.Context) *harness {
 		t.Fatalf("connect to database: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	return &harness{pool: pool, mailpit: mailpittest.NewClient(mailpitURL), cfg: cfg}
+	return &harness{
+		pool:       pool,
+		mailpit:    mailpittest.NewClient(mailpitURL),
+		mailpitURL: mailpitURL,
+		cfg:        cfg,
+	}
 }
 
 // insertOutboxRowCommitted writes one Outbox row inside its own database

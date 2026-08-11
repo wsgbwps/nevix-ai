@@ -15,7 +15,10 @@ package integrationtest
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/smtp"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -97,16 +100,44 @@ func runDocker(t *testing.T, ctx context.Context, args ...string) {
 	}
 }
 
-// waitMailpitUp polls the Mailpit HTTP API until the container serves again.
+// waitMailpitUp waits until both the Mailpit HTTP API and host SMTP mapping are
+// reachable again. A restored API alone is not enough for the Outbox Worker.
 func (h *harness) waitMailpitUp(t *testing.T, ctx context.Context) {
 	t.Helper()
+	httpEndpoint := strings.TrimRight(h.mailpitURL, "/") + "/api/v1/search"
+	smtpEndpoint := net.JoinHostPort(h.cfg.SMTP.Host, strconv.Itoa(h.cfg.SMTP.Port))
+	var httpErr error
+	var smtpErr error
 	for {
-		if _, err := h.mailpit.Search(ctx, `to:"mailpit-probe@nevix.test"`); err == nil {
+		httpCtx, cancelHTTP := context.WithTimeout(ctx, time.Second)
+		_, httpErr = h.mailpit.Search(httpCtx, `to:"mailpit-probe@nevix.test"`)
+		cancelHTTP()
+
+		smtpCtx, cancelSMTP := context.WithTimeout(ctx, time.Second)
+		var conn net.Conn
+		conn, smtpErr = (&net.Dialer{}).DialContext(smtpCtx, "tcp", smtpEndpoint)
+		if smtpErr == nil {
+			smtpErr = conn.SetDeadline(time.Now().Add(time.Second))
+		}
+		if smtpErr == nil {
+			var smtpClient *smtp.Client
+			smtpClient, smtpErr = smtp.NewClient(conn, h.cfg.SMTP.Host)
+			if smtpClient != nil {
+				_ = smtpClient.Close()
+			}
+		}
+		if conn != nil {
+			_ = conn.Close()
+		}
+		cancelSMTP()
+
+		if httpErr == nil && smtpErr == nil {
 			return
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("Mailpit did not come back: %v", ctx.Err())
+			t.Fatalf("Mailpit did not come back before deadline: HTTP API %s: %v; SMTP %s: %v; deadline: %v",
+				httpEndpoint, httpErr, smtpEndpoint, smtpErr, ctx.Err())
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
