@@ -14,4 +14,13 @@
 
 ## Comments
 
-- 2026-08-11: Draft PR [#43](https://github.com/wsgbwps/nevix-ai/pull/43) opened. Local acceptance is bound to final-state evidence `sha256:11ece80e0488895f05dea2133244c19186bf9841b84fccc79da0131c5e3d7e1e`; Desktop Smoke E2E, build, typecheck, lint, unit, architecture, and localization-contract checks passed. Awaiting PR CI and review.
+- 2026-08-11: Draft PR [#43](https://github.com/wsgbwps/nevix-ai/pull/43) updated for review `4907012608`. All invitation events now prefer the immutable recipient email, the native save filename is bilingual, and the packaged E2E direct-write guard has executable behavior coverage. The action vocabulary, packaged seam, and `(created_at, id)` keyset pagination fixes remain covered. Awaiting PR CI and merge.
+
+  Final-state evidence
+  - Acceptance boundary: Invitation recipient email precedence in timeline/CSV, bilingual native save filename, and packaged/unpackaged E2E output policy, without regressing action vocabulary or stable pagination.
+  - Final diff: `sha256:a69d3fea66f0df055a1011c9a46e946d6b9902644fb04180d7ee4eb1225ba18c`
+  - Relevant check: Desktop Organization Audit Log review closure
+  - Check result: PASS
+  - Check coverage: Desktop typecheck, lint, 15 unit tests, architecture verification, 6 i18n resource-contract tests, and 13 Smoke E2E tests including the accepted-invitation timeline/CSV behavior.
+  - Review conclusion: Reviewed the final Desktop Organization diff and PASS results; the four review requests are covered without changing public seams or regressing action vocabulary, packaged guard, or keyset pagination.
+  - Closure: accepted locally; PR remains in review until CI passes and the branch merges.

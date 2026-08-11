@@ -5,6 +5,7 @@ import type {
   AuditLogExportRequest,
   AuditLogExportResult
 } from '../../../shared/ipc/organization/types'
+import { resolveAuditLogE2EOutputPath } from './audit-log-export-path'
 import { requireTrustedRendererSender } from './trusted-sender'
 
 function validateRequest(request: unknown): AuditLogExportRequest {
@@ -24,19 +25,17 @@ function validateRequest(request: unknown): AuditLogExportRequest {
   return { csv: value.csv, suggestedFileName: value.suggestedFileName }
 }
 
-function testOutputPath(): string | undefined {
-  if (process.env.NEVIX_E2E !== '1' || app.isPackaged) return undefined
-  const outputPath = process.env.NEVIX_TEST_AUDIT_LOG_EXPORT_PATH
-  return outputPath && outputPath.length > 0 ? outputPath : undefined
-}
-
 export async function exportAuditLogHandler(
   event: Electron.IpcMainInvokeEvent,
   request: unknown
 ): Promise<AuditLogExportResult> {
   requireTrustedRendererSender(event)
   const { csv, suggestedFileName } = validateRequest(request)
-  const outputPath = testOutputPath()
+  const outputPath = resolveAuditLogE2EOutputPath({
+    e2eMode: process.env.NEVIX_E2E,
+    isPackaged: app.isPackaged,
+    configuredOutputPath: process.env.NEVIX_TEST_AUDIT_LOG_EXPORT_PATH
+  })
 
   if (outputPath) {
     await writeFile(outputPath, csv, 'utf8')

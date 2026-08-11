@@ -1,13 +1,14 @@
 import type { AuditLogEntry } from '../api/audit-logs'
 
 /**
- * Invitation writes intentionally have no User target, because the invitee may not yet have an
- * account. Their immutable metadata contains the recipient email, which is the timeline target.
+ * Invitation events use their immutable recipient email as the timeline and export target. Some
+ * events also snapshot a User target, so the email must take precedence when both are present.
  */
 export function auditLogTargetDisplayName(entry: AuditLogEntry): string | null {
-  if (entry.targetDisplayName) return entry.targetDisplayName
-  if (!entry.action.startsWith('invitation_')) return null
+  if (entry.action.startsWith('invitation_')) {
+    const email = entry.metadata.email
+    if (typeof email === 'string' && email.trim().length > 0) return email
+  }
 
-  const email = entry.metadata.email
-  return typeof email === 'string' && email.trim().length > 0 ? email : null
+  return entry.targetDisplayName
 }

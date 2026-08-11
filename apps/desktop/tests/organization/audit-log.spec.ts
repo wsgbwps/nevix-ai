@@ -52,6 +52,15 @@ test(
         action: 'member_removed',
         metadata: { reason: 'test fixture' },
         createdAt: occurredAt
+      },
+      {
+        actorUserId: userId,
+        actorDisplayName: 'Invitation Accepter',
+        targetUserId: userId,
+        targetDisplayName: 'Accepted Member Snapshot',
+        action: 'invitation_accepted',
+        metadata: { email: 'accepted-recipient@nevix.test' },
+        createdAt: occurredAt
       }
     ])
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-timeline-'))
@@ -77,6 +86,12 @@ test(
         const renderedDateTime = await timelineEntry.locator('time').getAttribute('dateTime')
         expect(renderedDateTime).not.toBeNull()
         expect(new Date(renderedDateTime as string).toISOString()).toBe(occurredAt)
+
+        const acceptedInvitationEntry = launched.page
+          .getByRole('listitem')
+          .filter({ hasText: 'Invitation accepted' })
+        await expect(acceptedInvitationEntry).toContainText('accepted-recipient@nevix.test')
+        await expect(acceptedInvitationEntry).not.toContainText('Accepted Member Snapshot')
       } finally {
         await launched.electronApp.close()
       }
@@ -192,15 +207,24 @@ test(
       name: 'Audit Export Studio'
     })
     const sharedTimestamp = new Date(Date.now() - 60_000).toISOString()
-    const entries = Array.from({ length: 101 }, (_, index) => ({
-      actorUserId: userId,
-      actorDisplayName: index === 0 ? '=CSV Actor 0' : `CSV Actor ${index}`,
-      targetUserId: crypto.randomUUID(),
-      targetDisplayName: index === 0 ? '@CSV Target 0' : `CSV Target ${index}`,
-      action: 'member_removed',
-      metadata: { row: index },
-      createdAt: sharedTimestamp
-    }))
+    const entries = Array.from({ length: 101 }, (_, index) => {
+      const isAcceptedInvitation = index === 1
+      return {
+        actorUserId: userId,
+        actorDisplayName: index === 0 ? '=CSV Actor 0' : `CSV Actor ${index}`,
+        targetUserId: crypto.randomUUID(),
+        targetDisplayName: isAcceptedInvitation
+          ? 'Accepted Member Snapshot'
+          : index === 0
+            ? '@CSV Target 0'
+            : `CSV Target ${index}`,
+        action: isAcceptedInvitation ? 'invitation_accepted' : 'member_removed',
+        metadata: isAcceptedInvitation
+          ? { email: 'accepted-export-recipient@nevix.test', row: index }
+          : { row: index },
+        createdAt: sharedTimestamp
+      }
+    })
     await seedAuditLogEntries(organization.id, entries)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-export-user-'))
     const exportDirectory = await mkdtemp(join(tmpdir(), 'nevix-audit-log-export-file-'))
@@ -255,6 +279,8 @@ test(
       expect(exportedActors).toContain("'=CSV Actor 0")
       expect(exportedActors).toContain('CSV Actor 100')
       expect(csv).toContain("'@CSV Target 0")
+      expect(csv).toContain('Invitation accepted,accepted-export-recipient@nevix.test,')
+      expect(csv).not.toContain('Accepted Member Snapshot')
       expect(csv).not.toContain('Inserted Between Pages')
     } finally {
       await rm(userDataDir, { recursive: true, force: true })

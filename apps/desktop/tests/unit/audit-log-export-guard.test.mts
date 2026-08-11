@@ -1,18 +1,34 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { resolveAuditLogE2EOutputPath } from '../../src/main/organization/ipc/audit-log-export-path.ts'
 
-const exportHandlerSource = await readFile(
-  join(import.meta.dirname, '../../src/main/organization/ipc/export-audit-log.ts'),
-  'utf8'
-)
+const e2eOutputPath = '/tmp/organization-audit-log.csv'
 
-test('the Audit Log E2E output path is disabled in packaged applications', () => {
-  const testOutputPath = exportHandlerSource.match(
-    /function testOutputPath\(\): string \| undefined \{[\s\S]*?\n\}/
-  )?.[0]
+const cases = [
+  {
+    name: 'an unpackaged E2E application uses the configured Audit Log output path',
+    input: { e2eMode: '1', isPackaged: false, configuredOutputPath: e2eOutputPath },
+    expected: e2eOutputPath
+  },
+  {
+    name: 'a packaged application ignores the configured Audit Log E2E output path',
+    input: { e2eMode: '1', isPackaged: true, configuredOutputPath: e2eOutputPath },
+    expected: undefined
+  },
+  {
+    name: 'an unpackaged non-E2E application ignores the configured output path',
+    input: { e2eMode: undefined, isPackaged: false, configuredOutputPath: e2eOutputPath },
+    expected: undefined
+  },
+  {
+    name: 'an unpackaged E2E application without an output path uses the native dialog',
+    input: { e2eMode: '1', isPackaged: false, configuredOutputPath: undefined },
+    expected: undefined
+  }
+] as const
 
-  assert.ok(testOutputPath, 'testOutputPath function was not found')
-  assert.match(testOutputPath, /process\.env\.NEVIX_E2E !== '1' \|\| app\.isPackaged/)
-})
+for (const testCase of cases) {
+  test(testCase.name, () => {
+    assert.equal(resolveAuditLogE2EOutputPath(testCase.input), testCase.expected)
+  })
+}

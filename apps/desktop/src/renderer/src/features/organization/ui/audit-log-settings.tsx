@@ -145,7 +145,7 @@ export function AuditLogSettings({
       )
       const result = await window.api.invoke('organization:export-audit-log', {
         csv,
-        suggestedFileName: 'organization-audit-log.csv'
+        suggestedFileName: t('audit.exportFileName')
       })
       if (result.saved) setExportedEntryCount(exportEntries.length)
     } catch {
