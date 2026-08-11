@@ -20,19 +20,22 @@ on:
       - "package.json"
       - "go.work"
       - "go.work.sum"
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      suite:
+        description: The E2E suite to run for the calling workflow.
+        required: true
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: desktop-e2e-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   e2e-smoke:
     name: E2E Smoke Suite
-    if: github.event_name == 'pull_request'
+    if: inputs.suite == 'smoke'
     # Pinned runner image so an unannounced runner switch cannot change the stack.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -79,7 +82,7 @@ jobs:
 
   e2e-full:
     name: Full E2E Suite
-    if: github.event_name != 'pull_request'
+    if: inputs.suite != 'smoke'
     # Pinned runner image so an unannounced runner switch cannot change the stack.
     runs-on: ubuntu-24.04
     timeout-minutes: 60

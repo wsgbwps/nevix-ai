@@ -1,0 +1,144 @@
+name: CI gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Validate and classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      desktop: ${{ steps.classify.outputs.desktop }}
+      server: ${{ steps.classify.outputs.server }}
+      mail: ${{ steps.classify.outputs.mail }}
+      e2e: ${{ steps.classify.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: classify
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git diff --check "$BASE_SHA...$HEAD_SHA"
+
+          desktop=false
+          server=false
+          mail=false
+          e2e=false
+
+          while IFS= read -r -d '' changed_path; do
+            case "$changed_path" in
+              apps/desktop/*|.github/workflows/desktop-ci.yml|pnpm-lock.yaml|pnpm-workspace.yaml|package.json)
+                desktop=true
+                ;;
+            esac
+
+            case "$changed_path" in
+              server/*|.github/workflows/server-ci.yml|go.work|go.work.sum)
+                server=true
+                ;;
+            esac
+
+            case "$changed_path" in
+              supabase/*|server/internal/identity/*|server/go.mod|server/go.sum|contracts/*|scripts/test-mail-smoke.sh|scripts/lib/supabase-local-harness.sh|scripts/tests/supabase-local-harness.test.sh|.github/workflows/mail-smoke-ci.yml|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|go.work|go.work.sum)
+                mail=true
+                ;;
+            esac
+
+            case "$changed_path" in
+              apps/desktop/*|server/internal/identity/*|server/cmd/server/*|server/go.mod|server/go.sum|contracts/*|supabase/*|scripts/lib/supabase-local-harness.sh|scripts/tests/supabase-local-harness.test.sh|.github/workflows/desktop-e2e-ci.yml|pnpm-lock.yaml|pnpm-workspace.yaml|package.json|go.work|go.work.sum)
+                e2e=true
+                ;;
+            esac
+
+            if [ "$changed_path" = ".github/workflows/ci-gate.yml" ]; then
+              desktop=true
+              server=true
+              mail=true
+              e2e=true
+            fi
+          done < <(git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA")
+
+          printf 'desktop=%s\n' "$desktop" >> "$GITHUB_OUTPUT"
+          printf 'server=%s\n' "$server" >> "$GITHUB_OUTPUT"
+          printf 'mail=%s\n' "$mail" >> "$GITHUB_OUTPUT"
+          printf 'e2e=%s\n' "$e2e" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    name: Desktop CI
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    uses: ./.github/workflows/desktop-ci.yml
+
+  server:
+    name: Server CI
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    uses: ./.github/workflows/server-ci.yml
+
+  mail:
+    name: Mail Smoke CI
+    needs: changes
+    if: needs.changes.outputs.mail == 'true'
+    uses: ./.github/workflows/mail-smoke-ci.yml
+
+  e2e:
+    name: Desktop E2E Smoke
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    uses: ./.github/workflows/desktop-e2e-ci.yml
+    with:
+      suite: smoke
+
+  gate:
+    name: CI gate
+    if: always()
+    needs: [changes, desktop, server, mail, e2e]
+    runs-on: ubuntu-latest
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      DESKTOP_REQUIRED: ${{ needs.changes.outputs.desktop }}
+      DESKTOP_RESULT: ${{ needs.desktop.result }}
+      SERVER_REQUIRED: ${{ needs.changes.outputs.server }}
+      SERVER_RESULT: ${{ needs.server.result }}
+      MAIL_REQUIRED: ${{ needs.changes.outputs.mail }}
+      MAIL_RESULT: ${{ needs.mail.result }}
+      E2E_REQUIRED: ${{ needs.changes.outputs.e2e }}
+      E2E_RESULT: ${{ needs.e2e.result }}
+    steps:
+      - name: Verify required checks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "Change validation did not succeed: $CHANGES_RESULT"
+            exit 1
+          fi
+
+          failed=false
+          for check in DESKTOP SERVER MAIL E2E; do
+            required_var="${check}_REQUIRED"
+            result_var="${check}_RESULT"
+            required="${!required_var}"
+            result="${!result_var}"
+
+            if [ "$required" = "true" ] && [ "$result" != "success" ]; then
+              echo "$check was required but finished as $result"
+              failed=true
+            fi
+          done
+
+          if [ "$failed" = "true" ]; then
+            exit 1
+          fi

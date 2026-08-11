@@ -9,12 +9,10 @@ on:
       - ".github/workflows/server-ci.yml"
       - "go.work"
       - "go.work.sum"
-  pull_request:
-    branches:
-      - main
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: server-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

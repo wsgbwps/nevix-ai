@@ -12,12 +12,10 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
-  pull_request:
-    branches:
-      - main
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: desktop-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
