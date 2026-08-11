@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Mail test harness: starts the pinned local Supabase stack (with Mailpit) from
-# an empty database, replays committed migrations, runs the Go mail smoke tests,
-# and always tears the stack down. Same entry point for local dev and CI.
+# Mail test harness: on a clean host, starts the pinned local Supabase stack
+# (with Mailpit) from an empty database, replays committed migrations, runs the
+# Go mail smoke tests, and tears down only the stack it owns. Same entry point
+# for local dev and CI.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+source "$repo_root/scripts/lib/supabase-local-harness.sh"
+cd "$repo_root"
 
 # Loopback traffic must never go through a developer HTTP proxy: the Supabase
 # CLI health checks, curl, and the Go tests all honor proxy variables.
@@ -12,14 +15,23 @@ export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
 export no_proxy="${NO_PROXY}"
 
 cleanup() {
-  pnpm exec supabase stop --no-backup >/dev/null 2>&1 || true
+  local exit_status="$1"
+
+  nevix_supabase_harness_cleanup "$exit_status"
 }
-trap cleanup EXIT
+trap 'exit_status=$?; trap - EXIT; cleanup "$exit_status"; exit $?' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+nevix_supabase_harness_acquire "$repo_root" mail-smoke
+nevix_supabase_harness_require_clean_projects nevix-ai
+nevix_supabase_harness_require_free_tcp_ports 54320 54321 54322 54324 54325
 
 echo "==> Supabase CLI version"
 pnpm exec supabase --version
 
 echo "==> Starting pinned local Supabase stack"
+nevix_supabase_harness_claim_stack nevix-ai
 pnpm exec supabase start
 
 echo "==> Stack service versions"
@@ -53,7 +65,9 @@ echo "==> Discovering Mailpit container"
 # captured-mailbox container; docker is present wherever the stack runs.
 # Match by image: the CLI names the container supabase_inbucket_<project> even
 # though it runs the supabase/mailpit image.
-mailpit_container="$(docker ps --format '{{.Names}} {{.Image}}' | awk '$2 ~ /mailpit/ {print $1}' | head -n 1)"
+mailpit_container="$(docker ps \
+  --filter 'label=com.supabase.cli.project=nevix-ai' \
+  --format '{{.Names}} {{.Image}}' | awk '$2 ~ /mailpit/ {print $1}' | head -n 1)"
 if [[ -z "${mailpit_container}" ]]; then
   echo "error: could not find a running Mailpit container" >&2
   exit 1

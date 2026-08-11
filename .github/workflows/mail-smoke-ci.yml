@@ -11,6 +11,8 @@ on:
       - "server/go.sum"
       - "contracts/**"
       - "scripts/test-mail-smoke.sh"
+      - "scripts/lib/supabase-local-harness.sh"
+      - "scripts/tests/supabase-local-harness.test.sh"
       - ".github/workflows/mail-smoke-ci.yml"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -27,6 +29,8 @@ on:
       - "server/go.sum"
       - "contracts/**"
       - "scripts/test-mail-smoke.sh"
+      - "scripts/lib/supabase-local-harness.sh"
+      - "scripts/tests/supabase-local-harness.test.sh"
       - ".github/workflows/mail-smoke-ci.yml"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -56,9 +60,10 @@ jobs:
         with:
           go-version-file: server/go.mod
       - run: pnpm install --frozen-lockfile
+      - run: bash scripts/tests/supabase-local-harness.test.sh
       - run: ./scripts/test-mail-smoke.sh
       # Backstop for the script's own EXIT trap: if the runner kills the script,
       # the trap never fires, so tear the stack down here as well.
       - name: Tear down Supabase stack
         if: always()
-        run: pnpm exec supabase stop --no-backup || true
+        run: pnpm exec supabase stop --project-id nevix-ai --no-backup || true

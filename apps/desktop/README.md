@@ -45,10 +45,18 @@ $ pnpm test:e2e:smoke  # Smoke Suite: one test-mode build, only specs tagged @sm
 ```
 
 The full command first verifies that missing and invalid public configuration block the app; the
-smoke command skips those phases and the typecheck that Desktop CI already covers. Both commands
-always stop the local stack with `--no-backup`, including when the build or tests fail. The local
-admin credential exists only in the Playwright process; the Electron launcher removes it from the
-Desktop process environment.
+smoke command skips those phases and the typecheck that Desktop CI already covers. Before either
+command builds or changes the database, it takes the repository Supabase harness lock and refuses
+to run if the `nevix-ai` project (or the legacy Auth harness project) already has labeled Docker
+containers, volumes, or networks. E2E and Mail Smoke therefore cannot run concurrently or reset a
+developer's shared local stack. On a clean host, the command owns the stack it starts and removes
+that exact project with `--no-backup` on success, failure, SIGINT, or SIGTERM. It also refuses to
+start when a required Supabase port or the identity server's port 8080 is already in use, so tests
+cannot silently connect to an unowned local service. If the process is
+SIGKILLed or the host crashes, the next run fails closed on the residual lock or Docker state;
+inspect both before manually recovering them. GitHub's one-use runners keep the same disposable
+start/reset/stop lifecycle. The local admin credential exists only in the Playwright process; the
+Electron launcher removes it from the Desktop process environment.
 
 Development and test builds accept a Supabase HTTP Origin only when its host is `localhost`, an
 exact loopback address, or an RFC1918 private IPv4 address. Production builds require HTTPS. The
