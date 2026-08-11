@@ -22,10 +22,11 @@ Read the file at the referenced path. The user will normally pass the path or th
 
 When implementation on a branch is complete, close it out in this order. Merging, pushing, and deleting remote branches are external write operations — each one still requires explicit user authorization every time; this checklist only fixes the steps and where the acceptance record lives.
 
-1. **Confirm CI is green** — the Desktop CI workflow (`.github/workflows/desktop-ci.yml`) must pass on the PR before merging.
-2. **Merge per the repo's delivery rules** — high-risk changes land through a branch and PR gated by CI and diff review; all other work may go directly to `main` (see the delivery workflow in the root `AGENTS.md`).
-3. **Delete the merged branch** — remove the local branch (`git branch -d <branch>`) and, with authorization, the remote branch.
-4. **Resolve the ticket** — in the `.scratch/<feature-slug>/issues/<NN>-<slug>.md` file, set `Status: resolved` and append the acceptance conclusion (what was verified and how, e.g. CI run, tests, review outcome) under the `## Comments` heading.
+1. **Bind the final local state** — for code changes, record the acceptance boundary, final diff, relevant check and review conclusion through [Final-state evidence](../specs/final-state-evidence.md). The check must run after the last code edit.
+2. **Confirm CI is green** — the Desktop CI workflow (`.github/workflows/desktop-ci.yml`) must pass on the PR before merging.
+3. **Merge per the repo's delivery rules** — high-risk changes land through a branch and PR gated by CI and diff review; all other work may go directly to `main` (see the delivery workflow in the root `AGENTS.md`).
+4. **Delete the merged branch** — remove the local branch (`git branch -d <branch>`) and, with authorization, the remote branch.
+5. **Resolve the ticket** — in the `.scratch/<feature-slug>/issues/<NN>-<slug>.md` file, set `Status: resolved` and append the acceptance conclusion (what was verified and how, e.g. final-state evidence, CI run, tests, review outcome) under the `## Comments` heading.
 
 ## Wayfinding operations
 
