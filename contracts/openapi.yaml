@@ -16,6 +16,14 @@ paths:
     $ref: "./identity.yaml#/paths/~1identity~1verification-codes"
   /identity/organizations:
     $ref: "./identity.yaml#/paths/~1identity~1organizations"
+  /identity/organizations/{organization_id}/settings:
+    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1settings"
+  /identity/organizations/{organization_id}/leave:
+    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1leave"
+  /identity/organizations/{organization_id}/members/{membership_id}/remove:
+    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1members~1{membership_id}~1remove"
+  /identity/organizations/{organization_id}/members/{membership_id}/role:
+    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1members~1{membership_id}~1role"
   /identity/organizations/{organization_id}/invitations:
     $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1invitations"
   /identity/organizations/{organization_id}/invitations/{invitation_id}/resend:

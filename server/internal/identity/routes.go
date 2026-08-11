@@ -12,6 +12,7 @@ import (
 
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/invitations"
+	"github.com/nevix-ai/server/internal/identity/memberships"
 	"github.com/nevix-ai/server/internal/identity/organizations"
 	"github.com/nevix-ai/server/internal/identity/verification"
 )
@@ -31,6 +32,40 @@ func (m *Module) routes() []command.Route {
 			Method:  http.MethodPost,
 			Path:    "/identity/organizations",
 			Handler: command.Handle(m.orgs.CreateOrganization, organizations.MapError, http.StatusOK),
+		},
+		{
+			Method: http.MethodPatch,
+			Path:   "/identity/organizations/{organizationID}/settings",
+			Handler: command.HandleWithRequest(func(ctx context.Context, r *http.Request, req organizations.UpdateOrganizationSettingsRequest) (organizations.OrganizationResponse, error) {
+				req.OrganizationID = chi.URLParam(r, "organizationID")
+				return m.orgs.UpdateOrganizationSettings(ctx, req)
+			}, organizations.MapError, http.StatusOK),
+		},
+		{
+			Method: http.MethodPost,
+			Path:   "/identity/organizations/{organizationID}/leave",
+			Handler: command.HandleWithRequest(func(ctx context.Context, r *http.Request, req memberships.LeaveOrganizationRequest) (memberships.MembershipResponse, error) {
+				req.OrganizationID = chi.URLParam(r, "organizationID")
+				return m.memberships.LeaveOrganization(ctx, req)
+			}, memberships.MapError, http.StatusOK),
+		},
+		{
+			Method: http.MethodPost,
+			Path:   "/identity/organizations/{organizationID}/members/{membershipID}/remove",
+			Handler: command.HandleWithRequest(func(ctx context.Context, r *http.Request, req memberships.RemoveMemberRequest) (memberships.MembershipResponse, error) {
+				req.OrganizationID = chi.URLParam(r, "organizationID")
+				req.MembershipID = chi.URLParam(r, "membershipID")
+				return m.memberships.RemoveMember(ctx, req)
+			}, memberships.MapError, http.StatusOK),
+		},
+		{
+			Method: http.MethodPost,
+			Path:   "/identity/organizations/{organizationID}/members/{membershipID}/role",
+			Handler: command.HandleWithRequest(func(ctx context.Context, r *http.Request, req memberships.ChangeMemberRoleRequest) (memberships.MembershipResponse, error) {
+				req.OrganizationID = chi.URLParam(r, "organizationID")
+				req.MembershipID = chi.URLParam(r, "membershipID")
+				return m.memberships.ChangeMemberRole(ctx, req)
+			}, memberships.MapError, http.StatusOK),
 		},
 		{
 			Method: http.MethodPost,

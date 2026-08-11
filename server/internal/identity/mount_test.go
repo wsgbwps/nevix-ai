@@ -24,7 +24,7 @@ import (
 func testModule() *Module {
 	return &Module{
 		issuer:      verification.NewCodeIssuer(nil, verification.CodeIssuanceConfig{}),
-		orgs:        organizations.NewCreator(nil),
+		orgs:        organizations.NewManager(nil),
 		verifier:    authjwt.NewVerifier("https://auth.nevix.test/.well-known/jwks.json"),
 		corsOrigins: []string{"https://app.nevix.test"},
 	}

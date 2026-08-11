@@ -179,6 +179,532 @@ paths:
                       error:
                         enum:
                           - internal_error
+  /identity/organizations/{organization_id}/settings:
+    patch:
+      operationId: updateOrganizationSettings
+      summary: 更新组织设置
+      description: |-
+        active Owner 或 Admin 可以更新 Organization 名称。名称会 trim，空名称被拒绝。
+
+        命令在同一事务中更新 Organization 并写入不可变 Audit Log；设置变更不发送邮件。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organization_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  description: 组织名称；trim 后为空被拒绝。
+      responses:
+        "200":
+          description: Organization 设置已更新。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - organization
+                properties:
+                  organization:
+                    type: object
+                    required:
+                      - id
+                      - name
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体没有 name；invalid_organization_name 指 name trim 后为空；invalid_organization_id 指路径参数不是 UUID。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_organization_name
+                          - invalid_organization_id
+        "401":
+          description: Bearer JWT 缺失、无效或已过期。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 调用方是 active Member 但不是 Owner 或 Admin。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - insufficient_organization_role
+        "404":
+          description: 调用方不是该 Organization 的 active Member，或 Organization 不存在。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - organization_not_found
+        "500":
+          description: 服务端未能更新 Organization，未提交部分状态。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/organizations/{organization_id}/leave:
+    post:
+      operationId: leaveOrganization
+      summary: 退出组织
+      description: |-
+        Member 或 Admin 结束自己在该 Organization 的 active Membership。结束行会保留，之后只能通过新的 Invitation 重新加入；Owner 必须先完成 Ownership Transfer。
+
+        命令在同一事务中结束 Membership 并写入不可变 Audit Log，不发送邮件。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organization_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Membership 已结束。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - membership
+                properties:
+                  membership:
+                    type: object
+                    required:
+                      - id
+                      - organization_id
+                      - user_id
+                      - role
+                      - status
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      organization_id:
+                        type: string
+                        format: uuid
+                      user_id:
+                        type: string
+                        format: uuid
+                      role:
+                        type: string
+                        enum:
+                          - admin
+                          - member
+                      status:
+                        type: string
+                        enum:
+                          - ended
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体不是 JSON 对象；invalid_organization_id 指路径参数不是 UUID。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_organization_id
+        "401":
+          description: Bearer JWT 缺失、无效或已过期。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "404":
+          description: 调用方不是该 Organization 的 active Member，或 Organization 不存在。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - organization_not_found
+        "409":
+          description: Owner 在未完成 Ownership Transfer 前不能退出。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - owner_cannot_leave
+        "500":
+          description: 服务端未能结束 Membership，未提交部分状态。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/organizations/{organization_id}/members/{membership_id}/remove:
+    post:
+      operationId: removeMember
+      summary: 移除普通成员
+      description: |-
+        Owner 或 Admin 结束一个 active Member Membership。结束行会保留，客户端的 RLS 读取随即不再将该用户视为 Organization 成员。
+
+        命令在同一事务中结束 Membership、写入不可变 Audit Log，并向被移除 User 写入一封不携码的双语 Outbox 邮件；不向 Owner 或操作者额外发送邮件。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organization_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: membership_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: 普通成员的 Membership 已结束。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - membership
+                properties:
+                  membership:
+                    type: object
+                    required:
+                      - id
+                      - organization_id
+                      - user_id
+                      - role
+                      - status
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      organization_id:
+                        type: string
+                        format: uuid
+                      user_id:
+                        type: string
+                        format: uuid
+                      role:
+                        type: string
+                        enum:
+                          - member
+                      status:
+                        type: string
+                        enum:
+                          - ended
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体不是 JSON 对象；invalid_organization_id 或 invalid_membership_id 指路径参数不是 UUID。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_organization_id
+                          - invalid_membership_id
+        "401":
+          description: Bearer JWT 缺失、无效或已过期。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 调用方是 active Member 但不是 Owner 或 Admin。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - insufficient_organization_role
+        "404":
+          description: 调用方不是该 Organization 的 active Member，或目标不是该 Organization 的 active Membership。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - organization_not_found
+                          - membership_not_found
+        "409":
+          description: 目标 active Membership 不是 Member（Owner 与 Admin 不能通过本命令移除）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - membership_not_member
+        "500":
+          description: 服务端未能移除 Membership，未提交部分状态。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/organizations/{organization_id}/members/{membership_id}/role:
+    post:
+      operationId: changeMemberRole
+      summary: 变更管理员角色
+      description: |-
+        只有 Owner 能执行 Admin 生命周期：promote 将 active Member 原地提升为 Admin；demote 将 active Admin 原地降为 Member；remove 结束 active Admin Membership。Owner Membership 永不由本命令变更，因而保持每个 Organization 恰有一个 active Owner。
+
+        命令在同一事务中更新 Membership、写入不可变 Audit Log，并为 affected User 与 Owner（即使 Owner 是操作者）各写入一封不携码的双语 Outbox 邮件。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organization_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: membership_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - promote
+                    - demote
+                    - remove
+      responses:
+        "200":
+          description: 请求的 Admin 生命周期状态已生效。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - membership
+                properties:
+                  membership:
+                    type: object
+                    required:
+                      - id
+                      - organization_id
+                      - user_id
+                      - role
+                      - status
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      organization_id:
+                        type: string
+                        format: uuid
+                      user_id:
+                        type: string
+                        format: uuid
+                      role:
+                        type: string
+                        enum:
+                          - admin
+                          - member
+                      status:
+                        type: string
+                        enum:
+                          - active
+                          - ended
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体没有 action；invalid_role_action 指 action 不在 promote、demote、remove 中；其余两个码指路径参数不是 UUID。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_role_action
+                          - invalid_organization_id
+                          - invalid_membership_id
+        "401":
+          description: Bearer JWT 缺失、无效或已过期。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 调用方不是该 Organization 的 active Owner。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - insufficient_organization_role
+        "404":
+          description: 调用方不是该 Organization 的 active Member，或目标不是该 Organization 的 active Membership。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - organization_not_found
+                          - membership_not_found
+        "409":
+          description: promote 的目标不是 active Member，或 demote/remove 的目标不是 active Admin；Owner 永不受本命令影响。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - membership_not_member
+                          - membership_not_admin
+        "500":
+          description: 服务端未能变更 Membership，未提交部分状态。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
   /identity/organizations/{organization_id}/invitations:
     post:
       operationId: createInvitation
