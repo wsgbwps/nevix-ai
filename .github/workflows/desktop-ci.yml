@@ -15,12 +15,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - "apps/desktop/**"
-      - ".github/workflows/desktop-ci.yml"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "package.json"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

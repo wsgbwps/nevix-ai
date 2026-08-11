@@ -23,22 +23,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - "apps/desktop/**"
-      - "server/internal/identity/**"
-      - "server/cmd/server/**"
-      - "server/go.mod"
-      - "server/go.sum"
-      - "contracts/**"
-      - "supabase/**"
-      - "scripts/lib/supabase-local-harness.sh"
-      - "scripts/tests/supabase-local-harness.test.sh"
-      - ".github/workflows/desktop-e2e-ci.yml"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "package.json"
-      - "go.work"
-      - "go.work.sum"
   workflow_dispatch:
 
 concurrency:
