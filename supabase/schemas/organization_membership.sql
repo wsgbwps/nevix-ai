@@ -77,6 +77,11 @@ CREATE TABLE public.invitations (
   organization_id uuid NOT NULL
     REFERENCES public.organizations (id) ON DELETE CASCADE,
   email text NOT NULL,
+  -- A pending invitee cannot read the parent Organization or the inviter's
+  -- Profile under RLS. These nullable write-time snapshots are the minimum
+  -- projection needed to render the invitation without widening either policy.
+  organization_name text,
+  inviter_display_name text,
   status text NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'accepted', 'revoked')),
   expires_at timestamptz NOT NULL,

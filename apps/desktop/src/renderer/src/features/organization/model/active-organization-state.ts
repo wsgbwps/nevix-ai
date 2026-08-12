@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import type { PendingInvitation } from '../api/invitations'
 import type { ActiveMembership } from '../api/memberships'
 
 // Startup resolution state for the current Session: 'idle' has not started, 'resolving' is
@@ -10,9 +11,12 @@ export interface ActiveOrganizationState {
   readonly startupPhase: OrganizationStartupPhase
   readonly activeOrganization: ActiveMembership | undefined
   readonly availableOrganizations: readonly ActiveMembership[]
+  readonly pendingInvitations: readonly PendingInvitation[]
   readonly rememberedOrganizationId: string | undefined
   readonly enterOrganization: (membership: ActiveMembership) => void
   readonly refreshActiveOrganization: () => Promise<ActiveMembership | undefined>
+  readonly acceptInvitation: (invitation: PendingInvitation, code: string) => Promise<void>
+  readonly reconcileStartupAfterInvitationChange: () => void
 }
 
 export const ActiveOrganizationContext = createContext<ActiveOrganizationState | null>(null)

@@ -18,14 +18,14 @@ import (
 	"time"
 )
 
-// invitationCommand sends one JSON command over the mounted Module surface.
-func invitationCommand(t *testing.T, handler http.Handler, method, path, token string, payload any) (int, []byte) {
+// identityCommand sends one JSON command over the mounted Module surface.
+func identityCommand(t *testing.T, handler http.Handler, method, path, token string, payload any) (int, []byte) {
 	t.Helper()
-	status, body, _ := invitationCommandFromIP(t, handler, method, path, token, "", payload)
+	status, body, _ := identityCommandFromIP(t, handler, method, path, token, "", payload)
 	return status, body
 }
 
-func invitationCommandFromIP(t *testing.T, handler http.Handler, method, path, token, clientIP string, payload any) (int, []byte, http.Header) {
+func identityCommandFromIP(t *testing.T, handler http.Handler, method, path, token, clientIP string, payload any) (int, []byte, http.Header) {
 	t.Helper()
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -48,16 +48,16 @@ func invitationCommandFromIP(t *testing.T, handler http.Handler, method, path, t
 	return rec.Code, rec.Body.Bytes(), rec.Header()
 }
 
-func assertInvitationError(t *testing.T, body []byte, want string) {
+func assertCommandError(t *testing.T, body []byte, want string) {
 	t.Helper()
 	var envelope struct {
 		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		t.Fatalf("decode invitation error: %v", err)
+		t.Fatalf("decode Identity command error: %v", err)
 	}
 	if envelope.Error != want {
-		t.Fatalf("invitation error = %q, want %q; body %s", envelope.Error, want, body)
+		t.Fatalf("Identity command error = %q, want %q; body %s", envelope.Error, want, body)
 	}
 }
 
@@ -105,11 +105,11 @@ func TestCreateInvitationEnforcesSharedCodeCooldownAndEmailLimit(t *testing.T) {
 
 	cooldownEmail := fmt.Sprintf("invitation-create-cooldown-%d@nevix.test", time.Now().UnixNano())
 	h.seedIssuance(t, ctx, cooldownEmail, "198.51.100.10", 10)
-	status, body, headers := invitationCommandFromIP(t, handler, http.MethodPost, path, token, "198.51.100.11", map[string]string{"email": cooldownEmail})
+	status, body, headers := identityCommandFromIP(t, handler, http.MethodPost, path, token, "198.51.100.11", map[string]string{"email": cooldownEmail})
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("create invitation during shared cooldown: status %d body %s, want 429", status, body)
 	}
-	assertInvitationError(t, body, "cooldown_active")
+	assertCommandError(t, body, "cooldown_active")
 	assertContractResponse(t, http.MethodPost, path, status, body)
 	retryAfter, err := strconv.Atoi(headers.Get("Retry-After"))
 	if err != nil || retryAfter < 1 || retryAfter > 60 {
@@ -120,11 +120,11 @@ func TestCreateInvitationEnforcesSharedCodeCooldownAndEmailLimit(t *testing.T) {
 	for i, ageSeconds := range []int{350, 280, 210, 140, 70} {
 		h.seedIssuance(t, ctx, hourlyEmail, fmt.Sprintf("198.51.100.%d", 20+i), ageSeconds)
 	}
-	status, body, headers = invitationCommandFromIP(t, handler, http.MethodPost, path, token, "198.51.100.30", map[string]string{"email": hourlyEmail})
+	status, body, headers = identityCommandFromIP(t, handler, http.MethodPost, path, token, "198.51.100.30", map[string]string{"email": hourlyEmail})
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("create invitation above shared email limit: status %d body %s, want 429", status, body)
 	}
-	assertInvitationError(t, body, "email_rate_limited")
+	assertCommandError(t, body, "email_rate_limited")
 	assertContractResponse(t, http.MethodPost, path, status, body)
 	if got := headers.Get("Retry-After"); got != "" {
 		t.Fatalf("email-rate-limited create Retry-After = %q, want absent", got)
@@ -165,7 +165,7 @@ func TestResendInvitationEnforcesCooldownAndIPLimitWithoutMutation(t *testing.T)
 	token := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
 	createPath := "/identity/organizations/" + orgID + "/invitations"
 	email := fmt.Sprintf("invitation-resend-limit-%d@nevix.test", time.Now().UnixNano())
-	status, body, _ := invitationCommandFromIP(t, handler, http.MethodPost, createPath, token, "203.0.113.40", map[string]string{"email": email})
+	status, body, _ := identityCommandFromIP(t, handler, http.MethodPost, createPath, token, "203.0.113.40", map[string]string{"email": email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for resend limits: status %d body %s, want 202", status, body)
 	}
@@ -182,11 +182,11 @@ func TestResendInvitationEnforcesCooldownAndIPLimitWithoutMutation(t *testing.T)
 	}
 	resendPath := createPath + "/" + invitationID + "/resend"
 
-	status, body, headers := invitationCommandFromIP(t, handler, http.MethodPost, resendPath, token, "203.0.113.41", map[string]string{})
+	status, body, headers := identityCommandFromIP(t, handler, http.MethodPost, resendPath, token, "203.0.113.41", map[string]string{})
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("resend invitation during cooldown: status %d body %s, want 429", status, body)
 	}
-	assertInvitationError(t, body, "cooldown_active")
+	assertCommandError(t, body, "cooldown_active")
 	assertContractResponse(t, http.MethodPost, resendPath, status, body)
 	retryAfter, err := strconv.Atoi(headers.Get("Retry-After"))
 	if err != nil || retryAfter < 1 || retryAfter > 60 {
@@ -202,11 +202,11 @@ func TestResendInvitationEnforcesCooldownAndIPLimitWithoutMutation(t *testing.T)
 	for i := 0; i < 20; i++ {
 		h.seedIssuance(t, ctx, fmt.Sprintf("invitation-ip-seed-%d-%d@nevix.test", time.Now().UnixNano(), i), saturatedIP, 120+i)
 	}
-	status, body, headers = invitationCommandFromIP(t, handler, http.MethodPost, resendPath, token, saturatedIP, map[string]string{})
+	status, body, headers = identityCommandFromIP(t, handler, http.MethodPost, resendPath, token, saturatedIP, map[string]string{})
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("resend invitation above shared IP limit: status %d body %s, want 429", status, body)
 	}
-	assertInvitationError(t, body, "ip_rate_limited")
+	assertCommandError(t, body, "ip_rate_limited")
 	assertContractResponse(t, http.MethodPost, resendPath, status, body)
 	if got := headers.Get("Retry-After"); got != "" {
 		t.Fatalf("IP-rate-limited resend Retry-After = %q, want absent", got)
@@ -256,7 +256,7 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 		t.Fatalf("count prior mail for invitee: %v", err)
 	}
 	path := "/identity/organizations/" + orgID + "/invitations"
-	status, body := invitationCommand(t, handler, http.MethodPost, path,
+	status, body := identityCommand(t, handler, http.MethodPost, path,
 		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation: status %d body %s, want 202", status, body)
@@ -293,6 +293,8 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 	var (
 		invitationID     string
 		invitationStatus string
+		organizationName string
+		inviterName      string
 		codeHash         string
 		actionType       string
 		targetID         string
@@ -303,12 +305,16 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 		metadataEmail    string
 	)
 	if err := h.pool.QueryRow(ctx,
-		`SELECT id, status FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
-	).Scan(&invitationID, &invitationStatus); err != nil {
+		`SELECT id, status, organization_name, inviter_display_name
+		 FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
+	).Scan(&invitationID, &invitationStatus, &organizationName, &inviterName); err != nil {
 		t.Fatalf("read invitation: %v", err)
 	}
 	if invitationStatus != "pending" {
 		t.Fatalf("invitation status = %q, want pending", invitationStatus)
+	}
+	if organizationName != "Invitation Org" || inviterName != "Owner Snapshot" {
+		t.Fatalf("invitation display snapshots = (%q, %q), want (Invitation Org, Owner Snapshot)", organizationName, inviterName)
 	}
 	if err := h.pool.QueryRow(ctx,
 		`SELECT code_hash, action_type, target_id FROM identity.verification_codes WHERE target_id = $1`, invitationID,
@@ -366,7 +372,7 @@ func TestInvitationCommandsSnapshotDirectoryEmailWithoutProfiles(t *testing.T) {
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	ownerToken := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
 	createPath := "/identity/organizations/" + orgID + "/invitations"
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
+	status, body := identityCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation without profiles: status %d body %s, want 202", status, body)
 	}
@@ -383,7 +389,7 @@ func TestInvitationCommandsSnapshotDirectoryEmailWithoutProfiles(t *testing.T) {
 		t.Fatalf("read profileless invitation: %v", err)
 	}
 	acceptPath := "/identity/invitations/" + invitationID + "/accept"
-	status, body = invitationCommand(t, handler, http.MethodPost, acceptPath,
+	status, body = identityCommand(t, handler, http.MethodPost, acceptPath,
 		keys.signToken(t, invitee.ID, time.Now().Add(time.Hour)), map[string]string{"code": extractCode(t, invitationBody)})
 	if status != http.StatusOK {
 		t.Fatalf("accept invitation without profiles: status %d body %s, want 200", status, body)
@@ -438,13 +444,13 @@ func TestCreateInvitationRejectsActiveMemberEmailAndAllowsEndedMember(t *testing
 	path := "/identity/organizations/" + orgID + "/invitations"
 	token := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
 
-	status, body := invitationCommand(t, handler, http.MethodPost, path, token, map[string]string{"email": active.Email})
+	status, body := identityCommand(t, handler, http.MethodPost, path, token, map[string]string{"email": active.Email})
 	if status != http.StatusConflict {
 		t.Fatalf("invite active member: status %d body %s, want 409", status, body)
 	}
 	assertContractResponse(t, http.MethodPost, path, status, body)
 
-	status, body = invitationCommand(t, handler, http.MethodPost, path, token, map[string]string{"email": ended.Email})
+	status, body = identityCommand(t, handler, http.MethodPost, path, token, map[string]string{"email": ended.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("invite ended member: status %d body %s, want 202", status, body)
 	}
@@ -480,7 +486,7 @@ func TestRevokeInvitationCancelsUndeliveredCode(t *testing.T) {
 	token := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
 	createPath := "/identity/organizations/" + orgID + "/invitations"
 
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath, token, map[string]string{"email": invitee.Email})
+	status, body := identityCommand(t, handler, http.MethodPost, createPath, token, map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for revoke: status %d body %s, want 202", status, body)
 	}
@@ -495,7 +501,7 @@ func TestRevokeInvitationCancelsUndeliveredCode(t *testing.T) {
 	}
 
 	revokePath := createPath + "/" + invitationID + "/revoke"
-	status, body = invitationCommand(t, handler, http.MethodPost, revokePath, token, map[string]string{})
+	status, body = identityCommand(t, handler, http.MethodPost, revokePath, token, map[string]string{})
 	if status != http.StatusOK {
 		t.Fatalf("revoke invitation: status %d body %s, want 200", status, body)
 	}
@@ -531,7 +537,7 @@ func TestRevokeInvitationCancelsUndeliveredCode(t *testing.T) {
 	if auditActorName != "Revoke Owner" {
 		t.Fatalf("revocation audit actor snapshot changed to %q, want Revoke Owner", auditActorName)
 	}
-	status, body = invitationCommand(t, handler, http.MethodPost, revokePath, token, map[string]string{})
+	status, body = identityCommand(t, handler, http.MethodPost, revokePath, token, map[string]string{})
 	if status != http.StatusOK {
 		t.Fatalf("repeat revoke invitation: status %d body %s, want 200", status, body)
 	}
@@ -570,7 +576,7 @@ func TestResendInvitationRefreshesCodeAndCancelsPriorUndeliveredMail(t *testing.
 	if err != nil {
 		t.Fatalf("count prior mail for resend invitee: %v", err)
 	}
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath, token, map[string]string{"email": invitee.Email})
+	status, body := identityCommand(t, handler, http.MethodPost, createPath, token, map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for resend: status %d body %s, want 202", status, body)
 	}
@@ -590,7 +596,7 @@ func TestResendInvitationRefreshesCodeAndCancelsPriorUndeliveredMail(t *testing.
 	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 
 	resendPath := createPath + "/" + invitationID + "/resend"
-	status, body = invitationCommand(t, handler, http.MethodPost, resendPath, token, map[string]string{})
+	status, body = identityCommand(t, handler, http.MethodPost, resendPath, token, map[string]string{})
 	if status != http.StatusAccepted {
 		t.Fatalf("resend invitation: status %d body %s, want 202", status, body)
 	}
@@ -688,7 +694,7 @@ func TestResendInvitationDoesNotRevalidateHistoricalCode(t *testing.T) {
 	originalReader := cryptorand.Reader
 	t.Cleanup(func() { cryptorand.Reader = originalReader })
 	cryptorand.Reader = bytes.NewReader([]byte{0, 0, 0})
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
+	status, body := identityCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for code history: status %d body %s, want 202", status, body)
 	}
@@ -707,14 +713,14 @@ func TestResendInvitationDoesNotRevalidateHistoricalCode(t *testing.T) {
 	resendPath := createPath + "/" + invitationID + "/resend"
 	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 	cryptorand.Reader = bytes.NewReader([]byte{0, 0, 1})
-	status, body = invitationCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
+	status, body = identityCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
 	if status != http.StatusAccepted {
 		t.Fatalf("first resend for code history: status %d body %s, want 202", status, body)
 	}
 
 	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 	cryptorand.Reader = bytes.NewReader([]byte{0, 0, 0, 0, 0, 2})
-	status, body = invitationCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
+	status, body = identityCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
 	cryptorand.Reader = originalReader
 	if status != http.StatusAccepted {
 		t.Fatalf("second resend for code history: status %d body %s, want 202", status, body)
@@ -734,13 +740,32 @@ func TestResendInvitationDoesNotRevalidateHistoricalCode(t *testing.T) {
 	}
 
 	acceptPath := "/identity/invitations/" + invitationID + "/accept"
-	status, body = invitationCommand(t, handler, http.MethodPost, acceptPath, inviteeToken, map[string]string{"code": initialCode})
-	if status != http.StatusBadRequest {
-		t.Fatalf("accept with historical code: status %d body %s, want 400", status, body)
+	var failedAttemptsBeforeHistorical, failedAttemptsAfterHistorical int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT failed_attempts FROM identity.verification_codes
+		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
+	).Scan(&failedAttemptsBeforeHistorical); err != nil {
+		t.Fatalf("read active attempt count before historical-code acceptance: %v", err)
 	}
-	assertInvitationError(t, body, "invalid_invitation_code")
+	status, body, headers := identityCommandFromIP(t, handler, http.MethodPost, acceptPath, inviteeToken, "", map[string]string{"code": initialCode})
+	if status != http.StatusConflict {
+		t.Fatalf("accept with historical code: status %d body %s, want 409", status, body)
+	}
+	assertCommandError(t, body, "invitation_code_invalidated")
 	assertContractResponse(t, http.MethodPost, acceptPath, status, body)
-	status, body = invitationCommand(t, handler, http.MethodPost, acceptPath, inviteeToken, map[string]string{"code": latestCode})
+	if got := headers.Get("X-Invitation-Code-Attempts-Remaining"); got != "" {
+		t.Fatalf("historical code remaining-attempts header = %q, want absent", got)
+	}
+	if err := h.pool.QueryRow(ctx,
+		`SELECT failed_attempts FROM identity.verification_codes
+		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
+	).Scan(&failedAttemptsAfterHistorical); err != nil {
+		t.Fatalf("read active attempt count after historical-code acceptance: %v", err)
+	}
+	if failedAttemptsAfterHistorical != failedAttemptsBeforeHistorical {
+		t.Fatalf("historical code changed current failed attempts from %d to %d", failedAttemptsBeforeHistorical, failedAttemptsAfterHistorical)
+	}
+	status, body = identityCommand(t, handler, http.MethodPost, acceptPath, inviteeToken, map[string]string{"code": latestCode})
 	if status != http.StatusOK {
 		t.Fatalf("accept with latest code: status %d body %s, want 200", status, body)
 	}
@@ -765,7 +790,7 @@ func TestAcceptInvitationCreatesMemberAndConsumesCode(t *testing.T) {
 	keys := newES256KeyServer(t)
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	createPath := "/identity/organizations/" + orgID + "/invitations"
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath,
+	status, body := identityCommand(t, handler, http.MethodPost, createPath,
 		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for acceptance: status %d body %s, want 202", status, body)
@@ -784,7 +809,7 @@ func TestAcceptInvitationCreatesMemberAndConsumesCode(t *testing.T) {
 	code := extractCode(t, pendingBody)
 
 	acceptPath := "/identity/invitations/" + invitationID + "/accept"
-	status, body = invitationCommand(t, handler, http.MethodPost, acceptPath,
+	status, body = identityCommand(t, handler, http.MethodPost, acceptPath,
 		keys.signToken(t, invitee.ID, time.Now().Add(time.Hour)), map[string]string{"code": code})
 	if status != http.StatusOK {
 		t.Fatalf("accept invitation: status %d body %s, want 200", status, body)
@@ -816,6 +841,16 @@ func TestAcceptInvitationCreatesMemberAndConsumesCode(t *testing.T) {
 	}
 	if activeMemberships != 1 || invitationStatus != "accepted" || codeStatus != "consumed" || actorID != invitee.ID || actorName != "Accept Invitee" || targetID != invitee.ID || targetName != "Accept Invitee" || action != "invitation_accepted" {
 		t.Fatalf("acceptance state = memberships:%d invitation:%q code:%q audit:(%q,%q,%q,%q,%q), want one active Member, accepted, consumed, and invitee snapshots", activeMemberships, invitationStatus, codeStatus, actorID, actorName, targetID, targetName, action)
+	}
+	var codelessOutboxMessages int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM identity.outbox_messages
+		 WHERE recipient = $1 AND verification_code_id IS NULL`, invitee.Email,
+	).Scan(&codelessOutboxMessages); err != nil {
+		t.Fatalf("count codeless acceptance notifications: %v", err)
+	}
+	if codelessOutboxMessages != 0 {
+		t.Fatalf("accepting an invitation queued %d codeless emails, want none", codelessOutboxMessages)
 	}
 	if _, err := h.pool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Accept Invitee Changed' WHERE user_id = $1`, invitee.ID); err != nil {
 		t.Fatalf("change accepting invitee profile after audit: %v", err)
@@ -854,7 +889,7 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 	createPath := "/identity/organizations/" + orgID + "/invitations"
 	createInvitation := func(email string) (string, string, string) {
 		t.Helper()
-		status, body := invitationCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": email})
+		status, body := identityCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": email})
 		if status != http.StatusAccepted {
 			t.Fatalf("create invitation for acceptance errors: status %d body %s, want 202", status, body)
 		}
@@ -873,12 +908,12 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 
 	attemptInvitationID, attemptCodeID, attemptCode := createInvitation(attemptInvitee.Email)
 	attemptPath := "/identity/invitations/" + attemptInvitationID + "/accept"
-	status, body := invitationCommand(t, handler, http.MethodPost, attemptPath,
+	status, body := identityCommand(t, handler, http.MethodPost, attemptPath,
 		keys.signToken(t, stranger.ID, time.Now().Add(time.Hour)), map[string]string{"code": attemptCode})
 	if status != http.StatusNotFound {
 		t.Fatalf("accept forwarded invitation: status %d body %s, want 404", status, body)
 	}
-	assertInvitationError(t, body, "invitation_not_found")
+	assertCommandError(t, body, "invitation_not_found")
 	assertContractResponse(t, http.MethodPost, attemptPath, status, body)
 	var failedAttempts int
 	if err := h.pool.QueryRow(ctx, `SELECT failed_attempts FROM identity.verification_codes WHERE id = $1`, attemptCodeID).Scan(&failedAttempts); err != nil {
@@ -894,7 +929,8 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 	}
 	inviteeToken := keys.signToken(t, attemptInvitee.ID, time.Now().Add(time.Hour))
 	for attempt := 1; attempt <= attemptLimit; attempt++ {
-		status, body = invitationCommand(t, handler, http.MethodPost, attemptPath, inviteeToken, map[string]string{"code": wrongCode})
+		var headers http.Header
+		status, body, headers = identityCommandFromIP(t, handler, http.MethodPost, attemptPath, inviteeToken, "", map[string]string{"code": wrongCode})
 		wantStatus, wantCode := http.StatusBadRequest, "invalid_invitation_code"
 		if attempt == attemptLimit {
 			wantStatus, wantCode = http.StatusConflict, "code_attempts_exhausted"
@@ -902,8 +938,11 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 		if status != wantStatus {
 			t.Fatalf("wrong invitation code attempt %d: status %d body %s, want %d", attempt, status, body, wantStatus)
 		}
-		assertInvitationError(t, body, wantCode)
+		assertCommandError(t, body, wantCode)
 		assertContractResponse(t, http.MethodPost, attemptPath, status, body)
+		if got, want := headers.Get("X-Invitation-Code-Attempts-Remaining"), strconv.Itoa(attemptLimit-attempt); got != want {
+			t.Fatalf("wrong invitation code attempt %d remaining-attempts header = %q, want %q", attempt, got, want)
+		}
 	}
 	var exhaustedStatus, exhaustedOutboxStatus string
 	if err := h.pool.QueryRow(ctx,
@@ -917,12 +956,15 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 	if failedAttempts != attemptLimit || exhaustedStatus != "superseded" || exhaustedOutboxStatus != "cancelled" {
 		t.Fatalf("exhausted code state = attempts:%d code:%q outbox:%q, want 5/superseded/cancelled", failedAttempts, exhaustedStatus, exhaustedOutboxStatus)
 	}
-	status, body = invitationCommand(t, handler, http.MethodPost, attemptPath, inviteeToken, map[string]string{"code": attemptCode})
+	status, body, headers := identityCommandFromIP(t, handler, http.MethodPost, attemptPath, inviteeToken, "", map[string]string{"code": attemptCode})
 	if status != http.StatusConflict {
 		t.Fatalf("accept exhausted code: status %d body %s, want 409", status, body)
 	}
-	assertInvitationError(t, body, "code_attempts_exhausted")
+	assertCommandError(t, body, "code_attempts_exhausted")
 	assertContractResponse(t, http.MethodPost, attemptPath, status, body)
+	if got := headers.Get("X-Invitation-Code-Attempts-Remaining"); got != "0" {
+		t.Fatalf("exhausted code remaining-attempts header = %q, want 0", got)
+	}
 
 	expiredInvitationID, _, expiredCode := createInvitation(expiredInvitee.Email)
 	if _, err := h.pool.Exec(ctx,
@@ -936,27 +978,27 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 		t.Fatalf("expire invitation code: %v", err)
 	}
 	expiredPath := "/identity/invitations/" + expiredInvitationID + "/accept"
-	status, body = invitationCommand(t, handler, http.MethodPost, expiredPath,
+	status, body = identityCommand(t, handler, http.MethodPost, expiredPath,
 		keys.signToken(t, expiredInvitee.ID, time.Now().Add(time.Hour)), map[string]string{"code": expiredCode})
 	if status != http.StatusConflict {
 		t.Fatalf("accept expired invitation: status %d body %s, want 409", status, body)
 	}
-	assertInvitationError(t, body, "invitation_expired")
+	assertCommandError(t, body, "invitation_expired")
 	assertContractResponse(t, http.MethodPost, expiredPath, status, body)
 
 	revokedInvitationID, _, revokedCode := createInvitation(revokedInvitee.Email)
 	revokePath := createPath + "/" + revokedInvitationID + "/revoke"
-	status, body = invitationCommand(t, handler, http.MethodPost, revokePath, ownerToken, map[string]string{})
+	status, body = identityCommand(t, handler, http.MethodPost, revokePath, ownerToken, map[string]string{})
 	if status != http.StatusOK {
 		t.Fatalf("revoke invitation before acceptance: status %d body %s, want 200", status, body)
 	}
 	revokedPath := "/identity/invitations/" + revokedInvitationID + "/accept"
-	status, body = invitationCommand(t, handler, http.MethodPost, revokedPath,
+	status, body = identityCommand(t, handler, http.MethodPost, revokedPath,
 		keys.signToken(t, revokedInvitee.ID, time.Now().Add(time.Hour)), map[string]string{"code": revokedCode})
 	if status != http.StatusConflict {
 		t.Fatalf("accept revoked invitation: status %d body %s, want 409", status, body)
 	}
-	assertInvitationError(t, body, "invitation_revoked")
+	assertCommandError(t, body, "invitation_revoked")
 	assertContractResponse(t, http.MethodPost, revokedPath, status, body)
 }
 
@@ -978,7 +1020,7 @@ func TestAcceptInvitationConcurrentRequestsCreateOneActiveMembership(t *testing.
 	keys := newES256KeyServer(t)
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	createPath := "/identity/organizations/" + orgID + "/invitations"
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath,
+	status, body := identityCommand(t, handler, http.MethodPost, createPath,
 		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for acceptance race: status %d body %s, want 202", status, body)
@@ -1071,23 +1113,23 @@ func TestInvitationAdminCommandsPreserveAuthorizationAndContractSemantics(t *tes
 	createPath := "/identity/organizations/" + orgID + "/invitations"
 	assertDenied := func(name, path string, payload any) {
 		t.Helper()
-		status, body := invitationCommand(t, handler, http.MethodPost, path, outsiderToken, payload)
+		status, body := identityCommand(t, handler, http.MethodPost, path, outsiderToken, payload)
 		if status != http.StatusNotFound {
 			t.Fatalf("%s as nonmember: status %d body %s, want 404", name, status, body)
 		}
-		assertInvitationError(t, body, "organization_not_found")
+		assertCommandError(t, body, "organization_not_found")
 		assertContractResponse(t, http.MethodPost, path, status, body)
 
-		status, body = invitationCommand(t, handler, http.MethodPost, path, memberToken, payload)
+		status, body = identityCommand(t, handler, http.MethodPost, path, memberToken, payload)
 		if status != http.StatusForbidden {
 			t.Fatalf("%s as Member: status %d body %s, want 403", name, status, body)
 		}
-		assertInvitationError(t, body, "insufficient_organization_role")
+		assertCommandError(t, body, "insufficient_organization_role")
 		assertContractResponse(t, http.MethodPost, path, status, body)
 	}
 
 	assertDenied("create invitation", createPath, map[string]string{"email": invitee.Email})
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
+	status, body := identityCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for authorization checks: status %d body %s, want 202", status, body)
 	}
@@ -1103,11 +1145,11 @@ func TestInvitationAdminCommandsPreserveAuthorizationAndContractSemantics(t *tes
 	assertDenied("revoke invitation", revokePath, map[string]string{})
 
 	invalidResendPath := createPath + "/not-a-uuid/resend"
-	status, body = invitationCommand(t, handler, http.MethodPost, invalidResendPath, ownerToken, map[string]string{})
+	status, body = identityCommand(t, handler, http.MethodPost, invalidResendPath, ownerToken, map[string]string{})
 	if status != http.StatusBadRequest {
 		t.Fatalf("resend malformed invitation id: status %d body %s, want 400", status, body)
 	}
-	assertInvitationError(t, body, "invalid_invitation_id")
+	assertCommandError(t, body, "invalid_invitation_id")
 	assertContractResponse(t, http.MethodPost, invalidResendPath, status, body)
 }
 
@@ -1128,7 +1170,7 @@ func TestCodeIssuanceSharesLimitsWithoutSharingInvalidationScope(t *testing.T) {
 	keys := newES256KeyServer(t)
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	createPath := "/identity/organizations/" + orgID + "/invitations"
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath,
+	status, body := identityCommand(t, handler, http.MethodPost, createPath,
 		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for issuance isolation: status %d body %s, want 202", status, body)
@@ -1149,7 +1191,7 @@ func TestCodeIssuanceSharesLimitsWithoutSharingInvalidationScope(t *testing.T) {
 		t.Fatalf("age invitation code beyond public resend cooldown: %v", err)
 	}
 
-	status, body = invitationCommand(t, handler, http.MethodPost, "/identity/verification-codes", "", map[string]string{"email": invitee.Email})
+	status, body = identityCommand(t, handler, http.MethodPost, "/identity/verification-codes", "", map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("issue public verification code: status %d body %s, want 202", status, body)
 	}
@@ -1183,7 +1225,7 @@ func TestCodeIssuanceSharesLimitsWithoutSharingInvalidationScope(t *testing.T) {
 		t.Fatalf("age shared-limit codes before invitation resend: %v", err)
 	}
 	resendPath := createPath + "/" + invitationID + "/resend"
-	status, body = invitationCommand(t, handler, http.MethodPost, resendPath,
+	status, body = identityCommand(t, handler, http.MethodPost, resendPath,
 		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{})
 	if status != http.StatusAccepted {
 		t.Fatalf("resend invitation for public-code isolation: status %d body %s, want 202", status, body)
@@ -1222,7 +1264,7 @@ func TestCreateInvitationWaitsForConcurrentAcceptanceBeforeCheckingMembership(t 
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	token := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
 	createPath := "/identity/organizations/" + orgID + "/invitations"
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath, token, map[string]string{"email": invitee.Email})
+	status, body := identityCommand(t, handler, http.MethodPost, createPath, token, map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for acceptance race: status %d body %s, want 202", status, body)
 	}
@@ -1265,7 +1307,7 @@ func TestCreateInvitationWaitsForConcurrentAcceptanceBeforeCheckingMembership(t 
 	}
 	results := make(chan creationResult, 1)
 	go func() {
-		status, body := invitationCommand(t, handler, http.MethodPost, createPath, token, map[string]string{"email": invitee.Email})
+		status, body := identityCommand(t, handler, http.MethodPost, createPath, token, map[string]string{"email": invitee.Email})
 		results <- creationResult{status: status, body: body}
 	}()
 
@@ -1302,7 +1344,7 @@ func TestCreateInvitationWaitsForConcurrentAcceptanceBeforeCheckingMembership(t 
 	if result.status != http.StatusConflict {
 		t.Fatalf("create after accepted membership: status %d body %s, want 409", result.status, result.body)
 	}
-	assertInvitationError(t, result.body, "active_membership_exists")
+	assertCommandError(t, result.body, "active_membership_exists")
 	assertContractResponse(t, http.MethodPost, createPath, result.status, result.body)
 
 	var pending int
@@ -1336,14 +1378,14 @@ func TestInvitationCommandsRejectMissingRequiredFields(t *testing.T) {
 	ownerToken := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
 	createPath := "/identity/organizations/" + orgID + "/invitations"
 
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{})
+	status, body := identityCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{})
 	if status != http.StatusBadRequest {
 		t.Fatalf("create invitation without email: status %d body %s, want 400", status, body)
 	}
-	assertInvitationError(t, body, "invalid_request")
+	assertCommandError(t, body, "invalid_request")
 	assertContractResponse(t, http.MethodPost, createPath, status, body)
 
-	status, body = invitationCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
+	status, body = identityCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for missing code test: status %d body %s, want 202", status, body)
 	}
@@ -1362,12 +1404,12 @@ func TestInvitationCommandsRejectMissingRequiredFields(t *testing.T) {
 		{name: "resend", path: resendPath},
 		{name: "revoke", path: revokePath},
 	} {
-		status, body = invitationCommand(t, handler, http.MethodPost, endpoint.path, ownerToken, nil)
+		status, body = identityCommand(t, handler, http.MethodPost, endpoint.path, ownerToken, nil)
 		if status != http.StatusBadRequest {
 			t.Errorf("%s invitation with null body: status %d body %s, want 400", endpoint.name, status, body)
 			continue
 		}
-		assertInvitationError(t, body, "invalid_request")
+		assertCommandError(t, body, "invalid_request")
 		assertContractResponse(t, http.MethodPost, endpoint.path, status, body)
 	}
 	var invitationStatus string
@@ -1378,12 +1420,12 @@ func TestInvitationCommandsRejectMissingRequiredFields(t *testing.T) {
 		t.Errorf("null-body commands changed invitation status to %q, want pending", invitationStatus)
 	}
 	acceptPath := "/identity/invitations/" + invitationID + "/accept"
-	status, body = invitationCommand(t, handler, http.MethodPost, acceptPath,
+	status, body = identityCommand(t, handler, http.MethodPost, acceptPath,
 		keys.signToken(t, invitee.ID, time.Now().Add(time.Hour)), map[string]string{})
 	if status != http.StatusBadRequest {
 		t.Fatalf("accept invitation without code: status %d body %s, want 400", status, body)
 	}
-	assertInvitationError(t, body, "invalid_request")
+	assertCommandError(t, body, "invalid_request")
 	assertContractResponse(t, http.MethodPost, acceptPath, status, body)
 }
 
@@ -1406,7 +1448,7 @@ func TestAcceptanceReleasesInvitationRowWhileWaitingForCreateSubjectLock(t *test
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	ownerToken := keys.signToken(t, owner.ID, time.Now().Add(time.Hour))
 	createPath := "/identity/organizations/" + orgID + "/invitations"
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
+	status, body := identityCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for lock order: status %d body %s, want 202", status, body)
 	}
@@ -1441,7 +1483,7 @@ func TestAcceptanceReleasesInvitationRowWhileWaitingForCreateSubjectLock(t *test
 	acceptResults := make(chan commandResult, 1)
 	acceptPath := "/identity/invitations/" + invitationID + "/accept"
 	go func() {
-		status, body := invitationCommand(t, handler, http.MethodPost, acceptPath,
+		status, body := identityCommand(t, handler, http.MethodPost, acceptPath,
 			inviteeToken, map[string]string{"code": invitationCode})
 		acceptResults <- commandResult{status: status, body: body}
 	}()
@@ -1469,7 +1511,7 @@ func TestAcceptanceReleasesInvitationRowWhileWaitingForCreateSubjectLock(t *test
 	revokeResults := make(chan commandResult, 1)
 	revokePath := createPath + "/" + invitationID + "/revoke"
 	go func() {
-		status, body := invitationCommand(t, handler, http.MethodPost, revokePath, ownerToken, map[string]string{})
+		status, body := identityCommand(t, handler, http.MethodPost, revokePath, ownerToken, map[string]string{})
 		revokeResults <- commandResult{status: status, body: body}
 	}()
 	select {
@@ -1489,7 +1531,7 @@ func TestAcceptanceReleasesInvitationRowWhileWaitingForCreateSubjectLock(t *test
 	if result.status != http.StatusConflict {
 		t.Fatalf("accept revoked invitation after lock release: status %d body %s, want 409", result.status, result.body)
 	}
-	assertInvitationError(t, result.body, "invitation_revoked")
+	assertCommandError(t, result.body, "invitation_revoked")
 	assertContractResponse(t, http.MethodPost, acceptPath, result.status, result.body)
 }
 
@@ -1568,7 +1610,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 	}
 	createResults := make(chan commandResult, 1)
 	go func() {
-		status, body := invitationCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
+		status, body := identityCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
 		createResults <- commandResult{status: status, body: body}
 	}()
 	waitForLock("%pg_advisory_xact_lock%", "create invitation", createResults)
@@ -1610,7 +1652,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 	resendPath := createPath + "/" + invitationID + "/resend"
 	resendResults := make(chan commandResult, 1)
 	go func() {
-		status, body := invitationCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
+		status, body := identityCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
 		resendResults <- commandResult{status: status, body: body}
 	}()
 	waitForLock("%FROM public.invitations%", "resend invitation", resendResults)
@@ -1661,7 +1703,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 	adminToken := keys.signToken(t, admin.ID, time.Now().Add(time.Hour))
 	inviteeToken := keys.signToken(t, invitee.ID, time.Now().Add(time.Hour))
 	createPath := "/identity/organizations/" + orgID + "/invitations"
-	status, body := invitationCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
+	status, body := identityCommand(t, handler, http.MethodPost, createPath, ownerToken, map[string]string{"email": invitee.Email})
 	if status != http.StatusAccepted {
 		t.Fatalf("create invitation for serialized resends: status %d body %s, want 202", status, body)
 	}
@@ -1696,7 +1738,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 	resendPath := createPath + "/" + invitationID + "/resend"
 	ownerResults := make(chan commandResult, 1)
 	go func() {
-		status, body := invitationCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
+		status, body := identityCommand(t, handler, http.MethodPost, resendPath, ownerToken, map[string]string{})
 		ownerResults <- commandResult{status: status, body: body}
 	}()
 	deadline := time.Now().Add(2 * time.Second)
@@ -1725,7 +1767,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	status, body = invitationCommand(t, handler, http.MethodPost, resendPath, adminToken, map[string]string{})
+	status, body = identityCommand(t, handler, http.MethodPost, resendPath, adminToken, map[string]string{})
 	if status != http.StatusAccepted {
 		t.Fatalf("admin resend while owner blocked: status %d body %s, want 202", status, body)
 	}
@@ -1775,7 +1817,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 	}
 
 	acceptPath := "/identity/invitations/" + invitationID + "/accept"
-	status, body = invitationCommand(t, handler, http.MethodPost, acceptPath, inviteeToken, map[string]string{"code": extractCode(t, activeBody)})
+	status, body = identityCommand(t, handler, http.MethodPost, acceptPath, inviteeToken, map[string]string{"code": extractCode(t, activeBody)})
 	if status != http.StatusOK {
 		t.Fatalf("accept current active code after serialized resends: status %d body %s, want 200", status, body)
 	}

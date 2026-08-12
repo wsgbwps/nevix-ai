@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '../../../components/ui/select'
+import type { AuthenticatedOrganizationSession } from '../api/client'
 import { readAuditLogEntries, type AuditLogEntry } from '../api/audit-logs'
 import { serializeAuditLogCsv } from '../lib/audit-log-csv'
 import {
@@ -20,9 +21,7 @@ import { auditLogTargetDisplayName } from '../lib/audit-log-target'
 import type { ActiveMembership } from '../api/memberships'
 import { useActiveOrganization } from '../model/active-organization-state'
 
-type GetSession = () => Promise<
-  { readonly accessToken: string; readonly userId: string } | undefined
->
+type GetSession = () => Promise<AuthenticatedOrganizationSession | undefined>
 
 const actionTranslationKeys = {
   invitation_created: 'audit.actions.invitationCreated',

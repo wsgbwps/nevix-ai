@@ -629,9 +629,10 @@ func TestRLSInvitationAndAuditLogVisibility(t *testing.T) {
 	}
 	for _, status := range []string{"pending", "accepted", "revoked"} {
 		if _, err := seedTx.Exec(ctx,
-			`INSERT INTO public.invitations (organization_id, email, status, expires_at)
-			 VALUES ($1, $2, $3, now() + interval '7 days')`,
-			orgID, invitee.Email, status,
+			`INSERT INTO public.invitations (
+			   organization_id, email, status, expires_at, organization_name, inviter_display_name
+			 ) VALUES ($1, $2, $3, now() + interval '7 days', $4, $5)`,
+			orgID, invitee.Email, status, "RLS Invitations Org", "Invitation Owner",
 		); err != nil {
 			t.Fatalf("seed %s invitation: %v", status, err)
 		}
@@ -709,9 +710,18 @@ func TestRLSInvitationAndAuditLogVisibility(t *testing.T) {
 	}
 
 	inviteeRows := stack.restRows(t, ctx,
-		"/invitations?select=id,status&organization_id=eq."+orgID, invitee.Token)
+		"/invitations?select=id,status,organization_name,inviter_display_name&organization_id=eq."+orgID, invitee.Token)
 	if len(inviteeRows) != 1 || fmt.Sprint(inviteeRows[0]["status"]) != "pending" {
 		t.Fatalf("%s sees invitations %v, want only the pending row", invitee.Email, inviteeRows)
+	}
+	if fmt.Sprint(inviteeRows[0]["organization_name"]) != "RLS Invitations Org" ||
+		fmt.Sprint(inviteeRows[0]["inviter_display_name"]) != "Invitation Owner" {
+		t.Fatalf("%s sees invitation display projection %v, want its organization and inviter snapshots", invitee.Email, inviteeRows)
+	}
+	inviteeOrganizations := stack.restRows(t, ctx,
+		"/organizations?select=id&id=eq."+orgID, invitee.Token)
+	if len(inviteeOrganizations) != 0 {
+		t.Fatalf("pending invitee sees parent Organization %v, want no Organization rows before acceptance", inviteeOrganizations)
 	}
 	memberInvitations := stack.restRows(t, ctx,
 		"/invitations?select=id&organization_id=eq."+orgID, member.Token)

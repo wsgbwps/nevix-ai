@@ -1,10 +1,6 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { parseSupabasePublicConfig } from '../../../../../shared/config/supabase-public-config'
+import { createOrganizationDataClient, type AuthenticatedOrganizationSession } from './client'
 
-export interface AuthenticatedMembershipSession {
-  readonly accessToken: string
-  readonly userId: string
-}
+export type AuthenticatedMembershipSession = AuthenticatedOrganizationSession
 
 export type OrganizationRole = 'owner' | 'admin' | 'member'
 
@@ -22,7 +18,7 @@ export interface ActiveMembership {
 export async function readActiveMemberships(
   session: AuthenticatedMembershipSession
 ): Promise<readonly ActiveMembership[]> {
-  const { data, error } = await membershipClient(session)
+  const { data, error } = await createOrganizationDataClient(session)
     .from('memberships')
     .select('role, organizations(id, name)')
     .eq('user_id', session.userId)
@@ -30,24 +26,6 @@ export async function readActiveMemberships(
 
   if (error) throw new Error('Membership request failed.')
   return data.map((row) => toActiveMembership(row))
-}
-
-function membershipClient(session: AuthenticatedMembershipSession): SupabaseClient {
-  const config = parseSupabasePublicConfig({
-    url: __NEVIX_SUPABASE_URL__,
-    publishableKey: __NEVIX_SUPABASE_PUBLISHABLE_KEY__,
-    policy: __NEVIX_SUPABASE_CONFIG_POLICY__
-  })
-  if (!config) throw new Error('Membership configuration is unavailable.')
-
-  return createClient(config.url, config.publishableKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false
-    },
-    accessToken: async () => session.accessToken
-  })
 }
 
 function toActiveMembership(value: unknown): ActiveMembership {

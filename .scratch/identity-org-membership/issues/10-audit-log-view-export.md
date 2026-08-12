@@ -37,3 +37,16 @@
   - Check coverage: Audit Log navigation preserves Authentication clear-session and logout across restart; runtime Admin-to-Member refresh hides the Audit Log navigation and section while RLS remains authoritative.
   - Review conclusion: Reviewed the complete final Organization diff and bound Smoke result; navigation no longer mutates the renderer URL, Authentication clear-session remains trusted, and refreshed Membership roles fail closed without inferring authorization from empty Audit Log data. No boundary or unrelated changes found.
   - Closure: accepted locally; PR remains in review pending the latest CI run and merge.
+
+- 2026-08-12: Integrated latest `main` (`615e75b`, PR #44) to clear GitHub's dirty merge state and allow the PR workflow to run. Three Organization conflicts were resolved as behavior unions: invitation acceptance/startup reconciliation remains intact; Audit Log Membership refresh remains intact; E2E helpers retain both invitation/Profile and Audit Log/role fixtures. Audit Log now reuses main's canonical `AuthenticatedOrganizationSession`, and the Member fixture explicitly supplies the Profile required by the latest startup flow.
+
+  Validation after integration: Desktop typecheck PASS; lint PASS; unit 20/20 PASS; architecture 30/30 PASS (111 source files); i18n resource contract 6/6 PASS; latest-main Smoke E2E 18/18 PASS, including clear-session + logout/restart, runtime Admin→Member removal, Member RLS denial, and PR #44 invitation flows.
+
+  Final-state evidence
+  - Acceptance boundary: Latest-main invitation/startup behavior and the Audit Log authorization fixes must coexist; clear-session/logout restart, runtime Admin→Member surface removal, and Member RLS denial must remain correct.
+  - Final diff: `sha256:1b49e222d05f538ece6f61d634cc26c22b3d6122e73023defbe30537bb8b0eb0`
+  - Relevant check: Desktop Organization Audit Log main integration closure
+  - Check result: PASS
+  - Check coverage: Merged invitation/startup reconciliation with Audit Log Membership refresh; Authentication clear-session/logout restart, runtime Admin-to-Member removal, and Member RLS denial remain correct on latest main.
+  - Review conclusion: Reviewed the latest-main conflict union and PASS results; PR #44 invitation/startup behavior and the Audit Log refresh/clear-session fixes are both preserved, the Organization session type is canonical, and Member fixtures now satisfy the Profile prerequisite without weakening RLS coverage.
+  - Closure: accepted locally; merge commit remains to be pushed so GitHub can start the latest PR CI gate.

@@ -19,6 +19,7 @@ import {
   seedActiveMembership,
   seedAuditLogEntries,
   seedOrganizationWithMembership,
+  seedProfile,
   updateMembershipRole
 } from './helpers/organization-seed'
 
@@ -408,6 +409,7 @@ test(
     ])
     const memberIdentity = uniqueAuthIdentity('audit-log-member')
     const memberId = await createAuthUser(authHarness, memberIdentity, true)
+    await seedProfile(memberId)
     await seedActiveMembership(organization.id, memberId, 'member')
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-member-'))
 

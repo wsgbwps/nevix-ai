@@ -7,8 +7,11 @@ export type StartupBranch =
 
 export function resolveStartupBranch(
   memberships: readonly ActiveMembership[],
-  rememberedOrganizationId: string | undefined
+  rememberedOrganizationId: string | undefined,
+  hasPendingInvitation = false
 ): StartupBranch {
+  if (hasPendingInvitation) return { kind: 'picker' }
+
   const rememberedMembership = memberships.find(
     (membership) => membership.organizationId === rememberedOrganizationId
   )
@@ -21,4 +24,21 @@ export function resolveStartupBranch(
   }
 
   return memberships.length === 0 ? { kind: 'onboarding' } : { kind: 'picker' }
+}
+
+export function reconcileStartupBranch(
+  memberships: readonly ActiveMembership[],
+  rememberedOrganizationId: string | undefined,
+  hasPendingInvitation: boolean,
+  actions: {
+    readonly beginOnboarding: () => void
+    readonly enterOrganization: (membership: ActiveMembership) => void
+  }
+): void {
+  const branch = resolveStartupBranch(memberships, rememberedOrganizationId, hasPendingInvitation)
+  if (branch.kind === 'onboarding') {
+    actions.beginOnboarding()
+  } else if (branch.kind === 'enter') {
+    actions.enterOrganization(branch.membership)
+  }
 }

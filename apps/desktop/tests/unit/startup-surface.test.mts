@@ -57,7 +57,20 @@ const surfaceRules: readonly SurfaceRule[] = [
   {
     statuses: ['authenticated'],
     eligibility: [true],
-    phases,
+    phases: ['idle', 'resolving'],
+    activeOrganizationStates,
+    expectedByPathname: {
+      '/auth': { render: 'restoring' },
+      '/onboarding': { render: 'restoring' },
+      '/select-organization': { render: 'restoring' },
+      '/': { render: 'restoring' },
+      '/projects/example': { render: 'restoring' }
+    }
+  },
+  {
+    statuses: ['authenticated'],
+    eligibility: [true],
+    phases: ['ready'],
     activeOrganizationStates,
     expectedByPathname: {
       '/auth': { navigate: '/onboarding' },
