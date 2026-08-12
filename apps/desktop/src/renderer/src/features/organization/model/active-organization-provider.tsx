@@ -7,7 +7,8 @@ import {
   type PendingInvitation
 } from '../api/invitations'
 import type { AuthenticatedOrganizationSession } from '../api/client'
-import { readActiveMemberships, type ActiveMembership } from '../api/memberships'
+import { leaveOrganization, readActiveMemberships, type ActiveMembership } from '../api/memberships'
+import { updateOrganizationSettings } from '../api/organization-settings'
 import {
   ActiveOrganizationContext,
   type ActiveOrganizationState,
@@ -40,7 +41,7 @@ export function ActiveOrganizationProvider({
   hasCompletedProfile,
   children
 }: ActiveOrganizationProviderProps): React.JSX.Element {
-  const onboarding = useOrganizationOnboarding()
+  const { beginOnboarding, resolveOnboarding } = useOrganizationOnboarding()
   const [startupPhase, setStartupPhase] = useState<OrganizationStartupPhase>('idle')
   const [activeOrganization, setActiveOrganization] = useState<ActiveMembership>()
   const [availableOrganizations, setAvailableOrganizations] = useState<readonly ActiveMembership[]>(
@@ -67,6 +68,16 @@ export function ActiveOrganizationProvider({
       organizationId: membership.organizationId
     })
   }, [])
+
+  const openOrganizationPicker = useCallback((): void => {
+    activeOrganizationRef.current = undefined
+    setActiveOrganization(undefined)
+    resolveOnboarding({
+      shouldCompleteProfile: false,
+      shouldCreateOrganization: false
+    })
+    setStartupPhase('ready')
+  }, [resolveOnboarding])
 
   const acceptInvitation = useCallback(
     async (invitation: PendingInvitation, code: string): Promise<void> => {
@@ -111,7 +122,7 @@ export function ActiveOrganizationProvider({
       rememberedOrganizationId,
       pendingInvitations.length > 0,
       {
-        beginOnboarding: onboarding.beginOnboarding,
+        beginOnboarding,
         enterOrganization
       }
     )
@@ -119,7 +130,7 @@ export function ActiveOrganizationProvider({
     availableOrganizations,
     rememberedOrganizationId,
     pendingInvitations.length,
-    onboarding.beginOnboarding,
+    beginOnboarding,
     enterOrganization
   ])
 
@@ -159,6 +170,56 @@ export function ActiveOrganizationProvider({
     return refresh
   }, [getSession, isAuthenticated])
 
+  const leaveActiveOrganization = useCallback(async (): Promise<void> => {
+    const currentOrganization = activeOrganizationRef.current
+    if (!isAuthenticated || !currentOrganization) {
+      throw new Error('Active Organization is unavailable.')
+    }
+
+    const session = await getSession()
+    if (!session) throw new Error('Active Organization Session is unavailable.')
+
+    await leaveOrganization(session, currentOrganization.organizationId)
+    const memberships = await readActiveMemberships(session)
+    activeOrganizationRef.current = undefined
+    setActiveOrganization(undefined)
+    setAvailableOrganizations(memberships)
+    resolveOnboarding({
+      shouldCompleteProfile: false,
+      shouldCreateOrganization: memberships.length === 0 && pendingInvitations.length === 0
+    })
+    setStartupPhase('ready')
+  }, [getSession, isAuthenticated, resolveOnboarding, pendingInvitations.length])
+
+  const updateActiveOrganizationName = useCallback(
+    async (name: string): Promise<void> => {
+      const trimmedName = name.trim()
+      if (trimmedName.length === 0) throw new Error('Organization name is required.')
+
+      const currentOrganization = activeOrganizationRef.current
+      if (!isAuthenticated || !currentOrganization) {
+        throw new Error('Active Organization is unavailable.')
+      }
+      const session = await getSession()
+      if (!session) throw new Error('Active Organization Session is unavailable.')
+
+      const updated = await updateOrganizationSettings(
+        session,
+        currentOrganization.organizationId,
+        trimmedName
+      )
+      const refreshed = await refreshActiveOrganization()
+      if (
+        !refreshed ||
+        refreshed.organizationId !== updated.id ||
+        refreshed.organizationName !== updated.name
+      ) {
+        throw new Error('Updated Active Organization is unavailable.')
+      }
+    },
+    [getSession, isAuthenticated, refreshActiveOrganization]
+  )
+
   useEffect(() => {
     if (!isAuthenticated) return
     if (activeOrganization) return
@@ -190,7 +251,7 @@ export function ActiveOrganizationProvider({
         setRememberedOrganizationId(rememberedId)
 
         const branch = resolveStartupBranch(memberships, rememberedId, pending.length > 0)
-        onboarding.resolveOnboarding({
+        resolveOnboarding({
           shouldCompleteProfile: !profileCompleted,
           shouldCreateOrganization: branch.kind === 'onboarding'
         })
@@ -206,7 +267,7 @@ export function ActiveOrganizationProvider({
     })()
   }, [
     isAuthenticated,
-    onboarding,
+    resolveOnboarding,
     activeOrganization,
     getSession,
     hasCompletedProfile,
@@ -221,6 +282,9 @@ export function ActiveOrganizationProvider({
       pendingInvitations,
       rememberedOrganizationId,
       enterOrganization,
+      openOrganizationPicker,
+      leaveActiveOrganization,
+      updateActiveOrganizationName,
       refreshActiveOrganization,
       acceptInvitation,
       reconcileStartupAfterInvitationChange
@@ -232,6 +296,9 @@ export function ActiveOrganizationProvider({
       pendingInvitations,
       rememberedOrganizationId,
       enterOrganization,
+      openOrganizationPicker,
+      leaveActiveOrganization,
+      updateActiveOrganizationName,
       refreshActiveOrganization,
       acceptInvitation,
       reconcileStartupAfterInvitationChange

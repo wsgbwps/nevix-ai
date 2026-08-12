@@ -156,6 +156,24 @@ export async function seedAuditLogEntries(
   })
 }
 
+export async function readPendingInvitationId(
+  organizationId: string,
+  email: string
+): Promise<string> {
+  return withIdentityAppClient(async (client) => {
+    const result = await client.query<{ id: string }>(
+      `SELECT id
+       FROM invitations
+       WHERE organization_id = $1 AND email = $2 AND status = 'pending'`,
+      [organizationId, email]
+    )
+    if (result.rows.length !== 1) {
+      throw new Error('Expected exactly one pending invitation')
+    }
+    return result.rows[0].id
+  })
+}
+
 export async function ageInvitationCodeBeyondCooldown(invitationId: string): Promise<void> {
   await withIdentityAppClient(async (client) => {
     const result = await client.query(
