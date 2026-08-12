@@ -5,6 +5,84 @@ import {
 
 export const organizationTranslations = defineResourceTranslations({
   'zh-CN': {
+    common: {
+      displayName: '显示名',
+      displayNamePlaceholder: '其他成员看到的名字',
+      orgName: '组织名称',
+      orgNamePlaceholder: '例如：星云设计',
+      email: '邮箱',
+      emailPlaceholder: 'name@example.com',
+      cancel: '取消',
+      save: '保存',
+      back: '返回',
+      continue: '继续',
+      close: '关闭',
+      youSuffix: '（你）',
+      roles: {
+        owner: '拥有者',
+        admin: '管理员',
+        member: '成员'
+      },
+      memberCount: '{{count}} 名成员',
+      validation: {
+        displayNameRequired: '请输入显示名（不能为纯空白）',
+        displayNameTooLong: '显示名最长 50 个字符',
+        orgNameRequired: '请输入组织名称'
+      }
+    },
+    shell: {
+      switchToPicker: '全部组织'
+    },
+    settingsChrome: {
+      groupOrg: '组织',
+      languageDescription: '选择 Desktop 界面的显示语言。',
+      updateOrganizationName: '应用组织改名',
+      discardOrganizationName: '放弃组织改名'
+    },
+    members: {
+      title: '成员',
+      inviteCta: '邀请成员',
+      inviteDialogTitle: '邀请成员',
+      inviteDialogDescription: '邀请码将发送到该邮箱；对方在 Desktop 输码后加入，默认角色为成员。',
+      send: '发送邀请',
+      sent: '邀请已发送至 {{email}}',
+      membersTab: '成员',
+      invitesTab: '待定邀请',
+      pendingSection: '待定邀请（{{count}}）',
+      emptyInvites: '暂无待定邀请。',
+      resend: '重发',
+      resent: '已重发，新邀请码 7 天内有效。',
+      revoke: '撤销',
+      revoked: '已撤销该邀请。',
+      expires: '{{days}} 天后过期',
+      setAdmin: '设为管理员',
+      setMember: '设为成员',
+      changeRole: '变更角色',
+      remove: '移除成员',
+      removeTitle: '移除 {{name}}？',
+      removeDescription: '移除后其访问立即结束，并会收到邮件通知。该操作会记入审计日志。',
+      confirmRemove: '确认移除',
+      leave: '退出组织',
+      leaveTitle: '退出「{{org}}」？',
+      leaveDescription: '退出后你将失去该组织的访问权限，可经再次邀请加入。',
+      confirmLeave: '确认退出',
+      roleUpdated: '已更新 {{name}} 的角色。',
+      memberReadOnly: '成员角色仅可查看成员列表。',
+      loading: '正在加载成员信息…',
+      loadError: '暂时无法加载成员信息。请重试。',
+      actionFailed: '操作失败，请重试。',
+      activeMembershipExists: '该邮箱已是组织成员。',
+      pendingInvitationExists: '该邮箱已有待定邀请。',
+      cooldownActive: '请在 {{seconds}} 秒后重试。',
+      invitationRateLimited: '邀请请求过于频繁，请稍后重试。',
+      retry: '重试',
+      retryLoadAria: '重新加载成员',
+      changeRoleAria: '变更 {{name}} 的角色',
+      removeAria: '移除成员 {{name}}',
+      leaveAria: '{{name}} 退出组织',
+      resendAria: '重发 {{email}} 的邀请',
+      revokeAria: '撤销 {{email}} 的邀请'
+    },
     startup: {
       restoring: '正在恢复你的工作区…'
     },
@@ -53,7 +131,6 @@ export const organizationTranslations = defineResourceTranslations({
     },
     audit: {
       title: '审计日志',
-      settingsGroup: '组织',
       description: '组织安全事件，滚动保留 365 天，不可修改。',
       filterAll: '全部事件',
       export: '导出',
@@ -83,6 +160,87 @@ export const organizationTranslations = defineResourceTranslations({
     }
   },
   en: {
+    common: {
+      displayName: 'Display name',
+      displayNamePlaceholder: 'The name other members see',
+      orgName: 'Organization name',
+      orgNamePlaceholder: 'e.g. Nebula Design',
+      email: 'Email',
+      emailPlaceholder: 'name@example.com',
+      cancel: 'Cancel',
+      save: 'Save',
+      back: 'Back',
+      continue: 'Continue',
+      close: 'Close',
+      youSuffix: '(you)',
+      roles: {
+        owner: 'Owner',
+        admin: 'Admin',
+        member: 'Member'
+      },
+      memberCount: '{{count}} members',
+      validation: {
+        displayNameRequired: 'Enter a display name (not whitespace only)',
+        displayNameTooLong: 'Display name is 50 characters at most',
+        orgNameRequired: 'Enter an organization name'
+      }
+    },
+    shell: {
+      switchToPicker: 'All organizations'
+    },
+    settingsChrome: {
+      groupOrg: 'Organization',
+      languageDescription: 'Choose the language used in the Desktop interface.',
+      updateOrganizationName: 'Apply organization rename',
+      discardOrganizationName: 'Discard organization rename'
+    },
+    members: {
+      title: 'Members',
+      inviteCta: 'Invite member',
+      inviteDialogTitle: 'Invite member',
+      inviteDialogDescription:
+        'A code is emailed to this address. They join as a Member after entering it in Desktop.',
+      send: 'Send invitation',
+      sent: 'Invitation sent to {{email}}',
+      membersTab: 'Members',
+      invitesTab: 'Pending invitations',
+      pendingSection: 'Pending invitations ({{count}})',
+      emptyInvites: 'No pending invitations.',
+      resend: 'Resend',
+      resent: 'Resent. The new code is valid for 7 days.',
+      revoke: 'Revoke',
+      revoked: 'Invitation revoked.',
+      expires: 'Expires in {{days}} days',
+      setAdmin: 'Make Admin',
+      setMember: 'Make Member',
+      changeRole: 'Change role',
+      remove: 'Remove member',
+      removeTitle: 'Remove {{name}}?',
+      removeDescription:
+        'Their access ends immediately and they are notified by email. This is recorded in the audit log.',
+      confirmRemove: 'Remove',
+      leave: 'Leave organization',
+      leaveTitle: 'Leave "{{org}}"?',
+      leaveDescription:
+        'You will lose access to this organization. You can rejoin with a new invitation.',
+      confirmLeave: 'Leave',
+      roleUpdated: 'Updated the role of {{name}}.',
+      memberReadOnly: 'The Member role can only view the roster.',
+      loading: 'Loading members…',
+      loadError: 'Unable to load members right now. Try again.',
+      actionFailed: 'The action failed. Try again.',
+      activeMembershipExists: 'This email already belongs to an organization member.',
+      pendingInvitationExists: 'A pending invitation already exists for this email.',
+      cooldownActive: 'Try again in {{seconds}} seconds.',
+      invitationRateLimited: 'Too many invitation requests. Try again later.',
+      retry: 'Try again',
+      retryLoadAria: 'Retry loading members',
+      changeRoleAria: 'Change role for {{name}}',
+      removeAria: 'Remove member {{name}}',
+      leaveAria: '{{name}} leave organization',
+      resendAria: 'Resend invitation to {{email}}',
+      revokeAria: 'Revoke invitation to {{email}}'
+    },
     startup: {
       restoring: 'Restoring your workspace…'
     },
@@ -132,7 +290,6 @@ export const organizationTranslations = defineResourceTranslations({
     },
     audit: {
       title: 'Audit log',
-      settingsGroup: 'Organization',
       description: 'Organization security events. Kept for 365 days, immutable.',
       filterAll: 'All events',
       export: 'Export',

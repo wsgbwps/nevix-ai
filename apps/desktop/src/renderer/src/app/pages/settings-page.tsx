@@ -1,8 +1,13 @@
 import { Link } from '@tanstack/react-router'
-import { useTranslation } from 'react-i18next'
 import { ArrowLeftIcon, LanguagesIcon, UserRoundIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { LanguageModeSettings } from '../../features/language'
-import { AuditLogSettings, AuditLogSettingsNavigation } from '../../features/organization'
+import {
+  ActiveOrganizationSettingsContext,
+  AuditLogSettings,
+  MembersSettings,
+  OrganizationSettingsNavigation
+} from '../../features/organization'
 import { ProfileSettings } from '../../features/profile'
 import { useAuthenticationState } from '../authentication-state'
 
@@ -18,7 +23,7 @@ export function SettingsPage(): React.JSX.Element | null {
 
   return (
     <div className="flex min-h-svh w-full">
-      <aside className="bg-sidebar text-sidebar-foreground flex w-64 shrink-0 flex-col gap-6 border-r p-4">
+      <aside className="bg-sidebar text-sidebar-foreground flex w-64 shrink-0 flex-col gap-5 border-r p-4">
         <Link
           to="/"
           className="text-muted-foreground hover:text-foreground flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors"
@@ -26,6 +31,9 @@ export function SettingsPage(): React.JSX.Element | null {
           <ArrowLeftIcon className="size-4" />
           {t('settings.back')}
         </Link>
+
+        <ActiveOrganizationSettingsContext />
+
         <nav aria-label={t('settings.title')} className="grid gap-4">
           <div className="grid gap-1">
             <p className="text-muted-foreground px-2.5 text-xs font-medium tracking-wide uppercase">
@@ -46,7 +54,8 @@ export function SettingsPage(): React.JSX.Element | null {
               {t('settings.language')}
             </a>
           </div>
-          <AuditLogSettingsNavigation />
+
+          <OrganizationSettingsNavigation />
         </nav>
       </aside>
       <main className="max-h-svh flex-1 overflow-y-auto">
@@ -63,6 +72,7 @@ export function SettingsPage(): React.JSX.Element | null {
               <LanguageModeSettings />
             </div>
           </section>
+          <MembersSettings getSession={authentication.getSession} />
           <AuditLogSettings getSession={authentication.getSession} />
         </div>
       </main>

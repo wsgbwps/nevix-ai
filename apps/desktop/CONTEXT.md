@@ -138,5 +138,5 @@ Session 建立后 Desktop 呈现的整体界面框架，由侧边导航与内容
 _Avoid_: Dashboard, Home Screen, Main Window
 
 **Settings Page**:
-承载设备级设置项（当前仅有 Language Mode）的独立全屏界面，在 App Shell 之外呈现；它只是各 Feature 所提供设置项的组合面，本身不构成 Domain、不拥有任何行为。
+承载账户（个人资料、语言）与组织（成员、审计日志）设置并展示当前 Organization 上下文卡的独立全屏聚合页；它在 App Shell 之外呈现，只组合各 Feature 的设置贡献，本身不构成 Domain、不拥有任何业务行为。
 _Avoid_: Settings Domain, Preferences Center, Settings Dialog

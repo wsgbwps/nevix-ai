@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ScrollTextIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import {
   Select,
@@ -18,8 +17,7 @@ import {
   formatAuditLogTime
 } from '../lib/audit-log-timeline'
 import { auditLogTargetDisplayName } from '../lib/audit-log-target'
-import { canViewAuditLog, useVerifiedAuditLogOrganization } from '../model/audit-log-access'
-import { useActiveOrganization } from '../model/active-organization-state'
+import { useVerifiedAuditLogOrganization } from '../model/audit-log-access'
 
 type GetSession = () => Promise<AuthenticatedOrganizationSession | undefined>
 
@@ -41,34 +39,6 @@ function actionTranslationKey(
 ): (typeof actionTranslationKeys)[keyof typeof actionTranslationKeys] | undefined {
   if (!Object.hasOwn(actionTranslationKeys, action)) return undefined
   return actionTranslationKeys[action as keyof typeof actionTranslationKeys]
-}
-
-/**
- * This contribution owns Organization-specific Settings navigation. The Settings composition root
- * only places it beside other feature contributions.
- */
-export function AuditLogSettingsNavigation(): React.JSX.Element | null {
-  const { t } = useTranslation('organization')
-  const { activeOrganization } = useActiveOrganization()
-
-  if (!canViewAuditLog(activeOrganization)) return null
-
-  return (
-    <div className="grid gap-1">
-      <p className="text-muted-foreground px-2.5 text-xs font-medium tracking-wide uppercase">
-        {t('audit.settingsGroup')}
-      </p>
-      <button
-        type="button"
-        aria-controls="audit-log"
-        onClick={() => document.getElementById('audit-log')?.scrollIntoView({ block: 'start' })}
-        className="text-sidebar-foreground hover:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
-      >
-        <ScrollTextIcon className="size-4" />
-        {t('audit.title')}
-      </button>
-    </div>
-  )
 }
 
 export function AuditLogSettings({
