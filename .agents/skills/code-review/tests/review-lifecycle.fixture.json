@@ -1,0 +1,185 @@
+{
+  "initial": {
+    "phase": "post-disposition",
+    "schema": "code-review-findings/v1",
+    "fixedPoint": "fixture-base",
+    "scopePaths": ["src/checkout.ts", "src/generated.ts"],
+    "currentDiffDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "fullReviewCount": 1,
+    "targetedReviewRound": 0,
+    "findings": [
+      {
+        "id": "CR-STANDARDS-0001",
+        "axis": "standards",
+        "identity": {
+          "owner": "src/checkout.ts",
+          "source": "AGENTS.md authorization rule",
+          "anchor": "src/checkout.ts:submitOrder",
+          "defect": "missing authorization guard"
+        },
+        "level": "blocker",
+        "disposition": "accepted",
+        "dispositionReason": "The current implementation permits an unauthorized order.",
+        "owner": "src/checkout.ts",
+        "status": "open",
+        "evidence": [
+          {
+            "kind": "diff-hunk",
+            "ref": "src/checkout.ts:submitOrder",
+            "claim": "The new command reaches persistence without authorization."
+          }
+        ],
+        "reviewedDiffDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unresolvedTargetedRounds": 0,
+        "introducedBy": null
+      },
+      {
+        "id": "CR-SPEC-0001",
+        "axis": "spec",
+        "identity": {
+          "owner": "src/checkout.ts",
+          "source": "fixture spec optional telemetry",
+          "anchor": "src/checkout.ts:submitOrder",
+          "defect": "telemetry detail omitted"
+        },
+        "level": "advisory",
+        "disposition": "deferred",
+        "dispositionReason": "The optional telemetry is tracked outside this blocker loop.",
+        "owner": "src/checkout.ts",
+        "status": "closed",
+        "evidence": [
+          {
+            "kind": "spec",
+            "ref": "fixture-spec:optional-telemetry",
+            "claim": "Telemetry is optional and does not affect acceptance."
+          }
+        ],
+        "reviewedDiffDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unresolvedTargetedRounds": 0,
+        "introducedBy": null
+      },
+      {
+        "id": "CR-STANDARDS-0002",
+        "axis": "standards",
+        "identity": {
+          "owner": "src/generated.ts",
+          "source": "smell baseline mysterious name",
+          "anchor": "src/generated.ts:x",
+          "defect": "generated identifier is terse"
+        },
+        "level": "advisory",
+        "disposition": "false-positive",
+        "dispositionReason": "The governing generator contract requires this generated identifier and excludes manual edits.",
+        "owner": "src/generated.ts",
+        "status": "closed",
+        "evidence": [
+          {
+            "kind": "counter-evidence",
+            "ref": "generator-contract:x",
+            "claim": "The repository contract overrides the smell baseline."
+          }
+        ],
+        "reviewedDiffDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unresolvedTargetedRounds": 0,
+        "introducedBy": null
+      }
+    ],
+    "repairRecords": [],
+    "relevantCheck": null,
+    "outcome": "needs-fix"
+  },
+  "success": {
+    "repairRecord": {
+      "fixFor": ["CR-STANDARDS-0001"],
+      "beforeDiffDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "afterDiffDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "repairDiffDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "touched": ["src/checkout.ts:submitOrder"],
+      "checks": ["checkout authorization fixture: PASS"]
+    },
+    "targetedResult": {
+      "round": 1,
+      "fullReviewStarted": false,
+      "fullReviewCount": 1,
+      "targetedIds": ["CR-STANDARDS-0001"],
+      "updates": [
+        {
+          "id": "CR-STANDARDS-0001",
+          "status": "closed",
+          "reviewedDiffDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "unresolvedTargetedRounds": 0
+        }
+      ],
+      "newFindings": [
+        {
+          "id": "CR-STANDARDS-0003",
+          "axis": "standards",
+          "identity": {
+            "owner": "src/checkout.ts",
+            "source": "AGENTS.md logging rule",
+            "anchor": "src/checkout.ts:submitOrder",
+            "defect": "repair logs raw authorization token"
+          },
+          "level": "advisory",
+          "disposition": "deferred",
+          "dispositionReason": "The repair risk is attributed and recorded for follow-up.",
+          "owner": "src/checkout.ts",
+          "status": "closed",
+          "evidence": [
+            {
+              "kind": "repair-hunk",
+              "ref": "src/checkout.ts:submitOrder",
+              "claim": "The authorization repair added the log statement."
+            }
+          ],
+          "reviewedDiffDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "unresolvedTargetedRounds": 0,
+          "introducedBy": {
+            "kind": "repair",
+            "findingIds": ["CR-STANDARDS-0001"],
+            "repairDiffDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        }
+      ],
+      "currentDiffDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "relevantCheck": {
+        "name": "review lifecycle fixture",
+        "result": "PASS",
+        "coverage": "accepted blocker closure and targeted re-review",
+        "diffDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "outcome": "closed"
+    }
+  },
+  "escalation": {
+    "rounds": [
+      {
+        "round": 1,
+        "fullReviewStarted": false,
+        "targetedIds": ["CR-STANDARDS-0001"],
+        "updates": [
+          {
+            "id": "CR-STANDARDS-0001",
+            "status": "open",
+            "unresolvedTargetedRounds": 1
+          }
+        ],
+        "outcome": "needs-fix"
+      },
+      {
+        "round": 2,
+        "fullReviewStarted": false,
+        "targetedIds": ["CR-STANDARDS-0001"],
+        "updates": [
+          {
+            "id": "CR-STANDARDS-0001",
+            "status": "escalated",
+            "unresolvedTargetedRounds": 2
+          }
+        ],
+        "outcome": "escalated"
+      }
+    ],
+    "fullReviewCount": 1
+  }
+}

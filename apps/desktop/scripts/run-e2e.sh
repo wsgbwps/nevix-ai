@@ -18,6 +18,23 @@ repo_root="$(cd "$desktop_root/../.." && pwd)"
 identity_server_pid=""
 identity_server_log=""
 identity_server_binary_dir=""
+identity_server_failure_injector_pid=""
+identity_server_artifact="$desktop_root/test-results/identity-server.log"
+identity_server_failure_marker_dir=""
+database_url=""
+publishable_key=""
+service_role_key=""
+identity_server_hash_key="desktop-e2e-test-hash-key"
+identity_server_smtp_password="mailpit"
+failure_injection="${NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE:-}"
+
+case "$failure_injection" in
+  "" | after-renderer-launch) ;;
+  *)
+    echo "error: NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE must be 'after-renderer-launch'" >&2
+    exit 2
+    ;;
+esac
 
 source "$repo_root/scripts/lib/supabase-local-harness.sh"
 
@@ -27,25 +44,85 @@ source "$repo_root/scripts/lib/supabase-local-harness.sh"
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
 export no_proxy="${NO_PROXY}"
 
-stop_identity_server() {
-  if [[ -n "$identity_server_pid" ]] && kill -0 "$identity_server_pid" >/dev/null 2>&1; then
-    kill "$identity_server_pid" >/dev/null 2>&1 || true
+stop_identity_server_process() {
+  if [[ -n "$identity_server_pid" ]]; then
+    if kill -0 "$identity_server_pid" >/dev/null 2>&1; then
+      kill "$identity_server_pid" >/dev/null 2>&1 || true
+    fi
     wait "$identity_server_pid" >/dev/null 2>&1 || true
   fi
   identity_server_pid=""
-  if [[ -n "$identity_server_log" ]]; then
-    rm -f "$identity_server_log"
+}
+
+stop_identity_server_failure_injector() {
+  if [[ -n "$identity_server_failure_injector_pid" ]]; then
+    if kill -0 "$identity_server_failure_injector_pid" >/dev/null 2>&1; then
+      kill "$identity_server_failure_injector_pid" >/dev/null 2>&1 || true
+    fi
+    wait "$identity_server_failure_injector_pid" >/dev/null 2>&1 || true
   fi
-  if [[ -n "$identity_server_binary_dir" ]]; then
-    rm -rf "$identity_server_binary_dir"
-  fi
+  identity_server_failure_injector_pid=""
+}
+
+inject_identity_server_failure_after_renderer_launch() {
+  for _ in $(seq 1 240); do
+    if [[ -f "$identity_server_failure_marker_dir/request-ready" ]]; then
+      if ! kill -0 "$identity_server_pid" >/dev/null 2>&1; then
+        echo "controlled failure injection failed: identity server was already stopped" \
+          >>"$identity_server_log"
+        return 1
+      fi
+
+      kill "$identity_server_pid"
+      for _ in $(seq 1 50); do
+        if ! curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+          echo "controlled failure injection: identity server stopped after renderer launch before the representative Desktop request" \
+            >>"$identity_server_log"
+          touch "$identity_server_failure_marker_dir/server-stopped"
+          return
+        fi
+        sleep 0.1
+      done
+
+      echo "controlled failure injection failed: identity server remained healthy" \
+        >>"$identity_server_log"
+      return 1
+    fi
+    sleep 0.25
+  done
+
+  echo "controlled failure injection failed: the representative Desktop request was not armed" \
+    >>"$identity_server_log"
+  return 1
 }
 
 cleanup() {
   local exit_status="$1"
+  local cleanup_status="$exit_status"
 
-  stop_identity_server
-  nevix_supabase_harness_cleanup "$exit_status"
+  stop_identity_server_failure_injector
+  stop_identity_server_process
+  if [[ -n "$identity_server_log" ]]; then
+    if ! NEVIX_E2E_REDACT_DATABASE_URL="$database_url" \
+      NEVIX_E2E_REDACT_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
+      NEVIX_E2E_REDACT_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
+      NEVIX_E2E_REDACT_VERIFICATION_CODE_HASH_KEY="$identity_server_hash_key" \
+      NEVIX_E2E_REDACT_SMTP_PASSWORD="$identity_server_smtp_password" \
+      node "$desktop_root/scripts/finalize-e2e-server-log.mjs" \
+        "$identity_server_log" "$identity_server_artifact" "$repo_root" "$exit_status"; then
+      echo "error: failed to finalize the identity server E2E log" >&2
+      rm -f "$identity_server_log"
+      if [[ "$cleanup_status" == "0" ]]; then
+        cleanup_status=1
+      fi
+    fi
+    identity_server_log=""
+  fi
+  if [[ -n "$identity_server_binary_dir" ]]; then
+    rm -rf "$identity_server_binary_dir"
+    identity_server_binary_dir=""
+  fi
+  nevix_supabase_harness_cleanup "$cleanup_status"
 }
 
 json_value() {
@@ -64,14 +141,14 @@ wait_for_identity_server() {
     fi
     if ! kill -0 "$identity_server_pid" >/dev/null 2>&1; then
       echo "error: identity server stopped before its health endpoint was ready" >&2
-      cat "$identity_server_log" >&2
+      echo "A sanitized server log will be retained in test-results." >&2
       return 1
     fi
     sleep 0.5
   done
 
   echo "error: identity server did not become ready" >&2
-  cat "$identity_server_log" >&2
+  echo "A sanitized server log will be retained in test-results." >&2
   return 1
 }
 
@@ -91,12 +168,12 @@ start_identity_server() {
   DATABASE_URL="$database_url" \
     AUTH_JWKS_URL="$supabase_url/auth/v1/.well-known/jwks.json" \
     CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
-    VERIFICATION_CODE_HASH_KEY="desktop-e2e-test-hash-key" \
+    VERIFICATION_CODE_HASH_KEY="$identity_server_hash_key" \
     SMTP_FROM="identity@nevix.test" \
     SMTP_HOST="127.0.0.1" \
     SMTP_PORT="54325" \
     SMTP_USER="mailpit" \
-    SMTP_PASSWORD="mailpit" \
+    SMTP_PASSWORD="$identity_server_smtp_password" \
     OUTBOX_RETRY_DELAYS="1s,2s,3s,4s,5s" \
     "$identity_server_binary" >"$identity_server_log" 2>&1 &
   identity_server_pid=$!
@@ -112,6 +189,7 @@ nevix_supabase_harness_require_clean_projects nevix-ai nevix-authentication-e2e
 nevix_supabase_harness_require_free_tcp_ports 54320 54321 54322 54324 54325 8080
 
 cd "$desktop_root"
+rm -f "$identity_server_artifact"
 
 if [[ "$mode" == "full" ]]; then
   pnpm typecheck
@@ -176,14 +254,28 @@ playwright_args=(--workers=2)
 if [[ "$mode" == "smoke" ]]; then
   playwright_args+=(--grep '@smoke')
 fi
+if [[ "$failure_injection" == "after-renderer-launch" ]]; then
+  echo "==> Arming a controlled identity server failure after renderer launch"
+  identity_server_failure_marker_dir="$identity_server_binary_dir/failure-injection"
+  mkdir -p "$identity_server_failure_marker_dir"
+  playwright_args=(tests/organization/onboarding.spec.ts --workers=1 --grep '@smoke')
+  inject_identity_server_failure_after_renderer_launch &
+  identity_server_failure_injector_pid=$!
+fi
 
 NEVIX_TEST_SUPABASE_URL="$api_url" \
   NEVIX_TEST_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
   NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
   NEVIX_TEST_DATABASE_URL="$database_url" \
+  NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR="$identity_server_failure_marker_dir" \
   NEVIX_TEST_MAILPIT_URL="$mailpit_url" \
   NEVIX_TEST_SERVER_URL="$server_url" \
   pnpm exec playwright test "${playwright_args[@]}"
+
+if [[ -n "$identity_server_failure_injector_pid" ]]; then
+  wait "$identity_server_failure_injector_pid"
+  identity_server_failure_injector_pid=""
+fi
 
 if [[ "$mode" == "full" ]]; then
   NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \

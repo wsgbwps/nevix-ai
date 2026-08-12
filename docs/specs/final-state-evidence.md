@@ -16,8 +16,11 @@ evidence` block with:
 - `Relevant check`: a stable, reader-facing check name.
 - `Check result`: `PASS` for an accepted local closure.
 - `Check coverage`: the behavior or risk exercised by that check.
-- `Review conclusion`: the conclusion from reviewing the final diff and the
-  check result together.
+- `Finding ledger`: the structured `code-review-findings/v1` ledger reviewed
+  against the final diff and relevant check.
+- `Finding ledger digest`: the ledger content digest recorded by the review
+  command.
+- `Review conclusion`: the ledger-derived conclusion for the current diff.
 - `Closure`: `accepted` only when the evidence above covers the current diff;
   otherwise report the task as blocked without claiming completion.
 
@@ -47,17 +50,45 @@ task-owned changed file. The resulting digest covers exactly that accepted path
 boundary, while each path is still verified against its live repository
 content.
 
-Review the complete final diff and the relevant check result together, then
-bind that conclusion to the same record:
+Review the complete final diff and relevant check together, update the existing
+finding ledger, then bind that structured result to the same record:
 
 ```bash
 node .codex/hooks/final-state-evidence.mjs review \
-  --conclusion "Reviewed the final diff and relevant check; <conclusion>"
+  --ledger <path-to-code-review-findings.json>
 ```
 
-The review command rejects a missing, failed, or stale relevant-check record.
-Any later code edit invalidates both the check and review because it changes the
-live digest.
+The review command accepts only `schema: code-review-findings/v1` with
+`outcome: closed` and enforces these closure conditions:
+
+- `currentDiffDigest`, every finding's `reviewedDiffDigest`, and the ledger's
+  `relevantCheck.diffDigest` equal the wrapper's current `Final diff`.
+- The ledger's final check name, result, and coverage equal the recorded check,
+  and its result is `PASS`.
+- Every blocker has `status: closed`, or carries explicit risk acceptance with
+  non-empty ownership and rationale:
+
+  ```json
+  {
+    "riskAcceptance": {
+      "decision": "accepted",
+      "acceptedBy": "<person-or-team>",
+      "reason": "<bounded rationale>"
+    }
+  }
+  ```
+
+- A repaired blocker (`disposition: accepted`, `status: closed`) has at least
+  one completed `targetedReviewRound` on the current digest. An empty ledger
+  from a full review with no findings may retain round `0`.
+
+The command derives the review conclusion from the validated ledger; a
+`Reviewed` or `审阅` substring has no acceptance meaning. It records the ledger
+path and its content digest, and the Stop hook revalidates both. A missing,
+failed, or stale relevant-check record is rejected. Any later code edit
+invalidates both check and review; even after rerunning the check, accepted
+closure remains blocked until the current ledger has been re-reviewed and
+recorded again.
 
 At `Stop`, the existing Codex hook route compares the live code diff with the
 recorded digest and the final handoff. A valid accepted handoff uses this exact
@@ -70,7 +101,9 @@ Final-state evidence
 - Relevant check: <check identity>
 - Check result: PASS
 - Check coverage: <behavior or risk covered>
-- Review conclusion: <final diff and check reviewed; conclusion>
+- Finding ledger: <path-to-code-review-findings.json>
+- Finding ledger digest: sha256:<digest>
+- Review conclusion: <ledger-derived conclusion>
 - Closure: accepted
 ```
 

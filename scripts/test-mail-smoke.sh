@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Mail test harness: on a clean host, starts the pinned local Supabase stack
-# (with Mailpit) from an empty database, replays committed migrations, runs the
-# Go mail smoke tests, and tears down only the stack it owns. Same entry point
-# for local dev and CI.
+# Identity integration harness implementation. The supported local and CI entry
+# is scripts/test-identity-integration.sh; this legacy filename remains callable
+# for compatibility. On a clean host, the harness starts the pinned local
+# Supabase stack, replays committed migrations, runs the real Go Identity
+# integration suite, and tears down only the stack it owns.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 source "$repo_root/scripts/lib/supabase-local-harness.sh"
 cd "$repo_root"
+
+identity_test_log=""
 
 # Loopback traffic must never go through a developer HTTP proxy: the Supabase
 # CLI health checks, curl, and the Go tests all honor proxy variables.
@@ -17,6 +20,12 @@ export no_proxy="${NO_PROXY}"
 cleanup() {
   local exit_status="$1"
 
+  if [[ -n "$identity_test_log" ]] && ! rm -f "$identity_test_log"; then
+    echo "error: failed to remove temporary Identity integration test output '$identity_test_log'" >&2
+    if [[ "$exit_status" == "0" ]]; then
+      exit_status=1
+    fi
+  fi
   nevix_supabase_harness_cleanup "$exit_status"
 }
 trap 'exit_status=$?; trap - EXIT; cleanup "$exit_status"; exit $?' EXIT
@@ -136,7 +145,44 @@ if [[ -z "${mailpit_container}" ]]; then
   exit 1
 fi
 
-echo "==> Running Go mail smoke tests"
+assert_identity_integration_executed() {
+  local output_file="$1"
+  local passed_count
+  local skipped_count
+  local test_name
+  local -a representative_tests=(
+    TestAcceptInvitationCreatesMemberAndConsumesCode
+    TestRLSClientWriteBoundary
+    TestCommittedOutboxRowIsDeliveredToMailpit
+  )
+
+  passed_count="$(grep -Ec '^--- PASS: Test[^/[:space:]]+[[:space:]]+\(' "$output_file" || true)"
+  skipped_count="$(grep -Ec '^--- SKIP: Test[^/[:space:]]+[[:space:]]+\(' "$output_file" || true)"
+
+  if [[ "$passed_count" -eq 0 ]]; then
+    echo "error: Identity integration was requested, but zero top-level integration tests passed." >&2
+    echo "Run ./scripts/test-identity-integration.sh from the repository root to start the supported harness; if this entry emitted the error, inspect the test output above." >&2
+    return 1
+  fi
+  if [[ "$skipped_count" -ne 0 ]]; then
+    echo "error: Identity integration was requested, but $skipped_count top-level integration test(s) skipped." >&2
+    echo "Run ./scripts/test-identity-integration.sh from the repository root so the harness supplies every required NEVIX_* value." >&2
+    return 1
+  fi
+
+  for test_name in "${representative_tests[@]}"; do
+    if ! grep -Fq -- "--- PASS: ${test_name} " "$output_file"; then
+      echo "error: requested Identity integration sentinel '$test_name' did not pass." >&2
+      echo "Run ./scripts/test-identity-integration.sh from the repository root and inspect the test output above." >&2
+      return 1
+    fi
+  done
+
+  echo "==> Verified $passed_count Identity integration tests executed with zero skips"
+  printf '    representative PASS: %s\n' "${representative_tests[@]}"
+}
+
+echo "==> Running Go Identity integration tests"
 # SMTP host port 54325 maps to the stack's Mailpit ([local_smtp].smtp_port), so
 # the identity Outbox Worker delivers into the same captured mailbox as GoTrue.
 # Mailpit ignores credentials; the values only satisfy the four-variable contract.
@@ -147,20 +193,35 @@ echo "==> Running Go mail smoke tests"
 # NEVIX_AUTH_JWKS_URL / NEVIX_CORS_ALLOWED_ORIGINS satisfy the Bearer JWT
 # transport contract; the Bearer command tests mint their own ES256 sessions
 # against a test key set, so the stack's JWKS URL only needs to be well-formed.
-NEVIX_SUPABASE_URL="${supabase_url}" \
-NEVIX_SUPABASE_PUBLISHABLE_KEY="${publishable_key}" \
-NEVIX_MAILPIT_URL="${mailpit_url}" \
-NEVIX_DATABASE_URL="${database_url}" \
-NEVIX_SMTP_HOST="${mailpit_smtp_host}" \
-NEVIX_SMTP_PORT="${mailpit_smtp_port}" \
-NEVIX_SMTP_USER="mailpit" \
-NEVIX_SMTP_PASSWORD="mailpit" \
-NEVIX_OUTBOX_RETRY_DELAYS="1s,2s,3s,4s,5s" \
-NEVIX_MAILPIT_CONTAINER="${mailpit_container}" \
-NEVIX_VERIFICATION_CODE_HASH_KEY="mail-smoke-test-hash-key" \
-NEVIX_SMTP_FROM="identity@nevix.test" \
-NEVIX_AUTH_JWKS_URL="${supabase_url}/auth/v1/.well-known/jwks.json" \
-NEVIX_CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
-  go test -C server -race -count=1 -v ./internal/identity/...
+export NEVIX_IDENTITY_INTEGRATION_REQUESTED=1
+export NEVIX_SUPABASE_URL="${supabase_url}"
+export NEVIX_SUPABASE_PUBLISHABLE_KEY="${publishable_key}"
+export NEVIX_MAILPIT_URL="${mailpit_url}"
+export NEVIX_DATABASE_URL="${database_url}"
+export NEVIX_SMTP_HOST="${mailpit_smtp_host}"
+export NEVIX_SMTP_PORT="${mailpit_smtp_port}"
+export NEVIX_SMTP_USER="mailpit"
+export NEVIX_SMTP_PASSWORD="mailpit"
+export NEVIX_OUTBOX_RETRY_DELAYS="1s,2s,3s,4s,5s"
+export NEVIX_MAILPIT_CONTAINER="${mailpit_container}"
+export NEVIX_VERIFICATION_CODE_HASH_KEY="mail-smoke-test-hash-key"
+export NEVIX_SMTP_FROM="identity@nevix.test"
+export NEVIX_AUTH_JWKS_URL="${supabase_url}/auth/v1/.well-known/jwks.json"
+export NEVIX_CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173"
 
-echo "==> Mail smoke tests passed"
+identity_test_log="$(mktemp -t nevix-identity-integration.XXXXXX)"
+set +e
+go test -C server -race -count=1 -v ./internal/identity/integrationtest | tee "$identity_test_log"
+test_status="${PIPESTATUS[0]}"
+set -e
+if [[ "$test_status" -ne 0 ]]; then
+  exit "$test_status"
+fi
+assert_identity_integration_executed "$identity_test_log"
+
+echo "==> Running database query-plan integration tests"
+go test -C server -race -count=1 -v \
+  -run '^(TestHistoricalInvitationCodeLookupUsesPartialIndex|TestIssuanceRateLimitQueriesConstrainCompositeIndexes)$' \
+  ./internal/identity/invitations ./internal/identity/verification
+
+echo "==> Identity integration tests passed"

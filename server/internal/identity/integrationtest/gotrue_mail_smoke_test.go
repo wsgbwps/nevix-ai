@@ -2,7 +2,7 @@
 // This file proves the GoTrue → captured mailbox (Mailpit) path: a signup
 // against the local Supabase stack must produce a confirmation email in Mailpit.
 //
-// The test is opt-in: it runs only when the harness (scripts/test-mail-smoke.sh
+// The test is opt-in: it runs only when the harness (scripts/test-identity-integration.sh
 // locally and in CI) exports NEVIX_SUPABASE_URL, NEVIX_SUPABASE_PUBLISHABLE_KEY,
 // and NEVIX_MAILPIT_URL. Without them it skips, so plain `go test ./...` stays
 // green with no stack running.
@@ -26,7 +26,10 @@ func requireEnv(t *testing.T, key string) string {
 	t.Helper()
 	value := os.Getenv(key)
 	if value == "" {
-		t.Skipf("skipping integration smoke test: %s is not set (run scripts/test-mail-smoke.sh)", key)
+		if os.Getenv("NEVIX_IDENTITY_INTEGRATION_REQUESTED") == "1" {
+			t.Fatalf("identity integration was requested, but %s is not set; run ./scripts/test-identity-integration.sh from the repository root to start the supported harness", key)
+		}
+		t.Skipf("identity integration was not requested: %s is not set (run ./scripts/test-identity-integration.sh)", key)
 	}
 	return value
 }

@@ -1,4 +1,4 @@
-name: Mail Smoke CI
+name: Identity Integration CI
 
 on:
   push:
@@ -10,6 +10,7 @@ on:
       - "server/go.mod"
       - "server/go.sum"
       - "contracts/**"
+      - "scripts/test-identity-integration.sh"
       - "scripts/test-mail-smoke.sh"
       - "scripts/lib/supabase-local-harness.sh"
       - "scripts/tests/supabase-local-harness.test.sh"
@@ -22,12 +23,12 @@ on:
   workflow_call:
 
 concurrency:
-  group: mail-smoke-ci-${{ github.ref }}
+  group: identity-integration-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  mail-smoke:
-    name: Supabase stack + GoTrue mail smoke
+  identity-integration:
+    name: Supabase stack + Identity integration
     # Pinned runner image so an unannounced runner switch cannot change the stack.
     runs-on: ubuntu-24.04
     steps:
@@ -44,7 +45,7 @@ jobs:
           go-version-file: server/go.mod
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/tests/supabase-local-harness.test.sh
-      - run: ./scripts/test-mail-smoke.sh
+      - run: ./scripts/test-identity-integration.sh
       # Backstop for the script's own EXIT trap: if the runner kills the script,
       # the trap never fires, so tear the stack down here as well.
       - name: Tear down Supabase stack
