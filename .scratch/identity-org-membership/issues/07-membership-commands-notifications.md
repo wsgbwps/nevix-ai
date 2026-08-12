@@ -4,10 +4,14 @@
 
 **Blocked by:** 06 — Go 邀请命令组 + 审计写入基建 + 携码模板
 
-**Status:** ready-for-agent
+**Status:** resolved — PR [#42](https://github.com/wsgbwps/nevix-ai/pull/42) merged into `main` as [`200fd74`](https://github.com/wsgbwps/nevix-ai/commit/200fd74dfe6a1dfc89dd3984b9dc89791f458be7) on 2026-08-11
 
-- [ ] 四命令集成测试通过，角色变更与"恰好一个 Owner"不变式经测试断言
-- [ ] 审计行与通知矩阵逐事件核对：四个通知事件各发对收件人，加入/退出/设置变更不发邮件
-- [ ] 被移除成员即时失权（RLS 只读活行）经测试验证
-- [ ] 防枚举 404/403 语义一致；openapi 对照校验通过
-- [ ] server/ 与 contracts/ 属 CI 门禁路径，走 feature branch + PR
+- [x] 四命令集成测试通过，角色变更与"恰好一个 Owner"不变式经测试断言
+- [x] 审计行与通知矩阵逐事件核对：四个通知事件各发对收件人，加入/退出/设置变更不发邮件
+- [x] 被移除成员即时失权（RLS 只读活行）经测试验证
+- [x] 防枚举 404/403 语义一致；openapi 对照校验通过
+- [x] server/ 与 contracts/ 属 CI 门禁路径，走 feature branch + PR
+
+## Comments
+
+- 2026-08-12：验收完成。PR [#42](https://github.com/wsgbwps/nevix-ai/pull/42) 已于 2026-08-11 通过 feature branch 合并到 `main`（`200fd74`）；全部 review threads 已解决。PR 的 Server CI、真实 Supabase/Mailpit Mail Smoke、Desktop E2E Smoke 与总 CI gate 均通过，覆盖四命令、审计/通知矩阵、单 Owner 不变式、移除后即时 RLS 失权、404/403 防枚举语义与 OpenAPI 响应对照。本次关闭前复跑 `go test ./...` 与 `go vet ./...` 通过。
