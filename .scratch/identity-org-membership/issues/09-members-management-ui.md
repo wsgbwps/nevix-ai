@@ -4,11 +4,17 @@
 
 **Blocked by:** 04 — Active Organization：状态、设备记忆与启动三分支；07 — Go 成员管理命令组 + 通知矩阵；08 — Desktop 邀请自动浮现 + 接受邀请流
 
-**Status:** ready-for-agent
+**Status:** in-review — PR #46
 
-- [ ] e2e：Owner/Admin 完成邀请创建/重发/撤销、角色变更、移除成员、退出组织全流程（含确认对话框）
-- [ ] e2e：Member 角色只读——无邀请按钮、无角色 Select、无审计入口
-- [ ] 待定邀请计数徽标与实际 pending 数一致
-- [ ] 组织改名即时反映到上下文卡与组织选择列表
-- [ ] PR 描述显式声明 dialog/tabs/badge 共享原语例外及影响与测试
-- [ ] 全部新 Localized Surface 双语过发布检查；e2e 用例归入既有 tier；走 feature branch + PR
+- [x] e2e：Owner/Admin 完成邀请创建/重发/撤销、角色变更、移除成员、退出组织全流程（含确认对话框）
+- [x] e2e：Member 角色只读——无邀请按钮、无角色 Select、无审计入口
+- [x] 待定邀请计数徽标与实际 pending 数一致
+- [x] 组织改名即时反映到上下文卡与组织选择列表
+- [x] PR 描述显式声明 dialog/tabs/badge 共享原语例外及影响与测试
+- [x] 全部新 Localized Surface 双语过发布检查；e2e 用例归入既有 tier；走 feature branch + PR
+
+## Comments
+
+- Implementation: [PR #46](https://github.com/wsgbwps/nevix-ai/pull/46)
+- Local acceptance: full Desktop E2E PASS（68 passed，4 skipped）；最终审查 ledger 关闭 1 个已修复 blocker，无未关闭 finding。
+- `resolved` 状态与合并证据按 branch wrap-up checklist 留待 PR 合并后记录。
