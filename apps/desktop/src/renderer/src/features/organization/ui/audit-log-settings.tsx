@@ -57,22 +57,24 @@ function canViewAuditLog(
  */
 export function AuditLogSettingsNavigation(): React.JSX.Element | null {
   const { t } = useTranslation('organization')
-  const { activeOrganization } = useActiveOrganization()
+  const organization = useVerifiedAuditLogOrganization()
 
-  if (!canViewAuditLog(activeOrganization)) return null
+  if (!organization) return null
 
   return (
     <div className="grid gap-1">
       <p className="text-muted-foreground px-2.5 text-xs font-medium tracking-wide uppercase">
         {t('audit.settingsGroup')}
       </p>
-      <a
-        href="#audit-log"
-        className="text-sidebar-foreground hover:bg-sidebar-accent flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium"
+      <button
+        type="button"
+        aria-controls="audit-log"
+        onClick={() => document.getElementById('audit-log')?.scrollIntoView({ block: 'start' })}
+        className="text-sidebar-foreground hover:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
       >
         <ScrollTextIcon className="size-4" />
         {t('audit.title')}
-      </a>
+      </button>
     </div>
   )
 }
@@ -83,8 +85,7 @@ export function AuditLogSettings({
   readonly getSession: GetSession
 }): React.JSX.Element | null {
   const { t, i18n } = useTranslation('organization')
-  const { activeOrganization } = useActiveOrganization()
-  const organization = canViewAuditLog(activeOrganization) ? activeOrganization : undefined
+  const organization = useVerifiedAuditLogOrganization()
   const [entries, setEntries] = useState<readonly AuditLogEntry[]>([])
   const [actionFilter, setActionFilter] = useState<string>('all')
   const [isExporting, setIsExporting] = useState(false)
@@ -211,6 +212,37 @@ export function AuditLogSettings({
       </div>
     </section>
   )
+}
+
+function useVerifiedAuditLogOrganization(): ActiveMembership | undefined {
+  const { activeOrganization, refreshActiveOrganization } = useActiveOrganization()
+  const activeOrganizationId = activeOrganization?.organizationId
+  const [verification, setVerification] = useState<{
+    readonly organizationId: string
+    readonly membership: ActiveMembership | undefined
+  }>()
+
+  useEffect(() => {
+    let isMounted = true
+    if (!activeOrganizationId) return
+
+    void refreshActiveOrganization()
+      .then((membership) => {
+        if (isMounted) setVerification({ organizationId: activeOrganizationId, membership })
+      })
+      .catch(() => {
+        if (isMounted) {
+          setVerification({ organizationId: activeOrganizationId, membership: undefined })
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [activeOrganizationId, refreshActiveOrganization])
+
+  if (!verification || verification.organizationId !== activeOrganizationId) return undefined
+  return canViewAuditLog(verification.membership) ? verification.membership : undefined
 }
 
 function AuditLogTimelineEntry({

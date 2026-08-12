@@ -12,6 +12,7 @@ export interface ActiveOrganizationState {
   readonly availableOrganizations: readonly ActiveMembership[]
   readonly rememberedOrganizationId: string | undefined
   readonly enterOrganization: (membership: ActiveMembership) => void
+  readonly refreshActiveOrganization: () => Promise<ActiveMembership | undefined>
 }
 
 export const ActiveOrganizationContext = createContext<ActiveOrganizationState | null>(null)

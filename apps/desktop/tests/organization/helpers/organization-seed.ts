@@ -68,6 +68,22 @@ export async function seedActiveMembership(
   })
 }
 
+export async function updateMembershipRole(
+  userId: string,
+  organizationId: string,
+  role: 'owner' | 'admin' | 'member'
+): Promise<void> {
+  await withIdentityAppClient(async (client) => {
+    const result = await client.query(
+      "UPDATE memberships SET role = $3 WHERE user_id = $1 AND organization_id = $2 AND status = 'active'",
+      [userId, organizationId, role]
+    )
+    if (result.rowCount === 0) {
+      throw new Error('Unable to update test Membership role: no active Membership found')
+    }
+  })
+}
+
 export async function endMembership(userId: string, organizationId: string): Promise<void> {
   await withIdentityAppClient(async (client) => {
     const result = await client.query(

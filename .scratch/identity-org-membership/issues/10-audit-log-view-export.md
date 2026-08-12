@@ -24,3 +24,16 @@
   - Check coverage: Desktop typecheck, lint, 15 unit tests, architecture verification, 6 i18n resource-contract tests, and 13 Smoke E2E tests including the accepted-invitation timeline/CSV behavior.
   - Review conclusion: Reviewed the final Desktop Organization diff and PASS results; the four review requests are covered without changing public seams or regressing action vocabulary, packaged guard, or keyset pagination.
   - Closure: accepted locally; PR remains in review until CI passes and the branch merges.
+
+- 2026-08-12: Draft PR [#43](https://github.com/wsgbwps/nevix-ai/pull/43) latest authorization review fixes are locally accepted. Audit Log navigation no longer changes the top-level renderer URL, so `authentication:clear-session` remains callable; Settings entry refreshes the current Membership under RLS and updates the Active Organization cache, so an Admin demoted to Member loses both Audit Log surfaces without treating an empty Audit Log as an authorization signal. Authentication, platform, RLS, migrations, and Go remain unchanged.
+
+  Validation: Desktop typecheck PASS; lint PASS; unit 15/15 PASS; architecture 30/30 PASS (109 source files); i18n resource contract 6/6 PASS; Smoke E2E 15/15 PASS, including clear-session + logout/restart and runtime Admin→Member behavior.
+
+  Final-state evidence
+  - Acceptance boundary: Audit Log navigation must preserve Authentication Session clearing and logout across restart; Settings entry must refresh the current Membership so runtime Admin→Member demotion hides both Audit Log surfaces while RLS remains authoritative.
+  - Final diff: `sha256:731ef404c719956789f17f34b4995464bf9e55d3f5f7d9acddb7e0ab4fb2275a`
+  - Relevant check: Desktop Organization Audit Log authorization review closure
+  - Check result: PASS
+  - Check coverage: Audit Log navigation preserves Authentication clear-session and logout across restart; runtime Admin-to-Member refresh hides the Audit Log navigation and section while RLS remains authoritative.
+  - Review conclusion: Reviewed the complete final Organization diff and bound Smoke result; navigation no longer mutates the renderer URL, Authentication clear-session remains trusted, and refreshed Membership roles fail closed without inferring authorization from empty Audit Log data. No boundary or unrelated changes found.
+  - Closure: accepted locally; PR remains in review pending the latest CI run and merge.

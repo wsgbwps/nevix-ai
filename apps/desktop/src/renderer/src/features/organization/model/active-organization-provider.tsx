@@ -39,6 +39,8 @@ export function ActiveOrganizationProvider({
     []
   )
   const [rememberedOrganizationId, setRememberedOrganizationId] = useState<string>()
+  const activeOrganizationRef = useRef<ActiveMembership | undefined>(undefined)
+  const refreshActiveOrganizationRef = useRef<Promise<ActiveMembership | undefined> | null>(null)
   // The startup verification runs at most once per authenticated Session; a failed fetch stays
   // on the restoring view instead of retrying in a loop.
   const resolutionRef = useRef<'none' | 'running' | 'done' | 'failed'>('none')
@@ -56,6 +58,42 @@ export function ActiveOrganizationProvider({
       organizationId: membership.organizationId
     })
   }, [])
+
+  useEffect(() => {
+    activeOrganizationRef.current = activeOrganization
+  }, [activeOrganization])
+
+  const refreshActiveOrganization = useCallback((): Promise<ActiveMembership | undefined> => {
+    const currentOrganization = activeOrganizationRef.current
+    if (!isAuthenticated || !currentOrganization) return Promise.resolve(undefined)
+    if (refreshActiveOrganizationRef.current) return refreshActiveOrganizationRef.current
+
+    const refresh = (async (): Promise<ActiveMembership | undefined> => {
+      const session = await getSession()
+      if (!session) throw new Error('Active Organization Session is unavailable.')
+
+      const memberships = await readActiveMemberships(session)
+      const refreshedOrganization = memberships.find(
+        (membership) => membership.organizationId === currentOrganization.organizationId
+      )
+      setAvailableOrganizations(memberships)
+      setActiveOrganization((organization) =>
+        organization?.organizationId === currentOrganization.organizationId
+          ? refreshedOrganization
+          : organization
+      )
+      return refreshedOrganization
+    })()
+
+    refreshActiveOrganizationRef.current = refresh
+    const clearRefresh = (): void => {
+      if (refreshActiveOrganizationRef.current === refresh) {
+        refreshActiveOrganizationRef.current = null
+      }
+    }
+    void refresh.then(clearRefresh, clearRefresh)
+    return refresh
+  }, [getSession, isAuthenticated])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -104,14 +142,16 @@ export function ActiveOrganizationProvider({
       activeOrganization,
       availableOrganizations,
       rememberedOrganizationId,
-      enterOrganization
+      enterOrganization,
+      refreshActiveOrganization
     }),
     [
       startupPhase,
       activeOrganization,
       availableOrganizations,
       rememberedOrganizationId,
-      enterOrganization
+      enterOrganization,
+      refreshActiveOrganization
     ]
   )
 

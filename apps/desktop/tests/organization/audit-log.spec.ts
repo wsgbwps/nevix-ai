@@ -10,11 +10,16 @@ import {
   signInOutsideDesktop,
   uniqueAuthIdentity
 } from '../auth/helpers/supabase-auth'
-import { launchTestApp, openSettingsFromUserMenu } from '../helpers/electron-app'
+import {
+  launchTestApp,
+  openSettingsFromUserMenu,
+  signOutFromUserMenu
+} from '../helpers/electron-app'
 import {
   seedActiveMembership,
   seedAuditLogEntries,
-  seedOrganizationWithMembership
+  seedOrganizationWithMembership,
+  updateMembershipRole
 } from './helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
@@ -76,7 +81,7 @@ test(
         await openSettingsFromUserMenu(launched.page)
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
         await expect(settingsNavigation.getByText('Organization')).toBeVisible()
-        await settingsNavigation.getByRole('link', { name: 'Audit log' }).click()
+        await settingsNavigation.getByRole('button', { name: 'Audit log' }).click()
 
         await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toBeVisible()
         await expect(launched.page.getByRole('heading', { name: 'Today' })).toBeVisible()
@@ -161,7 +166,7 @@ test('an Admin filters the Organization Audit Log by action', { tag: '@smoke' },
       await openSettingsFromUserMenu(launched.page)
       await launched.page
         .getByRole('navigation', { name: 'Settings' })
-        .getByRole('link', { name: 'Audit log' })
+        .getByRole('button', { name: 'Audit log' })
         .click()
 
       await expect(launched.page.getByText('Invitation created')).toBeVisible()
@@ -192,6 +197,57 @@ test('an Admin filters the Organization Audit Log by action', { tag: '@smoke' },
     await deleteAuthUser(authHarness, userId)
   }
 })
+
+test(
+  'Audit Log navigation preserves Authentication Session IPC and logout across restart',
+  { tag: '@smoke' },
+  async () => {
+    test.setTimeout(90_000)
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
+
+    const identity = uniqueAuthIdentity('audit-log-session-ipc')
+    const userId = await createAuthUser(authHarness, identity, true)
+    await seedOrganizationWithMembership(userId, { name: 'Audit Session IPC Studio' })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-session-ipc-'))
+
+    try {
+      let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      try {
+        await signIn(launched.page, identity)
+        await openSettingsFromUserMenu(launched.page)
+        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+        await settingsNavigation.getByText('Audit log', { exact: true }).click()
+
+        await launched.page.evaluate(() => window.api.invoke('authentication:clear-session'))
+        expect(await launched.page.evaluate(() => window.location.hash)).toBe('')
+
+        await launched.page.getByRole('link', { name: 'Back' }).click()
+        await signOutFromUserMenu(launched.page)
+        await expect(
+          launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
+        ).toBeVisible()
+      } finally {
+        await launched.electronApp.close()
+      }
+
+      launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      try {
+        await expect(
+          launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
+        ).toBeVisible()
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        ).toHaveCount(0)
+      } finally {
+        await launched.electronApp.close()
+      }
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
+    }
+  }
+)
 
 test(
   'an Owner exports every paginated Audit Log row to a local CSV file and receives feedback',
@@ -241,7 +297,7 @@ test(
         await openSettingsFromUserMenu(launched.page)
         await launched.page
           .getByRole('navigation', { name: 'Settings' })
-          .getByRole('link', { name: 'Audit log' })
+          .getByRole('button', { name: 'Audit log' })
           .click()
 
         await expect(launched.page.getByRole('listitem')).toHaveCount(101)
@@ -291,6 +347,46 @@ test(
 )
 
 test(
+  'an Admin demoted at runtime loses the Audit Log navigation and section on Settings entry',
+  { tag: '@smoke' },
+  async () => {
+    test.setTimeout(90_000)
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
+
+    const identity = uniqueAuthIdentity('audit-log-admin-demotion')
+    const userId = await createAuthUser(authHarness, identity, true)
+    const organization = await seedOrganizationWithMembership(userId, {
+      name: 'Audit Demotion Studio',
+      role: 'admin'
+    })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-admin-demotion-'))
+
+    try {
+      const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      try {
+        await signIn(launched.page, identity)
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        ).toBeVisible()
+
+        await updateMembershipRole(userId, organization.id, 'member')
+        await openSettingsFromUserMenu(launched.page)
+
+        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+        await expect(settingsNavigation.getByText('Audit log', { exact: true })).toHaveCount(0)
+        await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toHaveCount(0)
+      } finally {
+        await launched.electronApp.close()
+      }
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
+    }
+  }
+)
+
+test(
   'a Member has no Audit Log entry and its direct RLS read returns no Audit Log rows',
   { tag: '@smoke' },
   async () => {
@@ -333,7 +429,7 @@ test(
         await signIn(launched.page, memberIdentity)
         await openSettingsFromUserMenu(launched.page)
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
-        await expect(settingsNavigation.getByRole('link', { name: 'Audit log' })).toHaveCount(0)
+        await expect(settingsNavigation.getByRole('button', { name: 'Audit log' })).toHaveCount(0)
         await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toHaveCount(0)
       } finally {
         await launched.electronApp.close()
