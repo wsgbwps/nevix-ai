@@ -18,7 +18,7 @@ import {
   formatAuditLogTime
 } from '../lib/audit-log-timeline'
 import { auditLogTargetDisplayName } from '../lib/audit-log-target'
-import type { ActiveMembership } from '../api/memberships'
+import { canViewAuditLog, useVerifiedAuditLogOrganization } from '../model/audit-log-access'
 import { useActiveOrganization } from '../model/active-organization-state'
 
 type GetSession = () => Promise<AuthenticatedOrganizationSession | undefined>
@@ -43,16 +43,9 @@ function actionTranslationKey(
   return actionTranslationKeys[action as keyof typeof actionTranslationKeys]
 }
 
-/** The UI mirrors the Data API policy: only Owners and Admins may view audit events. */
-function canViewAuditLog(
-  organization: ActiveMembership | undefined
-): organization is ActiveMembership {
-  return organization?.role === 'owner' || organization?.role === 'admin'
-}
-
 /**
- * This contribution owns Organization-specific Settings navigation and its access rule. The
- * Settings composition root only places it beside other feature contributions.
+ * This contribution owns Organization-specific Settings navigation. The Settings composition root
+ * only places it beside other feature contributions.
  */
 export function AuditLogSettingsNavigation(): React.JSX.Element | null {
   const { t } = useTranslation('organization')
@@ -225,56 +218,6 @@ export function AuditLogSettings({
       )}
     </section>
   )
-}
-
-type AuditLogAccessVerification =
-  | {
-      readonly status: 'authorized'
-      readonly organizationId: string
-      readonly membership: ActiveMembership
-    }
-  | { readonly status: 'denied' | 'error'; readonly organizationId: string }
-
-function useVerifiedAuditLogOrganization(): {
-  readonly verification: AuditLogAccessVerification | undefined
-  readonly retry: () => void
-} {
-  const { activeOrganization, refreshActiveOrganization } = useActiveOrganization()
-  const activeOrganizationId = activeOrganization?.organizationId
-  const [verification, setVerification] = useState<AuditLogAccessVerification>()
-  const [verificationAttempt, setVerificationAttempt] = useState(0)
-
-  useEffect(() => {
-    let isMounted = true
-    if (!activeOrganizationId) return
-
-    void refreshActiveOrganization()
-      .then((membership) => {
-        if (!isMounted) return
-        setVerification(
-          canViewAuditLog(membership)
-            ? { status: 'authorized', organizationId: activeOrganizationId, membership }
-            : { status: 'denied', organizationId: activeOrganizationId }
-        )
-      })
-      .catch(() => {
-        if (isMounted) {
-          setVerification({ status: 'error', organizationId: activeOrganizationId })
-        }
-      })
-
-    return () => {
-      isMounted = false
-    }
-  }, [activeOrganizationId, refreshActiveOrganization, verificationAttempt])
-
-  return {
-    verification: verification?.organizationId === activeOrganizationId ? verification : undefined,
-    retry: () => {
-      setVerification(undefined)
-      setVerificationAttempt((attempt) => attempt + 1)
-    }
-  }
 }
 
 function AuditLogTimelineEntry({

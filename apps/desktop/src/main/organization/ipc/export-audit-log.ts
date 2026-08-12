@@ -6,7 +6,7 @@ import type {
   AuditLogExportResult
 } from '../../../shared/ipc/organization/types'
 import { resolveAuditLogE2EOutputPath } from './audit-log-export-path'
-import { requireTrustedRendererSender } from './trusted-sender'
+import { requireTrustedTopLevelRendererSender } from '../../window/trusted-renderer-sender'
 
 function validateRequest(request: unknown): AuditLogExportRequest {
   const keys = typeof request === 'object' && request !== null ? Object.keys(request) : []
@@ -29,7 +29,10 @@ export async function exportAuditLogHandler(
   event: Electron.IpcMainInvokeEvent,
   request: unknown
 ): Promise<AuditLogExportResult> {
-  requireTrustedRendererSender(event)
+  requireTrustedTopLevelRendererSender(
+    event,
+    'Audit Log export is available only to the trusted renderer'
+  )
   const { csv, suggestedFileName } = validateRequest(request)
   const outputPath = resolveAuditLogE2EOutputPath({
     e2eMode: process.env.NEVIX_E2E,
