@@ -10,6 +10,8 @@ Electron Main 以 Domain locality 为第一组织轴：Domain-owned IPC adapter 
 
 Canonical Domain 名贯穿实际存在的 Main、shared IPC、renderer Feature 与 Channel prefix，但不为缺失 seam 创建空目录。Authentication Domain 使用 `authentication`；Language Mode 与 Interface Language 合并归入 `language`，不把现有 `settings` 与 `i18n` 固化为两个互相依赖的 Domain。`window/`、`updater/`、`tray/` 等平台职责继续作为非-Domain owner。
 
+Renderer document 的身份与 top-level frame 判断是 `main/window/` 拥有的单一平台安全约束，而不是各业务 Domain 的 IPC 规则。敏感 Domain Handler 必须在产生副作用前显式调用该 canonical predicate，不得复制 domain-local sender 判断。按照 [ADR-0004](0004-renderer-routing-topology.md) 的 memory-history 决策，可信 URL 仅为 renderer entry 的 exact URL；fragment、query、其他路径或 origin 均不受信任。
+
 IPC adapter 可以依赖同 Domain implementation，implementation 不得反向依赖 IPC。Domain 只有在存在外部 Main caller 时才创建根 `index.ts` public interface；跨 Domain 依赖只能经过 public interface 且必须无环。
 
 ## 取舍

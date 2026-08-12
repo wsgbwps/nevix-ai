@@ -1,11 +1,14 @@
 import { clearPersistedSession } from '../session-store'
-import { requireTrustedRendererSender } from './trusted-sender'
+import { requireTrustedTopLevelRendererSender } from '../../window/trusted-renderer-sender'
 
 export async function clearSessionHandler(
   event: Electron.IpcMainInvokeEvent,
   ...args: unknown[]
 ): Promise<void> {
-  requireTrustedRendererSender(event)
+  requireTrustedTopLevelRendererSender(
+    event,
+    'Session storage is available only to the trusted renderer'
+  )
   if (args.length !== 0) throw new Error('Session clear does not accept a payload')
   await clearPersistedSession()
 }

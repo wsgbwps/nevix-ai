@@ -5,6 +5,16 @@ export interface SeededOrganization {
   readonly name: string
 }
 
+export interface AuditLogSeed {
+  readonly actorUserId: string
+  readonly actorDisplayName: string
+  readonly targetUserId?: string
+  readonly targetDisplayName?: string
+  readonly action: string
+  readonly metadata?: Readonly<Record<string, unknown>>
+  readonly createdAt?: string
+}
+
 export interface InvitationAcceptanceState {
   readonly displayName: string | undefined
   readonly invitationStatus: string | undefined
@@ -75,6 +85,35 @@ export async function seedOrganizationWithMembership(
   })
 }
 
+export async function seedActiveMembership(
+  organizationId: string,
+  userId: string,
+  role: 'owner' | 'admin' | 'member'
+): Promise<void> {
+  await withIdentityAppClient(async (client) => {
+    await client.query(
+      'INSERT INTO memberships (organization_id, user_id, role, status) VALUES ($1, $2, $3, $4)',
+      [organizationId, userId, role, 'active']
+    )
+  })
+}
+
+export async function updateMembershipRole(
+  userId: string,
+  organizationId: string,
+  role: 'owner' | 'admin' | 'member'
+): Promise<void> {
+  await withIdentityAppClient(async (client) => {
+    const result = await client.query(
+      "UPDATE memberships SET role = $3 WHERE user_id = $1 AND organization_id = $2 AND status = 'active'",
+      [userId, organizationId, role]
+    )
+    if (result.rowCount === 0) {
+      throw new Error('Unable to update test Membership role: no active Membership found')
+    }
+  })
+}
+
 export async function endMembership(userId: string, organizationId: string): Promise<void> {
   await withIdentityAppClient(async (client) => {
     const result = await client.query(
@@ -83,6 +122,36 @@ export async function endMembership(userId: string, organizationId: string): Pro
     )
     if (result.rowCount === 0) {
       throw new Error('Unable to end test Membership: no active Membership found')
+    }
+  })
+}
+
+/**
+ * Seeds immutable Audit Log snapshots through the trusted identity_app role. The Desktop reads
+ * these rows through the same RLS-protected Data API seam used in production.
+ */
+export async function seedAuditLogEntries(
+  organizationId: string,
+  entries: readonly AuditLogSeed[]
+): Promise<void> {
+  await withIdentityAppClient(async (client) => {
+    for (const entry of entries) {
+      await client.query(
+        `INSERT INTO audit_logs (
+          organization_id, actor_user_id, actor_display_name,
+          target_user_id, target_display_name, action, metadata, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
+        [
+          organizationId,
+          entry.actorUserId,
+          entry.actorDisplayName,
+          entry.targetUserId ?? null,
+          entry.targetDisplayName ?? null,
+          entry.action,
+          JSON.stringify(entry.metadata ?? {}),
+          entry.createdAt ?? new Date().toISOString()
+        ]
+      )
     }
   })
 }

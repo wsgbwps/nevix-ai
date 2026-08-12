@@ -14,6 +14,7 @@ export interface ActiveOrganizationState {
   readonly pendingInvitations: readonly PendingInvitation[]
   readonly rememberedOrganizationId: string | undefined
   readonly enterOrganization: (membership: ActiveMembership) => void
+  readonly refreshActiveOrganization: () => Promise<ActiveMembership | undefined>
   readonly acceptInvitation: (invitation: PendingInvitation, code: string) => Promise<void>
   readonly reconcileStartupAfterInvitationChange: () => void
 }
