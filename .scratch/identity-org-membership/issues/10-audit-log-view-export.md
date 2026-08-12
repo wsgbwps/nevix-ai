@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Active Organization：状态、设备记忆与启动三分支；06 — Go 邀请命令组 + 审计写入基建 + 携码模板
 
-**Status:** in-review
+**Status:** resolved
 
 - [x] e2e：Owner/Admin 查看按天分组的叙事时间线，行内容含快照显示名、动作、目标与时间
 - [x] e2e：动作过滤 Select 生效

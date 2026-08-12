@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Active Organization：状态、设备记忆与启动三分支；07 — Go 成员管理命令组 + 通知矩阵；08 — Desktop 邀请自动浮现 + 接受邀请流
 
-**Status:** in-review — PR #46
+**Status:** resolved — PR #46
 
 - [x] e2e：Owner/Admin 完成邀请创建/重发/撤销、角色变更、移除成员、退出组织全流程（含确认对话框）
 - [x] e2e：Member 角色只读——无邀请按钮、无角色 Select、无审计入口
