@@ -16,7 +16,6 @@ import {
 import { InvitationAcceptanceError, type PendingInvitation } from '../api/invitations'
 import { useActiveOrganization } from '../model/active-organization-state'
 import { useOrganizationOnboarding } from '../model/onboarding-state'
-import { resolveStartupBranch } from '../model/startup-resolution'
 import type { ActiveMembership } from '../api/memberships'
 
 interface OrganizationPickerPageProps {
@@ -41,7 +40,8 @@ export function OrganizationPickerPage({
     pendingInvitations,
     rememberedOrganizationId,
     enterOrganization,
-    acceptInvitation
+    acceptInvitation,
+    reconcileStartupAfterInvitationChange
   } = useActiveOrganization()
   const onboarding = useOrganizationOnboarding()
   const [selectedInvitation, setSelectedInvitation] = useState<PendingInvitation>()
@@ -67,16 +67,7 @@ export function OrganizationPickerPage({
 
     if (!shouldResolveStartup) return
 
-    const branch = resolveStartupBranch(
-      availableOrganizations,
-      rememberedOrganizationId,
-      pendingInvitations.length > 0
-    )
-    if (branch.kind === 'onboarding') {
-      onboarding.beginOnboarding()
-    } else if (branch.kind === 'enter') {
-      enterOrganization(branch.membership)
-    }
+    reconcileStartupAfterInvitationChange()
   }
 
   async function submitInvitation(event: React.FormEvent<HTMLFormElement>): Promise<void> {

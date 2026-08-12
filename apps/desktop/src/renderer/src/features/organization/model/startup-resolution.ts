@@ -25,3 +25,20 @@ export function resolveStartupBranch(
 
   return memberships.length === 0 ? { kind: 'onboarding' } : { kind: 'picker' }
 }
+
+export function reconcileStartupBranch(
+  memberships: readonly ActiveMembership[],
+  rememberedOrganizationId: string | undefined,
+  hasPendingInvitation: boolean,
+  actions: {
+    readonly beginOnboarding: () => void
+    readonly enterOrganization: (membership: ActiveMembership) => void
+  }
+): void {
+  const branch = resolveStartupBranch(memberships, rememberedOrganizationId, hasPendingInvitation)
+  if (branch.kind === 'onboarding') {
+    actions.beginOnboarding()
+  } else if (branch.kind === 'enter') {
+    actions.enterOrganization(branch.membership)
+  }
+}

@@ -13,7 +13,7 @@ import {
   type ActiveOrganizationState,
   type OrganizationStartupPhase
 } from './active-organization-state'
-import { resolveStartupBranch } from './startup-resolution'
+import { reconcileStartupBranch, resolveStartupBranch } from './startup-resolution'
 import { useOrganizationOnboarding } from './onboarding-state'
 
 interface ActiveOrganizationProviderProps {
@@ -103,6 +103,24 @@ export function ActiveOrganizationProvider({
     [getSession, enterOrganization]
   )
 
+  const reconcileStartupAfterInvitationChange = useCallback((): void => {
+    reconcileStartupBranch(
+      availableOrganizations,
+      rememberedOrganizationId,
+      pendingInvitations.length > 0,
+      {
+        beginOnboarding: onboarding.beginOnboarding,
+        enterOrganization
+      }
+    )
+  }, [
+    availableOrganizations,
+    rememberedOrganizationId,
+    pendingInvitations.length,
+    onboarding.beginOnboarding,
+    enterOrganization
+  ])
+
   useEffect(() => {
     if (!isAuthenticated) return
     if (activeOrganization) return
@@ -165,7 +183,8 @@ export function ActiveOrganizationProvider({
       pendingInvitations,
       rememberedOrganizationId,
       enterOrganization,
-      acceptInvitation
+      acceptInvitation,
+      reconcileStartupAfterInvitationChange
     }),
     [
       startupPhase,
@@ -174,7 +193,8 @@ export function ActiveOrganizationProvider({
       pendingInvitations,
       rememberedOrganizationId,
       enterOrganization,
-      acceptInvitation
+      acceptInvitation,
+      reconcileStartupAfterInvitationChange
     ]
   )
 

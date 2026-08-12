@@ -15,6 +15,7 @@ export interface ActiveOrganizationState {
   readonly rememberedOrganizationId: string | undefined
   readonly enterOrganization: (membership: ActiveMembership) => void
   readonly acceptInvitation: (invitation: PendingInvitation, code: string) => Promise<void>
+  readonly reconcileStartupAfterInvitationChange: () => void
 }
 
 export const ActiveOrganizationContext = createContext<ActiveOrganizationState | null>(null)
