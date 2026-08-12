@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp, openSettingsFromUserMenu } from '../helpers/electron-app'
@@ -13,6 +13,24 @@ import {
 const authHarness = readAuthHarnessConfig()
 const mailpitHarness = readMailpitHarnessConfig()
 const serverUrl = process.env.NEVIX_TEST_SERVER_URL
+const identityServerFailureMarkerDir = process.env.NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR
+
+async function injectIdentityServerFailureAfterRendererLaunch(): Promise<void> {
+  if (!identityServerFailureMarkerDir) return
+
+  await writeFile(
+    join(identityServerFailureMarkerDir, 'request-ready'),
+    `${new Date().toISOString()}\n`
+  )
+  await expect
+    .poll(() =>
+      access(join(identityServerFailureMarkerDir, 'server-stopped')).then(
+        () => true,
+        () => false
+      )
+    )
+    .toBe(true)
+}
 
 test(
   'a newly verified User completes the two-step onboarding flow and edits their Profile',
@@ -129,6 +147,7 @@ test(
         await createOrganizationButton.click()
         await expect.poll(() => submittedOrganizationIds.length).toBe(1)
         await expect(createOrganizationButton).toBeEnabled()
+        await injectIdentityServerFailureAfterRendererLaunch()
 
         const organizationResponse = launched.page.waitForResponse(
           (response) =>

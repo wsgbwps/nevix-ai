@@ -21,12 +21,23 @@ on:
       - "go.work"
       - "go.work.sum"
   workflow_dispatch:
+    inputs:
+      inject_identity_server_failure:
+        description: Retain a sanitized identity server log by failing a representative E2E.
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       suite:
         description: The E2E suite to run for the calling workflow.
         required: true
         type: string
+      inject_identity_server_failure:
+        description: Fail a representative E2E to validate the shared failure artifact.
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: desktop-e2e-ci-${{ github.ref }}
@@ -65,9 +76,15 @@ jobs:
         run: xvfb-run -a pnpm --filter @nevix/desktop test:e2e:smoke
         env:
           NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: "1"
-      # The Electron helper writes renderer readiness screenshots and process/page errors here.
-      - name: Upload E2E failure artifacts
+          NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE: ${{ inputs.inject_identity_server_failure && 'after-renderer-launch' || '' }}
+      # The Electron helper and E2E runner share this owner for Desktop diagnostics and the
+      # bounded, sanitized identity server log. The runner finalizes the log before cleanup.
+      - name: Verify E2E failure artifacts contain no credentials
+        id: verify-smoke-failure-artifacts
         if: failure()
+        run: pnpm --filter @nevix/desktop verify:auth-artifacts
+      - name: Upload E2E failure artifacts
+        if: failure() && steps.verify-smoke-failure-artifacts.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: e2e-smoke-test-results
@@ -112,9 +129,15 @@ jobs:
         run: xvfb-run -a pnpm --filter @nevix/desktop test:e2e
         env:
           NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: "1"
-      # The Electron helper writes renderer readiness screenshots and process/page errors here.
-      - name: Upload E2E failure artifacts
+          NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE: ${{ inputs.inject_identity_server_failure && 'after-renderer-launch' || '' }}
+      # The Electron helper and E2E runner share this owner for Desktop diagnostics and the
+      # bounded, sanitized identity server log. The runner finalizes the log before cleanup.
+      - name: Verify E2E failure artifacts contain no credentials
+        id: verify-full-failure-artifacts
         if: failure()
+        run: pnpm --filter @nevix/desktop verify:auth-artifacts
+      - name: Upload E2E failure artifacts
+        if: failure() && steps.verify-full-failure-artifacts.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: e2e-full-test-results

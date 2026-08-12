@@ -1,4 +1,4 @@
-.PHONY: dev build lint server supabase setup
+.PHONY: dev build lint server supabase test-identity-integration setup
 
 dev:
 	pnpm dev
@@ -14,6 +14,9 @@ server:
 
 supabase:
 	pnpm exec supabase start
+
+test-identity-integration:
+	./scripts/test-identity-integration.sh
 
 setup:
 	pnpm install

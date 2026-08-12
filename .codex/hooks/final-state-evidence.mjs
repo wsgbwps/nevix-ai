@@ -23,6 +23,7 @@ const CODE_PREFIXES = [
   "server/",
   "supabase/",
 ];
+const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
 function git(cwd, args, encoding = "utf8") {
   const result = spawnSync("git", args, { cwd, encoding });
@@ -115,7 +116,7 @@ export function snapshot(cwd = process.cwd(), pathScope = null) {
 }
 
 function recordPath(state, finalDiff) {
-  if (!/^sha256:[a-f0-9]{64}$/.test(finalDiff)) {
+  if (!DIGEST_PATTERN.test(finalDiff)) {
     throw new Error("invalid final diff identity");
   }
   return join(
@@ -123,6 +124,10 @@ function recordPath(state, finalDiff) {
     "codex-final-state-evidence",
     `${finalDiff.slice("sha256:".length)}.json`,
   );
+}
+
+function contentDigest(value) {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
 function statePath(state) {
@@ -245,17 +250,108 @@ function runCheck(args) {
   return exitCode;
 }
 
-function runReview(args) {
-  if (args.length !== 2 || args[0] !== "--conclusion") {
+function readFindingLedger(path, root, record) {
+  const findingLedger = resolve(root, path);
+  let content;
+  let ledger;
+  try {
+    content = readFileSync(findingLedger);
+    ledger = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw new Error("finding ledger must be a readable JSON file");
+  }
+
+  if (
+    ledger?.schema !== "code-review-findings/v1" ||
+    ledger.fullReviewCount !== 1 ||
+    !Number.isInteger(ledger.targetedReviewRound) ||
+    ledger.targetedReviewRound < 0 ||
+    !Array.isArray(ledger.findings) ||
+    ledger.outcome !== "closed"
+  ) {
+    throw new Error("finding ledger is malformed or not closed");
+  }
+  if (ledger.currentDiffDigest !== record.finalDiff) {
+    throw new Error("finding ledger does not match the current diff digest");
+  }
+  if (
+    ledger.relevantCheck?.name !== record.relevantCheck ||
+    ledger.relevantCheck?.result !== "PASS" ||
+    ledger.relevantCheck?.coverage !== record.checkCoverage ||
+    ledger.relevantCheck?.diffDigest !== record.finalDiff
+  ) {
     throw new Error(
-      'usage: final-state-evidence.mjs review --conclusion "Reviewed <final diff and relevant check conclusion>"',
+      "finding ledger relevant check is not PASS on the current diff digest",
     );
   }
 
-  const conclusion = args[1].trim();
-  if (conclusion.length > 400 || !/reviewed|审阅/i.test(conclusion)) {
+  const ids = new Set();
+  const blockers = [];
+  const unresolved = [];
+  let acceptedRiskCount = 0;
+  let repairedBlockerCount = 0;
+
+  for (const finding of ledger.findings) {
+    if (
+      !finding ||
+      typeof finding !== "object" ||
+      typeof finding.id !== "string" ||
+      !finding.id ||
+      ids.has(finding.id) ||
+      !["blocker", "advisory"].includes(finding.level) ||
+      finding.reviewedDiffDigest !== record.finalDiff
+    ) {
+      throw new Error(
+        "finding ledger entries must have unique IDs and review the current diff digest",
+      );
+    }
+    ids.add(finding.id);
+    if (finding.level !== "blocker") continue;
+
+    blockers.push(finding);
+    const risk = finding.riskAcceptance;
+    const acceptedRisk =
+      risk?.decision === "accepted" &&
+      typeof risk.acceptedBy === "string" &&
+      Boolean(risk.acceptedBy.trim()) &&
+      typeof risk.reason === "string" &&
+      Boolean(risk.reason.trim());
+    if (finding.status === "closed") {
+      if (finding.disposition === "accepted") repairedBlockerCount += 1;
+      continue;
+    }
+    if (acceptedRisk) {
+      acceptedRiskCount += 1;
+      continue;
+    }
+    unresolved.push(finding.id);
+  }
+
+  if (unresolved.length > 0) {
+    throw new Error(`unresolved blocker findings: ${unresolved.join(", ")}`);
+  }
+  if (repairedBlockerCount > 0 && ledger.targetedReviewRound < 1) {
     throw new Error(
-      "review conclusion must be 1-400 characters and explicitly contain Reviewed or 审阅",
+      "repaired blockers require a completed targeted re-review on the current diff digest",
+    );
+  }
+
+  return {
+    findingLedger,
+    findingLedgerDigest: contentDigest(content),
+    reviewConclusion: [
+      `Finding ledger closed on ${record.finalDiff}:`,
+      `${blockers.length - acceptedRiskCount} blockers closed,`,
+      `${acceptedRiskCount} risks explicitly accepted;`,
+      `targeted re-review round ${ledger.targetedReviewRound}.`,
+    ].join(" "),
+  };
+}
+
+function runReview(args) {
+  if (args.length !== 2 || args[0] !== "--ledger" || !args[1].trim()) {
+    throw new Error(
+      "usage: final-state-evidence.mjs review --ledger <code-review-findings.json>",
     );
   }
 
@@ -276,9 +372,11 @@ function runReview(args) {
     throw new Error("the relevant-check record is failed, stale, or malformed");
   }
 
+  const evidence = readFindingLedger(args[1], current.root, record);
   const reviewedRecord = {
     ...record,
-    reviewConclusion: conclusion,
+    ...evidence,
+    reviewedDiff: record.finalDiff,
     reviewedAt: new Date().toISOString(),
   };
   writeRecord(current, reviewedRecord);
@@ -325,10 +423,27 @@ export function evaluateStop(input, cwd = process.cwd()) {
       "The relevant-check record is failed, stale, or malformed; rerun it after the final code edit.",
     );
   }
-  if (!/reviewed|审阅/i.test(record.reviewConclusion || "")) {
+
+  let reviewEvidence;
+  try {
+    reviewEvidence = readFindingLedger(
+      record.findingLedger || "",
+      current.root,
+      record,
+    );
+  } catch {
+    reviewEvidence = null;
+  }
+  if (
+    !reviewEvidence ||
+    record.reviewedDiff !== record.finalDiff ||
+    record.findingLedger !== reviewEvidence.findingLedger ||
+    record.findingLedgerDigest !== reviewEvidence.findingLedgerDigest ||
+    record.reviewConclusion !== reviewEvidence.reviewConclusion
+  ) {
     return block(
       input,
-      'Review the complete final diff and relevant check result together, then record the conclusion with `node .codex/hooks/final-state-evidence.mjs review --conclusion "Reviewed <conclusion>"`.',
+      "Complete targeted re-review after the final code edit, then record the conclusion from a structured finding ledger with `node .codex/hooks/final-state-evidence.mjs review --ledger <code-review-findings.json>`.",
     );
   }
 
@@ -338,6 +453,8 @@ export function evaluateStop(input, cwd = process.cwd()) {
   const relevantCheck = field(message, "Relevant check");
   const checkResult = field(message, "Check result");
   const checkCoverage = field(message, "Check coverage");
+  const findingLedger = field(message, "Finding ledger");
+  const findingLedgerDigest = field(message, "Finding ledger digest");
   const reviewConclusion = field(message, "Review conclusion");
   const closure = field(message, "Closure");
 
@@ -348,6 +465,8 @@ export function evaluateStop(input, cwd = process.cwd()) {
     relevantCheck === record.relevantCheck &&
     checkResult === "PASS" &&
     checkCoverage === record.checkCoverage &&
+    findingLedger === record.findingLedger &&
+    findingLedgerDigest === record.findingLedgerDigest &&
     reviewConclusion === record.reviewConclusion &&
     closure === "accepted";
 
@@ -363,6 +482,8 @@ export function evaluateStop(input, cwd = process.cwd()) {
       `- Relevant check: ${record.relevantCheck}`,
       "- Check result: PASS",
       `- Check coverage: ${record.checkCoverage}`,
+      `- Finding ledger: ${record.findingLedger}`,
+      `- Finding ledger digest: ${record.findingLedgerDigest}`,
       `- Review conclusion: ${record.reviewConclusion}`,
       "- Closure: accepted",
     ].join("\n"),
