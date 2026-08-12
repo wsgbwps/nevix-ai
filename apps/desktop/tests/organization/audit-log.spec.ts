@@ -200,7 +200,7 @@ test('an Admin filters the Organization Audit Log by action', { tag: '@smoke' },
 })
 
 test(
-  'Audit Log navigation preserves Authentication Session IPC and logout across restart',
+  'Audit Log navigation preserves trusted Session IPC and real logout across restart',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(90_000)
@@ -220,8 +220,11 @@ test(
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
         await settingsNavigation.getByText('Audit log', { exact: true }).click()
 
-        await launched.page.evaluate(() => window.api.invoke('authentication:clear-session'))
         expect(await launched.page.evaluate(() => window.location.hash)).toBe('')
+        const sessionRead = await launched.page.evaluate(() =>
+          window.api.invoke('authentication:read-session')
+        )
+        expect(['empty', 'session']).toContain(sessionRead.outcome)
 
         await launched.page.getByRole('link', { name: 'Back' }).click()
         await signOutFromUserMenu(launched.page)
@@ -348,7 +351,7 @@ test(
 )
 
 test(
-  'an Admin demoted at runtime loses the Audit Log navigation and section on Settings entry',
+  'an Admin with no Audit Log entries loses Audit Log surfaces only after runtime demotion',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(90_000)
@@ -371,10 +374,18 @@ test(
           launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
         ).toBeVisible()
 
+        await openSettingsFromUserMenu(launched.page)
+        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+        await expect(settingsNavigation.getByText('Audit log', { exact: true })).toBeVisible()
+        await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toBeVisible()
+
+        await launched.page.getByRole('link', { name: 'Back' }).click()
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        ).toBeVisible()
         await updateMembershipRole(userId, organization.id, 'member')
         await openSettingsFromUserMenu(launched.page)
 
-        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
         await expect(settingsNavigation.getByText('Audit log', { exact: true })).toHaveCount(0)
         await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toHaveCount(0)
       } finally {

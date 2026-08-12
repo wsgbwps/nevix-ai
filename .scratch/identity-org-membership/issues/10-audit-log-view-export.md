@@ -50,3 +50,16 @@
   - Check coverage: Merged invitation/startup reconciliation with Audit Log Membership refresh; Authentication clear-session/logout restart, runtime Admin-to-Member removal, and Member RLS denial remain correct on latest main.
   - Review conclusion: Reviewed the latest-main conflict union and PASS results; PR #44 invitation/startup behavior and the Audit Log refresh/clear-session fixes are both preserved, the Organization session type is canonical, and Member fixtures now satisfy the Profile prerequisite without weakening RLS coverage.
   - Closure: accepted locally; merge commit remains to be pushed so GitHub can start the latest PR CI gate.
+
+- 2026-08-12: Spec evidence follow-up removes the manual Session clear that previously masked the real user-menu logout path. Audit Log navigation now proves the renderer URL remains fragment-free and the non-destructive Session read IPC remains trusted before a real logout; the same `userData` then restarts unauthenticated. The empty-log Admin scenario now proves both Audit Log surfaces are initially visible, returns to the App Shell, applies the runtime Member demotion, and proves both surfaces disappear on Settings re-entry.
+
+  Validation: the two focused Playwright scenarios PASS (2/2); Desktop typecheck PASS; Desktop lint PASS; the final Desktop Smoke rerun PASS (18/18). The first full Smoke attempt was 17/18 because an unchanged App Shell scenario remained on its startup restoration screen; every Audit Log scenario passed in that attempt, and the clean full rerun closed the check.
+
+  Final-state evidence
+  - Acceptance boundary: Audit Log navigation must leave the renderer URL fragment-free and Session IPC trusted; real user-menu logout must clear the persisted Session without a prior manual clear; an Admin with an empty Audit Log must see both Audit Log surfaces before a runtime Member demotion removes them on Settings re-entry.
+  - Final diff: `sha256:69305ff6f44cfd6698d2303d5b2779710dffeadc73563865c5784e967e47ebf4` (scoped Organization E2E diff)
+  - Relevant check: Desktop Organization Audit Log spec evidence closure
+  - Check result: PASS
+  - Check coverage: Fragment-free trusted Session IPC, real user-menu logout persistence across restart, and empty-log Admin visibility before runtime Member demotion; final Desktop Smoke 18/18.
+  - Review conclusion: The focused E2E diff now observes both requested behaviors without pre-clearing the persisted Session or using empty Audit Log data as an authorization signal; no product implementation or shared boundary changed.
+  - Closure: accepted locally; PR remains in review pending this evidence-only fix push and its CI gate.
