@@ -13,6 +13,8 @@ import (
 	"github.com/nevix-ai/server/internal/identity/command"
 )
 
+const exposedResponseHeaders = "X-Invitation-Code-Attempts-Remaining"
+
 // corsMiddleware builds the CORS gate from the environment whitelist and the
 // route table's per-path methods. An origin outside the whitelist receives no
 // CORS headers at all — the browser enforces the denial — while whitelisted
@@ -34,6 +36,7 @@ func corsMiddleware(allowedOrigins []string, methodsByPath map[string][]string) 
 				return
 			}
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Expose-Headers", exposedResponseHeaders)
 			w.Header().Add("Vary", "Origin")
 			if r.Method == http.MethodOptions {
 				path := r.Pattern

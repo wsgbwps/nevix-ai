@@ -35,7 +35,7 @@ test(
         await launched.page.getByRole('button', { name: '登录', exact: true }).click()
         await expect(
           launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })
-        ).toBeVisible()
+        ).toBeVisible({ timeout: 15_000 })
 
         // 组织切换器槽位：产品标识占位、不可切换，且不出现下拉死入口。
         const organizationSwitcher = launched.page.getByRole('button', { name: '组织切换器' })

@@ -1166,7 +1166,7 @@ paths:
       description: |-
         已验证且邮箱与 Invitation 匹配的 invitee 输入六位邀请码后加入 Organization。命令原子执行验证码校验、Member Membership 创建、Invitation 接受、Audit Log 写入和验证码消费。已接受的同一 Invitation 返回既有 active Membership，不会创建重复行。
 
-        错误码不会对不匹配邮箱披露 Invitation 状态；错误验证码最多允许五次，最后一次会使该码失效。
+        错误码不会对不匹配邮箱披露 Invitation 状态；错误验证码最多允许五次，最后一次会使该码失效。格式正确但不匹配的提交，以及已耗尽的码，会通过 `X-Invitation-Code-Attempts-Remaining` 响应头返回服务端权威的剩余次数。被重发替换的历史码返回 `invitation_code_invalidated`，不消耗现行码的尝试次数。
       security:
         - bearerAuth: []
       parameters:
@@ -1227,6 +1227,13 @@ paths:
                           - active
         "400":
           description: 请求不合法 —— invalid_request 指请求体不是含 code 字段的 JSON；invalid_invitation_id 指路径参数不是 UUID；invalid_invitation_code 指 code 不是六位数字或与有效码不匹配。
+          headers:
+            X-Invitation-Code-Attempts-Remaining:
+              description: 仅当格式正确的六码不匹配时返回；该次尝试已提交后的剩余次数（1–4）。
+              schema:
+                type: integer
+                minimum: 1
+                maximum: 4
           content:
             application/json:
               schema:
@@ -1265,6 +1272,13 @@ paths:
                           - invitation_not_found
         "409":
           description: 调用因 Invitation 状态、现有 active Membership 或耗尽验证码尝试次数而不能完成。
+          headers:
+            X-Invitation-Code-Attempts-Remaining:
+              description: 仅在 code_attempts_exhausted 时返回 0。
+              schema:
+                type: integer
+                minimum: 0
+                maximum: 0
           content:
             application/json:
               schema:
@@ -1278,6 +1292,7 @@ paths:
                           - invitation_not_pending
                           - invitation_revoked
                           - invitation_expired
+                          - invitation_code_invalidated
                           - code_attempts_exhausted
         "500":
           description: 服务端未能接受 Invitation，未提交部分状态。

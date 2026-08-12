@@ -37,6 +37,9 @@ func TestCORSWhitelistEchoesAllowedOriginsExactly(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://app.nevix.test" {
 		t.Fatalf("whitelisted origin: Allow-Origin %q, want the origin echoed exactly", got)
 	}
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "X-Invitation-Code-Attempts-Remaining") {
+		t.Fatalf("whitelisted origin: Expose-Headers %q, want invitation attempts header", got)
+	}
 }
 
 func TestCORSRejectsUnknownOriginsWithoutHeaders(t *testing.T) {
@@ -45,6 +48,9 @@ func TestCORSRejectsUnknownOriginsWithoutHeaders(t *testing.T) {
 	rec := doCORS(handler, http.MethodPost, "https://evil.example")
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("unknown origin got Allow-Origin %q, want no CORS headers at all", got)
+	}
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); got != "" {
+		t.Fatalf("unknown origin got Expose-Headers %q, want no CORS headers at all", got)
 	}
 }
 
@@ -57,6 +63,9 @@ func TestCORSPassesRequestsWithoutOrigin(t *testing.T) {
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("origin-less request got Allow-Origin %q, want none", got)
+	}
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); got != "" {
+		t.Fatalf("origin-less request got Expose-Headers %q, want none", got)
 	}
 }
 

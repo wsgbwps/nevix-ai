@@ -42,6 +42,7 @@ export type AuthenticationNotice =
 interface AuthenticatedSession {
   readonly accessToken: string
   readonly userId: string
+  readonly email: string
 }
 
 interface Authentication {
@@ -158,11 +159,13 @@ export function useAuthentication(): Authentication {
       data: { session },
       error: sessionError
     } = await client.auth.getSession()
-    if (sessionError || !session) return undefined
+    if (sessionError || !session || !session.user.email) return undefined
+    const email = session.user.email
 
     return {
       accessToken: session.access_token,
-      userId: session.user.id
+      userId: session.user.id,
+      email: email.toLowerCase()
     }
   }, [])
 

@@ -49,6 +49,14 @@ CREATE INDEX verification_codes_action_target_created_idx
   ON identity.verification_codes (target_id, created_at DESC)
   WHERE action_type IS NOT NULL;
 
+-- Invitation acceptance checks whether a submitted code belongs to a
+-- superseded predecessor before spending the active code's next attempt.
+-- Keep that exact historical lookup bounded even for an invitation that has
+-- been resent many times.
+CREATE INDEX verification_codes_invitation_superseded_hash_idx
+  ON identity.verification_codes (target_id, code_hash)
+  WHERE action_type = 'invitation' AND status = 'superseded';
+
 CREATE TABLE identity.outbox_messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   sender text NOT NULL,

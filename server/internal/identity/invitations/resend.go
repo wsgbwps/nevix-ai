@@ -73,9 +73,13 @@ func (c *Creator) ResendInvitation(ctx context.Context, req ResendInvitationRequ
 	}
 	if err := tx.QueryRow(ctx,
 		`UPDATE public.invitations
-		 SET expires_at = clock_timestamp() + make_interval(secs => $2), updated_at = now()
+		 SET expires_at = clock_timestamp() + make_interval(secs => $2),
+		     organization_name = $3,
+		     inviter_display_name = $4,
+		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING expires_at`, invitation.ID, invitationValidity.Seconds(),
+		organizationName, actor.DisplayName,
 	).Scan(&invitation.ExpiresAt); err != nil {
 		return InvitationResponse{}, fmt.Errorf("invitations: refresh invitation expiration: %w", err)
 	}

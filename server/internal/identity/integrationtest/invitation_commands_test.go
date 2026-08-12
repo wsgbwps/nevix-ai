@@ -293,6 +293,8 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 	var (
 		invitationID     string
 		invitationStatus string
+		organizationName string
+		inviterName      string
 		codeHash         string
 		actionType       string
 		targetID         string
@@ -303,12 +305,16 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 		metadataEmail    string
 	)
 	if err := h.pool.QueryRow(ctx,
-		`SELECT id, status FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
-	).Scan(&invitationID, &invitationStatus); err != nil {
+		`SELECT id, status, organization_name, inviter_display_name
+		 FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
+	).Scan(&invitationID, &invitationStatus, &organizationName, &inviterName); err != nil {
 		t.Fatalf("read invitation: %v", err)
 	}
 	if invitationStatus != "pending" {
 		t.Fatalf("invitation status = %q, want pending", invitationStatus)
+	}
+	if organizationName != "Invitation Org" || inviterName != "Owner Snapshot" {
+		t.Fatalf("invitation display snapshots = (%q, %q), want (Invitation Org, Owner Snapshot)", organizationName, inviterName)
 	}
 	if err := h.pool.QueryRow(ctx,
 		`SELECT code_hash, action_type, target_id FROM identity.verification_codes WHERE target_id = $1`, invitationID,
@@ -734,12 +740,31 @@ func TestResendInvitationDoesNotRevalidateHistoricalCode(t *testing.T) {
 	}
 
 	acceptPath := "/identity/invitations/" + invitationID + "/accept"
-	status, body = identityCommand(t, handler, http.MethodPost, acceptPath, inviteeToken, map[string]string{"code": initialCode})
-	if status != http.StatusBadRequest {
-		t.Fatalf("accept with historical code: status %d body %s, want 400", status, body)
+	var failedAttemptsBeforeHistorical, failedAttemptsAfterHistorical int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT failed_attempts FROM identity.verification_codes
+		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
+	).Scan(&failedAttemptsBeforeHistorical); err != nil {
+		t.Fatalf("read active attempt count before historical-code acceptance: %v", err)
 	}
-	assertCommandError(t, body, "invalid_invitation_code")
+	status, body, headers := identityCommandFromIP(t, handler, http.MethodPost, acceptPath, inviteeToken, "", map[string]string{"code": initialCode})
+	if status != http.StatusConflict {
+		t.Fatalf("accept with historical code: status %d body %s, want 409", status, body)
+	}
+	assertCommandError(t, body, "invitation_code_invalidated")
 	assertContractResponse(t, http.MethodPost, acceptPath, status, body)
+	if got := headers.Get("X-Invitation-Code-Attempts-Remaining"); got != "" {
+		t.Fatalf("historical code remaining-attempts header = %q, want absent", got)
+	}
+	if err := h.pool.QueryRow(ctx,
+		`SELECT failed_attempts FROM identity.verification_codes
+		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
+	).Scan(&failedAttemptsAfterHistorical); err != nil {
+		t.Fatalf("read active attempt count after historical-code acceptance: %v", err)
+	}
+	if failedAttemptsAfterHistorical != failedAttemptsBeforeHistorical {
+		t.Fatalf("historical code changed current failed attempts from %d to %d", failedAttemptsBeforeHistorical, failedAttemptsAfterHistorical)
+	}
 	status, body = identityCommand(t, handler, http.MethodPost, acceptPath, inviteeToken, map[string]string{"code": latestCode})
 	if status != http.StatusOK {
 		t.Fatalf("accept with latest code: status %d body %s, want 200", status, body)
@@ -904,7 +929,8 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 	}
 	inviteeToken := keys.signToken(t, attemptInvitee.ID, time.Now().Add(time.Hour))
 	for attempt := 1; attempt <= attemptLimit; attempt++ {
-		status, body = identityCommand(t, handler, http.MethodPost, attemptPath, inviteeToken, map[string]string{"code": wrongCode})
+		var headers http.Header
+		status, body, headers = identityCommandFromIP(t, handler, http.MethodPost, attemptPath, inviteeToken, "", map[string]string{"code": wrongCode})
 		wantStatus, wantCode := http.StatusBadRequest, "invalid_invitation_code"
 		if attempt == attemptLimit {
 			wantStatus, wantCode = http.StatusConflict, "code_attempts_exhausted"
@@ -914,6 +940,9 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 		}
 		assertCommandError(t, body, wantCode)
 		assertContractResponse(t, http.MethodPost, attemptPath, status, body)
+		if got, want := headers.Get("X-Invitation-Code-Attempts-Remaining"), strconv.Itoa(attemptLimit-attempt); got != want {
+			t.Fatalf("wrong invitation code attempt %d remaining-attempts header = %q, want %q", attempt, got, want)
+		}
 	}
 	var exhaustedStatus, exhaustedOutboxStatus string
 	if err := h.pool.QueryRow(ctx,
@@ -927,12 +956,15 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 	if failedAttempts != attemptLimit || exhaustedStatus != "superseded" || exhaustedOutboxStatus != "cancelled" {
 		t.Fatalf("exhausted code state = attempts:%d code:%q outbox:%q, want 5/superseded/cancelled", failedAttempts, exhaustedStatus, exhaustedOutboxStatus)
 	}
-	status, body = identityCommand(t, handler, http.MethodPost, attemptPath, inviteeToken, map[string]string{"code": attemptCode})
+	status, body, headers := identityCommandFromIP(t, handler, http.MethodPost, attemptPath, inviteeToken, "", map[string]string{"code": attemptCode})
 	if status != http.StatusConflict {
 		t.Fatalf("accept exhausted code: status %d body %s, want 409", status, body)
 	}
 	assertCommandError(t, body, "code_attempts_exhausted")
 	assertContractResponse(t, http.MethodPost, attemptPath, status, body)
+	if got := headers.Get("X-Invitation-Code-Attempts-Remaining"); got != "0" {
+		t.Fatalf("exhausted code remaining-attempts header = %q, want 0", got)
+	}
 
 	expiredInvitationID, _, expiredCode := createInvitation(expiredInvitee.Email)
 	if _, err := h.pool.Exec(ctx,

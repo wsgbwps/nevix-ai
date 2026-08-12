@@ -5,13 +5,30 @@ export interface SeededOrganization {
   readonly name: string
 }
 
+export interface InvitationAcceptanceState {
+  readonly displayName: string | undefined
+  readonly invitationStatus: string | undefined
+  readonly organizations: readonly {
+    readonly id: string
+    readonly name: string
+    readonly role: string
+    readonly status: string
+  }[]
+}
+
 /**
- * Seeds Organizations and Memberships through the stack's trusted `identity_app` role: clients
- * are SELECT-only on these tables by design (ADR-0008), so tests arrange startup fixtures with
- * the same trusted seam the Go identity server writes through, reached over a direct database
- * connection supplied by the E2E runner.
+ * Seeds Organizations and Memberships through the stack's trusted `identity_app` role. Profile
+ * fixtures use the harness database owner because `identity_app` is SELECT-only on profiles by
+ * design; production Profile writes remain authenticated RLS client operations.
  */
 async function withIdentityAppClient<T>(run: (client: Client) => Promise<T>): Promise<T> {
+  return withDatabaseClient(async (client) => {
+    await client.query('SET ROLE identity_app')
+    return run(client)
+  })
+}
+
+async function withDatabaseClient<T>(run: (client: Client) => Promise<T>): Promise<T> {
   const databaseUrl = process.env.NEVIX_TEST_DATABASE_URL
   if (!databaseUrl) {
     throw new Error(
@@ -22,18 +39,31 @@ async function withIdentityAppClient<T>(run: (client: Client) => Promise<T>): Pr
   const client = new Client({ connectionString: databaseUrl })
   await client.connect()
   try {
-    await client.query('SET ROLE identity_app')
     return await run(client)
   } finally {
     await client.end()
   }
 }
 
+export async function seedProfile(userId: string, displayName = 'E2E User'): Promise<void> {
+  await withDatabaseClient(async (client) => {
+    await client.query(
+      'INSERT INTO profiles (user_id, display_name) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING',
+      [userId, displayName]
+    )
+  })
+}
+
 export async function seedOrganizationWithMembership(
   userId: string,
-  options: { readonly name: string; readonly role?: 'owner' | 'admin' | 'member' }
+  options: {
+    readonly name: string
+    readonly role?: 'owner' | 'admin' | 'member'
+    readonly profileDisplayName?: string
+  }
 ): Promise<SeededOrganization> {
   const id = crypto.randomUUID()
+  await seedProfile(userId, options.profileDisplayName)
 
   return withIdentityAppClient(async (client) => {
     await client.query('INSERT INTO organizations (id, name) VALUES ($1, $2)', [id, options.name])
@@ -53,6 +83,81 @@ export async function endMembership(userId: string, organizationId: string): Pro
     )
     if (result.rowCount === 0) {
       throw new Error('Unable to end test Membership: no active Membership found')
+    }
+  })
+}
+
+export async function ageInvitationCodeBeyondCooldown(invitationId: string): Promise<void> {
+  await withIdentityAppClient(async (client) => {
+    const result = await client.query(
+      `UPDATE identity.verification_codes
+       SET created_at = clock_timestamp() - interval '2 minutes'
+       WHERE target_id = $1 AND action_type = 'invitation'`,
+      [invitationId]
+    )
+    if (result.rowCount !== 1) {
+      throw new Error('Unable to age the invitation code beyond the resend cooldown')
+    }
+  })
+}
+
+export async function expireInvitation(invitationId: string): Promise<void> {
+  await withIdentityAppClient(async (client) => {
+    const invitation = await client.query(
+      "UPDATE invitations SET expires_at = clock_timestamp() - interval '1 second' WHERE id = $1",
+      [invitationId]
+    )
+    if (invitation.rowCount !== 1) throw new Error('Unable to expire the test invitation')
+
+    const code = await client.query(
+      `UPDATE identity.verification_codes
+       SET expires_at = clock_timestamp() - interval '1 second'
+       WHERE target_id = $1 AND action_type = 'invitation'`,
+      [invitationId]
+    )
+    if (code.rowCount !== 1) throw new Error('Unable to expire the test invitation code')
+  })
+}
+
+export async function readInvitationAcceptanceState(
+  userId: string,
+  invitationId: string
+): Promise<InvitationAcceptanceState> {
+  return withIdentityAppClient(async (client) => {
+    const profile = await client.query<{ display_name: string }>(
+      'SELECT display_name FROM profiles WHERE user_id = $1',
+      [userId]
+    )
+    const invitation = await client.query<{ status: string }>(
+      'SELECT status FROM invitations WHERE id = $1',
+      [invitationId]
+    )
+    const organizations = await client.query<{
+      organization_id: string
+      organization_name: string
+      role: string
+      status: string
+    }>(
+      `SELECT organizations.id AS organization_id,
+              organizations.name AS organization_name,
+              memberships.role,
+              memberships.status
+       FROM memberships
+       JOIN organizations ON organizations.id = memberships.organization_id
+       WHERE memberships.user_id = $1
+       ORDER BY organizations.id`,
+      [userId]
+    )
+
+    return {
+      displayName: profile.rows[0]?.display_name,
+      invitationStatus: invitation.rows[0]?.status,
+      organizations: organizations.rows.map((row) => ({
+        id: row.organization_id,
+        name: row.organization_name,
+        role: row.role,
+        status: row.status
+      }))
     }
   })
 }

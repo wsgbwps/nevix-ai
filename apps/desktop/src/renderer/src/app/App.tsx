@@ -6,6 +6,7 @@ import {
   OrganizationOnboardingProvider,
   useOrganizationOnboarding
 } from '../features/organization'
+import { hasCompletedProfile } from '../features/profile'
 import { AuthenticationStateContext, useAuthenticationState } from './authentication-state'
 import { routeTree } from './routeTree.gen'
 
@@ -29,6 +30,7 @@ function App(): React.JSX.Element {
           key={authentication.status === 'authenticated' ? 'authenticated' : 'signed-out'}
           isAuthenticated={authentication.status === 'authenticated'}
           getSession={authentication.getSession}
+          hasCompletedProfile={hasCompletedProfile}
         >
           <ResetOnboardingAfterAuthenticationEnds />
           <RouterProvider router={router} />

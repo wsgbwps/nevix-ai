@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  acceptInvitation as acceptPendingInvitation,
+  InvitationAcceptanceError,
+  readPendingInvitations,
+  type AcceptedInvitation,
+  type PendingInvitation
+} from '../api/invitations'
+import type { AuthenticatedOrganizationSession } from '../api/client'
 import { readActiveMemberships, type ActiveMembership } from '../api/memberships'
 import {
   ActiveOrganizationContext,
   type ActiveOrganizationState,
   type OrganizationStartupPhase
 } from './active-organization-state'
-import { resolveStartupBranch } from './startup-resolution'
+import { reconcileStartupBranch, resolveStartupBranch } from './startup-resolution'
 import { useOrganizationOnboarding } from './onboarding-state'
 
 interface ActiveOrganizationProviderProps {
   readonly isAuthenticated: boolean
-  readonly getSession: () => Promise<
-    { readonly accessToken: string; readonly userId: string } | undefined
-  >
+  readonly getSession: () => Promise<AuthenticatedOrganizationSession | undefined>
+  readonly hasCompletedProfile: (session: AuthenticatedOrganizationSession) => Promise<boolean>
   readonly children: React.ReactNode
 }
 
@@ -30,6 +37,7 @@ interface ActiveOrganizationProviderProps {
 export function ActiveOrganizationProvider({
   isAuthenticated,
   getSession,
+  hasCompletedProfile,
   children
 }: ActiveOrganizationProviderProps): React.JSX.Element {
   const onboarding = useOrganizationOnboarding()
@@ -38,6 +46,7 @@ export function ActiveOrganizationProvider({
   const [availableOrganizations, setAvailableOrganizations] = useState<readonly ActiveMembership[]>(
     []
   )
+  const [pendingInvitations, setPendingInvitations] = useState<readonly PendingInvitation[]>([])
   const [rememberedOrganizationId, setRememberedOrganizationId] = useState<string>()
   // The startup verification runs at most once per authenticated Session; a failed fetch stays
   // on the restoring view instead of retrying in a loop.
@@ -57,9 +66,64 @@ export function ActiveOrganizationProvider({
     })
   }, [])
 
+  const acceptInvitation = useCallback(
+    async (invitation: PendingInvitation, code: string): Promise<void> => {
+      const session = await getSession()
+      if (!session) throw new Error('Invitation acceptance Session is unavailable.')
+
+      let accepted: AcceptedInvitation
+      try {
+        accepted = await acceptPendingInvitation({
+          session,
+          invitationId: invitation.id,
+          code
+        })
+      } catch (error) {
+        if (error instanceof InvitationAcceptanceError && error.code === 'invitation_revoked') {
+          setPendingInvitations((invitations) =>
+            invitations.filter((candidate) => candidate.id !== invitation.id)
+          )
+        }
+        throw error
+      }
+      // The command return is confirmation only. Re-read active Memberships under RLS so the
+      // Data API remains the source of truth for the Organization the Desktop enters.
+      const memberships = await readActiveMemberships(session)
+      const membership = memberships.find(
+        (candidate) => candidate.organizationId === accepted.organizationId
+      )
+      if (!membership) throw new Error('Accepted Organization Membership is unavailable.')
+
+      setAvailableOrganizations(memberships)
+      setPendingInvitations((invitations) =>
+        invitations.filter((candidate) => candidate.id !== invitation.id)
+      )
+      enterOrganization(membership)
+    },
+    [getSession, enterOrganization]
+  )
+
+  const reconcileStartupAfterInvitationChange = useCallback((): void => {
+    reconcileStartupBranch(
+      availableOrganizations,
+      rememberedOrganizationId,
+      pendingInvitations.length > 0,
+      {
+        beginOnboarding: onboarding.beginOnboarding,
+        enterOrganization
+      }
+    )
+  }, [
+    availableOrganizations,
+    rememberedOrganizationId,
+    pendingInvitations.length,
+    onboarding.beginOnboarding,
+    enterOrganization
+  ])
+
   useEffect(() => {
     if (!isAuthenticated) return
-    if (onboarding.isEligible || activeOrganization) return
+    if (activeOrganization) return
     if (resolutionRef.current !== 'none') return
 
     resolutionRef.current = 'running'
@@ -73,45 +137,64 @@ export function ActiveOrganizationProvider({
           return
         }
 
-        const [memberships, remembered] = await Promise.all([
+        const [memberships, pending, remembered, profileCompleted] = await Promise.all([
           readActiveMemberships(session),
-          window.api.invoke('organization:get-remembered-active-organization')
+          readPendingInvitations(session),
+          window.api.invoke('organization:get-remembered-active-organization'),
+          hasCompletedProfile(session)
         ])
         if (resolutionRef.current !== 'running') return
 
         resolutionRef.current = 'done'
         setAvailableOrganizations(memberships)
+        setPendingInvitations(pending)
         const rememberedId = remembered.organizationId ?? undefined
         setRememberedOrganizationId(rememberedId)
 
-        const branch = resolveStartupBranch(memberships, rememberedId)
+        const branch = resolveStartupBranch(memberships, rememberedId, pending.length > 0)
+        onboarding.resolveOnboarding({
+          shouldCompleteProfile: !profileCompleted,
+          shouldCreateOrganization: branch.kind === 'onboarding'
+        })
         if (branch.kind === 'enter') {
           enterOrganization(branch.membership)
           return
         }
 
         setStartupPhase('ready')
-        if (branch.kind === 'onboarding') onboarding.beginOnboarding()
       } catch {
         resolutionRef.current = 'failed'
       }
     })()
-  }, [isAuthenticated, onboarding, activeOrganization, getSession, enterOrganization])
+  }, [
+    isAuthenticated,
+    onboarding,
+    activeOrganization,
+    getSession,
+    hasCompletedProfile,
+    enterOrganization
+  ])
 
   const value = useMemo<ActiveOrganizationState>(
     () => ({
       startupPhase,
       activeOrganization,
       availableOrganizations,
+      pendingInvitations,
       rememberedOrganizationId,
-      enterOrganization
+      enterOrganization,
+      acceptInvitation,
+      reconcileStartupAfterInvitationChange
     }),
     [
       startupPhase,
       activeOrganization,
       availableOrganizations,
+      pendingInvitations,
       rememberedOrganizationId,
-      enterOrganization
+      enterOrganization,
+      acceptInvitation,
+      reconcileStartupAfterInvitationChange
     ]
   )
 
