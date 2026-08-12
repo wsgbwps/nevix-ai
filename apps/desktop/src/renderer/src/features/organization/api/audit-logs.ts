@@ -1,6 +1,4 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { parseSupabasePublicConfig } from '../../../../../shared/config/supabase-public-config'
-import type { AuthenticatedMembershipSession } from './memberships'
+import { createOrganizationDataClient, type AuthenticatedOrganizationSession } from './client'
 
 const AUDIT_LOG_PAGE_SIZE = 100
 
@@ -23,12 +21,12 @@ export interface AuditLogEntry {
  * the current Session can see a row; the renderer only supplies the selected Organization scope.
  */
 export async function readAuditLogEntries(
-  session: AuthenticatedMembershipSession,
+  session: AuthenticatedOrganizationSession,
   organizationId: string,
   action?: string
 ): Promise<readonly AuditLogEntry[]> {
   const entries: AuditLogEntry[] = []
-  const client = auditLogClient(session)
+  const client = createOrganizationDataClient(session)
   let cursor: AuditLogCursor | undefined
 
   while (true) {
@@ -59,24 +57,6 @@ export async function readAuditLogEntries(
     if (!cursorEntry) return entries
     cursor = { createdAt: cursorEntry.createdAt, id: cursorEntry.id }
   }
-}
-
-function auditLogClient(session: AuthenticatedMembershipSession): SupabaseClient {
-  const config = parseSupabasePublicConfig({
-    url: __NEVIX_SUPABASE_URL__,
-    publishableKey: __NEVIX_SUPABASE_PUBLISHABLE_KEY__,
-    policy: __NEVIX_SUPABASE_CONFIG_POLICY__
-  })
-  if (!config) throw new Error('Audit Log configuration is unavailable.')
-
-  return createClient(config.url, config.publishableKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false
-    },
-    accessToken: async () => session.accessToken
-  })
 }
 
 function toAuditLogEntry(value: unknown): AuditLogEntry {

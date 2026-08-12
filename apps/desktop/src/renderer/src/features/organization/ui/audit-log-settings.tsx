@@ -56,9 +56,9 @@ function canViewAuditLog(
  */
 export function AuditLogSettingsNavigation(): React.JSX.Element | null {
   const { t } = useTranslation('organization')
-  const organization = useVerifiedAuditLogOrganization()
+  const { activeOrganization } = useActiveOrganization()
 
-  if (!organization) return null
+  if (!canViewAuditLog(activeOrganization)) return null
 
   return (
     <div className="grid gap-1">
@@ -84,11 +84,12 @@ export function AuditLogSettings({
   readonly getSession: GetSession
 }): React.JSX.Element | null {
   const { t, i18n } = useTranslation('organization')
-  const organization = useVerifiedAuditLogOrganization()
+  const { verification, retry } = useVerifiedAuditLogOrganization()
   const [entries, setEntries] = useState<readonly AuditLogEntry[]>([])
   const [actionFilter, setActionFilter] = useState<string>('all')
   const [isExporting, setIsExporting] = useState(false)
   const [exportedEntryCount, setExportedEntryCount] = useState<number>()
+  const organization = verification?.status === 'authorized' ? verification.membership : undefined
 
   useEffect(() => {
     let isMounted = true
@@ -114,13 +115,13 @@ export function AuditLogSettings({
     }
   }, [actionFilter, getSession, organization])
 
-  if (!organization) return null
+  if (!verification || verification.status === 'denied') return null
 
-  const organizationId = organization.organizationId
+  const organizationId = organization?.organizationId
   const groups = groupAuditLogEntriesByDay(entries)
 
   async function exportAuditLog(): Promise<void> {
-    if (isExporting) return
+    if (isExporting || !organizationId) return
 
     setIsExporting(true)
     setExportedEntryCount(undefined)
@@ -163,63 +164,85 @@ export function AuditLogSettings({
         </h2>
         <p className="text-muted-foreground text-sm">{t('audit.description')}</p>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={actionFilter} onValueChange={setActionFilter}>
-          <SelectTrigger aria-label={t('audit.filterAll')} className="w-52">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('audit.filterAll')}</SelectItem>
-            {Object.entries(actionTranslationKeys).map(([action, translationKey]) => (
-              <SelectItem key={action} value={action}>
-                {t(translationKey)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button type="button" disabled={isExporting} onClick={() => void exportAuditLog()}>
-          {t('audit.export')}
-        </Button>
-        {exportedEntryCount !== undefined ? (
-          <p role="status" className="text-muted-foreground text-sm">
-            {t('audit.exported', { count: exportedEntryCount })}
+      {verification.status === 'error' ? (
+        <div className="grid justify-items-start gap-3">
+          <p role="alert" className="text-destructive text-sm">
+            {t('audit.accessUnavailable')}
           </p>
-        ) : null}
-      </div>
-      <div className="grid gap-6">
-        {groups.map((group) => (
-          <section
-            key={group.date.toISOString()}
-            aria-labelledby={`audit-log-day-${group.date.getTime()}`}
-          >
-            <h3
-              id={`audit-log-day-${group.date.getTime()}`}
-              className="text-muted-foreground mb-2 text-sm font-medium"
-            >
-              {formatAuditLogDay(group.date, i18n.language, {
-                today: t('audit.today'),
-                yesterday: t('audit.yesterday')
-              })}
-            </h3>
-            <ul className="grid gap-2">
-              {group.entries.map((entry) => (
-                <AuditLogTimelineEntry key={entry.id} entry={entry} language={i18n.language} />
-              ))}
-            </ul>
-          </section>
-        ))}
-      </div>
+          <Button type="button" variant="outline" size="sm" onClick={retry}>
+            {t('audit.retry')}
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={actionFilter} onValueChange={setActionFilter}>
+              <SelectTrigger aria-label={t('audit.filterAll')} className="w-52">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('audit.filterAll')}</SelectItem>
+                {Object.entries(actionTranslationKeys).map(([action, translationKey]) => (
+                  <SelectItem key={action} value={action}>
+                    {t(translationKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button type="button" disabled={isExporting} onClick={() => void exportAuditLog()}>
+              {t('audit.export')}
+            </Button>
+            {exportedEntryCount !== undefined ? (
+              <p role="status" className="text-muted-foreground text-sm">
+                {t('audit.exported', { count: exportedEntryCount })}
+              </p>
+            ) : null}
+          </div>
+          <div className="grid gap-6">
+            {groups.map((group) => (
+              <section
+                key={group.date.toISOString()}
+                aria-labelledby={`audit-log-day-${group.date.getTime()}`}
+              >
+                <h3
+                  id={`audit-log-day-${group.date.getTime()}`}
+                  className="text-muted-foreground mb-2 text-sm font-medium"
+                >
+                  {formatAuditLogDay(group.date, i18n.language, {
+                    today: t('audit.today'),
+                    yesterday: t('audit.yesterday')
+                  })}
+                </h3>
+                <ul className="grid gap-2">
+                  {group.entries.map((entry) => (
+                    <AuditLogTimelineEntry key={entry.id} entry={entry} language={i18n.language} />
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </>
+      )}
     </section>
   )
 }
 
-function useVerifiedAuditLogOrganization(): ActiveMembership | undefined {
+type AuditLogAccessVerification =
+  | {
+      readonly status: 'authorized'
+      readonly organizationId: string
+      readonly membership: ActiveMembership
+    }
+  | { readonly status: 'denied' | 'error'; readonly organizationId: string }
+
+function useVerifiedAuditLogOrganization(): {
+  readonly verification: AuditLogAccessVerification | undefined
+  readonly retry: () => void
+} {
   const { activeOrganization, refreshActiveOrganization } = useActiveOrganization()
   const activeOrganizationId = activeOrganization?.organizationId
-  const [verification, setVerification] = useState<{
-    readonly organizationId: string
-    readonly membership: ActiveMembership | undefined
-  }>()
+  const [verification, setVerification] = useState<AuditLogAccessVerification>()
+  const [verificationAttempt, setVerificationAttempt] = useState(0)
 
   useEffect(() => {
     let isMounted = true
@@ -227,21 +250,31 @@ function useVerifiedAuditLogOrganization(): ActiveMembership | undefined {
 
     void refreshActiveOrganization()
       .then((membership) => {
-        if (isMounted) setVerification({ organizationId: activeOrganizationId, membership })
+        if (!isMounted) return
+        setVerification(
+          canViewAuditLog(membership)
+            ? { status: 'authorized', organizationId: activeOrganizationId, membership }
+            : { status: 'denied', organizationId: activeOrganizationId }
+        )
       })
       .catch(() => {
         if (isMounted) {
-          setVerification({ organizationId: activeOrganizationId, membership: undefined })
+          setVerification({ status: 'error', organizationId: activeOrganizationId })
         }
       })
 
     return () => {
       isMounted = false
     }
-  }, [activeOrganizationId, refreshActiveOrganization])
+  }, [activeOrganizationId, refreshActiveOrganization, verificationAttempt])
 
-  if (!verification || verification.organizationId !== activeOrganizationId) return undefined
-  return canViewAuditLog(verification.membership) ? verification.membership : undefined
+  return {
+    verification: verification?.organizationId === activeOrganizationId ? verification : undefined,
+    retry: () => {
+      setVerification(undefined)
+      setVerificationAttempt((attempt) => attempt + 1)
+    }
+  }
 }
 
 function AuditLogTimelineEntry({

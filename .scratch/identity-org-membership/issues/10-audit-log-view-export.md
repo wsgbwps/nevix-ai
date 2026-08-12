@@ -63,3 +63,16 @@
   - Check coverage: Fragment-free trusted Session IPC, real user-menu logout persistence across restart, and empty-log Admin visibility before runtime Member demotion; final Desktop Smoke 18/18.
   - Review conclusion: The focused E2E diff now observes both requested behaviors without pre-clearing the persisted Session or using empty Audit Log data as an authorization signal; no product implementation or shared boundary changed.
   - Closure: accepted locally; PR remains in review pending this evidence-only fix push and its CI gate.
+
+- 2026-08-12: PR #43 follow-up keeps Membership refresh failures distinct from authorization denial. An Owner/Admin now receives bilingual, retryable feedback while Audit Log controls and rows stay fail closed; a successful retry may render a legitimate empty Audit Log, while a successful Member result still removes both surfaces. Audit Log and Membership reads now share `createOrganizationDataClient` with the canonical `AuthenticatedOrganizationSession`; the duplicate client and `AuthenticatedMembershipSession` alias were removed.
+
+  Validation: Desktop typecheck PASS; lint PASS; unit 20/20 PASS; architecture 30/30 PASS (111 source files); i18n resource contract 6/6 PASS; final Smoke rerun 19/19 PASS. The first Smoke run was 18/19 because the unchanged App Shell scenario remained on its startup restoration screen; all six Audit Log scenarios passed, and the clean full rerun closed the final check.
+
+  Final-state evidence
+  - Acceptance boundary: Membership refresh errors remain explicit and retryable without exposing protected Audit Log controls or rows; successful empty Audit Logs and true Members remain distinct; Audit Log reads reuse the Organization Data API client seam.
+  - Final diff: `sha256:7ac3ff27536359cf65d0c8f7aa0542c4591a3216db3c0dab1f52305d1e66e99f` (scoped Organization implementation and Smoke diff)
+  - Relevant check: Desktop Organization Audit Log review findings closure
+  - Check result: PASS
+  - Check coverage: Membership refresh failures remain explicit and retryable while Audit Log content stays fail closed; successful empty logs and true Members remain distinct; Audit Log reads reuse the Organization Data API client seam; Desktop Smoke remains green.
+  - Review conclusion: Reviewed the complete Organization implementation, Smoke, and ticket diff with the PASS relevant check; membership refresh errors remain retryable and fail closed, empty logs and true Members stay distinct, and the duplicate Data API client/session seam is removed without shared-area or architecture-boundary changes.
+  - Closure: accepted locally; commit and PR review-thread closure remain pending.

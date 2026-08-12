@@ -351,6 +351,69 @@ test(
 )
 
 test(
+  'an Owner sees a retryable Membership error before a successful empty Audit Log',
+  { tag: '@smoke' },
+  async () => {
+    test.setTimeout(90_000)
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
+
+    const identity = uniqueAuthIdentity('audit-log-membership-error')
+    const userId = await createAuthUser(authHarness, identity, true)
+    await seedOrganizationWithMembership(userId, { name: 'Audit Membership Retry Studio' })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-membership-error-'))
+
+    try {
+      const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      try {
+        await signIn(launched.page, identity)
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        ).toBeVisible()
+
+        let membershipUnavailable = true
+        await launched.page.route(/\/rest\/v1\/memberships\?/, async (route) => {
+          if (membershipUnavailable) {
+            await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
+            return
+          }
+          await route.continue()
+        })
+
+        await openSettingsFromUserMenu(launched.page)
+        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+        await expect(settingsNavigation.getByRole('button', { name: 'Audit log' })).toBeVisible()
+        await expect(
+          launched.page.getByText('Unable to verify your Audit Log access right now.')
+        ).toBeVisible()
+        await expect(launched.page.getByRole('combobox', { name: 'All events' })).toHaveCount(0)
+        await expect(launched.page.getByRole('button', { name: 'Export' })).toHaveCount(0)
+        await expect(launched.page.getByRole('listitem')).toHaveCount(0)
+
+        membershipUnavailable = false
+        const auditLogResponse = launched.page.waitForResponse(
+          (response) => response.url().includes('/rest/v1/audit_logs?') && response.ok()
+        )
+        await launched.page.getByRole('button', { name: 'Try again' }).click()
+        await auditLogResponse
+
+        await expect(
+          launched.page.getByText('Unable to verify your Audit Log access right now.')
+        ).toHaveCount(0)
+        await expect(launched.page.getByRole('combobox', { name: 'All events' })).toBeVisible()
+        await expect(launched.page.getByRole('button', { name: 'Export' })).toBeVisible()
+        await expect(launched.page.getByRole('listitem')).toHaveCount(0)
+      } finally {
+        await launched.electronApp.close()
+      }
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
+    }
+  }
+)
+
+test(
   'an Admin with no Audit Log entries loses Audit Log surfaces only after runtime demotion',
   { tag: '@smoke' },
   async () => {
@@ -378,6 +441,9 @@ test(
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
         await expect(settingsNavigation.getByText('Audit log', { exact: true })).toBeVisible()
         await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toBeVisible()
+        await expect(launched.page.getByRole('combobox', { name: 'All events' })).toBeVisible()
+        await expect(launched.page.getByRole('button', { name: 'Export' })).toBeVisible()
+        await expect(launched.page.getByRole('listitem')).toHaveCount(0)
 
         await launched.page.getByRole('link', { name: 'Back' }).click()
         await expect(
@@ -444,6 +510,9 @@ test(
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
         await expect(settingsNavigation.getByRole('button', { name: 'Audit log' })).toHaveCount(0)
         await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toHaveCount(0)
+        await expect(
+          launched.page.getByText('Unable to verify your Audit Log access right now.')
+        ).toHaveCount(0)
       } finally {
         await launched.electronApp.close()
       }

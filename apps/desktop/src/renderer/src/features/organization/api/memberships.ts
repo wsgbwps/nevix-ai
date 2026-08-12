@@ -1,7 +1,5 @@
 import { createOrganizationDataClient, type AuthenticatedOrganizationSession } from './client'
 
-export type AuthenticatedMembershipSession = AuthenticatedOrganizationSession
-
 export type OrganizationRole = 'owner' | 'admin' | 'member'
 
 export interface ActiveMembership {
@@ -16,7 +14,7 @@ export interface ActiveMembership {
  * Memberships never appear here.
  */
 export async function readActiveMemberships(
-  session: AuthenticatedMembershipSession
+  session: AuthenticatedOrganizationSession
 ): Promise<readonly ActiveMembership[]> {
   const { data, error } = await createOrganizationDataClient(session)
     .from('memberships')
