@@ -34,7 +34,6 @@ export const organizationTranslations = defineResourceTranslations({
       switchToPicker: '全部组织'
     },
     settingsChrome: {
-      groupAccount: '账户',
       groupOrg: '组织',
       languageDescription: '选择 Desktop 界面的显示语言。',
       updateOrganizationName: '应用组织改名',
@@ -190,7 +189,6 @@ export const organizationTranslations = defineResourceTranslations({
       switchToPicker: 'All organizations'
     },
     settingsChrome: {
-      groupAccount: 'Account',
       groupOrg: 'Organization',
       languageDescription: 'Choose the language used in the Desktop interface.',
       updateOrganizationName: 'Apply organization rename',

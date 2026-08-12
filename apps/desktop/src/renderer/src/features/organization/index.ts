@@ -9,5 +9,8 @@ export { useOrganizationOnboarding } from './model/onboarding-state'
 export { OnboardingPage } from './ui/onboarding-page'
 export { OrganizationPickerPage } from './ui/organization-picker-page'
 export { MembersSettings } from './ui/members-settings'
-export { OrganizationSettingsSidebar } from './ui/organization-settings-sidebar'
+export {
+  ActiveOrganizationSettingsContext,
+  OrganizationSettingsNavigation
+} from './ui/settings-contributions'
 export { StartupRestoringView } from './ui/startup-restoring-view'

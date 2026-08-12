@@ -116,6 +116,7 @@ test(
       profileDisplayName: 'Iris Owner'
     })
     const firstInvitee = uniqueAuthIdentity('members-invitation-first')
+    const mixedCaseFirstInviteeEmail = firstInvitee.email.toUpperCase()
     const secondInvitee = uniqueAuthIdentity('members-invitation-second')
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-members-invitations-'))
 
@@ -132,10 +133,10 @@ test(
         const firstMessages = await readMailpitMessageIds(mailpitHarness)
         await launched.page.getByRole('button', { name: 'Invite member' }).click()
         const firstDialog = launched.page.getByRole('dialog', { name: 'Invite member' })
-        await firstDialog.getByLabel('Email').fill(firstInvitee.email)
+        await firstDialog.getByLabel('Email').fill(mixedCaseFirstInviteeEmail)
         await firstDialog.getByRole('button', { name: 'Send invitation' }).click()
         await expect(launched.page.getByRole('status')).toHaveText(
-          `Invitation sent to ${firstInvitee.email}`
+          `Invitation sent to ${mixedCaseFirstInviteeEmail}`
         )
         const firstMessage = await waitForRegistrationMessage(
           mailpitHarness,
@@ -254,7 +255,7 @@ test(
   }
 )
 test(
-  'an Owner changes Memberships and renames the active Organization everywhere',
+  'an Owner renames everywhere despite a failed pre-write Organization projection',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(90_000)
@@ -276,12 +277,42 @@ test(
     await seedProfile(adminId, 'Ada Admin')
     await seedActiveMembership(organization.id, adminId, 'admin')
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-members-owner-management-'))
+    let activeProjectionRequestCount = 0
+    let preWriteRefreshCompleted = false
+    let releasePreWriteRefresh = (): void => undefined
+    const preWriteRefreshGate = new Promise<void>((resolve) => {
+      releasePreWriteRefresh = resolve
+    })
 
     try {
       const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
       try {
         await signIn(launched.page, ownerIdentity)
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        ).toBeVisible()
+        await launched.page.route('**/rest/v1/memberships*', async (route) => {
+          const select = new URL(route.request().url()).searchParams.get('select')
+          if (!select?.includes('organizations')) {
+            await route.continue()
+            return
+          }
+
+          activeProjectionRequestCount += 1
+          if (activeProjectionRequestCount === 1) {
+            await preWriteRefreshGate
+            await route.fulfill({
+              status: 500,
+              contentType: 'application/json',
+              body: JSON.stringify({ message: 'stale pre-write projection failed' })
+            })
+            preWriteRefreshCompleted = true
+            return
+          }
+          await route.continue()
+        })
         await openSettingsFromUserMenu(launched.page)
+        await expect.poll(() => activeProjectionRequestCount).toBe(1)
 
         await expect(memberRow(launched.page, 'Mason Member')).toContainText('Member')
         await expect(memberRow(launched.page, 'Ada Admin')).toContainText('Admin')
@@ -312,8 +343,12 @@ test(
           .getByRole('textbox', { name: 'Organization name', exact: true })
           .fill(renamedOrganization)
         await launched.page.getByRole('button', { name: 'Apply organization rename' }).click()
+        await expect.poll(() => activeProjectionRequestCount).toBeGreaterThanOrEqual(2)
+        releasePreWriteRefresh()
+        await expect.poll(() => preWriteRefreshCompleted).toBe(true)
         const settingsSidebar = launched.page.getByRole('complementary')
         await expect(settingsSidebar.getByText(renamedOrganization, { exact: true })).toBeVisible()
+        await expect(launched.page.getByText('The action failed. Try again.')).toHaveCount(0)
 
         await settingsSidebar.getByRole('button', { name: 'All organizations' }).click()
         await expect(
@@ -328,6 +363,7 @@ test(
           launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
         ).toBeVisible()
       } finally {
+        releasePreWriteRefresh()
         await launched.electronApp.close()
       }
     } finally {
@@ -340,7 +376,7 @@ test(
 )
 
 test(
-  'an Admin manages Invitations and Members, then leaves with confirmation',
+  'an Admin manages members and leaves despite a failed post-commit projection',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(90_000)
@@ -404,6 +440,16 @@ test(
           .getByRole('button', { name: 'Remove', exact: true })
           .click()
         await expect(launched.page.getByText('Miles Member', { exact: true })).toHaveCount(0)
+        await launched.page.route(
+          '**/rest/v1/memberships*',
+          (route) =>
+            route.fulfill({
+              status: 500,
+              contentType: 'application/json',
+              body: JSON.stringify({ message: 'post-leave projection failed' })
+            }),
+          { times: 1 }
+        )
 
         await launched.page.getByRole('button', { name: 'Aria Admin leave organization' }).click()
         await launched.page
@@ -411,8 +457,12 @@ test(
           .getByRole('button', { name: 'Leave', exact: true })
           .click()
         await expect(
-          launched.page.getByRole('heading', { name: 'Create your first organization' })
+          launched.page.getByRole('heading', { name: 'Select an organization' })
         ).toBeVisible()
+        await expect(
+          launched.page.getByRole('button', { name: /Admin Management Studio/ })
+        ).toHaveCount(0)
+        await expect(launched.page.getByText('The action failed. Try again.')).toHaveCount(0)
       } finally {
         await launched.electronApp.close()
       }

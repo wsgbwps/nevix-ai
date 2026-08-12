@@ -16,5 +16,5 @@
 ## Comments
 
 - Implementation: [PR #46](https://github.com/wsgbwps/nevix-ai/pull/46)
-- Local acceptance: full Desktop E2E PASS（68 passed，4 skipped）；最终审查 ledger 关闭 1 个已修复 blocker，无未关闭 finding。
+- Review repair: PR #46 最新审查的 4 个 blocker 已接受并修复；以该 PR 最新 Final-state evidence 中的 targeted re-review 结果为最终验收结论。
 - `resolved` 状态与合并证据按 branch wrap-up checklist 留待 PR 合并后记录。

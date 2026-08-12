@@ -27,13 +27,18 @@ export async function createOrganizationInvitation(
   organizationId: string,
   email: string
 ): Promise<void> {
+  const canonicalEmail = email.trim().toLowerCase()
   const response = await requestOrganizationCommand({
     accessToken: session.accessToken,
     method: 'POST',
     path: `/identity/organizations/${encodeURIComponent(organizationId)}/invitations`,
-    body: { email }
+    body: { email: canonicalEmail }
   })
-  validateInvitationCommandResponse(response, { organizationId, email, expectedStatus: 'pending' })
+  validateInvitationCommandResponse(response, {
+    organizationId,
+    email: canonicalEmail,
+    expectedStatus: 'pending'
+  })
 }
 
 export async function resendOrganizationInvitation(

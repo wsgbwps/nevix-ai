@@ -51,6 +51,8 @@ export function ActiveOrganizationProvider({
   const [rememberedOrganizationId, setRememberedOrganizationId] = useState<string>()
   const activeOrganizationRef = useRef<ActiveMembership | undefined>(undefined)
   const refreshActiveOrganizationRef = useRef<Promise<ActiveMembership | undefined> | null>(null)
+  // Only the newest Membership projection may update Organization state.
+  const refreshGenerationRef = useRef(0)
   // The startup verification runs at most once per authenticated Session; a failed fetch stays
   // on the restoring view instead of retrying in a loop.
   const resolutionRef = useRef<'none' | 'running' | 'done' | 'failed'>('none')
@@ -138,37 +140,45 @@ export function ActiveOrganizationProvider({
     activeOrganizationRef.current = activeOrganization
   }, [activeOrganization])
 
-  const refreshActiveOrganization = useCallback((): Promise<ActiveMembership | undefined> => {
-    const currentOrganization = activeOrganizationRef.current
-    if (!isAuthenticated || !currentOrganization) return Promise.resolve(undefined)
-    if (refreshActiveOrganizationRef.current) return refreshActiveOrganizationRef.current
-
-    const refresh = (async (): Promise<ActiveMembership | undefined> => {
-      const session = await getSession()
-      if (!session) throw new Error('Active Organization Session is unavailable.')
-
-      const memberships = await readActiveMemberships(session)
-      const refreshedOrganization = memberships.find(
-        (membership) => membership.organizationId === currentOrganization.organizationId
-      )
-      setAvailableOrganizations(memberships)
-      setActiveOrganization((organization) =>
-        organization?.organizationId === currentOrganization.organizationId
-          ? refreshedOrganization
-          : organization
-      )
-      return refreshedOrganization
-    })()
-
-    refreshActiveOrganizationRef.current = refresh
-    const clearRefresh = (): void => {
-      if (refreshActiveOrganizationRef.current === refresh) {
-        refreshActiveOrganizationRef.current = null
+  const refreshActiveOrganization = useCallback(
+    (force = false): Promise<ActiveMembership | undefined> => {
+      const currentOrganization = activeOrganizationRef.current
+      if (!isAuthenticated || !currentOrganization) return Promise.resolve(undefined)
+      if (!force && refreshActiveOrganizationRef.current) {
+        return refreshActiveOrganizationRef.current
       }
-    }
-    void refresh.then(clearRefresh, clearRefresh)
-    return refresh
-  }, [getSession, isAuthenticated])
+
+      const requestGeneration = ++refreshGenerationRef.current
+      const refresh = (async (): Promise<ActiveMembership | undefined> => {
+        const session = await getSession()
+        if (!session) throw new Error('Active Organization Session is unavailable.')
+
+        const memberships = await readActiveMemberships(session)
+        const refreshedOrganization = memberships.find(
+          (membership) => membership.organizationId === currentOrganization.organizationId
+        )
+        if (requestGeneration !== refreshGenerationRef.current) return undefined
+
+        setAvailableOrganizations(memberships)
+        setActiveOrganization((organization) =>
+          organization?.organizationId === currentOrganization.organizationId
+            ? refreshedOrganization
+            : organization
+        )
+        return refreshedOrganization
+      })()
+
+      refreshActiveOrganizationRef.current = refresh
+      const clearRefresh = (): void => {
+        if (refreshActiveOrganizationRef.current === refresh) {
+          refreshActiveOrganizationRef.current = null
+        }
+      }
+      void refresh.then(clearRefresh, clearRefresh)
+      return refresh
+    },
+    [getSession, isAuthenticated]
+  )
 
   const leaveActiveOrganization = useCallback(async (): Promise<void> => {
     const currentOrganization = activeOrganizationRef.current
@@ -180,15 +190,28 @@ export function ActiveOrganizationProvider({
     if (!session) throw new Error('Active Organization Session is unavailable.')
 
     await leaveOrganization(session, currentOrganization.organizationId)
-    const memberships = await readActiveMemberships(session)
+    const requestGeneration = ++refreshGenerationRef.current
     activeOrganizationRef.current = undefined
     setActiveOrganization(undefined)
-    setAvailableOrganizations(memberships)
-    resolveOnboarding({
-      shouldCompleteProfile: false,
-      shouldCreateOrganization: memberships.length === 0 && pendingInvitations.length === 0
-    })
-    setStartupPhase('ready')
+    setAvailableOrganizations((organizations) =>
+      organizations.filter(
+        (organization) => organization.organizationId !== currentOrganization.organizationId
+      )
+    )
+
+    try {
+      const memberships = await readActiveMemberships(session)
+      if (requestGeneration !== refreshGenerationRef.current) return
+
+      setAvailableOrganizations(memberships)
+      resolveOnboarding({
+        shouldCompleteProfile: false,
+        shouldCreateOrganization: memberships.length === 0 && pendingInvitations.length === 0
+      })
+      setStartupPhase('ready')
+    } catch {
+      // The command already committed, so preserve the cleared Organization context.
+    }
   }, [getSession, isAuthenticated, resolveOnboarding, pendingInvitations.length])
 
   const updateActiveOrganizationName = useCallback(
@@ -208,14 +231,21 @@ export function ActiveOrganizationProvider({
         currentOrganization.organizationId,
         trimmedName
       )
-      const refreshed = await refreshActiveOrganization()
-      if (
-        !refreshed ||
-        refreshed.organizationId !== updated.id ||
-        refreshed.organizationName !== updated.name
-      ) {
-        throw new Error('Updated Active Organization is unavailable.')
+      const updatedOrganization = {
+        ...currentOrganization,
+        organizationId: updated.id,
+        organizationName: updated.name
       }
+      activeOrganizationRef.current = updatedOrganization
+      setActiveOrganization(updatedOrganization)
+      setAvailableOrganizations((organizations) =>
+        organizations.map((organization) =>
+          organization.organizationId === updated.id
+            ? { ...organization, organizationName: updated.name }
+            : organization
+        )
+      )
+      void refreshActiveOrganization(true).catch(() => undefined)
     },
     [getSession, isAuthenticated, refreshActiveOrganization]
   )
