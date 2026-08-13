@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { createRootRoute, Outlet, useLocation, useRouter } from '@tanstack/react-router'
 import {
+  StartupFailureView,
   StartupRestoringView,
   useActiveOrganization,
   useOrganizationOnboarding
@@ -33,11 +34,13 @@ function RootView(): React.JSX.Element {
     }
   }, [router, startupSurface])
 
-  return 'render' in startupSurface && startupSurface.render === 'restoring' ? (
-    <StartupRestoringView />
-  ) : (
-    <Outlet />
-  )
+  if ('render' in startupSurface && startupSurface.render === 'restoring') {
+    return <StartupRestoringView />
+  }
+  if ('render' in startupSurface && startupSurface.render === 'startup-failure') {
+    return <StartupFailureView onRetry={organization.retryStartup} />
+  }
+  return <Outlet />
 }
 
 export const Route = createRootRoute({

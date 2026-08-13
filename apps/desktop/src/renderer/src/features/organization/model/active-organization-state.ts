@@ -4,8 +4,9 @@ import type { ActiveMembership } from '../api/memberships'
 
 // Startup resolution state for the current Session: 'idle' has not started, 'resolving' is
 // fetching Memberships and device memory, and 'ready' has taken one of the startup branches
-// (entered an Organization, opened the picker, or begun onboarding).
-export type OrganizationStartupPhase = 'idle' | 'resolving' | 'ready'
+// (entered an Organization, opened the picker, or begun onboarding). 'failed' exposes a
+// recoverable prerequisite failure instead of leaving the restoring boundary visible forever.
+export type OrganizationStartupPhase = 'idle' | 'resolving' | 'failed' | 'ready'
 
 export interface SessionAccessLostOrganization {
   readonly organizationId: string
@@ -19,6 +20,7 @@ export interface ActiveOrganizationState {
   readonly availableOrganizations: readonly ActiveMembership[]
   readonly pendingInvitations: readonly PendingInvitation[]
   readonly rememberedOrganizationId: string | undefined
+  readonly retryStartup: () => void
   readonly enterOrganization: (membership: ActiveMembership) => void
   readonly openOrganizationPicker: () => void
   readonly leaveActiveOrganization: () => Promise<void>

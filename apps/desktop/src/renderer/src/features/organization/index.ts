@@ -15,3 +15,4 @@ export {
   OrganizationSettingsNavigation
 } from './ui/settings-contributions'
 export { StartupRestoringView } from './ui/startup-restoring-view'
+export { StartupFailureView } from './ui/startup-failure-view'

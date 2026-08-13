@@ -53,13 +53,21 @@ export function ActiveOrganizationProvider({
   )
   const [pendingInvitations, setPendingInvitations] = useState<readonly PendingInvitation[]>([])
   const [rememberedOrganizationId, setRememberedOrganizationId] = useState<string>()
+  const [startupAttempt, setStartupAttempt] = useState(0)
   const activeOrganizationRef = useRef<ActiveMembership | undefined>(undefined)
   const refreshActiveOrganizationRef = useRef<Promise<ActiveMembership | undefined> | null>(null)
   // Only the newest Membership projection may update Organization state.
   const refreshGenerationRef = useRef(0)
-  // The startup verification runs at most once per authenticated Session; a failed fetch stays
-  // on the restoring view instead of retrying in a loop.
+  // A startup attempt never repeats on its own. A failed attempt can only be replaced by one
+  // explicit user retry.
   const resolutionRef = useRef<'none' | 'running' | 'done' | 'failed'>('none')
+
+  const retryStartup = useCallback((): void => {
+    if (!isAuthenticated || resolutionRef.current !== 'failed') return
+
+    resolutionRef.current = 'none'
+    setStartupAttempt((attempt) => attempt + 1)
+  }, [isAuthenticated])
 
   const enterOrganization = useCallback((membership: ActiveMembership): void => {
     setActiveOrganization(membership)
@@ -326,14 +334,16 @@ export function ActiveOrganizationProvider({
     if (activeOrganization) return
     if (resolutionRef.current !== 'none') return
 
+    let cancelled = false
     resolutionRef.current = 'running'
     setStartupPhase('resolving')
     void (async () => {
       try {
         const session = await getSession()
-        if (resolutionRef.current !== 'running') return
+        if (cancelled || resolutionRef.current !== 'running') return
         if (!session) {
           resolutionRef.current = 'failed'
+          setStartupPhase('failed')
           return
         }
 
@@ -343,7 +353,7 @@ export function ActiveOrganizationProvider({
           window.api.invoke('organization:get-remembered-active-organization'),
           hasCompletedProfile(session)
         ])
-        if (resolutionRef.current !== 'running') return
+        if (cancelled || resolutionRef.current !== 'running') return
 
         resolutionRef.current = 'done'
         setAvailableOrganizations(memberships)
@@ -363,16 +373,24 @@ export function ActiveOrganizationProvider({
 
         setStartupPhase('ready')
       } catch {
+        if (cancelled || resolutionRef.current !== 'running') return
         resolutionRef.current = 'failed'
+        setStartupPhase('failed')
       }
     })()
+
+    return () => {
+      cancelled = true
+      if (resolutionRef.current === 'running') resolutionRef.current = 'none'
+    }
   }, [
     isAuthenticated,
     resolveOnboarding,
     activeOrganization,
     getSession,
     hasCompletedProfile,
-    enterOrganization
+    enterOrganization,
+    startupAttempt
   ])
 
   const value = useMemo<ActiveOrganizationState>(
@@ -383,6 +401,7 @@ export function ActiveOrganizationProvider({
       availableOrganizations,
       pendingInvitations,
       rememberedOrganizationId,
+      retryStartup,
       enterOrganization,
       openOrganizationPicker,
       leaveActiveOrganization,
@@ -400,6 +419,7 @@ export function ActiveOrganizationProvider({
       availableOrganizations,
       pendingInvitations,
       rememberedOrganizationId,
+      retryStartup,
       enterOrganization,
       openOrganizationPicker,
       leaveActiveOrganization,

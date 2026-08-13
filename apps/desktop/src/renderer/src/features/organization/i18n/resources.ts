@@ -84,7 +84,10 @@ export const organizationTranslations = defineResourceTranslations({
       revokeAria: '撤销 {{email}} 的邀请'
     },
     startup: {
-      restoring: '正在恢复你的工作区…'
+      restoring: '正在恢复你的工作区…',
+      failureHeading: '暂时无法恢复你的工作区',
+      failureDescription: '请检查网络连接后重试。',
+      retry: '重试'
     },
     picker: {
       heading: '选择组织',
@@ -247,7 +250,10 @@ export const organizationTranslations = defineResourceTranslations({
       revokeAria: 'Revoke invitation to {{email}}'
     },
     startup: {
-      restoring: 'Restoring your workspace…'
+      restoring: 'Restoring your workspace…',
+      failureHeading: "We couldn't restore your workspace",
+      failureDescription: 'Check your connection and try again.',
+      retry: 'Try again'
     },
     picker: {
       heading: 'Select an organization',
