@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** in-review
 
 **Consumes**
 
@@ -36,3 +36,26 @@
 **Absence test:** 不依赖 Remembered Email、密码显示、Auth policy 或 Settings coordinator，可单独验收。
 
 **Commutativity test:** 与 05 的 Window close protocol 可任意顺序合并；02 只拥有编辑菜单语义，05 只拥有关闭意图语义。
+
+## Comments
+
+### Implementation plan — 2026-08-13
+
+- **Acceptance boundary:** real Electron editable targets receive standard undo, cut, copy,
+  paste, delete, and select-all behavior through native roles and platform accelerators; non-editable
+  targets receive no context menu, and no navigation, reload, window-opening, external-navigation, or
+  developer-tools command is introduced.
+- **Fixed point:** `21b3873098bf9bd7eb5dfab08fe1826f73edfa8b` (`origin/main`).
+- **Primary owner:** Desktop Window platform owner (non-Domain); Authentication supplies only the
+  password and one-time-code acceptance controls and gains no business rule or new interface.
+- **Task-owned paths:** `.scratch/auth-settings-ux/issues/02-native-editing.md`,
+  `apps/desktop/src/main/window/native-editing.ts`,
+  `apps/desktop/src/main/window/main-window.ts`, `apps/desktop/src/main/index.ts`, and
+  `apps/desktop/tests/window/native-editing.spec.ts`.
+- **Test seam:** the ticket-approved Electron Playwright seam launches the real BrowserWindow,
+  observes native Menu roles for renderer context-menu events, and verifies resulting editable-field
+  values after real platform accelerators. Authentication password and one-time-code inputs are
+  exercised without inspecting React internals.
+- **Delivery:** add the failing E2E first; implement only Window-owned native edit menus and wiring;
+  run the focused E2E, Electron security regression, Desktop lint/typecheck/build, then the relevant
+  full E2E gate; close the bounded finding ledger and final-state evidence before commit and PR.
