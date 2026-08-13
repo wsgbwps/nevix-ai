@@ -7,7 +7,7 @@ import {
   type PendingOrganizationInvitation
 } from '../api/admin-invitations'
 import type { AuthenticatedOrganizationSession } from '../api/client'
-import { OrganizationCommandError } from '../api/command-client'
+import { isPotentialOrganizationAccessLoss, OrganizationCommandError } from '../api/command-client'
 import {
   changeMemberRole,
   readOrganizationMembers,
@@ -15,6 +15,7 @@ import {
   type ActiveMembership,
   type OrganizationMember
 } from '../api/memberships'
+import { useActiveOrganization } from './active-organization-state'
 
 type GetSession = () => Promise<AuthenticatedOrganizationSession | undefined>
 type Projection = 'members' | 'invitations'
@@ -74,6 +75,7 @@ export function useMembersManagement({
   readonly demoteMember: (member: OrganizationMember) => Promise<boolean>
   readonly removeMember: (member: OrganizationMember) => Promise<boolean>
 } {
+  const { confirmActiveOrganizationAccess } = useActiveOrganization()
   const [members, setMembers] = useState<readonly OrganizationMember[]>([])
   const [pendingInvitations, setPendingInvitations] = useState<
     readonly PendingOrganizationInvitation[]
@@ -104,6 +106,11 @@ export function useMembersManagement({
           : Promise.resolve([])
       ])
       if (loadVersionRef.current !== version) return
+      if (nextMembers.length === 0) {
+        const confirmedOrganization = await confirmActiveOrganizationAccess()
+        if (!confirmedOrganization) return
+        throw new Error('Organization member response is empty for an active Membership.')
+      }
 
       setCurrentUserId(session.userId)
       setMembers(nextMembers)
@@ -112,7 +119,12 @@ export function useMembersManagement({
     } catch {
       if (loadVersionRef.current === version) setLoadState('error')
     }
-  }, [canManageInvitations, getSession, organization.organizationId])
+  }, [
+    canManageInvitations,
+    confirmActiveOrganizationAccess,
+    getSession,
+    organization.organizationId
+  ])
   useEffect(() => {
     let isMounted = true
     queueMicrotask(() => {
@@ -143,7 +155,13 @@ export function useMembersManagement({
         await command(session)
         try {
           if (projection === 'members') {
-            setMembers(await readOrganizationMembers(session, organization.organizationId))
+            const nextMembers = await readOrganizationMembers(session, organization.organizationId)
+            if (nextMembers.length === 0) {
+              const confirmedOrganization = await confirmActiveOrganizationAccess()
+              if (!confirmedOrganization) return true
+              throw new Error('Organization member response is empty for an active Membership.')
+            }
+            setMembers(nextMembers)
           } else if (canManageInvitations) {
             setPendingInvitations(
               await readPendingOrganizationInvitations(session, organization.organizationId)
@@ -157,6 +175,14 @@ export function useMembersManagement({
         setNotice(successNotice)
         return true
       } catch (error) {
+        if (isPotentialOrganizationAccessLoss(error)) {
+          try {
+            const confirmedOrganization = await confirmActiveOrganizationAccess()
+            if (!confirmedOrganization) return false
+          } catch {
+            // The command still failed, so fall through to its ordinary retryable error state.
+          }
+        }
         if (error instanceof OrganizationCommandError) {
           const staleProjection =
             staleInvitationCodes[error.code] === true
@@ -201,7 +227,7 @@ export function useMembersManagement({
         setIsMutating(false)
       }
     },
-    [canManageInvitations, getSession, organization.organizationId]
+    [canManageInvitations, confirmActiveOrganizationAccess, getSession, organization.organizationId]
   )
 
   async function createInvitation(email: string): Promise<boolean> {

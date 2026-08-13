@@ -9,14 +9,20 @@ interface OrganizationCommandInput {
 
 export class OrganizationCommandError extends Error {
   readonly code: string
+  readonly status: number
   readonly retryAfterSeconds: number | undefined
 
-  constructor(code: string, retryAfterSeconds: number | undefined) {
+  constructor(code: string, status: number, retryAfterSeconds: number | undefined) {
     super('Organization command failed.')
     this.name = 'OrganizationCommandError'
     this.code = code
+    this.status = status
     this.retryAfterSeconds = retryAfterSeconds
   }
+}
+
+export function isPotentialOrganizationAccessLoss(error: unknown): boolean {
+  return error instanceof OrganizationCommandError && (error.status === 403 || error.status === 404)
 }
 
 export async function requestOrganizationCommand({
@@ -68,7 +74,11 @@ async function toOrganizationCommandError(response: Response): Promise<Organizat
       ? body.error
       : 'organization_command_failed'
 
-  return new OrganizationCommandError(code, parseRetryAfter(response.headers.get('Retry-After')))
+  return new OrganizationCommandError(
+    code,
+    response.status,
+    parseRetryAfter(response.headers.get('Retry-After'))
+  )
 }
 
 function parseRetryAfter(value: string | null): number | undefined {
