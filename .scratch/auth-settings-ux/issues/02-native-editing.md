@@ -51,7 +51,9 @@
 - **Task-owned paths:** `.scratch/auth-settings-ux/issues/02-native-editing.md`,
   `apps/desktop/src/main/window/native-editing.ts`,
   `apps/desktop/src/main/window/main-window.ts`, `apps/desktop/src/main/index.ts`, and
-  `apps/desktop/tests/window/native-editing.spec.ts`.
+  `apps/desktop/tests/window/native-editing.spec.ts`, plus the existing
+  `apps/desktop/tests/i18n/startup-language.spec.ts` regression whose old no-menu assertion must
+  recognize the managed hidden edit-accelerator menu introduced by this slice.
 - **Test seam:** the ticket-approved Electron Playwright seam launches the real BrowserWindow,
   observes native Menu roles for renderer context-menu events, and verifies resulting editable-field
   values after real platform accelerators. Authentication password and one-time-code inputs are
@@ -59,3 +61,11 @@
 - **Delivery:** add the failing E2E first; implement only Window-owned native edit menus and wiring;
   run the focused E2E, Electron security regression, Desktop lint/typecheck/build, then the relevant
   full E2E gate; close the bounded finding ledger and final-state evidence before commit and PR.
+
+### CI repair plan — 2026-08-13
+
+- Manual Full E2E run `31702275056` passed both native-editing scenarios and exposed one stale
+  startup-language regression: it still required the application menu to be `null`.
+- The approved repair changes only that regression to require exactly the six hidden native editing
+  roles. This preserves the prohibition on visible or browser-navigation commands without changing
+  product behavior.
