@@ -2,8 +2,16 @@ import { app, BrowserWindow, Menu } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { initializeMainI18n } from './language'
 import { createWindow } from './window/main-window'
+import { requestOrdinaryCloseDecision } from './window/ipc/request-ordinary-close'
+import {
+  initializeOrdinaryCloseRuntime,
+  requestApplicationQuit
+} from './window/ordinary-close-runtime'
 
 Menu.setApplicationMenu(null)
+
+initializeOrdinaryCloseRuntime(requestOrdinaryCloseDecision)
+app.on('before-quit', requestApplicationQuit)
 
 const ipcModules = import.meta.glob('./*/ipc/index.ts', { eager: true })
 

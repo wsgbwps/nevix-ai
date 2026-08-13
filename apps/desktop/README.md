@@ -42,10 +42,11 @@ runs the Electron Playwright suite with one worker. Docker must be running.
 ```bash
 $ pnpm test:e2e        # Full E2E Suite: configuration-failure builds plus every spec
 $ pnpm test:e2e:smoke  # Smoke Suite: one test-mode build, only specs tagged @smoke
+$ pnpm test:e2e:settings # Settings Information Architecture: focused Settings spec
 ```
 
 The full command first verifies that missing and invalid public configuration block the app; the
-smoke command skips those phases and the typecheck that Desktop CI already covers. Before either
+focused commands skip those phases and the typecheck that Desktop CI already covers. Before any
 command builds or changes the database, it takes the repository Supabase harness lock and refuses
 to run if the `nevix-ai` project (or the legacy Auth harness project) already has labeled Docker
 containers, volumes, or networks. E2E and Mail Smoke therefore cannot run concurrently or reset a

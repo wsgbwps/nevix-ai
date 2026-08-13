@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../../resources/icon.png?asset'
 import { getMainWindowTitle } from '../language'
+import { protectOrdinaryClose } from './ordinary-close-runtime'
 import {
   loadWindowState,
   trackWindowState,
@@ -40,6 +41,7 @@ export function createWindow(): void {
     }
   })
 
+  protectOrdinaryClose(mainWindow)
   trackWindowState(mainWindow)
 
   mainWindow.webContents.session.setPermissionCheckHandler(() => false)

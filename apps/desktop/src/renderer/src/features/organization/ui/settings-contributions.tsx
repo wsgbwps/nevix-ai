@@ -4,9 +4,15 @@ import { canViewAuditLog } from '../model/audit-log-access'
 import { useActiveOrganization } from '../model/active-organization-state'
 import { useSettingsEntryMembershipRefresh } from '../model/settings-entry-refresh'
 
-export function ActiveOrganizationSettingsContext(): React.JSX.Element | null {
+export function ActiveOrganizationSettingsContext({
+  onOpenOrganizationPicker,
+  switchDisabled
+}: {
+  readonly onOpenOrganizationPicker: () => void
+  readonly switchDisabled: boolean
+}): React.JSX.Element | null {
   const { t } = useTranslation('organization')
-  const { activeOrganization, openOrganizationPicker } = useActiveOrganization()
+  const { activeOrganization } = useActiveOrganization()
   useSettingsEntryMembershipRefresh()
 
   if (!activeOrganization) return null
@@ -29,8 +35,9 @@ export function ActiveOrganizationSettingsContext(): React.JSX.Element | null {
       </div>
       <button
         type="button"
+        disabled={switchDisabled}
         className="text-muted-foreground hover:text-foreground text-left text-xs font-medium"
-        onClick={openOrganizationPicker}
+        onClick={onOpenOrganizationPicker}
       >
         {t('shell.switchToPicker')}
       </button>
@@ -38,7 +45,17 @@ export function ActiveOrganizationSettingsContext(): React.JSX.Element | null {
   )
 }
 
-export function OrganizationSettingsNavigation(): React.JSX.Element | null {
+export type OrganizationSettingsSection = 'members' | 'audit-log'
+
+export function OrganizationSettingsNavigation({
+  activeSection,
+  disabled,
+  onSelectSection
+}: {
+  readonly activeSection: OrganizationSettingsSection | undefined
+  readonly disabled: boolean
+  readonly onSelectSection: (section: OrganizationSettingsSection) => void
+}): React.JSX.Element | null {
   const { t } = useTranslation('organization')
   const { activeOrganization } = useActiveOrganization()
 
@@ -51,9 +68,10 @@ export function OrganizationSettingsNavigation(): React.JSX.Element | null {
       </p>
       <button
         type="button"
-        aria-controls="members"
-        onClick={() => document.getElementById('members')?.scrollIntoView({ block: 'start' })}
-        className="text-sidebar-foreground hover:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
+        aria-pressed={activeSection === 'members'}
+        disabled={disabled}
+        onClick={() => onSelectSection('members')}
+        className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
       >
         <UsersRoundIcon className="size-4" />
         {t('members.title')}
@@ -61,9 +79,10 @@ export function OrganizationSettingsNavigation(): React.JSX.Element | null {
       {canViewAuditLog(activeOrganization) ? (
         <button
           type="button"
-          aria-controls="audit-log"
-          onClick={() => document.getElementById('audit-log')?.scrollIntoView({ block: 'start' })}
-          className="text-sidebar-foreground hover:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
+          aria-pressed={activeSection === 'audit-log'}
+          disabled={disabled}
+          onClick={() => onSelectSection('audit-log')}
+          className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
         >
           <ScrollTextIcon className="size-4" />
           {t('audit.title')}
