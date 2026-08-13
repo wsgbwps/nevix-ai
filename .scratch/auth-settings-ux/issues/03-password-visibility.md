@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** in-review
 
 **Consumes**
 
@@ -36,3 +36,7 @@
 **Absence test:** 即使 Remembered Email、native editing、Auth policy 和 Settings 主线全部缺席，本票仍可通过真实 BrowserWindow 完整验收。
 
 **Commutativity test:** 与 01/04 任意顺序合并都保持 CI 通过；本票不决定登录存储或密码政策 interface。
+
+## Comments
+
+- 2026-08-13: Implemented on `feat/auth-password-visibility`. Local focused Electron acceptance covers independent login/signup controls, flow reset, BrowserWindow blur/minimize, controlled document visibility loss, and retained non-secret marker values. The recovery-new-password control is asserted in the existing recovery E2E. Desktop lint, typecheck, build, architecture, unit tests, localization resource contract, and packaged localization pass. The complete `Authentication Usability Desktop E2E` remains for the PR's clean CI runner because the local harness correctly refused to reset an existing shared Supabase Docker stack.
