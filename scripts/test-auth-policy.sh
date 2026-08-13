@@ -53,6 +53,16 @@ wait_for_auth() {
   return 1
 }
 
+contains_fixed_string() {
+  local value="$1"
+
+  if command -v rg >/dev/null 2>&1; then
+    rg -Fq "$value"
+  else
+    grep -Fq "$value"
+  fi
+}
+
 start_auth_container() {
   local mode="$1"
   local -a mode_args=()
@@ -142,7 +152,7 @@ stop_auth_container
 
 start_auth_container fail-open
 NEVIX_AUTH_POLICY_URL="$auth_url" node "$repo_root/scripts/auth-policy-harness.mjs" fail-open
-if ! docker logs "$auth_container" 2>&1 | rg -Fq \
+if ! docker logs "$auth_container" 2>&1 | contains_fixed_string \
   'Unable to perform password strength check with HaveIBeenPwned.org, pwned passwords are being allowed'; then
   echo "error: HIBP fail-open did not emit the expected internal warning" >&2
   exit 1
