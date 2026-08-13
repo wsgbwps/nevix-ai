@@ -35,6 +35,8 @@ jobs:
       - run: pnpm --filter @nevix/desktop lint
       - run: pnpm --filter @nevix/desktop verify:architecture
       - run: pnpm --filter @nevix/desktop test:unit
+      - run: pnpm --filter @nevix/desktop exec playwright install --with-deps chromium
+      - run: pnpm --filter @nevix/desktop test:component
 
   build:
     name: Typecheck and build

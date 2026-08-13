@@ -10,14 +10,14 @@ export const STARTUP_ROUTES = {
 export interface StartupSurfaceInput {
   readonly status: AuthenticationStatus
   readonly isEligible: boolean
-  readonly phase: 'idle' | 'resolving' | 'ready'
+  readonly phase: 'idle' | 'resolving' | 'failed' | 'ready'
   readonly hasActiveOrganization: boolean
   readonly pathname: string
 }
 
 export type StartupSurfaceDecision =
   | { readonly navigate: (typeof STARTUP_ROUTES)[keyof typeof STARTUP_ROUTES] }
-  | { readonly render: 'restoring' | 'outlet' }
+  | { readonly render: 'restoring' | 'startup-failure' | 'outlet' }
 
 export function resolveStartupSurface({
   status,
@@ -32,6 +32,7 @@ export function resolveStartupSurface({
       : { navigate: STARTUP_ROUTES.authentication }
   }
 
+  if (phase === 'failed') return { render: 'startup-failure' }
   if (phase !== 'ready') return { render: 'restoring' }
 
   if (isEligible) {

@@ -8,11 +8,11 @@ type AuthenticationStatus =
   | 'restore-failure'
   | 'unauthenticated'
   | 'authenticated'
-type OrganizationStartupPhase = 'idle' | 'resolving' | 'ready'
+type OrganizationStartupPhase = 'idle' | 'resolving' | 'failed' | 'ready'
 type Pathname = '/auth' | '/onboarding' | '/select-organization' | '/' | '/projects/example'
 type StartupSurfaceDecision =
   | { readonly navigate: string }
-  | { readonly render: 'restoring' | 'outlet' }
+  | { readonly render: 'restoring' | 'startup-failure' | 'outlet' }
 
 const statuses: readonly AuthenticationStatus[] = [
   'restoring',
@@ -22,7 +22,7 @@ const statuses: readonly AuthenticationStatus[] = [
   'authenticated'
 ]
 const eligibility: readonly boolean[] = [true, false]
-const phases: readonly OrganizationStartupPhase[] = ['idle', 'resolving', 'ready']
+const phases: readonly OrganizationStartupPhase[] = ['idle', 'resolving', 'failed', 'ready']
 const activeOrganizationStates: readonly boolean[] = [true, false]
 const pathnames: readonly Pathname[] = [
   '/auth',
@@ -52,6 +52,19 @@ const surfaceRules: readonly SurfaceRule[] = [
       '/select-organization': { navigate: '/auth' },
       '/': { navigate: '/auth' },
       '/projects/example': { navigate: '/auth' }
+    }
+  },
+  {
+    statuses: ['authenticated'],
+    eligibility,
+    phases: ['failed'],
+    activeOrganizationStates,
+    expectedByPathname: {
+      '/auth': { render: 'startup-failure' },
+      '/onboarding': { render: 'startup-failure' },
+      '/select-organization': { render: 'startup-failure' },
+      '/': { render: 'startup-failure' },
+      '/projects/example': { render: 'startup-failure' }
     }
   },
   {
