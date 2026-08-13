@@ -11,6 +11,7 @@ const FEATURES = 'src/renderer/src/features'
 const SHARED_IPC = 'src/shared/ipc'
 
 const PLATFORM_OWNERS = new Set(['window', 'updater', 'tray'])
+const PLATFORM_IPC_OWNERS = new Set(['window'])
 const LEGACY_DOMAIN_NAMES = new Set(['settings', 'i18n'])
 const FORBIDDEN_SEGMENTS = new Set(['components', 'hooks', 'store', 'types'])
 const CANONICAL_DISCOVERY_GLOB = './*/ipc/index.ts'
@@ -185,6 +186,10 @@ function mainDomainDirectories(files) {
   )
 }
 
+function mainIpcOwnerDirectories(files) {
+  return [...new Set([...mainDomainDirectories(files), ...PLATFORM_IPC_OWNERS])].sort()
+}
+
 function mainOwnerOf(path) {
   if (!path.startsWith(`${MAIN}/`)) return null
   const rest = path.slice(MAIN.length + 1)
@@ -207,12 +212,13 @@ function checkMainOwnership(files, collector) {
     )
   }
   for (const owner of PLATFORM_OWNERS) {
+    if (PLATFORM_IPC_OWNERS.has(owner)) continue
     for (const path of sourceFilesUnder(files, `${MAIN}/${owner}/ipc`)) {
       collector.report(
         'main/platform-owner-ipc',
         path,
         `Platform owner "${owner}" carries an IPC adapter.`,
-        'window/, updater/, and tray/ stay non-Domain owners; only src/main/<domain>/ipc/ registers Channels.'
+        'Only the Window platform owner may register platform Channels; updater/ and tray/ remain transport-free.'
       )
     }
   }
@@ -259,8 +265,8 @@ function checkRegistrationDiscovery(files, collector) {
 }
 
 function checkRegistrationModules(files, collector) {
-  for (const domain of mainDomainDirectories(files)) {
-    const adapterDirectory = `${MAIN}/${domain}/ipc`
+  for (const owner of mainIpcOwnerDirectories(files)) {
+    const adapterDirectory = `${MAIN}/${owner}/ipc`
     const adapterFiles = sourceFilesUnder(files, adapterDirectory)
     if (adapterFiles.length === 0) continue
 
@@ -269,8 +275,8 @@ function checkRegistrationModules(files, collector) {
         collector.report(
           'main/handler-nesting',
           path,
-          'Channel Handlers must be directly nested files of the Domain IPC adapter.',
-          'Each Channel Handler lives in src/main/<domain>/ipc/<action>.ts with no handlers/ or other wrapper directory.'
+          'Channel Handlers must be directly nested files of the IPC adapter.',
+          'Each Channel Handler lives in src/main/<owner>/ipc/<action>.ts with no handlers/ or other wrapper directory.'
         )
       }
     }
@@ -283,7 +289,7 @@ function checkRegistrationModules(files, collector) {
       collector.report(
         'main/registration-module-shape',
         `${adapterDirectory}/`,
-        'Domain IPC adapter has no registration module.',
+        'IPC adapter has no registration module.',
         expected
       )
       continue
@@ -327,17 +333,19 @@ function checkRegistrationModules(files, collector) {
 
 function checkMainImports(files, resolve, collector) {
   const domains = new Set(mainDomainDirectories(files))
+  const ipcOwners = new Set(mainIpcOwnerDirectories(files))
   const edges = new Map()
 
   for (const path of sourceFilesUnder(files, MAIN)) {
     const owner = mainOwnerOf(path)
     const ownDomain = owner !== null && domains.has(owner) ? owner : null
-    const insideAdapter = ownDomain !== null && path.startsWith(`${MAIN}/${ownDomain}/ipc/`)
+    const ownIpcOwner = owner !== null && ipcOwners.has(owner) ? owner : null
+    const insideAdapter = ownIpcOwner !== null && path.startsWith(`${MAIN}/${ownIpcOwner}/ipc/`)
     const imports = importsOf(files.get(path) ?? '')
 
     for (const { spec, line, statement } of imports) {
       if (
-        ownDomain !== null &&
+        ownIpcOwner !== null &&
         !insideAdapter &&
         spec === 'electron' &&
         /\bipc(Main|Renderer)\b/.test(statement)
@@ -345,30 +353,30 @@ function checkMainImports(files, resolve, collector) {
         collector.report(
           'main/implementation-ipc-independence',
           path,
-          'Domain implementation imports Electron IPC.',
-          'Only the Domain IPC adapter in src/main/<domain>/ipc/ touches IPC; implementation stays transport-free.',
+          'Main owner implementation imports Electron IPC.',
+          'Only an approved IPC adapter in src/main/<owner>/ipc/ touches IPC; owner implementation stays transport-free.',
           line
         )
       }
       const target = resolve(path, spec)
       if (target === null || !target.startsWith(`${MAIN}/`)) continue
-      const targetOwner = mainOwnerOf(target)
-      const targetDomain = targetOwner !== null && domains.has(targetOwner) ? targetOwner : null
-      if (targetDomain === null) continue
-
       if (
-        ownDomain !== null &&
+        ownIpcOwner !== null &&
         !insideAdapter &&
-        target.startsWith(`${MAIN}/${targetDomain}/ipc/`)
+        target.startsWith(`${MAIN}/${ownIpcOwner}/ipc/`)
       ) {
         collector.report(
           'main/implementation-ipc-independence',
           path,
-          'Domain implementation depends on an IPC adapter.',
-          'Only the Domain IPC adapter in src/main/<domain>/ipc/ touches IPC; implementation stays transport-free.',
+          'Main owner implementation depends on an IPC adapter.',
+          'Only an approved IPC adapter in src/main/<owner>/ipc/ touches IPC; owner implementation stays transport-free.',
           line
         )
       }
+      const targetOwner = mainOwnerOf(target)
+      const targetDomain = targetOwner !== null && domains.has(targetOwner) ? targetOwner : null
+      if (targetDomain === null) continue
+
       if (targetDomain !== ownDomain) {
         if (ownDomain !== null) {
           if (!edges.has(ownDomain)) edges.set(ownDomain, new Set())
@@ -432,7 +440,7 @@ function checkSharedIpc(files, collector) {
         'shared/channels-base',
         basePath,
         'Shared Channel base is not the empty aggregation model.',
-        'channels.ts contains only the empty IpcChannelMap and IpcEventMap interfaces; Domains extend them via declaration merging.'
+        'channels.ts contains only the empty IpcChannelMap and IpcEventMap interfaces; IPC owners extend them via declaration merging.'
       )
     }
   }
@@ -460,8 +468,8 @@ function checkSharedIpc(files, collector) {
         collector.report(
           'channels/domain-prefix',
           typesPath,
-          `Channel "${key}" does not use its owning Domain prefix.`,
-          `Channels declared by this Domain are named ${domain}:<action>.`,
+          `Channel "${key}" does not use its owner prefix.`,
+          `Channels declared by this owner are named ${domain}:<action>.`,
           lineAt(stripped, match.index ?? 0)
         )
       }
@@ -476,8 +484,8 @@ function checkSharedIpc(files, collector) {
         collector.report(
           'shared/channel-declaration-placement',
           path,
-          "Channel map augmentation lives outside a shared IPC Domain's types.ts.",
-          "declare module '@ipc/channels' appears only in src/shared/ipc/<domain>/types.ts."
+          "Channel map augmentation lives outside a shared IPC owner's types.ts.",
+          "declare module '@ipc/channels' appears only in src/shared/ipc/<owner>/types.ts."
         )
       }
     }
@@ -485,44 +493,44 @@ function checkSharedIpc(files, collector) {
 }
 
 function checkSeamNameAgreement(files, collector) {
-  for (const domain of childDirectories(files, SHARED_IPC)) {
-    if (LEGACY_DOMAIN_NAMES.has(domain)) continue
-    if (sourceFilesUnder(files, `${MAIN}/${domain}`).length === 0) {
+  for (const owner of childDirectories(files, SHARED_IPC)) {
+    if (LEGACY_DOMAIN_NAMES.has(owner)) continue
+    if (sourceFilesUnder(files, `${MAIN}/${owner}`).length === 0) {
       collector.report(
         'channels/seam-name-agreement',
-        `${SHARED_IPC}/${domain}/types.ts`,
-        `Shared IPC Domain "${domain}" has no matching Main Domain.`,
-        'The canonical Domain name is reused across every seam the Domain actually needs; Channels declared in src/shared/ipc/<domain>/ are owned by src/main/<domain>/.'
+        `${SHARED_IPC}/${owner}/types.ts`,
+        `Shared IPC owner "${owner}" has no matching Main owner.`,
+        'A canonical owner name is reused across every seam it needs; Channels declared in src/shared/ipc/<owner>/ are owned by src/main/<owner>/.'
       )
     }
   }
-  for (const domain of mainDomainDirectories(files)) {
-    if (LEGACY_DOMAIN_NAMES.has(domain)) continue
+  for (const owner of mainIpcOwnerDirectories(files)) {
+    if (LEGACY_DOMAIN_NAMES.has(owner)) continue
     if (
-      sourceFilesUnder(files, `${MAIN}/${domain}/ipc`).length > 0 &&
-      !files.has(`${SHARED_IPC}/${domain}/types.ts`)
+      sourceFilesUnder(files, `${MAIN}/${owner}/ipc`).length > 0 &&
+      !files.has(`${SHARED_IPC}/${owner}/types.ts`)
     ) {
       collector.report(
         'channels/seam-name-agreement',
-        `${MAIN}/${domain}/ipc/index.ts`,
-        `Main Domain "${domain}" registers IPC without shared Channel declarations.`,
-        'A Domain IPC adapter pairs with declaration merging in src/shared/ipc/<domain>/types.ts under the same canonical Domain name.'
+        `${MAIN}/${owner}/ipc/index.ts`,
+        `Main owner "${owner}" registers IPC without shared Channel declarations.`,
+        'An IPC adapter pairs with declaration merging in src/shared/ipc/<owner>/types.ts under the same canonical owner name.'
       )
     }
   }
 }
 
 function checkMainAdapterChannelPrefixes(files, collector) {
-  for (const domain of mainDomainDirectories(files)) {
-    for (const path of sourceFilesUnder(files, `${MAIN}/${domain}/ipc`)) {
+  for (const owner of mainIpcOwnerDirectories(files)) {
+    for (const path of sourceFilesUnder(files, `${MAIN}/${owner}/ipc`)) {
       const body = withoutImportStatements(files.get(path) ?? '')
       for (const match of body.matchAll(CHANNEL_LITERAL)) {
-        if (!match[1].startsWith(`${domain}:`)) {
+        if (!match[1].startsWith(`${owner}:`)) {
           collector.report(
             'channels/domain-prefix',
             path,
-            `Channel "${match[1]}" does not use its owning Domain prefix.`,
-            `Channels handled by this Domain adapter are named ${domain}:<action>.`,
+            `Channel "${match[1]}" does not use its owner prefix.`,
+            `Channels handled by this adapter are named ${owner}:<action>.`,
             lineAt(body, match.index ?? 0)
           )
         }
