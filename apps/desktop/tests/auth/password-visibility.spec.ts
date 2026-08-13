@@ -32,6 +32,7 @@ test(
       try {
         const loginPassword = launched.page.getByLabel('Password')
         await expect(loginPassword).toHaveAttribute('type', 'password')
+        await loginPassword.fill(NON_SECRET_VISIBILITY_MARKER)
         await visibilityToggle(loginPassword, 'Show entered value').click()
         await expect(loginPassword).toHaveAttribute('type', 'text')
 
@@ -41,6 +42,8 @@ test(
         const confirmPassword = launched.page.getByLabel('Confirm password')
         await expect(signupPassword).toHaveAttribute('type', 'password')
         await expect(confirmPassword).toHaveAttribute('type', 'password')
+        await signupPassword.fill(NON_SECRET_VISIBILITY_MARKER)
+        await confirmPassword.fill(NON_SECRET_VISIBILITY_MARKER)
 
         await visibilityToggle(signupPassword, 'Show entered value').click()
         await expect(signupPassword).toHaveAttribute('type', 'text')
@@ -51,7 +54,15 @@ test(
         await expect(confirmPassword).toHaveAttribute('type', 'text')
 
         await launched.page.getByRole('button', { name: 'Sign in instead' }).click()
-        await expect(launched.page.getByLabel('Password')).toHaveAttribute('type', 'password')
+        await expect(loginPassword).toHaveAttribute('type', 'password')
+        await expect(loginPassword).toHaveValue('')
+
+        await launched.page.getByRole('button', { name: 'Create account' }).click()
+        await expect(signupPassword).toHaveAttribute('type', 'password')
+        await expect(signupPassword).toHaveValue('')
+        await expect(confirmPassword).toHaveAttribute('type', 'password')
+        await expect(confirmPassword).toHaveValue('')
+        await launched.page.getByRole('button', { name: 'Sign in instead' }).click()
 
         await loginPassword.fill(NON_SECRET_VISIBILITY_MARKER)
         await visibilityToggle(loginPassword, 'Show entered value').click()
