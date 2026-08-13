@@ -243,9 +243,22 @@ cd server && go run ./cmd/server  # 启动后端
 
 make dev          # 同 pnpm dev
 make server       # 启动 Go 后端
+make server-mailpit # 启动 Go 后端，并强制投递邮件到本地 Mailpit
+make supabase     # 启动本地 Supabase（含 Mailpit）
 make build        # 构建所有
 make lint         # lint 所有
 ```
+
+### 本地开发启动顺序
+
+1. 首次运行 `cp server/.env.example server/.env.local`，然后按需调整本地非邮件配置；不要让 Server 使用 `postgres` owner 凭据。
+2. 运行 `make supabase`，启动本地 Supabase 和 Mailpit。
+3. 运行 `make server-mailpit`。该命令会为本次 Server 进程随机生成并配置本地 `identity_app` LOGIN 凭据，加载 `server/.env.local` 的其他配置，并强制使用最小权限数据库角色、`127.0.0.1:54325` 的 Mailpit SMTP 和压缩后的开发重试间隔；随机数据库凭据不会写入文件。
+4. 运行 `make dev`，启动 Desktop。
+
+Mailpit Web UI 位于 `http://127.0.0.1:54324`。Server 只在进程启动时读取 SMTP 配置；修改配置后必须重启 Server 才会生效。
+
+`server-mailpit` 仅用于本地开发。生产环境继续使用 `make server` 或直接启动部署二进制，并通过部署环境变量提供 Resend（服务商）的 SMTP 配置。
 
 ## 打包与应用身份
 
