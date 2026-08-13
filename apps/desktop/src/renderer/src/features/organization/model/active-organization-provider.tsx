@@ -7,12 +7,14 @@ import {
   type PendingInvitation
 } from '../api/invitations'
 import type { AuthenticatedOrganizationSession } from '../api/client'
+import { isPotentialOrganizationAccessLoss } from '../api/command-client'
 import { leaveOrganization, readActiveMemberships, type ActiveMembership } from '../api/memberships'
 import { updateOrganizationSettings } from '../api/organization-settings'
 import {
   ActiveOrganizationContext,
   type ActiveOrganizationState,
-  type OrganizationStartupPhase
+  type OrganizationStartupPhase,
+  type SessionAccessLostOrganization
 } from './active-organization-state'
 import { reconcileStartupBranch, resolveStartupBranch } from './startup-resolution'
 import { useOrganizationOnboarding } from './onboarding-state'
@@ -44,6 +46,8 @@ export function ActiveOrganizationProvider({
   const { beginOnboarding, resolveOnboarding } = useOrganizationOnboarding()
   const [startupPhase, setStartupPhase] = useState<OrganizationStartupPhase>('idle')
   const [activeOrganization, setActiveOrganization] = useState<ActiveMembership>()
+  const [sessionAccessLostOrganization, setSessionAccessLostOrganization] =
+    useState<SessionAccessLostOrganization>()
   const [availableOrganizations, setAvailableOrganizations] = useState<readonly ActiveMembership[]>(
     []
   )
@@ -140,6 +144,51 @@ export function ActiveOrganizationProvider({
     activeOrganizationRef.current = activeOrganization
   }, [activeOrganization])
 
+  const confirmActiveOrganizationAccess = useCallback(async (): Promise<
+    ActiveMembership | undefined
+  > => {
+    const currentOrganization = activeOrganizationRef.current
+    if (!isAuthenticated || !currentOrganization) return undefined
+
+    // A 403/404 or a disappearing RLS projection is only a signal. This read starts after the
+    // signal and remains the authority for whether the current Membership actually ended.
+    const requestGeneration = ++refreshGenerationRef.current
+    const session = await getSession()
+    if (!session) throw new Error('Active Organization Session is unavailable.')
+
+    const memberships = await readActiveMemberships(session)
+    if (requestGeneration !== refreshGenerationRef.current) {
+      return activeOrganizationRef.current
+    }
+    if (activeOrganizationRef.current?.organizationId !== currentOrganization.organizationId) {
+      return activeOrganizationRef.current
+    }
+
+    const confirmedOrganization = memberships.find(
+      (membership) => membership.organizationId === currentOrganization.organizationId
+    )
+    setAvailableOrganizations(memberships)
+    if (confirmedOrganization) {
+      activeOrganizationRef.current = confirmedOrganization
+      setActiveOrganization(confirmedOrganization)
+      return confirmedOrganization
+    }
+
+    activeOrganizationRef.current = undefined
+    setActiveOrganization(undefined)
+    resolveOnboarding({
+      shouldCompleteProfile: false,
+      shouldCreateOrganization: memberships.length === 0 && pendingInvitations.length === 0
+    })
+    setStartupPhase('ready')
+    setSessionAccessLostOrganization((lostOrganization) => lostOrganization ?? currentOrganization)
+    return undefined
+  }, [getSession, isAuthenticated, pendingInvitations.length, resolveOnboarding])
+
+  const acknowledgeSessionAccessLost = useCallback((): void => {
+    setSessionAccessLostOrganization(undefined)
+  }, [])
+
   const refreshActiveOrganization = useCallback(
     (force = false): Promise<ActiveMembership | undefined> => {
       const currentOrganization = activeOrganizationRef.current
@@ -159,12 +208,13 @@ export function ActiveOrganizationProvider({
         )
         if (requestGeneration !== refreshGenerationRef.current) return undefined
 
+        if (!refreshedOrganization) return confirmActiveOrganizationAccess()
+
         setAvailableOrganizations(memberships)
-        setActiveOrganization((organization) =>
-          organization?.organizationId === currentOrganization.organizationId
-            ? refreshedOrganization
-            : organization
-        )
+        if (activeOrganizationRef.current?.organizationId === currentOrganization.organizationId) {
+          activeOrganizationRef.current = refreshedOrganization
+          setActiveOrganization(refreshedOrganization)
+        }
         return refreshedOrganization
       })()
 
@@ -177,7 +227,7 @@ export function ActiveOrganizationProvider({
       void refresh.then(clearRefresh, clearRefresh)
       return refresh
     },
-    [getSession, isAuthenticated]
+    [confirmActiveOrganizationAccess, getSession, isAuthenticated]
   )
 
   const leaveActiveOrganization = useCallback(async (): Promise<void> => {
@@ -189,7 +239,14 @@ export function ActiveOrganizationProvider({
     const session = await getSession()
     if (!session) throw new Error('Active Organization Session is unavailable.')
 
-    await leaveOrganization(session, currentOrganization.organizationId)
+    try {
+      await leaveOrganization(session, currentOrganization.organizationId)
+    } catch (error) {
+      if (isPotentialOrganizationAccessLoss(error)) {
+        await confirmActiveOrganizationAccess().catch(() => undefined)
+      }
+      throw error
+    }
     const requestGeneration = ++refreshGenerationRef.current
     activeOrganizationRef.current = undefined
     setActiveOrganization(undefined)
@@ -212,7 +269,13 @@ export function ActiveOrganizationProvider({
     } catch {
       // The command already committed, so preserve the cleared Organization context.
     }
-  }, [getSession, isAuthenticated, resolveOnboarding, pendingInvitations.length])
+  }, [
+    confirmActiveOrganizationAccess,
+    getSession,
+    isAuthenticated,
+    resolveOnboarding,
+    pendingInvitations.length
+  ])
 
   const updateActiveOrganizationName = useCallback(
     async (name: string): Promise<void> => {
@@ -226,11 +289,19 @@ export function ActiveOrganizationProvider({
       const session = await getSession()
       if (!session) throw new Error('Active Organization Session is unavailable.')
 
-      const updated = await updateOrganizationSettings(
-        session,
-        currentOrganization.organizationId,
-        trimmedName
-      )
+      let updated: { readonly id: string; readonly name: string }
+      try {
+        updated = await updateOrganizationSettings(
+          session,
+          currentOrganization.organizationId,
+          trimmedName
+        )
+      } catch (error) {
+        if (isPotentialOrganizationAccessLoss(error)) {
+          await confirmActiveOrganizationAccess().catch(() => undefined)
+        }
+        throw error
+      }
       const updatedOrganization = {
         ...currentOrganization,
         organizationId: updated.id,
@@ -247,7 +318,7 @@ export function ActiveOrganizationProvider({
       )
       void refreshActiveOrganization(true).catch(() => undefined)
     },
-    [getSession, isAuthenticated, refreshActiveOrganization]
+    [confirmActiveOrganizationAccess, getSession, isAuthenticated, refreshActiveOrganization]
   )
 
   useEffect(() => {
@@ -308,6 +379,7 @@ export function ActiveOrganizationProvider({
     () => ({
       startupPhase,
       activeOrganization,
+      sessionAccessLostOrganization,
       availableOrganizations,
       pendingInvitations,
       rememberedOrganizationId,
@@ -316,12 +388,15 @@ export function ActiveOrganizationProvider({
       leaveActiveOrganization,
       updateActiveOrganizationName,
       refreshActiveOrganization,
+      confirmActiveOrganizationAccess,
+      acknowledgeSessionAccessLost,
       acceptInvitation,
       reconcileStartupAfterInvitationChange
     }),
     [
       startupPhase,
       activeOrganization,
+      sessionAccessLostOrganization,
       availableOrganizations,
       pendingInvitations,
       rememberedOrganizationId,
@@ -330,6 +405,8 @@ export function ActiveOrganizationProvider({
       leaveActiveOrganization,
       updateActiveOrganizationName,
       refreshActiveOrganization,
+      confirmActiveOrganizationAccess,
+      acknowledgeSessionAccessLost,
       acceptInvitation,
       reconcileStartupAfterInvitationChange
     ]

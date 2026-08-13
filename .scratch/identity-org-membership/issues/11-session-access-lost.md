@@ -4,9 +4,13 @@
 
 **Blocked by:** 04 — Active Organization：状态、设备记忆与启动三分支；07 — Go 成员管理命令组 + 通知矩阵
 
-**Status:** ready-for-agent
+**Status:** in-review
 
-- [ ] e2e：会话中被移除成员 → 阻断对话框出现（含组织名），确认后退出组织上下文
-- [ ] e2e：落点正确——有余组织进选择界面，无组织进 onboarding
-- [ ] 失权后不再渲染或操作该组织的任何数据
-- [ ] 全部新 Localized Surface 双语过发布检查；e2e 用例归入既有 tier；走 feature branch + PR
+- [x] e2e：会话中被移除成员 → 阻断对话框出现（含组织名），确认后退出组织上下文
+- [x] e2e：落点正确——有余组织进选择界面，无组织进 onboarding
+- [x] 失权后不再渲染或操作该组织的任何数据
+- [x] 全部新 Localized Surface 双语过发布检查；e2e 用例归入既有 tier；走 feature branch + PR
+
+## Comments
+
+- 2026-08-12：实现已在 `codex/feat-session-access-lost` 完成并进入正式审查。两条新增 `@smoke` 用例按 TDD 先红后绿，真实覆盖 Go 404 与 RLS 投影突变；Desktop Smoke Suite 26/26、lint、架构检查、unit tests 与 production build 均通过。

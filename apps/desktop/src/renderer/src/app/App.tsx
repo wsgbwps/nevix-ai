@@ -4,6 +4,7 @@ import { useAuthentication } from '../features/authentication'
 import {
   ActiveOrganizationProvider,
   OrganizationOnboardingProvider,
+  SessionAccessLostDialog,
   useOrganizationOnboarding
 } from '../features/organization'
 import { hasCompletedProfile } from '../features/profile'
@@ -33,6 +34,7 @@ function App(): React.JSX.Element {
           hasCompletedProfile={hasCompletedProfile}
         >
           <ResetOnboardingAfterAuthenticationEnds />
+          <SessionAccessLostDialog />
           <RouterProvider router={router} />
         </ActiveOrganizationProvider>
       </OrganizationOnboardingProvider>

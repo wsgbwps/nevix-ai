@@ -157,6 +157,11 @@ export const organizationTranslations = defineResourceTranslations({
         adminRemoved: '移除管理员',
         organizationSettingsUpdated: '更新组织设置'
       }
+    },
+    accessLost: {
+      title: '你已失去「{{org}}」的访问权限',
+      description: '你的成员身份已结束。如果是误操作，请联系组织管理员重新邀请。',
+      confirm: '知道了'
     }
   },
   en: {
@@ -316,6 +321,12 @@ export const organizationTranslations = defineResourceTranslations({
         adminRemoved: 'Removed admin',
         organizationSettingsUpdated: 'Updated organization settings'
       }
+    },
+    accessLost: {
+      title: 'You lost access to "{{org}}"',
+      description:
+        'Your membership has ended. If this was a mistake, ask an organization admin to invite you again.',
+      confirm: 'Got it'
     }
   }
 })

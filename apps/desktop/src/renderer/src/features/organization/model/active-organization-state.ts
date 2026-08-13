@@ -7,9 +7,15 @@ import type { ActiveMembership } from '../api/memberships'
 // (entered an Organization, opened the picker, or begun onboarding).
 export type OrganizationStartupPhase = 'idle' | 'resolving' | 'ready'
 
+export interface SessionAccessLostOrganization {
+  readonly organizationId: string
+  readonly organizationName: string
+}
+
 export interface ActiveOrganizationState {
   readonly startupPhase: OrganizationStartupPhase
   readonly activeOrganization: ActiveMembership | undefined
+  readonly sessionAccessLostOrganization: SessionAccessLostOrganization | undefined
   readonly availableOrganizations: readonly ActiveMembership[]
   readonly pendingInvitations: readonly PendingInvitation[]
   readonly rememberedOrganizationId: string | undefined
@@ -18,6 +24,8 @@ export interface ActiveOrganizationState {
   readonly leaveActiveOrganization: () => Promise<void>
   readonly updateActiveOrganizationName: (name: string) => Promise<void>
   readonly refreshActiveOrganization: () => Promise<ActiveMembership | undefined>
+  readonly confirmActiveOrganizationAccess: () => Promise<ActiveMembership | undefined>
+  readonly acknowledgeSessionAccessLost: () => void
   readonly acceptInvitation: (invitation: PendingInvitation, code: string) => Promise<void>
   readonly reconcileStartupAfterInvitationChange: () => void
 }
