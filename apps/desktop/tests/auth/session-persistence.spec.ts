@@ -19,6 +19,7 @@ import { seedOrganizationWithMembership } from '../organization/helpers/organiza
 
 const authHarness = readAuthHarnessConfig()
 const SESSION_FILE_NAME = 'authentication-session.enc'
+const RESTORE_BOUNDARY_REMEMBERED_EMAIL = 'restore-boundary@example.com'
 
 test('a securely persisted Session refreshes before restore, survives an outage, and logout deletes it', async () => {
   test.setTimeout(90_000)
@@ -43,6 +44,13 @@ test('a securely persisted Session refreshes before restore, survives an outage,
       const session = await signInAndReadSession(launched.page, identity)
       const originalEnvelope = await readFile(sessionPath, 'utf8')
       expectEncryptedEnvelope(originalEnvelope, identity.email, session)
+      expect(
+        await invokeAuthenticationChannel(
+          launched.page,
+          'authentication:replace-remembered-email',
+          { email: RESTORE_BOUNDARY_REMEMBERED_EMAIL }
+        )
+      ).toEqual({ outcome: 'persisted' })
     } finally {
       await launched.electronApp.close()
     }
@@ -76,6 +84,13 @@ test('a securely persisted Session refreshes before restore, survives an outage,
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
       expect(refreshRequests).toBe(1)
+      expect(
+        await invokeAuthenticationChannel(launched.page, 'authentication:read-remembered-email')
+      ).toEqual({
+        outcome: 'email',
+        email: RESTORE_BOUNDARY_REMEMBERED_EMAIL,
+        persistence: 'secure'
+      })
 
       const rotatedEnvelope = await readFile(sessionPath, 'utf8')
       expect(rotatedEnvelope).not.toBe(envelopeBeforeRetry)
@@ -92,6 +107,8 @@ test('a securely persisted Session refreshes before restore, survives an outage,
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
+      await expect(launched.page.getByLabel('Email')).toHaveValue(RESTORE_BOUNDARY_REMEMBERED_EMAIL)
+      await expect(launched.page.getByLabel('Password')).toBeFocused()
       await expectFileMissing(sessionPath)
     } finally {
       await launched.electronApp.close()
@@ -102,6 +119,7 @@ test('a securely persisted Session refreshes before restore, survives an outage,
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
+      await expect(launched.page.getByLabel('Email')).toHaveValue(RESTORE_BOUNDARY_REMEMBERED_EMAIL)
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toHaveCount(0)

@@ -6,8 +6,11 @@ import type { IpcChannelMap, IpcEventMap } from '@ipc/channels'
 // here without a declaration; tests/unit/ipc-channel-allowlist-drift.test.mts
 // enforces the same lockstep at runtime.
 const invokeChannels = {
+  'authentication:clear-remembered-email': true,
   'authentication:clear-session': true,
+  'authentication:read-remembered-email': true,
   'authentication:read-session': true,
+  'authentication:replace-remembered-email': true,
   'authentication:replace-session': true,
   'language:get-bootstrap': true,
   'language:get-language-mode': true,

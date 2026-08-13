@@ -8,6 +8,23 @@ export interface PersistedSessionWrite {
   readonly outcome: 'persisted' | 'unavailable'
 }
 
+export type RememberedEmailRead =
+  | {
+      readonly outcome: 'email'
+      readonly email: string
+      readonly persistence: 'secure' | 'memory-only'
+    }
+  | { readonly outcome: 'empty' }
+  | { readonly outcome: 'storage-unavailable' }
+
+export interface RememberedEmailWrite {
+  readonly outcome: 'persisted' | 'memory-only'
+}
+
+export interface RememberedEmailClear {
+  readonly outcome: 'cleared' | 'clear-failed'
+}
+
 declare module '@ipc/channels' {
   interface IpcChannelMap {
     'authentication:read-session': { response: PersistedSessionRead }
@@ -16,6 +33,12 @@ declare module '@ipc/channels' {
       response: PersistedSessionWrite
     }
     'authentication:clear-session': { response: void }
+    'authentication:read-remembered-email': { response: RememberedEmailRead }
+    'authentication:replace-remembered-email': {
+      request: { readonly email: string }
+      response: RememberedEmailWrite
+    }
+    'authentication:clear-remembered-email': { response: RememberedEmailClear }
   }
 }
 

@@ -17,6 +17,7 @@ import {
 
 const authHarness = readAuthHarnessConfig()
 const mailpitHarness = readMailpitHarnessConfig()
+const SIGNUP_BOUNDARY_REMEMBERED_EMAIL = 'signup-boundary@example.com'
 
 test(
   'a new User signs up with the original password and verifies a resent six-digit code',
@@ -38,6 +39,10 @@ test(
         await expect(
           launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
         ).toBeVisible()
+        await launched.page.evaluate(
+          async (email) => window.api.invoke('authentication:replace-remembered-email', { email }),
+          SIGNUP_BOUNDARY_REMEMBERED_EMAIL
+        )
         await launched.page.getByRole('button', { name: 'Create account' }).click()
         await expect(
           launched.page.getByRole('heading', { name: 'Create your Nevix AI account' })
@@ -148,6 +153,14 @@ test(
         await expect(
           launched.page.getByRole('heading', { name: 'What should we call you?' })
         ).toBeVisible()
+        expect(
+          await launched.page.evaluate(() =>
+            window.api.invoke('authentication:read-remembered-email')
+          )
+        ).toMatchObject({
+          outcome: 'email',
+          email: SIGNUP_BOUNDARY_REMEMBERED_EMAIL
+        })
       } finally {
         await launched.electronApp.close()
       }

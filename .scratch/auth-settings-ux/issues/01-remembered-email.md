@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** in-review
 
 **Consumes**
 
@@ -42,3 +42,13 @@
 **Absence test:** 即使其他十张票永不实现，本票仍可通过 Desktop E2E 和 native secure-storage acceptance 完整验收。
 
 **Commutativity test:** 与 02–06 任意合并顺序都保持 main 完整且 CI 通过；与 03/04 的 Authentication UI 重叠只是机械性冲突。
+
+## Implementation Plan
+
+- **Acceptance boundary:** Remembered Email 仅在勾选后的成功密码登录中，以 Supabase 返回 User 的权威邮箱替换；失败登录、注册、恢复、Session restore 和 logout 不改变它；取消勾选立即清除；任何安全存储失败都不落明文且不阻断认证；启动预填、默认勾选、初始焦点和一次性非阻塞说明可通过 Desktop 用户界面观察。
+- **Fixed point:** `21b3873098bf9bd7eb5dfab08fe1826f73edfa8b` (`origin/main` at task start).
+- **Primary Domain:** Desktop Authentication Domain.
+- **Owning boundaries:** Remembered Email store 与 handlers 归 `apps/desktop/src/main/authentication/`; cross-process interface 归 `apps/desktop/src/shared/ipc/authentication/`; 登录状态与界面归现有 Authentication Feature 内最窄的 `model/`、`api/`、`ui/` 责任目录；验收场景归现有 Desktop Electron Playwright authentication seam；新增 Localized Surface 文案归 Authentication Feature 自有资源。
+- **TDD seam:** 使用 spec 已确认的 Electron Playwright seam，按成功保存/替换、失败不覆盖、立即清除、启动预填与焦点、安全存储失败/损坏的垂直切片逐个 red → green；复用现有 native `safeStorage` acceptance，不新增前端单元测试框架。
+- **Checks and review:** 开发中运行 focused authentication E2E 与 Desktop typecheck；完成后运行 ticket 要求的 lint/typecheck/build、packaged localization 和适用的 native secure-storage acceptance，再按 `code-review-findings/v1` 做一次 Standards/Spec 完整评审及必要的定向修复，最后绑定 final-state evidence。
+- **Rollback:** 同一 PR 原子回滚 Authentication Domain store、typed IPC、登录 UI 与对应验收；不迁移数据库，不修改 Session 持久化契约，遗留密文对旧版本保持惰性。

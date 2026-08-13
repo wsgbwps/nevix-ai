@@ -24,6 +24,9 @@ interface AuthenticationScreenProps {
   readonly error?: AuthenticationError
   readonly notice?: AuthenticationNotice
   readonly isSubmitting?: boolean
+  readonly rememberedEmail?: string
+  readonly rememberEmailSelected: boolean
+  readonly showRememberedEmailPersistenceNotice: boolean
   readonly onRetryRestore: () => Promise<void>
   readonly resendSecondsRemaining: number
   readonly resendGeneration: number
@@ -31,6 +34,7 @@ interface AuthenticationScreenProps {
   readonly onShowLogin: () => void
   readonly onShowSignUp: () => void
   readonly onShowRecovery: () => void
+  readonly onRememberEmailSelectedChange: (selected: boolean) => void
   readonly onSignIn: (email: string, password: string) => Promise<void>
   readonly onSignUp: (email: string, password: string) => Promise<void>
   readonly onVerifySignUp: (code: string) => Promise<void>
@@ -46,6 +50,9 @@ export function AuthenticationScreen({
   error,
   notice,
   isSubmitting = false,
+  rememberedEmail,
+  rememberEmailSelected,
+  showRememberedEmailPersistenceNotice,
   resendSecondsRemaining,
   resendGeneration,
   didResend,
@@ -53,6 +60,7 @@ export function AuthenticationScreen({
   onShowLogin,
   onShowSignUp,
   onShowRecovery,
+  onRememberEmailSelectedChange,
   onSignIn,
   onSignUp,
   onVerifySignUp,
@@ -84,9 +92,13 @@ export function AuthenticationScreen({
                 error={error}
                 notice={notice}
                 isSubmitting={isSubmitting}
+                rememberedEmail={rememberedEmail}
+                rememberEmailSelected={rememberEmailSelected}
+                showRememberedEmailPersistenceNotice={showRememberedEmailPersistenceNotice}
                 onSignIn={onSignIn}
                 onShowSignUp={onShowSignUp}
                 onShowRecovery={onShowRecovery}
+                onRememberEmailSelectedChange={onRememberEmailSelectedChange}
               />
             ) : flow === 'signup' ? (
               <SignupForm
@@ -189,16 +201,24 @@ function LoginForm({
   error,
   notice,
   isSubmitting,
+  rememberedEmail,
+  rememberEmailSelected,
+  showRememberedEmailPersistenceNotice,
   onSignIn,
   onShowSignUp,
-  onShowRecovery
+  onShowRecovery,
+  onRememberEmailSelectedChange
 }: {
   readonly error?: AuthenticationError
   readonly notice?: AuthenticationNotice
   readonly isSubmitting: boolean
+  readonly rememberedEmail?: string
+  readonly rememberEmailSelected: boolean
+  readonly showRememberedEmailPersistenceNotice: boolean
   readonly onSignIn: (email: string, password: string) => Promise<void>
   readonly onShowSignUp: () => void
   readonly onShowRecovery: () => void
+  readonly onRememberEmailSelectedChange: (selected: boolean) => void
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
 
@@ -219,11 +239,30 @@ function LoginForm({
             {t(LOGIN_NOTICE_KEYS[notice])}
           </p>
         ) : null}
+        {showRememberedEmailPersistenceNotice ? (
+          <p role="status" className="text-muted-foreground text-sm">
+            {t('rememberedEmailPersistence.unavailable')}
+          </p>
+        ) : null}
         <CredentialFields
           passwordAutoComplete="current-password"
           disabled={isSubmitting}
+          emailDefaultValue={rememberedEmail}
+          emailAutoFocus={!rememberedEmail}
+          passwordAutoFocus={Boolean(rememberedEmail)}
           onForgotPassword={onShowRecovery}
         />
+        <label className="flex items-center gap-2 text-sm" htmlFor="authentication-remember-email">
+          <input
+            id="authentication-remember-email"
+            type="checkbox"
+            aria-label={t('login.rememberEmailAria')}
+            checked={rememberEmailSelected}
+            disabled={isSubmitting}
+            onChange={(event) => onRememberEmailSelectedChange(event.target.checked)}
+          />
+          {t('login.rememberEmail')}
+        </label>
         {error ? <AuthenticationErrorMessage error={error} context="login" /> : null}
         <Button type="submit" disabled={isSubmitting}>
           {t(isSubmitting ? 'login.submitting' : 'login.submit')}
@@ -614,13 +653,19 @@ function CredentialFields({
   passwordAutoComplete,
   password,
   onPasswordChange,
-  onForgotPassword
+  onForgotPassword,
+  emailDefaultValue,
+  emailAutoFocus = false,
+  passwordAutoFocus = false
 }: {
   readonly disabled: boolean
   readonly passwordAutoComplete: 'current-password' | 'new-password'
   readonly password?: string
   readonly onPasswordChange?: (password: string) => void
   readonly onForgotPassword?: () => void
+  readonly emailDefaultValue?: string
+  readonly emailAutoFocus?: boolean
+  readonly passwordAutoFocus?: boolean
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
 
@@ -635,6 +680,8 @@ function CredentialFields({
           autoComplete="email"
           required
           disabled={disabled}
+          defaultValue={emailDefaultValue}
+          autoFocus={emailAutoFocus}
         />
       </Field>
       <Field>
@@ -658,6 +705,7 @@ function CredentialFields({
           autoComplete={passwordAutoComplete}
           required
           disabled={disabled}
+          autoFocus={passwordAutoFocus}
           value={password}
           onChange={onPasswordChange ? (event) => onPasswordChange(event.target.value) : undefined}
         />
