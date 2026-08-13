@@ -116,11 +116,18 @@ test('the full recovery loop rotates the password, revokes old Sessions, and nev
       await expect(launched.page.getByRole('heading', { name: 'Set a new password' })).toBeVisible()
 
       const passwordInput = launched.page.getByLabel('New password')
+      await expect(
+        launched.page.getByText('We recommend using 12 or more characters.')
+      ).toBeVisible()
       await passwordInput.fill('12345678901')
-      await expect(launched.page.getByText('11 of 12–72 UTF-8 bytes')).toBeVisible()
+      await expect(
+        launched.page.getByRole('alert').filter({ hasText: 'Password is too short' })
+      ).toBeVisible()
       await expect(launched.page.getByRole('button', { name: 'Update password' })).toBeDisabled()
       await passwordInput.fill('x'.repeat(73))
-      await expect(launched.page.getByText('73 of 12–72 UTF-8 bytes')).toBeVisible()
+      await expect(
+        launched.page.getByRole('alert').filter({ hasText: 'Password is too long' })
+      ).toBeVisible()
       await expect(launched.page.getByRole('button', { name: 'Update password' })).toBeDisabled()
 
       await passwordInput.fill(identity.password)
@@ -133,7 +140,10 @@ test('the full recovery loop rotates the password, revokes old Sessions, and nev
 
       const messagesBeforeUpdate = await readMailpitMessageIds(mailpitHarness)
       await passwordInput.fill(newPassword)
-      await expect(launched.page.getByText('22 of 12–72 UTF-8 bytes')).toBeVisible()
+      await expect(launched.page.getByText(/UTF-8 bytes/)).toHaveCount(0)
+      await expect(
+        launched.page.getByRole('alert').filter({ hasText: /Password is too/ })
+      ).toHaveCount(0)
       const updateResponsePromise = launched.page.waitForResponse(
         (response) =>
           response.request().method() === 'PUT' && response.url().includes('/auth/v1/user')
@@ -357,8 +367,31 @@ test('a failed global revocation still discards the recovery Session and reports
       await launched.page.getByRole('button', { name: 'Verify code' }).click()
       await expect(launched.page.getByRole('heading', { name: 'Set a new password' })).toBeVisible()
 
-      // The update step maps 429 and network failure safely and stays in the recovery flow.
+      // The update step maps leaked passwords, 429, and network failure safely and stays in the
+      // recovery flow.
       await launched.page.getByLabel('New password').fill(`Rotated password ${Date.now()}`)
+      await launched.page.route('**/auth/v1/user**', (route) =>
+        route.fulfill({
+          status: 422,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 'weak_password',
+            message: 'provider detail must not reach the user',
+            weak_password: { reasons: ['pwned'] }
+          })
+        })
+      )
+      await launched.page.getByRole('button', { name: 'Update password' }).click()
+      await expect(
+        launched.page.getByRole('alert').filter({
+          hasText: 'This password has appeared in a data breach. Choose a different password.'
+        })
+      ).toBeVisible()
+      await expect(launched.page.getByText('provider detail must not reach the user')).toHaveCount(
+        0
+      )
+      await launched.page.unroute('**/auth/v1/user**')
+
       await launched.page.route('**/auth/v1/user**', (route) =>
         route.fulfill({
           status: 429,

@@ -16,7 +16,7 @@ import type {
   AuthenticationFlow,
   AuthenticationNotice
 } from '../model/use-authentication'
-import { isPasswordByteLengthValid, passwordByteLength } from '../policy/password'
+import { isPasswordByteLengthValid, passwordByteLengthError } from '../policy/password'
 
 interface AuthenticationScreenProps {
   readonly status: 'configuration-error' | 'restoring' | 'restore-failure' | 'unauthenticated'
@@ -258,7 +258,6 @@ function SignupForm({
   const { t } = useTranslation('authentication')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const byteLength = passwordByteLength(password)
   const isPasswordValid = isPasswordByteLengthValid(password)
   const isConfirmMismatch = confirmPassword !== '' && confirmPassword !== password
   const canSubmit = isPasswordValid && confirmPassword === password
@@ -281,11 +280,7 @@ function SignupForm({
           disabled={isSubmitting}
           onPasswordChange={setPassword}
         />
-        <p
-          className={isPasswordValid ? 'text-muted-foreground text-sm' : 'text-destructive text-sm'}
-        >
-          {t('signup.passwordBytes', { count: byteLength })}
-        </p>
+        <PasswordPolicyFeedback password={password} />
         <Field>
           <FieldLabel htmlFor="authentication-confirm-password">
             {t('signup.confirmPassword')}
@@ -555,7 +550,6 @@ function RecoveryNewPasswordForm({
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
   const [password, setPassword] = useState('')
-  const byteLength = passwordByteLength(password)
   const isPasswordValid = isPasswordByteLengthValid(password)
 
   function submit(event: React.FormEvent<HTMLFormElement>): void {
@@ -585,11 +579,7 @@ function RecoveryNewPasswordForm({
             onChange={(event) => setPassword(event.target.value)}
           />
         </Field>
-        <p
-          className={isPasswordValid ? 'text-muted-foreground text-sm' : 'text-destructive text-sm'}
-        >
-          {t('recovery.newPassword.passwordBytes', { count: byteLength })}
-        </p>
+        <PasswordPolicyFeedback password={password} />
         {error ? <AuthenticationErrorMessage error={error} context="recovery-password" /> : null}
         <Button type="submit" disabled={isSubmitting || !isPasswordValid}>
           {t(isSubmitting ? 'recovery.newPassword.submitting' : 'recovery.newPassword.submit')}
@@ -681,6 +671,22 @@ function FormHeader({
   )
 }
 
+function PasswordPolicyFeedback({ password }: { readonly password: string }): React.JSX.Element {
+  const { t } = useTranslation('authentication')
+  const lengthError = password === '' ? undefined : passwordByteLengthError(password)
+
+  return (
+    <div>
+      <FieldDescription>{t('passwordPolicy.recommendation')}</FieldDescription>
+      {lengthError ? (
+        <FieldError>
+          {t(`passwordPolicy.${lengthError === 'too-short' ? 'tooShort' : 'tooLong'}`)}
+        </FieldError>
+      ) : null}
+    </div>
+  )
+}
+
 type AuthenticationErrorContext =
   | 'login'
   | 'signup'
@@ -726,6 +732,10 @@ function AuthenticationErrorMessage({
         : t('verification.invalidCode')
   } else if (error === 'same-password') {
     message = t('recovery.newPassword.samePassword')
+  } else if (error === 'password-too-short') {
+    message = t('passwordPolicy.tooShort')
+  } else if (error === 'password-leaked') {
+    message = t('passwordPolicy.leaked')
   } else if (error === 'rate-limited') {
     message = t(RATE_LIMITED_KEYS[context])
   } else {
