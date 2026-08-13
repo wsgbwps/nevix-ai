@@ -94,16 +94,36 @@ test(
           document.dispatchEvent(new Event('visibilitychange'))
         })
         await visibilityToggle(loginPassword, 'Show entered value').click()
-        await launched.electronApp.evaluate(({ BrowserWindow }) => {
-          BrowserWindow.getAllWindows()[0]?.minimize()
-        })
-        await expect
-          .poll(() =>
-            launched.electronApp.evaluate(
-              ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMinimized() ?? false
+        const usedHeadlessMinimizeFallback = await launched.electronApp.evaluate(
+          ({ BrowserWindow }) => {
+            const window = BrowserWindow.getAllWindows()[0]
+            if (!window) {
+              throw new Error('Expected the main BrowserWindow to exist')
+            }
+
+            window.minimize()
+
+            // GitHub's Linux smoke job runs Electron in Xvfb without a window manager, so the
+            // native minimize request cannot change window state. Emitting the same Electron
+            // event keeps that environment focused on the main-process deactivation bridge.
+            const requiresFallback =
+              process.platform === 'linux' && Boolean(process.env.CI) && !window.isMinimized()
+            if (requiresFallback) {
+              window.emit('minimize')
+            }
+
+            return requiresFallback
+          }
+        )
+        if (!usedHeadlessMinimizeFallback) {
+          await expect
+            .poll(() =>
+              launched.electronApp.evaluate(
+                ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMinimized() ?? false
+              )
             )
-          )
-          .toBe(true)
+            .toBe(true)
+        }
         await expect(loginPassword).toHaveAttribute('type', 'password')
         await expect(loginPassword).toHaveValue(NON_SECRET_VISIBILITY_MARKER)
       } finally {
