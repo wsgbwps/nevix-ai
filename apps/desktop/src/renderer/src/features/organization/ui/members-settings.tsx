@@ -64,12 +64,10 @@ function MembersSettingsContent({
         </p>
       </div>
 
-      {canManage ? (
-        <OrganizationNameSettings
-          organization={organization}
-          updateName={updateActiveOrganizationName}
-        />
-      ) : null}
+      <OrganizationNameSettings
+        organization={organization}
+        updateName={updateActiveOrganizationName}
+      />
 
       {management.loadState === 'loading' ? (
         <p className="text-muted-foreground text-sm">{t('members.loading')}</p>
