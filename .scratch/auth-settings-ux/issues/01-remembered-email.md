@@ -1,0 +1,44 @@
+# 01 — Remembered Email 的安全登录闭环
+
+**What to build:** 让返回的 User 在明确选择后，由当前设备安全记住最近一个成功密码登录响应中的权威邮箱；后续启动可直接从密码继续，但不保存密码、不延长 Session，也不让失败输入覆盖已验证设备状态。
+
+**Blocked by:** None — can start immediately
+
+**Status:** ready-for-agent
+
+**Consumes**
+
+- Authentication Domain 现有的加密 Session 封装与原子替换原则。
+- Authentication typed IPC 的通用 invoke seam。
+- Supabase 成功登录响应中的权威 `User.email`。
+- Electron `safeStorage` 和既有 Desktop E2E/native secure-storage 验收 seam。
+
+**Produces**
+
+- 与 Session 独立的单槽 Remembered Email store interface，具有 read、replace 和 clear 行为。
+- Authentication Domain-owned read/replace/clear typed IPC interface 与 handlers。
+- 登录初始化、默认勾选、预填、初始焦点和非阻塞存储说明。
+
+**Owns**
+
+- Remembered Email 记录的版本、大小限制、加密存储、进程内 fallback、损坏删除和内部告警。
+- 只有成功密码登录才 replace，取消勾选立即 clear，signup、recovery、Session restore 和 logout 不改变它的状态转换。
+- Remembered Email 的 cross-process public interface；其他 ticket 不得向其中加入密码、token、User 列表、Profile 或 Organization 状态。
+
+**Acceptance**
+
+- [ ] 成功登录仅保存 Supabase 响应中的权威邮箱；不同 User 的后续成功登录替换旧值。
+- [ ] 失败登录保留当前输入，不改变原保存值；重启后仍预填原值。
+- [ ] 存在 Remembered Email 时预填并聚焦密码；不存在时邮箱为空、复选框仍默认勾选并聚焦邮箱。
+- [ ] 取消勾选立即删除加密记录和进程内 fallback；重新勾选只表示下次成功登录愿意保存。
+- [ ] signup、signup verification、recovery、Session restore 和当前设备 logout 都不覆盖或清除 Remembered Email。
+- [ ] 安全存储不可用、Linux `basic_text`、加密失败或文件写入失败时不落明文；当前进程可继续使用该值并只说明一次。
+- [ ] 损坏或无效记录被删除、按空值继续，并产生不暴露实现细节的内部告警。
+- [ ] `Authentication Usability Desktop E2E`、Desktop lint/typecheck/build、packaged localization 与适用的 native secure-storage acceptance 通过。
+- [ ] 产品代码前在本 ticket 的本地 tracker 范围记录短实施计划；最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
+
+**Parallel classification:** full parallel; `parallel-ready` from the current fixed point.
+
+**Absence test:** 即使其他十张票永不实现，本票仍可通过 Desktop E2E 和 native secure-storage acceptance 完整验收。
+
+**Commutativity test:** 与 02–06 任意合并顺序都保持 main 完整且 CI 通过；与 03/04 的 Authentication UI 重叠只是机械性冲突。

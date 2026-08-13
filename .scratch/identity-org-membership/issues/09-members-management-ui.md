@@ -6,6 +6,8 @@
 
 **Status:** resolved — PR #46
 
+**Superseded authorization:** 后续 Settings 信息架构设计把组织名称移入独立 Organization Details Section，并收紧为只有 Owner 可编辑；Admin 与 Member 只读。下次交付必须同时收紧 trusted command，不能只修改界面。
+
 - [x] e2e：Owner/Admin 完成邀请创建/重发/撤销、角色变更、移除成员、退出组织全流程（含确认对话框）
 - [x] e2e：Member 角色只读——无邀请按钮、无角色 Select、无审计入口
 - [x] 待定邀请计数徽标与实际 pending 数一致

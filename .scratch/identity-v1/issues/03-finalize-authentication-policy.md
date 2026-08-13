@@ -14,9 +14,11 @@ Identity V1 采用以下最小认证政策。
 
 ### 密码凭据
 
-- 密码允许 Unicode，权威长度为原始输入的 12–72 个 UTF-8 字节；72 字节是当前固定 Supabase Auth 上限。Desktop 显示动态字节计数并提前反馈同一规则。
+- 密码允许 Unicode，权威长度为原始输入的 12–72 个 UTF-8 字节；72 字节是当前固定 Supabase Auth 上限。Desktop 不向 User 暴露字节计数，正常状态以“建议使用 12 个以上字符”提供人类可读的长度建议，越界时只说明密码太短或太长。
 - 密码是精确、不透明的字节串。Desktop 和服务端都不得 trim、改变大小写或执行 Unicode NFC/NFKC 规范化。
-- 不强制大小写、数字或符号组合，不接入 HIBP，不维护常见密码库，也不建立可被绕过的纯客户端字符数规则或 Auth 代理。
+- 不强制大小写、数字或符号组合，也不建立可被绕过的纯客户端字符数规则或 Auth 代理。
+- Supabase Auth 启用 Have I Been Pwned（HIBP）泄露密码检查；命中已泄露密码时拒绝注册或改密并要求选择新密码。HIBP 查询异常时 fail open、记录内部告警并允许请求继续，避免外部检查服务故障阻断全部注册和改密。
+- Desktop 只在创建密码的注册与普通密码恢复界面常驻显示“建议使用 12 个以上字符”；登录界面不显示创建密码提示。最终密码策略必须在首个真实 User 创建前启用；产品发布前不存在需要迁移的遗留弱密码 User，因此 V1 不建设弱密码迁移流程，也不消费登录成功响应中的弱密码信号。只要邮箱与密码验证成功，Desktop 就按普通登录进入；HIBP 命中仍只在注册或改密时拒绝密码。
 - 新密码必须与当前密码不同，沿用 Supabase 的 `same_password` 校验；V1 不保存密码历史、不阻止隔代复用，也不设置定期过期或强制轮换。
 - 成功的密码修改或恢复发送不可关闭的安全通知；失败尝试不逐次发邮件。
 
@@ -58,6 +60,7 @@ Identity V1 采用以下最小认证政策。
 
 ### Session 撤销边界
 
+- Desktop 对离线、超时和临时网络错误保留加密 Session，恢复连接后继续刷新；明确的 refresh token 撤销、密码修改或恢复、退出登录及安全状态失效则清除本地 Session 并要求重新认证。重新认证只可预填 Remembered Email，不保存或重放密码。
 - Session 和 refresh token 的撤销立即生效，旧设备不能再刷新。
 - 已签发 access token 对普通 Supabase/RLS 数据访问最多仍可使用到一小时到期；V1 不让每条普通 RLS 查询 `auth.sessions`。
 - 所有 `internal/identity` 可信命令额外验证 JWT 的 `session_id` 仍然有效，因此密码重设、密码变更或退出后立即拒绝旧 Session 的治理与危险操作。
@@ -66,6 +69,6 @@ Identity V1 采用以下最小认证政策。
 
 ### 错误边界
 
-- 只向用户具体展示不会泄露身份存在性的可操作错误：密码字节长度、`same_password`、通用 invalid credentials、通用 invalid/expired code，以及 429。
+- 只向用户具体展示不会泄露身份存在性的可操作错误：密码过短或过长、已泄露密码、`same_password`、通用 invalid credentials、通用 invalid/expired code，以及 429。
 - 网络、SMTP 或服务异常使用可重试的通用错误，不暴露 Supabase 原始错误、内部状态、堆栈或标识符。
 - V1 不创建 Auth 错误码的公共共享抽象；Identity Domain 内执行穷尽映射，未知错误安全回退并进入内部遥测。

@@ -69,7 +69,7 @@ Authoritative context:
 27. As an Owner, I want to promote a Member to Admin, so that administration can be delegated.
 28. As an Owner, I want to demote or remove an Admin, so that I retain final control.
 29. As an affected User or Owner, I want email notification on Admin promotion, demotion, and removal, so that privilege changes are visible even when the actor is the Owner.
-30. As an Owner or Admin, I want to update Organization settings (name), so that Organization information stays current.
+30. As an Owner, I want to update Organization Details (name), so that Organization information stays current; Admin and Member may only view it.
 31. As an Owner or Admin, I want to view the Organization Audit Log, so that I can review security events with who-did-what-when.
 32. As an Owner or Admin, I want to export the Audit Log to a local file, so that I can archive or share it.
 33. As a Member, I want Audit Log access denied, so that security visibility stays with administrators.
@@ -145,13 +145,25 @@ Authoritative context:
 
 以下变体裁决与页面归属经用户逐项评判锁定，实现时不得重开；文案与字段规则以 [copy-and-validation-baseline.md](copy-and-validation-baseline.md) 为基线（原型 i18n.ts / validation.ts 的定稿提炼，全部 Localized Surface 中英双语）：
 
-- **页面归属（方向指令）**：成员 / 审计日志 / 个人资料归入设置页；App Shell 侧栏只放软件功能（首页等未来业务 Feature）。设置页从 App Shell 用户菜单「设置」进入，「返回应用」回首页；左导航分两组——**账户**（个人资料、语言）/ **组织**（成员、审计日志，Member 角色不显示审计入口）；侧栏顶部为当前组织上下文卡（组织标 + 组织名 + 角色）。
+- **页面归属（方向指令）**：成员 / 审计日志 / 个人资料归入设置页；App Shell 侧栏只放软件功能（首页等未来业务 Feature）。设置页从 App Shell 用户菜单「设置」进入；每次从普通业务视图新进入时默认呈现 Profile，「返回应用」回到打开设置页的业务视图，只有来源无效时才回首页。左导航分两组——**账户**（个人资料、语言）/ **组织**（Organization Details、成员、审计日志，Member 角色不显示审计入口）；侧栏顶部为当前组织上下文卡（组织标 + 组织名 + 角色）。从组织选择流程返回时恢复此前 Settings Section，并在新 Organization 无审计权限时回退到成员。
 - **落点**：onboarding 完成、选择组织、接受邀请后 → 首页。
 - **Onboarding（B 条件两步向导）**：缺 Profile 时先显示第 1 步显示名（trim 后 1–50 字符、拒纯空白）；同时需要首 Organization 时再显示第 2 步组织名（trim 非空），保留进度点、"第 x/2 步"标签与返回 Profile。Profile 已完成后主动创建 Organization 只显示组织步骤；有 pending Invitation 且缺 Profile 时只显示 Profile 步骤，保存后进入邀请 picker，不额外建组织。
 - **组织选择（A 居中列表）**：邀请区在组织列表上方；点选邀请浮出 6 位码输入（5 次尝试上限）；含"创建组织"入口进 onboarding。
 - **成员与邀请管理（B 标签页）**：两个标签页——成员 / 待定邀请（带计数徽标）；邀请创建/重发/撤销走对话框；角色变更用 Select；移除成员与退出组织均需确认对话框；Member 角色只读、无邀请按钮；成员行只显示显示名与角色（Profile 不含邮箱，RLS 下他人邮箱不可见）。
 - **审计日志（B 时间线）**：按天分组叙事时间线（"林晓 移除成员 → 李其 · 11:48"式行，与 ADR-0009 写入时快照模型一致）；动作过滤 Select；CSV 导出按钮 + 导出反馈（对应 Desktop 本地写文件）。
 - **个人资料（A 设置页区块）**：头像占位 + 显示名字段 + 保存/取消（脏检查）+ 已保存反馈。
+- **Organization Details**：全部活跃 Member 可查看当前组织名称，只有 Owner 可编辑；Admin 与 Member 只读。该权限要求取代本 spec 先前的 Owner/Admin 组织改名规则，并须由 trusted command 授权而不只由界面隐藏按钮。
+- **并发覆盖**：Profile 与 Organization Details 均采用最后一次成功写入覆盖；同一 User 或同一 Owner 的多设备修改不增加版本号、ETag 或冲突合并。每次进入 Section 重新读取权威值，保存失败保留草稿。
+- **Settings 导航与脏状态**：Settings Section 与来源业务视图保存在单一 `/settings` memory-history entry state 中，Section 选择 replace 当前 entry；Router Back 与“返回应用”执行同一脏表单检查并返回仍可进入的来源，否则回首页。主动切换 Section、离开 Settings 或切换 Organization 时，脏 Profile / Organization Details 要求丢弃确认；Membership、角色或 Session 的强制安全变化不得被确认框阻止，并立即丢弃相关草稿、恢复权威只读状态或离开 Settings。
+- **丢弃确认**：只提供继续编辑与丢弃更改，不在导航确认中执行异步保存。Profile 与 Organization Details 保存失败时保留草稿和当前 Section。
+- **保存与窗口关闭**：脏表单保护覆盖普通窗口关闭与应用退出；保存请求进行中时，Settings 内导航和 Organization 切换暂时不可用，普通窗口关闭等待保存结束，系统强制终止不承诺拦截。
+- **Settings 发起的 Organization 选择**：保留原 Active Organization 直到新选择成功；picker 可取消并返回原 Settings Section。若原 Membership 已失效，则不能恢复旧上下文，改走正常选择或 onboarding。从 Settings 创建 Organization 或接受 Invitation 成功后同样返回原 Section 并应用权限回退；只有启动流程进入 picker 时成功后落到首页。当前 Section 有脏草稿时，在进入 picker 前要求丢弃；确认丢弃后即使取消 picker，也重新读取权威值而不恢复草稿。Members 内部 Tab 不进入 history；重新进入或切换 Organization 后默认 Members，新角色无邀请权限时不显示 Pending Invitations。
+- **Section 数据生命周期**：离开一个 Settings Section 后释放其界面和请求状态，再次进入时重新读取权威数据，不建立跨 Section 额外缓存；Language 的即时设备状态除外。
+- **不恢复工作状态**：正常关闭、重启或崩溃后不恢复 Settings Page、当前 Section 或未保存草稿；Session 恢复仍走正常启动路径，下次普通进入 Settings 默认 Profile。
+- **写命令进行中的导航**：邀请、重发、撤销、角色变更、成员移除或退出等 trusted command 提交后，禁止 Settings Section/Organization 切换、返回和普通窗口关闭，直到请求成功、失败或明确超时。超时结果未知时不自动重试写命令，先重读 Membership、Members 与 Invitations。
+- **未知写结果**：命令超时后的权威重读也失败时，保持“结果尚未确认”，禁用同一写操作并只提供重新检查；重读成功后才按实际状态显示成功或允许重试。
+- **Audit 导出生命周期**：本地保存对话框打开或文件正在写出时，阻止 Settings 导航、Organization 切换与普通窗口关闭；取消保存立即恢复且不产生文件。
+- **组织权限刷新失败**：网络、超时或服务错误保持权限未知，不推断失权或回退 Section；保留此前成功加载的普通只读内容并标记无法验证，禁用依赖新鲜角色的操作，Audit 内容 fail closed。Audit 数据读取失败单独显示可重试错误，不伪装为空日志或权限丢失；只有成功刷新确认无权时才清内容并转到 Members。
 - **失权告知（A 阻断对话框）**：会话中失权 → 阻断式对话框（标题含失去的组织名 + 说明 + "知道了"）；确认时组织已从列表移除；落点：仍有余组织 → 选择界面，无组织 → onboarding。
 - **共享原语例外登记**：`dialog`、`tabs`、`badge` 三个 shadcn 原语加入 `components/ui/`（用户已裁决登记）；实现 ticket 须显式声明该例外并接受附加审查。
 
@@ -186,6 +198,8 @@ Authoritative context:
 3. **Go 命令 HTTP 接缝**：跨 `internal/identity` 外部 interface + 真实 DB。前置切片：JWKS 验证、CreateOrganization（幂等、原子性）；Membership 切片：8 条命令集成测试、审计行与通知矩阵逐事件核对、邀请并发接受竞态、携码邮件重试地平线。
 4. **Desktop Playwright e2e 接缝**：前置切片：onboarding、重启记忆恢复、启动三分支；Membership 切片：多组织切换、成员/邀请管理、接受邀请流（含缺 Profile 跨启动/另设备恢复与 revoked Invitation 关闭后消失）、审计查看/导出、失权退出。新用例归入既有 tier（ADR-0007：PR 跑 Smoke Suite、main 跑 Full E2E Suite）。
 5. **openapi 契约接缝**：响应级对照校验为测试断言。
+
+后续 Settings 信息架构切片同时收紧 `UpdateOrganizationSettings` 授权：Go 集成测试必须证明 Owner 成功、Admin 获得既有非枚举 403，Desktop E2E 必须证明 Owner 可编辑而 Admin/Member 只读。该高风险授权变更实施前须在 `.scratch/` 写短计划，并与 Settings Desktop 变更在同一 PR 中保持纵向一致。
 
 Prior art：阶段 1 Auth Harness（临时 Supabase 栈 + Mailpit）、mail-smoke-ci、desktop e2e 分层门禁、RLS 真实 token 测试、packaged localization 发布检查。
 

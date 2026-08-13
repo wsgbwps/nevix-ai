@@ -76,9 +76,17 @@ _Avoid_: Deleted, Disabled
 User 当前正在使用的唯一 Organization，决定界面中业务数据、文件、任务和额度的范围；设备记住的上次选择不构成访问权限。
 _Avoid_: Default Organization, Current Team
 
+**Organization Details**:
+Organization 对全部活跃 Member 可见的基础信息，只有 Owner 可以修改；当前仅包含组织名称。
+_Avoid_: Organization Profile, Organization Account
+
 **Session**:
 User 在单台设备上的已认证使用状态，独立于任何 Organization；V1 只允许 User 登录或退出当前设备，不提供其他设备的查看或撤销。
 _Avoid_: Organization Session, Membership Session
+
+**Remembered Email**:
+User 在登录界面明确选择后、由当前设备在登录成功时保存并用于预填后续登录的权威邮箱；设备只保存最近一个，取消选择会立即删除。它不是凭据，不延长 Session，注册与密码恢复不改变它，退出登录也不会清除它。
+_Avoid_: Remembered Password, Remembered Account, Profile Email
 
 **Organization Audit Log**:
 Organization 内不可由成员修改或删除、滚动保留 365 天的安全事件记录，覆盖邀请、Membership、角色、Ownership Transfer 和 Organization Deletion；仅 Owner 与 Admin 可查看或导出。
@@ -138,5 +146,9 @@ Session 建立后 Desktop 呈现的整体界面框架，由侧边导航与内容
 _Avoid_: Dashboard, Home Screen, Main Window
 
 **Settings Page**:
-承载账户（个人资料、语言）与组织（成员、审计日志）设置并展示当前 Organization 上下文卡的独立全屏聚合页；它在 App Shell 之外呈现，只组合各 Feature 的设置贡献，本身不构成 Domain、不拥有任何业务行为。
+承载账户与组织设置并展示当前 Organization 上下文卡的独立全屏聚合页；它在 App Shell 之外一次只呈现一个 Settings Section，正常进入时默认呈现 Profile，只组合各 Feature 的设置贡献，本身不构成 Domain、不拥有任何业务行为。
 _Avoid_: Settings Domain, Preferences Center, Settings Dialog
+
+**Settings Section**:
+Settings Page 中可独立选择并单独呈现的一级设置范围；一个 Settings Section 可以包含多个下属设置块或内部 Tab，但这些内容不成为同级导航入口。
+_Avoid_: Settings Route, Settings Domain, Anchor Section

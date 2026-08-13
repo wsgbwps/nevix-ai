@@ -78,13 +78,13 @@ The canonical definitions live in `apps/desktop/CONTEXT.md`. The following relat
 ### Admin
 
 - An Organization may have multiple Admins.
-- Admin may invite and remove ordinary Members and change ordinary Organization settings.
+- Admin may invite and remove ordinary Members, but cannot change Organization Details.
 - Admin cannot promote, demote, or remove another Admin.
 - Admin cannot operate on Owner, transfer ownership, or delete the Organization.
 
 ### Member
 
-- Member may use business capabilities but cannot administer members, roles, or Organization settings.
+- Member may use business capabilities but cannot administer members, roles, or Organization Details.
 - Every accepted Invitation creates a Member. Direct invitation as Admin is not supported.
 - Only Owner may promote an existing Member to Admin.
 

@@ -6,6 +6,8 @@
 
 **Status:** resolved — PR [#42](https://github.com/wsgbwps/nevix-ai/pull/42) merged into `main` as [`200fd74`](https://github.com/wsgbwps/nevix-ai/commit/200fd74dfe6a1dfc89dd3984b9dc89791f458be7) on 2026-08-11
 
+**Superseded authorization:** 后续 Authentication Usability and Settings Information Architecture 设计将 `UpdateOrganizationSettings` 收紧为仅 Owner 可执行；原 PR 的 Owner/Admin 规则是历史实现状态，不再是下一次交付的目标授权。
+
 - [x] 四命令集成测试通过，角色变更与"恰好一个 Owner"不变式经测试断言
 - [x] 审计行与通知矩阵逐事件核对：四个通知事件各发对收件人，加入/退出/设置变更不发邮件
 - [x] 被移除成员即时失权（RLS 只读活行）经测试验证
