@@ -39,3 +39,7 @@ Owner boundaries:
 This governance change uses the repository's existing pull-request route once.
 After the old gate passes, the same branch commit is exercised through the new
 candidate route and fast-forwarded with `make land`.
+
+The post-bootstrap rehearsal is a documentation-only candidate on a fresh
+short-lived branch. It must land without a pull request and run only the inline
+harness validation in `CI gate`; product jobs remain skipped.
