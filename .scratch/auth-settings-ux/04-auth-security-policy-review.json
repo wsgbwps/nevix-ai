@@ -5,14 +5,24 @@
     ".github/workflows/ci-gate.yml",
     ".github/workflows/desktop-e2e-ci.yml",
     ".scratch/auth-settings-ux/04-auth-security-policy-plan.md",
+    ".scratch/auth-settings-ux/issues/04-auth-security-policy.md",
+    "apps/desktop/src/renderer/src/features/authentication/i18n/resources.ts",
+    "apps/desktop/src/renderer/src/features/authentication/model/use-authentication.ts",
+    "apps/desktop/src/renderer/src/features/authentication/policy/password.ts",
+    "apps/desktop/src/renderer/src/features/authentication/ui/authentication-screen.tsx",
+    "apps/desktop/tests/auth/login-boundary.spec.ts",
     "apps/desktop/tests/auth/password-recovery.spec.ts",
+    "apps/desktop/tests/auth/signup-verification.spec.ts",
+    "package.json",
     "scripts/auth-policy-harness.mjs",
     "scripts/test-auth-policy.sh",
-    "scripts/tests/auth-policy-harness.test.mjs"
+    "scripts/tests/auth-policy-harness.test.mjs",
+    "supabase/auth-policy.env.example",
+    "supabase/config.toml"
   ],
-  "currentDiffDigest": "sha256:39f87ae41ade47b5ed40576f4a82aa0c23684c7f8f6a7a8990e202e0019969ec",
+  "currentDiffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c",
   "fullReviewCount": 1,
-  "targetedReviewRound": 1,
+  "targetedReviewRound": 2,
   "findings": [
     {
       "id": "CR-SPEC-0001",
@@ -43,9 +53,14 @@
           "kind": "targeted-review",
           "ref": "targeted review round 1; repair sha256:690e8758bcf416cb0c28e1e9f3d786c434cf8993fed3807d00fd1146d03c15de",
           "claim": "All three recovery cases carry @smoke and the final relevant check selected exactly those three cases through the PR Smoke Suite marker."
+        },
+        {
+          "kind": "targeted-review",
+          "ref": "targeted review round 2; merge 44451ba (parents 91540d4 and 4ae8f35)",
+          "claim": "At merged HEAD 44451ba, all three recovery cases retain @smoke and remain selected through the PR Smoke Suite; merged password-visibility behavior preserves the policy UX assertions."
         }
       ],
-      "reviewedDiffDigest": "sha256:39f87ae41ade47b5ed40576f4a82aa0c23684c7f8f6a7a8990e202e0019969ec",
+      "reviewedDiffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c",
       "unresolvedTargetedRounds": 0,
       "introducedBy": null
     },
@@ -78,9 +93,14 @@
           "kind": "targeted-review",
           "ref": "targeted review round 1; repair sha256:690e8758bcf416cb0c28e1e9f3d786c434cf8993fed3807d00fd1146d03c15de",
           "claim": "Pinned GoTrue used the local HTTPS fixture for controlled success and 503 outage while strict 422 reject, 200 fail-open, and exact warning checks passed."
+        },
+        {
+          "kind": "targeted-review",
+          "ref": "targeted review round 2; merge 44451ba (parents 91540d4 and 4ae8f35)",
+          "claim": "At merged HEAD 44451ba, the deterministic local HIBP success/outage paths and strict reject, fail-open, and warning assertions remain unchanged and the final-state check passes."
         }
       ],
-      "reviewedDiffDigest": "sha256:39f87ae41ade47b5ed40576f4a82aa0c23684c7f8f6a7a8990e202e0019969ec",
+      "reviewedDiffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c",
       "unresolvedTargetedRounds": 0,
       "introducedBy": null
     },
@@ -113,22 +133,22 @@
           "kind": "targeted-review",
           "ref": "targeted review round 1; repair sha256:690e8758bcf416cb0c28e1e9f3d786c434cf8993fed3807d00fd1146d03c15de",
           "claim": "The pre-Docker parity gate covers every overlapping env/TOML policy value and Desktop password limits; mutation tests prove representative drift reports the responsible mapping."
+        },
+        {
+          "kind": "targeted-review",
+          "ref": "targeted review round 2; merge 44451ba (parents 91540d4 and 4ae8f35)",
+          "claim": "All parity-repair and policy-source blobs are unchanged by the main merge. The conflict resolution retains localized password-policy feedback and @smoke recovery assertions together with main's password-visibility controls and assertions, without introducing duplicated policy/config or test fragility."
         }
       ],
-      "reviewedDiffDigest": "sha256:39f87ae41ade47b5ed40576f4a82aa0c23684c7f8f6a7a8990e202e0019969ec",
+      "reviewedDiffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c",
       "unresolvedTargetedRounds": 0,
       "introducedBy": null
     }
   ],
   "repairRecords": [
     {
-      "fixFor": [
-        "CR-SPEC-0001",
-        "CR-SPEC-0002"
-      ],
-      "advisoryRepairs": [
-        "CR-STANDARDS-0001"
-      ],
+      "fixFor": ["CR-SPEC-0001", "CR-SPEC-0002"],
+      "advisoryRepairs": ["CR-STANDARDS-0001"],
       "beforeDiffDigest": "sha256:fa0f77dba03919f263145a831be4ec484841ac0ba628974da881515ccfcbd1fa",
       "afterDiffDigest": "sha256:39f87ae41ade47b5ed40576f4a82aa0c23684c7f8f6a7a8990e202e0019969ec",
       "repairDiffDigest": "sha256:690e8758bcf416cb0c28e1e9f3d786c434cf8993fed3807d00fd1146d03c15de",
@@ -152,26 +172,38 @@
     {
       "round": 1,
       "fullReviewStarted": false,
-      "targetIds": [
-        "CR-SPEC-0001",
-        "CR-SPEC-0002"
-      ],
-      "advisoryRepairIds": [
-        "CR-STANDARDS-0001"
-      ],
+      "targetIds": ["CR-SPEC-0001", "CR-SPEC-0002"],
+      "advisoryRepairIds": ["CR-STANDARDS-0001"],
       "transitions": [
         "CR-SPEC-0001: fixed-pending-review -> closed",
         "CR-SPEC-0002: fixed-pending-review -> closed",
         "CR-STANDARDS-0001: deferred/closed repair evidence confirmed"
       ],
       "newFindings": []
+    },
+    {
+      "round": 2,
+      "fullReviewStarted": false,
+      "targetIds": ["CR-SPEC-0001", "CR-SPEC-0002"],
+      "advisoryRepairIds": ["CR-STANDARDS-0001"],
+      "repairHunks": [
+        "apps/desktop/src/renderer/src/features/authentication/i18n/resources.ts:password policy and visibility resources",
+        "apps/desktop/src/renderer/src/features/authentication/ui/authentication-screen.tsx:password policy and visibility composition",
+        "apps/desktop/tests/auth/password-recovery.spec.ts:policy, visibility, and @smoke assertions"
+      ],
+      "transitions": [
+        "CR-SPEC-0001: closed -> closed",
+        "CR-SPEC-0002: closed -> closed",
+        "CR-STANDARDS-0001: deferred/closed -> deferred/closed"
+      ],
+      "newFindings": []
     }
   ],
   "relevantCheck": {
-    "name": "PR #54 Authentication policy finding repair",
+    "name": "PR #54 Authentication policy finding repair after main merge",
     "result": "PASS",
-    "coverage": "deterministic HIBP reject and fail-open warning, Auth policy parity drift, recovery inclusion in the PR Smoke Suite, and Desktop lint/typecheck/unit/build",
-    "diffDigest": "sha256:39f87ae41ade47b5ed40576f4a82aa0c23684c7f8f6a7a8990e202e0019969ec"
+    "coverage": "deterministic HIBP reject and fail-open warning, Auth policy parity drift, recovery PR-smoke inclusion, password-visibility composition, and Desktop lint/typecheck/unit/build",
+    "diffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c"
   },
   "outcome": "closed"
 }
