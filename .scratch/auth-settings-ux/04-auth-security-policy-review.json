@@ -20,9 +20,9 @@
     "supabase/auth-policy.env.example",
     "supabase/config.toml"
   ],
-  "currentDiffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c",
+  "currentDiffDigest": "sha256:991b52e6ff84e41d73d1a65f4bfe565cdb90d06cb0d44ae366e73de4d8687a67",
   "fullReviewCount": 1,
-  "targetedReviewRound": 2,
+  "targetedReviewRound": 1,
   "findings": [
     {
       "id": "CR-SPEC-0001",
@@ -55,12 +55,12 @@
           "claim": "All three recovery cases carry @smoke and the final relevant check selected exactly those three cases through the PR Smoke Suite marker."
         },
         {
-          "kind": "targeted-review",
-          "ref": "targeted review round 2; merge 44451ba (parents 91540d4 and 4ae8f35)",
+          "kind": "current-state-audit",
+          "ref": "merge-resolution/current-state audit; fixed point 21b3873; merge 44451ba (parents 91540d4 and 4ae8f35); audited head b6c8206",
           "claim": "At merged HEAD 44451ba, all three recovery cases retain @smoke and remain selected through the PR Smoke Suite; merged password-visibility behavior preserves the policy UX assertions."
         }
       ],
-      "reviewedDiffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c",
+      "reviewedDiffDigest": "sha256:991b52e6ff84e41d73d1a65f4bfe565cdb90d06cb0d44ae366e73de4d8687a67",
       "unresolvedTargetedRounds": 0,
       "introducedBy": null
     },
@@ -95,12 +95,12 @@
           "claim": "Pinned GoTrue used the local HTTPS fixture for controlled success and 503 outage while strict 422 reject, 200 fail-open, and exact warning checks passed."
         },
         {
-          "kind": "targeted-review",
-          "ref": "targeted review round 2; merge 44451ba (parents 91540d4 and 4ae8f35)",
+          "kind": "current-state-audit",
+          "ref": "merge-resolution/current-state audit; fixed point 21b3873; merge 44451ba (parents 91540d4 and 4ae8f35); audited head b6c8206",
           "claim": "At merged HEAD 44451ba, the deterministic local HIBP success/outage paths and strict reject, fail-open, and warning assertions remain unchanged and the final-state check passes."
         }
       ],
-      "reviewedDiffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c",
+      "reviewedDiffDigest": "sha256:991b52e6ff84e41d73d1a65f4bfe565cdb90d06cb0d44ae366e73de4d8687a67",
       "unresolvedTargetedRounds": 0,
       "introducedBy": null
     },
@@ -135,12 +135,12 @@
           "claim": "The pre-Docker parity gate covers every overlapping env/TOML policy value and Desktop password limits; mutation tests prove representative drift reports the responsible mapping."
         },
         {
-          "kind": "targeted-review",
-          "ref": "targeted review round 2; merge 44451ba (parents 91540d4 and 4ae8f35)",
+          "kind": "current-state-audit",
+          "ref": "merge-resolution/current-state audit; fixed point 21b3873; merge 44451ba (parents 91540d4 and 4ae8f35); audited head b6c8206",
           "claim": "All parity-repair and policy-source blobs are unchanged by the main merge. The conflict resolution retains localized password-policy feedback and @smoke recovery assertions together with main's password-visibility controls and assertions, without introducing duplicated policy/config or test fragility."
         }
       ],
-      "reviewedDiffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c",
+      "reviewedDiffDigest": "sha256:991b52e6ff84e41d73d1a65f4bfe565cdb90d06cb0d44ae366e73de4d8687a67",
       "unresolvedTargetedRounds": 0,
       "introducedBy": null
     }
@@ -180,30 +180,35 @@
         "CR-STANDARDS-0001: deferred/closed repair evidence confirmed"
       ],
       "newFindings": []
-    },
-    {
-      "round": 2,
-      "fullReviewStarted": false,
-      "targetIds": ["CR-SPEC-0001", "CR-SPEC-0002"],
-      "advisoryRepairIds": ["CR-STANDARDS-0001"],
-      "repairHunks": [
-        "apps/desktop/src/renderer/src/features/authentication/i18n/resources.ts:password policy and visibility resources",
-        "apps/desktop/src/renderer/src/features/authentication/ui/authentication-screen.tsx:password policy and visibility composition",
-        "apps/desktop/tests/auth/password-recovery.spec.ts:policy, visibility, and @smoke assertions"
-      ],
-      "transitions": [
-        "CR-SPEC-0001: closed -> closed",
-        "CR-SPEC-0002: closed -> closed",
-        "CR-STANDARDS-0001: deferred/closed -> deferred/closed"
-      ],
-      "newFindings": []
     }
   ],
+  "currentStateAudit": {
+    "kind": "merge-resolution/current-state",
+    "fixedPoint": "21b3873098bf9bd7eb5dfab08fe1826f73edfa8b",
+    "auditedHead": "b6c820637e242b1ed4f1181137caeefd26cf3e25",
+    "mergeCommit": "44451ba75fcf72fb45404d81d87a74f43c87b48a",
+    "remoteMainAtAudit": "3c7ec18a24fa15cdfc218698738225e6660d3354",
+    "mergeBase": "4ae8f35b2c06a55621d4e0e28b5bf1cd68e11b5e",
+    "diffDigest": "sha256:991b52e6ff84e41d73d1a65f4bfe565cdb90d06cb0d44ae366e73de4d8687a67",
+    "overlapPaths": [
+      "apps/desktop/src/renderer/src/features/authentication/i18n/resources.ts",
+      "apps/desktop/src/renderer/src/features/authentication/ui/authentication-screen.tsx",
+      "apps/desktop/tests/auth/password-recovery.spec.ts"
+    ],
+    "evidence": [
+      "The PR merge-base remains 4ae8f35 after fetch; 4ae8f35..3c7ec18 changes no declared scope path.",
+      "The merge retains the accepted policy repair and password-visibility behavior across all three overlap paths without changing finding identity or repair provenance.",
+      "CI gate run 31766771679 passed on audited head b6c8206, including the Supabase Auth Policy Harness, E2E Smoke Suite, Desktop lint/unit/typecheck/build, Identity integration, and Server vet/test."
+    ],
+    "findingStateTransitions": [],
+    "newFindings": [],
+    "conclusion": "The current full task-owned scope was audited against the declared fixed point without starting another targeted review; the single completed repair round remains the lifecycle closure."
+  },
   "relevantCheck": {
-    "name": "PR #54 Authentication policy finding repair after main merge",
+    "name": "PR #54 Authentication review evidence closure",
     "result": "PASS",
-    "coverage": "deterministic HIBP reject and fail-open warning, Auth policy parity drift, recovery PR-smoke inclusion, password-visibility composition, and Desktop lint/typecheck/unit/build",
-    "diffDigest": "sha256:71d3135f76ae8ed996267439c65aebd8cf934c8ea9420ad24533be41f387b54c"
+    "coverage": "fixed-point scope identity and lifecycle legality, unchanged post-merge task scope, parity mutation regressions, and three recovery @smoke selections",
+    "diffDigest": "sha256:991b52e6ff84e41d73d1a65f4bfe565cdb90d06cb0d44ae366e73de4d8687a67"
   },
   "outcome": "closed"
 }
