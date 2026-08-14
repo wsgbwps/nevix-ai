@@ -38,6 +38,7 @@ export interface OrdinaryCloseCoordinator {
   readonly protect: (window: OrdinaryCloseWindow) => void
   readonly requestApplicationQuit: () => void
   readonly decide: (window: OrdinaryCloseWindow, request: OrdinaryCloseDecision) => void
+  readonly rendererUnavailable: (window: OrdinaryCloseWindow) => void
 }
 
 export function createOrdinaryCloseCoordinator({
@@ -91,6 +92,25 @@ export function createOrdinaryCloseCoordinator({
     }
   }
 
+  function resumeClose(
+    window: OrdinaryCloseWindow,
+    state: ProtectedWindowState,
+    resume: PendingClose['resume']
+  ): void {
+    state.bypassNextClose = true
+    if (resume === 'application-quit') quitApplication()
+    else window.close()
+  }
+
+  function rendererUnavailable(window: OrdinaryCloseWindow): void {
+    const state = protectedWindows.get(window)
+    if (!state?.pending) return
+
+    const { resume } = state.pending
+    state.pending = undefined
+    resumeClose(window, state, resume)
+  }
+
   function decide(window: OrdinaryCloseWindow, request: OrdinaryCloseDecision): void {
     const { requestId, decision } = request
     if (window.isDestroyed()) {
@@ -109,10 +129,8 @@ export function createOrdinaryCloseCoordinator({
       return
     }
 
-    state.bypassNextClose = true
-    if (resume === 'application-quit') quitApplication()
-    else window.close()
+    resumeClose(window, state, resume)
   }
 
-  return { protect, requestApplicationQuit, decide }
+  return { protect, requestApplicationQuit, decide, rendererUnavailable }
 }

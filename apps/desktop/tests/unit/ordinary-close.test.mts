@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { parseOrdinaryCloseDecision } from '../../src/main/window/ipc/ordinary-close-contract.ts'
+import {
+  markOrdinaryCloseRendererReady,
+  markOrdinaryCloseRendererUnavailable,
+  requestOrdinaryCloseDecision
+} from '../../src/main/window/ipc/request-ordinary-close.ts'
 import { createOrdinaryCloseCoordinator } from '../../src/main/window/ordinary-close.ts'
 
 interface CloseEvent {
@@ -181,15 +186,111 @@ for (const decision of invalidDecisions) {
 }
 
 test('a window without a live decision transport closes without being held', () => {
+  let requestCalls = 0
   const coordinator = createOrdinaryCloseCoordinator({
     createRequestId: () => 'request-1',
     quitApplication: () => undefined,
-    requestDecision: () => false
+    requestDecision: () => {
+      requestCalls += 1
+      return false
+    }
   })
   const window = new FakeWindow()
   coordinator.protect(window)
 
   assert.equal(window.requestClose().defaultPrevented, false)
+  assert.equal(window.requestClose().defaultPrevented, false)
+  assert.equal(requestCalls, 2)
+})
+
+test('ordinary close is not held before the renderer decision listener is ready', () => {
+  const sent: Array<{
+    readonly channel: string
+    readonly request: { readonly requestId: string }
+  }> = []
+  const window = {
+    webContents: {
+      isDestroyed: () => false,
+      send: (channel: string, request: { readonly requestId: string }) => {
+        sent.push({ channel, request })
+      }
+    }
+  } as unknown as Parameters<typeof requestOrdinaryCloseDecision>[0]
+
+  assert.equal(requestOrdinaryCloseDecision(window, { requestId: 'request-1' }), false)
+  assert.deepEqual(sent, [])
+})
+
+test('ordinary close is sent only while the renderer decision listener is ready', () => {
+  const sent: Array<{
+    readonly channel: string
+    readonly request: { readonly requestId: string }
+  }> = []
+  const window = {
+    webContents: {
+      isDestroyed: () => false,
+      send: (channel: string, request: { readonly requestId: string }) => {
+        sent.push({ channel, request })
+      }
+    }
+  } as unknown as Parameters<typeof requestOrdinaryCloseDecision>[0]
+
+  markOrdinaryCloseRendererReady(window)
+  assert.equal(requestOrdinaryCloseDecision(window, { requestId: 'request-1' }), true)
+  assert.deepEqual(sent, [
+    { channel: 'window:ordinary-close-requested', request: { requestId: 'request-1' } }
+  ])
+
+  markOrdinaryCloseRendererUnavailable(window)
+  assert.equal(requestOrdinaryCloseDecision(window, { requestId: 'request-2' }), false)
+  assert.equal(sent.length, 1)
+})
+
+test('a renderer send failure is treated as an unavailable decision listener', () => {
+  const window = {
+    webContents: {
+      isDestroyed: () => false,
+      send: () => {
+        throw new Error('renderer unavailable')
+      }
+    }
+  } as unknown as Parameters<typeof requestOrdinaryCloseDecision>[0]
+
+  markOrdinaryCloseRendererReady(window)
+  assert.equal(requestOrdinaryCloseDecision(window, { requestId: 'request-1' }), false)
+  assert.equal(requestOrdinaryCloseDecision(window, { requestId: 'request-2' }), false)
+})
+
+test('renderer unavailability fails open and clears the pending ordinary close', () => {
+  const { coordinator, requests } = setup()
+  const window = new FakeWindow()
+  coordinator.protect(window)
+
+  assert.equal(window.requestClose().defaultPrevented, true)
+  coordinator.rendererUnavailable(window)
+
+  assert.equal(window.closeCalls, 1)
+  assert.equal(requests.length, 1)
+  assert.throws(
+    () => coordinator.decide(window, { requestId: 'request-1', decision: 'allow' }),
+    /does not match a pending request/
+  )
+})
+
+test('renderer unavailability resumes a pending application quit', () => {
+  const { coordinator, quitCalls } = setup()
+  const window = new FakeWindow()
+  coordinator.protect(window)
+
+  coordinator.requestApplicationQuit()
+  assert.equal(window.requestClose().defaultPrevented, true)
+  coordinator.rendererUnavailable(window)
+
+  assert.equal(quitCalls(), 1)
+  assert.throws(
+    () => coordinator.decide(window, { requestId: 'request-1', decision: 'allow' }),
+    /does not match a pending request/
+  )
 })
 
 test('a destroyed owning window cannot decide a pending request', () => {

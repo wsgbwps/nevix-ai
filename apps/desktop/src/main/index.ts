@@ -2,7 +2,10 @@ import { app, BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { initializeMainI18n } from './language'
 import { createWindow } from './window/main-window'
-import { requestOrdinaryCloseDecision } from './window/ipc/request-ordinary-close'
+import {
+  markOrdinaryCloseRendererUnavailable,
+  requestOrdinaryCloseDecision
+} from './window/ipc/request-ordinary-close'
 import {
   initializeOrdinaryCloseRuntime,
   requestApplicationQuit
@@ -28,10 +31,12 @@ app.whenReady().then(async () => {
     ;(mod as { register: () => void }).register()
   }
 
-  createWindow()
+  createWindow(markOrdinaryCloseRendererUnavailable)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow(markOrdinaryCloseRendererUnavailable)
+    }
   })
 })
 

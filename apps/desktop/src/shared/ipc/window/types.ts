@@ -11,6 +11,9 @@ export interface DecideOrdinaryCloseRequest {
 
 declare module '@ipc/channels' {
   interface IpcChannelMap {
+    'window:ordinary-close-ready': {
+      response: void
+    }
     'window:decide-ordinary-close': {
       request: DecideOrdinaryCloseRequest
       response: void

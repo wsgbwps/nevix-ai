@@ -15,7 +15,8 @@ const invokeChannels = {
   'organization:get-remembered-active-organization': true,
   'organization:set-remembered-active-organization': true,
   'organization:export-audit-log': true,
-  'window:decide-ordinary-close': true
+  'window:decide-ordinary-close': true,
+  'window:ordinary-close-ready': true
 } satisfies Record<keyof IpcChannelMap, true>
 
 const eventChannels = {

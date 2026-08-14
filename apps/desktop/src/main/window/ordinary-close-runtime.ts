@@ -36,3 +36,7 @@ export function requestApplicationQuit(): void {
 export function decideOrdinaryClose(window: BrowserWindow, request: OrdinaryCloseDecision): void {
   requireCoordinator().decide(window, request)
 }
+
+export function ordinaryCloseRendererUnavailable(window: BrowserWindow): void {
+  requireCoordinator().rendererUnavailable(window)
+}

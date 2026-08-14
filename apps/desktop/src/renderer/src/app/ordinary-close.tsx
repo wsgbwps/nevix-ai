@@ -15,15 +15,15 @@ export function OrdinaryCloseProvider({
     handlerRef.current = handler
   }, [])
 
-  useEffect(
-    () =>
-      window.api.on('window:ordinary-close-requested', (request) => {
-        const handler = handlerRef.current
-        if (handler) handler(request)
-        else void decideOrdinaryClose(request.requestId, 'allow')
-      }),
-    []
-  )
+  useEffect(() => {
+    const removeListener = window.api.on('window:ordinary-close-requested', (request) => {
+      const handler = handlerRef.current
+      if (handler) handler(request)
+      else void decideOrdinaryClose(request.requestId, 'allow')
+    })
+    void window.api.invoke('window:ordinary-close-ready')
+    return removeListener
+  }, [])
 
   return (
     <OrdinaryCloseHandlerContext.Provider value={registerHandler}>
