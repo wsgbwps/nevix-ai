@@ -126,7 +126,9 @@ Set `outcome: closed` only when all conditions hold on the same current diff:
 - the final relevant check reports `PASS` and its diff digest equals
   `currentDiffDigest`; and
 - the final diff and check result have been reviewed together as required by
-  the repository's final-state evidence route.
+  the repository's final-state evidence route; low-risk candidates
+  (documentation or a single dependency-only change) close on check `PASS` alone
+  without a review ledger, as that route defines.
 
 Set `outcome: escalated` when the round bound is reached with an unresolved
 blocker. Return the blocker IDs, owners, evidence, attempted repairs, and failed

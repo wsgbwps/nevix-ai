@@ -12,7 +12,7 @@
 - Keep composition roots limited to wiring: `apps/desktop/src/main/index.ts`, renderer `app/`, and `server/cmd/server/main.go` hold no business logic
 - If a responsibility has no canonical owner, or its placement would change a documented boundary or ADR, stop implementation and surface the conflict. Resolve it through a dedicated architecture task before adding another convention
 - Before completing development work, inspect `git diff --name-status` and verify that every changed path still matches the declared Domain and canonical directory. Call out required shared-area or composition-root changes with their impact and tests
-- Before handing off repository changes, bind the acceptance boundary, base, final diff, relevant check identity/result/coverage, and review conclusion using [Final-state evidence](docs/specs/final-state-evidence.md); run the relevant check after the last edit
+- Before handing off repository changes, bind the acceptance boundary, base, final diff, relevant check identity/result/coverage, and — for high-risk changes — the review conclusion using [Final-state evidence](docs/specs/final-state-evidence.md); run the relevant check after the last edit. Landing (`make land`) enforces the bound evidence; low-risk candidates (documentation or a single dependency-only change) close on check `PASS` alone
 
 ## Shared areas and delivery workflow
 

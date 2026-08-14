@@ -11,8 +11,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { spawnSync } from "node:child_process";
-
+import { spawn, spawnSync } from "node:child_process";
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
 function git(cwd, args, encoding = "utf8") {
@@ -28,10 +27,6 @@ function zeroDelimited(value) {
   return value.toString("utf8").split("\0").filter(Boolean);
 }
 
-function isTaskPath(path) {
-  return !path.startsWith(".codex/better-harness/");
-}
-
 function repository(cwd = process.cwd()) {
   const root = git(cwd, ["rev-parse", "--show-toplevel"]).trim();
   const rawGitDir = git(root, ["rev-parse", "--git-dir"]).trim();
@@ -43,22 +38,6 @@ function resolveCommit(root, ref) {
   return git(root, ["rev-parse", "--verify", `${ref}^{commit}`]).trim();
 }
 
-function defaultBase(root) {
-  let branch = "";
-  try {
-    branch = git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]).trim();
-  } catch {
-    return resolveCommit(root, "HEAD");
-  }
-  if (branch !== "main") {
-    try {
-      return git(root, ["merge-base", "HEAD", "origin/main"]).trim();
-    } catch {
-      // A local-only fixture or repository still binds its working diff to HEAD.
-    }
-  }
-  return resolveCommit(root, "HEAD");
-}
 
 function hashPathState(hash, root, path) {
   const absolutePath = join(root, path);
@@ -102,9 +81,7 @@ export function snapshot(
       ),
     ),
   );
-  const changedPaths = [...new Set([...tracked, ...untracked])]
-    .filter(isTaskPath)
-    .sort();
+  const changedPaths = [...new Set([...tracked, ...untracked])].sort();
   const paths = pathScope ? [...new Set(pathScope)].sort() : changedPaths;
 
   if (
@@ -113,8 +90,7 @@ export function snapshot(
         !changedPaths.includes(path) ||
         path.startsWith("/") ||
         path.includes("\\") ||
-        path.split("/").includes("..") ||
-        !isTaskPath(path),
+        path.split("/").includes(".."),
     ) ||
     paths.length === 0
   ) {
@@ -156,6 +132,28 @@ function statePath(state) {
 
 function activePath(state) {
   return join(state.gitDir, "codex-final-state-evidence", "active.json");
+}
+
+function reviewedMarkerPath(state, finalDiff) {
+  if (!DIGEST_PATTERN.test(finalDiff)) {
+    throw new Error("invalid final diff identity");
+  }
+  return join(
+    state.gitDir,
+    "codex-final-state-evidence",
+    "reviewed",
+    `${finalDiff.slice("sha256:".length)}.json`,
+  );
+}
+
+function readReviewedMarker(state, finalDiff) {
+  const path = reviewedMarkerPath(state, finalDiff);
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 function writeRecord(state, record) {
@@ -202,6 +200,8 @@ function parseCheckArguments(args) {
   let base = "";
   let name = "";
   let covers = "";
+  let boundary = "";
+  let risk = "high";
   const paths = [];
   let index = 0;
 
@@ -212,12 +212,16 @@ function parseCheckArguments(args) {
       (flag === "--base" ||
         flag === "--name" ||
         flag === "--covers" ||
+        flag === "--boundary" ||
+        flag === "--risk" ||
         flag === "--path") &&
       value
     ) {
       if (flag === "--base") base = value.trim();
       if (flag === "--name") name = value.trim();
       if (flag === "--covers") covers = value.trim();
+      if (flag === "--boundary") boundary = value.trim();
+      if (flag === "--risk") risk = value.trim();
       if (flag === "--path") paths.push(value.trim());
       index += 2;
       continue;
@@ -225,27 +229,109 @@ function parseCheckArguments(args) {
     throw new Error(`unknown or incomplete option: ${flag}`);
   }
 
-  if (!base || !name || !covers || args[index] !== "--" || !args[index + 1]) {
+  if (
+    !base ||
+    !name ||
+    !covers ||
+    !boundary ||
+    args[index] !== "--" ||
+    !args[index + 1]
+  ) {
     throw new Error(
-      "usage: final-state-evidence.mjs check --base <fixed-point> --name <identity> --covers <behavior-or-risk> [--path <task-path> ...] -- <command> [args...]",
+      "usage: final-state-evidence.mjs check --base <fixed-point> --name <identity> --covers <behavior-or-risk> --boundary <acceptance-boundary> [--risk low|high] [--path <task-path> ...] -- <command> [args...]",
     );
   }
-  if (name.length > 160 || covers.length > 400) {
-    throw new Error("check identity or coverage is too long");
+  if (name.length > 160 || covers.length > 400 || boundary.length > 400) {
+    throw new Error("check identity, coverage, or boundary is too long");
+  }
+  if (risk !== "low" && risk !== "high") {
+    throw new Error("--risk must be low or high");
   }
 
   return {
     base,
     name,
     covers,
+    boundary,
+    risk,
     paths,
     command: args[index + 1],
     commandArgs: args.slice(index + 2),
   };
 }
 
-function runCheck(args) {
+const DEPENDENCY_ONLY_KEYS = new Set([
+  "packageManager",
+  "engines",
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+  "overrides",
+  "resolutions",
+  "pnpm",
+]);
+
+function isDependencyOnlyPackageJsonChange(baseCommit, root) {
+  let base;
+  let current;
+  try {
+    base = JSON.parse(git(root, ["show", `${baseCommit}:package.json`]));
+    current = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  } catch {
+    return false;
+  }
+  const changedKeys = [
+    ...new Set([...Object.keys(base), ...Object.keys(current)]),
+  ].filter((key) => JSON.stringify(base[key]) !== JSON.stringify(current[key]));
+  return changedKeys.length === 1 && DEPENDENCY_ONLY_KEYS.has(changedKeys[0]);
+}
+
+function assertLowRiskEligible({ baseCommit, root, paths }) {
+  const ineligible = paths.filter((path) => {
+    if (path.startsWith("docs/") || path.endsWith(".md")) return false;
+    if (path === "package.json") {
+      return !isDependencyOnlyPackageJsonChange(baseCommit, root);
+    }
+    return true;
+  });
+  if (ineligible.length > 0) {
+    throw new Error(
+      `--risk low requires documentation or a single dependency-only change; ineligible paths: ${ineligible.join(", ")}`,
+    );
+  }
+}
+
+function runCheckCommand(command, commandArgs, cwd) {
+  return new Promise((resolve) => {
+    const child = spawn(command, commandArgs, {
+      cwd,
+      stdio: ["inherit", "pipe", "pipe"],
+    });
+    const MAX_TAIL = 4096;
+    let tail = "";
+    const sink = (chunk, stream) => {
+      stream.write(chunk);
+      tail = `${tail}${chunk.toString("utf8")}`.slice(-MAX_TAIL);
+    };
+    child.stdout.on("data", (chunk) => sink(chunk, process.stdout));
+    child.stderr.on("data", (chunk) => sink(chunk, process.stderr));
+    child.on("error", (error) => {
+      tail = `${tail}${error.message}`.slice(-MAX_TAIL);
+      resolve({ status: null, tail });
+    });
+    child.on("close", (status) => resolve({ status, tail }));
+  });
+}
+
+async function runCheck(args) {
   const parsed = parseCheckArguments(args);
+  if (
+    ["true", ":", "echo"].includes(parsed.command) &&
+    parsed.commandArgs.length === 0
+  ) {
+    throw new Error("refusing a trivial no-op check command");
+  }
   const before = snapshot(
     process.cwd(),
     parsed.paths.length > 0 ? parsed.paths : null,
@@ -254,11 +340,15 @@ function runCheck(args) {
   if (!before.digest) {
     throw new Error("no candidate diff to bind");
   }
+  if (parsed.risk === "low") {
+    assertLowRiskEligible(before);
+  }
 
-  const result = spawnSync(parsed.command, parsed.commandArgs, {
-    cwd: before.root,
-    stdio: "inherit",
-  });
+  const result = await runCheckCommand(
+    parsed.command,
+    parsed.commandArgs,
+    before.root,
+  );
   const after = snapshot(before.root, before.paths, before.baseCommit);
   const exitCode = Number.isInteger(result.status) ? result.status : 1;
   const unchanged = before.digest === after.digest;
@@ -269,9 +359,12 @@ function runCheck(args) {
     baseCommit: after.baseCommit,
     finalDiff: `sha256:${after.digest}`,
     paths: after.paths,
+    acceptanceBoundary: parsed.boundary,
+    risk: parsed.risk,
     relevantCheck: parsed.name,
     checkResult: status,
     checkCoverage: parsed.covers,
+    checkOutputTail: result.tail,
     commandHash: createHash("sha256")
       .update(JSON.stringify([parsed.command, ...parsed.commandArgs]))
       .digest("hex"),
@@ -288,7 +381,6 @@ function runCheck(args) {
   }
   return exitCode;
 }
-
 function readFindingLedger(path, root, record) {
   const findingLedger = resolve(root, path);
   let content;
@@ -473,7 +565,9 @@ function runReview(args) {
     record.contract !== "nevix-final-state-evidence/v2" ||
     record.baseCommit !== current.baseCommit ||
     record.finalDiff !== `sha256:${current.digest}` ||
-    record.checkResult !== "PASS"
+    record.checkResult !== "PASS" ||
+    typeof record.acceptanceBoundary !== "string" ||
+    !record.acceptanceBoundary.trim()
   ) {
     throw new Error("the relevant-check record is failed, stale, or malformed");
   }
@@ -482,6 +576,16 @@ function runReview(args) {
     current,
     readFindingLedger(args[1], current.root, record),
   );
+  const marker = {
+    finalDiff: record.finalDiff,
+    findingLedgerDigest: evidence.findingLedgerDigest,
+    reviewedAt: new Date().toISOString(),
+  };
+  const markerPath = reviewedMarkerPath(current, record.finalDiff);
+  mkdirSync(dirname(markerPath), { recursive: true });
+  writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`, {
+    mode: 0o600,
+  });
   const reviewedRecord = {
     ...record,
     ...evidence,
@@ -499,11 +603,26 @@ function validateReviewedRecord(current, record) {
     record.baseCommit !== current.baseCommit ||
     record.finalDiff !== `sha256:${current.digest}` ||
     record.checkResult !== "PASS" ||
-    record.reviewedDiff !== record.finalDiff
+    typeof record.acceptanceBoundary !== "string" ||
+    !record.acceptanceBoundary.trim()
   ) {
     throw new Error("the accepted evidence is failed, stale, or malformed");
   }
-
+  const hasReview = Boolean(record.findingLedger && record.reviewedDiff);
+  if (!hasReview) {
+    if (readReviewedMarker(current, record.finalDiff)) {
+      throw new Error(
+        "this diff was previously reviewed; the finding ledger is required",
+      );
+    }
+    if (record.risk !== "low") {
+      throw new Error("the accepted evidence is failed, stale, or malformed");
+    }
+    return;
+  }
+  if (record.reviewedDiff !== record.finalDiff) {
+    throw new Error("the accepted evidence is failed, stale, or malformed");
+  }
   const reviewEvidence = readFindingLedger(
     record.findingLedger || "",
     current.root,
@@ -552,129 +671,11 @@ function runVerify(args) {
   return 0;
 }
 
-function field(message, label) {
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return message.match(
-    new RegExp(`^\\s*- ${escaped}:\\s*(.+?)\\s*$`, "mi"),
-  )?.[1];
-}
 
-function block(input, reason) {
-  if (input.stop_hook_active) {
-    return {
-      systemMessage: `Final-state evidence remains incomplete: ${reason}`,
-    };
-  }
-  return { decision: "block", reason };
-}
-
-export function evaluateStop(input, cwd = process.cwd()) {
-  const repo = repository(cwd);
-  const active = readActive(cwd);
-  const changed = active
-    ? snapshot(repo.root, null, active.record.baseCommit)
-    : snapshot(repo.root, null, defaultBase(repo.root));
-  if (!changed.digest) return {};
-
-  if (!active) {
-    return block(
-      input,
-      'Run the relevant check after the final code edit with `node .codex/hooks/final-state-evidence.mjs check --base origin/main --name "<identity>" --covers "<behavior or risk>" -- <command> [args...]`, then review the final diff.',
-    );
-  }
-
-  const { current, record } = active;
-  if (
-    !current.digest ||
-    record.contract !== "nevix-final-state-evidence/v2" ||
-    record.baseCommit !== current.baseCommit ||
-    record.finalDiff !== `sha256:${current.digest}` ||
-    record.checkResult !== "PASS"
-  ) {
-    return block(
-      input,
-      "The relevant-check record is failed, stale, or malformed; rerun it after the final code edit.",
-    );
-  }
-
-  let reviewEvidence;
-  try {
-    reviewEvidence = readFindingLedger(
-      record.findingLedger || "",
-      current.root,
-      record,
-    );
-  } catch {
-    reviewEvidence = null;
-  }
-  if (
-    !reviewEvidence ||
-    record.reviewedDiff !== record.finalDiff ||
-    record.findingLedger !== reviewEvidence.findingLedger ||
-    record.findingLedgerDigest !== reviewEvidence.findingLedgerDigest ||
-    record.reviewConclusion !== reviewEvidence.reviewConclusion
-  ) {
-    return block(
-      input,
-      "Complete targeted re-review after the final code edit, then record the conclusion from a structured finding ledger with `node .codex/hooks/final-state-evidence.mjs review --ledger <code-review-findings.json>`.",
-    );
-  }
-
-  const message = String(input.last_assistant_message || "");
-  const acceptance = field(message, "Acceptance boundary");
-  const baseCommit = field(message, "Base commit");
-  const finalDiff = field(message, "Final diff");
-  const relevantCheck = field(message, "Relevant check");
-  const checkResult = field(message, "Check result");
-  const checkCoverage = field(message, "Check coverage");
-  const findingLedger = field(message, "Finding ledger");
-  const findingLedgerDigest = field(message, "Finding ledger digest");
-  const reviewConclusion = field(message, "Review conclusion");
-  const closure = field(message, "Closure");
-
-  const valid =
-    /^Final-state evidence\s*$/im.test(message) &&
-    Boolean(acceptance) &&
-    baseCommit === record.baseCommit &&
-    finalDiff === record.finalDiff &&
-    relevantCheck === record.relevantCheck &&
-    checkResult === "PASS" &&
-    checkCoverage === record.checkCoverage &&
-    findingLedger === record.findingLedger &&
-    findingLedgerDigest === record.findingLedgerDigest &&
-    reviewConclusion === record.reviewConclusion &&
-    closure === "accepted";
-
-  if (valid) return {};
-
-  return block(
-    input,
-    [
-      "Finish with this exact evidence shape (replace the acceptance boundary):",
-      "Final-state evidence",
-      "- Acceptance boundary: <behavior or risk>",
-      `- Base commit: ${record.baseCommit}`,
-      `- Final diff: ${record.finalDiff}`,
-      `- Relevant check: ${record.relevantCheck}`,
-      "- Check result: PASS",
-      `- Check coverage: ${record.checkCoverage}`,
-      `- Finding ledger: ${record.findingLedger}`,
-      `- Finding ledger digest: ${record.findingLedgerDigest}`,
-      `- Review conclusion: ${record.reviewConclusion}`,
-      "- Closure: accepted",
-    ].join("\n"),
-  );
-}
-
-async function readStdin() {
-  let value = "";
-  for await (const chunk of process.stdin) value += chunk;
-  return value ? JSON.parse(value) : {};
-}
 
 async function main() {
   if (process.argv[2] === "check") {
-    process.exitCode = runCheck(process.argv.slice(3));
+    process.exitCode = await runCheck(process.argv.slice(3));
     return;
   }
   if (process.argv[2] === "review") {
@@ -685,8 +686,9 @@ async function main() {
     process.exitCode = runVerify(process.argv.slice(3));
     return;
   }
-  const input = await readStdin();
-  process.stdout.write(`${JSON.stringify(evaluateStop(input))}\n`);
+  throw new Error(
+    "usage: final-state-evidence.mjs <check|review|verify> [args...]",
+  );
 }
 
 if (

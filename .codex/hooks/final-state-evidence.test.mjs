@@ -33,15 +33,6 @@ function createRepository() {
   return directory;
 }
 
-function stop(directory, message = "", stopHookActive = false) {
-  const input = JSON.stringify({
-    hook_event_name: "Stop",
-    last_assistant_message: message,
-    stop_hook_active: stopHookActive,
-  });
-  const result = run(process.execPath, [SCRIPT], { cwd: directory, input });
-  return JSON.parse(result.stdout);
-}
 
 function check(directory) {
   const result = run(
@@ -55,6 +46,8 @@ function check(directory) {
       "fixture syntax",
       "--covers",
       "the final JavaScript file parses",
+      "--boundary",
+      "the fixture candidate parses and binds",
       "--path",
       ".codex/hooks/fixture.mjs",
       "--path",
@@ -113,21 +106,6 @@ function verify(directory, base, expectFailure = false) {
   return expectFailure ? result : JSON.parse(result.stdout);
 }
 
-function acceptedEvidence(record) {
-  return [
-    "Final-state evidence",
-    "- Acceptance boundary: the fixture must parse",
-    `- Base commit: ${record.baseCommit}`,
-    `- Final diff: ${record.finalDiff}`,
-    `- Relevant check: ${record.relevantCheck}`,
-    "- Check result: PASS",
-    `- Check coverage: ${record.checkCoverage}`,
-    `- Finding ledger: ${record.findingLedger}`,
-    `- Finding ledger digest: ${record.findingLedgerDigest}`,
-    `- Review conclusion: ${record.reviewConclusion}`,
-    "- Closure: accepted",
-  ].join("\n");
-}
 
 function createCheckedRepository(t) {
   const directory = createRepository();
@@ -140,11 +118,6 @@ function createCheckedRepository(t) {
   return { directory, fixture, record: check(directory) };
 }
 
-test("allows stop when there is no candidate diff", (t) => {
-  const directory = createRepository();
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  assert.deepEqual(stop(directory), {});
-});
 
 test("binds a documentation-only candidate", (t) => {
   const directory = createRepository();
@@ -163,6 +136,8 @@ test("binds a documentation-only candidate", (t) => {
       "documentation fixture",
       "--covers",
       "the documentation candidate is present",
+      "--boundary",
+      "the documentation candidate binds",
       "--",
       process.execPath,
       "--eval",
@@ -176,130 +151,6 @@ test("binds a documentation-only candidate", (t) => {
   assert.deepEqual(record.paths, ["docs/delivery.md"]);
 });
 
-test("requires a post-change relevant check and reviewed handoff", (t) => {
-  const directory = createRepository();
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const fixture = join(directory, ".codex/hooks/fixture.mjs");
-  mkdirSync(join(directory, ".codex/hooks"), { recursive: true });
-  writeFileSync(fixture, "export const value = 1\n");
-  writeFileSync(join(directory, "AGENTS.md"), "# Fixture guidance\n");
-  mkdirSync(join(directory, ".codex/better-harness/run"), { recursive: true });
-  writeFileSync(
-    join(directory, ".codex/better-harness/run/report.json"),
-    "{}\n",
-  );
-  mkdirSync(join(directory, "scripts"), { recursive: true });
-  writeFileSync(join(directory, "scripts/unrelated.sh"), "#!/bin/sh\n");
-
-  const missingCheck = stop(directory);
-  assert.equal(missingCheck.decision, "block");
-  assert.match(
-    missingCheck.reason,
-    /Run the relevant check after the final code edit/,
-  );
-
-  const record = check(directory);
-  assert.equal(record.checkResult, "PASS");
-  assert.deepEqual(record.paths, [".codex/hooks/fixture.mjs", "AGENTS.md"]);
-  assert.equal(record.paths.includes("scripts/unrelated.sh"), false);
-
-  const missingReview = stop(
-    directory,
-    [
-      "Final-state evidence",
-      "- Acceptance boundary: the fixture must parse",
-      `- Final diff: ${record.finalDiff}`,
-      "- Relevant check: fixture syntax",
-      "- Check result: PASS",
-      "- Check coverage: the final JavaScript file parses",
-      "- Closure: accepted",
-    ].join("\n"),
-  );
-  assert.equal(missingReview.decision, "block");
-  assert.match(missingReview.reason, /record the conclusion/);
-
-  const unreviewedConclusion = stop(
-    directory,
-    [
-      "Final-state evidence",
-      "- Acceptance boundary: the fixture must parse",
-      `- Final diff: ${record.finalDiff}`,
-      "- Relevant check: fixture syntax",
-      "- Check result: PASS",
-      "- Check coverage: the final JavaScript file parses",
-      "- Review conclusion: The final diff and relevant check have no findings.",
-      "- Closure: accepted",
-    ].join("\n"),
-  );
-  assert.equal(unreviewedConclusion.decision, "block");
-
-  const textOnlyReview = run(
-    process.execPath,
-    [
-      SCRIPT,
-      "review",
-      "--conclusion",
-      "Reviewed the final diff and relevant check; no findings.",
-    ],
-    { cwd: directory, expectFailure: true },
-  );
-  assert.notEqual(textOnlyReview.status, 0);
-  assert.match(textOnlyReview.stderr, /--ledger/);
-
-  const ledger = writeFindingLedger(directory, record);
-  const reviewedRecord = review(directory, ledger);
-  assert.match(reviewedRecord.reviewConclusion, /0 blockers/);
-  assert.notEqual(reviewedRecord.findingLedger, ledger);
-  assert.match(
-    reviewedRecord.findingLedger,
-    /codex-final-state-evidence\/ledgers\/[a-f0-9]{64}\.json$/,
-  );
-  assert.match(reviewedRecord.findingLedgerDigest, /^sha256:[a-f0-9]{64}$/);
-
-  rmSync(ledger);
-
-  const mismatchedFinalDiff = stop(
-    directory,
-    [
-      "Final-state evidence",
-      "- Acceptance boundary: the fixture must parse",
-      `- Final diff: sha256:${"0".repeat(64)}`,
-      "- Relevant check: fixture syntax",
-      "- Check result: PASS",
-      "- Check coverage: the final JavaScript file parses",
-      `- Finding ledger: ${reviewedRecord.findingLedger}`,
-      `- Finding ledger digest: ${reviewedRecord.findingLedgerDigest}`,
-      `- Review conclusion: ${reviewedRecord.reviewConclusion}`,
-      "- Closure: accepted",
-    ].join("\n"),
-  );
-  assert.equal(mismatchedFinalDiff.decision, "block");
-
-  const mismatchedBase = stop(
-    directory,
-    acceptedEvidence({ ...reviewedRecord, baseCommit: "0".repeat(40) }),
-  );
-  assert.equal(mismatchedBase.decision, "block");
-
-  const accepted = stop(directory, acceptedEvidence(reviewedRecord));
-  assert.deepEqual(accepted, {});
-
-  writeFileSync(fixture, "export const value = 2\n");
-  const stale = stop(directory);
-  assert.equal(stale.decision, "block");
-  assert.match(stale.reason, /failed, stale, or malformed/);
-
-  writeFileSync(
-    join(directory, ".git/codex-final-state-evidence/active.json"),
-    "{\n",
-  );
-  const malformedState = stop(directory);
-  assert.equal(malformedState.decision, "block");
-  assert.match(
-    malformedState.reason,
-    /Run the relevant check after the final code edit/,
-  );
-});
 
 test("rejects an unresolved blocker unless its risk is explicitly accepted", (t) => {
   const { directory, record } = createCheckedRepository(t);
@@ -398,19 +249,6 @@ test("rejects a finding ledger bound to a stale diff digest", (t) => {
   assert.match(result.stderr, /current diff digest/i);
 });
 
-test("rejects a later edit that was checked but not re-reviewed", (t) => {
-  const { directory, fixture, record } = createCheckedRepository(t);
-  const ledger = writeFindingLedger(directory, record);
-  const reviewedRecord = review(directory, ledger);
-  assert.deepEqual(stop(directory, acceptedEvidence(reviewedRecord)), {});
-
-  writeFileSync(fixture, "export const value = 2\n");
-  const currentRecord = check(directory);
-  const result = stop(directory, acceptedEvidence(currentRecord));
-
-  assert.equal(result.decision, "block");
-  assert.match(result.reason, /targeted re-review after the final code edit/i);
-});
 
 test("keeps accepted evidence valid across committing the same candidate", (t) => {
   const { directory, record } = createCheckedRepository(t);
@@ -426,7 +264,6 @@ test("keeps accepted evidence valid across committing the same candidate", (t) =
 
   const verified = verify(directory, record.baseCommit);
   assert.equal(verified.finalDiff, reviewedRecord.finalDiff);
-  assert.deepEqual(stop(directory, acceptedEvidence(reviewedRecord)), {});
 });
 
 test("rejects a changed landing base and incomplete accepted scope", (t) => {
@@ -450,6 +287,8 @@ test("rejects a changed landing base and incomplete accepted scope", (t) => {
       "fixture syntax",
       "--covers",
       "the scoped JavaScript file parses",
+      "--boundary",
+      "the scoped fixture candidate parses and binds",
       "--path",
       ".codex/hooks/fixture.mjs",
       "--",
@@ -478,17 +317,266 @@ test("rejects a changed landing base and incomplete accepted scope", (t) => {
   assert.match(changedBase.stderr, /base no longer matches/i);
 });
 
-test("avoids an infinite continuation loop", (t) => {
+
+test("closes a low-risk candidate on check alone without a review ledger", (t) => {
   const directory = createRepository();
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const fixtureDirectory = join(directory, ".codex/hooks");
-  mkdirSync(fixtureDirectory, { recursive: true });
+  writeFileSync(join(directory, "AGENTS.md"), "# Fixture guidance\n");
+  mkdirSync(join(directory, "docs"));
+  writeFileSync(join(directory, "docs/guide.md"), "# Guide\n");
+
+  const result = run(
+    process.execPath,
+    [
+      SCRIPT,
+      "check",
+      "--base",
+      "HEAD",
+      "--name",
+      "documentation fixture",
+      "--covers",
+      "the documentation candidate is present",
+      "--boundary",
+      "the documentation candidate closes on check alone",
+      "--risk",
+      "low",
+      "--",
+      process.execPath,
+      "--eval",
+      "process.exit(0)",
+    ],
+    { cwd: directory },
+  );
+  const lowRisk = JSON.parse(result.stdout);
+  assert.equal(lowRisk.risk, "low");
+  assert.equal(lowRisk.checkResult, "PASS");
+  assert.equal(lowRisk.acceptanceBoundary, "the documentation candidate closes on check alone");
+  assert.equal(lowRisk.findingLedger, undefined);
+
+  const verified = verify(directory, lowRisk.baseCommit);
+  assert.equal(verified.finalDiff, lowRisk.finalDiff);
+  assert.equal(verified.risk, "low");
+  assert.equal(verified.acceptanceBoundary, lowRisk.acceptanceBoundary);
+});
+
+test("requires an acceptance boundary", (t) => {
+  const { directory } = createCheckedRepository(t);
+  const result = run(
+    process.execPath,
+    [
+      SCRIPT,
+      "check",
+      "--base",
+      "HEAD",
+      "--name",
+      "fixture syntax",
+      "--covers",
+      "the fixture is present",
+      "--",
+      process.execPath,
+      "--check",
+      ".codex/hooks/fixture.mjs",
+    ],
+    { cwd: directory, expectFailure: true },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--boundary/);
+});
+
+test("rejects low-risk candidates with non-documentation paths", (t) => {
+  const { directory } = createCheckedRepository(t);
+  const result = run(
+    process.execPath,
+    [
+      SCRIPT,
+      "check",
+      "--base",
+      "HEAD",
+      "--name",
+      "fixture syntax",
+      "--covers",
+      "the final JavaScript file parses",
+      "--boundary",
+      "the fixture candidate binds",
+      "--risk",
+      "low",
+      "--path",
+      ".codex/hooks/fixture.mjs",
+      "--path",
+      "AGENTS.md",
+      "--",
+      process.execPath,
+      "--check",
+      ".codex/hooks/fixture.mjs",
+    ],
+    { cwd: directory, expectFailure: true },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /ineligible paths/);
+});
+
+test("gates low risk on dependency-only package.json changes", (t) => {
+  const checkArgs = (directory) => [
+    SCRIPT,
+    "check",
+    "--base",
+    "HEAD",
+    "--name",
+    "package fixture",
+    "--covers",
+    "the package manifest change is dependency-only",
+    "--boundary",
+    "the dependency-only change binds",
+    "--risk",
+    "low",
+    "--path",
+    "package.json",
+    "--",
+    process.execPath,
+    "--eval",
+    "process.exit(0)",
+  ];
+
+  const dependencyDirectory = createRepository();
+  t.after(() =>
+    rmSync(dependencyDirectory, { recursive: true, force: true }),
+  );
   writeFileSync(
-    join(fixtureDirectory, "fixture.mjs"),
+    join(dependencyDirectory, "package.json"),
+    '{"type":"module","packageManager":"pnpm@11.21.0"}\n',
+  );
+  const dependencyResult = run(process.execPath, checkArgs(dependencyDirectory), {
+    cwd: dependencyDirectory,
+  });
+  const dependencyRecord = JSON.parse(dependencyResult.stdout);
+  assert.equal(dependencyRecord.risk, "low");
+  assert.equal(dependencyRecord.checkResult, "PASS");
+  verify(dependencyDirectory, dependencyRecord.baseCommit);
+
+  const scriptDirectory = createRepository();
+  t.after(() => rmSync(scriptDirectory, { recursive: true, force: true }));
+  writeFileSync(
+    join(scriptDirectory, "package.json"),
+    '{"type":"module","scripts":{"postinstall":"true"}}\n',
+  );
+  const scriptResult = run(process.execPath, checkArgs(scriptDirectory), {
+    cwd: scriptDirectory,
+    expectFailure: true,
+  });
+  assert.notEqual(scriptResult.status, 0);
+  assert.match(scriptResult.stderr, /ineligible paths/);
+});
+
+test("keeps the finding ledger required after a review upgrade", (t) => {
+  const directory = createRepository();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(join(directory, "AGENTS.md"), "# Fixture guidance\n");
+  mkdirSync(join(directory, "docs"));
+  writeFileSync(join(directory, "docs/guide.md"), "# Guide\n");
+  const checkArgs = [
+    SCRIPT,
+    "check",
+    "--base",
+    "HEAD",
+    "--name",
+    "documentation fixture",
+    "--covers",
+    "the documentation candidate is present",
+    "--boundary",
+    "the documentation candidate binds",
+    "--risk",
+    "low",
+    "--",
+    process.execPath,
+    "--eval",
+    "process.exit(0)",
+  ];
+
+  const lowRisk = JSON.parse(
+    run(process.execPath, checkArgs, { cwd: directory }).stdout,
+  );
+  assert.equal(lowRisk.risk, "low");
+  verify(directory, lowRisk.baseCommit);
+
+  const ledger = writeFindingLedger(directory, lowRisk);
+  review(directory, ledger);
+
+  const rechecked = JSON.parse(
+    run(process.execPath, checkArgs, { cwd: directory }).stdout,
+  );
+  assert.equal(rechecked.risk, "low");
+  assert.equal(rechecked.findingLedger, undefined);
+
+  const downgraded = verify(directory, lowRisk.baseCommit, true);
+  assert.notEqual(downgraded.status, 0);
+  assert.match(downgraded.stderr, /previously reviewed/);
+
+  review(directory, ledger);
+  const upgraded = verify(directory, lowRisk.baseCommit);
+  assert.equal(upgraded.finalDiff, lowRisk.finalDiff);
+});
+
+
+
+test("refuses trivial no-op check commands", (t) => {
+  const directory = createRepository();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, ".codex/hooks"), { recursive: true });
+  writeFileSync(
+    join(directory, ".codex/hooks/fixture.mjs"),
     "export const value = 1\n",
   );
 
-  const result = stop(directory, "", true);
-  assert.equal(result.decision, undefined);
-  assert.match(result.systemMessage, /remains incomplete/);
+  const result = run(
+    process.execPath,
+    [
+      SCRIPT,
+      "check",
+      "--base",
+      "HEAD",
+      "--name",
+      "fixture syntax",
+      "--covers",
+      "the fixture is present",
+      "--boundary",
+      "the fixture candidate binds",
+      "--",
+      "true",
+    ],
+    { cwd: directory, expectFailure: true },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /trivial no-op/);
+});
+
+test("captures the check output tail into the record", (t) => {
+  const { directory, record } = createCheckedRepository(t);
+  assert.equal(typeof record.checkOutputTail, "string");
+
+  const result = run(
+    process.execPath,
+    [
+      SCRIPT,
+      "check",
+      "--base",
+      "HEAD",
+      "--name",
+      "fixture syntax",
+      "--covers",
+      "the fixture check prints",
+      "--boundary",
+      "the fixture candidate binds",
+      "--path",
+      ".codex/hooks/fixture.mjs",
+      "--path",
+      "AGENTS.md",
+      "--",
+      process.execPath,
+      "--eval",
+      "process.stderr.write('fixture-tail-ok')",
+    ],
+    { cwd: directory },
+  );
+  const printed = JSON.parse(result.stdout);
+  assert.match(printed.checkOutputTail, /fixture-tail-ok/);
 });

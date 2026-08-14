@@ -25,7 +25,7 @@ test-identity-integration:
 	./scripts/test-identity-integration.sh
 
 harness-test:
-	node --test .codex/hooks/final-state-evidence.test.mjs .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/land.test.mjs .pi/tests/codex-hooks.test.mjs
+	node --test .codex/hooks/final-state-evidence.test.mjs .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/land.test.mjs .pi/tests/pi-hooks.test.mjs
 
 land:
 	node scripts/land.mjs land

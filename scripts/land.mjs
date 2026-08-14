@@ -208,6 +208,7 @@ export function persistLandingReceipt({ candidate, evidence, run }) {
     ciRunId: run.databaseId,
     ciUrl: run.url,
     finalDiff: evidence.finalDiff,
+    acceptanceBoundary: evidence.acceptanceBoundary,
     findingLedger: evidence.findingLedger,
     findingLedgerDigest: evidence.findingLedgerDigest,
     landedAt: new Date().toISOString(),

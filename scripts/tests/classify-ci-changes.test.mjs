@@ -57,8 +57,8 @@ test("Pi agent definitions, extension code, and tests require inline harness val
   assert.deepEqual(
     selected([
       ".pi/agents/reviewer.md",
-      ".pi/extensions/codex-hooks.ts",
-      ".pi/tests/codex-hooks.test.mjs",
+      ".pi/extensions/pi-hooks.ts",
+      ".pi/tests/pi-hooks.test.mjs",
     ]),
     { harness: true },
   );

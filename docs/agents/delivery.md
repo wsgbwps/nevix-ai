@@ -15,7 +15,9 @@ are not the normal delivery path.
    reaches `main`.
 3. Run the smallest relevant check after the last edit and bind it to
    `origin/main` through [Final-state evidence](../specs/final-state-evidence.md).
-   Complete the independent review against the same base and diff.
+   Complete the independent review against the same base and diff. Candidates
+   recorded with `--risk low` (one-line dependency or documentation changes)
+   close on check `PASS` alone and skip the review ceremony.
 4. Commit the complete accepted candidate. The worktree must then be clean.
 5. With explicit authorization for both remote writes, run `make land`. The
    command pushes `ready/<sha>`, waits for the path-aware `CI gate`, rechecks

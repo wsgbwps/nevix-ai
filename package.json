@@ -16,7 +16,7 @@
     "supabase": "2.110.0",
     "turbo": "^2.5.0"
   },
-  "packageManager": "pnpm@11.0.9",
+  "packageManager": "pnpm@11.21.0",
   "lint-staged": {
     "apps/desktop/**/*.{ts,tsx,js,jsx,json,css,yaml}": [
       "prettier --write --config apps/desktop/.prettierrc.yaml --ignore-path apps/desktop/.prettierignore"

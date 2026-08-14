@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import registerCodexHooks, {
+import registerPiHooks, {
   blockedBashReason,
   isProtectedEditPath,
-} from "../extensions/codex-hooks.ts";
+} from "../extensions/pi-hooks.ts";
 
 test("protects lock files and environment files", () => {
   for (const path of [
@@ -64,11 +64,11 @@ test("registers Pi tool hooks and formats only successful unprotected edits", as
     },
     sendMessage() {},
   };
-  registerCodexHooks(pi);
+  registerPiHooks(pi);
 
   assert.deepEqual(
     [...handlers.keys()],
-    ["tool_call", "tool_result", "session_start", "agent_settled"],
+    ["tool_call", "tool_result"],
   );
 
   const ctx = { cwd: process.cwd(), hasUI: false, ui: { notify() {} } };

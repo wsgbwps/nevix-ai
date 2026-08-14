@@ -73,6 +73,8 @@ function createAcceptedCandidate(directory) {
       "fixture syntax",
       "--covers",
       "the landing fixture parses",
+      "--boundary",
+      "the landing fixture candidate binds",
       "--",
       process.execPath,
       "--check",
@@ -260,6 +262,10 @@ test("persists a per-SHA landing receipt and retires the active pointer", (t) =>
   assert.equal(receipt.landedCommit, candidate.head);
   assert.equal(receipt.ciUrl, successRun(candidate).url);
   assert.equal(receipt.finalDiff, verified.evidence.finalDiff);
+  assert.equal(
+    receipt.acceptanceBoundary,
+    verified.evidence.acceptanceBoundary,
+  );
   assert.equal(
     existsSync(join(directory, ".git/codex-final-state-evidence/active.json")),
     false,
