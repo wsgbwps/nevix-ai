@@ -1,3 +1,3 @@
 export { profileResourceOwner, profileResources } from './i18n/resources'
 export { hasCompletedProfile, saveProfile, type AuthenticatedProfileSession } from './api/profile'
-export { ProfileSettings } from './ui/profile-settings'
+export { ProfileSettings, type ProfileSettingsContribution } from './ui/profile-settings'

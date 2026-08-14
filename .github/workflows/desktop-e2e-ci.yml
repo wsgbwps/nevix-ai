@@ -12,6 +12,9 @@ on:
       - "server/go.sum"
       - "contracts/**"
       - "supabase/**"
+      - "scripts/auth-policy-harness.mjs"
+      - "scripts/test-auth-policy.sh"
+      - "scripts/tests/auth-policy-harness.test.mjs"
       - "scripts/lib/supabase-local-harness.sh"
       - "scripts/tests/supabase-local-harness.test.sh"
       - ".github/workflows/desktop-e2e-ci.yml"
@@ -44,6 +47,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  auth-policy:
+    name: Supabase Auth Policy Harness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:auth-policy
+      - name: Tear down Auth policy stack
+        if: always()
+        run: |
+          docker rm --force \
+            supabase_auth_nevix-auth-policy \
+            nevix_auth_policy_hibp_fixture \
+            2>/dev/null || true
+          pnpm exec supabase stop --project-id nevix-auth-policy --no-backup || true
+
   e2e-smoke:
     name: E2E Smoke Suite
     if: inputs.suite == 'smoke'

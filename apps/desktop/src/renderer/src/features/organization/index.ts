@@ -12,7 +12,8 @@ export { MembersSettings } from './ui/members-settings'
 export { SessionAccessLostDialog } from './ui/session-access-lost-dialog'
 export {
   ActiveOrganizationSettingsContext,
-  OrganizationSettingsNavigation
+  OrganizationSettingsNavigation,
+  type OrganizationSettingsSection
 } from './ui/settings-contributions'
 export { StartupRestoringView } from './ui/startup-restoring-view'
 export { StartupFailureView } from './ui/startup-failure-view'

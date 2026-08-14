@@ -17,12 +17,15 @@ const invokeChannels = {
   'language:set-language-mode': true,
   'organization:get-remembered-active-organization': true,
   'organization:set-remembered-active-organization': true,
-  'organization:export-audit-log': true
+  'organization:export-audit-log': true,
+  'window:decide-ordinary-close': true,
+  'window:ordinary-close-ready': true
 } satisfies Record<keyof IpcChannelMap, true>
 
 const eventChannels = {
   'language:language-mode-changed': true,
-  'window:deactivated': true
+  'window:deactivated': true,
+  'window:ordinary-close-requested': true
 } satisfies Record<keyof IpcEventMap, true>
 
 export const INVOKE_CHANNEL_ALLOWLIST: ReadonlySet<string> = new Set(Object.keys(invokeChannels))

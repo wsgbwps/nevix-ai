@@ -218,7 +218,7 @@ test(
         await signIn(launched.page, identity)
         await openSettingsFromUserMenu(launched.page)
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
-        await settingsNavigation.getByText('Audit log', { exact: true }).click()
+        await settingsNavigation.getByRole('button', { name: 'Audit log' }).click()
 
         expect(await launched.page.evaluate(() => window.location.hash)).toBe('')
         const sessionRead = await launched.page.evaluate(() =>
@@ -226,7 +226,7 @@ test(
         )
         expect(['empty', 'session']).toContain(sessionRead.outcome)
 
-        await launched.page.getByRole('link', { name: 'Back' }).click()
+        await launched.page.getByRole('button', { name: 'Back' }).click()
         await signOutFromUserMenu(launched.page)
         await expect(
           launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
@@ -382,7 +382,9 @@ test(
 
         await openSettingsFromUserMenu(launched.page)
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
-        await expect(settingsNavigation.getByRole('button', { name: 'Audit log' })).toBeVisible()
+        const auditLogSection = settingsNavigation.getByRole('button', { name: 'Audit log' })
+        await expect(auditLogSection).toBeVisible()
+        await auditLogSection.click()
         await expect(
           launched.page.getByText('Unable to verify your Audit Log access right now.')
         ).toBeVisible()
@@ -439,13 +441,15 @@ test(
 
         await openSettingsFromUserMenu(launched.page)
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
-        await expect(settingsNavigation.getByText('Audit log', { exact: true })).toBeVisible()
+        const auditLogSection = settingsNavigation.getByRole('button', { name: 'Audit log' })
+        await expect(auditLogSection).toBeVisible()
+        await auditLogSection.click()
         await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toBeVisible()
         await expect(launched.page.getByRole('combobox', { name: 'All events' })).toBeVisible()
         await expect(launched.page.getByRole('button', { name: 'Export' })).toBeVisible()
         await expect(launched.page.getByRole('listitem')).toHaveCount(0)
 
-        await launched.page.getByRole('link', { name: 'Back' }).click()
+        await launched.page.getByRole('button', { name: 'Back' }).click()
         await expect(
           launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
         ).toBeVisible()

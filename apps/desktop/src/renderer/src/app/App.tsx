@@ -9,6 +9,9 @@ import {
 } from '../features/organization'
 import { hasCompletedProfile } from '../features/profile'
 import { AuthenticationStateContext, useAuthenticationState } from './authentication-state'
+import { OrdinaryCloseProvider } from './ordinary-close'
+import { coordinateSettingsBack } from './pages/settings-back-navigation'
+import { SettingsBackNavigationContext } from './pages/settings-coordinator'
 import { routeTree } from './routeTree.gen'
 
 function App(): React.JSX.Element {
@@ -17,35 +20,43 @@ function App(): React.JSX.Element {
   // so URL synchronization has no value (apps/desktop/docs/adr/0004-renderer-routing-topology.md).
   // The app always boots unauthenticated (status starts as restoring), so the initial entry is
   // the authentication view.
+  const settingsNavigation = useMemo(() => {
+    const history = createMemoryHistory({ initialEntries: ['/auth'] })
+    return { history, back: coordinateSettingsBack(history) }
+  }, [])
   const router = useMemo(
-    () => createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ['/auth'] }) }),
-    []
+    () => createRouter({ routeTree, history: settingsNavigation.history }),
+    [settingsNavigation.history]
   )
 
   return (
-    <AuthenticationStateContext.Provider value={authentication}>
-      <OrganizationOnboardingProvider>
-        <ActiveOrganizationProvider
-          // Remounting on the authentication transition resets the Organization state, so the
-          // next Session never renders data the previous Session was entitled to.
-          key={authentication.status === 'authenticated' ? 'authenticated' : 'signed-out'}
-          isAuthenticated={authentication.status === 'authenticated'}
-          getSession={authentication.getSession}
-          hasCompletedProfile={hasCompletedProfile}
-        >
-          <ResetOnboardingAfterAuthenticationEnds />
-          <SessionAccessLostDialog />
-          <RememberedEmailPersistenceNotice
-            surface="authenticated"
-            isSurfaceActive={authentication.status === 'authenticated'}
-            isPersistenceUnavailable={authentication.isRememberedEmailPersistenceUnavailable}
-            noticeSurface={authentication.rememberedEmailPersistenceNoticeSurface}
-            onShown={authentication.consumeRememberedEmailPersistenceNotice}
-          />
-          <RouterProvider router={router} />
-        </ActiveOrganizationProvider>
-      </OrganizationOnboardingProvider>
-    </AuthenticationStateContext.Provider>
+    <OrdinaryCloseProvider>
+      <AuthenticationStateContext.Provider value={authentication}>
+        <OrganizationOnboardingProvider>
+          <ActiveOrganizationProvider
+            // Remounting on the authentication transition resets the Organization state, so the
+            // next Session never renders data the previous Session was entitled to.
+            key={authentication.status === 'authenticated' ? 'authenticated' : 'signed-out'}
+            isAuthenticated={authentication.status === 'authenticated'}
+            getSession={authentication.getSession}
+            hasCompletedProfile={hasCompletedProfile}
+          >
+            <ResetOnboardingAfterAuthenticationEnds />
+            <SessionAccessLostDialog />
+            <RememberedEmailPersistenceNotice
+              surface="authenticated"
+              isSurfaceActive={authentication.status === 'authenticated'}
+              isPersistenceUnavailable={authentication.isRememberedEmailPersistenceUnavailable}
+              noticeSurface={authentication.rememberedEmailPersistenceNoticeSurface}
+              onShown={authentication.consumeRememberedEmailPersistenceNotice}
+            />
+            <SettingsBackNavigationContext.Provider value={settingsNavigation.back}>
+              <RouterProvider router={router} />
+            </SettingsBackNavigationContext.Provider>
+          </ActiveOrganizationProvider>
+        </OrganizationOnboardingProvider>
+      </AuthenticationStateContext.Provider>
+    </OrdinaryCloseProvider>
   )
 }
 

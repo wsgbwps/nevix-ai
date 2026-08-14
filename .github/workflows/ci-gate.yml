@@ -50,13 +50,13 @@ jobs:
             esac
 
             case "$changed_path" in
-              supabase/*|server/internal/identity/*|server/go.mod|server/go.sum|contracts/*|scripts/test-identity-integration.sh|scripts/test-mail-smoke.sh|scripts/lib/supabase-local-harness.sh|scripts/tests/supabase-local-harness.test.sh|.github/workflows/mail-smoke-ci.yml|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|go.work|go.work.sum)
+              supabase/*|server/internal/identity/*|server/go.mod|server/go.sum|contracts/*|scripts/auth-policy-harness.mjs|scripts/test-auth-policy.sh|scripts/test-identity-integration.sh|scripts/test-mail-smoke.sh|scripts/lib/supabase-local-harness.sh|scripts/tests/supabase-local-harness.test.sh|.github/workflows/mail-smoke-ci.yml|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|go.work|go.work.sum)
                 mail=true
                 ;;
             esac
 
             case "$changed_path" in
-              apps/desktop/*|server/internal/identity/*|server/cmd/server/*|server/go.mod|server/go.sum|contracts/*|supabase/*|scripts/lib/supabase-local-harness.sh|scripts/tests/supabase-local-harness.test.sh|.github/workflows/desktop-e2e-ci.yml|pnpm-lock.yaml|pnpm-workspace.yaml|package.json|go.work|go.work.sum)
+              apps/desktop/*|server/internal/identity/*|server/cmd/server/*|server/go.mod|server/go.sum|contracts/*|supabase/*|scripts/auth-policy-harness.mjs|scripts/test-auth-policy.sh|scripts/lib/supabase-local-harness.sh|scripts/tests/auth-policy-harness.test.mjs|scripts/tests/supabase-local-harness.test.sh|.github/workflows/desktop-e2e-ci.yml|pnpm-lock.yaml|pnpm-workspace.yaml|package.json|go.work|go.work.sum)
                 e2e=true
                 ;;
             esac

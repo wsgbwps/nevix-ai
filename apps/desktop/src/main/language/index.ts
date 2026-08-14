@@ -1,1 +1,6 @@
-export { initializeMainI18n, getMainWindowTitle } from './interface-language'
+export {
+  initializeMainI18n,
+  getMainWindowTitle,
+  getNativeEditMenuLabels,
+  type NativeEditMenuLabels
+} from './interface-language'

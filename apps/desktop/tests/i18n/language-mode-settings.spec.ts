@@ -147,6 +147,12 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
 
       await openSettingsFromUserMenu(launched.page)
       await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
+      await launched.page
+        .getByRole('navigation', { name: '设置' })
+        .getByRole('button', {
+          name: '语言'
+        })
+        .click()
 
       const languageModeSelect = launched.page.getByRole('combobox', { name: '界面语言' })
       await expect(languageModeSelect).toBeVisible()
@@ -170,13 +176,19 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       ).toContainText('English')
       await expectWindowTitle(launched.electronApp, 'Nevix AI — Desktop')
 
-      await launched.page.getByRole('link', { name: 'Back to app' }).click()
+      await launched.page.getByRole('button', { name: 'Back to app' }).click()
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
 
       await openSettingsFromUserMenu(launched.page)
       await expect(launched.page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+      await launched.page
+        .getByRole('navigation', { name: 'Settings' })
+        .getByRole('button', {
+          name: 'Language'
+        })
+        .click()
       await launched.page.getByRole('combobox', { name: 'Interface language' }).click()
       await launched.page.getByRole('option', { name: 'Simplified Chinese' }).click()
       await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
@@ -185,7 +197,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       )
       await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')
 
-      await launched.page.getByRole('link', { name: '返回应用' }).click()
+      await launched.page.getByRole('button', { name: '返回应用' }).click()
       await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
       expect(navigationCount).toBe(0)
 

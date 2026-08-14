@@ -4,12 +4,14 @@ import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../../resources/icon.png?asset'
 import { getMainWindowTitle } from '../language'
+import { ordinaryCloseRendererUnavailable, protectOrdinaryClose } from './ordinary-close-runtime'
 import {
   loadWindowState,
   trackWindowState,
   MIN_WINDOW_HEIGHT,
   MIN_WINDOW_WIDTH
 } from './window-state'
+import { enableNativeEditing } from './native-editing'
 
 /** The only document this application loads, and therefore the only trusted IPC sender URL. */
 export function rendererEntryUrl(): string {
@@ -19,7 +21,9 @@ export function rendererEntryUrl(): string {
   return pathToFileURL(join(__dirname, '../renderer/index.html')).href
 }
 
-export function createWindow(): void {
+export function createWindow(
+  markOrdinaryCloseRendererUnavailable: (window: BrowserWindow) => void
+): void {
   const state = loadWindowState()
   const mainWindow = new BrowserWindow({
     ...(state.x !== undefined && state.y !== undefined ? { x: state.x, y: state.y } : {}),
@@ -40,7 +44,16 @@ export function createWindow(): void {
     }
   })
 
+  protectOrdinaryClose(mainWindow)
+  enableNativeEditing(mainWindow)
   trackWindowState(mainWindow)
+
+  const handleOrdinaryCloseRendererUnavailable = (): void => {
+    markOrdinaryCloseRendererUnavailable(mainWindow)
+    ordinaryCloseRendererUnavailable(mainWindow)
+  }
+  mainWindow.webContents.on('did-start-loading', handleOrdinaryCloseRendererUnavailable)
+  mainWindow.webContents.on('render-process-gone', handleOrdinaryCloseRendererUnavailable)
 
   mainWindow.webContents.session.setPermissionCheckHandler(() => false)
   mainWindow.webContents.session.setPermissionRequestHandler((_, __, callback) => {

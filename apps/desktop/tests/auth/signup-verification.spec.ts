@@ -50,15 +50,25 @@ test(
 
         const password = '  密码Secret42  '
         await launched.page.getByLabel('Email').fill(identity.email)
+        await expect(
+          launched.page.getByText('We recommend using 12 or more characters.')
+        ).toBeVisible()
         await launched.page.getByLabel('Password', { exact: true }).fill('12345678901')
-        await expect(launched.page.getByText('11 of 12–72 UTF-8 bytes')).toBeVisible()
+        await expect(
+          launched.page.getByRole('alert').filter({ hasText: 'Password is too short' })
+        ).toBeVisible()
         await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
         await launched.page.getByLabel('Password', { exact: true }).fill('x'.repeat(73))
-        await expect(launched.page.getByText('73 of 12–72 UTF-8 bytes')).toBeVisible()
+        await expect(
+          launched.page.getByRole('alert').filter({ hasText: 'Password is too long' })
+        ).toBeVisible()
         await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
 
         await launched.page.getByLabel('Password', { exact: true }).fill(password)
-        await expect(launched.page.getByText('18 of 12–72 UTF-8 bytes')).toBeVisible()
+        await expect(launched.page.getByText(/UTF-8 bytes/)).toHaveCount(0)
+        await expect(
+          launched.page.getByRole('alert').filter({ hasText: /Password is too/ })
+        ).toHaveCount(0)
         await launched.page.getByLabel('Confirm password').fill('a mismatched confirmation')
         await expect(launched.page.getByText('Passwords do not match')).toBeVisible()
         await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
@@ -235,6 +245,58 @@ test('signup network and rate-limit failures stay localized and existence-neutra
       await launched.page.getByLabel('Email').fill(identity.email)
       await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
       await launched.page.getByLabel('Confirm password').fill(identity.password)
+
+      await launched.page.route('**/auth/v1/signup', (route) =>
+        route.fulfill({
+          status: 422,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 'weak_password',
+            message: 'provider detail must not reach the user',
+            weak_password: { reasons: ['pwned'] }
+          })
+        })
+      )
+      await launched.page.getByRole('button', { name: 'Create account' }).click()
+      await expect(
+        launched.page.getByRole('alert').filter({
+          hasText: 'This password has appeared in a data breach. Choose a different password.'
+        })
+      ).toBeVisible()
+      await expect(launched.page.getByText('provider detail must not reach the user')).toHaveCount(
+        0
+      )
+      await launched.page.unroute('**/auth/v1/signup')
+
+      const providerWarnings: string[] = []
+      launched.page.on('console', (message) => {
+        if (message.type() === 'warning') providerWarnings.push(message.text())
+      })
+      await launched.page.route('**/auth/v1/signup', (route) =>
+        route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 'future_auth_failure',
+            message: 'provider detail must not reach the user'
+          })
+        })
+      )
+      await launched.page.getByRole('button', { name: 'Create account' }).click()
+      await expect(
+        launched.page.getByRole('alert').filter({
+          hasText: 'Sign-up is temporarily unavailable. Try again later.'
+        })
+      ).toBeVisible()
+      await expect
+        .poll(() => providerWarnings)
+        .toContain(
+          '[authentication] Unmapped password provider error operation=signup code=future_auth_failure status=503'
+        )
+      await expect(launched.page.getByText('provider detail must not reach the user')).toHaveCount(
+        0
+      )
+      await launched.page.unroute('**/auth/v1/signup')
 
       await launched.page.route('**/auth/v1/signup', (route) => route.abort('failed'))
       await launched.page.getByRole('button', { name: 'Create account' }).click()

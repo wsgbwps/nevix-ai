@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AuthApiError, type AuthError, type SupabaseClient } from '@supabase/supabase-js'
+import {
+  AuthApiError,
+  isAuthWeakPasswordError,
+  type AuthError,
+  type SupabaseClient
+} from '@supabase/supabase-js'
 import { createAuthenticationClient, createRecoveryClient } from '../api/client'
 import { readSupabasePublicConfig } from '../api/environment'
 import {
@@ -34,6 +39,8 @@ export type AuthenticationFlow =
 export type AuthenticationError =
   | 'invalid-credentials'
   | 'invalid-verification-code'
+  | 'password-too-short'
+  | 'password-leaked'
   | 'same-password'
   | 'rate-limited'
   | 'service-unavailable'
@@ -510,7 +517,7 @@ export function useAuthentication(): Authentication {
           SAFE_SIGNUP_CONFLICT_CODES.has(signUpError.code)
         )
       ) {
-        setError(isRateLimited(signUpError) ? 'rate-limited' : 'service-unavailable')
+        setError(mapPasswordProviderError('signup', signUpError))
         return
       }
 
@@ -693,11 +700,7 @@ export function useAuthentication(): Authentication {
         const { error: updateError } = await client.auth.updateUser({ password: newPassword })
 
         if (updateError) {
-          if (updateError instanceof AuthApiError && updateError.code === 'same_password') {
-            setError('same-password')
-          } else {
-            setError(isRateLimited(updateError) ? 'rate-limited' : 'service-unavailable')
-          }
+          setError(mapPasswordProviderError('recovery-update', updateError))
           return
         }
 
@@ -838,4 +841,21 @@ function isRateLimited(error: unknown): boolean {
     error instanceof AuthApiError &&
     (error.status === 429 || (error.code !== undefined && RATE_LIMIT_CODES.has(error.code)))
   )
+}
+
+function mapPasswordProviderError(
+  operation: 'signup' | 'recovery-update',
+  error: AuthError
+): AuthenticationError {
+  if (isRateLimited(error)) return 'rate-limited'
+  if (error instanceof AuthApiError && error.code === 'same_password') return 'same-password'
+  if (isAuthWeakPasswordError(error)) {
+    if (error.reasons.includes('pwned')) return 'password-leaked'
+    if (error.reasons.includes('length')) return 'password-too-short'
+  }
+
+  console.warn(
+    `[authentication] Unmapped password provider error operation=${operation} code=${error.code ?? 'unknown'} status=${error.status ?? 'unknown'}`
+  )
+  return 'service-unavailable'
 }

@@ -18,7 +18,13 @@ export const appTranslations = defineResourceTranslations({
       back: '返回应用',
       account: '账户',
       profile: '个人资料',
-      language: '语言'
+      language: '语言',
+      discard: {
+        title: '丢弃未保存的更改？',
+        description: '离开当前设置将丢弃你的草稿。',
+        continueEditing: '继续编辑',
+        discardChanges: '丢弃更改'
+      }
     }
   },
   en: {
@@ -35,7 +41,13 @@ export const appTranslations = defineResourceTranslations({
       back: 'Back to app',
       account: 'Account',
       profile: 'Profile',
-      language: 'Language'
+      language: 'Language',
+      discard: {
+        title: 'Discard unsaved changes?',
+        description: 'Leaving these settings will discard your draft.',
+        continueEditing: 'Continue editing',
+        discardChanges: 'Discard changes'
+      }
     }
   }
 })
