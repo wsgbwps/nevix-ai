@@ -1,28 +1,18 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const ROOT_CODE_FILES = new Set([
-  "go.work",
-  "go.work.sum",
-  "package.json",
-  "pnpm-lock.yaml",
-  "pnpm-workspace.yaml",
-  "turbo.json",
-]);
-const CODE_PREFIXES = [
-  ".codex/hooks/",
-  ".github/",
-  "apps/",
-  "contracts/",
-  "scripts/",
-  "server/",
-  "supabase/",
-];
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
 function git(cwd, args, encoding = "utf8") {
@@ -38,13 +28,6 @@ function zeroDelimited(value) {
   return value.toString("utf8").split("\0").filter(Boolean);
 }
 
-function isCodePath(path) {
-  return (
-    ROOT_CODE_FILES.has(path) ||
-    CODE_PREFIXES.some((prefix) => path.startsWith(prefix))
-  );
-}
-
 function isTaskPath(path) {
   return !path.startsWith(".codex/better-harness/");
 }
@@ -56,11 +39,58 @@ function repository(cwd = process.cwd()) {
   return { root, gitDir };
 }
 
-export function snapshot(cwd = process.cwd(), pathScope = null) {
+function resolveCommit(root, ref) {
+  return git(root, ["rev-parse", "--verify", `${ref}^{commit}`]).trim();
+}
+
+function defaultBase(root) {
+  let branch = "";
+  try {
+    branch = git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]).trim();
+  } catch {
+    return resolveCommit(root, "HEAD");
+  }
+  if (branch !== "main") {
+    try {
+      return git(root, ["merge-base", "HEAD", "origin/main"]).trim();
+    } catch {
+      // A local-only fixture or repository still binds its working diff to HEAD.
+    }
+  }
+  return resolveCommit(root, "HEAD");
+}
+
+function hashPathState(hash, root, path) {
+  const absolutePath = join(root, path);
+  if (!existsSync(absolutePath)) {
+    hash.update("deleted\0");
+    return;
+  }
+
+  const stat = lstatSync(absolutePath);
+  if (stat.isSymbolicLink()) {
+    hash.update("symlink\0");
+    hash.update(readlinkSync(absolutePath));
+    return;
+  }
+  if (!stat.isFile()) {
+    throw new Error(`unsupported changed path type: ${path}`);
+  }
+
+  hash.update(stat.mode & 0o111 ? "executable\0" : "file\0");
+  hash.update(readFileSync(absolutePath));
+}
+
+export function snapshot(
+  cwd = process.cwd(),
+  pathScope = null,
+  baseRef = "HEAD",
+) {
   const repo = repository(cwd);
+  const baseCommit = resolveCommit(repo.root, baseRef);
   const tracked = new Set(
     zeroDelimited(
-      git(repo.root, ["diff", "--name-only", "-z", "HEAD", "--"], null),
+      git(repo.root, ["diff", "--name-only", "-z", baseCommit, "--"], null),
     ),
   );
   const untracked = new Set(
@@ -86,33 +116,23 @@ export function snapshot(cwd = process.cwd(), pathScope = null) {
         path.split("/").includes("..") ||
         !isTaskPath(path),
     ) ||
-    !paths.some(isCodePath)
+    paths.length === 0
   ) {
-    return { ...repo, digest: null, paths: [] };
+    return { ...repo, baseCommit, digest: null, paths: [] };
   }
 
   const hash = createHash("sha256");
-  hash.update("nevix-final-state-evidence/v1\0");
+  hash.update("nevix-final-state-evidence/v2\0");
+  hash.update(baseCommit);
+  hash.update("\0");
   for (const path of paths) {
     hash.update(path);
     hash.update("\0");
-    if (untracked.has(path)) {
-      hash.update("untracked\0");
-      hash.update(readFileSync(join(repo.root, path)));
-    } else {
-      hash.update("tracked\0");
-      hash.update(
-        git(
-          repo.root,
-          ["diff", "--binary", "--no-ext-diff", "HEAD", "--", path],
-          null,
-        ),
-      );
-    }
+    hashPathState(hash, repo.root, path);
     hash.update("\0");
   }
 
-  return { ...repo, digest: hash.digest("hex"), paths };
+  return { ...repo, baseCommit, digest: hash.digest("hex"), paths };
 }
 
 function recordPath(state, finalDiff) {
@@ -144,7 +164,15 @@ function writeRecord(state, record) {
   writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
   writeFileSync(
     activePath(state),
-    `${JSON.stringify({ finalDiff: record.finalDiff, paths: record.paths }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        finalDiff: record.finalDiff,
+        baseCommit: record.baseCommit,
+        paths: record.paths,
+      },
+      null,
+      2,
+    )}\n`,
     { mode: 0o600 },
   );
   process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
@@ -156,18 +184,22 @@ function readActive(cwd = process.cwd()) {
 
   try {
     const pointer = JSON.parse(readFileSync(activePath(repo), "utf8"));
-    if (!Array.isArray(pointer.paths)) return null;
+    if (!Array.isArray(pointer.paths) || !pointer.baseCommit) return null;
     const path = recordPath(repo, pointer.finalDiff);
     if (!existsSync(path)) return null;
 
     const record = JSON.parse(readFileSync(path, "utf8"));
-    return { current: snapshot(repo.root, pointer.paths), record };
+    return {
+      current: snapshot(repo.root, pointer.paths, pointer.baseCommit),
+      record,
+    };
   } catch {
     return null;
   }
 }
 
 function parseCheckArguments(args) {
+  let base = "";
   let name = "";
   let covers = "";
   const paths = [];
@@ -177,9 +209,13 @@ function parseCheckArguments(args) {
     const flag = args[index];
     const value = args[index + 1];
     if (
-      (flag === "--name" || flag === "--covers" || flag === "--path") &&
+      (flag === "--base" ||
+        flag === "--name" ||
+        flag === "--covers" ||
+        flag === "--path") &&
       value
     ) {
+      if (flag === "--base") base = value.trim();
       if (flag === "--name") name = value.trim();
       if (flag === "--covers") covers = value.trim();
       if (flag === "--path") paths.push(value.trim());
@@ -189,9 +225,9 @@ function parseCheckArguments(args) {
     throw new Error(`unknown or incomplete option: ${flag}`);
   }
 
-  if (!name || !covers || args[index] !== "--" || !args[index + 1]) {
+  if (!base || !name || !covers || args[index] !== "--" || !args[index + 1]) {
     throw new Error(
-      "usage: final-state-evidence.mjs check --name <identity> --covers <behavior-or-risk> [--path <task-path> ...] -- <command> [args...]",
+      "usage: final-state-evidence.mjs check --base <fixed-point> --name <identity> --covers <behavior-or-risk> [--path <task-path> ...] -- <command> [args...]",
     );
   }
   if (name.length > 160 || covers.length > 400) {
@@ -199,6 +235,7 @@ function parseCheckArguments(args) {
   }
 
   return {
+    base,
     name,
     covers,
     paths,
@@ -212,22 +249,24 @@ function runCheck(args) {
   const before = snapshot(
     process.cwd(),
     parsed.paths.length > 0 ? parsed.paths : null,
+    parsed.base,
   );
   if (!before.digest) {
-    throw new Error("no code diff to bind");
+    throw new Error("no candidate diff to bind");
   }
 
   const result = spawnSync(parsed.command, parsed.commandArgs, {
     cwd: before.root,
     stdio: "inherit",
   });
-  const after = snapshot(before.root, before.paths);
+  const after = snapshot(before.root, before.paths, before.baseCommit);
   const exitCode = Number.isInteger(result.status) ? result.status : 1;
   const unchanged = before.digest === after.digest;
   const status =
     exitCode === 0 && unchanged ? "PASS" : unchanged ? "FAIL" : "STALE";
   const record = {
-    contract: "nevix-final-state-evidence/v1",
+    contract: "nevix-final-state-evidence/v2",
+    baseCommit: after.baseCommit,
     finalDiff: `sha256:${after.digest}`,
     paths: after.paths,
     relevantCheck: parsed.name,
@@ -243,7 +282,7 @@ function runCheck(args) {
 
   if (!unchanged) {
     process.stderr.write(
-      "code diff changed while the check ran; rerun after the final edit\n",
+      "candidate diff changed while the check ran; rerun after the final edit\n",
     );
     return 3;
   }
@@ -263,16 +302,35 @@ function readFindingLedger(path, root, record) {
 
   if (
     ledger?.schema !== "code-review-findings/v1" ||
+    typeof ledger.fixedPoint !== "string" ||
+    !Array.isArray(ledger.scopePaths) ||
     ledger.fullReviewCount !== 1 ||
     !Number.isInteger(ledger.targetedReviewRound) ||
     ledger.targetedReviewRound < 0 ||
+    ledger.targetedReviewRound > 2 ||
     !Array.isArray(ledger.findings) ||
+    !Array.isArray(ledger.repairRecords) ||
     ledger.outcome !== "closed"
   ) {
     throw new Error("finding ledger is malformed or not closed");
   }
   if (ledger.currentDiffDigest !== record.finalDiff) {
     throw new Error("finding ledger does not match the current diff digest");
+  }
+  let ledgerFixedPoint;
+  try {
+    ledgerFixedPoint = resolveCommit(root, ledger.fixedPoint);
+  } catch {
+    throw new Error("finding ledger fixed point is not a commit");
+  }
+  if (
+    ledgerFixedPoint !== record.baseCommit ||
+    JSON.stringify([...ledger.scopePaths].sort()) !==
+      JSON.stringify([...record.paths].sort())
+  ) {
+    throw new Error(
+      "finding ledger boundary does not match the accepted candidate",
+    );
   }
   if (
     ledger.relevantCheck?.name !== record.relevantCheck ||
@@ -306,9 +364,6 @@ function readFindingLedger(path, root, record) {
       );
     }
     ids.add(finding.id);
-    if (finding.level !== "blocker") continue;
-
-    blockers.push(finding);
     const risk = finding.riskAcceptance;
     const acceptedRisk =
       risk?.decision === "accepted" &&
@@ -316,8 +371,44 @@ function readFindingLedger(path, root, record) {
       Boolean(risk.acceptedBy.trim()) &&
       typeof risk.reason === "string" &&
       Boolean(risk.reason.trim());
+    const supportedFalsePositive =
+      finding.disposition === "false-positive" &&
+      typeof finding.dispositionReason === "string" &&
+      Boolean(finding.dispositionReason.trim());
+
+    if (finding.level === "advisory") {
+      if (
+        finding.status !== "closed" ||
+        !["deferred", "false-positive"].includes(finding.disposition) ||
+        (finding.disposition === "false-positive" && !supportedFalsePositive)
+      ) {
+        throw new Error(
+          `advisory finding is not explicitly closed: ${finding.id}`,
+        );
+      }
+      continue;
+    }
+
+    blockers.push(finding);
     if (finding.status === "closed") {
-      if (finding.disposition === "accepted") repairedBlockerCount += 1;
+      if (finding.disposition === "accepted") {
+        const repair = ledger.repairRecords.find(
+          (repairRecord) =>
+            Array.isArray(repairRecord?.fixFor) &&
+            repairRecord.fixFor.includes(finding.id) &&
+            repairRecord.afterDiffDigest === record.finalDiff,
+        );
+        if (!repair) {
+          throw new Error(
+            `closed repaired blocker lacks a current repair record: ${finding.id}`,
+          );
+        }
+        repairedBlockerCount += 1;
+      } else if (!supportedFalsePositive) {
+        throw new Error(
+          `closed blocker lacks an accepted repair or supported false-positive disposition: ${finding.id}`,
+        );
+      }
       continue;
     }
     if (acceptedRisk) {
@@ -337,6 +428,7 @@ function readFindingLedger(path, root, record) {
   }
 
   return {
+    content,
     findingLedger,
     findingLedgerDigest: contentDigest(content),
     reviewConclusion: [
@@ -346,6 +438,19 @@ function readFindingLedger(path, root, record) {
       `targeted re-review round ${ledger.targetedReviewRound}.`,
     ].join(" "),
   };
+}
+
+function persistFindingLedger(state, evidence) {
+  const digest = evidence.findingLedgerDigest.slice("sha256:".length);
+  const path = join(
+    state.gitDir,
+    "codex-final-state-evidence",
+    "ledgers",
+    `${digest}.json`,
+  );
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, evidence.content, { mode: 0o600 });
+  return { ...evidence, content: undefined, findingLedger: path };
 }
 
 function runReview(args) {
@@ -365,14 +470,18 @@ function runReview(args) {
   const { current, record } = active;
   if (
     !current.digest ||
-    record.contract !== "nevix-final-state-evidence/v1" ||
+    record.contract !== "nevix-final-state-evidence/v2" ||
+    record.baseCommit !== current.baseCommit ||
     record.finalDiff !== `sha256:${current.digest}` ||
     record.checkResult !== "PASS"
   ) {
     throw new Error("the relevant-check record is failed, stale, or malformed");
   }
 
-  const evidence = readFindingLedger(args[1], current.root, record);
+  const evidence = persistFindingLedger(
+    current,
+    readFindingLedger(args[1], current.root, record),
+  );
   const reviewedRecord = {
     ...record,
     ...evidence,
@@ -380,6 +489,66 @@ function runReview(args) {
     reviewedAt: new Date().toISOString(),
   };
   writeRecord(current, reviewedRecord);
+  return 0;
+}
+
+function validateReviewedRecord(current, record) {
+  if (
+    !current.digest ||
+    record.contract !== "nevix-final-state-evidence/v2" ||
+    record.baseCommit !== current.baseCommit ||
+    record.finalDiff !== `sha256:${current.digest}` ||
+    record.checkResult !== "PASS" ||
+    record.reviewedDiff !== record.finalDiff
+  ) {
+    throw new Error("the accepted evidence is failed, stale, or malformed");
+  }
+
+  const reviewEvidence = readFindingLedger(
+    record.findingLedger || "",
+    current.root,
+    record,
+  );
+  if (
+    record.findingLedger !== reviewEvidence.findingLedger ||
+    record.findingLedgerDigest !== reviewEvidence.findingLedgerDigest ||
+    record.reviewConclusion !== reviewEvidence.reviewConclusion
+  ) {
+    throw new Error("the accepted review ledger is stale or malformed");
+  }
+}
+
+export function verifyAcceptedCandidate(cwd = process.cwd(), baseRef) {
+  if (!baseRef) throw new Error("a landing base is required");
+  const active = readActive(cwd);
+  if (!active) throw new Error("no final-state evidence is active");
+
+  const requestedBase = resolveCommit(active.current.root, baseRef);
+  if (requestedBase !== active.record.baseCommit) {
+    throw new Error("the accepted base no longer matches the landing base");
+  }
+
+  const full = snapshot(active.current.root, null, requestedBase);
+  if (
+    JSON.stringify(full.paths) !== JSON.stringify(active.record.paths) ||
+    full.digest !== active.current.digest
+  ) {
+    throw new Error(
+      "final-state evidence does not cover the complete candidate diff",
+    );
+  }
+  validateReviewedRecord(full, active.record);
+  return { ...active.record, root: full.root, gitDir: full.gitDir };
+}
+
+function runVerify(args) {
+  if (args.length !== 2 || args[0] !== "--base" || !args[1].trim()) {
+    throw new Error(
+      "usage: final-state-evidence.mjs verify --base <fixed-point>",
+    );
+  }
+  const record = verifyAcceptedCandidate(process.cwd(), args[1]);
+  process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
   return 0;
 }
 
@@ -400,21 +569,25 @@ function block(input, reason) {
 }
 
 export function evaluateStop(input, cwd = process.cwd()) {
-  const changed = snapshot(cwd);
+  const repo = repository(cwd);
+  const active = readActive(cwd);
+  const changed = active
+    ? snapshot(repo.root, null, active.record.baseCommit)
+    : snapshot(repo.root, null, defaultBase(repo.root));
   if (!changed.digest) return {};
 
-  const active = readActive(cwd);
   if (!active) {
     return block(
       input,
-      'Run the relevant check after the final code edit with `node .codex/hooks/final-state-evidence.mjs check --name "<identity>" --covers "<behavior or risk>" -- <command> [args...]`, then review the final diff.',
+      'Run the relevant check after the final code edit with `node .codex/hooks/final-state-evidence.mjs check --base origin/main --name "<identity>" --covers "<behavior or risk>" -- <command> [args...]`, then review the final diff.',
     );
   }
 
   const { current, record } = active;
   if (
     !current.digest ||
-    record.contract !== "nevix-final-state-evidence/v1" ||
+    record.contract !== "nevix-final-state-evidence/v2" ||
+    record.baseCommit !== current.baseCommit ||
     record.finalDiff !== `sha256:${current.digest}` ||
     record.checkResult !== "PASS"
   ) {
@@ -449,6 +622,7 @@ export function evaluateStop(input, cwd = process.cwd()) {
 
   const message = String(input.last_assistant_message || "");
   const acceptance = field(message, "Acceptance boundary");
+  const baseCommit = field(message, "Base commit");
   const finalDiff = field(message, "Final diff");
   const relevantCheck = field(message, "Relevant check");
   const checkResult = field(message, "Check result");
@@ -461,6 +635,7 @@ export function evaluateStop(input, cwd = process.cwd()) {
   const valid =
     /^Final-state evidence\s*$/im.test(message) &&
     Boolean(acceptance) &&
+    baseCommit === record.baseCommit &&
     finalDiff === record.finalDiff &&
     relevantCheck === record.relevantCheck &&
     checkResult === "PASS" &&
@@ -478,6 +653,7 @@ export function evaluateStop(input, cwd = process.cwd()) {
       "Finish with this exact evidence shape (replace the acceptance boundary):",
       "Final-state evidence",
       "- Acceptance boundary: <behavior or risk>",
+      `- Base commit: ${record.baseCommit}`,
       `- Final diff: ${record.finalDiff}`,
       `- Relevant check: ${record.relevantCheck}`,
       "- Check result: PASS",
@@ -505,11 +681,18 @@ async function main() {
     process.exitCode = runReview(process.argv.slice(3));
     return;
   }
+  if (process.argv[2] === "verify") {
+    process.exitCode = runVerify(process.argv.slice(3));
+    return;
+  }
   const input = await readStdin();
   process.stdout.write(`${JSON.stringify(evaluateStop(input))}\n`);
 }
 
-if (pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (
+  process.argv[1] &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
   main().catch((error) => {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

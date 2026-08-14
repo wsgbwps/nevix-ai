@@ -268,9 +268,10 @@ Mailpit Web UI 位于 `http://127.0.0.1:54324`。Server 只在进程启动时读
 - **Product Name**：`Nevix AI`
 - App ID 一旦发布后变更，已安装用户会丢失数据和配置，必须在首次发布前确定
 
-## 分支与 PR 规范
+## 分支与交付规范
 
-- `main` 分支受保护，所有改动通过 PR 合并
-- 短命功能分支，命名：`feat/xxx`、`fix/xxx`
-- PR 合并前必须通过 CI（lint + build + test）
-- 合并方式：squash merge
+- 所有改动在短命任务分支完成；保持线性、可独立回滚的历史
+- 本地检查与 review 绑定同一 candidate diff 后，使用 `make land`
+- `make land` 将 exact SHA 推到 `ready/<sha>`，等待路径感知的 `CI gate`，再以普通 fast-forward push 更新 `main`
+- Pull request 仅用于确实需要另一位人类讨论或批准的任务，不是日常 CI 容器
+- 完整流程和失败边界见 [`docs/agents/delivery.md`](docs/agents/delivery.md)

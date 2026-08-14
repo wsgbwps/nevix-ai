@@ -1,14 +1,6 @@
 name: Server CI
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "server/**"
-      - ".github/workflows/server-ci.yml"
-      - "go.work"
-      - "go.work.sum"
   workflow_call:
 
 concurrency:

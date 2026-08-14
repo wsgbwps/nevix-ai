@@ -1,5 +1,5 @@
 name = "reviewer"
-description = "Read-only code review specialist for patch-introduced correctness, integration, security, and maintainability defects that the author would want fixed before merge."
+description = "Read-only code review specialist for patch-introduced correctness, integration, security, and maintainability defects that the author would want fixed before landing."
 model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"

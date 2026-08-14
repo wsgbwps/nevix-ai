@@ -2,6 +2,7 @@
 
 > 研究日期：2026-08-12
 > 问题：AI 完成 feature 后，如何让独立会话的 code review、修复与复审有边界地收敛，而不是把每轮意见都当作必须重做？
+> 注：本文记录研究时的 PR 门禁现状；当前交付事件映射已由 [ADR-0010](../adr/0010-verified-sha-landing.md) 修订，评审收敛原则仍适用。
 
 ## 结论与适用范围
 
@@ -12,7 +13,7 @@
 [Google Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html)
 [GitHub Copilot 最佳实践](https://docs.github.com/en/copilot/get-started/best-practices)
 
-本仓库已要求 `main` 经 PR 合并且合并前通过 CI（`README.md:256–261`）。`CI gate` 在 PR
+研究时本仓库要求 `main` 经 PR 合并且合并前通过 CI。`CI gate` 在 PR
 上按路径挑选 Desktop、Server、Mail 与 E2E Smoke，并在汇总 job 中拒绝所需 job 的非成功结果
 （`.github/workflows/ci-gate.yml:3–6, 39–75, 103–144`）。但 ADR 明说**当前未在 GitHub
 启用 required status check**（`docs/adr/0007-e2e-test-tiering.md:1–10`）；因此“远端权威门禁”是

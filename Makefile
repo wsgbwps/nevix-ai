@@ -1,4 +1,4 @@
-.PHONY: dev build lint server server-mailpit supabase test-identity-integration setup
+.PHONY: dev build lint server server-mailpit supabase test-identity-integration harness-test land setup
 
 dev:
 	pnpm dev
@@ -23,6 +23,12 @@ supabase:
 
 test-identity-integration:
 	./scripts/test-identity-integration.sh
+
+harness-test:
+	node --test .codex/hooks/final-state-evidence.test.mjs .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/land.test.mjs
+
+land:
+	node scripts/land.mjs land
 
 setup:
 	pnpm install

@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+
+repo_root=$(git rev-parse --show-toplevel) || exit 1
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    node "$repo_root/scripts/land.mjs" verify-push "$local_sha" "$remote_sha" || exit 1
+  fi
+done

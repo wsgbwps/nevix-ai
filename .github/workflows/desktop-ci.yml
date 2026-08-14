@@ -2,16 +2,8 @@ name: Desktop CI
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
-    paths:
-      - "apps/desktop/**"
-      - ".github/workflows/desktop-ci.yml"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "package.json"
   workflow_call:
 
 concurrency:

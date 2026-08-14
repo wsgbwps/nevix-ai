@@ -20,13 +20,13 @@ Read the file at the referenced path. The user will normally pass the path or th
 
 ## Branch wrap-up checklist
 
-When implementation on a branch is complete, close it out in this order. Merging, pushing, and deleting remote branches are external write operations — each one still requires explicit user authorization every time; this checklist only fixes the steps and where the acceptance record lives.
+When implementation on a branch is complete, close it out in this order. Remote verification and landing are external write operations and require explicit user authorization; this checklist only fixes the steps and where the acceptance record lives.
 
-1. **Bind the final local state** — for code changes, record the acceptance boundary, final diff, relevant check and review conclusion through [Final-state evidence](../specs/final-state-evidence.md). The check must run after the last code edit.
-2. **Confirm CI is green** — the Desktop CI workflow (`.github/workflows/desktop-ci.yml`) must pass on the PR before merging.
-3. **Merge per the repo's delivery rules** — high-risk changes land through a branch and PR gated by CI and diff review; all other work may go directly to `main` (see the delivery workflow in the root `AGENTS.md`).
-4. **Delete the merged branch** — remove the local branch (`git branch -d <branch>`) and, with authorization, the remote branch.
-5. **Resolve the ticket** — in the `.scratch/<feature-slug>/issues/<NN>-<slug>.md` file, set `Status: resolved` and append the acceptance conclusion (what was verified and how, e.g. final-state evidence, CI run, tests, review outcome) under the `## Comments` heading.
+1. **Resolve the candidate ticket** — set `Status: resolved` and append the local acceptance conclusion before freezing the candidate. The state becomes authoritative only when its commit reaches `main`.
+2. **Bind the final local state** — record the acceptance boundary, base, final diff, relevant check, and review conclusion through [Final-state evidence](../specs/final-state-evidence.md). The check must run after the last edit.
+3. **Commit the accepted candidate** — keep the task history linear and the working tree clean. Do not add a post-landing ticket commit.
+4. **Land the exact SHA** — follow [Verified SHA landing](delivery.md). `make land` confirms the remote candidate gate and fast-forwards `main` without creating a merge commit.
+5. **Delete the task branch when convenient** — the landing command removes its temporary `ready/<sha>` branch; local task-branch cleanup remains a separate recoverable operation.
 
 ## Wayfinding operations
 

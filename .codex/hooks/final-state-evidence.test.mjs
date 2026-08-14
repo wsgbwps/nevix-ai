@@ -49,6 +49,8 @@ function check(directory) {
     [
       SCRIPT,
       "check",
+      "--base",
+      "HEAD",
       "--name",
       "fixture syntax",
       "--covers",
@@ -71,7 +73,7 @@ function writeFindingLedger(directory, record, overrides = {}) {
   const currentDiffDigest = overrides.currentDiffDigest || record.finalDiff;
   const ledger = {
     schema: "code-review-findings/v1",
-    fixedPoint: "fixture-base",
+    fixedPoint: record.baseCommit,
     scopePaths: record.paths,
     currentDiffDigest,
     fullReviewCount: 1,
@@ -96,11 +98,18 @@ function writeFindingLedger(directory, record, overrides = {}) {
 }
 
 function review(directory, ledger, expectFailure = false) {
-  const result = run(
-    process.execPath,
-    [SCRIPT, "review", "--ledger", ledger],
-    { cwd: directory, expectFailure },
-  );
+  const result = run(process.execPath, [SCRIPT, "review", "--ledger", ledger], {
+    cwd: directory,
+    expectFailure,
+  });
+  return expectFailure ? result : JSON.parse(result.stdout);
+}
+
+function verify(directory, base, expectFailure = false) {
+  const result = run(process.execPath, [SCRIPT, "verify", "--base", base], {
+    cwd: directory,
+    expectFailure,
+  });
   return expectFailure ? result : JSON.parse(result.stdout);
 }
 
@@ -108,6 +117,7 @@ function acceptedEvidence(record) {
   return [
     "Final-state evidence",
     "- Acceptance boundary: the fixture must parse",
+    `- Base commit: ${record.baseCommit}`,
     `- Final diff: ${record.finalDiff}`,
     `- Relevant check: ${record.relevantCheck}`,
     "- Check result: PASS",
@@ -130,10 +140,40 @@ function createCheckedRepository(t) {
   return { directory, fixture, record: check(directory) };
 }
 
-test("allows stop when there is no code diff", (t) => {
+test("allows stop when there is no candidate diff", (t) => {
   const directory = createRepository();
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   assert.deepEqual(stop(directory), {});
+});
+
+test("binds a documentation-only candidate", (t) => {
+  const directory = createRepository();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "docs"));
+  writeFileSync(join(directory, "docs/delivery.md"), "# Delivery\n");
+
+  const result = run(
+    process.execPath,
+    [
+      SCRIPT,
+      "check",
+      "--base",
+      "HEAD",
+      "--name",
+      "documentation fixture",
+      "--covers",
+      "the documentation candidate is present",
+      "--",
+      process.execPath,
+      "--eval",
+      "process.exit(0)",
+    ],
+    { cwd: directory },
+  );
+  const record = JSON.parse(result.stdout);
+
+  assert.equal(record.checkResult, "PASS");
+  assert.deepEqual(record.paths, ["docs/delivery.md"]);
 });
 
 test("requires a post-change relevant check and reviewed handoff", (t) => {
@@ -209,8 +249,14 @@ test("requires a post-change relevant check and reviewed handoff", (t) => {
   const ledger = writeFindingLedger(directory, record);
   const reviewedRecord = review(directory, ledger);
   assert.match(reviewedRecord.reviewConclusion, /0 blockers/);
-  assert.equal(reviewedRecord.findingLedger, ledger);
+  assert.notEqual(reviewedRecord.findingLedger, ledger);
+  assert.match(
+    reviewedRecord.findingLedger,
+    /codex-final-state-evidence\/ledgers\/[a-f0-9]{64}\.json$/,
+  );
   assert.match(reviewedRecord.findingLedgerDigest, /^sha256:[a-f0-9]{64}$/);
+
+  rmSync(ledger);
 
   const mismatchedFinalDiff = stop(
     directory,
@@ -228,6 +274,12 @@ test("requires a post-change relevant check and reviewed handoff", (t) => {
     ].join("\n"),
   );
   assert.equal(mismatchedFinalDiff.decision, "block");
+
+  const mismatchedBase = stop(
+    directory,
+    acceptedEvidence({ ...reviewedRecord, baseCommit: "0".repeat(40) }),
+  );
+  assert.equal(mismatchedBase.decision, "block");
 
   const accepted = stop(directory, acceptedEvidence(reviewedRecord));
   assert.deepEqual(accepted, {});
@@ -283,6 +335,58 @@ test("rejects an unresolved blocker unless its risk is explicitly accepted", (t)
   assert.match(reviewedRecord.reviewConclusion, /1 risks explicitly accepted/);
 });
 
+test("rejects findings whose closed outcome is only declarative", (t) => {
+  const { directory, record } = createCheckedRepository(t);
+  const advisoryLedger = writeFindingLedger(directory, record, {
+    findings: [
+      {
+        id: "CR-STANDARDS-0001",
+        level: "advisory",
+        disposition: "pending",
+        status: "open",
+        reviewedDiffDigest: record.finalDiff,
+      },
+    ],
+  });
+  const advisoryResult = review(directory, advisoryLedger, true);
+  assert.notEqual(advisoryResult.status, 0);
+  assert.match(
+    advisoryResult.stderr,
+    /advisory finding.*not explicitly closed/i,
+  );
+
+  const blockerLedger = writeFindingLedger(directory, record, {
+    findings: [
+      {
+        id: "CR-SPEC-0001",
+        level: "blocker",
+        disposition: "pending",
+        status: "closed",
+        reviewedDiffDigest: record.finalDiff,
+      },
+    ],
+  });
+  const blockerResult = review(directory, blockerLedger, true);
+  assert.notEqual(blockerResult.status, 0);
+  assert.match(blockerResult.stderr, /closed blocker lacks/i);
+
+  const repairedWithoutRecord = writeFindingLedger(directory, record, {
+    targetedReviewRound: 1,
+    findings: [
+      {
+        id: "CR-SPEC-0002",
+        level: "blocker",
+        disposition: "accepted",
+        status: "closed",
+        reviewedDiffDigest: record.finalDiff,
+      },
+    ],
+  });
+  const repairResult = review(directory, repairedWithoutRecord, true);
+  assert.notEqual(repairResult.status, 0);
+  assert.match(repairResult.stderr, /lacks a current repair record/i);
+});
+
 test("rejects a finding ledger bound to a stale diff digest", (t) => {
   const { directory, record } = createCheckedRepository(t);
   const ledger = writeFindingLedger(directory, record, {
@@ -306,6 +410,72 @@ test("rejects a later edit that was checked but not re-reviewed", (t) => {
 
   assert.equal(result.decision, "block");
   assert.match(result.reason, /targeted re-review after the final code edit/i);
+});
+
+test("keeps accepted evidence valid across committing the same candidate", (t) => {
+  const { directory, record } = createCheckedRepository(t);
+  const ledger = writeFindingLedger(directory, record);
+  const reviewedRecord = review(directory, ledger);
+
+  run("git", ["add", ".codex/hooks/fixture.mjs", "AGENTS.md"], {
+    cwd: directory,
+  });
+  run("git", ["commit", "--quiet", "-m", "fixture candidate"], {
+    cwd: directory,
+  });
+
+  const verified = verify(directory, record.baseCommit);
+  assert.equal(verified.finalDiff, reviewedRecord.finalDiff);
+  assert.deepEqual(stop(directory, acceptedEvidence(reviewedRecord)), {});
+});
+
+test("rejects a changed landing base and incomplete accepted scope", (t) => {
+  const directory = createRepository();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, ".codex/hooks"), { recursive: true });
+  writeFileSync(
+    join(directory, ".codex/hooks/fixture.mjs"),
+    "export const value = 1\n",
+  );
+  writeFileSync(join(directory, "AGENTS.md"), "# Fixture guidance\n");
+
+  const scopedResult = run(
+    process.execPath,
+    [
+      SCRIPT,
+      "check",
+      "--base",
+      "HEAD",
+      "--name",
+      "fixture syntax",
+      "--covers",
+      "the scoped JavaScript file parses",
+      "--path",
+      ".codex/hooks/fixture.mjs",
+      "--",
+      process.execPath,
+      "--check",
+      ".codex/hooks/fixture.mjs",
+    ],
+    { cwd: directory },
+  );
+  const scopedRecord = JSON.parse(scopedResult.stdout);
+  const ledger = writeFindingLedger(directory, scopedRecord);
+  review(directory, ledger);
+
+  const incomplete = verify(directory, scopedRecord.baseCommit, true);
+  assert.notEqual(incomplete.status, 0);
+  assert.match(incomplete.stderr, /complete candidate diff/i);
+
+  run("git", ["add", ".codex/hooks/fixture.mjs", "AGENTS.md"], {
+    cwd: directory,
+  });
+  run("git", ["commit", "--quiet", "-m", "fixture candidate"], {
+    cwd: directory,
+  });
+  const changedBase = verify(directory, "HEAD", true);
+  assert.notEqual(changedBase.status, 0);
+  assert.match(changedBase.stderr, /base no longer matches/i);
 });
 
 test("avoids an infinite continuation loop", (t) => {

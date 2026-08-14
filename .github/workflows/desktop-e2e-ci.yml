@@ -1,28 +1,6 @@
 name: Desktop E2E CI
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "apps/desktop/**"
-      - "server/internal/identity/**"
-      - "server/cmd/server/**"
-      - "server/go.mod"
-      - "server/go.sum"
-      - "contracts/**"
-      - "supabase/**"
-      - "scripts/auth-policy-harness.mjs"
-      - "scripts/test-auth-policy.sh"
-      - "scripts/tests/auth-policy-harness.test.mjs"
-      - "scripts/lib/supabase-local-harness.sh"
-      - "scripts/tests/supabase-local-harness.test.sh"
-      - ".github/workflows/desktop-e2e-ci.yml"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "package.json"
-      - "go.work"
-      - "go.work.sum"
   workflow_dispatch:
     inputs:
       inject_identity_server_failure:

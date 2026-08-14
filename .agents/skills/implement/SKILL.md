@@ -9,7 +9,9 @@ Implement the work described by the user in the spec or tickets.
 Before editing, name the acceptance boundary, fixed point, primary Domain, and
 task-owned paths. Read and follow
 [`../code-review/references/finding-lifecycle.md`](../code-review/references/finding-lifecycle.md)
-for the shared review ledger and bounded repair loop.
+for the shared review ledger and bounded repair loop, and read
+[`../../../docs/agents/delivery.md`](../../../docs/agents/delivery.md) for the
+verified-SHA landing route.
 
 Use `/tdd` where possible at pre-agreed seams. Run typechecking and focused tests
 regularly, then the relevant full suite once before initial review. Freeze every
@@ -50,6 +52,8 @@ and check result are reviewed together under the repository's final-state
 evidence route.
 
 When the gate closes, report the final ledger outcome and commit the accepted
-diff to the current branch. When the outcome is `escalated`, do not claim
-completion or commit it as accepted work; return control to the user or named
-owner with the bounded evidence.
+diff to the current task branch. With explicit authorization for the remote
+writes, use `make land`; a pull request is needed only for human discussion or
+approval. When the outcome is `escalated`, do not claim completion or commit it
+as accepted work; return control to the user or named owner with the bounded
+evidence.

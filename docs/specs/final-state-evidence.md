@@ -8,10 +8,11 @@ it does not create a second issue, CI, or delivery workflow.
 
 ## Acceptance contract
 
-For a task with code changes, the final handoff records one `Final-state
+For any task with a candidate diff, the final handoff records one `Final-state
 evidence` block with:
 
 - `Acceptance boundary`: the behavior or risk the task must satisfy.
+- `Base commit`: the immutable commit SHA used as the candidate fixed point.
 - `Final diff`: the `sha256:<digest>` emitted by the relevant-check runner.
 - `Relevant check`: a stable, reader-facing check name.
 - `Check result`: `PASS` for an accepted local closure.
@@ -35,16 +36,21 @@ repository wrapper:
 
 ```bash
 node .codex/hooks/final-state-evidence.mjs check \
+  --base origin/main \
   --name "<check identity>" \
   --covers "<behavior or risk covered>" \
   [--path <task-owned changed path> ...] \
   -- <command> [args...]
 ```
 
-The wrapper runs the command, verifies that the code diff did not change while
-the check ran, and stores only bounded metadata under the Git directory. It
-does not add a repository artifact or replace normal test output. A failed
-check or a changed diff requires a repair and a fresh run.
+The wrapper resolves `--base` to an immutable commit, runs the command, verifies
+that the candidate diff did not change while the check ran, and stores only
+bounded metadata under the Git directory. The digest binds that base SHA,
+changed-path set, final file contents, executable bits, symlink targets, and
+deletions. It therefore remains stable when those exact contents are committed,
+but an edit, omitted candidate path, or rebase invalidates it. The wrapper does
+not add a repository artifact or replace normal test output. A failed check or
+a changed diff requires a repair and a fresh run.
 When the checkout already contains unrelated changes, repeat `--path` for every
 task-owned changed file. The resulting digest covers exactly that accepted path
 boundary, while each path is still verified against its live repository
@@ -83,20 +89,22 @@ The review command accepts only `schema: code-review-findings/v1` with
   from a full review with no findings may retain round `0`.
 
 The command derives the review conclusion from the validated ledger; a
-`Reviewed` or `审阅` substring has no acceptance meaning. It records the ledger
-path and its content digest, and the Stop hook revalidates both. A missing,
+`Reviewed` or `审阅` substring has no acceptance meaning. It copies the ledger
+into the current worktree's Git directory, records that durable path and its
+content digest, and the Stop and landing routes revalidate both. A missing,
 failed, or stale relevant-check record is rejected. Any later code edit
 invalidates both check and review; even after rerunning the check, accepted
 closure remains blocked until the current ledger has been re-reviewed and
 recorded again.
 
-At `Stop`, the existing Codex hook route compares the live code diff with the
-recorded digest and the final handoff. A valid accepted handoff uses this exact
-shape (values may be written in the task's language):
+At `Stop`, the existing Codex hook route compares the live candidate diff with
+the recorded digest and the final handoff. A valid accepted handoff uses this
+exact shape (values may be written in the task's language):
 
 ```text
 Final-state evidence
 - Acceptance boundary: <behavior or risk>
+- Base commit: <40-character commit SHA>
 - Final diff: sha256:<digest>
 - Relevant check: <check identity>
 - Check result: PASS
