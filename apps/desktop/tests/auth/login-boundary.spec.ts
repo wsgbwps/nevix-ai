@@ -42,6 +42,9 @@ test(
         await expect(launched.page.getByLabel('Email')).toBeVisible()
         await expect(launched.page.getByLabel('Password')).toBeVisible()
         await expect(launched.page.getByRole('button', { name: 'Sign in' })).toBeEnabled()
+        await expect(
+          launched.page.getByText('We recommend using 12 or more characters.')
+        ).toHaveCount(0)
 
         // The brand cover panel only renders at wide widths; the form stays usable when narrow.
         // The default window is wide enough to show the panel, so the narrow assertion pins the
@@ -100,7 +103,18 @@ test(
           passwordRequestCount += 1
           observeRequest?.()
           await requestMayContinue
-          await route.continue()
+          const response = await route.fetch()
+          const body = (await response.json()) as Record<string, unknown>
+          await route.fulfill({
+            response,
+            json: {
+              ...body,
+              weak_password: {
+                reasons: ['pwned'],
+                message: 'provider weak-password detail must not create a login gate'
+              }
+            }
+          })
         })
 
         await launched.page.getByLabel('Email').fill(identity.email)

@@ -21,6 +21,12 @@ export const authenticationTranslations = defineResourceTranslations({
     sessionPersistence: {
       unavailable: '此设备无法安全保存登录状态，关闭应用后需要重新登录。'
     },
+    passwordPolicy: {
+      recommendation: '建议使用 12 个以上字符。',
+      tooShort: '密码太短。',
+      tooLong: '密码太长。',
+      leaked: '此密码曾出现在数据泄露中，请选择其他密码。'
+    },
     passwordVisibility: {
       show: '显示输入内容',
       hide: '隐藏输入内容'
@@ -46,7 +52,6 @@ export const authenticationTranslations = defineResourceTranslations({
     signup: {
       heading: '创建你的 Nevix AI 账号',
       description: '只需邮箱和密码，无需填写个人资料或组织信息。',
-      passwordBytes: '{{count}} / 12–72 UTF-8 字节',
       confirmPassword: '确认密码',
       confirmPasswordMismatch: '两次输入的密码不一致',
       submit: '创建账号',
@@ -97,7 +102,6 @@ export const authenticationTranslations = defineResourceTranslations({
         heading: '设置新密码',
         description: '为你的账号设置新密码，之后需要使用新密码重新登录。',
         password: '新密码',
-        passwordBytes: '{{count}} / 12–72 UTF-8 字节',
         submit: '更新密码',
         submitting: '正在更新…',
         samePassword: '新密码不能与旧密码相同',
@@ -133,6 +137,12 @@ export const authenticationTranslations = defineResourceTranslations({
       unavailable:
         'This device cannot store your session securely, so you will sign in again after closing the application.'
     },
+    passwordPolicy: {
+      recommendation: 'We recommend using 12 or more characters.',
+      tooShort: 'Password is too short.',
+      tooLong: 'Password is too long.',
+      leaked: 'This password has appeared in a data breach. Choose a different password.'
+    },
     passwordVisibility: {
       show: 'Show entered value',
       hide: 'Hide entered value'
@@ -160,7 +170,6 @@ export const authenticationTranslations = defineResourceTranslations({
     signup: {
       heading: 'Create your Nevix AI account',
       description: 'Use only your email and password. No profile or organization is required.',
-      passwordBytes: '{{count}} of 12–72 UTF-8 bytes',
       confirmPassword: 'Confirm password',
       confirmPasswordMismatch: 'Passwords do not match',
       submit: 'Create account',
@@ -212,7 +221,6 @@ export const authenticationTranslations = defineResourceTranslations({
         description:
           'Choose a new password for your account, then sign in again with the new password.',
         password: 'New password',
-        passwordBytes: '{{count}} of 12–72 UTF-8 bytes',
         submit: 'Update password',
         submitting: 'Updating…',
         samePassword: 'New password must be different from your old password',
