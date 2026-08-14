@@ -234,6 +234,8 @@ test('sign-out revokes only the Desktop Session and reopening stays signed out',
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
+      await expect(launched.page.getByLabel('Email')).toHaveValue(identity.email)
+      await expect(launched.page.getByLabel('Password')).toBeFocused()
     } finally {
       await launched.electronApp.close()
     }

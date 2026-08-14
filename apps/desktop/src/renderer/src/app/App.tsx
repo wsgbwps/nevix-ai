@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
-import { useAuthentication } from '../features/authentication'
+import { RememberedEmailPersistenceNotice, useAuthentication } from '../features/authentication'
 import {
   ActiveOrganizationProvider,
   OrganizationOnboardingProvider,
@@ -43,6 +43,13 @@ function App(): React.JSX.Element {
           >
             <ResetOnboardingAfterAuthenticationEnds />
             <SessionAccessLostDialog />
+            <RememberedEmailPersistenceNotice
+              surface="authenticated"
+              isSurfaceActive={authentication.status === 'authenticated'}
+              isPersistenceUnavailable={authentication.isRememberedEmailPersistenceUnavailable}
+              noticeSurface={authentication.rememberedEmailPersistenceNoticeSurface}
+              onShown={authentication.consumeRememberedEmailPersistenceNotice}
+            />
             <SettingsBackNavigationContext.Provider value={settingsNavigation.back}>
               <RouterProvider router={router} />
             </SettingsBackNavigationContext.Provider>

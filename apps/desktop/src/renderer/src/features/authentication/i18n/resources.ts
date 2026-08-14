@@ -21,6 +21,9 @@ export const authenticationTranslations = defineResourceTranslations({
     sessionPersistence: {
       unavailable: '此设备无法安全保存登录状态，关闭应用后需要重新登录。'
     },
+    rememberedEmailPersistence: {
+      unavailable: '此设备无法安全保存记住的邮箱。本次选择仅在关闭应用前有效。'
+    },
     passwordPolicy: {
       recommendation: '建议使用 12 个以上字符。',
       tooShort: '密码太短。',
@@ -39,6 +42,8 @@ export const authenticationTranslations = defineResourceTranslations({
       passwordUpdated: '密码已更新，请使用新密码登录。',
       passwordUpdatedRevocationDelayed: '密码已更新，但其他设备的退出可能延迟。请使用新密码登录。',
       email: '邮箱',
+      rememberEmail: '记住邮箱',
+      rememberEmailAria: '记住登录地址',
       password: '密码',
       submit: '登录',
       submitting: '正在登录…',
@@ -137,6 +142,10 @@ export const authenticationTranslations = defineResourceTranslations({
       unavailable:
         'This device cannot store your session securely, so you will sign in again after closing the application.'
     },
+    rememberedEmailPersistence: {
+      unavailable:
+        'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
+    },
     passwordPolicy: {
       recommendation: 'We recommend using 12 or more characters.',
       tooShort: 'Password is too short.',
@@ -157,6 +166,8 @@ export const authenticationTranslations = defineResourceTranslations({
       passwordUpdatedRevocationDelayed:
         'Your password was updated, but signing out other devices may be delayed. Sign in with your new password.',
       email: 'Email',
+      rememberEmail: 'Remember email',
+      rememberEmailAria: 'Remember sign-in address',
       password: 'Password',
       submit: 'Sign in',
       submitting: 'Signing in…',

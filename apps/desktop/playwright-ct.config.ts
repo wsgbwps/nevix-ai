@@ -23,7 +23,9 @@ export default defineConfig({
         __NEVIX_SUPABASE_PUBLISHABLE_KEY__: JSON.stringify(
           'sb_publishable_component_test_key_1234567890'
         ),
-        __NEVIX_SUPABASE_CONFIG_POLICY__: JSON.stringify('https-only')
+        __NEVIX_SUPABASE_CONFIG_POLICY__: JSON.stringify('https-only'),
+        __NEVIX_SERVER_URL__: JSON.stringify('https://component-test-server.example'),
+        __NEVIX_SERVER_CONFIG_POLICY__: JSON.stringify('https-only')
       },
       resolve: {
         alias: {

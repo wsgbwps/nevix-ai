@@ -23,6 +23,7 @@ const authHarness = readAuthHarnessConfig()
 const mailpitHarness = readMailpitHarnessConfig()
 
 const SESSION_FILE_NAME = 'authentication-session.enc'
+const RECOVERY_BOUNDARY_REMEMBERED_EMAIL = 'recovery-boundary@example.com'
 
 test('@smoke the full recovery loop rotates the password, revokes old Sessions, and never persists the recovery Session', async () => {
   test.setTimeout(90_000)
@@ -47,6 +48,10 @@ test('@smoke the full recovery loop rotates the password, revokes old Sessions, 
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
+      await launched.page.evaluate(
+        async (email) => window.api.invoke('authentication:replace-remembered-email', { email }),
+        RECOVERY_BOUNDARY_REMEMBERED_EMAIL
+      )
       await launched.page.getByRole('button', { name: 'Forgot password?' }).click()
       await expect(
         launched.page.getByRole('heading', { name: 'Reset your password' })
@@ -169,6 +174,14 @@ test('@smoke the full recovery loop rotates the password, revokes old Sessions, 
           hasText: 'Your password was updated. Sign in with your new password.'
         })
       ).toBeVisible()
+      expect(
+        await launched.page.evaluate(() =>
+          window.api.invoke('authentication:read-remembered-email')
+        )
+      ).toMatchObject({
+        outcome: 'email',
+        email: RECOVERY_BOUNDARY_REMEMBERED_EMAIL
+      })
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toHaveCount(0)
