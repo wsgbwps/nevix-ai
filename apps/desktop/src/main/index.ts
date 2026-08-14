@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { initializeMainI18n } from './language'
 import { createWindow } from './window/main-window'
@@ -8,11 +8,8 @@ import {
   requestApplicationQuit
 } from './window/ordinary-close-runtime'
 
-Menu.setApplicationMenu(null)
-
 initializeOrdinaryCloseRuntime(requestOrdinaryCloseDecision)
 app.on('before-quit', requestApplicationQuit)
-
 const ipcModules = import.meta.glob('./*/ipc/index.ts', { eager: true })
 
 if (process.env.NEVIX_E2E === '1' && !app.isPackaged && process.env.NEVIX_TEST_USER_DATA_DIR) {

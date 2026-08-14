@@ -2,10 +2,26 @@ import { defineResourceTranslations, type ResourceOwner } from '../../shared/i18
 
 export const windowTranslations = defineResourceTranslations({
   'zh-CN': {
-    title: 'Nevix AI — 桌面端'
+    title: 'Nevix AI — 桌面端',
+    nativeEditing: {
+      undo: '撤销',
+      cut: '剪切',
+      copy: '复制',
+      paste: '粘贴',
+      delete: '删除',
+      selectAll: '全选'
+    }
   },
   en: {
-    title: 'Nevix AI — Desktop'
+    title: 'Nevix AI — Desktop',
+    nativeEditing: {
+      undo: 'Undo',
+      cut: 'Cut',
+      copy: 'Copy',
+      paste: 'Paste',
+      delete: 'Delete',
+      selectAll: 'Select All'
+    }
   }
 })
 
