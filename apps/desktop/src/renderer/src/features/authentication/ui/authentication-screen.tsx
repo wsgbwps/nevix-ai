@@ -745,18 +745,16 @@ function PasswordInput({
         disabled={disabled}
         className={cn('pr-10', className)}
       />
-      <Button
+      <button
         type="button"
-        variant="ghost"
-        size="icon-sm"
-        className="absolute top-1/2 right-0.5 -translate-y-1/2"
         disabled={disabled}
         aria-label={t(isVisible ? 'passwordVisibility.hide' : 'passwordVisibility.show')}
         aria-pressed={isVisible}
         onClick={() => setIsVisible((visible) => !visible)}
+        className="focus-visible:border-ring focus-visible:ring-ring/50 hover:bg-muted hover:text-foreground dark:hover:bg-muted/50 absolute top-1/2 right-0.5 inline-flex size-8 -translate-y-1/2 items-center justify-center rounded-[min(var(--radius-md),10px)] outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
       >
         {isVisible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
-      </Button>
+      </button>
     </div>
   )
 }
