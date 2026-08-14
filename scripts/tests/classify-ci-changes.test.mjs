@@ -53,6 +53,17 @@ test("agent and delivery documentation requires inline harness validation", () =
   );
 });
 
+test("Pi agent definitions, extension code, and tests require inline harness validation", () => {
+  assert.deepEqual(
+    selected([
+      ".pi/agents/reviewer.md",
+      ".pi/extensions/codex-hooks.ts",
+      ".pi/tests/codex-hooks.test.mjs",
+    ]),
+    { harness: true },
+  );
+});
+
 test("the classifier and CI gate select every product check and harness validation", () => {
   assert.deepEqual(selected(["scripts/classify-ci-changes.mjs"]), {
     desktop: true,

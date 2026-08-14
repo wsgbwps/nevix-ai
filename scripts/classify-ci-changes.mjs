@@ -86,6 +86,7 @@ export function classifyPaths(paths) {
       startsWith(path, ".codex") ||
       startsWith(path, ".husky") ||
       startsWith(path, ".omp") ||
+      startsWith(path, ".pi") ||
       startsWith(path, ".scratch") ||
       startsWith(path, "docs") ||
       isOneOf(path, [
