@@ -184,7 +184,7 @@ paths:
       operationId: updateOrganizationSettings
       summary: 更新组织设置
       description: |-
-        active Owner 或 Admin 可以更新 Organization 名称。名称会 trim，空名称被拒绝。
+        只有 active Owner 可以更新 Organization 名称；active Admin 与 Member 获得 insufficient_organization_role。名称会 trim，空名称被拒绝。
 
         命令在同一事务中更新 Organization 并写入不可变 Audit Log；设置变更不发送邮件。
       security:
@@ -208,6 +208,8 @@ paths:
                 name:
                   type: string
                   description: 组织名称；trim 后为空被拒绝。
+            example:
+              name: "  Owner Updated Studio  "
       responses:
         "200":
           description: Organization 设置已更新。
@@ -229,6 +231,10 @@ paths:
                         format: uuid
                       name:
                         type: string
+              example:
+                organization:
+                  id: 4b665cd1-6e72-49f0-b388-a16f9f387aea
+                  name: Owner Updated Studio
         "400":
           description: 请求不合法 —— invalid_request 指请求体没有 name；invalid_organization_name 指 name trim 后为空；invalid_organization_id 指路径参数不是 UUID。
           content:
@@ -256,7 +262,7 @@ paths:
                         enum:
                           - unauthorized
         "403":
-          description: 调用方是 active Member 但不是 Owner 或 Admin。
+          description: 调用方是 active Admin 或 Member，但不是 Owner。
           content:
             application/json:
               schema:
@@ -267,6 +273,9 @@ paths:
                       error:
                         enum:
                           - insufficient_organization_role
+              example:
+                error: insufficient_organization_role
+                message: Owner role is required.
         "404":
           description: 调用方不是该 Organization 的 active Member，或 Organization 不存在。
           content:
@@ -279,6 +288,9 @@ paths:
                       error:
                         enum:
                           - organization_not_found
+              example:
+                error: organization_not_found
+                message: The organization was not found.
         "500":
           description: 服务端未能更新 Organization，未提交部分状态。
           content:

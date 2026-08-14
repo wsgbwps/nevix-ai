@@ -119,6 +119,12 @@ test('@smoke the full recovery loop rotates the password, revokes old Sessions, 
       await expect(
         launched.page.getByText('We recommend using 12 or more characters.')
       ).toBeVisible()
+      await expect(passwordInput).toHaveAttribute('type', 'password')
+      await passwordInput.locator('..').getByRole('button', { name: 'Show entered value' }).click()
+      await expect(passwordInput).toHaveAttribute('type', 'text')
+      await passwordInput.locator('..').getByRole('button', { name: 'Hide entered value' }).click()
+      await expect(passwordInput).toHaveAttribute('type', 'password')
+
       await passwordInput.fill('12345678901')
       await expect(
         launched.page.getByRole('alert').filter({ hasText: 'Password is too short' })

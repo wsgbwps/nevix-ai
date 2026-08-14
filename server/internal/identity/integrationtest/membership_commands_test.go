@@ -500,7 +500,7 @@ func TestMembershipCommandsEnforceAuthorizationAndStateBoundaries(t *testing.T) 
 	}
 }
 
-func TestUpdateOrganizationSettingsAllowsAdministratorsWithoutEmail(t *testing.T) {
+func TestUpdateOrganizationSettingsOwnerOnlyAuthorization(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -509,9 +509,12 @@ func TestUpdateOrganizationSettingsAllowsAdministratorsWithoutEmail(t *testing.T
 	owner := stack.signUpConfirmedUser(t, ctx, "settings-owner")
 	admin := stack.signUpConfirmedUser(t, ctx, "settings-admin")
 	member := stack.signUpConfirmedUser(t, ctx, "settings-member")
+	formerMember := stack.signUpConfirmedUser(t, ctx, "settings-former-member")
+	outsider := stack.signUpConfirmedUser(t, ctx, "settings-outsider")
 	seedProfile(t, ctx, h, owner.ID, "Settings Owner")
 	seedProfile(t, ctx, h, admin.ID, "Settings Admin")
 	seedProfile(t, ctx, h, member.ID, "Settings Member")
+	seedProfile(t, ctx, h, formerMember.ID, "Former Settings Member")
 
 	orgID := newRLSOrgID(t)
 	stack.seedAsIdentityApp(t, ctx,
@@ -520,6 +523,7 @@ func TestUpdateOrganizationSettingsAllowsAdministratorsWithoutEmail(t *testing.T
 			{OrganizationID: orgID, UserID: owner.ID, Role: "owner", Status: "active"},
 			{OrganizationID: orgID, UserID: admin.ID, Role: "admin", Status: "active"},
 			{OrganizationID: orgID, UserID: member.ID, Role: "member", Status: "active"},
+			{OrganizationID: orgID, UserID: formerMember.ID, Role: "member", Status: "ended"},
 		},
 	)
 
@@ -527,27 +531,70 @@ func TestUpdateOrganizationSettingsAllowsAdministratorsWithoutEmail(t *testing.T
 	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
 	path := "/identity/organizations/" + orgID + "/settings"
 	status, body := identityCommand(t, handler, http.MethodPatch, path,
-		keys.signToken(t, admin.ID, time.Now().Add(time.Hour)), map[string]string{"name": "  Settings by Admin  "})
-	if status != http.StatusOK {
-		t.Fatalf("admin update settings: status %d body %s, want 200", status, body)
-	}
-	assertContractResponse(t, http.MethodPatch, path, status, body)
-	assertSettingsState(t, ctx, h, orgID, "Settings by Admin", "Settings Admin")
-
-	status, body = identityCommand(t, handler, http.MethodPatch, path,
-		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{"name": "Settings by Owner"})
+		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{"name": "  Settings by Owner  "})
 	if status != http.StatusOK {
 		t.Fatalf("owner update settings: status %d body %s, want 200", status, body)
 	}
 	assertContractResponse(t, http.MethodPatch, path, status, body)
+	var response struct {
+		Organization struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"organization"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatalf("decode owner settings response: %v", err)
+	}
+	if response.Organization.ID != orgID || response.Organization.Name != "Settings by Owner" {
+		t.Fatalf("owner settings response = id:%q name:%q, want id:%q trimmed name:%q", response.Organization.ID, response.Organization.Name, orgID, "Settings by Owner")
+	}
 	assertSettingsState(t, ctx, h, orgID, "Settings by Owner", "Settings Owner")
 
-	status, body = identityCommand(t, handler, http.MethodPatch, path,
-		keys.signToken(t, member.ID, time.Now().Add(time.Hour)), map[string]string{"name": "Member Cannot Rename"})
-	if status != http.StatusForbidden {
-		t.Fatalf("member update settings: status %d body %s, want 403", status, body)
+	for _, check := range []struct {
+		name, userID string
+	}{
+		{name: "admin", userID: admin.ID},
+		{name: "member", userID: member.ID},
+	} {
+		status, body = identityCommand(t, handler, http.MethodPatch, path,
+			keys.signToken(t, check.userID, time.Now().Add(time.Hour)), map[string]string{"name": "Rejected Rename"})
+		if status != http.StatusForbidden {
+			t.Fatalf("%s update settings: status %d body %s, want 403", check.name, status, body)
+		}
+		assertCommandError(t, body, "insufficient_organization_role")
+		var envelope struct {
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			t.Fatalf("decode %s settings error: %v", check.name, err)
+		}
+		if envelope.Message != "Owner role is required." {
+			t.Fatalf("%s settings error message = %q, want Owner-only explanation", check.name, envelope.Message)
+		}
+		assertContractResponse(t, http.MethodPatch, path, status, body)
 	}
-	assertCommandError(t, body, "insufficient_organization_role")
+
+	for _, check := range []struct {
+		name, userID string
+	}{
+		{name: "former member", userID: formerMember.ID},
+		{name: "outsider", userID: outsider.ID},
+	} {
+		status, body = identityCommand(t, handler, http.MethodPatch, path,
+			keys.signToken(t, check.userID, time.Now().Add(time.Hour)), map[string]string{"name": "Non-enumerating Rename"})
+		if status != http.StatusNotFound {
+			t.Fatalf("%s update settings: status %d body %s, want 404", check.name, status, body)
+		}
+		assertCommandError(t, body, "organization_not_found")
+		assertContractResponse(t, http.MethodPatch, path, status, body)
+	}
+
+	status, body = identityCommand(t, handler, http.MethodPatch, path,
+		keys.signToken(t, owner.ID, time.Now().Add(time.Hour)), map[string]string{})
+	if status != http.StatusBadRequest {
+		t.Fatalf("missing organization name: status %d body %s, want 400", status, body)
+	}
+	assertCommandError(t, body, "invalid_request")
 	assertContractResponse(t, http.MethodPatch, path, status, body)
 
 	status, body = identityCommand(t, handler, http.MethodPatch, path,
@@ -559,12 +606,20 @@ func TestUpdateOrganizationSettingsAllowsAdministratorsWithoutEmail(t *testing.T
 	assertContractResponse(t, http.MethodPatch, path, status, body)
 	assertSettingsState(t, ctx, h, orgID, "Settings by Owner", "Settings Owner")
 
-	var outboxRows int
+	var auditRows, outboxRows int
 	if err := h.pool.QueryRow(ctx,
-		`SELECT count(*) FROM identity.outbox_messages WHERE recipient IN ($1, $2, $3)`,
-		owner.Email, admin.Email, member.Email,
+		`SELECT count(*) FROM public.audit_logs WHERE organization_id = $1 AND action = 'organization_settings_updated'`, orgID,
+	).Scan(&auditRows); err != nil {
+		t.Fatalf("count settings audit rows: %v", err)
+	}
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM identity.outbox_messages WHERE recipient IN ($1, $2, $3, $4, $5)`,
+		owner.Email, admin.Email, member.Email, formerMember.Email, outsider.Email,
 	).Scan(&outboxRows); err != nil {
 		t.Fatalf("count settings outbox rows: %v", err)
+	}
+	if auditRows != 1 {
+		t.Fatalf("settings updates wrote %d audit rows, want exactly one Owner update", auditRows)
 	}
 	if outboxRows != 0 {
 		t.Fatalf("settings updates queued %d mail rows, want none", outboxRows)

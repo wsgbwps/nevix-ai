@@ -27,6 +27,10 @@ export const authenticationTranslations = defineResourceTranslations({
       tooLong: '密码太长。',
       leaked: '此密码曾出现在数据泄露中，请选择其他密码。'
     },
+    passwordVisibility: {
+      show: '显示输入内容',
+      hide: '隐藏输入内容'
+    },
     login: {
       heading: '登录 Nevix AI',
       description: '使用已验证的邮箱继续。',
@@ -138,6 +142,10 @@ export const authenticationTranslations = defineResourceTranslations({
       tooShort: 'Password is too short.',
       tooLong: 'Password is too long.',
       leaked: 'This password has appeared in a data breach. Choose a different password.'
+    },
+    passwordVisibility: {
+      show: 'Show entered value',
+      hide: 'Hide entered value'
     },
     login: {
       heading: 'Sign in to Nevix AI',
