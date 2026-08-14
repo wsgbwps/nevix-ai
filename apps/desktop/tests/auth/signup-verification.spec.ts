@@ -293,7 +293,9 @@ test('signup network and rate-limit failures stay localized and existence-neutra
       await expect
         .poll(() => providerWarnings)
         .toContain(
-          '[authentication] Unmapped password provider error operation=signup code=future_auth_failure status=503'
+          // supabase-js masks every 5xx response as AuthRetryableFetchError without a provider code,
+          // so the unmapped-error warning records the status only.
+          '[authentication] Unmapped password provider error operation=signup code=unknown status=503'
         )
       await expect(launched.page.getByText('provider detail must not reach the user')).toHaveCount(
         0

@@ -224,9 +224,12 @@ test('dirty Profile uses one discard decision for Section changes and ordinary c
       await discardDialog.getByRole('button', { name: '继续编辑' }).click()
       await expect(displayName).toHaveValue(`${authoritativeName || '用户'} 关闭草稿`)
 
+      const windowClosed = launched.page.waitForEvent('close')
       await requestOrdinaryWindowClose(launched.electronApp)
       await discardDialog.getByRole('button', { name: '丢弃更改' }).click()
-      await expectMainWindowCount(launched.electronApp, 0)
+      // Closing the last window quits the app on non-darwin platforms, so assert the window
+      // close event itself rather than a live window count.
+      await windowClosed
       expect(profileWrites).toBe(0)
     } finally {
       await launched.electronApp.close()
