@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** in-review
+**Status:** resolved
 
 **Consumes**
 
@@ -27,15 +27,15 @@
 
 **Acceptance**
 
-- [ ] 成功登录仅保存 Supabase 响应中的权威邮箱；不同 User 的后续成功登录替换旧值。
-- [ ] 失败登录保留当前输入，不改变原保存值；重启后仍预填原值。
-- [ ] 存在 Remembered Email 时预填并聚焦密码；不存在时邮箱为空、复选框仍默认勾选并聚焦邮箱。
-- [ ] 取消勾选立即删除加密记录和进程内 fallback；重新勾选只表示下次成功登录愿意保存。
-- [ ] signup、signup verification、recovery、Session restore 和当前设备 logout 都不覆盖或清除 Remembered Email。
-- [ ] 安全存储不可用、Linux `basic_text`、加密失败或文件写入失败时不落明文；当前进程可继续使用该值并只说明一次。
-- [ ] 损坏或无效记录被删除、按空值继续，并产生不暴露实现细节的内部告警。
-- [ ] `Authentication Usability Desktop E2E`、Desktop lint/typecheck/build、packaged localization 与适用的 native secure-storage acceptance 通过。
-- [ ] 产品代码前在本 ticket 的本地 tracker 范围记录短实施计划；最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
+- [x] 成功登录仅保存 Supabase 响应中的权威邮箱；不同 User 的后续成功登录替换旧值。
+- [x] 失败登录保留当前输入，不改变原保存值；重启后仍预填原值。
+- [x] 存在 Remembered Email 时预填并聚焦密码；不存在时邮箱为空、复选框仍默认勾选并聚焦邮箱。
+- [x] 取消勾选立即删除加密记录和进程内 fallback；重新勾选只表示下次成功登录愿意保存。
+- [x] signup、signup verification、recovery、Session restore 和当前设备 logout 都不覆盖或清除 Remembered Email。
+- [x] 安全存储不可用、Linux `basic_text`、加密失败或文件写入失败时不落明文；当前进程可继续使用该值并只说明一次。
+- [x] 损坏或无效记录被删除、按空值继续，并产生不暴露实现细节的内部告警。
+- [x] `Authentication Usability Desktop E2E`、Desktop lint/typecheck/build、packaged localization 与适用的 native secure-storage acceptance 通过。
+- [x] 产品代码前在本 ticket 的本地 tracker 范围记录短实施计划；最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
 
 **Parallel classification:** full parallel; `parallel-ready` from the current fixed point.
 
@@ -52,3 +52,7 @@
 - **TDD seam:** 使用 spec 已确认的 Electron Playwright seam，按成功保存/替换、失败不覆盖、立即清除、启动预填与焦点、安全存储失败/损坏的垂直切片逐个 red → green；复用现有 native `safeStorage` acceptance，不新增前端单元测试框架。
 - **Checks and review:** 开发中运行 focused authentication E2E 与 Desktop typecheck；完成后运行 ticket 要求的 lint/typecheck/build、packaged localization 和适用的 native secure-storage acceptance，再按 `code-review-findings/v1` 做一次 Standards/Spec 完整评审及必要的定向修复，最后绑定 final-state evidence。
 - **Rollback:** 同一 PR 原子回滚 Authentication Domain store、typed IPC、登录 UI 与对应验收；不迁移数据库，不修改 Session 持久化契约，遗留密文对旧版本保持惰性。
+
+## Comments
+
+- 2026-08-14: [PR #53](https://github.com/wsgbwps/nevix-ai/pull/53) 已 squash merge 为 `5f1e2e9`。最终 head 的 [CI gate 31772615697](https://github.com/wsgbwps/nevix-ai/actions/runs/31772615697) 成功；Remembered Email Electron E2E、Desktop 静态检查/构建、packaged localization、原生安全存储验收与 final-state review 均通过，5 个 blocker 已关闭且无风险接受。

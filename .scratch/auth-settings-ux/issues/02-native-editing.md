@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** in-review
+**Status:** resolved
 
 **Consumes**
 
@@ -24,12 +24,12 @@
 
 **Acceptance**
 
-- [ ] 可编辑字段中的标准键盘快捷键会改变字段值，而不只是检查菜单实现。
-- [ ] 右键菜单仅为 editable target 显示当前可用的标准编辑角色。
-- [ ] 登录、注册、密码恢复的密码字段与所有一次性验证码字段允许粘贴。
-- [ ] 不增加后退/前进、重载、新窗口、外部导航或开发者工具入口。
-- [ ] `Authentication Usability Desktop E2E`、Electron security regression、Desktop lint/typecheck/build 通过。
-- [ ] 最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
+- [x] 可编辑字段中的标准键盘快捷键会改变字段值，而不只是检查菜单实现。
+- [x] 右键菜单仅为 editable target 显示当前可用的标准编辑角色。
+- [x] 登录、注册、密码恢复的密码字段与所有一次性验证码字段允许粘贴。
+- [x] 不增加后退/前进、重载、新窗口、外部导航或开发者工具入口。
+- [x] `Authentication Usability Desktop E2E`、Electron security regression、Desktop lint/typecheck/build 通过。
+- [x] 最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
 
 **Parallel classification:** full parallel; `parallel-ready` from the current fixed point.
 
@@ -89,3 +89,5 @@
   harness without skipping the Organization Invitation assertion, plus Desktop lint,
   architecture, unit/component, typecheck, build, localization, targeted review, and final-state
   evidence.
+
+- 2026-08-14: [PR #51](https://github.com/wsgbwps/nevix-ai/pull/51) 已 squash merge 为 `3c7ec18`。最终 head 的 [CI gate 31766390120](https://github.com/wsgbwps/nevix-ai/actions/runs/31766390120) 成功；完整 Electron 验收、Desktop 静态检查/构建与 localization 均通过，3 个 blocker 和 advisory 修复已关闭，final-state evidence 已接受。

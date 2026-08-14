@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** in-review
+**Status:** resolved
 
 **Consumes**
 
@@ -26,15 +26,15 @@
 
 **Acceptance**
 
-- [ ] 注册与恢复新密码常驻显示“建议使用 12 个以上字符”；登录不显示创建密码提示。
-- [ ] UI 不显示实时字节计数；对超出 12–72 UTF-8 byte 边界的原始输入显示稳定的太短或太长错误。
-- [ ] 注册和密码更新拒绝已泄露密码；HIBP 不可用时请求继续并产生内部告警。
-- [ ] 已有 `same_password` 表现保持；未知 provider error 是安全、可重试的通用服务错误。
-- [ ] 成功 `signInWithPassword` 响应即使包含 weak-password signal 也正常进入已认证应用，不增加 state、route、modal 或 gate。
-- [ ] 真实 Auth harness 证明 12/72 UTF-8 byte 边界、无字符类强制、HIBP 拒绝与 fail-open、1h JWT、refresh rotation、14d inactivity 和 90d time-box。
-- [ ] 既有 Session 离线保留、明确撤销、密码恢复和 runtime security-state 验收仍通过。
-- [ ] `Authentication Usability Desktop E2E`、`Supabase Auth Policy Harness`、Desktop lint/typecheck/build 与 packaged localization 通过。
-- [ ] 产品代码前记录短实施计划；最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
+- [x] 注册与恢复新密码常驻显示“建议使用 12 个以上字符”；登录不显示创建密码提示。
+- [x] UI 不显示实时字节计数；对超出 12–72 UTF-8 byte 边界的原始输入显示稳定的太短或太长错误。
+- [x] 注册和密码更新拒绝已泄露密码；HIBP 不可用时请求继续并产生内部告警。
+- [x] 已有 `same_password` 表现保持；未知 provider error 是安全、可重试的通用服务错误。
+- [x] 成功 `signInWithPassword` 响应即使包含 weak-password signal 也正常进入已认证应用，不增加 state、route、modal 或 gate。
+- [x] 真实 Auth harness 证明 12/72 UTF-8 byte 边界、无字符类强制、HIBP 拒绝与 fail-open、1h JWT、refresh rotation、14d inactivity 和 90d time-box。
+- [x] 既有 Session 离线保留、明确撤销、密码恢复和 runtime security-state 验收仍通过。
+- [x] `Authentication Usability Desktop E2E`、`Supabase Auth Policy Harness`、Desktop lint/typecheck/build 与 packaged localization 通过。
+- [x] 产品代码前记录短实施计划；最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
 
 **Parallel classification:** full parallel; `parallel-ready` from the current fixed point.
 
@@ -43,3 +43,7 @@
 **Commutativity test:** 与 01/03 可任意顺序合并；04 只负责 Authentication UI/i18n 的机械性冲突收口，不接管它们的业务状态。
 
 **Rollback constraint:** 首个真实 User 之前可在显式安全决定下独立回滚；出现真实 User 后不得通过回滚静默降低密码或 Session 安全 floor。
+
+## Comments
+
+- 2026-08-14: [PR #54](https://github.com/wsgbwps/nevix-ai/pull/54) 已 squash merge 为 `092963e`。最终 head 的 [CI gate 31769347238](https://github.com/wsgbwps/nevix-ai/actions/runs/31769347238) 成功；真实 GoTrue policy harness、Desktop E2E/静态检查/构建、packaged localization 与 Session policy 边界均通过，2 个 blocker 已关闭、无风险接受，final-state evidence closure 为 accepted。

@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** in-review
+**Status:** resolved
 
 **Consumes**
 
@@ -46,4 +46,7 @@
 
 **Commutativity test:** 与 01–04、06 任意顺序合并都保持 main 完整且 CI 通过；与 02 的 Window 重叠只是机械性冲突。
 
-**Comments:** Window typed IPC prerequisite was authorized in the same PR as a separate architecture commit. Implementation review closed the Main IPC purity/transport findings and the memory-history Back guard finding; focused Settings E2E, static gates, build, and packaged localization form the acceptance evidence.
+## Comments
+
+- Window typed IPC prerequisite was authorized in the same PR as a separate architecture commit. Implementation review closed the Main IPC purity/transport findings and the memory-history Back guard finding; focused Settings E2E, static gates, build, and packaged localization form the acceptance evidence.
+- 2026-08-14: [PR #55](https://github.com/wsgbwps/nevix-ai/pull/55) 已 squash merge 为 `170eda1`。最终 head 的 [CI gate 31770251219](https://github.com/wsgbwps/nevix-ai/actions/runs/31770251219) 成功；全部适用 checks、Settings/ordinary-close 验收、Desktop 静态检查/构建和 packaged localization 均通过，1 个 blocker 已修复关闭，final-state evidence closure 为 accepted。
