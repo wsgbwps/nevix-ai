@@ -108,7 +108,7 @@ func MapError(err error) *command.Error {
 	case errors.Is(err, errOrganizationNotFound):
 		return &command.Error{Status: http.StatusNotFound, Code: "organization_not_found", Message: "The organization was not found."}
 	case errors.Is(err, errInsufficientRole):
-		return &command.Error{Status: http.StatusForbidden, Code: "insufficient_organization_role", Message: "Owner or Admin role is required."}
+		return &command.Error{Status: http.StatusForbidden, Code: "insufficient_organization_role", Message: "Owner role is required."}
 	default:
 		return nil
 	}

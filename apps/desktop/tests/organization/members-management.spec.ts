@@ -88,7 +88,18 @@ test(
         await expect(launched.page.getByRole('tab', { name: /Pending invitations/ })).toHaveCount(0)
         await expect(launched.page.getByRole('combobox', { name: /Change role/ })).toHaveCount(0)
         await expect(launched.page.getByRole('button', { name: /Remove member/ })).toHaveCount(0)
-        await expect(launched.page.getByLabel('Organization name')).toHaveCount(0)
+        const settingsMain = launched.page.getByRole('main')
+        await expect(settingsMain.getByText('Organization name', { exact: true })).toBeVisible()
+        await expect(settingsMain.getByText('Read-only Studio', { exact: true })).toBeVisible()
+        await expect(
+          settingsMain.getByRole('textbox', { name: 'Organization name', exact: true })
+        ).toHaveCount(0)
+        await expect(
+          settingsMain.getByRole('button', { name: 'Apply organization rename' })
+        ).toHaveCount(0)
+        await expect(
+          settingsMain.getByRole('button', { name: 'Discard organization rename' })
+        ).toHaveCount(0)
         await expect(settingsNavigation.getByRole('button', { name: 'Audit log' })).toHaveCount(0)
       } finally {
         await launched.electronApp.close()
@@ -339,9 +350,18 @@ test(
         await expect(launched.page.getByText('Ada Admin', { exact: true })).toHaveCount(0)
 
         const renamedOrganization = 'Renamed Membership Studio'
-        await launched.page
-          .getByRole('textbox', { name: 'Organization name', exact: true })
-          .fill(renamedOrganization)
+        const organizationName = launched.page.getByRole('textbox', {
+          name: 'Organization name',
+          exact: true
+        })
+        await expect(organizationName).toBeEditable()
+        await expect(
+          launched.page.getByRole('button', { name: 'Apply organization rename' })
+        ).toBeVisible()
+        await expect(
+          launched.page.getByRole('button', { name: 'Discard organization rename' })
+        ).toBeVisible()
+        await organizationName.fill(`  ${renamedOrganization}  `)
         await launched.page.getByRole('button', { name: 'Apply organization rename' }).click()
         await expect.poll(() => activeProjectionRequestCount).toBeGreaterThanOrEqual(2)
         releasePreWriteRefresh()
@@ -403,6 +423,20 @@ test(
         await signIn(launched.page, adminIdentity)
         await openSettingsFromUserMenu(launched.page)
 
+        const settingsMain = launched.page.getByRole('main')
+        await expect(settingsMain.getByText('Organization name', { exact: true })).toBeVisible()
+        await expect(
+          settingsMain.getByText('Admin Management Studio', { exact: true })
+        ).toBeVisible()
+        await expect(
+          settingsMain.getByRole('textbox', { name: 'Organization name', exact: true })
+        ).toHaveCount(0)
+        await expect(
+          settingsMain.getByRole('button', { name: 'Apply organization rename' })
+        ).toHaveCount(0)
+        await expect(
+          settingsMain.getByRole('button', { name: 'Discard organization rename' })
+        ).toHaveCount(0)
         await expect(launched.page.getByRole('combobox', { name: /Change role/ })).toHaveCount(0)
         await expect(
           launched.page.getByRole('button', { name: 'Remove member Miles Member' })

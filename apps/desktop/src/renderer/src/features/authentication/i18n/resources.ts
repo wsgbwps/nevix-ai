@@ -21,6 +21,10 @@ export const authenticationTranslations = defineResourceTranslations({
     sessionPersistence: {
       unavailable: '此设备无法安全保存登录状态，关闭应用后需要重新登录。'
     },
+    passwordVisibility: {
+      show: '显示输入内容',
+      hide: '隐藏输入内容'
+    },
     login: {
       heading: '登录 Nevix AI',
       description: '使用已验证的邮箱继续。',
@@ -128,6 +132,10 @@ export const authenticationTranslations = defineResourceTranslations({
     sessionPersistence: {
       unavailable:
         'This device cannot store your session securely, so you will sign in again after closing the application.'
+    },
+    passwordVisibility: {
+      show: 'Show entered value',
+      hide: 'Hide entered value'
     },
     login: {
       heading: 'Sign in to Nevix AI',
