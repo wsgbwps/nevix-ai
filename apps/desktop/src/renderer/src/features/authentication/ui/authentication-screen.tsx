@@ -17,6 +17,7 @@ import type {
   AuthenticationNotice
 } from '../model/use-authentication'
 import { isPasswordByteLengthValid, passwordByteLength } from '../policy/password'
+import { RememberedEmailPersistenceNotice } from './remembered-email-persistence-notice'
 
 interface AuthenticationScreenProps {
   readonly status: 'configuration-error' | 'restoring' | 'restore-failure' | 'unauthenticated'
@@ -26,7 +27,8 @@ interface AuthenticationScreenProps {
   readonly isSubmitting?: boolean
   readonly rememberedEmail?: string
   readonly rememberEmailSelected: boolean
-  readonly showRememberedEmailPersistenceNotice: boolean
+  readonly isRememberedEmailPersistenceUnavailable: boolean
+  readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   readonly onRetryRestore: () => Promise<void>
   readonly resendSecondsRemaining: number
   readonly resendGeneration: number
@@ -35,6 +37,7 @@ interface AuthenticationScreenProps {
   readonly onShowSignUp: () => void
   readonly onShowRecovery: () => void
   readonly onRememberEmailSelectedChange: (selected: boolean) => void
+  readonly onRememberedEmailPersistenceNoticeShown: () => void
   readonly onSignIn: (email: string, password: string) => Promise<void>
   readonly onSignUp: (email: string, password: string) => Promise<void>
   readonly onVerifySignUp: (code: string) => Promise<void>
@@ -52,7 +55,8 @@ export function AuthenticationScreen({
   isSubmitting = false,
   rememberedEmail,
   rememberEmailSelected,
-  showRememberedEmailPersistenceNotice,
+  isRememberedEmailPersistenceUnavailable,
+  rememberedEmailPersistenceNoticeSurface,
   resendSecondsRemaining,
   resendGeneration,
   didResend,
@@ -61,6 +65,7 @@ export function AuthenticationScreen({
   onShowSignUp,
   onShowRecovery,
   onRememberEmailSelectedChange,
+  onRememberedEmailPersistenceNoticeShown,
   onSignIn,
   onSignUp,
   onVerifySignUp,
@@ -94,11 +99,13 @@ export function AuthenticationScreen({
                 isSubmitting={isSubmitting}
                 rememberedEmail={rememberedEmail}
                 rememberEmailSelected={rememberEmailSelected}
-                showRememberedEmailPersistenceNotice={showRememberedEmailPersistenceNotice}
+                isRememberedEmailPersistenceUnavailable={isRememberedEmailPersistenceUnavailable}
+                rememberedEmailPersistenceNoticeSurface={rememberedEmailPersistenceNoticeSurface}
                 onSignIn={onSignIn}
                 onShowSignUp={onShowSignUp}
                 onShowRecovery={onShowRecovery}
                 onRememberEmailSelectedChange={onRememberEmailSelectedChange}
+                onRememberedEmailPersistenceNoticeShown={onRememberedEmailPersistenceNoticeShown}
               />
             ) : flow === 'signup' ? (
               <SignupForm
@@ -203,22 +210,26 @@ function LoginForm({
   isSubmitting,
   rememberedEmail,
   rememberEmailSelected,
-  showRememberedEmailPersistenceNotice,
+  isRememberedEmailPersistenceUnavailable,
+  rememberedEmailPersistenceNoticeSurface,
   onSignIn,
   onShowSignUp,
   onShowRecovery,
-  onRememberEmailSelectedChange
+  onRememberEmailSelectedChange,
+  onRememberedEmailPersistenceNoticeShown
 }: {
   readonly error?: AuthenticationError
   readonly notice?: AuthenticationNotice
   readonly isSubmitting: boolean
   readonly rememberedEmail?: string
   readonly rememberEmailSelected: boolean
-  readonly showRememberedEmailPersistenceNotice: boolean
+  readonly isRememberedEmailPersistenceUnavailable: boolean
+  readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   readonly onSignIn: (email: string, password: string) => Promise<void>
   readonly onShowSignUp: () => void
   readonly onShowRecovery: () => void
   readonly onRememberEmailSelectedChange: (selected: boolean) => void
+  readonly onRememberedEmailPersistenceNoticeShown: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
 
@@ -239,11 +250,12 @@ function LoginForm({
             {t(LOGIN_NOTICE_KEYS[notice])}
           </p>
         ) : null}
-        {showRememberedEmailPersistenceNotice ? (
-          <p role="status" className="text-muted-foreground text-sm">
-            {t('rememberedEmailPersistence.unavailable')}
-          </p>
-        ) : null}
+        <RememberedEmailPersistenceNotice
+          surface="login"
+          isPersistenceUnavailable={isRememberedEmailPersistenceUnavailable}
+          noticeSurface={rememberedEmailPersistenceNoticeSurface}
+          onShown={onRememberedEmailPersistenceNoticeShown}
+        />
         <CredentialFields
           passwordAutoComplete="current-password"
           disabled={isSubmitting}

@@ -10,6 +10,7 @@ type RememberedEmailReadResult =
     }
   | { readonly outcome: 'empty' }
   | { readonly outcome: 'storage-unavailable' }
+  | { readonly outcome: 'unreadable' }
 
 interface RememberedEmailWriteResult {
   readonly outcome: 'persisted' | 'memory-only'
@@ -35,9 +36,7 @@ export async function readRememberedEmail(): Promise<RememberedEmailReadResult> 
     envelope = await readFile(rememberedEmailPath(), 'utf8')
   } catch (error) {
     if (!isMissingFile(error)) {
-      rememberedEmailInMemory = null
-      persistenceUnavailable = true
-      return { outcome: 'storage-unavailable' }
+      return discardUnreadableRecord()
     }
 
     rememberedEmailInMemory = null
@@ -45,10 +44,10 @@ export async function readRememberedEmail(): Promise<RememberedEmailReadResult> 
     return currentMemoryResult()
   }
 
-  if (envelope.length > MAXIMUM_ENVELOPE_LENGTH) return discardInvalidRecord()
+  if (envelope.length > MAXIMUM_ENVELOPE_LENGTH) return discardUnreadableRecord()
 
   const ciphertext = readEnvelopeCiphertext(envelope)
-  if (!ciphertext) return discardInvalidRecord()
+  if (!ciphertext) return discardUnreadableRecord()
 
   if (!canPersistSecurely()) {
     rememberedEmailInMemory = null
@@ -58,13 +57,13 @@ export async function readRememberedEmail(): Promise<RememberedEmailReadResult> 
 
   try {
     const email = safeStorage.decryptString(ciphertext)
-    if (!isUsableRememberedEmail(email)) return discardInvalidRecord()
+    if (!isUsableRememberedEmail(email)) return discardUnreadableRecord()
 
     rememberedEmailInMemory = email
     persistenceUnavailable = false
     return { outcome: 'email', email, persistence: 'secure' }
   } catch {
-    return discardInvalidRecord()
+    return discardUnreadableRecord()
   }
 }
 
@@ -103,6 +102,7 @@ export async function replaceRememberedEmail(email: string): Promise<RememberedE
 
 export async function clearRememberedEmail(): Promise<RememberedEmailClearResult> {
   rememberedEmailInMemory = null
+  await delayRememberedEmailClearForTest()
   if (await removeRememberedEmailFiles()) {
     persistenceUnavailable = false
     return { outcome: 'cleared' }
@@ -123,12 +123,12 @@ function currentMemoryResult(): RememberedEmailReadResult {
   return persistenceUnavailable ? { outcome: 'storage-unavailable' } : { outcome: 'empty' }
 }
 
-async function discardInvalidRecord(): Promise<RememberedEmailReadResult> {
+async function discardUnreadableRecord(): Promise<RememberedEmailReadResult> {
   rememberedEmailInMemory = null
-  const removed = await removeRememberedEmailFiles()
-  console.warn('Remembered Email storage discarded an invalid encrypted record.')
+  const removed = await removeUnreadableRememberedEmailFiles()
+  console.warn('Remembered Email storage discarded an unreadable encrypted record.')
   persistenceUnavailable = !removed || !canPersistSecurely()
-  return currentMemoryResult()
+  return { outcome: 'unreadable' }
 }
 
 async function removeRememberedEmailFiles(): Promise<boolean> {
@@ -138,6 +138,23 @@ async function removeRememberedEmailFiles(): Promise<boolean> {
     rm(`${path}.pending`, { force: true })
   ])
   return results.every((result) => result.status === 'fulfilled')
+}
+
+async function removeUnreadableRememberedEmailFiles(): Promise<boolean> {
+  const path = rememberedEmailPath()
+  const results = await Promise.allSettled([
+    rm(path, { recursive: true, force: true }),
+    rm(`${path}.pending`, { recursive: true, force: true })
+  ])
+  return results.every((result) => result.status === 'fulfilled')
+}
+
+async function delayRememberedEmailClearForTest(): Promise<void> {
+  if (process.env.NEVIX_E2E !== '1' || app.isPackaged) return
+
+  const delay = Number(process.env.NEVIX_TEST_REMEMBERED_EMAIL_CLEAR_DELAY_MS)
+  if (!Number.isInteger(delay) || delay <= 0 || delay > 10_000) return
+  await new Promise((resolve) => setTimeout(resolve, delay))
 }
 
 function canPersistSecurely(): boolean {

@@ -1,7 +1,6 @@
 import { useEffect, useMemo } from 'react'
-import { useTranslation } from 'react-i18next'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
-import { useAuthentication } from '../features/authentication'
+import { RememberedEmailPersistenceNotice, useAuthentication } from '../features/authentication'
 import {
   ActiveOrganizationProvider,
   OrganizationOnboardingProvider,
@@ -36,7 +35,13 @@ function App(): React.JSX.Element {
         >
           <ResetOnboardingAfterAuthenticationEnds />
           <SessionAccessLostDialog />
-          <AuthenticatedRememberedEmailPersistenceNotice />
+          <RememberedEmailPersistenceNotice
+            surface="authenticated"
+            isSurfaceActive={authentication.status === 'authenticated'}
+            isPersistenceUnavailable={authentication.isRememberedEmailPersistenceUnavailable}
+            noticeSurface={authentication.rememberedEmailPersistenceNoticeSurface}
+            onShown={authentication.consumeRememberedEmailPersistenceNotice}
+          />
           <RouterProvider router={router} />
         </ActiveOrganizationProvider>
       </OrganizationOnboardingProvider>
@@ -55,27 +60,6 @@ function ResetOnboardingAfterAuthenticationEnds(): null {
   }, [onboarding, status])
 
   return null
-}
-
-function AuthenticatedRememberedEmailPersistenceNotice(): React.JSX.Element | null {
-  const { t } = useTranslation('authentication')
-  const authentication = useAuthenticationState()
-
-  if (
-    authentication.status !== 'authenticated' ||
-    authentication.rememberedEmailPersistenceNoticeTarget !== 'authenticated'
-  ) {
-    return null
-  }
-
-  return (
-    <p
-      role="status"
-      className="bg-card text-muted-foreground fixed right-6 bottom-6 z-50 max-w-sm rounded-lg border px-4 py-3 text-sm shadow-sm"
-    >
-      {t('rememberedEmailPersistence.unavailable')}
-    </p>
-  )
 }
 
 export default App

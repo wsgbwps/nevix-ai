@@ -22,8 +22,11 @@ function AuthenticationView(): React.JSX.Element | null {
       isSubmitting={authentication.isSubmitting}
       rememberedEmail={authentication.rememberedEmail}
       rememberEmailSelected={authentication.rememberEmailSelected}
-      showRememberedEmailPersistenceNotice={
-        authentication.rememberedEmailPersistenceNoticeTarget === 'login'
+      isRememberedEmailPersistenceUnavailable={
+        authentication.isRememberedEmailPersistenceUnavailable
+      }
+      rememberedEmailPersistenceNoticeSurface={
+        authentication.rememberedEmailPersistenceNoticeSurface
       }
       resendSecondsRemaining={authentication.resendSecondsRemaining}
       resendGeneration={authentication.resendGeneration}
@@ -33,6 +36,9 @@ function AuthenticationView(): React.JSX.Element | null {
       onShowSignUp={authentication.showSignUp}
       onShowRecovery={authentication.showRecovery}
       onRememberEmailSelectedChange={authentication.setRememberEmailSelected}
+      onRememberedEmailPersistenceNoticeShown={
+        authentication.consumeRememberedEmailPersistenceNotice
+      }
       onSignIn={authentication.signIn}
       onSignUp={authentication.signUp}
       onVerifySignUp={async (code) => {

@@ -16,6 +16,7 @@ export type RememberedEmailRead =
     }
   | { readonly outcome: 'empty' }
   | { readonly outcome: 'storage-unavailable' }
+  | { readonly outcome: 'unreadable' }
 
 export interface RememberedEmailWrite {
   readonly outcome: 'persisted' | 'memory-only'

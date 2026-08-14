@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -21,6 +21,15 @@ const rememberedEmailFileName = 'authentication-remembered-email.enc'
 async function fileExists(path: string): Promise<boolean> {
   try {
     await readFile(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path)
     return true
   } catch {
     return false
@@ -77,7 +86,8 @@ test('a successful password login securely remembers the authoritative email ind
       test.skip(true, 'requires Keychain, DPAPI, or Secret Service for native persistence')
     }
 
-    const submittedEmail = identity.email
+    const submittedEmail = identity.email.toUpperCase()
+    expect(submittedEmail).not.toBe(identity.email)
     await launched.page.evaluate(
       async (email) => window.api.invoke('authentication:replace-remembered-email', { email }),
       'previous-user@example.com'
@@ -210,6 +220,135 @@ test('clearing Remembered Email is immediate and reselecting does not save unver
   }
 })
 
+test(
+  'uncheck then recheck serializes clear before the next successful replacement',
+  { tag: '@smoke' },
+  async () => {
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
+
+    const identity = uniqueAuthIdentity('remembered-clear-replace-order')
+    const userId = await createAuthUser(authHarness, identity, true)
+    await seedOrganizationWithMembership(userId, { name: 'Remembered Clear Replace Org' })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-clear-replace-'))
+    const recordPath = join(userDataDir, rememberedEmailFileName)
+    let launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      environment: { NEVIX_TEST_REMEMBERED_EMAIL_CLEAR_DELAY_MS: '5000' }
+    })
+
+    try {
+      if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
+        await launched.electronApp.close()
+        test.skip(true, 'requires Keychain, DPAPI, or Secret Service for native persistence')
+      }
+
+      await launched.page.evaluate(
+        async (email) => window.api.invoke('authentication:replace-remembered-email', { email }),
+        'previous-clear-order@example.com'
+      )
+      await launched.page.reload()
+      await expect(launched.page.getByLabel('Email')).toHaveValue(
+        'previous-clear-order@example.com'
+      )
+
+      await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).uncheck()
+      await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).check()
+      await launched.page.getByLabel('Email').fill(identity.email)
+      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
+      await expect.poll(() => pathExists(recordPath)).toBe(true)
+
+      await launched.page.waitForTimeout(5500)
+      await expect
+        .poll(() =>
+          launched.page.evaluate(async () =>
+            window.api.invoke('authentication:read-remembered-email')
+          )
+        )
+        .toEqual({ outcome: 'email', email: identity.email, persistence: 'secure' })
+
+      await launched.electronApp.close()
+      await Promise.all([
+        rm(join(userDataDir, 'authentication-session.enc'), { force: true }),
+        rm(join(userDataDir, 'authentication-session.enc.pending'), { force: true })
+      ])
+      launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      await expect(launched.page.getByLabel('Email')).toHaveValue(identity.email)
+    } finally {
+      await launched.electronApp.close().catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
+    }
+  }
+)
+
+test(
+  'a stale failed clear cannot route the next memory-only replacement notice to login',
+  { tag: '@smoke' },
+  async () => {
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
+
+    const identity = uniqueAuthIdentity('remembered-stale-clear-failure')
+    const userId = await createAuthUser(authHarness, identity, true)
+    await seedOrganizationWithMembership(userId, { name: 'Remembered Stale Clear Org' })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-stale-clear-'))
+    const recordPath = join(userDataDir, rememberedEmailFileName)
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      environment: { NEVIX_TEST_REMEMBERED_EMAIL_CLEAR_DELAY_MS: '3000' }
+    })
+    const persistenceNotice = launched.page.getByText(
+      'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
+    )
+
+    try {
+      if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
+        await launched.electronApp.close()
+        test.skip(true, 'requires Keychain, DPAPI, or Secret Service for native persistence')
+      }
+
+      await launched.page.evaluate(
+        async (email) => window.api.invoke('authentication:replace-remembered-email', { email }),
+        'previous-stale-clear@example.com'
+      )
+      await rm(recordPath, { force: true })
+      await mkdir(recordPath)
+
+      await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).uncheck()
+      await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).check()
+      await launched.page.getByLabel('Email').fill(identity.email)
+      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
+
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
+      await expect(persistenceNotice).toBeVisible({ timeout: 10_000 })
+      await expect(persistenceNotice).toHaveCount(1)
+      await expect
+        .poll(
+          () =>
+            launched.page.evaluate(async () =>
+              window.api.invoke('authentication:read-remembered-email')
+            ),
+          { timeout: 10_000 }
+        )
+        .toEqual({ outcome: 'email', email: identity.email, persistence: 'memory-only' })
+    } finally {
+      await launched.electronApp.close().catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
+    }
+  }
+)
+
 test('a failed clear keeps the preference selected and explains that secure storage is unavailable', async () => {
   test.skip(
     !process.env.NEVIX_TEST_SUPABASE_URL,
@@ -251,6 +390,66 @@ test('a failed clear keeps the preference selected and explains that secure stor
     await rm(userDataDir, { recursive: true, force: true })
   }
 })
+
+test(
+  'a login persistence notice clears after the next replacement persists',
+  { tag: '@smoke' },
+  async () => {
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
+
+    const identity = uniqueAuthIdentity('remembered-login-notice-recovery')
+    const userId = await createAuthUser(authHarness, identity, true)
+    await seedOrganizationWithMembership(userId, { name: 'Remembered Login Recovery Org' })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-login-recovery-'))
+    const recordPath = join(userDataDir, rememberedEmailFileName)
+    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const persistenceNotice = launched.page.getByText(
+      'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
+    )
+
+    try {
+      if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
+        await launched.electronApp.close()
+        test.skip(true, 'requires Keychain, DPAPI, or Secret Service for native persistence')
+      }
+
+      await launched.page.evaluate(
+        async (email) => window.api.invoke('authentication:replace-remembered-email', { email }),
+        'previous-login-recovery@example.com'
+      )
+      await rm(recordPath, { force: true })
+      await mkdir(recordPath)
+      await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).uncheck()
+
+      await expect(
+        launched.page.getByRole('checkbox', { name: 'Remember sign-in address' })
+      ).toBeChecked()
+      await expect(persistenceNotice).toBeVisible()
+
+      await rm(recordPath, { recursive: true, force: true })
+      await launched.page.getByLabel('Email').fill(identity.email)
+      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
+
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
+      await expect(persistenceNotice).toHaveCount(0)
+      await expect
+        .poll(() =>
+          launched.page.evaluate(async () =>
+            window.api.invoke('authentication:read-remembered-email')
+          )
+        )
+        .toEqual({ outcome: 'email', email: identity.email, persistence: 'secure' })
+    } finally {
+      await launched.electronApp.close().catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
+    }
+  }
+)
 
 test('a new login boundary restores the selected default when no Remembered Email exists', async () => {
   test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
@@ -304,6 +503,14 @@ test('unavailable secure storage keeps Remembered Email only in the current proc
     )
     await expect(persistenceNotice).toBeVisible()
     await expect(persistenceNotice).toHaveCount(1)
+
+    await launched.page.getByRole('button', { name: 'Create account' }).click()
+    await expect(
+      launched.page.getByRole('heading', { name: 'Create your Nevix AI account' })
+    ).toBeVisible()
+    await launched.page.getByRole('button', { name: 'Sign in instead' }).click()
+    await expect(launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })).toBeVisible()
+    await expect(persistenceNotice).toHaveCount(0)
 
     const writeResult = await launched.page.evaluate(
       async (email) => window.api.invoke('authentication:replace-remembered-email', { email }),
@@ -386,43 +593,62 @@ test('an encryption failure keeps the new email in memory without writing plaint
   }
 })
 
-test('a successful login shows its memory-only notice on the onboarding surface', async () => {
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+test(
+  'an authenticated persistence notice clears after secure storage recovers',
+  { tag: '@smoke' },
+  async () => {
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
 
-  const identity = uniqueAuthIdentity('remembered-onboarding-notice')
-  const userId = await createAuthUser(authHarness, identity, true)
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-onboarding-notice-'))
-  const launched = await launchTestApp({
-    userDataDir,
-    systemLanguages: ['en-US'],
-    environment: { NEVIX_TEST_FAIL_REMEMBERED_EMAIL_ENCRYPTION: '1' }
-  })
+    const identity = uniqueAuthIdentity('remembered-authenticated-notice-recovery')
+    const userId = await createAuthUser(authHarness, identity, true)
+    await seedOrganizationWithMembership(userId, { name: 'Remembered Notice Recovery Org' })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-notice-recovery-'))
+    const pendingPath = join(userDataDir, `${rememberedEmailFileName}.pending`)
+    await mkdir(pendingPath)
+    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const persistenceNotice = launched.page.getByText(
+      'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
+    )
 
-  try {
-    if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
-      await launched.electronApp.close()
-      test.skip(true, 'requires a secure backend before encryption can be injected to fail')
+    try {
+      if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
+        await launched.electronApp.close()
+        test.skip(true, 'requires Keychain, DPAPI, or Secret Service for native persistence')
+      }
+
+      await launched.page.getByLabel('Email').fill(identity.email)
+      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
+      await expect(persistenceNotice).toBeVisible()
+      await expect(persistenceNotice).toHaveCount(1)
+
+      await signOutFromUserMenu(launched.page)
+      await rm(pendingPath, { recursive: true, force: true })
+      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
+
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
+      await expect(persistenceNotice).toHaveCount(0)
+      await expect
+        .poll(() =>
+          launched.page.evaluate(async () =>
+            window.api.invoke('authentication:read-remembered-email')
+          )
+        )
+        .toEqual({ outcome: 'email', email: identity.email, persistence: 'secure' })
+    } finally {
+      await launched.electronApp.close().catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
     }
-
-    await launched.page.getByLabel('Email').fill(identity.email)
-    await launched.page.getByLabel('Password').fill(identity.password)
-    await launched.page.getByRole('button', { name: 'Sign in' }).click()
-
-    await expect(
-      launched.page.getByRole('heading', { name: 'What should we call you?' })
-    ).toBeVisible()
-    await expect(
-      launched.page.getByText(
-        'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
-      )
-    ).toBeVisible()
-  } finally {
-    await launched.electronApp.close().catch(() => undefined)
-    await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
-})
+)
 
 test('a failed atomic write keeps the previous encrypted record and the new in-process value', async () => {
   test.skip(
@@ -502,7 +728,7 @@ test('a corrupt Remembered Email record is deleted with a generic internal warni
           return ''
         }
       })
-      .toContain('Remembered Email storage discarded an invalid encrypted record.')
+      .toContain('Remembered Email storage discarded an unreadable encrypted record.')
     const diagnostics = await readFile(diagnosticsPath, 'utf8')
     expect(diagnostics).not.toContain(sensitiveMarker)
     expect(diagnostics).not.toContain(recordPath)
@@ -511,6 +737,52 @@ test('a corrupt Remembered Email record is deleted with a generic internal warni
     await rm(userDataDir, { recursive: true, force: true })
   }
 })
+
+test(
+  'a non-missing read failure is deleted and treated as unreadable without a user warning',
+  { tag: '@smoke' },
+  async () => {
+    test.skip(
+      !process.env.NEVIX_TEST_SUPABASE_URL,
+      'requires the configured build produced by the Auth test command'
+    )
+
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-unreadable-'))
+    const recordPath = join(userDataDir, rememberedEmailFileName)
+    await mkdir(recordPath)
+    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+
+    try {
+      await expect(
+        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
+      ).toBeVisible()
+      await expect(launched.page.getByLabel('Email')).toHaveValue('')
+      await expect(launched.page.getByLabel('Email')).toBeFocused()
+      await expect.poll(() => pathExists(recordPath)).toBe(false)
+      await expect(
+        launched.page.getByText(
+          'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
+        )
+      ).toHaveCount(0)
+
+      const diagnosticsPath = test.info().outputPath('electron.log')
+      await expect
+        .poll(async () => {
+          try {
+            return await readFile(diagnosticsPath, 'utf8')
+          } catch {
+            return ''
+          }
+        })
+        .toContain('Remembered Email storage discarded an unreadable encrypted record.')
+      const diagnostics = await readFile(diagnosticsPath, 'utf8')
+      expect(diagnostics).not.toContain(recordPath)
+    } finally {
+      await launched.electronApp.close()
+      await rm(userDataDir, { recursive: true, force: true })
+    }
+  }
+)
 
 test('Linux basic_text keeps Remembered Email in memory without creating a record', async () => {
   test.skip(process.platform !== 'linux', 'Linux safeStorage backend acceptance')

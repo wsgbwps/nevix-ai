@@ -59,7 +59,8 @@ interface Authentication {
   readonly isSessionPersistenceUnavailable: boolean
   readonly rememberedEmail: string | undefined
   readonly rememberEmailSelected: boolean
-  readonly rememberedEmailPersistenceNoticeTarget: 'login' | 'authenticated' | undefined
+  readonly isRememberedEmailPersistenceUnavailable: boolean
+  readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   readonly userEmail: string | undefined
   readonly resendSecondsRemaining: number
   readonly resendGeneration: number
@@ -69,6 +70,7 @@ interface Authentication {
   readonly showSignUp: () => void
   readonly showRecovery: () => void
   readonly setRememberEmailSelected: (selected: boolean) => void
+  readonly consumeRememberedEmailPersistenceNotice: () => void
   readonly retryRestore: () => Promise<void>
   readonly signIn: (email: string, password: string) => Promise<void>
   readonly signUp: (email: string, password: string) => Promise<void>
@@ -109,7 +111,9 @@ export function useAuthentication(): Authentication {
   const [persistenceUnavailable, setPersistenceUnavailable] = useState(false)
   const [rememberedEmail, setRememberedEmail] = useState<string>()
   const [rememberEmailSelected, setRememberEmailSelectedState] = useState(true)
-  const [rememberedEmailPersistenceNoticeTarget, setRememberedEmailPersistenceNoticeTarget] =
+  const [rememberedEmailPersistenceUnavailable, setRememberedEmailPersistenceUnavailable] =
+    useState(false)
+  const [rememberedEmailPersistenceNoticeSurface, setRememberedEmailPersistenceNoticeSurface] =
     useState<'login' | 'authenticated'>()
   const [userEmail, setUserEmail] = useState<string | undefined>()
   const [verificationEmail, setVerificationEmail] = useState<string>()
@@ -120,6 +124,10 @@ export function useAuthentication(): Authentication {
   const clientRef = useRef<SupabaseClient | null>(null)
   const authSubscriptionRef = useRef<{ unsubscribe: () => void } | null>(null)
   const submissionRef = useRef(false)
+  const rememberEmailSelectedRef = useRef(true)
+  const rememberEmailSelectionGenerationRef = useRef(0)
+  const rememberedEmailMutationRef = useRef<Promise<void>>(Promise.resolve())
+  const hasShownRememberedEmailPersistenceNoticeRef = useRef(false)
   const hasInitializedRef = useRef(false)
   const restoreInProgressRef = useRef(false)
   const signOutInProgressRef = useRef(false)
@@ -127,6 +135,42 @@ export function useAuthentication(): Authentication {
   // recovery Session can never leak into a render or the top-level authenticated gate.
   const recoveryClientRef = useRef<SupabaseClient | null>(null)
   const recoveryEmailRef = useRef<string | undefined>(undefined)
+
+  const enqueueRememberedEmailMutation = useCallback(
+    <Result>(mutation: () => Promise<Result>): Promise<Result> => {
+      const result = rememberedEmailMutationRef.current.then(mutation)
+      rememberedEmailMutationRef.current = result.then(
+        () => undefined,
+        () => undefined
+      )
+      return result
+    },
+    []
+  )
+
+  const reportRememberedEmailPersistenceUnavailable = useCallback(
+    (target: 'login' | 'authenticated'): void => {
+      setRememberedEmailPersistenceUnavailable(true)
+      if (hasShownRememberedEmailPersistenceNoticeRef.current) return
+      setRememberedEmailPersistenceNoticeSurface((currentSurface) => currentSurface ?? target)
+    },
+    []
+  )
+
+  const reportRememberedEmailPersistenceAvailable = useCallback((): void => {
+    setRememberedEmailPersistenceUnavailable(false)
+    setRememberedEmailPersistenceNoticeSurface(undefined)
+  }, [])
+
+  const consumeRememberedEmailPersistenceNotice = useCallback((): void => {
+    if (hasShownRememberedEmailPersistenceNoticeRef.current) return
+    hasShownRememberedEmailPersistenceNoticeRef.current = true
+  }, [])
+
+  const retireRememberedEmailPersistenceNotice = useCallback((): void => {
+    if (!hasShownRememberedEmailPersistenceNoticeRef.current) return
+    setRememberedEmailPersistenceNoticeSurface(undefined)
+  }, [])
 
   const discardRecovery = useCallback((): void => {
     recoveryClientRef.current = null
@@ -149,21 +193,28 @@ export function useAuthentication(): Authentication {
         setError(undefined)
         setNotice('session-expired')
         setPersistenceUnavailable(false)
+        retireRememberedEmailPersistenceNotice()
         setUserEmail(undefined)
         setStatus('unauthenticated')
         setFlow('login')
+        rememberEmailSelectedRef.current = true
+        rememberEmailSelectionGenerationRef.current += 1
         setRememberEmailSelectedState(true)
         resetSignUpVerification()
         discardRecovery()
       })
-  }, [discardRecovery, resetSignUpVerification])
+  }, [discardRecovery, resetSignUpVerification, retireRememberedEmailPersistenceNotice])
 
-  const enterAuthenticatedShell = useCallback((email: string | undefined): void => {
-    setPersistenceUnavailable(isSessionPersistenceUnavailable())
-    setNotice(undefined)
-    setUserEmail(email)
-    setStatus('authenticated')
-  }, [])
+  const enterAuthenticatedShell = useCallback(
+    (email: string | undefined): void => {
+      retireRememberedEmailPersistenceNotice()
+      setPersistenceUnavailable(isSessionPersistenceUnavailable())
+      setNotice(undefined)
+      setUserEmail(email)
+      setStatus('authenticated')
+    },
+    [retireRememberedEmailPersistenceNotice]
+  )
 
   const getSession = useCallback(async (): Promise<AuthenticatedSession | undefined> => {
     const client = clientRef.current
@@ -207,7 +258,9 @@ export function useAuthentication(): Authentication {
         remembered.outcome === 'storage-unavailable' ||
         (remembered.outcome === 'email' && remembered.persistence === 'memory-only')
       ) {
-        setRememberedEmailPersistenceNoticeTarget('login')
+        reportRememberedEmailPersistenceUnavailable('login')
+      } else {
+        reportRememberedEmailPersistenceAvailable()
       }
 
       // The envelope may still hold a valid Session, so nothing is deleted; the retry boundary
@@ -254,7 +307,12 @@ export function useAuthentication(): Authentication {
     } finally {
       restoreInProgressRef.current = false
     }
-  }, [enterAuthenticatedShell, handleProviderSignedOut])
+  }, [
+    enterAuthenticatedShell,
+    handleProviderSignedOut,
+    reportRememberedEmailPersistenceAvailable,
+    reportRememberedEmailPersistenceUnavailable
+  ])
 
   useEffect(() => {
     if (hasInitializedRef.current) return
@@ -294,43 +352,70 @@ export function useAuthentication(): Authentication {
   }, [discardRecovery, resetSignUpVerification])
 
   const showSignUp = useCallback((): void => {
+    retireRememberedEmailPersistenceNotice()
     setFlow('signup')
     setError(undefined)
     setNotice(undefined)
     resetSignUpVerification()
     discardRecovery()
-  }, [discardRecovery, resetSignUpVerification])
+  }, [discardRecovery, resetSignUpVerification, retireRememberedEmailPersistenceNotice])
 
   const showRecovery = useCallback((): void => {
+    retireRememberedEmailPersistenceNotice()
     setFlow('recovery-request')
     setError(undefined)
     setNotice(undefined)
     resetSignUpVerification()
     discardRecovery()
-  }, [discardRecovery, resetSignUpVerification])
+  }, [discardRecovery, resetSignUpVerification, retireRememberedEmailPersistenceNotice])
 
   const setRememberEmailSelected = useCallback(
     (selected: boolean): void => {
+      rememberEmailSelectedRef.current = selected
+      const selectionGeneration = ++rememberEmailSelectionGenerationRef.current
       setRememberEmailSelectedState(selected)
       if (selected) return
 
       const previousRememberedEmail = rememberedEmail
       setRememberedEmail(undefined)
-      void clearRememberedEmail()
+      void enqueueRememberedEmailMutation(clearRememberedEmail)
         .then((result) => {
-          if (result.outcome === 'cleared') return
+          if (
+            selectionGeneration !== rememberEmailSelectionGenerationRef.current ||
+            rememberEmailSelectedRef.current
+          ) {
+            return
+          }
 
+          if (result.outcome === 'cleared') {
+            reportRememberedEmailPersistenceAvailable()
+            return
+          }
+
+          reportRememberedEmailPersistenceUnavailable('login')
           setRememberedEmail(previousRememberedEmail)
+          rememberEmailSelectedRef.current = true
           setRememberEmailSelectedState(true)
-          setRememberedEmailPersistenceNoticeTarget((target) => target ?? 'login')
         })
         .catch(() => {
+          if (
+            selectionGeneration !== rememberEmailSelectionGenerationRef.current ||
+            rememberEmailSelectedRef.current
+          ) {
+            return
+          }
+          reportRememberedEmailPersistenceUnavailable('login')
           setRememberedEmail(previousRememberedEmail)
+          rememberEmailSelectedRef.current = true
           setRememberEmailSelectedState(true)
-          setRememberedEmailPersistenceNoticeTarget((target) => target ?? 'login')
         })
     },
-    [rememberedEmail]
+    [
+      enqueueRememberedEmailMutation,
+      rememberedEmail,
+      reportRememberedEmailPersistenceAvailable,
+      reportRememberedEmailPersistenceUnavailable
+    ]
   )
 
   const signIn = useCallback(
@@ -358,17 +443,17 @@ export function useAuthentication(): Authentication {
         }
 
         const authoritativeEmail = data.user?.email ?? data.session.user.email
-        if (rememberEmailSelected && authoritativeEmail) {
+        if (rememberEmailSelectedRef.current && authoritativeEmail) {
           setRememberedEmail(authoritativeEmail)
-          void replaceRememberedEmail(authoritativeEmail)
+          void enqueueRememberedEmailMutation(() => replaceRememberedEmail(authoritativeEmail))
             .then((result) => {
               if (result.outcome === 'memory-only') {
-                setRememberedEmailPersistenceNoticeTarget((target) => target ?? 'authenticated')
+                reportRememberedEmailPersistenceUnavailable('authenticated')
+              } else {
+                reportRememberedEmailPersistenceAvailable()
               }
             })
-            .catch(() =>
-              setRememberedEmailPersistenceNoticeTarget((target) => target ?? 'authenticated')
-            )
+            .catch(() => reportRememberedEmailPersistenceUnavailable('authenticated'))
         }
         enterAuthenticatedShell(data.session.user.email)
       } catch {
@@ -378,7 +463,12 @@ export function useAuthentication(): Authentication {
         setIsSubmitting(false)
       }
     },
-    [enterAuthenticatedShell, rememberEmailSelected]
+    [
+      enqueueRememberedEmailMutation,
+      enterAuthenticatedShell,
+      reportRememberedEmailPersistenceAvailable,
+      reportRememberedEmailPersistenceUnavailable
+    ]
   )
 
   const signUp = useCallback(async (email: string, password: string): Promise<void> => {
@@ -638,9 +728,12 @@ export function useAuthentication(): Authentication {
       setError(undefined)
       setNotice(remoteRevocationConfirmed ? undefined : 'remote-sign-out-delayed')
       setPersistenceUnavailable(false)
+      retireRememberedEmailPersistenceNotice()
       setUserEmail(undefined)
       setStatus('unauthenticated')
       setFlow('login')
+      rememberEmailSelectedRef.current = true
+      rememberEmailSelectionGenerationRef.current += 1
       setRememberEmailSelectedState(true)
       resetSignUpVerification()
       discardRecovery()
@@ -648,7 +741,7 @@ export function useAuthentication(): Authentication {
       signOutInProgressRef.current = false
       setIsSubmitting(false)
     }
-  }, [discardRecovery, resetSignUpVerification])
+  }, [discardRecovery, resetSignUpVerification, retireRememberedEmailPersistenceNotice])
 
   return {
     status,
@@ -659,7 +752,8 @@ export function useAuthentication(): Authentication {
     isSessionPersistenceUnavailable: persistenceUnavailable,
     rememberedEmail,
     rememberEmailSelected,
-    rememberedEmailPersistenceNoticeTarget,
+    isRememberedEmailPersistenceUnavailable: rememberedEmailPersistenceUnavailable,
+    rememberedEmailPersistenceNoticeSurface,
     userEmail,
     resendSecondsRemaining,
     resendGeneration,
@@ -669,6 +763,7 @@ export function useAuthentication(): Authentication {
     showSignUp,
     showRecovery,
     setRememberEmailSelected,
+    consumeRememberedEmailPersistenceNotice,
     retryRestore: restore,
     signIn,
     signUp,
