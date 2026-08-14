@@ -124,6 +124,7 @@ export function useAuthentication(): Authentication {
   const clientRef = useRef<SupabaseClient | null>(null)
   const authSubscriptionRef = useRef<{ unsubscribe: () => void } | null>(null)
   const submissionRef = useRef(false)
+  const statusRef = useRef<AuthenticationStatus>('restoring')
   const rememberEmailSelectedRef = useRef(true)
   const rememberEmailSelectionGenerationRef = useRef(0)
   const rememberedEmailMutationRef = useRef<Promise<void>>(Promise.resolve())
@@ -135,6 +136,10 @@ export function useAuthentication(): Authentication {
   // recovery Session can never leak into a render or the top-level authenticated gate.
   const recoveryClientRef = useRef<SupabaseClient | null>(null)
   const recoveryEmailRef = useRef<string | undefined>(undefined)
+
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
 
   const enqueueRememberedEmailMutation = useCallback(
     <Result>(mutation: () => Promise<Result>): Promise<Result> => {
@@ -392,7 +397,9 @@ export function useAuthentication(): Authentication {
             return
           }
 
-          reportRememberedEmailPersistenceUnavailable('login')
+          reportRememberedEmailPersistenceUnavailable(
+            statusRef.current === 'authenticated' ? 'authenticated' : 'login'
+          )
           setRememberedEmail(previousRememberedEmail)
           rememberEmailSelectedRef.current = true
           setRememberEmailSelectedState(true)
@@ -404,7 +411,9 @@ export function useAuthentication(): Authentication {
           ) {
             return
           }
-          reportRememberedEmailPersistenceUnavailable('login')
+          reportRememberedEmailPersistenceUnavailable(
+            statusRef.current === 'authenticated' ? 'authenticated' : 'login'
+          )
           setRememberedEmail(previousRememberedEmail)
           rememberEmailSelectedRef.current = true
           setRememberEmailSelectedState(true)

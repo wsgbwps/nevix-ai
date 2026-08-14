@@ -288,6 +288,59 @@ test(
 )
 
 test(
+  'a delayed failed clear after successful login explains persistence on the authenticated surface',
+  { tag: '@smoke' },
+  async () => {
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
+
+    const identity = uniqueAuthIdentity('remembered-active-surface-clear-failure')
+    const userId = await createAuthUser(authHarness, identity, true)
+    await seedOrganizationWithMembership(userId, { name: 'Remembered Clear Failure Org' })
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-clear-failure-'))
+    const recordPath = join(userDataDir, rememberedEmailFileName)
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      environment: { NEVIX_TEST_REMEMBERED_EMAIL_CLEAR_DELAY_MS: '3000' }
+    })
+    const persistenceNotice = launched.page.getByText(
+      'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
+    )
+
+    try {
+      if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
+        await launched.electronApp.close()
+        test.skip(true, 'requires Keychain, DPAPI, or Secret Service for native persistence')
+      }
+
+      await launched.page.evaluate(
+        async (email) => window.api.invoke('authentication:replace-remembered-email', { email }),
+        identity.email
+      )
+      await launched.page.reload()
+      await expect(launched.page.getByLabel('Email')).toHaveValue(identity.email)
+      await rm(recordPath, { force: true })
+      await mkdir(recordPath)
+
+      await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).uncheck()
+      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
+
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
+      await expect(persistenceNotice).toBeVisible({ timeout: 10_000 })
+      await expect(persistenceNotice).toHaveCount(1)
+    } finally {
+      await launched.electronApp.close().catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
+    }
+  }
+)
+
+test(
   'a stale failed clear cannot route the next memory-only replacement notice to login',
   { tag: '@smoke' },
   async () => {
