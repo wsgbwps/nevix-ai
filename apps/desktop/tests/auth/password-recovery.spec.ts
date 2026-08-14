@@ -123,7 +123,7 @@ test('@smoke the full recovery loop rotates the password, revokes old Sessions, 
       const passwordInput = launched.page.getByLabel('New password')
       await expect(
         launched.page.getByText('We recommend using 12 or more characters.')
-      ).toBeVisible()
+      ).toHaveCount(0)
       await expect(passwordInput).toHaveAttribute('type', 'password')
       await passwordInput.locator('..').getByRole('button', { name: 'Show entered value' }).click()
       await expect(passwordInput).toHaveAttribute('type', 'text')

@@ -774,19 +774,21 @@ function FormHeader({
   )
 }
 
-function PasswordPolicyFeedback({ password }: { readonly password: string }): React.JSX.Element {
+function PasswordPolicyFeedback({
+  password
+}: {
+  readonly password: string
+}): React.JSX.Element | null {
   const { t } = useTranslation('authentication')
   const lengthError = password === '' ? undefined : passwordByteLengthError(password)
 
+  if (!lengthError) return null
+
   return (
-    <div>
-      <FieldDescription>{t('passwordPolicy.recommendation')}</FieldDescription>
-      {lengthError ? (
-        <FieldError>
-          {t(`passwordPolicy.${lengthError === 'too-short' ? 'tooShort' : 'tooLong'}`)}
-        </FieldError>
-      ) : null}
-    </div>
+    <FieldError>
+      {t('passwordPolicy.recommendation')}{' '}
+      {t(`passwordPolicy.${lengthError === 'too-short' ? 'tooShort' : 'tooLong'}`)}
+    </FieldError>
   )
 }
 

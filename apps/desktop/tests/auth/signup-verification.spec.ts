@@ -52,10 +52,12 @@ test(
         await launched.page.getByLabel('Email').fill(identity.email)
         await expect(
           launched.page.getByText('We recommend using 12 or more characters.')
-        ).toBeVisible()
+        ).toHaveCount(0)
         await launched.page.getByLabel('Password', { exact: true }).fill('12345678901')
         await expect(
-          launched.page.getByRole('alert').filter({ hasText: 'Password is too short' })
+          launched.page.getByRole('alert').filter({
+            hasText: 'We recommend using 12 or more characters. Password is too short'
+          })
         ).toBeVisible()
         await expect(launched.page.getByRole('button', { name: 'Create account' })).toBeDisabled()
         await launched.page.getByLabel('Password', { exact: true }).fill('x'.repeat(73))
