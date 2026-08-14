@@ -6,10 +6,11 @@
 - `authentication` owns credential verification and the current-device Session lifecycle. `language` owns Language Mode and Interface Language. Do not introduce the broader `identity` name or preserve `settings` / `i18n` as competing Domain names for Language behavior
 - Put IPC declarations and named request/response types in `shared/ipc/<domain>/types.ts`. Keep `preload/` generic: expose typed bridge primitives, but do not add per-Domain code or a central Domain registry
 - Put each Domain-owned IPC adapter in `main/<domain>/ipc/`. Its `index.ts` only exports a synchronous `register(): void`; loading it has no side effects, registration is order-independent, and each Channel Handler lives in a directly nested `<action>.ts` file. Do not add a `handlers/` directory
+- `window` is the sole platform-owner IPC exception: Window lifecycle Channels use `shared/ipc/window/types.ts`, `main/window/ipc/`, and the `window:<action>` prefix under the same registration, Handler-placement, declaration-merging, and generic-preload rules. `updater` and `tray` remain transport-free unless a later architecture decision names a required seam
 - A Domain IPC adapter may depend on implementation from the same Domain; Domain implementation must not depend on IPC. Registration must not initialize storage, run migrations, perform network work, or initialize the Domain
-- `main/index.ts` is a composition root. It explicitly initializes Domains through their public interfaces and auto-discovers registration modules with `./*/ipc/index.ts`. If registration ever requires ordering, replace auto-discovery with explicit wiring rather than relying on file order
+- `main/index.ts` is a composition root. It explicitly initializes Domains through their public interfaces and auto-discovers Domain plus approved Window registration modules with `./*/ipc/index.ts`. If registration ever requires ordering, replace auto-discovery with explicit wiring rather than relying on file order
 - Create `main/<domain>/index.ts` only when callers outside that Domain need a public interface. External Main callers must use it instead of deep-importing implementation; the Domain's own IPC adapter uses relative internal imports. Cross-Domain dependencies must use public interfaces and remain acyclic
-- Keep platform responsibilities such as `window/`, `updater/`, and `tray/` as explicit non-Domain owners. Do not invent a Domain merely to make the Main tree symmetrical
+- Keep platform responsibilities such as `window/`, `updater/`, and `tray/` as explicit non-Domain owners. Window lifecycle IPC does not turn `window` into a Domain; do not invent a Domain merely to make the Main tree symmetrical
 
 ## Renderer Feature interface and dependencies
 
@@ -21,7 +22,7 @@
 ## Renderer page ownership
 
 - Keep `renderer/src/app/routes/` thin: a route file only creates its file route and assembles its page component, with no page implementation
-- Put a page owned by a business Domain in `renderer/src/features/<domain>/`, exported through that Feature's public `index.ts`, and assembled by a thin route; per [ADR-0004](docs/adr/0004-renderer-routing-topology.md), authenticated views render in the App Shell content area except the Organization pre-shell routes (onboarding and organization selection), the documented full-screen exceptions before an Organization context exists
+- Put a page owned by a business Domain in `renderer/src/features/<domain>/`, exported through that Feature's public `index.ts`, and assembled by a thin route; per [ADR-0004](docs/adr/0004-renderer-routing-topology.md), authenticated views render in the App Shell content area except the Organization pre-shell routes before an Organization context exists and the app-owned full-screen Settings Page aggregation
 - Put cross-Feature aggregation pages and pages without a Domain owner in `renderer/src/app/pages/` (e.g. the Settings page)
 - Keep App Shell internals in `renderer/src/app/shell/`
 - Never add page files at the `renderer/src/app/` root

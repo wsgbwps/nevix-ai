@@ -13,6 +13,9 @@ export const profileTranslations = defineResourceTranslations({
     save: '保存',
     cancel: '取消',
     saved: '显示名已更新。',
+    loadFailed: '无法读取个人资料。请重试。',
+    saveFailed: '无法保存个人资料。草稿已保留，请重试。',
+    retry: '重试',
     validation: {
       displayNameRequired: '请输入显示名（不能为纯空白）',
       displayNameTooLong: '显示名最长 50 个字符'
@@ -28,6 +31,9 @@ export const profileTranslations = defineResourceTranslations({
     save: 'Save',
     cancel: 'Cancel',
     saved: 'Display name updated.',
+    loadFailed: 'Profile could not be loaded. Try again.',
+    saveFailed: 'Profile could not be saved. Your draft is retained; try again.',
+    retry: 'Try again',
     validation: {
       displayNameRequired: 'Enter a display name (not whitespace only)',
       displayNameTooLong: 'Display name is 50 characters at most'

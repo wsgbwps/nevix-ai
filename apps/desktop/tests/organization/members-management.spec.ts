@@ -13,7 +13,7 @@ import {
   readMailpitMessageIds,
   waitForRegistrationMessage
 } from '../auth/helpers/mailpit'
-import { launchTestApp, openSettingsFromUserMenu } from '../helpers/electron-app'
+import { launchTestApp, openSettingsSectionFromUserMenu } from '../helpers/electron-app'
 import {
   ageInvitationCodeBeyondCooldown,
   readPendingInvitationId,
@@ -63,7 +63,7 @@ test(
       const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
       try {
         await signIn(launched.page, memberIdentity)
-        await openSettingsFromUserMenu(launched.page)
+        await openSettingsSectionFromUserMenu(launched.page, 'Members')
 
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
         const settingsSidebar = launched.page.getByRole('complementary')
@@ -135,7 +135,7 @@ test(
       const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
       try {
         await signIn(launched.page, ownerIdentity)
-        await openSettingsFromUserMenu(launched.page)
+        await openSettingsSectionFromUserMenu(launched.page, 'Members')
 
         const pendingTab = launched.page.getByRole('tab', { name: /Pending invitations/ })
         await pendingTab.click()
@@ -229,7 +229,7 @@ test(
       const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
       try {
         await signIn(launched.page, ownerIdentity)
-        await openSettingsFromUserMenu(launched.page)
+        await openSettingsSectionFromUserMenu(launched.page, 'Members')
         await launched.page.getByRole('tab', { name: /Pending invitations/ }).click()
 
         await launched.page.route(
@@ -322,7 +322,7 @@ test(
           }
           await route.continue()
         })
-        await openSettingsFromUserMenu(launched.page)
+        await openSettingsSectionFromUserMenu(launched.page, 'Members')
         await expect.poll(() => activeProjectionRequestCount).toBe(1)
 
         await expect(memberRow(launched.page, 'Mason Member')).toContainText('Member')
@@ -421,7 +421,7 @@ test(
       const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
       try {
         await signIn(launched.page, adminIdentity)
-        await openSettingsFromUserMenu(launched.page)
+        await openSettingsSectionFromUserMenu(launched.page, 'Members')
 
         const settingsMain = launched.page.getByRole('main')
         await expect(settingsMain.getByText('Organization name', { exact: true })).toBeVisible()

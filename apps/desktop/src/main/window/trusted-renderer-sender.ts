@@ -6,10 +6,11 @@ import { isTrustedTopLevelRenderer } from './trusted-renderer'
 export function requireTrustedTopLevelRendererSender(
   event: Electron.IpcMainInvokeEvent,
   errorMessage: string
-): void {
+): BrowserWindow {
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender)
   if (
     !isTrustedTopLevelRenderer({
-      ownerWindow: BrowserWindow.fromWebContents(event.sender),
+      ownerWindow,
       senderFrame: event.senderFrame,
       mainFrame: event.sender.mainFrame,
       trustedRendererUrl: rendererEntryUrl()
@@ -17,4 +18,5 @@ export function requireTrustedTopLevelRendererSender(
   ) {
     throw new Error(errorMessage)
   }
+  return ownerWindow!
 }

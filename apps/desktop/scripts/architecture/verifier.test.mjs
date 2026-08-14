@@ -95,6 +95,24 @@ function canonicalTree() {
       '}',
       ''
     ].join('\n'),
+    'src/main/window/ipc/index.ts': [
+      "import { ipcMain } from 'electron'",
+      "import { decideOrdinaryCloseHandler } from './decide-ordinary-close'",
+      '',
+      'export function register(): void {',
+      "  ipcMain.handle('window:decide-ordinary-close', decideOrdinaryCloseHandler)",
+      '}',
+      ''
+    ].join('\n'),
+    'src/main/window/ipc/decide-ordinary-close.ts': [
+      "import { decideOrdinaryClose } from '../ordinary-close'",
+      '',
+      'export function decideOrdinaryCloseHandler(): void {',
+      '  decideOrdinaryClose()',
+      '}',
+      ''
+    ].join('\n'),
+    'src/main/window/ordinary-close.ts': 'export function decideOrdinaryClose(): void {}\n',
     'src/preload/index.ts': [
       "import { contextBridge, ipcRenderer } from 'electron'",
       "import type { IpcChannelMap } from '@ipc/channels'",
@@ -140,6 +158,16 @@ function canonicalTree() {
       '  }',
       '  interface IpcEventMap {',
       "    'language:language-mode-changed': { languageMode: string }",
+      '  }',
+      '}',
+      '',
+      'export {}',
+      ''
+    ].join('\n'),
+    'src/shared/ipc/window/types.ts': [
+      "declare module '@ipc/channels' {",
+      '  interface IpcChannelMap {',
+      "    'window:decide-ordinary-close': { response: void }",
       '  }',
       '}',
       '',
@@ -231,17 +259,22 @@ test('legacy Adapter-first Main IPC path fails', () => {
   assertViolation(run(files), 'main/adapter-first-ipc', 'src/main/ipc/language/index.ts')
 })
 
-test('IPC adapter under a non-Domain platform owner fails', () => {
+test('the Window platform owner may expose a canonical typed IPC adapter', () => {
+  const result = run(canonicalTree())
+  assert.equal(result.ok, true, formatViolations(result.violations).join('\n'))
+})
+
+test('IPC adapters under other non-Domain platform owners fail', () => {
   const files = canonicalTree()
-  files['src/main/window/ipc/index.ts'] = [
+  files['src/main/updater/ipc/index.ts'] = [
     "import { ipcMain } from 'electron'",
     '',
     'export function register(): void {',
-    "  ipcMain.handle('window:focus', () => undefined)",
+    "  ipcMain.handle('updater:check', () => undefined)",
     '}',
     ''
   ].join('\n')
-  assertViolation(run(files), 'main/platform-owner-ipc', 'src/main/window/ipc/index.ts')
+  assertViolation(run(files), 'main/platform-owner-ipc', 'src/main/updater/ipc/index.ts')
 })
 
 test('legacy Main Domain names fail', () => {
@@ -275,6 +308,12 @@ test('asynchronous or missing registration export fails', () => {
   assertViolation(run(missing), 'main/registration-module-shape', 'src/main/language/ipc/')
 })
 
+test('Window registration modules follow the canonical synchronous shape', () => {
+  const files = canonicalTree()
+  files['src/main/window/ipc/index.ts'] = 'export async function register(): Promise<void> {}\n'
+  assertViolation(run(files), 'main/registration-module-shape', 'src/main/window/ipc/index.ts')
+})
+
 test('registration module load-time side effects fail', () => {
   const files = canonicalTree()
   files['src/main/language/ipc/index.ts'] = [
@@ -304,6 +343,17 @@ test('extra Handler nesting fails', () => {
   )
 })
 
+test('Window Handlers must be directly nested in its adapter', () => {
+  const files = canonicalTree()
+  files['src/main/window/ipc/handlers/decide-ordinary-close.ts'] =
+    'export function decideOrdinaryCloseHandler(): void {}\n'
+  assertViolation(
+    run(files),
+    'main/handler-nesting',
+    'src/main/window/ipc/handlers/decide-ordinary-close.ts'
+  )
+})
+
 test('Domain implementation depending on IPC fails', () => {
   const files = canonicalTree()
   files['src/main/language/runtime.ts'] = [
@@ -323,6 +373,23 @@ test('Domain implementation depending on IPC fails', () => {
     run(files),
     'main/implementation-ipc-independence',
     'src/main/language/runtime.ts'
+  )
+})
+
+test('Window platform implementation depending on its IPC adapter fails', () => {
+  const files = canonicalTree()
+  files['src/main/window/main-window.ts'] = [
+    "import { decideOrdinaryCloseHandler } from './ipc/decide-ordinary-close'",
+    '',
+    'export function createWindow(): void {',
+    '  decideOrdinaryCloseHandler()',
+    '}',
+    ''
+  ].join('\n')
+  assertViolation(
+    run(files),
+    'main/implementation-ipc-independence',
+    'src/main/window/main-window.ts'
   )
 })
 
@@ -378,6 +445,15 @@ test('Main adapter Channels disagreeing with the Domain prefix fail', () => {
     "'authentication:get-bootstrap'"
   )
   assertViolation(run(files), 'channels/domain-prefix', 'src/main/language/ipc/index.ts')
+})
+
+test('Window adapter Channels use the Window prefix', () => {
+  const files = canonicalTree()
+  files['src/main/window/ipc/index.ts'] = files['src/main/window/ipc/index.ts'].replace(
+    "'window:decide-ordinary-close'",
+    "'organization:decide-ordinary-close'"
+  )
+  assertViolation(run(files), 'channels/domain-prefix', 'src/main/window/ipc/index.ts')
 })
 
 test('seam names disagreeing between shared IPC and Main fail', () => {

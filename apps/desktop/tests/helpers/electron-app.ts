@@ -177,6 +177,24 @@ export async function expectWindowTitle(
     .toBe(expectedTitle)
 }
 
+/** Requests the same ordinary close lifecycle as the main window's native close control. */
+export async function requestOrdinaryWindowClose(electronApp: ElectronApplication): Promise<void> {
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    const mainWindow = BrowserWindow.getAllWindows()[0]
+    if (!mainWindow) throw new Error('Main window was not created')
+    mainWindow.close()
+  })
+}
+
+export async function expectMainWindowCount(
+  electronApp: ElectronApplication,
+  expectedCount: number
+): Promise<void> {
+  await expect
+    .poll(() => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length))
+    .toBe(expectedCount)
+}
+
 /**
  * Opens the Settings Page through the App Shell user menu: opens the NavUser menu and activates
  * its Settings item. The shell renders both the menu trigger and the item through the Interface
@@ -190,6 +208,17 @@ export async function openSettingsFromUserMenu(page: Page): Promise<void> {
     await page.getByRole('button', { name: /user menu|用户菜单/i }).click()
   }
   await page.getByRole('menuitem', { name: /settings|设置/i }).click()
+}
+
+export async function openSettingsSectionFromUserMenu(
+  page: Page,
+  sectionName: string
+): Promise<void> {
+  await openSettingsFromUserMenu(page)
+  await page
+    .getByRole('navigation', { name: /^(Settings|设置)$/ })
+    .getByRole('button', { name: sectionName, exact: true })
+    .click()
 }
 
 /**

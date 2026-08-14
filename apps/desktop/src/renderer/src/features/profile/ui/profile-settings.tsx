@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { UserRoundIcon } from 'lucide-react'
 import { Avatar, AvatarFallback } from '../../../components/ui/avatar'
@@ -13,17 +13,27 @@ import { readProfile, saveProfile, type AuthenticatedProfileSession } from '../a
 
 type GetSession = () => Promise<AuthenticatedProfileSession | undefined>
 
+export type ProfileSettingsContribution =
+  | { readonly status: 'clean' }
+  | { readonly status: 'dirty'; readonly discard: () => void }
+  | { readonly status: 'saving' }
+
 export function ProfileSettings({
-  getSession
+  getSession,
+  onContributionChange
 }: {
   readonly getSession: GetSession
+  readonly onContributionChange?: (contribution: ProfileSettingsContribution) => void
 }): React.JSX.Element {
   const { t } = useTranslation('profile')
   const [savedDisplayName, setSavedDisplayName] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [validation, setValidation] = useState<DisplayNameValidation>()
   const [isLoading, setIsLoading] = useState(true)
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
   const [didSave, setDidSave] = useState(false)
 
   useEffect(() => {
@@ -39,10 +49,12 @@ export function ProfileSettings({
         const nextDisplayName = profile?.displayName ?? ''
         setSavedDisplayName(nextDisplayName)
         setDisplayName(nextDisplayName)
+        setSaveFailed(false)
       } catch {
         if (isMounted) {
           setSavedDisplayName('')
           setDisplayName('')
+          setLoadFailed(true)
         }
       } finally {
         if (isMounted) setIsLoading(false)
@@ -52,7 +64,7 @@ export function ProfileSettings({
     return () => {
       isMounted = false
     }
-  }, [getSession])
+  }, [getSession, loadAttempt])
 
   const isDirty = !isLoading && displayName !== savedDisplayName
   const validationMessage =
@@ -62,6 +74,14 @@ export function ProfileSettings({
         ? t('validation.displayNameTooLong')
         : undefined
 
+  const cancel = useCallback((): void => {
+    setDisplayName(savedDisplayName)
+    setValidation(undefined)
+    setSaveFailed(false)
+    setDidSave(false)
+    onContributionChange?.({ status: 'clean' })
+  }, [onContributionChange, savedDisplayName])
+
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     if (isLoading || isSaving) return
@@ -70,7 +90,9 @@ export function ProfileSettings({
     setValidation(nextValidation)
     if (nextValidation) return
 
+    onContributionChange?.({ status: 'saving' })
     setIsSaving(true)
+    setSaveFailed(false)
     setDidSave(false)
     try {
       const session = await getSession()
@@ -80,8 +102,11 @@ export function ProfileSettings({
       setSavedDisplayName(profile.displayName)
       setDisplayName(profile.displayName)
       setDidSave(true)
+      onContributionChange?.({ status: 'clean' })
     } catch {
       // Keep the draft untouched so the User can retry after a transient request failure.
+      setSaveFailed(true)
+      onContributionChange?.({ status: 'dirty', discard: cancel })
     } finally {
       setIsSaving(false)
     }
@@ -90,14 +115,36 @@ export function ProfileSettings({
   function changeDisplayName(value: string): void {
     setDisplayName(value)
     setValidation(undefined)
+    setSaveFailed(false)
     setDidSave(false)
   }
 
-  function cancel(): void {
-    setDisplayName(savedDisplayName)
-    setValidation(undefined)
-    setDidSave(false)
+  function retryLoad(): void {
+    setIsLoading(true)
+    setLoadFailed(false)
+    setLoadAttempt((value) => value + 1)
   }
+
+  const contribution = useMemo<ProfileSettingsContribution>(
+    () =>
+      isSaving
+        ? { status: 'saving' }
+        : isDirty
+          ? { status: 'dirty', discard: cancel }
+          : { status: 'clean' },
+    [cancel, isDirty, isSaving]
+  )
+
+  useEffect(() => {
+    onContributionChange?.(contribution)
+  }, [contribution, onContributionChange])
+
+  useEffect(
+    () => () => {
+      onContributionChange?.({ status: 'clean' })
+    },
+    [onContributionChange]
+  )
 
   return (
     <section aria-labelledby="profile-heading" className="grid gap-5 px-5 py-5">
@@ -114,6 +161,14 @@ export function ProfileSettings({
           <p className="text-muted-foreground text-sm">{t('description')}</p>
         </div>
       </div>
+      {loadFailed ? (
+        <div role="alert" className="bg-destructive/10 grid gap-3 rounded-md p-3 text-sm">
+          <p>{t('loadFailed')}</p>
+          <Button type="button" variant="outline" onClick={retryLoad}>
+            {t('retry')}
+          </Button>
+        </div>
+      ) : null}
       <form onSubmit={(event) => void submit(event)}>
         <FieldGroup>
           <Field data-invalid={validationMessage !== undefined || undefined}>
@@ -122,7 +177,7 @@ export function ProfileSettings({
               id="profile-display-name"
               value={displayName}
               placeholder={t('displayNamePlaceholder')}
-              disabled={isLoading || isSaving}
+              disabled={isLoading || isSaving || loadFailed}
               aria-invalid={validationMessage !== undefined || undefined}
               onChange={(event) => changeDisplayName(event.target.value)}
             />
@@ -143,6 +198,11 @@ export function ProfileSettings({
             {didSave ? (
               <p role="status" className="text-muted-foreground text-sm">
                 {t('saved')}
+              </p>
+            ) : null}
+            {saveFailed ? (
+              <p role="alert" className="text-destructive text-sm">
+                {t('saveFailed')}
               </p>
             ) : null}
           </div>

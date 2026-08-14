@@ -98,7 +98,8 @@ src/main/
 │   │   └── <action>.ts
 │   └── <language implementation>
 ├── window/
-│   └── main-window.ts            # 非 Domain 的平台职责
+│   ├── ipc/                      # 唯一获准的 platform-owned typed IPC adapter
+│   └── main-window.ts            # 非 Domain 的 BrowserWindow 平台职责
 ├── updater/
 │   └── auto-updater.ts           # 非 Domain 的平台职责
 └── tray/
@@ -109,7 +110,7 @@ src/main/
 |------|------|------|
 | `<domain>/` | Domain implementation、可选 public interface 与 domain-local adapters | Domain 实际需要时 |
 | `<domain>/ipc/` | IPC registration 与每 Channel 一个 Handler | Domain 拥有 IPC 时 |
-| `window/` | BrowserWindow 创建、多窗口管理、窗口状态持久化 | 初始化即有 |
+| `window/` | BrowserWindow 创建、多窗口管理、窗口状态持久化与 Window lifecycle typed IPC | 初始化即有 |
 | `updater/` | 自动更新检查、下载、安装提示 | 接入阿里云 OSS 时 |
 | `tray/` | 系统托盘图标和菜单 | 产品需要后台常驻时 |
 
@@ -118,15 +119,16 @@ src/main/
 采用 **Domain-first + Type-safe IPC + 自注册** 模式；完整取舍见 [Desktop ADR-0003](apps/desktop/docs/adr/0003-main-domain-first-ipc-adapters.md)：
 
 1. **Domain locality**：Domain-owned IPC adapter 位于 `main/<domain>/ipc/`，依赖同 Domain implementation；implementation 不反向依赖 IPC
-2. **类型与运行时分离**：cross-process interface 位于 `shared/ipc/<domain>/`，运行时 adapter 位于 Main Domain；两者使用同一 canonical Domain 名与 `<domain>:<action>` Channel prefix
-3. **每个 Handler 一个文件**：Handler 直接位于 `ipc/`，不增加 `handlers/`；复杂行为留在 Domain implementation
-4. **类型安全**：各 Domain 在自己的 `shared/ipc/<domain>/types.ts` 里通过 `declare module '@ipc/channels'` 扩展 `IpcChannelMap` / `IpcEventMap`，并导出具名 request/response 类型
-5. **纯 registration module**：`main/<domain>/ipc/index.ts` 加载无副作用，只导出同步且顺序无关的 `register(): void`
-6. **自动注册**：`main/index.ts` 通过 `import.meta.glob('./*/ipc/index.ts', { eager: true })` 发现所有 Domain registration module；Domain 初始化仍由 composition root 显式编排
-7. **Preload 通用化**：preload 只暴露 `typedInvoke` 与 `typedOn`，不增加 per-Domain implementation 或中央 Domain registry
-8. **按需创建 seam**：Domain 不需要 IPC、Main public interface 或 renderer Feature 时，不创建空镜像目录；`window/updater/tray` 等平台职责也不伪装成 Domain
+2. **Window lifecycle 例外**：`window` 是唯一获准拥有 typed IPC 的非 Domain platform owner，使用 `shared/ipc/window/`、`main/window/ipc/` 与 `window:<action>`；Updater/Tray 仍不拥有 transport
+3. **类型与运行时分离**：cross-process interface 位于 `shared/ipc/<owner>/`，运行时 adapter 位于对应 Main owner；两者使用同一 canonical owner 名与 `<owner>:<action>` Channel prefix
+4. **每个 Handler 一个文件**：Handler 直接位于 `ipc/`，不增加 `handlers/`；复杂行为留在 owner implementation
+5. **类型安全**：每个 IPC owner 在自己的 `shared/ipc/<owner>/types.ts` 里通过 `declare module '@ipc/channels'` 扩展 `IpcChannelMap` / `IpcEventMap`，并导出具名 request/response 类型
+6. **纯 registration module**：`main/<owner>/ipc/index.ts` 加载无副作用，只导出同步且顺序无关的 `register(): void`
+7. **自动注册**：`main/index.ts` 通过 `import.meta.glob('./*/ipc/index.ts', { eager: true })` 发现 Domain 与获准的 Window registration module；Domain 初始化仍由 composition root 显式编排
+8. **Preload 通用化**：preload 只暴露 `typedInvoke` 与 `typedOn`，不增加 per-owner implementation 或中央 registry
+9. **按需创建 seam**：Domain 不需要 IPC、Main public interface 或 renderer Feature 时，不创建空镜像目录；Window lifecycle IPC 不把 platform owner 伪装成 Domain
 
-加一个 Handler 只改自己 Domain 下的三个文件（`shared/ipc/<domain>/types.ts` + `main/<domain>/ipc/<action>.ts` + `main/<domain>/ipc/index.ts`），不碰中央共享注册文件。
+加一个 Handler 只改自己 owner 下的三个文件（`shared/ipc/<owner>/types.ts` + `main/<owner>/ipc/<action>.ts` + `main/<owner>/ipc/index.ts`），不碰中央共享注册文件。
 
 > **Migration note:** 当前 `main/ipc/`、`main/settings/` 与 `main/i18n/` 是已接受架构决定落地前的 migration debt。Domain-first Main、Language Domain 合并、Channel rename 与新 glob 必须原子迁移，不长期保留两套结构或兼容 alias。
 

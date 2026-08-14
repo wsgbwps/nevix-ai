@@ -8,7 +8,11 @@ import {
   readAuthHarnessConfig,
   uniqueAuthIdentity
 } from '../auth/helpers/supabase-auth'
-import { launchTestApp, openSettingsFromUserMenu } from '../helpers/electron-app'
+import {
+  launchTestApp,
+  openSettingsFromUserMenu,
+  openSettingsSectionFromUserMenu
+} from '../helpers/electron-app'
 import { endMembership, seedOrganizationWithMembership } from './helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
@@ -79,7 +83,7 @@ test(
         await expect(launched.page.getByRole('heading', { name: PICKER_HEADING })).toBeVisible()
         await launched.page.getByRole('button', { name: /Departed Studio/ }).click()
         await expect(launched.page.getByRole('heading', { name: HOME_HEADING })).toBeVisible()
-        await openSettingsFromUserMenu(launched.page)
+        await openSettingsSectionFromUserMenu(launched.page, 'Members')
         await expect(launched.page.getByText('Mina Member', { exact: true })).toBeVisible()
 
         await endMembership(userId, departedOrganization.id)

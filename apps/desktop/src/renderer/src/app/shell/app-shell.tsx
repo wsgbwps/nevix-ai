@@ -2,6 +2,8 @@ import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from '@tanstack/react-router'
 import { ChevronsUpDownIcon, HomeIcon, LogOutIcon, SettingsIcon } from 'lucide-react'
 import { useAuthenticationState } from '../authentication-state'
+import { useActiveOrganization } from '../../features/organization'
+import { createSettingsEntry } from '../pages/settings-navigation'
 import { Avatar, AvatarFallback } from '../../components/ui/avatar'
 import {
   Breadcrumb,
@@ -61,6 +63,7 @@ export function AppShell({
   const { t } = useTranslation('app')
   const { t: authenticationT } = useTranslation('authentication')
   const authentication = useAuthenticationState()
+  const { activeOrganization } = useActiveOrganization()
   const location = useLocation()
 
   if (authentication.status !== 'authenticated') {
@@ -157,7 +160,16 @@ export function AppShell({
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild>
-                      <Link to="/settings">
+                      <Link
+                        to="/settings"
+                        state={(state) => ({
+                          ...state,
+                          settings: createSettingsEntry(
+                            location,
+                            activeOrganization?.organizationId
+                          )
+                        })}
+                      >
                         <SettingsIcon />
                         {t('shell.settings')}
                       </Link>
