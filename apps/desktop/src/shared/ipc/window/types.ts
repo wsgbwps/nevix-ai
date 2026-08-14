@@ -18,6 +18,7 @@ declare module '@ipc/channels' {
   }
 
   interface IpcEventMap {
+    'window:deactivated': void
     'window:ordinary-close-requested': OrdinaryCloseRequestedEvent
   }
 }

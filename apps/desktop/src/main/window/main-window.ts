@@ -62,5 +62,13 @@ export function createWindow(): void {
     event.preventDefault()
   })
 
+  const notifyRendererDeactivated = (): void => {
+    if (!mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('window:deactivated')
+    }
+  }
+  mainWindow.on('blur', notifyRendererDeactivated)
+  mainWindow.on('minimize', notifyRendererDeactivated)
+
   mainWindow.loadURL(rendererEntryUrl())
 }

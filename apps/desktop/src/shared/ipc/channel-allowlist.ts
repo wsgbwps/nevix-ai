@@ -20,6 +20,7 @@ const invokeChannels = {
 
 const eventChannels = {
   'language:language-mode-changed': true,
+  'window:deactivated': true,
   'window:ordinary-close-requested': true
 } satisfies Record<keyof IpcEventMap, true>
 
