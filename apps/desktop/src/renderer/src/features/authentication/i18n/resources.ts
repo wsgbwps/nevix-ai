@@ -24,6 +24,10 @@ export const authenticationTranslations = defineResourceTranslations({
     rememberedEmailPersistence: {
       unavailable: '此设备无法安全保存记住的邮箱。本次选择仅在关闭应用前有效。'
     },
+    passwordVisibility: {
+      show: '显示输入内容',
+      hide: '隐藏输入内容'
+    },
     login: {
       heading: '登录 Nevix AI',
       description: '使用已验证的邮箱继续。',
@@ -137,6 +141,10 @@ export const authenticationTranslations = defineResourceTranslations({
     rememberedEmailPersistence: {
       unavailable:
         'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
+    },
+    passwordVisibility: {
+      show: 'Show entered value',
+      hide: 'Hide entered value'
     },
     login: {
       heading: 'Sign in to Nevix AI',

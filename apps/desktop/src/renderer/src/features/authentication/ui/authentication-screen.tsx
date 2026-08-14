@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Eye, EyeOff } from 'lucide-react'
 import { ModeToggle } from '../../../components/mode-toggle'
 import { useTheme } from '../../../hooks/use-theme'
 import { Button } from '../../../components/ui/button'
@@ -11,6 +12,7 @@ import {
   FieldLabel
 } from '../../../components/ui/field'
 import { Input } from '../../../components/ui/input'
+import { cn } from '../../../lib/utils'
 import type {
   AuthenticationError,
   AuthenticationFlow,
@@ -341,10 +343,9 @@ function SignupForm({
           <FieldLabel htmlFor="authentication-confirm-password">
             {t('signup.confirmPassword')}
           </FieldLabel>
-          <Input
+          <PasswordInput
             id="authentication-confirm-password"
             name="confirmPassword"
-            type="password"
             autoComplete="new-password"
             disabled={isSubmitting}
             aria-invalid={isConfirmMismatch || undefined}
@@ -625,10 +626,9 @@ function RecoveryNewPasswordForm({
           <FieldLabel htmlFor="authentication-recovery-new-password">
             {t('recovery.newPassword.password')}
           </FieldLabel>
-          <Input
+          <PasswordInput
             id="authentication-recovery-new-password"
             name="password"
-            type="password"
             autoComplete="new-password"
             required
             disabled={isSubmitting}
@@ -710,10 +710,9 @@ function CredentialFields({
             </button>
           ) : null}
         </div>
-        <Input
+        <PasswordInput
           id="authentication-password"
           name="password"
-          type="password"
           autoComplete={passwordAutoComplete}
           required
           disabled={disabled}
@@ -723,6 +722,52 @@ function CredentialFields({
         />
       </Field>
     </>
+  )
+}
+
+function PasswordInput({
+  className,
+  disabled,
+  ...props
+}: Omit<React.ComponentProps<'input'>, 'type'>): React.JSX.Element {
+  const { t } = useTranslation('authentication')
+  const [isVisible, setIsVisible] = useState(false)
+
+  useEffect(() => {
+    if (!isVisible) return
+
+    const hide = (): void => setIsVisible(false)
+    const stopListeningForWindowDeactivation = window.api.on('window:deactivated', hide)
+    window.addEventListener('blur', hide)
+    document.addEventListener('visibilitychange', hide)
+    return () => {
+      stopListeningForWindowDeactivation()
+      window.removeEventListener('blur', hide)
+      document.removeEventListener('visibilitychange', hide)
+    }
+  }, [isVisible])
+
+  return (
+    <div className="relative">
+      <Input
+        {...props}
+        type={isVisible ? 'text' : 'password'}
+        disabled={disabled}
+        className={cn('pr-10', className)}
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="absolute top-1/2 right-0.5 -translate-y-1/2"
+        disabled={disabled}
+        aria-label={t(isVisible ? 'passwordVisibility.hide' : 'passwordVisibility.show')}
+        aria-pressed={isVisible}
+        onClick={() => setIsVisible((visible) => !visible)}
+      >
+        {isVisible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+      </Button>
+    </div>
   )
 }
 

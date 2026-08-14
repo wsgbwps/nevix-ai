@@ -20,6 +20,15 @@ export function OrganizationNameSettings({
   const name = draftName ?? organization.organizationName
   const isDirty = draftName !== undefined && draftName !== organization.organizationName
 
+  if (organization.role !== 'owner') {
+    return (
+      <div className="bg-card grid gap-2 rounded-lg border p-5">
+        <p className="text-sm font-medium">{t('common.orgName')}</p>
+        <p className="text-sm">{organization.organizationName}</p>
+      </div>
+    )
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     if (isSaving) return

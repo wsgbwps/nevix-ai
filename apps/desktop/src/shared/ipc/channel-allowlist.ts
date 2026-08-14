@@ -21,7 +21,8 @@ const invokeChannels = {
 } satisfies Record<keyof IpcChannelMap, true>
 
 const eventChannels = {
-  'language:language-mode-changed': true
+  'language:language-mode-changed': true,
+  'window:deactivated': true
 } satisfies Record<keyof IpcEventMap, true>
 
 export const INVOKE_CHANNEL_ALLOWLIST: ReadonlySet<string> = new Set(Object.keys(invokeChannels))

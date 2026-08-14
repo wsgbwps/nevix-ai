@@ -121,6 +121,12 @@ test('the full recovery loop rotates the password, revokes old Sessions, and nev
       await expect(launched.page.getByRole('heading', { name: 'Set a new password' })).toBeVisible()
 
       const passwordInput = launched.page.getByLabel('New password')
+      await expect(passwordInput).toHaveAttribute('type', 'password')
+      await passwordInput.locator('..').getByRole('button', { name: 'Show entered value' }).click()
+      await expect(passwordInput).toHaveAttribute('type', 'text')
+      await passwordInput.locator('..').getByRole('button', { name: 'Hide entered value' }).click()
+      await expect(passwordInput).toHaveAttribute('type', 'password')
+
       await passwordInput.fill('12345678901')
       await expect(launched.page.getByText('11 of 12–72 UTF-8 bytes')).toBeVisible()
       await expect(launched.page.getByRole('button', { name: 'Update password' })).toBeDisabled()

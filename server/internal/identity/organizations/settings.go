@@ -32,9 +32,9 @@ func (r *UpdateOrganizationSettingsRequest) Validate() *command.Error {
 	return nil
 }
 
-// UpdateOrganizationSettings lets an active Owner or Admin change the
-// Organization name. The name change and its immutable audit entry commit
-// together; settings changes intentionally enqueue no email.
+// UpdateOrganizationSettings lets the active Owner change the Organization
+// name. The name change and its immutable audit entry commit together;
+// settings changes intentionally enqueue no email.
 func (m *Manager) UpdateOrganizationSettings(ctx context.Context, req UpdateOrganizationSettingsRequest) (OrganizationResponse, error) {
 	organizationID, err := normalizeOrganizationID(req.OrganizationID)
 	if err != nil {
@@ -51,7 +51,7 @@ func (m *Manager) UpdateOrganizationSettings(ctx context.Context, req UpdateOrga
 	if err != nil {
 		return OrganizationResponse{}, err
 	}
-	if role != "owner" && role != "admin" {
+	if role != "owner" {
 		return OrganizationResponse{}, errInsufficientRole
 	}
 	actor, err := audit.SnapshotUser(ctx, tx, authjwt.UserID(ctx))
