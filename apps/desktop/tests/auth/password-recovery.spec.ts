@@ -24,7 +24,7 @@ const mailpitHarness = readMailpitHarnessConfig()
 
 const SESSION_FILE_NAME = 'authentication-session.enc'
 
-test('the full recovery loop rotates the password, revokes old Sessions, and never persists the recovery Session', async () => {
+test('@smoke the full recovery loop rotates the password, revokes old Sessions, and never persists the recovery Session', async () => {
   test.setTimeout(90_000)
   test.skip(!authHarness || !mailpitHarness, 'requires disposable Supabase Auth and Mailpit')
   if (!authHarness || !mailpitHarness) return
@@ -203,7 +203,7 @@ test('the full recovery loop rotates the password, revokes old Sessions, and nev
   }
 })
 
-test('recovery entry points stay existence-neutral and failures map to safe localized messages', async () => {
+test('@smoke recovery entry points stay existence-neutral and failures map to safe localized messages', async () => {
   test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
   if (!authHarness) return
 
@@ -339,7 +339,7 @@ test('recovery entry points stay existence-neutral and failures map to safe loca
   }
 })
 
-test('a failed global revocation still discards the recovery Session and reports the delay', async () => {
+test('@smoke a failed global revocation still discards the recovery Session and reports the delay', async () => {
   test.setTimeout(60_000)
   test.skip(!authHarness || !mailpitHarness, 'requires disposable Supabase Auth and Mailpit')
   if (!authHarness || !mailpitHarness) return

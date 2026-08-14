@@ -23,6 +23,13 @@
 3. Add a pinned real-GoTrue policy harness that proves policy behavior through Auth HTTP responses and JWT/refresh results, not by only parsing `config.toml`; then set the supported Auth configuration and CI command until the harness passes.
 4. Rerun existing Session persistence, recovery, runtime revocation, localization, lint, typecheck, build, and the focused/full E2E suites required by the ticket.
 
+## PR #54 review repair addendum
+
+- **CR-SPEC-0001:** add the existing three password-recovery acceptance cases to the Smoke Suite with the repository's existing `@smoke` title marker. The PR continues to call only `test:e2e:smoke`; main push and manual dispatch continue to own the unconditional Full E2E Suite under ADR-0007.
+- **CR-SPEC-0002:** replace public HIBP dependence with an Auth-policy-local HTTPS fixture. A pinned Node container owns the `api.pwnedpasswords.com` network alias, uses a temporary test CA trusted only by the pinned GoTrue container, returns a fixed range hit during the reject phase, and returns a fixed 503 during the fail-open phase. Existing strict `422` signup/update, `200` fail-open, and warning assertions remain unchanged.
+- **CR-STANDARDS-0001:** add a narrow parity phase before Docker startup that explicitly compares the overlapping committed GoTrue env, Supabase CLI TOML, and Desktop password constants. A mutation test proves representative drift fails with a named mapping; this stays inside the Auth policy harness rather than creating a shared configuration framework.
+- The repair adds no product behavior, database/schema/RLS change, Go trusted command, public contract, dependency, or architecture responsibility. New test support remains under `scripts/`, and CI path classification changes only ensure that the new Auth-policy regression test reaches its existing named gate.
+
 ## Delivery and rollback
 
 - Freeze the task-owned diff against the fixed point, run one full Standards/Spec review, repair accepted blockers only, and close the ledger through targeted review when required.

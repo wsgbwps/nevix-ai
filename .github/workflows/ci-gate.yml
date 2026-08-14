@@ -56,7 +56,7 @@ jobs:
             esac
 
             case "$changed_path" in
-              apps/desktop/*|server/internal/identity/*|server/cmd/server/*|server/go.mod|server/go.sum|contracts/*|supabase/*|scripts/auth-policy-harness.mjs|scripts/test-auth-policy.sh|scripts/lib/supabase-local-harness.sh|scripts/tests/supabase-local-harness.test.sh|.github/workflows/desktop-e2e-ci.yml|pnpm-lock.yaml|pnpm-workspace.yaml|package.json|go.work|go.work.sum)
+              apps/desktop/*|server/internal/identity/*|server/cmd/server/*|server/go.mod|server/go.sum|contracts/*|supabase/*|scripts/auth-policy-harness.mjs|scripts/test-auth-policy.sh|scripts/lib/supabase-local-harness.sh|scripts/tests/auth-policy-harness.test.mjs|scripts/tests/supabase-local-harness.test.sh|.github/workflows/desktop-e2e-ci.yml|pnpm-lock.yaml|pnpm-workspace.yaml|package.json|go.work|go.work.sum)
                 e2e=true
                 ;;
             esac

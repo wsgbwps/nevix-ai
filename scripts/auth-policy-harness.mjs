@@ -1,13 +1,22 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createServer } from "node:https";
+import { join } from "node:path";
 
 const phase = process.argv[2];
-const authUrl = requiredEnvironment("NEVIX_AUTH_POLICY_URL");
+const authUrl = ["parity", "hibp-fixture"].includes(phase)
+  ? undefined
+  : requiredEnvironment("NEVIX_AUTH_POLICY_URL");
 const databaseContainer = process.env.NEVIX_AUTH_POLICY_DATABASE_CONTAINER;
 const legacyEmail = process.env.NEVIX_AUTH_POLICY_LEGACY_EMAIL;
 const pwnedPassword = "Password123!";
 
-if (phase === "bootstrap") {
+if (phase === "parity") {
+  verifyPolicyParity();
+} else if (phase === "hibp-fixture") {
+  await serveHIBPFixture();
+} else if (phase === "bootstrap") {
   await expectStatus(
     await signUp(requiredValue(legacyEmail, "legacy email"), pwnedPassword),
     200,
@@ -24,6 +33,192 @@ if (phase === "bootstrap") {
   );
 } else {
   throw new Error(`Unknown Auth policy harness phase: ${phase ?? "<missing>"}`);
+}
+
+async function serveHIBPFixture() {
+  const mode = requiredEnvironment("NEVIX_AUTH_POLICY_HIBP_FIXTURE_MODE");
+  assert(
+    ["success", "outage"].includes(mode),
+    `Unknown HIBP fixture mode: ${mode}`,
+  );
+  const certificate = readFileSync(
+    requiredEnvironment("NEVIX_AUTH_POLICY_HIBP_CERT"),
+  );
+  const privateKey = readFileSync(
+    requiredEnvironment("NEVIX_AUTH_POLICY_HIBP_KEY"),
+  );
+  const hash = createHash("sha1")
+    .update(pwnedPassword)
+    .digest("hex")
+    .toUpperCase();
+  const pwnedPrefix = hash.slice(0, 5);
+  const pwnedSuffix = hash.slice(5);
+
+  const server = createServer(
+    { cert: certificate, key: privateKey },
+    (request, response) => {
+      if (request.method === "GET" && request.url === "/health") {
+        response.writeHead(200).end("ok\n");
+        return;
+      }
+
+      const match =
+        request.method === "GET" &&
+        request.url?.match(/^\/range\/([0-9A-F]{5})$/);
+      if (!match) {
+        response.writeHead(404).end("not found\n");
+        return;
+      }
+
+      if (mode === "outage") {
+        response.writeHead(503).end("controlled HIBP outage\n");
+        return;
+      }
+
+      response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end(match[1] === pwnedPrefix ? `${pwnedSuffix}:1\n` : "");
+    },
+  );
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(443, "0.0.0.0", resolve);
+  });
+  console.log(`ready - controlled HIBP ${mode} fixture`);
+
+  const stop = () => server.close(() => process.exit(0));
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  await new Promise(() => {});
+}
+
+function verifyPolicyParity() {
+  const repoRoot = join(import.meta.dirname, "..");
+  const configPath =
+    process.env.NEVIX_AUTH_POLICY_CONFIG_TOML ??
+    join(repoRoot, "supabase/config.toml");
+  const environmentPath =
+    process.env.NEVIX_AUTH_POLICY_ENV_FILE ??
+    join(repoRoot, "supabase/auth-policy.env.example");
+  const desktopPath =
+    process.env.NEVIX_AUTH_POLICY_DESKTOP_PASSWORD_POLICY ??
+    join(
+      repoRoot,
+      "apps/desktop/src/renderer/src/features/authentication/policy/password.ts",
+    );
+  const config = readFileSync(configPath, "utf8");
+  const environment = readFileSync(environmentPath, "utf8");
+  const desktop = readFileSync(desktopPath, "utf8");
+
+  const env = (name) =>
+    uniqueCapture(environment, new RegExp(`^${name}=(.*)$`, "m"), name);
+  const toml = (name, pattern) => uniqueCapture(config, pattern, name);
+  const desktopConstant = (name) =>
+    uniqueCapture(
+      desktop,
+      new RegExp(`^export const ${name} = (.+)$`, "m"),
+      name,
+    );
+
+  assertParity("JWT expiry", [
+    ["GOTRUE_JWT_EXP", env("GOTRUE_JWT_EXP")],
+    ["auth.jwt_expiry", toml("auth.jwt_expiry", /^jwt_expiry = (\d+)$/m)],
+  ]);
+  assertParity("refresh-token rotation", [
+    [
+      "GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED",
+      env("GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED"),
+    ],
+    [
+      "auth.enable_refresh_token_rotation",
+      toml(
+        "auth.enable_refresh_token_rotation",
+        /^enable_refresh_token_rotation = (true|false)$/m,
+      ),
+    ],
+  ]);
+  assertParity("refresh-token reuse interval", [
+    [
+      "GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL",
+      env("GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL"),
+    ],
+    [
+      "auth.refresh_token_reuse_interval",
+      toml(
+        "auth.refresh_token_reuse_interval",
+        /^refresh_token_reuse_interval = (\d+)$/m,
+      ),
+    ],
+  ]);
+  assertParity("password minimum", [
+    ["GOTRUE_PASSWORD_MIN_LENGTH", env("GOTRUE_PASSWORD_MIN_LENGTH")],
+    [
+      "auth.minimum_password_length",
+      toml(
+        "auth.minimum_password_length",
+        /^minimum_password_length = (\d+)$/m,
+      ),
+    ],
+    ["MINIMUM_PASSWORD_BYTES", desktopConstant("MINIMUM_PASSWORD_BYTES")],
+  ]);
+  assertParity("required password characters", [
+    [
+      "GOTRUE_PASSWORD_REQUIRED_CHARACTERS",
+      env("GOTRUE_PASSWORD_REQUIRED_CHARACTERS"),
+    ],
+    [
+      "auth.password_requirements",
+      toml("auth.password_requirements", /^password_requirements = "(.*)"$/m),
+    ],
+  ]);
+  assertParity("Session inactivity", [
+    [
+      "GOTRUE_SESSIONS_INACTIVITY_TIMEOUT",
+      env("GOTRUE_SESSIONS_INACTIVITY_TIMEOUT"),
+    ],
+    [
+      "auth.sessions.inactivity_timeout",
+      toml(
+        "auth.sessions.inactivity_timeout",
+        /^inactivity_timeout = "(.*)"$/m,
+      ),
+    ],
+  ]);
+  assertParity("Session time-box", [
+    ["GOTRUE_SESSIONS_TIMEBOX", env("GOTRUE_SESSIONS_TIMEBOX")],
+    [
+      "auth.sessions.timebox",
+      toml("auth.sessions.timebox", /^timebox = "(.*)"$/m),
+    ],
+  ]);
+  assertParity("password maximum", [
+    ["MAXIMUM_PASSWORD_BYTES", desktopConstant("MAXIMUM_PASSWORD_BYTES")],
+    ["pinned GoTrue bcrypt byte limit", "72"],
+  ]);
+
+  console.log("ok - committed Auth policy projections remain in parity");
+}
+
+function uniqueCapture(source, pattern, label) {
+  const flags = pattern.flags.includes("g")
+    ? pattern.flags
+    : `${pattern.flags}g`;
+  const matches = [...source.matchAll(new RegExp(pattern.source, flags))];
+  assert(
+    matches.length === 1,
+    `Auth policy parity expected exactly one ${label} value`,
+  );
+  return matches[0][1];
+}
+
+function assertParity(label, values) {
+  const expected = values[0][1];
+  if (values.some(([, value]) => value !== expected)) {
+    const detail = values
+      .map(([name, value]) => `${name}=${JSON.stringify(value)}`)
+      .join(", ");
+    throw new Error(`Auth policy parity mismatch for ${label}: ${detail}`);
+  }
 }
 
 async function verifyNormalPolicy() {

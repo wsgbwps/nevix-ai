@@ -14,6 +14,7 @@ on:
       - "supabase/**"
       - "scripts/auth-policy-harness.mjs"
       - "scripts/test-auth-policy.sh"
+      - "scripts/tests/auth-policy-harness.test.mjs"
       - "scripts/lib/supabase-local-harness.sh"
       - "scripts/tests/supabase-local-harness.test.sh"
       - ".github/workflows/desktop-e2e-ci.yml"
@@ -64,7 +65,10 @@ jobs:
       - name: Tear down Auth policy stack
         if: always()
         run: |
-          docker rm --force supabase_auth_nevix-auth-policy 2>/dev/null || true
+          docker rm --force \
+            supabase_auth_nevix-auth-policy \
+            nevix_auth_policy_hibp_fixture \
+            2>/dev/null || true
           pnpm exec supabase stop --project-id nevix-auth-policy --no-backup || true
 
   e2e-smoke:
