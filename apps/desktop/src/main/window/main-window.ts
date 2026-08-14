@@ -10,6 +10,7 @@ import {
   MIN_WINDOW_HEIGHT,
   MIN_WINDOW_WIDTH
 } from './window-state'
+import { enableNativeEditing } from './native-editing'
 
 /** The only document this application loads, and therefore the only trusted IPC sender URL. */
 export function rendererEntryUrl(): string {
@@ -40,6 +41,7 @@ export function createWindow(): void {
     }
   })
 
+  enableNativeEditing(mainWindow)
   trackWindowState(mainWindow)
 
   mainWindow.webContents.session.setPermissionCheckHandler(() => false)

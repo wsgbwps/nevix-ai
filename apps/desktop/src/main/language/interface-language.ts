@@ -17,6 +17,15 @@ let languageMode: LanguageMode = DEFAULT_LANGUAGE_MODE
 let interfaceLanguage: SupportedLanguage | undefined
 let systemLanguagesAtStartup: readonly string[] | undefined
 
+export interface NativeEditMenuLabels {
+  readonly undo: string
+  readonly cut: string
+  readonly copy: string
+  readonly paste: string
+  readonly delete: string
+  readonly selectAll: string
+}
+
 export async function initializeMainI18n(): Promise<SupportedLanguage> {
   languageMode = await loadLanguageMode()
   systemLanguagesAtStartup = getSystemLanguagesAtStartup()
@@ -56,6 +65,17 @@ export async function setLanguageMode(nextLanguageMode: unknown): Promise<void> 
 
 export function getMainWindowTitle(): string {
   return mainI18n.t('title', { ns: 'window' })
+}
+
+export function getNativeEditMenuLabels(): NativeEditMenuLabels {
+  return {
+    undo: mainI18n.t('nativeEditing.undo', { ns: 'window' }),
+    cut: mainI18n.t('nativeEditing.cut', { ns: 'window' }),
+    copy: mainI18n.t('nativeEditing.copy', { ns: 'window' }),
+    paste: mainI18n.t('nativeEditing.paste', { ns: 'window' }),
+    delete: mainI18n.t('nativeEditing.delete', { ns: 'window' }),
+    selectAll: mainI18n.t('nativeEditing.selectAll', { ns: 'window' })
+  }
 }
 
 function getSystemLanguagesAtStartup(): readonly string[] {
