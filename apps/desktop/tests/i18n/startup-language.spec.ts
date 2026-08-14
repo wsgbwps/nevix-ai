@@ -24,28 +24,6 @@ async function close({
   await rm(userDataDir, { recursive: true, force: true })
 }
 
-test('the app exposes only managed hidden native edit accelerators', async () => {
-  const launched = await launchForSystemLanguages(['en-US'])
-
-  try {
-    const applicationMenuItems = await launched.electronApp.evaluate(({ Menu }) => {
-      const menu = Menu.getApplicationMenu()
-      return menu?.items.map((item) => ({ role: item.role, visible: item.visible })) ?? []
-    })
-
-    expect(applicationMenuItems).toEqual([
-      { role: 'undo', visible: false },
-      { role: 'cut', visible: false },
-      { role: 'copy', visible: false },
-      { role: 'paste', visible: false },
-      { role: 'delete', visible: false },
-      { role: 'selectall', visible: false }
-    ])
-  } finally {
-    await close(launched)
-  }
-})
-
 test('startup selects a matching Interface Language for the highest-priority system language', async () => {
   const cases = [
     {

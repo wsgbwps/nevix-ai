@@ -69,3 +69,23 @@
 - The approved repair changes only that regression to require exactly the six hidden native editing
   roles. This preserves the prohibition on visible or browser-navigation commands without changing
   product behavior.
+
+### Review repair plan — 2026-08-14
+
+- **Accepted findings:** repair `CR-STANDARDS-0001`, `CR-SPEC-0001`, and `CR-SPEC-0002`; also
+  implement the requested `CR-STANDARDS-0002` advisory without adding it to the blocker loop.
+- **Acceptance boundary:** visible native edit-role labels use the current app-owned Interface
+  Language even when it differs from the system language, and a newly opened menu reflects a
+  runtime Language Mode change. The real Organization Invitation code control joins the existing
+  Authentication password and one-time-code native-paste acceptance.
+- **Ownership:** Window remains the primary platform owner. Language exposes only the current
+  Window-label translation seam; no new IPC, preload API, Authentication command, Organization
+  business rule, or public contract is introduced. The hidden six-role application-menu contract
+  moves from the i18n test owner to the existing Window test owner.
+- **Integration:** merge current `origin/main` into the PR branch before repair so Window
+  deactivation from password visibility and native editing are validated together without rebasing
+  or rewriting either history.
+- **Verification:** after the final edit, run the full disposable Desktop E2E/Auth/Organization
+  harness without skipping the Organization Invitation assertion, plus Desktop lint,
+  architecture, unit/component, typecheck, build, localization, targeted review, and final-state
+  evidence.

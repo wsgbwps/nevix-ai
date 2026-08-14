@@ -1,15 +1,19 @@
 import { Menu, type BrowserWindow, type EditFlags, type MenuItemConstructorOptions } from 'electron'
+import { getNativeEditMenuLabels, type NativeEditMenuLabels } from '../language'
 
-function nativeEditItems(editFlags?: EditFlags): MenuItemConstructorOptions[] {
+function nativeEditItems(
+  editFlags?: EditFlags,
+  labels?: NativeEditMenuLabels
+): MenuItemConstructorOptions[] {
   return [
-    { role: 'undo', ...(editFlags ? { enabled: editFlags.canUndo } : {}) },
+    { role: 'undo', label: labels?.undo, enabled: editFlags?.canUndo ?? true },
     { type: 'separator' },
-    { role: 'cut', ...(editFlags ? { enabled: editFlags.canCut } : {}) },
-    { role: 'copy', ...(editFlags ? { enabled: editFlags.canCopy } : {}) },
-    { role: 'paste', ...(editFlags ? { enabled: editFlags.canPaste } : {}) },
-    { role: 'delete', ...(editFlags ? { enabled: editFlags.canDelete } : {}) },
+    { role: 'cut', label: labels?.cut, enabled: editFlags?.canCut ?? true },
+    { role: 'copy', label: labels?.copy, enabled: editFlags?.canCopy ?? true },
+    { role: 'paste', label: labels?.paste, enabled: editFlags?.canPaste ?? true },
+    { role: 'delete', label: labels?.delete, enabled: editFlags?.canDelete ?? true },
     { type: 'separator' },
-    { role: 'selectAll', ...(editFlags ? { enabled: editFlags.canSelectAll } : {}) }
+    { role: 'selectAll', label: labels?.selectAll, enabled: editFlags?.canSelectAll ?? true }
   ]
 }
 
@@ -27,7 +31,9 @@ export function enableNativeEditing(window: BrowserWindow): void {
   window.webContents.on('context-menu', (_event, params) => {
     if (!params.isEditable) return
 
-    const menu = Menu.buildFromTemplate(nativeEditItems(params.editFlags))
+    const menu = Menu.buildFromTemplate(
+      nativeEditItems(params.editFlags, getNativeEditMenuLabels())
+    )
     menu.popup({
       window,
       ...(params.frame ? { frame: params.frame } : {})
