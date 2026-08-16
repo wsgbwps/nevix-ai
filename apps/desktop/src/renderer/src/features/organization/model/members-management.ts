@@ -309,7 +309,10 @@ export function useMembersManagement({
 
         const outcome = await executeCommand(spec, session)
         try {
-          const projections = await reconcileProjections(session, spec.expectedMembershipLoss)
+          const projections = await reconcileProjections(
+            session,
+            outcome.status === 'failed' ? undefined : spec.expectedMembershipLoss
+          )
           return resolveMutation(spec, projections, outcome)
         } catch (error) {
           if (outcome.status === 'timed-out') {
