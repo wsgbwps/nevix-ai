@@ -19,8 +19,12 @@ import { useOrganizationOnboarding } from '../model/onboarding-state'
 import type { ActiveMembership } from '../api/memberships'
 
 interface OrganizationPickerPageProps {
+  readonly origin?: 'startup' | 'settings'
   readonly userEmail: string | undefined
   readonly isSigningOut: boolean
+  readonly onCancel?: () => Promise<void>
+  readonly onComplete?: () => void
+  readonly onCreateOrganization?: () => void
   readonly onSignOut: () => void
 }
 
@@ -30,8 +34,12 @@ interface OrganizationPickerPageProps {
  * than discovering a separate, manual invitation path.
  */
 export function OrganizationPickerPage({
+  origin = 'startup',
   userEmail,
   isSigningOut,
+  onCancel,
+  onComplete,
+  onCreateOrganization,
   onSignOut
 }: OrganizationPickerPageProps): React.JSX.Element {
   const { t } = useTranslation('organization')
@@ -39,52 +47,101 @@ export function OrganizationPickerPage({
     availableOrganizations,
     pendingInvitations,
     rememberedOrganizationId,
-    enterOrganization,
+    selectOrganization,
     acceptInvitation,
     reconcileStartupAfterInvitationChange
   } = useActiveOrganization()
   const onboarding = useOrganizationOnboarding()
   const [selectedInvitation, setSelectedInvitation] = useState<PendingInvitation>()
+  const [acceptedInvitationOrganizationId, setAcceptedInvitationOrganizationId] = useState<string>()
   const [code, setCode] = useState('')
   const [acceptanceError, setAcceptanceError] = useState<string>()
   const [isAccepting, setIsAccepting] = useState(false)
   const [shouldResolveStartupOnClose, setShouldResolveStartupOnClose] = useState(false)
+  const [pickerError, setPickerError] = useState<string>()
+  const [isSelecting, setIsSelecting] = useState(false)
+  const [isCancelling, setIsCancelling] = useState(false)
+  const isBusy = isAccepting || isSelecting || isCancelling
 
   function openInvitation(invitation: PendingInvitation): void {
     setSelectedInvitation(invitation)
+    setAcceptedInvitationOrganizationId(undefined)
     setCode('')
     setAcceptanceError(undefined)
     setShouldResolveStartupOnClose(false)
   }
 
   function closeInvitation(): void {
-    if (isAccepting) return
+    if (isAccepting || acceptedInvitationOrganizationId) return
     const shouldResolveStartup = shouldResolveStartupOnClose
     setSelectedInvitation(undefined)
+    setAcceptedInvitationOrganizationId(undefined)
     setCode('')
     setAcceptanceError(undefined)
     setShouldResolveStartupOnClose(false)
 
-    if (!shouldResolveStartup) return
+    if (!shouldResolveStartup || origin === 'settings') return
 
     reconcileStartupAfterInvitationChange()
   }
 
   async function submitInvitation(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    if (!selectedInvitation || code.length !== 6) return
+    if (!selectedInvitation) return
+    if (!acceptedInvitationOrganizationId && code.length !== 6) return
 
     setIsAccepting(true)
     setAcceptanceError(undefined)
     try {
-      await acceptInvitation(selectedInvitation, code)
-    } catch (error) {
-      setAcceptanceError(messageForInvitationError(error))
-      if (error instanceof InvitationAcceptanceError && error.code === 'invitation_revoked') {
-        setShouldResolveStartupOnClose(true)
+      let organizationId = acceptedInvitationOrganizationId
+      if (!organizationId) {
+        try {
+          organizationId = await acceptInvitation(selectedInvitation, code)
+          setAcceptedInvitationOrganizationId(organizationId)
+        } catch (error) {
+          setAcceptanceError(messageForInvitationError(error))
+          if (error instanceof InvitationAcceptanceError && error.code === 'invitation_revoked') {
+            setShouldResolveStartupOnClose(true)
+          }
+          return
+        }
+      }
+
+      try {
+        await selectOrganization(organizationId)
+        onComplete?.()
+      } catch {
+        setAcceptanceError(t('picker.acceptedMembershipUnconfirmed'))
       }
     } finally {
       setIsAccepting(false)
+    }
+  }
+
+  async function chooseOrganization(membership: ActiveMembership): Promise<void> {
+    if (isBusy) return
+    setIsSelecting(true)
+    setPickerError(undefined)
+    try {
+      await selectOrganization(membership.organizationId)
+      onComplete?.()
+    } catch {
+      setPickerError(t('picker.selectionUnavailable'))
+    } finally {
+      setIsSelecting(false)
+    }
+  }
+
+  async function cancelPicker(): Promise<void> {
+    if (isBusy || !onCancel) return
+    setIsCancelling(true)
+    setPickerError(undefined)
+    try {
+      await onCancel()
+    } catch {
+      setPickerError(t('picker.selectionUnavailable'))
+    } finally {
+      setIsCancelling(false)
     }
   }
 
@@ -139,6 +196,7 @@ export function OrganizationPickerPage({
                     type="button"
                     size="sm"
                     className="shrink-0"
+                    disabled={isBusy}
                     onClick={() => openInvitation(invitation)}
                   >
                     {t('picker.accept')}
@@ -154,19 +212,37 @@ export function OrganizationPickerPage({
               key={membership.organizationId}
               membership={membership}
               isRemembered={membership.organizationId === rememberedOrganizationId}
-              onEnter={enterOrganization}
+              disabled={isBusy}
+              onEnter={(selected) => void chooseOrganization(selected)}
             />
           ))}
         </ul>
+        {pickerError ? (
+          <p role="alert" className="text-destructive mt-3 text-sm">
+            {pickerError}
+          </p>
+        ) : null}
         <Button
           type="button"
           variant="outline"
           className="mt-4 w-full justify-start"
-          onClick={onboarding.beginOnboarding}
+          disabled={isBusy}
+          onClick={onCreateOrganization ?? onboarding.beginOnboarding}
         >
           <PlusIcon />
           {t('picker.createOrg')}
         </Button>
+        {origin === 'settings' ? (
+          <Button
+            type="button"
+            variant="ghost"
+            className="mt-2 w-full"
+            disabled={isBusy}
+            onClick={() => void cancelPicker()}
+          >
+            {t('picker.cancel')}
+          </Button>
+        ) : null}
         <div className="text-muted-foreground mt-6 flex items-center justify-between gap-3 text-sm">
           <span className="truncate">{t('picker.signedInAs', { email: userEmail ?? '' })}</span>
           <Button
@@ -174,7 +250,7 @@ export function OrganizationPickerPage({
             variant="ghost"
             size="sm"
             className="text-muted-foreground shrink-0"
-            disabled={isSigningOut}
+            disabled={isSigningOut || isBusy}
             onClick={onSignOut}
           >
             {t('picker.signOut')}
@@ -203,7 +279,7 @@ export function OrganizationPickerPage({
                   inputMode="numeric"
                   maxLength={6}
                   pattern="[0-9]{6}"
-                  disabled={isAccepting}
+                  disabled={isBusy || acceptedInvitationOrganizationId !== undefined}
                   aria-invalid={acceptanceError !== undefined || undefined}
                   onChange={(event) => {
                     setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
@@ -212,14 +288,21 @@ export function OrganizationPickerPage({
                 />
                 <FieldError>{acceptanceError}</FieldError>
               </Field>
-              <Button type="submit" disabled={isAccepting || code.length !== 6}>
-                {t('picker.codeSubmit')}
+              <Button
+                type="submit"
+                disabled={isBusy || (!acceptedInvitationOrganizationId && code.length !== 6)}
+              >
+                {acceptedInvitationOrganizationId ? t('picker.checkAgain') : t('picker.codeSubmit')}
               </Button>
             </FieldGroup>
           </form>
           <SheetFooter>
             <SheetClose asChild>
-              <Button type="button" variant="outline" disabled={isAccepting}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isBusy || acceptedInvitationOrganizationId !== undefined}
+              >
                 {t('picker.cancel')}
               </Button>
             </SheetClose>
@@ -233,10 +316,12 @@ export function OrganizationPickerPage({
 function OrganizationPickerRow({
   membership,
   isRemembered,
+  disabled,
   onEnter
 }: {
   readonly membership: ActiveMembership
   readonly isRemembered: boolean
+  readonly disabled: boolean
   readonly onEnter: (membership: ActiveMembership) => void
 }): React.JSX.Element {
   const { t } = useTranslation('organization')
@@ -245,6 +330,7 @@ function OrganizationPickerRow({
     <li>
       <button
         type="button"
+        disabled={disabled}
         className="hover:bg-accent flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-colors"
         onClick={() => onEnter(membership)}
       >

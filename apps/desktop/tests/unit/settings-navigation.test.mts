@@ -6,9 +6,13 @@ import { runSettingsNavigationIntent } from '../../src/renderer/src/app/pages/se
 import {
   captureSettingsSource,
   createSettingsEntry,
+  createSettingsOrganizationPickerState,
   isMatchingSettingsSource,
   readSettingsEntry,
+  readSettingsOrganizationPickerEntry,
+  replaceSettingsOrganizationPickerPhase,
   replaceSettingsSection,
+  restoreSettingsEntryAfterOrganizationPicker,
   returnToSettingsSource,
   type SettingsSourceDescriptor
 } from '../../src/renderer/src/app/pages/settings-navigation.ts'
@@ -164,4 +168,41 @@ test('an invalid Organization-bound source replaces Settings with Home', () => {
   )
   assert.equal(history.location.pathname, '/')
   assert.equal(history.location.state.__TSR_index, 1)
+})
+
+test('Settings picker state preserves the exact return Section and source until restoration', () => {
+  const source = captureSettingsSource(sourceLocation('business-source'), organizationId)
+  assert.ok(source)
+  const settingsEntry = { section: 'audit-log', source } as const
+  const pickerState = createSettingsOrganizationPickerState(
+    { __TSR_key: 'settings-entry', __TSR_index: 1, settings: settingsEntry },
+    settingsEntry
+  )
+
+  assert.deepEqual(readSettingsOrganizationPickerEntry(pickerState), {
+    origin: 'settings',
+    phase: 'picker',
+    returnTo: settingsEntry
+  })
+
+  const creationState = replaceSettingsOrganizationPickerPhase(pickerState, 'organization-create')
+  assert.deepEqual(readSettingsOrganizationPickerEntry(creationState), {
+    origin: 'settings',
+    phase: 'organization-create',
+    returnTo: settingsEntry
+  })
+
+  const restoredState = restoreSettingsEntryAfterOrganizationPicker(pickerState)
+  assert.deepEqual(readSettingsEntry(restoredState), settingsEntry)
+  assert.equal(readSettingsOrganizationPickerEntry(restoredState), undefined)
+})
+
+test('malformed picker state remains startup-origin and cannot invent a Settings return target', () => {
+  for (const state of [
+    undefined,
+    { organizationPicker: { origin: 'startup' } },
+    { organizationPicker: { origin: 'settings', returnTo: { section: 'unknown' } } }
+  ]) {
+    assert.equal(readSettingsOrganizationPickerEntry(state), undefined)
+  }
 })

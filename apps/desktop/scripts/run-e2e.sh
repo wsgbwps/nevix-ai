@@ -257,6 +257,7 @@ if [[ "$mode" == "smoke" ]]; then
 elif [[ "$mode" == "settings" ]]; then
   playwright_args=(
     tests/settings/settings-page.spec.ts
+    tests/settings/settings-organization-picker.spec.ts
     tests/organization/members-management.spec.ts
     --workers=1
   )

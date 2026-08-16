@@ -27,7 +27,12 @@ import {
 import { ProfileSettings, type ProfileSettingsContribution } from '../../features/profile'
 import { useAuthenticationState } from '../authentication-state'
 import { useSettingsCoordinator, type SettingsContribution } from './settings-coordinator'
-import { readSettingsEntry, type SettingsSourceDescriptor } from './settings-navigation'
+import { SettingsOrganizationPickerPage } from './settings-organization-picker-page'
+import {
+  readSettingsEntry,
+  readSettingsOrganizationPickerEntry,
+  type SettingsSourceDescriptor
+} from './settings-navigation'
 
 function canEnterBusinessSource(source: SettingsSourceDescriptor): boolean {
   return source.pathname === '/'
@@ -39,6 +44,7 @@ export function SettingsPage(): React.JSX.Element | null {
   const organization = useActiveOrganization()
   const location = useLocation()
   const entry = readSettingsEntry(location.state)
+  const organizationPicker = readSettingsOrganizationPickerEntry(location.state)
   const [profileContribution, setProfileContribution] = useState<SettingsContribution>({
     status: 'clean'
   })
@@ -92,6 +98,20 @@ export function SettingsPage(): React.JSX.Element | null {
     // The root route is already navigating to the authentication view; render nothing on the
     // transient frame so the Settings Page never shows for a signed-out user.
     return null
+  }
+
+  if (organizationPicker) {
+    return (
+      <SettingsOrganizationPickerPage
+        phase={organizationPicker.phase}
+        userEmail={authentication.userEmail}
+        isSigningOut={authentication.isSubmitting}
+        getSession={authentication.getSession}
+        onCreateOrganization={coordinator.openOrganizationCreation}
+        onFinish={coordinator.finishOrganizationPicker}
+        onSignOut={() => void authentication.signOut()}
+      />
+    )
   }
 
   const organizationSection: OrganizationSettingsSection | undefined =

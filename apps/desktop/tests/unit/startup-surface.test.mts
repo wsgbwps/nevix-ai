@@ -179,3 +179,18 @@ test('startup surface exhaustively resolves authentication, Organization, and ro
       pathnames.length
   )
 })
+
+test('Settings workflow state cannot put an Active Organization on a pre-shell picker route', () => {
+  const common = {
+    status: 'authenticated',
+    isEligible: false,
+    phase: 'ready',
+    hasActiveOrganization: true,
+    pathname: '/select-organization'
+  } as const
+
+  assert.deepEqual(resolveStartupSurface(common), { navigate: '/' })
+  assert.deepEqual(resolveStartupSurface({ ...common, isSettingsOrganizationPicker: true }), {
+    navigate: '/'
+  })
+})

@@ -41,7 +41,8 @@ export interface ActiveOrganizationState {
   readonly rememberedOrganizationId: string | undefined
   readonly retryStartup: () => void
   readonly enterOrganization: (membership: ActiveMembership) => void
-  readonly openOrganizationPicker: () => void
+  readonly selectOrganization: (organizationId: string) => Promise<void>
+  readonly openOrganizationPicker: (origin: 'startup' | 'settings') => void
   readonly leaveActiveOrganization: () => Promise<void>
   readonly updateActiveOrganizationName: (name: string) => Promise<void>
   readonly verifyActiveMembership: (options?: {
@@ -49,7 +50,7 @@ export interface ActiveOrganizationState {
   }) => Promise<ActiveMembershipVerification>
   readonly confirmActiveOrganizationLeft: (organizationId: string) => void
   readonly acknowledgeSessionAccessLost: () => void
-  readonly acceptInvitation: (invitation: PendingInvitation, code: string) => Promise<void>
+  readonly acceptInvitation: (invitation: PendingInvitation, code: string) => Promise<string>
   readonly reconcileStartupAfterInvitationChange: () => void
 }
 

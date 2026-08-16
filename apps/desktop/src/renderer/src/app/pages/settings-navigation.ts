@@ -19,6 +19,12 @@ export interface SettingsEntry {
   readonly source: SettingsSourceDescriptor | undefined
 }
 
+export interface SettingsOrganizationPickerEntry {
+  readonly origin: 'settings'
+  readonly phase: 'picker' | 'organization-create'
+  readonly returnTo: SettingsEntry
+}
+
 interface HistoryLocationLike {
   readonly pathname: string
   readonly state: unknown
@@ -92,6 +98,64 @@ export function readSettingsEntry(state: unknown): SettingsEntry {
     section: isSettingsSection(state.settings.section) ? state.settings.section : 'profile',
     source: readSource(state.settings.source)
   }
+}
+
+export function createSettingsOrganizationPickerState(
+  state: unknown,
+  returnTo: SettingsEntry
+): Record<string, unknown> {
+  return {
+    ...(isRecord(state) ? state : {}),
+    organizationPicker: { origin: 'settings', phase: 'picker', returnTo }
+  }
+}
+
+export function readSettingsOrganizationPickerEntry(
+  state: unknown
+): SettingsOrganizationPickerEntry | undefined {
+  if (!isRecord(state) || !isRecord(state.organizationPicker)) return undefined
+  const picker = state.organizationPicker
+  if (
+    picker.origin !== 'settings' ||
+    (picker.phase !== 'picker' && picker.phase !== 'organization-create') ||
+    !isRecord(picker.returnTo)
+  ) {
+    return undefined
+  }
+  if (!isSettingsSection(picker.returnTo.section)) return undefined
+
+  const source =
+    picker.returnTo.source === undefined ? undefined : readSource(picker.returnTo.source)
+  if (picker.returnTo.source !== undefined && source === undefined) return undefined
+
+  return {
+    origin: 'settings',
+    phase: picker.phase,
+    returnTo: { section: picker.returnTo.section, source }
+  }
+}
+
+export function replaceSettingsOrganizationPickerPhase(
+  state: unknown,
+  phase: SettingsOrganizationPickerEntry['phase']
+): Record<string, unknown> {
+  const historyState = isRecord(state) ? state : {}
+  const picker = readSettingsOrganizationPickerEntry(historyState)
+  if (!picker) return historyState
+  return {
+    ...historyState,
+    organizationPicker: { ...picker, phase }
+  }
+}
+
+export function restoreSettingsEntryAfterOrganizationPicker(
+  state: unknown
+): Record<string, unknown> {
+  const historyState = isRecord(state) ? { ...state } : {}
+  const picker = readSettingsOrganizationPickerEntry(historyState)
+  delete historyState.organizationPicker
+  if (picker) historyState.settings = picker.returnTo
+  return historyState
 }
 
 export function replaceSettingsSection(

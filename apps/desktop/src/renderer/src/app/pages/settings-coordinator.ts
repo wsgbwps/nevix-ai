@@ -6,7 +6,10 @@ import {
   useOrdinaryCloseHandler
 } from '../ordinary-close-handler'
 import {
+  createSettingsOrganizationPickerState,
+  replaceSettingsOrganizationPickerPhase,
   replaceSettingsSection,
+  restoreSettingsEntryAfterOrganizationPicker,
   returnToSettingsSource,
   type SettingsEntry,
   type SettingsSection,
@@ -30,7 +33,7 @@ interface SettingsCoordinatorOptions {
   readonly contribution: SettingsContribution
   readonly organizationId: string | undefined
   readonly canEnterSource: (source: SettingsSourceDescriptor) => boolean
-  readonly openOrganizationPicker: () => void
+  readonly openOrganizationPicker: (origin: 'settings') => void
 }
 
 interface SettingsCoordinator {
@@ -41,6 +44,8 @@ interface SettingsCoordinator {
   readonly forceSwitchSection: (section: SettingsSection) => void
   readonly returnToSource: () => void
   readonly openOrganizationPicker: () => void
+  readonly openOrganizationCreation: () => void
+  readonly finishOrganizationPicker: () => void
   readonly continueEditing: () => void
   readonly discardChanges: () => void
 }
@@ -218,8 +223,31 @@ export function useSettingsCoordinator({
   useEffect(() => backNavigation.register(returnToSource), [backNavigation, returnToSource])
 
   const requestOrganizationPicker = useCallback((): void => {
-    runNavigationIntent(openOrganizationPicker)
-  }, [openOrganizationPicker, runNavigationIntent])
+    runNavigationIntent(() => {
+      openOrganizationPicker('settings')
+      router.history.replace(
+        '/settings',
+        createSettingsOrganizationPickerState(router.history.location.state, entry),
+        { ignoreBlocker: true }
+      )
+    })
+  }, [entry, openOrganizationPicker, router.history, runNavigationIntent])
+
+  const openOrganizationCreation = useCallback((): void => {
+    router.history.replace(
+      '/settings',
+      replaceSettingsOrganizationPickerPhase(router.history.location.state, 'organization-create'),
+      { ignoreBlocker: true }
+    )
+  }, [router.history])
+
+  const finishOrganizationPicker = useCallback((): void => {
+    router.history.replace(
+      '/settings',
+      restoreSettingsEntryAfterOrganizationPicker(router.history.location.state),
+      { ignoreBlocker: true }
+    )
+  }, [router.history])
 
   const continueEditing = useCallback((): void => {
     const prompt = clearDiscardPrompt()
@@ -250,6 +278,8 @@ export function useSettingsCoordinator({
     forceSwitchSection,
     returnToSource,
     openOrganizationPicker: requestOrganizationPicker,
+    openOrganizationCreation,
+    finishOrganizationPicker,
     continueEditing,
     discardChanges
   }

@@ -23,7 +23,7 @@ interface OnboardingPageProps {
   readonly shouldCompleteProfile: boolean
   readonly shouldCreateOrganization: boolean
   readonly onProfileComplete: () => void
-  readonly onComplete: (organization: Organization) => void
+  readonly onComplete: (organization: Organization) => void | Promise<void>
 }
 
 export function OnboardingPage({
@@ -45,6 +45,8 @@ export function OnboardingPage({
   const [organizationNameValidation, setOrganizationNameValidation] =
     useState<OrganizationNameValidation>()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [createdOrganization, setCreatedOrganization] = useState<Organization>()
+  const [creationMembershipUnconfirmed, setCreationMembershipUnconfirmed] = useState(false)
   const organizationIdRef = useRef<string | undefined>(undefined)
   const totalSteps = Number(includedProfileStep) + Number(shouldCreateOrganization)
   const currentStep = step === 'profile' ? 1 : includedProfileStep ? 2 : 1
@@ -88,20 +90,27 @@ export function OnboardingPage({
     if (validation) return
 
     setIsSubmitting(true)
+    setCreationMembershipUnconfirmed(false)
+    let organization = createdOrganization
     try {
-      const session = await getSession()
-      if (!session) throw new Error('Onboarding Session is unavailable.')
+      if (!organization) {
+        const session = await getSession()
+        if (!session) throw new Error('Onboarding Session is unavailable.')
 
-      const id = organizationIdRef.current ?? crypto.randomUUID()
-      organizationIdRef.current = id
-      const organization = await createOrganization({
-        accessToken: session.accessToken,
-        id,
-        name: organizationName.trim()
-      })
-      onComplete(organization)
+        const id = organizationIdRef.current ?? crypto.randomUUID()
+        organizationIdRef.current = id
+        organization = await createOrganization({
+          accessToken: session.accessToken,
+          id,
+          name: organizationName.trim()
+        })
+        setCreatedOrganization(organization)
+      }
+      await onComplete(organization)
     } catch {
-      // Keep the values and generated client ID untouched so retry remains idempotent.
+      if (organization) setCreationMembershipUnconfirmed(true)
+      // Keep the values and generated client ID untouched. Once creation succeeds, retry only the
+      // caller's authoritative Membership reconciliation instead of resubmitting the command.
     } finally {
       setIsSubmitting(false)
     }
@@ -183,12 +192,17 @@ export function OnboardingPage({
                   id="onboarding-organization-name"
                   value={organizationName}
                   placeholder={t('onboarding.orgNamePlaceholder')}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || createdOrganization !== undefined}
                   aria-invalid={validationMessage !== undefined || undefined}
                   onChange={(event) => changeOrganizationName(event.target.value)}
                 />
                 <FieldError>{validationMessage}</FieldError>
               </Field>
+              {creationMembershipUnconfirmed ? (
+                <p role="alert" className="text-destructive text-sm">
+                  {t('onboarding.creationMembershipUnconfirmed')}
+                </p>
+              ) : null}
               <div className="flex items-center justify-between gap-3">
                 {includedProfileStep ? (
                   <Button
@@ -203,7 +217,7 @@ export function OnboardingPage({
                   <span />
                 )}
                 <Button type="submit" disabled={isSubmitting}>
-                  {t('onboarding.submit')}
+                  {createdOrganization ? t('onboarding.checkAgain') : t('onboarding.submit')}
                 </Button>
               </div>
             </FieldGroup>

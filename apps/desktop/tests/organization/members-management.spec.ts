@@ -444,7 +444,7 @@ test(
         await expect(renamedOrganizationButton).toBeVisible()
         await renamedOrganizationButton.click()
         await expect(
-          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+          launched.page.getByRole('heading', { name: 'Organization details', exact: true })
         ).toBeVisible()
       } finally {
         releasePreWriteRefresh()

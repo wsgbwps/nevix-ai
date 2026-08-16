@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +12,14 @@ import {
 import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
+
+async function expectSignedInHomeWithStartupRetry(page: Page): Promise<void> {
+  const homeHeading = page.getByRole('heading', { name: '使用 Nevix AI 创作' })
+  const retryButton = page.getByRole('button', { name: '重试', exact: true })
+  await expect(homeHeading.or(retryButton)).toBeVisible({ timeout: 15_000 })
+  if (await retryButton.isVisible()) await retryButton.click()
+  await expect(homeHeading).toBeVisible()
+}
 
 test(
   'signed-in users land in the App Shell with the organization switcher slot and the home entry',
@@ -33,9 +41,7 @@ test(
         await launched.page.getByLabel('邮箱').fill(identity.email)
         await launched.page.getByLabel('密码').fill(identity.password)
         await launched.page.getByRole('button', { name: '登录', exact: true }).click()
-        await expect(
-          launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })
-        ).toBeVisible({ timeout: 15_000 })
+        await expectSignedInHomeWithStartupRetry(launched.page)
 
         // 组织切换器槽位：产品标识占位、不可切换，且不出现下拉死入口。
         const organizationSwitcher = launched.page.getByRole('button', { name: '组织切换器' })

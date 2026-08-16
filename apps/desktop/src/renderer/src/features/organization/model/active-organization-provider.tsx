@@ -100,19 +100,42 @@ export function ActiveOrganizationProvider({
     [updateMembershipVerification]
   )
 
-  const openOrganizationPicker = useCallback((): void => {
-    activeOrganizationRef.current = undefined
-    setActiveOrganization(undefined)
-    updateMembershipVerification(undefined)
-    resolveOnboarding({
-      shouldCompleteProfile: false,
-      shouldCreateOrganization: false
-    })
-    setStartupPhase('ready')
-  }, [resolveOnboarding, updateMembershipVerification])
+  const selectOrganization = useCallback(
+    async (organizationId: string): Promise<void> => {
+      const session = await getSession()
+      if (!session) throw new Error('Organization selection Session is unavailable.')
+
+      const memberships = await readActiveMemberships(session)
+      availableOrganizationsRef.current = memberships
+      setAvailableOrganizations(memberships)
+      const selectedMembership = memberships.find(
+        (candidate) => candidate.organizationId === organizationId
+      )
+      if (!selectedMembership) throw new Error('Selected Organization Membership is unavailable.')
+
+      enterOrganization(selectedMembership)
+    },
+    [enterOrganization, getSession]
+  )
+
+  const openOrganizationPicker = useCallback(
+    (origin: 'startup' | 'settings'): void => {
+      if (origin === 'startup') {
+        activeOrganizationRef.current = undefined
+        setActiveOrganization(undefined)
+        updateMembershipVerification(undefined)
+      }
+      resolveOnboarding({
+        shouldCompleteProfile: false,
+        shouldCreateOrganization: false
+      })
+      setStartupPhase('ready')
+    },
+    [resolveOnboarding, updateMembershipVerification]
+  )
 
   const acceptInvitation = useCallback(
-    async (invitation: PendingInvitation, code: string): Promise<void> => {
+    async (invitation: PendingInvitation, code: string): Promise<string> => {
       const session = await getSession()
       if (!session) throw new Error('Invitation acceptance Session is unavailable.')
 
@@ -131,21 +154,13 @@ export function ActiveOrganizationProvider({
         }
         throw error
       }
-      // The command return is confirmation only. Re-read active Memberships under RLS so the
-      // Data API remains the source of truth for the Organization the Desktop enters.
-      const memberships = await readActiveMemberships(session)
-      const membership = memberships.find(
-        (candidate) => candidate.organizationId === accepted.organizationId
-      )
-      if (!membership) throw new Error('Accepted Organization Membership is unavailable.')
 
-      setAvailableOrganizations(memberships)
       setPendingInvitations((invitations) =>
         invitations.filter((candidate) => candidate.id !== invitation.id)
       )
-      enterOrganization(membership)
+      return accepted.organizationId
     },
-    [getSession, enterOrganization]
+    [getSession]
   )
 
   const reconcileStartupAfterInvitationChange = useCallback((): void => {
@@ -453,6 +468,7 @@ export function ActiveOrganizationProvider({
       rememberedOrganizationId,
       retryStartup,
       enterOrganization,
+      selectOrganization,
       openOrganizationPicker,
       leaveActiveOrganization,
       updateActiveOrganizationName,
@@ -472,6 +488,7 @@ export function ActiveOrganizationProvider({
       rememberedOrganizationId,
       retryStartup,
       enterOrganization,
+      selectOrganization,
       openOrganizationPicker,
       leaveActiveOrganization,
       updateActiveOrganizationName,

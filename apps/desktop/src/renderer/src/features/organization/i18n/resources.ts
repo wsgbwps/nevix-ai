@@ -128,6 +128,9 @@ export const organizationTranslations = defineResourceTranslations({
       codeRevoked: '该邀请已被撤销，请请求新的邀请。',
       codeInvalidated: '该邀请码已失效，请请求重发。',
       codeUnavailable: '暂时无法验证邀请码，请稍后重试。',
+      selectionUnavailable: '暂时无法切换组织，请重试。',
+      acceptedMembershipUnconfirmed: '邀请已接受，但成员身份结果尚未确认。',
+      checkAgain: '重新检查',
       unknownInviter: '组织管理员',
       unknownOrganization: '该组织',
       cancel: '取消'
@@ -145,6 +148,8 @@ export const organizationTranslations = defineResourceTranslations({
       next: '继续',
       back: '上一步',
       submit: '创建组织并进入',
+      checkAgain: '重新检查',
+      creationMembershipUnconfirmed: '组织已创建，但成员身份结果尚未确认。',
       validation: {
         displayNameRequired: '请输入显示名（不能为纯空白）',
         displayNameTooLong: '显示名最长 50 个字符',
@@ -320,6 +325,10 @@ export const organizationTranslations = defineResourceTranslations({
       codeRevoked: 'This invitation has been revoked. Request a new invitation.',
       codeInvalidated: 'This invitation code is no longer valid. Request a resend.',
       codeUnavailable: 'Unable to verify this invitation code. Try again shortly.',
+      selectionUnavailable: 'Unable to switch organizations right now. Try again.',
+      acceptedMembershipUnconfirmed:
+        'The Invitation was accepted, but its Membership is not confirmed yet.',
+      checkAgain: 'Check again',
       unknownInviter: 'An organization admin',
       unknownOrganization: 'this organization',
       cancel: 'Cancel'
@@ -338,6 +347,9 @@ export const organizationTranslations = defineResourceTranslations({
       next: 'Continue',
       back: 'Back',
       submit: 'Create organization and enter',
+      checkAgain: 'Check again',
+      creationMembershipUnconfirmed:
+        'The Organization was created, but its Membership is not confirmed yet.',
       validation: {
         displayNameRequired: 'Enter a display name (not whitespace only)',
         displayNameTooLong: 'Display name is 50 characters at most',
