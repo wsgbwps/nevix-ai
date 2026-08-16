@@ -20,6 +20,7 @@ import {
   OrganizationDetailsSettings,
   OrganizationSettingsNavigation,
   useActiveOrganization,
+  type MembersSettingsContribution,
   type OrganizationDetailsContribution,
   type OrganizationSettingsSection
 } from '../../features/organization'
@@ -53,19 +54,28 @@ export function SettingsPage(): React.JSX.Element | null {
     []
   )
   const [organizationDetailsContribution, setOrganizationDetailsContribution] =
-    useState<SettingsContribution>({ status: 'clean' })
+    useState<OrganizationDetailsContribution>({ status: 'clean' })
   const reportOrganizationDetailsContribution = useCallback(
     (next: OrganizationDetailsContribution): void => setOrganizationDetailsContribution(next),
     []
   )
-  const contribution: SettingsContribution =
-    entry.section === 'profile'
-      ? profileContribution
-      : entry.section === 'organization-details'
-        ? organizationDetailsContribution
-        : entry.section === 'audit-log'
-          ? auditContribution
-          : { status: 'clean' }
+  const [membersContribution, setMembersContribution] = useState<MembersSettingsContribution>({
+    status: 'clean'
+  })
+  const reportMembersContribution = useCallback(
+    (next: MembersSettingsContribution): void => setMembersContribution(next),
+    []
+  )
+  let contribution: SettingsContribution = { status: 'clean' }
+  if (entry.section === 'profile') {
+    contribution = profileContribution
+  } else if (entry.section === 'organization-details') {
+    contribution = organizationDetailsContribution
+  } else if (entry.section === 'members') {
+    contribution = membersContribution
+  } else if (entry.section === 'audit-log') {
+    contribution = auditContribution
+  }
   const coordinator = useSettingsCoordinator({
     entry,
     contribution,
@@ -174,7 +184,10 @@ export function SettingsPage(): React.JSX.Element | null {
               />
             ) : null}
             {coordinator.section === 'members' ? (
-              <MembersSettings getSession={authentication.getSession} />
+              <MembersSettings
+                getSession={authentication.getSession}
+                onContributionChange={reportMembersContribution}
+              />
             ) : null}
             {coordinator.section === 'audit-log' ? (
               <AuditLogSettings

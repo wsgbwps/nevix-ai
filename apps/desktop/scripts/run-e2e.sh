@@ -4,7 +4,7 @@ set -euo pipefail
 
 # full  — Full E2E Suite: configuration-failure builds, then every spec (default).
 # smoke — Smoke Suite: one test-mode build, then only specs tagged @smoke.
-# settings — Settings Information Architecture: one test-mode build, then the Settings spec.
+# settings — Settings Information Architecture: one test-mode build, then the Settings and Members specs.
 mode="${1:-full}"
 case "$mode" in
   full | smoke | settings) ;;
@@ -255,7 +255,11 @@ playwright_args=(--workers=2)
 if [[ "$mode" == "smoke" ]]; then
   playwright_args+=(--grep '@smoke')
 elif [[ "$mode" == "settings" ]]; then
-  playwright_args=(tests/settings/settings-page.spec.ts --workers=1)
+  playwright_args=(
+    tests/settings/settings-page.spec.ts
+    tests/organization/members-management.spec.ts
+    --workers=1
+  )
 fi
 if [[ "$failure_injection" == "after-renderer-launch" ]]; then
   echo "==> Arming a controlled identity server failure after renderer launch"

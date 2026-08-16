@@ -94,13 +94,15 @@ export async function changeMemberRole(
   session: AuthenticatedOrganizationSession,
   organizationId: string,
   membershipId: string,
-  action: 'promote' | 'demote' | 'remove'
+  action: 'promote' | 'demote' | 'remove',
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await requestOrganizationCommand({
     accessToken: session.accessToken,
     method: 'POST',
     path: `/identity/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(membershipId)}/role`,
-    body: { action }
+    body: { action },
+    signal
   })
   validateMembershipCommandResponse(response, {
     organizationId,
@@ -113,13 +115,15 @@ export async function changeMemberRole(
 export async function removeMember(
   session: AuthenticatedOrganizationSession,
   organizationId: string,
-  membershipId: string
+  membershipId: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await requestOrganizationCommand({
     accessToken: session.accessToken,
     method: 'POST',
     path: `/identity/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(membershipId)}/remove`,
-    body: {}
+    body: {},
+    signal
   })
   validateMembershipCommandResponse(response, {
     organizationId,
@@ -130,13 +134,15 @@ export async function removeMember(
 
 export async function leaveOrganization(
   session: AuthenticatedOrganizationSession,
-  organizationId: string
+  organizationId: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await requestOrganizationCommand({
     accessToken: session.accessToken,
     method: 'POST',
     path: `/identity/organizations/${encodeURIComponent(organizationId)}/leave`,
-    body: {}
+    body: {},
+    signal
   })
   validateMembershipCommandResponse(response, {
     organizationId,

@@ -42,7 +42,7 @@ runs the Electron Playwright suite with one worker. Docker must be running.
 ```bash
 $ pnpm test:e2e        # Full E2E Suite: configuration-failure builds plus every spec
 $ pnpm test:e2e:smoke  # Smoke Suite: one test-mode build, only specs tagged @smoke
-$ pnpm test:e2e:settings # Settings Information Architecture: focused Settings spec
+$ pnpm test:e2e:settings # Settings Information Architecture: focused Settings and Members specs
 ```
 
 The full command first verifies that missing and invalid public configuration block the app; the

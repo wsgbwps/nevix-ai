@@ -25,14 +25,16 @@ export async function readPendingOrganizationInvitations(
 export async function createOrganizationInvitation(
   session: AuthenticatedOrganizationSession,
   organizationId: string,
-  email: string
+  email: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const canonicalEmail = email.trim().toLowerCase()
   const response = await requestOrganizationCommand({
     accessToken: session.accessToken,
     method: 'POST',
     path: `/identity/organizations/${encodeURIComponent(organizationId)}/invitations`,
-    body: { email: canonicalEmail }
+    body: { email: canonicalEmail },
+    signal
   })
   validateInvitationCommandResponse(response, {
     organizationId,
@@ -44,13 +46,15 @@ export async function createOrganizationInvitation(
 export async function resendOrganizationInvitation(
   session: AuthenticatedOrganizationSession,
   organizationId: string,
-  invitationId: string
+  invitationId: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await requestOrganizationCommand({
     accessToken: session.accessToken,
     method: 'POST',
     path: `/identity/organizations/${encodeURIComponent(organizationId)}/invitations/${encodeURIComponent(invitationId)}/resend`,
-    body: {}
+    body: {},
+    signal
   })
   validateInvitationCommandResponse(response, {
     organizationId,
@@ -62,13 +66,15 @@ export async function resendOrganizationInvitation(
 export async function revokeOrganizationInvitation(
   session: AuthenticatedOrganizationSession,
   organizationId: string,
-  invitationId: string
+  invitationId: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await requestOrganizationCommand({
     accessToken: session.accessToken,
     method: 'POST',
     path: `/identity/organizations/${encodeURIComponent(organizationId)}/invitations/${encodeURIComponent(invitationId)}/revoke`,
-    body: {}
+    body: {},
+    signal
   })
   validateInvitationCommandResponse(response, {
     organizationId,

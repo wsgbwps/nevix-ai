@@ -13,18 +13,21 @@ import { OrganizationInvitations } from './organization-invitations'
 
 type GetSession = () => Promise<AuthenticatedOrganizationSession | undefined>
 
+export type MembersSettingsContribution =
+  | { readonly status: 'clean' }
+  | { readonly status: 'command-pending' }
+  | { readonly status: 'unknown-command-result' }
+
 export function MembersSettings({
-  getSession
+  getSession,
+  onContributionChange
 }: {
   readonly getSession: GetSession
+  readonly onContributionChange?: (contribution: MembersSettingsContribution) => void
 }): React.JSX.Element | null {
   const { t } = useTranslation('organization')
-  const {
-    activeOrganization,
-    leaveActiveOrganization,
-    membershipVerification,
-    verifyActiveMembership
-  } = useActiveOrganization()
+  const { activeOrganization, membershipVerification, verifyActiveMembership } =
+    useActiveOrganization()
   const activeOrganizationId = activeOrganization?.organizationId
   const [loadedRosterOrganizationId, setLoadedRosterOrganizationId] = useState<string>()
   const [verificationPending, setVerificationPending] = useState(false)
@@ -43,14 +46,14 @@ export function MembersSettings({
     }
   }
   if (!activeOrganization) return null
-  const providerVerificationStatus =
-    membershipVerification?.status === 'verified'
-      ? membershipVerification.membership.organizationId === activeOrganization.organizationId
-        ? 'verified'
-        : undefined
-      : membershipVerification?.organizationId === activeOrganization.organizationId
-        ? membershipVerification.status
-        : undefined
+  let providerVerificationStatus: 'verified' | 'lost' | 'unknown' | undefined
+  if (membershipVerification?.status === 'verified') {
+    if (membershipVerification.membership.organizationId === activeOrganization.organizationId) {
+      providerVerificationStatus = 'verified'
+    }
+  } else if (membershipVerification?.organizationId === activeOrganization.organizationId) {
+    providerVerificationStatus = membershipVerification.status
+  }
   const authorityFresh = providerVerificationStatus === 'verified'
   const hasVerifiedMembership =
     authorityFresh || loadedRosterOrganizationId === activeOrganization.organizationId
@@ -89,7 +92,7 @@ export function MembersSettings({
       key={`${activeOrganization.organizationId}:${activeOrganization.role}`}
       getSession={getSession}
       organization={activeOrganization}
-      leaveActiveOrganization={leaveActiveOrganization}
+      onContributionChange={onContributionChange}
       authorityFresh={authorityFresh}
       retryVerification={() => void retryMembershipVerification()}
       rosterLoaded={recordRosterLoaded}
@@ -101,7 +104,7 @@ export function MembersSettings({
 function MembersSettingsContent({
   getSession,
   organization,
-  leaveActiveOrganization,
+  onContributionChange,
   authorityFresh,
   retryVerification,
   rosterLoaded,
@@ -109,7 +112,7 @@ function MembersSettingsContent({
 }: {
   readonly getSession: GetSession
   readonly organization: ActiveMembership
-  readonly leaveActiveOrganization: () => Promise<void>
+  readonly onContributionChange?: (contribution: MembersSettingsContribution) => void
   readonly authorityFresh: boolean
   readonly retryVerification: () => void
   readonly rosterLoaded: () => void
@@ -120,6 +123,26 @@ function MembersSettingsContent({
   useEffect(() => {
     if (management.loadState === 'ready') rosterLoaded()
   }, [management.loadState, rosterLoaded])
+
+  useEffect(() => {
+    let contribution: MembersSettingsContribution = { status: 'clean' }
+    if (management.commandState === 'pending') {
+      contribution = { status: 'command-pending' }
+    } else if (management.commandState === 'unknown') {
+      contribution = { status: 'unknown-command-result' }
+    }
+    onContributionChange?.(contribution)
+  }, [management.commandState, onContributionChange])
+
+  useEffect(
+    () => () => {
+      onContributionChange?.({ status: 'clean' })
+    },
+    [onContributionChange]
+  )
+
+  const actionsEnabled = authorityFresh && management.commandState === 'idle'
+  const isMutating = management.commandState === 'pending'
   const canManage =
     authorityFresh && (organization.role === 'owner' || organization.role === 'admin')
   const noticeMessage = messageForNotice(management.notice, t)
@@ -135,7 +158,7 @@ function MembersSettingsContent({
         </p>
       </div>
 
-      {!authorityFresh ? (
+      {!authorityFresh && management.commandState !== 'unknown' ? (
         <div className="grid justify-items-start gap-3">
           <p role="alert" className="text-destructive text-sm">
             {t('members.verificationUnknown')}
@@ -148,6 +171,24 @@ function MembersSettingsContent({
             onClick={retryVerification}
           >
             {t('members.retry')}
+          </Button>
+        </div>
+      ) : null}
+
+      {management.commandState === 'unknown' ? (
+        <div className="bg-destructive/10 grid justify-items-start gap-3 rounded-md p-3">
+          <p role="alert" className="text-destructive text-sm">
+            {t('members.resultNotConfirmed')}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={t('members.checkAgainAria')}
+            disabled={management.isRechecking}
+            onClick={() => void management.checkUnknownResult()}
+          >
+            {t('members.checkAgain')}
           </Button>
         </div>
       ) : null}
@@ -172,8 +213,10 @@ function MembersSettingsContent({
       ) : canManage ? (
         <Tabs defaultValue="members">
           <TabsList>
-            <TabsTrigger value="members">{t('members.membersTab')}</TabsTrigger>
-            <TabsTrigger value="invitations">
+            <TabsTrigger value="members" disabled={!actionsEnabled}>
+              {t('members.membersTab')}
+            </TabsTrigger>
+            <TabsTrigger value="invitations" disabled={!actionsEnabled}>
               {t('members.invitesTab')}
               <Badge variant="secondary">{management.pendingInvitations.length}</Badge>
             </TabsTrigger>
@@ -181,23 +224,24 @@ function MembersSettingsContent({
           <TabsContent value="members" className="grid gap-4">
             <MemberRoster
               key={authorityFresh ? 'fresh' : 'unknown'}
-              actionsEnabled={authorityFresh}
+              actionsEnabled={actionsEnabled}
               organization={organization}
               members={management.members}
               currentUserId={management.currentUserId}
-              isMutating={management.isMutating}
+              isMutating={isMutating}
               actionError={actionError}
               clearNotice={management.clearNotice}
               promoteMember={management.promoteMember}
               demoteMember={management.demoteMember}
               removeMember={management.removeMember}
-              leaveOrganization={leaveActiveOrganization}
+              leaveOrganization={management.leaveOrganization}
             />
           </TabsContent>
           <TabsContent value="invitations" className="grid gap-4">
             <OrganizationInvitations
               invitations={management.pendingInvitations}
-              isMutating={management.isMutating}
+              actionsEnabled={actionsEnabled}
+              isMutating={!actionsEnabled || isMutating}
               actionError={actionError}
               clearNotice={management.clearNotice}
               createInvitation={management.createInvitation}
@@ -213,17 +257,17 @@ function MembersSettingsContent({
           ) : null}
           <MemberRoster
             key={authorityFresh ? 'fresh' : 'unknown'}
-            actionsEnabled={authorityFresh}
+            actionsEnabled={actionsEnabled}
             organization={organization}
             members={management.members}
             currentUserId={management.currentUserId}
-            isMutating={management.isMutating}
+            isMutating={isMutating}
             actionError={actionError}
             clearNotice={management.clearNotice}
             promoteMember={management.promoteMember}
             demoteMember={management.demoteMember}
             removeMember={management.removeMember}
-            leaveOrganization={leaveActiveOrganization}
+            leaveOrganization={management.leaveOrganization}
           />
         </div>
       )}
@@ -259,6 +303,10 @@ function messageForNotice(
       return t('members.revoked')
     case 'roleUpdated':
       return t('members.roleUpdated', { name: notice.displayName })
+    case 'notApplied':
+      return t('members.commandNotApplied')
+    case 'stateChanged':
+      return t('members.commandStateChanged')
     case 'error':
       switch (notice.code) {
         case 'active_membership_exists':

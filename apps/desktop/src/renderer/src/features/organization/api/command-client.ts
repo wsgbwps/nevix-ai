@@ -5,6 +5,7 @@ interface OrganizationCommandInput {
   readonly method: 'POST' | 'PATCH'
   readonly path: string
   readonly body: Readonly<Record<string, unknown>>
+  readonly signal?: AbortSignal
 }
 
 export class OrganizationCommandError extends Error {
@@ -29,7 +30,8 @@ export async function requestOrganizationCommand({
   accessToken,
   method,
   path,
-  body
+  body,
+  signal
 }: OrganizationCommandInput): Promise<unknown> {
   if (accessToken.length === 0) throw new Error('Organization command Session is unavailable.')
 
@@ -43,7 +45,8 @@ export async function requestOrganizationCommand({
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   })
 
   if (!response.ok) throw await toOrganizationCommandError(response)

@@ -44,7 +44,10 @@ export interface ActiveOrganizationState {
   readonly openOrganizationPicker: () => void
   readonly leaveActiveOrganization: () => Promise<void>
   readonly updateActiveOrganizationName: (name: string) => Promise<void>
-  readonly verifyActiveMembership: () => Promise<ActiveMembershipVerification>
+  readonly verifyActiveMembership: (options?: {
+    readonly expectedLoss?: 'leave-command'
+  }) => Promise<ActiveMembershipVerification>
+  readonly confirmActiveOrganizationLeft: (organizationId: string) => void
   readonly acknowledgeSessionAccessLost: () => void
   readonly acceptInvitation: (invitation: PendingInvitation, code: string) => Promise<void>
   readonly reconcileStartupAfterInvitationChange: () => void

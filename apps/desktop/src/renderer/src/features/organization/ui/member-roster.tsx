@@ -43,7 +43,7 @@ export function MemberRoster({
   readonly promoteMember: (member: OrganizationMember) => Promise<boolean>
   readonly demoteMember: (member: OrganizationMember) => Promise<boolean>
   readonly removeMember: (member: OrganizationMember) => Promise<boolean>
-  readonly leaveOrganization: () => Promise<void>
+  readonly leaveOrganization: () => Promise<boolean>
 }): React.JSX.Element {
   const { t } = useTranslation('organization')
   const [removalTarget, setRemovalTarget] = useState<OrganizationMember>()
@@ -68,7 +68,7 @@ export function MemberRoster({
     if (!actionsEnabled || isMutating) return
     setLeaveError(undefined)
     try {
-      await leaveOrganization()
+      if (await leaveOrganization()) setLeaveOpen(false)
     } catch {
       setLeaveError(t('members.actionFailed'))
     }

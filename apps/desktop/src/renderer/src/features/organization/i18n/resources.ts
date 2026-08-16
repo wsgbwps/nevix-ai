@@ -79,6 +79,11 @@ export const organizationTranslations = defineResourceTranslations({
       leaveDescription: '退出后你将失去该组织的访问权限，可经再次邀请加入。',
       confirmLeave: '确认退出',
       roleUpdated: '已更新 {{name}} 的角色。',
+      resultNotConfirmed: '结果尚未确认。请重新检查权威状态后再继续。',
+      checkAgain: '重新检查',
+      checkAgainAria: '重新检查命令结果',
+      commandNotApplied: '该命令未生效。当前状态已刷新；仅在操作仍可用时重试。',
+      commandStateChanged: '当前状态已刷新；原操作现在无需或不再允许重试。',
       memberReadOnly: '成员角色仅可查看成员列表。',
       loading: '正在加载成员信息…',
       loadError: '暂时无法加载成员信息。请重试。',
@@ -263,6 +268,14 @@ export const organizationTranslations = defineResourceTranslations({
         'You will lose access to this organization. You can rejoin with a new invitation.',
       confirmLeave: 'Leave',
       roleUpdated: 'Updated the role of {{name}}.',
+      resultNotConfirmed:
+        'The result is not confirmed yet. Check authoritative state before continuing.',
+      checkAgain: 'Check again',
+      checkAgainAria: 'Check the command result again',
+      commandNotApplied:
+        'The command was not applied. The current state is refreshed; retry only if the action is still available.',
+      commandStateChanged:
+        'The current state is refreshed; the original action no longer needs or permits a retry.',
       memberReadOnly: 'The Member role can only view the roster.',
       loading: 'Loading members…',
       loadError: 'Unable to load members right now. Try again.',

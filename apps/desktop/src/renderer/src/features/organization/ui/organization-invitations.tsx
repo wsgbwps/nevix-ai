@@ -18,6 +18,7 @@ const invitationDayMilliseconds = 24 * 60 * 60 * 1000
 
 export function OrganizationInvitations({
   invitations,
+  actionsEnabled,
   isMutating,
   actionError,
   clearNotice,
@@ -26,6 +27,7 @@ export function OrganizationInvitations({
   revokeInvitation
 }: {
   readonly invitations: readonly PendingOrganizationInvitation[]
+  readonly actionsEnabled: boolean
   readonly isMutating: boolean
   readonly actionError: string | undefined
   readonly clearNotice: () => void
@@ -42,7 +44,7 @@ export function OrganizationInvitations({
 
   async function submitInvitation(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    if (isMutating) return
+    if (!actionsEnabled || isMutating) return
     if (await createInvitation(email)) {
       setCreateOpen(false)
       setEmail('')
@@ -50,12 +52,12 @@ export function OrganizationInvitations({
   }
 
   async function confirmResend(): Promise<void> {
-    if (!resendTarget || isMutating) return
+    if (!actionsEnabled || !resendTarget || isMutating) return
     if (await resendInvitation(resendTarget.id)) setResendTarget(undefined)
   }
 
   async function confirmRevoke(): Promise<void> {
-    if (!revokeTarget || isMutating) return
+    if (!actionsEnabled || !revokeTarget || isMutating) return
     if (await revokeInvitation(revokeTarget.id)) setRevokeTarget(undefined)
   }
 
