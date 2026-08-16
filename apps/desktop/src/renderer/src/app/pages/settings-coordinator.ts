@@ -38,6 +38,7 @@ interface SettingsCoordinator {
   readonly navigationDisabled: boolean
   readonly discardPromptOpen: boolean
   readonly switchSection: (section: SettingsSection) => void
+  readonly forceSwitchSection: (section: SettingsSection) => void
   readonly returnToSource: () => void
   readonly openOrganizationPicker: () => void
   readonly continueEditing: () => void
@@ -188,6 +189,24 @@ export function useSettingsCoordinator({
     [entry.section, router.history, runNavigationIntent]
   )
 
+  const forceSwitchSection = useCallback(
+    (section: SettingsSection): void => {
+      const prompt = clearDiscardPrompt()
+      prompt?.continueEditing()
+      const queuedCloseRequest = queuedCloseRequestRef.current
+      queuedCloseRequestRef.current = undefined
+      if (queuedCloseRequest) answerClose(queuedCloseRequest, 'cancel')
+      if (contribution.status === 'dirty') contribution.discard()
+      if (section === entry.section) return
+      router.history.replace(
+        '/settings',
+        replaceSettingsSection(router.history.location.state, section),
+        { ignoreBlocker: true }
+      )
+    },
+    [answerClose, clearDiscardPrompt, contribution, entry.section, router.history]
+  )
+
   const navigateToSource = useCallback((): void => {
     returnToSettingsSource(router.history, entry.source, organizationId, canEnterSource)
   }, [canEnterSource, entry.source, organizationId, router.history])
@@ -228,6 +247,7 @@ export function useSettingsCoordinator({
     navigationDisabled: contribution.status !== 'clean' && contribution.status !== 'dirty',
     discardPromptOpen: discardPrompt !== undefined,
     switchSection,
+    forceSwitchSection,
     returnToSource,
     openOrganizationPicker: requestOrganizationPicker,
     continueEditing,

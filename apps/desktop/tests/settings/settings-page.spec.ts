@@ -19,7 +19,8 @@ import {
   seedActiveMembership,
   seedOrganizationWithMembership,
   seedProfile,
-  updateMembershipRole
+  updateMembershipRole,
+  updateOrganizationName
 } from '../organization/helpers/organization-seed'
 
 const authHarness = readAuthHarnessConfig()
@@ -99,6 +100,248 @@ test('signed-in users reach one focused Settings Section and return to its App s
   }
 })
 
+test('Organization Details remounts from authority and protects an Owner draft @smoke', async () => {
+  test.setTimeout(90_000)
+  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+  if (!authHarness) return
+
+  const identity = uniqueAuthIdentity('settings-organization-details-owner')
+  const userId = await createAuthUser(authHarness, identity, true)
+  const organization = await seedOrganizationWithMembership(userId, {
+    name: 'Initial Details Studio',
+    profileDisplayName: 'Drew Owner'
+  })
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-organization-details-owner-'))
+
+  try {
+    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    try {
+      await launched.page.getByLabel('Email').fill(identity.email)
+      await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
+      await openSettingsFromUserMenu(launched.page)
+
+      const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+      const detailsSection = settingsNavigation.getByRole('button', {
+        name: 'Organization details',
+        exact: true
+      })
+      const membersSection = settingsNavigation.getByRole('button', {
+        name: 'Members',
+        exact: true
+      })
+      const initialDetailsRead = launched.page.waitForResponse(
+        (response) => isActiveMembershipProjection(response.url()) && response.ok()
+      )
+      await detailsSection.click()
+      await initialDetailsRead
+
+      await expect(
+        launched.page.getByRole('heading', { name: 'Organization details', exact: true })
+      ).toBeVisible()
+      await expect(
+        launched.page.getByRole('heading', { name: 'Members', exact: true })
+      ).toHaveCount(0)
+      const organizationName = launched.page.getByRole('textbox', {
+        name: 'Organization name',
+        exact: true
+      })
+      await expect(organizationName).toHaveValue('Initial Details Studio')
+
+      await organizationName.fill('Unsaved Details Draft')
+      await membersSection.click()
+      const discardDialog = launched.page.getByRole('dialog', {
+        name: 'Discard unsaved changes?'
+      })
+      await expect(discardDialog).toBeVisible()
+      await discardDialog.getByRole('button', { name: 'Continue editing' }).click()
+      await expect(organizationName).toHaveValue('Unsaved Details Draft')
+
+      await membersSection.click()
+      await discardDialog.getByRole('button', { name: 'Discard changes' }).click()
+      await expect(
+        launched.page.getByRole('heading', { name: 'Members', exact: true })
+      ).toBeVisible()
+      await expect(
+        launched.page.getByRole('textbox', { name: 'Organization name', exact: true })
+      ).toHaveCount(0)
+
+      await updateOrganizationName(organization.id, 'Remote Authoritative Studio')
+      const authoritativeReread = launched.page.waitForResponse(
+        (response) => isActiveMembershipProjection(response.url()) && response.ok()
+      )
+      await detailsSection.click()
+      await authoritativeReread
+      await expect(organizationName).toHaveValue('Remote Authoritative Studio')
+
+      let markFailedSaveStarted = (): void => undefined
+      let releaseFailedSave = (): void => undefined
+      const failedSaveStarted = new Promise<void>((resolve) => {
+        markFailedSaveStarted = resolve
+      })
+      const failedSaveRelease = new Promise<void>((resolve) => {
+        releaseFailedSave = resolve
+      })
+      await launched.page.route(
+        `**/identity/organizations/${organization.id}/settings`,
+        async (route) => {
+          markFailedSaveStarted()
+          await failedSaveRelease
+          await route.fulfill({
+            status: 500,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'temporary_failure', message: 'temporary failure' })
+          })
+        },
+        { times: 1 }
+      )
+      await organizationName.fill('Retryable Owner Draft')
+      await launched.page.getByRole('button', { name: 'Apply organization rename' }).click()
+      await failedSaveStarted
+      await requestOrdinaryWindowClose(launched.electronApp)
+      await expectMainWindowCount(launched.electronApp, 1)
+      await expect(settingsNavigation.getByRole('button', { name: 'Members' })).toBeDisabled()
+      releaseFailedSave()
+      await expect(organizationName).toHaveValue('Retryable Owner Draft')
+      await expect(launched.page.getByRole('alert')).toContainText(
+        'Unable to save Organization details. Your draft is preserved. Try again.'
+      )
+
+      await requestOrdinaryWindowClose(launched.electronApp)
+      await expectMainWindowCount(launched.electronApp, 1)
+      await expect(discardDialog).toBeVisible()
+      await discardDialog.getByRole('button', { name: 'Continue editing' }).click()
+      await expect(organizationName).toHaveValue('Retryable Owner Draft')
+
+      await updateMembershipRole(userId, organization.id, 'admin')
+      const roleReductionVerification = launched.page.waitForResponse(
+        (response) => isActiveMembershipProjection(response.url()) && response.ok()
+      )
+      await membersSection.click()
+      await roleReductionVerification
+
+      await expect(
+        launched.page.getByRole('heading', { name: 'Members', exact: true })
+      ).toBeVisible()
+      await expect(organizationName).toHaveCount(0)
+      await expect(settingsNavigation.getByRole('status')).toContainText(
+        'Your Organization details editing permission changed. The authoritative name was reloaded.'
+      )
+      await expect(discardDialog).toHaveCount(0)
+
+      const reducedRoleDetailsRead = launched.page.waitForResponse(
+        (response) => isActiveMembershipProjection(response.url()) && response.ok()
+      )
+      await detailsSection.click()
+      await reducedRoleDetailsRead
+      await expect(
+        launched.page.getByRole('heading', { name: 'Organization details', exact: true })
+      ).toBeVisible()
+      await expect(organizationName).toHaveCount(0)
+      await expect(
+        launched.page.getByRole('main').getByText('Remote Authoritative Studio', { exact: true })
+      ).toBeVisible()
+    } finally {
+      await launched.electronApp.close()
+    }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
+    await deleteAuthUser(authHarness, userId)
+  }
+})
+
+test('stale Details verification cannot bypass a newer Profile draft @smoke', async () => {
+  test.setTimeout(90_000)
+  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+  if (!authHarness) return
+
+  const identity = uniqueAuthIdentity('settings-stale-details-verification')
+  const userId = await createAuthUser(authHarness, identity, true)
+  const organization = await seedOrganizationWithMembership(userId, {
+    name: 'Stale Verification Studio',
+    profileDisplayName: 'Vera Owner'
+  })
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-stale-details-'))
+
+  try {
+    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    try {
+      await launched.page.getByLabel('Email').fill(identity.email)
+      await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
+      await openSettingsFromUserMenu(launched.page)
+
+      const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+      const detailsRead = launched.page.waitForResponse(
+        (response) => isActiveMembershipProjection(response.url()) && response.ok()
+      )
+      await settingsNavigation
+        .getByRole('button', { name: 'Organization details', exact: true })
+        .click()
+      await detailsRead
+      await launched.page
+        .getByRole('textbox', { name: 'Organization name', exact: true })
+        .fill('Discarded Details Draft')
+
+      let markVerificationStarted = (): void => undefined
+      let releaseVerification = (): void => undefined
+      const verificationStarted = new Promise<void>((resolve) => {
+        markVerificationStarted = resolve
+      })
+      const verificationRelease = new Promise<void>((resolve) => {
+        releaseVerification = resolve
+      })
+      let holdNextVerification = true
+      await launched.page.route('**/rest/v1/memberships*', async (route) => {
+        if (holdNextVerification && isActiveMembershipProjection(route.request().url())) {
+          holdNextVerification = false
+          markVerificationStarted()
+          await verificationRelease
+        }
+        await route.continue()
+      })
+
+      await settingsNavigation.getByRole('button', { name: 'Members', exact: true }).click()
+      await verificationStarted
+      await settingsNavigation.getByRole('button', { name: 'Profile', exact: true }).click()
+      const discardDialog = launched.page.getByRole('dialog', {
+        name: 'Discard unsaved changes?'
+      })
+      await discardDialog.getByRole('button', { name: 'Discard changes' }).click()
+      const displayName = launched.page.getByLabel('Display name')
+      await displayName.fill('Protected Profile Draft')
+
+      await updateMembershipRole(userId, organization.id, 'admin')
+      const staleVerificationResponse = launched.page.waitForResponse(
+        (response) => isActiveMembershipProjection(response.url()) && response.ok()
+      )
+      releaseVerification()
+      await staleVerificationResponse
+
+      await expect(displayName).toHaveValue('Protected Profile Draft')
+      await expect(
+        settingsNavigation.getByRole('button', { name: 'Profile', exact: true })
+      ).toHaveAttribute('aria-pressed', 'true')
+      await expect(
+        launched.page.getByRole('heading', { name: 'Members', exact: true })
+      ).toHaveCount(0)
+      await expect(settingsNavigation.getByRole('status')).toHaveCount(0)
+      await launched.page.getByRole('main').getByRole('button', { name: 'Cancel' }).click()
+    } finally {
+      await launched.electronApp.close()
+    }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
+    await deleteAuthUser(authHarness, userId)
+  }
+})
+
 test('Members verifies a fresh Membership role before loading role-dependent controls @smoke', async () => {
   test.setTimeout(90_000)
   test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
@@ -163,7 +406,7 @@ test('Members verifies a fresh Membership role before loading role-dependent con
   }
 })
 
-test('confirmed Membership loss bypasses a dirty Settings draft before entering Members @smoke', async () => {
+test('confirmed Membership loss bypasses a dirty Settings draft before entering Organization Details @smoke', async () => {
   test.setTimeout(90_000)
   test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
   if (!authHarness) return
@@ -199,7 +442,7 @@ test('confirmed Membership loss bypasses a dirty Settings draft before entering 
       )
       await launched.page
         .getByRole('navigation', { name: 'Settings' })
-        .getByRole('button', { name: 'Members', exact: true })
+        .getByRole('button', { name: 'Organization details', exact: true })
         .click()
       await lossVerification
 

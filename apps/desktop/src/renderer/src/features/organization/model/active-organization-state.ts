@@ -21,6 +21,16 @@ export type ActiveMembershipVerification =
   | { readonly status: 'lost'; readonly organizationId: string }
   | { readonly status: 'unknown'; readonly organizationId: string }
 
+export class OrganizationSettingsAuthorityError extends Error {
+  readonly verification: ActiveMembershipVerification
+
+  constructor(verification: ActiveMembershipVerification) {
+    super('Organization settings authority changed.')
+    this.name = 'OrganizationSettingsAuthorityError'
+    this.verification = verification
+  }
+}
+
 export interface ActiveOrganizationState {
   readonly startupPhase: OrganizationStartupPhase
   readonly activeOrganization: ActiveMembership | undefined

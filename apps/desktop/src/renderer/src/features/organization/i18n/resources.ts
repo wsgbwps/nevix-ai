@@ -40,6 +40,17 @@ export const organizationTranslations = defineResourceTranslations({
       discardOrganizationName: '放弃组织改名',
       verificationUnknown: '成员身份暂时无法验证'
     },
+    details: {
+      title: '组织详情',
+      description: '查看组织的权威基础信息。只有拥有者可以修改组织名称。',
+      loading: '正在加载组织详情…',
+      verificationUnknown: '暂时无法验证你的成员身份，因此无法加载或修改组织详情。',
+      retry: '重试',
+      readOnly: '只有拥有者可以修改组织详情。',
+      saved: '组织详情已更新。',
+      saveFailed: '无法保存组织详情。草稿已保留，请重试。',
+      permissionChanged: '你的组织详情编辑权限已变更，已重新加载权威名称。'
+    },
     members: {
       title: '成员',
       inviteCta: '邀请成员',
@@ -206,6 +217,20 @@ export const organizationTranslations = defineResourceTranslations({
       updateOrganizationName: 'Apply organization rename',
       discardOrganizationName: 'Discard organization rename',
       verificationUnknown: 'Membership verification unavailable'
+    },
+    details: {
+      title: 'Organization details',
+      description:
+        'View authoritative Organization information. Only the Owner can change the name.',
+      loading: 'Loading Organization details…',
+      verificationUnknown:
+        'Unable to verify your Membership, so Organization details cannot be loaded or changed.',
+      retry: 'Try again',
+      readOnly: 'Only the Owner can change Organization details.',
+      saved: 'Organization details updated.',
+      saveFailed: 'Unable to save Organization details. Your draft is preserved. Try again.',
+      permissionChanged:
+        'Your Organization details editing permission changed. The authoritative name was reloaded.'
     },
     members: {
       title: 'Members',

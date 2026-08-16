@@ -114,6 +114,18 @@ export async function updateMembershipRole(
   })
 }
 
+export async function updateOrganizationName(organizationId: string, name: string): Promise<void> {
+  await withIdentityAppClient(async (client) => {
+    const result = await client.query('UPDATE organizations SET name = $2 WHERE id = $1', [
+      organizationId,
+      name
+    ])
+    if (result.rowCount === 0) {
+      throw new Error('Unable to update test Organization name: Organization not found')
+    }
+  })
+}
+
 export async function endMembership(userId: string, organizationId: string): Promise<void> {
   await withIdentityAppClient(async (client) => {
     const result = await client.query(

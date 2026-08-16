@@ -12,6 +12,7 @@ import { leaveOrganization, readActiveMemberships, type ActiveMembership } from 
 import { updateOrganizationSettings } from '../api/organization-settings'
 import {
   ActiveOrganizationContext,
+  OrganizationSettingsAuthorityError,
   type ActiveMembershipVerification,
   type ActiveOrganizationState,
   type OrganizationStartupPhase,
@@ -329,7 +330,8 @@ export function ActiveOrganizationProvider({
         )
       } catch (error) {
         if (isPotentialOrganizationAccessLoss(error)) {
-          await verifyActiveMembership()
+          const verification = await verifyActiveMembership()
+          throw new OrganizationSettingsAuthorityError(verification)
         }
         throw error
       }

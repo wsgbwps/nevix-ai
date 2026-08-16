@@ -10,7 +10,6 @@ import { type MembersManagementNotice, useMembersManagement } from '../model/mem
 import { useActiveOrganization } from '../model/active-organization-state'
 import { MemberRoster } from './member-roster'
 import { OrganizationInvitations } from './organization-invitations'
-import { OrganizationNameSettings } from './organization-name-settings'
 
 type GetSession = () => Promise<AuthenticatedOrganizationSession | undefined>
 
@@ -23,7 +22,6 @@ export function MembersSettings({
   const {
     activeOrganization,
     leaveActiveOrganization,
-    updateActiveOrganizationName,
     membershipVerification,
     verifyActiveMembership
   } = useActiveOrganization()
@@ -92,7 +90,6 @@ export function MembersSettings({
       getSession={getSession}
       organization={activeOrganization}
       leaveActiveOrganization={leaveActiveOrganization}
-      updateActiveOrganizationName={updateActiveOrganizationName}
       authorityFresh={authorityFresh}
       retryVerification={() => void retryMembershipVerification()}
       rosterLoaded={recordRosterLoaded}
@@ -105,7 +102,6 @@ function MembersSettingsContent({
   getSession,
   organization,
   leaveActiveOrganization,
-  updateActiveOrganizationName,
   authorityFresh,
   retryVerification,
   rosterLoaded,
@@ -114,7 +110,6 @@ function MembersSettingsContent({
   readonly getSession: GetSession
   readonly organization: ActiveMembership
   readonly leaveActiveOrganization: () => Promise<void>
-  readonly updateActiveOrganizationName: (name: string) => Promise<void>
   readonly authorityFresh: boolean
   readonly retryVerification: () => void
   readonly rosterLoaded: () => void
@@ -156,12 +151,6 @@ function MembersSettingsContent({
           </Button>
         </div>
       ) : null}
-
-      <OrganizationNameSettings
-        organization={organization}
-        authorityFresh={authorityFresh}
-        updateName={updateActiveOrganizationName}
-      />
 
       {management.loadState === 'loading' ? (
         <p className="text-muted-foreground text-sm">{t('members.loading')}</p>

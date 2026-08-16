@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { ScrollTextIcon, UsersRoundIcon } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Building2Icon, ScrollTextIcon, UsersRoundIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { canViewAuditLog } from '../model/audit-log-access'
 import { useActiveOrganization } from '../model/active-organization-state'
@@ -57,30 +57,55 @@ export function ActiveOrganizationSettingsContext({
   )
 }
 
-export type OrganizationSettingsSection = 'members' | 'audit-log'
+export type OrganizationSettingsSection = 'organization-details' | 'members' | 'audit-log'
 
 export function OrganizationSettingsNavigation({
   activeSection,
   disabled,
-  onSelectSection
+  onSelectSection,
+  onForceSelectSection
 }: {
   readonly activeSection: OrganizationSettingsSection | undefined
   readonly disabled: boolean
   readonly onSelectSection: (section: OrganizationSettingsSection) => void
+  readonly onForceSelectSection: (section: OrganizationSettingsSection) => void
 }): React.JSX.Element | null {
   const { t } = useTranslation('organization')
   const { activeOrganization, verifyActiveMembership } = useActiveOrganization()
   const [sectionVerificationPending, setSectionVerificationPending] = useState(false)
+  const [authorityChanged, setAuthorityChanged] = useState(false)
+  const verificationGenerationRef = useRef(0)
+
+  useEffect(() => {
+    verificationGenerationRef.current += 1
+    return () => {
+      verificationGenerationRef.current += 1
+    }
+  }, [activeSection])
 
   if (!activeOrganization) return null
 
-  async function selectMembersSection(): Promise<void> {
+  async function selectVerifiedSection(section: 'organization-details' | 'members'): Promise<void> {
     if (disabled || sectionVerificationPending) return
 
+    const previousRole = activeOrganization?.role
+    const generation = ++verificationGenerationRef.current
     setSectionVerificationPending(true)
     try {
       const verification = await verifyActiveMembership()
-      if (verification.status !== 'lost') onSelectSection('members')
+      if (generation !== verificationGenerationRef.current) return
+      if (verification.status === 'lost') return
+      if (
+        activeSection === 'organization-details' &&
+        previousRole === 'owner' &&
+        verification.status === 'verified' &&
+        verification.membership.role !== 'owner'
+      ) {
+        setAuthorityChanged(true)
+        onForceSelectSection(section)
+        return
+      }
+      onSelectSection(section)
     } finally {
       setSectionVerificationPending(false)
     }
@@ -93,9 +118,19 @@ export function OrganizationSettingsNavigation({
       </p>
       <button
         type="button"
+        aria-pressed={activeSection === 'organization-details'}
+        disabled={disabled || sectionVerificationPending}
+        onClick={() => void selectVerifiedSection('organization-details')}
+        className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
+      >
+        <Building2Icon className="size-4" />
+        {t('details.title')}
+      </button>
+      <button
+        type="button"
         aria-pressed={activeSection === 'members'}
         disabled={disabled || sectionVerificationPending}
-        onClick={() => void selectMembersSection()}
+        onClick={() => void selectVerifiedSection('members')}
         className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
       >
         <UsersRoundIcon className="size-4" />
@@ -112,6 +147,11 @@ export function OrganizationSettingsNavigation({
           <ScrollTextIcon className="size-4" />
           {t('audit.title')}
         </button>
+      ) : null}
+      {authorityChanged ? (
+        <p role="status" className="text-muted-foreground px-2.5 pt-1 text-xs">
+          {t('details.permissionChanged')}
+        </p>
       ) : null}
     </div>
   )

@@ -89,7 +89,7 @@ test(
 
         await openSettingsFromUserMenu(launched.page)
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
-        await expect(settingsNavigation.getByText('Organization')).toBeVisible()
+        await expect(settingsNavigation.getByText('Organization', { exact: true })).toBeVisible()
         await settingsNavigation.getByRole('button', { name: 'Audit log' }).click()
 
         await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toBeVisible()

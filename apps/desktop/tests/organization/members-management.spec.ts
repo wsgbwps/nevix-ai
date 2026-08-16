@@ -89,6 +89,13 @@ test(
         await expect(launched.page.getByRole('combobox', { name: /Change role/ })).toHaveCount(0)
         await expect(launched.page.getByRole('button', { name: /Remove member/ })).toHaveCount(0)
         const settingsMain = launched.page.getByRole('main')
+        await expect(settingsMain.getByText('Organization name', { exact: true })).toHaveCount(0)
+        await settingsNavigation
+          .getByRole('button', { name: 'Organization details', exact: true })
+          .click()
+        await expect(
+          settingsMain.getByRole('heading', { name: 'Organization details', exact: true })
+        ).toBeVisible()
         await expect(settingsMain.getByText('Organization name', { exact: true })).toBeVisible()
         await expect(settingsMain.getByText('Read-only Studio', { exact: true })).toBeVisible()
         await expect(
@@ -349,6 +356,14 @@ test(
         await removalDialog.getByRole('button', { name: 'Remove', exact: true }).click()
         await expect(launched.page.getByText('Ada Admin', { exact: true })).toHaveCount(0)
 
+        await expect(
+          launched.page.getByRole('textbox', { name: 'Organization name', exact: true })
+        ).toHaveCount(0)
+        await launched.page
+          .getByRole('navigation', { name: 'Settings' })
+          .getByRole('button', { name: 'Organization details', exact: true })
+          .click()
+
         const renamedOrganization = 'Renamed Membership Studio'
         const organizationName = launched.page.getByRole('textbox', {
           name: 'Organization name',
@@ -424,7 +439,14 @@ test(
         await openSettingsSectionFromUserMenu(launched.page, 'Members')
 
         const settingsMain = launched.page.getByRole('main')
-        await expect(settingsMain.getByText('Organization name', { exact: true })).toBeVisible()
+        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+        await expect(settingsMain.getByText('Organization name', { exact: true })).toHaveCount(0)
+        await settingsNavigation
+          .getByRole('button', { name: 'Organization details', exact: true })
+          .click()
+        await expect(
+          settingsMain.getByRole('heading', { name: 'Organization details', exact: true })
+        ).toBeVisible()
         await expect(
           settingsMain.getByText('Admin Management Studio', { exact: true })
         ).toBeVisible()
@@ -437,6 +459,10 @@ test(
         await expect(
           settingsMain.getByRole('button', { name: 'Discard organization rename' })
         ).toHaveCount(0)
+        await settingsNavigation.getByRole('button', { name: 'Members', exact: true }).click()
+        await expect(
+          settingsMain.getByRole('heading', { name: 'Members', exact: true })
+        ).toBeVisible()
         await expect(launched.page.getByRole('combobox', { name: /Change role/ })).toHaveCount(0)
         await expect(
           launched.page.getByRole('button', { name: 'Remove member Miles Member' })

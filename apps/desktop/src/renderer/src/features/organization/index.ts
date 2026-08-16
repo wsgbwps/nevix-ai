@@ -9,6 +9,10 @@ export { useOrganizationOnboarding } from './model/onboarding-state'
 export { OnboardingPage } from './ui/onboarding-page'
 export { OrganizationPickerPage } from './ui/organization-picker-page'
 export { MembersSettings } from './ui/members-settings'
+export {
+  OrganizationDetailsSettings,
+  type OrganizationDetailsContribution
+} from './ui/organization-name-settings'
 export { SessionAccessLostDialog } from './ui/session-access-lost-dialog'
 export {
   ActiveOrganizationSettingsContext,

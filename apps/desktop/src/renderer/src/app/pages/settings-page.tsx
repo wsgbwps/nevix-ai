@@ -17,8 +17,10 @@ import {
   AuditLogSettings,
   type AuditLogSettingsContribution,
   MembersSettings,
+  OrganizationDetailsSettings,
   OrganizationSettingsNavigation,
   useActiveOrganization,
+  type OrganizationDetailsContribution,
   type OrganizationSettingsSection
 } from '../../features/organization'
 import { ProfileSettings, type ProfileSettingsContribution } from '../../features/profile'
@@ -50,12 +52,20 @@ export function SettingsPage(): React.JSX.Element | null {
     (next: AuditLogSettingsContribution): void => setAuditContribution(next),
     []
   )
+  const [organizationDetailsContribution, setOrganizationDetailsContribution] =
+    useState<SettingsContribution>({ status: 'clean' })
+  const reportOrganizationDetailsContribution = useCallback(
+    (next: OrganizationDetailsContribution): void => setOrganizationDetailsContribution(next),
+    []
+  )
   const contribution: SettingsContribution =
     entry.section === 'profile'
       ? profileContribution
-      : entry.section === 'audit-log'
-        ? auditContribution
-        : { status: 'clean' }
+      : entry.section === 'organization-details'
+        ? organizationDetailsContribution
+        : entry.section === 'audit-log'
+          ? auditContribution
+          : { status: 'clean' }
   const coordinator = useSettingsCoordinator({
     entry,
     contribution,
@@ -75,7 +85,9 @@ export function SettingsPage(): React.JSX.Element | null {
   }
 
   const organizationSection: OrganizationSettingsSection | undefined =
-    coordinator.section === 'members' || coordinator.section === 'audit-log'
+    coordinator.section === 'organization-details' ||
+    coordinator.section === 'members' ||
+    coordinator.section === 'audit-log'
       ? coordinator.section
       : undefined
 
@@ -126,9 +138,11 @@ export function SettingsPage(): React.JSX.Element | null {
             </div>
 
             <OrganizationSettingsNavigation
+              key={organization.activeOrganization?.organizationId}
               activeSection={organizationSection}
               disabled={coordinator.navigationDisabled}
               onSelectSection={coordinator.switchSection}
+              onForceSelectSection={coordinator.forceSwitchSection}
             />
           </nav>
         </aside>
@@ -152,6 +166,12 @@ export function SettingsPage(): React.JSX.Element | null {
                   <LanguageModeSettings />
                 </div>
               </section>
+            ) : null}
+            {coordinator.section === 'organization-details' ? (
+              <OrganizationDetailsSettings
+                key={organization.activeOrganization?.organizationId}
+                onContributionChange={reportOrganizationDetailsContribution}
+              />
             ) : null}
             {coordinator.section === 'members' ? (
               <MembersSettings getSession={authentication.getSession} />

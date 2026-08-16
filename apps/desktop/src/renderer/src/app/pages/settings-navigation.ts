@@ -1,4 +1,10 @@
-export const SETTINGS_SECTIONS = ['profile', 'language', 'members', 'audit-log'] as const
+export const SETTINGS_SECTIONS = [
+  'profile',
+  'language',
+  'organization-details',
+  'members',
+  'audit-log'
+] as const
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
