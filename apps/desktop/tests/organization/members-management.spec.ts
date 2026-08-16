@@ -323,7 +323,7 @@ test(
           await route.continue()
         })
         await openSettingsSectionFromUserMenu(launched.page, 'Members')
-        await expect.poll(() => activeProjectionRequestCount).toBe(1)
+        await expect.poll(() => activeProjectionRequestCount).toBe(2)
 
         await expect(memberRow(launched.page, 'Mason Member')).toContainText('Member')
         await expect(memberRow(launched.page, 'Ada Admin')).toContainText('Admin')
@@ -363,7 +363,7 @@ test(
         ).toBeVisible()
         await organizationName.fill(`  ${renamedOrganization}  `)
         await launched.page.getByRole('button', { name: 'Apply organization rename' }).click()
-        await expect.poll(() => activeProjectionRequestCount).toBeGreaterThanOrEqual(2)
+        await expect.poll(() => activeProjectionRequestCount).toBeGreaterThanOrEqual(3)
         releasePreWriteRefresh()
         await expect.poll(() => preWriteRefreshCompleted).toBe(true)
         const settingsSidebar = launched.page.getByRole('complementary')

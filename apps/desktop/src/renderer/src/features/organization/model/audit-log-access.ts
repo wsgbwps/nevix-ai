@@ -21,7 +21,7 @@ export function useVerifiedAuditLogOrganization(): {
   readonly verification: AuditLogAccessVerification | undefined
   readonly retry: () => void
 } {
-  const { activeOrganization, refreshActiveOrganization } = useActiveOrganization()
+  const { activeOrganization, verifyActiveMembership } = useActiveOrganization()
   const activeOrganizationId = activeOrganization?.organizationId
   const [verification, setVerification] = useState<AuditLogAccessVerification>()
   const [verificationAttempt, setVerificationAttempt] = useState(0)
@@ -30,25 +30,26 @@ export function useVerifiedAuditLogOrganization(): {
     let isMounted = true
     if (!activeOrganizationId) return
 
-    void refreshActiveOrganization()
-      .then((membership) => {
-        if (!isMounted) return
-        setVerification(
-          canViewAuditLog(membership)
-            ? { status: 'authorized', organizationId: activeOrganizationId, membership }
-            : { status: 'denied', organizationId: activeOrganizationId }
-        )
-      })
-      .catch(() => {
-        if (isMounted) {
-          setVerification({ status: 'error', organizationId: activeOrganizationId })
-        }
-      })
+    void verifyActiveMembership().then((result) => {
+      if (!isMounted) return
+      setVerification(
+        result.status === 'verified' && canViewAuditLog(result.membership)
+          ? {
+              status: 'authorized',
+              organizationId: activeOrganizationId,
+              membership: result.membership
+            }
+          : {
+              status: result.status === 'unknown' ? 'error' : 'denied',
+              organizationId: activeOrganizationId
+            }
+      )
+    })
 
     return () => {
       isMounted = false
     }
-  }, [activeOrganizationId, refreshActiveOrganization, verificationAttempt])
+  }, [activeOrganizationId, verificationAttempt, verifyActiveMembership])
 
   return {
     verification: verification?.organizationId === activeOrganizationId ? verification : undefined,

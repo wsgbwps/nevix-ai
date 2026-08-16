@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Focused Account Settings 与普通关闭保护
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Consumes**
 
@@ -26,14 +26,14 @@
 
 **Acceptance**
 
-- [ ] 每次进入 Members Section 先刷新 Membership，Settings chrome 和 role-dependent controls 使用 fresh role。
-- [ ] Membership 网络、超时或服务失败产生 unknown，不执行 Section fallback 或 access-lost flow。
-- [ ] unknown 且已有成功载入的 roster 时保留该普通只读内容、显示无法验证说明，并禁用依赖 fresh role 的写操作。
-- [ ] unknown 且无旧内容时显示可重试状态。
-- [ ] 成功刷新确认 Membership 结束时，绕过 dirty confirmation、立即清除 Organization context 并走现有 access-lost 说明流程。
-- [ ] 成功刷新确认 role 变更时，Settings chrome、导航与 Members controls 使用新角色。
-- [ ] `Settings Information Architecture Desktop E2E`、既有 access-lost regression、Desktop lint/typecheck/build 与 packaged localization 通过。
-- [ ] 产品代码前记录短实施计划；最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
+- [x] 每次进入 Members Section 先刷新 Membership，Settings chrome 和 role-dependent controls 使用 fresh role。
+- [x] Membership 网络、超时或服务失败产生 unknown，不执行 Section fallback 或 access-lost flow。
+- [x] unknown 且已有成功载入的 roster 时保留该普通只读内容、显示无法验证说明，并禁用依赖 fresh role 的写操作。
+- [x] unknown 且无旧内容时显示可重试状态。
+- [x] 成功刷新确认 Membership 结束时，绕过 dirty confirmation、立即清除 Organization context 并走现有 access-lost 说明流程。
+- [x] 成功刷新确认 role 变更时，Settings chrome、导航与 Members controls 使用新角色。
+- [x] `Settings Information Architecture Desktop E2E`、既有 access-lost regression、Desktop lint/typecheck/build 与 packaged localization 通过。
+- [x] 产品代码前记录短实施计划；最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
 
 **Parallel classification:** stacked parallel behind 05; it is not `parallel-ready` at the current fixed point.
 

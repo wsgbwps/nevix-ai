@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '../../../components/ui/badge'
@@ -19,10 +20,71 @@ export function MembersSettings({
   readonly getSession: GetSession
 }): React.JSX.Element | null {
   const { t } = useTranslation('organization')
-  const { activeOrganization, leaveActiveOrganization, updateActiveOrganizationName } =
-    useActiveOrganization()
+  const {
+    activeOrganization,
+    leaveActiveOrganization,
+    updateActiveOrganizationName,
+    membershipVerification,
+    verifyActiveMembership
+  } = useActiveOrganization()
+  const activeOrganizationId = activeOrganization?.organizationId
+  const [loadedRosterOrganizationId, setLoadedRosterOrganizationId] = useState<string>()
+  const [verificationPending, setVerificationPending] = useState(false)
+  const recordRosterLoaded = useCallback((): void => {
+    if (activeOrganizationId) setLoadedRosterOrganizationId(activeOrganizationId)
+  }, [activeOrganizationId])
 
+  async function retryMembershipVerification(): Promise<void> {
+    if (!activeOrganizationId || verificationPending) return
+
+    setVerificationPending(true)
+    try {
+      await verifyActiveMembership()
+    } finally {
+      setVerificationPending(false)
+    }
+  }
   if (!activeOrganization) return null
+  const providerVerificationStatus =
+    membershipVerification?.status === 'verified'
+      ? membershipVerification.membership.organizationId === activeOrganization.organizationId
+        ? 'verified'
+        : undefined
+      : membershipVerification?.organizationId === activeOrganization.organizationId
+        ? membershipVerification.status
+        : undefined
+  const authorityFresh = providerVerificationStatus === 'verified'
+  const hasVerifiedMembership =
+    authorityFresh || loadedRosterOrganizationId === activeOrganization.organizationId
+  if (!hasVerifiedMembership) {
+    return (
+      <section aria-labelledby="members-heading" className="grid gap-3">
+        <h2 id="members-heading" className="text-base font-semibold">
+          {t('members.title')}
+        </h2>
+        {providerVerificationStatus === 'unknown' ? (
+          <>
+            <p role="alert" className="text-destructive text-sm">
+              {t('members.verificationUnknown')}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="justify-self-start"
+              aria-label={t('members.retryVerificationAria')}
+              disabled={verificationPending}
+              onClick={() => void retryMembershipVerification()}
+            >
+              {t('members.retry')}
+            </Button>
+          </>
+        ) : (
+          <p className="text-muted-foreground text-sm">{t('members.loading')}</p>
+        )}
+      </section>
+    )
+  }
 
   return (
     <MembersSettingsContent
@@ -31,6 +93,9 @@ export function MembersSettings({
       organization={activeOrganization}
       leaveActiveOrganization={leaveActiveOrganization}
       updateActiveOrganizationName={updateActiveOrganizationName}
+      authorityFresh={authorityFresh}
+      retryVerification={() => void retryMembershipVerification()}
+      rosterLoaded={recordRosterLoaded}
       translate={t}
     />
   )
@@ -41,16 +106,27 @@ function MembersSettingsContent({
   organization,
   leaveActiveOrganization,
   updateActiveOrganizationName,
+  authorityFresh,
+  retryVerification,
+  rosterLoaded,
   translate: t
 }: {
   readonly getSession: GetSession
   readonly organization: ActiveMembership
   readonly leaveActiveOrganization: () => Promise<void>
   readonly updateActiveOrganizationName: (name: string) => Promise<void>
+  readonly authorityFresh: boolean
+  readonly retryVerification: () => void
+  readonly rosterLoaded: () => void
   readonly translate: TFunction<'organization'>
 }): React.JSX.Element {
-  const management = useMembersManagement({ getSession, organization })
-  const canManage = organization.role === 'owner' || organization.role === 'admin'
+  const management = useMembersManagement({ getSession, organization, authorityFresh })
+
+  useEffect(() => {
+    if (management.loadState === 'ready') rosterLoaded()
+  }, [management.loadState, rosterLoaded])
+  const canManage =
+    authorityFresh && (organization.role === 'owner' || organization.role === 'admin')
   const noticeMessage = messageForNotice(management.notice, t)
   const actionError = management.notice?.kind === 'error' ? noticeMessage : undefined
   return (
@@ -64,8 +140,26 @@ function MembersSettingsContent({
         </p>
       </div>
 
+      {!authorityFresh ? (
+        <div className="grid justify-items-start gap-3">
+          <p role="alert" className="text-destructive text-sm">
+            {t('members.verificationUnknown')}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={t('members.retryVerificationAria')}
+            onClick={retryVerification}
+          >
+            {t('members.retry')}
+          </Button>
+        </div>
+      ) : null}
+
       <OrganizationNameSettings
         organization={organization}
+        authorityFresh={authorityFresh}
         updateName={updateActiveOrganizationName}
       />
 
@@ -97,6 +191,8 @@ function MembersSettingsContent({
           </TabsList>
           <TabsContent value="members" className="grid gap-4">
             <MemberRoster
+              key={authorityFresh ? 'fresh' : 'unknown'}
+              actionsEnabled={authorityFresh}
               organization={organization}
               members={management.members}
               currentUserId={management.currentUserId}
@@ -123,8 +219,12 @@ function MembersSettingsContent({
         </Tabs>
       ) : (
         <div className="grid gap-4">
-          <p className="text-muted-foreground text-sm">{t('members.memberReadOnly')}</p>
+          {authorityFresh ? (
+            <p className="text-muted-foreground text-sm">{t('members.memberReadOnly')}</p>
+          ) : null}
           <MemberRoster
+            key={authorityFresh ? 'fresh' : 'unknown'}
+            actionsEnabled={authorityFresh}
             organization={organization}
             members={management.members}
             currentUserId={management.currentUserId}

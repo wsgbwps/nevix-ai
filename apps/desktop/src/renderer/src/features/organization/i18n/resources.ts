@@ -37,7 +37,8 @@ export const organizationTranslations = defineResourceTranslations({
       groupOrg: '组织',
       languageDescription: '选择 Desktop 界面的显示语言。',
       updateOrganizationName: '应用组织改名',
-      discardOrganizationName: '放弃组织改名'
+      discardOrganizationName: '放弃组织改名',
+      verificationUnknown: '成员身份暂时无法验证'
     },
     members: {
       title: '成员',
@@ -70,6 +71,8 @@ export const organizationTranslations = defineResourceTranslations({
       memberReadOnly: '成员角色仅可查看成员列表。',
       loading: '正在加载成员信息…',
       loadError: '暂时无法加载成员信息。请重试。',
+      verificationUnknown: '暂时无法验证你的成员身份。',
+      retryVerificationAria: '重试成员身份验证',
       actionFailed: '操作失败，请重试。',
       activeMembershipExists: '该邮箱已是组织成员。',
       pendingInvitationExists: '该邮箱已有待定邀请。',
@@ -200,7 +203,8 @@ export const organizationTranslations = defineResourceTranslations({
       groupOrg: 'Organization',
       languageDescription: 'Choose the language used in the Desktop interface.',
       updateOrganizationName: 'Apply organization rename',
-      discardOrganizationName: 'Discard organization rename'
+      discardOrganizationName: 'Discard organization rename',
+      verificationUnknown: 'Membership verification unavailable'
     },
     members: {
       title: 'Members',
@@ -236,6 +240,8 @@ export const organizationTranslations = defineResourceTranslations({
       memberReadOnly: 'The Member role can only view the roster.',
       loading: 'Loading members…',
       loadError: 'Unable to load members right now. Try again.',
+      verificationUnknown: 'Unable to verify your membership right now.',
+      retryVerificationAria: 'Retry membership verification',
       actionFailed: 'The action failed. Try again.',
       activeMembershipExists: 'This email already belongs to an organization member.',
       pendingInvitationExists: 'A pending invitation already exists for this email.',

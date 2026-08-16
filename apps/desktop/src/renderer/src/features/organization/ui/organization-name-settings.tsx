@@ -7,9 +7,11 @@ import type { ActiveMembership } from '../api/memberships'
 
 export function OrganizationNameSettings({
   organization,
+  authorityFresh,
   updateName
 }: {
   readonly organization: ActiveMembership
+  readonly authorityFresh: boolean
   readonly updateName: (name: string) => Promise<void>
 }): React.JSX.Element {
   const { t } = useTranslation('organization')
@@ -20,7 +22,7 @@ export function OrganizationNameSettings({
   const name = draftName ?? organization.organizationName
   const isDirty = draftName !== undefined && draftName !== organization.organizationName
 
-  if (organization.role !== 'owner') {
+  if (!authorityFresh || organization.role !== 'owner') {
     return (
       <div className="bg-card grid gap-2 rounded-lg border p-5">
         <p className="text-sm font-medium">{t('common.orgName')}</p>

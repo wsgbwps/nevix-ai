@@ -21,6 +21,7 @@ import {
 import type { ActiveMembership, OrganizationMember } from '../api/memberships'
 
 export function MemberRoster({
+  actionsEnabled,
   organization,
   members,
   currentUserId,
@@ -32,6 +33,7 @@ export function MemberRoster({
   removeMember,
   leaveOrganization
 }: {
+  readonly actionsEnabled: boolean
   readonly organization: ActiveMembership
   readonly members: readonly OrganizationMember[]
   readonly currentUserId: string | undefined
@@ -49,7 +51,7 @@ export function MemberRoster({
   const [leaveError, setLeaveError] = useState<string>()
 
   async function selectRole(member: OrganizationMember, role: string): Promise<void> {
-    if (role === member.role || isMutating) return
+    if (!actionsEnabled || role === member.role || isMutating) return
     if (role === 'admin' && member.role === 'member') {
       await promoteMember(member)
     } else if (role === 'member' && member.role === 'admin') {
@@ -58,12 +60,12 @@ export function MemberRoster({
   }
 
   async function confirmRemoval(): Promise<void> {
-    if (!removalTarget || isMutating) return
+    if (!actionsEnabled || !removalTarget || isMutating) return
     if (await removeMember(removalTarget)) setRemovalTarget(undefined)
   }
 
   async function confirmLeave(): Promise<void> {
-    if (isMutating) return
+    if (!actionsEnabled || isMutating) return
     setLeaveError(undefined)
     try {
       await leaveOrganization()
@@ -78,16 +80,20 @@ export function MemberRoster({
         {members.map((member) => {
           const isCurrentUser = member.userId === currentUserId
           const canChangeRole =
+            actionsEnabled &&
             organization.role === 'owner' &&
             !isCurrentUser &&
             (member.role === 'admin' || member.role === 'member')
           const canRemove =
+            actionsEnabled &&
             !isCurrentUser &&
             member.role !== 'owner' &&
             (organization.role === 'owner' ||
               (organization.role === 'admin' && member.role === 'member'))
           const canLeave =
-            isCurrentUser && (organization.role === 'admin' || organization.role === 'member')
+            actionsEnabled &&
+            isCurrentUser &&
+            (organization.role === 'admin' || organization.role === 'member')
 
           return (
             <div key={member.membershipId} className="flex flex-wrap items-center gap-3 px-4 py-3">

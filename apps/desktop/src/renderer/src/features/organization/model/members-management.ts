@@ -55,10 +55,12 @@ const staleMembershipCodes: Readonly<Record<string, true>> = {
 
 export function useMembersManagement({
   getSession,
-  organization
+  organization,
+  authorityFresh
 }: {
   readonly getSession: GetSession
   readonly organization: ActiveMembership
+  readonly authorityFresh: boolean
 }): {
   readonly members: readonly OrganizationMember[]
   readonly pendingInvitations: readonly PendingOrganizationInvitation[]
@@ -75,7 +77,7 @@ export function useMembersManagement({
   readonly demoteMember: (member: OrganizationMember) => Promise<boolean>
   readonly removeMember: (member: OrganizationMember) => Promise<boolean>
 } {
-  const { confirmActiveOrganizationAccess } = useActiveOrganization()
+  const { verifyActiveMembership } = useActiveOrganization()
   const [members, setMembers] = useState<readonly OrganizationMember[]>([])
   const [pendingInvitations, setPendingInvitations] = useState<
     readonly PendingOrganizationInvitation[]
@@ -86,9 +88,11 @@ export function useMembersManagement({
   const [notice, setNotice] = useState<MembersManagementNotice>()
   const loadVersionRef = useRef(0)
   const mutationInFlightRef = useRef(false)
-  const canManageInvitations = organization.role === 'owner' || organization.role === 'admin'
+  const canManageInvitations =
+    authorityFresh && (organization.role === 'owner' || organization.role === 'admin')
 
   const reload = useCallback(async (): Promise<void> => {
+    if (!authorityFresh) return
     const version = loadVersionRef.current + 1
     loadVersionRef.current = version
 
@@ -107,8 +111,11 @@ export function useMembersManagement({
       ])
       if (loadVersionRef.current !== version) return
       if (nextMembers.length === 0) {
-        const confirmedOrganization = await confirmActiveOrganizationAccess()
-        if (!confirmedOrganization) return
+        const verification = await verifyActiveMembership()
+        if (verification.status === 'lost') return
+        if (verification.status === 'unknown') {
+          throw new Error('Active Membership verification is unavailable.')
+        }
         throw new Error('Organization member response is empty for an active Membership.')
       }
 
@@ -120,8 +127,9 @@ export function useMembersManagement({
       if (loadVersionRef.current === version) setLoadState('error')
     }
   }, [
+    authorityFresh,
     canManageInvitations,
-    confirmActiveOrganizationAccess,
+    verifyActiveMembership,
     getSession,
     organization.organizationId
   ])
@@ -142,7 +150,7 @@ export function useMembersManagement({
       projection: Projection,
       successNotice: MembersManagementNotice | undefined
     ): Promise<boolean> => {
-      if (mutationInFlightRef.current) return false
+      if (!authorityFresh || mutationInFlightRef.current) return false
 
       mutationInFlightRef.current = true
       loadVersionRef.current += 1
@@ -157,8 +165,11 @@ export function useMembersManagement({
           if (projection === 'members') {
             const nextMembers = await readOrganizationMembers(session, organization.organizationId)
             if (nextMembers.length === 0) {
-              const confirmedOrganization = await confirmActiveOrganizationAccess()
-              if (!confirmedOrganization) return true
+              const verification = await verifyActiveMembership()
+              if (verification.status === 'lost') return true
+              if (verification.status === 'unknown') {
+                throw new Error('Active Membership verification is unavailable.')
+              }
               throw new Error('Organization member response is empty for an active Membership.')
             }
             setMembers(nextMembers)
@@ -176,12 +187,8 @@ export function useMembersManagement({
         return true
       } catch (error) {
         if (isPotentialOrganizationAccessLoss(error)) {
-          try {
-            const confirmedOrganization = await confirmActiveOrganizationAccess()
-            if (!confirmedOrganization) return false
-          } catch {
-            // The command still failed, so fall through to its ordinary retryable error state.
-          }
+          const verification = await verifyActiveMembership()
+          if (verification.status === 'lost') return false
         }
         if (error instanceof OrganizationCommandError) {
           const staleProjection =
@@ -227,7 +234,13 @@ export function useMembersManagement({
         setIsMutating(false)
       }
     },
-    [canManageInvitations, confirmActiveOrganizationAccess, getSession, organization.organizationId]
+    [
+      authorityFresh,
+      canManageInvitations,
+      getSession,
+      organization.organizationId,
+      verifyActiveMembership
+    ]
   )
 
   async function createInvitation(email: string): Promise<boolean> {

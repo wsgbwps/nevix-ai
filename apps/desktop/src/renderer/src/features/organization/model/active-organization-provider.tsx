@@ -12,6 +12,7 @@ import { leaveOrganization, readActiveMemberships, type ActiveMembership } from 
 import { updateOrganizationSettings } from '../api/organization-settings'
 import {
   ActiveOrganizationContext,
+  type ActiveMembershipVerification,
   type ActiveOrganizationState,
   type OrganizationStartupPhase,
   type SessionAccessLostOrganization
@@ -46,6 +47,8 @@ export function ActiveOrganizationProvider({
   const { beginOnboarding, resolveOnboarding } = useOrganizationOnboarding()
   const [startupPhase, setStartupPhase] = useState<OrganizationStartupPhase>('idle')
   const [activeOrganization, setActiveOrganization] = useState<ActiveMembership>()
+  const [membershipVerification, setMembershipVerification] =
+    useState<ActiveMembershipVerification>()
   const [sessionAccessLostOrganization, setSessionAccessLostOrganization] =
     useState<SessionAccessLostOrganization>()
   const [availableOrganizations, setAvailableOrganizations] = useState<readonly ActiveMembership[]>(
@@ -55,7 +58,7 @@ export function ActiveOrganizationProvider({
   const [rememberedOrganizationId, setRememberedOrganizationId] = useState<string>()
   const [startupAttempt, setStartupAttempt] = useState(0)
   const activeOrganizationRef = useRef<ActiveMembership | undefined>(undefined)
-  const refreshActiveOrganizationRef = useRef<Promise<ActiveMembership | undefined> | null>(null)
+  const membershipVerificationRef = useRef<ActiveMembershipVerification | undefined>(undefined)
   // Only the newest Membership projection may update Organization state.
   const refreshGenerationRef = useRef(0)
   // A startup attempt never repeats on its own. A failed attempt can only be replaced by one
@@ -69,29 +72,42 @@ export function ActiveOrganizationProvider({
     setStartupAttempt((attempt) => attempt + 1)
   }, [isAuthenticated])
 
-  const enterOrganization = useCallback((membership: ActiveMembership): void => {
-    setActiveOrganization(membership)
-    setRememberedOrganizationId(membership.organizationId)
-    setAvailableOrganizations((organizations) =>
-      organizations.some((each) => each.organizationId === membership.organizationId)
-        ? organizations
-        : [...organizations, membership]
-    )
-    setStartupPhase('ready')
-    void window.api.invoke('organization:set-remembered-active-organization', {
-      organizationId: membership.organizationId
-    })
-  }, [])
+  const updateMembershipVerification = useCallback(
+    (verification: ActiveMembershipVerification | undefined): void => {
+      membershipVerificationRef.current = verification
+      setMembershipVerification(verification)
+    },
+    []
+  )
+
+  const enterOrganization = useCallback(
+    (membership: ActiveMembership): void => {
+      setActiveOrganization(membership)
+      updateMembershipVerification({ status: 'verified', membership })
+      setRememberedOrganizationId(membership.organizationId)
+      setAvailableOrganizations((organizations) =>
+        organizations.some((each) => each.organizationId === membership.organizationId)
+          ? organizations
+          : [...organizations, membership]
+      )
+      setStartupPhase('ready')
+      void window.api.invoke('organization:set-remembered-active-organization', {
+        organizationId: membership.organizationId
+      })
+    },
+    [updateMembershipVerification]
+  )
 
   const openOrganizationPicker = useCallback((): void => {
     activeOrganizationRef.current = undefined
     setActiveOrganization(undefined)
+    updateMembershipVerification(undefined)
     resolveOnboarding({
       shouldCompleteProfile: false,
       shouldCreateOrganization: false
     })
     setStartupPhase('ready')
-  }, [resolveOnboarding])
+  }, [resolveOnboarding, updateMembershipVerification])
 
   const acceptInvitation = useCallback(
     async (invitation: PendingInvitation, code: string): Promise<void> => {
@@ -152,91 +168,93 @@ export function ActiveOrganizationProvider({
     activeOrganizationRef.current = activeOrganization
   }, [activeOrganization])
 
-  const confirmActiveOrganizationAccess = useCallback(async (): Promise<
-    ActiveMembership | undefined
-  > => {
-    const currentOrganization = activeOrganizationRef.current
-    if (!isAuthenticated || !currentOrganization) return undefined
-
-    // A 403/404 or a disappearing RLS projection is only a signal. This read starts after the
-    // signal and remains the authority for whether the current Membership actually ended.
-    const requestGeneration = ++refreshGenerationRef.current
-    const session = await getSession()
-    if (!session) throw new Error('Active Organization Session is unavailable.')
-
-    const memberships = await readActiveMemberships(session)
-    if (requestGeneration !== refreshGenerationRef.current) {
-      return activeOrganizationRef.current
-    }
-    if (activeOrganizationRef.current?.organizationId !== currentOrganization.organizationId) {
-      return activeOrganizationRef.current
-    }
-
-    const confirmedOrganization = memberships.find(
-      (membership) => membership.organizationId === currentOrganization.organizationId
-    )
-    setAvailableOrganizations(memberships)
-    if (confirmedOrganization) {
-      activeOrganizationRef.current = confirmedOrganization
-      setActiveOrganization(confirmedOrganization)
-      return confirmedOrganization
-    }
-
-    activeOrganizationRef.current = undefined
-    setActiveOrganization(undefined)
-    resolveOnboarding({
-      shouldCompleteProfile: false,
-      shouldCreateOrganization: memberships.length === 0 && pendingInvitations.length === 0
-    })
-    setStartupPhase('ready')
-    setSessionAccessLostOrganization((lostOrganization) => lostOrganization ?? currentOrganization)
-    return undefined
-  }, [getSession, isAuthenticated, pendingInvitations.length, resolveOnboarding])
-
   const acknowledgeSessionAccessLost = useCallback((): void => {
     setSessionAccessLostOrganization(undefined)
   }, [])
 
-  const refreshActiveOrganization = useCallback(
-    (force = false): Promise<ActiveMembership | undefined> => {
-      const currentOrganization = activeOrganizationRef.current
-      if (!isAuthenticated || !currentOrganization) return Promise.resolve(undefined)
-      if (!force && refreshActiveOrganizationRef.current) {
-        return refreshActiveOrganizationRef.current
+  const verifyActiveMembership = useCallback(async (): Promise<ActiveMembershipVerification> => {
+    const currentOrganization = activeOrganizationRef.current
+    if (!isAuthenticated || !currentOrganization) {
+      return { status: 'lost', organizationId: currentOrganization?.organizationId ?? '' }
+    }
+
+    const requestGeneration = ++refreshGenerationRef.current
+    try {
+      const session = await getSession()
+      if (!session) throw new Error('Active Organization Session is unavailable.')
+      const memberships = await readActiveMemberships(session)
+
+      if (
+        requestGeneration !== refreshGenerationRef.current ||
+        activeOrganizationRef.current?.organizationId !== currentOrganization.organizationId
+      ) {
+        const latestVerification = membershipVerificationRef.current
+        const latestOrganizationId =
+          latestVerification?.status === 'verified'
+            ? latestVerification.membership.organizationId
+            : latestVerification?.organizationId
+        return latestVerification && latestOrganizationId === currentOrganization.organizationId
+          ? latestVerification
+          : { status: 'unknown', organizationId: currentOrganization.organizationId }
       }
 
-      const requestGeneration = ++refreshGenerationRef.current
-      const refresh = (async (): Promise<ActiveMembership | undefined> => {
-        const session = await getSession()
-        if (!session) throw new Error('Active Organization Session is unavailable.')
-
-        const memberships = await readActiveMemberships(session)
-        const refreshedOrganization = memberships.find(
-          (membership) => membership.organizationId === currentOrganization.organizationId
-        )
-        if (requestGeneration !== refreshGenerationRef.current) return undefined
-
-        if (!refreshedOrganization) return confirmActiveOrganizationAccess()
-
-        setAvailableOrganizations(memberships)
-        if (activeOrganizationRef.current?.organizationId === currentOrganization.organizationId) {
-          activeOrganizationRef.current = refreshedOrganization
-          setActiveOrganization(refreshedOrganization)
-        }
-        return refreshedOrganization
-      })()
-
-      refreshActiveOrganizationRef.current = refresh
-      const clearRefresh = (): void => {
-        if (refreshActiveOrganizationRef.current === refresh) {
-          refreshActiveOrganizationRef.current = null
-        }
+      const membership = memberships.find(
+        (candidate) => candidate.organizationId === currentOrganization.organizationId
+      )
+      setAvailableOrganizations(memberships)
+      if (membership) {
+        const result = { status: 'verified', membership } as const
+        activeOrganizationRef.current = membership
+        setActiveOrganization(membership)
+        updateMembershipVerification(result)
+        return result
       }
-      void refresh.then(clearRefresh, clearRefresh)
-      return refresh
-    },
-    [confirmActiveOrganizationAccess, getSession, isAuthenticated]
-  )
+
+      const result = {
+        status: 'lost',
+        organizationId: currentOrganization.organizationId
+      } as const
+      updateMembershipVerification(result)
+      activeOrganizationRef.current = undefined
+      setActiveOrganization(undefined)
+      resolveOnboarding({
+        shouldCompleteProfile: false,
+        shouldCreateOrganization: memberships.length === 0 && pendingInvitations.length === 0
+      })
+      setStartupPhase('ready')
+      setSessionAccessLostOrganization(
+        (lostOrganization) => lostOrganization ?? currentOrganization
+      )
+      return result
+    } catch {
+      const result = {
+        status: 'unknown',
+        organizationId: currentOrganization.organizationId
+      } as const
+      if (
+        requestGeneration === refreshGenerationRef.current &&
+        activeOrganizationRef.current?.organizationId === currentOrganization.organizationId
+      ) {
+        updateMembershipVerification(result)
+        return result
+      }
+
+      const latestVerification = membershipVerificationRef.current
+      const latestOrganizationId =
+        latestVerification?.status === 'verified'
+          ? latestVerification.membership.organizationId
+          : latestVerification?.organizationId
+      return latestVerification && latestOrganizationId === currentOrganization.organizationId
+        ? latestVerification
+        : result
+    }
+  }, [
+    getSession,
+    isAuthenticated,
+    pendingInvitations.length,
+    resolveOnboarding,
+    updateMembershipVerification
+  ])
 
   const leaveActiveOrganization = useCallback(async (): Promise<void> => {
     const currentOrganization = activeOrganizationRef.current
@@ -251,13 +269,17 @@ export function ActiveOrganizationProvider({
       await leaveOrganization(session, currentOrganization.organizationId)
     } catch (error) {
       if (isPotentialOrganizationAccessLoss(error)) {
-        await confirmActiveOrganizationAccess().catch(() => undefined)
+        await verifyActiveMembership()
       }
       throw error
     }
     const requestGeneration = ++refreshGenerationRef.current
     activeOrganizationRef.current = undefined
     setActiveOrganization(undefined)
+    updateMembershipVerification({
+      status: 'lost',
+      organizationId: currentOrganization.organizationId
+    })
     setAvailableOrganizations((organizations) =>
       organizations.filter(
         (organization) => organization.organizationId !== currentOrganization.organizationId
@@ -278,11 +300,12 @@ export function ActiveOrganizationProvider({
       // The command already committed, so preserve the cleared Organization context.
     }
   }, [
-    confirmActiveOrganizationAccess,
+    verifyActiveMembership,
     getSession,
     isAuthenticated,
     resolveOnboarding,
-    pendingInvitations.length
+    pendingInvitations.length,
+    updateMembershipVerification
   ])
 
   const updateActiveOrganizationName = useCallback(
@@ -306,7 +329,7 @@ export function ActiveOrganizationProvider({
         )
       } catch (error) {
         if (isPotentialOrganizationAccessLoss(error)) {
-          await confirmActiveOrganizationAccess().catch(() => undefined)
+          await verifyActiveMembership()
         }
         throw error
       }
@@ -317,6 +340,9 @@ export function ActiveOrganizationProvider({
       }
       activeOrganizationRef.current = updatedOrganization
       setActiveOrganization(updatedOrganization)
+      if (membershipVerificationRef.current?.status === 'verified') {
+        updateMembershipVerification({ status: 'verified', membership: updatedOrganization })
+      }
       setAvailableOrganizations((organizations) =>
         organizations.map((organization) =>
           organization.organizationId === updated.id
@@ -324,9 +350,9 @@ export function ActiveOrganizationProvider({
             : organization
         )
       )
-      void refreshActiveOrganization(true).catch(() => undefined)
+      void verifyActiveMembership()
     },
-    [confirmActiveOrganizationAccess, getSession, isAuthenticated, refreshActiveOrganization]
+    [getSession, isAuthenticated, updateMembershipVerification, verifyActiveMembership]
   )
 
   useEffect(() => {
@@ -397,6 +423,7 @@ export function ActiveOrganizationProvider({
     () => ({
       startupPhase,
       activeOrganization,
+      membershipVerification,
       sessionAccessLostOrganization,
       availableOrganizations,
       pendingInvitations,
@@ -406,8 +433,7 @@ export function ActiveOrganizationProvider({
       openOrganizationPicker,
       leaveActiveOrganization,
       updateActiveOrganizationName,
-      refreshActiveOrganization,
-      confirmActiveOrganizationAccess,
+      verifyActiveMembership,
       acknowledgeSessionAccessLost,
       acceptInvitation,
       reconcileStartupAfterInvitationChange
@@ -415,6 +441,7 @@ export function ActiveOrganizationProvider({
     [
       startupPhase,
       activeOrganization,
+      membershipVerification,
       sessionAccessLostOrganization,
       availableOrganizations,
       pendingInvitations,
@@ -424,8 +451,7 @@ export function ActiveOrganizationProvider({
       openOrganizationPicker,
       leaveActiveOrganization,
       updateActiveOrganizationName,
-      refreshActiveOrganization,
-      confirmActiveOrganizationAccess,
+      verifyActiveMembership,
       acknowledgeSessionAccessLost,
       acceptInvitation,
       reconcileStartupAfterInvitationChange

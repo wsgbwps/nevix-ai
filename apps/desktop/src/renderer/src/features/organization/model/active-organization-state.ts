@@ -13,9 +13,18 @@ export interface SessionAccessLostOrganization {
   readonly organizationName: string
 }
 
+export type ActiveMembershipVerification =
+  | {
+      readonly status: 'verified'
+      readonly membership: ActiveMembership
+    }
+  | { readonly status: 'lost'; readonly organizationId: string }
+  | { readonly status: 'unknown'; readonly organizationId: string }
+
 export interface ActiveOrganizationState {
   readonly startupPhase: OrganizationStartupPhase
   readonly activeOrganization: ActiveMembership | undefined
+  readonly membershipVerification: ActiveMembershipVerification | undefined
   readonly sessionAccessLostOrganization: SessionAccessLostOrganization | undefined
   readonly availableOrganizations: readonly ActiveMembership[]
   readonly pendingInvitations: readonly PendingInvitation[]
@@ -25,8 +34,7 @@ export interface ActiveOrganizationState {
   readonly openOrganizationPicker: () => void
   readonly leaveActiveOrganization: () => Promise<void>
   readonly updateActiveOrganizationName: (name: string) => Promise<void>
-  readonly refreshActiveOrganization: () => Promise<ActiveMembership | undefined>
-  readonly confirmActiveOrganizationAccess: () => Promise<ActiveMembership | undefined>
+  readonly verifyActiveMembership: () => Promise<ActiveMembershipVerification>
   readonly acknowledgeSessionAccessLost: () => void
   readonly acceptInvitation: (invitation: PendingInvitation, code: string) => Promise<void>
   readonly reconcileStartupAfterInvitationChange: () => void

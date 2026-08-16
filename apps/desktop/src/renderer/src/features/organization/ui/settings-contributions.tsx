@@ -1,8 +1,8 @@
+import { useEffect, useState } from 'react'
 import { ScrollTextIcon, UsersRoundIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { canViewAuditLog } from '../model/audit-log-access'
 import { useActiveOrganization } from '../model/active-organization-state'
-import { useSettingsEntryMembershipRefresh } from '../model/settings-entry-refresh'
 
 export function ActiveOrganizationSettingsContext({
   onOpenOrganizationPicker,
@@ -12,10 +12,19 @@ export function ActiveOrganizationSettingsContext({
   readonly switchDisabled: boolean
 }): React.JSX.Element | null {
   const { t } = useTranslation('organization')
-  const { activeOrganization } = useActiveOrganization()
-  useSettingsEntryMembershipRefresh()
+  const { activeOrganization, membershipVerification, verifyActiveMembership } =
+    useActiveOrganization()
+  const activeOrganizationId = activeOrganization?.organizationId
+
+  useEffect(() => {
+    if (!activeOrganizationId) return
+    void verifyActiveMembership()
+  }, [activeOrganizationId, verifyActiveMembership])
 
   if (!activeOrganization) return null
+  const verificationUnknown =
+    membershipVerification?.status === 'unknown' &&
+    membershipVerification.organizationId === activeOrganization.organizationId
 
   return (
     <div className="bg-background/70 grid gap-3 rounded-lg border p-3">
@@ -31,6 +40,9 @@ export function ActiveOrganizationSettingsContext({
           <p className="text-muted-foreground text-xs">
             {t(`common.roles.${activeOrganization.role}`)}
           </p>
+          {verificationUnknown ? (
+            <p className="text-destructive text-xs">{t('settingsChrome.verificationUnknown')}</p>
+          ) : null}
         </div>
       </div>
       <button
@@ -57,9 +69,22 @@ export function OrganizationSettingsNavigation({
   readonly onSelectSection: (section: OrganizationSettingsSection) => void
 }): React.JSX.Element | null {
   const { t } = useTranslation('organization')
-  const { activeOrganization } = useActiveOrganization()
+  const { activeOrganization, verifyActiveMembership } = useActiveOrganization()
+  const [sectionVerificationPending, setSectionVerificationPending] = useState(false)
 
   if (!activeOrganization) return null
+
+  async function selectMembersSection(): Promise<void> {
+    if (disabled || sectionVerificationPending) return
+
+    setSectionVerificationPending(true)
+    try {
+      const verification = await verifyActiveMembership()
+      if (verification.status !== 'lost') onSelectSection('members')
+    } finally {
+      setSectionVerificationPending(false)
+    }
+  }
 
   return (
     <div className="grid gap-1">
@@ -69,8 +94,8 @@ export function OrganizationSettingsNavigation({
       <button
         type="button"
         aria-pressed={activeSection === 'members'}
-        disabled={disabled}
-        onClick={() => onSelectSection('members')}
+        disabled={disabled || sectionVerificationPending}
+        onClick={() => void selectMembersSection()}
         className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
       >
         <UsersRoundIcon className="size-4" />
@@ -80,7 +105,7 @@ export function OrganizationSettingsNavigation({
         <button
           type="button"
           aria-pressed={activeSection === 'audit-log'}
-          disabled={disabled}
+          disabled={disabled || sectionVerificationPending}
           onClick={() => onSelectSection('audit-log')}
           className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
         >
