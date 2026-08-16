@@ -882,7 +882,7 @@ test('a timed-out command with failed reconciliation stays unknown until Check a
       await forceCloseTestApp(launched.electronApp)
     }
   } finally {
-    await rm(userDataDir, { recursive: true, force: true })
+    await rm(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     await deleteAuthUser(authHarness, ownerId)
   }
 })
