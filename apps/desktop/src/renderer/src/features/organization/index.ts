@@ -1,6 +1,6 @@
 export { organizationResourceOwner, organizationResources } from './i18n/resources'
 export { readActiveMemberships, type ActiveMembership } from './api/memberships'
-export { AuditLogSettings } from './ui/audit-log-settings'
+export { AuditLogSettings, type AuditLogSettingsContribution } from './ui/audit-log-settings'
 export { type Organization as OnboardingCompletedOrganization } from './api/create-organization'
 export { ActiveOrganizationProvider } from './model/active-organization-provider'
 export { useActiveOrganization } from './model/active-organization-state'

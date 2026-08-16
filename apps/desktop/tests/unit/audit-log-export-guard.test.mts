@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { resolveAuditLogE2EOutputPath } from '../../src/main/organization/ipc/audit-log-export-path.ts'
+import {
+  resolveAuditLogE2ECancelDelay,
+  resolveAuditLogE2EOutputPath
+} from '../../src/main/organization/ipc/audit-log-export-path.ts'
 
 const e2eOutputPath = '/tmp/organization-audit-log.csv'
 
@@ -32,3 +35,26 @@ for (const testCase of cases) {
     assert.equal(resolveAuditLogE2EOutputPath(testCase.input), testCase.expected)
   })
 }
+
+test('an unpackaged E2E application can hold then cancel the Audit Log save dialog', () => {
+  assert.equal(
+    resolveAuditLogE2ECancelDelay({
+      e2eMode: '1',
+      isPackaged: false,
+      configuredDelayMs: '750'
+    }),
+    750
+  )
+})
+
+test('production and invalid Audit Log cancel controls cannot bypass the native dialog', () => {
+  for (const input of [
+    { e2eMode: undefined, isPackaged: false, configuredDelayMs: '750' },
+    { e2eMode: '1', isPackaged: true, configuredDelayMs: '750' },
+    { e2eMode: '1', isPackaged: false, configuredDelayMs: '0' },
+    { e2eMode: '1', isPackaged: false, configuredDelayMs: '10001' },
+    { e2eMode: '1', isPackaged: false, configuredDelayMs: 'not-a-number' }
+  ]) {
+    assert.equal(resolveAuditLogE2ECancelDelay(input), undefined)
+  }
+})

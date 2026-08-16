@@ -11,8 +11,10 @@ import {
   uniqueAuthIdentity
 } from '../auth/helpers/supabase-auth'
 import {
+  expectMainWindowCount,
   launchTestApp,
   openSettingsFromUserMenu,
+  requestOrdinaryWindowClose,
   signOutFromUserMenu
 } from '../helpers/electron-app'
 import {
@@ -33,6 +35,12 @@ async function signIn(
   await page.getByLabel('Email').fill(identity.email)
   await page.getByLabel('Password', { exact: true }).fill(identity.password)
   await page.getByRole('button', { name: 'Sign in' }).click()
+
+  const home = page.getByRole('heading', { name: 'Create with Nevix AI' })
+  const startupRetry = page.getByRole('button', { name: 'Try again', exact: true })
+  await expect(home.or(startupRetry)).toBeVisible()
+  if (await startupRetry.isVisible()) await startupRetry.click()
+  await expect(home).toBeVisible()
 }
 
 test(
@@ -351,7 +359,79 @@ test(
 )
 
 test(
-  'an Owner sees a retryable Membership error before a successful empty Audit Log',
+  'cancelled Audit export blocks Settings navigation and ordinary close only while active',
+  { tag: '@smoke' },
+  async () => {
+    test.setTimeout(90_000)
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
+
+    const identity = uniqueAuthIdentity('audit-log-export-cancel')
+    const userId = await createAuthUser(authHarness, identity, true)
+    const organization = await seedOrganizationWithMembership(userId, {
+      name: 'Audit Export Cancel Studio'
+    })
+    await seedAuditLogEntries(organization.id, [
+      {
+        actorUserId: userId,
+        actorDisplayName: 'Cancel Export Auditor',
+        action: 'member_removed'
+      }
+    ])
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-export-cancel-user-'))
+    const exportDirectory = await mkdtemp(join(tmpdir(), 'nevix-audit-log-export-cancel-file-'))
+    const exportPath = join(exportDirectory, 'cancelled-audit-log.csv')
+
+    try {
+      const launched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['en-US'],
+        environment: {
+          NEVIX_TEST_AUDIT_LOG_CANCEL_DELAY_MS: '1500',
+          NEVIX_TEST_AUDIT_LOG_EXPORT_PATH: exportPath
+        }
+      })
+      try {
+        await signIn(launched.page, identity)
+        await openSettingsFromUserMenu(launched.page)
+        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+        await settingsNavigation.getByRole('button', { name: 'Audit log' }).click()
+        await expect(launched.page.getByText('Cancel Export Auditor')).toBeVisible()
+
+        const backButton = launched.page.getByRole('button', { name: 'Back' })
+        const profileSection = settingsNavigation.getByRole('button', { name: 'Profile' })
+        const organizationPicker = launched.page.getByRole('button', { name: 'All organizations' })
+        await launched.page.getByRole('button', { name: 'Export' }).click()
+
+        await expect(backButton).toBeDisabled()
+        await expect(profileSection).toBeDisabled()
+        await expect(organizationPicker).toBeDisabled()
+        await requestOrdinaryWindowClose(launched.electronApp)
+        await expectMainWindowCount(launched.electronApp, 1)
+
+        await expect(backButton).toBeEnabled({ timeout: 5_000 })
+        await expect(profileSection).toBeEnabled()
+        await expect(organizationPicker).toBeEnabled()
+        await expect(launched.page.getByRole('status')).toHaveCount(0)
+        await expect(readFile(exportPath, 'utf8')).rejects.toThrow(/ENOENT/)
+
+        await profileSection.click()
+        await expect(launched.page.getByRole('heading', { name: 'Profile' })).toBeVisible()
+      } finally {
+        await launched.electronApp.close()
+      }
+    } finally {
+      await Promise.all([
+        rm(userDataDir, { recursive: true, force: true }),
+        rm(exportDirectory, { recursive: true, force: true })
+      ])
+      await deleteAuthUser(authHarness, userId)
+    }
+  }
+)
+
+test(
+  'Membership unknown withholds mounted Audit rows until a successful retry',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(90_000)
@@ -360,7 +440,16 @@ test(
 
     const identity = uniqueAuthIdentity('audit-log-membership-error')
     const userId = await createAuthUser(authHarness, identity, true)
-    await seedOrganizationWithMembership(userId, { name: 'Audit Membership Retry Studio' })
+    const organization = await seedOrganizationWithMembership(userId, {
+      name: 'Audit Membership Retry Studio'
+    })
+    await seedAuditLogEntries(organization.id, [
+      {
+        actorUserId: userId,
+        actorDisplayName: 'Mounted Sensitive Auditor',
+        action: 'member_removed'
+      }
+    ])
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-membership-error-'))
 
     try {
@@ -371,6 +460,12 @@ test(
           launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
         ).toBeVisible()
 
+        await openSettingsFromUserMenu(launched.page)
+        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+        const auditLogSection = settingsNavigation.getByRole('button', { name: 'Audit log' })
+        await auditLogSection.click()
+        await expect(launched.page.getByText('Mounted Sensitive Auditor')).toBeVisible()
+
         let membershipUnavailable = true
         await launched.page.route(/\/rest\/v1\/memberships\?/, async (route) => {
           if (membershipUnavailable) {
@@ -379,18 +474,21 @@ test(
           }
           await route.continue()
         })
+        let auditLogRequests = 0
+        await launched.page.route(/\/rest\/v1\/audit_logs\?/, async (route) => {
+          auditLogRequests += 1
+          await route.continue()
+        })
 
-        await openSettingsFromUserMenu(launched.page)
-        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
-        const auditLogSection = settingsNavigation.getByRole('button', { name: 'Audit log' })
-        await expect(auditLogSection).toBeVisible()
-        await auditLogSection.click()
+        await launched.page.getByRole('button', { name: 'Export' }).click()
         await expect(
           launched.page.getByText('Unable to verify your Audit Log access right now.')
         ).toBeVisible()
+        await expect(launched.page.getByText('Mounted Sensitive Auditor')).toHaveCount(0)
         await expect(launched.page.getByRole('combobox', { name: 'All events' })).toHaveCount(0)
         await expect(launched.page.getByRole('button', { name: 'Export' })).toHaveCount(0)
-        await expect(launched.page.getByRole('listitem')).toHaveCount(0)
+        await expect(auditLogSection).toHaveAttribute('aria-pressed', 'true')
+        expect(auditLogRequests).toBe(0)
 
         membershipUnavailable = false
         const auditLogResponse = launched.page.waitForResponse(
@@ -402,9 +500,8 @@ test(
         await expect(
           launched.page.getByText('Unable to verify your Audit Log access right now.')
         ).toHaveCount(0)
-        await expect(launched.page.getByRole('combobox', { name: 'All events' })).toBeVisible()
-        await expect(launched.page.getByRole('button', { name: 'Export' })).toBeVisible()
-        await expect(launched.page.getByRole('listitem')).toHaveCount(0)
+        await expect(launched.page.getByText('Mounted Sensitive Auditor')).toBeVisible()
+        expect(auditLogRequests).toBe(1)
       } finally {
         await launched.electronApp.close()
       }
@@ -416,7 +513,97 @@ test(
 )
 
 test(
-  'an Admin with no Audit Log entries loses Audit Log surfaces only after runtime demotion',
+  'an authorized User stays in Audit Log with a retryable data error when the row request fails',
+  { tag: '@smoke' },
+  async () => {
+    test.setTimeout(90_000)
+    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+    if (!authHarness) return
+
+    const identity = uniqueAuthIdentity('audit-log-data-error')
+    const userId = await createAuthUser(authHarness, identity, true)
+    const organization = await seedOrganizationWithMembership(userId, {
+      name: 'Audit Data Retry Studio'
+    })
+    await seedAuditLogEntries(organization.id, [
+      {
+        actorUserId: userId,
+        actorDisplayName: 'Recovered Auditor',
+        action: 'member_removed'
+      }
+    ])
+    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-data-error-'))
+
+    try {
+      const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      try {
+        await signIn(launched.page, identity)
+        let auditDataUnavailable = true
+        let releaseDataRetry = (): void => undefined
+        const dataRetryMayContinue = new Promise<void>((resolve) => {
+          releaseDataRetry = resolve
+        })
+        await launched.page.route(/\/rest\/v1\/audit_logs\?/, async (route) => {
+          if (auditDataUnavailable) {
+            await route.fulfill({
+              status: 500,
+              contentType: 'application/json',
+              body: JSON.stringify({ message: 'temporary Audit Log data failure' })
+            })
+            return
+          }
+          await dataRetryMayContinue
+          await route.continue()
+        })
+
+        await openSettingsFromUserMenu(launched.page)
+        const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
+        await settingsNavigation.getByRole('button', { name: 'Audit log' }).click()
+
+        await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toBeVisible()
+        await expect(
+          launched.page.getByText('Unable to load the Audit Log right now.')
+        ).toBeVisible()
+        await expect(
+          launched.page.getByText('Unable to verify your Audit Log access right now.')
+        ).toHaveCount(0)
+        await expect(launched.page.getByRole('listitem')).toHaveCount(0)
+        await expect(settingsNavigation.getByRole('button', { name: 'Audit log' })).toHaveAttribute(
+          'aria-pressed',
+          'true'
+        )
+
+        auditDataUnavailable = false
+        const auditLogRequest = launched.page.waitForRequest((request) =>
+          request.url().includes('/rest/v1/audit_logs?')
+        )
+        const auditLogResponse = launched.page.waitForResponse(
+          (response) => response.url().includes('/rest/v1/audit_logs?') && response.ok()
+        )
+        await launched.page.getByRole('button', { name: 'Try again' }).click()
+        await auditLogRequest
+        await expect(
+          launched.page.getByText('Unable to load the Audit Log right now.')
+        ).toBeVisible()
+        releaseDataRetry()
+        await auditLogResponse
+
+        await expect(
+          launched.page.getByText('Unable to load the Audit Log right now.')
+        ).toHaveCount(0)
+        await expect(launched.page.getByText('Recovered Auditor')).toBeVisible()
+      } finally {
+        await launched.electronApp.close()
+      }
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true })
+      await deleteAuthUser(authHarness, userId)
+    }
+  }
+)
+
+test(
+  'fresh Membership confirmation replaces Audit Log with Members after permission loss',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(90_000)
@@ -429,6 +616,13 @@ test(
       name: 'Audit Demotion Studio',
       role: 'admin'
     })
+    await seedAuditLogEntries(organization.id, [
+      {
+        actorUserId: userId,
+        actorDisplayName: 'Mounted Demoted Auditor',
+        action: 'member_removed'
+      }
+    ])
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-audit-log-admin-demotion-'))
 
     try {
@@ -442,22 +636,30 @@ test(
         await openSettingsFromUserMenu(launched.page)
         const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
         const auditLogSection = settingsNavigation.getByRole('button', { name: 'Audit log' })
-        await expect(auditLogSection).toBeVisible()
         await auditLogSection.click()
-        await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toBeVisible()
-        await expect(launched.page.getByRole('combobox', { name: 'All events' })).toBeVisible()
-        await expect(launched.page.getByRole('button', { name: 'Export' })).toBeVisible()
-        await expect(launched.page.getByRole('listitem')).toHaveCount(0)
+        await expect(launched.page.getByText('Mounted Demoted Auditor')).toBeVisible()
 
-        await launched.page.getByRole('button', { name: 'Back' }).click()
-        await expect(
-          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-        ).toBeVisible()
+        let auditLogRequests = 0
+        await launched.page.route(/\/rest\/v1\/audit_logs\?/, async (route) => {
+          auditLogRequests += 1
+          await route.continue()
+        })
         await updateMembershipRole(userId, organization.id, 'member')
-        await openSettingsFromUserMenu(launched.page)
+        const membershipVerification = launched.page.waitForResponse(
+          (response) => response.url().includes('/rest/v1/memberships?') && response.ok()
+        )
+        await launched.page.getByRole('button', { name: 'Export' }).click()
+        await membershipVerification
 
+        await expect(launched.page.getByText('Mounted Demoted Auditor')).toHaveCount(0)
         await expect(settingsNavigation.getByText('Audit log', { exact: true })).toHaveCount(0)
+        await expect(settingsNavigation.getByRole('button', { name: 'Members' })).toHaveAttribute(
+          'aria-pressed',
+          'true'
+        )
+        await expect(launched.page.getByRole('heading', { name: 'Members' })).toBeVisible()
         await expect(launched.page.getByRole('heading', { name: 'Audit log' })).toHaveCount(0)
+        expect(auditLogRequests).toBe(0)
       } finally {
         await launched.electronApp.close()
       }

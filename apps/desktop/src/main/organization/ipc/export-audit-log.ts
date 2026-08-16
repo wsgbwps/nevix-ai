@@ -5,7 +5,10 @@ import type {
   AuditLogExportRequest,
   AuditLogExportResult
 } from '../../../shared/ipc/organization/types'
-import { resolveAuditLogE2EOutputPath } from './audit-log-export-path'
+import {
+  resolveAuditLogE2ECancelDelay,
+  resolveAuditLogE2EOutputPath
+} from './audit-log-export-path'
 import { requireTrustedTopLevelRendererSender } from '../../window/trusted-renderer-sender'
 
 function validateRequest(request: unknown): AuditLogExportRequest {
@@ -39,6 +42,15 @@ export async function exportAuditLogHandler(
     isPackaged: app.isPackaged,
     configuredOutputPath: process.env.NEVIX_TEST_AUDIT_LOG_EXPORT_PATH
   })
+  const e2eCancelDelayMs = resolveAuditLogE2ECancelDelay({
+    e2eMode: process.env.NEVIX_E2E,
+    isPackaged: app.isPackaged,
+    configuredDelayMs: process.env.NEVIX_TEST_AUDIT_LOG_CANCEL_DELAY_MS
+  })
+  if (e2eCancelDelayMs !== undefined) {
+    await new Promise((resolve) => setTimeout(resolve, e2eCancelDelayMs))
+    return { saved: false }
+  }
 
   if (outputPath) {
     await writeFile(outputPath, csv, 'utf8')

@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Focused Account Settings 与普通关闭保护; 07 — Membership-verified Organization Settings
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Consumes**
 
@@ -28,18 +28,22 @@
 
 **Acceptance**
 
-- [ ] 进入 Audit Log 时先通过 07 验证 Membership；只有 fresh Owner/Admin 才开始 Audit row request。
-- [ ] Membership unknown 时不开始新 Audit read，且清除或隐藏已挂载 Audit rows，但不执行失权回退。
-- [ ] Membership verified 但 Audit data request 失败时仍留在 Audit Log，清除 rows 并显示明确的可重试 data error，不显示空日志或 permission-loss 界面。
-- [ ] 成功验证确认 Audit 权限丢失时，清除 rows、隐藏导航入口并 replace 当前 Section 为 Members。
-- [ ] 原生 save dialog 打开或文件正在写入时，Section navigation、back、leave、Organization switch、picker entry 和 ordinary close 都被阻止。
-- [ ] User 取消 save dialog 时立即清除 export-active，恢复导航，且没有生成文件。
-- [ ] 成功导出仍稳定分页读取全部权威 rows，保持 CSV formula-injection guard 并显示实际导出数量。
-- [ ] `Settings Information Architecture Desktop E2E`、Audit E2E regression、Desktop lint/typecheck/build 与 packaged localization 通过。
-- [ ] 产品代码前记录短实施计划；最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
+- [x] 进入 Audit Log 时先通过 07 验证 Membership；只有 fresh Owner/Admin 才开始 Audit row request。
+- [x] Membership unknown 时不开始新 Audit read，且清除或隐藏已挂载 Audit rows，但不执行失权回退。
+- [x] Membership verified 但 Audit data request 失败时仍留在 Audit Log，清除 rows 并显示明确的可重试 data error，不显示空日志或 permission-loss 界面。
+- [x] 成功验证确认 Audit 权限丢失时，清除 rows、隐藏导航入口并 replace 当前 Section 为 Members。
+- [x] 原生 save dialog 打开或文件正在写入时，Section navigation、back、leave、Organization switch、picker entry 和 ordinary close 都被阻止。
+- [x] User 取消 save dialog 时立即清除 export-active，恢复导航，且没有生成文件。
+- [x] 成功导出仍稳定分页读取全部权威 rows，保持 CSV formula-injection guard 并显示实际导出数量。
+- [x] `Settings Information Architecture Desktop E2E`、Audit E2E regression、Desktop lint/typecheck/build 与 packaged localization 通过。
+- [x] 产品代码前记录短实施计划；最后代码修改后绑定 final-state evidence 并关闭 finding ledger。
 
 **Parallel classification:** full parallel with 08 and 09 from the fixed point after 05 and 07; it may start before 06 finishes and becomes `parallel-ready` when its own blockers resolve.
 
 **Absence test:** Organization Details、Members command 和 picker 票缺席时，Audit permission/data/export 闭环仍可独立验收。
 
 **Commutativity test:** 与 08/09 任意顺序合并都保持 main 完整且 CI 通过；共享重叠仅为 additive Feature exports、i18n 和 app composition。
+
+## Comments
+
+- Local acceptance: Audit 与 Settings 的 17 个相关 Electron Playwright 场景通过；Desktop lint、typecheck、unit、architecture、资源完整性、production build、macOS package 与 packaged localization 均通过。一次 initial review 产生的 5 个 blocker 已在 targeted round 1 全部关闭；3 个既有导出加固 advisory 明确 deferred，独立 Electron security review 无 blocker。最终 candidate 通过 repository final-state evidence 绑定后提交。

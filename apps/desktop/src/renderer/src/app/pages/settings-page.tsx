@@ -15,6 +15,7 @@ import { LanguageModeSettings } from '../../features/language'
 import {
   ActiveOrganizationSettingsContext,
   AuditLogSettings,
+  type AuditLogSettingsContribution,
   MembersSettings,
   OrganizationSettingsNavigation,
   useActiveOrganization,
@@ -42,8 +43,19 @@ export function SettingsPage(): React.JSX.Element | null {
     (next: ProfileSettingsContribution): void => setProfileContribution(next),
     []
   )
+  const [auditContribution, setAuditContribution] = useState<AuditLogSettingsContribution>({
+    status: 'clean'
+  })
+  const reportAuditContribution = useCallback(
+    (next: AuditLogSettingsContribution): void => setAuditContribution(next),
+    []
+  )
   const contribution: SettingsContribution =
-    entry.section === 'profile' ? profileContribution : { status: 'clean' }
+    entry.section === 'profile'
+      ? profileContribution
+      : entry.section === 'audit-log'
+        ? auditContribution
+        : { status: 'clean' }
   const coordinator = useSettingsCoordinator({
     entry,
     contribution,
@@ -51,6 +63,11 @@ export function SettingsPage(): React.JSX.Element | null {
     canEnterSource: canEnterBusinessSource,
     openOrganizationPicker: organization.openOrganizationPicker
   })
+  const switchSettingsSection = coordinator.switchSection
+  const returnToMembersAfterAuditPermissionLoss = useCallback(
+    (): void => switchSettingsSection('members'),
+    [switchSettingsSection]
+  )
   if (authentication.status !== 'authenticated') {
     // The root route is already navigating to the authentication view; render nothing on the
     // transient frame so the Settings Page never shows for a signed-out user.
@@ -140,7 +157,11 @@ export function SettingsPage(): React.JSX.Element | null {
               <MembersSettings getSession={authentication.getSession} />
             ) : null}
             {coordinator.section === 'audit-log' ? (
-              <AuditLogSettings getSession={authentication.getSession} />
+              <AuditLogSettings
+                getSession={authentication.getSession}
+                onContributionChange={reportAuditContribution}
+                onPermissionLost={returnToMembersAfterAuditPermissionLoss}
+              />
             ) : null}
           </div>
         </main>

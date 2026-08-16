@@ -21,6 +21,10 @@ import { useVerifiedAuditLogOrganization } from '../model/audit-log-access'
 
 type GetSession = () => Promise<AuthenticatedOrganizationSession | undefined>
 
+export type AuditLogSettingsContribution =
+  | { readonly status: 'clean' }
+  | { readonly status: 'audit-export-active' }
+
 const actionTranslationKeys = {
   invitation_created: 'audit.actions.invitationCreated',
   invitation_resent: 'audit.actions.invitationResent',
@@ -42,21 +46,32 @@ function actionTranslationKey(
 }
 
 export function AuditLogSettings({
-  getSession
+  getSession,
+  onPermissionLost,
+  onContributionChange
 }: {
   readonly getSession: GetSession
+  readonly onPermissionLost: () => void
+  readonly onContributionChange: (contribution: AuditLogSettingsContribution) => void
 }): React.JSX.Element | null {
   const { t, i18n } = useTranslation('organization')
-  const { verification, retry } = useVerifiedAuditLogOrganization()
+  const { verification, refresh, retry } = useVerifiedAuditLogOrganization()
   const [entries, setEntries] = useState<readonly AuditLogEntry[]>([])
   const [actionFilter, setActionFilter] = useState<string>('all')
+  const [dataReadAttempt, setDataReadAttempt] = useState(0)
+  const [dataLoadFailed, setDataLoadFailed] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [exportedEntryCount, setExportedEntryCount] = useState<number>()
   const organization = verification?.status === 'authorized' ? verification.membership : undefined
+  const organizationId = organization?.organizationId
+
+  useEffect(() => {
+    if (verification?.status === 'denied') onPermissionLost()
+  }, [onPermissionLost, verification?.status])
 
   useEffect(() => {
     let isMounted = true
-    if (!organization) return
+    if (!organizationId) return
 
     void (async () => {
       try {
@@ -64,36 +79,51 @@ export function AuditLogSettings({
         if (!session) throw new Error('Audit Log Session is unavailable.')
         const nextEntries = await readAuditLogEntries(
           session,
-          organization.organizationId,
+          organizationId,
           actionFilter === 'all' ? undefined : actionFilter
         )
-        if (isMounted) setEntries(nextEntries)
+        if (isMounted) {
+          setEntries(nextEntries)
+          setDataLoadFailed(false)
+        }
       } catch {
-        if (isMounted) setEntries([])
+        if (isMounted) {
+          setEntries([])
+          setDataLoadFailed(true)
+        }
       }
     })()
 
     return () => {
       isMounted = false
     }
-  }, [actionFilter, getSession, organization])
+  }, [actionFilter, dataReadAttempt, getSession, organizationId])
 
   if (!verification || verification.status === 'denied') return null
 
-  const organizationId = organization?.organizationId
   const groups = groupAuditLogEntriesByDay(entries)
+
+  function retryDataRead(): void {
+    setDataReadAttempt((attempt) => attempt + 1)
+  }
 
   async function exportAuditLog(): Promise<void> {
     if (isExporting || !organizationId) return
 
+    let exportActive = false
     setIsExporting(true)
     setExportedEntryCount(undefined)
     try {
+      const freshAccess = await refresh()
+      if (freshAccess?.status !== 'authorized') return
+
+      onContributionChange({ status: 'audit-export-active' })
+      exportActive = true
       const session = await getSession()
       if (!session) throw new Error('Audit Log Session is unavailable.')
       const exportEntries = await readAuditLogEntries(
         session,
-        organizationId,
+        freshAccess.organizationId,
         actionFilter === 'all' ? undefined : actionFilter
       )
       const csv = serializeAuditLogCsv(
@@ -115,6 +145,7 @@ export function AuditLogSettings({
     } catch {
       // Keep the timeline intact so the User can retry after a cancelled dialog or local I/O error.
     } finally {
+      if (exportActive) onContributionChange({ status: 'clean' })
       setIsExporting(false)
     }
   }
@@ -133,6 +164,15 @@ export function AuditLogSettings({
             {t('audit.accessUnavailable')}
           </p>
           <Button type="button" variant="outline" size="sm" onClick={retry}>
+            {t('audit.retry')}
+          </Button>
+        </div>
+      ) : dataLoadFailed ? (
+        <div className="grid justify-items-start gap-3">
+          <p role="alert" className="text-destructive text-sm">
+            {t('audit.dataUnavailable')}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={retryDataRead}>
             {t('audit.retry')}
           </Button>
         </div>
