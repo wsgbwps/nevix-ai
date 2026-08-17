@@ -20,36 +20,45 @@ export async function readPersistedSession(): Promise<PersistedSessionRead> {
     return isMissingFile(error) ? { outcome: 'empty' } : { outcome: 'unreadable' }
   }
 
-  if (envelope.length > MAXIMUM_ENVELOPE_LENGTH) return { outcome: 'unreadable' }
+  if (envelope.length > MAXIMUM_ENVELOPE_LENGTH) return discardUnreadableSession()
 
   const ciphertext = readEnvelopeCiphertext(envelope)
-  if (!ciphertext) return { outcome: 'unreadable' }
+  if (!ciphertext) return discardUnreadableSession()
 
   // A structurally valid envelope may hold intact ciphertext, so an unavailable backend is
   // recoverable; only structural corruption above is terminal even during an outage.
   if (!canPersistSecurely()) return { outcome: 'storage-unavailable' }
 
+  let storedSession: string
   try {
-    const session = safeStorage.decryptString(ciphertext)
-    return hasSessionShape(session) ? { outcome: 'session', session } : { outcome: 'unreadable' }
+    storedSession = safeStorage.decryptString(ciphertext)
   } catch {
-    return { outcome: 'unreadable' }
+    return discardUnreadableSession()
   }
+
+  const session = canonicalizeSession(storedSession)
+  if (!session) return discardUnreadableSession()
+
+  // Older releases encrypted Supabase's complete Session object. Rewrite it to the strict
+  // Authentication-owned schema as soon as it is successfully decrypted.
+  if (session !== storedSession) {
+    const rewrite = await replacePersistedSession(session)
+    if (rewrite.outcome === 'unavailable') return { outcome: 'storage-unavailable' }
+  }
+  return { outcome: 'session', session }
 }
 
 export async function replacePersistedSession(session: string): Promise<PersistedSessionWrite> {
-  if (!canPersistSecurely()) {
-    await clearPersistedSession().catch(() => undefined)
-    return { outcome: 'unavailable' }
-  }
-
+  const canonicalSession = canonicalizeSession(session)
+  if (!canonicalSession) throw new Error('Session storage received an invalid Session payload')
+  if (!canPersistSecurely()) return { outcome: 'unavailable' }
   const path = sessionPath()
   const pendingPath = `${path}.pending`
 
   try {
     const envelope = JSON.stringify({
       version: ENVELOPE_VERSION,
-      ciphertext: safeStorage.encryptString(session).toString('base64')
+      ciphertext: safeStorage.encryptString(canonicalSession).toString('base64')
     })
 
     await mkdir(dirname(path), { recursive: true })
@@ -67,8 +76,7 @@ export async function replacePersistedSession(session: string): Promise<Persiste
 
 export async function clearPersistedSession(): Promise<void> {
   const path = sessionPath()
-  await rm(path, { force: true })
-  await rm(`${path}.pending`, { force: true })
+  await Promise.all([rm(path, { force: true }), rm(`${path}.pending`, { force: true })])
 }
 
 function canPersistSecurely(): boolean {
@@ -117,45 +125,70 @@ function readEnvelopeCiphertext(envelope: string): Buffer | undefined {
   }
 }
 
-function hasSessionShape(session: string): boolean {
-  if (session.length === 0 || session.length > MAXIMUM_SESSION_LENGTH) return false
+function canonicalizeSession(session: string): string | undefined {
+  if (session.length === 0 || session.length > MAXIMUM_SESSION_LENGTH) return undefined
 
   try {
     const parsed: unknown = JSON.parse(session)
-    if (typeof parsed !== 'object' || parsed === null) return false
+    if (typeof parsed !== 'object' || parsed === null) return undefined
 
     const {
       access_token: accessToken,
       refresh_token: refreshToken,
       token_type: tokenType,
       expires_at: expiresAt,
+      expires_in: expiresIn,
       user
     } = parsed as {
       access_token?: unknown
       refresh_token?: unknown
       token_type?: unknown
       expires_at?: unknown
+      expires_in?: unknown
       user?: unknown
     }
     const userId =
       typeof user === 'object' && user !== null ? (user as { id?: unknown }).id : undefined
+    const userEmail =
+      typeof user === 'object' && user !== null ? (user as { email?: unknown }).email : undefined
 
-    return (
-      typeof accessToken === 'string' &&
-      accessToken.length > 0 &&
-      typeof refreshToken === 'string' &&
-      refreshToken.length > 0 &&
-      typeof tokenType === 'string' &&
-      tokenType.length > 0 &&
-      typeof expiresAt === 'number' &&
-      Number.isFinite(expiresAt) &&
-      expiresAt > 0 &&
-      typeof userId === 'string' &&
-      userId.length > 0
-    )
+    if (
+      typeof accessToken !== 'string' ||
+      accessToken.length === 0 ||
+      typeof refreshToken !== 'string' ||
+      refreshToken.length === 0 ||
+      typeof tokenType !== 'string' ||
+      tokenType.length === 0 ||
+      typeof expiresAt !== 'number' ||
+      !Number.isFinite(expiresAt) ||
+      expiresAt <= 0 ||
+      typeof expiresIn !== 'number' ||
+      !Number.isFinite(expiresIn) ||
+      expiresIn <= 0 ||
+      typeof userId !== 'string' ||
+      userId.length === 0 ||
+      typeof userEmail !== 'string' ||
+      userEmail.length === 0
+    ) {
+      return undefined
+    }
+
+    return JSON.stringify({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: tokenType,
+      expires_at: expiresAt,
+      expires_in: expiresIn,
+      user: { id: userId, email: userEmail }
+    })
   } catch {
-    return false
+    return undefined
   }
+}
+
+async function discardUnreadableSession(): Promise<PersistedSessionRead> {
+  await clearPersistedSession().catch(() => undefined)
+  return { outcome: 'unreadable' }
 }
 
 function isMissingFile(error: unknown): boolean {

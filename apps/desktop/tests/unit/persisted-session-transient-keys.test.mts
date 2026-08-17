@@ -1,13 +1,45 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-// The adapter only touches window.api for the Session slot; transient keys stay in memory.
+// The adapter only touches window.api for access-token-bearing Session values.
+const invocations: Array<{ channel: string; payload: unknown }> = []
 ;(globalThis as { window?: unknown }).window = {
-  api: { invoke: async () => ({ outcome: 'empty' }) }
+  api: {
+    invoke: async (channel: string, payload: unknown) => {
+      invocations.push({ channel, payload })
+      return channel === 'authentication:replace-session'
+        ? { outcome: 'persisted' }
+        : { outcome: 'empty' }
+    }
+  }
 }
 
-const { persistedSessionStorage, MAXIMUM_TRANSIENT_KEYS } =
+const { persistedSessionStorage, AUTHENTICATION_STORAGE_KEY, MAXIMUM_TRANSIENT_KEYS } =
   await import('../../src/renderer/src/features/authentication/session/persisted-session.ts')
+
+test('the Session slot keeps non-Session values in memory without invoking Main', async () => {
+  invocations.length = 0
+  const verifier = JSON.stringify({ code_verifier: 'temporary-verifier' })
+
+  await persistedSessionStorage.setItem(AUTHENTICATION_STORAGE_KEY, verifier)
+
+  assert.equal(await persistedSessionStorage.getItem(AUTHENTICATION_STORAGE_KEY), verifier)
+  assert.equal(invocations.length, 0)
+})
+
+test('the Session slot persists values with a non-empty access_token', async () => {
+  invocations.length = 0
+  const session = JSON.stringify({ access_token: 'access-token-marker' })
+
+  await persistedSessionStorage.setItem(AUTHENTICATION_STORAGE_KEY, session)
+
+  assert.deepEqual(invocations, [
+    {
+      channel: 'authentication:replace-session',
+      payload: { session }
+    }
+  ])
+})
 
 test('a transient key round-trips within the bound and removeItem deletes it', async () => {
   await persistedSessionStorage.setItem('transient-roundtrip', 'verifier-value')

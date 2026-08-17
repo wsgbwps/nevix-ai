@@ -40,6 +40,20 @@ export function isSessionPersistenceUnavailable(): boolean {
   return persistenceUnavailable
 }
 
+function hasAccessToken(value: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as { access_token?: unknown }).access_token === 'string' &&
+      (parsed as { access_token: string }).access_token.length > 0
+    )
+  } catch {
+    return false
+  }
+}
+
 export const persistedSessionStorage: SupportedStorage = {
   async getItem(key) {
     if (key !== AUTHENTICATION_STORAGE_KEY) return transientValues.get(key) ?? null
@@ -56,6 +70,7 @@ export const persistedSessionStorage: SupportedStorage = {
     }
 
     sessionInMemory = value
+    if (!hasAccessToken(value)) return
     try {
       const written = await window.api.invoke('authentication:replace-session', { session: value })
       persistenceUnavailable = written.outcome === 'unavailable'

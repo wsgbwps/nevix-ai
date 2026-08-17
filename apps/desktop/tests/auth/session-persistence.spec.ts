@@ -44,6 +44,37 @@ test('a securely persisted Session refreshes before restore, survives an outage,
       const session = await signInAndReadSession(launched.page, identity)
       const originalEnvelope = await readFile(sessionPath, 'utf8')
       expectEncryptedEnvelope(originalEnvelope, identity.email, session)
+      const storedPayload = await launched.electronApp.evaluate(({ safeStorage }, envelope) => {
+        const parsed = JSON.parse(envelope) as { ciphertext: string }
+        return JSON.parse(
+          safeStorage.decryptString(Buffer.from(parsed.ciphertext, 'base64'))
+        ) as Record<string, unknown>
+      }, originalEnvelope)
+      expect(Object.keys(storedPayload).sort()).toEqual([
+        'access_token',
+        'expires_at',
+        'expires_in',
+        'refresh_token',
+        'token_type',
+        'user'
+      ])
+      expect(Object.keys(storedPayload.user as Record<string, unknown>).sort()).toEqual([
+        'email',
+        'id'
+      ])
+
+      await launched.electronApp.evaluate(() => {
+        process.env.NEVIX_TEST_UNAVAILABLE_SECURE_STORAGE = '1'
+      })
+      expect(
+        await invokeAuthenticationChannel(launched.page, 'authentication:replace-session', {
+          session: JSON.stringify(session)
+        })
+      ).toEqual({ outcome: 'unavailable' })
+      expect(await readFile(sessionPath, 'utf8')).toBe(originalEnvelope)
+      await launched.electronApp.evaluate(() => {
+        delete process.env.NEVIX_TEST_UNAVAILABLE_SECURE_STORAGE
+      })
       expect(
         await invokeAuthenticationChannel(
           launched.page,
@@ -244,7 +275,8 @@ test('a failed Session replace preserves the previous envelope and clear removes
     refresh_token: 'first-refresh-token',
     token_type: 'bearer',
     expires_at: 4_102_444_800,
-    user: { id: 'write-failure-test-user' }
+    expires_in: 3600,
+    user: { id: 'write-failure-test-user', email: 'write-failure@example.com' }
   })
   const secondSession = firstSession.replaceAll('first-', 'second-')
 
