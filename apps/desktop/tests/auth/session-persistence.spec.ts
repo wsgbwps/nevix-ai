@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Session } from '@supabase/supabase-js'
@@ -482,6 +482,52 @@ test('a corrupt envelope stays terminal and deleted even while secure storage is
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('a transient Session read failure keeps the envelope and restore succeeds after recovery', async () => {
+  test.setTimeout(90_000)
+  test.skip(process.platform === 'win32', 'POSIX mode bits cannot emulate read failure on Windows')
+  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
+  if (!authHarness) return
+
+  const identity = uniqueAuthIdentity('read-failure')
+  const userId = await createAuthUser(authHarness, identity, true)
+  await seedOrganizationWithMembership(userId, { name: 'Read Failure Org' })
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-read-failure-'))
+  const sessionPath = join(userDataDir, SESSION_FILE_NAME)
+
+  try {
+    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    try {
+      test.skip(
+        !(await hasSecurePersistenceBackend(launched.electronApp)),
+        'requires a native Keychain, DPAPI, or Secret Service backend'
+      )
+      await signInAndReadSession(launched.page, identity)
+      await expect.poll(() => fileExists(sessionPath)).toBe(true)
+      const envelopeBeforeFailure = await readFile(sessionPath, 'utf8')
+
+      await chmod(sessionPath, 0o000)
+      expect(
+        await invokeAuthenticationChannel(launched.page, 'authentication:read-session')
+      ).toEqual({ outcome: 'storage-unavailable' })
+
+      await chmod(sessionPath, 0o600)
+      expect(await readFile(sessionPath, 'utf8')).toBe(envelopeBeforeFailure)
+
+      await chmod(sessionPath, 0o600)
+      const restored = await invokeAuthenticationChannel(
+        launched.page,
+        'authentication:read-session'
+      )
+      expect(restored).toMatchObject({ outcome: 'session' })
+    } finally {
+      await launched.electronApp.close()
+    }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
+    await deleteAuthUser(authHarness, userId)
   }
 })
 

@@ -17,7 +17,10 @@ export async function readPersistedSession(): Promise<PersistedSessionRead> {
   try {
     envelope = await readFile(sessionPath(), 'utf8')
   } catch (error) {
-    return isMissingFile(error) ? { outcome: 'empty' } : { outcome: 'unreadable' }
+    // A read failure is not structural corruption: the envelope may still hold a valid Session, so
+    // it must not be deleted. The renderer retry boundary re-reads the store once the file system
+    // recovers, so this mirrors the outage outcome without touching the envelope.
+    return isMissingFile(error) ? { outcome: 'empty' } : { outcome: 'storage-unavailable' }
   }
 
   if (envelope.length > MAXIMUM_ENVELOPE_LENGTH) return discardUnreadableSession()
