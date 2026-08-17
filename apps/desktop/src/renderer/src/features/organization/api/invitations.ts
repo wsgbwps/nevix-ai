@@ -1,5 +1,7 @@
-import { readServerPublicConfig } from '../../../lib/server-public-config'
+import { OrganizationCommandError, requestOrganizationCommand } from './command-client'
 import { createOrganizationDataClient, type AuthenticatedOrganizationSession } from './client'
+
+const INVITATION_ATTEMPTS_HEADER = 'X-Invitation-Code-Attempts-Remaining'
 
 export interface PendingInvitation {
   readonly id: string
@@ -56,25 +58,21 @@ export async function acceptInvitation({
   invitationId,
   code
 }: AcceptInvitationInput): Promise<AcceptedInvitation> {
-  const config = readServerPublicConfig()
-  if (!config) throw new Error('Server configuration is unavailable.')
-
-  const response = await fetch(
-    new URL(`/identity/invitations/${encodeURIComponent(invitationId)}/accept`, config.url),
-    {
+  let body: unknown
+  try {
+    body = await requestOrganizationCommand({
+      accessToken: session.accessToken,
       method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${session.accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ code })
+      path: `/identity/invitations/${encodeURIComponent(invitationId)}/accept`,
+      body: { code },
+      captureErrorHeaders: [INVITATION_ATTEMPTS_HEADER]
+    })
+  } catch (error) {
+    if (error instanceof OrganizationCommandError) {
+      throw toInvitationAcceptanceError(error)
     }
-  )
-
-  if (!response.ok) throw await toAcceptanceError(response)
-
-  const body: unknown = await response.json()
+    throw error
+  }
   if (typeof body !== 'object' || body === null) {
     throw new Error('Invitation acceptance response is invalid.')
   }
@@ -124,22 +122,13 @@ function toPendingInvitation(value: unknown): PendingInvitation {
   }
 }
 
-async function toAcceptanceError(response: Response): Promise<InvitationAcceptanceError> {
-  let body: unknown
-  try {
-    body = await response.json()
-  } catch {
-    body = undefined
-  }
-
-  const error = body as { error?: unknown; message?: unknown } | undefined
-  const code = typeof error?.error === 'string' ? error.error : 'invitation_acceptance_failed'
-  const message =
-    typeof error?.message === 'string' ? error.message : 'Invitation acceptance request failed.'
+function toInvitationAcceptanceError(error: OrganizationCommandError): InvitationAcceptanceError {
+  const code =
+    error.code === 'organization_command_failed' ? 'invitation_acceptance_failed' : error.code
   return new InvitationAcceptanceError(
     code,
-    message,
-    parseAttemptsRemaining(response.headers.get('X-Invitation-Code-Attempts-Remaining'))
+    error.serverMessage ?? 'Invitation acceptance request failed.',
+    parseAttemptsRemaining(error.capturedHeaders[INVITATION_ATTEMPTS_HEADER.toLowerCase()] ?? null)
   )
 }
 

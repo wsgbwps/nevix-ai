@@ -1,4 +1,4 @@
-import { readServerPublicConfig } from '../../../lib/server-public-config'
+import { OrganizationCommandError, requestOrganizationCommand } from './command-client'
 
 export interface CreateOrganizationInput {
   readonly accessToken: string
@@ -16,22 +16,20 @@ export async function createOrganization({
   id,
   name
 }: CreateOrganizationInput): Promise<Organization> {
-  const config = readServerPublicConfig()
-  if (!config) throw new Error('Server configuration is unavailable.')
-
-  const response = await fetch(new URL('/identity/organizations', config.url), {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ id, name })
-  })
-
-  if (!response.ok) throw new Error('Organization request failed.')
-
-  const body: unknown = await response.json()
+  let body: unknown
+  try {
+    body = await requestOrganizationCommand({
+      accessToken,
+      method: 'POST',
+      path: '/identity/organizations',
+      body: { id, name }
+    })
+  } catch (error) {
+    if (error instanceof OrganizationCommandError) {
+      throw new Error('Organization request failed.')
+    }
+    throw error
+  }
   if (typeof body !== 'object' || body === null)
     throw new Error('Organization response is invalid.')
 
