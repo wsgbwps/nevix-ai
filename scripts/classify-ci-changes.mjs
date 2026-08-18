@@ -101,9 +101,7 @@ export function classifyPaths(paths) {
         "skills-lock.json",
         "scripts/.gitkeep",
         "scripts/classify-ci-changes.mjs",
-        "scripts/land.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
-        "scripts/tests/land.test.mjs",
       ])
     ) {
       checks.add("harness");
@@ -164,6 +162,7 @@ function main() {
     [
       "diff",
       "--no-renames",
+      "--diff-filter=d",
       "--name-only",
       "-z",
       `${args.base}...${args.head}`,

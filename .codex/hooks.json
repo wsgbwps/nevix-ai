@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cmd=$(jq -r '.tool_input.command // .tool_input.cmd // empty'); branch=$(git symbolic-ref --short HEAD 2>/dev/null); if [ \"$branch\" = \"main\" ] && echo \"$cmd\" | grep -qE 'git[[:space:]]+commit'; then echo 'BLOCKED: 在任务分支完成并验收修改，再使用 make land 快进 main' >&2; exit 2; fi; if echo \"$cmd\" | grep -qE 'git[[:space:]]+push([^;&|]*)([[:space:]]main([[:space:]]|$)|:refs/heads/main|:main([[:space:]]|$))'; then echo 'BLOCKED: 主干更新必须通过 make land 的 exact-SHA 候选门禁' >&2; exit 2; fi"
+            "command": "cmd=$(jq -r '.tool_input.command // .tool_input.cmd // empty'); branch=$(git symbolic-ref --short HEAD 2>/dev/null); if [ \"$branch\" = \"main\" ] && echo \"$cmd\" | grep -qE 'git[[:space:]]+commit'; then echo 'BLOCKED: 在任务分支完成修改并开 PR,不要直接在 main 上提交' >&2; exit 2; fi; if echo \"$cmd\" | grep -qE 'git[[:space:]]+push([^;&|]*)([[:space:]]main([[:space:]]|$)|:refs/heads/main|:main([[:space:]]|$))'; then echo 'BLOCKED: main 通过 PR squash merge 更新,不要直接 push main' >&2; exit 2; fi"
           }
         ]
       }

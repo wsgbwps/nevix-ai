@@ -21,10 +21,10 @@ export function blockedBashReason(
   branch: string,
 ): string | undefined {
   if (branch === "main" && /git\s+commit/.test(command)) {
-    return "在任务分支完成并验收修改，再使用 make land 快进 main";
+    return "在任务分支完成修改并开 PR,不要直接在 main 上提交";
   }
   if (MAIN_PUSH_COMMAND.test(command)) {
-    return "主干更新必须通过 make land 的 exact-SHA 候选门禁";
+    return "main 通过 PR squash merge 更新,不要直接 push main";
   }
   return undefined;
 }

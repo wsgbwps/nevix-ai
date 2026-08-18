@@ -271,7 +271,6 @@ Mailpit Web UI 位于 `http://127.0.0.1:54324`。Server 只在进程启动时读
 ## 分支与交付规范
 
 - 所有改动在短命任务分支完成；保持线性、可独立回滚的历史
-- 本地检查与 review 绑定同一 candidate diff 后，使用 `make land`
-- `make land` 将 exact SHA 推到 `ready/<sha>`，等待路径感知的 `CI gate`，再以普通 fast-forward push 更新 `main`
-- Pull request 仅用于确实需要另一位人类讨论或批准的任务，不是日常 CI 容器
-- 完整流程和失败边界见 [`docs/agents/delivery.md`](docs/agents/delivery.md)
+- 推送任务分支并开 PR（`gh pr create --fill --base main`），用 `gh pr checks --watch --fail-fast` 等待路径感知的 `CI gate`
+- 检查通过后 squash merge 并删除分支（`gh pr merge --squash --delete-branch`）；每个任务在 `main` 上一个 commit，PR 页面即验收记录
+- 本地 hooks 拦截对 `main` 的直接提交与推送；完整流程见 [`docs/agents/delivery.md`](docs/agents/delivery.md)

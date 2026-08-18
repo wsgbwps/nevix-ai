@@ -48,7 +48,7 @@ test("root JavaScript manifests cover product and harness consumers", () => {
 
 test("agent and delivery documentation requires inline harness validation", () => {
   assert.deepEqual(
-    selected(["AGENTS.md", "docs/specs/final-state-evidence.md"]),
+    selected(["AGENTS.md", "docs/adr/0011-pr-based-delivery.md"]),
     { harness: true },
   );
 });
@@ -85,6 +85,15 @@ test("unknown paths fail closed", () => {
   assert.deepEqual(classifyPaths(["new-runtime/module.ts"]).unknownPaths, [
     "new-runtime/module.ts",
   ]);
+});
+
+test("the classifier excludes deleted paths before classification", () => {
+  const main = readFileSync(
+    join(REPOSITORY, "scripts/classify-ci-changes.mjs"),
+    "utf8",
+  );
+
+  assert.match(main, /--diff-filter=d/);
 });
 
 test("the CI gate runs harness tests inline without a separate job", () => {

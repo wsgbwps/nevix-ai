@@ -3,7 +3,7 @@ name: CI gate
 on:
   push:
     branches:
-      - "ready/**"
+      - main
   pull_request:
     branches:
       - main
@@ -30,18 +30,18 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base_sha="$PR_BASE_SHA"
             head_sha="$PR_HEAD_SHA"
           else
-            base_sha="$(git rev-parse origin/main)"
+            base_sha="$PUSH_BEFORE_SHA"
+            if [ -z "$base_sha" ] || echo "$base_sha" | grep -qE '^0+$'; then
+              base_sha="$(git rev-parse HEAD^)"
+            fi
             head_sha="$(git rev-parse HEAD)"
-            git merge-base --is-ancestor "$base_sha" "$head_sha" || {
-              echo "Candidate must contain the current origin/main" >&2
-              exit 1
-            }
           fi
 
           node scripts/classify-ci-changes.mjs \

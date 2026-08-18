@@ -11,7 +11,7 @@ task-owned paths. Read and follow
 [`../code-review/references/finding-lifecycle.md`](../code-review/references/finding-lifecycle.md)
 for the shared review ledger and bounded repair loop, and read
 [`../../../docs/agents/delivery.md`](../../../docs/agents/delivery.md) for the
-verified-SHA landing route.
+pull-request delivery route.
 
 Use `/tdd` where possible at pre-agreed seams. Run typechecking and focused tests
 regularly, then the relevant full suite once before initial review. Freeze every
@@ -47,13 +47,11 @@ diff; preserve unrelated working-tree changes.
 
 Normal completion requires all lifecycle stop gates: no unresolved or escalated
 blocker; every advisory and false-positive has an explicit closed disposition;
-the final relevant check passes on the current diff digest; and the final diff
-and check result are reviewed together under the repository's final-state
-evidence route.
+and the final relevant check passes on the current diff digest.
 
 When the gate closes, report the final ledger outcome and commit the accepted
-diff to the current task branch. With explicit authorization for the remote
-writes, use `make land`; a pull request is needed only for human discussion or
-approval. When the outcome is `escalated`, do not claim completion or commit it
-as accepted work; return control to the user or named owner with the bounded
-evidence.
+diff to the current task branch. Then follow the pull-request route in
+[`../../../docs/agents/delivery.md`](../../../docs/agents/delivery.md): push the
+branch, open the PR, wait for its checks, and squash-merge. When the outcome is
+`escalated`, do not claim completion or commit it as accepted work; return
+control to the user or named owner with the bounded evidence.

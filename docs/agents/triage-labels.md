@@ -18,7 +18,6 @@ Edit the right-hand column to match whatever vocabulary you actually use.
 
 The five canonical state roles do not cover the full lifecycle of a local-markdown ticket. This repo additionally uses:
 
-- `in-verification` — implementation is complete while its final local check or independent review remains open.
-- `resolved` — terminal state written into an accepted candidate. It becomes authoritative when that exact commit lands on `main`; remote evidence remains attached to the commit SHA.
+- `resolved` — terminal state for an accepted ticket; the conclusion is written into the ticket before the candidate is frozen.
 - Wayfinding states `open` / `claimed` / `resolved` — only on `/wayfinder` map tickets, per `issue-tracker.md`.
 - Superseded tickets — label `wontfix` and record the superseding decision directly in the `Status:` line.

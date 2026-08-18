@@ -20,13 +20,11 @@ Read the file at the referenced path. The user will normally pass the path or th
 
 ## Branch wrap-up checklist
 
-When implementation on a branch is complete, close it out in this order. Remote verification and landing are external write operations and require explicit user authorization; this checklist only fixes the steps and where the acceptance record lives.
+When implementation on a branch is complete, close it out in this order. Remote operations (push, PR, merge) are external writes and require explicit user authorization; this checklist only fixes the steps.
 
-1. **Resolve the candidate ticket** — set `Status: resolved` and append the local acceptance conclusion before freezing the candidate. The state becomes authoritative only when its commit reaches `main`.
-2. **Bind the final local state** — record the acceptance boundary, base, final diff, and relevant check through [Final-state evidence](../specs/final-state-evidence.md), plus the review conclusion for high-risk changes. The check must run after the last edit.
-3. **Commit the accepted candidate** — keep the task history linear and the working tree clean. Do not add a post-landing ticket commit.
-4. **Land the exact SHA** — follow [Verified SHA landing](delivery.md). `make land` confirms the remote candidate gate and fast-forwards `main` without creating a merge commit.
-5. **Delete the task branch when convenient** — the landing command removes its temporary `ready/<sha>` branch; local task-branch cleanup remains a separate recoverable operation.
+1. **Resolve the candidate ticket** — set `Status: resolved` and append the acceptance conclusion before freezing the candidate.
+2. **Commit the accepted candidate** — keep the task history linear and the working tree clean. Do not add a post-merge ticket commit.
+3. **Open, watch, and merge the PR** — follow [Delivery](delivery.md): push the branch, `gh pr create --fill --base main`, wait for the `CI gate` (`gh pr checks --watch --fail-fast`), then `gh pr merge --squash --delete-branch`.
 
 ## Wayfinding operations
 
