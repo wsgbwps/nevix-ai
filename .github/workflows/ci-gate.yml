@@ -112,6 +112,9 @@ jobs:
       IDENTITY_REQUIRED: ${{ needs.changes.outputs.identity }}
       IDENTITY_RESULT: ${{ needs.identity.result }}
       E2E_REQUIRED: ${{ needs.changes.outputs.e2e }}
+      # 合并后的 main push 按设计跳过 E2E（PR 已验证同一棵树），gate 只在
+      # pull_request 事件上强制 E2E，否则 skipped 会被误判为失败。
+      E2E_ENFORCED: ${{ github.event_name == 'pull_request' }}
       E2E_RESULT: ${{ needs.e2e.result }}
     steps:
       - name: Verify required checks
@@ -130,6 +133,12 @@ jobs:
             result_var="${check}_RESULT"
             required="${!required_var}"
             result="${!result_var}"
+
+            # Post-merge main pushes intentionally skip E2E (see the e2e job
+            # condition); the gate enforces it only where it runs.
+            if [ "$check" = "E2E" ] && [ "$E2E_ENFORCED" != "true" ]; then
+              continue
+            fi
 
             if [ "$required" = "true" ] && [ "$result" != "success" ]; then
               echo "$check was required but finished as $result"
