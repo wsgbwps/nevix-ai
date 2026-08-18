@@ -1,0 +1,98 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "b979565",
+  "scopePaths": [
+    "server",
+    "scripts/test-mail-smoke.sh",
+    "docs/adr/0008-identity-write-boundary-and-rls-grant-structure.md",
+    ".scratch/identity-execution"
+  ],
+  "currentDiffDigest": "sha256:f8278cd05076abf2846e4933678710e36c5c92f873cd9bb0398d9cfd59f71a0e",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 1,
+  "findings": [
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "scripts/test-mail-smoke.sh",
+        "source": ".scratch/identity-execution/spec.md Testing Decisions — real PostgreSQL roles must prove owner/admin rejection and direct identity_app acceptance at the runner seam",
+        "anchor": "server/internal/identity/writetx/runner_roles_integration_test.go package-level role suite",
+        "defect": "the real-role runner tests skip without harness environment variables while no configured harness invocation runs the writetx package, so the required evidence never executes"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Real coverage gap: the role evidence existed but was unreachable from every checked invocation.",
+      "owner": "scripts/test-mail-smoke.sh",
+      "status": "closed",
+      "evidence": [
+        "scripts/test-mail-smoke.sh:220-229 — checked invocation now runs ./internal/identity/integrationtest ./internal/identity/writetx and asserts exit status plus captured output",
+        "scripts/test-mail-smoke.sh:174-179 — TestRunRejectsOwnerCredential added to representative_tests, so assert_identity_integration_executed requires its PASS and zero skips",
+        "server/internal/identity/writetx/runner_roles_integration_test.go:22-30 — requireEnv fails fast under NEVIX_IDENTITY_INTEGRATION_REQUESTED=1 instead of silently skipping",
+        "Targeted re-review on digest sha256:f8278cd0…: closed, no repair-introduced problem"
+      ],
+      "reviewedDiffDigest": "sha256:f8278cd05076abf2846e4933678710e36c5c92f873cd9bb0398d9cfd59f71a0e",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/writetx",
+        "source": ".scratch/identity-execution/spec.md Implementation Decisions — rollback errors remain secondary to the triggering callback, cancellation, identity, or panic failure",
+        "anchor": "server/internal/identity/writetx/writetx.go invoke",
+        "defect": "panic-path rollback discarded its error, eliminating the required secondary diagnostic"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Advisory; repaired in the same batch anyway (c75072c): invoke now logs the rollback failure via slog before re-panicking, and TestRunKeepsPanicWhenPanicRollbackFails proves the panic survives a failing rollback.",
+      "owner": "server/internal/identity/writetx",
+      "status": "closed",
+      "evidence": [
+        "server/internal/identity/writetx/writetx.go invoke — slog.Error(\"identity: rollback after callback panic failed\", …) before panic(p)",
+        "server/internal/identity/writetx/writetx_test.go TestRunKeepsPanicWhenPanicRollbackFails"
+      ],
+      "reviewedDiffDigest": "sha256:f8278cd05076abf2846e4933678710e36c5c92f873cd9bb0398d9cfd59f71a0e",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0003",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/writetx",
+        "source": ".scratch/identity-execution/plan-02-enforce-verified-identity-for-all-writes.md Key Decisions — Runner holds an unexported TxBeginner interface",
+        "anchor": "server/internal/identity/writetx/writetx.go TxBeginner",
+        "defect": "the test seam was exported despite no cross-package consumer, widening the module interface beyond the planned boundary"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Advisory; repaired in the same batch (c75072c): renamed to unexported txBeginner; in-package tests construct Runner{pool: …} directly.",
+      "owner": "server/internal/identity/writetx",
+      "status": "closed",
+      "evidence": [
+        "server/internal/identity/writetx/writetx.go — type txBeginner interface; Runner.pool txBeginner"
+      ],
+      "reviewedDiffDigest": "sha256:f8278cd05076abf2846e4933678710e36c5c92f873cd9bb0398d9cfd59f71a0e",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [
+    {
+      "fixFor": ["CR-SPEC-0001"],
+      "commit": "c75072c",
+      "beforeDigest": "sha256:c6ff838a8ebdfda0740e8cbd223a8e009e6e50e1607bb334fd6e6b5f803ad6cd",
+      "afterDigest": "sha256:f8278cd05076abf2846e4933678710e36c5c92f873cd9bb0398d9cfd59f71a0e",
+      "notes": "Harness checked invocation runs writetx with a zero-skip sentinel plus fail-fast requireEnv; advisory repairs CR-SPEC-0002 (panic rollback diagnostic) and CR-SPEC-0003 (unexported seam) ride the same batch."
+    }
+  ],
+  "relevantCheck": {
+    "name": "server: go build ./... && go vet ./... && go test ./... -count=1 (clean tree at c75072c); bash -n scripts/test-mail-smoke.sh; make harness-test",
+    "result": "PASS",
+    "coverage": "All 10 server packages build, vet, and pass unit tests including the writetx contract suite. Real-stack legs (identity integration incl. writetx role evidence, Desktop E2E, Full E2E) run as PR CI on the identical tree and are watched before merge per delivery.md — local Docker is unavailable on this host (same constraint as ticket 01).",
+    "diffDigest": "sha256:f8278cd05076abf2846e4933678710e36c5c92f873cd9bb0398d9cfd59f71a0e"
+  },
+  "outcome": "closed"
+}

@@ -47,58 +47,56 @@ func (m *Manager) RemoveMember(ctx context.Context, req RemoveMemberRequest) (Me
 		return MembershipResponse{}, err
 	}
 
-	tx, err := m.begin(ctx)
-	if err != nil {
-		return MembershipResponse{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
+	var targetMembership Membership
+	err = m.tx.Run(ctx, func(tx pgx.Tx) error {
+		actorMembership, lockedTarget, organizationName, err := lockActorAndTargetMembership(ctx, tx, organizationID, authjwt.UserID(ctx), membershipID)
+		if err != nil {
+			return err
+		}
+		if actorMembership.Role != "owner" && actorMembership.Role != "admin" {
+			return errInsufficientRole
+		}
+		if lockedTarget.Role != "member" {
+			return errTargetNotMember
+		}
+		actor, err := audit.SnapshotUser(ctx, tx, actorMembership.UserID)
+		if err != nil {
+			return err
+		}
+		target, err := audit.SnapshotUser(ctx, tx, lockedTarget.UserID)
+		if err != nil {
+			return err
+		}
 
-	actorMembership, targetMembership, organizationName, err := lockActorAndTargetMembership(ctx, tx, organizationID, authjwt.UserID(ctx), membershipID)
+		if err := tx.QueryRow(ctx,
+			`UPDATE public.memberships
+			 SET status = 'ended', updated_at = now()
+			 WHERE id = $1
+			 RETURNING id, organization_id, user_id, role, status`, lockedTarget.ID,
+		).Scan(
+			&targetMembership.ID,
+			&targetMembership.OrganizationID,
+			&targetMembership.UserID,
+			&targetMembership.Role,
+			&targetMembership.Status,
+		); err != nil {
+			return fmt.Errorf("memberships: remove member: %w", err)
+		}
+		if err := audit.Write(ctx, tx, audit.Entry{
+			OrganizationID: organizationID,
+			Actor:          actor,
+			Target:         &target,
+			Action:         audit.MemberRemoved,
+		}); err != nil {
+			return err
+		}
+		if err := m.queueMemberRemoval(ctx, tx, organizationName, actor, target); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return MembershipResponse{}, err
-	}
-	if actorMembership.Role != "owner" && actorMembership.Role != "admin" {
-		return MembershipResponse{}, errInsufficientRole
-	}
-	if targetMembership.Role != "member" {
-		return MembershipResponse{}, errTargetNotMember
-	}
-	actor, err := audit.SnapshotUser(ctx, tx, actorMembership.UserID)
-	if err != nil {
-		return MembershipResponse{}, err
-	}
-	target, err := audit.SnapshotUser(ctx, tx, targetMembership.UserID)
-	if err != nil {
-		return MembershipResponse{}, err
-	}
-
-	if err := tx.QueryRow(ctx,
-		`UPDATE public.memberships
-		 SET status = 'ended', updated_at = now()
-		 WHERE id = $1
-		 RETURNING id, organization_id, user_id, role, status`, targetMembership.ID,
-	).Scan(
-		&targetMembership.ID,
-		&targetMembership.OrganizationID,
-		&targetMembership.UserID,
-		&targetMembership.Role,
-		&targetMembership.Status,
-	); err != nil {
-		return MembershipResponse{}, fmt.Errorf("memberships: remove member: %w", err)
-	}
-	if err := audit.Write(ctx, tx, audit.Entry{
-		OrganizationID: organizationID,
-		Actor:          actor,
-		Target:         &target,
-		Action:         audit.MemberRemoved,
-	}); err != nil {
-		return MembershipResponse{}, err
-	}
-	if err := m.queueMemberRemoval(ctx, tx, organizationName, actor, target); err != nil {
-		return MembershipResponse{}, err
-	}
-	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return MembershipResponse{}, fmt.Errorf("memberships: commit remove member: %w", err)
 	}
 	return MembershipResponse{Membership: targetMembership}, nil
 }

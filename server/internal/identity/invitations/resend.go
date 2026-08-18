@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/authjwt"
 	"github.com/nevix-ai/server/internal/identity/command"
@@ -44,61 +46,59 @@ func (c *Creator) ResendInvitation(ctx context.Context, req ResendInvitationRequ
 		return InvitationResponse{}, err
 	}
 
-	tx, err := c.begin(ctx)
-	if err != nil {
-		return InvitationResponse{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
+	var invitation Invitation
+	err = c.tx.Run(ctx, func(tx pgx.Tx) error {
+		organizationName, actor, err := authorizeInvitationAdmin(ctx, tx, organizationID, authjwt.UserID(ctx))
+		if err != nil {
+			return err
+		}
+		invitation, err = lockInvitation(ctx, tx, organizationID, invitationID)
+		if err != nil {
+			return err
+		}
+		if invitation.Status != "pending" {
+			return errInvitationNotPending
+		}
 
-	organizationName, actor, err := authorizeInvitationAdmin(ctx, tx, organizationID, authjwt.UserID(ctx))
+		if err := verification.EnforceIssuanceLimits(ctx, tx, invitation.Email, req.ClientIP); err != nil {
+			return err
+		}
+		if err := cancelPendingInvitationOutbox(ctx, tx, invitation.ID); err != nil {
+			return err
+		}
+		if err := supersedeActiveInvitationCodes(ctx, tx, invitation.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx,
+			`UPDATE public.invitations
+			 SET expires_at = clock_timestamp() + make_interval(secs => $2),
+			     organization_name = $3,
+			     inviter_display_name = $4,
+			     updated_at = now()
+			 WHERE id = $1
+			 RETURNING expires_at`, invitation.ID, invitationValidity.Seconds(),
+			organizationName, actor.DisplayName,
+		).Scan(&invitation.ExpiresAt); err != nil {
+			return fmt.Errorf("invitations: refresh invitation expiration: %w", err)
+		}
+		if err := c.issueInvitationCode(ctx, tx, invitation, req.ClientIP, organizationName); err != nil {
+			return err
+		}
+		if err := audit.Write(ctx, tx, audit.Entry{
+			OrganizationID: organizationID,
+			Actor:          actor,
+			Action:         audit.InvitationResent,
+			Metadata: map[string]string{
+				"invitation_id": invitation.ID,
+				"email":         invitation.Email,
+			},
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return InvitationResponse{}, err
-	}
-	invitation, err := lockInvitation(ctx, tx, organizationID, invitationID)
-	if err != nil {
-		return InvitationResponse{}, err
-	}
-	if invitation.Status != "pending" {
-		return InvitationResponse{}, errInvitationNotPending
-	}
-
-	if err := verification.EnforceIssuanceLimits(ctx, tx, invitation.Email, req.ClientIP); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := cancelPendingInvitationOutbox(ctx, tx, invitation.ID); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := supersedeActiveInvitationCodes(ctx, tx, invitation.ID); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := tx.QueryRow(ctx,
-		`UPDATE public.invitations
-		 SET expires_at = clock_timestamp() + make_interval(secs => $2),
-		     organization_name = $3,
-		     inviter_display_name = $4,
-		     updated_at = now()
-		 WHERE id = $1
-		 RETURNING expires_at`, invitation.ID, invitationValidity.Seconds(),
-		organizationName, actor.DisplayName,
-	).Scan(&invitation.ExpiresAt); err != nil {
-		return InvitationResponse{}, fmt.Errorf("invitations: refresh invitation expiration: %w", err)
-	}
-	if err := c.issueInvitationCode(ctx, tx, invitation, req.ClientIP, organizationName); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := audit.Write(ctx, tx, audit.Entry{
-		OrganizationID: organizationID,
-		Actor:          actor,
-		Action:         audit.InvitationResent,
-		Metadata: map[string]string{
-			"invitation_id": invitation.ID,
-			"email":         invitation.Email,
-		},
-	}); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return InvitationResponse{}, fmt.Errorf("invitations: commit resend: %w", err)
 	}
 	return InvitationResponse{Invitation: invitation}, nil
 }

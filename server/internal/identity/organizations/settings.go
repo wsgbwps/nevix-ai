@@ -41,43 +41,40 @@ func (m *Manager) UpdateOrganizationSettings(ctx context.Context, req UpdateOrga
 		return OrganizationResponse{}, err
 	}
 
-	tx, err := m.begin(ctx)
-	if err != nil {
-		return OrganizationResponse{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
-
-	role, err := lockOrganizationActor(ctx, tx, organizationID, authjwt.UserID(ctx))
-	if err != nil {
-		return OrganizationResponse{}, err
-	}
-	if role != "owner" {
-		return OrganizationResponse{}, errInsufficientRole
-	}
-	actor, err := audit.SnapshotUser(ctx, tx, authjwt.UserID(ctx))
-	if err != nil {
-		return OrganizationResponse{}, err
-	}
-
 	var response OrganizationResponse
-	if err := tx.QueryRow(ctx,
-		`UPDATE public.organizations
-		 SET name = $1, updated_at = now()
-		 WHERE id = $2
-		 RETURNING id, name`,
-		*req.Name, organizationID,
-	).Scan(&response.Organization.ID, &response.Organization.Name); err != nil {
-		return OrganizationResponse{}, fmt.Errorf("organizations: update settings: %w", err)
-	}
-	if err := audit.Write(ctx, tx, audit.Entry{
-		OrganizationID: organizationID,
-		Actor:          actor,
-		Action:         audit.OrganizationSettingsUpdated,
-	}); err != nil {
+	err = m.tx.Run(ctx, func(tx pgx.Tx) error {
+		role, err := lockOrganizationActor(ctx, tx, organizationID, authjwt.UserID(ctx))
+		if err != nil {
+			return err
+		}
+		if role != "owner" {
+			return errInsufficientRole
+		}
+		actor, err := audit.SnapshotUser(ctx, tx, authjwt.UserID(ctx))
+		if err != nil {
+			return err
+		}
+
+		if err := tx.QueryRow(ctx,
+			`UPDATE public.organizations
+			 SET name = $1, updated_at = now()
+			 WHERE id = $2
+			 RETURNING id, name`,
+			*req.Name, organizationID,
+		).Scan(&response.Organization.ID, &response.Organization.Name); err != nil {
+			return fmt.Errorf("organizations: update settings: %w", err)
+		}
+		if err := audit.Write(ctx, tx, audit.Entry{
+			OrganizationID: organizationID,
+			Actor:          actor,
+			Action:         audit.OrganizationSettingsUpdated,
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return OrganizationResponse{}, err
-	}
-	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return OrganizationResponse{}, fmt.Errorf("organizations: commit settings update: %w", err)
 	}
 	return response, nil
 }

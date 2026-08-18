@@ -71,116 +71,119 @@ func (c *Creator) AcceptInvitation(ctx context.Context, req AcceptInvitationRequ
 		return AcceptInvitationResponse{}, err
 	}
 
-	tx, err := c.begin(ctx)
-	if err != nil {
-		return AcceptInvitationResponse{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
-
-	userID := authjwt.UserID(ctx)
-	userEmail, err := invitationUserEmail(ctx, tx, userID)
-	if err != nil {
-		return AcceptInvitationResponse{}, err
-	}
-	organizationID, err := invitationOrganizationID(ctx, tx, invitationID)
-	if err != nil {
-		return AcceptInvitationResponse{}, err
-	}
-	if err := lockInvitationEmail(ctx, tx, organizationID, userEmail); err != nil {
-		return AcceptInvitationResponse{}, err
-	}
-	invitation, err := lockInvitationForAcceptance(ctx, tx, invitationID)
-	if err != nil {
-		return AcceptInvitationResponse{}, err
-	}
-	if userEmail != invitation.Email {
-		return AcceptInvitationResponse{}, errInvitationNotFound
-	}
-
-	if invitation.Status == "accepted" {
-		membership, err := activeMembershipForInvitee(ctx, tx, invitation.OrganizationID, userID)
+	var membership Membership
+	// commandErr carries a committed transaction's public command error (the
+	// wrong-code attempt counter): the bookkeeping commits and the error is
+	// reported only after the transaction returned successfully.
+	var commandErr error
+	err = c.tx.Run(ctx, func(tx pgx.Tx) error {
+		userID := authjwt.UserID(ctx)
+		userEmail, err := invitationUserEmail(ctx, tx, userID)
 		if err != nil {
-			return AcceptInvitationResponse{}, err
+			return err
 		}
-		return AcceptInvitationResponse{Membership: membership}, nil
-	}
-	if invitation.Status == "revoked" {
-		return AcceptInvitationResponse{}, errInvitationRevoked
-	}
-	if invitation.Status != "pending" {
-		return AcceptInvitationResponse{}, errInvitationNotPending
-	}
-	code, err := lockLatestInvitationCode(ctx, tx, invitation.ID)
-	if err != nil {
-		return AcceptInvitationResponse{}, err
-	}
-	currentTime, err := databaseCurrentTime(ctx, tx)
-	if err != nil {
-		return AcceptInvitationResponse{}, err
-	}
-	if !invitation.ExpiresAt.After(currentTime) || !code.ExpiresAt.After(currentTime) {
-		return AcceptInvitationResponse{}, errInvitationExpired
-	}
-	if code.Status != "active" {
-		if code.FailedAttempts >= invitationCodeAttemptLimit {
-			return AcceptInvitationResponse{}, &invitationCodeAttemptError{
-				cause:             errCodeAttemptsExhausted,
-				attemptsRemaining: 0,
+		organizationID, err := invitationOrganizationID(ctx, tx, invitationID)
+		if err != nil {
+			return err
+		}
+		if err := lockInvitationEmail(ctx, tx, organizationID, userEmail); err != nil {
+			return err
+		}
+		invitation, err := lockInvitationForAcceptance(ctx, tx, invitationID)
+		if err != nil {
+			return err
+		}
+		if userEmail != invitation.Email {
+			return errInvitationNotFound
+		}
+
+		if invitation.Status == "accepted" {
+			membership, err = activeMembershipForInvitee(ctx, tx, invitation.OrganizationID, userID)
+			if err != nil {
+				return err
 			}
+			return nil
 		}
-		return AcceptInvitationResponse{}, errInvalidInvitationCode
-	}
-	submittedCodeHash := verification.HashCode(c.cfg.HashKey, *req.Code)
-	if !hmac.Equal([]byte(code.Hash), []byte(submittedCodeHash)) {
-		isHistorical, err := isHistoricalInvitationCode(ctx, tx, invitation.ID, submittedCodeHash)
+		if invitation.Status == "revoked" {
+			return errInvitationRevoked
+		}
+		if invitation.Status != "pending" {
+			return errInvitationNotPending
+		}
+		code, err := lockLatestInvitationCode(ctx, tx, invitation.ID)
 		if err != nil {
-			return AcceptInvitationResponse{}, err
+			return err
 		}
-		if isHistorical {
-			return AcceptInvitationResponse{}, errInvitationCodeInvalidated
-		}
-		commandErr, err := c.recordFailedInvitationCode(ctx, tx, invitation.ID, code)
+		currentTime, err := databaseCurrentTime(ctx, tx)
 		if err != nil {
-			return AcceptInvitationResponse{}, err
+			return err
 		}
-		if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-			return AcceptInvitationResponse{}, fmt.Errorf("invitations: commit failed code attempt: %w", err)
+		if !invitation.ExpiresAt.After(currentTime) || !code.ExpiresAt.After(currentTime) {
+			return errInvitationExpired
 		}
-		return AcceptInvitationResponse{}, commandErr
-	}
+		if code.Status != "active" {
+			if code.FailedAttempts >= invitationCodeAttemptLimit {
+				return &invitationCodeAttemptError{
+					cause:             errCodeAttemptsExhausted,
+					attemptsRemaining: 0,
+				}
+			}
+			return errInvalidInvitationCode
+		}
+		submittedCodeHash := verification.HashCode(c.cfg.HashKey, *req.Code)
+		if !hmac.Equal([]byte(code.Hash), []byte(submittedCodeHash)) {
+			isHistorical, err := isHistoricalInvitationCode(ctx, tx, invitation.ID, submittedCodeHash)
+			if err != nil {
+				return err
+			}
+			if isHistorical {
+				return errInvitationCodeInvalidated
+			}
+			attemptErr, err := c.recordFailedInvitationCode(ctx, tx, invitation.ID, code)
+			if err != nil {
+				return err
+			}
+			commandErr = attemptErr
+			return nil
+		}
 
-	membership, err := insertActiveMember(ctx, tx, invitation.OrganizationID, userID)
+		membership, err = insertActiveMember(ctx, tx, invitation.OrganizationID, userID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE public.invitations SET status = 'accepted', updated_at = now() WHERE id = $1`, invitation.ID,
+		); err != nil {
+			return fmt.Errorf("invitations: accept invitation: %w", err)
+		}
+		actor, err := audit.SnapshotUser(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		if err := audit.Write(ctx, tx, audit.Entry{
+			OrganizationID: invitation.OrganizationID,
+			Actor:          actor,
+			Target:         &actor,
+			Action:         audit.InvitationAccepted,
+			Metadata: map[string]string{
+				"invitation_id": invitation.ID,
+				"email":         invitation.Email,
+			},
+		}); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE identity.verification_codes SET status = 'consumed' WHERE id = $1`, code.ID,
+		); err != nil {
+			return fmt.Errorf("invitations: consume invitation code: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return AcceptInvitationResponse{}, err
 	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE public.invitations SET status = 'accepted', updated_at = now() WHERE id = $1`, invitation.ID,
-	); err != nil {
-		return AcceptInvitationResponse{}, fmt.Errorf("invitations: accept invitation: %w", err)
-	}
-	actor, err := audit.SnapshotUser(ctx, tx, userID)
-	if err != nil {
-		return AcceptInvitationResponse{}, err
-	}
-	if err := audit.Write(ctx, tx, audit.Entry{
-		OrganizationID: invitation.OrganizationID,
-		Actor:          actor,
-		Target:         &actor,
-		Action:         audit.InvitationAccepted,
-		Metadata: map[string]string{
-			"invitation_id": invitation.ID,
-			"email":         invitation.Email,
-		},
-	}); err != nil {
-		return AcceptInvitationResponse{}, err
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE identity.verification_codes SET status = 'consumed' WHERE id = $1`, code.ID,
-	); err != nil {
-		return AcceptInvitationResponse{}, fmt.Errorf("invitations: consume invitation code: %w", err)
-	}
-	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return AcceptInvitationResponse{}, fmt.Errorf("invitations: commit acceptance: %w", err)
+	if commandErr != nil {
+		return AcceptInvitationResponse{}, commandErr
 	}
 	return AcceptInvitationResponse{Membership: membership}, nil
 }

@@ -11,11 +11,11 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/authjwt"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
 var (
@@ -32,14 +32,15 @@ var (
 	errInvalidRoleAction     = errors.New("memberships: invalid role action")
 )
 
-// Manager handles Membership trusted commands through the identity_app role.
+// Manager handles Membership trusted commands through the identity_app
+// write-transaction runner.
 type Manager struct {
-	pool   *pgxpool.Pool
+	tx     *writetx.Runner
 	sender string
 }
 
-func NewManager(pool *pgxpool.Pool, sender string) *Manager {
-	return &Manager{pool: pool, sender: sender}
+func NewManager(tx *writetx.Runner, sender string) *Manager {
+	return &Manager{tx: tx, sender: sender}
 }
 
 // Membership is the minimal Membership representation returned by its commands.
@@ -113,56 +114,43 @@ func (m *Manager) LeaveOrganization(ctx context.Context, req LeaveOrganizationRe
 		return MembershipResponse{}, err
 	}
 
-	tx, err := m.begin(ctx)
+	var membership Membership
+	err = m.tx.Run(ctx, func(tx pgx.Tx) error {
+		var actor audit.Subject
+		membership, actor, err = lockCallerMembership(ctx, tx, organizationID, authjwt.UserID(ctx))
+		if err != nil {
+			return err
+		}
+		if membership.Role == "owner" {
+			return errOwnerCannotLeave
+		}
+		if err := tx.QueryRow(ctx,
+			`UPDATE public.memberships
+			 SET status = 'ended', updated_at = now()
+			 WHERE id = $1
+			 RETURNING id, organization_id, user_id, role, status`, membership.ID,
+		).Scan(
+			&membership.ID,
+			&membership.OrganizationID,
+			&membership.UserID,
+			&membership.Role,
+			&membership.Status,
+		); err != nil {
+			return fmt.Errorf("memberships: end membership: %w", err)
+		}
+		if err := audit.Write(ctx, tx, audit.Entry{
+			OrganizationID: organizationID,
+			Actor:          actor,
+			Action:         audit.MembershipLeft,
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return MembershipResponse{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
-
-	membership, actor, err := lockCallerMembership(ctx, tx, organizationID, authjwt.UserID(ctx))
-	if err != nil {
-		return MembershipResponse{}, err
-	}
-	if membership.Role == "owner" {
-		return MembershipResponse{}, errOwnerCannotLeave
-	}
-	if err := tx.QueryRow(ctx,
-		`UPDATE public.memberships
-		 SET status = 'ended', updated_at = now()
-		 WHERE id = $1
-		 RETURNING id, organization_id, user_id, role, status`, membership.ID,
-	).Scan(
-		&membership.ID,
-		&membership.OrganizationID,
-		&membership.UserID,
-		&membership.Role,
-		&membership.Status,
-	); err != nil {
-		return MembershipResponse{}, fmt.Errorf("memberships: end membership: %w", err)
-	}
-	if err := audit.Write(ctx, tx, audit.Entry{
-		OrganizationID: organizationID,
-		Actor:          actor,
-		Action:         audit.MembershipLeft,
-	}); err != nil {
-		return MembershipResponse{}, err
-	}
-	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return MembershipResponse{}, fmt.Errorf("memberships: commit leave organization: %w", err)
 	}
 	return MembershipResponse{Membership: membership}, nil
-}
-
-func (m *Manager) begin(ctx context.Context) (pgx.Tx, error) {
-	tx, err := m.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("memberships: begin command: %w", err)
-	}
-	if _, err := tx.Exec(ctx, "SET LOCAL ROLE identity_app"); err != nil {
-		tx.Rollback(context.WithoutCancel(ctx))
-		return nil, fmt.Errorf("memberships: switch to identity_app: %w", err)
-	}
-	return tx, nil
 }
 
 func normalizeOrganizationID(raw string) (string, error) {

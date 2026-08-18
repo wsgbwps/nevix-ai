@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/authjwt"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/outbox"
 	"github.com/nevix-ai/server/internal/identity/verification"
+	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
 const invitationValidity = 7 * 24 * time.Hour
@@ -42,15 +42,16 @@ var (
 	errCodeAttemptsExhausted     = errors.New("invitations: invitation code attempts exhausted")
 )
 
-// Creator handles Invitation trusted commands with the deployment-scoped code
-// HMAC key and sender reused from the existing verification-code capability.
+// Creator handles Invitation trusted commands through the identity_app
+// write-transaction runner, with the deployment-scoped code HMAC key and
+// sender reused from the existing verification-code capability.
 type Creator struct {
-	pool *pgxpool.Pool
-	cfg  verification.CodeIssuanceConfig
+	tx  *writetx.Runner
+	cfg verification.CodeIssuanceConfig
 }
 
-func NewCreator(pool *pgxpool.Pool, cfg verification.CodeIssuanceConfig) *Creator {
-	return &Creator{pool: pool, cfg: cfg}
+func NewCreator(tx *writetx.Runner, cfg verification.CodeIssuanceConfig) *Creator {
+	return &Creator{tx: tx, cfg: cfg}
 }
 
 // Invitation is the minimal Invitation representation returned by its commands.
@@ -159,78 +160,63 @@ func (c *Creator) CreateInvitation(ctx context.Context, req CreateInvitationRequ
 	}
 	email := *req.Email
 
-	tx, err := c.begin(ctx)
-	if err != nil {
-		return InvitationResponse{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
-
-	organizationName, actor, err := authorizeInvitationAdmin(ctx, tx, organizationID, authjwt.UserID(ctx))
-	if err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := lockInvitationEmail(ctx, tx, organizationID, email); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := rejectActiveMemberEmail(ctx, tx, organizationID, email); err != nil {
-		return InvitationResponse{}, err
-	}
-
 	var invitation Invitation
-	err = tx.QueryRow(ctx,
-		`INSERT INTO public.invitations (
-		   organization_id, email, expires_at, organization_name, inviter_display_name
-		 ) VALUES ($1, $2, clock_timestamp() + make_interval(secs => $3), $4, $5)
-		 ON CONFLICT (organization_id, email) WHERE status = 'pending' DO NOTHING
-		 RETURNING id, organization_id, email, status, expires_at`,
-		organizationID, email, invitationValidity.Seconds(), organizationName, actor.DisplayName,
-	).Scan(
-		&invitation.ID,
-		&invitation.OrganizationID,
-		&invitation.Email,
-		&invitation.Status,
-		&invitation.ExpiresAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return InvitationResponse{}, errPendingInvitation
-	}
-	if err != nil {
-		return InvitationResponse{}, fmt.Errorf("invitations: insert invitation: %w", err)
-	}
+	err = c.tx.Run(ctx, func(tx pgx.Tx) error {
+		organizationName, actor, err := authorizeInvitationAdmin(ctx, tx, organizationID, authjwt.UserID(ctx))
+		if err != nil {
+			return err
+		}
+		if err := lockInvitationEmail(ctx, tx, organizationID, email); err != nil {
+			return err
+		}
+		if err := rejectActiveMemberEmail(ctx, tx, organizationID, email); err != nil {
+			return err
+		}
 
-	if err := verification.EnforceIssuanceLimits(ctx, tx, invitation.Email, req.ClientIP); err != nil {
+		err = tx.QueryRow(ctx,
+			`INSERT INTO public.invitations (
+			   organization_id, email, expires_at, organization_name, inviter_display_name
+			 ) VALUES ($1, $2, clock_timestamp() + make_interval(secs => $3), $4, $5)
+			 ON CONFLICT (organization_id, email) WHERE status = 'pending' DO NOTHING
+			 RETURNING id, organization_id, email, status, expires_at`,
+			organizationID, email, invitationValidity.Seconds(), organizationName, actor.DisplayName,
+		).Scan(
+			&invitation.ID,
+			&invitation.OrganizationID,
+			&invitation.Email,
+			&invitation.Status,
+			&invitation.ExpiresAt,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errPendingInvitation
+		}
+		if err != nil {
+			return fmt.Errorf("invitations: insert invitation: %w", err)
+		}
+
+		if err := verification.EnforceIssuanceLimits(ctx, tx, invitation.Email, req.ClientIP); err != nil {
+			return err
+		}
+		if err := c.issueInvitationCode(ctx, tx, invitation, req.ClientIP, organizationName); err != nil {
+			return err
+		}
+		if err := audit.Write(ctx, tx, audit.Entry{
+			OrganizationID: organizationID,
+			Actor:          actor,
+			Action:         audit.InvitationCreated,
+			Metadata: map[string]string{
+				"invitation_id": invitation.ID,
+				"email":         invitation.Email,
+			},
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return InvitationResponse{}, err
-	}
-	if err := c.issueInvitationCode(ctx, tx, invitation, req.ClientIP, organizationName); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := audit.Write(ctx, tx, audit.Entry{
-		OrganizationID: organizationID,
-		Actor:          actor,
-		Action:         audit.InvitationCreated,
-		Metadata: map[string]string{
-			"invitation_id": invitation.ID,
-			"email":         invitation.Email,
-		},
-	}); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return InvitationResponse{}, fmt.Errorf("invitations: commit create: %w", err)
 	}
 	return InvitationResponse{Invitation: invitation}, nil
-}
-
-func (c *Creator) begin(ctx context.Context) (pgx.Tx, error) {
-	tx, err := c.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("invitations: begin command: %w", err)
-	}
-	if _, err := tx.Exec(ctx, "SET LOCAL ROLE identity_app"); err != nil {
-		tx.Rollback(context.WithoutCancel(ctx))
-		return nil, fmt.Errorf("invitations: switch to identity_app: %w", err)
-	}
-	return tx, nil
 }
 
 func normalizeOrganizationID(raw string) (string, error) {
