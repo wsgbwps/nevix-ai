@@ -1,5 +1,9 @@
 # Verify a candidate SHA once, then fast-forward main
 
+## 状态
+
+已被 [ADR-0011](0011-pr-based-delivery.md) 取代 — 2026-04-30
+
 Nevix AI uses short-lived task branches and promotes an exact commit only after
 its local evidence, review ledger, and path-aware remote CI gate agree. This
 keeps the quality signal previously carried by pull requests while avoiding a

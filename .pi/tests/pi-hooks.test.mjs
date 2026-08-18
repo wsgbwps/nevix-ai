@@ -39,11 +39,11 @@ test("blocks commits on main and pushes to main", () => {
   );
   assert.match(
     blockedBashReason("git push origin main", "feature/task") ?? "",
-    /exact-SHA/,
+    /PR squash merge/,
   );
   assert.match(
     blockedBashReason("git push origin :refs/heads/main", "feature/task") ?? "",
-    /主干更新/,
+    /直接 push main/,
   );
   assert.equal(
     blockedBashReason("git push origin feature/task", "feature/task"),

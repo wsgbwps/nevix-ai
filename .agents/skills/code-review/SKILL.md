@@ -113,9 +113,9 @@ does not invent the implementer or user's decision.
 
 Set `fullReviewCount: 1`, `targetedReviewRound: 0`, and an outcome of
 `needs-disposition` when any finding exists. An empty result may close only after
-the final relevant check passes on the same digest; the repository's final-state
-evidence route may close low-risk candidates (documentation or a single
-dependency-only change) on check `PASS` alone without a finding ledger.
+the final relevant check passes on the same digest; low-risk candidates
+(documentation or a single dependency-only change) may close on check `PASS`
+alone without a finding ledger.
 
 ## Targeted re-review
 
