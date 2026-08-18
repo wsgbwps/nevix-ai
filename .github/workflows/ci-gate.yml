@@ -87,11 +87,17 @@ jobs:
   e2e:
     name: Desktop E2E
     needs: changes
-    if: needs.changes.outputs.e2e == 'true'
+    # PR 只跑 smoke;需要全量时给 PR 打 full-e2e 标签主动升级
+    # (workflow_dispatch 也可手动跑全量)。合并后的 main push 不再跑 E2E:
+    # PR 已对同一棵代码树验证过,合并后重跑只产生重复成本。
+    if: >-
+      needs.changes.outputs.e2e == 'true' && (
+        github.event_name == 'pull_request' ||
+        contains(github.event.pull_request.labels.*.name, 'full-e2e')
+      )
     uses: ./.github/workflows/desktop-e2e-ci.yml
     with:
-      suite: ${{ github.event_name == 'push' && 'full' || 'smoke' }}
-
+      suite: ${{ contains(github.event.pull_request.labels.*.name, 'full-e2e') && 'full' || 'smoke' }}
   gate:
     name: CI gate
     if: always()

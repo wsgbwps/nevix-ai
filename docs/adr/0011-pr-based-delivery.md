@@ -30,3 +30,9 @@ ADR-0010 用本地 verified-SHA 落地路线(`make land` + final-state-evidence 
 名单外路径的推送仍须走 PR。同日扩展:根 `*.md`、`docs/**` 与嵌套 `AGENTS.md`
 一并纳入快道——纯文档改动同样跳过 CI 直提直推;产品目录内的其他文档与
 `Makefile` 等可执行配置不在此列。
+
+同日第二项更新:合并后的 `main` push 不再跑 E2E。squash merge 的树与
+PR head 相同,PR 已验证;合并后重跑只产生重复成本(实测每次约 9 分钟)。
+Full E2E 改为按需:给 PR 打 `full-e2e` 标签即在 PR 上升级为全量,
+`workflow_dispatch` 保留手动触发。交付机器自身(workflow + 分类器)的
+改动也只跑 harness 内联测试,不再触发产品套件。

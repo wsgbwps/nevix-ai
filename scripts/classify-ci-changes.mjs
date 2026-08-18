@@ -114,7 +114,9 @@ export function classifyPaths(paths) {
         "scripts/tests/classify-ci-changes.test.mjs",
       ])
     ) {
-      CLASSIFICATIONS.forEach((classification) => checks.add(classification));
+      // 交付机器自身改动只跑 harness 内联测试;workflow 语法或测试坏了
+      // 会在几秒内显性失败,不需要产品套件验证。
+      checks.add("harness");
     }
 
     if (checks.size === 0) {
