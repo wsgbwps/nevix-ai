@@ -112,6 +112,8 @@ export function classifyPaths(paths) {
         ".github/workflows/ci-gate.yml",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
+        "scripts/post-merge-dedup.mjs",
+        "scripts/tests/post-merge-dedup.test.mjs",
       ])
     ) {
       // 交付机器自身改动只跑 harness 内联测试;workflow 语法或测试坏了
