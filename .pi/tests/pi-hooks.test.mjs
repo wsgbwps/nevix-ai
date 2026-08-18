@@ -51,7 +51,7 @@ test("blocks commits on main and pushes to main", () => {
   );
 });
 
-test("agent-config fast lane allows direct main commit and push", () => {
+test("fast-lane paths allow direct main commit and push", () => {
   // 未提供路径（信息不可得）时 fail-safe 拦截
   assert.match(blockedBashReason("git commit -m x", "main") ?? "", /任务分支/);
   assert.match(
@@ -96,6 +96,36 @@ test("agent-config fast lane allows direct main commit and push", () => {
   assert.match(
     blockedBashReason("git push origin main", "main", undefined, undefined) ?? "",
     /直接 push main/,
+  );
+});
+
+test("documentation paths ride the fast lane, product docs do not", () => {
+  assert.equal(
+    blockedBashReason("git commit -m docs", "main", [
+      "README.md",
+      "AGENTS.md",
+      "docs/adr/0012-x.md",
+      "apps/desktop/AGENTS.md",
+      "server/AGENTS.md",
+    ]),
+    undefined,
+  );
+  assert.match(
+    blockedBashReason("git commit -m x", "main", [
+      "apps/desktop/docs/guide.md",
+    ]) ?? "",
+    /任务分支/,
+  );
+  assert.match(
+    blockedBashReason("git commit -m x", "main", ["Makefile"]) ?? "",
+    /任务分支/,
+  );
+  assert.equal(
+    blockedBashReason("git push origin main", "main", undefined, [
+      "docs/agents/delivery.md",
+      ".scratch/plan.md",
+    ]),
+    undefined,
   );
 });
 

@@ -10,6 +10,10 @@ on:
       - ".agents/**"
       - ".omp/**"
       - ".scratch/**"
+      - "docs/**"
+      - "*.md"
+      - "apps/desktop/AGENTS.md"
+      - "server/AGENTS.md"
   pull_request:
     branches:
       - main

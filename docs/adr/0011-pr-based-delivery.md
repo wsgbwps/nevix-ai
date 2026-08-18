@@ -27,4 +27,6 @@ ADR-0010 用本地 verified-SHA 落地路线(`make land` + final-state-evidence 
 仅限 `.pi/`、`.codex/`、`.agents/`、`.omp/`、`.scratch/` 的改动可直接在
 `main` 提交并推送:push 触发以 `paths-ignore` 跳过 CI,本地 hooks 仅当待
 提交/待推送改动全部落在这五个目录内时放行(信息不可得时拦截)。混合白
-名单外路径的推送仍须走 PR。
+名单外路径的推送仍须走 PR。同日扩展:根 `*.md`、`docs/**` 与嵌套 `AGENTS.md`
+一并纳入快道——纯文档改动同样跳过 CI 直提直推;产品目录内的其他文档与
+`Makefile` 等可执行配置不在此列。

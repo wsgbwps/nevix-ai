@@ -6,17 +6,18 @@ const GO_PATH = /\.go$/;
 const MAIN_PUSH_COMMAND =
   /git\s+push([^;&|]*)(\s+main(\s|$)|:refs\/heads\/main|:main(\s|$))/;
 
-const AGENT_CONFIG_PATH = /^\.(?:pi|codex|agents|omp|scratch)\//;
+const FAST_LANE_PATH =
+  /^(\.(?:pi|codex|agents|omp|scratch)\/|docs\/|(?:apps\/desktop|server)\/AGENTS\.md$|[^/]+\.md$)/;
 const FAST_LANE_NOTE =
-  "（仅 .pi/.codex/.agents/.omp/.scratch 配置改动可直提直推）";
+  "（仅 agent 配置与文档改动可直提直推）";
 
-export function isAgentConfigPath(path: string): boolean {
-  return AGENT_CONFIG_PATH.test(path);
+export function isFastLanePath(path: string): boolean {
+  return FAST_LANE_PATH.test(path);
 }
 
-function agentConfigOnly(paths: string[] | undefined): boolean {
+function fastLaneOnly(paths: string[] | undefined): boolean {
   // 未提供路径信息时按非白名单处理（fail-safe）
-  return paths !== undefined && paths.every(isAgentConfigPath);
+  return paths !== undefined && paths.every(isFastLanePath);
 }
 function normalizeToolPath(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -37,11 +38,11 @@ export function blockedBashReason(
   if (
     branch === "main" &&
     /git\s+commit/.test(command) &&
-    !agentConfigOnly(trackedPaths)
+    !fastLaneOnly(trackedPaths)
   ) {
     return "在任务分支完成修改并开 PR,不要直接在 main 上提交" + FAST_LANE_NOTE;
   }
-  if (MAIN_PUSH_COMMAND.test(command) && !agentConfigOnly(pushedPaths)) {
+  if (MAIN_PUSH_COMMAND.test(command) && !fastLaneOnly(pushedPaths)) {
     return "main 通过 PR squash merge 更新,不要直接 push main" + FAST_LANE_NOTE;
   }
   return undefined;
