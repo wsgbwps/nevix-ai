@@ -23,9 +23,14 @@ import (
 	"github.com/nevix-ai/server/internal/identity/mailpittest"
 )
 
-// harness wires one test to the running local stack, or skips.
+// harness wires one test to the running local stack, or skips. pool is the
+// owner credential: it applies fixtures and makes authoritative assertions, and
+// is never handed to the identity Module. runtime is the pool that
+// authenticates directly as identity_app — the production runtime credential —
+// and is the only pool Module construction sees.
 type harness struct {
 	pool       *pgxpool.Pool
+	runtime    *pgxpool.Pool
 	mailpit    *mailpittest.Client
 	mailpitURL string
 	cfg        identity.Config
@@ -34,6 +39,7 @@ type harness struct {
 func newHarness(t *testing.T, ctx context.Context) *harness {
 	t.Helper()
 	databaseURL := requireEnv(t, "NEVIX_DATABASE_URL")
+	runtimeDatabaseURL := requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL")
 	mailpitURL := requireEnv(t, "NEVIX_MAILPIT_URL")
 	for _, key := range []string{
 		"NEVIX_SMTP_HOST", "NEVIX_SMTP_PORT", "NEVIX_SMTP_USER", "NEVIX_SMTP_PASSWORD",
@@ -50,11 +56,17 @@ func newHarness(t *testing.T, ctx context.Context) *harness {
 	}
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
-		t.Fatalf("connect to database: %v", err)
+		t.Fatalf("connect owner fixture database: %v", err)
 	}
 	t.Cleanup(pool.Close)
+	runtime, err := pgxpool.New(ctx, runtimeDatabaseURL)
+	if err != nil {
+		t.Fatalf("connect identity_app runtime database: %v", err)
+	}
+	t.Cleanup(runtime.Close)
 	return &harness{
 		pool:       pool,
+		runtime:    runtime,
 		mailpit:    mailpittest.NewClient(mailpitURL),
 		mailpitURL: mailpitURL,
 		cfg:        cfg,
@@ -87,7 +99,7 @@ func (h *harness) insertOutboxRowCommitted(t *testing.T, ctx context.Context, re
 // gracefully.
 func (h *harness) startWorker(t *testing.T) (stop func()) {
 	t.Helper()
-	m, err := identity.NewModule(h.pool, h.cfg)
+	m, err := identity.NewModule(context.Background(), h.runtime, h.cfg)
 	if err != nil {
 		t.Fatalf("construct identity module: %v", err)
 	}

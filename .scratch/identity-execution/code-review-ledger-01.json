@@ -1,0 +1,135 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "66eadb5",
+  "scopePaths": [
+    "server",
+    "apps/desktop/scripts/run-e2e.sh",
+    "scripts",
+    "docs/adr/0008-identity-write-boundary-and-rls-grant-structure.md",
+    ".scratch/identity-execution"
+  ],
+  "currentDiffDigest": "sha256:81953625da1a2769287d89bb3ef2310f5e154a5aba7f6e51adccc3e07bbc714d",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 1,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": ".scratch/identity-execution/issues/01-reject-unexpected-postgres-identity-at-startup.md",
+        "source": "docs/agents/triage-labels.md — Local state extensions",
+        "anchor": ".scratch/identity-execution/issues/01:35 Status line",
+        "defect": "implementation ticket used wayfinder-only status 'claimed'"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Genuine deviation, but the wrap-up step of this same delivery sets Status: resolved with the acceptance conclusion per docs/agents/issue-tracker.md, which is the documented terminal state for implementation tickets; the intermediate label never lands on main.",
+      "owner": ".scratch/identity-execution/issues/01-reject-unexpected-postgres-identity-at-startup.md",
+      "status": "closed",
+      "evidence": [
+        "triage-labels.md reserves claimed/resolved pair for wayfinder map tickets; implementation tickets use the five canonical roles plus resolved",
+        "Wrap-up per issue-tracker.md branch checklist step 1 sets resolved before the candidate is committed"
+      ],
+      "reviewedDiffDigest": "sha256:ee63e0ef0440c8bfc658ec4428ed5129e89585002dcceaf7c55b0718c7b5f73f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/integrationtest",
+        "source": "Fowler smell baseline — Mysterious Name",
+        "anchor": "server/internal/identity/integrationtest/outbox_walking_skeleton_test.go harness struct",
+        "defect": "generic 'pool' means owner credential while 'runtime' means identity_app after the split"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Judgement-call smell. Renaming h.pool to h.ownerPool would mechanically churn ~100 call sites across 8 test files with zero behavior change, against the surgical-change guideline for this slice; the struct doc comment states the credential contract explicitly, and ticket 02 (per-transaction runner) revisits this harness seam where a rename can land with the behavior change it explains.",
+      "owner": "server/internal/identity/integrationtest",
+      "status": "closed",
+      "evidence": [
+        "harness struct doc comment pins: pool = owner fixture/assertion credential never handed to the Module; runtime = direct identity_app login",
+        "All three Module-construction sites now read h.runtime"
+      ],
+      "reviewedDiffDigest": "sha256:ee63e0ef0440c8bfc658ec4428ed5129e89585002dcceaf7c55b0718c7b5f73f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0003",
+      "axis": "standards",
+      "identity": {
+        "owner": "Makefile:server-mailpit",
+        "source": "Fowler smell baseline — Duplicated Code",
+        "anchor": "scripts/lib/supabase-local-harness.sh nevix_supabase_harness_identity_app_database_url vs Makefile server-mailpit",
+        "defect": "random-password + ALTER ROLE + URL assembly duplicated between dev recipe and harness lib"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "The two call sites intentionally differ: server-mailpit is an interactive developer convenience against a long-lived dev stack the developer owns, while the lib function targets a harness-owned ephemeral stack behind the lifecycle guard. Wiring the Makefile into the harness lib would couple unrelated lifecycle assumptions inside this ticket; recorded as follow-up cleanup if drift is ever observed. Ticket 01's 'one credential-provisioning rule' requirement binds the Go integration and Desktop E2E harnesses, which do share the single lib function.",
+      "owner": "Makefile",
+      "status": "closed",
+      "evidence": [
+        "scripts/lib/supabase-local-harness.sh:43 is the single provisioning rule consumed by both scripts/test-mail-smoke.sh and apps/desktop/scripts/run-e2e.sh",
+        "Makefile server-mailpit predates this change and targets a manually started dev stack"
+      ],
+      "reviewedDiffDigest": "sha256:ee63e0ef0440c8bfc658ec4428ed5129e89585002dcceaf7c55b0718c7b5f73f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "docs/adr/0008-identity-write-boundary-and-rls-grant-structure.md",
+        "source": "spec Documentation decision / ticket 01 checklist item 11",
+        "anchor": "ADR-0008 § Schema 与角色 identity.directory bullet",
+        "defect": "startup amendment replaced the pre-existing identity.directory grant invariant instead of adding after it, making the ADR omit an active security invariant and its 'only grants in this ADR' wording inaccurate"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Verified: the edit removed the identity.directory bullet. Documented-architecture breakage preventing acceptance.",
+      "owner": "docs/adr/0008-identity-write-boundary-and-rls-grant-structure.md",
+      "status": "closed",
+      "evidence": [
+        "Frozen bundle ee63e0ef showed the 邮箱解析 identity.directory bullet absent from the amended section",
+        "Migration supabase/schemas/organization_membership.sql still creates the view and GRANT SELECT to identity_app, so the ADR text must keep documenting it"
+      ],
+      "reviewedDiffDigest": "sha256:ee63e0ef0440c8bfc658ec4428ed5129e89585002dcceaf7c55b0718c7b5f73f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [
+    {
+      "fixFor": ["CR-SPEC-0001"],
+      "beforeDigest": "sha256:ee63e0ef0440c8bfc658ec4428ed5129e89585002dcceaf7c55b0718c7b5f73f",
+      "afterDigest": "sha256:81953625da1a2769287d89bb3ef2310f5e154a5aba7f6e51adccc3e07bbc714d",
+      "touchedPaths": [
+        "docs/adr/0008-identity-write-boundary-and-rls-grant-structure.md"
+      ],
+      "touchedHunks": [
+        "§ Schema 与角色: restored '- 邮箱解析经 identity.directory (id,email) security definer 只读视图引用 auth.users，GRANT SELECT 仅 identity_app。' unchanged, immediately before the two new direct-login bullets"
+      ],
+      "checks": [
+        "git diff 66eadb5 -- <ADR> is now purely additive (two + lines, zero deletions)",
+        "cd server && go build ./... && go vet ./... && go test ./... — PASS (docs-only repair; suite re-run to keep the check bound to the new digest)",
+        "make harness-test — PASS (21/21)"
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "name": "server go suite (build+vet+test) + harness-test; real-stack Identity integration and Desktop E2E deferred to PR CI (local Docker unavailable)",
+    "result": "PASS",
+    "coverage": "unit + harness self-tests locally; Identity Integration CI + Desktop E2E CI on the PR run the same harness scripts against the real stack",
+    "diffDigest": "sha256:81953625da1a2769287d89bb3ef2310f5e154a5aba7f6e51adccc3e07bbc714d"
+  },
+  "independentSecurityReview": {
+    "kind": "go-security-reviewer",
+    "verdict": "PASS — no blocker or advisory findings",
+    "summary": "Startup check uses a static SELECT with no interpolated input and no production connection hooks; ephemeral hex password reaches psql over stdin only and is redacted from artifacts; identity errors surface only at startup log.Fatal, never HTTP; no privilege regression; owner credential no longer reaches Module construction.",
+    "reviewedDiffDigest": "sha256:81953625da1a2769287d89bb3ef2310f5e154a5aba7f6e51adccc3e07bbc714d"
+  },
+  "outcome": "closed"
+}

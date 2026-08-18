@@ -95,7 +95,7 @@ func newTransportHandler(t *testing.T, h *harness, jwksURL string, origins []str
 	cfg := h.cfg
 	cfg.JWKSURL = jwksURL
 	cfg.CORSAllowedOrigins = origins
-	m, err := identity.NewModule(h.pool, cfg)
+	m, err := identity.NewModule(context.Background(), h.runtime, cfg)
 	if err != nil {
 		t.Fatalf("construct identity module: %v", err)
 	}

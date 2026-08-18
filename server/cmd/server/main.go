@@ -48,7 +48,7 @@ func run() error {
 	}
 	defer pool.Close()
 
-	identityModule, err := identity.NewModule(pool, identityConfig)
+	identityModule, err := identity.NewModule(ctx, pool, identityConfig)
 	if err != nil {
 		return err
 	}

@@ -41,7 +41,7 @@ var codePattern = regexp.MustCompile(`\b\d{6}\b`)
 // derived preflight twins behave as in production).
 func (h *harness) commandRouter(t *testing.T) http.Handler {
 	t.Helper()
-	m, err := identity.NewModule(h.pool, h.cfg)
+	m, err := identity.NewModule(context.Background(), h.runtime, h.cfg)
 	if err != nil {
 		t.Fatalf("construct identity module: %v", err)
 	}

@@ -6,6 +6,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test_root="$(mktemp -d -t nevix-supabase-harness-test.XXXXXX)"
 export TMPDIR="$test_root"
 listener_pid=""
+exec_sql_file="$test_root/provision.sql"
+docker_exec_status=0
 
 cleanup_test_root() {
   if [[ -n "$listener_pid" ]] && kill -0 "$listener_pid" >/dev/null 2>&1; then
@@ -40,6 +42,11 @@ docker() {
       ;;
     "network ls")
       [[ "$docker_state" != "network" ]] || echo "supabase_network_nevix-ai"
+      ;;
+    "exec -i")
+      [[ "$3" == "supabase_db_nevix-ai" ]] || fail "unexpected provisioning container: $*"
+      cat >"$exec_sql_file"
+      return "$docker_exec_status"
       ;;
     *)
       fail "unexpected docker invocation: $*"
@@ -132,3 +139,22 @@ if nevix_supabase_harness_cleanup 0 >/dev/null 2>&1; then
 fi
 [[ ! -d "$NEVIX_SUPABASE_HARNESS_LOCK_DIR" ]] || fail "cleanup failure left the lock behind"
 echo "ok - cleanup failure makes a successful run fail"
+
+# The identity_app runtime-credential provisioning rule shared by the Go
+# integration and Desktop E2E harnesses.
+runtime_url="$(nevix_supabase_harness_identity_app_database_url nevix-ai 54322)" \
+  || fail "identity_app credential provisioning failed"
+[[ "$runtime_url" =~ ^postgresql://identity_app:[0-9a-f]{64}@127\.0\.0\.1:54322/postgres\?sslmode=disable$ ]] \
+  || fail "unexpected runtime url: $runtime_url"
+grep -Eq "^ALTER ROLE identity_app PASSWORD '[0-9a-f]{64}';$" "$exec_sql_file" \
+  || fail "provisioning did not set a random identity_app password via the db container"
+second_url="$(nevix_supabase_harness_identity_app_database_url nevix-ai 54322)" \
+  || fail "second identity_app credential provisioning failed"
+[[ "$second_url" != "$runtime_url" ]] || fail "provisioning reused the previous password"
+echo "ok - identity_app runtime credential is a fresh direct-login URL"
+
+docker_exec_status=1
+if nevix_supabase_harness_identity_app_database_url nevix-ai 54322 >/dev/null 2>&1; then
+  fail "identity_app credential provisioning succeeded despite a failing db container"
+fi
+echo "ok - identity_app credential provisioning fails closed"
