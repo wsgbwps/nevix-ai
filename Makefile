@@ -25,7 +25,7 @@ test-identity-integration:
 	./scripts/test-identity-integration.sh
 
 harness-test:
-	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs .pi/tests/pi-hooks.test.mjs
+	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/post-merge-dedup.test.mjs .pi/tests/pi-hooks.test.mjs
 
 setup:
 	pnpm install

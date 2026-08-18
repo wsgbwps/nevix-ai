@@ -65,9 +65,15 @@ test("Pi agent definitions, extension code, and tests require inline harness val
 });
 
 test("delivery-harness changes run only the inline harness tests", () => {
-  assert.deepEqual(selected(["scripts/classify-ci-changes.mjs"]), {
-    harness: true,
-  });
+  assert.deepEqual(
+    selected([
+      "scripts/classify-ci-changes.mjs",
+      "scripts/tests/classify-ci-changes.test.mjs",
+      "scripts/post-merge-dedup.mjs",
+      "scripts/tests/post-merge-dedup.test.mjs",
+    ]),
+    { harness: true },
+  );
   assert.deepEqual(selected([".github/workflows/ci-gate.yml"]), {
     harness: true,
   });

@@ -26,11 +26,17 @@ jobs:
   changes:
     name: Validate, classify, and test harness
     runs-on: ubuntu-latest
+    # dedup 查询 GitHub API:PR head、commit 树、green run 列表。
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
     outputs:
       desktop: ${{ steps.classify.outputs.desktop }}
       server: ${{ steps.classify.outputs.server }}
       identity: ${{ steps.classify.outputs.identity }}
       e2e: ${{ steps.classify.outputs.e2e }}
+      skip_verified: ${{ steps.dedup.outputs.skip_verified }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -58,6 +64,28 @@ jobs:
             --base "$base_sha" \
             --head "$head_sha" \
             --github-output "$GITHUB_OUTPUT"
+      # 合并后 main push 的 tree-SHA 去重:squash 合并在 base 未移动时
+      # 精确复现 PR head 的树;若该 head 已有 green gate run,则 PR 已
+      # 验证过与本次 push 完全相同的内容,main 上重复的产品检查可以跳过。
+      # 任何不确定情形(非 push、无 (#N)、base 已移动、无 green run、
+      # API 失败)都 fail-open 到 false,照常全量跑。
+      - name: Post-merge dedup (tree-SHA)
+        id: dedup
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          node scripts/post-merge-dedup.mjs \
+            --event "$EVENT_NAME" \
+            --head-sha "$HEAD_SHA" \
+            --repo "$REPOSITORY" \
+            --github-output "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         if: steps.classify.outputs.harness == 'true'
         with:
@@ -69,19 +97,20 @@ jobs:
   desktop:
     name: Desktop CI
     needs: changes
-    if: needs.changes.outputs.desktop == 'true'
+    # dedup 证明本次 push 的树已由 green PR run 验证过时,跳过重复检查。
+    if: needs.changes.outputs.desktop == 'true' && needs.changes.outputs.skip_verified != 'true'
     uses: ./.github/workflows/desktop-ci.yml
 
   server:
     name: Server CI
     needs: changes
-    if: needs.changes.outputs.server == 'true'
+    if: needs.changes.outputs.server == 'true' && needs.changes.outputs.skip_verified != 'true'
     uses: ./.github/workflows/server-ci.yml
 
   identity:
     name: Identity Integration CI
     needs: changes
-    if: needs.changes.outputs.identity == 'true'
+    if: needs.changes.outputs.identity == 'true' && needs.changes.outputs.skip_verified != 'true'
     uses: ./.github/workflows/mail-smoke-ci.yml
 
   e2e:
@@ -116,6 +145,9 @@ jobs:
       # pull_request 事件上强制 E2E，否则 skipped 会被误判为失败。
       E2E_ENFORCED: ${{ github.event_name == 'pull_request' }}
       E2E_RESULT: ${{ needs.e2e.result }}
+      # tree-SHA 去重命中时,产品检查被有意跳过（green PR run 已验证同一
+      # 棵树），gate 把这种 skipped 视为已满足。
+      DEDUP_SKIP: ${{ needs.changes.outputs.skip_verified == 'true' }}
     steps:
       - name: Verify required checks
         shell: bash
@@ -141,6 +173,11 @@ jobs:
             fi
 
             if [ "$required" = "true" ] && [ "$result" != "success" ]; then
+              # Post-merge dedup intentionally skips checks whose tree a
+              # green PR run already verified; treat that skip as satisfied.
+              if [ "$DEDUP_SKIP" = "true" ] && [ "$result" = "skipped" ]; then
+                continue
+              fi
               echo "$check was required but finished as $result"
               failed=true
             fi

@@ -26,12 +26,16 @@ those paths. A push that mixes them with anything else must go through a PR.
 4. Squash-merge and delete the branch: `gh pr merge --squash --delete-branch`.
    Each task lands as exactly one commit on `main`; the PR page is its
    acceptance record.
-5. The merge push runs the gate once on `main` (desktop/server/identity as
-   classified; never E2E — the PR already validated the same tree). A failed
-   post-merge run is repaired by a follow-up PR or a revert PR. When a change
-   needs the Full E2E Suite (auth/session/security-sensitive UI), label the
-   PR `full-e2e` before merging, or run the suite manually via
-   `workflow_dispatch`.
+5. The merge push runs the gate once on `main` (never E2E — the PR already
+   validated the same tree). When the squash commit reproduces the merged
+   PR's head tree exactly and that head has a green gate run, tree-SHA
+   dedup (`scripts/post-merge-dedup.mjs`) skips desktop/server/identity as
+   already verified; otherwise they run as classified. Dedup fails open:
+   a moved base, a missing green run, or an API error runs the full
+   post-merge gate. A failed post-merge run is repaired by a follow-up PR
+   or a revert PR. When a change needs the Full E2E Suite
+   (auth/session/security-sensitive UI), label the PR `full-e2e` before
+   merging, or run the suite manually via `workflow_dispatch`.
 
 ## Notes
 
