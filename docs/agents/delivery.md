@@ -1,9 +1,17 @@
 # Delivery: pull requests
 
-`main` receives work exclusively through pull requests. The GitHub Free private
+`main` receives work through pull requests. The GitHub Free private
 repository has no server-side branch protection, so the PR checks are watched
-locally before merging; local hooks block accidental direct `main` commits and
-pushes.
+locally before merging; local hooks block direct `main` commits and pushes
+that fall outside the agent-config fast lane.
+
+## Agent-config fast lane
+
+Changes confined to `.pi/`, `.codex/`, `.agents/`, `.omp/`, and `.scratch/`
+may be committed and pushed directly to `main`. The push skips the CI gate
+(`paths-ignore`), and the local hooks allow it only when every tracked change
+in the push stays inside those directories. A push that mixes these paths with
+anything else must go through a PR.
 
 ## Task flow
 

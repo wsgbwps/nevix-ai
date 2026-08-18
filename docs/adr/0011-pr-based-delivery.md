@@ -21,3 +21,10 @@ ADR-0010 用本地 verified-SHA 落地路线(`make land` + final-state-evidence 
 - 检查失败不触碰 `main`:在任务分支修复、推送,门禁自动重跑。
 - 连续快速合并可能经 `cancel-in-progress` 取消在途的合并后运行;后继运行仍验证自己的合并 diff。
 - 将来若启用分支保护,只需把本地 watch 步骤换成 GitHub 强制的 required checks。
+
+## 更新 — 2026-04-30:agent-config 直提快道
+
+仅限 `.pi/`、`.codex/`、`.agents/`、`.omp/`、`.scratch/` 的改动可直接在
+`main` 提交并推送:push 触发以 `paths-ignore` 跳过 CI,本地 hooks 仅当待
+提交/待推送改动全部落在这五个目录内时放行(信息不可得时拦截)。混合白
+名单外路径的推送仍须走 PR。

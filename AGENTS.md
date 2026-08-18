@@ -16,7 +16,7 @@
 
 - `apps/desktop/src/renderer/src/components/ui/`, `apps/desktop/src/renderer/src/lib/`, `apps/desktop/src/renderer/src/hooks/`, `server/internal/` shared sub-packages (e.g. `internal/event`), and root `contracts/` are shared areas; call out their changes with impact and tests in the PR description
 - One task delivers one cohesive vertical slice for one primary Domain on a short-lived task branch; no unrelated cleanup or generalized refactors
-- Delivery is PR-based: push the branch, open a PR against `main`, wait for the path-aware `CI gate`, then squash-merge — see [docs/agents/delivery.md](docs/agents/delivery.md)
+- Delivery is PR-based: push the branch, open a PR against `main`, wait for the path-aware `CI gate`, then squash-merge — see [docs/agents/delivery.md](docs/agents/delivery.md). Exception: changes confined to `.pi/`, `.codex/`, `.agents/`, `.omp/`, or `.scratch/` may be committed and pushed directly to `main` without CI
 - Changes to responsibilities across contexts or modules, trusted-execution seams, or architectural decisions require an updated ADR where warranted, before implementation
 - High-risk changes — authentication or authorization, security boundaries, public contracts such as root `contracts/`, and persistent data or migrations — require a brief written plan under `.scratch/` before implementation
 

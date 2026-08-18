@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - ".pi/**"
+      - ".codex/**"
+      - ".agents/**"
+      - ".omp/**"
+      - ".scratch/**"
   pull_request:
     branches:
       - main

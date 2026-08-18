@@ -51,6 +51,54 @@ test("blocks commits on main and pushes to main", () => {
   );
 });
 
+test("agent-config fast lane allows direct main commit and push", () => {
+  // 未提供路径（信息不可得）时 fail-safe 拦截
+  assert.match(blockedBashReason("git commit -m x", "main") ?? "", /任务分支/);
+  assert.match(
+    blockedBashReason("git push origin main", "main") ?? "",
+    /直接 push main/,
+  );
+
+  // 白名单内的已跟踪改动:允许在 main 上提交
+  assert.equal(
+    blockedBashReason("git commit -m 'tweak skill'", "main", [
+      ".agents/skills/implement/SKILL.md",
+      ".scratch/note.md",
+    ]),
+    undefined,
+  );
+
+  // 混入白名单外路径:拦截
+  assert.match(
+    blockedBashReason("git commit -m x", "main", [
+      ".pi/extensions/pi-hooks.ts",
+      "server/main.go",
+    ]) ?? "",
+    /任务分支/,
+  );
+
+  // 待推送 diff 全在白名单:允许直推 main;混入业务代码则拦截
+  assert.equal(
+    blockedBashReason("git push origin main", "main", undefined, [
+      ".omp/agents/researcher.md",
+    ]),
+    undefined,
+  );
+  assert.match(
+    blockedBashReason("git push origin main", "main", undefined, [
+      ".codex/hooks.json",
+      "apps/desktop/src/main/index.ts",
+    ]) ?? "",
+    /直接 push main/,
+  );
+
+  // git 不可用(undefined)时拦截直推
+  assert.match(
+    blockedBashReason("git push origin main", "main", undefined, undefined) ?? "",
+    /直接 push main/,
+  );
+});
+
 test("registers Pi tool hooks and formats only successful unprotected edits", async () => {
   const handlers = new Map();
   const calls = [];
