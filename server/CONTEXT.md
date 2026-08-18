@@ -31,3 +31,11 @@ _Avoid_: mailer service, sender, dispatcher
 **Resend（服务商）**:
 生产环境的邮件投递服务商，仅通过标准 SMTP 端点接入。与「重发码」（重新签发一次性验证码的动作，见 identity 规格）严格区分，讨论中须标注是服务商还是动作。
 _Avoid_: resend（指动作时不带限定语）
+
+**Authentication Identity (认证身份)**:
+运行时数据库连接经 `session_user` 观察到的登录主体。Identity 运行时必须**直接以 `identity_app` 登录**；owner 等高权限凭据即使能 `SET ROLE identity_app` 也不是合法运行配置，认证身份不能用事务内角色切换替代。
+_Avoid_: login role（泛指任意登录角色）, service role, 数据库用户（不区分认证/执行时）
+
+**Execution Identity (执行身份)**:
+同一连接经 `current_user` 观察到的、实际参与权限检查的角色，与认证身份一起在 Identity Module 构造时以真实数据库往返验证为恰 `identity_app`；验证失败即构造失败，进程不得启动 HTTP listener 或 Worker。
+_Avoid_: 权限角色（不指明观察方式）, effective role

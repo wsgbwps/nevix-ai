@@ -23,6 +23,7 @@ identity_server_failure_injector_pid=""
 identity_server_artifact="$desktop_root/test-results/identity-server.log"
 identity_server_failure_marker_dir=""
 database_url=""
+identity_database_url=""
 publishable_key=""
 service_role_key=""
 identity_server_hash_key="desktop-e2e-test-hash-key"
@@ -105,6 +106,7 @@ cleanup() {
   stop_identity_server_process
   if [[ -n "$identity_server_log" ]]; then
     if ! NEVIX_E2E_REDACT_DATABASE_URL="$database_url" \
+      NEVIX_E2E_REDACT_IDENTITY_DATABASE_URL="$identity_database_url" \
       NEVIX_E2E_REDACT_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
       NEVIX_E2E_REDACT_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
       NEVIX_E2E_REDACT_VERIFICATION_CODE_HASH_KEY="$identity_server_hash_key" \
@@ -232,9 +234,14 @@ publishable_key="$(json_value "$status_json" PUBLISHABLE_KEY)"
 service_role_key="$(json_value "$status_json" SERVICE_ROLE_KEY)"
 mailpit_url="$(json_value "$status_json" INBUCKET_URL)"
 database_url="$(json_value "$status_json" DB_URL)"
+# The real Server runs on the ephemeral runtime credential that
+# authenticates directly as identity_app — the same startup contract as
+# production. The owner DB_URL above stays with the Playwright fixtures
+# (seeding and authoritative assertions) and never reaches the server.
+identity_database_url="$(nevix_supabase_harness_identity_app_database_url nevix-ai 54322)"
 server_url="http://127.0.0.1:8080"
 
-start_identity_server "$database_url" "$api_url"
+start_identity_server "$identity_database_url" "$api_url"
 
 if [[ "$mode" == "full" ]]; then
   env \

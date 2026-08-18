@@ -198,6 +198,11 @@ export NEVIX_SUPABASE_URL="${supabase_url}"
 export NEVIX_SUPABASE_PUBLISHABLE_KEY="${publishable_key}"
 export NEVIX_MAILPIT_URL="${mailpit_url}"
 export NEVIX_DATABASE_URL="${database_url}"
+# The runtime credential: the Identity Module only constructs on a pool
+# that authenticated directly as identity_app; NEVIX_DATABASE_URL stays the
+# owner fixture/assertion credential.
+identity_database_url="$(nevix_supabase_harness_identity_app_database_url nevix-ai 54322)"
+export NEVIX_IDENTITY_DATABASE_URL="${identity_database_url}"
 export NEVIX_SMTP_HOST="${mailpit_smtp_host}"
 export NEVIX_SMTP_PORT="${mailpit_smtp_port}"
 export NEVIX_SMTP_USER="mailpit"

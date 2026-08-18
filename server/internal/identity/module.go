@@ -109,10 +109,31 @@ type Module struct {
 	corsOrigins []string
 }
 
+// identityAppRole is the only PostgreSQL role the Identity Module may run as:
+// the fixed, least-privilege LOGIN role created by the Identity migrations.
+const identityAppRole = "identity_app"
+
+// ErrUnexpectedDatabaseIdentity reports that the runtime database
+// connection did not prove the expected identity_app execution identity.
+// It is wrapped by construction and transaction errors and is never part of
+// a public HTTP response; callers use it to distinguish a configuration
+// failure from other database errors.
+var ErrUnexpectedDatabaseIdentity = errors.New("unexpected database identity")
+
 // NewModule constructs the command layers, the transport guard, and the
-// Outbox Worker. Worker construction probes the SMTP endpoint, so an
+// Outbox Worker, after proving the runtime database identity with a real
+// round trip: session_user (the authenticated principal) and current_user
+// (the role actually used for permission checks) must both be exactly
+// identity_app. A pool authenticated as the owner, a migration role, or any
+// other role is rejected even when it could SET ROLE identity_app, and an
+// unreachable database fails the round trip, so either way construction
+// fails before the composition root starts the HTTP listener or workers.
+// Worker construction additionally probes the SMTP endpoint, so an
 // unreachable endpoint fails startup explicitly.
-func NewModule(pool *pgxpool.Pool, cfg Config) (*Module, error) {
+func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, error) {
+	if err := verifyRuntimeDatabaseIdentity(ctx, pool); err != nil {
+		return nil, err
+	}
 	worker, err := outbox.NewOutboxWorker(pool, cfg.SMTP, cfg.RetryDelays)
 	if err != nil {
 		return nil, err
@@ -126,6 +147,31 @@ func NewModule(pool *pgxpool.Pool, cfg Config) (*Module, error) {
 		orgs:        organizations.NewManager(pool),
 		corsOrigins: cfg.CORSAllowedOrigins,
 	}, nil
+}
+
+// verifyRuntimeDatabaseIdentity performs the construction-time round trip:
+// it observes the connection's authentication identity (session_user) and
+// execution identity (current_user) and requires both to equal
+// identity_app. An unreachable or failing database surfaces as a plain
+// infrastructure error, distinct from ErrUnexpectedDatabaseIdentity.
+func verifyRuntimeDatabaseIdentity(ctx context.Context, pool *pgxpool.Pool) error {
+	var sessionUser, currentUser string
+	if err := pool.QueryRow(ctx, "SELECT session_user, current_user").Scan(&sessionUser, &currentUser); err != nil {
+		return fmt.Errorf("identity: verify runtime database identity: %w", err)
+	}
+	return unexpectedDatabaseIdentityError(sessionUser, currentUser)
+}
+
+// unexpectedDatabaseIdentityError is the identity decision, isolated so the
+// two role checks are provable independently of a live database: the
+// message records the expected versus observed roles for operators without
+// carrying any connection string or credential.
+func unexpectedDatabaseIdentityError(sessionUser, currentUser string) error {
+	if sessionUser != identityAppRole || currentUser != identityAppRole {
+		return fmt.Errorf("%w: runtime database connection must authenticate directly as %s, got session_user=%s current_user=%s",
+			ErrUnexpectedDatabaseIdentity, identityAppRole, sessionUser, currentUser)
+	}
+	return nil
 }
 
 // Register mounts the Module's trusted commands from the static route table:

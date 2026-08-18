@@ -2,7 +2,9 @@
 
 # Shared lifecycle guard for the repository's destructive local Supabase test
 # harnesses. Callers must acquire the lock, require clean project state, and
-# claim ownership immediately before `supabase start`.
+# claim ownership immediately before `supabase start`. It also owns the one
+# identity_app runtime-credential provisioning rule shared by the Go
+# Identity integration harness and the Desktop E2E harness.
 
 NEVIX_SUPABASE_HARNESS_LOCK_HELD=0
 NEVIX_SUPABASE_HARNESS_STACK_OWNED=0
@@ -110,6 +112,29 @@ nevix_supabase_harness_claim_stack() {
   NEVIX_SUPABASE_HARNESS_STACK_OWNED=1
 }
 
+# Provision the ephemeral runtime credential for the Identity runtime: a
+# fresh random password for the existing identity_app LOGIN role on the
+# harness-owned stack, printed as a DATABASE URL that authenticates
+# directly as identity_app. The credential is never written to disk; it
+# lives only in the caller's environment, and the stack is torn down with
+# --no-backup after the run. Provision after `supabase db reset`: the role
+# outlives the reset database, but the password must be (re)set each run.
+# Arguments: <project-id> <db-port>; prints the URL on stdout.
+nevix_supabase_harness_identity_app_database_url() {
+  local project_id="$1"
+  local db_port="$2"
+  local db_container="supabase_db_${project_id}"
+  local identity_app_password
+
+  identity_app_password="$(openssl rand -hex 32)" || return 1
+  if ! printf "ALTER ROLE identity_app PASSWORD '%s';\n" "$identity_app_password" \
+    | docker exec -i "$db_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null; then
+    echo "error: could not provision the ephemeral identity_app credential on '$db_container'" >&2
+    return 1
+  fi
+  printf 'postgresql://identity_app:%s@127.0.0.1:%s/postgres?sslmode=disable' \
+    "$identity_app_password" "$db_port"
+}
 nevix_supabase_harness_cleanup() {
   local exit_status="$1"
   local cleanup_failed=0
