@@ -64,19 +64,11 @@ test("Pi agent definitions, extension code, and tests require inline harness val
   );
 });
 
-test("the classifier and CI gate select every product check and harness validation", () => {
+test("delivery-harness changes run only the inline harness tests", () => {
   assert.deepEqual(selected(["scripts/classify-ci-changes.mjs"]), {
-    desktop: true,
-    server: true,
-    identity: true,
-    e2e: true,
     harness: true,
   });
   assert.deepEqual(selected([".github/workflows/ci-gate.yml"]), {
-    desktop: true,
-    server: true,
-    identity: true,
-    e2e: true,
     harness: true,
   });
 });

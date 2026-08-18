@@ -2,8 +2,20 @@
 
 repo_root=$(git rev-parse --show-toplevel) || exit 1
 
+# main 只接受两类更新:
+# 1. 快道路径(.pi/.codex/.agents/.omp/.scratch/docs/、根 *.md、嵌套 AGENTS.md)的直推
+# 2. 其他一切改动走 PR squash merge(GitHub 侧执行,不经过本地 pre-push)
 while read -r local_ref local_sha remote_ref remote_sha; do
   if [ "$remote_ref" = "refs/heads/main" ]; then
-    node "$repo_root/scripts/land.mjs" verify-push "$local_sha" "$remote_sha" || exit 1
+    base="$remote_sha"
+    # 远端分支新建时 remote_sha 为全零,回退 HEAD^
+    if [ -z "$base" ] || echo "$base" | grep -qE '^0+$'; then
+      base=$(git rev-parse "$local_sha^") || exit 1
+    fi
+    files=$(git diff --no-renames --name-only "$base..$local_sha") || exit 1
+    if [ -n "$files" ] && echo "$files" | grep -qvE '^(\.(pi|codex|agents|omp|scratch)/|docs/|(apps/desktop|server)/AGENTS\.md$|[^/]+\.md$)'; then
+      echo "BLOCKED: main 更新须走 PR squash merge;仅 agent 配置与文档改动可直推" >&2
+      exit 1
+    fi
   fi
 done

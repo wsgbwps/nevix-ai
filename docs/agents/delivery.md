@@ -26,9 +26,12 @@ those paths. A push that mixes them with anything else must go through a PR.
 4. Squash-merge and delete the branch: `gh pr merge --squash --delete-branch`.
    Each task lands as exactly one commit on `main`; the PR page is its
    acceptance record.
-5. The merge push triggers the gate again on `main`; e2e-relevant merges run
-   the Full E2E Suite. A failed post-merge run is repaired by a follow-up PR
-   or a revert PR.
+5. The merge push runs the gate once on `main` (desktop/server/identity as
+   classified; never E2E — the PR already validated the same tree). A failed
+   post-merge run is repaired by a follow-up PR or a revert PR. When a change
+   needs the Full E2E Suite (auth/session/security-sensitive UI), label the
+   PR `full-e2e` before merging, or run the suite manually via
+   `workflow_dispatch`.
 
 ## Notes
 
