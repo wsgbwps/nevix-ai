@@ -37,5 +37,9 @@ _Avoid_: resend（指动作时不带限定语）
 _Avoid_: login role（泛指任意登录角色）, service role, 数据库用户（不区分认证/执行时）
 
 **Execution Identity (执行身份)**:
-同一连接经 `current_user` 观察到的、实际参与权限检查的角色，与认证身份一起在 Identity Module 构造时以真实数据库往返验证为恰 `identity_app`；验证失败即构造失败，进程不得启动 HTTP listener 或 Worker。
+同一连接经 `current_user` 观察到的、实际参与权限检查的角色，与认证身份一起在 Identity Module 构造时以真实数据库往返验证为恰 `identity_app`（验证失败即构造失败，进程不得启动 HTTP listener 或 Worker），并在每个写事务开始后由 Write Transaction Module 重新验证——事务期验证失败则该事务回滚、业务代码不执行，Lean V1 仅失败受影响操作。
 _Avoid_: 权限角色（不指明观察方式）, effective role
+
+**Write Transaction Module (写事务模块)**:
+Identity Domain 内全部 Identity-owned 写事务的唯一生产入口（`internal/identity/writetx`）。它独占事务开始、执行身份验证、commit 与 rollback：回调 nil 提交、错误回滚、回调完成前观察到的取消阻止提交、panic 尽力回滚并保留、从不自动重放回调。Organization、Membership、Invitation、Verification 签发与 Outbox Worker 写路径一律经由它；命令层与 Worker 组件持有 runner 而非数据库连接池，新增 Identity 写路径不得自建事务约定。它是 Domain 内的责任命名子包，不是 Server 共享数据库层。
+_Avoid_: transaction framework, Unit of Work, 共享数据库执行层

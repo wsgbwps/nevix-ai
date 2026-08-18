@@ -47,53 +47,53 @@ func (c *Creator) RevokeInvitation(ctx context.Context, req RevokeInvitationRequ
 		return InvitationResponse{}, err
 	}
 
-	tx, err := c.begin(ctx)
-	if err != nil {
-		return InvitationResponse{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
+	var invitation Invitation
+	err = c.tx.Run(ctx, func(tx pgx.Tx) error {
+		_, actor, err := authorizeInvitationAdmin(ctx, tx, organizationID, authjwt.UserID(ctx))
+		if err != nil {
+			return err
+		}
+		invitation, err = lockInvitation(ctx, tx, organizationID, invitationID)
+		if err != nil {
+			return err
+		}
+		if invitation.Status == "revoked" {
+			// Repeating a completed revocation returns the same resource without
+			// adding another Audit Log row.
+			return nil
+		}
+		if invitation.Status != "pending" {
+			return errInvitationNotPending
+		}
 
-	_, actor, err := authorizeInvitationAdmin(ctx, tx, organizationID, authjwt.UserID(ctx))
+		if _, err := tx.Exec(ctx,
+			`UPDATE public.invitations SET status = 'revoked', updated_at = now() WHERE id = $1`, invitation.ID,
+		); err != nil {
+			return fmt.Errorf("invitations: revoke invitation: %w", err)
+		}
+		if err := supersedeActiveInvitationCodes(ctx, tx, invitation.ID); err != nil {
+			return err
+		}
+		if err := cancelPendingInvitationOutbox(ctx, tx, invitation.ID); err != nil {
+			return err
+		}
+		if err := audit.Write(ctx, tx, audit.Entry{
+			OrganizationID: organizationID,
+			Actor:          actor,
+			Action:         audit.InvitationRevoked,
+			Metadata: map[string]string{
+				"invitation_id": invitation.ID,
+				"email":         invitation.Email,
+			},
+		}); err != nil {
+			return err
+		}
+		invitation.Status = "revoked"
+		return nil
+	})
 	if err != nil {
 		return InvitationResponse{}, err
 	}
-	invitation, err := lockInvitation(ctx, tx, organizationID, invitationID)
-	if err != nil {
-		return InvitationResponse{}, err
-	}
-	if invitation.Status == "revoked" {
-		return InvitationResponse{Invitation: invitation}, nil
-	}
-	if invitation.Status != "pending" {
-		return InvitationResponse{}, errInvitationNotPending
-	}
-
-	if _, err := tx.Exec(ctx,
-		`UPDATE public.invitations SET status = 'revoked', updated_at = now() WHERE id = $1`, invitation.ID,
-	); err != nil {
-		return InvitationResponse{}, fmt.Errorf("invitations: revoke invitation: %w", err)
-	}
-	if err := supersedeActiveInvitationCodes(ctx, tx, invitation.ID); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := cancelPendingInvitationOutbox(ctx, tx, invitation.ID); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := audit.Write(ctx, tx, audit.Entry{
-		OrganizationID: organizationID,
-		Actor:          actor,
-		Action:         audit.InvitationRevoked,
-		Metadata: map[string]string{
-			"invitation_id": invitation.ID,
-			"email":         invitation.Email,
-		},
-	}); err != nil {
-		return InvitationResponse{}, err
-	}
-	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return InvitationResponse{}, fmt.Errorf("invitations: commit revoke: %w", err)
-	}
-	invitation.Status = "revoked"
 	return InvitationResponse{Invitation: invitation}, nil
 }
 

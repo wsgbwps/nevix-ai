@@ -22,6 +22,7 @@ Organization Membership 切片首次让 Desktop client 直读五张共享表（p
 - Go 使用单一 `identity_app` LOGIN 角色承载命令、Outbox Worker 与 retention sweep，不按用途拆角色；不授 BYPASSRLS，改在五张 public 表上对 identity_app 加 permissive policy（USING true），RLS 保持全局兜底。
 - 邮箱解析经 `identity.directory (id,email)` security definer 只读视图引用 auth.users，GRANT SELECT 仅 identity_app。
 - 运行时身份澄清（2026-08-18，identity-execution ticket 01 落地时确认）：`identity_app` 必须以**直接登录**使用——运行时连接的 `session_user`（认证身份）与 `current_user`（执行身份）都必须恰为 `identity_app`，Identity Module 构造时以真实数据库往返验证该 invariant；数据库不可达同样导致构造失败，先于 HTTP listener 与 Worker 启动。owner、migration 或其他高权限凭据即使能 `SET ROLE identity_app` 也不构成合法运行配置，认证身份不能以事务内降级约定替代。本角色仍是唯一运行角色：ADR 不引入第二个执行角色。
+- 写事务所有权（2026-08-18，identity-execution ticket 02 落地时确认）：全部 Identity-owned 写事务——Organization、Membership、Invitation、Verification 签发与 Outbox Worker——统一经过 Identity-local 的 Write Transaction Module（`internal/identity/writetx`）：每次事务开始后、业务回调执行前重新验证 `session_user` 与 `current_user` 都恰为 `identity_app`，验证失败即回滚且不执行业务代码；commit/rollback 由该 runner 独占，Lean V1 回调契约为 `func(pgx.Tx) error`——nil 提交、错误回滚、回调完成前观察到的取消阻止提交、panic 尽力回滚并保留、从不自动重放回调。各命令事务内历史的 `SET LOCAL ROLE identity_app` 语句随之移除：直接登录使角色切换成为冗余，且角色切换本就不能把 owner 凭据合法化。该 Module 是 Identity Domain 内的责任命名子包，不提升为 Server 共享数据库层；Outbox Worker 保留其既有的认领、SMTP、重试与投递后提交语义（投递命运一经决定，簿记提交对 shutdown 免疫），Lean V1 不为事务期身份漂移引入终态或进程退出协议。
 - 运行时凭据属于部署侧：开发与测试 harness 以一次性随机口令直接登录 `identity_app`（每次运行重置，不落盘）；生产连接串同样必须以 `identity_app` 认证。Go Module 只验证身份，不枚举或修补角色属性/授权——角色契约（非 superuser、无 BYPASSRLS、无管理属性、仅本 ADR 所列 GRANT）仍由 migrations 权威定义并由集成测试按目录与行为分别验证。
 
 ### RLS helper 词汇

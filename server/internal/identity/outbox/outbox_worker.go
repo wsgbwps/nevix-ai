@@ -15,7 +15,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/nevix-ai/server/internal/identity/writetx"
 	"github.com/wneessen/go-mail"
 	"github.com/wneessen/go-mail/smtp"
 )
@@ -33,7 +34,7 @@ const pollInterval = time.Second
 // of being delivered (ticket 05). It holds no other business rules; rate
 // limiting and cooldowns live in the command layer.
 type OutboxWorker struct {
-	pool        *pgxpool.Pool
+	tx          *writetx.Runner
 	client      *mail.Client
 	retryDelays []time.Duration
 }
@@ -45,7 +46,7 @@ type OutboxWorker struct {
 // An unreachable endpoint fails construction — and therefore startup —
 // explicitly. retryDelays is the backoff schedule between delivery attempts;
 // its length is the retry budget (see LoadRetryDelays).
-func NewOutboxWorker(pool *pgxpool.Pool, cfg SMTPConfig, retryDelays []time.Duration) (*OutboxWorker, error) {
+func NewOutboxWorker(tx *writetx.Runner, cfg SMTPConfig, retryDelays []time.Duration) (*OutboxWorker, error) {
 	if len(retryDelays) == 0 {
 		return nil, errors.New("identity: outbox retry schedule is empty")
 	}
@@ -71,7 +72,7 @@ func NewOutboxWorker(pool *pgxpool.Pool, cfg SMTPConfig, retryDelays []time.Dura
 	if err != nil {
 		return nil, fmt.Errorf("identity: build SMTP client: %w", err)
 	}
-	return &OutboxWorker{pool: pool, client: client, retryDelays: retryDelays}, nil
+	return &OutboxWorker{tx: tx, client: client, retryDelays: retryDelays}, nil
 }
 
 // probeAuthSupport asks the SMTP server whether it advertises AUTH, upgrading
@@ -137,103 +138,113 @@ func (w *OutboxWorker) Run(ctx context.Context) error {
 // (next attempt scheduled, or failed terminal state once the budget is
 // spent); a send canceled by shutdown rolls back untouched.
 func (w *OutboxWorker) deliverNext(ctx context.Context) (claimed bool, err error) {
-	tx, err := w.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("identity: begin outbox claim: %w", err)
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
+	// The runner's finalization must stay immune to shutdown once the mail's
+	// fate is decided mid-callback: a delivered or genuinely failed row commits
+	// its bookkeeping even when shutdown began during the send, or the row
+	// would roll back to pending and be delivered twice (delivered case) or
+	// silently forget a spent attempt (failed case). deliverNext therefore runs
+	// the runner on a cancellation-immune context and enforces shutdown itself
+	// up to the send decision: the claim and the SMTP send use the real ctx,
+	// and a canceled send returns an error so the untouched row rolls back to
+	// pending.
+	var sendErr error
+	txErr := w.tx.Run(context.WithoutCancel(ctx), func(tx pgx.Tx) error {
+		var (
+			id                               string
+			sender, recipient, subject, body string
+			attempts                         int
+			// deliverable is true for codeless rows and for rows whose code is
+			// still usable; codeExpiresAt is nil for codeless rows. Both use the
+			// database clock (selected alongside) so the retry horizon never
+			// depends on the process clock.
+			deliverable   bool
+			codeExpiresAt *time.Time
+			dbNow         time.Time
+		)
+		err := tx.QueryRow(ctx,
+			`SELECT m.id, m.sender, m.recipient, m.subject, m.body, m.attempts,
+			        c.id IS NULL OR (c.status = 'active' AND now() <= c.expires_at),
+			        c.expires_at, now()
+			 FROM identity.outbox_messages m
+			 LEFT JOIN identity.verification_codes c ON c.id = m.verification_code_id
+			 WHERE m.status = 'pending' AND m.next_attempt_at <= now()
+			 ORDER BY m.next_attempt_at, m.created_at
+			 LIMIT 1
+			 FOR UPDATE OF m SKIP LOCKED`,
+		).Scan(&id, &sender, &recipient, &subject, &body, &attempts, &deliverable, &codeExpiresAt, &dbNow)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("identity: claim outbox row: %w", err)
+		}
+		claimed = true
 
-	var (
-		id                               string
-		sender, recipient, subject, body string
-		attempts                         int
-		// deliverable is true for codeless rows and for rows whose code is
-		// still usable; codeExpiresAt is nil for codeless rows. Both use the
-		// database clock (selected alongside) so the retry horizon never
-		// depends on the process clock.
-		deliverable   bool
-		codeExpiresAt *time.Time
-		dbNow         time.Time
-	)
-	err = tx.QueryRow(ctx,
-		`SELECT m.id, m.sender, m.recipient, m.subject, m.body, m.attempts,
-		        c.id IS NULL OR (c.status = 'active' AND now() <= c.expires_at),
-		        c.expires_at, now()
-		 FROM identity.outbox_messages m
-		 LEFT JOIN identity.verification_codes c ON c.id = m.verification_code_id
-		 WHERE m.status = 'pending' AND m.next_attempt_at <= now()
-		 ORDER BY m.next_attempt_at, m.created_at
-		 LIMIT 1
-		 FOR UPDATE OF m SKIP LOCKED`,
-	).Scan(&id, &sender, &recipient, &subject, &body, &attempts, &deliverable, &codeExpiresAt, &dbNow)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("identity: claim outbox row: %w", err)
-	}
+		if !deliverable {
+			// The carried code was superseded or has expired: the row takes its
+			// cancelled terminal state without a delivery attempt, so the user
+			// never receives an already-invalid code and no retry budget is spent.
+			if _, err := tx.Exec(context.WithoutCancel(ctx),
+				`UPDATE identity.outbox_messages SET status = 'cancelled' WHERE id = $1`, id,
+			); err != nil {
+				return fmt.Errorf("identity: cancel outbox row %s with invalidated code: %w", id, err)
+			}
+			return nil
+		}
 
-	if !deliverable {
-		// The carried code was superseded or has expired: the row takes its
-		// cancelled terminal state without a delivery attempt, so the user
-		// never receives an already-invalid code and no retry budget is spent.
-		commitCtx := context.WithoutCancel(ctx)
-		if _, err := tx.Exec(commitCtx,
-			`UPDATE identity.outbox_messages SET status = 'cancelled' WHERE id = $1`, id,
+		msg := mail.NewMsg()
+		if err := msg.From(sender); err != nil {
+			return fmt.Errorf("identity: outbox row %s sender: %w", id, err)
+		}
+		if err := msg.To(recipient); err != nil {
+			return fmt.Errorf("identity: outbox row %s recipient: %w", id, err)
+		}
+		msg.Subject(subject)
+		msg.SetBodyString(mail.TypeTextPlain, body)
+
+		if err := w.client.DialAndSendWithContext(ctx, msg); err != nil {
+			if ctx.Err() != nil {
+				// Shutdown canceled the send: returning the error rolls the
+				// row back to pending untouched, so a restart never spends retry
+				// budget on an attempt that never reached the wire.
+				return fmt.Errorf("identity: deliver outbox row %s: %w", id, err)
+			}
+			if err := w.recordFailure(ctx, tx, id, attempts, codeExpiresAt, dbNow); err != nil {
+				return err
+			}
+			// The retry bookkeeping commits with this callback's nil; the
+			// delivery failure is reported from outside the transaction.
+			sendErr = fmt.Errorf("identity: deliver outbox row %s: %w", id, err)
+			return nil
+		}
+
+		// The mail is on the wire: finish the bookkeeping even if shutdown began
+		// mid-send, otherwise the row would roll back to pending and be delivered
+		// a second time on restart.
+		if _, err := tx.Exec(context.WithoutCancel(ctx),
+			`UPDATE identity.outbox_messages SET status = 'delivered', attempts = $2 WHERE id = $1`, id, attempts+1,
 		); err != nil {
-			return true, fmt.Errorf("identity: cancel outbox row %s with invalidated code: %w", id, err)
+			return fmt.Errorf("identity: mark outbox row %s delivered: %w", id, err)
 		}
-		if err := tx.Commit(commitCtx); err != nil {
-			return true, fmt.Errorf("identity: commit outbox row %s cancellation: %w", id, err)
-		}
-		return true, nil
+		return nil
+	})
+	if txErr != nil {
+		return claimed, txErr
 	}
-
-	msg := mail.NewMsg()
-	if err := msg.From(sender); err != nil {
-		return true, fmt.Errorf("identity: outbox row %s sender: %w", id, err)
-	}
-	if err := msg.To(recipient); err != nil {
-		return true, fmt.Errorf("identity: outbox row %s recipient: %w", id, err)
-	}
-	msg.Subject(subject)
-	msg.SetBodyString(mail.TypeTextPlain, body)
-
-	if err := w.client.DialAndSendWithContext(ctx, msg); err != nil {
-		if ctx.Err() != nil {
-			// Shutdown canceled the send: the deferred rollback returns the
-			// row to pending untouched, so a restart never spends retry
-			// budget on an attempt that never reached the wire.
-			return true, fmt.Errorf("identity: deliver outbox row %s: %w", id, err)
-		}
-		return true, w.recordFailure(ctx, tx, id, attempts, codeExpiresAt, dbNow, err)
-	}
-
-	// The mail is on the wire: finish the bookkeeping even if shutdown began
-	// mid-send, otherwise the row would roll back to pending and be delivered
-	// a second time on restart.
-	commitCtx := context.WithoutCancel(ctx)
-	if _, err := tx.Exec(commitCtx,
-		`UPDATE identity.outbox_messages SET status = 'delivered', attempts = $2 WHERE id = $1`, id, attempts+1,
-	); err != nil {
-		return true, fmt.Errorf("identity: mark outbox row %s delivered: %w", id, err)
-	}
-	if err := tx.Commit(commitCtx); err != nil {
-		return true, fmt.Errorf("identity: commit outbox row %s: %w", id, err)
-	}
-	return true, nil
+	return claimed, sendErr
 }
 
-// recordFailure commits the bookkeeping for a genuinely failed attempt: the
+// recordFailure writes the bookkeeping for a genuinely failed attempt: the
 // next retry is scheduled from the backoff table, or — once the retry budget
 // (the schedule's length) is spent — the row takes its failed terminal state
 // and stays in the table as the only operational visibility. For a
 // code-carrying row whose next retry would land beyond the code's remaining
 // validity, the retry horizon ends here instead: the row takes its cancelled
-// terminal state immediately rather than waiting out a backoff that can never
-// deliver a valid code. The mail never reached the wire, so committing cannot
-// duplicate a delivery.
-func (w *OutboxWorker) recordFailure(ctx context.Context, tx pgx.Tx, id string, attempts int, codeExpiresAt *time.Time, dbNow time.Time, sendErr error) error {
+// terminal state immediately rather than waiting out a backoff that can
+// never deliver a valid code. The mail never reached the wire, so committing
+// cannot duplicate a delivery; the runner commits and the caller reports the
+// send failure after the transaction returns.
+func (w *OutboxWorker) recordFailure(ctx context.Context, tx pgx.Tx, id string, attempts int, codeExpiresAt *time.Time, dbNow time.Time) error {
 	commitCtx := context.WithoutCancel(ctx)
 	attempts++
 	switch {
@@ -258,8 +269,5 @@ func (w *OutboxWorker) recordFailure(ctx context.Context, tx pgx.Tx, id string, 
 			return fmt.Errorf("identity: schedule outbox row %s retry: %w", id, err)
 		}
 	}
-	if err := tx.Commit(commitCtx); err != nil {
-		return fmt.Errorf("identity: commit outbox row %s retry bookkeeping: %w", id, err)
-	}
-	return fmt.Errorf("identity: deliver outbox row %s: %w", id, sendErr)
+	return nil
 }

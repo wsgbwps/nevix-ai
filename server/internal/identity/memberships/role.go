@@ -91,47 +91,46 @@ func (m *Manager) ChangeMemberRole(ctx context.Context, req ChangeMemberRoleRequ
 		return MembershipResponse{}, errInvalidRoleAction
 	}
 
-	tx, err := m.begin(ctx)
-	if err != nil {
-		return MembershipResponse{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
+	var targetMembership Membership
+	err = m.tx.Run(ctx, func(tx pgx.Tx) error {
+		actorMembership, lockedTarget, organizationName, err := lockActorAndTargetMembership(ctx, tx, organizationID, authjwt.UserID(ctx), membershipID)
+		if err != nil {
+			return err
+		}
+		if actorMembership.Role != "owner" {
+			return errOwnerRoleRequired
+		}
+		if lockedTarget.Role != descriptor.sourceRole {
+			return descriptor.sourceRoleError
+		}
+		actor, err := audit.SnapshotUser(ctx, tx, actorMembership.UserID)
+		if err != nil {
+			return err
+		}
+		target, err := audit.SnapshotUser(ctx, tx, lockedTarget.UserID)
+		if err != nil {
+			return err
+		}
 
-	actorMembership, targetMembership, organizationName, err := lockActorAndTargetMembership(ctx, tx, organizationID, authjwt.UserID(ctx), membershipID)
+		targetMembership = lockedTarget
+		if err := applyAdminRoleAction(ctx, tx, action, descriptor, &targetMembership); err != nil {
+			return err
+		}
+		if err := audit.Write(ctx, tx, audit.Entry{
+			OrganizationID: organizationID,
+			Actor:          actor,
+			Target:         &target,
+			Action:         descriptor.auditAction,
+		}); err != nil {
+			return err
+		}
+		if err := m.queueAdminRoleNotifications(ctx, tx, action, descriptor, organizationID, organizationName, actor, target); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return MembershipResponse{}, err
-	}
-	if actorMembership.Role != "owner" {
-		return MembershipResponse{}, errOwnerRoleRequired
-	}
-	if targetMembership.Role != descriptor.sourceRole {
-		return MembershipResponse{}, descriptor.sourceRoleError
-	}
-	actor, err := audit.SnapshotUser(ctx, tx, actorMembership.UserID)
-	if err != nil {
-		return MembershipResponse{}, err
-	}
-	target, err := audit.SnapshotUser(ctx, tx, targetMembership.UserID)
-	if err != nil {
-		return MembershipResponse{}, err
-	}
-
-	if err := applyAdminRoleAction(ctx, tx, action, descriptor, &targetMembership); err != nil {
-		return MembershipResponse{}, err
-	}
-	if err := audit.Write(ctx, tx, audit.Entry{
-		OrganizationID: organizationID,
-		Actor:          actor,
-		Target:         &target,
-		Action:         descriptor.auditAction,
-	}); err != nil {
-		return MembershipResponse{}, err
-	}
-	if err := m.queueAdminRoleNotifications(ctx, tx, action, descriptor, organizationID, organizationName, actor, target); err != nil {
-		return MembershipResponse{}, err
-	}
-	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return MembershipResponse{}, fmt.Errorf("memberships: commit change member role: %w", err)
 	}
 	return MembershipResponse{Membership: targetMembership}, nil
 }

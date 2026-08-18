@@ -14,10 +14,10 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/identity/authjwt"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
 var (
@@ -34,13 +34,14 @@ var (
 // client generates; the database column stays the source of truth.
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// Manager handles Organization trusted commands through the identity_app role.
+// Manager handles Organization trusted commands through the identity_app
+// write-transaction runner.
 type Manager struct {
-	pool *pgxpool.Pool
+	tx *writetx.Runner
 }
 
-func NewManager(pool *pgxpool.Pool) *Manager {
-	return &Manager{pool: pool}
+func NewManager(tx *writetx.Runner) *Manager {
+	return &Manager{tx: tx}
 }
 
 // CreateOrganizationRequest is the CreateOrganization command input. Validate
@@ -114,79 +115,63 @@ func MapError(err error) *command.Error {
 	}
 }
 
-// create runs the command transaction as identity_app. The client-generated
-// id is the idempotency key: an insert conflict for the same active Owner is
-// a no-op that returns the existing organization, while a conflict owned by
-// anyone else is rejected. The FOR UPDATE read on the conflict path waits out
-// a concurrent winner, so a retry never observes a half-created organization.
+// create runs the command transaction through the write runner. The
+// client-generated id is the idempotency key: an insert conflict for the same
+// active Owner is a no-op that returns the existing organization, while a
+// conflict owned by anyone else is rejected. The FOR UPDATE read on the
+// conflict path waits out a concurrent winner, so a retry never observes a
+// half-created organization.
 func (m *Manager) create(ctx context.Context, userID, id, name string) (string, error) {
-	tx, err := m.begin(ctx)
+	var storedName string
+	err := m.tx.Run(ctx, func(tx pgx.Tx) error {
+		var insertedID string
+		err := tx.QueryRow(ctx,
+			`INSERT INTO public.organizations (id, name) VALUES ($1, $2)
+			 ON CONFLICT (id) DO NOTHING
+			 RETURNING id`, id, name,
+		).Scan(&insertedID)
+		conflict := errors.Is(err, pgx.ErrNoRows)
+		if err != nil && !conflict {
+			return fmt.Errorf("organizations: insert organization: %w", err)
+		}
+
+		if conflict {
+			if err := tx.QueryRow(ctx,
+				`SELECT name FROM public.organizations WHERE id = $1 FOR UPDATE`, id,
+			).Scan(&storedName); err != nil {
+				return fmt.Errorf("organizations: read conflicting organization: %w", err)
+			}
+			var isOwner bool
+			if err := tx.QueryRow(ctx,
+				`SELECT EXISTS (
+				     SELECT 1 FROM public.memberships
+				     WHERE organization_id = $1 AND user_id = $2
+				       AND status = 'active' AND role = 'owner')`, id, userID,
+			).Scan(&isOwner); err != nil {
+				return fmt.Errorf("organizations: check conflicting owner: %w", err)
+			}
+			if !isOwner {
+				return errIDConflict
+			}
+			return nil
+		}
+
+		// The organization row and its first Owner membership commit atomically:
+		// the active-owner unique index backs the transaction if two creators
+		// raced on the same id.
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO public.memberships (organization_id, user_id, role, status)
+			 VALUES ($1, $2, 'owner', 'active')`, id, userID,
+		); err != nil {
+			return fmt.Errorf("organizations: insert owner membership: %w", err)
+		}
+		storedName = name
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
-
-	var insertedID string
-	err = tx.QueryRow(ctx,
-		`INSERT INTO public.organizations (id, name) VALUES ($1, $2)
-		 ON CONFLICT (id) DO NOTHING
-		 RETURNING id`, id, name,
-	).Scan(&insertedID)
-	conflict := errors.Is(err, pgx.ErrNoRows)
-	if err != nil && !conflict {
-		return "", fmt.Errorf("organizations: insert organization: %w", err)
-	}
-
-	if conflict {
-		var storedName string
-		if err := tx.QueryRow(ctx,
-			`SELECT name FROM public.organizations WHERE id = $1 FOR UPDATE`, id,
-		).Scan(&storedName); err != nil {
-			return "", fmt.Errorf("organizations: read conflicting organization: %w", err)
-		}
-		var isOwner bool
-		if err := tx.QueryRow(ctx,
-			`SELECT EXISTS (
-			     SELECT 1 FROM public.memberships
-			     WHERE organization_id = $1 AND user_id = $2
-			       AND status = 'active' AND role = 'owner')`, id, userID,
-		).Scan(&isOwner); err != nil {
-			return "", fmt.Errorf("organizations: check conflicting owner: %w", err)
-		}
-		if !isOwner {
-			return "", errIDConflict
-		}
-		if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-			return "", fmt.Errorf("organizations: commit idempotent create: %w", err)
-		}
-		return storedName, nil
-	}
-
-	// The organization row and its first Owner membership commit atomically:
-	// the active-owner unique index backs the transaction if two creators
-	// raced on the same id.
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO public.memberships (organization_id, user_id, role, status)
-		 VALUES ($1, $2, 'owner', 'active')`, id, userID,
-	); err != nil {
-		return "", fmt.Errorf("organizations: insert owner membership: %w", err)
-	}
-	if err := tx.Commit(context.WithoutCancel(ctx)); err != nil {
-		return "", fmt.Errorf("organizations: commit create: %w", err)
-	}
-	return name, nil
-}
-
-func (m *Manager) begin(ctx context.Context) (pgx.Tx, error) {
-	tx, err := m.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("organizations: begin command: %w", err)
-	}
-	if _, err := tx.Exec(ctx, "SET LOCAL ROLE identity_app"); err != nil {
-		tx.Rollback(context.WithoutCancel(ctx))
-		return nil, fmt.Errorf("organizations: switch to identity_app: %w", err)
-	}
-	return tx, nil
+	return storedName, nil
 }
 
 func normalizeOrganizationID(raw string) (string, error) {
