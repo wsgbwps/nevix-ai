@@ -147,6 +147,30 @@ func TestRunRollsBackPanicAndPropagatesIt(t *testing.T) {
 	}
 }
 
+// A rollback failure during panic cleanup must not hide the panic: the
+// diagnostic is logged by invoke and the programming fault stays observable.
+func TestRunKeepsPanicWhenPanicRollbackFails(t *testing.T) {
+	tx := identityAppTx()
+	tx.rollbackErr = errors.New("rollback failed")
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = r == "programming fault"
+			}
+		}()
+		_ = runnerFor(tx).Run(context.Background(), func(pgx.Tx) error {
+			panic("programming fault")
+		})
+	}()
+	if !panicked {
+		t.Fatal("rollback failure replaced the original panic")
+	}
+	if tx.commits != 0 {
+		t.Fatalf("commits=%d, want no commit on the panic path", tx.commits)
+	}
+}
+
 func TestRunReturnsCommitFailure(t *testing.T) {
 	tx := identityAppTx()
 	tx.commitErr = errors.New("commit failed")

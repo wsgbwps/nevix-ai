@@ -154,6 +154,7 @@ assert_identity_integration_executed() {
     TestAcceptInvitationCreatesMemberAndConsumesCode
     TestRLSClientWriteBoundary
     TestCommittedOutboxRowIsDeliveredToMailpit
+    TestRunRejectsOwnerCredential
   )
 
   passed_count="$(grep -Ec '^--- PASS: Test[^/[:space:]]+[[:space:]]+\(' "$output_file" || true)"
@@ -216,7 +217,10 @@ export NEVIX_CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173"
 
 identity_test_log="$(mktemp -t nevix-identity-integration.XXXXXX)"
 set +e
-go test -C server -race -count=1 -v ./internal/identity/integrationtest | tee "$identity_test_log"
+# The writetx package rides the same checked invocation: its real-role
+# evidence (owner rejected, assumed role rejected, direct identity_app
+# accepted) must execute with zero skips whenever the harness runs.
+go test -C server -race -count=1 -v ./internal/identity/integrationtest ./internal/identity/writetx | tee "$identity_test_log"
 test_status="${PIPESTATUS[0]}"
 set -e
 if [[ "$test_status" -ne 0 ]]; then

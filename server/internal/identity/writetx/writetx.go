@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,19 +31,19 @@ const identityAppRole = "identity_app"
 // from other database errors.
 var ErrUnexpectedDatabaseIdentity = errors.New("unexpected database identity")
 
-// TxBeginner is the single pool capability the runner needs. Production
+// txBeginner is the single pool capability the runner needs. Production
 // supplies *pgxpool.Pool; in-package tests substitute a narrow double where
 // deterministic begin/commit/rollback failure injection cannot be expressed
 // reliably against PostgreSQL. Real PostgreSQL roles remain the evidence for
 // session_user and current_user semantics.
-type TxBeginner interface {
+type txBeginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 // Runner owns the Identity write-transaction lifecycle: begin, execution-
 // identity verification, and finalization.
 type Runner struct {
-	pool TxBeginner
+	pool txBeginner
 }
 
 // New builds the runner over the runtime pool. The pool must authenticate
@@ -94,11 +95,15 @@ func (r *Runner) Run(ctx context.Context, fn func(pgx.Tx) error) error {
 }
 
 // invoke runs the callback so a panic still gets a best-effort rollback
-// before the panic propagates unchanged.
+// before the panic propagates unchanged. A rollback failure here cannot be
+// returned (the panic owns the outcome), so it is logged as the secondary
+// diagnostic instead of being discarded.
 func invoke(ctx context.Context, tx pgx.Tx, fn func(pgx.Tx) error) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
-			_ = tx.Rollback(context.WithoutCancel(ctx))
+			if err := tx.Rollback(context.WithoutCancel(ctx)); err != nil {
+				slog.Error("identity: rollback after callback panic failed", "panic", p, "error", err)
+			}
 			panic(p)
 		}
 	}()
