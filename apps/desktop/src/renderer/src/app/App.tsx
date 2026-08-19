@@ -1,14 +1,14 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
 import { RememberedEmailPersistenceNotice, useAuthentication } from '../features/authentication'
 import {
   ActiveOrganizationProvider,
   OrganizationOnboardingProvider,
-  SessionAccessLostDialog,
-  useOrganizationOnboarding
+  SessionAccessLostDialog
 } from '../features/organization'
 import { hasCompletedProfile } from '../features/profile'
-import { AuthenticationStateContext, useAuthenticationState } from './authentication-state'
+import { AuthenticationStateContext } from './authentication-state'
+import { ResetOrganizationOnboardingAfterSessionEnds } from './organization-onboarding-session-reset'
 import { OrdinaryCloseProvider } from './ordinary-close'
 import { routeTree } from './routeTree.gen'
 
@@ -33,7 +33,7 @@ function App(): React.JSX.Element {
             getSession={authentication.getSession}
             hasCompletedProfile={hasCompletedProfile}
           >
-            <ResetOnboardingAfterAuthenticationEnds />
+            <ResetOrganizationOnboardingAfterSessionEnds />
             <SessionAccessLostDialog />
             <RememberedEmailPersistenceNotice
               surface="authenticated"
@@ -48,19 +48,6 @@ function App(): React.JSX.Element {
       </AuthenticationStateContext.Provider>
     </OrdinaryCloseProvider>
   )
-}
-
-function ResetOnboardingAfterAuthenticationEnds(): null {
-  const { status } = useAuthenticationState()
-  const onboarding = useOrganizationOnboarding()
-
-  useEffect(() => {
-    if (status !== 'authenticated' && onboarding.isEligible) {
-      onboarding.completeOnboarding()
-    }
-  }, [onboarding, status])
-
-  return null
 }
 
 export default App

@@ -26,6 +26,10 @@ export function OrganizationOnboardingProvider({
     setShouldCompleteProfile(false)
     setShouldCreateOrganization(false)
   }, [])
+  const resetOnboarding = useCallback((): void => {
+    setShouldCompleteProfile(false)
+    setShouldCreateOrganization(false)
+  }, [])
   const isEligible = shouldCompleteProfile || shouldCreateOrganization
   const value = useMemo<OrganizationOnboardingState>(
     () => ({
@@ -35,12 +39,14 @@ export function OrganizationOnboardingProvider({
       beginOnboarding,
       resolveOnboarding,
       completeProfile,
-      completeOnboarding
+      completeOnboarding,
+      resetOnboarding
     }),
     [
       beginOnboarding,
       completeProfile,
       completeOnboarding,
+      resetOnboarding,
       isEligible,
       resolveOnboarding,
       shouldCompleteProfile,
