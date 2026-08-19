@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import {
-  decideOrdinaryClose,
+  allowOrdinaryClose,
   OrdinaryCloseHandlerContext,
   type OrdinaryCloseHandler
 } from './ordinary-close-handler'
@@ -19,7 +19,9 @@ export function OrdinaryCloseProvider({
     const removeListener = window.api.on('window:ordinary-close-requested', (request) => {
       const handler = handlerRef.current
       if (handler) handler(request)
-      else void decideOrdinaryClose(request.requestId, 'allow')
+      // Renderer-side mirror of the main-process fail-open policy: when no handler has
+      // registered (no view holds state that must decide a close), an ordinary close is allowed.
+      else void allowOrdinaryClose(request.requestId)
     })
     void window.api.invoke('window:ordinary-close-ready')
     return removeListener

@@ -80,6 +80,10 @@ _Avoid_: Default Organization, Current Team
 Organization 对全部活跃 Member 可见的基础信息，只有 Owner 可以修改；当前仅包含组织名称。
 _Avoid_: Organization Profile, Organization Account
 
+**Organization Onboarding**:
+新 User 在进入业务界面前完成初始 Profile 与首个 Organization 创建的引导流程；开始于注册成功或已认证 User 缺少二者之一，进行状态只存在于当前应用运行内，Session 结束即复位，下一 Session 按当时的 Profile 与 Membership 事实重新推导。
+_Avoid_: Onboarding（未指明归属）, Setup Wizard, First-Run Experience
+
 **Session**:
 User 在单台设备上的已认证使用状态，独立于任何 Organization；V1 只允许 User 登录或退出当前设备，不提供其他设备的查看或撤销。
 _Avoid_: Organization Session, Membership Session

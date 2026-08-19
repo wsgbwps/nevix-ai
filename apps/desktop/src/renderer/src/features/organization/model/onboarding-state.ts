@@ -11,6 +11,7 @@ export interface OrganizationOnboardingState {
   }) => void
   readonly completeProfile: () => void
   readonly completeOnboarding: () => void
+  readonly resetOnboarding: () => void
 }
 
 export const OrganizationOnboardingContext = createContext<OrganizationOnboardingState | null>(null)
