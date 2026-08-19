@@ -146,7 +146,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       await expectNoLanguageSwitchControl(launched.page)
 
       await openSettingsFromUserMenu(launched.page)
-      await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '个人资料' })).toBeVisible()
       await launched.page
         .getByRole('navigation', { name: '设置' })
         .getByRole('button', {
@@ -170,7 +170,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       })
 
       await launched.page.getByRole('option', { name: 'English' }).click()
-      await expect(launched.page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Language' })).toBeVisible()
       await expect(
         launched.page.getByRole('combobox', { name: 'Interface language' })
       ).toContainText('English')
@@ -182,7 +182,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       ).toBeVisible()
 
       await openSettingsFromUserMenu(launched.page)
-      await expect(launched.page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Profile' })).toBeVisible()
       await launched.page
         .getByRole('navigation', { name: 'Settings' })
         .getByRole('button', {
@@ -191,7 +191,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
         .click()
       await launched.page.getByRole('combobox', { name: 'Interface language' }).click()
       await launched.page.getByRole('option', { name: 'Simplified Chinese' }).click()
-      await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '语言' })).toBeVisible()
       await expect(launched.page.getByRole('combobox', { name: '界面语言' })).toContainText(
         '简体中文'
       )

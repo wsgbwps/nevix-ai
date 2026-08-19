@@ -204,7 +204,6 @@ export function SettingsPage(): React.JSX.Element | null {
         </aside>
         <main className="max-h-svh flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-8 py-10">
-            <h1 className="text-2xl font-semibold tracking-tight">{t('settings.title')}</h1>
             {sectionRenderers[entry.section]()}
           </div>
         </main>

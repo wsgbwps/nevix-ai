@@ -62,8 +62,8 @@ test('signed-in users reach one focused Settings Section and return to its App s
 
       await openSettingsFromUserMenu(launched.page)
 
-      // 设置页是独立全屏界面：App Shell 的侧边栏不再出现。
-      await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
+      // 设置页是独立全屏界面：App Shell 的侧边栏不再出现；页面标题即当前 Section 的标题。
+      await expect(launched.page.getByRole('navigation', { name: '设置' })).toBeVisible()
       await expect(launched.page.getByRole('button', { name: '切换侧边栏' })).toHaveCount(0)
 
       // 左侧设置导航：顶部"返回应用"操作 + 账户组中的个人资料和语言。
@@ -705,7 +705,7 @@ test('the Settings Page Select switches the Interface Language without reloading
       await launched.page.getByRole('option', { name: 'English' }).click()
 
       // 设置页全部 Localized Surface 立即以新 Interface Language 呈现。
-      await expect(launched.page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Language' })).toBeVisible()
       await expect(launched.page.getByRole('button', { name: 'Back to app' })).toBeVisible()
       const settingsNav = launched.page.getByRole('navigation', { name: 'Settings' })
       await expect(settingsNav.getByText('Account')).toBeVisible()
@@ -767,7 +767,7 @@ test('dirty Profile uses one discard decision for Section changes and ordinary c
       await expect(discardDialog).toBeVisible()
       await discardDialog.getByRole('button', { name: '继续编辑' }).click()
       await expect(displayName).toHaveValue(draftName)
-      await expect(launched.page.getByRole('heading', { name: '设置' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '个人资料' })).toBeVisible()
 
       await launched.page
         .getByRole('navigation', { name: '设置' })
