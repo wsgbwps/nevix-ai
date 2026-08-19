@@ -4,6 +4,7 @@
 
 - [Desktop](./apps/desktop/CONTEXT.md) — Electron 桌面客户端，含主进程、预加载层和渲染进程
 - [Server](./server/CONTEXT.md) — Go 后端，API 服务与 Agent 编排
+- [仓库级术语](./CONTEXT.md) — 跨 context 的交付/CI 词汇（如 gate 强制）
 
 ## Relationships
 
