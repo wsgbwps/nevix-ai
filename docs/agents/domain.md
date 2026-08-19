@@ -1,40 +1,34 @@
 # Domain Docs
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
-
 ## Before exploring, read these
 
-- **`CONTEXT-MAP.md`** at the repo root — it points at one `CONTEXT.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`** — read ADRs that touch the area you're about to work in.
-- In multi-context work, also check `<context>/docs/adr/` for context-scoped decisions, such as `apps/desktop/docs/adr/` and `server/docs/adr/`.
+- `CONTEXT-MAP.md` at the repository root, then each relevant context's `CONTEXT.md`.
+- Relevant system-wide decisions in `docs/adr/`.
+- Relevant context-scoped ADRs, including `apps/desktop/docs/adr/` and `<context>/docs/adr/` when present.
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence or suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+If a document does not exist, proceed silently. Create or revise domain documentation only when terminology or an architectural decision is actually being resolved.
 
 ## File structure
 
-Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
+This is a multi-context repository:
 
 ```
 /
 ├── CONTEXT-MAP.md
-├── docs/adr/                          ← system-wide decisions
-├── apps/
-│   └── desktop/
-│       ├── CONTEXT.md
-│       └── docs/adr/                  ← desktop-specific decisions
+├── docs/adr/                  ← system-wide decisions
+├── apps/desktop/
+│   ├── CONTEXT.md
+│   └── docs/adr/              ← desktop-specific decisions
 └── server/
-    ├── CONTEXT.md
-    └── docs/adr/                      ← server-specific decisions
+    └── CONTEXT.md
 ```
 
 ## Use the glossary's vocabulary
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, or a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
+Use terms defined in the relevant `CONTEXT.md` for issue titles, proposals, hypotheses, and test names. Do not substitute a glossary term with an avoided synonym.
 
-If the concept you need isn't in the glossary yet, either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
+If a needed concept is absent, reconsider whether existing terminology applies; otherwise record the gap for `/domain-modeling`.
 
 ## Flag ADR conflicts
 
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
-
-> _Contradicts ADR-0004 (Supabase–Go trusted execution seam) — but worth reopening because…_
+Explicitly surface a conflict with an existing ADR rather than silently overriding it.

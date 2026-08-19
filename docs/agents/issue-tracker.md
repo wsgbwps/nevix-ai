@@ -1,38 +1,38 @@
-# Issue tracker: Local Markdown
+# Issue tracker: GitHub
 
-Issues and specs for this repo live as markdown files in `.scratch/`.
+GitHub Issues are the canonical tracker for this repository. Use the `gh` CLI for all tracker operations.
+
+Supporting plans and analysis may remain under `.scratch/<feature-slug>/` when required by repository policy, but they are not tracker records; link them to the relevant GitHub issue.
 
 ## Conventions
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The spec is `.scratch/<feature-slug>/spec.md`
-- Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` — never a single combined tickets file
-- Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
-- Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
+- **Read an issue**: `gh issue view <number> --comments`, also fetching labels when needed.
+- **List issues**: `gh issue list --state open --json number,title,body,labels,comments` with appropriate `--label` and `--state` filters.
+- **Comment on an issue**: `gh issue comment <number> --body "..."`
+- **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
+- **Close**: `gh issue close <number> --comment "..."`
+
+Infer the repository from `git remote -v`; `gh` does this automatically inside this clone.
+
+## Pull requests as a triage surface
+
+**PRs as a request surface: no.**
 
 ## When a skill says "publish to the issue tracker"
 
-Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).
+Create a GitHub issue.
 
 ## When a skill says "fetch the relevant ticket"
 
-Read the file at the referenced path. The user will normally pass the path or the issue number directly.
-
-## Branch wrap-up checklist
-
-When implementation on a branch is complete, close it out in this order. Remote operations (push, PR, merge) are external writes and require explicit user authorization; this checklist only fixes the steps.
-
-1. **Resolve the candidate ticket** — set `Status: resolved` and append the acceptance conclusion before freezing the candidate.
-2. **Commit the accepted candidate** — keep the task history linear and the working tree clean. Do not add a post-merge ticket commit.
-3. **Open, watch, and merge the PR** — follow [Delivery](delivery.md): push the branch, `gh pr create --fill --base main`, wait for the `CI gate` (`gh pr checks --watch --fail-fast`), then `gh pr merge --squash --delete-branch`.
+Run `gh issue view <number> --comments`.
 
 ## Wayfinding operations
 
-Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
+Used by `/wayfinder`. The map is one GitHub issue with child issues as tickets.
 
-- **Map**: `.scratch/<effort>/map.md` — the Notes / Decisions-so-far / Fog body.
-- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:` line records the ticket type (`research`/`prototype`/`grilling`/`task`); a `Status:` line records `claimed`/`resolved`.
-- **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked when every file it lists is `resolved`.
-- **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
-- **Claim**: set `Status: claimed` and save before any work.
-- **Resolve**: append the answer under an `## Answer` heading, set `Status: resolved`, then append a context pointer (gist + link) to the map's Decisions-so-far in `map.md`.
+- **Map**: create one issue labelled `wayfinder:map`.
+- **Child ticket**: link it as a GitHub sub-issue; where unavailable, use a task list and `Part of #<map>` in the child. Apply `wayfinder:<type>` labels.
+- **Blocking**: use GitHub native issue dependencies; where unavailable, use a `Blocked by: #<n>` line.
+- **Claim**: `gh issue edit <n> --add-assignee @me`.
+- **Resolve**: comment with the answer, close the issue, then add the context pointer to the map.

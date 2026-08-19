@@ -28,6 +28,14 @@
 
 ## Agent skills
 
-- **Issue tracker** — tickets are local markdown under `.scratch/<feature-slug>/`; read `docs/agents/issue-tracker.md` when publishing or fetching tickets, or wrapping up a branch
-- **Triage labels** — read `docs/agents/triage-labels.md` before writing a ticket `Status:` line
-- **Domain docs** — read `docs/agents/domain.md` before exploring a Domain or naming domain concepts; it routes to `CONTEXT-MAP.md`, per-context `CONTEXT.md`, and ADRs
+### Issue tracker
+
+Issues are tracked in this repository's GitHub Issues through `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default GitHub triage-label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a multi-context repository; start with `CONTEXT-MAP.md`. See `docs/agents/domain.md`.
