@@ -159,7 +159,7 @@ export function AppShell({
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
+                    <DropdownMenuItem asChild className="cursor-pointer">
                       <Link
                         to="/settings"
                         state={(state) => ({
@@ -175,6 +175,7 @@ export function AppShell({
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem
+                      className="cursor-pointer"
                       disabled={authentication.isSubmitting}
                       onClick={() => void authentication.signOut()}
                     >
