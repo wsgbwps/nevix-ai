@@ -42,4 +42,14 @@ _Avoid_: 权限角色（不指明观察方式）, effective role
 
 **Write Transaction Module (写事务模块)**:
 Identity Domain 内全部 Identity-owned 写事务的唯一生产入口（`internal/identity/writetx`）。它独占事务开始、执行身份验证、commit 与 rollback：回调 nil 提交、错误回滚、回调完成前观察到的取消阻止提交、panic 尽力回滚并保留、从不自动重放回调。Organization、Membership、Invitation、Verification 签发与 Outbox Worker 写路径一律经由它；命令层与 Worker 组件持有 runner 而非数据库连接池，新增 Identity 写路径不得自建事务约定。它是 Domain 内的责任命名子包，不是 Server 共享数据库层。
-_Avoid_: transaction framework, Unit of Work, 共享数据库执行层
+_Avoid_: transaction framework, Unit of Work, 共享数据库执行层。
+
+**测试边界（Test Boundary）**: 测试所观察的责任边界；按被测代码是通过 owning package 的内部 seam，还是通过 Module 的公开 contract 来划分，不按是否使用真实数据库划分。
+
+**Module 契约测试（Module Contract Test）**: 只通过 Module 的公开 contract（`LoadConfig`、`NewModule`、`Register`、`RunWorkers`）观察真实协作行为的测试；不依赖业务子包的未导出实现。
+
+**包内真库测试（Package-Local Real-Database Test）**: 在 owning package 内直接验证 SQL、query plan、事务或其他内部 seam 的测试；使用真实数据库不会改变其 package-local 归属。
+
+**测试资源（Test Resource）**: 测试所依赖的 fake、真实 PostgreSQL、认证服务、Mailpit 等外部协作者；资源类型决定运行环境和测试命令，不决定测试的 canonical owner。
+
+**测试支持代码（Test Support Code）**: 仅为测试组装环境或访问测试替身服务的代码，不属于生产业务 contract；只有在存在第二个真实 Module consumer 时，才考虑提升为跨 Module 的共享测试包。
