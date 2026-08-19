@@ -11,7 +11,11 @@ export const appTranslations = defineResourceTranslations({
       toggleSidebar: '切换侧边栏',
       organizationSwitcher: '组织切换器',
       userMenu: '用户菜单',
-      settings: '设置'
+      settings: '设置',
+      theme: {
+        light: '浅色模式',
+        dark: '深色模式'
+      }
     },
     settings: {
       title: '设置',
@@ -34,7 +38,11 @@ export const appTranslations = defineResourceTranslations({
       toggleSidebar: 'Toggle sidebar',
       organizationSwitcher: 'Organization switcher',
       userMenu: 'User menu',
-      settings: 'Settings'
+      settings: 'Settings',
+      theme: {
+        light: 'Light mode',
+        dark: 'Dark mode'
+      }
     },
     settings: {
       title: 'Settings',
