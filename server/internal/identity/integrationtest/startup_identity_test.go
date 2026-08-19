@@ -55,7 +55,7 @@ func TestIdentityModuleConstructionRejectsOwnerCredential(t *testing.T) {
 	// its rejection proves the direct-login requirement rather than a
 	// missing membership.
 	var ownerCanAssume bool
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT pg_has_role(session_user, 'identity_app', 'MEMBER')`,
 	).Scan(&ownerCanAssume); err != nil {
 		t.Fatalf("read owner role membership: %v", err)
@@ -64,7 +64,7 @@ func TestIdentityModuleConstructionRejectsOwnerCredential(t *testing.T) {
 		t.Fatal("owner cannot assume identity_app; the rejection evidence is meaningless")
 	}
 
-	_, err := constructModule(t, ctx, h.pool, h.cfg)
+	_, err := constructModule(t, ctx, h.fixturePool, h.cfg)
 	if !errors.Is(err, identity.ErrUnexpectedDatabaseIdentity) {
 		t.Fatalf("owner credential accepted or wrong error: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestIdentityAppRoleAttributes(t *testing.T) {
 	h := newHarness(t, ctx)
 
 	var canLogin, super, bypassRLS, createRole, createDB, replication bool
-	err := h.pool.QueryRow(ctx, `SELECT
+	err := h.fixturePool.QueryRow(ctx, `SELECT
 		   rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication
 		 FROM pg_roles WHERE rolname = 'identity_app'`,
 	).Scan(&canLogin, &super, &bypassRLS, &createRole, &createDB, &replication)

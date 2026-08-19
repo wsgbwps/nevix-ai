@@ -12,72 +12,15 @@ package integrationtest
 import (
 	"context"
 	"fmt"
-	"os"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/nevix-ai/server/internal/identity"
-	"github.com/nevix-ai/server/internal/identity/mailpittest"
 )
-
-// harness wires one test to the running local stack, or skips. pool is the
-// owner credential: it applies fixtures and makes authoritative assertions, and
-// is never handed to the identity Module. runtime is the pool that
-// authenticates directly as identity_app — the production runtime credential —
-// and is the only pool Module construction sees.
-type harness struct {
-	pool       *pgxpool.Pool
-	runtime    *pgxpool.Pool
-	mailpit    *mailpittest.Client
-	mailpitURL string
-	cfg        identity.Config
-}
-
-func newHarness(t *testing.T, ctx context.Context) *harness {
-	t.Helper()
-	databaseURL := requireEnv(t, "NEVIX_DATABASE_URL")
-	runtimeDatabaseURL := requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL")
-	mailpitURL := requireEnv(t, "NEVIX_MAILPIT_URL")
-	for _, key := range []string{
-		"NEVIX_SMTP_HOST", "NEVIX_SMTP_PORT", "NEVIX_SMTP_USER", "NEVIX_SMTP_PASSWORD",
-		"NEVIX_VERIFICATION_CODE_HASH_KEY", "NEVIX_SMTP_FROM",
-		"NEVIX_AUTH_JWKS_URL", "NEVIX_CORS_ALLOWED_ORIGINS",
-	} {
-		requireEnv(t, key)
-	}
-	// The harness assembles the Module through the same seam as the
-	// composition root: LoadConfig + NewModule + Register/RunWorkers.
-	cfg, err := identity.LoadConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
-	if err != nil {
-		t.Fatalf("load identity module config from NEVIX_-prefixed environment: %v", err)
-	}
-	pool, err := pgxpool.New(ctx, databaseURL)
-	if err != nil {
-		t.Fatalf("connect owner fixture database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	runtime, err := pgxpool.New(ctx, runtimeDatabaseURL)
-	if err != nil {
-		t.Fatalf("connect identity_app runtime database: %v", err)
-	}
-	t.Cleanup(runtime.Close)
-	return &harness{
-		pool:       pool,
-		runtime:    runtime,
-		mailpit:    mailpittest.NewClient(mailpitURL),
-		mailpitURL: mailpitURL,
-		cfg:        cfg,
-	}
-}
 
 // insertOutboxRowCommitted writes one Outbox row inside its own database
 // transaction and commits — the transactional write seam.
 func (h *harness) insertOutboxRowCommitted(t *testing.T, ctx context.Context, recipient string) {
 	t.Helper()
-	tx, err := h.pool.Begin(ctx)
+	tx, err := h.fixturePool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin transaction: %v", err)
 	}
@@ -92,36 +35,6 @@ func (h *harness) insertOutboxRowCommitted(t *testing.T, ctx context.Context, re
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit outbox row: %v", err)
 	}
-}
-
-// startWorker runs one Module's background workers for the duration of the
-// test and returns a stop function that cancels them and asserts they exit
-// gracefully.
-func (h *harness) startWorker(t *testing.T) (stop func()) {
-	t.Helper()
-	m, err := identity.NewModule(context.Background(), h.runtime, h.cfg)
-	if err != nil {
-		t.Fatalf("construct identity module: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- m.RunWorkers(ctx) }()
-	var once sync.Once
-	stop = func() {
-		once.Do(func() {
-			cancel()
-			select {
-			case err := <-done:
-				if err != nil {
-					t.Errorf("worker did not shut down cleanly: %v", err)
-				}
-			case <-time.After(10 * time.Second):
-				t.Errorf("worker did not stop within 10s of context cancellation")
-			}
-		})
-	}
-	t.Cleanup(stop)
-	return stop
 }
 
 func TestCommittedOutboxRowIsDeliveredToMailpit(t *testing.T) {
@@ -149,7 +62,7 @@ func TestCommittedOutboxRowIsDeliveredToMailpit(t *testing.T) {
 	stop()
 
 	var status string
-	err = h.pool.QueryRow(ctx,
+	err = h.fixturePool.QueryRow(ctx,
 		`SELECT status FROM identity.outbox_messages WHERE recipient = $1`, recipient,
 	).Scan(&status)
 	if err != nil {
@@ -194,7 +107,7 @@ func TestConcurrentPollersDoNotDuplicateDelivery(t *testing.T) {
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var pending int
-		if err := h.pool.QueryRow(ctx,
+		if err := h.fixturePool.QueryRow(ctx,
 			`SELECT count(*) FROM identity.outbox_messages
 			 WHERE recipient LIKE $1 AND status <> 'delivered'`,
 			fmt.Sprintf("concurrent-%d-%%@nevix.test", runID),

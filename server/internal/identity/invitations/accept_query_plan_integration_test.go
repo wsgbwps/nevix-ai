@@ -34,10 +34,7 @@ func (p historicalCodeExplainPlan) usesIndex(name string) bool {
 }
 
 func TestHistoricalInvitationCodeLookupUsesPartialIndex(t *testing.T) {
-	databaseURL := os.Getenv("NEVIX_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("skipping query-plan test: NEVIX_DATABASE_URL is not set (run scripts/test-mail-smoke.sh)")
-	}
+	databaseURL := requireDatabaseURL(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -78,4 +75,20 @@ func TestHistoricalInvitationCodeLookupUsesPartialIndex(t *testing.T) {
 	if len(document) != 1 || !document[0].Plan.usesIndex(historicalInvitationCodeIndex) {
 		t.Errorf("historical invitation-code lookup does not use %s: %s", historicalInvitationCodeIndex, rawPlan)
 	}
+}
+
+// requireDatabaseURL returns the owner-credential database URL this
+// package-local real-database test needs, with the suite's shared opt-in
+// semantics: plain `go test ./...` skips without the harness, while
+// NEVIX_IDENTITY_INTEGRATION_REQUESTED=1 makes a missing value fatal.
+func requireDatabaseURL(t *testing.T) string {
+	t.Helper()
+	databaseURL := os.Getenv("NEVIX_DATABASE_URL")
+	if databaseURL == "" {
+		if os.Getenv("NEVIX_IDENTITY_INTEGRATION_REQUESTED") == "1" {
+			t.Fatalf("identity integration was requested, but NEVIX_DATABASE_URL is not set; run ./scripts/test-identity-integration.sh from the repository root to start the supported harness")
+		}
+		t.Skip("identity integration was not requested: NEVIX_DATABASE_URL is not set (run ./scripts/test-identity-integration.sh)")
+	}
+	return databaseURL
 }

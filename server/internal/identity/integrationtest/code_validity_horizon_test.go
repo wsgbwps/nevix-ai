@@ -28,7 +28,7 @@ import (
 // a resend's old and new rows can be told apart.
 func (h *harness) outboxCodeRows(t *testing.T, ctx context.Context, recipient string) []outboxRowState {
 	t.Helper()
-	rows, err := h.pool.Query(ctx,
+	rows, err := h.fixturePool.Query(ctx,
 		`SELECT status, attempts FROM identity.outbox_messages
 		 WHERE recipient = $1 ORDER BY created_at`, recipient)
 	if err != nil {
@@ -71,7 +71,7 @@ func (h *harness) waitForOutboxCodeRows(t *testing.T, ctx context.Context, recip
 func (h *harness) activeCodeHash(t *testing.T, ctx context.Context, email string) string {
 	t.Helper()
 	var hash string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT code_hash FROM identity.verification_codes WHERE email = $1 AND status = 'active'`, email,
 	).Scan(&hash); err != nil {
 		t.Fatalf("read active code row: %v", err)
@@ -102,7 +102,7 @@ func TestSupersededCodeEmailStopsRetrying(t *testing.T) {
 
 	// Age the first issuance beyond the resend cooldown through the write
 	// seam, then resend: the new code supersedes the old one.
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`UPDATE identity.verification_codes
 		 SET created_at = now() - make_interval(secs => 61)
 		 WHERE email = $1`, email,
@@ -166,7 +166,7 @@ func TestExpiredCodeEmailGoesTerminal(t *testing.T) {
 	h.waitForOutboxCodeRows(t, ctx, email, func(rows []outboxRowState) bool {
 		return len(rows) == 1 && rows[0].status == "pending" && rows[0].attempts >= 1
 	})
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`UPDATE identity.verification_codes SET expires_at = now() + make_interval(secs => 2.5) WHERE email = $1`, email,
 	); err != nil {
 		t.Fatalf("shorten code validity: %v", err)

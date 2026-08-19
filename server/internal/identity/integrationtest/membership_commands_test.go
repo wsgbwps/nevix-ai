@@ -46,7 +46,7 @@ func TestLeaveOrganizationEndsMembershipWithoutEmail(t *testing.T) {
 
 	var role, membershipStatus, actorID, action string
 	var targetIsNull bool
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT m.role, m.status, a.actor_user_id, a.action, a.target_user_id IS NULL
 		 FROM public.memberships AS m
 		 JOIN public.audit_logs AS a ON a.organization_id = m.organization_id AND a.actor_user_id = m.user_id AND a.action = 'membership_left'
@@ -60,7 +60,7 @@ func TestLeaveOrganizationEndsMembershipWithoutEmail(t *testing.T) {
 	}
 
 	var outboxRows int
-	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, member.Email).Scan(&outboxRows); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, member.Email).Scan(&outboxRows); err != nil {
 		t.Fatalf("count leave outbox rows: %v", err)
 	}
 	if outboxRows != 0 {
@@ -73,7 +73,7 @@ func TestLeaveOrganizationEndsMembershipWithoutEmail(t *testing.T) {
 		t.Fatalf("admin leave organization: status %d body %s, want 200", status, body)
 	}
 	assertContractResponse(t, http.MethodPost, path, status, body)
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT m.role, m.status, a.actor_user_id, a.action, a.target_user_id IS NULL
 		 FROM public.memberships AS m
 		 JOIN public.audit_logs AS a ON a.organization_id = m.organization_id AND a.actor_user_id = m.user_id AND a.action = 'membership_left'
@@ -85,7 +85,7 @@ func TestLeaveOrganizationEndsMembershipWithoutEmail(t *testing.T) {
 	if role != "admin" || membershipStatus != "ended" || actorID != admin.ID || action != "membership_left" || !targetIsNull {
 		t.Fatalf("admin leave state = role:%q status:%q actor:%q action:%q targetIsNull:%t, want ended Admin + self membership_left audit", role, membershipStatus, actorID, action, targetIsNull)
 	}
-	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, admin.Email).Scan(&outboxRows); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, admin.Email).Scan(&outboxRows); err != nil {
 		t.Fatalf("count admin leave outbox rows: %v", err)
 	}
 	if outboxRows != 0 {
@@ -113,7 +113,7 @@ func TestRemoveMemberEndsAccessAndQueuesOnlyMemberNotification(t *testing.T) {
 		},
 	)
 	var membershipID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.memberships WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`, orgID, member.ID,
 	).Scan(&membershipID); err != nil {
 		t.Fatalf("read removable membership: %v", err)
@@ -130,7 +130,7 @@ func TestRemoveMemberEndsAccessAndQueuesOnlyMemberNotification(t *testing.T) {
 	assertContractResponse(t, http.MethodPost, path, status, body)
 
 	var membershipStatus, actorName, targetName, action string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT m.status, a.actor_display_name, a.target_display_name, a.action
 		 FROM public.memberships AS m
 		 JOIN public.audit_logs AS a ON a.organization_id = m.organization_id
@@ -145,7 +145,7 @@ func TestRemoveMemberEndsAccessAndQueuesOnlyMemberNotification(t *testing.T) {
 
 	var recipient, subject, message string
 	var carriesCode bool
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT recipient, subject, body, verification_code_id IS NOT NULL
 		 FROM identity.outbox_messages
 		 WHERE recipient = $1`, member.Email,
@@ -161,7 +161,7 @@ func TestRemoveMemberEndsAccessAndQueuesOnlyMemberNotification(t *testing.T) {
 		}
 	}
 	var ownerRows int
-	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, owner.Email).Scan(&ownerRows); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, owner.Email).Scan(&ownerRows); err != nil {
 		t.Fatalf("count owner removal outbox rows: %v", err)
 	}
 	if ownerRows != 0 {
@@ -196,7 +196,7 @@ func TestAdminCanRemoveOrdinaryMember(t *testing.T) {
 		},
 	)
 	var membershipID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.memberships WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`, orgID, member.ID,
 	).Scan(&membershipID); err != nil {
 		t.Fatalf("read admin-removable membership: %v", err)
@@ -213,7 +213,7 @@ func TestAdminCanRemoveOrdinaryMember(t *testing.T) {
 	assertContractResponse(t, http.MethodPost, path, status, body)
 
 	var membershipStatus, actorName, action string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT m.status, a.actor_display_name, a.action
 		 FROM public.memberships AS m
 		 JOIN public.audit_logs AS a ON a.organization_id = m.organization_id AND a.target_user_id = m.user_id
@@ -226,10 +226,10 @@ func TestAdminCanRemoveOrdinaryMember(t *testing.T) {
 	}
 
 	var ownerRows, memberRows int
-	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, owner.Email).Scan(&ownerRows); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, owner.Email).Scan(&ownerRows); err != nil {
 		t.Fatalf("count owner admin-removal notifications: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, member.Email).Scan(&memberRows); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, member.Email).Scan(&memberRows); err != nil {
 		t.Fatalf("count member admin-removal notifications: %v", err)
 	}
 	if ownerRows != 0 || memberRows != 1 {
@@ -260,12 +260,12 @@ func TestChangeMemberRolePreservesOwnerAndQueuesAdminNotifications(t *testing.T)
 		},
 	)
 	var memberID, adminID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.memberships WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`, orgID, member.ID,
 	).Scan(&memberID); err != nil {
 		t.Fatalf("read promotable membership: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.memberships WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`, orgID, admin.ID,
 	).Scan(&adminID); err != nil {
 		t.Fatalf("read removable admin membership: %v", err)
@@ -315,7 +315,7 @@ func TestChangeMemberRolePreservesOwnerAndQueuesAdminNotifications(t *testing.T)
 	)
 
 	var activeOwners, ownerNotificationRows int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.memberships WHERE organization_id = $1 AND role = 'owner' AND status = 'active'`, orgID,
 	).Scan(&activeOwners); err != nil {
 		t.Fatalf("count active owners: %v", err)
@@ -323,7 +323,7 @@ func TestChangeMemberRolePreservesOwnerAndQueuesAdminNotifications(t *testing.T)
 	if activeOwners != 1 {
 		t.Fatalf("active owner count = %d, want exactly one", activeOwners)
 	}
-	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, owner.Email).Scan(&ownerNotificationRows); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, owner.Email).Scan(&ownerNotificationRows); err != nil {
 		t.Fatalf("count owner Admin lifecycle notifications: %v", err)
 	}
 	if ownerNotificationRows != 3 {
@@ -334,7 +334,7 @@ func TestChangeMemberRolePreservesOwnerAndQueuesAdminNotifications(t *testing.T)
 func assertRoleChangeState(t *testing.T, ctx context.Context, h *harness, membershipID, wantRole, wantStatus, wantAction, wantActor, wantTarget string) {
 	t.Helper()
 	var role, membershipStatus, action, actorName, targetName string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT m.role, m.status, a.action, a.actor_display_name, a.target_display_name
 		 FROM public.memberships AS m
 		 JOIN public.audit_logs AS a ON a.organization_id = m.organization_id AND a.target_user_id = m.user_id
@@ -359,7 +359,7 @@ func assertAdminNotification(t *testing.T, ctx context.Context, h *harness, affe
 	} {
 		var subject, body string
 		var carriesCode bool
-		if err := h.pool.QueryRow(ctx,
+		if err := h.fixturePool.QueryRow(ctx,
 			`SELECT subject, body, verification_code_id IS NOT NULL
 			 FROM identity.outbox_messages
 			 WHERE recipient = $1
@@ -394,7 +394,7 @@ func assertAdminNotification(t *testing.T, ctx context.Context, h *harness, affe
 		}
 	}
 	var affectedRows int
-	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, affectedEmail).Scan(&affectedRows); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, affectedEmail).Scan(&affectedRows); err != nil {
 		t.Fatalf("count notifications for %s: %v", affectedEmail, err)
 	}
 	if affectedRows != wantAffectedRows {
@@ -423,12 +423,12 @@ func TestMembershipCommandsEnforceAuthorizationAndStateBoundaries(t *testing.T) 
 		},
 	)
 	var adminID, memberID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.memberships WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`, orgID, admin.ID,
 	).Scan(&adminID); err != nil {
 		t.Fatalf("read command-boundary admin: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.memberships WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`, orgID, member.ID,
 	).Scan(&memberID); err != nil {
 		t.Fatalf("read command-boundary member: %v", err)
@@ -476,20 +476,20 @@ func TestMembershipCommandsEnforceAuthorizationAndStateBoundaries(t *testing.T) 
 	}
 
 	var activeOwners, activeMembers, auditRows, outboxRows int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.memberships WHERE organization_id = $1 AND role = 'owner' AND status = 'active'`, orgID,
 	).Scan(&activeOwners); err != nil {
 		t.Fatalf("count command-boundary owners: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.memberships WHERE organization_id = $1 AND status = 'active'`, orgID,
 	).Scan(&activeMembers); err != nil {
 		t.Fatalf("count command-boundary memberships: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM public.audit_logs WHERE organization_id = $1`, orgID).Scan(&auditRows); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT count(*) FROM public.audit_logs WHERE organization_id = $1`, orgID).Scan(&auditRows); err != nil {
 		t.Fatalf("count command-boundary audits: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM identity.outbox_messages WHERE recipient IN ($1, $2, $3, $4)`,
 		owner.Email, admin.Email, member.Email, outsider.Email,
 	).Scan(&outboxRows); err != nil {
@@ -607,12 +607,12 @@ func TestUpdateOrganizationSettingsOwnerOnlyAuthorization(t *testing.T) {
 	assertSettingsState(t, ctx, h, orgID, "Settings by Owner", "Settings Owner")
 
 	var auditRows, outboxRows int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.audit_logs WHERE organization_id = $1 AND action = 'organization_settings_updated'`, orgID,
 	).Scan(&auditRows); err != nil {
 		t.Fatalf("count settings audit rows: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM identity.outbox_messages WHERE recipient IN ($1, $2, $3, $4, $5)`,
 		owner.Email, admin.Email, member.Email, formerMember.Email, outsider.Email,
 	).Scan(&outboxRows); err != nil {
@@ -630,7 +630,7 @@ func assertSettingsState(t *testing.T, ctx context.Context, h *harness, organiza
 	t.Helper()
 	var name, action, actorName string
 	var targetIsNull bool
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT o.name, a.action, a.actor_display_name, a.target_user_id IS NULL
 		 FROM public.organizations AS o
 		 JOIN public.audit_logs AS a ON a.organization_id = o.id

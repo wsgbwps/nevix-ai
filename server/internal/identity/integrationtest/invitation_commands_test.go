@@ -63,7 +63,7 @@ func assertCommandError(t *testing.T, body []byte, want string) {
 
 func seedProfile(t *testing.T, ctx context.Context, h *harness, userID, displayName string) {
 	t.Helper()
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`INSERT INTO public.profiles (user_id, display_name) VALUES ($1, $2)`, userID, displayName,
 	); err != nil {
 		t.Fatalf("seed profile %s: %v", userID, err)
@@ -72,7 +72,7 @@ func seedProfile(t *testing.T, ctx context.Context, h *harness, userID, displayN
 
 func ageActiveInvitationCodeBeyondCooldown(t *testing.T, ctx context.Context, h *harness, invitationID string) {
 	t.Helper()
-	result, err := h.pool.Exec(ctx,
+	result, err := h.fixturePool.Exec(ctx,
 		`UPDATE identity.verification_codes
 		 SET created_at = clock_timestamp() - interval '2 minutes'
 		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
@@ -132,7 +132,7 @@ func TestCreateInvitationEnforcesSharedCodeCooldownAndEmailLimit(t *testing.T) {
 
 	for _, email := range []string{cooldownEmail, hourlyEmail} {
 		var invitations, outboxRows, audits int
-		if err := h.pool.QueryRow(ctx,
+		if err := h.fixturePool.QueryRow(ctx,
 			`SELECT
 				(SELECT count(*) FROM public.invitations WHERE organization_id = $1 AND email = $2),
 				(SELECT count(*) FROM identity.outbox_messages WHERE recipient = $2),
@@ -172,7 +172,7 @@ func TestResendInvitationEnforcesCooldownAndIPLimitWithoutMutation(t *testing.T)
 
 	var invitationID, codeID string
 	var originalExpiresAt time.Time
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.id, i.expires_at, c.id
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -193,7 +193,7 @@ func TestResendInvitationEnforcesCooldownAndIPLimitWithoutMutation(t *testing.T)
 		t.Fatalf("resend invitation Retry-After %q, want 1..60 seconds", headers.Get("Retry-After"))
 	}
 
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`UPDATE identity.verification_codes SET created_at = now() - interval '2 minutes' WHERE id = $1`, codeID,
 	); err != nil {
 		t.Fatalf("age invitation code beyond cooldown: %v", err)
@@ -215,7 +215,7 @@ func TestResendInvitationEnforcesCooldownAndIPLimitWithoutMutation(t *testing.T)
 	var currentExpiresAt time.Time
 	var codeStatus, outboxStatus string
 	var codeRows, outboxRows, auditRows int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.expires_at, c.status, o.status,
 			(SELECT count(*) FROM identity.verification_codes WHERE target_id = i.id AND action_type = 'invitation'),
 			(SELECT count(*) FROM identity.outbox_messages WHERE recipient = i.email),
@@ -304,7 +304,7 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 		action           string
 		metadataEmail    string
 	)
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id, status, organization_name, inviter_display_name
 		 FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
 	).Scan(&invitationID, &invitationStatus, &organizationName, &inviterName); err != nil {
@@ -316,7 +316,7 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 	if organizationName != "Invitation Org" || inviterName != "Owner Snapshot" {
 		t.Fatalf("invitation display snapshots = (%q, %q), want (Invitation Org, Owner Snapshot)", organizationName, inviterName)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT code_hash, action_type, target_id FROM identity.verification_codes WHERE target_id = $1`, invitationID,
 	).Scan(&codeHash, &actionType, &targetID); err != nil {
 		t.Fatalf("read invitation verification code: %v", err)
@@ -324,7 +324,7 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 	if codeHash != h.codeHash(code) || actionType != "invitation" || targetID != invitationID {
 		t.Fatalf("invitation code row = (hash=%q action=%q target=%q), want mailed hash, invitation, %q", codeHash, actionType, targetID, invitationID)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT verification_code_id FROM identity.outbox_messages WHERE recipient = $1 ORDER BY created_at DESC LIMIT 1`, invitee.Email,
 	).Scan(&outboxCodeID); err != nil {
 		t.Fatalf("read invitation outbox row: %v", err)
@@ -332,7 +332,7 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 	if outboxCodeID == "" {
 		t.Fatal("invitation outbox row has no verification_code_id retry horizon")
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_user_id, actor_display_name, action, metadata->>'email'
 		 FROM public.audit_logs WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1`, orgID,
 	).Scan(&actorID, &actorName, &action, &metadataEmail); err != nil {
@@ -342,10 +342,10 @@ func TestCreateInvitationQueuesBilingualCodeEmailAndAuditSnapshot(t *testing.T) 
 		t.Fatalf("invitation audit row = (%q, %q, %q, %q), want owner snapshot + invitation_created", actorID, actorName, action, metadataEmail)
 	}
 
-	if _, err := h.pool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Owner Changed' WHERE user_id = $1`, owner.ID); err != nil {
+	if _, err := h.fixturePool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Owner Changed' WHERE user_id = $1`, owner.ID); err != nil {
 		t.Fatalf("change owner profile after audit: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_display_name FROM public.audit_logs WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1`, orgID,
 	).Scan(&actorName); err != nil {
 		t.Fatalf("re-read invitation audit row: %v", err)
@@ -379,7 +379,7 @@ func TestInvitationCommandsSnapshotDirectoryEmailWithoutProfiles(t *testing.T) {
 	assertContractResponse(t, http.MethodPost, createPath, status, body)
 
 	var invitationID, invitationBody string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.id, o.body
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -397,13 +397,13 @@ func TestInvitationCommandsSnapshotDirectoryEmailWithoutProfiles(t *testing.T) {
 	assertContractResponse(t, http.MethodPost, acceptPath, status, body)
 
 	var createdActorName, acceptedActorName, acceptedTargetName string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_display_name FROM public.audit_logs
 		 WHERE organization_id = $1 AND action = 'invitation_created'`, orgID,
 	).Scan(&createdActorName); err != nil {
 		t.Fatalf("read profileless creation audit: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_display_name, target_display_name FROM public.audit_logs
 		 WHERE organization_id = $1 AND action = 'invitation_accepted'`, orgID,
 	).Scan(&acceptedActorName, &acceptedTargetName); err != nil {
@@ -456,7 +456,7 @@ func TestCreateInvitationRejectsActiveMemberEmailAndAllowsEndedMember(t *testing
 	}
 	assertContractResponse(t, http.MethodPost, path, status, body)
 	var pending int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.invitations WHERE organization_id = $1 AND email = $2 AND status = 'pending'`,
 		orgID, ended.Email,
 	).Scan(&pending); err != nil {
@@ -491,7 +491,7 @@ func TestRevokeInvitationCancelsUndeliveredCode(t *testing.T) {
 		t.Fatalf("create invitation for revoke: status %d body %s, want 202", status, body)
 	}
 	var invitationID, codeID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.id, c.id
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -508,16 +508,16 @@ func TestRevokeInvitationCancelsUndeliveredCode(t *testing.T) {
 	assertContractResponse(t, http.MethodPost, revokePath, status, body)
 
 	var invitationStatus, codeStatus, outboxStatus, auditActorID, auditActorName, auditAction, auditInvitationID, auditEmail string
-	if err := h.pool.QueryRow(ctx, `SELECT status FROM public.invitations WHERE id = $1`, invitationID).Scan(&invitationStatus); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT status FROM public.invitations WHERE id = $1`, invitationID).Scan(&invitationStatus); err != nil {
 		t.Fatalf("read revoked invitation: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx, `SELECT status FROM identity.verification_codes WHERE id = $1`, codeID).Scan(&codeStatus); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT status FROM identity.verification_codes WHERE id = $1`, codeID).Scan(&codeStatus); err != nil {
 		t.Fatalf("read revoked code: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx, `SELECT status FROM identity.outbox_messages WHERE verification_code_id = $1`, codeID).Scan(&outboxStatus); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT status FROM identity.outbox_messages WHERE verification_code_id = $1`, codeID).Scan(&outboxStatus); err != nil {
 		t.Fatalf("read revoked outbox row: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_user_id, actor_display_name, action, metadata->>'invitation_id', metadata->>'email'
 		 FROM public.audit_logs WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1`, orgID,
 	).Scan(&auditActorID, &auditActorName, &auditAction, &auditInvitationID, &auditEmail); err != nil {
@@ -526,10 +526,10 @@ func TestRevokeInvitationCancelsUndeliveredCode(t *testing.T) {
 	if invitationStatus != "revoked" || codeStatus != "superseded" || outboxStatus != "cancelled" || auditActorID != owner.ID || auditActorName != "Revoke Owner" || auditAction != "invitation_revoked" || auditInvitationID != invitationID || auditEmail != invitee.Email {
 		t.Fatalf("revocation state = invitation:%q code:%q outbox:%q audit:(%q,%q,%q,%q,%q), want revoked/superseded/cancelled and owner snapshot", invitationStatus, codeStatus, outboxStatus, auditActorID, auditActorName, auditAction, auditInvitationID, auditEmail)
 	}
-	if _, err := h.pool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Revoke Owner Changed' WHERE user_id = $1`, owner.ID); err != nil {
+	if _, err := h.fixturePool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Revoke Owner Changed' WHERE user_id = $1`, owner.ID); err != nil {
 		t.Fatalf("change revoke owner profile after audit: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_display_name FROM public.audit_logs WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1`, orgID,
 	).Scan(&auditActorName); err != nil {
 		t.Fatalf("re-read revocation audit row: %v", err)
@@ -543,7 +543,7 @@ func TestRevokeInvitationCancelsUndeliveredCode(t *testing.T) {
 	}
 	assertContractResponse(t, http.MethodPost, revokePath, status, body)
 	var revocationAudits int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.audit_logs WHERE organization_id = $1 AND action = 'invitation_revoked'`, orgID,
 	).Scan(&revocationAudits); err != nil {
 		t.Fatalf("count repeat-revocation audit rows: %v", err)
@@ -583,7 +583,7 @@ func TestResendInvitationRefreshesCodeAndCancelsPriorUndeliveredMail(t *testing.
 
 	var invitationID, originalCodeID, originalBody string
 	var originalExpiresAt time.Time
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.id, i.expires_at, c.id, o.body
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -603,21 +603,21 @@ func TestResendInvitationRefreshesCodeAndCancelsPriorUndeliveredMail(t *testing.
 	assertContractResponse(t, http.MethodPost, resendPath, status, body)
 
 	var refreshedExpiresAt time.Time
-	if err := h.pool.QueryRow(ctx, `SELECT expires_at FROM public.invitations WHERE id = $1`, invitationID).Scan(&refreshedExpiresAt); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT expires_at FROM public.invitations WHERE id = $1`, invitationID).Scan(&refreshedExpiresAt); err != nil {
 		t.Fatalf("read refreshed invitation deadline: %v", err)
 	}
 	if !refreshedExpiresAt.After(originalExpiresAt) {
 		t.Fatalf("resend expiration = %s, want later than original %s", refreshedExpiresAt, originalExpiresAt)
 	}
 	var originalCodeStatus, originalOutboxStatus string
-	if err := h.pool.QueryRow(ctx, `SELECT status FROM identity.verification_codes WHERE id = $1`, originalCodeID).Scan(&originalCodeStatus); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT status FROM identity.verification_codes WHERE id = $1`, originalCodeID).Scan(&originalCodeStatus); err != nil {
 		t.Fatalf("read superseded code: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx, `SELECT status FROM identity.outbox_messages WHERE verification_code_id = $1`, originalCodeID).Scan(&originalOutboxStatus); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT status FROM identity.outbox_messages WHERE verification_code_id = $1`, originalCodeID).Scan(&originalOutboxStatus); err != nil {
 		t.Fatalf("read cancelled old outbox row: %v", err)
 	}
 	var refreshedCodeID, refreshedCodeStatus, refreshedOutboxStatus string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT c.id, c.status, o.status
 		 FROM identity.verification_codes c
 		 JOIN identity.outbox_messages o ON o.verification_code_id = c.id
@@ -648,7 +648,7 @@ func TestResendInvitationRefreshesCodeAndCancelsPriorUndeliveredMail(t *testing.
 		t.Fatal("resend delivered the superseded invitation code")
 	}
 	var resendActorID, resendActorName, resendAction, resendInvitationID, resendEmail string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_user_id, actor_display_name, action, metadata->>'invitation_id', metadata->>'email'
 		 FROM public.audit_logs WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1`, orgID,
 	).Scan(&resendActorID, &resendActorName, &resendAction, &resendInvitationID, &resendEmail); err != nil {
@@ -657,10 +657,10 @@ func TestResendInvitationRefreshesCodeAndCancelsPriorUndeliveredMail(t *testing.
 	if resendActorID != owner.ID || resendActorName != "Resend Owner" || resendAction != "invitation_resent" || resendInvitationID != invitationID || resendEmail != invitee.Email {
 		t.Fatalf("resend audit = (%q,%q,%q,%q,%q), want owner snapshot + invitation_resent", resendActorID, resendActorName, resendAction, resendInvitationID, resendEmail)
 	}
-	if _, err := h.pool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Resend Owner Changed' WHERE user_id = $1`, owner.ID); err != nil {
+	if _, err := h.fixturePool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Resend Owner Changed' WHERE user_id = $1`, owner.ID); err != nil {
 		t.Fatalf("change resend owner profile after audit: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_display_name FROM public.audit_logs WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1`, orgID,
 	).Scan(&resendActorName); err != nil {
 		t.Fatalf("re-read resend audit row: %v", err)
@@ -699,7 +699,7 @@ func TestResendInvitationDoesNotRevalidateHistoricalCode(t *testing.T) {
 		t.Fatalf("create invitation for code history: status %d body %s, want 202", status, body)
 	}
 	var invitationID, initialBody string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.id, o.body
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -726,7 +726,7 @@ func TestResendInvitationDoesNotRevalidateHistoricalCode(t *testing.T) {
 		t.Fatalf("second resend for code history: status %d body %s, want 202", status, body)
 	}
 	var latestBody string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT o.body
 		 FROM identity.verification_codes c
 		 JOIN identity.outbox_messages o ON o.verification_code_id = c.id
@@ -741,7 +741,7 @@ func TestResendInvitationDoesNotRevalidateHistoricalCode(t *testing.T) {
 
 	acceptPath := "/identity/invitations/" + invitationID + "/accept"
 	var failedAttemptsBeforeHistorical, failedAttemptsAfterHistorical int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT failed_attempts FROM identity.verification_codes
 		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
 	).Scan(&failedAttemptsBeforeHistorical); err != nil {
@@ -756,7 +756,7 @@ func TestResendInvitationDoesNotRevalidateHistoricalCode(t *testing.T) {
 	if got := headers.Get("X-Invitation-Code-Attempts-Remaining"); got != "" {
 		t.Fatalf("historical code remaining-attempts header = %q, want absent", got)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT failed_attempts FROM identity.verification_codes
 		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
 	).Scan(&failedAttemptsAfterHistorical); err != nil {
@@ -797,7 +797,7 @@ func TestAcceptInvitationCreatesMemberAndConsumesCode(t *testing.T) {
 	}
 
 	var invitationID, codeID, pendingBody string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.id, c.id, o.body
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -820,20 +820,20 @@ func TestAcceptInvitationCreatesMemberAndConsumesCode(t *testing.T) {
 	}
 
 	var activeMemberships int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.memberships
 		 WHERE organization_id = $1 AND user_id = $2 AND role = 'member' AND status = 'active'`, orgID, invitee.ID,
 	).Scan(&activeMemberships); err != nil {
 		t.Fatalf("count accepted membership: %v", err)
 	}
 	var invitationStatus, codeStatus, actorID, actorName, targetID, targetName, action string
-	if err := h.pool.QueryRow(ctx, `SELECT status FROM public.invitations WHERE id = $1`, invitationID).Scan(&invitationStatus); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT status FROM public.invitations WHERE id = $1`, invitationID).Scan(&invitationStatus); err != nil {
 		t.Fatalf("read accepted invitation: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx, `SELECT status FROM identity.verification_codes WHERE id = $1`, codeID).Scan(&codeStatus); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT status FROM identity.verification_codes WHERE id = $1`, codeID).Scan(&codeStatus); err != nil {
 		t.Fatalf("read consumed invitation code: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_user_id, actor_display_name, target_user_id, target_display_name, action
 		 FROM public.audit_logs WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1`, orgID,
 	).Scan(&actorID, &actorName, &targetID, &targetName, &action); err != nil {
@@ -843,7 +843,7 @@ func TestAcceptInvitationCreatesMemberAndConsumesCode(t *testing.T) {
 		t.Fatalf("acceptance state = memberships:%d invitation:%q code:%q audit:(%q,%q,%q,%q,%q), want one active Member, accepted, consumed, and invitee snapshots", activeMemberships, invitationStatus, codeStatus, actorID, actorName, targetID, targetName, action)
 	}
 	var codelessOutboxMessages int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM identity.outbox_messages
 		 WHERE recipient = $1 AND verification_code_id IS NULL`, invitee.Email,
 	).Scan(&codelessOutboxMessages); err != nil {
@@ -852,10 +852,10 @@ func TestAcceptInvitationCreatesMemberAndConsumesCode(t *testing.T) {
 	if codelessOutboxMessages != 0 {
 		t.Fatalf("accepting an invitation queued %d codeless emails, want none", codelessOutboxMessages)
 	}
-	if _, err := h.pool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Accept Invitee Changed' WHERE user_id = $1`, invitee.ID); err != nil {
+	if _, err := h.fixturePool.Exec(ctx, `UPDATE public.profiles SET display_name = 'Accept Invitee Changed' WHERE user_id = $1`, invitee.ID); err != nil {
 		t.Fatalf("change accepting invitee profile after audit: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT actor_display_name, target_display_name FROM public.audit_logs WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1`, orgID,
 	).Scan(&actorName, &targetName); err != nil {
 		t.Fatalf("re-read acceptance audit row: %v", err)
@@ -894,7 +894,7 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 			t.Fatalf("create invitation for acceptance errors: status %d body %s, want 202", status, body)
 		}
 		var invitationID, codeID, outboxBody string
-		if err := h.pool.QueryRow(ctx,
+		if err := h.fixturePool.QueryRow(ctx,
 			`SELECT i.id, c.id, o.body
 			 FROM public.invitations i
 			 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -916,7 +916,7 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 	assertCommandError(t, body, "invitation_not_found")
 	assertContractResponse(t, http.MethodPost, attemptPath, status, body)
 	var failedAttempts int
-	if err := h.pool.QueryRow(ctx, `SELECT failed_attempts FROM identity.verification_codes WHERE id = $1`, attemptCodeID).Scan(&failedAttempts); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT failed_attempts FROM identity.verification_codes WHERE id = $1`, attemptCodeID).Scan(&failedAttempts); err != nil {
 		t.Fatalf("read forwarded-code attempts: %v", err)
 	}
 	if failedAttempts != 0 {
@@ -945,7 +945,7 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 		}
 	}
 	var exhaustedStatus, exhaustedOutboxStatus string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT c.failed_attempts, c.status, o.status
 		 FROM identity.verification_codes c
 		 JOIN identity.outbox_messages o ON o.verification_code_id = c.id
@@ -967,12 +967,12 @@ func TestAcceptInvitationRejectsForwardedExpiredRevokedAndExhaustedCodes(t *test
 	}
 
 	expiredInvitationID, _, expiredCode := createInvitation(expiredInvitee.Email)
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`UPDATE public.invitations SET expires_at = now() - interval '1 second' WHERE id = $1`, expiredInvitationID,
 	); err != nil {
 		t.Fatalf("expire invitation: %v", err)
 	}
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`UPDATE identity.verification_codes SET expires_at = now() - interval '1 second' WHERE target_id = $1`, expiredInvitationID,
 	); err != nil {
 		t.Fatalf("expire invitation code: %v", err)
@@ -1026,7 +1026,7 @@ func TestAcceptInvitationConcurrentRequestsCreateOneActiveMembership(t *testing.
 		t.Fatalf("create invitation for acceptance race: status %d body %s, want 202", status, body)
 	}
 	var invitationID, pendingBody string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.id, o.body
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -1069,13 +1069,13 @@ func TestAcceptInvitationConcurrentRequestsCreateOneActiveMembership(t *testing.
 	}
 
 	var activeMembers, acceptanceAudits int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.memberships
 		 WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`, orgID, invitee.ID,
 	).Scan(&activeMembers); err != nil {
 		t.Fatalf("count concurrent active memberships: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.audit_logs
 		 WHERE organization_id = $1 AND action = 'invitation_accepted'`, orgID,
 	).Scan(&acceptanceAudits); err != nil {
@@ -1134,7 +1134,7 @@ func TestInvitationAdminCommandsPreserveAuthorizationAndContractSemantics(t *tes
 		t.Fatalf("create invitation for authorization checks: status %d body %s, want 202", status, body)
 	}
 	var invitationID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
 	).Scan(&invitationID); err != nil {
 		t.Fatalf("read invitation for authorization checks: %v", err)
@@ -1177,7 +1177,7 @@ func TestCodeIssuanceSharesLimitsWithoutSharingInvalidationScope(t *testing.T) {
 	}
 
 	var invitationID, invitationCodeID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.id, c.id
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -1185,7 +1185,7 @@ func TestCodeIssuanceSharesLimitsWithoutSharingInvalidationScope(t *testing.T) {
 	).Scan(&invitationID, &invitationCodeID); err != nil {
 		t.Fatalf("read invitation code for issuance isolation: %v", err)
 	}
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`UPDATE identity.verification_codes SET created_at = now() - interval '2 minutes' WHERE id = $1`, invitationCodeID,
 	); err != nil {
 		t.Fatalf("age invitation code beyond public resend cooldown: %v", err)
@@ -1198,7 +1198,7 @@ func TestCodeIssuanceSharesLimitsWithoutSharingInvalidationScope(t *testing.T) {
 	assertContractResponse(t, http.MethodPost, "/identity/verification-codes", status, body)
 
 	var invitationCodeStatus, invitationOutboxStatus string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT c.status, o.status
 		 FROM identity.verification_codes c
 		 JOIN identity.outbox_messages o ON o.verification_code_id = c.id
@@ -1211,13 +1211,13 @@ func TestCodeIssuanceSharesLimitsWithoutSharingInvalidationScope(t *testing.T) {
 	}
 
 	var publicCodeID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM identity.verification_codes
 		 WHERE email = $1 AND action_type IS NULL AND target_id IS NULL`, invitee.Email,
 	).Scan(&publicCodeID); err != nil {
 		t.Fatalf("read public code for invitation isolation: %v", err)
 	}
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`UPDATE identity.verification_codes
 		 SET created_at = clock_timestamp() - interval '2 minutes'
 		 WHERE id = $1 OR id = $2`, invitationCodeID, publicCodeID,
@@ -1233,7 +1233,7 @@ func TestCodeIssuanceSharesLimitsWithoutSharingInvalidationScope(t *testing.T) {
 	assertContractResponse(t, http.MethodPost, resendPath, status, body)
 
 	var publicCodeStatus, publicOutboxStatus string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT c.status, o.status
 		 FROM identity.verification_codes c
 		 JOIN identity.outbox_messages o ON o.verification_code_id = c.id
@@ -1270,13 +1270,13 @@ func TestCreateInvitationWaitsForConcurrentAcceptanceBeforeCheckingMembership(t 
 	}
 
 	var invitationID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
 	).Scan(&invitationID); err != nil {
 		t.Fatalf("read invitation for acceptance race: %v", err)
 	}
 
-	tx, err := h.pool.Begin(ctx)
+	tx, err := h.fixturePool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin simulated acceptance: %v", err)
 	}
@@ -1319,7 +1319,7 @@ func TestCreateInvitationWaitsForConcurrentAcceptanceBeforeCheckingMembership(t 
 		default:
 		}
 		var waiting int
-		if err := h.pool.QueryRow(ctx,
+		if err := h.fixturePool.QueryRow(ctx,
 			`SELECT count(*)
 			 FROM pg_stat_activity
 			 WHERE datname = current_database()
@@ -1348,7 +1348,7 @@ func TestCreateInvitationWaitsForConcurrentAcceptanceBeforeCheckingMembership(t 
 	assertContractResponse(t, http.MethodPost, createPath, result.status, result.body)
 
 	var pending int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM public.invitations
 		 WHERE organization_id = $1 AND email = $2 AND status = 'pending'`, orgID, invitee.Email,
 	).Scan(&pending); err != nil {
@@ -1390,7 +1390,7 @@ func TestInvitationCommandsRejectMissingRequiredFields(t *testing.T) {
 		t.Fatalf("create invitation for missing code test: status %d body %s, want 202", status, body)
 	}
 	var invitationID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
 	).Scan(&invitationID); err != nil {
 		t.Fatalf("read invitation for missing code test: %v", err)
@@ -1413,7 +1413,7 @@ func TestInvitationCommandsRejectMissingRequiredFields(t *testing.T) {
 		assertContractResponse(t, http.MethodPost, endpoint.path, status, body)
 	}
 	var invitationStatus string
-	if err := h.pool.QueryRow(ctx, `SELECT status FROM public.invitations WHERE id = $1`, invitationID).Scan(&invitationStatus); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT status FROM public.invitations WHERE id = $1`, invitationID).Scan(&invitationStatus); err != nil {
 		t.Fatalf("read invitation after null-body commands: %v", err)
 	}
 	if invitationStatus != "pending" {
@@ -1453,7 +1453,7 @@ func TestAcceptanceReleasesInvitationRowWhileWaitingForCreateSubjectLock(t *test
 		t.Fatalf("create invitation for lock order: status %d body %s, want 202", status, body)
 	}
 	var invitationID, invitationBody string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT i.id, o.body
 		 FROM public.invitations i
 		 JOIN identity.verification_codes c ON c.target_id = i.id AND c.action_type = 'invitation'
@@ -1465,7 +1465,7 @@ func TestAcceptanceReleasesInvitationRowWhileWaitingForCreateSubjectLock(t *test
 	invitationCode := extractCode(t, invitationBody)
 	inviteeToken := keys.signToken(t, invitee.ID, time.Now().Add(time.Hour))
 
-	tx, err := h.pool.Begin(ctx)
+	tx, err := h.fixturePool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin subject lock: %v", err)
 	}
@@ -1491,7 +1491,7 @@ func TestAcceptanceReleasesInvitationRowWhileWaitingForCreateSubjectLock(t *test
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		var waiting int
-		if err := h.pool.QueryRow(ctx,
+		if err := h.fixturePool.QueryRow(ctx,
 			`SELECT count(*) FROM pg_stat_activity
 			 WHERE datname = current_database()
 			   AND wait_event_type = 'Lock'
@@ -1568,7 +1568,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 			default:
 			}
 			var waiting int
-			if err := h.pool.QueryRow(ctx,
+			if err := h.fixturePool.QueryRow(ctx,
 				`SELECT count(*)
 				 FROM pg_stat_activity
 				 WHERE datname = current_database()
@@ -1595,7 +1595,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 		}
 	}
 
-	createBlocker, err := h.pool.Begin(ctx)
+	createBlocker, err := h.fixturePool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin create subject lock: %v", err)
 	}
@@ -1616,7 +1616,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 	waitForLock("%pg_advisory_xact_lock%", "create invitation", createResults)
 	time.Sleep(time.Second)
 	var createReleasedAt time.Time
-	if err := h.pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&createReleasedAt); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&createReleasedAt); err != nil {
 		t.Fatalf("read database clock before create release: %v", err)
 	}
 	if err := createBlocker.Commit(context.WithoutCancel(ctx)); err != nil {
@@ -1630,7 +1630,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 
 	var invitationID string
 	var createdExpiresAt time.Time
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id, expires_at FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
 	).Scan(&invitationID, &createdExpiresAt); err != nil {
 		t.Fatalf("read created invitation deadline: %v", err)
@@ -1638,7 +1638,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 	assertFreshDeadline("created invitation", createReleasedAt, createdExpiresAt)
 	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 
-	resendBlocker, err := h.pool.Begin(ctx)
+	resendBlocker, err := h.fixturePool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin resend invitation lock: %v", err)
 	}
@@ -1658,7 +1658,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 	waitForLock("%FROM public.invitations%", "resend invitation", resendResults)
 	time.Sleep(time.Second)
 	var resendReleasedAt time.Time
-	if err := h.pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&resendReleasedAt); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&resendReleasedAt); err != nil {
 		t.Fatalf("read database clock before resend release: %v", err)
 	}
 	if err := resendBlocker.Commit(context.WithoutCancel(ctx)); err != nil {
@@ -1671,7 +1671,7 @@ func TestInvitationDeadlinesStartAfterBlockingLocks(t *testing.T) {
 	assertContractResponse(t, http.MethodPost, resendPath, resendResult.status, resendResult.body)
 
 	var resentExpiresAt time.Time
-	if err := h.pool.QueryRow(ctx, `SELECT expires_at FROM public.invitations WHERE id = $1`, invitationID).Scan(&resentExpiresAt); err != nil {
+	if err := h.fixturePool.QueryRow(ctx, `SELECT expires_at FROM public.invitations WHERE id = $1`, invitationID).Scan(&resentExpiresAt); err != nil {
 		t.Fatalf("read resent invitation deadline: %v", err)
 	}
 	assertFreshDeadline("resent invitation", resendReleasedAt, resentExpiresAt)
@@ -1708,14 +1708,14 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 		t.Fatalf("create invitation for serialized resends: status %d body %s, want 202", status, body)
 	}
 	var invitationID string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT id FROM public.invitations WHERE organization_id = $1 AND email = $2`, orgID, invitee.Email,
 	).Scan(&invitationID); err != nil {
 		t.Fatalf("read invitation for serialized resends: %v", err)
 	}
 	ageActiveInvitationCodeBeyondCooldown(t, ctx, h, invitationID)
 
-	blocker, err := h.pool.Begin(ctx)
+	blocker, err := h.fixturePool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin owner membership lock: %v", err)
 	}
@@ -1749,7 +1749,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 		default:
 		}
 		var waiting int
-		if err := h.pool.QueryRow(ctx,
+		if err := h.fixturePool.QueryRow(ctx,
 			`SELECT count(*)
 			 FROM pg_stat_activity
 			 WHERE datname = current_database()
@@ -1785,7 +1785,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 	// The issuance path now records the post-lock wall clock. Backdate only the
 	// active row through the test write seam to keep this regression focused on
 	// selecting by status rather than assuming timestamp order implies validity.
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`UPDATE identity.verification_codes
 		 SET created_at = clock_timestamp() - interval '4 minutes'
 		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'active'`, invitationID,
@@ -1795,7 +1795,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 
 	var activeCreatedAt, latestSupersededCreatedAt time.Time
 	var activeBody string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT c.created_at, o.body
 		 FROM identity.verification_codes c
 		 JOIN identity.outbox_messages o ON o.verification_code_id = c.id
@@ -1803,7 +1803,7 @@ func TestAcceptInvitationUsesActiveCodeAfterSerializedResends(t *testing.T) {
 	).Scan(&activeCreatedAt, &activeBody); err != nil {
 		t.Fatalf("read active resent invitation code: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT created_at
 		 FROM identity.verification_codes
 		 WHERE target_id = $1 AND action_type = 'invitation' AND status = 'superseded'

@@ -15,10 +15,6 @@ package integrationtest
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/smtp"
-	"os/exec"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +30,7 @@ type outboxRowState struct {
 func (h *harness) outboxRowState(t *testing.T, ctx context.Context, recipient string) outboxRowState {
 	t.Helper()
 	var state outboxRowState
-	err := h.pool.QueryRow(ctx,
+	err := h.fixturePool.QueryRow(ctx,
 		`SELECT status, attempts FROM identity.outbox_messages WHERE recipient = $1`, recipient,
 	).Scan(&state.status, &state.attempts)
 	if err != nil {
@@ -74,73 +70,6 @@ func parseRetryDelays(t *testing.T, raw string) []time.Duration {
 		delays = append(delays, delay)
 	}
 	return delays
-}
-
-// stopMailpit makes the captured mailbox unavailable, producing real SMTP
-// failures for the worker; startMailpit restores it. Both go through the
-// docker CLI — the same availability operator CI has, no test doubles.
-func stopMailpit(t *testing.T, ctx context.Context, container string) {
-	t.Helper()
-	runDocker(t, ctx, "stop", container)
-	// Return Mailpit to the stack even if the test fails midway, so later
-	// tests in the same run are unaffected. docker start is idempotent here.
-	t.Cleanup(func() { _ = exec.Command("docker", "start", container).Run() })
-}
-
-func startMailpit(t *testing.T, ctx context.Context, container string) {
-	t.Helper()
-	runDocker(t, ctx, "start", container)
-}
-
-func runDocker(t *testing.T, ctx context.Context, args ...string) {
-	t.Helper()
-	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("docker %s: %v: %s", strings.Join(args, " "), err, out)
-	}
-}
-
-// waitMailpitUp waits until both the Mailpit HTTP API and host SMTP mapping are
-// reachable again. A restored API alone is not enough for the Outbox Worker.
-func (h *harness) waitMailpitUp(t *testing.T, ctx context.Context) {
-	t.Helper()
-	httpEndpoint := strings.TrimRight(h.mailpitURL, "/") + "/api/v1/search"
-	smtpEndpoint := net.JoinHostPort(h.cfg.SMTP.Host, strconv.Itoa(h.cfg.SMTP.Port))
-	var httpErr error
-	var smtpErr error
-	for {
-		httpCtx, cancelHTTP := context.WithTimeout(ctx, time.Second)
-		_, httpErr = h.mailpit.Search(httpCtx, `to:"mailpit-probe@nevix.test"`)
-		cancelHTTP()
-
-		smtpCtx, cancelSMTP := context.WithTimeout(ctx, time.Second)
-		var conn net.Conn
-		conn, smtpErr = (&net.Dialer{}).DialContext(smtpCtx, "tcp", smtpEndpoint)
-		if smtpErr == nil {
-			smtpErr = conn.SetDeadline(time.Now().Add(time.Second))
-		}
-		if smtpErr == nil {
-			var smtpClient *smtp.Client
-			smtpClient, smtpErr = smtp.NewClient(conn, h.cfg.SMTP.Host)
-			if smtpClient != nil {
-				_ = smtpClient.Close()
-			}
-		}
-		if conn != nil {
-			_ = conn.Close()
-		}
-		cancelSMTP()
-
-		if httpErr == nil && smtpErr == nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("Mailpit did not come back before deadline: HTTP API %s: %v; SMTP %s: %v; deadline: %v",
-				httpEndpoint, httpErr, smtpEndpoint, smtpErr, ctx.Err())
-		case <-time.After(500 * time.Millisecond):
-		}
-	}
 }
 
 func TestOutboxRowDeliveredAfterMailpitRecovery(t *testing.T) {
