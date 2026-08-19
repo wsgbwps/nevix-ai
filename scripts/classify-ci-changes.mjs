@@ -79,7 +79,11 @@ export function classifyPaths(paths) {
       checks.add("identity");
     }
     if (path === ".github/workflows/desktop-e2e-ci.yml") checks.add("e2e");
-
+    if (startsWith(path, ".github/actions")) {
+      // Composite actions back the E2E and identity harness jobs that call them.
+      checks.add("e2e");
+      checks.add("identity");
+    }
     if (
       startsWith(path, ".codegraph") ||
       startsWith(path, ".agents") ||
@@ -95,6 +99,7 @@ export function classifyPaths(paths) {
         "AGENTS.md",
         "CLAUDE.md",
         "CONTEXT-MAP.md",
+        "CONTEXT.md",
         "DESIGN.md",
         "Makefile",
         "README.md",
