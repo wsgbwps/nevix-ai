@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createMemoryHistory } from '@tanstack/react-router'
-import { coordinateSettingsBack } from '../../src/renderer/src/app/pages/settings-back-navigation.ts'
-import { runSettingsNavigationIntent } from '../../src/renderer/src/app/pages/settings-navigation-intent.ts'
+import { installSettingsBackInterception } from '../../src/renderer/src/app/settings/settings-back-navigation.ts'
 import {
   captureSettingsSource,
   createSettingsEntry,
@@ -15,9 +14,10 @@ import {
   restoreSettingsEntryAfterOrganizationPicker,
   returnToSettingsSource,
   type SettingsSourceDescriptor
-} from '../../src/renderer/src/app/pages/settings-navigation.ts'
+} from '../../src/renderer/src/app/settings/settings-navigation.ts'
+import { settingsLeaveIntent } from '../../src/renderer/src/app/settings/settings-leave-semantics.ts'
 
-const organizationId = '91ef8acc-287c-45fa-b9c4-a67b2ade6a12'
+const organizationId = '91ef8acc-287c-45fa-9c4-a67b2ade6a12'
 
 function sourceLocation(key: string): {
   readonly pathname: '/'
@@ -112,7 +112,6 @@ test('return uses the exact adjacent source when two business entries share a pa
 
 test('dirty back stays on Settings until discard confirms the coordinated return', () => {
   const { history, source } = enterSettingsFromCurrentEntry()
-  const backNavigation = coordinateSettingsBack(history)
   let discarded = false
   let prompt:
     | {
@@ -121,10 +120,10 @@ test('dirty back stays on Settings until discard confirms the coordinated return
       }
     | undefined
 
-  let result: ReturnType<typeof runSettingsNavigationIntent> | undefined
-  backNavigation.register(() => {
-    result = runSettingsNavigationIntent(
-      { status: 'dirty', discard: () => (discarded = true) },
+  let result: ReturnType<typeof settingsLeaveIntent> | undefined
+  const removeInterception = installSettingsBackInterception(history, () => {
+    result = settingsLeaveIntent(
+      { navigate: 'confirm-discard', close: 'confirm', discard: () => (discarded = true) },
       () => returnToSettingsSource(history, source, organizationId, () => true),
       (nextPrompt) => {
         prompt = nextPrompt
@@ -139,16 +138,16 @@ test('dirty back stays on Settings until discard confirms the coordinated return
   prompt?.discardChanges()
   assert.equal(discarded, true)
   assert.equal(history.location.state.__TSR_key, source.entryKey)
+  removeInterception()
 })
 
 test('saving back is blocked without mutating memory history', () => {
   const { history, source } = enterSettingsFromCurrentEntry()
-  const backNavigation = coordinateSettingsBack(history)
 
-  let result: ReturnType<typeof runSettingsNavigationIntent> | undefined
-  backNavigation.register(() => {
-    result = runSettingsNavigationIntent(
-      { status: 'saving' },
+  let result: ReturnType<typeof settingsLeaveIntent> | undefined
+  const removeInterception = installSettingsBackInterception(history, () => {
+    result = settingsLeaveIntent(
+      { navigate: 'blocked', close: 'defer' },
       () => returnToSettingsSource(history, source, organizationId, () => true),
       () => true
     )
@@ -157,6 +156,27 @@ test('saving back is blocked without mutating memory history', () => {
 
   assert.equal(result, 'blocked')
   assert.equal(history.location.pathname, '/settings')
+  removeInterception()
+})
+
+test('back interception passes blocker-exempt calls through and restores the original back', () => {
+  const { history } = enterSettingsFromCurrentEntry()
+  let intercepted = 0
+  const removeInterception = installSettingsBackInterception(history, () => {
+    intercepted += 1
+  })
+
+  history.back({ ignoreBlocker: true })
+  assert.equal(intercepted, 0)
+  assert.equal(history.location.pathname, '/')
+
+  history.push('/settings')
+  history.back()
+  assert.equal(intercepted, 1)
+
+  removeInterception()
+  history.back()
+  assert.equal(intercepted, 1)
 })
 
 test('an invalid Organization-bound source replaces Settings with Home', () => {

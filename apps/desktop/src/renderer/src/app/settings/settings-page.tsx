@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useLocation } from '@tanstack/react-router'
 import { ArrowLeftIcon, LanguagesIcon, UserRoundIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -15,29 +15,41 @@ import { LanguageModeSettings } from '../../features/language'
 import {
   ActiveOrganizationSettingsContext,
   AuditLogSettings,
-  type AuditLogSettingsContribution,
   MembersSettings,
   OrganizationDetailsSettings,
   OrganizationSettingsNavigation,
   useActiveOrganization,
-  type MembersSettingsContribution,
-  type OrganizationDetailsContribution,
   type OrganizationSettingsSection
 } from '../../features/organization'
-import { ProfileSettings, type ProfileSettingsContribution } from '../../features/profile'
+import { ProfileSettings } from '../../features/profile'
 import { useAuthenticationState } from '../authentication-state'
 import { useSettingsCoordinator, type SettingsContribution } from './settings-coordinator'
 import { SettingsOrganizationPickerPage } from './settings-organization-picker-page'
 import {
   readSettingsEntry,
   readSettingsOrganizationPickerEntry,
-  type SettingsSourceDescriptor
+  type SettingsSection
 } from './settings-navigation'
+import { CLEAN_LEAVE_SEMANTICS } from './settings-leave-semantics'
 
-function canEnterBusinessSource(source: SettingsSourceDescriptor): boolean {
-  return source.pathname === '/'
+/**
+ * One row per Settings Section: its scope and the contribution semantics it reports
+ * before its Feature has spoken. Adding a Section is one row here plus its renderer
+ * below and the Feature-owned files that contribute it; the Record keyed by
+ * SettingsSection makes a missing row a compile error.
+ */
+interface SettingsSectionDescriptor {
+  readonly scope: 'account' | 'organization'
+  readonly defaultContribution: SettingsContribution
 }
 
+const SETTINGS_SECTION_REGISTRY: Record<SettingsSection, SettingsSectionDescriptor> = {
+  profile: { scope: 'account', defaultContribution: CLEAN_LEAVE_SEMANTICS },
+  language: { scope: 'account', defaultContribution: CLEAN_LEAVE_SEMANTICS },
+  'organization-details': { scope: 'organization', defaultContribution: CLEAN_LEAVE_SEMANTICS },
+  members: { scope: 'organization', defaultContribution: CLEAN_LEAVE_SEMANTICS },
+  'audit-log': { scope: 'organization', defaultContribution: CLEAN_LEAVE_SEMANTICS }
+}
 export function SettingsPage(): React.JSX.Element | null {
   const { t } = useTranslation('app')
   const authentication = useAuthenticationState()
@@ -45,55 +57,76 @@ export function SettingsPage(): React.JSX.Element | null {
   const location = useLocation()
   const entry = readSettingsEntry(location.state)
   const organizationPicker = readSettingsOrganizationPickerEntry(location.state)
-  const [profileContribution, setProfileContribution] = useState<SettingsContribution>({
-    status: 'clean'
-  })
-  const reportProfileContribution = useCallback(
-    (next: ProfileSettingsContribution): void => setProfileContribution(next),
-    []
-  )
-  const [auditContribution, setAuditContribution] = useState<AuditLogSettingsContribution>({
-    status: 'clean'
-  })
-  const reportAuditContribution = useCallback(
-    (next: AuditLogSettingsContribution): void => setAuditContribution(next),
-    []
-  )
-  const [organizationDetailsContribution, setOrganizationDetailsContribution] =
-    useState<OrganizationDetailsContribution>({ status: 'clean' })
-  const reportOrganizationDetailsContribution = useCallback(
-    (next: OrganizationDetailsContribution): void => setOrganizationDetailsContribution(next),
-    []
-  )
-  const [membersContribution, setMembersContribution] = useState<MembersSettingsContribution>({
-    status: 'clean'
-  })
-  const reportMembersContribution = useCallback(
-    (next: MembersSettingsContribution): void => setMembersContribution(next),
-    []
-  )
-  let contribution: SettingsContribution = { status: 'clean' }
-  if (entry.section === 'profile') {
-    contribution = profileContribution
-  } else if (entry.section === 'organization-details') {
-    contribution = organizationDetailsContribution
-  } else if (entry.section === 'members') {
-    contribution = membersContribution
-  } else if (entry.section === 'audit-log') {
-    contribution = auditContribution
-  }
+  const [contributions, setContributions] = useState<
+    Partial<Record<SettingsSection, SettingsContribution>>
+  >({})
+  const contributionReporters = useMemo(() => {
+    const reporters: Record<SettingsSection, (next: SettingsContribution) => void> = {} as Record<
+      SettingsSection,
+      (next: SettingsContribution) => void
+    >
+    for (const section of Object.keys(SETTINGS_SECTION_REGISTRY) as SettingsSection[]) {
+      reporters[section] = (next) =>
+        setContributions((previous) => ({ ...previous, [section]: next }))
+    }
+    return reporters
+  }, [])
+  const contribution =
+    contributions[entry.section] ?? SETTINGS_SECTION_REGISTRY[entry.section].defaultContribution
   const coordinator = useSettingsCoordinator({
     entry,
     contribution,
     organizationId: organization.activeOrganization?.organizationId,
-    canEnterSource: canEnterBusinessSource,
     openOrganizationPicker: organization.openOrganizationPicker
   })
-  const switchSettingsSection = coordinator.switchSection
-  const returnToMembersAfterAuditPermissionLoss = useCallback(
-    (): void => switchSettingsSection('members'),
-    [switchSettingsSection]
-  )
+  const organizationId = organization.activeOrganization?.organizationId
+  const sectionRenderers: Record<SettingsSection, () => React.JSX.Element | null> = {
+    profile: () => (
+      <div className="bg-card rounded-lg border">
+        <ProfileSettings
+          getSession={authentication.getSession}
+          onContributionChange={contributionReporters.profile}
+        />
+      </div>
+    ),
+    language: () => (
+      <section aria-labelledby="settings-language-heading" className="grid gap-3">
+        <h2 id="settings-language-heading" className="text-base font-semibold">
+          {t('settings.language')}
+        </h2>
+        <div className="bg-card rounded-lg border">
+          <LanguageModeSettings />
+        </div>
+      </section>
+    ),
+    'organization-details': () => (
+      <OrganizationDetailsSettings
+        key={organizationId}
+        onContributionChange={contributionReporters['organization-details']}
+      />
+    ),
+    members: () => (
+      <MembersSettings
+        getSession={authentication.getSession}
+        onContributionChange={contributionReporters.members}
+      />
+    ),
+    'audit-log': () => (
+      <AuditLogSettings
+        getSession={authentication.getSession}
+        onContributionChange={contributionReporters['audit-log']}
+        // The audit-log Feature reports permission loss; the Settings Flow
+        // owns where a member who lost access lands.
+        onPermissionLost={() => coordinator.forceSwitchSection('members')}
+      />
+    )
+  }
+  // The registry defines the organization-scoped sections to be exactly the
+  // Organization Feature's Settings Sections.
+  const organizationSection: OrganizationSettingsSection | undefined =
+    SETTINGS_SECTION_REGISTRY[coordinator.section].scope === 'organization'
+      ? (coordinator.section as OrganizationSettingsSection)
+      : undefined
   if (authentication.status !== 'authenticated') {
     // The root route is already navigating to the authentication view; render nothing on the
     // transient frame so the Settings Page never shows for a signed-out user.
@@ -113,13 +146,6 @@ export function SettingsPage(): React.JSX.Element | null {
       />
     )
   }
-
-  const organizationSection: OrganizationSettingsSection | undefined =
-    coordinator.section === 'organization-details' ||
-    coordinator.section === 'members' ||
-    coordinator.section === 'audit-log'
-      ? coordinator.section
-      : undefined
 
   return (
     <>
@@ -179,43 +205,7 @@ export function SettingsPage(): React.JSX.Element | null {
         <main className="max-h-svh flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-8 py-10">
             <h1 className="text-2xl font-semibold tracking-tight">{t('settings.title')}</h1>
-            {coordinator.section === 'profile' ? (
-              <div className="bg-card rounded-lg border">
-                <ProfileSettings
-                  getSession={authentication.getSession}
-                  onContributionChange={reportProfileContribution}
-                />
-              </div>
-            ) : null}
-            {coordinator.section === 'language' ? (
-              <section aria-labelledby="settings-language-heading" className="grid gap-3">
-                <h2 id="settings-language-heading" className="text-base font-semibold">
-                  {t('settings.language')}
-                </h2>
-                <div className="bg-card rounded-lg border">
-                  <LanguageModeSettings />
-                </div>
-              </section>
-            ) : null}
-            {coordinator.section === 'organization-details' ? (
-              <OrganizationDetailsSettings
-                key={organization.activeOrganization?.organizationId}
-                onContributionChange={reportOrganizationDetailsContribution}
-              />
-            ) : null}
-            {coordinator.section === 'members' ? (
-              <MembersSettings
-                getSession={authentication.getSession}
-                onContributionChange={reportMembersContribution}
-              />
-            ) : null}
-            {coordinator.section === 'audit-log' ? (
-              <AuditLogSettings
-                getSession={authentication.getSession}
-                onContributionChange={reportAuditContribution}
-                onPermissionLost={returnToMembersAfterAuditPermissionLoss}
-              />
-            ) : null}
+            {sectionRenderers[entry.section]()}
           </div>
         </main>
       </div>

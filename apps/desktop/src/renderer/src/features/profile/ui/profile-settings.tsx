@@ -13,11 +13,26 @@ import { readProfile, saveProfile, type AuthenticatedProfileSession } from '../a
 
 type GetSession = () => Promise<AuthenticatedProfileSession | undefined>
 
-export type ProfileSettingsContribution =
-  | { readonly status: 'clean' }
-  | { readonly status: 'dirty'; readonly discard: () => void }
-  | { readonly status: 'saving' }
+type SettingsNavigateSemantics = 'navigable' | 'confirm-discard' | 'blocked'
+type SettingsCloseSemantics = 'allow' | 'confirm' | 'defer' | 'deny'
 
+// Structurally mirrors the Settings Flow's SettingsLeaveSemantics contract
+// (app/settings); Features do not import across that seam.
+export type ProfileSettingsContribution = {
+  readonly navigate: SettingsNavigateSemantics
+  readonly close: SettingsCloseSemantics
+  readonly discard?: () => void
+}
+
+const CLEAN_CONTRIBUTION: ProfileSettingsContribution = {
+  navigate: 'navigable',
+  close: 'allow'
+}
+
+const SAVING_CONTRIBUTION: ProfileSettingsContribution = {
+  navigate: 'blocked',
+  close: 'defer'
+}
 export function ProfileSettings({
   getSession,
   onContributionChange
@@ -79,7 +94,7 @@ export function ProfileSettings({
     setValidation(undefined)
     setSaveFailed(false)
     setDidSave(false)
-    onContributionChange?.({ status: 'clean' })
+    onContributionChange?.(CLEAN_CONTRIBUTION)
   }, [onContributionChange, savedDisplayName])
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -90,7 +105,7 @@ export function ProfileSettings({
     setValidation(nextValidation)
     if (nextValidation) return
 
-    onContributionChange?.({ status: 'saving' })
+    onContributionChange?.(SAVING_CONTRIBUTION)
     setIsSaving(true)
     setSaveFailed(false)
     setDidSave(false)
@@ -102,11 +117,11 @@ export function ProfileSettings({
       setSavedDisplayName(profile.displayName)
       setDisplayName(profile.displayName)
       setDidSave(true)
-      onContributionChange?.({ status: 'clean' })
+      onContributionChange?.(CLEAN_CONTRIBUTION)
     } catch {
       // Keep the draft untouched so the User can retry after a transient request failure.
       setSaveFailed(true)
-      onContributionChange?.({ status: 'dirty', discard: cancel })
+      onContributionChange?.({ navigate: 'confirm-discard', close: 'confirm', discard: cancel })
     } finally {
       setIsSaving(false)
     }
@@ -128,10 +143,10 @@ export function ProfileSettings({
   const contribution = useMemo<ProfileSettingsContribution>(
     () =>
       isSaving
-        ? { status: 'saving' }
+        ? SAVING_CONTRIBUTION
         : isDirty
-          ? { status: 'dirty', discard: cancel }
-          : { status: 'clean' },
+          ? { navigate: 'confirm-discard', close: 'confirm', discard: cancel }
+          : CLEAN_CONTRIBUTION,
     [cancel, isDirty, isSaving]
   )
 
@@ -141,7 +156,7 @@ export function ProfileSettings({
 
   useEffect(
     () => () => {
-      onContributionChange?.({ status: 'clean' })
+      onContributionChange?.(CLEAN_CONTRIBUTION)
     },
     [onContributionChange]
   )

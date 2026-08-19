@@ -1,10 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import {
   allowOrdinaryClose,
   cancelOrdinaryClose,
   useOrdinaryCloseHandler
 } from '../ordinary-close-handler'
+import { installSettingsBackInterception } from './settings-back-navigation'
 import {
   createSettingsOrganizationPickerState,
   replaceSettingsOrganizationPickerPhase,
@@ -15,24 +16,30 @@ import {
   type SettingsSection,
   type SettingsSourceDescriptor
 } from './settings-navigation'
-import type { SettingsBackNavigation } from './settings-back-navigation'
 import {
-  runSettingsNavigationIntent,
+  resolveDeferredSettingsClose,
+  settingsCloseDecision,
+  settingsLeaveIntent,
+  settingsNavigationBlockDecision,
   type PendingSettingsDiscardPrompt,
-  type SettingsNavigationContribution
-} from './settings-navigation-intent'
+  type SettingsLeaveSemantics
+} from './settings-leave-semantics'
 
-export const SettingsBackNavigationContext = createContext<SettingsBackNavigation | undefined>(
-  undefined
-)
+export type SettingsContribution = SettingsLeaveSemantics
 
-export type SettingsContribution = SettingsNavigationContribution
+/**
+ * Only the Home surface (`/`) is a re-enterable business source: every other
+ * path either belongs to a flow that owns its own lifecycle or no longer
+ * exists, so returning there would strand the user mid-flow.
+ */
+function canEnterBusinessSource(source: SettingsSourceDescriptor): boolean {
+  return source.pathname === '/'
+}
 
 interface SettingsCoordinatorOptions {
   readonly entry: SettingsEntry
   readonly contribution: SettingsContribution
   readonly organizationId: string | undefined
-  readonly canEnterSource: (source: SettingsSourceDescriptor) => boolean
   readonly openOrganizationPicker: (origin: 'settings') => void
 }
 
@@ -50,20 +57,13 @@ interface SettingsCoordinator {
   readonly discardChanges: () => void
 }
 
-const FORCED_SECURITY_PATHS = new Set(['/auth', '/onboarding', '/select-organization'])
-
 export function useSettingsCoordinator({
   entry,
   contribution,
   organizationId,
-  canEnterSource,
   openOrganizationPicker
 }: SettingsCoordinatorOptions): SettingsCoordinator {
   const router = useRouter()
-  const backNavigation = useContext(SettingsBackNavigationContext)
-  if (!backNavigation) {
-    throw new Error('Settings back navigation must be provided by the app composition root.')
-  }
   const [discardPrompt, setDiscardPrompt] = useState<PendingSettingsDiscardPrompt>()
   const discardPromptRef = useRef<PendingSettingsDiscardPrompt | undefined>(undefined)
   const queuedCloseRequestRef = useRef<string | undefined>(undefined)
@@ -90,9 +90,9 @@ export function useSettingsCoordinator({
     return prompt
   }, [])
 
-  const runNavigationIntent = useCallback(
+  const runLeaveIntent = useCallback(
     (navigate: () => void): void => {
-      runSettingsNavigationIntent(contribution, navigate, openDiscardPrompt)
+      settingsLeaveIntent(contribution, navigate, openDiscardPrompt)
     },
     [contribution, openDiscardPrompt]
   )
@@ -102,23 +102,19 @@ export function useSettingsCoordinator({
       router.history.block({
         enableBeforeUnload: false,
         blockerFn: async ({ currentLocation, nextLocation }) => {
-          if (
-            currentLocation.pathname !== '/settings' ||
-            FORCED_SECURITY_PATHS.has(nextLocation.pathname)
-          ) {
-            return false
-          }
-
-          const current = contribution
-
-          if (current.status === 'clean') return false
-          if (current.status !== 'dirty') return true
+          const decision = settingsNavigationBlockDecision(
+            currentLocation.pathname,
+            nextLocation.pathname,
+            contribution
+          )
+          if (decision === 'pass') return false
+          if (decision === 'block') return true
 
           return await new Promise<boolean>((resolve) => {
             const didOpen = openDiscardPrompt({
               continueEditing: () => resolve(true),
               discardChanges: () => {
-                current.discard()
+                contribution.discard?.()
                 resolve(false)
               }
             })
@@ -132,31 +128,29 @@ export function useSettingsCoordinator({
   const handleOrdinaryClose = useCallback(
     ({ requestId }: { readonly requestId: string }): void => {
       outstandingCloseRequestsRef.current.add(requestId)
-      const current = contribution
-      if (current.status === 'clean') {
-        answerClose(requestId, 'allow')
-        return
-      }
-      if (current.status === 'saving') {
-        savingCloseRequestRef.current = requestId
-        return
-      }
-      if (current.status !== 'dirty') {
-        answerClose(requestId, 'cancel')
-        return
-      }
-      if (discardPromptRef.current) {
-        queuedCloseRequestRef.current = requestId
-        return
-      }
-
-      openDiscardPrompt({
-        continueEditing: () => answerClose(requestId, 'cancel'),
-        discardChanges: () => {
-          current.discard()
+      switch (settingsCloseDecision(contribution, discardPromptRef.current !== undefined)) {
+        case 'allow':
           answerClose(requestId, 'allow')
-        }
-      })
+          break
+        case 'defer':
+          savingCloseRequestRef.current = requestId
+          break
+        case 'cancel':
+          answerClose(requestId, 'cancel')
+          break
+        case 'queue':
+          queuedCloseRequestRef.current = requestId
+          break
+        case 'prompt':
+          openDiscardPrompt({
+            continueEditing: () => answerClose(requestId, 'cancel'),
+            discardChanges: () => {
+              contribution.discard?.()
+              answerClose(requestId, 'allow')
+            }
+          })
+          break
+      }
     },
     [answerClose, contribution, openDiscardPrompt]
   )
@@ -164,11 +158,11 @@ export function useSettingsCoordinator({
 
   useEffect(() => {
     const requestId = savingCloseRequestRef.current
-    if (!requestId || contribution.status === 'saving') return
+    if (!requestId || contribution.close === 'defer') return
 
     savingCloseRequestRef.current = undefined
-    answerClose(requestId, contribution.status === 'clean' ? 'allow' : 'cancel')
-  }, [answerClose, contribution.status])
+    answerClose(requestId, resolveDeferredSettingsClose(contribution))
+  }, [answerClose, contribution])
 
   useEffect(
     () => () => {
@@ -183,7 +177,7 @@ export function useSettingsCoordinator({
   const switchSection = useCallback(
     (section: SettingsSection): void => {
       if (section === entry.section) return
-      runNavigationIntent(() => {
+      runLeaveIntent(() => {
         router.history.replace(
           '/settings',
           replaceSettingsSection(router.history.location.state, section),
@@ -191,7 +185,7 @@ export function useSettingsCoordinator({
         )
       })
     },
-    [entry.section, router.history, runNavigationIntent]
+    [entry.section, router.history, runLeaveIntent]
   )
 
   const forceSwitchSection = useCallback(
@@ -201,7 +195,7 @@ export function useSettingsCoordinator({
       const queuedCloseRequest = queuedCloseRequestRef.current
       queuedCloseRequestRef.current = undefined
       if (queuedCloseRequest) answerClose(queuedCloseRequest, 'cancel')
-      if (contribution.status === 'dirty') contribution.discard()
+      if (contribution.navigate === 'confirm-discard') contribution.discard?.()
       if (section === entry.section) return
       router.history.replace(
         '/settings',
@@ -213,17 +207,20 @@ export function useSettingsCoordinator({
   )
 
   const navigateToSource = useCallback((): void => {
-    returnToSettingsSource(router.history, entry.source, organizationId, canEnterSource)
-  }, [canEnterSource, entry.source, organizationId, router.history])
+    returnToSettingsSource(router.history, entry.source, organizationId, canEnterBusinessSource)
+  }, [entry.source, organizationId, router.history])
 
   const returnToSource = useCallback((): void => {
-    runNavigationIntent(navigateToSource)
-  }, [navigateToSource, runNavigationIntent])
+    runLeaveIntent(navigateToSource)
+  }, [navigateToSource, runLeaveIntent])
 
-  useEffect(() => backNavigation.register(returnToSource), [backNavigation, returnToSource])
+  useEffect(
+    () => installSettingsBackInterception(router.history, returnToSource),
+    [returnToSource, router.history]
+  )
 
   const requestOrganizationPicker = useCallback((): void => {
-    runNavigationIntent(() => {
+    runLeaveIntent(() => {
       openOrganizationPicker('settings')
       router.history.replace(
         '/settings',
@@ -231,7 +228,7 @@ export function useSettingsCoordinator({
         { ignoreBlocker: true }
       )
     })
-  }, [entry, openOrganizationPicker, router.history, runNavigationIntent])
+  }, [entry, openOrganizationPicker, router.history, runLeaveIntent])
 
   const openOrganizationCreation = useCallback((): void => {
     router.history.replace(
@@ -262,7 +259,7 @@ export function useSettingsCoordinator({
     const queuedCloseRequest = queuedCloseRequestRef.current
     queuedCloseRequestRef.current = undefined
     if (queuedCloseRequest) {
-      if (contribution.status === 'dirty') contribution.discard()
+      if (contribution.navigate === 'confirm-discard') contribution.discard?.()
       answerClose(queuedCloseRequest, 'allow')
       prompt?.continueEditing()
       return
@@ -272,7 +269,7 @@ export function useSettingsCoordinator({
 
   return {
     section: entry.section,
-    navigationDisabled: contribution.status !== 'clean' && contribution.status !== 'dirty',
+    navigationDisabled: contribution.navigate === 'blocked',
     discardPromptOpen: discardPrompt !== undefined,
     switchSection,
     forceSwitchSection,

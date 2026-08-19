@@ -23,10 +23,10 @@
 
 - Keep `renderer/src/app/routes/` thin: a route file only creates its file route and assembles its page component, with no page implementation
 - Put a page owned by a business Domain in `renderer/src/features/<domain>/`, exported through that Feature's public `index.ts`, and assembled by a thin route; per [ADR-0004](docs/adr/0004-renderer-routing-topology.md), authenticated views render in the App Shell content area except the Organization pre-shell routes before an Organization context exists and the app-owned full-screen Settings Page aggregation
-- Put cross-Feature aggregation pages and pages without a Domain owner in `renderer/src/app/pages/` (e.g. the Settings page)
+- Put cross-Feature aggregation pages and pages without a Domain owner in `renderer/src/app/pages/` (e.g. the Home placeholder page)
 - Keep App Shell internals in `renderer/src/app/shell/`
 - Never add page files at the `renderer/src/app/` root
-- Do not create a Feature named `settings` — the Settings page is owned by `app/pages/`
+- Do not create a Feature named `settings` — the Settings page is owned by the app-level Settings Flow module (`app/settings/`), which composes Feature contributions and is not a Feature
 
 ## Renderer Feature segments
 

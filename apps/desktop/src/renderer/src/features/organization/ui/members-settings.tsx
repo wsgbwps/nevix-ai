@@ -13,11 +13,28 @@ import { OrganizationInvitations } from './organization-invitations'
 
 type GetSession = () => Promise<AuthenticatedOrganizationSession | undefined>
 
-export type MembersSettingsContribution =
-  | { readonly status: 'clean' }
-  | { readonly status: 'command-pending' }
-  | { readonly status: 'unknown-command-result' }
+type SettingsNavigateSemantics = 'navigable' | 'confirm-discard' | 'blocked'
+type SettingsCloseSemantics = 'allow' | 'confirm' | 'defer' | 'deny'
 
+// Structurally mirrors the Settings Flow's SettingsLeaveSemantics contract
+// (app/settings); Features do not import across that seam.
+export type MembersSettingsContribution = {
+  readonly navigate: SettingsNavigateSemantics
+  readonly close: SettingsCloseSemantics
+  readonly discard?: () => void
+}
+
+const CLEAN_CONTRIBUTION: MembersSettingsContribution = {
+  navigate: 'navigable',
+  close: 'allow'
+}
+
+// A membership command in flight, or one whose outcome is still unknown:
+// leaving would abandon it, and closing the window must not either.
+const COMMAND_UNRESOLVED_CONTRIBUTION: MembersSettingsContribution = {
+  navigate: 'blocked',
+  close: 'deny'
+}
 export function MembersSettings({
   getSession,
   onContributionChange
@@ -125,18 +142,16 @@ function MembersSettingsContent({
   }, [management.loadState, rosterLoaded])
 
   useEffect(() => {
-    let contribution: MembersSettingsContribution = { status: 'clean' }
-    if (management.commandState === 'pending') {
-      contribution = { status: 'command-pending' }
-    } else if (management.commandState === 'unknown') {
-      contribution = { status: 'unknown-command-result' }
-    }
+    const contribution: MembersSettingsContribution =
+      management.commandState === 'pending' || management.commandState === 'unknown'
+        ? COMMAND_UNRESOLVED_CONTRIBUTION
+        : CLEAN_CONTRIBUTION
     onContributionChange?.(contribution)
   }, [management.commandState, onContributionChange])
 
   useEffect(
     () => () => {
-      onContributionChange?.({ status: 'clean' })
+      onContributionChange?.(CLEAN_CONTRIBUTION)
     },
     [onContributionChange]
   )

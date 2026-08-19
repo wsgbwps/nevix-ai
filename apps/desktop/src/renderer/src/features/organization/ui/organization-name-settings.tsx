@@ -8,11 +8,26 @@ import {
   useActiveOrganization
 } from '../model/active-organization-state'
 
-export type OrganizationDetailsContribution =
-  | { readonly status: 'clean' }
-  | { readonly status: 'dirty'; readonly discard: () => void }
-  | { readonly status: 'saving' }
+type SettingsNavigateSemantics = 'navigable' | 'confirm-discard' | 'blocked'
+type SettingsCloseSemantics = 'allow' | 'confirm' | 'defer' | 'deny'
 
+// Structurally mirrors the Settings Flow's SettingsLeaveSemantics contract
+// (app/settings); Features do not import across that seam.
+export type OrganizationDetailsContribution = {
+  readonly navigate: SettingsNavigateSemantics
+  readonly close: SettingsCloseSemantics
+  readonly discard?: () => void
+}
+
+const CLEAN_CONTRIBUTION: OrganizationDetailsContribution = {
+  navigate: 'navigable',
+  close: 'allow'
+}
+
+const SAVING_CONTRIBUTION: OrganizationDetailsContribution = {
+  navigate: 'blocked',
+  close: 'defer'
+}
 export function OrganizationDetailsSettings({
   onContributionChange
 }: {
@@ -73,7 +88,7 @@ export function OrganizationDetailsSettings({
     setValidationMessage(undefined)
     setSaveFailed(false)
     setDidSave(false)
-    onContributionChange?.({ status: 'clean' })
+    onContributionChange?.(CLEAN_CONTRIBUTION)
   }, [onContributionChange])
 
   const verifyDetails = useCallback(async () => {
@@ -95,7 +110,7 @@ export function OrganizationDetailsSettings({
         setSaveFailed(false)
         setDidSave(false)
         setPermissionChanged(true)
-        onContributionChange?.({ status: 'clean' })
+        onContributionChange?.(CLEAN_CONTRIBUTION)
       }
       editorEstablishedRef.current = nextEditorEstablished
       setHasAuthoritativeDetails(true)
@@ -137,10 +152,10 @@ export function OrganizationDetailsSettings({
   const contribution = useMemo<OrganizationDetailsContribution>(
     () =>
       isSaving
-        ? { status: 'saving' }
+        ? SAVING_CONTRIBUTION
         : isDirty
-          ? { status: 'dirty', discard }
-          : { status: 'clean' },
+          ? { navigate: 'confirm-discard', close: 'confirm', discard }
+          : CLEAN_CONTRIBUTION,
     [discard, isDirty, isSaving]
   )
 
@@ -150,7 +165,7 @@ export function OrganizationDetailsSettings({
 
   useEffect(
     () => () => {
-      onContributionChange?.({ status: 'clean' })
+      onContributionChange?.(CLEAN_CONTRIBUTION)
     },
     [onContributionChange]
   )
@@ -167,7 +182,7 @@ export function OrganizationDetailsSettings({
       return
     }
 
-    onContributionChange?.({ status: 'saving' })
+    onContributionChange?.(SAVING_CONTRIBUTION)
     setIsSaving(true)
     setValidationMessage(undefined)
     setSaveFailed(false)
@@ -176,7 +191,7 @@ export function OrganizationDetailsSettings({
       await updateActiveOrganizationName(nextName)
       setDraftName(undefined)
       setDidSave(true)
-      onContributionChange?.({ status: 'clean' })
+      onContributionChange?.(CLEAN_CONTRIBUTION)
     } catch (error) {
       if (error instanceof OrganizationSettingsAuthorityError) {
         const verification = error.verification
@@ -194,12 +209,12 @@ export function OrganizationDetailsSettings({
           setSaveFailed(false)
           setDidSave(false)
           setPermissionChanged(true)
-          onContributionChange?.({ status: 'clean' })
+          onContributionChange?.(CLEAN_CONTRIBUTION)
           return
         }
       }
       setSaveFailed(true)
-      onContributionChange?.({ status: 'dirty', discard })
+      onContributionChange?.({ navigate: 'confirm-discard', close: 'confirm', discard })
     } finally {
       setIsSaving(false)
     }
