@@ -14,6 +14,22 @@ function isOneOf(path, values) {
   return values.includes(path);
 }
 
+// apps/desktop 下不改变应用运行时行为的路径:文档与根级 markdown、
+// 本地测试产物,以及只由 Desktop CI 自己执行的 unit/component 测试。
+// 它们不值得为一次 PR 启动整套 Supabase 栈 + Electron 的 Smoke E2E。
+function isDesktopNonRuntimePath(path) {
+  if (
+    startsWith(path, "apps/desktop/docs") ||
+    startsWith(path, "apps/desktop/test-results") ||
+    startsWith(path, "apps/desktop/tests/unit") ||
+    startsWith(path, "apps/desktop/tests/component")
+  ) {
+    return true;
+  }
+  const relative = path.slice("apps/desktop/".length);
+  return !relative.includes("/") && relative.endsWith(".md");
+}
+
 export function classifyPaths(paths) {
   const selected = Object.fromEntries(
     CLASSIFICATIONS.map((classification) => [classification, false]),
@@ -25,7 +41,9 @@ export function classifyPaths(paths) {
 
     if (startsWith(path, "apps/desktop")) {
       checks.add("desktop");
-      checks.add("e2e");
+      if (!isDesktopNonRuntimePath(path)) {
+        checks.add("e2e");
+      }
     }
 
     if (startsWith(path, "server")) checks.add("server");

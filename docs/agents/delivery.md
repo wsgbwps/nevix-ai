@@ -22,7 +22,10 @@ those paths. A push that mixes them with anything else must go through a PR.
    main`). Describe shared-area changes with their impact and tests in the PR
    body.
 3. Wait for the path-aware `CI gate`: `gh pr checks --watch --fail-fast`. PRs
-   run smoke E2E when e2e-relevant paths change.
+   run smoke E2E when e2e-relevant paths change (desktop docs/markdown,
+   `test-results/`, and unit/component tests do not trigger E2E). Label the
+   PR `skip-e2e` to skip a classified smoke run that is genuinely
+   unnecessary; `full-e2e` takes precedence over `skip-e2e`.
 4. Squash-merge and delete the branch: `gh pr merge --squash --delete-branch`.
    Each task lands as exactly one commit on `main`; the PR page is its
    acceptance record.

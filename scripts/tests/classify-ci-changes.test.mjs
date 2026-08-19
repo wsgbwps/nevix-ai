@@ -24,6 +24,39 @@ test("Desktop pages require Desktop CI and Full E2E", () => {
   );
 });
 
+test("Desktop documentation and local artifacts stay out of E2E", () => {
+  assert.deepEqual(
+    selected([
+      "apps/desktop/README.md",
+      "apps/desktop/CONTEXT.md",
+      "apps/desktop/AGENTS.md",
+      "apps/desktop/docs/adr/0004-renderer-routing-topology.md",
+      "apps/desktop/test-results/.last-run.json",
+    ]),
+    { desktop: true },
+  );
+});
+
+test("Desktop unit and component tests run only inside Desktop CI", () => {
+  assert.deepEqual(
+    selected([
+      "apps/desktop/tests/unit/startup-resolution.test.mts",
+      "apps/desktop/tests/component/authentication-transition.spec.tsx",
+    ]),
+    { desktop: true },
+  );
+});
+
+test("E2E specs and their helpers still require E2E", () => {
+  assert.deepEqual(
+    selected([
+      "apps/desktop/tests/auth/session-persistence.spec.ts",
+      "apps/desktop/tests/helpers/electron-app.ts",
+    ]),
+    { desktop: true, e2e: true },
+  );
+});
+
 test("ordinary Go packages require only Server CI", () => {
   assert.deepEqual(selected(["server/internal/event/bus.go"]), {
     server: true,
@@ -113,6 +146,20 @@ test("the CI gate runs harness tests inline without a separate job", () => {
   );
   assert.doesNotMatch(workflow, /harness-ci\.yml|\n  harness:\n/);
   assert.doesNotMatch(workflow, /HARNESS_(?:REQUIRED|RESULT)/);
+});
+
+test("the e2e job and gate honor the skip-e2e label with full-e2e precedence", () => {
+  const workflow = readFileSync(
+    join(REPOSITORY, ".github/workflows/ci-gate.yml"),
+    "utf8",
+  );
+
+  // full-e2e 的升级请求优先:skip-e2e 只在没有 full-e2e 时生效。
+  assert.match(
+    workflow,
+    /E2E_ENFORCED: \$\{\{ github\.event_name == 'pull_request' && \(contains\(github\.event\.pull_request\.labels\.\*\.name, 'full-e2e'\) \|\| !contains\(github\.event\.pull_request\.labels\.\*\.name, 'skip-e2e'\)\) \}\}/,
+  );
+  assert.match(workflow, /suite: .*'full' \|\| 'smoke'/);
 });
 
 test("every existing repository path has an explicit check owner", () => {
