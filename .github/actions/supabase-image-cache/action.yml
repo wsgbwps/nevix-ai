@@ -1,0 +1,54 @@
+name: Supabase image cache
+description: >-
+  Restore or save the Docker images the local Supabase harnesses pull, so CI
+  does not re-download multi-GB layers every run. Docker Hub anonymous rate
+  limits have failed these jobs in practice (toomanyrequests on supabase start).
+
+inputs:
+  phase:
+    description: '"restore" loads a cached image tarball before the harness runs; "save" snapshots the daemon images into the cache after it.'
+    required: true
+
+outputs:
+  cache-hit:
+    description: Whether the restore phase found a cached tarball (exact key).
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - id: restore
+      if: inputs.phase == 'restore'
+      uses: actions/cache/restore@v4
+      with:
+        path: /tmp/nevix-supabase-images.tar
+        # The lockfile pins the Supabase CLI (and thus the stack image tags);
+        # test-auth-policy.sh pins the gotrue and hibp-fixture images explicitly.
+        key: supabase-images-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'scripts/test-auth-policy.sh') }}
+    - name: Load cached Supabase images
+      if: inputs.phase == 'restore' && steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      run: docker load --input /tmp/nevix-supabase-images.tar
+    - id: snapshot
+      name: Snapshot daemon images
+      if: inputs.phase == 'save'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The harness entrypoints own every image on this ephemeral runner that
+        # carries a real tag, so snapshot them all rather than maintaining a
+        # per-service catalog that would silently miss new stack services.
+        images="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -v '<none>' || true)"
+        if [[ -z "$images" ]]; then
+          echo "no tagged images to snapshot"
+          echo "saved=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        docker save --output /tmp/nevix-supabase-images.tar $images
+        echo "saved=true" >> "$GITHUB_OUTPUT"
+    - name: Save Supabase image snapshot
+      if: inputs.phase == 'save' && steps.snapshot.outputs.saved == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: /tmp/nevix-supabase-images.tar
+        key: supabase-images-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'scripts/test-auth-policy.sh') }}

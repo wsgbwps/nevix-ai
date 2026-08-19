@@ -26,9 +26,18 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/supabase-image-cache
+        id: supabase-images
+        with:
+          phase: restore
       - run: bash scripts/tests/supabase-local-harness.test.sh
       - run: ./scripts/test-identity-integration.sh
+      - uses: ./.github/actions/supabase-image-cache
+        if: steps.supabase-images.outputs.cache-hit != 'true'
+        with:
+          phase: save
       # Backstop for the script's own EXIT trap: if the runner kills the script,
       # the trap never fires, so tear the stack down here as well.
       - name: Tear down Supabase stack

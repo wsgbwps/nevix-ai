@@ -64,6 +64,13 @@ test("Pi agent definitions, extension code, and tests require inline harness val
   );
 });
 
+test("shared composite actions run the harness jobs they back", () => {
+  assert.deepEqual(
+    selected([".github/actions/supabase-image-cache/action.yml"]),
+    { e2e: true, identity: true },
+  );
+});
+
 test("delivery-harness changes run only the inline harness tests", () => {
   assert.deepEqual(
     selected([

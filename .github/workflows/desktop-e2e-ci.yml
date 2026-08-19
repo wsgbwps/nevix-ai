@@ -39,7 +39,15 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/supabase-image-cache
+        id: supabase-images
+        with:
+          phase: restore
       - run: pnpm test:auth-policy
+      - uses: ./.github/actions/supabase-image-cache
+        if: steps.supabase-images.outputs.cache-hit != 'true'
+        with:
+          phase: save
       - name: Tear down Auth policy stack
         if: always()
         run: |
@@ -74,6 +82,10 @@ jobs:
           sudo apt-get install -y libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64
           libcups2t64 libdrm2 libgbm1 libgtk-3-0t64 libnss3 xvfb
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/supabase-image-cache
+        id: supabase-images
+        with:
+          phase: restore
       - run: bash scripts/tests/supabase-local-harness.test.sh
       - name: Run the E2E Smoke Suite
         # Linux runners only offer the basic_text safeStorage backend; force it so the
@@ -82,6 +94,10 @@ jobs:
         env:
           NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: "1"
           NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE: ${{ inputs.inject_identity_server_failure && 'after-renderer-launch' || '' }}
+      - uses: ./.github/actions/supabase-image-cache
+        if: steps.supabase-images.outputs.cache-hit != 'true'
+        with:
+          phase: save
       # The Electron helper and E2E runner share this owner for Desktop diagnostics and the
       # bounded, sanitized identity server log. The runner finalizes the log before cleanup.
       - name: Verify E2E failure artifacts contain no credentials
@@ -127,6 +143,10 @@ jobs:
           sudo apt-get install -y libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64
           libcups2t64 libdrm2 libgbm1 libgtk-3-0t64 libnss3 xvfb
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/supabase-image-cache
+        id: supabase-images
+        with:
+          phase: restore
       - run: bash scripts/tests/supabase-local-harness.test.sh
       - name: Run the Full E2E Suite
         # Linux runners only offer the basic_text safeStorage backend; force it so the
@@ -135,6 +155,10 @@ jobs:
         env:
           NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: "1"
           NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE: ${{ inputs.inject_identity_server_failure && 'after-renderer-launch' || '' }}
+      - uses: ./.github/actions/supabase-image-cache
+        if: steps.supabase-images.outputs.cache-hit != 'true'
+        with:
+          phase: save
       # The Electron helper and E2E runner share this owner for Desktop diagnostics and the
       # bounded, sanitized identity server log. The runner finalizes the log before cleanup.
       - name: Verify E2E failure artifacts contain no credentials
