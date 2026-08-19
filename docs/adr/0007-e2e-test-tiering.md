@@ -17,3 +17,5 @@ Desktop 的 Electron E2E 此前只有一条本地命令：四次构建加全部 
 > **2026-04-30 更新**：`ready/<sha>` 路线已由 [ADR-0011](0011-pr-based-delivery.md) 的 PR 路线取代。现行分层：PR 触及 E2E 相关路径跑 Smoke；需要全量时给 PR 打 `full-e2e` 标签升级为 Full（`workflow_dispatch` 亦可手动触发）；合并后的 `main` push 不再跑任何 E2E（PR 已验证同一棵代码树）。
 - 词汇以本 ADR 为准：**Smoke Suite**（开发或 PR 反馈子集）、**Full E2E Suite**（相关候选的全量门禁）、**Auth Harness**（`tests/auth/harness` 下的一次性 Supabase 栈）；它们是测试基础设施词汇，不进产品语言 CONTEXT.md。
 - 名不副实的 `test:auth`（实际跑全量）正名为 `test:e2e` / `test:e2e:smoke`。
+
+> **2026-08-19 更新**：E2E 触发路径细化——`apps/desktop` 下的文档与根级 markdown、`test-results/` 本地产物，以及只由 Desktop CI 执行的 `tests/unit`、`tests/component` 不再触发 E2E（仍归 Desktop CI 门禁）。另增 `skip-e2e` PR 标签：路径分类命中 E2E 但确无运行必要时可跳过 Smoke；与 `full-e2e` 同时存在时 `full-e2e` 优先，显式升级请求不被静默吞掉。

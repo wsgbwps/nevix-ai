@@ -120,10 +120,14 @@ jobs:
     # PR 只跑 smoke;需要全量时给 PR 打 full-e2e 标签主动升级
     # (workflow_dispatch 也可手动跑全量)。合并后的 main push 不再跑 E2E:
     # PR 已对同一棵代码树验证过,合并后重跑只产生重复成本。
+    # skip-e2e 可跳过已分类的 smoke 运行;full-e2e 的升级请求优先,
+    # 不被陈旧的 skip-e2e 标签静默吞掉。
     if: >-
-      needs.changes.outputs.e2e == 'true' && (
-        github.event_name == 'pull_request' ||
-        contains(github.event.pull_request.labels.*.name, 'full-e2e')
+      needs.changes.outputs.e2e == 'true' &&
+      github.event_name == 'pull_request' &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'full-e2e') ||
+        !contains(github.event.pull_request.labels.*.name, 'skip-e2e')
       )
     uses: ./.github/workflows/desktop-e2e-ci.yml
     with:
@@ -144,8 +148,9 @@ jobs:
       IDENTITY_RESULT: ${{ needs.identity.result }}
       E2E_REQUIRED: ${{ needs.changes.outputs.e2e }}
       # 合并后的 main push 按设计跳过 E2E（PR 已验证同一棵树），gate 只在
-      # pull_request 事件上强制 E2E，否则 skipped 会被误判为失败。
-      E2E_ENFORCED: ${{ github.event_name == 'pull_request' }}
+      # pull_request 事件上强制 E2E，否则 skipped 会被误判为失败。PR 打了
+      # skip-e2e 时同样不强制;full-e2e 优先于 skip-e2e,升级请求仍被强制。
+      E2E_ENFORCED: ${{ github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'full-e2e') || !contains(github.event.pull_request.labels.*.name, 'skip-e2e')) }}
       E2E_RESULT: ${{ needs.e2e.result }}
       # tree-SHA 去重命中时,产品检查被有意跳过（green PR run 已验证同一
       # 棵树），gate 把这种 skipped 视为已满足。
