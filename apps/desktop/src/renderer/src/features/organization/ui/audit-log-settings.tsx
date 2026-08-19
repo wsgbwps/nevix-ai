@@ -21,10 +21,26 @@ import { useVerifiedAuditLogOrganization } from '../model/audit-log-access'
 
 type GetSession = () => Promise<AuthenticatedOrganizationSession | undefined>
 
-export type AuditLogSettingsContribution =
-  | { readonly status: 'clean' }
-  | { readonly status: 'audit-export-active' }
+type SettingsNavigateSemantics = 'navigable' | 'confirm-discard' | 'blocked'
+type SettingsCloseSemantics = 'allow' | 'confirm' | 'defer' | 'deny'
 
+// Structurally mirrors the Settings Flow's SettingsLeaveSemantics contract
+// (app/settings); Features do not import across that seam.
+export type AuditLogSettingsContribution = {
+  readonly navigate: SettingsNavigateSemantics
+  readonly close: SettingsCloseSemantics
+  readonly discard?: () => void
+}
+
+const CLEAN_CONTRIBUTION: AuditLogSettingsContribution = {
+  navigate: 'navigable',
+  close: 'allow'
+}
+
+const EXPORT_ACTIVE_CONTRIBUTION: AuditLogSettingsContribution = {
+  navigate: 'blocked',
+  close: 'deny'
+}
 const actionTranslationKeys = {
   invitation_created: 'audit.actions.invitationCreated',
   invitation_resent: 'audit.actions.invitationResent',
@@ -117,7 +133,7 @@ export function AuditLogSettings({
       const freshAccess = await refresh()
       if (freshAccess?.status !== 'authorized') return
 
-      onContributionChange({ status: 'audit-export-active' })
+      onContributionChange(EXPORT_ACTIVE_CONTRIBUTION)
       exportActive = true
       const session = await getSession()
       if (!session) throw new Error('Audit Log Session is unavailable.')
@@ -145,7 +161,7 @@ export function AuditLogSettings({
     } catch {
       // Keep the timeline intact so the User can retry after a cancelled dialog or local I/O error.
     } finally {
-      if (exportActive) onContributionChange({ status: 'clean' })
+      if (exportActive) onContributionChange(CLEAN_CONTRIBUTION)
       setIsExporting(false)
     }
   }

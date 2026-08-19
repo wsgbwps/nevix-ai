@@ -3,7 +3,7 @@ import { Link, useLocation } from '@tanstack/react-router'
 import { ChevronsUpDownIcon, HomeIcon, LogOutIcon, SettingsIcon } from 'lucide-react'
 import { useAuthenticationState } from '../authentication-state'
 import { useActiveOrganization } from '../../features/organization'
-import { createSettingsEntry } from '../pages/settings-navigation'
+import { createSettingsEntry } from '../settings'
 import { Avatar, AvatarFallback } from '../../components/ui/avatar'
 import {
   Breadcrumb,

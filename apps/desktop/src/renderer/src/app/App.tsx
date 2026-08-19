@@ -10,8 +10,6 @@ import {
 import { hasCompletedProfile } from '../features/profile'
 import { AuthenticationStateContext, useAuthenticationState } from './authentication-state'
 import { OrdinaryCloseProvider } from './ordinary-close'
-import { coordinateSettingsBack } from './pages/settings-back-navigation'
-import { SettingsBackNavigationContext } from './pages/settings-coordinator'
 import { routeTree } from './routeTree.gen'
 
 function App(): React.JSX.Element {
@@ -20,14 +18,8 @@ function App(): React.JSX.Element {
   // so URL synchronization has no value (apps/desktop/docs/adr/0004-renderer-routing-topology.md).
   // The app always boots unauthenticated (status starts as restoring), so the initial entry is
   // the authentication view.
-  const settingsNavigation = useMemo(() => {
-    const history = createMemoryHistory({ initialEntries: ['/auth'] })
-    return { history, back: coordinateSettingsBack(history) }
-  }, [])
-  const router = useMemo(
-    () => createRouter({ routeTree, history: settingsNavigation.history }),
-    [settingsNavigation.history]
-  )
+  const history = useMemo(() => createMemoryHistory({ initialEntries: ['/auth'] }), [])
+  const router = useMemo(() => createRouter({ routeTree, history }), [history])
 
   return (
     <OrdinaryCloseProvider>
@@ -50,9 +42,7 @@ function App(): React.JSX.Element {
               noticeSurface={authentication.rememberedEmailPersistenceNoticeSurface}
               onShown={authentication.consumeRememberedEmailPersistenceNotice}
             />
-            <SettingsBackNavigationContext.Provider value={settingsNavigation.back}>
-              <RouterProvider router={router} />
-            </SettingsBackNavigationContext.Provider>
+            <RouterProvider router={router} />
           </ActiveOrganizationProvider>
         </OrganizationOnboardingProvider>
       </AuthenticationStateContext.Provider>

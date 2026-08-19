@@ -152,3 +152,7 @@ _Avoid_: Settings Domain, Preferences Center, Settings Dialog
 **Settings Section**:
 Settings Page 中可独立选择并单独呈现的一级设置范围；一个 Settings Section 可以包含多个下属设置块或内部 Tab，但这些内容不成为同级导航入口。
 _Avoid_: Settings Route, Settings Domain, Anchor Section
+
+**Settings Flow**:
+app 拥有的深模块（`app/settings/`），聚合 Settings 页面外壳、Section 注册表、离开确认（discard prompt）、路由 blocker 与窗口关闭编排；public interface 只有页面组件与 Settings entry 构造。Feature 以导航语义（`SettingsLeaveSemantics`：`navigate` / `close` / `discard`）参与，不暴露自身内部状态；`app/pages/` 不再承载 Settings。Settings Page 是它的呈现，不是独立 owner。
+_Avoid_: Settings Domain, Settings Feature, Settings Controller, settings 模块（指 Feature 时）
