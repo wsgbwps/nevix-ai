@@ -1,7 +1,15 @@
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from '@tanstack/react-router'
-import { ChevronsUpDownIcon, HomeIcon, LogOutIcon, SettingsIcon } from 'lucide-react'
+import {
+  ChevronsUpDownIcon,
+  HomeIcon,
+  LogOutIcon,
+  MoonIcon,
+  SettingsIcon,
+  SunIcon
+} from 'lucide-react'
 import { useAuthenticationState } from '../authentication-state'
+import { type Theme, useTheme } from '../../hooks/use-theme'
 import { useActiveOrganization } from '../../features/organization'
 import { createSettingsEntry } from '../settings'
 import { Avatar, AvatarFallback } from '../../components/ui/avatar'
@@ -16,7 +24,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '../../components/ui/dropdown-menu'
 import { Separator } from '../../components/ui/separator'
@@ -65,6 +78,7 @@ export function AppShell({
   const authentication = useAuthenticationState()
   const { activeOrganization } = useActiveOrganization()
   const location = useLocation()
+  const { theme, setTheme } = useTheme()
 
   if (authentication.status !== 'authenticated') {
     // The root route is already navigating to the authentication view; render nothing on the
@@ -159,6 +173,27 @@ export function AppShell({
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="cursor-pointer">
+                        {theme === 'dark' ? <MoonIcon /> : <SunIcon />}
+                        {t(theme === 'dark' ? 'shell.theme.dark' : 'shell.theme.light')}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="min-w-40">
+                        <DropdownMenuRadioGroup
+                          value={theme}
+                          onValueChange={(value) => setTheme(value as Theme)}
+                        >
+                          <DropdownMenuRadioItem value="light" className="cursor-pointer">
+                            <SunIcon />
+                            {t('shell.theme.light')}
+                          </DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="dark" className="cursor-pointer">
+                            <MoonIcon />
+                            {t('shell.theme.dark')}
+                          </DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                     <DropdownMenuItem asChild className="cursor-pointer">
                       <Link
                         to="/settings"
