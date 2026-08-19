@@ -62,7 +62,10 @@ jobs:
     if: inputs.suite == 'smoke'
     # Pinned runner image so an unannounced runner switch cannot change the stack.
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # #72's image-cache save (docker save of the whole stack) runs as a post-step
+    # after the suite; 10m cut the job mid-snapshot and reported an all-green
+    # suite as cancelled. Budget the save phase explicitly.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
