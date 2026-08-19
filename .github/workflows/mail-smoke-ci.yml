@@ -12,6 +12,8 @@ jobs:
     name: Supabase stack + Identity integration
     # Pinned runner image so an unannounced runner switch cannot change the stack.
     runs-on: ubuntu-24.04
+    # Starts a full Supabase stack; median ~5 min, allow generous headroom.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4

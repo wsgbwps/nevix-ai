@@ -11,6 +11,7 @@ jobs:
   quality:
     name: Vet and test
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6

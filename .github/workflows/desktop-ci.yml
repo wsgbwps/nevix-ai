@@ -14,6 +14,9 @@ jobs:
   quality:
     name: Lint and unit test
     runs-on: ubuntu-latest
+    # Unbounded external downloads (Playwright CDN) have hung this job for
+    # 25+ minutes in practice; cap it so a hang fails fast instead.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
@@ -23,6 +26,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # Cache the Playwright browser so `playwright install` is a no-op on hit;
+      # a cold CDN download is the known hang point of this job.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @nevix/desktop lint
       - run: pnpm --filter @nevix/desktop verify:architecture
@@ -33,6 +44,7 @@ jobs:
   build:
     name: Typecheck and build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4

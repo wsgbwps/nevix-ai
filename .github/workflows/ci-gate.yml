@@ -26,6 +26,7 @@ jobs:
   changes:
     name: Validate, classify, and test harness
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     # dedup 查询 GitHub API:PR head、commit 树、green run 列表。
     permissions:
       contents: read
@@ -132,6 +133,7 @@ jobs:
     if: always()
     needs: [changes, desktop, server, identity, e2e]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
       CHANGES_RESULT: ${{ needs.changes.result }}
       DESKTOP_REQUIRED: ${{ needs.changes.outputs.desktop }}
