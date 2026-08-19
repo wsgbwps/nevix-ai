@@ -1,8 +1,14 @@
-package integrationtest
+// Package-local real-database test for the Outbox persistence seam: the
+// verification_code_id foreign-key index must cover every non-null reference
+// status-independently, so terminal Outbox rows stay indexed. It reads the
+// PostgreSQL catalog and EXPLAIN plans on the owner credential; opt-in like
+// the rest of the real-database tests (scripts/test-identity-integration.sh).
+package outbox
 
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +43,7 @@ func TestOutboxVerificationCodeForeignKeyIndexCoversEveryReferenceStatus(t *test
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, requireEnv(t, "NEVIX_DATABASE_URL"))
+	pool, err := pgxpool.New(ctx, requireDatabaseURL(t))
 	if err != nil {
 		t.Fatalf("connect to database: %v", err)
 	}
@@ -98,4 +104,20 @@ func TestOutboxVerificationCodeForeignKeyIndexCoversEveryReferenceStatus(t *test
 	if len(document) != 1 || !document[0].Plan.usesIndex(outboxVerificationCodeIndex) {
 		t.Errorf("status-independent Outbox reference plan does not use %s: %s", outboxVerificationCodeIndex, rawPlan)
 	}
+}
+
+// requireDatabaseURL returns the owner-credential database URL this
+// package-local real-database test needs, with the suite's shared opt-in
+// semantics: plain `go test ./...` skips without the harness, while
+// NEVIX_IDENTITY_INTEGRATION_REQUESTED=1 makes a missing value fatal.
+func requireDatabaseURL(t *testing.T) string {
+	t.Helper()
+	databaseURL := os.Getenv("NEVIX_DATABASE_URL")
+	if databaseURL == "" {
+		if os.Getenv("NEVIX_IDENTITY_INTEGRATION_REQUESTED") == "1" {
+			t.Fatalf("identity integration was requested, but NEVIX_DATABASE_URL is not set; run ./scripts/test-identity-integration.sh from the repository root to start the supported harness")
+		}
+		t.Skip("identity integration was not requested: NEVIX_DATABASE_URL is not set (run ./scripts/test-identity-integration.sh)")
+	}
+	return databaseURL
 }

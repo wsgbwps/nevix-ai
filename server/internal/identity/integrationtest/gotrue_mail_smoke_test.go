@@ -15,24 +15,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/nevix-ai/server/internal/identity/mailpittest"
 )
-
-func requireEnv(t *testing.T, key string) string {
-	t.Helper()
-	value := os.Getenv(key)
-	if value == "" {
-		if os.Getenv("NEVIX_IDENTITY_INTEGRATION_REQUESTED") == "1" {
-			t.Fatalf("identity integration was requested, but %s is not set; run ./scripts/test-identity-integration.sh from the repository root to start the supported harness", key)
-		}
-		t.Skipf("identity integration was not requested: %s is not set (run ./scripts/test-identity-integration.sh)", key)
-	}
-	return value
-}
 
 func TestGoTrueSignupDeliversConfirmationEmailToMailpit(t *testing.T) {
 	supabaseURL := requireEnv(t, "NEVIX_SUPABASE_URL")
@@ -69,7 +54,7 @@ func TestGoTrueSignupDeliversConfirmationEmailToMailpit(t *testing.T) {
 		t.Fatalf("signup returned status %s: %s", resp.Status, payload)
 	}
 
-	mailpit := mailpittest.NewClient(mailpitURL)
+	mailpit := newMailpitClient(mailpitURL)
 	messages, err := mailpit.WaitForMessages(ctx, fmt.Sprintf("to:%q", recipient))
 	if err != nil {
 		t.Fatalf("confirmation email never reached Mailpit: %v", err)

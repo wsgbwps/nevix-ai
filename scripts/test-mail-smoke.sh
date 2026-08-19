@@ -155,6 +155,9 @@ assert_identity_integration_executed() {
     TestRLSClientWriteBoundary
     TestCommittedOutboxRowIsDeliveredToMailpit
     TestRunRejectsOwnerCredential
+    TestHistoricalInvitationCodeLookupUsesPartialIndex
+    TestIssuanceRateLimitQueriesConstrainCompositeIndexes
+    TestOutboxVerificationCodeForeignKeyIndexCoversEveryReferenceStatus
   )
 
   passed_count="$(grep -Ec '^--- PASS: Test[^/[:space:]]+[[:space:]]+\(' "$output_file" || true)"
@@ -217,20 +220,19 @@ export NEVIX_CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173"
 
 identity_test_log="$(mktemp -t nevix-identity-integration.XXXXXX)"
 set +e
-# The writetx package rides the same checked invocation: its real-role
-# evidence (owner rejected, assumed role rejected, direct identity_app
-# accepted) must execute with zero skips whenever the harness runs.
-go test -C server -race -count=1 -v ./internal/identity/integrationtest ./internal/identity/writetx | tee "$identity_test_log"
+# One recursive, serialized invocation covers the whole identity tree: the
+# Module-seam integration suite, the writetx real-role evidence (owner
+# rejected, assumed role rejected, direct identity_app accepted), and the
+# package-local real-database tests (query plans, the outbox FK index) all
+# ride the same checked run with zero skips. -p 1 serializes packages
+# because they share one stack whose state some tests mutate (Mailpit
+# stop/start, planner statistics); fast unit tests merely re-run first.
+go test -C server -race -count=1 -p 1 -v ./internal/identity/... | tee "$identity_test_log"
 test_status="${PIPESTATUS[0]}"
 set -e
 if [[ "$test_status" -ne 0 ]]; then
   exit "$test_status"
 fi
 assert_identity_integration_executed "$identity_test_log"
-
-echo "==> Running database query-plan integration tests"
-go test -C server -race -count=1 -v \
-  -run '^(TestHistoricalInvitationCodeLookupUsesPartialIndex|TestIssuanceRateLimitQueriesConstrainCompositeIndexes)$' \
-  ./internal/identity/invitations ./internal/identity/verification
 
 echo "==> Identity integration tests passed"

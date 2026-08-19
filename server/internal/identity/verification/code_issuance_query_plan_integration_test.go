@@ -58,10 +58,7 @@ func TestIssuanceRateLimitQueriesConstrainCompositeIndexes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	databaseURL := os.Getenv("NEVIX_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("skipping query-plan test: NEVIX_DATABASE_URL is not set (run scripts/test-mail-smoke.sh)")
-	}
+	databaseURL := requireDatabaseURL(t)
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		t.Fatalf("connect to database: %v", err)
@@ -161,4 +158,20 @@ func TestIssuanceRateLimitQueriesConstrainCompositeIndexes(t *testing.T) {
 			t.Errorf("%s Index Cond = %q, want both %s and created_at", want.indexName, condition, want.column)
 		}
 	}
+}
+
+// requireDatabaseURL returns the owner-credential database URL this
+// package-local real-database test needs, with the suite's shared opt-in
+// semantics: plain `go test ./...` skips without the harness, while
+// NEVIX_IDENTITY_INTEGRATION_REQUESTED=1 makes a missing value fatal.
+func requireDatabaseURL(t *testing.T) string {
+	t.Helper()
+	databaseURL := os.Getenv("NEVIX_DATABASE_URL")
+	if databaseURL == "" {
+		if os.Getenv("NEVIX_IDENTITY_INTEGRATION_REQUESTED") == "1" {
+			t.Fatalf("identity integration was requested, but NEVIX_DATABASE_URL is not set; run ./scripts/test-identity-integration.sh from the repository root to start the supported harness")
+		}
+		t.Skip("identity integration was not requested: NEVIX_DATABASE_URL is not set (run ./scripts/test-identity-integration.sh)")
+	}
+	return databaseURL
 }

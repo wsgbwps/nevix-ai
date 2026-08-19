@@ -222,6 +222,13 @@ server/
 
 跨 Module 的 Domain Event 类型统一定义在 `internal/event/types.go`，Module 内不另建同名事件类型目录或文件。
 
+测试摆放按**边界**决定，不按是否使用真实数据库决定：
+
+- 验证 Module 公开 seam（`LoadConfig`/`NewModule`/`Register`/`RunWorkers` 装配、GoTrue/PostgREST 数据平面、SMTP 投递、OpenAPI 契约）的测试归该 Module 的 `integrationtest/`（Identity 即 `internal/identity/integrationtest/`）
+- 验证 owning package 内部责任（SQL、query plan、事务、catalog）的测试留在该 package；依赖真实数据库等外部资源的以 `*_integration_test.go` 命名（资源标签，非 build tag），如 `writetx/`、`invitations/`、`verification/`、`outbox/` 内
+- 测试支持代码只存在于 `*_test.go` 测试编译单元；不提前创建跨 Module 共享 testkit（出现第二个真实 Module consumer 且语义一致时再议）
+- 缺环境的真库测试：普通 `go test ./...` skip；专用入口（`make test-identity-integration`）设 `NEVIX_IDENTITY_INTEGRATION_REQUESTED=1`，缺环境即 fail，并以零 skip + 代表性 sentinel 证明关键保障实际执行
+
 ---
 
 ### API 契约 (`contracts/`)

@@ -25,30 +25,9 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/go-chi/chi/v5"
-
-	"github.com/nevix-ai/server/internal/event"
-	"github.com/nevix-ai/server/internal/identity"
-	"github.com/nevix-ai/server/internal/identity/mailpittest"
 )
 
 var codePattern = regexp.MustCompile(`\b\d{6}\b`)
-
-// commandRouter mounts the Module's external commands through a chi Group
-// exactly as the composition root does, so tests assert only the HTTP
-// contract (group-scoped middleware runs only on matched routes, so the
-// derived preflight twins behave as in production).
-func (h *harness) commandRouter(t *testing.T) http.Handler {
-	t.Helper()
-	m, err := identity.NewModule(context.Background(), h.runtime, h.cfg)
-	if err != nil {
-		t.Fatalf("construct identity module: %v", err)
-	}
-	router := chi.NewRouter()
-	router.Group(func(r chi.Router) { m.Register(r, event.NewInMemoryBus()) })
-	return router
-}
 
 // issueCode posts the issuance command over the Module's HTTP surface from
 // the given client IP and returns the status code and raw response body.
@@ -90,7 +69,7 @@ func extractCode(t *testing.T, body string) string {
 // write seam, backdated by ageSeconds.
 func (h *harness) seedIssuance(t *testing.T, ctx context.Context, email, ip string, ageSeconds int) {
 	t.Helper()
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`INSERT INTO identity.verification_codes (email, code_hash, request_ip, created_at, expires_at)
 		 VALUES ($1, $2, $3, now() - make_interval(secs => $4), now())`,
 		email, "seeded", ip, ageSeconds,
@@ -100,7 +79,7 @@ func (h *harness) seedIssuance(t *testing.T, ctx context.Context, email, ip stri
 }
 
 // waitForMessageCount polls Mailpit until exactly want messages match.
-func waitForMessageCount(t *testing.T, ctx context.Context, client *mailpittest.Client, query string, want int) []mailpittest.MessageSummary {
+func waitForMessageCount(t *testing.T, ctx context.Context, client *mailpitClient, query string, want int) []mailpitMessageSummary {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
@@ -119,12 +98,12 @@ func waitForMessageCount(t *testing.T, ctx context.Context, client *mailpittest.
 func (h *harness) assertIssuedRows(t *testing.T, ctx context.Context, email string, wantCodes, wantOutbox int) {
 	t.Helper()
 	var codeRows, outboxRows int
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM identity.verification_codes WHERE email = $1`, email,
 	).Scan(&codeRows); err != nil {
 		t.Fatalf("count code rows: %v", err)
 	}
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT count(*) FROM identity.outbox_messages WHERE recipient = $1`, email,
 	).Scan(&outboxRows); err != nil {
 		t.Fatalf("count outbox rows: %v", err)
@@ -162,7 +141,7 @@ func TestIssuedCodeEmailArrivesInMailpit(t *testing.T) {
 
 	// The server stores only the HMAC hash of the code.
 	var storedHash, rowStatus string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT code_hash, status FROM identity.verification_codes WHERE email = $1`, email,
 	).Scan(&storedHash, &rowStatus); err != nil {
 		t.Fatalf("read verification code row: %v", err)
@@ -179,7 +158,7 @@ func TestIssuedCodeEmailArrivesInMailpit(t *testing.T) {
 
 	// The queued email carries the configured sender.
 	var sender string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT sender FROM identity.outbox_messages WHERE recipient = $1`, email,
 	).Scan(&sender); err != nil {
 		t.Fatalf("read outbox row: %v", err)
@@ -294,7 +273,7 @@ func TestIPRateLimitAppliesIndependently(t *testing.T) {
 		t.Fatalf("request from fresh IP status = %d, want %d (body %q)", status, http.StatusAccepted, body)
 	}
 	var storedIP string
-	if err := h.pool.QueryRow(ctx,
+	if err := h.fixturePool.QueryRow(ctx,
 		`SELECT request_ip FROM identity.verification_codes WHERE email = $1`, email,
 	).Scan(&storedIP); err != nil {
 		t.Fatalf("read code row: %v", err)
@@ -324,7 +303,7 @@ func TestResendSupersedesPreviousCode(t *testing.T) {
 	oldCode := extractCode(t, firstDetail.Text)
 
 	// Move the first issuance beyond the cooldown through the write seam.
-	if _, err := h.pool.Exec(ctx,
+	if _, err := h.fixturePool.Exec(ctx,
 		`UPDATE identity.verification_codes
 		 SET created_at = now() - make_interval(secs => 61)
 		 WHERE email = $1`, email,
@@ -353,7 +332,7 @@ func TestResendSupersedesPreviousCode(t *testing.T) {
 
 	// The old code is immediately superseded; the only active code is the
 	// one in the newest email.
-	rows, err := h.pool.Query(ctx,
+	rows, err := h.fixturePool.Query(ctx,
 		`SELECT code_hash, status, superseded_at IS NOT NULL
 		 FROM identity.verification_codes WHERE email = $1 ORDER BY created_at`, email)
 	if err != nil {

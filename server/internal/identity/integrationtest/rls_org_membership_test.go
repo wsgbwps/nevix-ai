@@ -24,7 +24,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nevix-ai/server/internal/identity/mailpittest"
 )
 
 // rlsStack wires the RLS tests to the running local Supabase stack.
@@ -32,7 +31,7 @@ type rlsStack struct {
 	supabaseURL    string
 	publishableKey string
 	pool           *pgxpool.Pool
-	mailpit        *mailpittest.Client
+	mailpit        *mailpitClient
 }
 
 func newRLSStack(t *testing.T, ctx context.Context) *rlsStack {
@@ -51,7 +50,7 @@ func newRLSStack(t *testing.T, ctx context.Context) *rlsStack {
 		supabaseURL:    supabaseURL,
 		publishableKey: publishableKey,
 		pool:           pool,
-		mailpit:        mailpittest.NewClient(mailpitURL),
+		mailpit:        newMailpitClient(mailpitURL),
 	}
 }
 
