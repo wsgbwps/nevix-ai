@@ -17,8 +17,6 @@ import {
   ListRestartIcon,
   LoaderCircleIcon,
   Maximize2Icon,
-  MessageSquarePlusIcon,
-  MoreHorizontalIcon,
   PencilLineIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -197,80 +195,6 @@ function TaskProgress({ scenario }: { scenario: Scenario }): React.JSX.Element {
           )}
           style={{ width: `${scenario.progress}%` }}
         />
-      </div>
-    </div>
-  )
-}
-
-function SessionList({
-  activeSessionId,
-  hasDraftSession,
-  onNewSession,
-  onSelectSession
-}: {
-  activeSessionId: string
-  hasDraftSession: boolean
-  onNewSession: () => void
-  onSelectSession: (id: string, scenario: ScenarioKey) => void
-}): React.JSX.Element {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between px-3 pt-3 pb-2">
-        <div>
-          <p className="text-sm font-semibold">我的创作</p>
-          <p className="text-muted-foreground text-[11px]">仅你可见与编辑</p>
-        </div>
-        <Button size="icon-sm" variant="outline" aria-label="新建创作" onClick={onNewSession}>
-          <MessageSquarePlusIcon />
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-3">
-        {hasDraftSession ? (
-          <button
-            className={cn(
-              'hover:bg-muted/60 flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left',
-              activeSessionId === 'new' && 'bg-accent'
-            )}
-            onClick={() => onSelectSession('new', 'queued')}
-          >
-            <span className="bg-primary mt-1 size-1.5 shrink-0 rounded-full" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-medium">未命名创作</span>
-              <span className="text-muted-foreground block text-[10px]">草稿 · 刚刚</span>
-            </span>
-          </button>
-        ) : null}
-        {SESSION_ITEMS.map((session) => {
-          const itemScenario = scenarioByKey(session.scenario)
-          return (
-            <button
-              key={session.id}
-              className={cn(
-                'hover:bg-muted/60 flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors',
-                activeSessionId === session.id && 'bg-accent'
-              )}
-              onClick={() => onSelectSession(session.id, session.scenario)}
-            >
-              <span
-                className={cn(
-                  'mt-1 size-1.5 shrink-0 rounded-full',
-                  itemScenario.tone === 'primary' && 'bg-primary',
-                  itemScenario.tone === 'warning' && 'bg-warning',
-                  itemScenario.tone === 'danger' && 'bg-destructive',
-                  itemScenario.tone === 'success' && 'bg-emerald-400',
-                  itemScenario.tone === 'neutral' && 'bg-muted-foreground'
-                )}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium">{session.title}</span>
-                <span className="text-muted-foreground block text-[10px]">{session.meta}</span>
-              </span>
-              {activeSessionId === session.id ? (
-                <ChevronRightIcon className="mt-0.5 size-3" />
-              ) : null}
-            </button>
-          )
-        })}
       </div>
     </div>
   )
@@ -640,8 +564,8 @@ function ResultActions({
 }
 
 type VariantProps = {
+  includeProductRail: boolean
   activeSessionId: string
-  hasDraftSession: boolean
   mediaMode: MediaMode
   videoComposer: VideoComposer
   prompt: string
@@ -667,99 +591,388 @@ type VariantProps = {
   onRegenerate: () => void
   onRetry: () => void
   onOpenAssets: () => void
+  onToggleState: () => void
 }
 
 function VariantA(props: VariantProps): React.JSX.Element {
+  const isEmptySession = props.activeSessionId === 'new'
+  const templateCards = [
+    {
+      title: '商品场景合成',
+      detail: '将商品自然放入真实使用场景',
+      prompt: '将商品放入干净明亮的生活方式场景，突出真实材质与核心卖点。',
+      gradient: 'from-amber-950 via-stone-900 to-sky-950'
+    },
+    {
+      title: '系列主图变体',
+      detail: '统一风格，快速探索多种构图',
+      prompt: '围绕同一商品生成一组视觉统一、构图不同的跨境电商主图。',
+      gradient: 'from-sky-950 via-zinc-900 to-violet-950'
+    },
+    {
+      title: '短视频广告创意',
+      detail: '用清晰节奏展示商品使用价值',
+      prompt: '为商品制作一支节奏明快的短视频广告，包含开场钩子、卖点展示和结尾定格。',
+      gradient: 'from-rose-950 via-stone-900 to-amber-950'
+    }
+  ] as const
+
   return (
-    <section className="grid min-h-0 flex-1 grid-cols-[176px_minmax(0,1fr)_304px] overflow-hidden">
-      <aside className="bg-card/55 flex min-h-0 border-r">
-        <SessionList
-          activeSessionId={props.activeSessionId}
-          hasDraftSession={props.hasDraftSession}
-          onNewSession={props.onNewSession}
-          onSelectSession={props.onSelectSession}
-        />
-      </aside>
-      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden px-4 pt-3 pb-20">
-        <header className="mb-3 flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-semibold">夏季跑鞋主图</h1>
-              <StatusBadge scenario={props.scenario} />
+    <section className="flex min-h-0 flex-1 overflow-hidden bg-[#0d0e11] text-zinc-100">
+      {props.includeProductRail ? (
+        <nav className="flex w-[60px] shrink-0 flex-col items-center border-r border-white/[0.06] bg-[#101115] py-3">
+          <div className="mb-7 grid size-8 place-items-center rounded-xl bg-cyan-300 text-sm font-black text-zinc-950 shadow-lg shadow-cyan-400/10">
+            N
+          </div>
+          <div className="flex flex-1 flex-col gap-4">
+            {[
+              { label: '灵感', icon: <ImageIcon /> },
+              { label: '生成', icon: <SparklesIcon />, active: true },
+              { label: '资产', icon: <FolderOpenIcon /> }
+            ].map((item) => (
+              <button
+                key={item.label}
+                className={cn(
+                  'flex w-11 flex-col items-center gap-1 rounded-lg py-2 text-[9px] transition-colors [&_svg]:size-4',
+                  item.active ? 'bg-white/[0.07] text-white' : 'text-zinc-500 hover:text-zinc-200'
+                )}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+          <button className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-cyan-800 to-violet-900 text-[10px] text-white">
+            E
+          </button>
+        </nav>
+      ) : null}
+
+      <aside className="flex w-[210px] shrink-0 flex-col border-r border-white/[0.06] bg-[#15161a]">
+        <div className="flex h-14 items-center justify-between px-4">
+          <span className="text-sm font-semibold">开启创作</span>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            className="text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"
+            aria-label="收起会话列表"
+          >
+            <SlidersHorizontalIcon />
+          </Button>
+        </div>
+        <div className="px-2">
+          <button
+            className="flex h-9 w-full items-center gap-2 rounded-lg bg-white/[0.065] px-3 text-left text-xs font-medium text-zinc-200 hover:bg-white/[0.09]"
+            onClick={props.onNewSession}
+          >
+            <PencilLineIcon className="size-3.5" />
+            新对话
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pt-3">
+          <button
+            className={cn(
+              'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors',
+              isEmptySession ? 'bg-[#24262d]' : 'hover:bg-white/[0.04]'
+            )}
+            onClick={() => props.onSelectSession('new', 'queued')}
+          >
+            <div className="grid size-8 shrink-0 place-items-center rounded-md bg-gradient-to-br from-cyan-950 to-slate-800">
+              <SparklesIcon className="size-3.5 text-cyan-200" />
             </div>
-            <p className="text-muted-foreground mt-1 text-[11px]">
-              图片 · 规格快照 #3 · 创建者私有
-            </p>
-          </div>
-          <Button size="icon-sm" variant="ghost" aria-label="更多会话操作">
-            <MoreHorizontalIcon />
-          </Button>
-        </header>
-        <div className="bg-card/55 mb-3 rounded-xl border p-3">
-          <TaskProgress scenario={props.scenario} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium">默认创作</span>
+              <span className="block truncate text-[9px] text-zinc-500">空白会话 · 仅自己可见</span>
+            </span>
+          </button>
+          {SESSION_ITEMS.slice(0, 4).map((session) => (
+            <button
+              key={session.id}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors',
+                props.activeSessionId === session.id ? 'bg-[#24262d]' : 'hover:bg-white/[0.04]'
+              )}
+              onClick={() => props.onSelectSession(session.id, session.scenario)}
+            >
+              <div
+                className={cn(
+                  'relative grid size-8 shrink-0 place-items-center rounded-md bg-gradient-to-br',
+                  RESULT_GRADIENTS[SESSION_ITEMS.indexOf(session) % RESULT_GRADIENTS.length]
+                )}
+              >
+                {session.scenario === 'processing' ? (
+                  <LoaderCircleIcon className="size-3.5 animate-spin text-cyan-200" />
+                ) : (
+                  <FileImageIcon className="size-3.5 text-white/75" />
+                )}
+                <span
+                  className={cn(
+                    'absolute -right-0.5 -bottom-0.5 size-2 rounded-full border border-[#15161a]',
+                    session.scenario === 'processing' && 'bg-cyan-400',
+                    session.scenario === 'partial' && 'bg-amber-400',
+                    session.scenario === 'queued' && 'bg-zinc-500',
+                    session.scenario === 'failed' && 'bg-red-400'
+                  )}
+                />
+              </div>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium">{session.title}</span>
+                <span className="block truncate text-[9px] text-zinc-500">{session.meta}</span>
+              </span>
+            </button>
+          ))}
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <ResultGrid scenario={props.scenario} />
-          <div className="mt-3">
-            <ResultActions
-              scenario={props.scenario}
-              onEdit={props.onEdit}
-              onRegenerate={props.onRegenerate}
-              onRetry={props.onRetry}
-              onOpenAssets={props.onOpenAssets}
-            />
-          </div>
-        </div>
-      </div>
-      <aside className="bg-card/55 min-h-0 overflow-y-auto border-l px-3 pt-3 pb-20">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold">创作规格</p>
-            <p className="text-muted-foreground text-[10px]">编辑只影响下一次提交</p>
-          </div>
-          <SlidersHorizontalIcon className="text-muted-foreground size-4" />
-        </div>
-        <div className="space-y-4">
-          <ModePicker
-            mediaMode={props.mediaMode}
-            videoComposer={props.videoComposer}
-            onMediaModeChange={props.onMediaModeChange}
-            onVideoComposerChange={props.onVideoComposerChange}
-          />
-          <ReferenceMaterials
-            mediaMode={props.mediaMode}
-            videoComposer={props.videoComposer}
-            referenceCount={props.referenceCount}
-            onAdd={props.onAddReference}
-            onRemove={props.onRemoveReference}
-          />
-          <PromptBox prompt={props.prompt} onPromptChange={props.onPromptChange} />
-          <ParameterControls
-            mediaMode={props.mediaMode}
-            ratio={props.ratio}
-            resolution={props.resolution}
-            quantity={props.quantity}
-            onRatioChange={props.onRatioChange}
-            onResolutionChange={props.onResolutionChange}
-            onQuantityChange={props.onQuantityChange}
-          />
-          <div className="bg-muted/30 rounded-lg border p-2.5">
-            <p className="text-xs font-medium">
-              {props.mediaMode === 'image' ? '图片模型 V1' : '视频模型 V1'}
-            </p>
-            <p className="text-muted-foreground mt-0.5 text-[10px]">
-              Organization 连接 · 能力已验证
-            </p>
-          </div>
-          <RightsConfirmation
-            confirmed={props.rightsConfirmed}
-            onChange={props.onRightsConfirmedChange}
-          />
-          <Button className="w-full" onClick={props.onSubmit}>
-            <SparklesIcon /> 开始生成 {props.quantity} 个结果
-          </Button>
+        <div className="border-t border-white/[0.05] px-3 py-3 text-[9px] text-zinc-600">
+          Creation Session 由创建者私有
         </div>
       </aside>
+
+      <main className="relative min-w-0 flex-1 overflow-hidden bg-[#0d0e11]">
+        <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-white/[0.08] bg-[#18191e] text-zinc-300 hover:bg-[#22242b] hover:text-white"
+            onClick={props.onOpenAssets}
+          >
+            <FolderOpenIcon /> 资产库
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="outline"
+            className="border-white/[0.08] bg-[#18191e] text-zinc-400 hover:bg-[#22242b] hover:text-white"
+            aria-label="查看原型完整状态"
+            onClick={props.onToggleState}
+          >
+            <InfoIcon />
+          </Button>
+        </div>
+
+        <div className="h-full overflow-y-auto px-6 pb-[190px]">
+          {isEmptySession ? (
+            <div className="mx-auto flex min-h-full max-w-[720px] flex-col items-center justify-center pb-10">
+              <div className="mb-6 text-center">
+                <div className="mx-auto mb-3 grid size-10 place-items-center rounded-2xl bg-white/[0.05] text-cyan-200">
+                  <SparklesIcon className="size-5" />
+                </div>
+                <h1 className="text-xl font-semibold tracking-tight">你好，想创作什么？</h1>
+                <p className="mt-2 text-xs text-zinc-500">从描述开始，或选一个电商创作起点</p>
+              </div>
+              <div className="grid w-full grid-cols-3 gap-2.5">
+                {templateCards.map((card, index) => (
+                  <button
+                    key={card.title}
+                    className="group overflow-hidden rounded-xl border border-white/[0.07] bg-[#15161a] text-left transition-colors hover:border-white/[0.15] hover:bg-[#191a1f]"
+                    onClick={() => props.onPromptChange(card.prompt)}
+                  >
+                    <div
+                      className={cn(
+                        'relative aspect-[1.65] overflow-hidden bg-gradient-to-br',
+                        card.gradient
+                      )}
+                    >
+                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_30%,rgba(255,255,255,0.18),transparent_32%)]" />
+                      <div className="absolute right-4 bottom-3 grid size-11 place-items-center rounded-[45%] bg-white/80 shadow-2xl transition-transform group-hover:scale-105">
+                        {index === 2 ? (
+                          <VideoIcon className="size-5 text-zinc-800" />
+                        ) : (
+                          <ImageIcon className="size-5 text-zinc-800" />
+                        )}
+                      </div>
+                      <span className="absolute bottom-2 left-2 rounded-md bg-black/35 px-1.5 py-0.5 text-[9px] text-white/80 backdrop-blur">
+                        Official Template
+                      </span>
+                    </div>
+                    <div className="p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-medium text-zinc-200">{card.title}</p>
+                        <span className="rounded-md border border-white/[0.08] px-1.5 py-0.5 text-[9px] text-zinc-500">
+                          试一试
+                        </span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-[9px] leading-4 text-zinc-600">
+                        {card.detail}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mx-auto max-w-[820px] pt-16">
+              <div className="mb-3 flex items-start justify-between gap-4">
+                <div>
+                  <h1 className="text-base font-semibold">
+                    {SESSION_ITEMS.find((session) => session.id === props.activeSessionId)?.title ??
+                      '夏季跑鞋主图'}
+                  </h1>
+                  <p className="mt-1 text-[10px] text-zinc-600">图片 · Generation Task #3</p>
+                </div>
+                <StatusBadge scenario={props.scenario} />
+              </div>
+              <p className="mb-3 text-xs leading-5 text-zinc-400">{props.prompt}</p>
+              <div className="mb-3 grid grid-cols-4 gap-1.5">
+                {Array.from({ length: props.scenario.total }, (_, index) => {
+                  const state =
+                    index < props.scenario.completed
+                      ? 'success'
+                      : props.scenario.key === 'processing' && index === props.scenario.completed
+                        ? 'processing'
+                        : props.scenario.key === 'partial' || props.scenario.key === 'failed'
+                          ? 'failed'
+                          : 'queued'
+                  return <ResultCard key={index} index={index} state={state} />
+                })}
+              </div>
+              <div className="rounded-xl bg-[#15161a] p-3 ring-1 ring-white/[0.06]">
+                <TaskProgress scenario={props.scenario} />
+              </div>
+              <div className="mt-3">
+                <ResultActions
+                  scenario={props.scenario}
+                  onEdit={props.onEdit}
+                  onRegenerate={props.onRegenerate}
+                  onRetry={props.onRetry}
+                  onOpenAssets={props.onOpenAssets}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="absolute right-6 bottom-5 left-6 z-20 mx-auto max-w-[760px]">
+          <div className="rounded-[22px] border border-white/[0.08] bg-[#1a1b20] p-3 shadow-2xl shadow-black/40">
+            {props.referenceCount > 0 ? (
+              <div className="mb-2 flex gap-1.5">
+                {Array.from({ length: props.referenceCount }, (_, index) => (
+                  <div
+                    key={index}
+                    className="relative grid size-10 place-items-center rounded-lg border border-white/[0.07] bg-gradient-to-br from-cyan-950 to-stone-800"
+                  >
+                    <FileImageIcon className="size-3.5 text-white/70" />
+                    <span className="absolute bottom-0.5 left-1 text-[7px] text-white/45">
+                      @图片{index + 1}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div className="flex items-start gap-2">
+              <button
+                className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#24262d] text-zinc-500 hover:text-zinc-200"
+                aria-label="添加参考素材"
+                onClick={props.onAddReference}
+              >
+                <PlusIcon className="size-4" />
+              </button>
+              <textarea
+                aria-label="创作描述"
+                className="min-h-14 flex-1 resize-none bg-transparent px-1 py-1 text-xs leading-5 text-zinc-200 outline-none placeholder:text-zinc-600"
+                placeholder="输入想法、上传参考素材，或选择 Official Template 开始创作"
+                value={props.prompt}
+                onChange={(event) => props.onPromptChange(event.target.value)}
+              />
+              <Button
+                size="icon-lg"
+                className="self-end rounded-full bg-zinc-600 text-zinc-200 hover:bg-cyan-300 hover:text-zinc-950"
+                aria-label="提交生成任务"
+                onClick={props.onSubmit}
+              >
+                <SendIcon />
+              </Button>
+            </div>
+            <div className="mt-2 flex min-w-0 items-center gap-1.5 border-t border-white/[0.05] pt-2">
+              <button
+                className={cn(
+                  'flex h-7 items-center gap-1 rounded-lg px-2 text-[10px]',
+                  props.mediaMode === 'image'
+                    ? 'bg-cyan-400/10 text-cyan-200'
+                    : 'text-zinc-500 hover:bg-white/[0.05]'
+                )}
+                onClick={() => props.onMediaModeChange('image')}
+              >
+                <ImageIcon className="size-3" /> 图片
+              </button>
+              <button
+                className={cn(
+                  'flex h-7 items-center gap-1 rounded-lg px-2 text-[10px]',
+                  props.mediaMode === 'video'
+                    ? 'bg-cyan-400/10 text-cyan-200'
+                    : 'text-zinc-500 hover:bg-white/[0.05]'
+                )}
+                onClick={() => props.onMediaModeChange('video')}
+              >
+                <VideoIcon className="size-3" /> 视频
+              </button>
+              {props.mediaMode === 'video' ? (
+                <select
+                  aria-label="视频 composer"
+                  className="h-7 rounded-lg border border-white/[0.06] bg-[#202126] px-2 text-[10px] text-zinc-400"
+                  value={props.videoComposer}
+                  onChange={(event) =>
+                    props.onVideoComposerChange(event.target.value as VideoComposer)
+                  }
+                >
+                  <option value="frames">首尾帧</option>
+                  <option value="references">全能参考</option>
+                </select>
+              ) : null}
+              <select
+                aria-label="比例"
+                className="h-7 rounded-lg border border-white/[0.06] bg-[#202126] px-2 text-[10px] text-zinc-400"
+                value={props.ratio}
+                onChange={(event) => props.onRatioChange(event.target.value)}
+              >
+                <option>1:1</option>
+                <option>4:5</option>
+                <option>16:9</option>
+                <option>9:16</option>
+              </select>
+              <select
+                aria-label="分辨率"
+                className="h-7 rounded-lg border border-white/[0.06] bg-[#202126] px-2 text-[10px] text-zinc-400"
+                value={props.resolution}
+                onChange={(event) => props.onResolutionChange(event.target.value)}
+              >
+                {props.mediaMode === 'image' ? (
+                  <>
+                    <option>1K</option>
+                    <option>2K</option>
+                    <option>4K</option>
+                  </>
+                ) : (
+                  <>
+                    <option>480p</option>
+                    <option>720p</option>
+                    <option>1080p</option>
+                  </>
+                )}
+              </select>
+              <select
+                aria-label="生成数量"
+                className="h-7 rounded-lg border border-white/[0.06] bg-[#202126] px-2 text-[10px] text-zinc-400"
+                value={props.quantity}
+                onChange={(event) => props.onQuantityChange(Number(event.target.value))}
+              >
+                {[1, 2, 3, 4].map((value) => (
+                  <option key={value} value={value}>
+                    {value} 个
+                  </option>
+                ))}
+              </select>
+              <label className="ml-auto flex min-w-0 items-center gap-1 text-[9px] text-zinc-600">
+                <input
+                  className="size-3 accent-cyan-300"
+                  type="checkbox"
+                  checked={props.rightsConfirmed}
+                  onChange={(event) => props.onRightsConfirmedChange(event.target.checked)}
+                />
+                <span className="truncate">已确认素材权利</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </main>
     </section>
   )
 }
@@ -1115,24 +1328,25 @@ function PrototypeSwitcher({
   )
 }
 
-export function CreationWorkbenchPrototype(): React.JSX.Element {
+export function CreationWorkbenchPrototype({
+  includeProductRail = false
+}: {
+  includeProductRail?: boolean
+} = {}): React.JSX.Element {
   const [variant, setVariant] = useState<VariantKey>(readVariant)
-  const [scenarioKey, setScenarioKey] = useState<ScenarioKey>('partial')
-  const [activeSessionId, setActiveSessionId] = useState('shoe')
-  const [hasDraftSession, setHasDraftSession] = useState(false)
+  const [scenarioKey, setScenarioKey] = useState<ScenarioKey>('queued')
+  const [activeSessionId, setActiveSessionId] = useState('new')
   const [mediaMode, setMediaMode] = useState<MediaMode>('image')
   const [videoComposer, setVideoComposer] = useState<VideoComposer>('frames')
-  const [prompt, setPrompt] = useState(
-    '将 @图片1 的白色跑鞋放在雨后城市街道，保留鞋面结构，加入清晨侧逆光和轻微水汽，适合跨境电商首页主视觉。'
-  )
-  const [referenceCount, setReferenceCount] = useState(2)
+  const [prompt, setPrompt] = useState('')
+  const [referenceCount, setReferenceCount] = useState(0)
   const [ratio, setRatio] = useState('4:5')
   const [resolution, setResolution] = useState('2K')
-  const [quantity, setQuantity] = useState(4)
-  const [expectedSlots, setExpectedSlots] = useState(4)
+  const [quantity, setQuantity] = useState(1)
+  const [expectedSlots, setExpectedSlots] = useState(1)
   const [rightsConfirmed, setRightsConfirmed] = useState(true)
   const [showState, setShowState] = useState(false)
-  const [lastAction, setLastAction] = useState('载入“夏季跑鞋主图”的部分成功 Task')
+  const [lastAction, setLastAction] = useState('打开空白 Creation Session')
 
   const baseScenario = scenarioByKey(scenarioKey)
   const scenario: Scenario = {
@@ -1166,18 +1380,43 @@ export function CreationWorkbenchPrototype(): React.JSX.Element {
   const selectSession = (id: string, nextScenario: ScenarioKey): void => {
     setActiveSessionId(id)
     setScenarioKey(nextScenario)
-    setExpectedSlots(4)
+    if (id === 'new') {
+      setPrompt('')
+      setReferenceCount(0)
+      setMediaMode('image')
+      setVideoComposer('frames')
+      setRatio('4:5')
+      setResolution('2K')
+      setQuantity(1)
+      setExpectedSlots(1)
+      setRightsConfirmed(true)
+    } else {
+      setPrompt(
+        '将 @图片1 的白色跑鞋放在雨后城市街道，保留鞋面结构，加入清晨侧逆光和轻微水汽，适合跨境电商首页主视觉。'
+      )
+      setReferenceCount(2)
+      setRightsConfirmed(true)
+      setMediaMode(id === 'video' ? 'video' : 'image')
+      setResolution(id === 'video' ? '720p' : '2K')
+      setQuantity(4)
+      setExpectedSlots(4)
+    }
     const title = SESSION_ITEMS.find((session) => session.id === id)?.title ?? '未命名创作'
     setLastAction(`打开 Creation Session“${title}”`)
   }
 
   const newSession = (): void => {
-    setHasDraftSession(true)
     setActiveSessionId('new')
     setScenarioKey('queued')
-    setExpectedSlots(4)
+    setExpectedSlots(1)
     setPrompt('')
     setReferenceCount(0)
+    setMediaMode('image')
+    setVideoComposer('frames')
+    setRatio('4:5')
+    setResolution('2K')
+    setQuantity(1)
+    setRightsConfirmed(true)
     setLastAction('创建仅当前创建者可见的内存草稿 Session')
   }
 
@@ -1242,8 +1481,8 @@ export function CreationWorkbenchPrototype(): React.JSX.Element {
   }
 
   const variantProps: VariantProps = {
+    includeProductRail,
     activeSessionId,
-    hasDraftSession,
     mediaMode,
     videoComposer,
     prompt,
@@ -1296,19 +1535,22 @@ export function CreationWorkbenchPrototype(): React.JSX.Element {
     onEdit: editAgain,
     onRegenerate: regenerate,
     onRetry: retryIncomplete,
-    onOpenAssets: openAssets
+    onOpenAssets: openAssets,
+    onToggleState: () => setShowState((visible) => !visible)
   }
 
   return (
     <div className="bg-background text-foreground relative flex min-h-0 flex-1 flex-col overflow-hidden">
-      <PrototypeControls
-        scenario={scenario}
-        onScenarioChange={(nextScenario) => {
-          setScenarioKey(nextScenario)
-          setLastAction(`切换代表状态为“${scenarioByKey(nextScenario).label}”`)
-        }}
-        onToggleState={() => setShowState((visible) => !visible)}
-      />
+      {variant !== 'A' ? (
+        <PrototypeControls
+          scenario={scenario}
+          onScenarioChange={(nextScenario) => {
+            setScenarioKey(nextScenario)
+            setLastAction(`切换代表状态为“${scenarioByKey(nextScenario).label}”`)
+          }}
+          onToggleState={() => setShowState((visible) => !visible)}
+        />
+      ) : null}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {variant === 'A' ? <VariantA {...variantProps} /> : null}
         {variant === 'B' ? <VariantB {...variantProps} /> : null}
@@ -1316,7 +1558,7 @@ export function CreationWorkbenchPrototype(): React.JSX.Element {
       </div>
 
       {showState ? (
-        <aside className="bg-popover/98 absolute top-12 right-3 z-40 flex max-h-[calc(100%-4.5rem)] w-[340px] flex-col overflow-hidden rounded-xl border shadow-2xl backdrop-blur-xl">
+        <aside className="bg-popover/98 absolute top-3 right-3 z-40 flex max-h-[calc(100%-1.5rem)] w-[340px] flex-col overflow-hidden rounded-xl border shadow-2xl backdrop-blur-xl">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <div>
               <p className="text-xs font-semibold">完整内存状态</p>
@@ -1337,10 +1579,12 @@ export function CreationWorkbenchPrototype(): React.JSX.Element {
         </aside>
       ) : null}
 
-      <div className="bg-popover/95 pointer-events-none absolute right-3 bottom-14 z-30 max-w-[380px] rounded-lg border px-3 py-2 text-[10px] shadow-lg backdrop-blur">
-        <span className="text-muted-foreground">最近动作：</span> {lastAction}
-      </div>
-      {import.meta.env.DEV ? (
+      {variant !== 'A' ? (
+        <div className="bg-popover/95 pointer-events-none absolute right-3 bottom-14 z-30 max-w-[380px] rounded-lg border px-3 py-2 text-[10px] shadow-lg backdrop-blur">
+          <span className="text-muted-foreground">最近动作：</span> {lastAction}
+        </div>
+      ) : null}
+      {variant !== 'A' && import.meta.env.DEV ? (
         <PrototypeSwitcher variant={variant} onChange={changeVariant} />
       ) : null}
     </div>

@@ -9,7 +9,7 @@ document.documentElement.classList.add('dark')
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <main className="bg-background text-foreground flex h-screen min-h-0 overflow-hidden">
-      <CreationWorkbenchPrototype />
+      <CreationWorkbenchPrototype includeProductRail />
     </main>
   </StrictMode>
 )
