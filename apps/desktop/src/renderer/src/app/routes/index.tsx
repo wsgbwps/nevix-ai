@@ -1,6 +1,15 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { HomePage } from '../pages/home-page'
+import { CreationWorkbenchPrototype } from '../../features/creation'
+import { AppShell } from '../shell/app-shell'
+
+function CreationWorkbenchPrototypePage(): React.JSX.Element {
+  return (
+    <AppShell>
+      <CreationWorkbenchPrototype />
+    </AppShell>
+  )
+}
 
 export const Route = createFileRoute('/')({
-  component: HomePage
+  component: CreationWorkbenchPrototypePage
 })

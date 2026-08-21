@@ -5,6 +5,8 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
+    "prototype:creation-workbench": "pnpm --filter @nevix/desktop prototype:creation-workbench",
+    "prototype:creation-workbench:build": "pnpm --filter @nevix/desktop prototype:creation-workbench:build",
     "test:auth-policy": "bash scripts/test-auth-policy.sh",
     "prepare": "husky"
   },

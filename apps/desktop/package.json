@@ -19,6 +19,8 @@
     "test:e2e:settings": "bash scripts/run-e2e.sh settings",
     "verify:architecture": "node --test scripts/architecture/verifier.test.mjs && node scripts/verify-desktop-architecture.mjs",
     "verify:auth-artifacts": "node scripts/verify-auth-artifacts.mjs",
+    "prototype:creation-workbench": "vite --config prototype.creation-workbench.vite.config.ts --open /creation-workbench-prototype.html",
+    "prototype:creation-workbench:build": "vite build --config prototype.creation-workbench.vite.config.ts",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
