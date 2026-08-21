@@ -21,6 +21,7 @@
     "verify:auth-artifacts": "node scripts/verify-auth-artifacts.mjs",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "prototype:inspiration": "vite --config inspiration-prototype.vite.config.ts --open /inspiration-prototype.html",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
