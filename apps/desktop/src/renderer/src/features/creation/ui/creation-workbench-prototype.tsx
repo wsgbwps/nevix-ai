@@ -919,7 +919,7 @@ function VariantA(props: VariantProps): React.JSX.Element {
                   {isReferenceStackExpanded ? (
                     <div
                       aria-hidden="true"
-                      className="absolute -top-12 left-0 z-0 h-20"
+                      className="absolute inset-y-0 left-0 z-0"
                       style={{
                         width: props.referenceCount * 40 + (props.referenceCount < 4 ? 48 : 8)
                       }}
@@ -929,7 +929,7 @@ function VariantA(props: VariantProps): React.JSX.Element {
                     const depth = props.referenceCount - referenceIndex - 1
                     const isTop = depth === 0
                     const x = isReferenceStackExpanded ? depth * 40 : depth * 3
-                    const y = isReferenceStackExpanded ? -48 : depth * -2
+                    const y = isReferenceStackExpanded ? 0 : depth * -2
                     const scale = isReferenceStackExpanded ? 1 : 1 - depth * 0.025
                     const rotation = isReferenceStackExpanded
                       ? [-4, 4, -6, 3][depth]
@@ -989,7 +989,7 @@ function VariantA(props: VariantProps): React.JSX.Element {
                       )}
                       style={{
                         transform: isReferenceStackExpanded
-                          ? `translate(${props.referenceCount * 40}px, -48px) rotate(-4deg)`
+                          ? `translate(${props.referenceCount * 40}px, 0) rotate(-4deg)`
                           : 'translate(28px, 36px)'
                       }}
                       onClick={props.onAddReference}
