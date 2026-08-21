@@ -17,6 +17,7 @@ import {
   ListRestartIcon,
   LoaderCircleIcon,
   Maximize2Icon,
+  MoreHorizontalIcon,
   PencilLineIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -452,13 +453,20 @@ function PromptBox({
 
 function ResultCard({
   index,
-  state
+  state,
+  flat = false
 }: {
   index: number
   state: 'success' | 'processing' | 'failed' | 'queued'
+  flat?: boolean
 }): React.JSX.Element {
   return (
-    <article className="bg-card group relative aspect-square min-h-24 overflow-hidden rounded-xl border">
+    <article
+      className={cn(
+        'bg-card group relative min-h-24 overflow-hidden',
+        flat ? 'aspect-[3/4] border-0' : 'aspect-square rounded-xl border'
+      )}
+    >
       <div className={cn('absolute inset-0 bg-gradient-to-br', RESULT_GRADIENTS[index % 4])} />
       <div className="absolute inset-0 grid place-items-center">
         {state === 'success' ? (
@@ -485,10 +493,12 @@ function ResultCard({
           </div>
         )}
       </div>
-      <div className="absolute top-2 left-2 rounded-md bg-black/45 px-1.5 py-0.5 text-[9px] text-white/80 backdrop-blur">
-        #{index + 1}
-      </div>
-      {state === 'success' ? (
+      {!flat ? (
+        <div className="absolute top-2 left-2 rounded-md bg-black/45 px-1.5 py-0.5 text-[9px] text-white/80 backdrop-blur">
+          #{index + 1}
+        </div>
+      ) : null}
+      {state === 'success' && !flat ? (
         <div className="absolute inset-x-2 bottom-2 flex translate-y-8 justify-end gap-1 opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100">
           <Button size="icon-xs" variant="secondary" aria-label={`放大结果 ${index + 1}`}>
             <Maximize2Icon />
@@ -811,30 +821,36 @@ function VariantA(props: VariantProps): React.JSX.Element {
                 <StatusBadge scenario={props.scenario} />
               </div>
               <p className="mb-3 text-xs leading-5 text-zinc-400">{props.prompt}</p>
-              <div className="mb-3 grid grid-cols-4 gap-1.5">
-                {Array.from({ length: props.scenario.total }, (_, index) => {
-                  const state =
-                    index < props.scenario.completed
-                      ? 'success'
-                      : props.scenario.key === 'processing' && index === props.scenario.completed
-                        ? 'processing'
-                        : props.scenario.key === 'partial' || props.scenario.key === 'failed'
-                          ? 'failed'
-                          : 'queued'
-                  return <ResultCard key={index} index={index} state={state} />
-                })}
+              <div className="mb-3 overflow-hidden rounded-[3px] border border-white/[0.06] bg-black">
+                <div className="grid grid-cols-4 gap-px">
+                  {Array.from({ length: props.scenario.total }, (_, index) => {
+                    const state =
+                      index < props.scenario.completed
+                        ? 'success'
+                        : props.scenario.key === 'processing' && index === props.scenario.completed
+                          ? 'processing'
+                          : props.scenario.key === 'partial' || props.scenario.key === 'failed'
+                            ? 'failed'
+                            : 'queued'
+                    return <ResultCard key={index} index={index} state={state} flat />
+                  })}
+                </div>
               </div>
-              <div className="rounded-xl bg-[#15161a] p-3 ring-1 ring-white/[0.06]">
-                <TaskProgress scenario={props.scenario} />
-              </div>
-              <div className="mt-3">
-                <ResultActions
-                  scenario={props.scenario}
-                  onEdit={props.onEdit}
-                  onRegenerate={props.onRegenerate}
-                  onRetry={props.onRetry}
-                  onOpenAssets={props.onOpenAssets}
-                />
+              <div className="flex flex-wrap gap-1.5">
+                <Button size="sm" variant="outline" onClick={props.onEdit}>
+                  <PencilLineIcon /> 重新编辑
+                </Button>
+                <Button size="sm" variant="outline" onClick={props.onRegenerate}>
+                  <RefreshCwIcon /> 再次生成
+                </Button>
+                {props.scenario.key === 'partial' ? (
+                  <Button size="sm" variant="outline" onClick={props.onRetry}>
+                    <ListRestartIcon /> 重试未完成项
+                  </Button>
+                ) : null}
+                <Button size="icon-sm" variant="outline" aria-label="更多任务操作">
+                  <MoreHorizontalIcon />
+                </Button>
               </div>
             </div>
           )}
