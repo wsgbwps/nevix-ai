@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SparklesIcon } from 'lucide-react'
@@ -13,7 +14,7 @@ function readVariant(): PrototypeVariant {
   return PROTOTYPE_VARIANTS.find((variant) => variant === candidate) ?? 'A'
 }
 
-export function InspirationPrototypePreview(): React.JSX.Element {
+function InspirationPrototypePreview(): React.JSX.Element {
   const [variant, setVariant] = useState<PrototypeVariant>(readVariant)
 
   function selectVariant(nextVariant: PrototypeVariant): void {
