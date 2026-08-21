@@ -537,6 +537,32 @@ function VariantA({
   readonly onSelect: (item: InspirationItem) => void
   readonly onReset: () => void
 }): React.JSX.Element {
+  const galleryRef = useRef<HTMLDivElement>(null)
+  const [galleryColumnCount, setGalleryColumnCount] = useState(1)
+
+  useEffect(() => {
+    const gallery = galleryRef.current
+    if (!gallery) return
+
+    const updateColumnCount = (): void => {
+      const nextColumnCount = Math.min(6, Math.max(1, Math.floor((gallery.clientWidth + 6) / 190)))
+      setGalleryColumnCount(nextColumnCount)
+    }
+
+    updateColumnCount()
+    const resizeObserver = new ResizeObserver(updateColumnCount)
+    resizeObserver.observe(gallery)
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  const galleryColumns = useMemo(
+    () =>
+      Array.from({ length: galleryColumnCount }, (_, columnIndex) =>
+        items.filter((_, itemIndex) => itemIndex % galleryColumnCount === columnIndex)
+      ),
+    [galleryColumnCount, items]
+  )
+
   return (
     <main className="bg-background min-h-full flex-1 px-4 pb-28 sm:px-6">
       <section className="mx-auto max-w-[1500px]">
@@ -619,10 +645,19 @@ function VariantA({
         </div>
 
         {items.length > 0 ? (
-          <div className="columns-2 gap-3 md:columns-3 lg:columns-4">
-            {items.map((item) => (
-              <MasonryGalleryCard key={item.id} item={item} onSelect={onSelect} />
-            ))}
+          <div ref={galleryRef} className="mx-auto w-full max-w-[1134px]">
+            <div
+              className="grid justify-center gap-1.5"
+              style={{ gridTemplateColumns: `repeat(${galleryColumnCount}, 184px)` }}
+            >
+              {galleryColumns.map((columnItems, columnIndex) => (
+                <div key={columnIndex} className="flex min-w-0 flex-col gap-1.5">
+                  {columnItems.map((item) => (
+                    <MasonryGalleryCard key={item.id} item={item} onSelect={onSelect} />
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
           <EmptyState onReset={onReset} />
@@ -970,31 +1005,25 @@ function MasonryGalleryCard({
   return (
     <button
       type="button"
-      className="group mb-3 inline-block w-full break-inside-avoid text-left"
+      className="group block w-[184px] overflow-hidden rounded-lg text-left focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-1 focus-visible:ring-offset-black"
       onClick={() => onSelect(item)}
     >
-      <span className="bg-card relative block overflow-hidden rounded-xl">
+      <span className="bg-card relative block overflow-hidden rounded-lg">
         <CoverVisual item={item} className={masonryCoverClasses[item.id] ?? 'aspect-[4/5]'} />
-        <span className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/15 opacity-70 transition-opacity group-hover:opacity-90" />
-        <span className="absolute top-3 left-3">
-          <SourceBadge item={item} compact />
-        </span>
-        <span className="absolute right-3 bottom-3 translate-y-1 rounded-full bg-black/55 px-3 py-1.5 text-[11px] font-medium text-white opacity-0 backdrop-blur transition group-hover:translate-y-0 group-hover:opacity-100">
-          查看详情
-        </span>
-      </span>
-      <span className="block px-1 pt-2.5 pb-1">
-        <span className="flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.title}</span>
-          {item.mediaType === 'video' ? (
-            <CirclePlayIcon className="text-muted-foreground size-3.5 shrink-0" />
-          ) : null}
-        </span>
-        <span className="text-muted-foreground mt-1 flex items-center justify-between gap-2 text-[11px]">
-          <span className="truncate">
-            {item.source === 'official' ? 'Nevix 策划' : item.author}
+        <span className="absolute inset-0 flex translate-y-2 flex-col justify-end bg-gradient-to-t from-black/90 via-black/25 to-transparent p-3 text-white opacity-0 transition duration-200 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
+          <span className="mb-auto flex items-start justify-between gap-2">
+            <SourceBadge item={item} compact />
+            <span className="rounded-full bg-black/40 px-2 py-1 text-[10px] backdrop-blur">
+              查看详情
+            </span>
           </span>
-          <span className="shrink-0">{item.parameters.slice(0, 2).join(' · ')}</span>
+          <span className="line-clamp-2 text-sm leading-5 font-semibold">{item.title}</span>
+          <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-white/70">
+            <span className="truncate">
+              {item.source === 'official' ? 'Nevix 策划' : item.author}
+            </span>
+            <span className="shrink-0">{item.parameters.slice(0, 2).join(' · ')}</span>
+          </span>
         </span>
       </span>
     </button>
