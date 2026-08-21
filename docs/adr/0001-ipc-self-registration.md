@@ -6,6 +6,8 @@
 
 TypeScript runtime registration 的物理路径与 glob 于 2026-07-30 被 [Desktop ADR-0003](../../apps/desktop/docs/adr/0003-main-domain-first-ipc-adapters.md) 部分取代。下文第 2 项及效果表中的 `main/ipc/<domain>/` 路径保留为原始决策记录；分散类型声明、declaration merging、generic preload、自注册原则和 Go 显式注册决定继续有效。
 
+2026-08-21 备注：项目已转为个人开发（单人开发背景首见于 [ADR-0011](0011-pr-based-delivery.md)）。背景与被拒方案中的「3 人团队」「3 人同时编辑」保留为决策时点的协作背景；分散声明与自注册继续有效的理由转为保持 owner 边界清晰、注册点可发现与 AI 上下文局部性。
+
 ## 背景
 
 项目采用 3 人团队 vertical-slice 开发，每人负责一个 feature domain（初始规划为 video-generation、image-editing、project-management）。AI 业务 owner 示例后来由 [ADR-0012](0012-unified-ai-creation-owner.md) 统一为 `creation`；本 ADR 保留其原始背景，不再把初始名称视为当前 owner。初始架构设计中有三个共享文件会被所有开发者频繁编辑：

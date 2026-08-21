@@ -43,7 +43,7 @@ nevix-ai/
 
 ## 架构设计
 
-采用 Feature-Sliced + Vertical Slice + DDD，3 人按功能垂直切分，代码物理隔离。详见 [ADR-0002](docs/adr/0002-feature-sliced-vertical-slice.md)。
+采用 Feature-Sliced + Vertical Slice + DDD，个人开发，按功能垂直切分，代码物理隔离。详见 [ADR-0002](docs/adr/0002-feature-sliced-vertical-slice.md)。
 
 AI 创作使用跨 Desktop、Server 与 OpenAPI 的唯一 canonical owner `creation`；图片、视频、灵感页、创作工作台与资产库不拆分独立 Domain/Module。详见 [ADR-0012](docs/adr/0012-unified-ai-creation-owner.md)。
 
@@ -157,7 +157,7 @@ src/renderer/src/
 │   ├── settings/                 # Settings Flow（app 拥有的聚合深模块：Section 注册表、离开语义、关闭编排）
 │   ├── shell/                    # App Shell（已认证布局外壳）
 │   └── providers.tsx             # 全局 providers（QueryClient, ThemeProvider 等）
-├── features/                     # ★ 功能模块（每人一个目录，互不侵入）
+├── features/                     # ★ 功能模块（每个业务 Domain 一个目录，互不侵入）
 │   ├── creation/                 # AI Creation Domain；图片/视频与三个业务页面共用此 owner
 │   │   ├── ui/                   # 展示与交互责任
 │   │   ├── model/                # 业务状态、规则与流程编排
@@ -195,7 +195,7 @@ Feature 目录遵循以下受控演化规则；segment 词汇与 public interfac
 server/
 ├── cmd/server/
 │   └── main.go                   # 入口：显式调用各 module 的 Register()
-├── internal/                     # ★ 业务模块（每人一个目录）+ 跨 Module 共享子包
+├── internal/                     # ★ 业务模块（每个业务 Module 一个目录）+ 跨 Module 共享子包
 │   ├── event/                    # 事件总线（types.go 定义事件类型，bus.go 定义接口）
 │   ├── creation/                 # AI Creation 复杂 Module — 完整 DDD 分层
 │   │   ├── domain/
