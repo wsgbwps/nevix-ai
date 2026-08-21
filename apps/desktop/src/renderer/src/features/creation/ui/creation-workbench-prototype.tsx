@@ -139,6 +139,20 @@ const MODEL_OPTIONS: Record<
   ]
 }
 
+const REFERENCE_PREVIEW_SRC =
+  'data:image/svg+xml;charset=UTF-8,' +
+  encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="192" height="256" viewBox="0 0 192 256">
+      <rect width="192" height="256" fill="#2b3038"/>
+      <rect width="192" height="136" fill="#3a4651"/>
+      <circle cx="142" cy="48" r="22" fill="#c5b89c" opacity=".72"/>
+      <path d="M0 122 52 78l38 36 28-22 74 58v106H0Z" fill="#20262d"/>
+      <path d="M24 178c31-23 55-21 82-9 18 8 33 10 62 7l9 20c-35 15-77 19-119 12-24-4-36-13-34-30Z" fill="#aeb7bd"/>
+      <path d="M37 174c28-11 48-9 70 1" fill="none" stroke="#59636c" stroke-width="5" stroke-linecap="round"/>
+      <path d="M29 202c39 12 92 13 148-6" fill="none" stroke="#66717a" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+  `)
+
 const VARIANT_NAMES: Record<VariantKey, string> = {
   A: '任务舞台',
   B: '会话时间线',
@@ -870,33 +884,43 @@ function VariantA(props: VariantProps): React.JSX.Element {
 
         <div className="absolute right-6 bottom-5 left-6 z-20 mx-auto max-w-[760px]">
           <div className="rounded-[22px] border border-white/[0.08] bg-[#1a1b20] p-3 shadow-2xl shadow-black/40">
-            {props.referenceCount > 0 ? (
-              <div className="mb-2 flex gap-1.5">
-                {Array.from({ length: props.referenceCount }, (_, index) => (
-                  <div
-                    key={index}
-                    className="relative grid size-10 place-items-center rounded-lg border border-white/[0.07] bg-gradient-to-br from-cyan-950 to-stone-800"
-                  >
-                    <FileImageIcon className="size-3.5 text-white/70" />
-                    <span className="absolute bottom-0.5 left-1 text-[7px] text-white/45">
-                      @图片{index + 1}
-                    </span>
+            <div className="flex min-h-16 items-start gap-3">
+              {props.referenceCount === 0 ? (
+                <button
+                  aria-label="添加参考内容"
+                  className="flex h-16 w-12 shrink-0 flex-col items-center justify-center gap-1 rounded-[8px] border border-transparent bg-[#24262d] text-zinc-500 transition-colors duration-[180ms] ease-out hover:border-white/[0.10] hover:bg-[#292b32] hover:text-zinc-300 focus-visible:ring-2 focus-visible:ring-sky-400/45 focus-visible:outline-none"
+                  onClick={props.onAddReference}
+                >
+                  <PlusIcon className="size-4 stroke-[1.5]" />
+                  <span className="text-[8px] leading-3">参考内容</span>
+                </button>
+              ) : (
+                <div className="group relative h-16 w-12 shrink-0 overflow-hidden rounded-[8px] focus-within:ring-2 focus-within:ring-sky-400/45">
+                  <img
+                    src={REFERENCE_PREVIEW_SRC}
+                    alt=""
+                    aria-label="已添加的参考图片"
+                    className="size-full object-cover"
+                  />
+                  <div className="absolute inset-0 grid place-items-center bg-black/45 opacity-0 transition-opacity duration-[180ms] ease-out group-focus-within:opacity-100 group-hover:opacity-100">
+                    <button
+                      aria-label="移除参考图片"
+                      className="grid size-7 translate-y-[3px] scale-[0.98] place-items-center rounded-md bg-black/35 text-zinc-100 transition-transform duration-[180ms] ease-out group-focus-within:translate-y-0 group-focus-within:scale-100 group-hover:translate-y-0 group-hover:scale-100 hover:bg-black/55 focus-visible:ring-2 focus-visible:ring-sky-400/50 focus-visible:outline-none"
+                      onClick={props.onRemoveReference}
+                    >
+                      <XIcon className="size-3.5" />
+                    </button>
                   </div>
-                ))}
-              </div>
-            ) : null}
-            <div className="flex items-start gap-2">
-              <button
-                className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#24262d] text-zinc-500 hover:text-zinc-200"
-                aria-label="添加参考素材"
-                onClick={props.onAddReference}
-              >
-                <PlusIcon className="size-4" />
-              </button>
+                </div>
+              )}
               <textarea
                 aria-label="创作描述"
-                className="min-h-14 flex-1 resize-none bg-transparent px-1 py-1 text-xs leading-5 text-zinc-200 outline-none placeholder:text-zinc-600"
-                placeholder="输入想法、上传参考素材，或选择 Official Template 开始创作"
+                className="min-h-16 flex-1 resize-none bg-transparent px-1 py-1 text-xs leading-5 text-zinc-200 outline-none placeholder:text-zinc-600"
+                placeholder={
+                  props.referenceCount > 0
+                    ? '继续添加参考内容，或输入你想创作的画面'
+                    : '输入想法，或添加参考内容开始创作'
+                }
                 value={props.prompt}
                 onChange={(event) => props.onPromptChange(event.target.value)}
               />
@@ -1589,7 +1613,7 @@ export function CreationWorkbenchPrototype({
       setPrompt(
         '将 @图片1 的白色跑鞋放在雨后城市街道，保留鞋面结构，加入清晨侧逆光和轻微水汽，适合跨境电商首页主视觉。'
       )
-      setReferenceCount(2)
+      setReferenceCount(1)
       setMediaMode(id === 'video' ? 'video' : 'image')
       setModel(id === 'video' ? 'video-mini' : 'image-pro')
       setVideoComposer(id === 'video' ? 'references' : 'frames')
@@ -1709,12 +1733,12 @@ export function CreationWorkbenchPrototype({
       setLastAction('编辑草稿提示词')
     },
     onAddReference: () => {
-      setReferenceCount((count) => Math.min(4, count + 1))
+      setReferenceCount(1)
       setLastAction('添加新的内存 Reference Material')
     },
     onRemoveReference: () => {
-      setReferenceCount((count) => Math.max(0, count - 1))
-      setLastAction('从草稿移除最后一项 Reference Material')
+      setReferenceCount(0)
+      setLastAction('从草稿移除 Reference Material')
     },
     onRatioChange: (value) => {
       setRatio(value)
