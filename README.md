@@ -45,6 +45,8 @@ nevix-ai/
 
 采用 Feature-Sliced + Vertical Slice + DDD，3 人按功能垂直切分，代码物理隔离。详见 [ADR-0002](docs/adr/0002-feature-sliced-vertical-slice.md)。
 
+AI 创作使用跨 Desktop、Server 与 OpenAPI 的唯一 canonical owner `creation`；图片、视频、灵感页、创作工作台与资产库不拆分独立 Domain/Module。详见 [ADR-0012](docs/adr/0012-unified-ai-creation-owner.md)。
+
 数据平面默认由 Desktop 使用用户 JWT 直连受策略保护的 Supabase；只有密钥、额度/支付、Webhook、管理员权限、事务或异步编排需要跨入 Go 的可信执行 seam。Go 不是 Supabase 的通用代理层；完整决策见 [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md)。
 
 领域术语详见 `CONTEXT-MAP.md` → 各子 context 的 `CONTEXT.md`；Codex 的持久开发与评审规则详见 [`AGENTS.md`](AGENTS.md)。
@@ -66,12 +68,14 @@ nevix-ai/
 
 ```
 src/shared/ipc/
-├── channels.ts                   # IPC 类型基座（空 interface，各 domain 通过 declaration merging 扩展）
-├── video-generation/
+├── channels.ts                   # IPC 类型基座（空 interface，各 owner 通过 declaration merging 扩展）
+├── authentication/
 │   └── types.ts                  # declare module '@ipc/channels' 扩展 + 具名 req/res 类型
-├── image-editing/
+├── language/
 │   └── types.ts
-└── project-management/
+├── organization/
+│   └── types.ts
+└── window/                       # 唯一 platform-owned typed IPC 例外
     └── types.ts
 ```
 
@@ -154,7 +158,7 @@ src/renderer/src/
 │   ├── shell/                    # App Shell（已认证布局外壳）
 │   └── providers.tsx             # 全局 providers（QueryClient, ThemeProvider 等）
 ├── features/                     # ★ 功能模块（每人一个目录，互不侵入）
-│   ├── video-generation/         # 开发者 A
+│   ├── creation/                 # AI Creation Domain；图片/视频与三个业务页面共用此 owner
 │   │   ├── ui/                   # 展示与交互责任
 │   │   ├── model/                # 业务状态、规则与流程编排
 │   │   ├── api/                  # 后端 queries / mutations
@@ -163,8 +167,7 @@ src/renderer/src/
 │   │   ├── i18n/                 # 满足准入门槛的自定义责任 segment
 │   │   │   └── resources.ts      # Feature 自有的本地化资源
 │   │   └── index.ts              # 唯一 public interface，显式 named exports
-│   ├── image-editing/            # 开发者 B
-│   └── project-management/       # 开发者 C
+│   └── <other-domain>/           # 其他业务 Domain 各自独占 Feature
 ├── components/
 │   └── ui/                       # shadcn/ui 组件（button, dialog, input...）
 ├── assets/                       # 静态资源（图片、SVG、字体文件）
@@ -194,7 +197,7 @@ server/
 │   └── main.go                   # 入口：显式调用各 module 的 Register()
 ├── internal/                     # ★ 业务模块（每人一个目录）+ 跨 Module 共享子包
 │   ├── event/                    # 事件总线（types.go 定义事件类型，bus.go 定义接口）
-│   ├── videogen/                 # 复杂模块 — 完整 DDD 分层
+│   ├── creation/                 # AI Creation 复杂 Module — 完整 DDD 分层
 │   │   ├── domain/
 │   │   │   ├── entity.go         # 实体、聚合根
 │   │   │   ├── value.go          # 值对象
@@ -236,12 +239,11 @@ server/
 ```
 contracts/
 ├── openapi.yaml             # API 总纲
-├── video-generation.yaml    # 开发者 A 维护
-├── image-editing.yaml       # 开发者 B 维护
-└── project-management.yaml  # 开发者 C 维护
+├── identity.yaml            # Identity 可信命令 seam
+└── creation.yaml            # AI 创作可信命令 seam（正式开发时按需创建）
 ```
 
-每个开发者维护自己功能模块的 API 契约，`openapi.yaml` 通过 `$ref` 引用各子契约。
+每个 Server Module 维护自己业务 owner 的 API 契约，`openapi.yaml` 通过 `$ref` 引用各子契约。AI 创作只使用 `creation` contract owner，不按图片与视频拆分。
 
 ## 常用命令
 

@@ -8,7 +8,7 @@ TypeScript runtime registration 的物理路径与 glob 于 2026-07-30 被 [Desk
 
 ## 背景
 
-项目采用 3 人团队 vertical-slice 开发，每人负责一个 feature domain（video-generation、image-editing、project-management）。初始架构设计中有三个共享文件会被所有开发者频繁编辑：
+项目采用 3 人团队 vertical-slice 开发，每人负责一个 feature domain（初始规划为 video-generation、image-editing、project-management）。AI 业务 owner 示例后来由 [ADR-0012](0012-unified-ai-creation-owner.md) 统一为 `creation`；本 ADR 保留其原始背景，不再把初始名称视为当前 owner。初始架构设计中有三个共享文件会被所有开发者频繁编辑：
 
 - `ipc/types.ts` — 集中定义所有 IPC channel 的请求/响应类型
 - `ipc/register.ts` — 手工 import 并注册所有 domain 的 handler

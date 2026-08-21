@@ -112,6 +112,26 @@ _Avoid_: controller, listener
 Desktop 中拥有一组内聚业务责任与术语的组织范围；Domain 只出现在实际需要的进程与 interface 中，不由目录对称性定义。
 _Avoid_: module（与 Go 侧混淆）, service
 
+**AI Creation Domain**:
+以 Organization 内从灵感复用、图片与视频生成，到媒体资产沉淀与发布复用的完整创作闭环为边界、canonical owner 名为 `creation` 的 Desktop Domain；供应商连接属于该闭环，媒体类型、页面和独立生命周期的聚合均不单独构成 Domain。
+_Avoid_: Generation Domain, Image Generation Domain, Video Generation Domain, Media Asset Domain, Inspiration Domain
+
+**Inspiration Page**:
+AI Creation Domain 拥有的灵感浏览与复用页面，组合 Official Selection 与当前 Organization 的 Discovery；它不是独立 Domain 或 app-owned 跨 Feature 聚合页。
+_Avoid_: Inspiration Domain, Discovery Domain
+
+**Official Template**:
+由 Nevix 策划、在 Inspiration Page 以真实生成的示例封面呈现的可复用创作起点；V1 包含简体中文名称、说明与提示词骨架，以及具备复用授权的参考素材、媒体类型、推荐模型和生成参数。“做同款”会把参考素材、提示词、推荐模型与参数填入统一的 Creation Workbench，User 可以保留、删除、替换或修改这些内容；供应商连接由 Organization 固定，模型只能在该连接内经 Nevix 适配并验证、且支持当前媒体类型的列表中切换。Official Selection 只是这类模板的展示集合，不构成独立作品类型。
+_Avoid_: Official Featured Work, Channel Template, Static Example
+
+**Creation Workbench**:
+AI Creation Domain 拥有的会话式创作页面，承载创作上下文、生成操作、任务状态和结果；它是界面而非 Domain、Organization 或新的租户边界。
+_Avoid_: Generation Workspace, Creation Workspace
+
+**Asset Library**:
+AI Creation Domain 拥有的媒体资产浏览与复用页面；媒体资产的独立生命周期不使该页面成为独立 Domain，也不与 renderer 静态 assets 混同。
+_Avoid_: Media Asset Domain, Asset Workspace
+
 **Authentication Domain**:
 以凭据验证和当前设备 Session 生命周期为范围的 Desktop Domain，不包含 User、Profile 或 Membership 管理。
 _Avoid_: Identity Domain, Account Domain

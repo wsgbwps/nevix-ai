@@ -63,7 +63,7 @@
 | Kat Zień | Flat 起步；`cmd/` 单 main 时无价值；在其团队一切默认 internal，不刻意建 `internal/` 目录；五种结构按规模递进：Flat → Flat+Layer → Group-by-Module → Hexagonal → DDD-with-Events | [app-structure-examples](https://raw.githubusercontent.com/katzien/app-structure-examples/master/README.md) |
 | Ardan Labs (Bill Kennedy) | 应用项目三件套 `cmd/` + `internal/`（内含 `platform/`）+ `vendor/`，**无 `pkg/`**；「Packages that need to be imported by multiple programs within the project belong inside the `internal/` folder」；同级 internal 包禁止互导 | [Package Oriented Design, 2017](https://www.ardanlabs.com/blog/2017/02/package-oriented-design.html) |
 
-**对本仓库规模的映射（推断）**：server 约 2.2K 行、单一二进制、个人开发者。按上表，最小合理结构甚至可以是 flat；当前结构已包含 `cmd/` + `internal/` + 子包拆分，比最小结构超前，但每一处拆分（`identity/verification`、`identity/outbox`、未来的 `videogen` 四层）都对应真实职责且已由 ADR-0003 的「复杂度驱动」规则约束，**属于合理演进而非过度设计**。唯一没有真实职责支撑的结构就是 `pkg/` 层与三个空目录。
+**对本仓库规模的映射（推断）**：server 约 2.2K 行、单一二进制、个人开发者。按上表，最小合理结构甚至可以是 flat；当前结构已包含 `cmd/` + `internal/` + 子包拆分，比最小结构超前，但每一处拆分（`identity/verification`、`identity/outbox`、未来的 `creation` 四层）都对应真实职责且已由 ADR-0003 的「复杂度驱动」规则约束，**属于合理演进而非过度设计**。唯一没有真实职责支撑的结构就是 `pkg/` 层与三个空目录。
 
 ### 子问题 4：针对本仓库的具体改进建议（全部为推断，非来源直接陈述）
 
