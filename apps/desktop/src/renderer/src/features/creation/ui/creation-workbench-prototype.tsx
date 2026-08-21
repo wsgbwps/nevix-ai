@@ -5,6 +5,9 @@ import { useEffect, useState } from 'react'
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
+  BoxIcon,
+  CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   CircleCheckIcon,
@@ -29,12 +32,20 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
 type VariantKey = 'A' | 'B' | 'C'
 type ScenarioKey = 'queued' | 'processing' | 'partial' | 'failed' | 'success'
 type MediaMode = 'image' | 'video'
 type VideoComposer = 'frames' | 'references'
+type ModelKey = 'image-pro' | 'image-lite' | 'image-47' | 'video-mini' | 'video-pro'
 
 type Scenario = {
   key: ScenarioKey
@@ -112,6 +123,21 @@ const SESSION_ITEMS = [
   { id: 'bag', title: '通勤包广告素材', meta: '图片 · 昨天', scenario: 'failed' as const },
   { id: 'lamp', title: '露营灯氛围图', meta: '图片 · 周二', scenario: 'success' as const }
 ] as const
+
+const MODEL_OPTIONS: Record<
+  MediaMode,
+  readonly { key: ModelKey; label: string; detail: string }[]
+> = {
+  image: [
+    { key: 'image-pro', label: '图片 5.0 Pro', detail: '商业设计、影视与高密度图文场景' },
+    { key: 'image-lite', label: '图片 5.0 Lite', detail: '响应更轻快，适合快速探索构图' },
+    { key: 'image-47', label: '图片 4.7', detail: '稳定画质与提示词响应' }
+  ],
+  video: [
+    { key: 'video-mini', label: '即梦 Seedance 2.0 mini', detail: '快速生成与多参考创作' },
+    { key: 'video-pro', label: '即梦 Seedance 2.0 Pro', detail: '更高运动质量与镜头一致性' }
+  ]
+}
 
 const VARIANT_NAMES: Record<VariantKey, string> = {
   A: '任务舞台',
@@ -402,26 +428,6 @@ function ParameterControls({
   )
 }
 
-function RightsConfirmation({
-  confirmed,
-  onChange
-}: {
-  confirmed: boolean
-  onChange: (confirmed: boolean) => void
-}): React.JSX.Element {
-  return (
-    <label className="text-muted-foreground flex items-start gap-2 text-[10px] leading-4">
-      <input
-        className="accent-primary mt-0.5 size-3.5"
-        type="checkbox"
-        checked={confirmed}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span>我确认拥有上传、商业生成及 Organization 内使用这些素材所需的权利</span>
-    </label>
-  )
-}
-
 function PromptBox({
   prompt,
   compact = false,
@@ -577,17 +583,18 @@ type VariantProps = {
   includeProductRail: boolean
   activeSessionId: string
   mediaMode: MediaMode
+  model: ModelKey
   videoComposer: VideoComposer
   prompt: string
   referenceCount: number
   ratio: string
   resolution: string
   quantity: number
-  rightsConfirmed: boolean
   scenario: Scenario
   onNewSession: () => void
   onSelectSession: (id: string, scenario: ScenarioKey) => void
   onMediaModeChange: (mode: MediaMode) => void
+  onModelChange: (model: ModelKey) => void
   onVideoComposerChange: (composer: VideoComposer) => void
   onPromptChange: (prompt: string) => void
   onAddReference: () => void
@@ -595,7 +602,6 @@ type VariantProps = {
   onRatioChange: (value: string) => void
   onResolutionChange: (value: string) => void
   onQuantityChange: (value: number) => void
-  onRightsConfirmedChange: (confirmed: boolean) => void
   onSubmit: () => void
   onEdit: () => void
   onRegenerate: () => void
@@ -606,6 +612,10 @@ type VariantProps = {
 
 function VariantA(props: VariantProps): React.JSX.Element {
   const isEmptySession = props.activeSessionId === 'new'
+  const currentModel = MODEL_OPTIONS[props.mediaMode].find((model) => model.key === props.model)
+  const videoComposerLabel = props.videoComposer === 'references' ? '全能参考' : '首尾帧'
+  const composerControlClass =
+    'group flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/[0.06] bg-[#23242a] px-2.5 text-[10px] text-zinc-300 outline-none transition-colors hover:bg-[#2a2c33] data-[state=open]:bg-[#30323a]'
   const templateCards = [
     {
       title: '商品场景合成',
@@ -888,103 +898,229 @@ function VariantA(props: VariantProps): React.JSX.Element {
                 value={props.prompt}
                 onChange={(event) => props.onPromptChange(event.target.value)}
               />
+            </div>
+            <div className="mt-2 flex min-w-0 items-center gap-1.5 border-t border-white/[0.05] pt-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label={`创作类型：${props.mediaMode === 'image' ? '图片生成' : '视频生成'}`}
+                    className={cn(composerControlClass, 'text-cyan-300')}
+                  >
+                    {props.mediaMode === 'image' ? (
+                      <ImageIcon className="size-3.5" />
+                    ) : (
+                      <VideoIcon className="size-3.5" />
+                    )}
+                    {props.mediaMode === 'image' ? '图片生成' : '视频生成'}
+                    <ChevronDownIcon className="size-3 transition-transform group-data-[state=open]:rotate-180" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  sideOffset={10}
+                  align="start"
+                  className="w-52 rounded-2xl border border-white/[0.08] bg-[#1b1c20] p-2 text-zinc-200 shadow-2xl"
+                >
+                  <DropdownMenuLabel className="px-2 pb-2 text-[10px] text-zinc-600">
+                    创作类型
+                  </DropdownMenuLabel>
+                  {(['image', 'video'] as const).map((mode) => (
+                    <DropdownMenuItem
+                      key={mode}
+                      className={cn(
+                        'h-11 cursor-pointer rounded-xl px-3 text-xs focus:bg-[#292b32] focus:text-white',
+                        props.mediaMode === mode && 'bg-[#292b32]'
+                      )}
+                      onSelect={() => props.onMediaModeChange(mode)}
+                    >
+                      {mode === 'image' ? (
+                        <ImageIcon className="size-4" />
+                      ) : (
+                        <VideoIcon className="size-4" />
+                      )}
+                      {mode === 'image' ? '图片生成' : '视频生成'}
+                      {props.mediaMode === mode ? <CheckIcon className="ml-auto size-4" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label={`模型：${currentModel?.label}`}
+                    className={composerControlClass}
+                  >
+                    <BoxIcon className="size-3.5" />
+                    <span className="max-w-40 truncate">{currentModel?.label}</span>
+                    <SparklesIcon className="size-3 text-cyan-300" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  sideOffset={10}
+                  align="start"
+                  className="w-[360px] rounded-2xl border border-white/[0.08] bg-[#1b1c20] p-2 text-zinc-200 shadow-2xl"
+                >
+                  <DropdownMenuLabel className="px-2 pb-2 text-[10px] text-zinc-600">
+                    选择模型 · {currentModel?.label}
+                  </DropdownMenuLabel>
+                  {MODEL_OPTIONS[props.mediaMode].map((model) => (
+                    <DropdownMenuItem
+                      key={model.key}
+                      className={cn(
+                        'min-h-14 cursor-pointer rounded-xl px-3 py-2 focus:bg-[#292b32] focus:text-white',
+                        props.model === model.key && 'bg-[#292b32]'
+                      )}
+                      onSelect={() => props.onModelChange(model.key)}
+                    >
+                      <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/[0.08] bg-[#23252c]">
+                        <SparklesIcon className="size-4 text-zinc-200" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-xs font-medium">{model.label}</span>
+                        <span className="mt-0.5 block truncate text-[10px] text-zinc-600">
+                          {model.detail}
+                        </span>
+                      </span>
+                      {props.model === model.key ? <CheckIcon className="size-4" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {props.mediaMode === 'video' ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      aria-label={`视频模式：${videoComposerLabel}`}
+                      className={composerControlClass}
+                    >
+                      <SlidersHorizontalIcon className="size-3.5" />
+                      {videoComposerLabel}
+                      <ChevronDownIcon className="size-3 transition-transform group-data-[state=open]:rotate-180" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    side="top"
+                    sideOffset={10}
+                    align="start"
+                    className="w-52 rounded-2xl border border-white/[0.08] bg-[#1b1c20] p-2 text-zinc-200 shadow-2xl"
+                  >
+                    <DropdownMenuLabel className="px-2 pb-2 text-[10px] text-zinc-600">
+                      视频生成模式
+                    </DropdownMenuLabel>
+                    {(['references', 'frames'] as const).map((composer) => (
+                      <DropdownMenuItem
+                        key={composer}
+                        className={cn(
+                          'h-11 cursor-pointer rounded-xl px-3 text-xs focus:bg-[#292b32] focus:text-white',
+                          props.videoComposer === composer && 'bg-[#292b32]'
+                        )}
+                        onSelect={() => props.onVideoComposerChange(composer)}
+                      >
+                        <SlidersHorizontalIcon className="size-4" />
+                        {composer === 'references' ? '全能参考' : '首尾帧'}
+                        {props.videoComposer === composer ? (
+                          <CheckIcon className="ml-auto size-4" />
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label={`生成参数：${props.ratio} ${props.resolution} ${props.quantity} 个`}
+                    className={composerControlClass}
+                  >
+                    <span className="block size-3 rounded-[3px] border border-zinc-300" />
+                    {props.ratio}
+                    <span className="text-zinc-600">|</span>
+                    {props.resolution}
+                    <SparklesIcon className="size-3 text-cyan-300" />
+                    <span className="text-zinc-600">|</span>
+                    {props.quantity}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  sideOffset={10}
+                  align="end"
+                  className="w-[420px] rounded-2xl border border-white/[0.08] bg-[#1b1c20] p-4 text-zinc-200 shadow-2xl"
+                >
+                  <div className="space-y-4">
+                    <div>
+                      <p className="mb-2 text-[10px] text-zinc-600">选择比例</p>
+                      <div className="grid grid-cols-4 gap-1 rounded-xl bg-[#222329] p-1">
+                        {['1:1', '4:5', '16:9', '9:16'].map((value) => (
+                          <button
+                            key={value}
+                            className={cn(
+                              'h-11 rounded-lg text-[11px] transition-colors hover:bg-[#2b2d34]',
+                              props.ratio === value && 'bg-[#32343d] text-white'
+                            )}
+                            onClick={() => props.onRatioChange(value)}
+                          >
+                            <span className="mx-auto mb-1 block h-2.5 w-4 rounded-[3px] border border-zinc-300" />
+                            {value}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-[10px] text-zinc-600">
+                        {props.mediaMode === 'image' ? '选择分辨率' : '选择清晰度'}
+                      </p>
+                      <div className="grid grid-cols-3 gap-1 rounded-xl bg-[#222329] p-1">
+                        {(props.mediaMode === 'image'
+                          ? ['1K', '2K', '4K']
+                          : ['480p', '720p', '1080p']
+                        ).map((value) => (
+                          <button
+                            key={value}
+                            className={cn(
+                              'h-9 rounded-lg text-[11px] transition-colors hover:bg-[#2b2d34]',
+                              props.resolution === value && 'bg-[#32343d] text-white'
+                            )}
+                            onClick={() => props.onResolutionChange(value)}
+                          >
+                            {value}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-[10px] text-zinc-600">选择生成数量</p>
+                      <div className="grid grid-cols-4 gap-1 rounded-xl bg-[#222329] p-1">
+                        {[1, 2, 3, 4].map((value) => (
+                          <button
+                            key={value}
+                            className={cn(
+                              'h-9 rounded-lg text-[11px] transition-colors hover:bg-[#2b2d34]',
+                              props.quantity === value && 'bg-[#32343d] text-white'
+                            )}
+                            onClick={() => props.onQuantityChange(value)}
+                          >
+                            {value}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               <Button
                 size="icon-lg"
-                className="self-end rounded-full bg-zinc-600 text-zinc-200 hover:bg-cyan-300 hover:text-zinc-950"
+                className="ml-auto size-8 shrink-0 rounded-full bg-zinc-600 text-zinc-200 hover:bg-cyan-300 hover:text-zinc-950"
                 aria-label="提交生成任务"
                 onClick={props.onSubmit}
               >
                 <SendIcon />
               </Button>
-            </div>
-            <div className="mt-2 flex min-w-0 items-center gap-1.5 border-t border-white/[0.05] pt-2">
-              <button
-                className={cn(
-                  'flex h-7 items-center gap-1 rounded-lg px-2 text-[10px]',
-                  props.mediaMode === 'image'
-                    ? 'bg-cyan-400/10 text-cyan-200'
-                    : 'text-zinc-500 hover:bg-white/[0.05]'
-                )}
-                onClick={() => props.onMediaModeChange('image')}
-              >
-                <ImageIcon className="size-3" /> 图片
-              </button>
-              <button
-                className={cn(
-                  'flex h-7 items-center gap-1 rounded-lg px-2 text-[10px]',
-                  props.mediaMode === 'video'
-                    ? 'bg-cyan-400/10 text-cyan-200'
-                    : 'text-zinc-500 hover:bg-white/[0.05]'
-                )}
-                onClick={() => props.onMediaModeChange('video')}
-              >
-                <VideoIcon className="size-3" /> 视频
-              </button>
-              {props.mediaMode === 'video' ? (
-                <select
-                  aria-label="视频 composer"
-                  className="h-7 rounded-lg border border-white/[0.06] bg-[#202126] px-2 text-[10px] text-zinc-400"
-                  value={props.videoComposer}
-                  onChange={(event) =>
-                    props.onVideoComposerChange(event.target.value as VideoComposer)
-                  }
-                >
-                  <option value="frames">首尾帧</option>
-                  <option value="references">全能参考</option>
-                </select>
-              ) : null}
-              <select
-                aria-label="比例"
-                className="h-7 rounded-lg border border-white/[0.06] bg-[#202126] px-2 text-[10px] text-zinc-400"
-                value={props.ratio}
-                onChange={(event) => props.onRatioChange(event.target.value)}
-              >
-                <option>1:1</option>
-                <option>4:5</option>
-                <option>16:9</option>
-                <option>9:16</option>
-              </select>
-              <select
-                aria-label="分辨率"
-                className="h-7 rounded-lg border border-white/[0.06] bg-[#202126] px-2 text-[10px] text-zinc-400"
-                value={props.resolution}
-                onChange={(event) => props.onResolutionChange(event.target.value)}
-              >
-                {props.mediaMode === 'image' ? (
-                  <>
-                    <option>1K</option>
-                    <option>2K</option>
-                    <option>4K</option>
-                  </>
-                ) : (
-                  <>
-                    <option>480p</option>
-                    <option>720p</option>
-                    <option>1080p</option>
-                  </>
-                )}
-              </select>
-              <select
-                aria-label="生成数量"
-                className="h-7 rounded-lg border border-white/[0.06] bg-[#202126] px-2 text-[10px] text-zinc-400"
-                value={props.quantity}
-                onChange={(event) => props.onQuantityChange(Number(event.target.value))}
-              >
-                {[1, 2, 3, 4].map((value) => (
-                  <option key={value} value={value}>
-                    {value} 个
-                  </option>
-                ))}
-              </select>
-              <label className="ml-auto flex min-w-0 items-center gap-1 text-[9px] text-zinc-600">
-                <input
-                  className="size-3 accent-cyan-300"
-                  type="checkbox"
-                  checked={props.rightsConfirmed}
-                  onChange={(event) => props.onRightsConfirmedChange(event.target.checked)}
-                />
-                <span className="truncate">已确认素材权利</span>
-              </label>
             </div>
           </div>
         </div>
@@ -1113,15 +1249,6 @@ function VariantB(props: VariantProps): React.JSX.Element {
               <span className="text-muted-foreground text-[10px]">
                 {props.ratio} · {props.resolution} · {props.quantity} 个
               </span>
-              <label className="text-muted-foreground ml-auto flex items-center gap-1 text-[10px]">
-                <input
-                  className="accent-primary size-3"
-                  type="checkbox"
-                  checked={props.rightsConfirmed}
-                  onChange={(event) => props.onRightsConfirmedChange(event.target.checked)}
-                />
-                已确认素材权利
-              </label>
             </div>
           </div>
           <Button size="icon-lg" aria-label="开始生成" onClick={props.onSubmit}>
@@ -1167,10 +1294,6 @@ function VariantC(props: VariantProps): React.JSX.Element {
             onRatioChange={props.onRatioChange}
             onResolutionChange={props.onResolutionChange}
             onQuantityChange={props.onQuantityChange}
-          />
-          <RightsConfirmation
-            confirmed={props.rightsConfirmed}
-            onChange={props.onRightsConfirmedChange}
           />
           <Button className="w-full" onClick={props.onSubmit}>
             <SparklesIcon /> 提交 Generation Task
@@ -1353,6 +1476,7 @@ export function CreationWorkbenchPrototype({
   const [scenarioKey, setScenarioKey] = useState<ScenarioKey>('queued')
   const [activeSessionId, setActiveSessionId] = useState('new')
   const [mediaMode, setMediaMode] = useState<MediaMode>('image')
+  const [model, setModel] = useState<ModelKey>('image-pro')
   const [videoComposer, setVideoComposer] = useState<VideoComposer>('frames')
   const [prompt, setPrompt] = useState('')
   const [referenceCount, setReferenceCount] = useState(0)
@@ -1360,7 +1484,6 @@ export function CreationWorkbenchPrototype({
   const [resolution, setResolution] = useState('2K')
   const [quantity, setQuantity] = useState(1)
   const [expectedSlots, setExpectedSlots] = useState(1)
-  const [rightsConfirmed, setRightsConfirmed] = useState(true)
   const [showState, setShowState] = useState(false)
   const [lastAction, setLastAction] = useState('打开空白 Creation Session')
 
@@ -1400,19 +1523,20 @@ export function CreationWorkbenchPrototype({
       setPrompt('')
       setReferenceCount(0)
       setMediaMode('image')
+      setModel('image-pro')
       setVideoComposer('frames')
       setRatio('4:5')
       setResolution('2K')
       setQuantity(1)
       setExpectedSlots(1)
-      setRightsConfirmed(true)
     } else {
       setPrompt(
         '将 @图片1 的白色跑鞋放在雨后城市街道，保留鞋面结构，加入清晨侧逆光和轻微水汽，适合跨境电商首页主视觉。'
       )
       setReferenceCount(2)
-      setRightsConfirmed(true)
       setMediaMode(id === 'video' ? 'video' : 'image')
+      setModel(id === 'video' ? 'video-mini' : 'image-pro')
+      setVideoComposer(id === 'video' ? 'references' : 'frames')
       setResolution(id === 'video' ? '720p' : '2K')
       setQuantity(4)
       setExpectedSlots(4)
@@ -1428,19 +1552,15 @@ export function CreationWorkbenchPrototype({
     setPrompt('')
     setReferenceCount(0)
     setMediaMode('image')
+    setModel('image-pro')
     setVideoComposer('frames')
     setRatio('4:5')
     setResolution('2K')
     setQuantity(1)
-    setRightsConfirmed(true)
     setLastAction('创建仅当前创建者可见的内存草稿 Session')
   }
 
   const submit = (): void => {
-    if (referenceCount > 0 && !rightsConfirmed) {
-      setLastAction('未提交：请先确认参考素材权利')
-      return
-    }
     setScenarioKey('queued')
     setExpectedSlots(quantity)
     setLastAction(`提交 1 个 Generation Task，预留 ${quantity} 个稳定结果槽位`)
@@ -1462,7 +1582,6 @@ export function CreationWorkbenchPrototype({
     setScenarioKey('queued')
     setQuantity(2)
     setExpectedSlots(2)
-    setRightsConfirmed(true)
     setLastAction('只为可重试的 2 个未完成槽位创建新的 Generation Task')
   }
 
@@ -1476,6 +1595,7 @@ export function CreationWorkbenchPrototype({
     visibility: 'creator-private',
     draft: {
       mediaMode,
+      model,
       videoComposer: mediaMode === 'video' ? videoComposer : null,
       prompt,
       referenceMaterialIds: Array.from(
@@ -1484,8 +1604,7 @@ export function CreationWorkbenchPrototype({
       ),
       ratio,
       resolution,
-      quantity,
-      rightsConfirmed
+      quantity
     },
     activeGenerationTask: {
       id: 'task-3',
@@ -1500,20 +1619,26 @@ export function CreationWorkbenchPrototype({
     includeProductRail,
     activeSessionId,
     mediaMode,
+    model,
     videoComposer,
     prompt,
     referenceCount,
     ratio,
     resolution,
     quantity,
-    rightsConfirmed,
     scenario,
     onNewSession: newSession,
     onSelectSession: selectSession,
     onMediaModeChange: (mode) => {
       setMediaMode(mode)
+      setModel(mode === 'image' ? 'image-pro' : 'video-mini')
+      if (mode === 'video') setVideoComposer('references')
       setResolution(mode === 'image' ? '2K' : '720p')
       setLastAction(`composer 切换为${mode === 'image' ? '图片' : '视频'}模式`)
+    },
+    onModelChange: (nextModel) => {
+      setModel(nextModel)
+      setLastAction(`切换生成模型为 ${nextModel}`)
     },
     onVideoComposerChange: (composer) => {
       setVideoComposer(composer)
@@ -1542,10 +1667,6 @@ export function CreationWorkbenchPrototype({
     onQuantityChange: (value) => {
       setQuantity(value)
       setLastAction(`将新 Task 的输出数量设为 ${value}`)
-    },
-    onRightsConfirmedChange: (confirmed) => {
-      setRightsConfirmed(confirmed)
-      setLastAction(confirmed ? '确认参考素材权利声明' : '取消参考素材权利声明')
     },
     onSubmit: submit,
     onEdit: editAgain,
