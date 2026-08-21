@@ -627,16 +627,22 @@ function VariantA({
             onSourceChange(nextSource)
           }}
         >
-          <div className="border-border flex flex-wrap items-end justify-between gap-x-5 gap-y-3 border-b">
-            <TabsList variant="line" className="h-12 gap-6 bg-transparent">
-              <TabsTrigger value="official" className="h-12 px-0 text-base">
+          <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
+            <TabsList className="h-11 gap-2 bg-transparent p-0">
+              <TabsTrigger
+                value="official"
+                className="data-active:bg-muted h-11 flex-none rounded-xl px-4 text-sm !shadow-none data-active:border-transparent dark:data-active:bg-white/[0.07]"
+              >
                 <BadgeCheckIcon /> 官方精选
               </TabsTrigger>
-              <TabsTrigger value="discovery" className="h-12 px-0 text-base">
+              <TabsTrigger
+                value="discovery"
+                className="data-active:bg-muted h-11 flex-none rounded-xl px-4 text-sm !shadow-none data-active:border-transparent dark:data-active:bg-white/[0.07]"
+              >
                 <SparklesIcon /> 当前组织 · 发现
               </TabsTrigger>
             </TabsList>
-            <span className="text-muted-foreground pb-3 text-xs">
+            <span className="text-muted-foreground text-xs">
               {source === 'official' ? 'Nevix 策划 · Official Template' : '星河出海 · 已发布'} ·{' '}
               {items.length} 个结果
             </span>
