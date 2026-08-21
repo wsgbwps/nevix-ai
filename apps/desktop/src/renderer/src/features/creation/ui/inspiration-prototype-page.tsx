@@ -545,7 +545,7 @@ function VariantA({
     if (!gallery) return
 
     const updateColumnCount = (): void => {
-      const nextColumnCount = Math.min(6, Math.max(1, Math.floor((gallery.clientWidth + 6) / 190)))
+      const nextColumnCount = Math.min(6, Math.max(1, Math.floor((gallery.clientWidth + 2) / 186)))
       setGalleryColumnCount(nextColumnCount)
     }
 
@@ -565,7 +565,7 @@ function VariantA({
 
   return (
     <main className="bg-background min-h-full flex-1 px-4 pb-28 sm:px-6">
-      <section className="mx-auto max-w-[1500px]">
+      <section className="mx-auto max-w-[1680px]">
         <header className="relative overflow-hidden px-4 pt-12 pb-9 text-center sm:pt-16">
           <div className="bg-primary/12 absolute top-4 left-1/2 h-44 w-[34rem] -translate-x-1/2 rounded-full blur-[100px]" />
           <div className="relative">
@@ -645,13 +645,13 @@ function VariantA({
         </div>
 
         {items.length > 0 ? (
-          <div ref={galleryRef} className="mx-auto w-full max-w-[1134px]">
+          <div ref={galleryRef} className="w-full overflow-hidden rounded-xl">
             <div
-              className="grid justify-center gap-1.5"
-              style={{ gridTemplateColumns: `repeat(${galleryColumnCount}, 184px)` }}
+              className="grid gap-0.5"
+              style={{ gridTemplateColumns: `repeat(${galleryColumnCount}, minmax(0, 1fr))` }}
             >
               {galleryColumns.map((columnItems, columnIndex) => (
-                <div key={columnIndex} className="flex min-w-0 flex-col gap-1.5">
+                <div key={columnIndex} className="flex min-w-0 flex-col gap-0.5">
                   {columnItems.map((item) => (
                     <MasonryGalleryCard key={item.id} item={item} onSelect={onSelect} />
                   ))}
@@ -1005,10 +1005,10 @@ function MasonryGalleryCard({
   return (
     <button
       type="button"
-      className="group block w-[184px] overflow-hidden rounded-lg text-left focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-1 focus-visible:ring-offset-black"
+      className="group block w-full overflow-hidden text-left focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-inset"
       onClick={() => onSelect(item)}
     >
-      <span className="bg-card relative block overflow-hidden rounded-lg">
+      <span className="bg-card relative block overflow-hidden">
         <CoverVisual item={item} className={masonryCoverClasses[item.id] ?? 'aspect-[4/5]'} />
         <span className="absolute inset-0 flex translate-y-2 flex-col justify-end bg-gradient-to-t from-black/90 via-black/25 to-transparent p-3 text-white opacity-0 transition duration-200 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
           <span className="mb-auto flex items-start justify-between gap-2">
