@@ -600,6 +600,7 @@ type VariantProps = {
   model: ModelKey
   videoComposer: VideoComposer
   prompt: string
+  referenceIds: number[]
   referenceCount: number
   ratio: string
   resolution: string
@@ -613,7 +614,7 @@ type VariantProps = {
   onVideoComposerChange: (composer: VideoComposer) => void
   onPromptChange: (prompt: string) => void
   onAddReference: () => void
-  onRemoveReference: () => void
+  onRemoveReference: (index?: number) => void
   onRatioChange: (value: string) => void
   onResolutionChange: (value: string) => void
   onQuantityChange: (value: number) => void
@@ -628,6 +629,10 @@ type VariantProps = {
 
 function VariantA(props: VariantProps): React.JSX.Element {
   const isEmptySession = props.activeSessionId === 'new'
+  const [isReferenceStackHovered, setIsReferenceStackHovered] = useState(false)
+  const [isReferenceStackFocused, setIsReferenceStackFocused] = useState(false)
+  const [hoveredReferenceId, setHoveredReferenceId] = useState<number | null>(null)
+  const isReferenceStackExpanded = isReferenceStackHovered || isReferenceStackFocused
   const currentModel = MODEL_OPTIONS[props.mediaMode].find((model) => model.key === props.model)
   const videoComposerLabel = props.videoComposer === 'references' ? '全能参考' : '首尾帧'
   const composerControlClass =
@@ -898,60 +903,102 @@ function VariantA(props: VariantProps): React.JSX.Element {
                 <div
                   aria-label={`${props.referenceCount} 张参考图片`}
                   role="group"
-                  className="group relative h-16 w-12 shrink-0 rounded-[8px] focus-within:ring-2 focus-within:ring-sky-400/45"
+                  className="group relative h-16 w-12 shrink-0 rounded-[8px]"
+                  onMouseEnter={() => setIsReferenceStackHovered(true)}
+                  onMouseLeave={() => {
+                    setIsReferenceStackHovered(false)
+                    setHoveredReferenceId(null)
+                  }}
+                  onFocus={() => setIsReferenceStackFocused(true)}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                      setIsReferenceStackFocused(false)
+                    }
+                  }}
                 >
-                  {Array.from({ length: Math.min(props.referenceCount, 3) }, (_, visibleIndex) => {
-                    const referenceIndex =
-                      props.referenceCount - Math.min(props.referenceCount, 3) + visibleIndex
+                  {isReferenceStackExpanded ? (
+                    <div
+                      aria-hidden="true"
+                      className="absolute -top-12 left-0 z-0 h-20"
+                      style={{
+                        width: props.referenceCount * 40 + (props.referenceCount < 4 ? 48 : 8)
+                      }}
+                    />
+                  ) : null}
+                  {props.referenceIds.map((referenceId, referenceIndex) => {
                     const depth = props.referenceCount - referenceIndex - 1
                     const isTop = depth === 0
+                    const x = isReferenceStackExpanded ? depth * 40 : depth * 3
+                    const y = isReferenceStackExpanded ? -48 : depth * -2
+                    const scale = isReferenceStackExpanded ? 1 : 1 - depth * 0.025
+                    const rotation = isReferenceStackExpanded
+                      ? [-4, 4, -6, 3][depth]
+                      : [2, -4, 5, -5][depth]
+                    const showRemove =
+                      isReferenceStackExpanded && hoveredReferenceId === referenceId
 
                     return (
                       <div
-                        key={`reference-${referenceIndex}`}
+                        key={`reference-${referenceId}`}
                         className={cn(
-                          'absolute inset-0 overflow-hidden rounded-[8px] border border-[#1a1b20] transition-[transform,opacity] duration-200 ease-out',
+                          'absolute inset-0 transition-[transform,opacity] duration-200 ease-out',
                           isTop && 'animate-in fade-in-0 zoom-in-95'
                         )}
                         style={{
-                          zIndex: 10 - depth,
-                          opacity: 1 - depth * 0.16,
-                          transform: `translate(${depth * 4}px, ${depth * -3}px) scale(${1 - depth * 0.035})`
+                          zIndex: hoveredReferenceId === referenceId ? 40 : 20 - depth,
+                          opacity: isReferenceStackExpanded ? 1 : 1 - depth * 0.16,
+                          transform: `translate(${x}px, ${y}px) rotate(${rotation}deg) scale(${scale})`
                         }}
+                        onMouseEnter={() => setHoveredReferenceId(referenceId)}
+                        onMouseLeave={() => setHoveredReferenceId(null)}
                       >
-                        <img
-                          src={REFERENCE_PREVIEW_SRC}
-                          alt=""
-                          aria-hidden={!isTop}
-                          aria-label={isTop ? '已添加的参考图片' : undefined}
-                          className="size-full object-cover"
-                          style={{ filter: `hue-rotate(${referenceIndex * 24}deg)` }}
-                        />
+                        <div className="size-full overflow-hidden rounded-[8px] border border-white/20 bg-[#24262d] shadow-sm shadow-black/40">
+                          <img
+                            src={REFERENCE_PREVIEW_SRC}
+                            alt=""
+                            aria-hidden={!isTop && !isReferenceStackExpanded}
+                            aria-label={isTop ? '已添加的参考图片' : undefined}
+                            className="size-full object-cover"
+                            style={{ filter: `hue-rotate(${referenceId * 24}deg)` }}
+                          />
+                        </div>
+                        <button
+                          aria-label="移除参考图片"
+                          title={`移除参考图片 ${referenceIndex + 1}`}
+                          className={cn(
+                            'absolute -top-2 -right-2 grid size-7 place-items-center rounded-full border border-white/10 bg-[#30333b] text-zinc-100 shadow-md shadow-black/50 transition-[opacity,transform,background-color] duration-[180ms] ease-out hover:bg-[#3a3d46] focus-visible:ring-2 focus-visible:ring-sky-400/50 focus-visible:outline-none',
+                            showRemove
+                              ? 'translate-y-0 scale-100 opacity-100'
+                              : 'pointer-events-none translate-y-[3px] scale-[0.98] opacity-0 focus:pointer-events-auto focus:translate-y-0 focus:scale-100 focus:opacity-100'
+                          )}
+                          onClick={() => props.onRemoveReference(referenceIndex)}
+                        >
+                          <XIcon className="size-3.5" />
+                        </button>
                       </div>
                     )
                   })}
-                  <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-0.5 rounded-[8px] bg-black/45 opacity-0 transition-opacity duration-[180ms] ease-out group-focus-within:opacity-100 group-hover:opacity-100">
-                    {props.referenceCount < 4 ? (
-                      <button
-                        aria-label="继续添加参考内容"
-                        className="pointer-events-auto grid size-7 translate-y-[3px] scale-[0.98] place-items-center rounded-md bg-black/35 text-zinc-100 transition-transform duration-[180ms] ease-out group-focus-within:translate-y-0 group-focus-within:scale-100 group-hover:translate-y-0 group-hover:scale-100 hover:bg-black/55 focus-visible:ring-2 focus-visible:ring-sky-400/50 focus-visible:outline-none"
-                        onClick={props.onAddReference}
-                      >
-                        <PlusIcon className="size-3.5" />
-                      </button>
-                    ) : null}
+                  {props.referenceCount < 4 ? (
                     <button
-                      aria-label="移除参考图片"
-                      className="pointer-events-auto grid size-7 translate-y-[3px] scale-[0.98] place-items-center rounded-md bg-black/35 text-zinc-100 transition-transform duration-[180ms] ease-out group-focus-within:translate-y-0 group-focus-within:scale-100 group-hover:translate-y-0 group-hover:scale-100 hover:bg-black/55 focus-visible:ring-2 focus-visible:ring-sky-400/50 focus-visible:outline-none"
-                      onClick={props.onRemoveReference}
+                      aria-label="继续添加参考内容"
+                      className={cn(
+                        'absolute inset-0 z-30 flex items-center justify-center border border-white/[0.08] bg-[#3a3d46] text-zinc-100 shadow-md shadow-black/40 transition-[transform,background-color] duration-200 ease-out hover:bg-[#454953] focus-visible:ring-2 focus-visible:ring-sky-400/50 focus-visible:outline-none',
+                        isReferenceStackExpanded
+                          ? 'h-16 w-12 flex-col gap-1 rounded-[8px]'
+                          : 'size-7 rounded-full'
+                      )}
+                      style={{
+                        transform: isReferenceStackExpanded
+                          ? `translate(${props.referenceCount * 40}px, -48px) rotate(-4deg)`
+                          : 'translate(28px, 36px)'
+                      }}
+                      onClick={props.onAddReference}
                     >
-                      <XIcon className="size-3.5" />
+                      <PlusIcon className="size-4 shrink-0 stroke-[1.5]" />
+                      {isReferenceStackExpanded ? (
+                        <span className="text-[8px] leading-3 text-zinc-400">参考内容</span>
+                      ) : null}
                     </button>
-                  </div>
-                  {props.referenceCount > 1 ? (
-                    <span className="animate-in fade-in-0 zoom-in-95 absolute -right-1 -bottom-1 z-30 grid size-5 place-items-center rounded-full border border-[#1a1b20] bg-[#30333b] text-[9px] font-medium text-zinc-200 tabular-nums duration-200">
-                      {props.referenceCount}
-                    </span>
                   ) : null}
                 </div>
               )}
@@ -1599,7 +1646,8 @@ export function CreationWorkbenchPrototype({
   const [model, setModel] = useState<ModelKey>('image-pro')
   const [videoComposer, setVideoComposer] = useState<VideoComposer>('frames')
   const [prompt, setPrompt] = useState('')
-  const [referenceCount, setReferenceCount] = useState(0)
+  const [referenceIds, setReferenceIds] = useState<number[]>([])
+  const referenceCount = referenceIds.length
   const [ratio, setRatio] = useState('4:5')
   const [resolution, setResolution] = useState('2K')
   const [quantity, setQuantity] = useState(1)
@@ -1642,7 +1690,7 @@ export function CreationWorkbenchPrototype({
     setScenarioKey(nextScenario)
     if (id === 'new') {
       setPrompt('')
-      setReferenceCount(0)
+      setReferenceIds([])
       setMediaMode('image')
       setModel('image-pro')
       setVideoComposer('frames')
@@ -1655,7 +1703,7 @@ export function CreationWorkbenchPrototype({
       setPrompt(
         '将 @图片1 的白色跑鞋放在雨后城市街道，保留鞋面结构，加入清晨侧逆光和轻微水汽，适合跨境电商首页主视觉。'
       )
-      setReferenceCount(1)
+      setReferenceIds([1, 2, 3])
       setMediaMode(id === 'video' ? 'video' : 'image')
       setModel(id === 'video' ? 'video-mini' : 'image-pro')
       setVideoComposer(id === 'video' ? 'references' : 'frames')
@@ -1673,7 +1721,7 @@ export function CreationWorkbenchPrototype({
     setScenarioKey('queued')
     setExpectedSlots(1)
     setPrompt('')
-    setReferenceCount(0)
+    setReferenceIds([])
     setMediaMode('image')
     setModel('image-pro')
     setVideoComposer('frames')
@@ -1722,10 +1770,7 @@ export function CreationWorkbenchPrototype({
       model,
       videoComposer: mediaMode === 'video' ? videoComposer : null,
       prompt,
-      referenceMaterialIds: Array.from(
-        { length: referenceCount },
-        (_, index) => `ref-${index + 1}`
-      ),
+      referenceMaterialIds: referenceIds.map((referenceId) => `ref-${referenceId}`),
       ratio,
       resolution,
       quantity,
@@ -1747,6 +1792,7 @@ export function CreationWorkbenchPrototype({
     model,
     videoComposer,
     prompt,
+    referenceIds,
     referenceCount,
     ratio,
     resolution,
@@ -1775,12 +1821,19 @@ export function CreationWorkbenchPrototype({
       setLastAction('编辑草稿提示词')
     },
     onAddReference: () => {
-      setReferenceCount((count) => Math.min(4, count + 1))
+      setReferenceIds((currentIds) => {
+        if (currentIds.length >= 4) return currentIds
+        const nextId = currentIds.reduce((maxId, id) => Math.max(maxId, id), 0) + 1
+        return [...currentIds, nextId]
+      })
       setLastAction('添加新的内存 Reference Material')
     },
-    onRemoveReference: () => {
-      setReferenceCount((count) => Math.max(0, count - 1))
-      setLastAction('从草稿移除最后一项 Reference Material')
+    onRemoveReference: (index) => {
+      setReferenceIds((currentIds) => {
+        const removalIndex = index ?? currentIds.length - 1
+        return currentIds.filter((_, currentIndex) => currentIndex !== removalIndex)
+      })
+      setLastAction('从草稿移除指定 Reference Material')
     },
     onRatioChange: (value) => {
       setRatio(value)
