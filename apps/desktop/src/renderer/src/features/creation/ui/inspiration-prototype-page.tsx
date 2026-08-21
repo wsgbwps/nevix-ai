@@ -13,10 +13,20 @@ import {
   SlidersHorizontalIcon,
   SparklesIcon,
   VideoIcon,
-  WandSparklesIcon
+  WandSparklesIcon,
+  XIcon
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import {
   Sheet,
@@ -415,23 +425,37 @@ export function InspirationPrototypePage({
         />
       )}
 
-      <ItemDetailSheet
-        item={variant === 'C' ? null : selectedItem}
-        onOpenChange={(open) => {
-          if (!open) setSelectedItem(null)
-        }}
-        onCreateSimilar={createSimilar}
-      />
-      <PrototypeStateInspector state={stateSnapshot} />
-      <InspirationPrototypeSwitcher
-        variant={variant}
-        onVariantChange={(nextVariant) => {
-          setView('inspiration')
-          setSelectedItem(null)
-          setSource(nextVariant === 'A' ? 'official' : 'all')
-          onVariantChange(nextVariant)
-        }}
-      />
+      {variant === 'A' ? (
+        <ItemDetailDialog
+          item={selectedItem}
+          onOpenChange={(open) => {
+            if (!open) setSelectedItem(null)
+          }}
+          onCreateSimilar={createSimilar}
+        />
+      ) : (
+        <ItemDetailSheet
+          item={variant === 'C' ? null : selectedItem}
+          onOpenChange={(open) => {
+            if (!open) setSelectedItem(null)
+          }}
+          onCreateSimilar={createSimilar}
+        />
+      )}
+      {variant === 'A' && selectedItem ? null : (
+        <>
+          <PrototypeStateInspector state={stateSnapshot} />
+          <InspirationPrototypeSwitcher
+            variant={variant}
+            onVariantChange={(nextVariant) => {
+              setView('inspiration')
+              setSelectedItem(null)
+              setSource(nextVariant === 'A' ? 'official' : 'all')
+              onVariantChange(nextVariant)
+            }}
+          />
+        </>
+      )}
     </>
   )
 }
@@ -579,7 +603,7 @@ function VariantA({
               浏览官方模板与当前 Organization 已发布作品，找到起点后直接做同款。
             </p>
 
-            <div className="border-border bg-card/80 focus-within:border-primary/45 focus-within:ring-primary/10 mx-auto mt-7 flex max-w-3xl items-center rounded-2xl border p-1.5 shadow-2xl shadow-black/20 transition focus-within:ring-4">
+            <div className="border-border bg-card/80 focus-within:border-primary/45 focus-within:ring-primary/10 mx-auto mt-7 flex max-w-3xl items-center rounded-2xl border p-1.5 shadow-sm shadow-black/10 transition focus-within:ring-4">
               <SearchIcon className="text-muted-foreground ml-3 size-5 shrink-0" />
               <Input
                 value={query}
@@ -1007,22 +1031,16 @@ function MasonryGalleryCard({
       type="button"
       className="group block w-full overflow-hidden text-left focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-inset"
       onClick={() => onSelect(item)}
+      aria-label={`查看 ${item.title} 详情`}
     >
       <span className="bg-card relative block overflow-hidden">
         <CoverVisual item={item} className={masonryCoverClasses[item.id] ?? 'aspect-[4/5]'} />
-        <span className="absolute inset-0 flex translate-y-2 flex-col justify-end bg-gradient-to-t from-black/90 via-black/25 to-transparent p-3 text-white opacity-0 transition duration-200 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
-          <span className="mb-auto flex items-start justify-between gap-2">
-            <SourceBadge item={item} compact />
-            <span className="rounded-full bg-black/40 px-2 py-1 text-[10px] backdrop-blur">
-              查看详情
-            </span>
+        <span className="absolute inset-x-0 bottom-0 flex h-1/2 translate-y-2 flex-col justify-end bg-gradient-to-t from-black/75 via-black/35 to-transparent px-3 pt-10 pb-3 text-white opacity-0 transition duration-200 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
+          <span className="truncate text-xs font-medium">
+            {item.source === 'official' ? 'Nevix 策划' : item.author}
           </span>
-          <span className="line-clamp-2 text-sm leading-5 font-semibold">{item.title}</span>
-          <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-white/70">
-            <span className="truncate">
-              {item.source === 'official' ? 'Nevix 策划' : item.author}
-            </span>
-            <span className="shrink-0">{item.parameters.slice(0, 2).join(' · ')}</span>
+          <span className="mt-1 line-clamp-2 text-[10px] leading-4 text-white/70">
+            {item.description}
           </span>
         </span>
       </span>
@@ -1049,7 +1067,7 @@ function CoverVisual({
       <span className="absolute -bottom-8 -left-6 size-28 rounded-full bg-black/15 blur-2xl" />
       <span className="relative grid place-items-center self-stretch">
         <span
-          className={`grid place-items-center rounded-[28%] border border-white/35 bg-black/20 text-white shadow-2xl backdrop-blur-sm ${
+          className={`grid place-items-center rounded-[28%] border border-white/35 bg-black/20 text-white shadow-sm backdrop-blur-sm ${
             compact ? 'size-9' : 'size-20'
           }`}
         >
@@ -1083,6 +1101,141 @@ function SourceBadge({
     >
       已发布
     </Badge>
+  )
+}
+
+function ItemDetailDialog({
+  item,
+  onOpenChange,
+  onCreateSimilar
+}: {
+  readonly item: InspirationItem | null
+  readonly onOpenChange: (open: boolean) => void
+  readonly onCreateSimilar: (item: InspirationItem) => void
+}): React.JSX.Element {
+  const previewRatio = item
+    ? item.parameters.find((parameter) => /^\d+:\d+$/.test(parameter))
+    : null
+  const [previewWidth = 4, previewHeight = 5] = previewRatio
+    ? previewRatio.split(':').map(Number)
+    : []
+  const isLandscape = previewWidth > previewHeight
+  const isSquare = previewWidth === previewHeight
+
+  return (
+    <Dialog open={item !== null} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        className="h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-none grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(280px,42vh)] gap-0 overflow-hidden rounded-xl bg-[#0b0b0d] p-0 text-white ring-white/10 sm:max-w-none lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-1"
+      >
+        {item ? (
+          <>
+            <DialogHeader className="sr-only">
+              <DialogTitle>{item.title}</DialogTitle>
+              <DialogDescription>{item.description}</DialogDescription>
+            </DialogHeader>
+
+            <section className="relative flex min-h-0 items-center justify-center overflow-hidden bg-[#0b0b0d] p-5 sm:p-8">
+              <CoverVisual
+                item={item}
+                className={`max-h-full max-w-full rounded-lg ${
+                  isLandscape
+                    ? 'aspect-video w-full max-w-5xl'
+                    : isSquare
+                      ? 'aspect-square h-[min(78dvh,760px)]'
+                      : 'aspect-[3/4] h-full max-h-[calc(100dvh-5rem)]'
+                }`}
+              />
+              {item.mediaType === 'video' ? (
+                <span className="pointer-events-none absolute grid size-16 place-items-center rounded-full border border-white/20 bg-black/45 backdrop-blur-sm">
+                  <CirclePlayIcon className="size-8" />
+                </span>
+              ) : null}
+              <DialogClose asChild>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="absolute top-4 right-4 rounded-full bg-white/10 text-white hover:bg-white/15 hover:text-white"
+                >
+                  <XIcon />
+                  <span className="sr-only">关闭详情</span>
+                </Button>
+              </DialogClose>
+            </section>
+
+            <aside className="flex min-h-0 flex-col border-t border-white/10 bg-[#111114] lg:border-t-0 lg:border-l">
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+                <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {item.source === 'official' ? 'Nevix 策划' : item.author}
+                    </p>
+                    <p className="mt-1 text-[11px] text-white/45">
+                      {item.source === 'official'
+                        ? '官方创作模板'
+                        : `${item.publishedAt ?? '最近'} · 当前 Organization`}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-white/10 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                  >
+                    关注
+                  </Button>
+                </div>
+
+                <div className="space-y-6 pt-5">
+                  <DetailSection title="作品说明">
+                    <p className="text-xs leading-5 text-white/70">{item.description}</p>
+                  </DetailSection>
+                  <DetailSection title={item.mediaType === 'video' ? '视频提示词' : '图片提示词'}>
+                    <p className="text-xs leading-5 text-white/70">{item.prompt}</p>
+                  </DetailSection>
+                  <DetailSection title="生成参数">
+                    <div className="flex flex-wrap gap-x-3 gap-y-2 text-[11px] text-white/50">
+                      {item.parameters.map((parameter) => (
+                        <span key={parameter}>{parameter}</span>
+                      ))}
+                    </div>
+                  </DetailSection>
+                  <DetailSection title="参考素材">
+                    <div className="space-y-2">
+                      {item.references.map((reference, index) => (
+                        <div
+                          key={reference}
+                          className="flex items-center gap-3 border-t border-white/10 pt-2 text-xs text-white/65 first:border-t-0 first:pt-0"
+                        >
+                          <span className="grid size-8 shrink-0 place-items-center bg-white/5">
+                            <PackageIcon className="size-4 text-white/40" />
+                          </span>
+                          <span>
+                            {index + 1}. {reference}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </DetailSection>
+                </div>
+              </div>
+
+              <DialogFooter className="grid grid-cols-2 gap-2 border-t border-white/10 p-4">
+                <Button
+                  variant="secondary"
+                  className="bg-white/8 text-white hover:bg-white/12"
+                  disabled
+                >
+                  <ImageIcon /> 用作参考图
+                </Button>
+                <Button onClick={() => onCreateSimilar(item)}>
+                  <WandSparklesIcon /> 做同款
+                </Button>
+              </DialogFooter>
+            </aside>
+          </>
+        ) : null}
+      </DialogContent>
+    </Dialog>
   )
 }
 
