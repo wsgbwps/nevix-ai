@@ -6,17 +6,15 @@
 
 TypeScript runtime registration 的物理路径与 glob 于 2026-07-30 被 [Desktop ADR-0003](../../apps/desktop/docs/adr/0003-main-domain-first-ipc-adapters.md) 部分取代。下文第 2 项及效果表中的 `main/ipc/<domain>/` 路径保留为原始决策记录；分散类型声明、declaration merging、generic preload、自注册原则和 Go 显式注册决定继续有效。
 
-2026-08-21 备注：项目已转为个人开发（单人开发背景首见于 [ADR-0011](0011-pr-based-delivery.md)）。背景与被拒方案中的「3 人团队」「3 人同时编辑」保留为决策时点的协作背景；分散声明与自注册继续有效的理由转为保持 owner 边界清晰、注册点可发现与 AI 上下文局部性。
-
 ## 背景
 
-项目采用 3 人团队 vertical-slice 开发，每人负责一个 feature domain（初始规划为 video-generation、image-editing、project-management）。AI 业务 owner 示例后来由 [ADR-0012](0012-unified-ai-creation-owner.md) 统一为 `creation`；本 ADR 保留其原始背景，不再把初始名称视为当前 owner。初始架构设计中有三个共享文件会被所有开发者频繁编辑：
+项目采用 vertical-slice 开发，每个 feature domain 一个 owner；AI 业务 owner 由 [ADR-0012](0012-unified-ai-creation-owner.md) 统一为 `creation`。集中式设计会形成三个被所有 domain 频繁编辑的中央共享文件：
 
 - `ipc/types.ts` — 集中定义所有 IPC channel 的请求/响应类型
 - `ipc/register.ts` — 手工 import 并注册所有 domain 的 handler
 - `cmd/server/main.go` — 手工注册所有 module 的路由和事件订阅
 
-这与"物理隔离、互不冲突"的核心目标直接矛盾。
+这与"物理隔离、owner 边界清晰"的核心目标直接矛盾。
 
 ## 决策
 
@@ -34,7 +32,7 @@ TypeScript runtime registration 的物理路径与 glob 于 2026-07-30 被 [Desk
 
 ### Go 侧
 
-6. **显式注册，不用 `init()` + blank import。** 每个 module 导出 `Register(r chi.Router, bus event.Bus)`，`main.go` 逐个调用。路由和事件订阅在同一个函数中完成。`main.go` 是会被编辑的，但每次只增加一行，冲突概率极低。保留了所有路由的可见性。
+6. **显式注册，不用 `init()` + blank import。** 每个 module 导出 `Register(r chi.Router, bus event.Bus)`，`main.go` 逐个调用。路由和事件订阅在同一个函数中完成。`main.go` 是会被编辑的，但每次只增加一行，保留了所有路由的可见性。
 
 ## 效果
 
@@ -47,6 +45,6 @@ TypeScript runtime registration 的物理路径与 glob 于 2026-07-30 被 [Desk
 
 ## 被拒绝的替代方案
 
-- **集中 `ipc/types.ts`**：3 人同时编辑，冲突频繁。
+- **集中 `ipc/types.ts`**：所有 domain 的类型改动汇聚到一个中央热点文件。
 - **`_augmentations.ts` barrel 文件**：实测 tsconfig include 已足够，barrel 是不必要的额外共享编辑点。
-- **Go `init()` + blank import**：隐藏了依赖关系和注册顺序，对 3 module 规模的项目不值得。
+- **Go `init()` + blank import**：隐藏了依赖关系和注册顺序，对当前 module 规模不值得。
