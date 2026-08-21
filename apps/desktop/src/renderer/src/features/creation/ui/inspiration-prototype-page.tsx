@@ -603,7 +603,7 @@ function VariantA({
               浏览官方模板与当前 Organization 已发布作品，找到起点后直接做同款。
             </p>
 
-            <div className="border-border bg-card/80 focus-within:border-primary/45 focus-within:ring-primary/10 mx-auto mt-7 flex max-w-3xl items-center rounded-2xl border p-1.5 shadow-sm shadow-black/10 transition focus-within:ring-4">
+            <div className="border-border bg-card/80 focus-within:border-primary/45 focus-within:ring-primary/10 mx-auto mt-7 flex max-w-3xl items-center rounded-2xl border p-1.5 shadow-none transition focus-within:ring-4">
               <SearchIcon className="text-muted-foreground ml-3 size-5 shrink-0" />
               <Input
                 value={query}
@@ -619,7 +619,14 @@ function VariantA({
           </div>
         </header>
 
-        <Tabs value={source} onValueChange={(value) => onSourceChange(value as Source)}>
+        <Tabs
+          value={source}
+          onValueChange={(value) => {
+            const nextSource = value as Source
+            if (nextSource === 'discovery') onCategoryChange('all')
+            onSourceChange(nextSource)
+          }}
+        >
           <div className="border-border flex flex-wrap items-end justify-between gap-x-5 gap-y-3 border-b">
             <TabsList variant="line" className="h-12 gap-6 bg-transparent">
               <TabsTrigger value="official" className="h-12 px-0 text-base">
@@ -637,21 +644,25 @@ function VariantA({
         </Tabs>
 
         <div className="flex flex-wrap items-center gap-2 py-4">
-          {(Object.entries(categoryLabels) as [Category, string][]).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
-                category === value
-                  ? 'bg-foreground text-background font-medium'
-                  : 'bg-muted/60 text-muted-foreground hover:bg-accent hover:text-foreground'
-              }`}
-              onClick={() => onCategoryChange(value)}
-            >
-              {label}
-            </button>
-          ))}
-          <span className="bg-border mx-1 h-4 w-px" />
+          {source === 'official' ? (
+            <>
+              {(Object.entries(categoryLabels) as [Category, string][]).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
+                    category === value
+                      ? 'bg-foreground text-background font-medium'
+                      : 'bg-muted/60 text-muted-foreground hover:bg-accent hover:text-foreground'
+                  }`}
+                  onClick={() => onCategoryChange(value)}
+                >
+                  {label}
+                </button>
+              ))}
+              <span className="bg-border mx-1 h-4 w-px" />
+            </>
+          ) : null}
           {(Object.entries(mediaLabels) as [MediaType, string][]).map(([value, label]) => (
             <button
               key={value}
@@ -1026,6 +1037,9 @@ function MasonryGalleryCard({
   readonly item: InspirationItem
   readonly onSelect: (item: InspirationItem) => void
 }): React.JSX.Element {
+  const [aspectRatio = '—', resolution = '—'] = item.parameters
+  const author = item.source === 'official' ? 'Nevix 策划' : (item.author ?? 'Organization 成员')
+
   return (
     <button
       type="button"
@@ -1035,12 +1049,17 @@ function MasonryGalleryCard({
     >
       <span className="bg-card relative block overflow-hidden">
         <CoverVisual item={item} className={masonryCoverClasses[item.id] ?? 'aspect-[4/5]'} />
-        <span className="absolute inset-x-0 bottom-0 flex h-1/2 translate-y-2 flex-col justify-end bg-gradient-to-t from-black/75 via-black/35 to-transparent px-3 pt-10 pb-3 text-white opacity-0 transition duration-200 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
-          <span className="truncate text-xs font-medium">
-            {item.source === 'official' ? 'Nevix 策划' : item.author}
+        <span className="absolute inset-x-0 bottom-0 flex h-1/2 translate-y-2 items-end bg-gradient-to-t from-black/55 via-black/15 to-transparent px-3 pt-10 pb-3 text-white opacity-0 transition duration-200 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="grid size-5 shrink-0 place-items-center rounded-full bg-white/20 text-[9px] font-semibold ring-1 ring-white/25">
+              {author.slice(0, 1)}
+            </span>
+            <span className="truncate text-xs font-medium">{author}</span>
           </span>
-          <span className="mt-1 line-clamp-2 text-[10px] leading-4 text-white/70">
-            {item.description}
+          <span className="ml-auto flex shrink-0 items-center gap-2 pl-3 text-[10px] text-white/75">
+            <span>{aspectRatio}</span>
+            <span className="h-3 w-px bg-white/25" />
+            <span>{resolution}</span>
           </span>
         </span>
       </span>
@@ -1067,7 +1086,7 @@ function CoverVisual({
       <span className="absolute -bottom-8 -left-6 size-28 rounded-full bg-black/15 blur-2xl" />
       <span className="relative grid place-items-center self-stretch">
         <span
-          className={`grid place-items-center rounded-[28%] border border-white/35 bg-black/20 text-white shadow-sm backdrop-blur-sm ${
+          className={`grid place-items-center rounded-[28%] border border-white/35 bg-black/20 text-white shadow-none backdrop-blur-sm ${
             compact ? 'size-9' : 'size-20'
           }`}
         >
