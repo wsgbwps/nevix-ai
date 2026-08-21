@@ -590,6 +590,7 @@ type VariantProps = {
   ratio: string
   resolution: string
   quantity: number
+  duration: number
   scenario: Scenario
   onNewSession: () => void
   onSelectSession: (id: string, scenario: ScenarioKey) => void
@@ -602,6 +603,7 @@ type VariantProps = {
   onRatioChange: (value: string) => void
   onResolutionChange: (value: string) => void
   onQuantityChange: (value: number) => void
+  onDurationChange: (value: number) => void
   onSubmit: () => void
   onEdit: () => void
   onRegenerate: () => void
@@ -1113,6 +1115,58 @@ function VariantA(props: VariantProps): React.JSX.Element {
                 </DropdownMenuContent>
               </DropdownMenu>
 
+              {props.mediaMode === 'video' ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      aria-label={`视频时长：${props.duration} 秒`}
+                      className={composerControlClass}
+                    >
+                      <Clock3Icon className="size-3.5" />
+                      {props.duration}s
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    side="top"
+                    sideOffset={10}
+                    align="end"
+                    className="w-[400px] rounded-2xl border border-white/[0.08] bg-[#1b1c20] p-4 text-zinc-200 shadow-2xl"
+                  >
+                    <p className="mb-4 text-xs font-medium text-zinc-500">选择视频生成时长</p>
+                    <div className="flex items-center gap-4">
+                      <div className="min-w-0 flex-1">
+                        <input
+                          aria-label="视频生成时长"
+                          type="range"
+                          min="1"
+                          max="15"
+                          step="1"
+                          value={props.duration}
+                          className="h-1.5 w-full cursor-pointer accent-cyan-300"
+                          onChange={(event) => props.onDurationChange(Number(event.target.value))}
+                        />
+                        <div className="mt-2 flex justify-between text-[10px] text-zinc-500">
+                          {[1, 5, 10, 15].map((value) => (
+                            <button
+                              key={value}
+                              aria-label={`设置视频时长为 ${value} 秒`}
+                              className="hover:text-zinc-200"
+                              onClick={() => props.onDurationChange(value)}
+                            >
+                              {value}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex h-10 w-20 shrink-0 items-center justify-between rounded-xl bg-[#292b32] px-3 text-sm">
+                        <span>{props.duration}</span>
+                        <span className="text-zinc-600">s</span>
+                      </div>
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+
               <Button
                 size="icon-lg"
                 className="ml-auto size-8 shrink-0 rounded-full bg-zinc-600 text-zinc-200 hover:bg-cyan-300 hover:text-zinc-950"
@@ -1483,6 +1537,7 @@ export function CreationWorkbenchPrototype({
   const [ratio, setRatio] = useState('4:5')
   const [resolution, setResolution] = useState('2K')
   const [quantity, setQuantity] = useState(1)
+  const [duration, setDuration] = useState(5)
   const [expectedSlots, setExpectedSlots] = useState(1)
   const [showState, setShowState] = useState(false)
   const [lastAction, setLastAction] = useState('打开空白 Creation Session')
@@ -1528,6 +1583,7 @@ export function CreationWorkbenchPrototype({
       setRatio('4:5')
       setResolution('2K')
       setQuantity(1)
+      setDuration(5)
       setExpectedSlots(1)
     } else {
       setPrompt(
@@ -1539,6 +1595,7 @@ export function CreationWorkbenchPrototype({
       setVideoComposer(id === 'video' ? 'references' : 'frames')
       setResolution(id === 'video' ? '720p' : '2K')
       setQuantity(4)
+      setDuration(5)
       setExpectedSlots(4)
     }
     const title = SESSION_ITEMS.find((session) => session.id === id)?.title ?? '未命名创作'
@@ -1557,6 +1614,7 @@ export function CreationWorkbenchPrototype({
     setRatio('4:5')
     setResolution('2K')
     setQuantity(1)
+    setDuration(5)
     setLastAction('创建仅当前创建者可见的内存草稿 Session')
   }
 
@@ -1604,7 +1662,8 @@ export function CreationWorkbenchPrototype({
       ),
       ratio,
       resolution,
-      quantity
+      quantity,
+      duration: mediaMode === 'video' ? duration : null
     },
     activeGenerationTask: {
       id: 'task-3',
@@ -1626,6 +1685,7 @@ export function CreationWorkbenchPrototype({
     ratio,
     resolution,
     quantity,
+    duration,
     scenario,
     onNewSession: newSession,
     onSelectSession: selectSession,
@@ -1667,6 +1727,10 @@ export function CreationWorkbenchPrototype({
     onQuantityChange: (value) => {
       setQuantity(value)
       setLastAction(`将新 Task 的输出数量设为 ${value}`)
+    },
+    onDurationChange: (value) => {
+      setDuration(value)
+      setLastAction(`将视频生成时长设为 ${value} 秒`)
     },
     onSubmit: submit,
     onEdit: editAgain,
