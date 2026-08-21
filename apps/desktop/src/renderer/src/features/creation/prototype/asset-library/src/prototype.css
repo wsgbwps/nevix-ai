@@ -29,6 +29,6 @@ input {
   background-clip: padding-box;
 }
 
-.prototype-grid {
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+.prototype-asset-wall {
+  grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
 }
