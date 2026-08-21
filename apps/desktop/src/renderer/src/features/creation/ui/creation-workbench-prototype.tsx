@@ -895,22 +895,64 @@ function VariantA(props: VariantProps): React.JSX.Element {
                   <span className="text-[8px] leading-3">参考内容</span>
                 </button>
               ) : (
-                <div className="group relative h-16 w-12 shrink-0 overflow-hidden rounded-[8px] focus-within:ring-2 focus-within:ring-sky-400/45">
-                  <img
-                    src={REFERENCE_PREVIEW_SRC}
-                    alt=""
-                    aria-label="已添加的参考图片"
-                    className="size-full object-cover"
-                  />
-                  <div className="absolute inset-0 grid place-items-center bg-black/45 opacity-0 transition-opacity duration-[180ms] ease-out group-focus-within:opacity-100 group-hover:opacity-100">
+                <div
+                  aria-label={`${props.referenceCount} 张参考图片`}
+                  role="group"
+                  className="group relative h-16 w-12 shrink-0 rounded-[8px] focus-within:ring-2 focus-within:ring-sky-400/45"
+                >
+                  {Array.from({ length: Math.min(props.referenceCount, 3) }, (_, visibleIndex) => {
+                    const referenceIndex =
+                      props.referenceCount - Math.min(props.referenceCount, 3) + visibleIndex
+                    const depth = props.referenceCount - referenceIndex - 1
+                    const isTop = depth === 0
+
+                    return (
+                      <div
+                        key={`reference-${referenceIndex}`}
+                        className={cn(
+                          'absolute inset-0 overflow-hidden rounded-[8px] border border-[#1a1b20] transition-[transform,opacity] duration-200 ease-out',
+                          isTop && 'animate-in fade-in-0 zoom-in-95'
+                        )}
+                        style={{
+                          zIndex: 10 - depth,
+                          opacity: 1 - depth * 0.16,
+                          transform: `translate(${depth * 4}px, ${depth * -3}px) scale(${1 - depth * 0.035})`
+                        }}
+                      >
+                        <img
+                          src={REFERENCE_PREVIEW_SRC}
+                          alt=""
+                          aria-hidden={!isTop}
+                          aria-label={isTop ? '已添加的参考图片' : undefined}
+                          className="size-full object-cover"
+                          style={{ filter: `hue-rotate(${referenceIndex * 24}deg)` }}
+                        />
+                      </div>
+                    )
+                  })}
+                  <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-0.5 rounded-[8px] bg-black/45 opacity-0 transition-opacity duration-[180ms] ease-out group-focus-within:opacity-100 group-hover:opacity-100">
+                    {props.referenceCount < 4 ? (
+                      <button
+                        aria-label="继续添加参考内容"
+                        className="pointer-events-auto grid size-7 translate-y-[3px] scale-[0.98] place-items-center rounded-md bg-black/35 text-zinc-100 transition-transform duration-[180ms] ease-out group-focus-within:translate-y-0 group-focus-within:scale-100 group-hover:translate-y-0 group-hover:scale-100 hover:bg-black/55 focus-visible:ring-2 focus-visible:ring-sky-400/50 focus-visible:outline-none"
+                        onClick={props.onAddReference}
+                      >
+                        <PlusIcon className="size-3.5" />
+                      </button>
+                    ) : null}
                     <button
                       aria-label="移除参考图片"
-                      className="grid size-7 translate-y-[3px] scale-[0.98] place-items-center rounded-md bg-black/35 text-zinc-100 transition-transform duration-[180ms] ease-out group-focus-within:translate-y-0 group-focus-within:scale-100 group-hover:translate-y-0 group-hover:scale-100 hover:bg-black/55 focus-visible:ring-2 focus-visible:ring-sky-400/50 focus-visible:outline-none"
+                      className="pointer-events-auto grid size-7 translate-y-[3px] scale-[0.98] place-items-center rounded-md bg-black/35 text-zinc-100 transition-transform duration-[180ms] ease-out group-focus-within:translate-y-0 group-focus-within:scale-100 group-hover:translate-y-0 group-hover:scale-100 hover:bg-black/55 focus-visible:ring-2 focus-visible:ring-sky-400/50 focus-visible:outline-none"
                       onClick={props.onRemoveReference}
                     >
                       <XIcon className="size-3.5" />
                     </button>
                   </div>
+                  {props.referenceCount > 1 ? (
+                    <span className="animate-in fade-in-0 zoom-in-95 absolute -right-1 -bottom-1 z-30 grid size-5 place-items-center rounded-full border border-[#1a1b20] bg-[#30333b] text-[9px] font-medium text-zinc-200 tabular-nums duration-200">
+                      {props.referenceCount}
+                    </span>
+                  ) : null}
                 </div>
               )}
               <textarea
@@ -1733,12 +1775,12 @@ export function CreationWorkbenchPrototype({
       setLastAction('编辑草稿提示词')
     },
     onAddReference: () => {
-      setReferenceCount(1)
+      setReferenceCount((count) => Math.min(4, count + 1))
       setLastAction('添加新的内存 Reference Material')
     },
     onRemoveReference: () => {
-      setReferenceCount(0)
-      setLastAction('从草稿移除 Reference Material')
+      setReferenceCount((count) => Math.max(0, count - 1))
+      setLastAction('从草稿移除最后一项 Reference Material')
     },
     onRatioChange: (value) => {
       setRatio(value)
