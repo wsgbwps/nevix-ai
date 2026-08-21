@@ -5,6 +5,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
+    "prototype:asset-library": "pnpm --filter @nevix/desktop prototype:asset-library",
     "test:auth-policy": "bash scripts/test-auth-policy.sh",
     "prepare": "husky"
   },
