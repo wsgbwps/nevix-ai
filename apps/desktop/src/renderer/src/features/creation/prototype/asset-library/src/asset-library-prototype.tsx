@@ -522,59 +522,126 @@ function ErrorState({ onReady }: { onReady: () => void }): React.JSX.Element {
 
 function DetailPanel({
   asset,
+  relatedAssets,
   onClose,
+  onSelectAsset,
   onAction
 }: {
   asset: Asset
+  relatedAssets: Asset[]
   onClose: () => void
+  onSelectAsset: (asset: Asset) => void
   onAction: (message: string) => void
 }): React.JSX.Element {
+  const previewStyle =
+    asset.ratio === '16:9'
+      ? { aspectRatio: '16 / 9', width: 'min(92%, 1040px)' }
+      : asset.ratio === '1:1'
+        ? { aspectRatio: '1 / 1', width: 'min(72vh, calc(100vw - 500px))' }
+        : {
+            aspectRatio: asset.ratio.replace(':', ' / '),
+            height: 'calc(100vh - 52px)',
+            maxHeight: '100%'
+          }
+
   return (
-    <>
-      <button
-        type="button"
-        aria-label="关闭资产详情"
-        onClick={onClose}
-        className="fixed inset-0 z-40 bg-black/46 backdrop-blur-[1px]"
-      />
-      <aside className="prototype-scrollbar fixed top-2 right-2 bottom-2 z-50 flex w-[390px] flex-col overflow-y-auto rounded-xl border border-white/10 bg-[#18191d] shadow-[-30px_0_80px_rgba(0,0,0,0.5)]">
-        <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/7 px-4">
-          <span className="text-[11px] font-medium text-white/70">资产详情</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="grid size-7 place-items-center rounded-md text-white/35 hover:bg-white/6 hover:text-white/70"
-          >
-            <X className="size-4" />
-          </button>
+    <section
+      role="dialog"
+      aria-modal="true"
+      aria-label={`资产详情：${asset.title}`}
+      className="fixed top-0 right-0 bottom-0 left-[64px] z-50 flex bg-[#0b0c0f]"
+    >
+      <div className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-[#0b0c0f] p-6">
+        <div className="absolute top-4 left-5 z-10 rounded-md bg-black/25 px-2.5 py-1.5 text-[9px] text-white/38 backdrop-blur-md">
+          {asset.title} · {asset.ratio}
         </div>
-        <div className="aspect-[4/3] shrink-0 bg-black">
+        <button
+          type="button"
+          aria-label="关闭资产详情"
+          onClick={onClose}
+          className="absolute top-4 right-4 z-10 grid size-8 place-items-center rounded-md bg-white/6 text-white/55 backdrop-blur-md hover:bg-white/10 hover:text-white"
+        >
+          <X className="size-4" />
+        </button>
+        <div
+          className="max-h-full max-w-full overflow-hidden rounded-md bg-black shadow-[0_24px_80px_rgba(0,0,0,0.38)]"
+          style={previewStyle}
+        >
           <AssetVisual asset={asset} detail />
         </div>
-        <div className="flex flex-1 flex-col p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[9px] font-medium tracking-[0.12em] text-white/28 uppercase">
-                {asset.type === 'video' ? '视频资产' : '图片资产'}
-                {asset.published ? <span className="ml-2 text-emerald-300/65">已发布</span> : null}
-              </p>
-              <h2 className="mt-1.5 text-[17px] font-semibold">{asset.title}</h2>
-            </div>
-            <button type="button" className="grid size-7 place-items-center text-white/30">
+      </div>
+
+      <aside className="prototype-scrollbar flex h-full w-[360px] shrink-0 flex-col overflow-y-auto border-l border-white/7 bg-[#111216] shadow-[-24px_0_70px_rgba(0,0,0,0.2)]">
+        <div className="flex h-[52px] shrink-0 items-center justify-between border-b border-white/7 px-4">
+          <span className="text-[10px] font-medium text-white/50">资产详情</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onAction(`已准备下载「${asset.title}」（原型）`)}
+              className="flex h-7 items-center gap-1.5 rounded-md bg-white/6 px-2.5 text-[9px] text-white/62 hover:bg-white/10"
+            >
+              <Download className="size-3" /> 下载
+            </button>
+            <button
+              type="button"
+              aria-label="更多操作"
+              className="grid size-7 place-items-center rounded-md text-white/35 hover:bg-white/6 hover:text-white/70"
+            >
               <MoreHorizontal className="size-4" />
             </button>
           </div>
-          <div className="mt-2 flex gap-3 text-[10px] text-white/34">
-            <span>{asset.creator}</span>
-            <span>{asset.time}</span>
-            <span>
-              {asset.ratio} · {asset.resolution}
-            </span>
-          </div>
-          <section className="mt-5 rounded-lg border border-white/7 bg-white/3 p-3">
-            <p className="text-[9px] tracking-[0.12em] text-white/28 uppercase">提示词</p>
-            <p className="mt-2 text-[11px] leading-5 text-white/57">{asset.prompt}</p>
+        </div>
+
+        <div className="flex flex-1 flex-col p-4">
+          <section>
+            <div className="grid grid-cols-4 gap-1.5">
+              {relatedAssets.map((relatedAsset) => (
+                <button
+                  type="button"
+                  key={relatedAsset.id}
+                  aria-label={`查看同组资产 ${relatedAsset.title}`}
+                  onClick={() => onSelectAsset(relatedAsset)}
+                  className={`aspect-square overflow-hidden rounded-md bg-black ${relatedAsset.id === asset.id ? 'ring-1 ring-white ring-offset-1 ring-offset-[#111216]' : 'opacity-62 hover:opacity-100'}`}
+                >
+                  <AssetVisual asset={relatedAsset} />
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-[8px] tracking-[0.12em] text-white/24 uppercase">
+              同组结果 · {relatedAssets.length} 项
+            </p>
           </section>
+
+          <section className="mt-5">
+            <p className="text-[9px] font-medium tracking-[0.12em] text-white/28 uppercase">
+              {asset.type === 'video' ? '视频资产' : '图片资产'}
+              {asset.published ? <span className="ml-2 text-emerald-300/65">已发布</span> : null}
+            </p>
+            <h2 className="mt-1.5 text-[16px] font-semibold text-white/88">{asset.title}</h2>
+            <div className="mt-2 flex gap-3 text-[9px] text-white/32">
+              <span>{asset.creator}</span>
+              <span>{asset.time}</span>
+            </div>
+          </section>
+
+          <section className="mt-5 border-t border-white/7 pt-4">
+            <p className="text-[9px] tracking-[0.12em] text-white/28 uppercase">提示词</p>
+            <p className="mt-2 text-[10px] leading-[1.7] text-white/55">{asset.prompt}</p>
+          </section>
+
+          <section className="mt-4 grid grid-cols-3 gap-px overflow-hidden rounded-md border border-white/7 bg-white/7">
+            {[
+              ['类型', asset.type === 'video' ? '视频' : '图片'],
+              ['比例', asset.ratio],
+              ['分辨率', asset.resolution]
+            ].map(([label, value]) => (
+              <div key={label} className="bg-[#15161a] px-2.5 py-2.5">
+                <span className="block text-[8px] text-white/24">{label}</span>
+                <span className="mt-1 block text-[9px] text-white/58">{value}</span>
+              </div>
+            ))}
+          </section>
+
           <section className="mt-5">
             <p className="text-[9px] tracking-[0.12em] text-white/28 uppercase">来源</p>
             <button
@@ -583,21 +650,22 @@ function DetailPanel({
               className="mt-2 flex w-full items-center justify-between rounded-lg border border-white/7 bg-white/3 p-3 text-left hover:bg-white/5"
             >
               <span>
-                <span className="block text-[11px] text-white/68">{asset.source}</span>
-                <span className="mt-1 block text-[9px] text-white/30">{asset.sourceKind}</span>
+                <span className="block text-[10px] text-white/64">{asset.source}</span>
+                <span className="mt-1 block text-[8px] text-white/28">{asset.sourceKind}</span>
               </span>
               <ChevronDown className="size-3.5 -rotate-90 text-white/28" />
             </button>
-            <p className="mt-2 flex items-start gap-2 rounded-md border border-dashed border-white/7 px-2.5 py-2 text-[9px] leading-4 text-white/28">
+            <p className="mt-2 flex items-start gap-2 rounded-md border border-dashed border-white/7 px-2.5 py-2 text-[8px] leading-4 text-white/26">
               <CircleAlert className="mt-0.5 size-3 shrink-0" />
               临时参考上传只保留在来源上下文，不会作为 Media Asset 出现在这里。
             </p>
           </section>
+
           <div className="mt-auto grid grid-cols-2 gap-2 pt-6">
             <button
               type="button"
               onClick={() => onAction(`已准备下载「${asset.title}」（原型）`)}
-              className="flex h-9 items-center justify-center gap-2 rounded-md border border-white/9 bg-white/4 text-[11px] text-white/68 hover:bg-white/8"
+              className="flex h-9 items-center justify-center gap-2 rounded-md border border-white/9 bg-white/4 text-[10px] text-white/64 hover:bg-white/8"
             >
               <Download className="size-3.5" /> 下载
             </button>
@@ -606,7 +674,7 @@ function DetailPanel({
               onClick={() =>
                 onAction(`将以「${asset.title}」创建新的私有 Creation Session（原型）`)
               }
-              className="flex h-9 items-center justify-center gap-2 rounded-md bg-white text-[11px] font-medium text-black hover:bg-white/90"
+              className="flex h-9 items-center justify-center gap-2 rounded-md bg-white text-[10px] font-medium text-black hover:bg-white/90"
             >
               <CopyPlus className="size-3.5" /> 做同款
             </button>
@@ -620,7 +688,7 @@ function DetailPanel({
                     : `将为「${asset.title}」创建 Organization Publication（原型）`
                 )
               }
-              className="col-span-2 flex h-9 items-center justify-center gap-2 rounded-md border border-white/9 bg-white/4 text-[11px] text-white/62 enabled:hover:bg-white/8 disabled:cursor-not-allowed disabled:text-white/22"
+              className="col-span-2 flex h-9 items-center justify-center gap-2 rounded-md border border-white/9 bg-white/4 text-[10px] text-white/60 enabled:hover:bg-white/8 disabled:cursor-not-allowed disabled:text-white/22"
             >
               <Send className="size-3.5" />
               {asset.mine
@@ -632,7 +700,7 @@ function DetailPanel({
           </div>
         </div>
       </aside>
-    </>
+    </section>
   )
 }
 
@@ -769,6 +837,9 @@ export function AssetLibraryPrototype(): React.JSX.Element {
   }, [creator, media, search, sortOrder, tab, time])
 
   const detailAsset = ASSETS.find((asset) => asset.id === detailAssetId)
+  const relatedAssets = detailAsset
+    ? ASSETS.filter((asset) => asset.source === detailAsset.source).slice(0, 4)
+    : []
 
   useEffect(() => {
     if (!toast) return
@@ -979,7 +1050,9 @@ export function AssetLibraryPrototype(): React.JSX.Element {
       {detailAsset ? (
         <DetailPanel
           asset={detailAsset}
+          relatedAssets={relatedAssets}
           onClose={() => setDetailAssetId(undefined)}
+          onSelectAsset={(asset) => setDetailAssetId(asset.id)}
           onAction={setToast}
         />
       ) : null}
