@@ -205,6 +205,66 @@ const inspirationItems: readonly InspirationItem[] = [
     coverClass: 'from-orange-950 via-amber-700 to-yellow-300',
     author: '陈梨',
     publishedAt: '8 月 18 日'
+  },
+  {
+    id: 'publication-serum-macro',
+    source: 'discovery',
+    mediaType: 'image',
+    category: 'marketing',
+    title: '精华液水光微距',
+    description: '以水面反射和玻璃质感突出精华液的通透卖点。',
+    prompt: '透明精华液瓶悬浮在浅蓝水面上，微距水珠与折射高光清晰，画面轻盈、通透。',
+    parameters: ['3:4', '2K', '2 张', '图片'],
+    references: ['精华液正面', '瓶身材质参考'],
+    motif: 'bottle',
+    coverClass: 'from-sky-100 via-cyan-300 to-blue-700',
+    author: 'Ada',
+    publishedAt: '8 月 17 日'
+  },
+  {
+    id: 'publication-travel-organizer',
+    source: 'discovery',
+    mediaType: 'image',
+    category: 'scene',
+    title: '旅行收纳包窗边场景',
+    description: '把收纳包放进真实出行前的整理时刻。',
+    prompt: '旅行收纳包摊开放在窗边木桌，衣物分区整齐，午后自然光呈现真实织物纹理。',
+    parameters: ['4:3', '2K', '2 张', '图片'],
+    references: ['收纳包俯拍', '织物细节'],
+    motif: 'package',
+    coverClass: 'from-rose-200 via-orange-100 to-sky-300',
+    author: '宋嘉',
+    publishedAt: '8 月 16 日'
+  },
+  {
+    id: 'publication-camp-bottle',
+    source: 'discovery',
+    mediaType: 'video',
+    category: 'video-ad',
+    title: '晨雾营地水杯运镜',
+    description: '用纵向镜头完成保温杯户外功能感开场。',
+    prompt: '竖版镜头贴近带露水的保温杯向上移动，背景营地晨雾缓慢散开，保持杯身一致。',
+    parameters: ['9:16', '720p', '5 秒', '1 条'],
+    references: ['保温杯首帧', '营地氛围'],
+    motif: 'outdoor',
+    coverClass: 'from-slate-700 via-emerald-500 to-amber-200',
+    author: 'Kiko',
+    publishedAt: '8 月 15 日'
+  },
+  {
+    id: 'publication-speaker-beat',
+    source: 'discovery',
+    mediaType: 'video',
+    category: 'video-ad',
+    title: '音箱节奏光影实验',
+    description: '让光带和镜头节奏共同表达便携音箱的能量感。',
+    prompt: '黑色空间中便携音箱缓慢旋转，紫青光带随低频闪动，镜头最终推近材质细节。',
+    parameters: ['9:16', '720p', '5 秒', '1 条'],
+    references: ['音箱三视图', '灯光节奏参考'],
+    motif: 'speaker',
+    coverClass: 'from-neutral-950 via-purple-800 to-cyan-400',
+    author: 'Arlo',
+    publishedAt: '8 月 14 日'
   }
 ]
 
@@ -478,56 +538,90 @@ function VariantA({
   readonly onReset: () => void
 }): React.JSX.Element {
   return (
-    <main className="bg-background min-h-full flex-1 px-6 pb-28">
-      <section className="mx-auto max-w-7xl space-y-6">
-        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-neutral-950 px-8 py-9 text-white shadow-xl">
-          <div className="absolute -top-28 -right-16 size-80 rounded-full bg-violet-600/25 blur-3xl" />
-          <div className="absolute -bottom-32 left-24 size-72 rounded-full bg-cyan-500/15 blur-3xl" />
-          <div className="relative max-w-2xl space-y-3">
-            <Badge className="border-white/15 bg-white/10 text-white">跨境电商创作灵感</Badge>
-            <h1 className="text-3xl font-semibold tracking-tight">从一个成熟起点开始创作</h1>
-            <p className="max-w-xl text-sm leading-6 text-white/65">
-              官方模板提供稳定起点，组织发现沉淀成员已经发布的可复用经验。
+    <main className="bg-background min-h-full flex-1 px-4 pb-28 sm:px-6">
+      <section className="mx-auto max-w-[1500px]">
+        <header className="relative overflow-hidden px-4 pt-12 pb-9 text-center sm:pt-16">
+          <div className="bg-primary/12 absolute top-4 left-1/2 h-44 w-[34rem] -translate-x-1/2 rounded-full blur-[100px]" />
+          <div className="relative">
+            <p className="text-primary text-xs font-semibold tracking-[0.2em] uppercase">
+              Nevix AI Creation
             </p>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+              今天，想从哪种灵感开始？
+            </h1>
+            <p className="text-muted-foreground mx-auto mt-3 max-w-xl text-sm leading-6">
+              浏览官方模板与当前 Organization 已发布作品，找到起点后直接做同款。
+            </p>
+
+            <div className="border-border bg-card/80 focus-within:border-primary/45 focus-within:ring-primary/10 mx-auto mt-7 flex max-w-3xl items-center rounded-2xl border p-1.5 shadow-2xl shadow-black/20 transition focus-within:ring-4">
+              <SearchIcon className="text-muted-foreground ml-3 size-5 shrink-0" />
+              <Input
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                className="h-12 border-0 bg-transparent px-3 text-base shadow-none focus-visible:ring-0"
+                placeholder="搜索商品、场景、提示词或发布者"
+                aria-label="搜索灵感"
+              />
+              <div className="bg-primary text-primary-foreground mr-1 grid size-9 shrink-0 place-items-center rounded-xl">
+                <SparklesIcon className="size-4" />
+              </div>
+            </div>
           </div>
-          <div className="relative mt-7 max-w-3xl">
-            <FilterControls
-              query={query}
-              mediaType={mediaType}
-              category={category}
-              onQueryChange={onQueryChange}
-              onMediaTypeChange={onMediaTypeChange}
-              onCategoryChange={onCategoryChange}
-              compact
-            />
-          </div>
-        </div>
+        </header>
 
         <Tabs value={source} onValueChange={(value) => onSourceChange(value as Source)}>
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <TabsList variant="line" className="gap-5">
-                <TabsTrigger value="official" className="px-0 text-base">
-                  <BadgeCheckIcon /> 官方精选
-                </TabsTrigger>
-                <TabsTrigger value="discovery" className="px-0 text-base">
-                  <SparklesIcon /> 当前组织 · 发现
-                </TabsTrigger>
-              </TabsList>
-              <p className="text-muted-foreground mt-3 text-sm">
-                {source === 'official'
-                  ? '由 Nevix 策划的 Official Template，示例只表达可复用起点。'
-                  : '仅显示当前 Organization 成员直接发布、仍有效的内容。'}
-              </p>
-            </div>
-            <span className="text-muted-foreground text-xs">{items.length} 个结果</span>
+          <div className="border-border flex flex-wrap items-end justify-between gap-x-5 gap-y-3 border-b">
+            <TabsList variant="line" className="h-12 gap-6 bg-transparent">
+              <TabsTrigger value="official" className="h-12 px-0 text-base">
+                <BadgeCheckIcon /> 官方精选
+              </TabsTrigger>
+              <TabsTrigger value="discovery" className="h-12 px-0 text-base">
+                <SparklesIcon /> 当前组织 · 发现
+              </TabsTrigger>
+            </TabsList>
+            <span className="text-muted-foreground pb-3 text-xs">
+              {source === 'official' ? 'Nevix 策划 · Official Template' : '星河出海 · 已发布'} ·{' '}
+              {items.length} 个结果
+            </span>
           </div>
         </Tabs>
 
+        <div className="flex flex-wrap items-center gap-2 py-4">
+          {(Object.entries(categoryLabels) as [Category, string][]).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
+                category === value
+                  ? 'bg-foreground text-background font-medium'
+                  : 'bg-muted/60 text-muted-foreground hover:bg-accent hover:text-foreground'
+              }`}
+              onClick={() => onCategoryChange(value)}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="bg-border mx-1 h-4 w-px" />
+          {(Object.entries(mediaLabels) as [MediaType, string][]).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
+                mediaType === value
+                  ? 'bg-primary/15 text-primary font-medium'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              }`}
+              onClick={() => onMediaTypeChange(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {items.length > 0 ? (
-          <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
+          <div className="columns-2 gap-3 md:columns-3 lg:columns-4">
             {items.map((item) => (
-              <GalleryCard key={item.id} item={item} onSelect={onSelect} />
+              <MasonryGalleryCard key={item.id} item={item} onSelect={onSelect} />
             ))}
           </div>
         ) : (
@@ -849,7 +943,24 @@ function VariantC({
   )
 }
 
-function GalleryCard({
+const masonryCoverClasses: Record<string, string> = {
+  'official-clean-studio': 'aspect-[4/5]',
+  'official-context-display': 'aspect-[3/4]',
+  'official-selling-point': 'aspect-[4/5]',
+  'official-festival': 'aspect-square',
+  'official-product-camera': 'aspect-[9/14]',
+  'official-scene-performance': 'aspect-[4/3]',
+  'publication-linen-lamp': 'aspect-[4/5]',
+  'publication-coffee-motion': 'aspect-[9/14]',
+  'publication-summer-shoe': 'aspect-[3/4]',
+  'publication-holiday-box': 'aspect-square',
+  'publication-serum-macro': 'aspect-[3/4]',
+  'publication-travel-organizer': 'aspect-[4/3]',
+  'publication-camp-bottle': 'aspect-[9/14]',
+  'publication-speaker-beat': 'aspect-[9/16]'
+}
+
+function MasonryGalleryCard({
   item,
   onSelect
 }: {
@@ -859,21 +970,31 @@ function GalleryCard({
   return (
     <button
       type="button"
-      className="group border-border bg-card overflow-hidden rounded-2xl border text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
+      className="group mb-3 inline-block w-full break-inside-avoid text-left"
       onClick={() => onSelect(item)}
     >
-      <CoverVisual item={item} className="aspect-[16/10]" />
-      <span className="block p-4">
-        <span className="flex items-center justify-between gap-3">
-          <span className="truncate font-semibold">{item.title}</span>
+      <span className="bg-card relative block overflow-hidden rounded-xl">
+        <CoverVisual item={item} className={masonryCoverClasses[item.id] ?? 'aspect-[4/5]'} />
+        <span className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/15 opacity-70 transition-opacity group-hover:opacity-90" />
+        <span className="absolute top-3 left-3">
           <SourceBadge item={item} compact />
         </span>
-        <span className="text-muted-foreground mt-1.5 line-clamp-2 min-h-10 text-sm leading-5">
-          {item.description}
+        <span className="absolute right-3 bottom-3 translate-y-1 rounded-full bg-black/55 px-3 py-1.5 text-[11px] font-medium text-white opacity-0 backdrop-blur transition group-hover:translate-y-0 group-hover:opacity-100">
+          查看详情
         </span>
-        <span className="text-muted-foreground mt-3 flex items-center justify-between text-xs">
-          <span>{item.parameters.slice(0, 3).join(' · ')}</span>
-          <span className="group-hover:text-foreground transition-colors">查看详情 →</span>
+      </span>
+      <span className="block px-1 pt-2.5 pb-1">
+        <span className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.title}</span>
+          {item.mediaType === 'video' ? (
+            <CirclePlayIcon className="text-muted-foreground size-3.5 shrink-0" />
+          ) : null}
+        </span>
+        <span className="text-muted-foreground mt-1 flex items-center justify-between gap-2 text-[11px]">
+          <span className="truncate">
+            {item.source === 'official' ? 'Nevix 策划' : item.author}
+          </span>
+          <span className="shrink-0">{item.parameters.slice(0, 2).join(' · ')}</span>
         </span>
       </span>
     </button>
