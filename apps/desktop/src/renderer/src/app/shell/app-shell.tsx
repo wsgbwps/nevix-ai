@@ -6,6 +6,7 @@ import {
   LogOutIcon,
   MoonIcon,
   SettingsIcon,
+  SparklesIcon,
   SunIcon
 } from 'lucide-react'
 import { useAuthenticationState } from '../authentication-state'
@@ -89,7 +90,12 @@ export function AppShell({
   const userInitial = initialOf(authentication.userEmail)
   // The App Shell currently hosts a single real entry; future business Features gain routes in
   // the content area and extend this mapping from the current pathname.
-  const breadcrumbLabel = location.pathname === '/' ? t('shell.home') : undefined
+  const breadcrumbLabel =
+    location.pathname === '/'
+      ? t('shell.home')
+      : import.meta.env.DEV && location.pathname === '/inspiration-prototype'
+        ? '灵感页原型'
+        : undefined
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -134,6 +140,20 @@ export function AppShell({
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+                  {import.meta.env.DEV ? (
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={location.pathname === '/inspiration-prototype'}
+                        tooltip="灵感页原型"
+                      >
+                        <Link to="/inspiration-prototype" search={{ variant: 'A' }}>
+                          <SparklesIcon />
+                          <span className="group-data-[collapsible=icon]:hidden">灵感页原型</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ) : null}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>

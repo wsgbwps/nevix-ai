@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as InspirationPrototypeRouteImport } from './routes/inspiration-prototype'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as SelectOrganizationRouteImport } from './routes/select-organization'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InspirationPrototypeRoute = InspirationPrototypeRouteImport.update({
+  id: '/inspiration-prototype',
+  path: '/inspiration-prototype',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OnboardingRoute = OnboardingRouteImport.update({
@@ -44,6 +50,7 @@ const SettingsRoute = SettingsRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/inspiration-prototype': typeof InspirationPrototypeRoute
   '/onboarding': typeof OnboardingRoute
   '/select-organization': typeof SelectOrganizationRoute
   '/settings': typeof SettingsRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/inspiration-prototype': typeof InspirationPrototypeRoute
   '/onboarding': typeof OnboardingRoute
   '/select-organization': typeof SelectOrganizationRoute
   '/settings': typeof SettingsRoute
@@ -59,6 +67,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/inspiration-prototype': typeof InspirationPrototypeRoute
   '/onboarding': typeof OnboardingRoute
   '/select-organization': typeof SelectOrganizationRoute
   '/settings': typeof SettingsRoute
@@ -68,15 +77,23 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/inspiration-prototype'
     | '/onboarding'
     | '/select-organization'
     | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/onboarding' | '/select-organization' | '/settings'
+  to:
+    | '/'
+    | '/auth'
+    | '/inspiration-prototype'
+    | '/onboarding'
+    | '/select-organization'
+    | '/settings'
   id:
     | '__root__'
     | '/'
     | '/auth'
+    | '/inspiration-prototype'
     | '/onboarding'
     | '/select-organization'
     | '/settings'
@@ -85,6 +102,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRoute
+  InspirationPrototypeRoute: typeof InspirationPrototypeRoute
   OnboardingRoute: typeof OnboardingRoute
   SelectOrganizationRoute: typeof SelectOrganizationRoute
   SettingsRoute: typeof SettingsRoute
@@ -104,6 +122,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inspiration-prototype': {
+      id: '/inspiration-prototype'
+      path: '/inspiration-prototype'
+      fullPath: '/inspiration-prototype'
+      preLoaderRoute: typeof InspirationPrototypeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding': {
@@ -133,6 +158,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRoute,
+  InspirationPrototypeRoute: InspirationPrototypeRoute,
   OnboardingRoute: OnboardingRoute,
   SelectOrganizationRoute: SelectOrganizationRoute,
   SettingsRoute: SettingsRoute,
