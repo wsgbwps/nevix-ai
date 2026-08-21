@@ -8,8 +8,12 @@ Go 后端服务，按业务复杂度决定分层深度。
 `internal/` 下的独立业务单元，组合根与测试只见 Module 包本身。统一 contract：`LoadConfig(getenv)` 加载部署配置、`NewModule` 构造依赖、`Register(r chi.Router, bus event.Bus)` 完成路由和事件订阅注册、`RunWorkers(ctx) error` 运行后台 Worker 直到 ctx 取消（无 Worker 的 Module 空转）。
 _Avoid_: service, package, domain
 
+**AI Creation Module**:
+Server 中 canonical owner 名为 `creation`、与 Desktop AI Creation Domain 共享同一 AI 创作业务 owner 的 Module，边界覆盖图片与视频生成的可信命令、供应商连接和异步编排；媒体类型和供应商 adapter 不单独构成 Module。
+_Avoid_: Video Generation Module, Image Generation Module, Provider Module, videogen
+
 **Aggregate Root**:
-拥有一致性边界的领域实体，仅在复杂 module 中使用（如 videogen）。
+拥有一致性边界的领域实体，仅在复杂 module 中使用（如 AI Creation Module）。
 _Avoid_: model, record
 
 **Domain Event**:

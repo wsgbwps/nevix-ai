@@ -1,6 +1,6 @@
 # 采用 Feature-Sliced + Vertical Slice 架构
 
-3 人团队并行开发，核心需求是代码物理隔离——每人改自己的目录，PR 不交叉，合并冲突概率趋近于零。采用 Feature-Sliced Design 组织前端渲染进程，每个功能模块（video-generation、image-editing、project-management）独占一个 feature 目录；后端同样按 domain 拆分 `internal/` 子目录。功能模块之间禁止直接 import，跨模块通信走共享层（前端 `lib/`、后端 `pkg/event/`）。
+3 人团队并行开发，核心需求是代码物理隔离——每人改自己的目录，PR 不交叉，合并冲突概率趋近于零。采用 Feature-Sliced Design 组织前端渲染进程，每个业务 Domain 独占一个 feature 目录；后端同样按业务 Module 拆分 `internal/` 子目录。AI 创作按 [ADR-0012](0012-unified-ai-creation-owner.md) 使用单一 `creation` owner，不再按图片、视频或页面拆 Feature/Module。功能模块之间禁止直接 import，跨模块通信走已批准的共享 owner。
 
 ## Considered Options
 
