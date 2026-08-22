@@ -8,7 +8,7 @@
   ],
   "currentDiffDigest": "sha256:c13a168abca4c5de82a6e7b173a751ea6b316edcdb4dcd3e5749fb76f86817ce",
   "fullReviewCount": 1,
-  "targetedReviewRound": 0,
+  "targetedReviewRound": 1,
   "findings": [
     {
       "id": "CR-STANDARDS-0001",
@@ -111,10 +111,11 @@
       "disposition": "accepted",
       "dispositionReason": "Security-boundary inconsistency on a trusted write: same seam, weaker posture than the sibling client; one-line fix in current scope.",
       "owner": "apps/desktop/src/renderer/src/features/profile/api/profile.ts",
-      "status": "fixed-pending-review",
+      "status": "closed",
       "evidence": [
         "path: features/authentication/api/client.ts request() sets redirect:'error' with comment 'A trusted write must never be replayed against a redirect target'",
-        "path: features/profile/api/profile.ts saveProfile/requestMe fetch init has no redirect option (defaults to 'follow')"
+        "path: features/profile/api/profile.ts saveProfile/requestMe fetch init has no redirect option (defaults to 'follow')",
+        "targeted re-review round 1 verdict: closed — parity confirmed against features/authentication/api/client.ts; no repair-introduced problems"
       ],
       "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
       "unresolvedTargetedRounds": 0,
@@ -232,6 +233,11 @@
       ]
     }
   ],
-  "relevantCheck": null,
-  "outcome": "needs-targeted-review"
+  "relevantCheck": {
+    "name": "desktop full check suite (typecheck, lint, 64 unit, 2 component, architecture, E2E full 66 passed / 0 failed / 4 platform-gated skips, verify:auth-artifacts)",
+    "result": "PASS",
+    "coverage": "apps/desktop + .github/workflows/desktop-e2e-ci.yml + pnpm-lock.yaml",
+    "diffDigest": "sha256:c13a168abca4c5de82a6e7b173a751ea6b316edcdb4dcd3e5749fb76f86817ce"
+  },
+  "outcome": "closed"
 }
