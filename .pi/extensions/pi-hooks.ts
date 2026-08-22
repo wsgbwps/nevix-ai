@@ -26,7 +26,12 @@ function normalizeToolPath(value: unknown): string {
 
 export function isProtectedEditPath(value: unknown): boolean {
   const path = normalizeToolPath(value);
-  return path.endsWith("pnpm-lock.yaml") || /\.env(?:\..*)?$/.test(path);
+  if (path.endsWith("pnpm-lock.yaml")) return true;
+  // `.env.example` 类模板是供人复制的文档（server/.env.example、
+  // supabase/auth-policy.env.example），不承载机密，保持可编辑；
+  // 真实 dotenv 文件（.env、.env.local、.env.production、*.env）仍被拦截。
+  if (path.endsWith(".env.example")) return false;
+  return /\.env(?:\.[^/]*)?$/.test(path);
 }
 
 export function blockedBashReason(

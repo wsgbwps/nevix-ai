@@ -6,13 +6,14 @@ import registerPiHooks, {
   isProtectedEditPath,
 } from "../extensions/pi-hooks.ts";
 
-test("protects lock files and environment files", () => {
+test("protects lock files and real environment files, not templates", () => {
   for (const path of [
     "pnpm-lock.yaml",
     "apps/desktop/pnpm-lock.yaml",
     ".env",
     ".env.local",
-    "config.env.example",
+    "server/.env.production",
+    "deploy/prod.env",
     "@server\\.env.test",
   ]) {
     assert.equal(isProtectedEditPath(path), true, path);
@@ -23,6 +24,9 @@ test("protects lock files and environment files", () => {
     "pnpm-lock.yml",
     ".envexample",
     "src/config.ts",
+    "server/.env.example",
+    "supabase/auth-policy.env.example",
+    "config.env.example",
   ]) {
     assert.equal(isProtectedEditPath(path), false, path);
   }
