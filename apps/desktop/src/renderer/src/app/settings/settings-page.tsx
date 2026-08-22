@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useLocation } from '@tanstack/react-router'
-import { ArrowLeftIcon, LanguagesIcon, UserRoundIcon } from 'lucide-react'
+import { ArrowLeftIcon, LanguagesIcon, ServerIcon, UserRoundIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/ui/button'
 import {
@@ -13,7 +13,9 @@ import {
 } from '../../components/ui/dialog'
 import { LanguageModeSettings } from '../../features/language'
 import { ProfileSettings } from '../../features/profile'
+import { ServerConnectionSettings } from '../../features/connection'
 import { useAuthenticationState } from '../authentication-state'
+import { useServerConnectionState } from '../connection-state'
 import { useSettingsCoordinator, type SettingsContribution } from './settings-coordinator'
 import { readSettingsEntry, type SettingsSection } from './settings-navigation'
 import { CLEAN_LEAVE_SEMANTICS } from './settings-leave-semantics'
@@ -26,12 +28,14 @@ import { CLEAN_LEAVE_SEMANTICS } from './settings-leave-semantics'
  */
 const SETTINGS_SECTION_REGISTRY: Record<SettingsSection, SettingsContribution> = {
   profile: CLEAN_LEAVE_SEMANTICS,
-  language: CLEAN_LEAVE_SEMANTICS
+  language: CLEAN_LEAVE_SEMANTICS,
+  connection: CLEAN_LEAVE_SEMANTICS
 }
 
 export function SettingsPage(): React.JSX.Element | null {
   const { t } = useTranslation('app')
   const authentication = useAuthenticationState()
+  const connection = useServerConnectionState()
   const location = useLocation()
   const entry = readSettingsEntry(location.state)
   const [contributions, setContributions] = useState<
@@ -50,11 +54,19 @@ export function SettingsPage(): React.JSX.Element | null {
   }, [])
   const contribution = contributions[entry.section] ?? SETTINGS_SECTION_REGISTRY[entry.section]
   const coordinator = useSettingsCoordinator({ entry, contribution })
+  const handleServerConnectionSaved = useCallback(async (): Promise<void> => {
+    // A new URL becomes the renderer's runtime connect-src only after a
+    // document reload; the previous server's session cannot carry over, so it
+    // is cleared locally and the boot restarts at the login boundary.
+    await window.api.invoke('authentication:clear-session').catch(() => undefined)
+    window.location.reload()
+  }, [])
   const sectionRenderers: Record<SettingsSection, () => React.JSX.Element | null> = {
     profile: () => (
       <div className="bg-card rounded-lg border">
         <ProfileSettings
           getSession={authentication.getSession}
+          serverUrl={connection.url ?? ''}
           onContributionChange={contributionReporters.profile}
         />
       </div>
@@ -66,6 +78,20 @@ export function SettingsPage(): React.JSX.Element | null {
         </h2>
         <div className="bg-card rounded-lg border">
           <LanguageModeSettings />
+        </div>
+      </section>
+    ),
+    connection: () => (
+      <section aria-labelledby="settings-connection-heading" className="grid gap-3">
+        <h2 id="settings-connection-heading" className="text-base font-semibold">
+          {t('settings.connection')}
+        </h2>
+        <div className="bg-card rounded-lg border p-4">
+          <ServerConnectionSettings
+            serverUrl={connection.url}
+            onSaved={handleServerConnectionSaved}
+            onContributionChange={contributionReporters.connection}
+          />
         </div>
       </section>
     )
@@ -114,6 +140,21 @@ export function SettingsPage(): React.JSX.Element | null {
               >
                 <LanguagesIcon className="size-4" />
                 {t('settings.language')}
+              </button>
+            </div>
+            <div className="grid gap-1">
+              <p className="text-muted-foreground px-2.5 text-xs font-medium tracking-wide uppercase">
+                {t('settings.server')}
+              </p>
+              <button
+                type="button"
+                aria-pressed={coordinator.section === 'connection'}
+                disabled={coordinator.navigationDisabled}
+                onClick={() => coordinator.switchSection('connection')}
+                className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium"
+              >
+                <ServerIcon className="size-4" />
+                {t('settings.connection')}
               </button>
             </div>
           </nav>

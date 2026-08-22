@@ -28,7 +28,8 @@ test(
     try {
       const launched = await launchTestApp({
         userDataDir,
-        systemLanguages: ['en-US']
+        systemLanguages: ['en-US'],
+        serverUrl: identityServer!.serverUrl
       })
 
       try {
@@ -84,7 +85,8 @@ test('a User signs in once and enters the authenticated app shell', { tag: '@smo
   try {
     const launched = await launchTestApp({
       userDataDir,
-      systemLanguages: ['en-US']
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
     })
 
     try {
@@ -135,7 +137,8 @@ test('unknown and incorrect credentials share one safe error', async () => {
   try {
     const launched = await launchTestApp({
       userDataDir,
-      systemLanguages: ['en-US']
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
     })
 
     try {
@@ -175,7 +178,8 @@ test('a disabled account reports its specific error and stays at the boundary', 
   try {
     const launched = await launchTestApp({
       userDataDir,
-      systemLanguages: ['en-US']
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
     })
 
     try {
@@ -214,7 +218,8 @@ test('sign-out revokes only the Desktop session and reopening stays signed out',
   try {
     let launched = await launchTestApp({
       userDataDir,
-      systemLanguages: ['en-US']
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
     })
 
     try {
@@ -244,7 +249,8 @@ test('sign-out revokes only the Desktop session and reopening stays signed out',
 
     launched = await launchTestApp({
       userDataDir,
-      systemLanguages: ['en-US']
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
     })
     try {
       await expect(

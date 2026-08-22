@@ -3,6 +3,7 @@ import { initReactI18next } from 'react-i18next'
 import { createI18nOptions, type I18nEnvironment } from '../../../../shared/i18n/i18next-options'
 import type { SupportedLanguage } from '../../../../shared/i18n/resource-contract'
 import { authenticationResources } from '../../features/authentication'
+import { connectionResources } from '../../features/connection'
 import { languageResources } from '../../features/language'
 import { profileResources } from '../../features/profile'
 import { appResources } from '.'
@@ -13,12 +14,14 @@ export const rendererResources = {
   'zh-CN': {
     ...appResources['zh-CN'],
     ...authenticationResources['zh-CN'],
+    ...connectionResources['zh-CN'],
     ...languageResources['zh-CN'],
     ...profileResources['zh-CN']
   },
   en: {
     ...appResources.en,
     ...authenticationResources.en,
+    ...connectionResources.en,
     ...languageResources.en,
     ...profileResources.en
   }

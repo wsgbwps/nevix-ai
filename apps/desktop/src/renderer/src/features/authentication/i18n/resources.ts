@@ -5,10 +5,6 @@ import {
 
 export const authenticationTranslations = defineResourceTranslations({
   'zh-CN': {
-    configurationError: {
-      heading: '认证暂不可用',
-      description: '此构建缺少有效的服务器地址配置。'
-    },
     restoring: {
       heading: '正在初始化认证',
       description: '确认登录状态前不会显示应用内容。'
@@ -74,10 +70,6 @@ export const authenticationTranslations = defineResourceTranslations({
     }
   },
   en: {
-    configurationError: {
-      heading: 'Authentication is unavailable',
-      description: 'This build is missing a valid server address configuration.'
-    },
     restoring: {
       heading: 'Initializing authentication',
       description: 'Application content stays hidden until your session is checked.'

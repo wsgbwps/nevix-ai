@@ -18,10 +18,6 @@ export default defineConfig({
       build: {
         emptyOutDir: true
       },
-      define: {
-        __NEVIX_SERVER_URL__: JSON.stringify('https://component-test-server.example'),
-        __NEVIX_SERVER_CONFIG_POLICY__: JSON.stringify('https-only')
-      },
       resolve: {
         alias: {
           '@': resolve('src/renderer/src'),

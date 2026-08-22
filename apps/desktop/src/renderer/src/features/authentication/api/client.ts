@@ -1,5 +1,3 @@
-import type { ServerPublicConfig } from '../../../../../shared/config/server-public-config'
-
 /** The account half of the server's user object (contracts/identity.yaml). */
 export interface UserAccount {
   readonly id: string
@@ -51,11 +49,11 @@ interface RequestInput {
   readonly token?: string
 }
 
-export function createIdentityClient(config: ServerPublicConfig): IdentityClient {
+export function createIdentityClient(serverUrl: string): IdentityClient {
   async function request<T>(input: RequestInput): Promise<IdentityApiResult<T>> {
     let response: Response
     try {
-      response = await fetch(new URL(input.path, config.url), {
+      response = await fetch(new URL(input.path, serverUrl), {
         method: input.method,
         // A trusted write must never be replayed against a redirect target.
         redirect: 'error',

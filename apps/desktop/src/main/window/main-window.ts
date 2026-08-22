@@ -65,7 +65,11 @@ export function createWindow(
   })
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  mainWindow.webContents.on('will-navigate', (event) => {
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    // A same-URL navigation is the document reload the connection Domain uses
+    // to apply runtime state (the connect-src CSP); every other navigation
+    // would leave this window's single trusted document.
+    if (url === mainWindow.webContents.getURL()) return
     event.preventDefault()
   })
 

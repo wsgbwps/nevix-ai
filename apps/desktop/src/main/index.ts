@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
+import { initializeConnectionRuntime } from './connection'
 import { initializeMainI18n } from './language'
 import { createWindow } from './window/main-window'
 import {
@@ -22,6 +23,7 @@ if (process.env.NEVIX_E2E === '1' && !app.isPackaged && process.env.NEVIX_TEST_U
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.nevix.ai')
   await initializeMainI18n()
+  await initializeConnectionRuntime()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

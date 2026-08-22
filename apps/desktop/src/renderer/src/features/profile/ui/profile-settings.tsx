@@ -35,9 +35,11 @@ const SAVING_CONTRIBUTION: ProfileSettingsContribution = {
 }
 export function ProfileSettings({
   getSession,
+  serverUrl,
   onContributionChange
 }: {
   readonly getSession: GetSession
+  readonly serverUrl: string
   readonly onContributionChange?: (contribution: ProfileSettingsContribution) => void
 }): React.JSX.Element {
   const { t } = useTranslation('profile')
@@ -59,7 +61,7 @@ export function ProfileSettings({
         const session = await getSession()
         if (!session) throw new Error('Profile Session is unavailable.')
 
-        const profile = await readProfile(session)
+        const profile = await readProfile(session, serverUrl)
         if (!isMounted) return
         const nextDisplayName = profile?.displayName ?? ''
         setSavedDisplayName(nextDisplayName)
@@ -79,7 +81,7 @@ export function ProfileSettings({
     return () => {
       isMounted = false
     }
-  }, [getSession, loadAttempt])
+  }, [getSession, loadAttempt, serverUrl])
 
   const isDirty = !isLoading && displayName !== savedDisplayName
   const validationMessage =
@@ -113,7 +115,7 @@ export function ProfileSettings({
       const session = await getSession()
       if (!session) throw new Error('Profile Session is unavailable.')
 
-      const profile = await saveProfile(session, displayName.trim())
+      const profile = await saveProfile(session, serverUrl, displayName.trim())
       setSavedDisplayName(profile.displayName)
       setDisplayName(profile.displayName)
       setDidSave(true)

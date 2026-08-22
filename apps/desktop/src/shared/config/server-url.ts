@@ -1,17 +1,10 @@
-export interface ServerPublicConfig {
-  readonly url: string
-}
-
-export type ServerPublicConfigPolicy = 'https-only' | 'private-network-http'
-
-interface ServerPublicConfigInput {
-  readonly url: string | undefined
-  readonly policy: ServerPublicConfigPolicy
-}
-
-export function serverPublicConfigPolicyForMode(mode: string): ServerPublicConfigPolicy {
-  return mode === 'development' || mode === 'test' ? 'private-network-http' : 'https-only'
-}
+/**
+ * The single runtime policy for the server URL a device may connect to
+ * (ADR-0014): https is valid on any host; plain http is reserved for
+ * loopback and RFC1918 intranet hosts. Build-time URL injection and its
+ * per-mode policy are gone — this validation guards both the persisted
+ * connection store and the Connection Screen input.
+ */
 
 /** RFC1918, loopback, and nothing else: the hosts a plain-http server URL may target. */
 export function isAllowedPrivateHttpHostname(hostname: string): boolean {
@@ -33,19 +26,17 @@ export function isAllowedPrivateHttpHostname(hostname: string): boolean {
   )
 }
 
-export function parseServerPublicConfig({
-  url,
-  policy
-}: ServerPublicConfigInput): ServerPublicConfig | undefined {
-  if (!url) return undefined
-
+/**
+ * Parses a server URL into its canonical origin, or `undefined` when the URL
+ * is not an exact server origin under the runtime policy: no credentials,
+ * path, query, or fragment, https anywhere, http only on private hosts.
+ */
+export function parseServerUrl(url: string): string | undefined {
   try {
     const parsedUrl = new URL(url)
     const isSecure = parsedUrl.protocol === 'https:'
     const isAllowedPrivateHttp =
-      policy === 'private-network-http' &&
-      parsedUrl.protocol === 'http:' &&
-      isAllowedPrivateHttpHostname(parsedUrl.hostname)
+      parsedUrl.protocol === 'http:' && isAllowedPrivateHttpHostname(parsedUrl.hostname)
 
     if (
       (!isSecure && !isAllowedPrivateHttp) ||
@@ -58,7 +49,7 @@ export function parseServerPublicConfig({
       return undefined
     }
 
-    return { url: parsedUrl.origin }
+    return parsedUrl.origin
   } catch {
     return undefined
   }

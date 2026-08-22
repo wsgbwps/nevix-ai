@@ -16,6 +16,7 @@ import {
 import { windowResourceOwner } from '../../src/main/language/resources'
 import { appResourceOwner } from '../../src/renderer/src/app/i18n'
 import { authenticationResourceOwner } from '../../src/renderer/src/features/authentication'
+import { connectionResourceOwner } from '../../src/renderer/src/features/connection'
 import { languageResourceOwner } from '../../src/renderer/src/features/language'
 import { profileResourceOwner } from '../../src/renderer/src/features/profile'
 
@@ -23,6 +24,7 @@ const resourceOwners = [
   windowResourceOwner,
   appResourceOwner,
   authenticationResourceOwner,
+  connectionResourceOwner,
   languageResourceOwner,
   profileResourceOwner
 ]

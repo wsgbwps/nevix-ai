@@ -22,11 +22,16 @@ identity_server_binary_dir=""
 identity_server_failure_injector_pid=""
 identity_server_artifact="$desktop_root/test-results/identity-server.log"
 identity_server_failure_marker_dir=""
+tls_terminator_pid=""
+tls_terminator_dir=""
+tls_terminator_log=""
 postgres_container=""
 database_url=""
 identity_database_url=""
 admin_email="bootstrap.admin@nevix.test"
 admin_initial_password="initial-horse-battery-staple"
+tls_host=127.0.0.1
+tls_port=8443
 failure_injection="${NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE:-}"
 
 case "$failure_injection" in
@@ -88,6 +93,25 @@ stop_identity_server_failure_injector() {
   identity_server_failure_injector_pid=""
 }
 
+stop_tls_terminator() {
+  if [[ -n "$tls_terminator_pid" ]]; then
+    if kill -0 "$tls_terminator_pid" >/dev/null 2>&1; then
+      kill "$tls_terminator_pid" >/dev/null 2>&1 || true
+    fi
+    wait "$tls_terminator_pid" >/dev/null 2>&1 || true
+  fi
+  tls_terminator_pid=""
+  if [[ -n "$tls_terminator_log" ]]; then
+    cat "$tls_terminator_log" >>"$identity_server_log" 2>/dev/null || true
+    rm -f "$tls_terminator_log"
+    tls_terminator_log=""
+  fi
+  if [[ -n "$tls_terminator_dir" ]]; then
+    rm -rf "$tls_terminator_dir"
+    tls_terminator_dir=""
+  fi
+}
+
 inject_identity_server_failure_after_renderer_launch() {
   for _ in $(seq 1 240); do
     if [[ -f "$identity_server_failure_marker_dir/request-ready" ]]; then
@@ -125,6 +149,7 @@ cleanup() {
   local cleanup_status="$exit_status"
 
   stop_identity_server_failure_injector
+  stop_tls_terminator
   stop_identity_server_process
   if [[ -n "$identity_server_log" ]]; then
     if ! NEVIX_E2E_REDACT_DATABASE_URL="$database_url" \
@@ -262,6 +287,47 @@ stabilize_bootstrap_admin() {
     >/dev/null
 }
 
+# The TLS terminator fronts the identity server with a self-signed certificate
+# so the TOFU specs exercise a genuinely untrusted chain, and can rotate to a
+# second certificate mid-run for the fingerprint-change warning.
+start_tls_terminator() {
+  tls_terminator_dir="$(mktemp -d -t nevix-desktop-e2e-tls.XXXXXX)"
+  for cert in a b; do
+    openssl req -x509 -newkey rsa:2048 -sha256 -days 2 -nodes \
+      -keyout "$tls_terminator_dir/key-$cert.pem" \
+      -out "$tls_terminator_dir/cert-$cert.pem" \
+      -subj "/CN=localhost" \
+      -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" >/dev/null 2>&1
+  done
+  printf '{"cert":"cert-a.pem","key":"key-a.pem"}' >"$tls_terminator_dir/rotation.json"
+
+  tls_terminator_log="$(mktemp -t nevix-desktop-e2e-tls.XXXXXX.log)"
+  node "$desktop_root/tests/connection/helpers/tls-terminator.mjs" \
+    --listen="$tls_host:$tls_port" \
+    --target="http://127.0.0.1:8080" \
+    --rotation-file="$tls_terminator_dir/rotation.json" >"$tls_terminator_log" 2>&1 &
+  tls_terminator_pid=$!
+
+  for _ in $(seq 1 40); do
+    if curl -fsk "https://$tls_host:$tls_port/health" >/dev/null 2>&1; then
+      return
+    fi
+    if ! kill -0 "$tls_terminator_pid" >/dev/null 2>&1; then
+      echo "error: TLS terminator stopped before its health endpoint was ready" >&2
+      return 1
+    fi
+    sleep 0.25
+  done
+
+  echo "error: TLS terminator did not become ready" >&2
+  return 1
+}
+
+tls_fingerprint() {
+  openssl x509 -in "$tls_terminator_dir/cert-$1.pem" -noout -fingerprint -sha256 \
+    | cut -d= -f2
+}
+
 trap 'exit_status=$?; trap - EXIT; cleanup "$exit_status"; exit $?' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -271,31 +337,20 @@ rm -f "$identity_server_artifact"
 
 if [[ "$mode" == "full" ]]; then
   pnpm typecheck
-
-  env \
-    -u VITE_SERVER_URL \
-    pnpm exec electron-vite build --mode production
-  NEVIX_EXPECT_INVALID_SERVER_CONFIG=1 \
-    pnpm exec playwright test tests/auth/configuration.spec.ts --workers=1
-
-  env \
-    VITE_SERVER_URL=http://192.168.1.50:8000 \
-    pnpm exec electron-vite build --mode production
-  NEVIX_EXPECT_PRODUCTION_PRIVATE_HTTP_BLOCK=1 \
-    pnpm exec playwright test tests/auth/configuration.spec.ts --workers=1
 fi
 
 acquire_lock
 require_free_port "$postgres_host_port"
 require_free_port 8080
+require_free_port "$tls_port"
 
 start_postgres
 start_identity_server
 stabilize_bootstrap_admin
+start_tls_terminator
 server_url="http://127.0.0.1:8080"
 
-VITE_SERVER_URL="$server_url" \
-  pnpm exec electron-vite build --mode test
+pnpm exec electron-vite build --mode test
 
 playwright_args=(--workers=2)
 if [[ "$mode" == "smoke" ]]; then
@@ -319,6 +374,10 @@ NEVIX_TEST_SERVER_URL="$server_url" \
   NEVIX_TEST_ADMIN_EMAIL="$admin_email" \
   NEVIX_TEST_ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
   NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR="$identity_server_failure_marker_dir" \
+  NEVIX_TEST_TLS_URL="https://$tls_host:$tls_port" \
+  NEVIX_TEST_TLS_DIR="$tls_terminator_dir" \
+  NEVIX_TEST_TLS_FINGERPRINT_A="$(tls_fingerprint a)" \
+  NEVIX_TEST_TLS_FINGERPRINT_B="$(tls_fingerprint b)" \
   NEVIX_E2E_RUN_ID="$(date +%s)-$$" \
   pnpm exec playwright test "${playwright_args[@]}"
 

@@ -1,4 +1,4 @@
-export const SETTINGS_SECTIONS = ['profile', 'language'] as const
+export const SETTINGS_SECTIONS = ['profile', 'language', 'connection'] as const
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 

@@ -16,7 +16,7 @@ registerHooks({
 const { createIdentityClient } =
   await import('../../src/renderer/src/features/authentication/api/client.ts')
 
-const config = { url: 'https://server.example' }
+const serverUrl = 'https://server.example'
 
 async function withFetch<T>(implementation: typeof fetch, run: () => Promise<T>): Promise<T> {
   const originalFetch = globalThis.fetch
@@ -60,7 +60,7 @@ test('login sends its credential JSON with the trusted-write discipline and pars
       assert.equal(init?.body, JSON.stringify({ email: 'admin@example.com', password: 'secret' }))
       return jsonResponse(loginSuccessBody)
     }) as typeof fetch,
-    () => createIdentityClient(config).login('admin@example.com', 'secret')
+    () => createIdentityClient(serverUrl).login('admin@example.com', 'secret')
   )
 
   assert.equal(result.outcome, 'succeeded')
@@ -88,7 +88,7 @@ test('authenticated calls carry the opaque token in the Authorization header onl
       return jsonResponse({ user: loginSuccessBody.user })
     }) as typeof fetch,
     async () => {
-      const me = await createIdentityClient(config).me('opaque-session-token')
+      const me = await createIdentityClient(serverUrl).me('opaque-session-token')
       assert.equal(me.outcome, 'succeeded')
       assert.deepEqual(me.value, {
         id: 'user-1',
@@ -111,7 +111,7 @@ test('authenticated calls carry the opaque token in the Authorization header onl
       return jsonResponse({ status: 'logged_out' })
     }) as typeof fetch,
     async () => {
-      const logout = await createIdentityClient(config).logout('opaque-session-token')
+      const logout = await createIdentityClient(serverUrl).logout('opaque-session-token')
       assert.equal(logout.outcome, 'succeeded')
     }
   )
@@ -126,7 +126,7 @@ test('authenticated calls carry the opaque token in the Authorization header onl
       return jsonResponse({ status: 'password_changed' })
     }) as typeof fetch,
     async () => {
-      const change = await createIdentityClient(config).changePassword(
+      const change = await createIdentityClient(serverUrl).changePassword(
         'opaque-session-token',
         'initial',
         'replacement'
@@ -144,7 +144,7 @@ test('a wrong password stays a credential verdict instead of a session rejection
         401
       )) as typeof fetch,
     async () => {
-      const result = await createIdentityClient(config).login('admin@example.com', 'wrong')
+      const result = await createIdentityClient(serverUrl).login('admin@example.com', 'wrong')
       assert.deepEqual(result, { outcome: 'request-rejected', code: 'invalid_credentials' })
     }
   )
@@ -156,7 +156,7 @@ test('a wrong password stays a credential verdict instead of a session rejection
         401
       )) as typeof fetch,
     async () => {
-      const result = await createIdentityClient(config).changePassword(
+      const result = await createIdentityClient(serverUrl).changePassword(
         'opaque-session-token',
         'wrong',
         'replacement'
@@ -174,7 +174,7 @@ test('a rejected session, a disabled account, and a rate limit each keep their i
         401
       )) as typeof fetch,
     async () => {
-      const result = await createIdentityClient(config).me('revoked-token')
+      const result = await createIdentityClient(serverUrl).me('revoked-token')
       assert.deepEqual(result, { outcome: 'unauthorized' })
     }
   )
@@ -186,7 +186,7 @@ test('a rejected session, a disabled account, and a rate limit each keep their i
         403
       )) as typeof fetch,
     async () => {
-      const result = await createIdentityClient(config).login('member@example.com', 'secret')
+      const result = await createIdentityClient(serverUrl).login('member@example.com', 'secret')
       assert.deepEqual(result, { outcome: 'request-rejected', code: 'account_disabled' })
     }
   )
@@ -198,7 +198,7 @@ test('a rejected session, a disabled account, and a rate limit each keep their i
         headers: { 'Retry-After': '7' }
       })) as typeof fetch,
     async () => {
-      const result = await createIdentityClient(config).login('member@example.com', 'secret')
+      const result = await createIdentityClient(serverUrl).login('member@example.com', 'secret')
       assert.deepEqual(result, { outcome: 'rate-limited' })
     }
   )
@@ -206,7 +206,7 @@ test('a rejected session, a disabled account, and a rate limit each keep their i
   await withFetch(
     (async () => jsonResponse({ error: 'password_change_required' }, 403)) as typeof fetch,
     async () => {
-      const result = await createIdentityClient(config).me('gated-token')
+      const result = await createIdentityClient(serverUrl).me('gated-token')
       assert.deepEqual(result, { outcome: 'request-rejected', code: 'password_change_required' })
     }
   )
@@ -218,20 +218,20 @@ test('unreachable servers and unreadable bodies degrade to network failures, nev
       throw new TypeError('fetch failed')
     }) as typeof fetch,
     async () => {
-      const result = await createIdentityClient(config).login('admin@example.com', 'secret')
+      const result = await createIdentityClient(serverUrl).login('admin@example.com', 'secret')
       assert.deepEqual(result, { outcome: 'network-failure' })
     }
   )
 
   await withFetch((async () => new Response('{', { status: 200 })) as typeof fetch, async () => {
-    const result = await createIdentityClient(config).login('admin@example.com', 'secret')
+    const result = await createIdentityClient(serverUrl).login('admin@example.com', 'secret')
     assert.deepEqual(result, { outcome: 'network-failure' })
   })
 
   await withFetch(
     (async () => jsonResponse({ token: 'opaque-session-token' })) as typeof fetch,
     async () => {
-      const result = await createIdentityClient(config).login('admin@example.com', 'secret')
+      const result = await createIdentityClient(serverUrl).login('admin@example.com', 'secret')
       assert.deepEqual(result, { outcome: 'network-failure' })
     }
   )

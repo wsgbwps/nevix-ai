@@ -23,7 +23,7 @@ type AuthenticationTransitionTestWindow = Window & {
 }
 
 export function AuthenticationTransitionStory(): React.JSX.Element {
-  const authentication = useAuthentication()
+  const authentication = useAuthentication('https://component-test-server.example')
 
   async function enterAuthenticatedShellBeforeClearFails(): Promise<void> {
     authentication.setRememberEmailSelected(false)

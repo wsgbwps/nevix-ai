@@ -4,13 +4,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expectWindowTitle, launchTestApp } from '../helpers/electron-app'
 
+const serverUrl = process.env.NEVIX_TEST_SERVER_URL
+
 async function launchForSystemLanguages(
   systemLanguages: readonly string[]
 ): Promise<Awaited<ReturnType<typeof launchTestApp>> & { userDataDir: string }> {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-i18n-'))
   const launched = await launchTestApp({
     userDataDir,
-    systemLanguages
+    systemLanguages,
+    serverUrl
   })
 
   return { ...launched, userDataDir }
@@ -25,6 +28,7 @@ async function close({
 }
 
 test('startup selects a matching Interface Language for the highest-priority system language', async () => {
+  test.skip(!serverUrl, 'requires the identity server stack produced by the E2E command')
   const cases = [
     {
       systemLanguages: ['zh-Hant-TW', 'en-US'],

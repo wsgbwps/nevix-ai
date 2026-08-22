@@ -12,7 +12,6 @@ import {
   replaceRememberedEmail
 } from '../api/remembered-email'
 import { isPasswordByteLengthValid } from '../policy/password'
-import { readServerPublicConfig } from '../../../lib/server-public-config'
 import {
   clearPersistedSession,
   isSessionPersistenceUnavailable,
@@ -22,7 +21,6 @@ import {
 
 export type AuthenticationStatus =
   | 'restoring'
-  | 'configuration-error'
   | 'restore-failure'
   | 'unauthenticated'
   | 'password-change-required'
@@ -67,7 +65,7 @@ interface Authentication {
 
 const MINIMUM_INITIALIZATION_DISPLAY_MS = 500
 
-export function useAuthentication(): Authentication {
+export function useAuthentication(serverUrl: string | undefined): Authentication {
   const [status, setStatus] = useState<AuthenticationStatus>('restoring')
   const [error, setError] = useState<AuthenticationError>()
   const [notice, setNotice] = useState<AuthenticationNotice>()
@@ -180,6 +178,7 @@ export function useAuthentication(): Authentication {
 
   const restore = useCallback(async (): Promise<void> => {
     if (restoreInProgressRef.current) return
+    if (serverUrl === undefined) return
     restoreInProgressRef.current = true
 
     statusRef.current = 'restoring'
@@ -187,13 +186,7 @@ export function useAuthentication(): Authentication {
     setError(undefined)
 
     try {
-      const config = readServerPublicConfig()
-      if (!config) {
-        statusRef.current = 'configuration-error'
-        setStatus('configuration-error')
-        return
-      }
-      clientRef.current = createIdentityClient(config)
+      clientRef.current = createIdentityClient(serverUrl)
 
       const [stored, remembered] = await Promise.all([
         readPersistedCredentials(),
@@ -259,12 +252,17 @@ export function useAuthentication(): Authentication {
     abandonRejectedSession,
     reportRememberedEmailPersistenceAvailable,
     reportRememberedEmailPersistenceUnavailable,
+    serverUrl,
     settleSession,
     settleUnauthenticated
   ])
 
   useEffect(() => {
-    if (hasInitializedRef.current) return
+    if (serverUrl === undefined) return
+    if (hasInitializedRef.current) {
+      void restore()
+      return
+    }
     hasInitializedRef.current = true
 
     // The restoring boundary stays visible long enough that no launch flashes another boundary.
@@ -272,7 +270,7 @@ export function useAuthentication(): Authentication {
       setTimeout(resolve, MINIMUM_INITIALIZATION_DISPLAY_MS)
     })
     void initialized.then(() => restore())
-  }, [restore])
+  }, [restore, serverUrl])
 
   const setRememberEmailSelected = useCallback(
     (selected: boolean): void => {
