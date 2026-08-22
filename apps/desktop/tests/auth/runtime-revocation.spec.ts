@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchTestApp } from '../helpers/electron-app'
+import { hasSecurePersistenceBackend, launchTestApp } from '../helpers/electron-app'
 import {
   createStableTeamUser,
   readIdentityServerConfig,
@@ -31,6 +31,12 @@ test('a session revoked at runtime is cleared on the next launch and cannot rest
   try {
     const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
     try {
+      // The revocation evidence rides the stored envelope across a relaunch, so a backend
+      // that persists nothing by design (CI-forced basic_text) cannot exercise it.
+      test.skip(
+        !(await hasSecurePersistenceBackend(launched.electronApp)),
+        'requires a native Keychain, DPAPI, or Secret Service backend'
+      )
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()

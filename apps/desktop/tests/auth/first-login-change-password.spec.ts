@@ -221,6 +221,12 @@ test('a stored session that still owes the change returns to the forced change b
   try {
     const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
     try {
+      // Relaunching a stored gated session requires a backend that actually persists the
+      // envelope; CI-forced basic_text stores nothing by design.
+      test.skip(
+        !(await hasSecurePersistenceBackend(launched.electronApp)),
+        'requires a native Keychain, DPAPI, or Secret Service backend'
+      )
       await signIn(launched.page, identity)
       await expect(launched.page.getByRole('heading', { name: 'Set a new password' })).toBeVisible()
       // Closing the app mid-flow leaves the session persisted but still gated.
