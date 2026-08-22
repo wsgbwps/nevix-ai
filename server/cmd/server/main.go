@@ -1,6 +1,6 @@
-// Composition root: constructs dependencies, starts the identity Outbox
-// Worker and the HTTP server, and shuts both down gracefully. No business
-// logic lives here.
+// Composition root: applies schema migrations with the DDL credential, then
+// constructs dependencies, starts the identity maintenance worker and the
+// HTTP server, and shuts both down gracefully. No business logic lives here.
 package main
 
 import (
@@ -19,6 +19,7 @@ import (
 
 	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity"
+	"github.com/nevix-ai/server/internal/migration"
 )
 
 func main() {
@@ -38,9 +39,27 @@ func run() error {
 	if databaseURL == "" {
 		return errors.New("missing required deployment variable: DATABASE_URL")
 	}
+	// The migration credential owns DDL; the application pool (identity_app)
+	// never does (ADR-0014). Startup runs migrations automatically before the
+	// module exists (ADR-0013).
+	migrationDatabaseURL := os.Getenv("MIGRATION_DATABASE_URL")
+	if migrationDatabaseURL == "" {
+		return errors.New("missing required deployment variable: MIGRATION_DATABASE_URL")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	applied, err := migration.Apply(ctx, migrationDatabaseURL)
+	if err != nil {
+		return err
+	}
+	for _, m := range applied {
+		log.Printf("migration applied: %04d_%s", m.Version, m.Name)
+	}
+	if len(applied) == 0 {
+		log.Println("migrations current; nothing to apply")
+	}
 
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
@@ -81,7 +100,7 @@ func run() error {
 		return fmt.Errorf("http server shutdown: %w", err)
 	}
 	if err := <-workerDone; err != nil {
-		return fmt.Errorf("outbox worker shutdown: %w", err)
+		return fmt.Errorf("identity worker shutdown: %w", err)
 	}
 	log.Println("shut down cleanly")
 	return nil

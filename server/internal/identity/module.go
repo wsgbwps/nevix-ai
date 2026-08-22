@@ -1,11 +1,11 @@
 // Package identity is the identity Module's composition surface. The command
-// skeleton (unified error envelope, decode-validate-map pipeline, and route
-// table machinery) lives in command; one-time verification-code issuance lives
-// in verification; the Outbox Worker lives in outbox; Bearer JWT verification
-// lives in authjwt; and Organization and Invitation command layers live in
-// their respective sub-packages. Callers outside the Module — the composition
-// root and integration test harness — see only this package: LoadConfig,
-// NewModule, Register, and RunWorkers.
+// skeleton (unified error envelope, decode-validate-map pipeline, guard-policy
+// route table machinery) lives in command; the auth service (passwords,
+// sessions, login/logout/me, bootstrap, the maintenance sweep) lives in auth;
+// audit log writes live in audit; and the Write Transaction Module lives in
+// writetx. Callers outside the Module — the composition root and the
+// integration test harness — see only this package: LoadConfig, NewModule,
+// Register, and RunWorkers.
 package identity
 
 import (
@@ -13,66 +13,42 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/event"
-	"github.com/nevix-ai/server/internal/identity/authjwt"
+	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
-	"github.com/nevix-ai/server/internal/identity/invitations"
-	"github.com/nevix-ai/server/internal/identity/memberships"
-	"github.com/nevix-ai/server/internal/identity/organizations"
-	"github.com/nevix-ai/server/internal/identity/outbox"
-	"github.com/nevix-ai/server/internal/identity/verification"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
-// Config is the identity Module's deployment configuration, aggregated from
-// the sub-package loaders so the composition root sees one seam. JWKSURL is
-// the auth provider's published key set for Bearer JWT verification;
-// CORSAllowedOrigins is the per-environment browser origin whitelist.
+// Config is the identity Module's deployment configuration. AdminEmail and
+// AdminInitialPassword bootstrap the first admin on an empty database and are
+// inert once any user exists (ADR-0015); CORSAllowedOrigins is the
+// per-environment browser origin whitelist.
 type Config struct {
-	CodeIssuance       verification.CodeIssuanceConfig
-	SMTP               outbox.SMTPConfig
-	RetryDelays        []time.Duration
-	JWKSURL            string
-	CORSAllowedOrigins []string
+	AdminEmail           string
+	AdminInitialPassword string
+	CORSAllowedOrigins   []string
 }
 
-// LoadConfig reads the Module's deployment variables via getenv, delegating
-// to the sub-package loaders. A missing or invalid variable is an error
-// naming that variable; the composition root loads configuration before
-// opening the database pool, so a misconfigured process fails before touching
-// infrastructure.
+// LoadConfig reads the Module's deployment variables via getenv. A missing or
+// invalid variable is an error naming that variable; the composition root
+// loads configuration before opening the database pool, so a misconfigured
+// process fails before touching infrastructure. Bootstrap credentials are
+// optional at load time: whether they matter depends on the database being
+// empty, which only NewModule can observe.
 func LoadConfig(getenv func(string) string) (Config, error) {
-	codeIssuance, err := verification.LoadCodeIssuanceConfig(getenv)
-	if err != nil {
-		return Config{}, err
-	}
-	smtp, err := outbox.LoadSMTPConfig(getenv)
-	if err != nil {
-		return Config{}, err
-	}
-	retryDelays, err := outbox.LoadRetryDelays(getenv)
-	if err != nil {
-		return Config{}, err
-	}
-	jwksURL := getenv("AUTH_JWKS_URL")
-	if jwksURL == "" {
-		return Config{}, errors.New("identity: missing required deployment variable: AUTH_JWKS_URL")
-	}
 	corsOrigins, err := loadCORSAllowedOrigins(getenv("CORS_ALLOWED_ORIGINS"))
 	if err != nil {
 		return Config{}, err
 	}
 	return Config{
-		CodeIssuance:       codeIssuance,
-		SMTP:               smtp,
-		RetryDelays:        retryDelays,
-		JWKSURL:            jwksURL,
-		CORSAllowedOrigins: corsOrigins,
+		AdminEmail:           strings.TrimSpace(getenv("ADMIN_EMAIL")),
+		AdminInitialPassword: getenv("ADMIN_INITIAL_PASSWORD"),
+		CORSAllowedOrigins:   corsOrigins,
 	}, nil
 }
 
@@ -97,16 +73,11 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 	return origins, nil
 }
 
-// Module is the identity Module's composition surface: it owns the command
-// layers', the transport guard's, and the Outbox Worker's dependencies and
-// registers the Module's HTTP routes.
+// Module is the identity Module's composition surface: it owns the auth
+// service and the guard vocabulary and registers the Module's HTTP routes.
 type Module struct {
-	issuer      *verification.CodeIssuer
-	invitations *invitations.Creator
-	memberships *memberships.Manager
-	worker      *outbox.OutboxWorker
-	verifier    *authjwt.Verifier
-	orgs        *organizations.Manager
+	auth        *auth.Service
+	guard       *authz.Guard
 	corsOrigins []string
 }
 
@@ -118,54 +89,53 @@ type Module struct {
 // failure from other database errors.
 var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 
-// NewModule constructs the command layers, the transport guard, and the
-// Outbox Worker around one Write Transaction Module (writetx.Runner): after
-// proving the runtime database identity with a real round trip — session_user
-// (the authenticated principal) and current_user (the role actually used for
-// permission checks) must both be exactly identity_app — every Organization,
-// Membership, Invitation, Verification, and Outbox Worker write transaction
-// runs through the same runner, which re-proves the identity per transaction
-// and owns commit and rollback. A pool authenticated as the owner, a
-// migration role, or any other role is rejected even when it could SET ROLE
-// identity_app, and an unreachable database fails the round trip, so either
-// way construction fails before the composition root starts the HTTP
-// listener or workers. Worker construction additionally probes the SMTP
-// endpoint, so an unreachable endpoint fails startup explicitly.
+// NewModule constructs the auth service and the guard vocabulary around one
+// Write Transaction Module (writetx.Runner): after proving the runtime
+// database identity with a real round trip — session_user (the authenticated
+// principal) and current_user (the role actually used for permission checks)
+// must both be exactly identity_app — every user, session, and audit write
+// transaction runs through the same runner, which re-proves the identity per
+// transaction and owns commit and rollback. A pool authenticated as the
+// owner, a migration role, or any other role is rejected even when it could
+// SET ROLE identity_app, and an unreachable database fails the round trip, so
+// either way construction fails before the composition root starts the HTTP
+// listener or workers. Construction then runs the first-admin bootstrap: on
+// an empty users table the ADMIN_EMAIL / ADMIN_INITIAL_PASSWORD pair creates
+// the first admin; on a non-empty table the pair is ignored with a warning.
 func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, error) {
 	tx := writetx.New(pool)
 	if err := tx.VerifyStartupIdentity(ctx); err != nil {
 		return nil, err
 	}
-	worker, err := outbox.NewOutboxWorker(tx, cfg.SMTP, cfg.RetryDelays)
-	if err != nil {
+	service := auth.NewService(pool, tx)
+	if err := service.Bootstrap(ctx, cfg.AdminEmail, cfg.AdminInitialPassword); err != nil {
 		return nil, err
 	}
 	return &Module{
-		issuer:      verification.NewCodeIssuer(tx, cfg.CodeIssuance),
-		invitations: invitations.NewCreator(tx, cfg.CodeIssuance),
-		memberships: memberships.NewManager(tx, cfg.CodeIssuance.From),
-		worker:      worker,
-		verifier:    authjwt.NewVerifier(cfg.JWKSURL),
-		orgs:        organizations.NewManager(tx),
+		auth:        service,
+		guard:       authz.NewGuard(service),
 		corsOrigins: cfg.CORSAllowedOrigins,
 	}, nil
 }
 
 // Register mounts the Module's trusted commands from the static route table:
 // the CORS whitelist gates the Module surface, every path's OPTIONS preflight
-// twin and Allow-Methods value derive from the same table, and routes that do
-// not declare Public mount behind the Bearer JWT guard. The Module publishes
-// no Domain Events yet; the bus is part of the Module contract.
+// twin and Allow-Methods value derive from the same table, and every route
+// runs behind its declared authz guard (only login is public). The Module
+// publishes no Domain Events yet; the bus is part of the Module contract.
 func (m *Module) Register(r chi.Router, _ event.Bus) {
 	routes := m.routes()
 	r.Use(corsMiddleware(m.corsOrigins, command.MethodsByPath(routes)))
-	command.Mount(r, routes, m.verifier.Middleware)
+	command.Mount(r, routes, command.Guards{
+		ActiveUser: m.guard.RequireActiveUser,
+		Admin:      m.guard.RequireAdmin,
+	})
 }
 
-// RunWorkers runs the Module's background workers until ctx is canceled, then
-// returns nil. Delivery errors are logged and retried on the backoff
-// schedule, not propagated: a failed row already has terminal-state
-// bookkeeping in the Outbox.
+// RunWorkers runs the Module's background maintenance until ctx is canceled,
+// then returns nil: the daily sweep deletes expired sessions, prunes the
+// login limiter, and re-logs the pending-initial-password reminder. Sweep
+// failures are logged and retried on the next tick, not propagated.
 func (m *Module) RunWorkers(ctx context.Context) error {
-	return m.worker.Run(ctx)
+	return m.auth.RunSweepLoop(ctx)
 }

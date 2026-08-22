@@ -9,9 +9,9 @@ concurrency:
 
 jobs:
   quality:
-    name: Vet and test
+    name: Vet, test, and integrate
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -24,3 +24,8 @@ jobs:
       - name: Test
         working-directory: server
         run: go test ./...
+      # Pure-PostgreSQL integration suite (no Supabase stack): the harness
+      # starts one pinned throwaway postgres container and runs the identity
+      # tree against it with zero skips.
+      - name: Identity integration (real PostgreSQL)
+        run: ./scripts/test-identity-integration.sh

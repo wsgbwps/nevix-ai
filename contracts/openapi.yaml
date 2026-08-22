@@ -1,44 +1,30 @@
 openapi: 3.1.0
 info:
   title: Nevix AI API
-  version: 0.3.0
+  version: 0.4.0
   description: |-
     API contract between desktop client and backend server.
 
-    本文件是 Desktop ↔ Server 受信命令 seam 的单一事实源（见根目录 CONTEXT-MAP.md 与 docs/adr/0004-supabase-go-trusted-execution-seam.md）。关于本文件的约定：
+    本文件是 Desktop ↔ Server 受信命令 seam 的单一事实源（见根目录 CONTEXT-MAP.md 与 docs/adr/0014-go-sole-trusted-data-plane.md）。关于本文件的约定：
 
     - **错误信封**：所有受信命令的错误响应统一使用 components/schemas/Error —— error 为 snake_case 机器码，是客户端分支处理的唯一依据；message 为人类可读文案，不作为程序判断依据。
-    - **限流数值为信息性**：description 中出现的限流数值（如 60 秒冷却、每小时上限）是当前部署策略，调整不算契约变更；客户端应依赖错误码与 Retry-After 响应头，而非硬编码数值。
+    - **限流数值为信息性**：description 中出现的限流数值（如登录失败窗口）是当前部署策略，调整不算契约变更；客户端应依赖错误码与 Retry-After 响应头，而非硬编码数值。
     - **演进纪律**：只增不改 —— 新增命令加路径、响应只加字段，不改既有字段与错误码语义；不引入 /v1 版本前缀，直到出现真实的 breaking 需求。
-    - **漂移防线**：当前以人工纪律与 PR review 保持实现与本文件一致；当受信命令超过一条或首次漂移发生时，引入响应级对照校验（测试断言实现符合本文件）。响应级对照校验已作为测试断言落地（CreateOrganization 引入后受信命令超过一条，触发条件满足）：server 集成测试将其观察到的受信命令 HTTP 响应与本文件逐条对照 —— 状态码必须有文档条目、响应体必须含文档要求的必填字段、error 机器码必须属于该状态码文档化的枚举。
+    - **漂移防线**：响应级对照校验已作为测试断言落地：server 集成测试将其观察到的受信命令 HTTP 响应与本文件逐条对照 —— 状态码必须有文档条目、响应体必须含文档要求的必填字段、error 机器码必须属于该状态码文档化的枚举。
 paths:
-  /identity/verification-codes:
-    $ref: "./identity.yaml#/paths/~1identity~1verification-codes"
-  /identity/organizations:
-    $ref: "./identity.yaml#/paths/~1identity~1organizations"
-  /identity/organizations/{organization_id}/settings:
-    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1settings"
-  /identity/organizations/{organization_id}/leave:
-    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1leave"
-  /identity/organizations/{organization_id}/members/{membership_id}/remove:
-    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1members~1{membership_id}~1remove"
-  /identity/organizations/{organization_id}/members/{membership_id}/role:
-    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1members~1{membership_id}~1role"
-  /identity/organizations/{organization_id}/invitations:
-    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1invitations"
-  /identity/organizations/{organization_id}/invitations/{invitation_id}/resend:
-    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1invitations~1{invitation_id}~1resend"
-  /identity/organizations/{organization_id}/invitations/{invitation_id}/revoke:
-    $ref: "./identity.yaml#/paths/~1identity~1organizations~1{organization_id}~1invitations~1{invitation_id}~1revoke"
-  /identity/invitations/{invitation_id}/accept:
-    $ref: "./identity.yaml#/paths/~1identity~1invitations~1{invitation_id}~1accept"
+  /identity/auth/login:
+    $ref: "./identity.yaml#/paths/~1identity~1auth~1login"
+  /identity/auth/logout:
+    $ref: "./identity.yaml#/paths/~1identity~1auth~1logout"
+  /identity/users/me:
+    $ref: "./identity.yaml#/paths/~1identity~1users~1me"
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
-      description: 认证提供方签发的会话 JWT（ES256/P-256，服务端按 JWKS 验证并按 kid 缓存公钥）；缺失、无效或过期一律 401 unauthorized。
+      bearerFormat: Opaque
+      description: 登录签发的 opaque session token（服务端只存 hash，可吊销、滑动过期）；缺失、无效、已过期或已吊销一律 401 unauthorized。token 经 Authorization 头携带，永不进 URL。
   schemas:
     Error:
       type: object

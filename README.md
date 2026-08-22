@@ -251,23 +251,23 @@ pnpm lint         # 运行 lint
 cd server && go run ./cmd/server  # 启动后端
 
 make dev          # 同 pnpm dev
-make server       # 启动 Go 后端
-make server-mailpit # 启动 Go 后端，并强制投递邮件到本地 Mailpit
-make supabase     # 启动本地 Supabase（含 Mailpit）
+make server       # 启动 Go 后端（读取 server/.env.local）
 make build        # 构建所有
 make lint         # lint 所有
+
+./scripts/test-identity-integration.sh  # 起一次性 PostgreSQL 跑 Server 集成测试
 ```
 
-### 本地开发启动顺序
+### 本地开发启动顺序（Server 侧）
 
-1. 首次运行 `cp server/.env.example server/.env.local`，然后按需调整本地非邮件配置；不要让 Server 使用 `postgres` owner 凭据。
-2. 运行 `make supabase`，启动本地 Supabase 和 Mailpit。
-3. 运行 `make server-mailpit`。该命令会为本次 Server 进程随机生成并配置本地 `identity_app` LOGIN 凭据，加载 `server/.env.local` 的其他配置，并强制使用最小权限数据库角色、`127.0.0.1:54325` 的 Mailpit SMTP 和压缩后的开发重试间隔；随机数据库凭据不会写入文件。
-4. 运行 `make dev`，启动 Desktop。
+Server 已迁移到单租户用户系统（登录/会话走 Go API，纯 PostgreSQL，无 Supabase/邮件依赖）：
 
-Mailpit Web UI 位于 `http://127.0.0.1:54324`。Server 只在进程启动时读取 SMTP 配置；修改配置后必须重启 Server 才会生效。
+1. 首次运行 `cp server/.env.example server/.env.local`，按注释填入两条数据库凭据：`MIGRATION_DATABASE_URL`（owner/DDL，启动时自动执行 up-only migration）与 `DATABASE_URL`（必须直接以 `identity_app` LOGIN 角色登录），以及 `ADMIN_EMAIL` / `ADMIN_INITIAL_PASSWORD`（仅空库 bootstrap 生效）。
+2. 本地启动一个 PostgreSQL（例如 `docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres:17.5-alpine`），并在首次启动 Server 前预置应用角色：`CREATE ROLE identity_app LOGIN PASSWORD '…'`（migration 只会采用已存在的角色、绝不重置密码；全新库上该角色要等首启的 migration 才被创建，若不预置，首启时应用池认证即失败）。
+3. 运行 `make server`：启动时自动执行 migration、空库时 bootstrap 首个 admin。
+4. 运行 `make dev`，启动 Desktop（注意：桌面端登录流仍在迁移中，当前渲染端依旧面向旧 Supabase 面）。
 
-`server-mailpit` 仅用于本地开发。生产环境继续使用 `make server` 或直接启动部署二进制，并通过部署环境变量提供 Resend（服务商）的 SMTP 配置。
+Server 集成测试：`./scripts/test-identity-integration.sh` 拉起一次性 pinned PostgreSQL 容器并运行整套真库集成测试。
 
 ## 打包与应用身份
 

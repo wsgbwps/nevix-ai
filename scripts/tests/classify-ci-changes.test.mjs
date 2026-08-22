@@ -63,17 +63,33 @@ test("ordinary Go packages require only Server CI", () => {
   });
 });
 
-test("Identity server changes require every cross-runtime check", () => {
+test("Identity server changes require Server CI and Desktop E2E", () => {
   assert.deepEqual(
-    selected(["server/internal/identity/invitations/accept.go"]),
-    { server: true, identity: true, e2e: true },
+    selected(["server/internal/identity/auth/sessions.go"]),
+    { server: true, e2e: true },
   );
+});
+
+test("API contracts require Server CI and Desktop E2E", () => {
+  assert.deepEqual(
+    selected(["contracts/identity.yaml"]),
+    { server: true, e2e: true },
+  );
+});
+
+test("the Supabase desktop stack is an E2E concern only", () => {
+  assert.deepEqual(selected(["supabase/config.toml"]), { e2e: true });
+});
+
+test("the server integration harness entry runs Server CI", () => {
+  assert.deepEqual(selected(["scripts/test-identity-integration.sh"]), {
+    server: true,
+  });
 });
 
 test("root JavaScript manifests cover product and harness consumers", () => {
   assert.deepEqual(selected(["package.json"]), {
     desktop: true,
-    identity: true,
     e2e: true,
     harness: true,
   });
@@ -100,7 +116,7 @@ test("Pi agent definitions, extension code, and tests require inline harness val
 test("shared composite actions run the harness jobs they back", () => {
   assert.deepEqual(
     selected([".github/actions/supabase-image-cache/action.yml"]),
-    { e2e: true, identity: true },
+    { e2e: true },
   );
 });
 

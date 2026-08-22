@@ -18,7 +18,7 @@ func corsHandler(origins []string, methodsByPath map[string][]string) http.Handl
 }
 
 func doCORS(handler http.Handler, method, origin string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, "/identity/organizations", nil)
+	req := httptest.NewRequest(method, "/identity/auth/login", nil)
 	if origin != "" {
 		req.Header.Set("Origin", origin)
 	}
@@ -37,8 +37,8 @@ func TestCORSWhitelistEchoesAllowedOriginsExactly(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://app.nevix.test" {
 		t.Fatalf("whitelisted origin: Allow-Origin %q, want the origin echoed exactly", got)
 	}
-	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "X-Invitation-Code-Attempts-Remaining") {
-		t.Fatalf("whitelisted origin: Expose-Headers %q, want invitation attempts header", got)
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "Retry-After") {
+		t.Fatalf("whitelisted origin: Expose-Headers %q, want the rate-limit Retry-After header", got)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestCORSPassesRequestsWithoutOrigin(t *testing.T) {
 }
 
 func TestCORSPreflightServesAllowedOriginsOnly(t *testing.T) {
-	handler := corsHandler([]string{"https://app.nevix.test"}, map[string][]string{"/identity/organizations": {http.MethodPost}})
+	handler := corsHandler([]string{"https://app.nevix.test"}, map[string][]string{"/identity/auth/login": {http.MethodPost}})
 
 	rec := doCORS(handler, http.MethodOptions, "https://app.nevix.test")
 	if rec.Code != http.StatusNoContent {
@@ -91,15 +91,7 @@ func TestCORSPreflightServesAllowedOriginsOnly(t *testing.T) {
 
 func fullTransportEnv(overrides map[string]string) func(string) string {
 	values := map[string]string{
-		"VERIFICATION_CODE_HASH_KEY": "hash-key",
-		"SMTP_FROM":                  "identity@nevix.test",
-		"SMTP_HOST":                  "127.0.0.1",
-		"SMTP_PORT":                  "54325",
-		"SMTP_USER":                  "mailpit",
-		"SMTP_PASSWORD":              "mailpit",
-		"OUTBOX_RETRY_DELAYS":        "1s,2s",
-		"AUTH_JWKS_URL":              "https://auth.nevix.test/.well-known/jwks.json",
-		"CORS_ALLOWED_ORIGINS":       "https://app.nevix.test,http://127.0.0.1:5173",
+		"CORS_ALLOWED_ORIGINS": "https://app.nevix.test,http://127.0.0.1:5173",
 	}
 	for key, value := range overrides {
 		values[key] = value
@@ -112,9 +104,6 @@ func TestLoadConfigParsesTransportVariables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.JWKSURL != "https://auth.nevix.test/.well-known/jwks.json" {
-		t.Fatalf("JWKSURL %q, want the AUTH_JWKS_URL value", cfg.JWKSURL)
-	}
 	want := []string{"https://app.nevix.test", "http://127.0.0.1:5173"}
 	if len(cfg.CORSAllowedOrigins) != len(want) {
 		t.Fatalf("CORSAllowedOrigins %v, want %v", cfg.CORSAllowedOrigins, want)
@@ -126,9 +115,30 @@ func TestLoadConfigParsesTransportVariables(t *testing.T) {
 	}
 }
 
+func TestLoadConfigCarriesBootstrapVariablesVerbatim(t *testing.T) {
+	cfg, err := LoadConfig(func(key string) string {
+		values := map[string]string{
+			"CORS_ALLOWED_ORIGINS":   "https://app.nevix.test",
+			"ADMIN_EMAIL":            "  Admin@Example.com ",
+			"ADMIN_INITIAL_PASSWORD": "initial-password",
+		}
+		return values[key]
+	})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	// LoadConfig only trims surrounding whitespace; canonicalization and the
+	// empty-table decision belong to Bootstrap, which can see the database.
+	if cfg.AdminEmail != "Admin@Example.com" {
+		t.Fatalf("AdminEmail %q, want the trimmed value", cfg.AdminEmail)
+	}
+	if cfg.AdminInitialPassword != "initial-password" {
+		t.Fatalf("AdminInitialPassword %q, want the verbatim value", cfg.AdminInitialPassword)
+	}
+}
+
 func TestLoadConfigRejectsWildcardAndMissingTransportVariables(t *testing.T) {
 	cases := map[string]map[string]string{
-		"missing JWKS url":     {"AUTH_JWKS_URL": ""},
 		"missing CORS origins": {"CORS_ALLOWED_ORIGINS": ""},
 		"wildcard origin":      {"CORS_ALLOWED_ORIGINS": "*"},
 		"wildcard among list":  {"CORS_ALLOWED_ORIGINS": "https://app.nevix.test,*"},

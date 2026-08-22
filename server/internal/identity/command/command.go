@@ -1,11 +1,11 @@
 // Package command is the identity Module's trusted-command skeleton: the
 // single error envelope writer, the shared decode-validate-map pipeline
-// (Handle and HandleWithRequest), and the static route table machinery
-// (Route, Mount, MethodsByPath, AllowMethods) from which every path's OPTIONS
-// preflight twin and Allow-Methods value are derived. Domain sub-packages
-// keep only their business functions and request/response types; HTTP
-// mechanics live here, so adding a trusted command never touches CORS,
-// preflight, or the error envelope again.
+// (Handle, HandleWithRequest, HandleNoBody), and the static route table
+// machinery (Route, GuardPolicy, Guards, Mount, MethodsByPath, AllowMethods)
+// from which every path's guard, OPTIONS preflight twin, and Allow-Methods
+// value derive. Domain sub-packages keep only their business functions and
+// request/response types; HTTP mechanics live here, so adding a trusted
+// command never touches CORS, preflight, or the error envelope again.
 package command
 
 import (
@@ -34,13 +34,34 @@ type Validator interface {
 	Validate() *Error
 }
 
-// Route declares one trusted command in the Module's static table. Public is
-// zero-value safe: a route that does not set Public: true is mounted behind
-// the Bearer guard, the spec's default for new commands.
+// GuardPolicy names the authorization a route requires (ADR-0015 vocabulary).
+// GuardActiveUser is the zero value: a route that does not declare its guard
+// is mounted behind RequireActiveUser, the default for new commands.
+type GuardPolicy string
+
+const (
+	// GuardActiveUser requires a session resolving to an active user.
+	GuardActiveUser GuardPolicy = ""
+	// GuardAdmin additionally requires the admin role.
+	GuardAdmin GuardPolicy = "admin"
+	// GuardPublic is open without a session; use only where the command is
+	// itself an authentication step (login).
+	GuardPublic GuardPolicy = "public"
+)
+
+// Guards carries the mountable guard middlewares; the Module builds them from
+// the authz vocabulary and hands them to Mount, so the route table stays
+// declarative.
+type Guards struct {
+	ActiveUser func(http.Handler) http.Handler
+	Admin      func(http.Handler) http.Handler
+}
+
+// Route declares one trusted command in the Module's static table.
 type Route struct {
 	Method  string
 	Path    string
-	Public  bool
+	Guard   GuardPolicy
 	Handler http.HandlerFunc
 }
 
@@ -56,18 +77,36 @@ func WriteError(w http.ResponseWriter, e *Error) {
 	fmt.Fprintf(w, `{"error":%q,"message":%q}`, e.Code, e.Message)
 }
 
-// Mount registers the route table: each entry gets its method route (behind
-// the Bearer guard unless Public) and an automatic OPTIONS twin, so browser
-// preflights stay reachable when the Module is mounted inside a chi Group,
-// where route-scoped middleware never runs for unmatched methods.
-func Mount(r chi.Router, routes []Route, bearer func(http.Handler) http.Handler) {
+// Mount registers the route table: each entry gets its method route behind
+// the declared guard and an automatic OPTIONS twin, so browser preflights
+// stay reachable when the Module is mounted inside a chi Group, where
+// route-scoped middleware never runs for unmatched methods. A route whose
+// guard has no middleware is a wiring bug and fails loudly at mount time.
+func Mount(r chi.Router, routes []Route, guards Guards) {
 	for _, route := range routes {
 		handler := http.Handler(route.Handler)
-		if !route.Public {
-			handler = bearer(handler)
+		switch route.Guard {
+		case GuardActiveUser:
+			requireMiddleware(route, guards.ActiveUser, "ActiveUser")
+			handler = guards.ActiveUser(handler)
+		case GuardAdmin:
+			requireMiddleware(route, guards.Admin, "Admin")
+			handler = guards.Admin(handler)
+		case GuardPublic:
+			// open route
+		default:
+			panic(fmt.Sprintf("command: route %s %s declares unknown guard %q", route.Method, route.Path, route.Guard))
 		}
 		r.Method(route.Method, route.Path, handler)
 		r.Options(route.Path, preflightEndpoint)
+	}
+}
+
+// requireMiddleware panics with the route context when a guarded route lacks
+// its middleware, so a forgotten guard wiring cannot silently open a route.
+func requireMiddleware(route Route, middleware func(http.Handler) http.Handler, name string) {
+	if middleware == nil {
+		panic(fmt.Sprintf("command: route %s %s needs the %s guard but Mount received none", route.Method, route.Path, name))
 	}
 }
 

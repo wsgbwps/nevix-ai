@@ -60,6 +60,6 @@ _Avoid_: transaction framework, Unit of Work, 共享数据库执行层。
 
 **包内真库测试（Package-Local Real-Database Test）**: 在 owning package 内直接验证 SQL、query plan、事务或其他内部 seam 的测试；使用真实数据库不会改变其 package-local 归属。
 
-**测试资源（Test Resource）**: 测试所依赖的 fake、真实 PostgreSQL、认证服务、Mailpit 等外部协作者；资源类型决定运行环境和测试命令，不决定测试的 canonical owner。
+**测试资源（Test Resource）**: 测试所依赖的 fake、真实 PostgreSQL 等外部协作者；资源类型决定运行环境和测试命令，不决定测试的 canonical owner。
 
 **测试支持代码（Test Support Code）**: 仅为测试组装环境或访问测试替身服务的代码，不属于生产业务 contract；只有在存在第二个真实 Module consumer 时，才考虑提升为跨 Module 的共享测试包。

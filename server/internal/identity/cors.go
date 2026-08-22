@@ -13,7 +13,9 @@ import (
 	"github.com/nevix-ai/server/internal/identity/command"
 )
 
-const exposedResponseHeaders = "X-Invitation-Code-Attempts-Remaining"
+// Retry-After rides on the login rate-limit response and is not a
+// CORS-safelisted response header, so browser clients need it exposed.
+const exposedResponseHeaders = "Retry-After"
 
 // corsMiddleware builds the CORS gate from the environment whitelist and the
 // route table's per-path methods. An origin outside the whitelist receives no
