@@ -9,46 +9,28 @@ import {
   requestOrdinaryWindowClose
 } from '../helpers/electron-app'
 import {
-  createAuthUser,
-  deleteAuthUser,
-  readAuthHarnessConfig,
-  uniqueAuthIdentity
-} from '../auth/helpers/supabase-auth'
-import {
-  endMembership,
-  seedActiveMembership,
-  seedOrganizationWithMembership,
-  seedProfile,
-  updateMembershipRole,
-  updateOrganizationName
-} from '../organization/helpers/organization-seed'
+  createStableTeamUser,
+  readIdentityServerConfig,
+  uniqueIdentity
+} from '../auth/helpers/identity-server'
 
-const authHarness = readAuthHarnessConfig()
+const identityServer = readIdentityServerConfig()
 
 async function expectSignedInHomeWithStartupRetry(page: Page): Promise<void> {
   const homeHeading = page.getByRole('heading', { name: '使用 Nevix AI 创作' })
   const retryButton = page.getByRole('button', { name: '重试', exact: true })
-  await expect(homeHeading.or(retryButton)).toBeVisible()
+  await expect(homeHeading.or(retryButton)).toBeVisible({ timeout: 15_000 })
   if (await retryButton.isVisible()) await retryButton.click()
   await expect(homeHeading).toBeVisible()
 }
 
-function isActiveMembershipProjection(url: string): boolean {
-  const request = new URL(url)
-  return (
-    request.pathname.endsWith('/rest/v1/memberships') &&
-    request.searchParams.get('select')?.includes('organizations') === true
-  )
-}
-
 test('signed-in users reach one focused Settings Section and return to its App source @smoke', async () => {
   test.setTimeout(60_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('settings-page-presentation')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: '设置页组织' })
+  const identity = uniqueIdentity('settings-page-presentation')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-page-presentation-'))
 
   try {
@@ -66,7 +48,7 @@ test('signed-in users reach one focused Settings Section and return to its App s
       await expect(launched.page.getByRole('navigation', { name: '设置' })).toBeVisible()
       await expect(launched.page.getByRole('button', { name: '切换侧边栏' })).toHaveCount(0)
 
-      // 左侧设置导航：顶部"返回应用"操作 + 账户组中的个人资料和语言。
+      // 左侧设置导航：顶部“返回应用”操作 + 账户组中的个人资料和语言。
       await expect(launched.page.getByRole('button', { name: '返回应用' })).toBeVisible()
       const settingsNav = launched.page.getByRole('navigation', { name: '设置' })
       await expect(settingsNav.getByText('账户')).toBeVisible()
@@ -96,586 +78,62 @@ test('signed-in users reach one focused Settings Section and return to its App s
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
-test('Organization Details remounts from authority and protects an Owner draft @smoke', async () => {
-  test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+test('Profile display-name editing saves through the identity server and reloads the authoritative value', async () => {
+  test.setTimeout(60_000)
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('settings-organization-details-owner')
-  const userId = await createAuthUser(authHarness, identity, true)
-  const organization = await seedOrganizationWithMembership(userId, {
-    name: 'Initial Details Studio',
-    profileDisplayName: 'Drew Owner'
-  })
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-organization-details-owner-'))
+  const identity = uniqueIdentity('settings-profile-server')
+  await createStableTeamUser(identityServer, identity, 'Old Name')
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-profile-server-'))
 
   try {
     const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
     try {
       await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
+      await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
+
       await openSettingsFromUserMenu(launched.page)
-
-      const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
-      const detailsSection = settingsNavigation.getByRole('button', {
-        name: 'Organization details',
-        exact: true
-      })
-      const membersSection = settingsNavigation.getByRole('button', {
-        name: 'Members',
-        exact: true
-      })
-      const initialDetailsRead = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await detailsSection.click()
-      await initialDetailsRead
-
-      await expect(
-        launched.page.getByRole('heading', { name: 'Organization details', exact: true })
-      ).toBeVisible()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Members', exact: true })
-      ).toHaveCount(0)
-      const organizationName = launched.page.getByRole('textbox', {
-        name: 'Organization name',
-        exact: true
-      })
-      await expect(organizationName).toHaveValue('Initial Details Studio')
-
-      await organizationName.fill('Unsaved Details Draft')
-      await membersSection.click()
-      const discardDialog = launched.page.getByRole('dialog', {
-        name: 'Discard unsaved changes?'
-      })
-      await expect(discardDialog).toBeVisible()
-      await discardDialog.getByRole('button', { name: 'Continue editing' }).click()
-      await expect(organizationName).toHaveValue('Unsaved Details Draft')
-
-      await membersSection.click()
-      await discardDialog.getByRole('button', { name: 'Discard changes' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Members', exact: true })
-      ).toBeVisible()
-      await expect(
-        launched.page.getByRole('textbox', { name: 'Organization name', exact: true })
-      ).toHaveCount(0)
-
-      await updateOrganizationName(organization.id, 'Remote Authoritative Studio')
-      const authoritativeReread = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await detailsSection.click()
-      await authoritativeReread
-      await expect(organizationName).toHaveValue('Remote Authoritative Studio')
-
-      let markFailedSaveStarted = (): void => undefined
-      let releaseFailedSave = (): void => undefined
-      const failedSaveStarted = new Promise<void>((resolve) => {
-        markFailedSaveStarted = resolve
-      })
-      const failedSaveRelease = new Promise<void>((resolve) => {
-        releaseFailedSave = resolve
-      })
-      await launched.page.route(
-        `**/identity/organizations/${organization.id}/settings`,
-        async (route) => {
-          markFailedSaveStarted()
-          await failedSaveRelease
-          await route.fulfill({
-            status: 500,
-            contentType: 'application/json',
-            body: JSON.stringify({ error: 'temporary_failure', message: 'temporary failure' })
-          })
-        },
-        { times: 1 }
-      )
-      await organizationName.fill('Retryable Owner Draft')
-      await launched.page.getByRole('button', { name: 'Apply organization rename' }).click()
-      await failedSaveStarted
-      await requestOrdinaryWindowClose(launched.electronApp)
-      await expectMainWindowCount(launched.electronApp, 1)
-      await expect(settingsNavigation.getByRole('button', { name: 'Members' })).toBeDisabled()
-      releaseFailedSave()
-      await expect(organizationName).toHaveValue('Retryable Owner Draft')
-      await expect(launched.page.getByRole('alert')).toContainText(
-        'Unable to save Organization details. Your draft is preserved. Try again.'
-      )
-
-      await requestOrdinaryWindowClose(launched.electronApp)
-      await expectMainWindowCount(launched.electronApp, 1)
-      await expect(discardDialog).toBeVisible()
-      await discardDialog.getByRole('button', { name: 'Continue editing' }).click()
-      await expect(organizationName).toHaveValue('Retryable Owner Draft')
-
-      await updateMembershipRole(userId, organization.id, 'admin')
-      const roleReductionVerification = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await membersSection.click()
-      await roleReductionVerification
-
-      await expect(
-        launched.page.getByRole('heading', { name: 'Members', exact: true })
-      ).toBeVisible()
-      await expect(organizationName).toHaveCount(0)
-      await expect(settingsNavigation.getByRole('status')).toContainText(
-        'Your Organization details editing permission changed. The authoritative name was reloaded.'
-      )
-      await expect(discardDialog).toHaveCount(0)
-
-      const reducedRoleDetailsRead = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await detailsSection.click()
-      await reducedRoleDetailsRead
-      await expect(
-        launched.page.getByRole('heading', { name: 'Organization details', exact: true })
-      ).toBeVisible()
-      await expect(organizationName).toHaveCount(0)
-      await expect(
-        launched.page.getByRole('main').getByText('Remote Authoritative Studio', { exact: true })
-      ).toBeVisible()
-    } finally {
-      await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
-  }
-})
-
-test('stale Details verification cannot bypass a newer Profile draft @smoke', async () => {
-  test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
-
-  const identity = uniqueAuthIdentity('settings-stale-details-verification')
-  const userId = await createAuthUser(authHarness, identity, true)
-  const organization = await seedOrganizationWithMembership(userId, {
-    name: 'Stale Verification Studio',
-    profileDisplayName: 'Vera Owner'
-  })
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-stale-details-'))
-
-  try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
-    try {
-      await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
-      await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
-      await openSettingsFromUserMenu(launched.page)
-
-      const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
-      const detailsRead = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await settingsNavigation
-        .getByRole('button', { name: 'Organization details', exact: true })
-        .click()
-      await detailsRead
-      await launched.page
-        .getByRole('textbox', { name: 'Organization name', exact: true })
-        .fill('Discarded Details Draft')
-
-      let markVerificationStarted = (): void => undefined
-      let releaseVerification = (): void => undefined
-      const verificationStarted = new Promise<void>((resolve) => {
-        markVerificationStarted = resolve
-      })
-      const verificationRelease = new Promise<void>((resolve) => {
-        releaseVerification = resolve
-      })
-      let holdNextVerification = true
-      await launched.page.route('**/rest/v1/memberships*', async (route) => {
-        if (holdNextVerification && isActiveMembershipProjection(route.request().url())) {
-          holdNextVerification = false
-          markVerificationStarted()
-          await verificationRelease
-        }
-        await route.continue()
-      })
-
-      await settingsNavigation.getByRole('button', { name: 'Members', exact: true }).click()
-      await verificationStarted
-      await settingsNavigation.getByRole('button', { name: 'Profile', exact: true }).click()
-      const discardDialog = launched.page.getByRole('dialog', {
-        name: 'Discard unsaved changes?'
-      })
-      await discardDialog.getByRole('button', { name: 'Discard changes' }).click()
       const displayName = launched.page.getByLabel('Display name')
-      await displayName.fill('Protected Profile Draft')
+      await expect(displayName).toBeEnabled()
+      await expect(displayName).toHaveValue('Old Name')
 
-      await updateMembershipRole(userId, organization.id, 'admin')
-      const staleVerificationResponse = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      releaseVerification()
-      await staleVerificationResponse
+      await displayName.fill('Renamed Member')
+      await launched.page.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect(launched.page.getByRole('status')).toContainText('Display name updated.')
 
-      await expect(displayName).toHaveValue('Protected Profile Draft')
-      await expect(
-        settingsNavigation.getByRole('button', { name: 'Profile', exact: true })
-      ).toHaveAttribute('aria-pressed', 'true')
-      await expect(
-        launched.page.getByRole('heading', { name: 'Members', exact: true })
-      ).toHaveCount(0)
-      await expect(settingsNavigation.getByRole('status')).toHaveCount(0)
-      await launched.page.getByRole('main').getByRole('button', { name: 'Cancel' }).click()
-    } finally {
-      await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
-  }
-})
-
-test('Members verifies a fresh Membership role before loading role-dependent controls @smoke', async () => {
-  test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
-
-  const adminIdentity = uniqueAuthIdentity('settings-membership-role-admin')
-  const memberIdentity = uniqueAuthIdentity('settings-membership-role-member')
-  const adminId = await createAuthUser(authHarness, adminIdentity, true)
-  const memberId = await createAuthUser(authHarness, memberIdentity, true)
-  const organization = await seedOrganizationWithMembership(adminId, {
-    name: 'Fresh Role Studio',
-    role: 'admin',
-    profileDisplayName: 'Avery Admin'
-  })
-  await seedProfile(memberId, 'Morgan Member')
-  await seedActiveMembership(organization.id, memberId, 'member')
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-membership-role-'))
-
-  try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
-    try {
-      await launched.page.getByLabel('Email').fill(adminIdentity.email)
-      await launched.page.getByLabel('Password', { exact: true }).fill(adminIdentity.password)
-      await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
-
-      const entryVerification = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await openSettingsFromUserMenu(launched.page)
-      await entryVerification
-      const settingsSidebar = launched.page.getByRole('complementary')
-      await expect(settingsSidebar.getByText('Admin', { exact: true })).toBeVisible()
-
-      await updateMembershipRole(adminId, organization.id, 'member')
-      const membersVerification = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
+      // Re-entering the Section rereads the authoritative value from the server.
       await launched.page
         .getByRole('navigation', { name: 'Settings' })
-        .getByRole('button', { name: 'Members', exact: true })
+        .getByRole('button', { name: 'Language' })
         .click()
-      await membersVerification
-
-      await expect(settingsSidebar.getByText('Member', { exact: true })).toBeVisible()
-      await expect(launched.page.getByText('Avery Admin', { exact: true })).toBeVisible()
-      await expect(launched.page.getByText('Morgan Member', { exact: true })).toBeVisible()
-      await expect(launched.page.getByRole('button', { name: 'Invite member' })).toHaveCount(0)
-      await expect(launched.page.getByRole('tab', { name: /Pending invitations/ })).toHaveCount(0)
-      await expect(
-        launched.page.getByRole('button', { name: 'Remove member Morgan Member' })
-      ).toHaveCount(0)
-    } finally {
-      await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, memberId)
-    await deleteAuthUser(authHarness, adminId)
-  }
-})
-
-test('confirmed Membership loss bypasses a dirty Settings draft before entering Organization Details @smoke', async () => {
-  test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
-
-  const identity = uniqueAuthIdentity('settings-membership-confirmed-loss')
-  const userId = await createAuthUser(authHarness, identity, true)
-  const organization = await seedOrganizationWithMembership(userId, {
-    name: 'Departed Settings Studio',
-    profileDisplayName: 'Dana Departing'
-  })
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-membership-loss-'))
-
-  try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
-    try {
-      await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
-      await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
-
-      const entryVerification = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await openSettingsFromUserMenu(launched.page)
-      await entryVerification
-      await launched.page.getByLabel('Display name').fill('Unsaved departing draft')
-
-      await endMembership(userId, organization.id)
-      const lossVerification = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
       await launched.page
         .getByRole('navigation', { name: 'Settings' })
-        .getByRole('button', { name: 'Organization details', exact: true })
+        .getByRole('button', { name: 'Profile' })
         .click()
-      await lossVerification
-
-      await expect(
-        launched.page.getByRole('dialog', { name: 'You lost access to "Departed Settings Studio"' })
-      ).toBeVisible()
-      await expect(
-        launched.page.getByRole('dialog', { name: 'Discard unsaved changes?' })
-      ).toHaveCount(0)
-      await expect(launched.page.getByLabel('Display name')).toHaveCount(0)
-      await expect(
-        launched.page.getByText('Unable to verify your membership right now.')
-      ).toHaveCount(0)
+      await expect(displayName).toHaveValue('Renamed Member')
     } finally {
       await launched.electronApp.close()
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
-  }
-})
-
-test('Members treats Membership service failure as retryable unknown without losing Organization access @smoke', async () => {
-  test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
-
-  const ownerIdentity = uniqueAuthIdentity('settings-membership-unknown-owner')
-  const memberIdentity = uniqueAuthIdentity('settings-membership-unknown-member')
-  const ownerId = await createAuthUser(authHarness, ownerIdentity, true)
-  const memberId = await createAuthUser(authHarness, memberIdentity, true)
-  const organization = await seedOrganizationWithMembership(ownerId, {
-    name: 'Unknown Membership Studio',
-    profileDisplayName: 'Uma Owner'
-  })
-  await seedProfile(memberId, 'Noah Member')
-  await seedActiveMembership(organization.id, memberId, 'member')
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-membership-unknown-'))
-
-  try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
-    try {
-      await launched.page.getByLabel('Email').fill(ownerIdentity.email)
-      await launched.page.getByLabel('Password', { exact: true }).fill(ownerIdentity.password)
-      await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
-
-      let membershipUnavailable = true
-      await launched.page.route('**/rest/v1/memberships*', async (route) => {
-        if (membershipUnavailable && isActiveMembershipProjection(route.request().url())) {
-          await route.fulfill({
-            status: 500,
-            contentType: 'application/json',
-            body: JSON.stringify({ message: 'temporary Membership verification failure' })
-          })
-          return
-        }
-        await route.continue()
-      })
-
-      await openSettingsFromUserMenu(launched.page)
-      const settingsNavigation = launched.page.getByRole('navigation', { name: 'Settings' })
-      await settingsNavigation.getByRole('button', { name: 'Members', exact: true }).click()
-
-      await expect(
-        launched.page.getByText('Unable to verify your membership right now.')
-      ).toBeVisible()
-      await expect(
-        launched.page.getByRole('button', { name: 'Retry membership verification' })
-      ).toBeVisible()
-      await expect(launched.page.getByText('Uma Owner', { exact: true })).toHaveCount(0)
-      await expect(launched.page.getByText('Noah Member', { exact: true })).toHaveCount(0)
-      await expect(launched.page.getByRole('button', { name: 'Invite member' })).toHaveCount(0)
-      await expect(launched.page.getByRole('dialog', { name: /lost access/i })).toHaveCount(0)
-      await expect(
-        launched.page
-          .getByRole('complementary')
-          .getByText('Unknown Membership Studio', { exact: true })
-      ).toBeVisible()
-
-      membershipUnavailable = false
-      const retryVerification = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await launched.page.getByRole('button', { name: 'Retry membership verification' }).click()
-      await retryVerification
-
-      await expect(
-        launched.page.getByText('Unable to verify your membership right now.')
-      ).toHaveCount(0)
-      await expect(launched.page.getByText('Uma Owner', { exact: true })).toBeVisible()
-      await expect(launched.page.getByText('Noah Member', { exact: true })).toBeVisible()
-      const pendingInvitations = launched.page.getByRole('tab', { name: /Pending invitations/ })
-      await expect(pendingInvitations).toBeVisible()
-      await pendingInvitations.click()
-      await expect(launched.page.getByRole('button', { name: 'Invite member' })).toBeVisible()
-    } finally {
-      await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, memberId)
-    await deleteAuthUser(authHarness, ownerId)
-  }
-})
-
-test('Members preserves a loaded roster but disables writes when re-verification becomes unknown @smoke', async () => {
-  test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
-
-  const ownerIdentity = uniqueAuthIdentity('settings-membership-stale-owner')
-  const memberIdentity = uniqueAuthIdentity('settings-membership-stale-member')
-  const ownerId = await createAuthUser(authHarness, ownerIdentity, true)
-  const memberId = await createAuthUser(authHarness, memberIdentity, true)
-  const organization = await seedOrganizationWithMembership(ownerId, {
-    name: 'Retained Roster Studio',
-    profileDisplayName: 'Rina Owner'
-  })
-  await seedProfile(memberId, 'Milo Member')
-  await seedActiveMembership(organization.id, memberId, 'member')
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-membership-stale-'))
-
-  try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
-    try {
-      await launched.page.getByLabel('Email').fill(ownerIdentity.email)
-      await launched.page.getByLabel('Password', { exact: true }).fill(ownerIdentity.password)
-      await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
-      let membershipUnavailable = true
-      await launched.page.route('**/rest/v1/memberships*', async (route) => {
-        if (membershipUnavailable && isActiveMembershipProjection(route.request().url())) {
-          await route.fulfill({
-            status: 500,
-            contentType: 'application/json',
-            body: JSON.stringify({ message: 'temporary Membership verification failure' })
-          })
-          return
-        }
-        await route.continue()
-      })
-
-      await openSettingsFromUserMenu(launched.page)
-      await launched.page
-        .getByRole('navigation', { name: 'Settings' })
-        .getByRole('button', { name: 'Members', exact: true })
-        .click()
-      await expect(
-        launched.page.getByText('Unable to verify your membership right now.')
-      ).toBeVisible()
-
-      membershipUnavailable = false
-      const navigationVerification = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await launched.page
-        .getByRole('navigation', { name: 'Settings' })
-        .getByRole('button', { name: 'Members', exact: true })
-        .click()
-      await navigationVerification
-      await expect(launched.page.getByText('Rina Owner', { exact: true })).toBeVisible()
-      await expect(launched.page.getByText('Milo Member', { exact: true })).toBeVisible()
-      membershipUnavailable = true
-
-      await launched.page.route(
-        '**/identity/organizations/*/members/*/remove',
-        (route) =>
-          route.fulfill({
-            status: 403,
-            contentType: 'application/json',
-            body: JSON.stringify({
-              error: 'insufficient_organization_role',
-              message: 'Owner or Admin role is required.'
-            })
-          }),
-        { times: 1 }
-      )
-
-      await launched.page.getByRole('button', { name: 'Remove member Milo Member' }).click()
-      await launched.page
-        .getByRole('dialog', { name: 'Remove Milo Member?' })
-        .getByRole('button', { name: 'Remove', exact: true })
-        .click()
-
-      await expect(
-        launched.page.getByText('Unable to verify your membership right now.')
-      ).toBeVisible()
-      await expect(launched.page.getByText('Rina Owner', { exact: true })).toBeVisible()
-      await expect(launched.page.getByText('Milo Member', { exact: true })).toBeVisible()
-      await expect(launched.page.getByRole('dialog', { name: 'Remove Milo Member?' })).toHaveCount(
-        0
-      )
-      await expect(
-        launched.page.getByRole('button', { name: 'Remove member Milo Member' })
-      ).toHaveCount(0)
-      await expect(launched.page.getByRole('button', { name: 'Invite member' })).toHaveCount(0)
-
-      membershipUnavailable = false
-      const retryVerification = launched.page.waitForResponse(
-        (response) => isActiveMembershipProjection(response.url()) && response.ok()
-      )
-      await launched.page.getByRole('button', { name: 'Retry membership verification' }).click()
-      await retryVerification
-      await expect(
-        launched.page.getByRole('button', { name: 'Remove member Milo Member' })
-      ).toBeVisible()
-      const pendingInvitations = launched.page.getByRole('tab', { name: /Pending invitations/ })
-      await expect(pendingInvitations).toBeVisible()
-      await pendingInvitations.click()
-      await expect(launched.page.getByRole('button', { name: 'Invite member' })).toBeVisible()
-    } finally {
-      await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, memberId)
-    await deleteAuthUser(authHarness, ownerId)
   }
 })
 
 test('the Settings Page Select switches the Interface Language without reloading', async () => {
   test.setTimeout(60_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('settings-page-language')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: '语言切换组织' })
+  const identity = uniqueIdentity('settings-page-language')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-page-language-'))
 
   try {
@@ -726,18 +184,16 @@ test('the Settings Page Select switches the Interface Language without reloading
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
 test('dirty Profile uses one discard decision for Section changes and ordinary close', async () => {
   test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('settings-profile-dirty')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: '草稿保护组织' })
+  const identity = uniqueIdentity('settings-profile-dirty')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-profile-dirty-'))
 
   try {
@@ -755,7 +211,7 @@ test('dirty Profile uses one discard decision for Section changes and ordinary c
       const draftName = `${authoritativeName || '用户'} 草稿`
       let profileWrites = 0
       launched.page.on('request', (request) => {
-        if (request.method() === 'POST' && request.url().includes('/rest/v1/profiles')) {
+        if (request.method() === 'PATCH' && request.url().endsWith('/identity/users/me')) {
           profileWrites += 1
         }
       })
@@ -819,18 +275,16 @@ test('dirty Profile uses one discard decision for Section changes and ordinary c
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
 test('ordinary close waits for Profile save failure and resumes after a successful retry', async () => {
   test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('settings-profile-saving-close')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: '保存关闭组织' })
+  const identity = uniqueIdentity('settings-profile-saving-close')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-profile-saving-close-'))
 
   interface ControlledProfileWrite {
@@ -878,8 +332,8 @@ test('ordinary close waits for Profile save failure and resumes after a successf
       await expect(launched.page.getByRole('status')).toContainText('显示名已更新。')
 
       let activeWrite: ControlledProfileWrite | undefined
-      await launched.page.route('**/rest/v1/profiles**', async (route) => {
-        if (route.request().method() !== 'POST') {
+      await launched.page.route('**/identity/users/me', async (route) => {
+        if (route.request().method() !== 'PATCH') {
           await route.continue()
           return
         }
@@ -932,6 +386,5 @@ test('ordinary close waits for Profile save failure and resumes after a successf
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })

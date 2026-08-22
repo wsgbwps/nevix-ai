@@ -4,99 +4,23 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 
 ## Language
 
-> 2026-08-22：ADR-0013/0015 起产品转单租户私有化。本词典中 Organization、Membership、Organization Invitation、Owner 及整个组织时代词群（Email Change、Security Lock、Ownership Transfer、Organization Deletion、Active Organization、Organization Onboarding、Organization Audit Log、Organization/Profile Domain 等）已判死，随用户系统迁移逐条移除；Owner 与 Admin 合并为单一 Admin。新词汇落点见 [Server 词典](../../server/CONTEXT.md) 与[仓库级词典](../../CONTEXT.md)。
-
-**Organization**:
-企业租户，也是业务数据、文件、额度和订阅的归属边界；即使只有一名 User，业务资源也归 Organization 而非个人所有。
-_Avoid_: Team, Workspace, Account
+> 2026-08-22：用户系统迁移（#99）已落地到桌面端：组织时代词群随 Organization Feature 一并移除，本词典只剩单租户词汇；账号治理词汇（Admin/Member 等）见 [Server 词典](../../server/CONTEXT.md)，待桌面端 Admin 界面（#105）落地时按需入册。
 
 **User**:
-使用产品的自然人，可以通过 Membership 加入多个 Organization；其业务身份独立于登录凭据，即使凭据删除，必要的历史归属仍指向不具备登录能力的身份记录。
+使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
 _Avoid_: Account
 
 **Profile**:
-User 在所有 Organization 中共享的公开资料，V1 仅包含必填显示名称和可选头像；登录邮箱不属于 Profile。
-_Avoid_: Organization Profile, Account
-
-**Membership**:
-User 与 Organization 之间的关系，承载该用户在该组织中的角色和成员状态。
-_Avoid_: Team Member, User Role
-
-**Organization Invitation**:
-由 Owner 或 Admin 向指定邮箱发出的一次性 Organization 加入凭证，有效期七天，且只能由已验证同一邮箱的 User 接受并成为 Member；待处理期间重发会保留同一 Invitation、重置七日期限并使旧凭证失效。
-_Avoid_: Shareable Invite Link, Team Invitation
-
-**Owner**:
-Organization 唯一的最终控制者角色；创建者默认成为首任 Owner，且 Owner 只能通过 Ownership Transfer 更换。
-_Avoid_: Super Admin, Primary Admin
-
-**Admin**:
-可管理邀请、普通 Member 和组织设置的 Organization 角色，但不能提升、降级或移除其他 Admin，也不能操作 Owner、转移所有权或删除 Organization。
-_Avoid_: Administrator, Manager
-
-**Member**:
-仅使用 Organization 业务功能、不管理成员或组织设置的基础角色。
-_Avoid_: User, Regular User
-
-**Former Member**:
-Membership 已结束、因此不再拥有 Organization 访问权限的 User；其历史操作和所创建资源仍保留原始归属记录。
-_Avoid_: Deactivated User, Deleted Member
-
-**User Deletion**:
-User 在重新认证且不再拥有任何 Organization 后发起的账号终止过程；它会结束全部 Membership、撤销待处理邀请，并在七天撤销期后删除登录凭证和个人资料。撤销删除只恢复账号使用资格，不恢复已结束的 Membership 或已撤销的 Invitation。
-_Avoid_: Immediate Account Delete, Member Removal
-
-**Pending User Deletion**:
-User Deletion 发起后的七天可恢复状态，User 不能正常登录，只能通过已验证邮箱撤销删除；它与 Email Change 和 Security Lock 互斥。
-_Avoid_: Deleted User, Suspended User
-
-**Email Change**:
-正常状态的 User 在重新认证后更换登录邮箱的过程，新邮箱必须在 24 小时内完成验证；变更不改变 User、Membership、角色或 Ownership。
-_Avoid_: New User, Profile Email
-
-**Security Lock**:
-旧邮箱接收者明确确认 Email Change 并非本人操作后触发的保护状态；它结束全部 Session，并阻止账号使用，直到旧邮箱完成验证、密码重设且邮箱变更被撤销。
-_Avoid_: Membership Suspension, User Deletion
-
-**Ownership Transfer**:
-当前 Owner 在重新认证后向一名 Admin 发起的唯一 Owner 身份移交；目标 Admin 必须在 24 小时内接受，完成后原 Owner 成为 Admin。
-_Avoid_: Owner Downgrade, Ownership Assignment
-
-**Pending Ownership Transfer**:
-Ownership Transfer 发起后、目标 Admin 接受前的状态；当前 Owner 仍是唯一 Owner，可以撤销转移，且同一 Organization 只能存在一个待处理转移。
-_Avoid_: Transferred Ownership, Co-Owner
-
-**Organization Deletion**:
-由 Owner 在重新认证后发起的组织终止过程；所有成员都会收到通知，并在七天撤销期结束后才永久生效。
-_Avoid_: Immediate Delete, Organization Disable
-
-**Pending Deletion**:
-Organization Deletion 发起后的七天可撤销状态；成员只能读取或导出数据，不能新建任务、邀请成员、修改角色、转移所有权或变更订阅。进入时会终止全部待处理 Invitation 和 Ownership Transfer，取消删除后不恢复这些流程。
-_Avoid_: Deleted, Disabled
-
-**Active Organization**:
-User 当前正在使用的唯一 Organization，决定界面中业务数据、文件、任务和额度的范围；设备记住的上次选择不构成访问权限。
-_Avoid_: Default Organization, Current Team
-
-**Organization Details**:
-Organization 对全部活跃 Member 可见的基础信息，只有 Owner 可以修改；当前仅包含组织名称。
-_Avoid_: Organization Profile, Organization Account
-
-**Organization Onboarding**:
-新 User 在进入业务界面前完成初始 Profile 与首个 Organization 创建的引导流程；开始于注册成功或已认证 User 缺少二者之一，进行状态只存在于当前应用运行内，Session 结束即复位，下一 Session 按当时的 Profile 与 Membership 事实重新推导。
-_Avoid_: Onboarding（未指明归属）, Setup Wizard, First-Run Experience
+User 的公开资料，V1 仅包含显示名（display name）；登录邮箱不属于 Profile。
+_Avoid_: Account, User Management
 
 **Session**:
-User 在单台设备上的已认证使用状态，独立于任何 Organization；V1 只允许 User 登录或退出当前设备，不提供其他设备的查看或撤销。
-_Avoid_: Organization Session, Membership Session
+User 在单台设备上的已认证使用状态；opaque token 存于本设备加密存储，多设备会话互相独立，退出登录只结束当前设备。
+_Avoid_: Organization Session, Login State
 
 **Remembered Email**:
-User 在登录界面明确选择后、由当前设备在登录成功时保存并用于预填后续登录的权威邮箱；设备只保存最近一个，取消选择会立即删除。它不是凭据，不延长 Session，注册与密码恢复不改变它，退出登录也不会清除它。
+User 在登录界面明确选择后、由当前设备在登录成功时保存并用于预填后续登录的权威邮箱；设备只保存最近一个，取消选择会立即删除。它不是凭据，不延长 Session，退出登录也不会清除它。
 _Avoid_: Remembered Password, Remembered Account, Profile Email
-
-**Organization Audit Log**:
-Organization 内不可由成员修改或删除、滚动保留 365 天的安全事件记录，覆盖邀请、Membership、角色、Ownership Transfer 和 Organization Deletion；仅 Owner 与 Admin 可查看或导出。
-_Avoid_: Activity Feed, Analytics Log
 
 **Feature**:
 一个拥有单一 public interface 的完整 Desktop 垂直功能切片；内部责任受控演化，peer Feature 彼此隔离。
@@ -115,35 +39,31 @@ Desktop 中拥有一组内聚业务责任与术语的组织范围；Domain 只�
 _Avoid_: module（与 Go 侧混淆）, service
 
 **AI Creation Domain**:
-以 Organization 内从灵感复用、图片与视频生成，到媒体资产沉淀与发布复用的完整创作闭环为边界、canonical owner 名为 `creation` 的 Desktop Domain；供应商连接属于该闭环，媒体类型、页面和独立生命周期的聚合均不单独构成 Domain。
+以从灵感复用、图片与视频生成，到媒体资产沉淀与发布复用的完整创作闭环为边界、canonical owner 名为 `creation` 的 Desktop Domain；供应商连接属于该闭环，媒体类型、页面和独立生命周期的聚合均不单独构成 Domain。
 _Avoid_: Generation Domain, Image Generation Domain, Video Generation Domain, Media Asset Domain, Inspiration Domain
 
 **Inspiration Page**:
-AI Creation Domain 拥有的灵感浏览与复用页面，组合 Official Selection 与当前 Organization 的 Discovery；它不是独立 Domain 或 app-owned 跨 Feature 聚合页。
+AI Creation Domain 拥有的灵感浏览与复用页面，组合 Official Selection 与当前部署实例的 Discovery；它不是独立 Domain 或 app-owned 跨 Feature 聚合页。
 _Avoid_: Inspiration Domain, Discovery Domain
 
 **Official Template**:
-由 Nevix 策划、在 Inspiration Page 以真实生成的示例封面呈现的可复用创作起点；V1 包含简体中文名称、说明与提示词骨架，以及具备复用授权的参考素材、媒体类型、推荐模型和生成参数。“做同款”会把参考素材、提示词、推荐模型与参数填入统一的 Creation Workbench，User 可以保留、删除、替换或修改这些内容；供应商连接由 Organization 固定，模型只能在该连接内经 Nevix 适配并验证、且支持当前媒体类型的列表中切换。Official Selection 只是这类模板的展示集合，不构成独立作品类型。
+由 Nevix 策划、在 Inspiration Page 以真实生成的示例封面呈现的可复用创作起点；V1 包含简体中文名称、说明与提示词骨架，以及具备复用授权的参考素材、媒体类型、推荐模型和生成参数。"做同款"会把参考素材、提示词、推荐模型与参数填入统一的 Creation Workbench，User 可以保留、删除、替换或修改这些内容；供应商连接由部署实例固定，模型只能在该连接内经 Nevix 适配并验证、且支持当前媒体类型的列表中切换。Official Selection 只是这类模板的展示集合，不构成独立作品类型。
 _Avoid_: Official Featured Work, Channel Template, Static Example
 
 **Creation Workbench**:
-AI Creation Domain 拥有的会话式创作页面，承载创作上下文、生成操作、任务状态和结果；它是界面而非 Domain、Organization 或新的租户边界。
+AI Creation Domain 拥有的会话式创作页面，承载创作上下文、生成操作、任务状态和结果；它是界面而非 Domain 或新的租户边界。
 _Avoid_: Generation Workspace, Creation Workspace
 
 **Asset Library**:
-AI Creation Domain 拥有的媒体资产浏览与复用页面；媒体资产的独立生命周期不使该页面成为独立 Domain，也不与 renderer 静态 assets 混同。
+AI Creation Domain 拥有的媒体资产浏览与复用页面；媒体资产的独立生命周期不使该页面成为独立 Domain，不与 renderer 静态 assets 混同。
 _Avoid_: Media Asset Domain, Asset Workspace
 
 **Authentication Domain**:
-以凭据验证和当前设备 Session 生命周期为范围的 Desktop Domain，不包含 User、Profile 或 Membership 管理。
+以凭据验证和当前设备 Session 生命周期为范围的 Desktop Domain，不包含 User 或账号管理。
 _Avoid_: Identity Domain, Account Domain
 
-**Organization Domain**:
-拥有 Membership 直读、Active Organization 状态及其设备记忆、组织切换、组织 onboarding、成员与邀请管理、组织设置和 Organization Audit Log 查看界面的 Desktop Domain；不拥有凭据、Session 或全局 Profile。
-_Avoid_: Identity Domain, Team Domain, Workspace Domain
-
 **Profile Domain**:
-仅拥有全局 Profile 读写与显示名称编辑的窄 Desktop Domain；Profile 跨 Organization 共享，不归属任何 Organization 上下文；不承担凭据、Session 或账号安全职责。
+仅拥有全局 Profile 读写与显示名称编辑的窄 Desktop Domain；不承担凭据、Session 或账号安全职责。
 _Avoid_: Account Domain, Identity Domain, User Domain
 
 **Language Domain**:
@@ -172,7 +92,7 @@ Session 建立后 Desktop 呈现的整体界面框架，由侧边导航与内容
 _Avoid_: Dashboard, Home Screen, Main Window
 
 **Settings Page**:
-承载账户与组织设置并展示当前 Organization 上下文卡的独立全屏聚合页；它在 App Shell 之外一次只呈现一个 Settings Section，正常进入时默认呈现 Profile，只组合各 Feature 的设置贡献，本身不构成 Domain、不拥有任何业务行为。
+承载账户设置的独立全屏聚合页；它在 App Shell 之外一次只呈现一个 Settings Section，正常进入时默认呈现 Profile，只组合各 Feature 的设置贡献，本身不构成 Domain、不拥有任何业务行为。
 _Avoid_: Settings Domain, Preferences Center, Settings Dialog
 
 **Settings Section**:

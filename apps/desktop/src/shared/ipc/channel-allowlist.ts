@@ -15,9 +15,6 @@ const invokeChannels = {
   'language:get-bootstrap': true,
   'language:get-language-mode': true,
   'language:set-language-mode': true,
-  'organization:get-remembered-active-organization': true,
-  'organization:set-remembered-active-organization': true,
-  'organization:export-audit-log': true,
   'window:decide-ordinary-close': true,
   'window:ordinary-close-ready': true
 } satisfies Record<keyof IpcChannelMap, true>

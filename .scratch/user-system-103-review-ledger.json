@@ -1,0 +1,263 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "06a164a21bfb6b055885af1659efc268d9f93745",
+  "scopePaths": [
+    "apps/desktop",
+    ".github/workflows/desktop-e2e-ci.yml",
+    "pnpm-lock.yaml"
+  ],
+  "currentDiffDigest": "sha256:325a58be5f91ea4408af45a4771f59620837a4e8a515fbe4648d49d47f6258fc",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 1,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": ".github/workflows/desktop-e2e-ci.yml",
+        "source": "AGENTS.md delivery / dead CI weight",
+        "anchor": ".github/workflows/desktop-e2e-ci.yml auth-policy job; scripts/tests/supabase-local-harness.test.sh",
+        "defect": "The diff removed the only execution of supabase-local-harness.test.sh (e2e jobs) leaving it unrun anywhere, while the auth-policy job, root supabase CLI, and scripts/lib/supabase-local-harness.sh persist for a dead desktop seam"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Deliberate scope boundary: spec #99 and issue #106 own 'mail-smoke CI、auth-policy harness、E2E 内 Supabase 栈步骤全部移除'; the auth-policy job still consumes the harness lib and root CLI until #106 removes them together.",
+      "owner": ".github/workflows/desktop-e2e-ci.yml",
+      "status": "closed",
+      "evidence": [
+        "source: issue #106 AC 'mail-smoke CI、auth-policy harness、E2E 内 Supabase 栈步骤全部移除'",
+        "path: scripts/test-auth-policy.sh:18 sources scripts/lib/supabase-local-harness.sh (still alive until #106)"
+      ],
+      "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/AGENTS.md",
+        "source": "apps/desktop/AGENTS.md page-ownership rule",
+        "anchor": "apps/desktop/AGENTS.md 'Organization pre-shell routes' wording",
+        "defect": "The standards doc still cites Organization pre-shell routes that this diff deletes"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "AGENTS.md is config/docs fast-lane eligible and cannot ride the task PR (fast-lane pushes go directly to main); the one-line fix lands as an immediate fast-lane commit on main right after this PR merges.",
+      "owner": "apps/desktop/AGENTS.md",
+      "status": "closed",
+      "evidence": [
+        "source: docs/agents/delivery.md 'Config and docs fast lane' allows direct main push for nested AGENTS.md only",
+        "path: apps/desktop/AGENTS.md renderer page ownership bullet cites 'the Organization pre-shell routes before an Organization context exists'"
+      ],
+      "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0003",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication.ts",
+        "source": "Fowler Speculative Generality",
+        "anchor": "use-authentication.ts AuthenticationError 'password-too-short'/'password-too-long' + authentication-screen.tsx AuthenticationErrorMessage branches",
+        "defect": "Dead error branches: no producer remains after mapRequestFailure because client-side byte-length checks gate submission"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Dead-but-harmless UI mapping; removal is a mechanical cleanup that rides the next behavior touch of the authentication model (#105 settings surface or #104 connection base) rather than this convergence loop.",
+      "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication.ts",
+      "status": "closed",
+      "evidence": [
+        "path: mapRequestFailure returns only invalid-credentials/account-disabled/invalid-password/rate-limited/service-unavailable",
+        "path: policy/password.ts isPasswordByteLengthValid gates both submission paths in the UI"
+      ],
+      "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0004",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/authentication/session/persisted-session.ts",
+        "source": "Fowler Duplicated Code (schema knowledge split renderer/main)",
+        "anchor": "persisted-session.ts serializeSession vs main session-store.ts canonicalizeSession",
+        "defect": "Claimed: renderer writes a 5-field user snapshot while main canonicalizes to {id,email}, forcing an envelope rewrite/re-encryption on the first restore after every login and breaking the smoke checklist's unchanged-checksum steps"
+      },
+      "level": "advisory",
+      "disposition": "false-positive",
+      "dispositionReason": "Counter-evidence: replacePersistedSession canonicalizes BEFORE encrypting (session-store.ts: `const canonicalSession = canonicalizeSession(session)` … `encryptString(canonicalSession)`), so every written envelope is already the minimal canonical form and readPersistedSession's rewrite branch never triggers for envelopes this app wrote. The E2E suite confirms empirically: session-persistence.spec.ts asserts the envelope is byte-identical across an offline retry and a successful restore, and it passed. The doc comment in persisted-session.ts accurately describes the stored shape; the intentional dual validation is the same defensive-boundary pattern the Supabase-era code used for the prior schema.",
+      "owner": "apps/desktop/src/renderer/src/features/authentication/session/persisted-session.ts",
+      "status": "closed",
+      "evidence": [
+        "path: apps/desktop/src/main/authentication/session-store.ts replacePersistedSession encrypts canonicalizeSession(session), not the raw payload",
+        "check: E2E full suite PASS — tests/auth/session-persistence.spec.ts 'expect(await readFile(sessionPath, utf8)).toBe(envelopeBeforeRetry)' after restore"
+      ],
+      "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0005",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/profile/api/profile.ts",
+        "source": "ADR-0014 trusted data plane seam posture",
+        "anchor": "profile/api/profile.ts saveProfile (PATCH /identity/users/me) and requestMe fetch options",
+        "defect": "The trusted-write PATCH (and the me read) omit redirect:'error', unlike the authentication client which sets it with an explicit security rationale — a 3xx from a compromised path would replay the authenticated write to a redirect target"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Security-boundary inconsistency on a trusted write: same seam, weaker posture than the sibling client; one-line fix in current scope.",
+      "owner": "apps/desktop/src/renderer/src/features/profile/api/profile.ts",
+      "status": "closed",
+      "evidence": [
+        "path: features/authentication/api/client.ts request() sets redirect:'error' with comment 'A trusted write must never be replayed against a redirect target'",
+        "path: features/profile/api/profile.ts saveProfile/requestMe fetch init has no redirect option (defaults to 'follow')",
+        "targeted re-review round 1 verdict: closed — parity confirmed against features/authentication/api/client.ts; no repair-introduced problems"
+      ],
+      "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0006",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/profile/api/profile.ts",
+        "source": "Fowler Duplicated Code / Middle Man",
+        "anchor": "profile/api/profile.ts hand-rolled fetch chain beside features/authentication/api/client.ts createIdentityClient",
+        "defect": "A second parallel identity-API client exists because peer Features cannot import each other; promoting a shared client to an approved shared owner was skipped"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Per-feature api/ segments follow the existing repository pattern (organization feature previously owned its own command client); promoting a shared identity client is an architecture decision that belongs to #105, which adds the admin user-management surface facing the same need. The security-relevant part (redirect posture) is repaired as CR-STANDARDS-0005.",
+      "owner": "apps/desktop/src/renderer/src/features/profile/api/profile.ts",
+      "status": "closed",
+      "evidence": [
+        "source: apps/desktop/AGENTS.md 'Peer Features must not import one another' forced the per-feature client",
+        "path: prior art features/organization/api/command-client.ts was also feature-local"
+      ],
+      "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/tests/auth/first-login-change-password.spec.ts",
+        "source": "issue #103 AC6 'server 不可达时呈现明确错误态'",
+        "anchor": "tests/auth/first-login-change-password.spec.ts failure-injection lane; tests/unit/identity-api-client.test.mts",
+        "defect": "The login surface's unreachable-server state ('The server cannot be reached…') has no Seam B E2E; coverage exists at the change-password submission (failure-injection lane) and the restore boundary (outage tests), plus unit tests for the network-failure mapping"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "AC6 is covered at two E2E surfaces and the login mapping is unit-covered; extending the injection lane to a third surface is coverage polish for the E2E-stack ticket #106.",
+      "owner": "apps/desktop/tests/auth/first-login-change-password.spec.ts",
+      "status": "closed",
+      "evidence": [
+        "check: E2E failure-injection lane PASS (change-password serviceError) + session-persistence outage tests PASS (restore-failure boundary)",
+        "check: tests/unit/identity-api-client.test.mts 'unreachable servers … degrade to network failures' PASS"
+      ],
+      "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/test-results/.last-run.json",
+        "source": "issue #103 incidental churn / repo hygiene",
+        "anchor": "apps/desktop/test-results/.last-run.json tracked artifact mutated by the feature commit",
+        "defect": "Generated Playwright artifact is version-controlled and churns on every E2E run"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Pre-existing tracking (added in fe4881d, before the fixed point); untracking generated E2E output is test-stack hygiene owned by #106 ('测试栈与 CI 收尾').",
+      "owner": "apps/desktop/test-results/.last-run.json",
+      "status": "closed",
+      "evidence": [
+        "git: `git ls-tree 06a164a -- apps/desktop/test-results/.last-run.json` shows the file tracked at the fixed point"
+      ],
+      "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0003",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/profile/api/profile.ts",
+        "source": "issue #99 Implementation Decisions 桌面端改造 (failure-vocabulary divergence)",
+        "anchor": "profile/api/profile.ts readProfile/saveProfile 401 handling",
+        "defect": "A 401 during profile read/save renders the generic loadFailed/saveFailed retry UI instead of a session-expired sign-out path"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Documented slice decision: #103 ships no background 401 propagation (no SSE/polling yet); revocation is detected on restore and asserted by tests/auth/runtime-revocation.spec.ts. Wiring an app-level 401→sign-out path is needed by #105's user-management surface and should be solved once there, not bolted onto the profile Feature now.",
+      "owner": "apps/desktop/src/renderer/src/features/profile/api/profile.ts",
+      "status": "closed",
+      "evidence": [
+        "path: .scratch/user-system-103-desktop-login-plan.md 关键决策 4 records the no-polling decision",
+        "check: tests/auth/runtime-revocation.spec.ts PASS documents the restart-detection contract"
+      ],
+      "reviewedDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [
+    {
+      "fixFor": [
+        "CR-STANDARDS-0005"
+      ],
+      "beforeDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "afterDigest": "sha256:c13a168abca4c5de82a6e7b173a751ea6b316edcdb4dcd3e5749fb76f86817ce",
+      "commit": "363d2f4",
+      "touchedPaths": [
+        "apps/desktop/src/renderer/src/features/profile/api/profile.ts (saveProfile fetch init + redirect:'error' with rationale comment; requestMe fetch init + redirect:'error')"
+      ],
+      "hunks": [
+        "saveProfile: added redirect: 'error' + comment before headers",
+        "requestMe: added redirect: 'error'"
+      ],
+      "checks": [
+        "pnpm typecheck PASS",
+        "pnpm lint 0 errors",
+        "pnpm test:unit 64/64 PASS",
+        "pnpm test:component 2/2 PASS",
+        "pnpm test:e2e:settings 5/5 PASS (live profile PATCH against the Go server)"
+      ]
+    },
+    {
+      "fixFor": [],
+      "kind": "ci-gate-delivery-repair",
+      "note": "No open finding: the CI-forced Linux basic_text backend (NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE=1) exposed a platform assumption in two new E2E specs — the stored-gated-session relaunch and the runtime-revocation relaunch need a secure persistence backend that actually writes the envelope. Fixed by adding the same hasSecurePersistenceBackend skip guard the session-persistence family uses (commit 1d745c4), plus a missing import that only manifested at runtime (commit 1652dca).",
+      "beforeDigest": "sha256:c13a168abca4c5de82a6e7b173a751ea6b316edcdb4dcd3e5749fb76f86817ce",
+      "afterDigest": "sha256:325a58be5f91ea4408af45a4771f59620837a4e8a515fbe4648d49d47f6258fc",
+      "commits": [
+        "1d745c4",
+        "1652dca"
+      ],
+      "touchedPaths": [
+        "apps/desktop/tests/auth/first-login-change-password.spec.ts",
+        "apps/desktop/tests/auth/runtime-revocation.spec.ts"
+      ],
+      "checks": [
+        "Local full E2E re-run PASS (66 passed / 0 failed / 4 platform-gated skips)",
+        "CI Full E2E Suite PASS on PR head (workflow run 32580860886 + gate run 32580843136)",
+        "CI gate all-green including full-e2e labeled run"
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "name": "CI gate on PR head incl. Full E2E Suite (full-e2e label) + Desktop CI + auth-policy harness",
+    "result": "PASS",
+    "coverage": "apps/desktop + .github/workflows/desktop-e2e-ci.yml + pnpm-lock.yaml",
+    "diffDigest": "sha256:325a58be5f91ea4408af45a4771f59620837a4e8a515fbe4648d49d47f6258fc"
+  },
+  "outcome": "closed"
+}

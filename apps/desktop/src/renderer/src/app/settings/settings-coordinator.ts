@@ -7,10 +7,7 @@ import {
 } from '../ordinary-close-handler'
 import { installSettingsBackInterception } from './settings-back-navigation'
 import {
-  createSettingsOrganizationPickerState,
-  replaceSettingsOrganizationPickerPhase,
   replaceSettingsSection,
-  restoreSettingsEntryAfterOrganizationPicker,
   returnToSettingsSource,
   type SettingsEntry,
   type SettingsSection,
@@ -39,8 +36,6 @@ function canEnterBusinessSource(source: SettingsSourceDescriptor): boolean {
 interface SettingsCoordinatorOptions {
   readonly entry: SettingsEntry
   readonly contribution: SettingsContribution
-  readonly organizationId: string | undefined
-  readonly openOrganizationPicker: (origin: 'settings') => void
 }
 
 interface SettingsCoordinator {
@@ -50,18 +45,13 @@ interface SettingsCoordinator {
   readonly switchSection: (section: SettingsSection) => void
   readonly forceSwitchSection: (section: SettingsSection) => void
   readonly returnToSource: () => void
-  readonly openOrganizationPicker: () => void
-  readonly openOrganizationCreation: () => void
-  readonly finishOrganizationPicker: () => void
   readonly continueEditing: () => void
   readonly discardChanges: () => void
 }
 
 export function useSettingsCoordinator({
   entry,
-  contribution,
-  organizationId,
-  openOrganizationPicker
+  contribution
 }: SettingsCoordinatorOptions): SettingsCoordinator {
   const router = useRouter()
   const [discardPrompt, setDiscardPrompt] = useState<PendingSettingsDiscardPrompt>()
@@ -207,8 +197,8 @@ export function useSettingsCoordinator({
   )
 
   const navigateToSource = useCallback((): void => {
-    returnToSettingsSource(router.history, entry.source, organizationId, canEnterBusinessSource)
-  }, [entry.source, organizationId, router.history])
+    returnToSettingsSource(router.history, entry.source, canEnterBusinessSource)
+  }, [entry.source, router.history])
 
   const returnToSource = useCallback((): void => {
     runLeaveIntent(navigateToSource)
@@ -218,33 +208,6 @@ export function useSettingsCoordinator({
     () => installSettingsBackInterception(router.history, returnToSource),
     [returnToSource, router.history]
   )
-
-  const requestOrganizationPicker = useCallback((): void => {
-    runLeaveIntent(() => {
-      openOrganizationPicker('settings')
-      router.history.replace(
-        '/settings',
-        createSettingsOrganizationPickerState(router.history.location.state, entry),
-        { ignoreBlocker: true }
-      )
-    })
-  }, [entry, openOrganizationPicker, router.history, runLeaveIntent])
-
-  const openOrganizationCreation = useCallback((): void => {
-    router.history.replace(
-      '/settings',
-      replaceSettingsOrganizationPickerPhase(router.history.location.state, 'organization-create'),
-      { ignoreBlocker: true }
-    )
-  }, [router.history])
-
-  const finishOrganizationPicker = useCallback((): void => {
-    router.history.replace(
-      '/settings',
-      restoreSettingsEntryAfterOrganizationPicker(router.history.location.state),
-      { ignoreBlocker: true }
-    )
-  }, [router.history])
 
   const continueEditing = useCallback((): void => {
     const prompt = clearDiscardPrompt()
@@ -274,9 +237,6 @@ export function useSettingsCoordinator({
     switchSection,
     forceSwitchSection,
     returnToSource,
-    openOrganizationPicker: requestOrganizationPicker,
-    openOrganizationCreation,
-    finishOrganizationPicker,
     continueEditing,
     discardChanges
   }

@@ -101,9 +101,7 @@ test('navigation away from settings is never blocked while outside settings', ()
 })
 
 test('security paths are always allowed through the blocker', () => {
-  for (const pathname of ['/auth', '/onboarding', '/select-organization']) {
-    assert.equal(settingsNavigationBlockDecision('/settings', pathname, discardable), 'pass')
-  }
+  assert.equal(settingsNavigationBlockDecision('/settings', '/auth', discardable), 'pass')
 })
 
 test('blocker follows the navigate semantics otherwise', () => {

@@ -5,19 +5,13 @@ import { installSettingsBackInterception } from '../../src/renderer/src/app/sett
 import {
   captureSettingsSource,
   createSettingsEntry,
-  createSettingsOrganizationPickerState,
   isMatchingSettingsSource,
   readSettingsEntry,
-  readSettingsOrganizationPickerEntry,
-  replaceSettingsOrganizationPickerPhase,
   replaceSettingsSection,
-  restoreSettingsEntryAfterOrganizationPicker,
   returnToSettingsSource,
   type SettingsSourceDescriptor
 } from '../../src/renderer/src/app/settings/settings-navigation.ts'
 import { settingsLeaveIntent } from '../../src/renderer/src/app/settings/settings-leave-semantics.ts'
-
-const organizationId = '91ef8acc-287c-45fa-9c4-a67b2ade6a12'
 
 function sourceLocation(key: string): {
   readonly pathname: '/'
@@ -30,39 +24,17 @@ function sourceLocation(key: string): {
 }
 
 test('same-path business entries remain distinct Settings return sources', () => {
-  const first = captureSettingsSource(sourceLocation('business-source-a'), organizationId)
-  const second = captureSettingsSource(sourceLocation('business-source-b'), organizationId)
+  const first = captureSettingsSource(sourceLocation('business-source-a'))
+  const second = captureSettingsSource(sourceLocation('business-source-b'))
 
   assert.notDeepEqual(first, second)
-  assert.equal(
-    isMatchingSettingsSource(first, sourceLocation('business-source-a'), organizationId),
-    true
-  )
-  assert.equal(
-    isMatchingSettingsSource(first, sourceLocation('business-source-b'), organizationId),
-    false
-  )
-  assert.equal(
-    isMatchingSettingsSource(second, sourceLocation('business-source-b'), organizationId),
-    true
-  )
-})
-
-test('a source becomes invalid after its Organization context changes', () => {
-  const source = captureSettingsSource(sourceLocation('business-source'), organizationId)
-
-  assert.equal(
-    isMatchingSettingsSource(
-      source,
-      sourceLocation('business-source'),
-      '0d7d044e-b84e-409d-a74c-f2c12567c721'
-    ),
-    false
-  )
+  assert.equal(isMatchingSettingsSource(first, sourceLocation('business-source-a')), true)
+  assert.equal(isMatchingSettingsSource(first, sourceLocation('business-source-b')), false)
+  assert.equal(isMatchingSettingsSource(second, sourceLocation('business-source-b')), true)
 })
 
 test('Section replacement preserves the source and does not invent URL state', () => {
-  const profileEntry = createSettingsEntry(sourceLocation('business-source'), organizationId)
+  const profileEntry = createSettingsEntry(sourceLocation('business-source'))
   const languageState = replaceSettingsSection(
     { __TSR_key: 'settings-entry', __TSR_index: 1, settings: profileEntry },
     'language'
@@ -87,7 +59,7 @@ function enterSettingsFromCurrentEntry(): {
   readonly source: SettingsSourceDescriptor
 } {
   const history = createMemoryHistory({ initialEntries: ['/'] })
-  const source = captureSettingsSource(history.location, organizationId)
+  const source = captureSettingsSource(history.location)
   assert.ok(source)
   history.push('/settings', { settings: { section: 'profile', source } })
   return { history, source }
@@ -97,12 +69,12 @@ test('return uses the exact adjacent source when two business entries share a pa
   const history = createMemoryHistory({ initialEntries: ['/'] })
   const firstEntryKey = history.location.state.__TSR_key
   history.push('/')
-  const source = captureSettingsSource(history.location, organizationId)
+  const source = captureSettingsSource(history.location)
   assert.ok(source)
   history.push('/settings', { settings: { section: 'profile', source } })
 
   assert.equal(
-    returnToSettingsSource(history, source, organizationId, () => true),
+    returnToSettingsSource(history, source, () => true),
     'source'
   )
   assert.equal(history.location.pathname, '/')
@@ -124,7 +96,7 @@ test('dirty back stays on Settings until discard confirms the coordinated return
   const removeInterception = installSettingsBackInterception(history, () => {
     result = settingsLeaveIntent(
       { navigate: 'confirm-discard', close: 'confirm', discard: () => (discarded = true) },
-      () => returnToSettingsSource(history, source, organizationId, () => true),
+      () => returnToSettingsSource(history, source, () => true),
       (nextPrompt) => {
         prompt = nextPrompt
         return true
@@ -148,7 +120,7 @@ test('saving back is blocked without mutating memory history', () => {
   const removeInterception = installSettingsBackInterception(history, () => {
     result = settingsLeaveIntent(
       { navigate: 'blocked', close: 'defer' },
-      () => returnToSettingsSource(history, source, organizationId, () => true),
+      () => returnToSettingsSource(history, source, () => true),
       () => true
     )
   })
@@ -179,50 +151,13 @@ test('back interception passes blocker-exempt calls through and restores the ori
   assert.equal(intercepted, 1)
 })
 
-test('an invalid Organization-bound source replaces Settings with Home', () => {
+test('an unusable source replaces Settings with Home', () => {
   const { history, source } = enterSettingsFromCurrentEntry()
 
   assert.equal(
-    returnToSettingsSource(history, source, '0d7d044e-b84e-409d-a74c-f2c12567c721', () => true),
+    returnToSettingsSource(history, source, () => false),
     'home'
   )
   assert.equal(history.location.pathname, '/')
   assert.equal(history.location.state.__TSR_index, 1)
-})
-
-test('Settings picker state preserves the exact return Section and source until restoration', () => {
-  const source = captureSettingsSource(sourceLocation('business-source'), organizationId)
-  assert.ok(source)
-  const settingsEntry = { section: 'audit-log', source } as const
-  const pickerState = createSettingsOrganizationPickerState(
-    { __TSR_key: 'settings-entry', __TSR_index: 1, settings: settingsEntry },
-    settingsEntry
-  )
-
-  assert.deepEqual(readSettingsOrganizationPickerEntry(pickerState), {
-    origin: 'settings',
-    phase: 'picker',
-    returnTo: settingsEntry
-  })
-
-  const creationState = replaceSettingsOrganizationPickerPhase(pickerState, 'organization-create')
-  assert.deepEqual(readSettingsOrganizationPickerEntry(creationState), {
-    origin: 'settings',
-    phase: 'organization-create',
-    returnTo: settingsEntry
-  })
-
-  const restoredState = restoreSettingsEntryAfterOrganizationPicker(pickerState)
-  assert.deepEqual(readSettingsEntry(restoredState), settingsEntry)
-  assert.equal(readSettingsOrganizationPickerEntry(restoredState), undefined)
-})
-
-test('malformed picker state remains startup-origin and cannot invent a Settings return target', () => {
-  for (const state of [
-    undefined,
-    { organizationPicker: { origin: 'startup' } },
-    { organizationPicker: { origin: 'settings', returnTo: { section: 'unknown' } } }
-  ]) {
-    assert.equal(readSettingsOrganizationPickerEntry(state), undefined)
-  }
 })

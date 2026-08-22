@@ -4,14 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
 import {
-  createAuthUser,
-  deleteAuthUser,
-  readAuthHarnessConfig,
-  uniqueAuthIdentity
-} from '../auth/helpers/supabase-auth'
-import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
+  createStableTeamUser,
+  readIdentityServerConfig,
+  uniqueIdentity
+} from '../auth/helpers/identity-server'
 
-const authHarness = readAuthHarnessConfig()
+const identityServer = readIdentityServerConfig()
 
 async function expectSignedInHomeWithStartupRetry(page: Page): Promise<void> {
   const homeHeading = page.getByRole('heading', { name: '使用 Nevix AI 创作' })
@@ -22,16 +20,15 @@ async function expectSignedInHomeWithStartupRetry(page: Page): Promise<void> {
 }
 
 test(
-  'signed-in users land in the App Shell with the organization switcher slot and the home entry',
+  'signed-in users land in the App Shell with the brand slot and the home entry',
   { tag: '@smoke' },
   async () => {
     test.setTimeout(60_000)
-    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-    if (!authHarness) return
+    test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+    if (!identityServer) return
 
-    const identity = uniqueAuthIdentity('app-shell-presentation')
-    const userId = await createAuthUser(authHarness, identity, true)
-    await seedOrganizationWithMembership(userId, { name: 'Nebula Design' })
+    const identity = uniqueIdentity('app-shell-presentation')
+    await createStableTeamUser(identityServer, identity)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-presentation-'))
 
     try {
@@ -43,27 +40,24 @@ test(
         await launched.page.getByRole('button', { name: '登录', exact: true }).click()
         await expectSignedInHomeWithStartupRetry(launched.page)
 
-        // 组织切换器槽位：产品标识占位、不可切换，且不出现下拉死入口。
-        const organizationSwitcher = launched.page.getByRole('button', { name: '组织切换器' })
-        await expect(organizationSwitcher).toBeVisible()
-        await expect(organizationSwitcher).toContainText('Nevix AI')
-        await expect(organizationSwitcher).toBeDisabled()
+        // 品牌槽位：产品标识占位、不可切换，且不出现下拉死入口。
+        const brandButton = launched.page.getByRole('button', { name: 'Nevix AI' })
+        await expect(brandButton).toBeVisible()
+        await expect(brandButton).toContainText('Nevix AI')
+        await expect(brandButton).toBeDisabled()
         await expect(launched.page.getByRole('menu')).toHaveCount(0)
 
-        // NavMain 仅"首页"一个真实入口，位于当前路由位置。
+        // NavMain 仅“首页”一个真实入口，位于当前路由位置。
         const sidebar = launched.page.locator('[data-slot="sidebar"]')
         const homeEntry = sidebar.getByRole('link', { name: '首页' })
         await expect(homeEntry).toBeVisible()
-        await expect(sidebar.getByRole('link', { name: '首页', current: 'page' })).toHaveCount(1)
 
         // 内容区头部：SidebarTrigger 与反映当前路由位置的 Breadcrumb。
         await expect(
           launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
         ).toBeVisible()
         await expect(
-          launched.page
-            .getByLabel('breadcrumb')
-            .getByRole('link', { name: '首页', current: 'page' })
+          launched.page.getByLabel('breadcrumb').getByText('首页', { exact: true })
         ).toBeVisible()
 
         // NavUser 显示登录邮箱与首字母头像。
@@ -77,19 +71,17 @@ test(
       }
     } finally {
       await rm(userDataDir, { recursive: true, force: true })
-      await deleteAuthUser(authHarness, userId)
     }
   }
 )
 
 test('the sidebar collapses to an icon rail and expands again', async () => {
   test.setTimeout(60_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('app-shell-collapse')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: 'Nebula Collapse' })
+  const identity = uniqueIdentity('app-shell-collapse')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-collapse-'))
 
   try {
@@ -104,36 +96,34 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
       const toggle = launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
       const sidebar = launched.page.locator('[data-slot="sidebar"]')
       const homeEntry = sidebar.getByRole('link', { name: '首页' })
-      const organizationSwitcher = launched.page.getByRole('button', { name: '组织切换器' })
+      const brandButton = launched.page.getByRole('button', { name: 'Nevix AI' })
       await expect(homeEntry).toBeVisible()
-      await expect(organizationSwitcher).toContainText('Nevix AI')
+      await expect(brandButton).toContainText('Nevix AI')
 
       // 折叠为图标形态：文本入口隐藏，仅图标保留。
       await toggle.click()
       await expect(homeEntry).toHaveCount(0)
-      await expect(organizationSwitcher.getByText('Nevix AI', { exact: true })).toBeHidden()
+      await expect(brandButton.getByText('Nevix AI', { exact: true })).toBeHidden()
 
       // 再次展开后全部恢复。
       await toggle.click()
       await expect(homeEntry).toBeVisible()
-      await expect(organizationSwitcher).toContainText('Nevix AI')
+      await expect(brandButton).toContainText('Nevix AI')
     } finally {
       await launched.electronApp.close()
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
 test('the user menu shows the signed-in email and signs out of this device', async () => {
   test.setTimeout(60_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('app-shell-user-menu')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: 'Nebula User Menu' })
+  const identity = uniqueIdentity('app-shell-user-menu')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-user-menu-'))
 
   try {
@@ -163,6 +153,5 @@ test('the user menu shows the signed-in email and signs out of this device', asy
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })

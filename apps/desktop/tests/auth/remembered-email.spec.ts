@@ -8,14 +8,12 @@ import {
   signOutFromUserMenu
 } from '../helpers/electron-app'
 import {
-  createAuthUser,
-  deleteAuthUser,
-  readAuthHarnessConfig,
-  uniqueAuthIdentity
-} from './helpers/supabase-auth'
-import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
+  createStableTeamUser,
+  readIdentityServerConfig,
+  uniqueIdentity
+} from './helpers/identity-server'
 
-const authHarness = readAuthHarnessConfig()
+const identityServer = readIdentityServerConfig()
 const rememberedEmailFileName = 'authentication-remembered-email.enc'
 
 async function fileExists(path: string): Promise<boolean> {
@@ -41,8 +39,8 @@ test(
   { tag: '@smoke' },
   async () => {
     test.skip(
-      !process.env.NEVIX_TEST_SUPABASE_URL,
-      'requires the configured build produced by the Auth test command'
+      !process.env.NEVIX_TEST_SERVER_URL,
+      'requires the configured build produced by the E2E command'
     )
 
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-empty-'))
@@ -72,11 +70,11 @@ test(
 )
 
 test('a successful password login securely remembers the authoritative email independently of the Session', async () => {
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('remembered-success')
-  const userId = await createAuthUser(authHarness, identity, true)
+  const identity = uniqueIdentity('remembered-success')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-success-'))
   let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
 
@@ -110,8 +108,7 @@ test('a successful password login securely remembers the authoritative email ind
     expect(persistedEnvelope).not.toContain(identity.email)
     expect(persistedEnvelope).not.toContain(submittedEmail)
     expect(persistedEnvelope).not.toContain(identity.password)
-    expect(persistedEnvelope).not.toContain('access_token')
-    expect(persistedEnvelope).not.toContain('refresh_token')
+    expect(persistedEnvelope).not.toContain('"token"')
 
     await launched.electronApp.close()
     await Promise.all([
@@ -128,16 +125,15 @@ test('a successful password login securely remembers the authoritative email ind
   } finally {
     await launched.electronApp.close().catch(() => undefined)
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
 test('a failed password login keeps typed input without replacing the saved email', async () => {
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
   const savedEmail = 'previously-verified@example.com'
-  const failedIdentity = uniqueAuthIdentity('remembered-failed')
+  const failedIdentity = uniqueIdentity('remembered-failed')
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-failed-'))
   let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
 
@@ -174,8 +170,8 @@ test('a failed password login keeps typed input without replacing the saved emai
 
 test('clearing Remembered Email is immediate and reselecting does not save unverified input', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-clear-'))
@@ -224,12 +220,11 @@ test(
   'uncheck then recheck serializes clear before the next successful replacement',
   { tag: '@smoke' },
   async () => {
-    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-    if (!authHarness) return
+    test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+    if (!identityServer) return
 
-    const identity = uniqueAuthIdentity('remembered-clear-replace-order')
-    const userId = await createAuthUser(authHarness, identity, true)
-    await seedOrganizationWithMembership(userId, { name: 'Remembered Clear Replace Org' })
+    const identity = uniqueIdentity('remembered-clear-replace-order')
+    await createStableTeamUser(identityServer, identity)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-clear-replace-'))
     const recordPath = join(userDataDir, rememberedEmailFileName)
     let launched = await launchTestApp({
@@ -282,7 +277,6 @@ test(
     } finally {
       await launched.electronApp.close().catch(() => undefined)
       await rm(userDataDir, { recursive: true, force: true })
-      await deleteAuthUser(authHarness, userId)
     }
   }
 )
@@ -291,12 +285,11 @@ test(
   'a delayed failed clear after successful login explains persistence on the authenticated surface',
   { tag: '@smoke' },
   async () => {
-    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-    if (!authHarness) return
+    test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+    if (!identityServer) return
 
-    const identity = uniqueAuthIdentity('remembered-active-surface-clear-failure')
-    const userId = await createAuthUser(authHarness, identity, true)
-    await seedOrganizationWithMembership(userId, { name: 'Remembered Clear Failure Org' })
+    const identity = uniqueIdentity('remembered-active-surface-clear-failure')
+    await createStableTeamUser(identityServer, identity)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-clear-failure-'))
     const recordPath = join(userDataDir, rememberedEmailFileName)
     const launched = await launchTestApp({
@@ -335,7 +328,6 @@ test(
     } finally {
       await launched.electronApp.close().catch(() => undefined)
       await rm(userDataDir, { recursive: true, force: true })
-      await deleteAuthUser(authHarness, userId)
     }
   }
 )
@@ -344,12 +336,11 @@ test(
   'a stale failed clear cannot route the next memory-only replacement notice to login',
   { tag: '@smoke' },
   async () => {
-    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-    if (!authHarness) return
+    test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+    if (!identityServer) return
 
-    const identity = uniqueAuthIdentity('remembered-stale-clear-failure')
-    const userId = await createAuthUser(authHarness, identity, true)
-    await seedOrganizationWithMembership(userId, { name: 'Remembered Stale Clear Org' })
+    const identity = uniqueIdentity('remembered-stale-clear-failure')
+    await createStableTeamUser(identityServer, identity)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-stale-clear-'))
     const recordPath = join(userDataDir, rememberedEmailFileName)
     const launched = await launchTestApp({
@@ -397,15 +388,14 @@ test(
     } finally {
       await launched.electronApp.close().catch(() => undefined)
       await rm(userDataDir, { recursive: true, force: true })
-      await deleteAuthUser(authHarness, userId)
     }
   }
 )
 
 test('a failed clear keeps the preference selected and explains that secure storage is unavailable', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-clear-failure-'))
@@ -448,12 +438,11 @@ test(
   'a login persistence notice clears after the next replacement persists',
   { tag: '@smoke' },
   async () => {
-    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-    if (!authHarness) return
+    test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+    if (!identityServer) return
 
-    const identity = uniqueAuthIdentity('remembered-login-notice-recovery')
-    const userId = await createAuthUser(authHarness, identity, true)
-    await seedOrganizationWithMembership(userId, { name: 'Remembered Login Recovery Org' })
+    const identity = uniqueIdentity('remembered-login-notice-recovery')
+    await createStableTeamUser(identityServer, identity)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-login-recovery-'))
     const recordPath = join(userDataDir, rememberedEmailFileName)
     const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
@@ -499,18 +488,16 @@ test(
     } finally {
       await launched.electronApp.close().catch(() => undefined)
       await rm(userDataDir, { recursive: true, force: true })
-      await deleteAuthUser(authHarness, userId)
     }
   }
 )
 
 test('a new login boundary restores the selected default when no Remembered Email exists', async () => {
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('remembered-default-reset')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: 'Remembered Default Reset Org' })
+  const identity = uniqueIdentity('remembered-default-reset')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-default-reset-'))
   const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
 
@@ -530,14 +517,13 @@ test('a new login boundary restores the selected default when no Remembered Emai
   } finally {
     await launched.electronApp.close()
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
 test('unavailable secure storage keeps Remembered Email only in the current process', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-memory-'))
@@ -556,14 +542,6 @@ test('unavailable secure storage keeps Remembered Email only in the current proc
     )
     await expect(persistenceNotice).toBeVisible()
     await expect(persistenceNotice).toHaveCount(1)
-
-    await launched.page.getByRole('button', { name: 'Create account' }).click()
-    await expect(
-      launched.page.getByRole('heading', { name: 'Create your Nevix AI account' })
-    ).toBeVisible()
-    await launched.page.getByRole('button', { name: 'Sign in instead' }).click()
-    await expect(launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })).toBeVisible()
-    await expect(persistenceNotice).toHaveCount(0)
 
     const writeResult = await launched.page.evaluate(
       async (email) => window.api.invoke('authentication:replace-remembered-email', { email }),
@@ -596,8 +574,8 @@ test('unavailable secure storage keeps Remembered Email only in the current proc
 
 test('an encryption failure keeps the new email in memory without writing plaintext', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-encryption-'))
@@ -650,12 +628,11 @@ test(
   'an authenticated persistence notice clears after secure storage recovers',
   { tag: '@smoke' },
   async () => {
-    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-    if (!authHarness) return
+    test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+    if (!identityServer) return
 
-    const identity = uniqueAuthIdentity('remembered-authenticated-notice-recovery')
-    const userId = await createAuthUser(authHarness, identity, true)
-    await seedOrganizationWithMembership(userId, { name: 'Remembered Notice Recovery Org' })
+    const identity = uniqueIdentity('remembered-authenticated-notice-recovery')
+    await createStableTeamUser(identityServer, identity)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-notice-recovery-'))
     const pendingPath = join(userDataDir, `${rememberedEmailFileName}.pending`)
     await mkdir(pendingPath)
@@ -698,15 +675,14 @@ test(
     } finally {
       await launched.electronApp.close().catch(() => undefined)
       await rm(userDataDir, { recursive: true, force: true })
-      await deleteAuthUser(authHarness, userId)
     }
   }
 )
 
 test('a failed atomic write keeps the previous encrypted record and the new in-process value', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-write-'))
@@ -756,8 +732,8 @@ test('a failed atomic write keeps the previous encrypted record and the new in-p
 
 test('a corrupt Remembered Email record is deleted with a generic internal warning', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-corrupt-'))
@@ -796,8 +772,8 @@ test(
   { tag: '@smoke' },
   async () => {
     test.skip(
-      !process.env.NEVIX_TEST_SUPABASE_URL,
-      'requires the configured build produced by the Auth test command'
+      !process.env.NEVIX_TEST_SERVER_URL,
+      'requires the configured build produced by the E2E command'
     )
 
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-unreadable-'))
@@ -840,8 +816,8 @@ test(
 test('Linux basic_text keeps Remembered Email in memory without creating a record', async () => {
   test.skip(process.platform !== 'linux', 'Linux safeStorage backend acceptance')
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-basic-text-'))

@@ -3,16 +3,10 @@ import { join, relative } from 'node:path'
 
 const desktopRoot = new URL('..', import.meta.url).pathname
 const roots = ['out', 'test-results']
-const exactForbiddenValues = [
-  process.env.NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY,
-  process.env.NEVIX_TEST_SUPABASE_SECRET_KEY
-].filter((value) => typeof value === 'string' && value.length > 0)
-const forbiddenPatterns = [
-  /sb_secret_[A-Za-z0-9_-]{20,}/,
-  /InNlcnZpY2Vfcm9sZSI6/,
-  /postgres(?:ql)?:\/\/[^\s"']+:[^\s"']+@/,
-  /super-secret-jwt-token-with-at-least/
-]
+const exactForbiddenValues = [process.env.NEVIX_TEST_ADMIN_INITIAL_PASSWORD].filter(
+  (value) => typeof value === 'string' && value.length > 0
+)
+const forbiddenPatterns = [/postgres(?:ql)?:\/\/[^\s"']+:[^\s"']+@/, /initial-horse-battery-staple/]
 
 /**
  * @param {string} directory

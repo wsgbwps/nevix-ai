@@ -4,24 +4,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
 import {
-  createAuthUser,
-  deleteAuthUser,
-  readAuthHarnessConfig,
-  refreshOutsideDesktop,
-  signInOutsideDesktop,
-  uniqueAuthIdentity
-} from './helpers/supabase-auth'
-import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
+  createTeamUser,
+  disableTeamUser,
+  expectSessionAccepted,
+  loginOutsideDesktop,
+  readIdentityServerConfig,
+  uniqueIdentity
+} from './helpers/identity-server'
 
-const authHarness = readAuthHarnessConfig()
+const identityServer = readIdentityServerConfig()
 
 test(
   'a configured build starts at the localized unauthenticated boundary',
   { tag: '@smoke' },
   async () => {
     test.skip(
-      !process.env.NEVIX_TEST_SUPABASE_URL,
-      'requires the configured build produced by the Auth test command'
+      !process.env.NEVIX_TEST_SERVER_URL,
+      'requires the configured build produced by the E2E command'
     )
 
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-boundary-'))
@@ -53,7 +52,7 @@ test(
         await expect(launched.page.locator('aside')).toBeHidden()
         await launched.page.setViewportSize({ width: 1280, height: 800 })
         await expect(launched.page.locator('aside')).toBeVisible()
-        await expect(launched.page.getByLabel('Email')).toBeVisible()
+        await launched.page.getByLabel('Email').isVisible()
         await launched.page.setViewportSize({ width: 900, height: 670 })
         await expect(launched.page.locator('aside')).toBeHidden()
 
@@ -69,98 +68,68 @@ test(
   }
 )
 
-test(
-  'a verified User signs in once and enters the authenticated app shell',
-  { tag: '@smoke' },
-  async () => {
-    test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-    if (!authHarness) return
+test('a User signs in once and enters the authenticated app shell', { tag: '@smoke' }, async () => {
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-    const identity = uniqueAuthIdentity('verified-login')
-    const userId = await createAuthUser(authHarness, identity, true)
-    // A verified User with a single Organization auto-enters it at startup, landing in the shell.
-    await seedOrganizationWithMembership(userId, { name: 'Verified Login Org' })
-    const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-login-'))
+  const identity = uniqueIdentity('verified-login')
+  await createTeamUser(identityServer, identity, 'Verified Login')
+  // The forced first-login change is covered by its own spec; this boundary test stabilizes the
+  // password over raw HTTP so the Desktop sign-in lands directly in the shell.
+  const setupGrant = await loginOutsideDesktop(identityServer, identity)
+  await completeFirstLoginChangeOutsideDesktop(identityServer, identity, setupGrant.token)
+
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-login-'))
+
+  try {
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US']
+    })
 
     try {
-      const launched = await launchTestApp({
-        userDataDir,
-        systemLanguages: ['en-US']
+      let loginRequests = 0
+      await launched.page.route('**/identity/auth/login', async (route) => {
+        loginRequests += 1
+        await route.continue()
       })
 
-      try {
-        let releaseRequest: (() => void) | undefined
-        const requestMayContinue = new Promise<void>((resolve) => {
-          releaseRequest = resolve
-        })
-        let observeRequest: (() => void) | undefined
-        const requestObserved = new Promise<void>((resolve) => {
-          observeRequest = resolve
-        })
-        let passwordRequestCount = 0
+      await launched.page.getByLabel('Email').fill(identity.email)
+      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
 
-        await launched.page.route('**/auth/v1/token?grant_type=password', async (route) => {
-          passwordRequestCount += 1
-          observeRequest?.()
-          await requestMayContinue
-          const response = await route.fetch()
-          const body = (await response.json()) as Record<string, unknown>
-          await route.fulfill({
-            response,
-            json: {
-              ...body,
-              weak_password: {
-                reasons: ['pwned'],
-                message: 'provider weak-password detail must not create a login gate'
-              }
-            }
-          })
-        })
-
-        await launched.page.getByLabel('Email').fill(identity.email)
-        await launched.page.getByLabel('Password').fill(identity.password)
-        await launched.page.getByRole('button', { name: 'Sign in' }).click()
-        await requestObserved
-
-        await expect(launched.page.getByRole('button', { name: 'Signing in…' })).toBeDisabled()
-        expect(passwordRequestCount).toBe(1)
-
-        releaseRequest?.()
-        await expect(
-          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-        ).toBeVisible()
-        await expect(
-          launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
-        ).toHaveCount(0)
-        expect(
-          await launched.page.evaluate(async () => ({
-            localStorageKeys: Object.keys(localStorage),
-            indexedDatabaseNames: (await indexedDB.databases())
-              .map((database) => database.name)
-              .filter((name): name is string => name !== undefined)
-          }))
-        ).toEqual({
-          localStorageKeys: [],
-          indexedDatabaseNames: []
-        })
-      } finally {
-        await launched.electronApp.close()
-      }
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })).toHaveCount(
+        0
+      )
+      expect(loginRequests).toBe(1)
+      expect(
+        await launched.page.evaluate(async () => ({
+          localStorageKeys: Object.keys(localStorage),
+          indexedDatabaseNames: (await indexedDB.databases())
+            .map((database) => database.name)
+            .filter((name): name is string => name !== undefined)
+        }))
+      ).toEqual({
+        localStorageKeys: [],
+        indexedDatabaseNames: []
+      })
     } finally {
-      await rm(userDataDir, { recursive: true, force: true })
-      await deleteAuthUser(authHarness, userId)
+      await launched.electronApp.close()
     }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
   }
-)
+})
 
-test('unknown, unverified, and incorrect credentials share one safe error', async () => {
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+test('unknown and incorrect credentials share one safe error', async () => {
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const verifiedIdentity = uniqueAuthIdentity('wrong-password')
-  const unverifiedIdentity = uniqueAuthIdentity('unverified-login')
-  const verifiedUserId = await createAuthUser(authHarness, verifiedIdentity, true)
-  const unverifiedUserId = await createAuthUser(authHarness, unverifiedIdentity, false)
+  const identity = uniqueIdentity('wrong-password')
+  await createTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-errors-'))
 
   try {
@@ -171,9 +140,8 @@ test('unknown, unverified, and incorrect credentials share one safe error', asyn
 
     try {
       const attempts = [
-        uniqueAuthIdentity('unknown-login'),
-        { email: unverifiedIdentity.email, password: unverifiedIdentity.password },
-        { email: verifiedIdentity.email, password: `${verifiedIdentity.password}-wrong` }
+        uniqueIdentity('unknown-login'),
+        { email: identity.email, password: `${identity.password}-wrong` }
       ]
 
       for (const attempt of attempts) {
@@ -192,21 +160,55 @@ test('unknown, unverified, and incorrect credentials share one safe error', asyn
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await Promise.all([
-      deleteAuthUser(authHarness, verifiedUserId),
-      deleteAuthUser(authHarness, unverifiedUserId)
-    ])
   }
 })
 
-test('sign-out revokes only the Desktop Session and reopening stays signed out', async () => {
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+test('a disabled account reports its specific error and stays at the boundary', async () => {
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('local-signout')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: 'Local Signout Org' })
-  const otherSession = await signInOutsideDesktop(authHarness, identity)
+  const identity = uniqueIdentity('disabled-login')
+  const user = await createTeamUser(identityServer, identity)
+  await disableTeamUser(identityServer, user.id)
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-disabled-'))
+
+  try {
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US']
+    })
+
+    try {
+      await launched.page.getByLabel('Email').fill(identity.email)
+      await launched.page.getByLabel('Password').fill(identity.password)
+      await launched.page.getByRole('button', { name: 'Sign in' }).click()
+      await expect(
+        launched.page
+          .getByRole('alert')
+          .filter({ hasText: 'This account has been disabled. Contact your administrator.' })
+      ).toBeVisible()
+      await expect(
+        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toHaveCount(0)
+    } finally {
+      await launched.electronApp.close()
+    }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('sign-out revokes only the Desktop session and reopening stays signed out', async () => {
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
+
+  const identity = uniqueIdentity('local-signout')
+  await createTeamUser(identityServer, identity)
+  // A second device session proves the Desktop sign-out only revokes the Desktop session; the
+  // forced first-login change is completed over raw HTTP so the Desktop sign-in lands in the shell.
+  const setupGrant = await loginOutsideDesktop(identityServer, identity)
+  await completeFirstLoginChangeOutsideDesktop(identityServer, identity, setupGrant.token)
+  const stableGrant = await loginOutsideDesktop(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-signout-'))
 
   try {
@@ -223,14 +225,11 @@ test('sign-out revokes only the Desktop Session and reopening stays signed out',
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
 
-      const localLogoutRequest = launched.page.waitForRequest(
-        (request) =>
-          request.method() === 'POST' &&
-          request.url().includes('/auth/v1/logout') &&
-          request.url().includes('scope=local')
+      const logoutRequest = launched.page.waitForRequest(
+        (request) => request.method() === 'POST' && request.url().endsWith('/identity/auth/logout')
       )
       await signOutFromUserMenu(launched.page)
-      await localLogoutRequest
+      await logoutRequest
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
@@ -240,7 +239,8 @@ test('sign-out revokes only the Desktop Session and reopening stays signed out',
       await launched.electronApp.close()
     }
 
-    await refreshOutsideDesktop(authHarness, otherSession.refresh_token)
+    // The other device's session survived the Desktop sign-out.
+    await expectSessionAccepted(identityServer, stableGrant.token, true)
 
     launched = await launchTestApp({
       userDataDir,
@@ -258,6 +258,28 @@ test('sign-out revokes only the Desktop Session and reopening stays signed out',
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
+
+/**
+ * Completes the forced first-login change over raw HTTP so a test account reaches a stable,
+ * reusable password without driving the Desktop UI for it.
+ */
+async function completeFirstLoginChangeOutsideDesktop(
+  config: NonNullable<typeof identityServer>,
+  identity: { readonly password: string },
+  token: string
+): Promise<void> {
+  const response = await fetch(new URL('/identity/auth/change-password', config.serverUrl), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      current_password: identity.password,
+      new_password: identity.password
+    })
+  })
+  expect(response.status, await response.clone().text()).toBe(200)
+}

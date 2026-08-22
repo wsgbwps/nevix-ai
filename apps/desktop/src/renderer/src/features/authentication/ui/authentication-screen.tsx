@@ -4,26 +4,20 @@ import { Eye, EyeOff } from 'lucide-react'
 import { ModeToggle } from '../../../components/mode-toggle'
 import { useTheme } from '../../../hooks/use-theme'
 import { Button } from '../../../components/ui/button'
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel
-} from '../../../components/ui/field'
+import { Field, FieldError, FieldGroup, FieldLabel } from '../../../components/ui/field'
 import { Input } from '../../../components/ui/input'
 import { cn } from '../../../lib/utils'
-import type {
-  AuthenticationError,
-  AuthenticationFlow,
-  AuthenticationNotice
-} from '../model/use-authentication'
+import type { AuthenticationError, AuthenticationNotice } from '../model/use-authentication'
 import { isPasswordByteLengthValid, passwordByteLengthError } from '../policy/password'
 import { RememberedEmailPersistenceNotice } from './remembered-email-persistence-notice'
 
 interface AuthenticationScreenProps {
-  readonly status: 'configuration-error' | 'restoring' | 'restore-failure' | 'unauthenticated'
-  readonly flow: AuthenticationFlow
+  readonly status:
+    | 'configuration-error'
+    | 'restoring'
+    | 'restore-failure'
+    | 'unauthenticated'
+    | 'password-change-required'
   readonly error?: AuthenticationError
   readonly notice?: AuthenticationNotice
   readonly isSubmitting?: boolean
@@ -32,26 +26,15 @@ interface AuthenticationScreenProps {
   readonly isRememberedEmailPersistenceUnavailable: boolean
   readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   readonly onRetryRestore: () => Promise<void>
-  readonly resendSecondsRemaining: number
-  readonly resendGeneration: number
-  readonly didResend: boolean
-  readonly onShowLogin: () => void
-  readonly onShowSignUp: () => void
-  readonly onShowRecovery: () => void
   readonly onRememberEmailSelectedChange: (selected: boolean) => void
   readonly onRememberedEmailPersistenceNoticeShown: () => void
   readonly onSignIn: (email: string, password: string) => Promise<void>
-  readonly onSignUp: (email: string, password: string) => Promise<void>
-  readonly onVerifySignUp: (code: string) => Promise<void>
-  readonly onResendSignUp: () => Promise<void>
-  readonly onRequestRecovery: (email: string) => Promise<void>
-  readonly onVerifyRecovery: (code: string) => Promise<void>
-  readonly onCompleteRecovery: (newPassword: string) => Promise<void>
+  readonly onCompletePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
+  readonly onSignOut: () => Promise<void>
 }
 
 export function AuthenticationScreen({
   status,
-  flow,
   error,
   notice,
   isSubmitting = false,
@@ -59,22 +42,12 @@ export function AuthenticationScreen({
   rememberEmailSelected,
   isRememberedEmailPersistenceUnavailable,
   rememberedEmailPersistenceNoticeSurface,
-  resendSecondsRemaining,
-  resendGeneration,
-  didResend,
   onRetryRestore,
-  onShowLogin,
-  onShowSignUp,
-  onShowRecovery,
   onRememberEmailSelectedChange,
   onRememberedEmailPersistenceNoticeShown,
   onSignIn,
-  onSignUp,
-  onVerifySignUp,
-  onResendSignUp,
-  onRequestRecovery,
-  onVerifyRecovery,
-  onCompleteRecovery
+  onCompletePasswordChange,
+  onSignOut
 }: AuthenticationScreenProps): React.JSX.Element {
   const { t } = useTranslation('authentication')
   const { theme } = useTheme()
@@ -92,9 +65,7 @@ export function AuthenticationScreen({
         </div>
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-xs">
-            {status !== 'unauthenticated' ? (
-              <StatusPanel status={status} onRetryRestore={onRetryRestore} />
-            ) : flow === 'login' ? (
+            {status === 'unauthenticated' ? (
               <LoginForm
                 error={error}
                 notice={notice}
@@ -104,51 +75,18 @@ export function AuthenticationScreen({
                 isRememberedEmailPersistenceUnavailable={isRememberedEmailPersistenceUnavailable}
                 rememberedEmailPersistenceNoticeSurface={rememberedEmailPersistenceNoticeSurface}
                 onSignIn={onSignIn}
-                onShowSignUp={onShowSignUp}
-                onShowRecovery={onShowRecovery}
                 onRememberEmailSelectedChange={onRememberEmailSelectedChange}
                 onRememberedEmailPersistenceNoticeShown={onRememberedEmailPersistenceNoticeShown}
               />
-            ) : flow === 'signup' ? (
-              <SignupForm
+            ) : status === 'password-change-required' ? (
+              <FirstLoginPasswordChangeForm
                 error={error}
                 isSubmitting={isSubmitting}
-                onSignUp={onSignUp}
-                onShowLogin={onShowLogin}
-              />
-            ) : flow === 'signup-verification' ? (
-              <SignupVerificationForm
-                key={resendGeneration}
-                error={error}
-                isSubmitting={isSubmitting}
-                resendSecondsRemaining={resendSecondsRemaining}
-                didResend={didResend}
-                onVerify={onVerifySignUp}
-                onResend={onResendSignUp}
-                onShowLogin={onShowLogin}
-                onShowRecovery={onShowRecovery}
-              />
-            ) : flow === 'recovery-request' ? (
-              <RecoveryRequestForm
-                error={error}
-                isSubmitting={isSubmitting}
-                onRequestRecovery={onRequestRecovery}
-                onShowLogin={onShowLogin}
-              />
-            ) : flow === 'recovery-verification' ? (
-              <RecoveryVerificationForm
-                error={error}
-                isSubmitting={isSubmitting}
-                onVerify={onVerifyRecovery}
-                onShowLogin={onShowLogin}
+                onCompletePasswordChange={onCompletePasswordChange}
+                onSignOut={onSignOut}
               />
             ) : (
-              <RecoveryNewPasswordForm
-                error={error}
-                isSubmitting={isSubmitting}
-                onCompleteRecovery={onCompleteRecovery}
-                onShowLogin={onShowLogin}
-              />
+              <StatusPanel status={status} onRetryRestore={onRetryRestore} />
             )}
           </div>
         </div>
@@ -201,9 +139,7 @@ function StatusPanel({
 
 const LOGIN_NOTICE_KEYS = {
   'session-expired': 'login.sessionExpired',
-  'remote-sign-out-delayed': 'login.remoteSignOutDelayed',
-  'password-updated': 'login.passwordUpdated',
-  'password-updated-revocation-delayed': 'login.passwordUpdatedRevocationDelayed'
+  'remote-sign-out-delayed': 'login.remoteSignOutDelayed'
 } as const
 
 function LoginForm({
@@ -215,8 +151,6 @@ function LoginForm({
   isRememberedEmailPersistenceUnavailable,
   rememberedEmailPersistenceNoticeSurface,
   onSignIn,
-  onShowSignUp,
-  onShowRecovery,
   onRememberEmailSelectedChange,
   onRememberedEmailPersistenceNoticeShown
 }: {
@@ -228,8 +162,6 @@ function LoginForm({
   readonly isRememberedEmailPersistenceUnavailable: boolean
   readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   readonly onSignIn: (email: string, password: string) => Promise<void>
-  readonly onShowSignUp: () => void
-  readonly onShowRecovery: () => void
   readonly onRememberEmailSelectedChange: (selected: boolean) => void
   readonly onRememberedEmailPersistenceNoticeShown: () => void
 }): React.JSX.Element {
@@ -258,14 +190,30 @@ function LoginForm({
           noticeSurface={rememberedEmailPersistenceNoticeSurface}
           onShown={onRememberedEmailPersistenceNoticeShown}
         />
-        <CredentialFields
-          passwordAutoComplete="current-password"
-          disabled={isSubmitting}
-          emailDefaultValue={rememberedEmail}
-          emailAutoFocus={!rememberedEmail}
-          passwordAutoFocus={Boolean(rememberedEmail)}
-          onForgotPassword={onShowRecovery}
-        />
+        <Field>
+          <FieldLabel htmlFor="authentication-email">{t('login.email')}</FieldLabel>
+          <Input
+            id="authentication-email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            disabled={isSubmitting}
+            defaultValue={rememberedEmail}
+            autoFocus={!rememberedEmail}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="authentication-password">{t('login.password')}</FieldLabel>
+          <PasswordInput
+            id="authentication-password"
+            name="password"
+            autoComplete="current-password"
+            required
+            disabled={isSubmitting}
+            autoFocus={Boolean(rememberedEmail)}
+          />
+        </Field>
         <label className="flex items-center gap-2 text-sm" htmlFor="authentication-remember-email">
           <input
             id="authentication-remember-email"
@@ -281,437 +229,107 @@ function LoginForm({
         <Button type="submit" disabled={isSubmitting}>
           {t(isSubmitting ? 'login.submitting' : 'login.submit')}
         </Button>
-        <p className="text-muted-foreground text-center text-sm">
-          {t('login.noAccount')}{' '}
-          <button
-            type="button"
-            className="text-foreground font-medium underline underline-offset-4"
-            disabled={isSubmitting}
-            onClick={onShowSignUp}
-          >
-            {t('login.createAccount')}
-          </button>
-        </p>
       </FieldGroup>
     </form>
   )
 }
 
-function SignupForm({
+function FirstLoginPasswordChangeForm({
   error,
   isSubmitting,
-  onSignUp,
-  onShowLogin
+  onCompletePasswordChange,
+  onSignOut
 }: {
   readonly error?: AuthenticationError
   readonly isSubmitting: boolean
-  readonly onSignUp: (email: string, password: string) => Promise<void>
-  readonly onShowLogin: () => void
+  readonly onCompletePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
+  readonly onSignOut: () => Promise<void>
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
-  const [password, setPassword] = useState('')
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const isPasswordValid = isPasswordByteLengthValid(password)
-  const isConfirmMismatch = confirmPassword !== '' && confirmPassword !== password
-  const canSubmit = isPasswordValid && confirmPassword === password
+  const isNewPasswordValid = isPasswordByteLengthValid(newPassword)
+  const isConfirmMismatch = confirmPassword !== '' && confirmPassword !== newPassword
+  const canSubmit = currentPassword !== '' && isNewPasswordValid && confirmPassword === newPassword
 
   function submit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault()
     if (isSubmitting || !canSubmit) return
 
-    const credentials = readCredentials(event.currentTarget)
-    if (credentials) void onSignUp(credentials.email, credentials.password)
+    void onCompletePasswordChange(currentPassword, newPassword)
   }
 
   return (
     <form onSubmit={submit}>
-      <FormHeader heading={t('signup.heading')} description={t('signup.description')} />
+      <FormHeader
+        heading={t('passwordChange.heading')}
+        description={t('passwordChange.description')}
+      />
       <FieldGroup>
-        <CredentialFields
-          passwordAutoComplete="new-password"
-          password={password}
-          disabled={isSubmitting}
-          onPasswordChange={setPassword}
-        />
-        <PasswordPolicyFeedback password={password} />
+        <Field>
+          <FieldLabel htmlFor="authentication-current-password">
+            {t('passwordChange.currentPassword')}
+          </FieldLabel>
+          <PasswordInput
+            id="authentication-current-password"
+            name="currentPassword"
+            autoComplete="current-password"
+            required
+            disabled={isSubmitting}
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="authentication-new-password">
+            {t('passwordChange.newPassword')}
+          </FieldLabel>
+          <PasswordInput
+            id="authentication-new-password"
+            name="newPassword"
+            autoComplete="new-password"
+            required
+            disabled={isSubmitting}
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+          />
+          <PasswordPolicyFeedback password={newPassword} />
+        </Field>
         <Field>
           <FieldLabel htmlFor="authentication-confirm-password">
-            {t('signup.confirmPassword')}
+            {t('passwordChange.confirmPassword')}
           </FieldLabel>
           <PasswordInput
             id="authentication-confirm-password"
             name="confirmPassword"
             autoComplete="new-password"
+            required
             disabled={isSubmitting}
             aria-invalid={isConfirmMismatch || undefined}
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
           />
           {isConfirmMismatch ? (
-            <FieldError>{t('signup.confirmPasswordMismatch')}</FieldError>
+            <FieldError>{t('passwordChange.confirmPasswordMismatch')}</FieldError>
           ) : null}
         </Field>
-        {error ? <AuthenticationErrorMessage error={error} context="signup" /> : null}
+        {error ? <AuthenticationErrorMessage error={error} context="password-change" /> : null}
         <Button type="submit" disabled={isSubmitting || !canSubmit}>
-          {t(isSubmitting ? 'signup.submitting' : 'signup.submit')}
-        </Button>
-        <p className="text-muted-foreground text-center text-sm">
-          {t('signup.hasAccount')}{' '}
-          <button
-            type="button"
-            className="text-foreground font-medium underline underline-offset-4"
-            disabled={isSubmitting}
-            onClick={onShowLogin}
-          >
-            {t('signup.signIn')}
-          </button>
-        </p>
-      </FieldGroup>
-    </form>
-  )
-}
-
-function SignupVerificationForm({
-  error,
-  isSubmitting,
-  resendSecondsRemaining,
-  didResend,
-  onVerify,
-  onResend,
-  onShowLogin,
-  onShowRecovery
-}: {
-  readonly error?: AuthenticationError
-  readonly isSubmitting: boolean
-  readonly resendSecondsRemaining: number
-  readonly didResend: boolean
-  readonly onVerify: (code: string) => Promise<void>
-  readonly onResend: () => Promise<void>
-  readonly onShowLogin: () => void
-  readonly onShowRecovery: () => void
-}): React.JSX.Element {
-  const { t } = useTranslation('authentication')
-  const [code, setCode] = useState('')
-  const isComplete = /^\d{6}$/.test(code)
-
-  function submit(event: React.FormEvent<HTMLFormElement>): void {
-    event.preventDefault()
-    if (!isSubmitting && isComplete) void onVerify(code)
-  }
-
-  return (
-    <form onSubmit={submit}>
-      <FormHeader heading={t('verification.heading')} description={t('verification.description')} />
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="authentication-verification-code">
-            {t('verification.code')}
-          </FieldLabel>
-          <Input
-            id="authentication-verification-code"
-            name="code"
-            type="text"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            value={code}
-            disabled={isSubmitting}
-            onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-            className="h-12 text-center text-lg tracking-[0.45em]"
-          />
-          <FieldDescription>{t('verification.codeHint')}</FieldDescription>
-        </Field>
-        {didResend ? (
-          <p role="status" className="text-sm">
-            {t('verification.resent')}
-          </p>
-        ) : null}
-        {error ? <AuthenticationErrorMessage error={error} context="verification" /> : null}
-        <Button type="submit" disabled={isSubmitting || !isComplete}>
-          {t(isSubmitting ? 'verification.verifying' : 'verification.verify')}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={isSubmitting || resendSecondsRemaining > 0}
-          onClick={() => void onResend()}
-        >
-          {resendSecondsRemaining > 0
-            ? t('verification.resendCountdown', { count: resendSecondsRemaining })
-            : t('verification.resend')}
-        </Button>
-        <div className="flex justify-center gap-6 text-sm">
-          <button
-            type="button"
-            className="font-medium underline underline-offset-4"
-            disabled={isSubmitting}
-            onClick={onShowLogin}
-          >
-            {t('verification.signIn')}
-          </button>
-          <button
-            type="button"
-            className="font-medium underline underline-offset-4"
-            disabled={isSubmitting}
-            onClick={onShowRecovery}
-          >
-            {t('login.forgotPassword')}
-          </button>
-        </div>
-      </FieldGroup>
-    </form>
-  )
-}
-
-function RecoveryRequestForm({
-  error,
-  isSubmitting,
-  onRequestRecovery,
-  onShowLogin
-}: {
-  readonly error?: AuthenticationError
-  readonly isSubmitting: boolean
-  readonly onRequestRecovery: (email: string) => Promise<void>
-  readonly onShowLogin: () => void
-}): React.JSX.Element {
-  const { t } = useTranslation('authentication')
-
-  function submit(event: React.FormEvent<HTMLFormElement>): void {
-    event.preventDefault()
-    if (isSubmitting) return
-
-    const email = new FormData(event.currentTarget).get('email')
-    if (typeof email === 'string') void onRequestRecovery(email)
-  }
-
-  return (
-    <form onSubmit={submit}>
-      <FormHeader
-        heading={t('recovery.request.heading')}
-        description={t('recovery.request.description')}
-      />
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="authentication-recovery-email">{t('login.email')}</FieldLabel>
-          <Input
-            id="authentication-recovery-email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            disabled={isSubmitting}
-          />
-        </Field>
-        {error ? <AuthenticationErrorMessage error={error} context="recovery-request" /> : null}
-        <Button type="submit" disabled={isSubmitting}>
-          {t(isSubmitting ? 'recovery.request.submitting' : 'recovery.request.submit')}
+          {t(isSubmitting ? 'passwordChange.submitting' : 'passwordChange.submit')}
         </Button>
         <div className="flex justify-center text-sm">
           <button
             type="button"
             className="font-medium underline underline-offset-4"
             disabled={isSubmitting}
-            onClick={onShowLogin}
+            onClick={() => void onSignOut()}
           >
-            {t('recovery.request.backToLogin')}
+            {t('passwordChange.signOutInstead')}
           </button>
         </div>
       </FieldGroup>
     </form>
-  )
-}
-
-function RecoveryVerificationForm({
-  error,
-  isSubmitting,
-  onVerify,
-  onShowLogin
-}: {
-  readonly error?: AuthenticationError
-  readonly isSubmitting: boolean
-  readonly onVerify: (code: string) => Promise<void>
-  readonly onShowLogin: () => void
-}): React.JSX.Element {
-  const { t } = useTranslation('authentication')
-  const [code, setCode] = useState('')
-  const isComplete = /^\d{6}$/.test(code)
-
-  function submit(event: React.FormEvent<HTMLFormElement>): void {
-    event.preventDefault()
-    if (!isSubmitting && isComplete) void onVerify(code)
-  }
-
-  return (
-    <form onSubmit={submit}>
-      <FormHeader
-        heading={t('recovery.verification.heading')}
-        description={t('recovery.verification.description')}
-      />
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="authentication-recovery-code">
-            {t('recovery.verification.code')}
-          </FieldLabel>
-          <Input
-            id="authentication-recovery-code"
-            name="code"
-            type="text"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            value={code}
-            disabled={isSubmitting}
-            onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-            className="h-12 text-center text-lg tracking-[0.45em]"
-          />
-          <FieldDescription>{t('recovery.verification.codeHint')}</FieldDescription>
-        </Field>
-        {error ? (
-          <AuthenticationErrorMessage error={error} context="recovery-verification" />
-        ) : null}
-        <Button type="submit" disabled={isSubmitting || !isComplete}>
-          {t(isSubmitting ? 'recovery.verification.verifying' : 'recovery.verification.verify')}
-        </Button>
-        <div className="flex justify-center text-sm">
-          <button
-            type="button"
-            className="font-medium underline underline-offset-4"
-            disabled={isSubmitting}
-            onClick={onShowLogin}
-          >
-            {t('recovery.verification.backToLogin')}
-          </button>
-        </div>
-      </FieldGroup>
-    </form>
-  )
-}
-
-function RecoveryNewPasswordForm({
-  error,
-  isSubmitting,
-  onCompleteRecovery,
-  onShowLogin
-}: {
-  readonly error?: AuthenticationError
-  readonly isSubmitting: boolean
-  readonly onCompleteRecovery: (newPassword: string) => Promise<void>
-  readonly onShowLogin: () => void
-}): React.JSX.Element {
-  const { t } = useTranslation('authentication')
-  const [password, setPassword] = useState('')
-  const isPasswordValid = isPasswordByteLengthValid(password)
-
-  function submit(event: React.FormEvent<HTMLFormElement>): void {
-    event.preventDefault()
-    if (!isSubmitting && isPasswordValid) void onCompleteRecovery(password)
-  }
-
-  return (
-    <form onSubmit={submit}>
-      <FormHeader
-        heading={t('recovery.newPassword.heading')}
-        description={t('recovery.newPassword.description')}
-      />
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="authentication-recovery-new-password">
-            {t('recovery.newPassword.password')}
-          </FieldLabel>
-          <PasswordInput
-            id="authentication-recovery-new-password"
-            name="password"
-            autoComplete="new-password"
-            required
-            disabled={isSubmitting}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </Field>
-        <PasswordPolicyFeedback password={password} />
-        {error ? <AuthenticationErrorMessage error={error} context="recovery-password" /> : null}
-        <Button type="submit" disabled={isSubmitting || !isPasswordValid}>
-          {t(isSubmitting ? 'recovery.newPassword.submitting' : 'recovery.newPassword.submit')}
-        </Button>
-        <div className="flex justify-center text-sm">
-          <button
-            type="button"
-            className="font-medium underline underline-offset-4"
-            disabled={isSubmitting}
-            onClick={onShowLogin}
-          >
-            {t('recovery.verification.backToLogin')}
-          </button>
-        </div>
-      </FieldGroup>
-    </form>
-  )
-}
-
-function CredentialFields({
-  disabled,
-  passwordAutoComplete,
-  password,
-  onPasswordChange,
-  onForgotPassword,
-  emailDefaultValue,
-  emailAutoFocus = false,
-  passwordAutoFocus = false
-}: {
-  readonly disabled: boolean
-  readonly passwordAutoComplete: 'current-password' | 'new-password'
-  readonly password?: string
-  readonly onPasswordChange?: (password: string) => void
-  readonly onForgotPassword?: () => void
-  readonly emailDefaultValue?: string
-  readonly emailAutoFocus?: boolean
-  readonly passwordAutoFocus?: boolean
-}): React.JSX.Element {
-  const { t } = useTranslation('authentication')
-
-  return (
-    <>
-      <Field>
-        <FieldLabel htmlFor="authentication-email">{t('login.email')}</FieldLabel>
-        <Input
-          id="authentication-email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          required
-          disabled={disabled}
-          defaultValue={emailDefaultValue}
-          autoFocus={emailAutoFocus}
-        />
-      </Field>
-      <Field>
-        <div className="flex items-center">
-          <FieldLabel htmlFor="authentication-password">{t('login.password')}</FieldLabel>
-          {onForgotPassword ? (
-            <button
-              type="button"
-              className="ml-auto text-sm underline-offset-4 hover:underline"
-              disabled={disabled}
-              onClick={onForgotPassword}
-            >
-              {t('login.forgotPassword')}
-            </button>
-          ) : null}
-        </div>
-        <PasswordInput
-          id="authentication-password"
-          name="password"
-          autoComplete={passwordAutoComplete}
-          required
-          disabled={disabled}
-          autoFocus={passwordAutoFocus}
-          value={password}
-          onChange={onPasswordChange ? (event) => onPasswordChange(event.target.value) : undefined}
-        />
-      </Field>
-    </>
   )
 }
 
@@ -792,31 +410,7 @@ function PasswordPolicyFeedback({
   )
 }
 
-type AuthenticationErrorContext =
-  | 'login'
-  | 'signup'
-  | 'verification'
-  | 'recovery-request'
-  | 'recovery-verification'
-  | 'recovery-password'
-
-const RATE_LIMITED_KEYS = {
-  login: 'login.rateLimited',
-  signup: 'signup.rateLimited',
-  verification: 'verification.rateLimited',
-  'recovery-request': 'recovery.request.rateLimited',
-  'recovery-verification': 'recovery.verification.rateLimited',
-  'recovery-password': 'recovery.newPassword.rateLimited'
-} as const satisfies Record<AuthenticationErrorContext, string>
-
-const SERVICE_ERROR_KEYS = {
-  login: 'login.serviceError',
-  signup: 'signup.serviceError',
-  verification: 'verification.serviceError',
-  'recovery-request': 'recovery.request.serviceError',
-  'recovery-verification': 'recovery.verification.serviceError',
-  'recovery-password': 'recovery.newPassword.serviceError'
-} as const satisfies Record<AuthenticationErrorContext, string>
+type AuthenticationErrorContext = 'login' | 'password-change'
 
 function AuthenticationErrorMessage({
   error,
@@ -829,22 +423,22 @@ function AuthenticationErrorMessage({
   let message: string
 
   if (error === 'invalid-credentials') {
-    message = t('login.invalidCredentials')
-  } else if (error === 'invalid-verification-code') {
     message =
-      context === 'recovery-verification'
-        ? t('recovery.verification.invalidCode')
-        : t('verification.invalidCode')
-  } else if (error === 'same-password') {
-    message = t('recovery.newPassword.samePassword')
+      context === 'password-change'
+        ? t('passwordChange.invalidCurrentPassword')
+        : t('login.invalidCredentials')
+  } else if (error === 'account-disabled') {
+    message = t('login.accountDisabled')
+  } else if (error === 'invalid-password') {
+    message = t('passwordPolicy.invalidPassword')
   } else if (error === 'password-too-short') {
     message = t('passwordPolicy.tooShort')
-  } else if (error === 'password-leaked') {
-    message = t('passwordPolicy.leaked')
+  } else if (error === 'password-too-long') {
+    message = t('passwordPolicy.tooLong')
   } else if (error === 'rate-limited') {
-    message = t(RATE_LIMITED_KEYS[context])
+    message = t(context === 'login' ? 'login.rateLimited' : 'passwordChange.rateLimited')
   } else {
-    message = t(SERVICE_ERROR_KEYS[context])
+    message = t(context === 'login' ? 'login.serviceError' : 'passwordChange.serviceError')
   }
 
   return (

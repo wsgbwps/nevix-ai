@@ -42,7 +42,8 @@ export async function readPersistedSession(): Promise<PersistedSessionRead> {
   const session = canonicalizeSession(storedSession)
   if (!session) return discardUnreadableSession()
 
-  // Older releases encrypted Supabase's complete Session object. Rewrite it to the strict
+  // Supabase-era sessions no longer match the canonical schema and were discarded above; a
+  // decryptable session that merely carries extra fields is rewritten to the strict
   // Authentication-owned schema as soon as it is successfully decrypted.
   if (session !== storedSession) {
     const rewrite = await replacePersistedSession(session)
@@ -136,18 +137,12 @@ function canonicalizeSession(session: string): string | undefined {
     if (typeof parsed !== 'object' || parsed === null) return undefined
 
     const {
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_type: tokenType,
+      token,
       expires_at: expiresAt,
-      expires_in: expiresIn,
       user
     } = parsed as {
-      access_token?: unknown
-      refresh_token?: unknown
-      token_type?: unknown
+      token?: unknown
       expires_at?: unknown
-      expires_in?: unknown
       user?: unknown
     }
     const userId =
@@ -156,18 +151,10 @@ function canonicalizeSession(session: string): string | undefined {
       typeof user === 'object' && user !== null ? (user as { email?: unknown }).email : undefined
 
     if (
-      typeof accessToken !== 'string' ||
-      accessToken.length === 0 ||
-      typeof refreshToken !== 'string' ||
-      refreshToken.length === 0 ||
-      typeof tokenType !== 'string' ||
-      tokenType.length === 0 ||
-      typeof expiresAt !== 'number' ||
-      !Number.isFinite(expiresAt) ||
-      expiresAt <= 0 ||
-      typeof expiresIn !== 'number' ||
-      !Number.isFinite(expiresIn) ||
-      expiresIn <= 0 ||
+      typeof token !== 'string' ||
+      token.length === 0 ||
+      typeof expiresAt !== 'string' ||
+      Number.isNaN(Date.parse(expiresAt)) ||
       typeof userId !== 'string' ||
       userId.length === 0 ||
       typeof userEmail !== 'string' ||
@@ -176,12 +163,11 @@ function canonicalizeSession(session: string): string | undefined {
       return undefined
     }
 
+    // The canonical Authentication-owned schema: the opaque token, its server-computed
+    // expiry, and the account snapshot the login response carried.
     return JSON.stringify({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_type: tokenType,
+      token,
       expires_at: expiresAt,
-      expires_in: expiresIn,
       user: { id: userId, email: userEmail }
     })
   } catch {

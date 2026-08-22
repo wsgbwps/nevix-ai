@@ -27,10 +27,10 @@ export interface PendingSettingsDiscardPrompt {
 
 /**
  * Paths that must never be held up by the Settings discard blocker: the
- * authentication, onboarding, and organization-selection flows own the session
- * lifecycle and outrank any unsaved Settings draft.
+ * authentication flow owns the session lifecycle and outranks any unsaved
+ * Settings draft.
  */
-const FORCED_SECURITY_PATHS = new Set(['/auth', '/onboarding', '/select-organization'])
+const FORCED_SECURITY_PATHS = new Set(['/auth'])
 
 /**
  * How the router blocker should treat a navigation that would leave

@@ -1,8 +1,9 @@
 # Authentication Session and Remembered Email native credential-backend smoke
 
-Run this checklist on a packaged Desktop build against a disposable Supabase Auth project. Use a
+Run this checklist on a packaged Desktop build against a disposable identity server
+(Go server + PostgreSQL, provisioned by the delivery documentation). Use a
 test User and a fresh operating-system account or disposable virtual machine. Never record the
-password, access token, refresh token, publishable key, response body, or decrypted Session in the
+password, session token, response body, or decrypted Session in the
 evidence.
 
 Passing the Ubuntu/Xvfb Playwright lane does not prove Linux Secret Service support. Record a
@@ -31,17 +32,16 @@ collecting evidence.
 3. Confirm both encrypted files exist. Parse each as JSON and verify that it contains only
    `version: 1` and a non-empty base64 `ciphertext`. Search the file as bytes and text and confirm it
    contains no email address or password; additionally confirm the Session file contains no
-   `access_token`, `refresh_token`, or complete Session JSON.
+   session `token` value or complete Session JSON.
 4. Save a checksum of each ciphertext envelope without copying its contents into the evidence.
 5. Quit the app normally, relaunch it with the same operating-system User and `userData`, and
    confirm the restoring boundary appears before the app shell.
-6. Confirm the app shell appears only while the Supabase Auth origin is reachable. Confirm the
-   envelope checksum changed after restoration, proving the refreshed, rotated Session was
-   atomically re-encrypted.
+6. Confirm the app shell appears only while the server is reachable. The opaque session token
+   does not rotate on restore, so the envelope checksum is unchanged by a successful restoration.
 7. Quit again, make the Auth origin unreachable, and relaunch. Confirm the retryable restore screen
    appears, the app shell remains hidden, and the envelope checksum is unchanged.
 8. Restore connectivity, select **Retry**, confirm the app shell appears, and confirm the envelope
-   checksum changes.
+   checksum is unchanged.
 9. Select **Sign out of this device**. Confirm the login screen appears, the authoritative email is
    prefilled with password focus, `authentication-session.enc` is deleted, and
    `authentication-remembered-email.enc` remains unchanged.
@@ -49,7 +49,7 @@ collecting evidence.
     Clear **Remember email**, confirm its encrypted file is deleted immediately, reselect the
     checkbox, edit the email without signing in, then relaunch; confirm the field is empty, the
     checkbox defaults selected, and focus returns to email.
-11. Sign in again, then repeat step 9 while the Auth origin is unreachable. Confirm the app immediately returns to
+11. Sign in again, then repeat step 9 while the server is unreachable. Confirm the app immediately returns to
     login, shows the remote-revocation-delay wording, deletes the file, and remains signed out after
     relaunch.
 
