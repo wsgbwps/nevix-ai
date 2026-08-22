@@ -6,7 +6,7 @@
     ".github/workflows/desktop-e2e-ci.yml",
     "pnpm-lock.yaml"
   ],
-  "currentDiffDigest": "sha256:c13a168abca4c5de82a6e7b173a751ea6b316edcdb4dcd3e5749fb76f86817ce",
+  "currentDiffDigest": "sha256:325a58be5f91ea4408af45a4771f59620837a4e8a515fbe4648d49d47f6258fc",
   "fullReviewCount": 1,
   "targetedReviewRound": 1,
   "findings": [
@@ -231,13 +231,33 @@
         "pnpm test:component 2/2 PASS",
         "pnpm test:e2e:settings 5/5 PASS (live profile PATCH against the Go server)"
       ]
+    },
+    {
+      "fixFor": [],
+      "kind": "ci-gate-delivery-repair",
+      "note": "No open finding: the CI-forced Linux basic_text backend (NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE=1) exposed a platform assumption in two new E2E specs — the stored-gated-session relaunch and the runtime-revocation relaunch need a secure persistence backend that actually writes the envelope. Fixed by adding the same hasSecurePersistenceBackend skip guard the session-persistence family uses (commit 1d745c4), plus a missing import that only manifested at runtime (commit 1652dca).",
+      "beforeDigest": "sha256:c13a168abca4c5de82a6e7b173a751ea6b316edcdb4dcd3e5749fb76f86817ce",
+      "afterDigest": "sha256:325a58be5f91ea4408af45a4771f59620837a4e8a515fbe4648d49d47f6258fc",
+      "commits": [
+        "1d745c4",
+        "1652dca"
+      ],
+      "touchedPaths": [
+        "apps/desktop/tests/auth/first-login-change-password.spec.ts",
+        "apps/desktop/tests/auth/runtime-revocation.spec.ts"
+      ],
+      "checks": [
+        "Local full E2E re-run PASS (66 passed / 0 failed / 4 platform-gated skips)",
+        "CI Full E2E Suite PASS on PR head (workflow run 32580860886 + gate run 32580843136)",
+        "CI gate all-green including full-e2e labeled run"
+      ]
     }
   ],
   "relevantCheck": {
-    "name": "desktop full check suite (typecheck, lint, 64 unit, 2 component, architecture, E2E full 66 passed / 0 failed / 4 platform-gated skips, verify:auth-artifacts)",
+    "name": "CI gate on PR head incl. Full E2E Suite (full-e2e label) + Desktop CI + auth-policy harness",
     "result": "PASS",
     "coverage": "apps/desktop + .github/workflows/desktop-e2e-ci.yml + pnpm-lock.yaml",
-    "diffDigest": "sha256:c13a168abca4c5de82a6e7b173a751ea6b316edcdb4dcd3e5749fb76f86817ce"
+    "diffDigest": "sha256:325a58be5f91ea4408af45a4771f59620837a4e8a515fbe4648d49d47f6258fc"
   },
   "outcome": "closed"
 }
