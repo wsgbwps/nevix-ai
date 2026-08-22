@@ -1,5 +1,9 @@
 # Outbox 通用 relay 的拆分推迟到第二个消费者出现
 
+## 状态
+
+已作废 — 2026-08-22 — 邮件体系（验证码/邀请函投递）随单租户管理员建号一并移除（[ADR-0013](0013-onprem-single-tenant-delivery.md)/[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)），Outbox 唯一消费者消失，本文的拆分触发条件永不到来；表与 Worker 的删除清单见 ADR-0015。原文保留如下。
+
 identity 的 Outbox Worker 把通用投递机械（SKIP LOCKED 认领、退避调度、终态）与携码重试地平线（认领 SQL JOIN `identity.verification_codes`、码过期或作废即 cancelled）焊在一个 Worker 里。我们现在不拆：relay 只有一个消费者，按 ADR-0003「一个 adapter 是假设的 seam，两个才是真实的」，此时抽离是投机性通用性。本 ADR 记录拆分的触发条件与拆分时的所有权边界，避免未来读者把刻意的焊死当成疏漏，或在没有真实消费者时提前付抽象成本。
 
 ## 触发条件
