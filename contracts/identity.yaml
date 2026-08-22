@@ -538,6 +538,18 @@ paths:
                       error:
                         enum:
                           - unauthorized
+        "403":
+          description: must_change_password 为 true：首登改密完成前业务端点被门禁拒绝（#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - password_change_required
         "500":
           description: 服务端内部错误。
           content:
@@ -657,7 +669,7 @@ paths:
                         enum:
                           - unauthorized
         "403":
-          description: 已认证但非 Admin 角色。
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
           content:
             application/json:
               schema:
@@ -668,6 +680,7 @@ paths:
                       error:
                         enum:
                           - forbidden
+                          - password_change_required
         "409":
           description: email 已被另一个账号占用。
           content:
@@ -801,7 +814,7 @@ paths:
                         enum:
                           - unauthorized
         "403":
-          description: 已认证但非 Admin 角色。
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
           content:
             application/json:
               schema:
@@ -812,6 +825,7 @@ paths:
                       error:
                         enum:
                           - forbidden
+                          - password_change_required
         "500":
           description: 服务端内部错误。
           content:
@@ -916,7 +930,7 @@ paths:
                         enum:
                           - unauthorized
         "403":
-          description: 已认证但非 Admin 角色。
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
           content:
             application/json:
               schema:
@@ -927,6 +941,7 @@ paths:
                       error:
                         enum:
                           - forbidden
+                          - password_change_required
         "404":
           description: 目标用户不存在（或 id 非 UUID）。
           content:
@@ -1062,7 +1077,7 @@ paths:
                         enum:
                           - unauthorized
         "403":
-          description: 已认证但非 Admin 角色。
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
           content:
             application/json:
               schema:
@@ -1073,6 +1088,7 @@ paths:
                       error:
                         enum:
                           - forbidden
+                          - password_change_required
         "404":
           description: 目标用户不存在（或 id 非 UUID）。
           content:
@@ -1197,7 +1213,7 @@ paths:
                         enum:
                           - unauthorized
         "403":
-          description: 已认证但非 Admin 角色。
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
           content:
             application/json:
               schema:
@@ -1208,6 +1224,7 @@ paths:
                       error:
                         enum:
                           - forbidden
+                          - password_change_required
         "404":
           description: 目标用户不存在（或 id 非 UUID）。
           content:
@@ -1345,7 +1362,7 @@ paths:
                         enum:
                           - unauthorized
         "403":
-          description: 已认证但非 Admin 角色。
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
           content:
             application/json:
               schema:
@@ -1356,6 +1373,7 @@ paths:
                       error:
                         enum:
                           - forbidden
+                          - password_change_required
         "404":
           description: 目标用户不存在（或 id 非 UUID）。
           content:
@@ -1429,7 +1447,7 @@ paths:
                         enum:
                           - unauthorized
         "403":
-          description: 已认证但非 Admin 角色。
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
           content:
             application/json:
               schema:
@@ -1440,6 +1458,7 @@ paths:
                       error:
                         enum:
                           - forbidden
+                          - password_change_required
         "404":
           description: 目标用户不存在（或 id 非 UUID）。
           content:

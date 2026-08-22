@@ -10,7 +10,7 @@
     "server/internal/migration/",
     ".scratch/user-system-102-admin-governance-plan.md"
   ],
-  "currentDiffDigest": "sha256:a8f256ca752d2f6953e9fd1fdb8a6d1c59b7778e3152e5e55cf2012f565be8de",
+  "currentDiffDigest": "sha256:f145b1fab72b56af21644116cc397e876803fcd801b63920b0c6414fe3198636",
   "fullReviewCount": 1,
   "targetedReviewRound": 1,
   "findings": [
@@ -239,9 +239,25 @@
   "relevantCheck": {
     "name": "scripts/test-identity-integration.sh",
     "result": "PASS",
-    "coverage": "107 integration tests, zero skips; plus go vet ./... and go test ./... green",
-    "diffDigest": "sha256:a8f256ca752d2f6953e9fd1fdb8a6d1c59b7778e3152e5e55cf2012f565be8de"
+    "coverage": "120 integration tests, zero skips after rebasing onto main@e0e1c4a (#101 merge); plus go vet ./... and go test ./... green",
+    "diffDigest": "sha256:f145b1fab72b56af21644116cc397e876803fcd801b63920b0c6414fe3198636"
   },
   "outcome": "closed",
-  "closure": "Targeted re-review round 1 (reviewer agent): all six repaired blockers closed with evidence, no repair-introduced regression. Advisories CR-STANDARDS-0004 and CR-SPEC-0004 deferred with status closed. Final relevant check scripts/test-identity-integration.sh PASS (107 tests, zero skips) on digest sha256:a8f256ca752d2f6953e9fd1fdb8a6d1c59b7778e3152e5e55cf2012f565be8de, plus go vet ./... and go test ./... green. Reviewer coverage note (non-finding): the upgrade backfill test asserts nullability, not the exact winning timestamp."
+  "closure": "Targeted re-review round 1 (reviewer agent): all six repaired blockers closed with evidence, no repair-introduced regression. Advisories CR-STANDARDS-0004 and CR-SPEC-0004 deferred with status closed. Final relevant check scripts/test-identity-integration.sh PASS (107 tests, zero skips) on digest sha256:a8f256ca752d2f6953e9fd1fdb8a6d1c59b7778e3152e5e55cf2012f565be8de, plus go vet ./... and go test ./... green. Reviewer coverage note (non-finding): the upgrade backfill test asserts nullability, not the exact winning timestamp.",
+  "postCloseAmendments": [
+    {
+      "kind": "integration-rebase",
+      "reason": "main advanced: #101 (self-service password change + PasswordGate) merged while this task was in review",
+      "changes": [
+        "routes/audit/command merges kept both feature sets; governance routes inherit the default-enforced password gate",
+        "contracts: password_change_required added to the 403 enums of all nine new endpoints (the gate can reject a must-change session); directory GET gained a gate-only 403 entry",
+        "auth/account.go (#101) call sites updated to the exported HashPassword and audit.SnapshotSubject seams"
+      ],
+      "checks": [
+        "go vet ./... PASS",
+        "go test ./... PASS",
+        "scripts/test-identity-integration.sh PASS — 120 tests, zero skips"
+      ]
+    }
+  ]
 }
