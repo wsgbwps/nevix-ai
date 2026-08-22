@@ -228,22 +228,27 @@ func TestAllowMethodsDerivesFromTable(t *testing.T) {
 	}
 }
 
-func TestMountGuardsPrivateRoutesAndRegistersPreflightTwins(t *testing.T) {
-	var bearerCalls []string
-	bearer := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			bearerCalls = append(bearerCalls, r.Method+" "+r.URL.Path)
-			next.ServeHTTP(w, r)
-		})
+func TestMountGuardsRoutesByDeclaredPolicyAndRegistersPreflightTwins(t *testing.T) {
+	var activeUserCalls, adminCalls []string
+	record := func(calls *[]string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				*calls = append(*calls, r.Method+" "+r.URL.Path)
+				next.ServeHTTP(w, r)
+			})
+		}
 	}
 	ok := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
 	routes := []command.Route{
-		{Method: http.MethodPost, Path: "/commands/private", Handler: ok},
-		{Method: http.MethodDelete, Path: "/commands/private", Handler: ok},
-		{Method: http.MethodPost, Path: "/commands/public", Public: true, Handler: ok},
+		{Method: http.MethodPost, Path: "/commands/default", Handler: ok},
+		{Method: http.MethodPost, Path: "/commands/public", Guard: command.GuardPublic, Handler: ok},
+		{Method: http.MethodPost, Path: "/commands/admin", Guard: command.GuardAdmin, Handler: ok},
+		{Method: http.MethodDelete, Path: "/commands/admin", Guard: command.GuardAdmin, Handler: ok},
 	}
 	router := chi.NewRouter()
-	router.Group(func(r chi.Router) { command.Mount(r, routes, bearer) })
+	router.Group(func(r chi.Router) {
+		command.Mount(r, routes, command.Guards{ActiveUser: record(&activeUserCalls), Admin: record(&adminCalls)})
+	})
 
 	do := func(method, path string) int {
 		rec := httptest.NewRecorder()
@@ -254,23 +259,40 @@ func TestMountGuardsPrivateRoutesAndRegistersPreflightTwins(t *testing.T) {
 		method, path string
 		want         int
 	}{
-		{http.MethodPost, "/commands/private", http.StatusOK},
-		{http.MethodDelete, "/commands/private", http.StatusOK},
+		{http.MethodPost, "/commands/default", http.StatusOK},
 		{http.MethodPost, "/commands/public", http.StatusOK},
+		{http.MethodPost, "/commands/admin", http.StatusOK},
+		{http.MethodDelete, "/commands/admin", http.StatusOK},
 	} {
 		if got := do(tc.method, tc.path); got != tc.want {
 			t.Fatalf("%s %s: status %d, want %d", tc.method, tc.path, got, tc.want)
 		}
 	}
-	want := []string{"POST /commands/private", "DELETE /commands/private"}
-	if !slices.Equal(bearerCalls, want) {
-		t.Fatalf("bearer saw %v, want it to guard only the private route methods %v", bearerCalls, want)
+	// The zero-value guard is RequireActiveUser: an undeclared route is an
+	// authenticated route, and only the declared public route bypasses it.
+	if want := []string{"POST /commands/default"}; !slices.Equal(activeUserCalls, want) {
+		t.Fatalf("ActiveUser saw %v, want only the default-guard route %v", activeUserCalls, want)
+	}
+	if want := []string{"POST /commands/admin", "DELETE /commands/admin"}; !slices.Equal(adminCalls, want) {
+		t.Fatalf("Admin saw %v, want %v", adminCalls, want)
 	}
 
-	// Every path gets its OPTIONS twin, answered without reaching the guard.
-	for _, path := range []string{"/commands/private", "/commands/public"} {
+	// Every path gets its OPTIONS twin, answered without reaching a guard.
+	for _, path := range []string{"/commands/default", "/commands/public", "/commands/admin"} {
 		if got := do(http.MethodOptions, path); got != http.StatusNoContent {
 			t.Fatalf("OPTIONS %s: status %d, want 204", path, got)
 		}
 	}
+}
+
+func TestMountPanicsWhenAGuardedRouteLacksItsMiddleware(t *testing.T) {
+	ok := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Mount accepted an admin route without the Admin middleware")
+		}
+	}()
+	command.Mount(chi.NewRouter(), []command.Route{
+		{Method: http.MethodGet, Path: "/commands/admin", Guard: command.GuardAdmin, Handler: ok},
+	}, command.Guards{})
 }

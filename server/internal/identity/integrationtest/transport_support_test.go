@@ -1,47 +1,130 @@
-// Shared transport wiring for the HTTP command tests: mounts the Module
-// exactly as the composition root mounts it (a chi Group, where group-scoped
-// middleware runs only on matched routes), so tests assert only the HTTP
-// contract and derived preflight twins behave as in production.
+// Shared transport wiring and HTTP helpers for the command tests: mounts the
+// Module exactly as the composition root mounts it (a chi Group, where
+// group-scoped middleware runs only on matched routes), so tests assert only
+// the HTTP contract and derived preflight twins behave as in production.
 package integrationtest
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity"
 )
 
-// newTransportHandler mounts the Module with the transport configuration
-// pointed at the test key set and whitelist.
-func newTransportHandler(t *testing.T, h *harness, jwksURL string, origins []string) http.Handler {
+// moduleWithConfig constructs a Module on the runtime pool through the same
+// seam as the composition root and mounts its routes.
+func (h *harness) moduleWithConfig(t *testing.T, cfg identity.Config) (*identity.Module, http.Handler) {
 	t.Helper()
-	cfg := h.cfg
-	cfg.JWKSURL = jwksURL
-	cfg.CORSAllowedOrigins = origins
 	m, err := identity.NewModule(context.Background(), h.runtimePool, cfg)
 	if err != nil {
 		t.Fatalf("construct identity module: %v", err)
 	}
 	router := chi.NewRouter()
 	router.Group(func(r chi.Router) { m.Register(r, event.NewInMemoryBus()) })
-	return router
+	return m, router
 }
 
-// commandRouter mounts the Module's external commands through a chi Group
-// exactly as the composition root does, so tests assert only the HTTP
-// contract (group-scoped middleware runs only on matched routes, so the
-// derived preflight twins behave as in production).
+// commandRouter mounts a Module with the harness configuration.
 func (h *harness) commandRouter(t *testing.T) http.Handler {
 	t.Helper()
-	m, err := identity.NewModule(context.Background(), h.runtimePool, h.cfg)
+	_, handler := h.moduleWithConfig(t, h.cfg)
+	return handler
+}
+
+// insertUser creates a user row through the owner credential with a real
+// bcrypt hash, returning its id. Tests that need exact control over state
+// bypass the module for fixture setup.
+func (h *harness) insertUser(t *testing.T, email, password, role, status string, mustChangePassword bool) string {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 	if err != nil {
-		t.Fatalf("construct identity module: %v", err)
+		t.Fatalf("hash fixture password: %v", err)
 	}
-	router := chi.NewRouter()
-	router.Group(func(r chi.Router) { m.Register(r, event.NewInMemoryBus()) })
-	return router
+	var id string
+	if err := h.fixturePool.QueryRow(context.Background(),
+		`INSERT INTO public.users (email, password_hash, display_name, role, status, must_change_password)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		email, string(hash), email, role, status, mustChangePassword,
+	).Scan(&id); err != nil {
+		t.Fatalf("insert fixture user: %v", err)
+	}
+	return id
+}
+
+// loginBody is the login request shape.
+func loginBody(email, password string) []byte {
+	body, _ := json.Marshal(map[string]string{"email": email, "password": password, "device_name": "integration-test"})
+	return body
+}
+
+// loginResponse is the login success shape.
+type loginResponse struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	User      struct {
+		ID                 string `json:"id"`
+		Email              string `json:"email"`
+		DisplayName        string `json:"display_name"`
+		Role               string `json:"role"`
+		MustChangePassword bool   `json:"must_change_password"`
+	} `json:"user"`
+}
+
+// doLogin posts a login and returns status, raw body, and the decoded success
+// body when status is 200.
+func doLogin(t *testing.T, handler http.Handler, email, password string) (int, []byte, loginResponse) {
+	t.Helper()
+	return doLoginFull(t, handler, loginBody(email, password))
+}
+
+func doLoginFull(t *testing.T, handler http.Handler, body []byte) (int, []byte, loginResponse) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/identity/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	var decoded loginResponse
+	if rec.Code == http.StatusOK {
+		if err := json.Unmarshal(rec.Body.Bytes(), &decoded); err != nil {
+			t.Fatalf("login 200 body is not the success shape: %v (%s)", err, rec.Body.String())
+		}
+	}
+	return rec.Code, rec.Body.Bytes(), decoded
+}
+
+// doAuthenticated performs a bearer-authenticated request.
+func doAuthenticated(t *testing.T, handler http.Handler, method, path, token string) (int, []byte) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
+// doLogout posts the logout command with the given session token.
+func doLogout(t *testing.T, handler http.Handler, token string) (int, []byte) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/identity/auth/logout", bytes.NewReader([]byte("{}")))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
+// contains reports whether the raw body contains the exact JSON fragment.
+func contains(body []byte, fragment string) bool {
+	return bytes.Contains(body, []byte(fragment))
 }

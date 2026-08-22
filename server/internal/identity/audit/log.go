@@ -1,13 +1,13 @@
 // Package audit owns immutable Identity Audit Log writes. Commands construct
-// entries from transaction-time profile snapshots; this package validates the
+// entries from transaction-time user snapshots; this package validates the
 // action vocabulary and persists the row without exposing a mutation seam to
-// callers outside the identity Module.
+// callers outside the identity Module. Rows carry no organization dimension
+// (ADR-0009 revision) and are immutable by grant, not by trigger.
 package audit
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -18,67 +18,36 @@ import (
 type Action string
 
 const (
-	InvitationCreated           Action = "invitation_created"
-	InvitationResent            Action = "invitation_resent"
-	InvitationRevoked           Action = "invitation_revoked"
-	InvitationAccepted          Action = "invitation_accepted"
-	MembershipLeft              Action = "membership_left"
-	MemberRemoved               Action = "member_removed"
-	AdminPromoted               Action = "admin_promoted"
-	AdminDemoted                Action = "admin_demoted"
-	AdminRemoved                Action = "admin_removed"
-	OrganizationSettingsUpdated Action = "organization_settings_updated"
+	// BootstrapAdminCreated records the environment-driven creation of the
+	// first admin on an empty deployment (ADR-0015 bootstrap).
+	BootstrapAdminCreated Action = "bootstrap_admin_created"
+	// SessionCreated records a successful login issuing an opaque session.
+	SessionCreated Action = "session_created"
+	// SessionRevoked records a logout ending exactly one session.
+	SessionRevoked Action = "session_revoked"
 )
 
 var validActions = map[Action]struct{}{
-	InvitationCreated:           {},
-	InvitationResent:            {},
-	InvitationRevoked:           {},
-	InvitationAccepted:          {},
-	MembershipLeft:              {},
-	MemberRemoved:               {},
-	AdminPromoted:               {},
-	AdminDemoted:                {},
-	AdminRemoved:                {},
-	OrganizationSettingsUpdated: {},
+	BootstrapAdminCreated: {},
+	SessionCreated:        {},
+	SessionRevoked:        {},
 }
 
-// Subject is a User identity snapshot stored in an Audit Log entry.
+// Subject is a User identity snapshot stored in an Audit Log entry: user_id
+// and display name exactly as they were at write time, deliberately without a
+// foreign key so history survives later renames and deletions (ADR-0009).
 type Subject struct {
 	UserID      string
 	DisplayName string
 }
 
 // Entry is one immutable Audit Log row. A nil Target records an action without
-// a User target, such as an invitation sent to an email address.
+// a second User involved.
 type Entry struct {
-	OrganizationID string
-	Actor          Subject
-	Target         *Subject
-	Action         Action
-	Metadata       map[string]string
-}
-
-var ErrProfileNotFound = errors.New("identity audit: profile not found")
-
-// SnapshotUser records the Profile display name inside the caller's command
-// transaction. A User who has not completed Profile setup is identified by the
-// verified directory email instead, so an otherwise valid trusted command
-// never loses its immutable audit event to an internal error.
-func SnapshotUser(ctx context.Context, tx pgx.Tx, userID string) (Subject, error) {
-	subject := Subject{UserID: userID}
-	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(p.display_name, d.email)
-		 FROM identity.directory AS d
-		 LEFT JOIN public.profiles AS p ON p.user_id = d.id
-		 WHERE d.id = $1`, userID,
-	).Scan(&subject.DisplayName); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Subject{}, ErrProfileNotFound
-		}
-		return Subject{}, fmt.Errorf("identity audit: read user snapshot: %w", err)
-	}
-	return subject, nil
+	Actor    Subject
+	Target   *Subject
+	Action   Action
+	Metadata map[string]string
 }
 
 // Write validates and inserts one immutable Audit Log row in the caller's
@@ -104,10 +73,9 @@ func Write(ctx context.Context, tx pgx.Tx, entry Entry) error {
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO public.audit_logs (
-			organization_id, actor_user_id, actor_display_name,
+			actor_user_id, actor_display_name,
 			target_user_id, target_display_name, action, metadata
-		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
-		entry.OrganizationID,
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
 		entry.Actor.UserID,
 		entry.Actor.DisplayName,
 		targetUserID,

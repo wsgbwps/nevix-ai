@@ -1,8 +1,10 @@
 // Mount-level tests for the Module's transport: Register is mounted through a
 // chi Group exactly like the composition root, so the derived OPTIONS twins,
-// the per-path Allow-Methods values, and the Bearer guard all behave as they
+// the per-path Allow-Methods values, and the authz guards all behave as they
 // will in production (the route-scoped middleware regression shape). No stack
-// required.
+// required: the guard rejects unauthenticated requests before any database
+// work, and the public command's request-shape failure never reaches the
+// service.
 package identity
 
 import (
@@ -13,19 +15,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nevix-ai/server/internal/identity/authjwt"
+	"github.com/nevix-ai/server/internal/authz"
+	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
-	"github.com/nevix-ai/server/internal/identity/organizations"
-	"github.com/nevix-ai/server/internal/identity/verification"
 )
 
 // testModule builds a Module with nil pool dependencies: Register needs only
 // the transport wiring, and no command here reaches the database.
 func testModule() *Module {
+	service := auth.NewService(nil, nil)
 	return &Module{
-		issuer:      verification.NewCodeIssuer(nil, verification.CodeIssuanceConfig{}),
-		orgs:        organizations.NewManager(nil),
-		verifier:    authjwt.NewVerifier("https://auth.nevix.test/.well-known/jwks.json"),
+		auth:        service,
+		guard:       authz.NewGuard(service),
 		corsOrigins: []string{"https://app.nevix.test"},
 	}
 }
@@ -53,13 +54,17 @@ func TestRegisterDerivesPreflightSurfaceFromRouteTable(t *testing.T) {
 	// Whitelisted preflight on every registered path: answered with 204, the
 	// echoed origin, and the table-derived Allow-Methods — never reaching the
 	// command.
-	for _, path := range []string{"/identity/verification-codes", "/identity/organizations"} {
+	for path, wantMethods := range map[string]string{
+		"/identity/auth/login":  "POST, OPTIONS",
+		"/identity/auth/logout": "POST, OPTIONS",
+		"/identity/users/me":    "GET, OPTIONS",
+	} {
 		rec := doMountedRequest(handler, http.MethodOptions, path, whitelistedOrigin)
 		if rec.Code != http.StatusNoContent {
 			t.Fatalf("%s preflight: status %d, want 204", path, rec.Code)
 		}
-		if got := rec.Header().Get("Access-Control-Allow-Methods"); got != "POST, OPTIONS" {
-			t.Fatalf("%s preflight: Allow-Methods %q, want %q", path, got, "POST, OPTIONS")
+		if got := rec.Header().Get("Access-Control-Allow-Methods"); got != wantMethods {
+			t.Fatalf("%s preflight: Allow-Methods %q, want %q", path, got, wantMethods)
 		}
 		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != whitelistedOrigin {
 			t.Fatalf("%s preflight: Allow-Origin %q, want the whitelisted origin", path, got)
@@ -68,7 +73,7 @@ func TestRegisterDerivesPreflightSurfaceFromRouteTable(t *testing.T) {
 
 	// Unknown-origin preflight falls through to the OPTIONS twin: 204 without
 	// any CORS headers, so the browser still enforces the denial.
-	rec := doMountedRequest(handler, http.MethodOptions, "/identity/organizations", "https://evil.example")
+	rec := doMountedRequest(handler, http.MethodOptions, "/identity/users/me", "https://evil.example")
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("unknown-origin preflight: status %d, want 204", rec.Code)
 	}
@@ -80,19 +85,22 @@ func TestRegisterDerivesPreflightSurfaceFromRouteTable(t *testing.T) {
 func TestDerivedPreflightMatchesParameterizedRoutePattern(t *testing.T) {
 	const whitelistedOrigin = "https://app.nevix.test"
 	routes := []command.Route{
-		{Method: http.MethodPost, Path: "/identity/organizations/{organizationID}", Public: true, Handler: func(http.ResponseWriter, *http.Request) {}},
-		{Method: http.MethodDelete, Path: "/identity/organizations/{organizationID}", Public: true, Handler: func(http.ResponseWriter, *http.Request) {}},
+		{Method: http.MethodPost, Path: "/identity/things/{thingID}", Guard: command.GuardPublic, Handler: func(http.ResponseWriter, *http.Request) {}},
+		{Method: http.MethodDelete, Path: "/identity/things/{thingID}", Handler: func(http.ResponseWriter, *http.Request) {}},
 	}
 	router := chi.NewRouter()
 	router.Group(func(r chi.Router) {
 		r.Use(corsMiddleware([]string{whitelistedOrigin}, command.MethodsByPath(routes)))
-		command.Mount(r, routes, func(next http.Handler) http.Handler { return next })
+		command.Mount(r, routes, command.Guards{
+			ActiveUser: func(next http.Handler) http.Handler { return next },
+			Admin:      func(next http.Handler) http.Handler { return next },
+		})
 	})
 
 	rec := doMountedRequest(
 		router,
 		http.MethodOptions,
-		"/identity/organizations/01K1ABCDEF",
+		"/identity/things/01K1ABCDEF",
 		whitelistedOrigin,
 	)
 	if rec.Code != http.StatusNoContent {
@@ -107,26 +115,31 @@ func TestDerivedPreflightMatchesParameterizedRoutePattern(t *testing.T) {
 	}
 }
 
-func TestRegisterGuardsOnlyPrivateRoutes(t *testing.T) {
+func TestRegisterGuardsEveryRouteExceptLogin(t *testing.T) {
 	handler := mountedRegister()
 
-	// The private command without a token never reaches the handler: the
-	// Bearer guard answers with the 401 envelope.
-	rec := doMountedRequest(handler, http.MethodPost, "/identity/organizations", "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("private command: status %d body %s, want 401", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); !strings.Contains(got, `"unauthorized"`) {
-		t.Fatalf("private command envelope %q, want unauthorized", got)
+	// The guarded commands without a session never reach the handler: the
+	// authz guard answers with the 401 envelope.
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/identity/auth/logout"},
+		{http.MethodGet, "/identity/users/me"},
+	} {
+		rec := doMountedRequest(handler, tc.method, tc.path, "")
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s: status %d body %s, want 401", tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Body.String(); !strings.Contains(got, `"unauthorized"`) {
+			t.Fatalf("%s %s envelope %q, want unauthorized", tc.method, tc.path, got)
+		}
 	}
 
-	// The public command without a token reaches the handler, which rejects
-	// the empty body with the request-shape 400 envelope.
-	rec = doMountedRequest(handler, http.MethodPost, "/identity/verification-codes", "")
+	// The public login command without a session reaches the handler, which
+	// rejects the empty body with the request-shape 400 envelope.
+	rec := doMountedRequest(handler, http.MethodPost, "/identity/auth/login", "")
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("public command: status %d body %s, want 400", rec.Code, rec.Body.String())
+		t.Fatalf("public login: status %d body %s, want 400", rec.Code, rec.Body.String())
 	}
 	if got := rec.Body.String(); !strings.Contains(got, `"invalid_request"`) {
-		t.Fatalf("public command envelope %q, want invalid_request", got)
+		t.Fatalf("public login envelope %q, want invalid_request", got)
 	}
 }

@@ -6,6 +6,7 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -39,13 +40,29 @@ func HandleWithRequest[Req, Resp any](fn func(context.Context, *http.Request, Re
 	}
 }
 
+// HandleNoBody adapts a request-only function — the reads that carry no
+// request body — through the same map/encode tail as the decoding
+// adapters.
+func HandleNoBody[Resp any](fn func(context.Context, *http.Request) (Resp, error), mapError func(error) *Error, successStatus int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := fn(r.Context(), r)
+		respond(w, r, resp, err, mapError, successStatus)
+	}
+}
+
 // serve runs the shared pipeline. Request-shape failures (decode, Validate)
 // are answered with their own status and never pass through mapError; domain
 // errors are mapped by mapError, and an unmapped error is logged and
 // collapsed to 500 internal_error.
 func serve[Req, Resp any](w http.ResponseWriter, r *http.Request, fn func(context.Context, Req) (Resp, error), mapError func(error) *Error, successStatus int) {
+	// A JSON `null` body is a shape failure: every command takes a JSON object.
+	var body json.RawMessage
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(&body); err != nil || len(body) == 0 || bytes.Equal(body, []byte("null")) {
+		WriteError(w, &Error{Status: http.StatusBadRequest, Code: "invalid_request", Message: "Request body must be JSON."})
+		return
+	}
 	var req Req
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		WriteError(w, &Error{Status: http.StatusBadRequest, Code: "invalid_request", Message: "Request body must be JSON."})
 		return
 	}
@@ -56,6 +73,13 @@ func serve[Req, Resp any](w http.ResponseWriter, r *http.Request, fn func(contex
 		}
 	}
 	resp, err := fn(r.Context(), req)
+	respond(w, r, resp, err, mapError, successStatus)
+}
+
+// respond is the shared tail of every adapter: map domain errors through
+// mapError (an unmapped error is logged and collapsed to 500 internal_error),
+// then encode the success response with the declared status.
+func respond[Resp any](w http.ResponseWriter, r *http.Request, resp Resp, err error, mapError func(error) *Error, successStatus int) {
 	if err != nil {
 		if mapped := mapError(err); mapped != nil {
 			WriteError(w, mapped)

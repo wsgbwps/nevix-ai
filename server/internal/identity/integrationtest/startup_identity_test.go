@@ -1,13 +1,13 @@
-// Integration tests for the startup execution-identity invariant
-// (identity-execution ticket 01): Module construction succeeds only when the
-// runtime pool authenticates directly as identity_app, and an owner (or any
-// other role) is rejected even when it is permitted to SET ROLE identity_app.
-// Real PostgreSQL roles are the evidence: the harness supplies a runtime pool
-// that logged in as identity_app and an owner pool that only touches fixtures,
-// catalog inspection, and assertions.
+// Integration tests for the startup execution-identity invariant:
+// Module construction succeeds only when the runtime pool authenticates
+// directly as identity_app, and an owner (or any other role) is rejected even
+// when it is permitted to SET ROLE identity_app. Real PostgreSQL roles are
+// the evidence: the harness supplies a runtime pool that logged in as
+// identity_app and an owner pool that only touches fixtures, catalog
+// inspection, and assertions.
 //
 // Opt-in like the rest of the suite: requires the harness
-// (scripts/test-mail-smoke.sh) to export the NEVIX_* variables.
+// (scripts/test-identity-integration.sh) to export the NEVIX_* variables.
 package integrationtest
 
 import (
@@ -35,12 +35,11 @@ func TestIdentityModuleConstructionAcceptsDirectIdentityAppCredential(t *testing
 	defer cancel()
 	h := newHarness(t, ctx)
 
-	// newTransportHandler constructs the Module on the runtime pool through
-	// the same seam as the composition root; a constructed Module must also
-	// be the usable product surface — the guarded command stays reachable.
-	keys := newES256KeyServer(t)
-	handler := newTransportHandler(t, h, keys.server.URL, []string{"http://desktop.nevix.test"})
-	status, body, _ := createOrganizationRequest(handler, "", newRLSOrgID(t), "Startup Identity Org", "")
+	// moduleWithConfig constructs the Module on the runtime pool through the
+	// same seam as the composition root; a constructed Module must also be the
+	// usable product surface — the guarded command stays reachable.
+	_, handler := h.moduleWithConfig(t, h.cfg)
+	status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", "")
 	if status != http.StatusUnauthorized {
 		t.Fatalf("guarded probe through the accepted Module: status %d body %s, want the guard's 401", status, body)
 	}

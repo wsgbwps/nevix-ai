@@ -4,7 +4,7 @@ import { appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const CLASSIFICATIONS = ["desktop", "server", "identity", "e2e", "harness"];
+const CLASSIFICATIONS = ["desktop", "server", "e2e", "harness"];
 
 function startsWith(path, prefix) {
   return path === prefix || path.startsWith(`${prefix}/`);
@@ -47,32 +47,38 @@ export function classifyPaths(paths) {
     }
 
     if (startsWith(path, "server")) checks.add("server");
+    // identity 的服务端与契约变化跑 Server CI（集成套件在 server-ci 内联，
+    // 纯 Postgres）并触发 E2E（Desktop harness 会拉起真 server）。
     if (
       startsWith(path, "server/internal/identity") ||
       isOneOf(path, ["server/go.mod", "server/go.sum"])
     ) {
-      checks.add("identity");
       checks.add("e2e");
     }
     if (startsWith(path, "server/cmd/server")) checks.add("e2e");
 
-    if (startsWith(path, "supabase") || startsWith(path, "contracts")) {
-      checks.add("identity");
+    // contracts 是 Desktop ↔ Server 的 seam:server 契约一致性测试与 Desktop
+    // 消费端都依赖它。
+    if (startsWith(path, "contracts")) {
+      checks.add("server");
+      checks.add("e2e");
+    }
+    if (startsWith(path, "supabase")) {
       checks.add("e2e");
     }
 
+    if (isOneOf(path, ["scripts/test-identity-integration.sh"])) {
+      checks.add("server");
+    }
     if (
       isOneOf(path, [
         "scripts/auth-policy-harness.mjs",
         "scripts/test-auth-policy.sh",
-        "scripts/test-identity-integration.sh",
-        "scripts/test-mail-smoke.sh",
         "scripts/lib/supabase-local-harness.sh",
         "scripts/tests/auth-policy-harness.test.mjs",
         "scripts/tests/supabase-local-harness.test.sh",
       ])
     ) {
-      checks.add("identity");
       checks.add("e2e");
     }
 
@@ -80,27 +86,21 @@ export function classifyPaths(paths) {
       isOneOf(path, ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"])
     ) {
       checks.add("desktop");
-      checks.add("identity");
       checks.add("e2e");
       checks.add("harness");
     }
     if (path === "turbo.json") checks.add("desktop");
     if (isOneOf(path, ["go.work", "go.work.sum"])) {
       checks.add("server");
-      checks.add("identity");
       checks.add("e2e");
     }
 
     if (path === ".github/workflows/desktop-ci.yml") checks.add("desktop");
     if (path === ".github/workflows/server-ci.yml") checks.add("server");
-    if (path === ".github/workflows/mail-smoke-ci.yml") {
-      checks.add("identity");
-    }
     if (path === ".github/workflows/desktop-e2e-ci.yml") checks.add("e2e");
     if (startsWith(path, ".github/actions")) {
-      // Composite actions back the E2E and identity harness jobs that call them.
+      // Composite actions back the E2E harness jobs that call them.
       checks.add("e2e");
-      checks.add("identity");
     }
     if (
       startsWith(path, ".codegraph") ||
