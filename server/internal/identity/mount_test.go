@@ -55,10 +55,17 @@ func TestRegisterDerivesPreflightSurfaceFromRouteTable(t *testing.T) {
 	// echoed origin, and the table-derived Allow-Methods — never reaching the
 	// command.
 	for path, wantMethods := range map[string]string{
-		"/identity/auth/login":           "POST, OPTIONS",
-		"/identity/auth/logout":          "POST, OPTIONS",
-		"/identity/auth/change-password": "POST, OPTIONS",
-		"/identity/users/me":             "GET, PATCH, OPTIONS",
+		"/identity/auth/login":                    "POST, OPTIONS",
+		"/identity/auth/logout":                   "POST, OPTIONS",
+		"/identity/auth/change-password":          "POST, OPTIONS",
+		"/identity/users/me":                      "GET, PATCH, OPTIONS",
+		"/identity/users":                         "GET, POST, OPTIONS",
+		"/identity/admin/users":                   "GET, OPTIONS",
+		"/identity/users/{userID}/disable":        "POST, OPTIONS",
+		"/identity/users/{userID}/reset-password": "POST, OPTIONS",
+		"/identity/users/{userID}/email":          "POST, OPTIONS",
+		"/identity/users/{userID}/role":           "POST, OPTIONS",
+		"/identity/audit-logs":                    "GET, OPTIONS",
 	} {
 		rec := doMountedRequest(handler, http.MethodOptions, path, whitelistedOrigin)
 		if rec.Code != http.StatusNoContent {
@@ -126,6 +133,15 @@ func TestRegisterGuardsEveryRouteExceptLogin(t *testing.T) {
 		{http.MethodPost, "/identity/auth/change-password"},
 		{http.MethodGet, "/identity/users/me"},
 		{http.MethodPatch, "/identity/users/me"},
+		{http.MethodGet, "/identity/users"},
+		{http.MethodPost, "/identity/users"},
+		{http.MethodGet, "/identity/admin/users"},
+		{http.MethodPost, "/identity/users/01K1ABCDEF/disable"},
+		{http.MethodPost, "/identity/users/01K1ABCDEF/reset-password"},
+		{http.MethodPost, "/identity/users/01K1ABCDEF/email"},
+		{http.MethodPost, "/identity/users/01K1ABCDEF/role"},
+		{http.MethodDelete, "/identity/users/01K1ABCDEF"},
+		{http.MethodGet, "/identity/audit-logs"},
 	} {
 		rec := doMountedRequest(handler, tc.method, tc.path, "")
 		if rec.Code != http.StatusUnauthorized {

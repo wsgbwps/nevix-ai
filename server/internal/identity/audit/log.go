@@ -1,7 +1,8 @@
-// Package audit owns immutable Identity Audit Log writes. Commands construct
-// entries from transaction-time user snapshots; this package validates the
-// action vocabulary and persists the row without exposing a mutation seam to
-// callers outside the identity Module. Rows carry no organization dimension
+// Package audit owns the Identity Audit Log: immutable transactional writes
+// (commands construct entries from transaction-time user snapshots; this
+// package validates the action vocabulary and persists the row without
+// exposing a mutation seam to callers outside the identity Module) and the
+// admin-only paginated read. Rows carry no organization dimension
 // (ADR-0009 revision) and are immutable by grant, not by trigger.
 package audit
 
@@ -32,6 +33,22 @@ const (
 	// change the name later audit snapshots attribute, so the trail records
 	// who renamed what.
 	DisplayNameChanged Action = "display_name_changed"
+	// UserCreated records an admin creating an account with an initial
+	// password (must_change_password rides the account row).
+	UserCreated Action = "user_created"
+	// UserDisabled records an admin deactivating an account; the same
+	// transaction revoked every one of its sessions.
+	UserDisabled Action = "user_disabled"
+	// UserPasswordReset records an admin resetting an account's password to
+	// a new initial password; the same transaction revoked its sessions.
+	UserPasswordReset Action = "user_password_reset"
+	// UserEmailChanged records an admin changing an account's login email.
+	UserEmailChanged Action = "user_email_changed"
+	// UserRoleChanged records an admin switching an account between member
+	// and admin.
+	UserRoleChanged Action = "user_role_changed"
+	// UserDeleted records an admin deleting an account that never logged in.
+	UserDeleted Action = "user_deleted"
 )
 
 var validActions = map[Action]struct{}{
@@ -40,6 +57,12 @@ var validActions = map[Action]struct{}{
 	SessionRevoked:        {},
 	PasswordChanged:       {},
 	DisplayNameChanged:    {},
+	UserCreated:           {},
+	UserDisabled:          {},
+	UserPasswordReset:     {},
+	UserEmailChanged:      {},
+	UserRoleChanged:       {},
+	UserDeleted:           {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id
@@ -57,6 +80,20 @@ type Entry struct {
 	Target   *Subject
 	Action   Action
 	Metadata map[string]string
+}
+
+// SnapshotSubject reads the audit subject (id + display name) for one user
+// inside the caller's write transaction, so audit rows record the display
+// name committed at write time (ADR-0009). The shared snapshot seam for every
+// audit-writing command.
+func SnapshotSubject(ctx context.Context, tx pgx.Tx, userID string) (Subject, error) {
+	var subject Subject
+	if err := tx.QueryRow(ctx,
+		`SELECT id, display_name FROM public.users WHERE id = $1`, userID,
+	).Scan(&subject.UserID, &subject.DisplayName); err != nil {
+		return Subject{}, fmt.Errorf("identity audit: snapshot subject: %w", err)
+	}
+	return subject, nil
 }
 
 // Write validates and inserts one immutable Audit Log row in the caller's

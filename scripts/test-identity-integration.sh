@@ -128,6 +128,16 @@ assert_identity_integration_executed() {
     TestSessionSlidingExpiryRefreshesOnUse
     TestExpiredSessionIsRejected
     TestSweepDeletesExpiredSessions
+    TestCreateUserIssuesAccountWithInitialPassword
+    TestDisableUserRevokesAllSessionsImmediately
+    TestLastActiveAdminCannotBeDisabledOrDemoted
+    TestDeleteOnlyAllowsAccountsThatNeverLoggedIn
+    TestResetPasswordRevokesAllSessionsAndRearmsChange
+    TestChangeEmailMovesTheLoginIdentifier
+    TestChangeRoleAdjustsAdminAccessBothWays
+    TestDirectoryShowsActiveUsersToEveryActiveUser
+    TestManagementListShowsEveryAccountToAdminsOnly
+    TestAuditListIsAdminOnlyAndNewestFirst
     TestIdentityModuleConstructionRejectsOwnerCredential
     TestBaselineSchemaIsTheSingleTenantUserSystem
     TestIdentityAppGrantsMatchTheLeastPrivilegeContract
@@ -141,7 +151,7 @@ assert_identity_integration_executed() {
     TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase
     TestApplyIsIdempotentWhenAlreadyCurrent
     TestFailedMigrationRollsBackAndStaysUnrecorded
-    TestConcurrentApplyRunsBaselineExactlyOnce
+    TestConcurrentApplyRunsTheEmbeddedSetExactlyOnce
   )
 
   passed_count="$(grep -Ec '^--- PASS: Test[^/[:space:]]+[[:space:]]+\(' "$output_file" || true)"

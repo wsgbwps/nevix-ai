@@ -80,7 +80,7 @@ func (r *LoginRequest) Validate() *command.Error {
 	if r.Email == nil || r.Password == nil {
 		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_request", Message: "Request body must be JSON with email and password."}
 	}
-	if _, err := normalizeEmail(*r.Email); err != nil {
+	if _, err := NormalizeEmail(*r.Email); err != nil {
 		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_email", Message: "Email must be a bare address."}
 	}
 	if len(r.DeviceName) > maxDeviceNameLength {
@@ -106,7 +106,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (LoginResponse, e
 		// guards direct callers against a nil dereference.
 		return LoginResponse{}, fmt.Errorf("auth: login request missing email or password")
 	}
-	email, err := normalizeEmail(*req.Email)
+	email, err := NormalizeEmail(*req.Email)
 	if err != nil {
 		return LoginResponse{}, errInvalidCredentials
 	}

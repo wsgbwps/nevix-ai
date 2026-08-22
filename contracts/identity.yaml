@@ -455,7 +455,1198 @@ paths:
                       error:
                         enum:
                           - internal_error
+  /identity/users:
+    get:
+      operationId: listUsers
+      summary: 团队目录（活跃用户互见）
+      description: |-
+        返回活跃用户目录（v1 可见性模型：所有活跃用户可见全部活跃用户的 email 与显示名，ADR-0015）。仅返回 status=active 的账号，每条仅含 id、email、display_name 三字段 —— 角色、状态、凭据状态与登录历史只出现在管理列表。按 email 升序，支持共享分页与搜索契约（q 对 email 与 display_name 做不区分大小写的子串匹配）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: 可选搜索词，对 email 与 display_name 做不区分大小写的子串匹配；长度上限 256，超限回答 400 invalid_search。
+          schema:
+            type: string
+            maxLength: 256
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perPage"
+      responses:
+        "200":
+          description: 一页目录。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - users
+                  - page
+                  - per_page
+                  - total
+                properties:
+                  users:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - email
+                        - display_name
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        email:
+                          type: string
+                          format: email
+                        display_name:
+                          type: string
+                  page:
+                    type: integer
+                    minimum: 1
+                  per_page:
+                    type: integer
+                    minimum: 1
+                    maximum: 100
+                  total:
+                    type: integer
+                    description: 匹配搜索条件的总行数（跨页不变）。
+        "400":
+          description: 查询参数不合法 —— invalid_pagination 指 page 非正整数或 per_page 不在 1..100；invalid_search 指搜索词超过 256 字符。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_pagination
+                          - invalid_search
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: must_change_password 为 true：首登改密完成前业务端点被门禁拒绝（#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - password_change_required
+        "500":
+          description: 服务端内部错误。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+    post:
+      operationId: createUser
+      summary: 建号（Admin）
+      description: |-
+        管理员创建账号并设置初始密码（无邮件流程，ADR-0015）。建出的账号固定为 member 角色、active 状态、must_change_password=true（首次登录强制改密）；display_name 省略时取 email 本地部分。同一写事务写入 user_created 审计行。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - initial_password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 裸 RFC 5322 地址，服务端统一按小写规范化；部署内唯一。
+                initial_password:
+                  type: string
+                  description: 初始密码明文；最小长度 8（唯一密码策略）。
+                display_name:
+                  type: string
+                  maxLength: 128
+                  description: 可选显示名；省略或留白时取 email 本地部分。
+      responses:
+        "201":
+          description: 账号已创建，返回完整管理视图。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - user
+                properties:
+                  user:
+                    type: object
+                    required:
+                      - id
+                      - email
+                      - display_name
+                      - role
+                      - status
+                      - must_change_password
+                      - last_login_at
+                      - created_at
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      display_name:
+                        type: string
+                      role:
+                        type: string
+                        enum:
+                          - admin
+                          - member
+                      status:
+                        type: string
+                        enum:
+                          - active
+                          - disabled
+                      must_change_password:
+                        type: boolean
+                      last_login_at:
+                        type:
+                          - string
+                          - "null"
+                        format: date-time
+                        description: 最近一次登录时刻；null 表示从未登录（删除资格判定）。
+                      created_at:
+                        type: string
+                        format: date-time
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体缺 email 或 initial_password；invalid_email 指非裸地址；password_too_short 指初始密码短于 8；invalid_display_name 指显示名超长。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_email
+                          - password_too_short
+                          - invalid_display_name
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "409":
+          description: email 已被另一个账号占用。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - email_taken
+        "500":
+          description: 服务端内部错误，账号未创建。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/admin/users:
+    get:
+      operationId: listUsersForManagement
+      summary: 用户管理列表（Admin）
+      description: |-
+        管理员的全量账号列表：不限状态（含已停用账号），字段为完整管理视图（role、status、must_change_password、last_login_at、created_at）。last_login_at 为 null 表示从未登录（删除资格判定）。按 email 升序，共享分页与搜索契约。member 调用被 RequireAdmin 拒 403。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: 可选搜索词，对 email 与 display_name 做不区分大小写的子串匹配。
+          schema:
+            type: string
+            maxLength: 256
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perPage"
+      responses:
+        "200":
+          description: 一页管理列表。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - users
+                  - page
+                  - per_page
+                  - total
+                properties:
+                  users:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - email
+                        - display_name
+                        - role
+                        - status
+                        - must_change_password
+                        - last_login_at
+                        - created_at
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        email:
+                          type: string
+                          format: email
+                        display_name:
+                          type: string
+                        role:
+                          type: string
+                          enum:
+                            - admin
+                            - member
+                        status:
+                          type: string
+                          enum:
+                            - active
+                            - disabled
+                        must_change_password:
+                          type: boolean
+                        last_login_at:
+                          type:
+                            - string
+                            - "null"
+                          format: date-time
+                          description: 最近一次登录时刻；null 表示从未登录（删除资格判定）。
+                        created_at:
+                          type: string
+                          format: date-time
+                  page:
+                    type: integer
+                    minimum: 1
+                  per_page:
+                    type: integer
+                    minimum: 1
+                    maximum: 100
+                  total:
+                    type: integer
+        "400":
+          description: 查询参数不合法 —— 同目录端点的 invalid_pagination / invalid_search。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_pagination
+                          - invalid_search
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "500":
+          description: 服务端内部错误。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/users/{userID}/disable:
+    post:
+      operationId: disableUser
+      summary: 停用账号（Admin）
+      description: |-
+        停用一个账号并在同一写事务内吊销其全部会话：被停用者的存量会话在下一个请求即失效。停用已停用账号是幂等成功（无审计行）。停用最后一个活跃 Admin（含调用者自己）被拒 409。同一事务写入 user_disabled 审计行。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/userID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: 账号已停用（或本已停用），返回更新后的管理视图。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - user
+                properties:
+                  user:
+                    type: object
+                    required:
+                      - id
+                      - email
+                      - display_name
+                      - role
+                      - status
+                      - must_change_password
+                      - last_login_at
+                      - created_at
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      display_name:
+                        type: string
+                      role:
+                        type: string
+                        enum:
+                          - admin
+                          - member
+                      status:
+                        type: string
+                        enum:
+                          - active
+                          - disabled
+                      must_change_password:
+                        type: boolean
+                      last_login_at:
+                        type:
+                          - string
+                          - "null"
+                        format: date-time
+                        description: 最近一次登录时刻；null 表示从未登录（删除资格判定）。
+                      created_at:
+                        type: string
+                        format: date-time
+        "400":
+          description: 请求体不是 JSON 对象（空对象 {} 即可）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "404":
+          description: 目标用户不存在（或 id 非 UUID）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - user_not_found
+        "409":
+          description: 目标是最后一个活跃 Admin，停用会使部署失去可管理的管理员。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - last_admin_protected
+        "500":
+          description: 服务端内部错误，停用未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/users/{userID}/reset-password:
+    post:
+      operationId: resetUserPassword
+      summary: 重置密码（Admin）
+      description: |-
+        管理员为账号设置新的初始密码：must_change_password 重新置位，并在同一写事务内吊销该用户全部会话（凭据卫生，ADR-0015）。同一事务写入 user_password_reset 审计行。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/userID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - initial_password
+              properties:
+                initial_password:
+                  type: string
+                  description: 新初始密码明文；最小长度 8。
+      responses:
+        "200":
+          description: 密码已重置，返回更新后的管理视图（must_change_password=true）。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - user
+                properties:
+                  user:
+                    type: object
+                    required:
+                      - id
+                      - email
+                      - display_name
+                      - role
+                      - status
+                      - must_change_password
+                      - last_login_at
+                      - created_at
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      display_name:
+                        type: string
+                      role:
+                        type: string
+                        enum:
+                          - admin
+                          - member
+                      status:
+                        type: string
+                        enum:
+                          - active
+                          - disabled
+                      must_change_password:
+                        type: boolean
+                      last_login_at:
+                        type:
+                          - string
+                          - "null"
+                        format: date-time
+                        description: 最近一次登录时刻；null 表示从未登录（删除资格判定）。
+                      created_at:
+                        type: string
+                        format: date-time
+        "400":
+          description: 请求不合法 —— invalid_request 指缺 initial_password；password_too_short 指短于 8。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - password_too_short
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "404":
+          description: 目标用户不存在（或 id 非 UUID）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - user_not_found
+        "500":
+          description: 服务端内部错误，重置未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/users/{userID}/email:
+    post:
+      operationId: changeUserEmail
+      summary: 修改登录 email（Admin）
+      description: |-
+        修改账号的唯一登录标识（email 仅 Admin 可改，ADR-0015）。同一写事务写入 user_email_changed 审计行（metadata 记录 from/to）。目标为另一账号已占用的 email 时回答 409 email_taken。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/userID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 新裸地址，服务端统一按小写规范化。
+      responses:
+        "200":
+          description: email 已更新，返回更新后的管理视图。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - user
+                properties:
+                  user:
+                    type: object
+                    required:
+                      - id
+                      - email
+                      - display_name
+                      - role
+                      - status
+                      - must_change_password
+                      - last_login_at
+                      - created_at
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      display_name:
+                        type: string
+                      role:
+                        type: string
+                        enum:
+                          - admin
+                          - member
+                      status:
+                        type: string
+                        enum:
+                          - active
+                          - disabled
+                      must_change_password:
+                        type: boolean
+                      last_login_at:
+                        type:
+                          - string
+                          - "null"
+                        format: date-time
+                        description: 最近一次登录时刻；null 表示从未登录（删除资格判定）。
+                      created_at:
+                        type: string
+                        format: date-time
+        "400":
+          description: 请求不合法 —— invalid_request 指缺 email；invalid_email 指非裸地址。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_email
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "404":
+          description: 目标用户不存在（或 id 非 UUID）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - user_not_found
+        "409":
+          description: 新 email 已被另一个账号占用。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - email_taken
+        "500":
+          description: 服务端内部错误，修改未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/users/{userID}/role:
+    post:
+      operationId: changeUserRole
+      summary: 调整角色（Admin）
+      description: |-
+        在 member 与 admin 之间切换账号角色。降级最后一个活跃 Admin（含调用者自己）被拒 409。同一写事务写入 user_role_changed 审计行（metadata 记录 from/to）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/userID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role
+              properties:
+                role:
+                  type: string
+                  enum:
+                    - admin
+                    - member
+      responses:
+        "200":
+          description: 角色已更新，返回更新后的管理视图。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - user
+                properties:
+                  user:
+                    type: object
+                    required:
+                      - id
+                      - email
+                      - display_name
+                      - role
+                      - status
+                      - must_change_password
+                      - last_login_at
+                      - created_at
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      display_name:
+                        type: string
+                      role:
+                        type: string
+                        enum:
+                          - admin
+                          - member
+                      status:
+                        type: string
+                        enum:
+                          - active
+                          - disabled
+                      must_change_password:
+                        type: boolean
+                      last_login_at:
+                        type:
+                          - string
+                          - "null"
+                        format: date-time
+                        description: 最近一次登录时刻；null 表示从未登录（删除资格判定）。
+                      created_at:
+                        type: string
+                        format: date-time
+        "400":
+          description: 请求不合法 —— invalid_request 指缺 role；invalid_role 指值不属于两级角色。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_role
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "404":
+          description: 目标用户不存在（或 id 非 UUID）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - user_not_found
+        "409":
+          description: 目标是最后一个活跃 Admin，降级会使部署失去可管理的管理员。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - last_admin_protected
+        "500":
+          description: 服务端内部错误，调整未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/users/{userID}:
+    delete:
+      operationId: deleteUser
+      summary: 删除从未登录的账号（Admin）
+      description: |-
+        删除仅对从未登录过的账号放行（last_login_at 为 null）：清理建错的号，不触碰有历史归属的账号（离职走停用）。审计行刻意不带外键并快照 email，删除后历史仍可读（ADR-0009）。同一事务写入 user_deleted 审计行。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/userID"
+      responses:
+        "200":
+          description: 账号已删除。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - deleted
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "404":
+          description: 目标用户不存在（或 id 非 UUID）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - user_not_found
+        "409":
+          description: 目标账号曾登录过，不可删除；离职收权请使用停用。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - user_has_logged_in
+        "500":
+          description: 服务端内部错误，删除未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/audit-logs:
+    get:
+      operationId: listAuditLogs
+      summary: 审计日志分页（Admin）
+      description: |-
+        按创建时间倒序分页读取审计日志（ADR-0009 修订：客户端直读取消，读取经 Go API 且 admin-only）。member 调用被 RequireAdmin 拒 403。条目快照写入时刻的 actor/target 显示名；metadata 为任意键值对象。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perPage"
+      responses:
+        "200":
+          description: 一页审计日志（newest-first）。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - entries
+                  - page
+                  - per_page
+                  - total
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - action
+                        - actor_user_id
+                        - actor_display_name
+                        - target_user_id
+                        - target_display_name
+                        - metadata
+                        - created_at
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        action:
+                          type: string
+                          description: 审计动作词表（如 session_created、user_created、user_disabled……），由服务端单一写入方校验。
+                        actor_user_id:
+                          type: string
+                          format: uuid
+                        actor_display_name:
+                          type: string
+                          description: 写入时刻的 actor 显示名快照（ADR-0009）。
+                        target_user_id:
+                          type:
+                            - string
+                            - "null"
+                          format: uuid
+                        target_display_name:
+                          type:
+                            - string
+                            - "null"
+                        metadata:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        created_at:
+                          type: string
+                          format: date-time
+                  page:
+                    type: integer
+                    minimum: 1
+                  per_page:
+                    type: integer
+                    minimum: 1
+                    maximum: 100
+                  total:
+                    type: integer
+        "400":
+          description: 查询参数不合法（page 非正整数或 per_page 不在 1..100）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_pagination
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色（审计日志仅 Admin 可见，ADR-0015）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+        "500":
+          description: 服务端内部错误。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
 components:
+  parameters:
+    userID:
+      name: userID
+      in: path
+      required: true
+      description: 目标用户 id（UUID）。
+      schema:
+        type: string
+        format: uuid
+    page:
+      name: page
+      in: query
+      required: false
+      description: 页码，从 1 起，默认 1。
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    perPage:
+      name: per_page
+      in: query
+      required: false
+      description: 每页行数，1..100，默认 20。
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
   schemas:
     Error:
       $ref: "./openapi.yaml#/components/schemas/Error"

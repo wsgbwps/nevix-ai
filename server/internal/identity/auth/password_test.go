@@ -8,9 +8,9 @@ import (
 )
 
 func TestHashPasswordRoundTrips(t *testing.T) {
-	hash, err := hashPassword("correct horse battery")
+	hash, err := HashPassword("correct horse battery")
 	if err != nil {
-		t.Fatalf("hashPassword: %v", err)
+		t.Fatalf("HashPassword: %v", err)
 	}
 	if strings.HasPrefix(hash, "correct") || len(hash) < 20 {
 		t.Fatalf("hash %q does not look like a bcrypt string", hash)
@@ -24,10 +24,10 @@ func TestHashPasswordRoundTrips(t *testing.T) {
 }
 
 func TestHashPasswordEnforcesMinimumLength(t *testing.T) {
-	if _, err := hashPassword("short"); err == nil {
+	if _, err := HashPassword("short"); err == nil {
 		t.Fatal("password shorter than the minimum was accepted")
 	}
-	if err := validateNewPassword(strings.Repeat("x", minPasswordLength)); err != nil {
+	if err := ValidateNewPassword(strings.Repeat("x", minPasswordLength)); err != nil {
 		t.Fatalf("policy-valid password rejected: %v", err)
 	}
 }
@@ -45,17 +45,17 @@ func TestNormalizeEmail(t *testing.T) {
 		"user.name+x@sub.example.com": "user.name+x@sub.example.com",
 	}
 	for raw, want := range valid {
-		got, err := normalizeEmail(raw)
+		got, err := NormalizeEmail(raw)
 		if err != nil {
-			t.Fatalf("normalizeEmail(%q): %v", raw, err)
+			t.Fatalf("NormalizeEmail(%q): %v", raw, err)
 		}
 		if got != want {
-			t.Fatalf("normalizeEmail(%q) = %q, want %q", raw, got, want)
+			t.Fatalf("NormalizeEmail(%q) = %q, want %q", raw, got, want)
 		}
 	}
 	for _, raw := range []string{"", "not-an-email", "Display Name <user@example.com>", "user@example.com extra"} {
-		if _, err := normalizeEmail(raw); err == nil {
-			t.Fatalf("normalizeEmail(%q) accepted a non-bare address", raw)
+		if _, err := NormalizeEmail(raw); err == nil {
+			t.Fatalf("NormalizeEmail(%q) accepted a non-bare address", raw)
 		}
 	}
 }

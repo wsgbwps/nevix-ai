@@ -27,18 +27,21 @@ const maxPasswordBytes = 72
 // cost is revisited only with evidence.
 const bcryptCost = 10
 
-// validateNewPassword enforces the policy for every credential-setting path
-// (bootstrap here; admin-created accounts later).
-func validateNewPassword(password string) error {
+// ValidateNewPassword enforces the policy for every credential-setting path
+// (bootstrap, admin-created accounts, admin resets). Exported so the
+// user-governance request shapes validate against the same single rule.
+func ValidateNewPassword(password string) error {
 	if len(password) < minPasswordLength {
 		return fmt.Errorf("auth: password must be at least %d characters", minPasswordLength)
 	}
 	return nil
 }
 
-// hashPassword returns the bcrypt hash of a policy-valid password.
-func hashPassword(password string) (string, error) {
-	if err := validateNewPassword(password); err != nil {
+// HashPassword returns the bcrypt hash of a policy-valid password. Exported
+// for the user-governance commands, which set credentials through the same
+// single password-policy owner (admin create and reset).
+func HashPassword(password string) (string, error) {
+	if err := ValidateNewPassword(password); err != nil {
 		return "", err
 	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
@@ -55,10 +58,11 @@ func verifyPassword(storedHash, candidate string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(candidate)) == nil
 }
 
-// normalizeEmail canonicalizes a login email: trimmed, lowercased, and a bare
+// NormalizeEmail canonicalizes a login email: trimmed, lowercased, and a bare
 // RFC 5322 address (a display-name form is rejected). Email is the unique
 // login identifier, so every comparison runs on this canonical form.
-func normalizeEmail(raw string) (string, error) {
+// Exported so the user-governance commands validate against the same rule.
+func NormalizeEmail(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	address, err := mail.ParseAddress(trimmed)
 	if err != nil || address.Address != trimmed {

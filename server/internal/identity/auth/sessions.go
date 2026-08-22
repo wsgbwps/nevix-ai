@@ -50,19 +50,6 @@ type userRecord struct {
 	MustChangePassword bool
 }
 
-// snapshotUser reads the audit subject (id + display name) for one user
-// inside the caller's write transaction, so audit rows record the display
-// name committed at write time (ADR-0009).
-func snapshotUser(ctx context.Context, tx pgx.Tx, userID string) (audit.Subject, error) {
-	var subject audit.Subject
-	if err := tx.QueryRow(ctx,
-		`SELECT id, display_name FROM public.users WHERE id = $1`, userID,
-	).Scan(&subject.UserID, &subject.DisplayName); err != nil {
-		return audit.Subject{}, fmt.Errorf("auth: snapshot audit subject: %w", err)
-	}
-	return subject, nil
-}
-
 // newSessionToken returns the opaque bearer token (base64url) and the SHA-256
 // hash persisted in the sessions table. The token itself is never stored.
 func newSessionToken() (string, []byte, error) {
@@ -143,13 +130,35 @@ func (s *Service) refreshSession(ctx context.Context, tokenHash []byte) {
 	}
 }
 
-// issueSession inserts one session row and its audit entry in a single write
-// transaction, returning the server-computed expiry. The audit actor is
-// snapshotted inside the transaction (ADR-0009): the display name recorded
-// is the one committed at write time, not one read before the transaction.
+// issueSession inserts one session row, stamps the account's last_login_at,
+// and writes the audit entry in a single write transaction, returning the
+// server-computed expiry. The transaction first re-verifies the account
+// under its row lock — status still active and the stored password hash
+// still the one Login verified — so a reset-password or disable that commits
+// while this login is in flight can never leave a stale-credential session
+// behind (ADR-0015 revocation immediacy). last_login_at is the durable "has
+// ever logged in" marker admin deletion keys on (issue #102), so it rides
+// the same commit as the session. The audit actor is snapshotted inside the
+// transaction (ADR-0009): the display name recorded is the one committed at
+// write time, not one read before the transaction.
 func (s *Service) issueSession(ctx context.Context, user userRecord, tokenHash []byte, deviceName string) (time.Time, error) {
 	var expiresAt time.Time
 	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+		var currentHash, status string
+		if err := tx.QueryRow(ctx,
+			`SELECT password_hash, status FROM public.users WHERE id = $1 FOR UPDATE`, user.ID,
+		).Scan(&currentHash, &status); err != nil {
+			return fmt.Errorf("auth: lock account for session issuance: %w", err)
+		}
+		if status != "active" {
+			return errAccountDisabled
+		}
+		if currentHash != user.PasswordHash {
+			// The credential changed between verification and this
+			// transaction (an admin reset landed in between): the same uniform
+			// answer as any other wrong password.
+			return errInvalidCredentials
+		}
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO public.sessions (user_id, token_hash, device_name, expires_at)
 			 VALUES ($1, $2, $3, now() + make_interval(secs => $4))
@@ -158,7 +167,12 @@ func (s *Service) issueSession(ctx context.Context, user userRecord, tokenHash [
 		).Scan(&expiresAt); err != nil {
 			return fmt.Errorf("auth: insert session: %w", err)
 		}
-		actor, err := snapshotUser(ctx, tx, user.ID)
+		if _, err := tx.Exec(ctx,
+			`UPDATE public.users SET last_login_at = now() WHERE id = $1`, user.ID,
+		); err != nil {
+			return fmt.Errorf("auth: stamp last login: %w", err)
+		}
+		actor, err := audit.SnapshotSubject(ctx, tx, user.ID)
 		if err != nil {
 			return err
 		}
@@ -193,7 +207,7 @@ func (s *Service) revokeSession(ctx context.Context, principal authz.Principal) 
 		if tag.RowsAffected() == 0 {
 			return nil
 		}
-		actor, err := snapshotUser(ctx, tx, principal.UserID)
+		actor, err := audit.SnapshotSubject(ctx, tx, principal.UserID)
 		if err != nil {
 			return err
 		}

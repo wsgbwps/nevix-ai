@@ -8,6 +8,7 @@ package migration
 
 import (
 	"context"
+	"os"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -26,8 +27,8 @@ func TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply on empty database: %v", err)
 	}
-	if len(applied) != 1 || applied[0].Source.Version != 1 {
-		t.Fatalf("applied %d migrations, want exactly version 1", len(applied))
+	if len(applied) != 2 || applied[0].Source.Version != 1 || applied[1].Source.Version != 2 {
+		t.Fatalf("applied %d migrations, want versions [1 2] in order", len(applied))
 	}
 
 	db := openDB(t, ctx, scratchURL)
@@ -65,16 +66,29 @@ func TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase(t *testing.T) {
 		}
 	}
 
-	// Versions live only in Goose's standard ledger, with the baseline
-	// recorded as applied.
-	var recorded int
-	if err := db.QueryRowContext(ctx,
-		`SELECT count(*) FROM public.goose_db_version WHERE version_id = 1 AND is_applied`,
-	).Scan(&recorded); err != nil {
-		t.Fatalf("read goose ledger: %v", err)
+	// Versions live only in Goose's standard ledger, with the baseline and
+	// its first up-only successor recorded as applied.
+	for _, version := range []int64{1, 2} {
+		var recorded int
+		if err := db.QueryRowContext(ctx,
+			`SELECT count(*) FROM public.goose_db_version WHERE version_id = $1 AND is_applied`, version,
+		).Scan(&recorded); err != nil {
+			t.Fatalf("read goose ledger for version %d: %v", version, err)
+		}
+		if recorded != 1 {
+			t.Fatalf("goose_db_version records version %d %d times, want exactly 1", version, recorded)
+		}
 	}
-	if recorded != 1 {
-		t.Fatalf("goose_db_version records version 1 %d times, want exactly 1", recorded)
+
+	// The up-only successor ran: the never-logged-in marker exists on users.
+	var hasColumn bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'last_login_at')`,
+	).Scan(&hasColumn); err != nil {
+		t.Fatalf("inspect users.last_login_at: %v", err)
+	}
+	if !hasColumn {
+		t.Fatal("users.last_login_at does not exist; migration 0002 did not run")
 	}
 }
 
@@ -130,7 +144,7 @@ func TestFailedMigrationRollsBackAndStaysUnrecorded(t *testing.T) {
 	}
 }
 
-func TestConcurrentApplyRunsBaselineExactlyOnce(t *testing.T) {
+func TestConcurrentApplyRunsTheEmbeddedSetExactlyOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	ownerURL := requireOwnerURL(t)
@@ -161,19 +175,21 @@ func TestConcurrentApplyRunsBaselineExactlyOnce(t *testing.T) {
 		}
 		totalApplied += len(results[i])
 	}
-	if totalApplied != 1 {
-		t.Fatalf("concurrent applies ran the baseline %d times in total, want exactly 1", totalApplied)
+	if totalApplied != 2 {
+		t.Fatalf("concurrent applies ran %d migrations in total, want exactly the 2 embedded ones (each once)", totalApplied)
 	}
 
 	db := openDB(t, ctx, scratchURL)
-	var recorded int
-	if err := db.QueryRowContext(ctx,
-		`SELECT count(*) FROM public.goose_db_version WHERE version_id = 1 AND is_applied`,
-	).Scan(&recorded); err != nil {
-		t.Fatalf("read goose ledger: %v", err)
-	}
-	if recorded != 1 {
-		t.Fatalf("goose_db_version records version 1 %d times, want exactly 1", recorded)
+	for _, version := range []int64{1, 2} {
+		var recorded int
+		if err := db.QueryRowContext(ctx,
+			`SELECT count(*) FROM public.goose_db_version WHERE version_id = $1 AND is_applied`, version,
+		).Scan(&recorded); err != nil {
+			t.Fatalf("read goose ledger for version %d: %v", version, err)
+		}
+		if recorded != 1 {
+			t.Fatalf("goose_db_version records version %d %d times, want exactly 1", version, recorded)
+		}
 	}
 	var usersExists bool
 	if err := db.QueryRowContext(ctx,
@@ -183,5 +199,86 @@ func TestConcurrentApplyRunsBaselineExactlyOnce(t *testing.T) {
 	}
 	if !usersExists {
 		t.Fatal("public.users does not exist after concurrent startup")
+	}
+}
+
+// A baseline-v1 deployment upgrading to the 0002 world keeps the
+// never-logged-in invariant: accounts with live sessions or session_created
+// audit evidence are backfilled as logged-in; an account with no evidence
+// stays NULL (issue #102 review).
+func TestUpgradeFromBaselineBackfillsLastLogin(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	ownerURL := requireOwnerURL(t)
+	scratchURL := scratchDatabase(t, ctx, ownerURL, "nevix_migration_upgrade_backfill")
+
+	// Bring the scratch database to exactly baseline v1: the controlled set
+	// carries only the real 0001 file.
+	baselineSQL, err := os.ReadFile("migrations/0001_baseline_user_system.sql")
+	if err != nil {
+		t.Fatalf("read baseline migration: %v", err)
+	}
+	v1Only := fstest.MapFS{
+		"migrations/0001_baseline_user_system.sql": &fstest.MapFile{Data: baselineSQL},
+	}
+	if _, err := applyFS(ctx, scratchURL, v1Only); err != nil {
+		t.Fatalf("apply baseline v1: %v", err)
+	}
+
+	db := openDB(t, ctx, scratchURL)
+	seed := func(email string) string {
+		var id string
+		if err := db.QueryRowContext(ctx,
+			`INSERT INTO public.users (email, password_hash, display_name, role, status, must_change_password)
+			 VALUES ($1, 'seed-hash', $1, 'member', 'active', false) RETURNING id`, email,
+		).Scan(&id); err != nil {
+			t.Fatalf("seed %s: %v", email, err)
+		}
+		return id
+	}
+	alice := seed("alice@nevix.test") // live session
+	bob := seed("bob@nevix.test")     // no evidence at all
+	carol := seed("carol@nevix.test") // sessions all revoked; audit row remains
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO public.sessions (user_id, token_hash, device_name, expires_at)
+		 VALUES ($1, decode('aa','hex'), 'alice-device', now() + interval '1 day')`, alice,
+	); err != nil {
+		t.Fatalf("seed alice session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO public.audit_logs (actor_user_id, actor_display_name, action, metadata, created_at)
+		 VALUES ($1, 'carol@nevix.test', 'session_created', '{}'::jsonb, now() - interval '2 hours')`, carol,
+	); err != nil {
+		t.Fatalf("seed carol audit row: %v", err)
+	}
+
+	// The production startup path now applies only 0002 (v1 is recorded).
+	applied, err := Apply(ctx, scratchURL)
+	if err != nil {
+		t.Fatalf("upgrade to v2: %v", err)
+	}
+	if len(applied) != 1 || applied[0].Source.Version != 2 {
+		t.Fatalf("upgrade applied %+v, want exactly version 2", applied)
+	}
+
+	lastLogin := func(userID string) (*time.Time, string) {
+		var stamp *time.Time
+		var email string
+		if err := db.QueryRowContext(ctx,
+			`SELECT last_login_at, email FROM public.users WHERE id = $1`, userID,
+		).Scan(&stamp, &email); err != nil {
+			t.Fatalf("read %s: %v", userID, err)
+		}
+		return stamp, email
+	}
+	for _, userID := range []string{alice, carol} {
+		stamp, email := lastLogin(userID)
+		if stamp == nil {
+			t.Fatalf("%s upgraded with NULL last_login_at despite login evidence", email)
+		}
+	}
+	if stamp, email := lastLogin(bob); stamp != nil {
+		t.Fatalf("%s upgraded with last_login_at %v despite never logging in", email, stamp)
 	}
 }
