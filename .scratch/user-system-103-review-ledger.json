@@ -6,7 +6,7 @@
     ".github/workflows/desktop-e2e-ci.yml",
     "pnpm-lock.yaml"
   ],
-  "currentDiffDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+  "currentDiffDigest": "sha256:c13a168abca4c5de82a6e7b173a751ea6b316edcdb4dcd3e5749fb76f86817ce",
   "fullReviewCount": 1,
   "targetedReviewRound": 0,
   "findings": [
@@ -111,7 +111,7 @@
       "disposition": "accepted",
       "dispositionReason": "Security-boundary inconsistency on a trusted write: same seam, weaker posture than the sibling client; one-line fix in current scope.",
       "owner": "apps/desktop/src/renderer/src/features/profile/api/profile.ts",
-      "status": "open",
+      "status": "fixed-pending-review",
       "evidence": [
         "path: features/authentication/api/client.ts request() sets redirect:'error' with comment 'A trusted write must never be replayed against a redirect target'",
         "path: features/profile/api/profile.ts saveProfile/requestMe fetch init has no redirect option (defaults to 'follow')"
@@ -208,7 +208,30 @@
       "introducedBy": null
     }
   ],
-  "repairRecords": [],
+  "repairRecords": [
+    {
+      "fixFor": [
+        "CR-STANDARDS-0005"
+      ],
+      "beforeDigest": "sha256:7a7e07a44f32d87fbda583ebafa14eb68d58d352e38b023087f72369e298d853",
+      "afterDigest": "sha256:c13a168abca4c5de82a6e7b173a751ea6b316edcdb4dcd3e5749fb76f86817ce",
+      "commit": "363d2f4",
+      "touchedPaths": [
+        "apps/desktop/src/renderer/src/features/profile/api/profile.ts (saveProfile fetch init + redirect:'error' with rationale comment; requestMe fetch init + redirect:'error')"
+      ],
+      "hunks": [
+        "saveProfile: added redirect: 'error' + comment before headers",
+        "requestMe: added redirect: 'error'"
+      ],
+      "checks": [
+        "pnpm typecheck PASS",
+        "pnpm lint 0 errors",
+        "pnpm test:unit 64/64 PASS",
+        "pnpm test:component 2/2 PASS",
+        "pnpm test:e2e:settings 5/5 PASS (live profile PATCH against the Go server)"
+      ]
+    }
+  ],
   "relevantCheck": null,
-  "outcome": "needs-fix"
+  "outcome": "needs-targeted-review"
 }
