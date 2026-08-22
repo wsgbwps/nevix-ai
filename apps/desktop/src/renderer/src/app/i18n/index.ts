@@ -23,6 +23,8 @@ export const appTranslations = defineResourceTranslations({
       account: '账户',
       profile: '个人资料',
       language: '语言',
+      server: '服务器',
+      connection: '服务器连接',
       discard: {
         title: '丢弃未保存的更改？',
         description: '离开当前设置将丢弃你的草稿。',
@@ -50,6 +52,8 @@ export const appTranslations = defineResourceTranslations({
       account: 'Account',
       profile: 'Profile',
       language: 'Language',
+      server: 'Server',
+      connection: 'Server connection',
       discard: {
         title: 'Discard unsaved changes?',
         description: 'Leaving these settings will discard your draft.',

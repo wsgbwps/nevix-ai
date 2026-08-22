@@ -5,6 +5,7 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 ## Language
 
 > 2026-08-22：用户系统迁移（#99）已落地到桌面端：组织时代词群随 Organization Feature 一并移除，本词典只剩单租户词汇；账号治理词汇（Admin/Member 等）见 [Server 词典](../../server/CONTEXT.md)，待桌面端 Admin 界面（#105）落地时按需入册。
+> 2026-08-23：连接基座（#104）落地，新增 Server URL / Connection Screen / Connection Probe / Certificate Fingerprint Pin 词群，取代已消亡的「构建期服务器配置」概念。
 
 **User**:
 使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
@@ -17,6 +18,22 @@ _Avoid_: Account, User Management
 **Session**:
 User 在单台设备上的已认证使用状态；opaque token 存于本设备加密存储，多设备会话互相独立，退出登录只结束当前设备。
 _Avoid_: Organization Session, Login State
+
+**Server URL**:
+设备运行时配置的 Go server 基地址（origin），不再构建期烧死；经 IPC 持久化于本机 userData，仅 https 任意主机或 RFC1918/loopback 内网 http 可接受，公网明文 http 被拒绝。
+_Avoid_: Build-time Server Config, API Endpoint（指单个端点而非基地址）
+
+**Connection Screen**:
+设备尚无 Server URL 时首次启动呈现的预登录界面：输入 Server URL、测试连通、保存后重载进入登录；它是 `/connect` 预认证路由的唯一页面，归 connection Feature 所有。
+_Avoid_: Onboarding, Server Setup Wizard, Login Screen
+
+**Connection Probe**:
+主进程对候选 Server URL 的连通验证：先按标准证书验证探活 `/health`，仅对不受信链进入 TOFU 决策；每次探测使用一次性连接，不复用旧 TLS 会话。
+_Avoid_: Health Check（不承载信任决策）, Ping
+
+**Certificate Fingerprint Pin**:
+User 首次确认自签证书时按主机名记下的 SHA-256 指纹；渲染层 fetch 与主进程探测共用同一 pin 判定，指纹不变则放行、变更则告警并要求重新确认，任何路径都不全局跳过验证。
+_Avoid_: Certificate Bypass, Insecure TLS, Trust All Certificates
 
 **Remembered Email**:
 User 在登录界面明确选择后、由当前设备在登录成功时保存并用于预填后续登录的权威邮箱；设备只保存最近一个，取消选择会立即删除。它不是凭据，不延长 Session，退出登录也不会清除它。

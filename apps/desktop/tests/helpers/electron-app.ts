@@ -2,6 +2,7 @@ import { expect, test, type ElectronApplication, type Page } from '@playwright/t
 import { _electron as electron } from 'playwright'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { seedServerConnection } from './server-connection'
 
 const desktopRoot = join(__dirname, '../..')
 const appEntry = join(desktopRoot, 'out/main/index.js')
@@ -9,6 +10,8 @@ const appEntry = join(desktopRoot, 'out/main/index.js')
 interface LaunchTestAppOptions {
   readonly userDataDir: string
   readonly systemLanguages: readonly string[]
+  /** When set, the device boots already connected to this server URL. */
+  readonly serverUrl?: string
   readonly offline?: boolean
   readonly environment?: Readonly<Record<string, string>>
 }
@@ -25,8 +28,7 @@ const FORBIDDEN_CHILD_ENVIRONMENT_KEYS = [
   'NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR',
   'POSTGRES_PASSWORD',
   'POSTGRES_URL',
-  'SMTP_PASS',
-  'VITE_SERVER_URL'
+  'SMTP_PASS'
 ] as const
 
 function desktopProcessEnvironment(): NodeJS.ProcessEnv {
@@ -109,12 +111,15 @@ async function waitForRendererReady(page: Page, diagnostics: TestDiagnostics): P
 export async function launchTestApp({
   userDataDir,
   systemLanguages,
+  serverUrl,
   offline = false,
   environment = {}
 }: LaunchTestAppOptions): Promise<{ electronApp: ElectronApplication; page: Page }> {
   const testEnvironment = { ...environment }
   for (const key of FORBIDDEN_CHILD_ENVIRONMENT_KEYS) delete testEnvironment[key]
   const diagnostics = createTestDiagnostics()
+
+  if (serverUrl) await seedServerConnection(userDataDir, serverUrl)
 
   const electronApp = await electron.launch({
     args: [appEntry, `--user-data-dir=${userDataDir}`],

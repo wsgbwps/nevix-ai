@@ -30,7 +30,11 @@ test('a securely persisted session restores without a fresh login, survives an o
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
   try {
-    let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    let launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       test.skip(
         !(await hasSecurePersistenceBackend(launched.electronApp)),
@@ -79,6 +83,7 @@ test('a securely persisted session restores without a fresh login, survives an o
     launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       offline: true
     })
     try {
@@ -130,7 +135,11 @@ test('a securely persisted session restores without a fresh login, survives an o
       await launched.electronApp.close()
     }
 
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
@@ -158,7 +167,11 @@ test('a revoked stored session is cleared and returns to the localized login bou
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       test.skip(
         !(await hasSecurePersistenceBackend(launched.electronApp)),
@@ -173,7 +186,11 @@ test('a revoked stored session is cleared and returns to the localized login bou
     // An Admin password reset revokes every session of the user in the same write transaction.
     await resetTeamUserPassword(identityServer, user.id, 'rotated horse battery staple')
 
-    const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const relaunched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(
         relaunched.page.getByText('Your session is no longer valid. Sign in again.')
@@ -201,7 +218,11 @@ test('corrupt, unknown, random, and malformed encrypted session envelopes are te
   let encryptedMalformedSession: string | undefined
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       if (await hasSecurePersistenceBackend(launched.electronApp)) {
         encryptedMalformedSession = await launched.electronApp.evaluate(({ safeStorage }) =>
@@ -230,7 +251,11 @@ test('corrupt, unknown, random, and malformed encrypted session envelopes are te
       await mkdir(dirname(sessionPath), { recursive: true })
       await writeFile(sessionPath, envelope, 'utf8')
 
-      const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      const relaunched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['en-US'],
+        serverUrl: identityServer!.serverUrl
+      })
       try {
         await expect(
           relaunched.page.getByText('Your session is no longer valid. Sign in again.')
@@ -260,7 +285,11 @@ test('a failed session replace preserves the previous envelope and clear removes
   const secondSession = firstSession.replaceAll('first-', 'second-')
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       test.skip(
         !(await hasSecurePersistenceBackend(launched.electronApp)),
@@ -317,6 +346,7 @@ test('unavailable secure storage keeps only the runtime session and offline logo
     let launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment
     })
     try {
@@ -351,6 +381,7 @@ test('unavailable secure storage keeps only the runtime session and offline logo
     launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment
     })
     try {
@@ -379,7 +410,11 @@ test('a secure-storage outage keeps the encrypted session envelope and restore s
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
   try {
-    let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    let launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       test.skip(
         !(await hasSecurePersistenceBackend(launched.electronApp)),
@@ -395,6 +430,7 @@ test('a secure-storage outage keeps the encrypted session envelope and restore s
     launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment: { NEVIX_TEST_UNAVAILABLE_SECURE_STORAGE: '1' }
     })
     try {
@@ -409,7 +445,11 @@ test('a secure-storage outage keeps the encrypted session envelope and restore s
       await launched.electronApp.close()
     }
 
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
@@ -442,6 +482,7 @@ test('a corrupt envelope stays terminal and deleted even while secure storage is
     const launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment: { NEVIX_TEST_UNAVAILABLE_SECURE_STORAGE: '1' }
     })
     try {
@@ -472,7 +513,11 @@ test('a transient session read failure keeps the envelope and the read recovers 
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       test.skip(
         !(await hasSecurePersistenceBackend(launched.electronApp)),
@@ -518,6 +563,7 @@ test('Linux basic_text is treated as unavailable and never creates a session fil
     const launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment: { NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: '1' }
     })
     try {

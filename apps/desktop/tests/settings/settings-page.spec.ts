@@ -34,7 +34,11 @@ test('signed-in users reach one focused Settings Section and return to its App s
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-page-presentation-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['zh-CN'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await launched.page.getByLabel('邮箱').fill(identity.email)
@@ -91,7 +95,11 @@ test('Profile display-name editing saves through the identity server and reloads
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-profile-server-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await launched.page.getByLabel('Email').fill(identity.email)
       await launched.page.getByLabel('Password').fill(identity.password)
@@ -137,7 +145,11 @@ test('the Settings Page Select switches the Interface Language without reloading
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-page-language-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['zh-CN'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await launched.page.getByLabel('邮箱').fill(identity.email)
@@ -197,7 +209,11 @@ test('dirty Profile uses one discard decision for Section changes and ordinary c
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-settings-profile-dirty-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['zh-CN'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await launched.page.getByLabel('邮箱').fill(identity.email)
       await launched.page.getByLabel('密码').fill(identity.password)
@@ -314,7 +330,11 @@ test('ordinary close waits for Profile save failure and resumes after a successf
   }
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['zh-CN'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await launched.page.getByLabel('邮箱').fill(identity.email)
       await launched.page.getByLabel('密码').fill(identity.password)

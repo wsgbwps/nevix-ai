@@ -68,7 +68,11 @@ test('the app exposes only managed hidden native edit accelerators', async () =>
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-native-editing-menu-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: process.env.NEVIX_TEST_SERVER_URL
+    })
 
     try {
       const applicationMenuItems = await launched.electronApp.evaluate(({ Menu }) => {
@@ -106,7 +110,11 @@ test('editable controls expose only native edit roles and standard accelerators 
   )
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['zh-CN'],
+      serverUrl: process.env.NEVIX_TEST_SERVER_URL
+    })
 
     try {
       await captureContextMenuPopups(launched.electronApp)

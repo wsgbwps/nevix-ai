@@ -12,12 +12,7 @@ import { isPasswordByteLengthValid, passwordByteLengthError } from '../policy/pa
 import { RememberedEmailPersistenceNotice } from './remembered-email-persistence-notice'
 
 interface AuthenticationScreenProps {
-  readonly status:
-    | 'configuration-error'
-    | 'restoring'
-    | 'restore-failure'
-    | 'unauthenticated'
-    | 'password-change-required'
+  readonly status: 'restoring' | 'restore-failure' | 'unauthenticated' | 'password-change-required'
   readonly error?: AuthenticationError
   readonly notice?: AuthenticationNotice
   readonly isSubmitting?: boolean
@@ -113,16 +108,11 @@ function StatusPanel({
   status,
   onRetryRestore
 }: {
-  readonly status: 'configuration-error' | 'restoring' | 'restore-failure'
+  readonly status: 'restoring' | 'restore-failure'
   readonly onRetryRestore: () => Promise<void>
 }): React.JSX.Element {
   const { t } = useTranslation('authentication')
-  const translationKey =
-    status === 'restoring'
-      ? 'restoring'
-      : status === 'restore-failure'
-        ? 'restoreFailure'
-        : 'configurationError'
+  const translationKey = status === 'restoring' ? 'restoring' : 'restoreFailure'
 
   return (
     <div className="text-center">

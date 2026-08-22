@@ -25,7 +25,8 @@ async function launchForSystemLanguages(
   return launchTestApp({
     userDataDir,
     systemLanguages,
-    offline: true
+    offline: true,
+    serverUrl: identityServer!.serverUrl
   })
 }
 
@@ -120,7 +121,11 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-language-mode-'))
 
   try {
-    let launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+    let launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['zh-CN'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await expectNoLanguageSwitchControl(launched.page)
@@ -194,7 +199,11 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       await launched.electronApp.close()
     }
 
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['zh-CN'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')

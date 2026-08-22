@@ -30,7 +30,11 @@ test(
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-password-visibility-'))
 
     try {
-      const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      const launched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['en-US'],
+        serverUrl: identityServer!.serverUrl
+      })
 
       try {
         const loginPassword = launched.page.getByLabel('Password', { exact: true })

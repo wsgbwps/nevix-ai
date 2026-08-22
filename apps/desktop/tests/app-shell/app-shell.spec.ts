@@ -32,7 +32,11 @@ test(
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-presentation-'))
 
     try {
-      const launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+      const launched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['zh-CN'],
+        serverUrl: identityServer!.serverUrl
+      })
       try {
         await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
         await launched.page.getByLabel('邮箱').fill(identity.email)
@@ -85,7 +89,11 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-collapse-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['zh-CN'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await launched.page.getByLabel('邮箱').fill(identity.email)
@@ -127,7 +135,11 @@ test('the user menu shows the signed-in email and signs out of this device', asy
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-app-shell-user-menu-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['zh-CN'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await launched.page.getByLabel('邮箱').fill(identity.email)

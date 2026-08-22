@@ -29,7 +29,11 @@ test('a session revoked at runtime is cleared on the next launch and cannot rest
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       // The revocation evidence rides the stored envelope across a relaunch, so a backend
       // that persists nothing by design (CI-forced basic_text) cannot exercise it.
@@ -59,7 +63,11 @@ test('a session revoked at runtime is cleared on the next launch and cannot rest
       await launched.electronApp.close()
     }
 
-    const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const relaunched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(
         relaunched.page.getByText('Your session is no longer valid. Sign in again.')

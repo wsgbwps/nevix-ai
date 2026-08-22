@@ -4,18 +4,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp } from '../helpers/electron-app'
 
+const serverUrl = process.env.NEVIX_TEST_SERVER_URL
+
 test('the real Authentication BrowserWindow has hardened web preferences', async () => {
-  test.skip(
-    !process.env.NEVIX_TEST_SERVER_URL,
-    'requires the configured build produced by the E2E command'
-  )
+  test.skip(!serverUrl, 'requires the identity server stack produced by the E2E command')
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-security-'))
 
   try {
     const launched = await launchTestApp({
       userDataDir,
-      systemLanguages: ['en-US']
+      systemLanguages: ['en-US'],
+      serverUrl
     })
 
     try {
@@ -70,17 +70,15 @@ test('the real Authentication BrowserWindow has hardened web preferences', async
 })
 
 test('the preload bridge rejects IPC channels outside the runtime allowlist', async () => {
-  test.skip(
-    !process.env.NEVIX_TEST_SERVER_URL,
-    'requires the configured build produced by the E2E command'
-  )
+  test.skip(!serverUrl, 'requires the identity server stack produced by the E2E command')
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-allowlist-'))
 
   try {
     const launched = await launchTestApp({
       userDataDir,
-      systemLanguages: ['en-US']
+      systemLanguages: ['en-US'],
+      serverUrl
     })
 
     try {
@@ -138,9 +136,8 @@ test('the preload bridge rejects IPC channels outside the runtime allowlist', as
   }
 })
 
-test('CSP allows only this build server origin and blocks a sentinel origin', async () => {
-  const serverUrl = process.env.NEVIX_TEST_SERVER_URL
-  test.skip(!serverUrl, 'requires the configured build produced by the E2E command')
+test('CSP allows only the runtime server origin and blocks a sentinel origin', async () => {
+  test.skip(!serverUrl, 'requires the identity server stack produced by the E2E command')
   if (!serverUrl) return
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-csp-'))
@@ -148,7 +145,8 @@ test('CSP allows only this build server origin and blocks a sentinel origin', as
   try {
     const launched = await launchTestApp({
       userDataDir,
-      systemLanguages: ['en-US']
+      systemLanguages: ['en-US'],
+      serverUrl
     })
 
     try {
@@ -193,13 +191,17 @@ test('CSP allows only this build server origin and blocks a sentinel origin', as
         blockedUri: 'https://csp-sentinel.invalid/auth/v1/health'
       })
 
-      const connectSource = result.policy
+      // The static meta policy carries the non-runtime directives and must
+      // not freeze connect-src: that source is injected per document from the
+      // device's runtime server connection.
+      const directives = result.policy
         .split(';')
         .map((directive) => directive.trim())
-        .find((directive) => directive.startsWith('connect-src '))
-      expect(connectSource).toBe(`connect-src ${new URL(serverUrl).origin}`)
-      expect(connectSource).not.toContain('*')
-      expect(connectSource).not.toMatch(/(?:^|\s)(?:http:|https:|ws:|wss:)(?:\s|$)/)
+        .filter((directive) => directive.length > 0)
+      expect(directives).toContain("script-src 'self'")
+      expect(directives).toContain("object-src 'none'")
+      expect(directives.some((directive) => directive.startsWith('connect-src'))).toBe(false)
+      expect(directives.some((directive) => directive.startsWith('default-src'))).toBe(false)
     } finally {
       await launched.electronApp.close()
     }

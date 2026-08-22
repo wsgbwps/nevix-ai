@@ -48,7 +48,8 @@ test(
     try {
       const launched = await launchTestApp({
         userDataDir,
-        systemLanguages: ['en-US']
+        systemLanguages: ['en-US'],
+        serverUrl: identityServer!.serverUrl
       })
 
       try {
@@ -76,7 +77,11 @@ test('a successful password login securely remembers the authoritative email ind
   const identity = uniqueIdentity('remembered-success')
   await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-success-'))
-  let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+  let launched = await launchTestApp({
+    userDataDir,
+    systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl
+  })
 
   try {
     if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
@@ -115,7 +120,11 @@ test('a successful password login securely remembers the authoritative email ind
       rm(join(userDataDir, 'authentication-session.enc'), { force: true }),
       rm(join(userDataDir, 'authentication-session.enc.pending'), { force: true })
     ])
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     await expect(launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })).toBeVisible()
     await expect(launched.page.getByLabel('Email')).toHaveValue(identity.email)
     await expect(launched.page.getByLabel('Password')).toBeFocused()
@@ -135,7 +144,11 @@ test('a failed password login keeps typed input without replacing the saved emai
   const savedEmail = 'previously-verified@example.com'
   const failedIdentity = uniqueIdentity('remembered-failed')
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-failed-'))
-  let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+  let launched = await launchTestApp({
+    userDataDir,
+    systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl
+  })
 
   try {
     if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
@@ -148,7 +161,11 @@ test('a failed password login keeps typed input without replacing the saved emai
       savedEmail
     )
     await launched.electronApp.close()
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
 
     await launched.page.getByLabel('Email').fill(failedIdentity.email)
     await launched.page.getByLabel('Password').fill(failedIdentity.password)
@@ -159,7 +176,11 @@ test('a failed password login keeps typed input without replacing the saved emai
     await expect(launched.page.getByLabel('Email')).toHaveValue(failedIdentity.email)
 
     await launched.electronApp.close()
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     await expect(launched.page.getByLabel('Email')).toHaveValue(savedEmail)
     await expect(launched.page.getByLabel('Password')).toBeFocused()
   } finally {
@@ -178,7 +199,11 @@ test('clearing Remembered Email is immediate and reselecting does not save unver
   const seededEmail = 'remembered@example.com'
   const unverifiedEmail = 'not-verified@example.com'
   const recordPath = join(userDataDir, rememberedEmailFileName)
-  let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+  let launched = await launchTestApp({
+    userDataDir,
+    systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl
+  })
 
   try {
     if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
@@ -193,7 +218,11 @@ test('clearing Remembered Email is immediate and reselecting does not save unver
     await expect.poll(() => fileExists(recordPath)).toBe(true)
 
     await launched.electronApp.close()
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     await expect(launched.page.getByLabel('Email')).toHaveValue(seededEmail)
 
     await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).uncheck()
@@ -203,7 +232,11 @@ test('clearing Remembered Email is immediate and reselecting does not save unver
     await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).check()
     await launched.page.getByLabel('Email').fill(unverifiedEmail)
     await launched.electronApp.close()
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
 
     await expect(launched.page.getByLabel('Email')).toHaveValue('')
     await expect(launched.page.getByLabel('Email')).toBeFocused()
@@ -230,6 +263,7 @@ test(
     let launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment: { NEVIX_TEST_REMEMBERED_EMAIL_CLEAR_DELAY_MS: '5000' }
     })
 
@@ -272,7 +306,11 @@ test(
         rm(join(userDataDir, 'authentication-session.enc'), { force: true }),
         rm(join(userDataDir, 'authentication-session.enc.pending'), { force: true })
       ])
-      launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      launched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['en-US'],
+        serverUrl: identityServer!.serverUrl
+      })
       await expect(launched.page.getByLabel('Email')).toHaveValue(identity.email)
     } finally {
       await launched.electronApp.close().catch(() => undefined)
@@ -295,6 +333,7 @@ test(
     const launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment: { NEVIX_TEST_REMEMBERED_EMAIL_CLEAR_DELAY_MS: '3000' }
     })
     const persistenceNotice = launched.page.getByText(
@@ -346,6 +385,7 @@ test(
     const launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment: { NEVIX_TEST_REMEMBERED_EMAIL_CLEAR_DELAY_MS: '3000' }
     })
     const persistenceNotice = launched.page.getByText(
@@ -400,7 +440,11 @@ test('a failed clear keeps the preference selected and explains that secure stor
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-clear-failure-'))
   const recordPath = join(userDataDir, rememberedEmailFileName)
-  let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+  let launched = await launchTestApp({
+    userDataDir,
+    systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl
+  })
 
   try {
     if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
@@ -413,7 +457,11 @@ test('a failed clear keeps the preference selected and explains that secure stor
       'cannot-clear@example.com'
     )
     await launched.electronApp.close()
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     await expect(launched.page.getByLabel('Email')).toHaveValue('cannot-clear@example.com')
 
     await rm(recordPath, { force: true })
@@ -445,7 +493,11 @@ test(
     await createStableTeamUser(identityServer, identity)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-login-recovery-'))
     const recordPath = join(userDataDir, rememberedEmailFileName)
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     const persistenceNotice = launched.page.getByText(
       'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
     )
@@ -499,7 +551,11 @@ test('a new login boundary restores the selected default when no Remembered Emai
   const identity = uniqueIdentity('remembered-default-reset')
   await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-default-reset-'))
-  const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+  const launched = await launchTestApp({
+    userDataDir,
+    systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl
+  })
 
   try {
     await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).uncheck()
@@ -533,6 +589,7 @@ test('unavailable secure storage keeps Remembered Email only in the current proc
   let launched = await launchTestApp({
     userDataDir,
     systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl,
     environment: unavailableEnvironment
   })
 
@@ -561,6 +618,7 @@ test('unavailable secure storage keeps Remembered Email only in the current proc
     launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment: unavailableEnvironment
     })
     await expect(launched.page.getByLabel('Email')).toHaveValue('')
@@ -585,6 +643,7 @@ test('an encryption failure keeps the new email in memory without writing plaint
   let launched = await launchTestApp({
     userDataDir,
     systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl,
     environment: failureEnvironment
   })
 
@@ -614,6 +673,7 @@ test('an encryption failure keeps the new email in memory without writing plaint
     launched = await launchTestApp({
       userDataDir,
       systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl,
       environment: failureEnvironment
     })
     await expect(launched.page.getByLabel('Email')).toHaveValue('')
@@ -636,7 +696,11 @@ test(
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-notice-recovery-'))
     const pendingPath = join(userDataDir, `${rememberedEmailFileName}.pending`)
     await mkdir(pendingPath)
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     const persistenceNotice = launched.page.getByText(
       'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
     )
@@ -690,7 +754,11 @@ test('a failed atomic write keeps the previous encrypted record and the new in-p
   const pendingPath = `${recordPath}.pending`
   const previousEmail = 'previous-write@example.com'
   const replacementEmail = 'replacement-write@example.com'
-  let launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+  let launched = await launchTestApp({
+    userDataDir,
+    systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl
+  })
 
   try {
     if (!(await hasSecurePersistenceBackend(launched.electronApp))) {
@@ -722,7 +790,11 @@ test('a failed atomic write keeps the previous encrypted record and the new in-p
 
     await launched.electronApp.close()
     await rm(pendingPath, { recursive: true, force: true })
-    launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     await expect(launched.page.getByLabel('Email')).toHaveValue(previousEmail)
   } finally {
     await launched.electronApp.close().catch(() => undefined)
@@ -741,7 +813,11 @@ test('a corrupt Remembered Email record is deleted with a generic internal warni
   const sensitiveMarker = 'must-not-leak@example.com'
   await writeFile(recordPath, JSON.stringify({ version: 99, ciphertext: sensitiveMarker }))
 
-  const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+  const launched = await launchTestApp({
+    userDataDir,
+    systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl
+  })
   try {
     await expect(launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })).toBeVisible()
     await expect(launched.page.getByLabel('Email')).toHaveValue('')
@@ -779,7 +855,11 @@ test(
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-remembered-email-unreadable-'))
     const recordPath = join(userDataDir, rememberedEmailFileName)
     await mkdir(recordPath)
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
 
     try {
       await expect(
@@ -825,6 +905,7 @@ test('Linux basic_text keeps Remembered Email in memory without creating a recor
   const launched = await launchTestApp({
     userDataDir,
     systemLanguages: ['en-US'],
+    serverUrl: identityServer!.serverUrl,
     environment: { NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE: '1' }
   })
 

@@ -1,5 +1,3 @@
-import { readServerPublicConfig } from '../../../lib/server-public-config'
-
 /** The minimum a Profile call needs from the current session: the opaque token. */
 export interface AuthenticatedProfileSession {
   readonly token: string
@@ -13,19 +11,20 @@ export interface Profile {
  * Reads the account's display name from the trusted data plane. `undefined` means
  * the server answer could not be read as an account; callers treat it as a load failure.
  */
-export async function readProfile(session: AuthenticatedProfileSession): Promise<Profile> {
-  const user = await requestMe(session)
+export async function readProfile(
+  session: AuthenticatedProfileSession,
+  serverUrl: string
+): Promise<Profile> {
+  const user = await requestMe(session, serverUrl)
   return { displayName: user.display_name }
 }
 
 export async function saveProfile(
   session: AuthenticatedProfileSession,
+  serverUrl: string,
   displayName: string
 ): Promise<Profile> {
-  const config = readServerPublicConfig()
-  if (!config) throw new Error('Server configuration is unavailable.')
-
-  const response = await fetch(new URL('/identity/users/me', config.url), {
+  const response = await fetch(new URL('/identity/users/me', serverUrl), {
     method: 'PATCH',
     // A trusted write must never be replayed against a redirect target.
     redirect: 'error',
@@ -50,13 +49,13 @@ export async function saveProfile(
   return { displayName: saved }
 }
 
-async function requestMe(session: AuthenticatedProfileSession): Promise<{
+async function requestMe(
+  session: AuthenticatedProfileSession,
+  serverUrl: string
+): Promise<{
   readonly display_name: string
 }> {
-  const config = readServerPublicConfig()
-  if (!config) throw new Error('Server configuration is unavailable.')
-
-  const response = await fetch(new URL('/identity/users/me', config.url), {
+  const response = await fetch(new URL('/identity/users/me', serverUrl), {
     redirect: 'error',
     headers: { Authorization: `Bearer ${session.token}` }
   })

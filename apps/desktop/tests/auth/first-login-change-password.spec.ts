@@ -50,7 +50,11 @@ test(
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-first-login-'))
 
     try {
-      const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      const launched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['en-US'],
+        serverUrl: identityServer!.serverUrl
+      })
       try {
         await signIn(launched.page, identity)
 
@@ -119,7 +123,11 @@ test(
       }
 
       // The replacement password signs in straight to the App Shell — no second forced change.
-      const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+      const relaunched = await launchTestApp({
+        userDataDir,
+        systemLanguages: ['en-US'],
+        serverUrl: identityServer!.serverUrl
+      })
       try {
         await signIn(relaunched.page, { email: identity.email, password: REPLACEMENT_PASSWORD })
         await expect(
@@ -146,7 +154,11 @@ test('a mismatched confirmation and a short new password never reach the server'
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-first-login-validation-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await signIn(launched.page, identity)
       await expect(launched.page.getByRole('heading', { name: 'Set a new password' })).toBeVisible()
@@ -193,7 +205,11 @@ test('signing out from the forced change boundary keeps the account pending, and
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-first-login-escape-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await signIn(launched.page, identity)
       await expect(launched.page.getByRole('heading', { name: 'Set a new password' })).toBeVisible()
@@ -223,7 +239,11 @@ test('a stored session that still owes the change returns to the forced change b
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-first-login-restore-'))
 
   try {
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const launched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       // Relaunching a stored gated session requires a backend that actually persists the
       // envelope; CI-forced basic_text stores nothing by design.
@@ -238,7 +258,11 @@ test('a stored session that still owes the change returns to the forced change b
       await launched.electronApp.close()
     }
 
-    const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    const relaunched = await launchTestApp({
+      userDataDir,
+      systemLanguages: ['en-US'],
+      serverUrl: identityServer!.serverUrl
+    })
     try {
       await expect(
         relaunched.page.getByRole('heading', { name: 'Set a new password' })
