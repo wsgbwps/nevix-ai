@@ -2,7 +2,11 @@ import { expect, test, type Page } from '@playwright/test'
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
+import {
+  hasSecurePersistenceBackend,
+  launchTestApp,
+  signOutFromUserMenu
+} from '../helpers/electron-app'
 import {
   createTeamUser,
   loginOutsideDesktop,
