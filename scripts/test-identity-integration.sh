@@ -127,9 +127,16 @@ assert_identity_integration_executed() {
     TestBaselineSchemaIsTheSingleTenantUserSystem
     TestIdentityAppGrantsMatchTheLeastPrivilegeContract
     TestReapplyingMigrationsIsANoOp
-    TestMigrationRunnerRejectsVersionsMissingFromTheBinary
+    TestBaselineDropsTheLegacyWorldAndRebuilds
     TestRunRejectsOwnerCredential
     TestRunAcceptsDirectIdentityAppCredential
+  )
+  # Goose migration-engine sentinels live in the migration package.
+  local -a migration_tests=(
+    TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase
+    TestApplyIsIdempotentWhenAlreadyCurrent
+    TestFailedMigrationRollsBackAndStaysUnrecorded
+    TestConcurrentApplyRunsBaselineExactlyOnce
   )
 
   passed_count="$(grep -Ec '^--- PASS: Test[^/[:space:]]+[[:space:]]+\(' "$output_file" || true)"
@@ -146,7 +153,7 @@ assert_identity_integration_executed() {
     return 1
   fi
 
-  for test_name in "${representative_tests[@]}"; do
+  for test_name in "${representative_tests[@]}" "${migration_tests[@]}"; do
     if ! grep -Fq -- "--- PASS: ${test_name} " "$output_file"; then
       echo "error: requested Identity integration sentinel '$test_name' did not pass." >&2
       echo "Run ./scripts/test-identity-integration.sh from the repository root and inspect the test output above." >&2
@@ -155,7 +162,7 @@ assert_identity_integration_executed() {
   done
 
   echo "==> Verified $passed_count Identity integration tests executed with zero skips"
-  printf '    representative PASS: %s\n' "${representative_tests[@]}"
+  printf '    representative PASS: %s\n' "${representative_tests[@]}" "${migration_tests[@]}"
 }
 
 echo "==> Running Go Identity integration tests"
@@ -173,11 +180,12 @@ export NEVIX_ADMIN_INITIAL_PASSWORD="initial-password-123"
 
 identity_test_log="$(mktemp -t nevix-identity-integration.XXXXXX)"
 set +e
-# One recursive, serialized invocation covers the whole identity tree: the
-# Module-seam integration suite, the writetx real-role evidence, and the
-# package-local tests all ride one PostgreSQL stack. -p 1 serializes packages
-# because they share one database whose state the tests reset between cases.
-go test -C server -race -count=1 -p 1 -v ./internal/identity/... | tee "$identity_test_log"
+# One recursive, serialized invocation covers the identity and migration
+# trees: the Module-seam integration suite, the writetx real-role evidence,
+# the Goose-backed migration engine, and the package-local tests all ride one
+# PostgreSQL stack. -p 1 serializes packages because they share one database
+# whose state the tests reset between cases.
+go test -C server -race -count=1 -p 1 -v ./internal/identity/... ./internal/migration/... | tee "$identity_test_log"
 test_status="${PIPESTATUS[0]}"
 set -e
 if [[ "$test_status" -ne 0 ]]; then

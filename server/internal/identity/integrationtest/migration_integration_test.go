@@ -1,13 +1,12 @@
 // Schema-baseline evidence (issue #100): the migrations applied by the
 // production runner create the single-tenant user system — no RLS, no
 // organization dimension, no identity schema — with the least-privilege
-// identity_app grants, and the embedded set only grows. Catalog inspection
-// runs on the owner credential.
+// identity_app grants, and re-apply is a no-op (Goose ledger, issue #108).
+// Catalog inspection runs on the owner credential.
 package integrationtest
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -25,29 +24,6 @@ func TestReapplyingMigrationsIsANoOp(t *testing.T) {
 	}
 	if len(applied) != 0 {
 		t.Fatalf("re-apply ran %d migrations (%v), want 0: versions must be recorded exactly once", len(applied), applied)
-	}
-}
-
-func TestMigrationRunnerRejectsVersionsMissingFromTheBinary(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-	h := newHarness(t, ctx)
-
-	if _, err := h.fixturePool.Exec(ctx,
-		`INSERT INTO public.schema_migrations (version, name) VALUES (999999, 'phantom')`,
-	); err != nil {
-		t.Fatalf("insert phantom version: %v", err)
-	}
-	defer func() {
-		if _, err := h.fixturePool.Exec(context.WithoutCancel(ctx), `DELETE FROM public.schema_migrations WHERE version = 999999`); err != nil {
-			t.Fatalf("remove phantom version: %v", err)
-		}
-	}()
-
-	if _, err := migration.Apply(ctx, h.ownerURL); err == nil {
-		t.Fatal("apply accepted a database recording a version the binary does not embed; the embedded set must only grow")
-	} else if !strings.Contains(err.Error(), "999999") {
-		t.Fatalf("apply error %v does not name the phantom version", err)
 	}
 }
 

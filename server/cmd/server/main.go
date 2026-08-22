@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,7 +58,7 @@ func run() error {
 		return err
 	}
 	for _, m := range applied {
-		log.Printf("migration applied: %04d_%s", m.Version, m.Name)
+		log.Printf("migration applied: %s", strings.TrimSuffix(filepath.Base(m.Source.Path), filepath.Ext(m.Source.Path)))
 	}
 	if len(applied) == 0 {
 		log.Println("migrations current; nothing to apply")
