@@ -1,0 +1,304 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "1b5fa30",
+  "scopePaths": [
+    "apps/desktop/src/main/connection/**",
+    "apps/desktop/src/shared/config/server-url.ts",
+    "apps/desktop/src/shared/ipc/connection/**",
+    "apps/desktop/src/shared/ipc/channel-allowlist.ts",
+    "apps/desktop/src/renderer/src/features/connection/**",
+    "apps/desktop/src/renderer/src/app/connection-state.tsx",
+    "apps/desktop/src/renderer/src/app/routes/connect.tsx",
+    "apps/desktop/src/renderer/src/app/startup-surface.ts",
+    "apps/desktop/src/renderer/src/app/settings/**",
+    "apps/desktop/src/renderer/src/app/App.tsx",
+    "apps/desktop/src/renderer/src/app/routes/__root.tsx",
+    "apps/desktop/src/renderer/src/app/routes/auth.tsx",
+    "apps/desktop/src/renderer/index.html",
+    "apps/desktop/electron.vite.config.ts",
+    "apps/desktop/playwright-ct.config.ts",
+    "apps/desktop/scripts/run-e2e.sh",
+    "apps/desktop/tests/connection/**",
+    "apps/desktop/tests/helpers/**",
+    "apps/desktop/tests/unit/server-url.test.mts",
+    "apps/desktop/tests/unit/connection-runtime.test.mts",
+    "apps/desktop/tests/unit/startup-surface.test.mts",
+    "apps/desktop/tests/**",
+    "apps/desktop/src/renderer/src/features/authentication/**",
+    "apps/desktop/src/renderer/src/features/profile/**",
+    "apps/desktop/src/main/window/main-window.ts",
+    "apps/desktop/src/main/index.ts",
+    "apps/desktop/CONTEXT.md",
+    "apps/desktop/AGENTS.md",
+    "apps/desktop/docs/adr/0004-renderer-routing-topology.md",
+    ".scratch/user-system-104-connection-plan.md"
+  ],
+  "currentDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 0,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/main/connection/ipc/",
+        "source": "apps/desktop/AGENTS.md — Domain ownership and IPC (handler 文件职责；main/window/ipc/ordinary-close-contract.ts 先例)",
+        "anchor": "apps/desktop/src/main/connection/ipc/test-server.ts#readRequestUrl",
+        "defect": "请求解析助手从 test-server Channel Handler 导出并被 save/trust 两个 Handler 复用，三个 Handler 文件耦合"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "结构性耦合（潜在 Shotgun Surgery），无行为缺陷；按 lifecycle 契约不在本收敛环内修复，留待 connection Domain 下次演进时移入独立 request-url.ts。",
+      "owner": "apps/desktop/src/main/connection/ipc/",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/src/main/connection/ipc/save-server.ts",
+          "observation": "import { readRequestUrl } from './test-server' — Handler 间横向依赖"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/main/connection/",
+        "source": "Fowler smell baseline — Duplicated Code / Mysterious Name",
+        "anchor": "apps/desktop/src/main/connection/ipc/trust-certificate.ts#FINGERPRINT_PATTERN",
+        "defect": "sha256 hex 指纹格式校验在 certificate-pins.ts、trust-certificate.ts、connection-store.ts 三处重复，且 store 侧对坏指纹返回误导性的 invalid-url"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "重复常量漂移风险，当前三处语义一致、无行为缺陷；收敛为单一导出留待后续。",
+      "owner": "apps/desktop/src/main/connection/",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/src/main/connection/certificate-pins.ts#FINGERPRINT_PATTERN",
+          "observation": "/^[a-f0-9]{64}$/ 三处出现"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0003",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/connection/ui/certificate-decision.tsx",
+        "source": "Fowler smell baseline — Speculative Generality",
+        "anchor": "certificate-decision.tsx#isTrusting",
+        "defect": "isTrusting 恒为 false（trusting 态下组件已卸载），certificate.trusting 文案与禁用分支不可达"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "不可达 UI 分支，无行为破坏（信任请求通常 <100ms）；清理留待后续。",
+      "owner": "apps/desktop/src/renderer/src/features/connection/ui/certificate-decision.tsx",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/src/renderer/src/features/connection/ui/connection-screen.tsx",
+          "observation": "CertificateDecision 仅在 state.kind === 'certificate' 时渲染，isTrusting 传 false"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0004",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+        "source": "Fowler smell baseline — Primitive Obsession",
+        "anchor": "settings-page.tsx#connection.url ?? ''",
+        "defect": "以空串哨兵传入 ProfileSettings 的 serverUrl（ServerConnectionSettings 则用 string | undefined），若可达会在 new URL(path, '') 抛错"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "ProfileSettings 仅在 authenticated 下渲染，而 authenticated 蕴含 configured，空串不可达；类型收紧留待后续。",
+      "owner": "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+          "observation": "serverUrl={connection.url ?? ''} 与 settings 页 authenticated 门卫并存"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0005",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/app/settings/settings-coordinator.ts",
+        "source": "apps/desktop/AGENTS.md — Shared renderer owners（跨 Feature 实现应提升到 approved shared owner）",
+        "anchor": "features/connection/ui/server-connection-settings.tsx#ServerConnectionSettingsContribution",
+        "defect": "SettingsLeaveSemantics 契约的第二份手工镜像（ProfileSettingsContribution 之后），语义演进时三处漂移"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Feature 不跨 seam import 是桌面规则明文要求，镜像即当前合规形态；提升为共享 owner 是跨切片架构动作，需专门任务。",
+      "owner": "apps/desktop/src/renderer/src/app/settings/settings-coordinator.ts",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/src/renderer/src/features/profile/ui/profile-settings.tsx#ProfileSettingsContribution",
+          "observation": "既有镜像先例，本变更加入第二份"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/app/startup-surface.ts",
+        "source": "#104 AC4「指纹变更触发告警」/ ADR-0014「存后变更即告警」/ #99 用户故事 34",
+        "anchor": "main/connection/probe.ts#probeServerConnection + renderer/src/app/routes/connect.tsx",
+        "defect": "已配置但未登录设备遇证书轮换时，启动呈通用 restore-failure/网络错误，无界面入口触达 changed-fingerprint 告警或重新信任（补救需手删 server-connection.json）"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "AC4 的告警机制在可达路径（已登录设置节、连接屏）上完整工作且 E2E 覆盖；缺口是登录前状态的入口问题，失败方向为 fail-closed（无任何绕过），修复需触及设置页认证门卫，超出本切片。已知缺口随 PR 记录。",
+      "owner": "apps/desktop/src/renderer/src/app/startup-surface.ts",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/src/main/connection/certificate-verify.ts",
+          "observation": "pin 不匹配 → callback(-3)，渲染层 fetch 失败呈网络错误"
+        },
+        {
+          "source": "E2E tests/connection/connection-tofu.spec.ts",
+          "path": "已登录设置节路径",
+          "observation": "变更告警流已按 AC5 验证通过"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+        "source": "#104 AC2「设置页可查看与修改」/ 计划决策 7（clear-session 限定「改 URL」）",
+        "anchor": "settings-page.tsx#handleServerConnectionSaved",
+        "defect": "设置节保存未变更的 URL 也会 clear-session + reload，把仅做连通测试后误点保存的用户登出"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "无 AC 承诺同 URL 保存保持会话；行为为保守方向的烦扰而非破坏（环境不切换、凭据本就属于同一 server）。按 isDirty 门卫化留待后续。",
+      "owner": "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+          "observation": "handleServerConnectionSaved 无条件 clear-session"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0003",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/main/connection/connection-store.ts",
+        "source": "#104 AC4「持久化」",
+        "anchor": "connection-store.ts#loadIntoRuntime + saveServerConnectionUrl",
+        "defect": "瞬时读失败清空内存 pins 后，下一次 URL 保存会把空 pins 原子覆盖写回文件，静默丢弃既有 TOFU pin"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "失败方向为 fail-closed（丢失 pin 只会导致重新确认，不会放行错误证书）；瞬时 IO 错误叠加立即保存是小概率路径。read-failure 保留 pins 的增强留待后续。",
+      "owner": "apps/desktop/src/main/connection/connection-store.ts",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/src/main/connection/connection-store.ts",
+          "observation": "catch → resetRuntime()（url 与 pins 一并清空）→ save 持久化空 pins"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0004",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/index.html",
+        "source": "ADR-0014 TLS 与桌面端连接的安全姿态 / 计划 §5（CSP 运行时化）",
+        "anchor": "src/renderer/index.html#meta-CSP + main/connection/renderer-csp-injection.ts",
+        "defect": "摘除 default-src 后 font-src/media-src/worker-src/form-action 失去 meta 兜底（注入失败时这些指令不再受约束）"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "交集语义下保留 default-src 会把 connect-src 冻结为 'self'，运行时 connect-src 因此不可能留在 meta；XSS 关键指令（script/style/object/base/frame）仍由 meta 独立强制，注入由组合根无条件注册且被 electron-security 行为化断言覆盖。计划已声明该取舍。",
+      "owner": "apps/desktop/src/renderer/index.html",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/src/main/connection/renderer-csp.ts",
+          "observation": "header 仅注入 connect-src；meta 保留 script-src 'self' 等指令"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0005",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/scripts/run-e2e.sh",
+        "source": "#104 AC5「E2E 覆盖内网 http 连接成功流」",
+        "anchor": "scripts/run-e2e.sh#server_url + tests/connection/connection-screen.spec.ts",
+        "defect": "E2E 内网 http 成功流跑在 loopback（127.0.0.1）上，真实 RFC1918 字面量仅由单元测试覆盖（无特权无法绑定 RFC1918 地址）"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "loopback 与 RFC1918 走同一 isAllowedPrivateHttpHostname 分支与同一端到端通路；RFC1918 字面量边界由 server-url 单测钉死。PR 中明示该取舍。",
+      "owner": "apps/desktop/scripts/run-e2e.sh",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff bundle sha256:60be2752",
+          "path": "apps/desktop/tests/unit/server-url.test.mts",
+          "observation": "10.x/172.16-31/192.168 及越界反例全部断言"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [],
+  "relevantCheck": {
+    "name": "desktop full gate: pnpm typecheck + test:unit + test:component + lint + verify:architecture + run-e2e.sh full (70 passed / 2 platform-skipped / 0 failed, verify-auth-artifacts clean)",
+    "result": "PASS",
+    "coverage": "apps/desktop（本任务全部任务自有路径；server/ 与 contracts/ 零改动）",
+    "diffDigest": "sha256:60be27520c376afad789e28a0f6cc8004a083d39578934311078da33a443184f"
+  },
+  "outcome": "closed"
+}
