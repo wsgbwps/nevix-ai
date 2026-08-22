@@ -526,3 +526,48 @@ func TestChangeRoleAdjustsAdminAccessBothWays(t *testing.T) {
 		t.Fatalf("unknown role: status %d body %s, want 400 invalid_role", status, raw)
 	}
 }
+
+// Every governance route sits behind RequireAdmin: a member with a perfectly
+// valid session is answered 403 forbidden before the command runs, and the
+// target account is untouched. The table completes the gate coverage the
+// individual command tests sample (issue #102 criterion: guards covered at
+// Seam A).
+func TestGovernanceRoutesRejectMembers(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	h, handler, _ := governanceReady(t, ctx)
+	h.insertUser(t, "member@nevix.test", "member-password-1", "member", "active", false)
+	adminID := h.userIDByEmail(t, "admin@nevix.test")
+	_, _, memberLogin := doLogin(t, handler, "member@nevix.test", "member-password-1")
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   []byte
+	}{
+		{"create", http.MethodPost, "/identity/users", []byte(`{"email":"x@nevix.test","initial_password":"initial-pass-1"}`)},
+		{"disable", http.MethodPost, "/identity/users/" + adminID + "/disable", []byte(`{}`)},
+		{"reset-password", http.MethodPost, "/identity/users/" + adminID + "/reset-password", []byte(`{"initial_password":"whatever-pass-1"}`)},
+		{"email", http.MethodPost, "/identity/users/" + adminID + "/email", []byte(`{"email":"x@nevix.test"}`)},
+		{"role", http.MethodPost, "/identity/users/" + adminID + "/role", []byte(`{"role":"member"}`)},
+		{"delete", http.MethodDelete, "/identity/users/" + adminID, nil},
+	} {
+		status, raw := doJSON(t, handler, tc.method, tc.path, memberLogin.Token, tc.body)
+		assertContractResponse(t, tc.method, tc.path, status, raw)
+		if status != http.StatusForbidden || !contains(raw, `"forbidden"`) {
+			t.Fatalf("%s as member: status %d body %s, want 403 forbidden", tc.name, status, raw)
+		}
+	}
+
+	// The guard answered before any command: the admin account is untouched.
+	var status string
+	if err := h.fixturePool.QueryRow(ctx,
+		`SELECT status FROM public.users WHERE id = $1`, adminID,
+	).Scan(&status); err != nil || status != "active" {
+		t.Fatalf("admin account after member attempts = %q (err %v), want untouched active", status, err)
+	}
+	if got := len(h.auditActions(t)); got != 2 {
+		t.Fatalf("audit rows after member attempts = %d, want the 2 setup logins only (no governance row)", got)
+	}
+}

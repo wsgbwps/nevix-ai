@@ -8,6 +8,7 @@ package migration
 
 import (
 	"context"
+	"os"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -198,5 +199,86 @@ func TestConcurrentApplyRunsTheEmbeddedSetExactlyOnce(t *testing.T) {
 	}
 	if !usersExists {
 		t.Fatal("public.users does not exist after concurrent startup")
+	}
+}
+
+// A baseline-v1 deployment upgrading to the 0002 world keeps the
+// never-logged-in invariant: accounts with live sessions or session_created
+// audit evidence are backfilled as logged-in; an account with no evidence
+// stays NULL (issue #102 review).
+func TestUpgradeFromBaselineBackfillsLastLogin(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	ownerURL := requireOwnerURL(t)
+	scratchURL := scratchDatabase(t, ctx, ownerURL, "nevix_migration_upgrade_backfill")
+
+	// Bring the scratch database to exactly baseline v1: the controlled set
+	// carries only the real 0001 file.
+	baselineSQL, err := os.ReadFile("migrations/0001_baseline_user_system.sql")
+	if err != nil {
+		t.Fatalf("read baseline migration: %v", err)
+	}
+	v1Only := fstest.MapFS{
+		"migrations/0001_baseline_user_system.sql": &fstest.MapFile{Data: baselineSQL},
+	}
+	if _, err := applyFS(ctx, scratchURL, v1Only); err != nil {
+		t.Fatalf("apply baseline v1: %v", err)
+	}
+
+	db := openDB(t, ctx, scratchURL)
+	seed := func(email string) string {
+		var id string
+		if err := db.QueryRowContext(ctx,
+			`INSERT INTO public.users (email, password_hash, display_name, role, status, must_change_password)
+			 VALUES ($1, 'seed-hash', $1, 'member', 'active', false) RETURNING id`, email,
+		).Scan(&id); err != nil {
+			t.Fatalf("seed %s: %v", email, err)
+		}
+		return id
+	}
+	alice := seed("alice@nevix.test") // live session
+	bob := seed("bob@nevix.test")     // no evidence at all
+	carol := seed("carol@nevix.test") // sessions all revoked; audit row remains
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO public.sessions (user_id, token_hash, device_name, expires_at)
+		 VALUES ($1, decode('aa','hex'), 'alice-device', now() + interval '1 day')`, alice,
+	); err != nil {
+		t.Fatalf("seed alice session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO public.audit_logs (actor_user_id, actor_display_name, action, metadata, created_at)
+		 VALUES ($1, 'carol@nevix.test', 'session_created', '{}'::jsonb, now() - interval '2 hours')`, carol,
+	); err != nil {
+		t.Fatalf("seed carol audit row: %v", err)
+	}
+
+	// The production startup path now applies only 0002 (v1 is recorded).
+	applied, err := Apply(ctx, scratchURL)
+	if err != nil {
+		t.Fatalf("upgrade to v2: %v", err)
+	}
+	if len(applied) != 1 || applied[0].Source.Version != 2 {
+		t.Fatalf("upgrade applied %+v, want exactly version 2", applied)
+	}
+
+	lastLogin := func(userID string) (*time.Time, string) {
+		var stamp *time.Time
+		var email string
+		if err := db.QueryRowContext(ctx,
+			`SELECT last_login_at, email FROM public.users WHERE id = $1`, userID,
+		).Scan(&stamp, &email); err != nil {
+			t.Fatalf("read %s: %v", userID, err)
+		}
+		return stamp, email
+	}
+	for _, userID := range []string{alice, carol} {
+		stamp, email := lastLogin(userID)
+		if stamp == nil {
+			t.Fatalf("%s upgraded with NULL last_login_at despite login evidence", email)
+		}
+	}
+	if stamp, email := lastLogin(bob); stamp != nil {
+		t.Fatalf("%s upgraded with last_login_at %v despite never logging in", email, stamp)
 	}
 }

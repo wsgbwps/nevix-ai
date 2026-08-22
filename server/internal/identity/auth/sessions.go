@@ -132,14 +132,33 @@ func (s *Service) refreshSession(ctx context.Context, tokenHash []byte) {
 
 // issueSession inserts one session row, stamps the account's last_login_at,
 // and writes the audit entry in a single write transaction, returning the
-// server-computed expiry. last_login_at is the durable "has ever logged in"
-// marker admin deletion keys on (issue #102), so it rides the same commit as
-// the session. The audit actor is snapshotted inside the transaction
-// (ADR-0009): the display name recorded is the one committed at write time,
-// not one read before the transaction.
+// server-computed expiry. The transaction first re-verifies the account
+// under its row lock — status still active and the stored password hash
+// still the one Login verified — so a reset-password or disable that commits
+// while this login is in flight can never leave a stale-credential session
+// behind (ADR-0015 revocation immediacy). last_login_at is the durable "has
+// ever logged in" marker admin deletion keys on (issue #102), so it rides
+// the same commit as the session. The audit actor is snapshotted inside the
+// transaction (ADR-0009): the display name recorded is the one committed at
+// write time, not one read before the transaction.
 func (s *Service) issueSession(ctx context.Context, user userRecord, tokenHash []byte, deviceName string) (time.Time, error) {
 	var expiresAt time.Time
 	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+		var currentHash, status string
+		if err := tx.QueryRow(ctx,
+			`SELECT password_hash, status FROM public.users WHERE id = $1 FOR UPDATE`, user.ID,
+		).Scan(&currentHash, &status); err != nil {
+			return fmt.Errorf("auth: lock account for session issuance: %w", err)
+		}
+		if status != "active" {
+			return errAccountDisabled
+		}
+		if currentHash != user.PasswordHash {
+			// The credential changed between verification and this
+			// transaction (an admin reset landed in between): the same uniform
+			// answer as any other wrong password.
+			return errInvalidCredentials
+		}
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO public.sessions (user_id, token_hash, device_name, expires_at)
 			 VALUES ($1, $2, $3, now() + make_interval(secs => $4))

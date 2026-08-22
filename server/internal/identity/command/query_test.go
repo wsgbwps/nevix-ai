@@ -72,3 +72,17 @@ func TestParseSearchTrimsAndBounds(t *testing.T) {
 		t.Fatal("overly long search accepted, want ErrInvalidSearch")
 	}
 }
+
+func TestParseSearchCountsCharactersNotBytes(t *testing.T) {
+	// 100 CJK characters are 300 UTF-8 bytes: contract-valid at maxLength
+	// 256 (OpenAPI counts characters) and must pass.
+	req := httptest.NewRequest("GET", "/things?q="+url.QueryEscape(strings.Repeat("搜", 100)), nil)
+	if _, err := ParseSearch(req); err != nil {
+		t.Fatalf("100-character multibyte search rejected: %v", err)
+	}
+	// 257 characters exceed the bound however they are encoded.
+	req = httptest.NewRequest("GET", "/things?q="+url.QueryEscape(strings.Repeat("搜", MaxSearchLength+1)), nil)
+	if _, err := ParseSearch(req); err == nil {
+		t.Fatal("257-character multibyte search accepted, want ErrInvalidSearch")
+	}
+}

@@ -161,3 +161,21 @@ func TestLocalPartDerivation(t *testing.T) {
 		t.Fatalf("localPart = %q, want jane.doe", got)
 	}
 }
+
+func TestCreateRequestValidateCountsDisplayNamesInCharacters(t *testing.T) {
+	req := CreateRequest{Email: ptr("member@nevix.test"), InitialPassword: ptr("initial-pass-1")}
+	req.DisplayName = strings.Repeat("名", maxDisplayNameLength)
+	if got := req.Validate(); got != nil {
+		t.Fatalf("128-character multibyte display name rejected: %+v", got)
+	}
+	req.DisplayName = strings.Repeat("名", maxDisplayNameLength+1)
+	if got := req.Validate(); got == nil || got.Code != "invalid_display_name" {
+		t.Fatalf("129-character multibyte display name: error = %+v, want invalid_display_name", got)
+	}
+	// A whitespace-only value of any length derives from the email (the
+	// contract's documented default), so it is not an oversize rejection.
+	req.DisplayName = strings.Repeat(" ", maxDisplayNameLength*4)
+	if got := req.Validate(); got != nil {
+		t.Fatalf("long blank display name rejected: %+v, want the email-derived default", got)
+	}
+}

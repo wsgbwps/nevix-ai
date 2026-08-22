@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,7 +23,8 @@ import (
 	"github.com/nevix-ai/server/internal/identity/command"
 )
 
-// maxDisplayNameLength bounds an explicit display name on account creation.
+// maxDisplayNameLength bounds an explicit display name on account creation,
+// counted in characters to match the contract's maxLength semantics.
 const maxDisplayNameLength = 128
 
 // CreateRequest is the account-creation command body. Email and
@@ -46,7 +48,7 @@ func (r *CreateRequest) Validate() *command.Error {
 	if err := auth.ValidateNewPassword(*r.InitialPassword); err != nil {
 		return &command.Error{Status: http.StatusBadRequest, Code: "password_too_short", Message: "Initial password must be at least 8 characters."}
 	}
-	if len(r.DisplayName) > maxDisplayNameLength {
+	if utf8.RuneCountInString(strings.TrimSpace(r.DisplayName)) > maxDisplayNameLength {
 		return &command.Error{Status: http.StatusBadRequest, Code: "invalid_display_name", Message: "Display name is too long."}
 	}
 	return nil

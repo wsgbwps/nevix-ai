@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -17,7 +18,8 @@ const (
 	DefaultPerPage = 20
 	// MaxPerPage bounds one page so a caller cannot ask for the whole table.
 	MaxPerPage = 100
-	// MaxSearchLength bounds the free-text query parameter.
+	// MaxSearchLength bounds the free-text query parameter, counted in
+	// characters to match the contract's maxLength semantics.
 	MaxSearchLength = 256
 )
 
@@ -64,10 +66,11 @@ func ParsePagination(query url.Values) (Pagination, error) {
 }
 
 // ParseSearch reads the q parameter: trimmed free text, empty when absent.
-// The bound keeps one oversized parameter from dominating the ILIKE scan.
+// The bound counts characters (the contract's maxLength semantics — not
+// bytes) and keeps one oversized parameter from dominating the ILIKE scan.
 func ParseSearch(r *http.Request) (string, error) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if len(q) > MaxSearchLength {
+	if utf8.RuneCountInString(q) > MaxSearchLength {
 		return "", ErrInvalidSearch
 	}
 	return q, nil
