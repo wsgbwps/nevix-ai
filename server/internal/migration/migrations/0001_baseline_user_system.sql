@@ -5,6 +5,10 @@
 -- organization-free audit log — is created in their place. No RLS is
 -- created: with no client-side database access there is no policy
 -- evaluation subject (ADR-0015).
+--
+-- Up-only (ADR-0013): no Down section is ever provided.
+
+-- +goose Up
 
 -- Legacy teardown, idempotent against both a fresh cluster and one still
 -- carrying the Supabase-era schema (DROP ... IF EXISTS never fails on a
@@ -22,6 +26,9 @@ DROP TABLE IF EXISTS public.audit_logs CASCADE;
 -- table grants below and nothing else. No password is part of the migration;
 -- deployment provisioning (and the test harness) owns credentials. Idempotent
 -- so a re-run against a cluster where the role already exists still succeeds.
+-- StatementBegin/End fence the block's embedded semicolons from Goose's
+-- statement splitter.
+-- +goose StatementBegin
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'identity_app') THEN
@@ -29,6 +36,7 @@ BEGIN
   END IF;
 END
 $$;
+-- +goose StatementEnd
 
 -- The bundled Postgres `postgres` user is a true superuser, but keep role
 -- membership explicit so maintenance and tests can SET ROLE identity_app on
