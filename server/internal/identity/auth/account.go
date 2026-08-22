@@ -69,7 +69,7 @@ type ChangePasswordResponse struct {
 // password_changed audit row. A wrong current password answers
 // errInvalidCredentials exactly like login.
 func (s *Service) ChangePassword(ctx context.Context, principal authz.Principal, req ChangePasswordRequest) (ChangePasswordResponse, error) {
-	newHash, err := hashPassword(*req.NewPassword)
+	newHash, err := HashPassword(*req.NewPassword)
 	if err != nil {
 		// Validate already enforced the policy; a failure here is unreachable
 		// through HTTP and still must not proceed unhashed.
@@ -102,7 +102,7 @@ func (s *Service) ChangePassword(ctx context.Context, principal authz.Principal,
 		); err != nil {
 			return fmt.Errorf("auth: revoke other sessions on password change: %w", err)
 		}
-		actor, err := snapshotUser(ctx, tx, principal.UserID)
+		actor, err := audit.SnapshotSubject(ctx, tx, principal.UserID)
 		if err != nil {
 			return err
 		}
@@ -171,7 +171,7 @@ func (s *Service) UpdateMe(ctx context.Context, principal authz.Principal, req U
 		).Scan(&updated.ID, &updated.Email, &updated.PasswordHash, &updated.DisplayName, &updated.Role, &updated.Status, &updated.MustChangePassword); err != nil {
 			return fmt.Errorf("auth: update display name: %w", err)
 		}
-		actor, err := snapshotUser(ctx, tx, principal.UserID)
+		actor, err := audit.SnapshotSubject(ctx, tx, principal.UserID)
 		if err != nil {
 			return err
 		}

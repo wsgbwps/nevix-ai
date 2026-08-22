@@ -26,8 +26,8 @@ func TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply on empty database: %v", err)
 	}
-	if len(applied) != 1 || applied[0].Source.Version != 1 {
-		t.Fatalf("applied %d migrations, want exactly version 1", len(applied))
+	if len(applied) != 2 || applied[0].Source.Version != 1 || applied[1].Source.Version != 2 {
+		t.Fatalf("applied %d migrations, want versions [1 2] in order", len(applied))
 	}
 
 	db := openDB(t, ctx, scratchURL)
@@ -65,16 +65,29 @@ func TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase(t *testing.T) {
 		}
 	}
 
-	// Versions live only in Goose's standard ledger, with the baseline
-	// recorded as applied.
-	var recorded int
-	if err := db.QueryRowContext(ctx,
-		`SELECT count(*) FROM public.goose_db_version WHERE version_id = 1 AND is_applied`,
-	).Scan(&recorded); err != nil {
-		t.Fatalf("read goose ledger: %v", err)
+	// Versions live only in Goose's standard ledger, with the baseline and
+	// its first up-only successor recorded as applied.
+	for _, version := range []int64{1, 2} {
+		var recorded int
+		if err := db.QueryRowContext(ctx,
+			`SELECT count(*) FROM public.goose_db_version WHERE version_id = $1 AND is_applied`, version,
+		).Scan(&recorded); err != nil {
+			t.Fatalf("read goose ledger for version %d: %v", version, err)
+		}
+		if recorded != 1 {
+			t.Fatalf("goose_db_version records version %d %d times, want exactly 1", version, recorded)
+		}
 	}
-	if recorded != 1 {
-		t.Fatalf("goose_db_version records version 1 %d times, want exactly 1", recorded)
+
+	// The up-only successor ran: the never-logged-in marker exists on users.
+	var hasColumn bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'last_login_at')`,
+	).Scan(&hasColumn); err != nil {
+		t.Fatalf("inspect users.last_login_at: %v", err)
+	}
+	if !hasColumn {
+		t.Fatal("users.last_login_at does not exist; migration 0002 did not run")
 	}
 }
 
@@ -130,7 +143,7 @@ func TestFailedMigrationRollsBackAndStaysUnrecorded(t *testing.T) {
 	}
 }
 
-func TestConcurrentApplyRunsBaselineExactlyOnce(t *testing.T) {
+func TestConcurrentApplyRunsTheEmbeddedSetExactlyOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	ownerURL := requireOwnerURL(t)
@@ -161,19 +174,21 @@ func TestConcurrentApplyRunsBaselineExactlyOnce(t *testing.T) {
 		}
 		totalApplied += len(results[i])
 	}
-	if totalApplied != 1 {
-		t.Fatalf("concurrent applies ran the baseline %d times in total, want exactly 1", totalApplied)
+	if totalApplied != 2 {
+		t.Fatalf("concurrent applies ran %d migrations in total, want exactly the 2 embedded ones (each once)", totalApplied)
 	}
 
 	db := openDB(t, ctx, scratchURL)
-	var recorded int
-	if err := db.QueryRowContext(ctx,
-		`SELECT count(*) FROM public.goose_db_version WHERE version_id = 1 AND is_applied`,
-	).Scan(&recorded); err != nil {
-		t.Fatalf("read goose ledger: %v", err)
-	}
-	if recorded != 1 {
-		t.Fatalf("goose_db_version records version 1 %d times, want exactly 1", recorded)
+	for _, version := range []int64{1, 2} {
+		var recorded int
+		if err := db.QueryRowContext(ctx,
+			`SELECT count(*) FROM public.goose_db_version WHERE version_id = $1 AND is_applied`, version,
+		).Scan(&recorded); err != nil {
+			t.Fatalf("read goose ledger for version %d: %v", version, err)
+		}
+		if recorded != 1 {
+			t.Fatalf("goose_db_version records version %d %d times, want exactly 1", version, recorded)
+		}
 	}
 	var usersExists bool
 	if err := db.QueryRowContext(ctx,

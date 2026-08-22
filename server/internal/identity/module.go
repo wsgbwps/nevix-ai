@@ -2,10 +2,12 @@
 // skeleton (unified error envelope, decode-validate-map pipeline, guard-policy
 // route table machinery) lives in command; the auth service (passwords,
 // sessions, login/logout/me, bootstrap, the maintenance sweep) lives in auth;
-// audit log writes live in audit; and the Write Transaction Module lives in
-// writetx. Callers outside the Module — the composition root and the
-// integration test harness — see only this package: LoadConfig, NewModule,
-// Register, and RunWorkers.
+// the user-account surface beyond self (team directory, admin governance
+// commands) lives in users; audit log writes and the admin-only paginated
+// read live in audit; and the Write Transaction Module lives in writetx.
+// Callers outside the Module — the composition root and the integration test
+// harness — see only this package: LoadConfig, NewModule, Register, and
+// RunWorkers.
 package identity
 
 import (
@@ -19,8 +21,10 @@ import (
 
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/event"
+	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/users"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
@@ -74,9 +78,12 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 }
 
 // Module is the identity Module's composition surface: it owns the auth
-// service and the guard vocabulary and registers the Module's HTTP routes.
+// service, the user-account governance service, the audit read service, the
+// guard vocabulary, and registers the Module's HTTP routes.
 type Module struct {
 	auth        *auth.Service
+	users       *users.Service
+	auditRead   *audit.ReadService
 	guard       *authz.Guard
 	corsOrigins []string
 }
@@ -113,6 +120,8 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 	}
 	return &Module{
 		auth:        service,
+		users:       users.NewService(pool, tx),
+		auditRead:   audit.NewReadService(pool),
 		guard:       authz.NewGuard(service),
 		corsOrigins: cfg.CORSAllowedOrigins,
 	}, nil

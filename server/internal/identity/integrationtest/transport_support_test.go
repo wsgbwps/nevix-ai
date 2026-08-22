@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -150,6 +151,26 @@ func doChangePassword(t *testing.T, handler http.Handler, token, currentPassword
 func doUpdateMe(t *testing.T, handler http.Handler, token, displayName string) (int, []byte) {
 	t.Helper()
 	return doAuthenticatedJSON(t, handler, http.MethodPatch, "/identity/users/me", token, displayNameBody(displayName))
+}
+
+// doJSON performs a bearer-authenticated request with a JSON body; a nil
+// body sends no body at all (guard rejections never read it).
+func doJSON(t *testing.T, handler http.Handler, method, path, token string, body []byte) (int, []byte) {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
 }
 
 // doLogout posts the logout command with the given session token.

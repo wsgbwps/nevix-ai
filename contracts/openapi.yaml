@@ -20,6 +20,22 @@ paths:
     $ref: "./identity.yaml#/paths/~1identity~1auth~1change-password"
   /identity/users/me:
     $ref: "./identity.yaml#/paths/~1identity~1users~1me"
+  /identity/users:
+    $ref: "./identity.yaml#/paths/~1identity~1users"
+  /identity/admin/users:
+    $ref: "./identity.yaml#/paths/~1identity~1admin~1users"
+  /identity/users/{userID}/disable:
+    $ref: "./identity.yaml#/paths/~1identity~1users~1{userID}~1disable"
+  /identity/users/{userID}/reset-password:
+    $ref: "./identity.yaml#/paths/~1identity~1users~1{userID}~1reset-password"
+  /identity/users/{userID}/email:
+    $ref: "./identity.yaml#/paths/~1identity~1users~1{userID}~1email"
+  /identity/users/{userID}/role:
+    $ref: "./identity.yaml#/paths/~1identity~1users~1{userID}~1role"
+  /identity/users/{userID}:
+    $ref: "./identity.yaml#/paths/~1identity~1users~1{userID}"
+  /identity/audit-logs:
+    $ref: "./identity.yaml#/paths/~1identity~1audit-logs"
 components:
   securitySchemes:
     bearerAuth:

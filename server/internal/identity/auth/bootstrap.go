@@ -38,11 +38,11 @@ func (s *Service) Bootstrap(ctx context.Context, adminEmail, adminPassword strin
 		return errors.New("identity: bootstrap requires both ADMIN_EMAIL and ADMIN_INITIAL_PASSWORD")
 	}
 
-	email, err := normalizeEmail(adminEmail)
+	email, err := NormalizeEmail(adminEmail)
 	if err != nil {
 		return fmt.Errorf("identity: bootstrap ADMIN_EMAIL: %w", err)
 	}
-	passwordHash, err := hashPassword(adminPassword)
+	passwordHash, err := HashPassword(adminPassword)
 	if err != nil {
 		return fmt.Errorf("identity: bootstrap ADMIN_INITIAL_PASSWORD: %w", err)
 	}

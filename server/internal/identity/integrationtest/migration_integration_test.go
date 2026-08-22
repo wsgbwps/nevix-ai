@@ -84,8 +84,11 @@ func TestIdentityAppGrantsMatchTheLeastPrivilegeContract(t *testing.T) {
 	h := newHarness(t, ctx)
 
 	// has_table_privilege proves the effective grant surface behaviorally.
+	// users carries DELETE since issue #102 (deletion of never-logged-in
+	// accounts); audit stays without UPDATE (immutability by grant,
+	// ADR-0009).
 	for table, want := range map[string][]string{
-		"public.users":      {"SELECT", "INSERT", "UPDATE"},
+		"public.users":      {"SELECT", "INSERT", "UPDATE", "DELETE"},
 		"public.sessions":   {"SELECT", "INSERT", "UPDATE", "DELETE"},
 		"public.audit_logs": {"SELECT", "INSERT", "DELETE"},
 	} {
