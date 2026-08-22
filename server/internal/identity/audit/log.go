@@ -25,12 +25,21 @@ const (
 	SessionCreated Action = "session_created"
 	// SessionRevoked records a logout ending exactly one session.
 	SessionRevoked Action = "session_revoked"
+	// PasswordChanged records a user rotating their own password (the
+	// first-login forced change and everyday self-service rotation alike).
+	PasswordChanged Action = "password_changed"
+	// DisplayNameChanged records a user renaming their own account: renames
+	// change the name later audit snapshots attribute, so the trail records
+	// who renamed what.
+	DisplayNameChanged Action = "display_name_changed"
 )
 
 var validActions = map[Action]struct{}{
 	BootstrapAdminCreated: {},
 	SessionCreated:        {},
 	SessionRevoked:        {},
+	PasswordChanged:       {},
+	DisplayNameChanged:    {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id

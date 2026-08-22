@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/nevix-ai/server/internal/authz"
 )
 
 // Error is the command layer's single error representation: the HTTP status,
@@ -57,12 +59,34 @@ type Guards struct {
 	Admin      func(http.Handler) http.Handler
 }
 
+// PasswordGatePolicy declares how the must-change-password gate treats one
+// route. The zero value PasswordGateEnforce is the safe default: a guarded
+// route stays unusable while the caller's account still owes the forced
+// first-login password change, so every future business command is gated
+// without declaring anything. Only the auth-scoped routes that the forced
+// change flow itself needs declare PasswordGateOpen. The gate is account
+// hygiene resolved from the guard's principal — deliberately not a third
+// authz guard, keeping ADR-0015's vocabulary at exactly two.
+type PasswordGatePolicy string
+
+const (
+	// PasswordGateEnforce answers 403 password_change_required while the
+	// account owes the forced change. The zero value.
+	PasswordGateEnforce PasswordGatePolicy = ""
+	// PasswordGateOpen keeps a route usable while the change is owed: me,
+	// logout, and the change itself.
+	PasswordGateOpen PasswordGatePolicy = "open"
+)
+
 // Route declares one trusted command in the Module's static table.
 type Route struct {
-	Method  string
-	Path    string
-	Guard   GuardPolicy
-	Handler http.HandlerFunc
+	Method string
+	Path   string
+	Guard  GuardPolicy
+	// PasswordGate declares the route's must-change-password gate policy;
+	// see PasswordGatePolicy.
+	PasswordGate PasswordGatePolicy
+	Handler      http.HandlerFunc
 }
 
 // WriteError writes the Module's only error envelope, byte-for-byte the
@@ -88,10 +112,10 @@ func Mount(r chi.Router, routes []Route, guards Guards) {
 		switch route.Guard {
 		case GuardActiveUser:
 			requireMiddleware(route, guards.ActiveUser, "ActiveUser")
-			handler = guards.ActiveUser(handler)
+			handler = guards.ActiveUser(rejectPendingPasswordChange(route, handler))
 		case GuardAdmin:
 			requireMiddleware(route, guards.Admin, "Admin")
-			handler = guards.Admin(handler)
+			handler = guards.Admin(rejectPendingPasswordChange(route, handler))
 		case GuardPublic:
 			// open route
 		default:
@@ -100,6 +124,29 @@ func Mount(r chi.Router, routes []Route, guards Guards) {
 		r.Method(route.Method, route.Path, handler)
 		r.Options(route.Path, preflightEndpoint)
 	}
+}
+
+// rejectPendingPasswordChange wraps an already-guarded handler with the
+// must-change-password gate when the route enforces it: a session whose
+// account still owes the forced first-login change answers 403
+// password_change_required before the command runs. The gate runs inside the
+// guard, so the principal — resolved fresh per request — is already in the
+// context; a cleared flag takes effect on the very next request.
+func rejectPendingPasswordChange(route Route, next http.Handler) http.Handler {
+	if route.PasswordGate == PasswordGateOpen {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if principal, ok := authz.PrincipalFrom(r.Context()); ok && principal.MustChangePassword {
+			WriteError(w, &Error{
+				Status:  http.StatusForbidden,
+				Code:    "password_change_required",
+				Message: "The initial password must be changed before using this command.",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // requireMiddleware panics with the route context when a guarded route lacks

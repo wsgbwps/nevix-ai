@@ -207,11 +207,89 @@ paths:
                       error:
                         enum:
                           - internal_error
+  /identity/auth/change-password:
+    post:
+      operationId: changePassword
+      summary: 修改自己的密码（含首登强制改密）
+      description: |-
+        验证 current_password 后改密：新密码须满足长度策略（最小 8 字符、最大 72 字节，400 invalid_password）。凭据验证在写事务内对用户行加锁后针对已提交哈希执行，并发改密恰有一个成功（后到者凭据验证失败得 401）。成功时在单一写事务内完成——更新 password_hash、清除 must_change_password 标记、吊销该用户**其他全部**会话（当前请求的会话保留，作为当前会话处置的契约定义）、写入 password_changed 审计行（首登清除初始密码时 metadata.initial 为 true）。
+
+        该命令是 must_change_password 标记用户唯一可用的业务写命令；改密完成后标记清除，全部业务端点恢复可用。current_password 错误回答 401 invalid_credentials（与登录的防枚举语义一致：持有有效会话但凭据验证失败）。本端点不受 403 password_change_required 门禁影响。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - current_password
+                - new_password
+              properties:
+                current_password:
+                  type: string
+                  description: 当前密码（首登场景即管理员设置的初始密码）。
+                new_password:
+                  type: string
+                  description: 新密码明文；最小长度 8、最大 72 字节（bcrypt 容量的编码约束，非组成规则；数值为信息性，客户端依据错误码分支）。
+      responses:
+        "200":
+          description: 改密成功；当前会话保留，其他会话已吊销，must_change_password 已清除。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - password_changed
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体不是含 current_password 与 new_password 的 JSON；invalid_password 指新密码不满足长度策略（过短或超过 72 字节上限）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_password
+        "401":
+          description: Bearer token 无效（unauthorized），或 current_password 验证失败（invalid_credentials）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+                          - invalid_credentials
+        "500":
+          description: 服务端内部错误，改密未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
   /identity/users/me:
     get:
       operationId: getCurrentUser
       summary: 读取自己的账号信息
-      description: 返回当前会话用户的账号信息（email、显示名、角色、must_change_password 标记），反映签发会话之后已提交的变更。
+      description: 返回当前会话用户的账号信息（email、显示名、角色、must_change_password 标记），反映签发会话之后已提交的变更。must_change_password 为 true 的会话仍可读取（首登改密流需要账号展示）。
       security:
         - bearerAuth: []
       responses:
@@ -262,6 +340,111 @@ paths:
                           - unauthorized
         "500":
           description: 服务端内部错误。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+    patch:
+      operationId: updateCurrentUser
+      summary: 修改自己的账号（显示名）
+      description: |-
+        自助修改显示名：去除首尾空白后须为 1–128 个 Unicode 字符（长度按字符计数，与 maxLength 语义一致；数值为信息性，客户端依据错误码分支），成功后返回更新后的完整账号（形状与 GET 相同），同一写事务写入 display_name_changed 审计行（含 from/to），后续目录与审计快照按新显示名生效。
+
+        这是业务端点：must_change_password 为 true 的会话被 403 password_change_required 拒绝 —— 首登强制改密完成前仅 me / logout / change-password 可用。登录 email 仅 Admin 可改（独立命令），不在本端点。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - display_name
+              properties:
+                display_name:
+                  type: string
+                  maxLength: 128
+                  description: 新显示名；长度按原始值以 Unicode 字符计数（与 maxLength 语义一致，非字节，空白计入长度、裁剪不豁免超长），去除首尾空白后须非空，存储按裁剪后值。
+      responses:
+        "200":
+          description: 显示名已更新，返回更新后的账号信息。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - user
+                properties:
+                  user:
+                    type: object
+                    required:
+                      - id
+                      - email
+                      - display_name
+                      - role
+                      - must_change_password
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      display_name:
+                        type: string
+                      role:
+                        type: string
+                        enum:
+                          - admin
+                          - member
+                      must_change_password:
+                        type: boolean
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体不是含 display_name 的 JSON；invalid_display_name 指原始值超过 128 个 Unicode 字符（含首尾空白）或去除空白后为空。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_display_name
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: must_change_password 为 true：首登改密完成前业务端点被门禁拒绝。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - password_change_required
+        "500":
+          description: 服务端内部错误，更新未提交。
           content:
             application/json:
               schema:

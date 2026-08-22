@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/identity/command"
 )
 
@@ -295,4 +296,59 @@ func TestMountPanicsWhenAGuardedRouteLacksItsMiddleware(t *testing.T) {
 	command.Mount(chi.NewRouter(), []command.Route{
 		{Method: http.MethodGet, Path: "/commands/admin", Guard: command.GuardAdmin, Handler: ok},
 	}, command.Guards{})
+}
+
+// principalInjector stands in for a guard: it resolves a fixed principal so
+// the password gate nested inside it can be exercised without a database.
+func principalInjector(principal authz.Principal) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(authz.WithPrincipal(r.Context(), principal)))
+		})
+	}
+}
+
+func TestMountEnforcesPasswordGateByDeclaredPolicy(t *testing.T) {
+	reached := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
+	flagged := authz.Principal{UserID: "u1", Role: "member", MustChangePassword: true}
+	settled := authz.Principal{UserID: "u1", Role: "member"}
+
+	mount := func(principal authz.Principal) http.Handler {
+		routes := []command.Route{
+			{Method: http.MethodPost, Path: "/commands/business", Handler: reached},
+			{Method: http.MethodPost, Path: "/commands/auth-scoped", PasswordGate: command.PasswordGateOpen, Handler: reached},
+		}
+		router := chi.NewRouter()
+		router.Group(func(r chi.Router) {
+			command.Mount(r, routes, command.Guards{
+				ActiveUser: principalInjector(principal),
+				Admin:      principalInjector(principal),
+			})
+		})
+		return router
+	}
+
+	do := func(handler http.Handler, path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+		return rec
+	}
+
+	// While the forced change is owed, the zero-value policy blocks the
+	// business route before its handler; the declared-open route runs.
+	gated := mount(flagged)
+	if rec := do(gated, "/commands/business"); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"password_change_required"`) {
+		t.Fatalf("business route while change owed: status %d body %s, want 403 password_change_required", rec.Code, rec.Body.String())
+	}
+	if rec := do(gated, "/commands/auth-scoped"); rec.Code != http.StatusOK {
+		t.Fatalf("auth-scoped route while change owed: status %d body %s, want 200", rec.Code, rec.Body.String())
+	}
+
+	// Once the change is done, the same routes all run.
+	settledHandler := mount(settled)
+	for _, path := range []string{"/commands/business", "/commands/auth-scoped"} {
+		if rec := do(settledHandler, path); rec.Code != http.StatusOK {
+			t.Fatalf("%s after change completed: status %d body %s, want 200", path, rec.Code, rec.Body.String())
+		}
+	}
 }
