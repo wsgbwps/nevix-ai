@@ -27,6 +27,8 @@ export async function saveProfile(
 
   const response = await fetch(new URL('/identity/users/me', config.url), {
     method: 'PATCH',
+    // A trusted write must never be replayed against a redirect target.
+    redirect: 'error',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.token}`
@@ -55,6 +57,7 @@ async function requestMe(session: AuthenticatedProfileSession): Promise<{
   if (!config) throw new Error('Server configuration is unavailable.')
 
   const response = await fetch(new URL('/identity/users/me', config.url), {
+    redirect: 'error',
     headers: { Authorization: `Bearer ${session.token}` }
   })
 
