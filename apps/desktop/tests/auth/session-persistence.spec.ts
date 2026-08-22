@@ -2,34 +2,30 @@ import { expect, test, type Page } from '@playwright/test'
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { Session } from '@supabase/supabase-js'
 import {
   hasSecurePersistenceBackend,
   launchTestApp,
   signOutFromUserMenu
 } from '../helpers/electron-app'
 import {
-  createAuthUser,
-  deleteAuthUser,
-  readAuthHarnessConfig,
-  revokeSessionOutsideDesktop,
-  uniqueAuthIdentity
-} from './helpers/supabase-auth'
-import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
+  createStableTeamUser,
+  readIdentityServerConfig,
+  resetTeamUserPassword,
+  uniqueIdentity,
+  type LoginGrant
+} from './helpers/identity-server'
 
-const authHarness = readAuthHarnessConfig()
+const identityServer = readIdentityServerConfig()
 const SESSION_FILE_NAME = 'authentication-session.enc'
 const RESTORE_BOUNDARY_REMEMBERED_EMAIL = 'restore-boundary@example.com'
 
-test('a securely persisted Session refreshes before restore, survives an outage, and logout deletes it', async () => {
+test('a securely persisted session restores without a fresh login, survives an outage, and logout deletes it', async () => {
   test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('session-restore')
-  const userId = await createAuthUser(authHarness, identity, true)
-  // Signing in must reach the App Shell, so the User needs an Organization to auto-enter.
-  await seedOrganizationWithMembership(userId, { name: 'Session Restore Org' })
+  const identity = uniqueIdentity('session-restore')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-restore-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
@@ -41,23 +37,16 @@ test('a securely persisted Session refreshes before restore, survives an outage,
         'requires a native Keychain, DPAPI, or Secret Service backend'
       )
 
-      const session = await signInAndReadSession(launched.page, identity)
+      const grant = await signInAndReadGrant(launched.page, identity)
       const originalEnvelope = await readFile(sessionPath, 'utf8')
-      expectEncryptedEnvelope(originalEnvelope, identity.email, session)
+      expectEncryptedEnvelope(originalEnvelope, identity.email, grant)
       const storedPayload = await launched.electronApp.evaluate(({ safeStorage }, envelope) => {
         const parsed = JSON.parse(envelope) as { ciphertext: string }
         return JSON.parse(
           safeStorage.decryptString(Buffer.from(parsed.ciphertext, 'base64'))
         ) as Record<string, unknown>
       }, originalEnvelope)
-      expect(Object.keys(storedPayload).sort()).toEqual([
-        'access_token',
-        'expires_at',
-        'expires_in',
-        'refresh_token',
-        'token_type',
-        'user'
-      ])
+      expect(Object.keys(storedPayload).sort()).toEqual(['expires_at', 'token', 'user'])
       expect(Object.keys(storedPayload.user as Record<string, unknown>).sort()).toEqual([
         'email',
         'id'
@@ -68,7 +57,7 @@ test('a securely persisted Session refreshes before restore, survives an outage,
       })
       expect(
         await invokeAuthenticationChannel(launched.page, 'authentication:replace-session', {
-          session: JSON.stringify(session)
+          session: JSON.stringify(grant)
         })
       ).toEqual({ outcome: 'unavailable' })
       expect(await readFile(sessionPath, 'utf8')).toBe(originalEnvelope)
@@ -105,16 +94,19 @@ test('a securely persisted Session refreshes before restore, survives an outage,
         session.defaultSession.disableNetworkEmulation()
       })
       await launched.page.unrouteAll({ behavior: 'wait' })
-      let refreshRequests = 0
-      await launched.page.route('**/auth/v1/token?grant_type=refresh_token', async (route) => {
-        refreshRequests += 1
+      let meRequests = 0
+      await launched.page.route('**/identity/users/me', async (route) => {
+        meRequests += 1
         await route.continue()
       })
       await launched.page.getByRole('button', { name: 'Try again' }).click()
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
-      expect(refreshRequests).toBe(1)
+      // Restore verifies the opaque token against /me exactly once; the stored envelope is
+      // never rewritten because nothing rotates an opaque token.
+      expect(meRequests).toBe(1)
+      expect(await readFile(sessionPath, 'utf8')).toBe(envelopeBeforeRetry)
       expect(
         await invokeAuthenticationChannel(launched.page, 'authentication:read-remembered-email')
       ).toEqual({
@@ -123,18 +115,11 @@ test('a securely persisted Session refreshes before restore, survives an outage,
         persistence: 'secure'
       })
 
-      const rotatedEnvelope = await readFile(sessionPath, 'utf8')
-      expect(rotatedEnvelope).not.toBe(envelopeBeforeRetry)
-      expectEncryptedEnvelope(rotatedEnvelope, identity.email)
-
-      const localLogoutRequest = launched.page.waitForRequest(
-        (request) =>
-          request.method() === 'POST' &&
-          request.url().includes('/auth/v1/logout') &&
-          request.url().includes('scope=local')
+      const logoutRequest = launched.page.waitForRequest(
+        (request) => request.method() === 'POST' && request.url().endsWith('/identity/auth/logout')
       )
       await signOutFromUserMenu(launched.page)
-      await localLogoutRequest
+      await logoutRequest
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
@@ -159,36 +144,34 @@ test('a securely persisted Session refreshes before restore, survives an outage,
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
-test('a revoked refresh Session is cleared and returns to the localized login boundary', async () => {
+test('a revoked stored session is cleared and returns to the localized login boundary', async () => {
   test.setTimeout(60_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('revoked-restore')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: 'Revoked Restore Org' })
+  const identity = uniqueIdentity('revoked-restore')
+  const user = await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-revoked-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
   try {
     const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
-    let session: Session
     try {
       test.skip(
         !(await hasSecurePersistenceBackend(launched.electronApp)),
         'requires a native Keychain, DPAPI, or Secret Service backend'
       )
-      session = await signInAndReadSession(launched.page, identity)
+      await signInAndReadGrant(launched.page, identity)
       await expect.poll(() => fileExists(sessionPath)).toBe(true)
     } finally {
       await launched.electronApp.close()
     }
 
-    await revokeSessionOutsideDesktop(authHarness, session.access_token)
+    // An Admin password reset revokes every session of the user in the same write transaction.
+    await resetTeamUserPassword(identityServer, user.id, 'rotated horse battery staple')
 
     const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
     try {
@@ -204,14 +187,13 @@ test('a revoked refresh Session is cleared and returns to the localized login bo
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
-test('corrupt, unknown, random, and malformed encrypted Session envelopes are terminal and deleted', async () => {
+test('corrupt, unknown, random, and malformed encrypted session envelopes are terminal and deleted', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-corrupt-'))
@@ -223,7 +205,7 @@ test('corrupt, unknown, random, and malformed encrypted Session envelopes are te
     try {
       if (await hasSecurePersistenceBackend(launched.electronApp)) {
         encryptedMalformedSession = await launched.electronApp.evaluate(({ safeStorage }) =>
-          safeStorage.encryptString('{"access_token":"incomplete"}').toString('base64')
+          safeStorage.encryptString('{"token":"incomplete"}').toString('base64')
         )
       }
     } finally {
@@ -232,7 +214,7 @@ test('corrupt, unknown, random, and malformed encrypted Session envelopes are te
 
     // Structurally valid envelopes are only terminal when a secure backend can attempt
     // decryption; without one the store reports storage-unavailable and keeps the file, so
-    // those cases run only alongside the backend-encrypted malformed Session (Issue 06).
+    // those cases run only alongside the backend-encrypted malformed session.
     const cases = [
       '{"version":1,"ciphertext":',
       JSON.stringify({ version: 999, ciphertext: 'dW5rbm93bi12ZXJzaW9u' }),
@@ -266,16 +248,13 @@ test('corrupt, unknown, random, and malformed encrypted Session envelopes are te
   }
 })
 
-test('a failed Session replace preserves the previous envelope and clear removes pending state', async () => {
+test('a failed session replace preserves the previous envelope and clear removes pending state', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-write-failure-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
   const pendingPath = `${sessionPath}.pending`
   const firstSession = JSON.stringify({
-    access_token: 'first-access-token',
-    refresh_token: 'first-refresh-token',
-    token_type: 'bearer',
-    expires_at: 4_102_444_800,
-    expires_in: 3600,
+    token: 'first-opaque-session-token',
+    expires_at: '2026-01-01T00:00:00Z',
     user: { id: 'write-failure-test-user', email: 'write-failure@example.com' }
   })
   const secondSession = firstSession.replaceAll('first-', 'second-')
@@ -323,14 +302,13 @@ test('a failed Session replace preserves the previous envelope and clear removes
   }
 })
 
-test('unavailable secure storage keeps only the runtime Session and offline logout still ends local access', async () => {
+test('unavailable secure storage keeps only the runtime session and offline logout still ends local access', async () => {
   test.setTimeout(60_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('unavailable-storage')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: 'Unavailable Storage Org' })
+  const identity = uniqueIdentity('unavailable-storage')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-unavailable-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
   const environment = { NEVIX_TEST_UNAVAILABLE_SECURE_STORAGE: '1' }
@@ -342,7 +320,7 @@ test('unavailable secure storage keeps only the runtime Session and offline logo
       environment
     })
     try {
-      await signInAndReadSession(launched.page, identity)
+      await signInAndReadGrant(launched.page, identity)
       await expect(
         launched.page.getByText(
           'This device cannot store your session securely, so you will sign in again after closing the application.'
@@ -353,7 +331,7 @@ test('unavailable secure storage keeps only the runtime Session and offline logo
       await launched.electronApp.evaluate(({ session }) => {
         session.defaultSession.enableNetworkEmulation({ offline: true })
       })
-      await launched.page.route('**/auth/v1/logout?scope=local', (route) =>
+      await launched.page.route('**/identity/auth/logout', (route) =>
         route.abort('internetdisconnected')
       )
       await signOutFromUserMenu(launched.page)
@@ -387,18 +365,16 @@ test('unavailable secure storage keeps only the runtime Session and offline logo
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
-test('a secure-storage outage keeps the encrypted Session envelope and restore succeeds after recovery', async () => {
+test('a secure-storage outage keeps the encrypted session envelope and restore succeeds after recovery', async () => {
   test.setTimeout(90_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('storage-outage')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: 'Storage Outage Org' })
+  const identity = uniqueIdentity('storage-outage')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-outage-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
@@ -409,7 +385,7 @@ test('a secure-storage outage keeps the encrypted Session envelope and restore s
         !(await hasSecurePersistenceBackend(launched.electronApp)),
         'requires a native Keychain, DPAPI, or Secret Service backend'
       )
-      await signInAndReadSession(launched.page, identity)
+      await signInAndReadGrant(launched.page, identity)
       await expect.poll(() => fileExists(sessionPath)).toBe(true)
     } finally {
       await launched.electronApp.close()
@@ -443,14 +419,13 @@ test('a secure-storage outage keeps the encrypted Session envelope and restore s
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
 test('a corrupt envelope stays terminal and deleted even while secure storage is unavailable', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-corrupt-outage-'))
@@ -485,15 +460,14 @@ test('a corrupt envelope stays terminal and deleted even while secure storage is
   }
 })
 
-test('a transient Session read failure keeps the envelope and restore succeeds after recovery', async () => {
+test('a transient session read failure keeps the envelope and the read recovers after the mode bit is restored', async () => {
   test.setTimeout(90_000)
   test.skip(process.platform === 'win32', 'POSIX mode bits cannot emulate read failure on Windows')
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('read-failure')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: 'Read Failure Org' })
+  const identity = uniqueIdentity('read-failure')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-read-failure-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
@@ -504,7 +478,7 @@ test('a transient Session read failure keeps the envelope and restore succeeds a
         !(await hasSecurePersistenceBackend(launched.electronApp)),
         'requires a native Keychain, DPAPI, or Secret Service backend'
       )
-      await signInAndReadSession(launched.page, identity)
+      await signInAndReadGrant(launched.page, identity)
       await expect.poll(() => fileExists(sessionPath)).toBe(true)
       const envelopeBeforeFailure = await readFile(sessionPath, 'utf8')
 
@@ -516,7 +490,6 @@ test('a transient Session read failure keeps the envelope and restore succeeds a
       await chmod(sessionPath, 0o600)
       expect(await readFile(sessionPath, 'utf8')).toBe(envelopeBeforeFailure)
 
-      await chmod(sessionPath, 0o600)
       const restored = await invokeAuthenticationChannel(
         launched.page,
         'authentication:read-session'
@@ -527,19 +500,17 @@ test('a transient Session read failure keeps the envelope and restore succeeds a
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
-test('Linux basic_text is treated as unavailable and never creates a Session file', async () => {
+test('Linux basic_text is treated as unavailable and never creates a session file', async () => {
   test.setTimeout(60_000)
   test.skip(process.platform !== 'linux', 'Electron basic_text exists only on Linux')
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('basic-text-storage')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: 'Basic Text Org' })
+  const identity = uniqueIdentity('basic-text-storage')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-basic-text-'))
   const sessionPath = join(userDataDir, SESSION_FILE_NAME)
 
@@ -555,7 +526,7 @@ test('Linux basic_text is treated as unavailable and never creates a Session fil
           safeStorage.getSelectedStorageBackend()
         )
       ).toBe('basic_text')
-      await signInAndReadSession(launched.page, identity)
+      await signInAndReadGrant(launched.page, identity)
       await expect(
         launched.page.getByText(
           'This device cannot store your session securely, so you will sign in again after closing the application.'
@@ -567,27 +538,25 @@ test('Linux basic_text is treated as unavailable and never creates a Session fil
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })
 
-async function signInAndReadSession(
+async function signInAndReadGrant(
   page: Page,
   identity: { readonly email: string; readonly password: string }
-): Promise<Session> {
+): Promise<LoginGrant> {
   await expect(page.getByRole('heading', { name: 'Sign in to Nevix AI' })).toBeVisible()
   const responsePromise = page.waitForResponse(
     (response) =>
-      response.request().method() === 'POST' &&
-      response.url().includes('/auth/v1/token?grant_type=password')
+      response.request().method() === 'POST' && response.url().endsWith('/identity/auth/login')
   )
   await page.getByLabel('Email').fill(identity.email)
   await page.getByLabel('Password').fill(identity.password)
   await page.getByRole('button', { name: 'Sign in' }).click()
   const response = await responsePromise
-  const session = (await response.json()) as Session
+  const grant = (await response.json()) as LoginGrant
   await expect(page.getByRole('heading', { name: 'Create with Nevix AI' })).toBeVisible()
-  return session
+  return grant
 }
 
 async function invokeAuthenticationChannel(
@@ -608,18 +577,15 @@ async function invokeAuthenticationChannel(
   )
 }
 
-function expectEncryptedEnvelope(envelope: string, email: string, session?: Session): void {
+function expectEncryptedEnvelope(envelope: string, email: string, grant?: LoginGrant): void {
   const parsed = JSON.parse(envelope) as Record<string, unknown>
   expect(Object.keys(parsed).sort()).toEqual(['ciphertext', 'version'])
   expect(parsed.version).toBe(1)
   expect(typeof parsed.ciphertext).toBe('string')
   expect(envelope).not.toContain(email)
-  expect(envelope).not.toContain('"access_token"')
-  expect(envelope).not.toContain('"refresh_token"')
-  if (session) {
-    expect(envelope).not.toContain(session.access_token)
-    expect(envelope).not.toContain(session.refresh_token)
-    expect(envelope).not.toContain(JSON.stringify(session))
+  expect(envelope).not.toContain('"token"')
+  if (grant) {
+    expect(envelope).not.toContain(grant.token)
   }
 }
 

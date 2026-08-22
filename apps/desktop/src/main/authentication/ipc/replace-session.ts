@@ -2,7 +2,7 @@ import { replacePersistedSession } from '../session-store'
 import { requireTrustedTopLevelRendererSender } from '../../window/trusted-renderer-sender'
 import type { PersistedSessionWrite } from '../../../shared/ipc/authentication/types'
 
-/** A Supabase Session serializes to a few kilobytes; anything larger is not one. */
+/** An opaque session with its account snapshot is well under a kilobyte; larger is not one. */
 const MAXIMUM_SESSION_LENGTH = 64 * 1024
 
 export async function replaceSessionHandler(

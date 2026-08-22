@@ -7,7 +7,7 @@ export const profileTranslations = defineResourceTranslations({
   'zh-CN': {
     navLabel: '个人资料',
     title: '个人资料',
-    description: '显示名在所有组织中共享；登录邮箱不属于个人资料。',
+    description: '显示名会展示在团队目录中；登录邮箱不属于个人资料。',
     displayName: '显示名',
     displayNamePlaceholder: '其他成员看到的名字',
     save: '保存',
@@ -25,7 +25,7 @@ export const profileTranslations = defineResourceTranslations({
     navLabel: 'Profile',
     title: 'Profile',
     description:
-      'Your display name is shared across organizations. Your sign-in email is not part of the profile.',
+      'Your display name is shown in the team directory. Your sign-in email is not part of the profile.',
     displayName: 'Display name',
     displayNamePlaceholder: 'The name other members see',
     save: 'Save',

@@ -1,79 +1,77 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { parseSupabasePublicConfig } from '../../../../../shared/config/supabase-public-config'
+import { readServerPublicConfig } from '../../../lib/server-public-config'
 
+/** The minimum a Profile call needs from the current session: the opaque token. */
 export interface AuthenticatedProfileSession {
-  readonly accessToken: string
-  readonly userId: string
+  readonly token: string
 }
 
 export interface Profile {
   readonly displayName: string
 }
 
-export async function readProfile(
-  session: AuthenticatedProfileSession
-): Promise<Profile | undefined> {
-  const { data, error } = await profileClient(session)
-    .from('profiles')
-    .select('user_id, display_name')
-    .eq('user_id', session.userId)
-    .maybeSingle()
-
-  if (error) throw new Error('Profile request failed.')
-  if (data === null) return undefined
-
-  return toProfile(data, session.userId)
-}
-
-export async function hasCompletedProfile(session: AuthenticatedProfileSession): Promise<boolean> {
-  return (await readProfile(session)) !== undefined
+/**
+ * Reads the account's display name from the trusted data plane. `undefined` means
+ * the server answer could not be read as an account; callers treat it as a load failure.
+ */
+export async function readProfile(session: AuthenticatedProfileSession): Promise<Profile> {
+  const user = await requestMe(session)
+  return { displayName: user.display_name }
 }
 
 export async function saveProfile(
   session: AuthenticatedProfileSession,
   displayName: string
 ): Promise<Profile> {
-  const { data, error } = await profileClient(session)
-    .from('profiles')
-    .upsert(
-      {
-        user_id: session.userId,
-        display_name: displayName
-      },
-      { onConflict: 'user_id' }
-    )
-    .select('user_id, display_name')
-    .single()
+  const config = readServerPublicConfig()
+  if (!config) throw new Error('Server configuration is unavailable.')
 
-  if (error) throw new Error('Profile request failed.')
-  return toProfile(data, session.userId)
-}
-
-function profileClient(session: AuthenticatedProfileSession): SupabaseClient {
-  const config = parseSupabasePublicConfig({
-    url: __NEVIX_SUPABASE_URL__,
-    publishableKey: __NEVIX_SUPABASE_PUBLISHABLE_KEY__,
-    policy: __NEVIX_SUPABASE_CONFIG_POLICY__
-  })
-  if (!config) throw new Error('Profile configuration is unavailable.')
-
-  return createClient(config.url, config.publishableKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false
+  const response = await fetch(new URL('/identity/users/me', config.url), {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.token}`
     },
-    accessToken: async () => session.accessToken
+    body: JSON.stringify({ display_name: displayName })
   })
-}
 
-function toProfile(value: unknown, userId: string): Profile {
-  if (typeof value !== 'object' || value === null) throw new Error('Profile response is invalid.')
-
-  const row = value as { user_id?: unknown; display_name?: unknown }
-  if (row.user_id !== userId || typeof row.display_name !== 'string') {
-    throw new Error('Profile response is invalid.')
+  const payload = await readJson(response).catch(() => undefined)
+  if (!response.ok || payload === undefined) {
+    throw new Error('Profile request failed.')
   }
 
-  return { displayName: row.display_name }
+  const user = (payload as { user?: unknown }).user
+  if (typeof user !== 'object' || user === null) throw new Error('Profile response is invalid.')
+
+  const saved = (user as { display_name?: unknown }).display_name
+  if (typeof saved !== 'string') throw new Error('Profile response is invalid.')
+
+  return { displayName: saved }
+}
+
+async function requestMe(session: AuthenticatedProfileSession): Promise<{
+  readonly display_name: string
+}> {
+  const config = readServerPublicConfig()
+  if (!config) throw new Error('Server configuration is unavailable.')
+
+  const response = await fetch(new URL('/identity/users/me', config.url), {
+    headers: { Authorization: `Bearer ${session.token}` }
+  })
+
+  const payload = await readJson(response).catch(() => undefined)
+  if (!response.ok || payload === undefined) {
+    throw new Error('Profile request failed.')
+  }
+
+  const user = (payload as { user?: unknown }).user
+  if (typeof user !== 'object' || user === null) throw new Error('Profile response is invalid.')
+
+  const displayName = (user as { display_name?: unknown }).display_name
+  if (typeof displayName !== 'string') throw new Error('Profile response is invalid.')
+
+  return { display_name: displayName }
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  return response.json()
 }

@@ -1,14 +1,7 @@
 import { useMemo } from 'react'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
 import { RememberedEmailPersistenceNotice, useAuthentication } from '../features/authentication'
-import {
-  ActiveOrganizationProvider,
-  OrganizationOnboardingProvider,
-  SessionAccessLostDialog
-} from '../features/organization'
-import { hasCompletedProfile } from '../features/profile'
 import { AuthenticationStateContext } from './authentication-state'
-import { ResetOrganizationOnboardingAfterSessionEnds } from './organization-onboarding-session-reset'
 import { OrdinaryCloseProvider } from './ordinary-close'
 import { routeTree } from './routeTree.gen'
 
@@ -24,27 +17,14 @@ function App(): React.JSX.Element {
   return (
     <OrdinaryCloseProvider>
       <AuthenticationStateContext.Provider value={authentication}>
-        <OrganizationOnboardingProvider>
-          <ActiveOrganizationProvider
-            // Remounting on the authentication transition resets the Organization state, so the
-            // next Session never renders data the previous Session was entitled to.
-            key={authentication.status === 'authenticated' ? 'authenticated' : 'signed-out'}
-            isAuthenticated={authentication.status === 'authenticated'}
-            getSession={authentication.getSession}
-            hasCompletedProfile={hasCompletedProfile}
-          >
-            <ResetOrganizationOnboardingAfterSessionEnds />
-            <SessionAccessLostDialog />
-            <RememberedEmailPersistenceNotice
-              surface="authenticated"
-              isSurfaceActive={authentication.status === 'authenticated'}
-              isPersistenceUnavailable={authentication.isRememberedEmailPersistenceUnavailable}
-              noticeSurface={authentication.rememberedEmailPersistenceNoticeSurface}
-              onShown={authentication.consumeRememberedEmailPersistenceNotice}
-            />
-            <RouterProvider router={router} />
-          </ActiveOrganizationProvider>
-        </OrganizationOnboardingProvider>
+        <RememberedEmailPersistenceNotice
+          surface="authenticated"
+          isSurfaceActive={authentication.status === 'authenticated'}
+          isPersistenceUnavailable={authentication.isRememberedEmailPersistenceUnavailable}
+          noticeSurface={authentication.rememberedEmailPersistenceNoticeSurface}
+          onShown={authentication.consumeRememberedEmailPersistenceNotice}
+        />
+        <RouterProvider router={router} />
       </AuthenticationStateContext.Provider>
     </OrdinaryCloseProvider>
   )

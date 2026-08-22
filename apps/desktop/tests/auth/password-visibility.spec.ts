@@ -3,6 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp } from '../helpers/electron-app'
+import { createTeamUser, readIdentityServerConfig, uniqueIdentity } from './helpers/identity-server'
+
+const identityServer = readIdentityServerConfig()
 
 // This value is deliberately not an authentication credential. It is safe if Playwright includes
 // it in a failure message or screenshot while proving that remasking does not clear the field.
@@ -19,50 +22,67 @@ test(
   'password fields reveal independently and remask at every renderer safety boundary',
   { tag: '@smoke' },
   async () => {
-    test.skip(
-      !process.env.NEVIX_TEST_SUPABASE_URL,
-      'requires the configured build produced by the Auth test command'
-    )
+    test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+    if (!identityServer) return
 
+    const identity = uniqueIdentity('password-visibility')
+    await createTeamUser(identityServer, identity)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-password-visibility-'))
 
     try {
       const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
 
       try {
-        const loginPassword = launched.page.getByLabel('Password')
+        const loginPassword = launched.page.getByLabel('Password', { exact: true })
         await expect(loginPassword).toHaveAttribute('type', 'password')
         await loginPassword.fill(NON_SECRET_VISIBILITY_MARKER)
         await visibilityToggle(loginPassword, 'Show entered value').click()
         await expect(loginPassword).toHaveAttribute('type', 'text')
 
-        await launched.page.getByRole('button', { name: 'Create account' }).click()
-
-        const signupPassword = launched.page.getByLabel('Password', { exact: true })
-        const confirmPassword = launched.page.getByLabel('Confirm password')
-        await expect(signupPassword).toHaveAttribute('type', 'password')
+        // The forced first-login change form carries the remaining password fields.
+        await launched.page.getByLabel('Email').fill(identity.email)
+        await loginPassword.fill(identity.password)
+        await launched.page.getByRole('button', { name: 'Sign in' }).click()
+        const initialPassword = launched.page.getByLabel('Initial password', { exact: true })
+        const newPassword = launched.page.getByLabel('New password', { exact: true })
+        const confirmPassword = launched.page.getByLabel('Confirm new password')
+        await expect(initialPassword).toHaveAttribute('type', 'password')
+        await expect(newPassword).toHaveAttribute('type', 'password')
         await expect(confirmPassword).toHaveAttribute('type', 'password')
-        await signupPassword.fill(NON_SECRET_VISIBILITY_MARKER)
+        await initialPassword.fill(NON_SECRET_VISIBILITY_MARKER)
+        await newPassword.fill(NON_SECRET_VISIBILITY_MARKER)
         await confirmPassword.fill(NON_SECRET_VISIBILITY_MARKER)
 
-        await visibilityToggle(signupPassword, 'Show entered value').click()
-        await expect(signupPassword).toHaveAttribute('type', 'text')
+        await visibilityToggle(initialPassword, 'Show entered value').click()
+        await expect(initialPassword).toHaveAttribute('type', 'text')
+        await expect(newPassword).toHaveAttribute('type', 'password')
+        await expect(confirmPassword).toHaveAttribute('type', 'password')
+
+        await visibilityToggle(newPassword, 'Show entered value').click()
+        await expect(initialPassword).toHaveAttribute('type', 'text')
+        await expect(newPassword).toHaveAttribute('type', 'text')
         await expect(confirmPassword).toHaveAttribute('type', 'password')
 
         await visibilityToggle(confirmPassword, 'Show entered value').click()
-        await expect(signupPassword).toHaveAttribute('type', 'text')
+        await expect(initialPassword).toHaveAttribute('type', 'text')
+        await expect(newPassword).toHaveAttribute('type', 'text')
         await expect(confirmPassword).toHaveAttribute('type', 'text')
 
-        await launched.page.getByRole('button', { name: 'Sign in instead' }).click()
+        // Leaving the change boundary remounts the login form remasked and cleared.
+        await launched.page.getByRole('button', { name: 'Sign out without changing' }).click()
         await expect(loginPassword).toHaveAttribute('type', 'password')
         await expect(loginPassword).toHaveValue('')
 
-        await launched.page.getByRole('button', { name: 'Create account' }).click()
-        await expect(signupPassword).toHaveAttribute('type', 'password')
-        await expect(signupPassword).toHaveValue('')
+        // Re-entering the change boundary remounts its fields remasked and cleared as well.
+        await loginPassword.fill(identity.password)
+        await launched.page.getByRole('button', { name: 'Sign in' }).click()
+        await expect(initialPassword).toHaveAttribute('type', 'password')
+        await expect(initialPassword).toHaveValue('')
+        await expect(newPassword).toHaveAttribute('type', 'password')
+        await expect(newPassword).toHaveValue('')
         await expect(confirmPassword).toHaveAttribute('type', 'password')
         await expect(confirmPassword).toHaveValue('')
-        await launched.page.getByRole('button', { name: 'Sign in instead' }).click()
+        await launched.page.getByRole('button', { name: 'Sign out without changing' }).click()
 
         await loginPassword.fill(NON_SECRET_VISIBILITY_MARKER)
         await visibilityToggle(loginPassword, 'Show entered value').click()

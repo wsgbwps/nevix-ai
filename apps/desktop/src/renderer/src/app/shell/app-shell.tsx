@@ -10,7 +10,6 @@ import {
 } from 'lucide-react'
 import { useAuthenticationState } from '../authentication-state'
 import { type Theme, useTheme } from '../../hooks/use-theme'
-import { useActiveOrganization } from '../../features/organization'
 import { createSettingsEntry } from '../settings'
 import { Avatar, AvatarFallback } from '../../components/ui/avatar'
 import {
@@ -76,7 +75,6 @@ export function AppShell({
   const { t } = useTranslation('app')
   const { t: authenticationT } = useTranslation('authentication')
   const authentication = useAuthenticationState()
-  const { activeOrganization } = useActiveOrganization()
   const location = useLocation()
   const { theme, setTheme } = useTheme()
 
@@ -98,13 +96,12 @@ export function AppShell({
           <SidebarHeader>
             <SidebarMenu>
               <SidebarMenuItem>
-                {/* Organization switcher slot: the form stays, the behavior is empty until the
-                  Organization UI lands; it shows the product mark placeholder and no fictional
-                  organization name. */}
+                {/* Brand slot: the product mark placeholder stays until a workspace
+                  identity lands. */}
                 <SidebarMenuButton
                   size="lg"
                   disabled
-                  aria-label={t('shell.organizationSwitcher')}
+                  aria-label={t('shell.brand')}
                   className="disabled:opacity-100"
                 >
                   <BrandMark />
@@ -199,10 +196,7 @@ export function AppShell({
                         to="/settings"
                         state={(state) => ({
                           ...state,
-                          settings: createSettingsEntry(
-                            location,
-                            activeOrganization?.organizationId
-                          )
+                          settings: createSettingsEntry(location)
                         })}
                       >
                         <SettingsIcon />

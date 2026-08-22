@@ -5,40 +5,31 @@ import { AuthenticationTransitionStory } from './fixtures/authentication-transit
 const authoritativeEmail = 'remembered-transition@example.com'
 
 async function installAuthenticationBoundaries(page: Page): Promise<void> {
-  await page.route(
-    'https://component-test.supabase.co/auth/v1/token?grant_type=password',
-    (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        headers: { 'access-control-allow-origin': '*' },
-        body: JSON.stringify({
-          access_token: 'component-test-access-token',
-          token_type: 'bearer',
-          expires_in: 3600,
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
-          refresh_token: 'component-test-refresh-token',
-          user: {
-            id: '00000000-0000-4000-8000-000000000053',
-            aud: 'authenticated',
-            role: 'authenticated',
-            email: authoritativeEmail,
-            email_confirmed_at: '2026-08-14T00:00:00.000Z',
-            phone: '',
-            confirmed_at: '2026-08-14T00:00:00.000Z',
-            last_sign_in_at: '2026-08-14T00:00:00.000Z',
-            app_metadata: { provider: 'email', providers: ['email'] },
-            user_metadata: {},
-            identities: [],
-            created_at: '2026-08-14T00:00:00.000Z',
-            updated_at: '2026-08-14T00:00:00.000Z',
-            is_anonymous: false
-          }
-        })
+  await page.route('https://component-test-server.example/identity/auth/login', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify({
+        token: 'component-test-session-token',
+        expires_at: '2026-08-15T00:00:00Z',
+        user: {
+          id: '00000000-0000-4000-8000-000000000053',
+          email: authoritativeEmail,
+          display_name: 'remembered-transition',
+          role: 'member',
+          must_change_password: false
+        }
       })
+    })
   )
-  await page.route('https://component-test.supabase.co/auth/v1/logout?scope=local', (route) =>
-    route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' } })
+  await page.route('https://component-test-server.example/identity/auth/logout', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify({ status: 'logged_out' })
+    })
   )
 
   await page.evaluate(() => {

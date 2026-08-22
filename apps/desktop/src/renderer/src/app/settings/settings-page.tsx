@@ -12,51 +12,28 @@ import {
   DialogTitle
 } from '../../components/ui/dialog'
 import { LanguageModeSettings } from '../../features/language'
-import {
-  ActiveOrganizationSettingsContext,
-  AuditLogSettings,
-  MembersSettings,
-  OrganizationDetailsSettings,
-  OrganizationSettingsNavigation,
-  useActiveOrganization,
-  type OrganizationSettingsSection
-} from '../../features/organization'
 import { ProfileSettings } from '../../features/profile'
 import { useAuthenticationState } from '../authentication-state'
 import { useSettingsCoordinator, type SettingsContribution } from './settings-coordinator'
-import { SettingsOrganizationPickerPage } from './settings-organization-picker-page'
-import {
-  readSettingsEntry,
-  readSettingsOrganizationPickerEntry,
-  type SettingsSection
-} from './settings-navigation'
+import { readSettingsEntry, type SettingsSection } from './settings-navigation'
 import { CLEAN_LEAVE_SEMANTICS } from './settings-leave-semantics'
 
 /**
- * One row per Settings Section: its scope and the contribution semantics it reports
- * before its Feature has spoken. Adding a Section is one row here plus its renderer
+ * One row per Settings Section: the contribution semantics it reports before
+ * its Feature has spoken. Adding a Section is one row here plus its renderer
  * below and the Feature-owned files that contribute it; the Record keyed by
  * SettingsSection makes a missing row a compile error.
  */
-interface SettingsSectionDescriptor {
-  readonly scope: 'account' | 'organization'
-  readonly defaultContribution: SettingsContribution
+const SETTINGS_SECTION_REGISTRY: Record<SettingsSection, SettingsContribution> = {
+  profile: CLEAN_LEAVE_SEMANTICS,
+  language: CLEAN_LEAVE_SEMANTICS
 }
 
-const SETTINGS_SECTION_REGISTRY: Record<SettingsSection, SettingsSectionDescriptor> = {
-  profile: { scope: 'account', defaultContribution: CLEAN_LEAVE_SEMANTICS },
-  language: { scope: 'account', defaultContribution: CLEAN_LEAVE_SEMANTICS },
-  'organization-details': { scope: 'organization', defaultContribution: CLEAN_LEAVE_SEMANTICS },
-  members: { scope: 'organization', defaultContribution: CLEAN_LEAVE_SEMANTICS },
-  'audit-log': { scope: 'organization', defaultContribution: CLEAN_LEAVE_SEMANTICS }
-}
 export function SettingsPage(): React.JSX.Element | null {
   const { t } = useTranslation('app')
   const authentication = useAuthenticationState()
-  const organization = useActiveOrganization()
   const location = useLocation()
   const entry = readSettingsEntry(location.state)
-  const organizationPicker = readSettingsOrganizationPickerEntry(location.state)
   const [contributions, setContributions] = useState<
     Partial<Record<SettingsSection, SettingsContribution>>
   >({})
@@ -71,15 +48,8 @@ export function SettingsPage(): React.JSX.Element | null {
     }
     return reporters
   }, [])
-  const contribution =
-    contributions[entry.section] ?? SETTINGS_SECTION_REGISTRY[entry.section].defaultContribution
-  const coordinator = useSettingsCoordinator({
-    entry,
-    contribution,
-    organizationId: organization.activeOrganization?.organizationId,
-    openOrganizationPicker: organization.openOrganizationPicker
-  })
-  const organizationId = organization.activeOrganization?.organizationId
+  const contribution = contributions[entry.section] ?? SETTINGS_SECTION_REGISTRY[entry.section]
+  const coordinator = useSettingsCoordinator({ entry, contribution })
   const sectionRenderers: Record<SettingsSection, () => React.JSX.Element | null> = {
     profile: () => (
       <div className="bg-card rounded-lg border">
@@ -98,53 +68,12 @@ export function SettingsPage(): React.JSX.Element | null {
           <LanguageModeSettings />
         </div>
       </section>
-    ),
-    'organization-details': () => (
-      <OrganizationDetailsSettings
-        key={organizationId}
-        onContributionChange={contributionReporters['organization-details']}
-      />
-    ),
-    members: () => (
-      <MembersSettings
-        getSession={authentication.getSession}
-        onContributionChange={contributionReporters.members}
-      />
-    ),
-    'audit-log': () => (
-      <AuditLogSettings
-        getSession={authentication.getSession}
-        onContributionChange={contributionReporters['audit-log']}
-        // The audit-log Feature reports permission loss; the Settings Flow
-        // owns where a member who lost access lands.
-        onPermissionLost={() => coordinator.forceSwitchSection('members')}
-      />
     )
   }
-  // The registry defines the organization-scoped sections to be exactly the
-  // Organization Feature's Settings Sections.
-  const organizationSection: OrganizationSettingsSection | undefined =
-    SETTINGS_SECTION_REGISTRY[coordinator.section].scope === 'organization'
-      ? (coordinator.section as OrganizationSettingsSection)
-      : undefined
   if (authentication.status !== 'authenticated') {
     // The root route is already navigating to the authentication view; render nothing on the
     // transient frame so the Settings Page never shows for a signed-out user.
     return null
-  }
-
-  if (organizationPicker) {
-    return (
-      <SettingsOrganizationPickerPage
-        phase={organizationPicker.phase}
-        userEmail={authentication.userEmail}
-        isSigningOut={authentication.isSubmitting}
-        getSession={authentication.getSession}
-        onCreateOrganization={coordinator.openOrganizationCreation}
-        onFinish={coordinator.finishOrganizationPicker}
-        onSignOut={() => void authentication.signOut()}
-      />
-    )
   }
 
   return (
@@ -160,11 +89,6 @@ export function SettingsPage(): React.JSX.Element | null {
             <ArrowLeftIcon className="size-4" />
             {t('settings.back')}
           </button>
-
-          <ActiveOrganizationSettingsContext
-            switchDisabled={coordinator.navigationDisabled}
-            onOpenOrganizationPicker={coordinator.openOrganizationPicker}
-          />
 
           <nav aria-label={t('settings.title')} className="grid gap-4">
             <div className="grid gap-1">
@@ -192,14 +116,6 @@ export function SettingsPage(): React.JSX.Element | null {
                 {t('settings.language')}
               </button>
             </div>
-
-            <OrganizationSettingsNavigation
-              key={organization.activeOrganization?.organizationId}
-              activeSection={organizationSection}
-              disabled={coordinator.navigationDisabled}
-              onSelectSection={coordinator.switchSection}
-              onForceSelectSection={coordinator.forceSwitchSection}
-            />
           </nav>
         </aside>
         <main className="max-h-svh flex-1 overflow-y-auto">

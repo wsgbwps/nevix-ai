@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  AuthApiError,
-  isAuthWeakPasswordError,
-  type AuthError,
-  type SupabaseClient
-} from '@supabase/supabase-js'
-import { createAuthenticationClient, createRecoveryClient } from '../api/client'
-import { readSupabasePublicConfig } from '../api/environment'
+  createIdentityClient,
+  type IdentityApiFailure,
+  type IdentityClient,
+  type SessionCredentials,
+  type UserAccount
+} from '../api/client'
 import {
   clearRememberedEmail,
   readRememberedEmail,
@@ -17,49 +16,37 @@ import { readServerPublicConfig } from '../../../lib/server-public-config'
 import {
   clearPersistedSession,
   isSessionPersistenceUnavailable,
-  readPersistedSession
+  readPersistedCredentials,
+  replacePersistedCredentials
 } from '../session/persisted-session'
-import type { SupabasePublicConfig } from '../../../../../shared/config/supabase-public-config'
 
 export type AuthenticationStatus =
   | 'restoring'
   | 'configuration-error'
   | 'restore-failure'
   | 'unauthenticated'
+  | 'password-change-required'
   | 'authenticated'
-
-export type AuthenticationFlow =
-  | 'login'
-  | 'signup'
-  | 'signup-verification'
-  | 'recovery-request'
-  | 'recovery-verification'
-  | 'recovery-new-password'
 
 export type AuthenticationError =
   | 'invalid-credentials'
-  | 'invalid-verification-code'
+  | 'account-disabled'
+  | 'invalid-password'
   | 'password-too-short'
-  | 'password-leaked'
-  | 'same-password'
+  | 'password-too-long'
   | 'rate-limited'
   | 'service-unavailable'
 
-export type AuthenticationNotice =
-  | 'session-expired'
-  | 'remote-sign-out-delayed'
-  | 'password-updated'
-  | 'password-updated-revocation-delayed'
+export type AuthenticationNotice = 'session-expired' | 'remote-sign-out-delayed'
 
-interface AuthenticatedSession {
-  readonly accessToken: string
-  readonly userId: string
-  readonly email: string
+/** The session handed to authenticated consumers; the token stays out of URLs and storage except the encrypted slot. */
+export interface AuthenticatedSession {
+  readonly token: string
+  readonly user: UserAccount
 }
 
 interface Authentication {
   readonly status: AuthenticationStatus
-  readonly flow: AuthenticationFlow
   readonly error: AuthenticationError | undefined
   readonly notice: AuthenticationNotice | undefined
   readonly isSubmitting: boolean
@@ -69,49 +56,19 @@ interface Authentication {
   readonly isRememberedEmailPersistenceUnavailable: boolean
   readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   readonly userEmail: string | undefined
-  readonly resendSecondsRemaining: number
-  readonly resendGeneration: number
-  readonly didResend: boolean
   readonly getSession: () => Promise<AuthenticatedSession | undefined>
-  readonly showLogin: () => void
-  readonly showSignUp: () => void
-  readonly showRecovery: () => void
   readonly setRememberEmailSelected: (selected: boolean) => void
   readonly consumeRememberedEmailPersistenceNotice: () => void
   readonly retryRestore: () => Promise<void>
   readonly signIn: (email: string, password: string) => Promise<void>
-  readonly signUp: (email: string, password: string) => Promise<void>
-  readonly verifySignUp: (code: string) => Promise<boolean>
-  readonly resendSignUp: () => Promise<void>
-  readonly requestRecovery: (email: string) => Promise<void>
-  readonly verifyRecovery: (code: string) => Promise<void>
-  readonly completeRecovery: (newPassword: string) => Promise<void>
+  readonly completePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
   readonly signOut: () => Promise<void>
 }
 
-const INVALID_CREDENTIAL_CODES = new Set([
-  'email_not_confirmed',
-  'invalid_credentials',
-  'user_not_found'
-])
-const SAFE_SIGNUP_CONFLICT_CODES = new Set(['email_exists', 'user_already_exists'])
-const INVALID_VERIFICATION_CODES = new Set([
-  'bad_code_verifier',
-  'invalid_otp',
-  'otp_expired',
-  'token_expired'
-])
-const RATE_LIMIT_CODES = new Set([
-  'over_email_send_rate_limit',
-  'over_request_rate_limit',
-  'request_rate_limit_reached'
-])
 const MINIMUM_INITIALIZATION_DISPLAY_MS = 500
-const RESEND_COOLDOWN_MS = 60_000
 
 export function useAuthentication(): Authentication {
   const [status, setStatus] = useState<AuthenticationStatus>('restoring')
-  const [flow, setFlow] = useState<AuthenticationFlow>('login')
   const [error, setError] = useState<AuthenticationError>()
   const [notice, setNotice] = useState<AuthenticationNotice>()
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -123,13 +80,8 @@ export function useAuthentication(): Authentication {
   const [rememberedEmailPersistenceNoticeSurface, setRememberedEmailPersistenceNoticeSurface] =
     useState<'login' | 'authenticated'>()
   const [userEmail, setUserEmail] = useState<string | undefined>()
-  const [verificationEmail, setVerificationEmail] = useState<string>()
-  const [resendAvailableAt, setResendAvailableAt] = useState<number>()
-  const [resendSecondsRemaining, setResendSecondsRemaining] = useState(0)
-  const [resendGeneration, setResendGeneration] = useState(0)
-  const [didResend, setDidResend] = useState(false)
-  const clientRef = useRef<SupabaseClient | null>(null)
-  const authSubscriptionRef = useRef<{ unsubscribe: () => void } | null>(null)
+  const clientRef = useRef<IdentityClient | null>(null)
+  const credentialsRef = useRef<SessionCredentials | undefined>(undefined)
   const submissionRef = useRef(false)
   const statusRef = useRef<AuthenticationStatus>('restoring')
   const rememberEmailSelectedRef = useRef(true)
@@ -138,11 +90,6 @@ export function useAuthentication(): Authentication {
   const hasShownRememberedEmailPersistenceNoticeRef = useRef(false)
   const hasInitializedRef = useRef(false)
   const restoreInProgressRef = useRef(false)
-  const signOutInProgressRef = useRef(false)
-  // The recovery subflow keeps its isolated client and email out of React state so the temporary
-  // recovery Session can never leak into a render or the top-level authenticated gate.
-  const recoveryClientRef = useRef<SupabaseClient | null>(null)
-  const recoveryEmailRef = useRef<string | undefined>(undefined)
 
   const enqueueRememberedEmailMutation = useCallback(
     <Result>(mutation: () => Promise<Result>): Promise<Result> => {
@@ -180,68 +127,55 @@ export function useAuthentication(): Authentication {
     setRememberedEmailPersistenceNoticeSurface(undefined)
   }, [])
 
-  const discardRecovery = useCallback((): void => {
-    recoveryClientRef.current = null
-    recoveryEmailRef.current = undefined
-  }, [])
+  const settleUnauthenticated = useCallback(
+    (nextNotice: AuthenticationNotice | undefined): void => {
+      credentialsRef.current = undefined
+      retireRememberedEmailPersistenceNotice()
+      setError(undefined)
+      setNotice(nextNotice)
+      setPersistenceUnavailable(false)
+      setUserEmail(undefined)
+      rememberEmailSelectedRef.current = true
+      rememberEmailSelectionGenerationRef.current += 1
+      setRememberEmailSelectedState(true)
+      statusRef.current = 'unauthenticated'
+      setStatus('unauthenticated')
+    },
+    [retireRememberedEmailPersistenceNotice]
+  )
 
-  const resetSignUpVerification = useCallback((): void => {
-    setVerificationEmail(undefined)
-    setDidResend(false)
-    setResendAvailableAt(undefined)
-    setResendSecondsRemaining(0)
-  }, [])
+  /** Ends a session the server has rejected: local credentials die, the login screen explains why. */
+  const abandonRejectedSession = useCallback(
+    (nextNotice: AuthenticationNotice): void => {
+      void clearPersistedSession()
+        .catch(() => undefined)
+        .finally(() => settleUnauthenticated(nextNotice))
+    },
+    [settleUnauthenticated]
+  )
 
-  const handleProviderSignedOut = useCallback((): void => {
-    if (restoreInProgressRef.current || signOutInProgressRef.current) return
-
-    void clearPersistedSession()
-      .catch(() => undefined)
-      .finally(() => {
-        setError(undefined)
-        setNotice('session-expired')
-        setPersistenceUnavailable(false)
-        retireRememberedEmailPersistenceNotice()
-        setUserEmail(undefined)
-        statusRef.current = 'unauthenticated'
-        setStatus('unauthenticated')
-        setFlow('login')
-        rememberEmailSelectedRef.current = true
-        rememberEmailSelectionGenerationRef.current += 1
-        setRememberEmailSelectedState(true)
-        resetSignUpVerification()
-        discardRecovery()
-      })
-  }, [discardRecovery, resetSignUpVerification, retireRememberedEmailPersistenceNotice])
-
-  const enterAuthenticatedShell = useCallback(
-    (email: string | undefined): void => {
+  const settleSession = useCallback(
+    (credentials: SessionCredentials): void => {
+      credentialsRef.current = credentials
       retireRememberedEmailPersistenceNotice()
       setPersistenceUnavailable(isSessionPersistenceUnavailable())
       setNotice(undefined)
-      setUserEmail(email)
-      statusRef.current = 'authenticated'
-      setStatus('authenticated')
+      setUserEmail(credentials.user.email)
+      const nextStatus: AuthenticationStatus = credentials.user.mustChangePassword
+        ? 'password-change-required'
+        : 'authenticated'
+      statusRef.current = nextStatus
+      setStatus(nextStatus)
     },
     [retireRememberedEmailPersistenceNotice]
   )
 
   const getSession = useCallback(async (): Promise<AuthenticatedSession | undefined> => {
-    const client = clientRef.current
-    if (!client) return undefined
+    if (statusRef.current !== 'authenticated') return undefined
+    const credentials = credentialsRef.current
+    if (!credentials) return undefined
 
-    const {
-      data: { session },
-      error: sessionError
-    } = await client.auth.getSession()
-    if (sessionError || !session || !session.user.email) return undefined
-    const email = session.user.email
-
-    return {
-      accessToken: session.access_token,
-      userId: session.user.id,
-      email: email.toLowerCase()
-    }
+    return { token: credentials.token, user: credentials.user }
   }, [])
 
   const restore = useCallback(async (): Promise<void> => {
@@ -253,16 +187,16 @@ export function useAuthentication(): Authentication {
     setError(undefined)
 
     try {
-      const publicConfig = readSupabasePublicConfig()
-      const serverConfig = readServerPublicConfig()
-      if (!publicConfig || !serverConfig) {
+      const config = readServerPublicConfig()
+      if (!config) {
         statusRef.current = 'configuration-error'
         setStatus('configuration-error')
         return
       }
+      clientRef.current = createIdentityClient(config)
 
       const [stored, remembered] = await Promise.all([
-        readPersistedSession(),
+        readPersistedCredentials(),
         readRememberedEmail().catch(() => ({ outcome: 'storage-unavailable' as const }))
       ])
       setRememberedEmail(remembered.outcome === 'email' ? remembered.email : undefined)
@@ -275,7 +209,7 @@ export function useAuthentication(): Authentication {
         reportRememberedEmailPersistenceAvailable()
       }
 
-      // The envelope may still hold a valid Session, so nothing is deleted; the retry boundary
+      // The envelope may still hold a valid token, so nothing is deleted; the retry boundary
       // re-reads the store once the secure-storage backend recovers.
       if (stored.outcome === 'storage-unavailable') {
         statusRef.current = 'restore-failure'
@@ -283,41 +217,38 @@ export function useAuthentication(): Authentication {
         return
       }
 
-      const isUnusable = stored.outcome === 'unreadable'
-      if (isUnusable) await clearPersistedSession()
-
-      // A retry must reach the network again, so each attempt starts from a client that has no
-      // memory of the previous refresh failure.
-      const client = replaceAuthenticationClient(
-        clientRef,
-        authSubscriptionRef,
-        publicConfig,
-        handleProviderSignedOut
-      )
-
-      if (stored.outcome !== 'session') {
-        setNotice(isUnusable ? 'session-expired' : undefined)
-        statusRef.current = 'unauthenticated'
-        setStatus('unauthenticated')
+      if (stored.outcome === 'unreadable') {
+        await clearPersistedSession().catch(() => undefined)
+        settleUnauthenticated('session-expired')
         return
       }
 
-      const { data, error: refreshError } = await client.auth.refreshSession()
-      if (data.session) {
-        enterAuthenticatedShell(data.session.user.email)
+      if (stored.outcome === 'empty') {
+        settleUnauthenticated(undefined)
         return
       }
 
-      if (!isTerminalRestoreFailure(refreshError)) {
-        statusRef.current = 'restore-failure'
-        setStatus('restore-failure')
+      const client = clientRef.current
+      const me = await client.me(stored.credentials.token)
+      if (me.outcome === 'succeeded') {
+        // /me is the authority for account facts: display name, role, and any password
+        // change the server started demanding since the session was stored.
+        settleSession({
+          token: stored.credentials.token,
+          expiresAt: stored.credentials.expiresAt,
+          user: me.value
+        })
         return
       }
 
-      await clearPersistedSession()
-      setNotice('session-expired')
-      statusRef.current = 'unauthenticated'
-      setStatus('unauthenticated')
+      if (me.outcome === 'unauthorized') {
+        abandonRejectedSession('session-expired')
+        return
+      }
+
+      // Network and server failures stay retryable: a temporary outage is never a logout.
+      statusRef.current = 'restore-failure'
+      setStatus('restore-failure')
     } catch {
       statusRef.current = 'restore-failure'
       setStatus('restore-failure')
@@ -325,10 +256,11 @@ export function useAuthentication(): Authentication {
       restoreInProgressRef.current = false
     }
   }, [
-    enterAuthenticatedShell,
-    handleProviderSignedOut,
+    abandonRejectedSession,
     reportRememberedEmailPersistenceAvailable,
-    reportRememberedEmailPersistenceUnavailable
+    reportRememberedEmailPersistenceUnavailable,
+    settleSession,
+    settleUnauthenticated
   ])
 
   useEffect(() => {
@@ -341,50 +273,6 @@ export function useAuthentication(): Authentication {
     })
     void initialized.then(() => restore())
   }, [restore])
-
-  useEffect(
-    () => () => {
-      authSubscriptionRef.current?.unsubscribe()
-      void clientRef.current?.auth.stopAutoRefresh()
-    },
-    []
-  )
-
-  useEffect(() => {
-    if (resendAvailableAt === undefined) return
-
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((resendAvailableAt - Date.now()) / 1000))
-      setResendSecondsRemaining(remaining)
-      if (remaining === 0) clearInterval(interval)
-    }, 250)
-    return () => clearInterval(interval)
-  }, [resendAvailableAt])
-
-  const showLogin = useCallback((): void => {
-    setFlow('login')
-    setError(undefined)
-    resetSignUpVerification()
-    discardRecovery()
-  }, [discardRecovery, resetSignUpVerification])
-
-  const showSignUp = useCallback((): void => {
-    retireRememberedEmailPersistenceNotice()
-    setFlow('signup')
-    setError(undefined)
-    setNotice(undefined)
-    resetSignUpVerification()
-    discardRecovery()
-  }, [discardRecovery, resetSignUpVerification, retireRememberedEmailPersistenceNotice])
-
-  const showRecovery = useCallback((): void => {
-    retireRememberedEmailPersistenceNotice()
-    setFlow('recovery-request')
-    setError(undefined)
-    setNotice(undefined)
-    resetSignUpVerification()
-    discardRecovery()
-  }, [discardRecovery, resetSignUpVerification, retireRememberedEmailPersistenceNotice])
 
   const setRememberEmailSelected = useCallback(
     (selected: boolean): void => {
@@ -439,6 +327,32 @@ export function useAuthentication(): Authentication {
     ]
   )
 
+  const rememberLoginEmail = useCallback(
+    (email: string): void => {
+      setRememberedEmail(email)
+      void enqueueRememberedEmailMutation(() => replaceRememberedEmail(email))
+        .then((result) => {
+          if (result.outcome === 'memory-only') {
+            reportRememberedEmailPersistenceUnavailable(
+              statusRef.current === 'authenticated' ? 'authenticated' : 'login'
+            )
+          } else {
+            reportRememberedEmailPersistenceAvailable()
+          }
+        })
+        .catch(() =>
+          reportRememberedEmailPersistenceUnavailable(
+            statusRef.current === 'authenticated' ? 'authenticated' : 'login'
+          )
+        )
+    },
+    [
+      enqueueRememberedEmailMutation,
+      reportRememberedEmailPersistenceAvailable,
+      reportRememberedEmailPersistenceUnavailable
+    ]
+  )
+
   const signIn = useCallback(
     async (email: string, password: string): Promise<void> => {
       const client = clientRef.current
@@ -449,40 +363,19 @@ export function useAuthentication(): Authentication {
       setError(undefined)
 
       try {
-        const { data, error: signInError } = await client.auth.signInWithPassword({
-          email,
-          password
-        })
-
-        if (signInError || !data.session) {
-          const isInvalidCredential =
-            signInError instanceof AuthApiError &&
-            signInError.code !== undefined &&
-            INVALID_CREDENTIAL_CODES.has(signInError.code)
-          setError(isInvalidCredential ? 'invalid-credentials' : 'service-unavailable')
+        const login = await client.login(email, password)
+        if (login.outcome !== 'succeeded') {
+          setError(mapRequestFailure(login))
           return
         }
 
-        const authoritativeEmail = data.user?.email ?? data.session.user.email
-        if (rememberEmailSelectedRef.current && authoritativeEmail) {
-          setRememberedEmail(authoritativeEmail)
-          void enqueueRememberedEmailMutation(() => replaceRememberedEmail(authoritativeEmail))
-            .then((result) => {
-              if (result.outcome === 'memory-only') {
-                reportRememberedEmailPersistenceUnavailable(
-                  statusRef.current === 'authenticated' ? 'authenticated' : 'login'
-                )
-              } else {
-                reportRememberedEmailPersistenceAvailable()
-              }
-            })
-            .catch(() =>
-              reportRememberedEmailPersistenceUnavailable(
-                statusRef.current === 'authenticated' ? 'authenticated' : 'login'
-              )
-            )
+        // The encrypted slot is written before the shell opens, so a crash right after
+        // login still restores this session on the next launch.
+        await replacePersistedCredentials(login.value)
+        if (rememberEmailSelectedRef.current && login.value.user.email) {
+          rememberLoginEmail(login.value.user.email)
         }
-        enterAuthenticatedShell(data.session.user.email)
+        settleSession(login.value)
       } catch {
         setError('service-unavailable')
       } finally {
@@ -490,235 +383,39 @@ export function useAuthentication(): Authentication {
         setIsSubmitting(false)
       }
     },
-    [
-      enqueueRememberedEmailMutation,
-      enterAuthenticatedShell,
-      reportRememberedEmailPersistenceAvailable,
-      reportRememberedEmailPersistenceUnavailable
-    ]
+    [rememberLoginEmail, settleSession]
   )
 
-  const signUp = useCallback(async (email: string, password: string): Promise<void> => {
-    const client = clientRef.current
-    if (!client || submissionRef.current || !isPasswordByteLengthValid(password)) return
-
-    submissionRef.current = true
-    setIsSubmitting(true)
-    setError(undefined)
-
-    try {
-      const { error: signUpError } = await client.auth.signUp({ email, password })
-
-      if (
-        signUpError &&
-        !(
-          signUpError instanceof AuthApiError &&
-          signUpError.code !== undefined &&
-          SAFE_SIGNUP_CONFLICT_CODES.has(signUpError.code)
-        )
-      ) {
-        setError(mapPasswordProviderError('signup', signUpError))
-        return
-      }
-
-      setVerificationEmail(email)
-      setFlow('signup-verification')
-      setResendAvailableAt(Date.now() + RESEND_COOLDOWN_MS)
-      setResendSecondsRemaining(RESEND_COOLDOWN_MS / 1000)
-      setResendGeneration(0)
-      setDidResend(false)
-    } catch {
-      setError('service-unavailable')
-    } finally {
-      submissionRef.current = false
-      setIsSubmitting(false)
-    }
-  }, [])
-
-  const verifySignUp = useCallback(
-    async (code: string): Promise<boolean> => {
+  const completePasswordChange = useCallback(
+    async (currentPassword: string, newPassword: string): Promise<void> => {
       const client = clientRef.current
-      if (!client || !verificationEmail || submissionRef.current || !/^\d{6}$/.test(code)) {
-        return false
-      }
+      const credentials = credentialsRef.current
+      if (!client || !credentials || submissionRef.current) return
+      if (!isPasswordByteLengthValid(newPassword)) return
 
       submissionRef.current = true
       setIsSubmitting(true)
       setError(undefined)
 
       try {
-        const { data, error: verificationError } = await client.auth.verifyOtp({
-          email: verificationEmail,
-          token: code,
-          type: 'email'
-        })
-
-        if (verificationError || !data.session) {
-          if (isRateLimited(verificationError)) {
-            setError('rate-limited')
-          } else if (
-            verificationError instanceof AuthApiError &&
-            verificationError.code !== undefined &&
-            INVALID_VERIFICATION_CODES.has(verificationError.code)
-          ) {
-            setError('invalid-verification-code')
-          } else {
-            setError('service-unavailable')
+        const change = await client.changePassword(credentials.token, currentPassword, newPassword)
+        if (change.outcome !== 'succeeded') {
+          if (change.outcome === 'unauthorized') {
+            abandonRejectedSession('session-expired')
+            return
           }
-          return false
-        }
-
-        enterAuthenticatedShell(data.session.user.email)
-        setFlow('login')
-        resetSignUpVerification()
-        return true
-      } catch {
-        setError('service-unavailable')
-        return false
-      } finally {
-        submissionRef.current = false
-        setIsSubmitting(false)
-      }
-    },
-    [enterAuthenticatedShell, resetSignUpVerification, verificationEmail]
-  )
-
-  const resendSignUp = useCallback(async (): Promise<void> => {
-    const client = clientRef.current
-    if (!client || !verificationEmail || submissionRef.current || resendSecondsRemaining > 0) {
-      return
-    }
-
-    submissionRef.current = true
-    setIsSubmitting(true)
-    setError(undefined)
-
-    try {
-      const { error: resendError } = await client.auth.resend({
-        type: 'signup',
-        email: verificationEmail
-      })
-
-      if (resendError) {
-        setError(isRateLimited(resendError) ? 'rate-limited' : 'service-unavailable')
-        return
-      }
-
-      setDidResend(true)
-      setResendGeneration((generation) => generation + 1)
-      setResendAvailableAt(Date.now() + RESEND_COOLDOWN_MS)
-      setResendSecondsRemaining(RESEND_COOLDOWN_MS / 1000)
-    } catch {
-      setError('service-unavailable')
-    } finally {
-      submissionRef.current = false
-      setIsSubmitting(false)
-    }
-  }, [resendSecondsRemaining, verificationEmail])
-
-  const requestRecovery = useCallback(async (email: string): Promise<void> => {
-    if (submissionRef.current) return
-    const publicConfig = readSupabasePublicConfig()
-    if (!publicConfig) return
-
-    submissionRef.current = true
-    setIsSubmitting(true)
-    setError(undefined)
-
-    try {
-      const client = createRecoveryClient(publicConfig)
-      const { error: recoveryError } = await client.auth.resetPasswordForEmail(email)
-
-      if (recoveryError) {
-        setError(isRateLimited(recoveryError) ? 'rate-limited' : 'service-unavailable')
-        return
-      }
-
-      // Success is existence-neutral: the same code state appears whether or not the email exists.
-      recoveryClientRef.current = client
-      recoveryEmailRef.current = email
-      setFlow('recovery-verification')
-    } catch {
-      setError('service-unavailable')
-    } finally {
-      submissionRef.current = false
-      setIsSubmitting(false)
-    }
-  }, [])
-
-  const verifyRecovery = useCallback(async (code: string): Promise<void> => {
-    const client = recoveryClientRef.current
-    const email = recoveryEmailRef.current
-    if (!client || !email || submissionRef.current || !/^\d{6}$/.test(code)) return
-
-    submissionRef.current = true
-    setIsSubmitting(true)
-    setError(undefined)
-
-    try {
-      const { data, error: verificationError } = await client.auth.verifyOtp({
-        email,
-        token: code,
-        type: 'recovery'
-      })
-
-      if (verificationError || !data.session) {
-        if (isRateLimited(verificationError)) {
-          setError('rate-limited')
-        } else if (
-          verificationError instanceof AuthApiError &&
-          verificationError.code !== undefined &&
-          INVALID_VERIFICATION_CODES.has(verificationError.code)
-        ) {
-          setError('invalid-verification-code')
-        } else {
-          setError('service-unavailable')
-        }
-        return
-      }
-
-      // The recovery Session stays inside the isolated client; only the flow state advances.
-      setFlow('recovery-new-password')
-    } catch {
-      setError('service-unavailable')
-    } finally {
-      submissionRef.current = false
-      setIsSubmitting(false)
-    }
-  }, [])
-
-  const completeRecovery = useCallback(
-    async (newPassword: string): Promise<void> => {
-      const client = recoveryClientRef.current
-      if (!client || submissionRef.current || !isPasswordByteLengthValid(newPassword)) return
-
-      submissionRef.current = true
-      setIsSubmitting(true)
-      setError(undefined)
-
-      try {
-        const { error: updateError } = await client.auth.updateUser({ password: newPassword })
-
-        if (updateError) {
-          setError(mapPasswordProviderError('recovery-update', updateError))
+          setError(mapRequestFailure(change))
           return
         }
 
-        let remoteRevocationConfirmed = false
-        try {
-          const { error: revocationError } = await client.auth.signOut({ scope: 'global' })
-          remoteRevocationConfirmed = revocationError === null
-        } catch {
-          remoteRevocationConfirmed = false
+        // The server keeps this session alive while revoking every other device.
+        const changed: SessionCredentials = {
+          token: credentials.token,
+          expiresAt: credentials.expiresAt,
+          user: { ...credentials.user, mustChangePassword: false }
         }
-
-        // Whatever the revocation outcome, the recovery Session is discarded and never promoted;
-        // the user always returns to login and signs in with the new password.
-        discardRecovery()
-        setNotice(
-          remoteRevocationConfirmed ? 'password-updated' : 'password-updated-revocation-delayed'
-        )
-        setFlow('login')
+        await replacePersistedCredentials(changed)
+        settleSession(changed)
       } catch {
         setError('service-unavailable')
       } finally {
@@ -726,50 +423,38 @@ export function useAuthentication(): Authentication {
         setIsSubmitting(false)
       }
     },
-    [discardRecovery]
+    [abandonRejectedSession, settleSession]
   )
 
   const signOut = useCallback(async (): Promise<void> => {
     const client = clientRef.current
+    const credentials = credentialsRef.current
     if (!client || submissionRef.current) return
 
     submissionRef.current = true
-    // Suppresses the provider's own SIGNED_OUT emission so this deliberate sign-out cannot race
-    // handleProviderSignedOut into a misleading session-expired notice.
-    signOutInProgressRef.current = true
     setIsSubmitting(true)
     let remoteRevocationConfirmed = false
 
     try {
-      const { error: signOutError } = await client.auth.signOut({ scope: 'local' })
-      remoteRevocationConfirmed = signOutError === null
+      if (credentials) {
+        const logout = await client.logout(credentials.token)
+        remoteRevocationConfirmed = logout.outcome === 'succeeded'
+      } else {
+        remoteRevocationConfirmed = true
+      }
     } catch {
       remoteRevocationConfirmed = false
     } finally {
       // Local access ends now even when the Desktop could not confirm remote revocation.
       await clearPersistedSession().catch(() => undefined)
-      setError(undefined)
-      setNotice(remoteRevocationConfirmed ? undefined : 'remote-sign-out-delayed')
-      setPersistenceUnavailable(false)
-      retireRememberedEmailPersistenceNotice()
-      setUserEmail(undefined)
-      statusRef.current = 'unauthenticated'
-      setStatus('unauthenticated')
-      setFlow('login')
-      rememberEmailSelectedRef.current = true
-      rememberEmailSelectionGenerationRef.current += 1
-      setRememberEmailSelectedState(true)
-      resetSignUpVerification()
-      discardRecovery()
+      settleUnauthenticated(remoteRevocationConfirmed ? undefined : 'remote-sign-out-delayed')
       submissionRef.current = false
-      signOutInProgressRef.current = false
       setIsSubmitting(false)
     }
-  }, [discardRecovery, resetSignUpVerification, retireRememberedEmailPersistenceNotice])
+  }, [settleUnauthenticated])
 
   return {
     status,
-    flow,
     error,
     notice,
     isSubmitting,
@@ -779,83 +464,28 @@ export function useAuthentication(): Authentication {
     isRememberedEmailPersistenceUnavailable: rememberedEmailPersistenceUnavailable,
     rememberedEmailPersistenceNoticeSurface,
     userEmail,
-    resendSecondsRemaining,
-    resendGeneration,
-    didResend,
     getSession,
-    showLogin,
-    showSignUp,
-    showRecovery,
     setRememberEmailSelected,
     consumeRememberedEmailPersistenceNotice,
     retryRestore: restore,
     signIn,
-    signUp,
-    verifySignUp,
-    resendSignUp,
-    requestRecovery,
-    verifyRecovery,
-    completeRecovery,
+    completePasswordChange,
     signOut
   }
 }
 
-function replaceAuthenticationClient(
-  clientRef: React.RefObject<SupabaseClient | null>,
-  subscriptionRef: React.RefObject<{ unsubscribe: () => void } | null>,
-  config: SupabasePublicConfig,
-  onSignedOut: () => void
-): SupabaseClient {
-  void clientRef.current?.auth.stopAutoRefresh()
-  subscriptionRef.current?.unsubscribe()
-  const client = createAuthenticationClient(config)
-  const {
-    data: { subscription }
-  } = client.auth.onAuthStateChange((event) => {
-    if (event === 'SIGNED_OUT') onSignedOut()
-  })
-  clientRef.current = client
-  subscriptionRef.current = subscription
-  return client
-}
+function mapRequestFailure(failure: IdentityApiFailure): AuthenticationError {
+  if (failure.outcome === 'rate-limited') return 'rate-limited'
+  if (failure.outcome !== 'request-rejected') return 'service-unavailable'
 
-/**
- * Only a Session the provider has actually rejected may destroy local credentials; every other
- * outcome, including an unclassified one, stays retryable so a temporary failure is never a logout.
- */
-function isTerminalRestoreFailure(error: AuthError | null): boolean {
-  if (!error) return true
-  if (error.name === 'AuthSessionMissingError') return true
-
-  return (
-    error instanceof AuthApiError &&
-    error.status !== undefined &&
-    error.status >= 400 &&
-    error.status < 500 &&
-    error.status !== 429
-  )
-}
-
-function isRateLimited(error: unknown): boolean {
-  return (
-    error instanceof AuthApiError &&
-    (error.status === 429 || (error.code !== undefined && RATE_LIMIT_CODES.has(error.code)))
-  )
-}
-
-function mapPasswordProviderError(
-  operation: 'signup' | 'recovery-update',
-  error: AuthError
-): AuthenticationError {
-  if (isRateLimited(error)) return 'rate-limited'
-  if (error instanceof AuthApiError && error.code === 'same_password') return 'same-password'
-  if (isAuthWeakPasswordError(error)) {
-    if (error.reasons.includes('pwned')) return 'password-leaked'
-    if (error.reasons.includes('length')) return 'password-too-short'
+  switch (failure.code) {
+    case 'invalid_credentials':
+      return 'invalid-credentials'
+    case 'account_disabled':
+      return 'account-disabled'
+    case 'invalid_password':
+      return 'invalid-password'
+    default:
+      return 'service-unavailable'
   }
-
-  console.warn(
-    `[authentication] Unmapped password provider error operation=${operation} code=${error.code ?? 'unknown'} status=${error.status ?? 'unknown'}`
-  )
-  return 'service-unavailable'
 }

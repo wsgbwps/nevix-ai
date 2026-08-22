@@ -6,8 +6,8 @@ import { launchTestApp } from '../helpers/electron-app'
 
 test('the real Authentication BrowserWindow has hardened web preferences', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-security-'))
@@ -50,7 +50,7 @@ test('the real Authentication BrowserWindow has hardened web preferences', async
       })
       expect(
         await launched.electronApp.evaluate(
-          () => process.env.NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY ?? null
+          () => process.env.NEVIX_TEST_ADMIN_INITIAL_PASSWORD ?? null
         )
       ).toBeNull()
 
@@ -71,8 +71,8 @@ test('the real Authentication BrowserWindow has hardened web preferences', async
 
 test('the preload bridge rejects IPC channels outside the runtime allowlist', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-allowlist-'))
@@ -138,11 +138,10 @@ test('the preload bridge rejects IPC channels outside the runtime allowlist', as
   }
 })
 
-test('CSP allows only this build Supabase and server origins and blocks a sentinel origin', async () => {
-  const supabaseUrl = process.env.NEVIX_TEST_SUPABASE_URL
+test('CSP allows only this build server origin and blocks a sentinel origin', async () => {
   const serverUrl = process.env.NEVIX_TEST_SERVER_URL
-  test.skip(!supabaseUrl || !serverUrl, 'requires configured Supabase and server origins')
-  if (!supabaseUrl || !serverUrl) return
+  test.skip(!serverUrl, 'requires the configured build produced by the E2E command')
+  if (!serverUrl) return
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-csp-'))
 
@@ -171,7 +170,7 @@ test('CSP allows only this build Supabase and server origins and blocks a sentin
           )
         })
 
-        const allowedResponse = await fetch(`${allowedOrigin}/auth/v1/health`)
+        const allowedResponse = await fetch(`${allowedOrigin}/health`)
         let sentinelFetchRejected = false
         try {
           await fetch('https://csp-sentinel.invalid/auth/v1/health')
@@ -185,7 +184,7 @@ test('CSP allows only this build Supabase and server origins and blocks a sentin
           sentinelFetchRejected,
           violation: await violation
         }
-      }, supabaseUrl)
+      }, serverUrl)
 
       expect(result.allowedResponseOk).toBe(true)
       expect(result.sentinelFetchRejected).toBe(true)
@@ -198,9 +197,7 @@ test('CSP allows only this build Supabase and server origins and blocks a sentin
         .split(';')
         .map((directive) => directive.trim())
         .find((directive) => directive.startsWith('connect-src '))
-      expect(connectSource).toBe(
-        `connect-src ${new URL(supabaseUrl).origin} ${new URL(serverUrl).origin}`
-      )
+      expect(connectSource).toBe(`connect-src ${new URL(serverUrl).origin}`)
       expect(connectSource).not.toContain('*')
       expect(connectSource).not.toMatch(/(?:^|\s)(?:http:|https:|ws:|wss:)(?:\s|$)/)
     } finally {

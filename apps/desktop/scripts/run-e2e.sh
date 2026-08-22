@@ -4,7 +4,7 @@ set -euo pipefail
 
 # full  — Full E2E Suite: configuration-failure builds, then every spec (default).
 # smoke — Smoke Suite: one test-mode build, then only specs tagged @smoke.
-# settings — Settings Information Architecture: one test-mode build, then the Settings and Members specs.
+# settings — Settings Information Architecture: one test-mode build, then the Settings spec.
 mode="${1:-full}"
 case "$mode" in
   full | smoke | settings) ;;
@@ -22,12 +22,11 @@ identity_server_binary_dir=""
 identity_server_failure_injector_pid=""
 identity_server_artifact="$desktop_root/test-results/identity-server.log"
 identity_server_failure_marker_dir=""
+postgres_container=""
 database_url=""
 identity_database_url=""
-publishable_key=""
-service_role_key=""
-identity_server_hash_key="desktop-e2e-test-hash-key"
-identity_server_smtp_password="mailpit"
+admin_email="bootstrap.admin@nevix.test"
+admin_initial_password="initial-horse-battery-staple"
 failure_injection="${NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE:-}"
 
 case "$failure_injection" in
@@ -38,13 +37,36 @@ case "$failure_injection" in
     ;;
 esac
 
-source "$repo_root/scripts/lib/supabase-local-harness.sh"
-
-# Loopback traffic must never go through a developer HTTP proxy: the Supabase
-# CLI, the Go server health check, and Electron's local test traffic all need
-# to reach the pinned stack directly.
+# Loopback traffic must never go through a developer HTTP proxy: the Go server
+# health check, PostgreSQL provisioning, and Electron's local test traffic all
+# need to reach the pinned stack directly.
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
 export no_proxy="${NO_PROXY}"
+
+postgres_image="postgres:17.5-alpine"
+postgres_host_port=54391
+lock_dir="${TMPDIR:-/tmp}/nevix-ai-desktop-e2e-postgres.lock"
+
+acquire_lock() {
+  if ! mkdir "$lock_dir" 2>/dev/null; then
+    echo "error: another Desktop E2E harness owns $lock_dir" >&2
+    if [[ -r "$lock_dir/owner" ]]; then
+      echo "owner:" >&2
+      sed 's/^/  /' "$lock_dir/owner" >&2
+    fi
+    echo "Refusing to start a second Desktop E2E stack. Inspect the owner before recovery." >&2
+    return 1
+  fi
+  printf 'pid=%s\nworkspace=%s\n' "$$" "$repo_root" >"$lock_dir/owner"
+}
+
+require_free_port() {
+  if (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; then
+    echo "error: required harness port 127.0.0.1:$1 is already in use" >&2
+    echo "Refusing to attach tests to an unowned local service." >&2
+    return 1
+  fi
+}
 
 stop_identity_server_process() {
   if [[ -n "$identity_server_pid" ]]; then
@@ -107,10 +129,7 @@ cleanup() {
   if [[ -n "$identity_server_log" ]]; then
     if ! NEVIX_E2E_REDACT_DATABASE_URL="$database_url" \
       NEVIX_E2E_REDACT_IDENTITY_DATABASE_URL="$identity_database_url" \
-      NEVIX_E2E_REDACT_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
-      NEVIX_E2E_REDACT_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
-      NEVIX_E2E_REDACT_VERIFICATION_CODE_HASH_KEY="$identity_server_hash_key" \
-      NEVIX_E2E_REDACT_SMTP_PASSWORD="$identity_server_smtp_password" \
+      NEVIX_E2E_REDACT_ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
       node "$desktop_root/scripts/finalize-e2e-server-log.mjs" \
         "$identity_server_log" "$identity_server_artifact" "$repo_root" "$exit_status"; then
       echo "error: failed to finalize the identity server E2E log" >&2
@@ -125,16 +144,15 @@ cleanup() {
     rm -rf "$identity_server_binary_dir"
     identity_server_binary_dir=""
   fi
-  nevix_supabase_harness_cleanup "$cleanup_status"
-}
-
-json_value() {
-  STATUS_JSON="$1" STATUS_KEY="$2" node -e '
-    const status = JSON.parse(process.env.STATUS_JSON)
-    const value = status[process.env.STATUS_KEY]
-    if (typeof value !== "string" || value.length === 0) process.exit(1)
-    process.stdout.write(value)
-  '
+  if [[ -n "$postgres_container" ]]; then
+    docker rm -f "$postgres_container" >/dev/null 2>&1 || true
+    postgres_container=""
+  fi
+  if [[ -d "$lock_dir" ]]; then
+    rm -f "$lock_dir/owner"
+    rmdir "$lock_dir" 2>/dev/null || true
+  fi
+  return "$cleanup_status"
 }
 
 wait_for_identity_server() {
@@ -155,9 +173,52 @@ wait_for_identity_server() {
   return 1
 }
 
+start_postgres() {
+  local postgres_password
+  local identity_app_password
+
+  postgres_password="$(openssl rand -hex 32)"
+  identity_app_password="$(openssl rand -hex 32)"
+  postgres_container="nevix-desktop-e2e-pg-$$"
+
+  echo "==> Starting pinned PostgreSQL ($postgres_image) on 127.0.0.1:$postgres_host_port"
+  docker run --rm -d \
+    --name "$postgres_container" \
+    -e "POSTGRES_PASSWORD=$postgres_password" \
+    -p "127.0.0.1:$postgres_host_port:5432" \
+    "$postgres_image" >/dev/null
+
+  for attempt in $(seq 1 60); do
+    if docker exec "$postgres_container" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+      break
+    fi
+    if [[ "$attempt" -eq 60 ]]; then
+      echo "error: PostgreSQL was not ready after 60 attempts" >&2
+      return 1
+    fi
+    sleep 1
+  done
+
+  echo "==> Provisioning the identity_app runtime credential"
+  docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'identity_app') THEN
+    CREATE ROLE identity_app LOGIN;
+  END IF;
+END
+\$\$;
+ALTER ROLE identity_app PASSWORD '$identity_app_password';
+SQL
+
+  # MIGRATION_DATABASE_URL stays with the Goose owner credential; the runtime
+  # DATABASE_URL authenticates directly as identity_app — the same startup
+  # contract as production (ADR-0015).
+  database_url="postgresql://identity_app:${identity_app_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
+  identity_database_url="postgresql://postgres:${postgres_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
+}
+
 start_identity_server() {
-  local database_url="$1"
-  local supabase_url="$2"
   local identity_server_binary
 
   identity_server_binary_dir="$(mktemp -d -t nevix-identity-e2e.XXXXXX)"
@@ -169,27 +230,41 @@ start_identity_server() {
 
   identity_server_log="$(mktemp -t nevix-identity-e2e.XXXXXX.log)"
   DATABASE_URL="$database_url" \
-    AUTH_JWKS_URL="$supabase_url/auth/v1/.well-known/jwks.json" \
+    MIGRATION_DATABASE_URL="$identity_database_url" \
     CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
-    VERIFICATION_CODE_HASH_KEY="$identity_server_hash_key" \
-    SMTP_FROM="identity@nevix.test" \
-    SMTP_HOST="127.0.0.1" \
-    SMTP_PORT="54325" \
-    SMTP_USER="mailpit" \
-    SMTP_PASSWORD="$identity_server_smtp_password" \
-    OUTBOX_RETRY_DELAYS="1s,2s,3s,4s,5s" \
+    ADMIN_EMAIL="$admin_email" \
+    ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
     "$identity_server_binary" >"$identity_server_log" 2>&1 &
   identity_server_pid=$!
   wait_for_identity_server
 }
 
+# The bootstrap admin owes the first-login password change; completing it once over
+# raw HTTP leaves a stable administrative credential for the whole suite, exactly
+# like an operator would after first boot.
+stabilize_bootstrap_admin() {
+  local login_body
+  local admin_token
+
+  login_body="$(curl -fsS -X POST http://127.0.0.1:8080/identity/auth/login \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}")"
+  admin_token="$(LOGIN_BODY="$login_body" node -e '
+    const body = JSON.parse(process.env.LOGIN_BODY)
+    if (typeof body.token !== "string" || body.token.length === 0) process.exit(1)
+    process.stdout.write(body.token)
+  ')"
+
+  curl -fsS -X POST http://127.0.0.1:8080/identity/auth/change-password \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $admin_token" \
+    -d "{\"current_password\":\"$admin_initial_password\",\"new_password\":\"$admin_initial_password\"}" \
+    >/dev/null
+}
+
 trap 'exit_status=$?; trap - EXIT; cleanup "$exit_status"; exit $?' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-
-nevix_supabase_harness_acquire "$repo_root" desktop-e2e
-nevix_supabase_harness_require_clean_projects nevix-ai nevix-authentication-e2e
-nevix_supabase_harness_require_free_tcp_ports 54320 54321 54322 54324 54325 8080
 
 cd "$desktop_root"
 rm -f "$identity_server_artifact"
@@ -198,64 +273,28 @@ if [[ "$mode" == "full" ]]; then
   pnpm typecheck
 
   env \
-    -u VITE_SUPABASE_URL \
-    -u VITE_SUPABASE_PUBLISHABLE_KEY \
     -u VITE_SERVER_URL \
-    pnpm exec electron-vite build --mode production
-  NEVIX_EXPECT_INVALID_SUPABASE_CONFIG=1 \
-    pnpm exec playwright test tests/auth/configuration.spec.ts --workers=1
-
-  env \
-    -u VITE_SERVER_URL \
-    VITE_SUPABASE_URL=https://example.supabase.co \
-    VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_invalid \
-    pnpm exec electron-vite build --mode production
-  NEVIX_EXPECT_INVALID_SUPABASE_CONFIG=1 \
-    pnpm exec playwright test tests/auth/configuration.spec.ts --workers=1
-
-  env \
-    -u VITE_SERVER_URL \
-    VITE_SUPABASE_URL=https://example.supabase.co \
-    VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrst \
     pnpm exec electron-vite build --mode production
   NEVIX_EXPECT_INVALID_SERVER_CONFIG=1 \
     pnpm exec playwright test tests/auth/configuration.spec.ts --workers=1
-fi
 
-nevix_supabase_harness_claim_stack nevix-ai
-pnpm --dir "$repo_root" exec supabase start \
-  -x realtime,storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor \
-  >/dev/null
-pnpm --dir "$repo_root" exec supabase db reset --local >/dev/null
-
-status_json="$(pnpm --dir "$repo_root" exec supabase status -o json)"
-api_url="$(json_value "$status_json" API_URL)"
-publishable_key="$(json_value "$status_json" PUBLISHABLE_KEY)"
-service_role_key="$(json_value "$status_json" SERVICE_ROLE_KEY)"
-mailpit_url="$(json_value "$status_json" INBUCKET_URL)"
-database_url="$(json_value "$status_json" DB_URL)"
-# The real Server runs on the ephemeral runtime credential that
-# authenticates directly as identity_app — the same startup contract as
-# production. The owner DB_URL above stays with the Playwright fixtures
-# (seeding and authoritative assertions) and never reaches the server.
-identity_database_url="$(nevix_supabase_harness_identity_app_database_url nevix-ai 54322)"
-server_url="http://127.0.0.1:8080"
-
-start_identity_server "$identity_database_url" "$api_url"
-
-if [[ "$mode" == "full" ]]; then
   env \
-    -u VITE_SERVER_URL \
-    VITE_SUPABASE_URL=http://192.168.1.50:8000 \
-    VITE_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
+    VITE_SERVER_URL=http://192.168.1.50:8000 \
     pnpm exec electron-vite build --mode production
   NEVIX_EXPECT_PRODUCTION_PRIVATE_HTTP_BLOCK=1 \
     pnpm exec playwright test tests/auth/configuration.spec.ts --workers=1
 fi
 
-VITE_SUPABASE_URL="$api_url" \
-  VITE_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
-  VITE_SERVER_URL="$server_url" \
+acquire_lock
+require_free_port "$postgres_host_port"
+require_free_port 8080
+
+start_postgres
+start_identity_server
+stabilize_bootstrap_admin
+server_url="http://127.0.0.1:8080"
+
+VITE_SERVER_URL="$server_url" \
   pnpm exec electron-vite build --mode test
 
 playwright_args=(--workers=2)
@@ -264,8 +303,6 @@ if [[ "$mode" == "smoke" ]]; then
 elif [[ "$mode" == "settings" ]]; then
   playwright_args=(
     tests/settings/settings-page.spec.ts
-    tests/settings/settings-organization-picker.spec.ts
-    tests/organization/members-management.spec.ts
     --workers=1
   )
 fi
@@ -273,18 +310,16 @@ if [[ "$failure_injection" == "after-renderer-launch" ]]; then
   echo "==> Arming a controlled identity server failure after renderer launch"
   identity_server_failure_marker_dir="$identity_server_binary_dir/failure-injection"
   mkdir -p "$identity_server_failure_marker_dir"
-  playwright_args=(tests/organization/onboarding.spec.ts --workers=1 --grep '@smoke')
+  playwright_args=(tests/auth/first-login-change-password.spec.ts --workers=1 --grep '@smoke')
   inject_identity_server_failure_after_renderer_launch &
   identity_server_failure_injector_pid=$!
 fi
 
-NEVIX_TEST_SUPABASE_URL="$api_url" \
-  NEVIX_TEST_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \
-  NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
-  NEVIX_TEST_DATABASE_URL="$database_url" \
+NEVIX_TEST_SERVER_URL="$server_url" \
+  NEVIX_TEST_ADMIN_EMAIL="$admin_email" \
+  NEVIX_TEST_ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
   NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR="$identity_server_failure_marker_dir" \
-  NEVIX_TEST_MAILPIT_URL="$mailpit_url" \
-  NEVIX_TEST_SERVER_URL="$server_url" \
+  NEVIX_E2E_RUN_ID="$(date +%s)-$$" \
   pnpm exec playwright test "${playwright_args[@]}"
 
 if [[ -n "$identity_server_failure_injector_pid" ]]; then
@@ -293,6 +328,6 @@ if [[ -n "$identity_server_failure_injector_pid" ]]; then
 fi
 
 if [[ "$mode" == "full" ]]; then
-  NEVIX_TEST_SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
+  NEVIX_TEST_ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
     pnpm verify:auth-artifacts
 fi

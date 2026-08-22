@@ -9,14 +9,12 @@ import {
   signOutFromUserMenu
 } from '../helpers/electron-app'
 import {
-  createAuthUser,
-  deleteAuthUser,
-  readAuthHarnessConfig,
-  uniqueAuthIdentity
-} from '../auth/helpers/supabase-auth'
-import { seedOrganizationWithMembership } from '../organization/helpers/organization-seed'
+  createStableTeamUser,
+  readIdentityServerConfig,
+  uniqueIdentity
+} from '../auth/helpers/identity-server'
 
-const authHarness = readAuthHarnessConfig()
+const identityServer = readIdentityServerConfig()
 const LANGUAGE_MODE_FILE_NAME = 'language-mode.json'
 const languageGroupNames = ['界面语言', 'Interface language'] as const
 
@@ -44,17 +42,6 @@ test('no language switch control is rendered anywhere on the unauthenticated bou
     const launched = await launchForSystemLanguages(userDataDir, ['zh-CN'])
     try {
       await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
-      await expectNoLanguageSwitchControl(launched.page)
-
-      await launched.page.getByRole('button', { name: '创建账号', exact: true }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: '创建你的 Nevix AI 账号' })
-      ).toBeVisible()
-      await expectNoLanguageSwitchControl(launched.page)
-
-      await launched.page.getByRole('button', { name: '返回登录' }).click()
-      await launched.page.getByRole('button', { name: '忘记密码？' }).click()
-      await expect(launched.page.getByRole('heading', { name: '重置密码' })).toBeVisible()
       await expectNoLanguageSwitchControl(launched.page)
     } finally {
       await launched.electronApp.close()
@@ -125,12 +112,11 @@ test('a saved per-device Language Mode still resolves the login screen it cannot
 
 test('Language Mode lives in the Settings Page, applies immediately, and persists per device', async () => {
   test.setTimeout(60_000)
-  test.skip(!authHarness, 'requires the disposable Supabase Auth harness')
-  if (!authHarness) return
+  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
+  if (!identityServer) return
 
-  const identity = uniqueAuthIdentity('settings-language-mode')
-  const userId = await createAuthUser(authHarness, identity, true)
-  await seedOrganizationWithMembership(userId, { name: '语言模式组织' })
+  const identity = uniqueIdentity('settings-language-mode')
+  await createStableTeamUser(identityServer, identity)
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-language-mode-'))
 
   try {
@@ -218,6 +204,5 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, userId)
   }
 })

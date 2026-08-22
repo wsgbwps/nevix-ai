@@ -3,8 +3,8 @@ export { AuthenticationScreen } from './ui/authentication-screen'
 export { RememberedEmailPersistenceNotice } from './ui/remembered-email-persistence-notice'
 export {
   useAuthentication,
+  type AuthenticatedSession,
   type AuthenticationError,
-  type AuthenticationFlow,
   type AuthenticationNotice,
   type AuthenticationStatus
 } from './model/use-authentication'

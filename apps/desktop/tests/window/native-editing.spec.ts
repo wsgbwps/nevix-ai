@@ -3,26 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp } from '../helpers/electron-app'
-import {
-  createAuthUser,
-  deleteAuthUser,
-  readAuthHarnessConfig,
-  signInOutsideDesktop,
-  uniqueAuthIdentity
-} from '../auth/helpers/supabase-auth'
-import {
-  readMailpitHarnessConfig,
-  readMailpitMessageIds,
-  waitForRegistrationMessage
-} from '../auth/helpers/mailpit'
-import {
-  seedOrganizationWithMembership,
-  seedProfile
-} from '../organization/helpers/organization-seed'
 
-const authHarness = readAuthHarnessConfig()
-const mailpitHarness = readMailpitHarnessConfig()
-const serverUrl = process.env.NEVIX_TEST_SERVER_URL
 const editModifier = process.platform === 'darwin' ? 'Meta' : 'Control'
 const LANGUAGE_MODE_FILE_NAME = 'language-mode.json'
 
@@ -113,8 +94,8 @@ test('the app exposes only managed hidden native edit accelerators', async () =>
 
 test('editable controls expose only native edit roles and standard accelerators change their value', async () => {
   test.skip(
-    !process.env.NEVIX_TEST_SUPABASE_URL,
-    'requires the configured build produced by the Auth test command'
+    !process.env.NEVIX_TEST_SERVER_URL,
+    'requires the configured build produced by the E2E command'
   )
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-native-editing-'))
@@ -209,125 +190,5 @@ test('editable controls expose only native edit roles and standard accelerators 
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
-  }
-})
-
-test('Password and all one-time-code fields accept native paste shortcuts', async () => {
-  test.setTimeout(150_000)
-  if (!authHarness || !mailpitHarness || !serverUrl) {
-    throw new Error(
-      'Organization Invitation native-paste coverage requires the disposable E2E integration harness'
-    )
-  }
-
-  const signupIdentity = uniqueAuthIdentity('native-editing-signup')
-  const recoveryIdentity = uniqueAuthIdentity('native-editing-recovery')
-  const ownerIdentity = uniqueAuthIdentity('native-editing-invitation-owner')
-  const recoveryUserId = await createAuthUser(authHarness, recoveryIdentity, true)
-  const ownerUserId = await createAuthUser(authHarness, ownerIdentity, true)
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-native-editing-auth-'))
-
-  try {
-    await seedProfile(recoveryUserId, 'Native Editing Invitee')
-    const organization = await seedOrganizationWithMembership(ownerUserId, {
-      name: 'Native Editing Invitation Studio',
-      profileDisplayName: 'Native Editing Owner'
-    })
-    const ownerSession = await signInOutsideDesktop(authHarness, ownerIdentity)
-    const messagesBeforeInvitation = await readMailpitMessageIds(mailpitHarness)
-    const invitationResponse = await fetch(
-      new URL(`/identity/organizations/${organization.id}/invitations`, serverUrl),
-      {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${ownerSession.access_token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ email: recoveryIdentity.email })
-      }
-    )
-    if (!invitationResponse.ok) {
-      throw new Error(
-        `Unable to create native-editing test invitation: ${invitationResponse.status}`
-      )
-    }
-    const invitationMessage = await waitForRegistrationMessage(
-      mailpitHarness,
-      messagesBeforeInvitation,
-      recoveryIdentity.email
-    )
-
-    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
-
-    try {
-      const loginPassword = launched.page.getByLabel('Password')
-      await pasteInto(launched.electronApp, launched.page, loginPassword, recoveryIdentity.password)
-      await expect(loginPassword).toHaveValue(recoveryIdentity.password)
-
-      await launched.page.getByRole('button', { name: 'Create account' }).click()
-      await launched.page.getByLabel('Email').fill(signupIdentity.email)
-      const signupPassword = launched.page.getByLabel('Password', { exact: true })
-      const confirmPassword = launched.page.getByLabel('Confirm password')
-      await pasteInto(launched.electronApp, launched.page, signupPassword, signupIdentity.password)
-      await pasteInto(launched.electronApp, launched.page, confirmPassword, signupIdentity.password)
-      await expect(signupPassword).toHaveValue(signupIdentity.password)
-      await expect(confirmPassword).toHaveValue(signupIdentity.password)
-
-      const messagesBeforeSignup = await readMailpitMessageIds(mailpitHarness)
-      await launched.page.getByRole('button', { name: 'Create account' }).click()
-      const signupMessage = await waitForRegistrationMessage(
-        mailpitHarness,
-        messagesBeforeSignup,
-        signupIdentity.email
-      )
-      const verificationCode = launched.page.getByLabel('Verification code')
-      await pasteInto(launched.electronApp, launched.page, verificationCode, signupMessage.code)
-      await expect(verificationCode).toHaveValue(signupMessage.code)
-
-      await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await launched.page.getByRole('button', { name: 'Forgot password?' }).click()
-      const messagesBeforeRecovery = await readMailpitMessageIds(mailpitHarness)
-      await launched.page.getByLabel('Email').fill(recoveryIdentity.email)
-      await launched.page.waitForTimeout(1_100)
-      await launched.page.getByRole('button', { name: 'Send recovery code' }).click()
-      const recoveryMessage = await waitForRegistrationMessage(
-        mailpitHarness,
-        messagesBeforeRecovery,
-        recoveryIdentity.email
-      )
-      const recoveryCode = launched.page.getByLabel('Recovery code')
-      await pasteInto(launched.electronApp, launched.page, recoveryCode, recoveryMessage.code)
-      await expect(recoveryCode).toHaveValue(recoveryMessage.code)
-
-      await launched.page.getByRole('button', { name: 'Verify code' }).click()
-      const recoveryPassword = launched.page.getByLabel('New password')
-      const replacementPassword = 'Replacement password 42'
-      await pasteInto(launched.electronApp, launched.page, recoveryPassword, replacementPassword)
-      await expect(recoveryPassword).toHaveValue(replacementPassword)
-
-      await launched.page.getByRole('button', { name: 'Update password' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
-      ).toBeVisible()
-      await launched.page.getByLabel('Email').fill(recoveryIdentity.email)
-      await launched.page.getByLabel('Password').fill(replacementPassword)
-      await launched.page.getByRole('button', { name: 'Sign in' }).click()
-
-      await expect(
-        launched.page.getByRole('heading', { name: 'Select an organization' })
-      ).toBeVisible()
-      await launched.page.getByRole('button', { name: 'Accept' }).click()
-      const invitationCode = launched.page.getByRole('textbox', { name: 'Invitation code' })
-      await expect(invitationCode).toBeVisible()
-      await pasteInto(launched.electronApp, launched.page, invitationCode, invitationMessage.code)
-      await expect(invitationCode).toHaveValue(invitationMessage.code)
-    } finally {
-      await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-    await deleteAuthUser(authHarness, recoveryUserId)
-    await deleteAuthUser(authHarness, ownerUserId)
   }
 })
