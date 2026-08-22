@@ -2,7 +2,7 @@
 
 ## 状态
 
-已接受 — 2026-07-23
+已作废 — 2026-08-22 — 产品转向 B 端私有化（单租户 Docker 交付），Supabase 数据平面退场。继任决策：数据面 seam 见 [ADR-0014](0014-go-sole-trusted-data-plane.md)，交付形态见 [ADR-0013](0013-onprem-single-tenant-delivery.md)，用户系统与授权见 [ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)。旧世界存档于 `saas-final` tag，原文保留如下。
 
 ## 背景
 

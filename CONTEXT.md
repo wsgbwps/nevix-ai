@@ -11,7 +11,15 @@ watch 兑现。GitHub 免费私库没有服务端 required checks，这套本地
 唯一的门禁。
 _Avoid_: required checks、required status checks、分支保护
 
+## 交付
+
+**License**:
+年订阅的离线授权凭证，界定客户、到期日与席位上限；仅由 Server 校验，Desktop 不感知。
+_Avoid_: entitlement, activation, license key（指实现时）
+
 ## AI 创作
+
+> 2026-08-22 注：产品已转单租户私有化（ADR-0013/0015），本词群中的 Organization 泛指部署实例内全体用户；词群的正式修订随 issue #77。
 
 **AI Creation**:
 在 Organization 内从灵感复用、图片与视频生成，到媒体资产沉淀与发布复用的端到端业务能力；图片与视频共享该边界，不按媒体类型或页面拆分。

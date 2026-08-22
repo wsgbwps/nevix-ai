@@ -24,17 +24,23 @@ _Avoid_: message, notification, signal
 聚合根的持久化接口，定义在 `domain/repository.go`，实现在 `infrastructure/`。简单 module 不需要拆出。
 _Avoid_: store, DAO, data layer
 
-**Outbox**:
-与领域状态、Audit Log 同一数据库事务提交的待发消息记录，是 module 对外发送邮件等副作用的唯一出口。
-_Avoid_: message queue, mail queue, 待发送表
+## 用户系统
 
-**Outbox Worker**:
-轮询 Outbox 并执行投递与重试的纯投递器，不包含限流、冷却等任何业务规则。携码邮件的重试地平线属投递语义：码被作废或过期时停止投递并将行置为终态（cancelled），由 Worker 在认领与重试调度时执行。
-_Avoid_: mailer service, sender, dispatcher
+**User**:
+由管理员创建的登录主体，email 是唯一登录标识；含显示名、角色与状态，密码重置由管理员执行，无自助邮件通道。
+_Avoid_: Account, Member（指角色时）, Profile
 
-**Resend（服务商）**:
-生产环境的邮件投递服务商，仅通过标准 SMTP 端点接入。与「重发码」（重新签发一次性验证码的动作，见 identity 规格）严格区分，讨论中须标注是服务商还是动作。
-_Avoid_: resend（指动作时不带限定语）
+**Admin**:
+两级角色中的管理者：建号、停用、重置密码、改登录 email、读 Audit Log；最后一个活跃 Admin 不可自降级或自停用。
+_Avoid_: Owner, Administrator, Manager
+
+**Member**:
+两级角色中的基础使用者；对业务数据与全体活跃用户目录团队共享可读。
+_Avoid_: User, Regular User
+
+**Session**:
+服务端可吊销的已认证状态：opaque token 仅以 hash 存于 Postgres，多设备并存、滑动过期；改密、停用或吊销即刻生效并断开该用户的 SSE 连接。
+_Avoid_: JWT, 登录态
 
 **Authentication Identity (认证身份)**:
 运行时数据库连接经 `session_user` 观察到的登录主体。Identity 运行时必须**直接以 `identity_app` 登录**；owner 等高权限凭据即使能 `SET ROLE identity_app` 也不是合法运行配置，认证身份不能用事务内角色切换替代。
@@ -45,7 +51,7 @@ _Avoid_: login role（泛指任意登录角色）, service role, 数据库用户
 _Avoid_: 权限角色（不指明观察方式）, effective role
 
 **Write Transaction Module (写事务模块)**:
-Identity Domain 内全部 Identity-owned 写事务的唯一生产入口（`internal/identity/writetx`）。它独占事务开始、执行身份验证、commit 与 rollback：回调 nil 提交、错误回滚、回调完成前观察到的取消阻止提交、panic 尽力回滚并保留、从不自动重放回调。Organization、Membership、Invitation、Verification 签发与 Outbox Worker 写路径一律经由它；命令层与 Worker 组件持有 runner 而非数据库连接池，新增 Identity 写路径不得自建事务约定。它是 Domain 内的责任命名子包，不是 Server 共享数据库层。
+Identity Domain 内全部 Identity-owned 写事务的唯一生产入口（`internal/identity/writetx`）。它独占事务开始、执行身份验证、commit 与 rollback：回调 nil 提交、错误回滚、回调完成前观察到的取消阻止提交、panic 尽力回滚并保留、从不自动重放回调。用户、会话与审计写路径一律经由它；命令层组件持有 runner 而非数据库连接池，新增 Identity 写路径不得自建事务约定。它是 Domain 内的责任命名子包，不是 Server 共享数据库层。
 _Avoid_: transaction framework, Unit of Work, 共享数据库执行层。
 
 **测试边界（Test Boundary）**: 测试所观察的责任边界；按被测代码是通过 owning package 的内部 seam，还是通过 Module 的公开 contract 来划分，不按是否使用真实数据库划分。

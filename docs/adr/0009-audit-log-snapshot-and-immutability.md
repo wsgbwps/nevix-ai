@@ -15,6 +15,12 @@ Audit Log 行需要呈现 actor 与 target 的显示名。直觉设计是存 use
 - 不可变性靠 GRANT 落地：client 角色对 audit_logs 无任何写权限，identity_app 持 SELECT,INSERT,DELETE 但无 UPDATE；不加触发器或 WORM 机制。
 - 保留策略：identity_app 每日 sweep 删除 365 天前的行；导出 = Desktop 经 RLS 直读分页 + 本地写文件，不建服务端导出接口。
 
+## 修订 — 2026-08-22（单租户私有化）
+
+- organization 维度随单租户移除：`audit_logs` 去 `organization_id` 及其 FK；写入时快照、无 actor/target FK、无 UPDATE 授权、action 由 Go 单一写入方校验、365 天滚动 sweep 等决策全部继续有效。
+- 客户端 RLS 直读取消：读取与导出改为经 Go API 的 admin-only 分页端点；导出仍是 Desktop 本地写文件，不建服务端导出接口。
+- 背景见 [ADR-0013](0013-onprem-single-tenant-delivery.md) 与 [ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)。
+
 ## Considered Options
 
 - **FK + join 派生显示名**：改名会回改历史、删用户留下悬空引用或级联删历史，与审计语义冲突；否决。

@@ -2,7 +2,7 @@
 
 ## 状态
 
-已接受 — 2026-08-05
+已作废 — 2026-08-22 — 多租户 Organization 与 Supabase Auth 前提随私有化消失。继任决策见 [ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)（单租户用户系统与 Go 层授权；单一最小权限角色、启动与写事务身份验证、Write Transaction Module 契约在该 ADR 中延续）。原文保留如下。
 
 ## 背景
 

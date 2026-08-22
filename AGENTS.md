@@ -2,7 +2,7 @@
 
 - Before planning or changing files under `apps/desktop/`, read `apps/desktop/AGENTS.md`; under `server/`, read `server/AGENTS.md`
 - Before planning or performing development work, read and follow the `/karpathy-guidelines` skill throughout the task
-- Before changes involving Supabase (Postgres, Storage, Realtime, Webhooks), Go trusted operations, or AI providers, read [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md); changes to its responsibility seam follow the architecture-change rules under **Shared areas and delivery**
+- Before changes involving the trusted data plane seam (Go server API, auth, storage, push), Go trusted operations, or AI providers, read [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md), [ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md), and [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md); changes to their responsibility seams follow the architecture-change rules under **Shared areas and delivery**
 
 ## Directory architecture gate
 

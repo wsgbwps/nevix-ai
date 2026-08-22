@@ -16,7 +16,7 @@ AI 媒体创作 SaaS 桌面应用。
 | 后端 | Go — API 服务 / Agent 编排 |
 | Monorepo | Turborepo + pnpm Workspaces |
 | 打包 | electron-builder |
-| 自动更新 | electron-updater (generic provider → 阿里云 OSS) |
+| 自动更新 | 暂无（分发与更新机制推迟至打包分发阶段，见 [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md)） |
 
 ## 目录结构
 
@@ -104,8 +104,6 @@ src/main/
 ├── window/
 │   ├── ipc/                      # 唯一获准的 platform-owned typed IPC adapter
 │   └── main-window.ts            # 非 Domain 的 BrowserWindow 平台职责
-├── updater/
-│   └── auto-updater.ts           # 非 Domain 的平台职责
 └── tray/
     └── tray.ts                   # 非 Domain 的平台职责
 ```
@@ -115,7 +113,6 @@ src/main/
 | `<domain>/` | Domain implementation、可选 public interface 与 domain-local adapters | Domain 实际需要时 |
 | `<domain>/ipc/` | IPC registration 与每 Channel 一个 Handler | Domain 拥有 IPC 时 |
 | `window/` | BrowserWindow 创建、多窗口管理、窗口状态持久化与 Window lifecycle typed IPC | 初始化即有 |
-| `updater/` | 自动更新检查、下载、安装提示 | 接入阿里云 OSS 时 |
 | `tray/` | 系统托盘图标和菜单 | 产品需要后台常驻时 |
 
 **IPC 架构说明：**

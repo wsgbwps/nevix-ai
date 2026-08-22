@@ -4,6 +4,8 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 
 ## Language
 
+> 2026-08-22：ADR-0013/0015 起产品转单租户私有化。本词典中 Organization、Membership、Organization Invitation、Owner 及整个组织时代词群（Email Change、Security Lock、Ownership Transfer、Organization Deletion、Active Organization、Organization Onboarding、Organization Audit Log、Organization/Profile Domain 等）已判死，随用户系统迁移逐条移除；Owner 与 Admin 合并为单一 Admin。新词汇落点见 [Server 词典](../../server/CONTEXT.md) 与[仓库级词典](../../CONTEXT.md)。
+
 **Organization**:
 企业租户，也是业务数据、文件、额度和订阅的归属边界；即使只有一名 User，业务资源也归 Organization 而非个人所有。
 _Avoid_: Team, Workspace, Account
