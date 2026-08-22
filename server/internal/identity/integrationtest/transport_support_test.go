@@ -113,6 +113,45 @@ func doAuthenticated(t *testing.T, handler http.Handler, method, path, token str
 	return rec.Code, rec.Body.Bytes()
 }
 
+// doAuthenticatedJSON performs a bearer-authenticated request with a JSON
+// body (the self-service write commands).
+func doAuthenticatedJSON(t *testing.T, handler http.Handler, method, path, token string, body []byte) (int, []byte) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
+// changePasswordBody is the change-password request shape.
+func changePasswordBody(currentPassword, newPassword string) []byte {
+	body, _ := json.Marshal(map[string]string{"current_password": currentPassword, "new_password": newPassword})
+	return body
+}
+
+// displayNameBody is the PATCH /users/me request shape.
+func displayNameBody(name string) []byte {
+	body, _ := json.Marshal(map[string]string{"display_name": name})
+	return body
+}
+
+// doChangePassword posts the change-password command with the given session
+// token.
+func doChangePassword(t *testing.T, handler http.Handler, token, currentPassword, newPassword string) (int, []byte) {
+	t.Helper()
+	return doAuthenticatedJSON(t, handler, http.MethodPost, "/identity/auth/change-password", token, changePasswordBody(currentPassword, newPassword))
+}
+
+// doUpdateMe patches the caller's display name.
+func doUpdateMe(t *testing.T, handler http.Handler, token, displayName string) (int, []byte) {
+	t.Helper()
+	return doAuthenticatedJSON(t, handler, http.MethodPatch, "/identity/users/me", token, displayNameBody(displayName))
+}
+
 // doLogout posts the logout command with the given session token.
 func doLogout(t *testing.T, handler http.Handler, token string) (int, []byte) {
 	t.Helper()

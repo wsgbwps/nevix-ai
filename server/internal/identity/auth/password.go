@@ -13,6 +13,15 @@ import (
 // minPasswordLength is the whole password policy (ADR-0015).
 const minPasswordLength = 8
 
+// maxPasswordBytes is the bcrypt generator's hard capacity: generation of a
+// longer input fails inside the hasher, so request validation rejects it
+// with a documented 400 instead of surfacing that limit as a 500. Below the
+// cap the policy stays minimum-length-only (ADR-0015); the bound is an
+// encoding constraint, not a composition rule. Verification of longer
+// candidates is unaffected: bcrypt comparison truncates above the cap the
+// same way generation does.
+const maxPasswordBytes = 72
+
 // bcryptCost is the bcrypt work factor. Deliberately a constant: the
 // deployment profile is a few hundred users on customer intranets, and the
 // cost is revisited only with evidence.

@@ -106,12 +106,12 @@ func (s *Service) Authenticate(r *http.Request) (authz.Principal, error) {
 	var principal authz.Principal
 	var expiresAt time.Time
 	err := s.db.QueryRow(r.Context(),
-		`SELECT u.id, u.email, u.display_name, u.role, s.expires_at
+		`SELECT u.id, u.email, u.display_name, u.role, u.must_change_password, s.expires_at
 		 FROM public.sessions AS s
 		 JOIN public.users AS u ON u.id = s.user_id
 		 WHERE s.token_hash = $1 AND s.expires_at > now() AND u.status = 'active'`,
 		hash,
-	).Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &principal.Role, &expiresAt)
+	).Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &principal.Role, &principal.MustChangePassword, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return authz.Principal{}, authz.ErrNotAuthenticated
 	}

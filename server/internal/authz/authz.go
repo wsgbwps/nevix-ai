@@ -32,6 +32,12 @@ type Principal struct {
 	Email            string
 	DisplayName      string
 	Role             string // "admin" | "member"
+	// MustChangePassword reports that the account still owes the forced
+	// first-login password change. It is account state resolved with the
+	// session — not authorization vocabulary: the two guards below never
+	// branch on it; the identity Module's route table gates business
+	// endpoints on it separately.
+	MustChangePassword bool
 }
 
 // SessionAuthenticator resolves a request's Bearer token to a Principal. The

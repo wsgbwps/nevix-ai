@@ -55,9 +55,10 @@ func TestRegisterDerivesPreflightSurfaceFromRouteTable(t *testing.T) {
 	// echoed origin, and the table-derived Allow-Methods — never reaching the
 	// command.
 	for path, wantMethods := range map[string]string{
-		"/identity/auth/login":  "POST, OPTIONS",
-		"/identity/auth/logout": "POST, OPTIONS",
-		"/identity/users/me":    "GET, OPTIONS",
+		"/identity/auth/login":           "POST, OPTIONS",
+		"/identity/auth/logout":          "POST, OPTIONS",
+		"/identity/auth/change-password": "POST, OPTIONS",
+		"/identity/users/me":             "GET, PATCH, OPTIONS",
 	} {
 		rec := doMountedRequest(handler, http.MethodOptions, path, whitelistedOrigin)
 		if rec.Code != http.StatusNoContent {
@@ -122,7 +123,9 @@ func TestRegisterGuardsEveryRouteExceptLogin(t *testing.T) {
 	// authz guard answers with the 401 envelope.
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodPost, "/identity/auth/logout"},
+		{http.MethodPost, "/identity/auth/change-password"},
 		{http.MethodGet, "/identity/users/me"},
+		{http.MethodPatch, "/identity/users/me"},
 	} {
 		rec := doMountedRequest(handler, tc.method, tc.path, "")
 		if rec.Code != http.StatusUnauthorized {

@@ -1,0 +1,326 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "e51ea59",
+  "scopePaths": [
+    "contracts/identity.yaml",
+    "contracts/openapi.yaml",
+    "scripts/test-identity-integration.sh",
+    "server/internal/authz/authz.go",
+    "server/internal/identity/audit/log.go",
+    "server/internal/identity/auth/account.go",
+    "server/internal/identity/auth/password.go",
+    "server/internal/identity/auth/sessions.go",
+    "server/internal/identity/command/command.go",
+    "server/internal/identity/command/command_test.go",
+    "server/internal/identity/integrationtest/password_self_service_test.go",
+    "server/internal/identity/integrationtest/transport_support_test.go",
+    "server/internal/identity/mount_test.go",
+    "server/internal/identity/routes.go",
+    ".scratch/101-self-service-plan.md"
+  ],
+  "currentDiffDigest": "sha256:4c7b4eab00b7bfdb53a22e4e6b909702cf496b87f251abf303cbd6dd457f8e97",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 2,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/auth/",
+        "source": "ADR-0015 §Session/写事务纪律",
+        "anchor": "server/internal/identity/auth/account.go:Service.ChangePassword",
+        "defect": "current-password verification reads the hash outside the serialized write transaction; concurrent change-password requests can both verify the old hash, both return success, and overwrite each other's password/session disposition"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "TOCTOU on credential state with cross-request session deletion; repair by verifying the current password inside the write transaction under a row lock.",
+      "owner_field": "server/internal/identity/auth/account.go",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "frozen diff /tmp/nevix-101-frozen.diff",
+          "anchor": "account.go ChangePassword: loadUserByID + verifyPassword run before runner.Run",
+          "consequence": "two concurrent requests both pass verification; second commit overwrites first password and deletes first caller's session while both answered 200",
+          "checks": []
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e082e4affb827de488e7da170066bf8e07c14eadbebf0d81928955156f3fd2a8",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/auth/",
+        "source": "ADR-0015 §账号生命周期 (密码策略仅最小长度)",
+        "anchor": "server/internal/identity/auth/account.go:Service.ChangePassword/hashPassword",
+        "defect": "bcrypt generation rejects passwords over 72 bytes, so a policy-compliant long passphrase yields an unmapped 500 instead of a documented client error"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "valid-per-policy input must not 500; repair by bounding new_password at the bcrypt capacity (72 bytes) in request validation with a documented 400 invalid_password.",
+      "owner_field": "server/internal/identity/auth/account.go",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "frozen diff /tmp/nevix-101-frozen.diff",
+          "anchor": "account.go ChangePassword -> hashPassword -> bcrypt.GenerateFromPassword (ErrPasswordTooLong)",
+          "consequence": "change-password with a >72-byte passphrase answers 500 internal_error",
+          "checks": []
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e082e4affb827de488e7da170066bf8e07c14eadbebf0d81928955156f3fd2a8",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0003",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/auth/account.go",
+        "source": "OpenAPI 3.1 public-contract rule (root AGENTS.md: contracts are shared areas; maxLength counts characters)",
+        "anchor": "server/internal/identity/auth/account.go:UpdateMeRequest.Validate",
+        "defect": "display-name length enforced with UTF-8 byte length while the contract's maxLength counts characters; multibyte names within the contract are rejected"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "server/contract disagreement on a public contract; repair with utf8.RuneCountInString plus multibyte boundary tests and an explicit contract rule.",
+      "owner_field": "server/internal/identity/auth/account.go",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "frozen diff /tmp/nevix-101-frozen.diff",
+          "anchor": "account.go UpdateMeRequest.Validate uses len(name)",
+          "consequence": "a 43-CJK-character name (129 bytes) is rejected although maxLength: 128 permits it",
+          "checks": []
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e082e4affb827de488e7da170066bf8e07c14eadbebf0d81928955156f3fd2a8",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0004",
+      "axis": "standards",
+      "identity": {
+        "owner": "contracts/identity.yaml",
+        "source": "Fowler smell baseline: Duplicated Code",
+        "anchor": "contracts/identity.yaml:updateCurrentUser.responses.200",
+        "defect": "third literal copy of the User response schema in the module contract"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Centralizing requires extending the contract-conformance resolver to follow cross-file component refs (identity.yaml currently only cross-refs the master Error schema, which the flattener skips); out of proportion for this slice. Tracked for the next contract addition (#102 adds a users list that will force the canonical schema).",
+      "owner_field": "contracts/identity.yaml",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "frozen diff /tmp/nevix-101-frozen.diff",
+          "anchor": "identity.yaml PATCH /identity/users/me 200 user object duplicates login/GET shape",
+          "consequence": "contract evolution is a three-site edit with drift risk",
+          "checks": []
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e082e4affb827de488e7da170066bf8e07c14eadbebf0d81928955156f3fd2a8",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/auth/account.go",
+        "source": "#101 AC3 (自助改密吊销该用户全部其他会话) / OpenAPI 当前会话处置",
+        "anchor": "server/internal/identity/auth/account.go:Service.ChangePassword",
+        "defect": "credential verification occurs outside the serialized write, so concurrent self-service changes produce order-dependent password state and a deleted current session despite a 200 response"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Same race observed from the Spec axis (AC3's current-session disposition can be violated); repaired together with CR-STANDARDS-0001 by in-transaction verification under a row lock.",
+      "owner_field": "server/internal/identity/auth/account.go",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "frozen diff /tmp/nevix-101-frozen.diff",
+          "anchor": "account.go ChangePassword verification before runner.Run",
+          "consequence": "AC3's defined current-session disposition (caller survives) breaks under concurrent changes from two devices",
+          "checks": []
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e082e4affb827de488e7da170066bf8e07c14eadbebf0d81928955156f3fd2a8",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/auth/account.go",
+        "source": "#99 Implementation Decisions (需要写 Audit Log 的写操作在写事务内同写审计行; ADR-0009 快照语义)",
+        "anchor": "server/internal/identity/auth/account.go:Service.UpdateMe",
+        "defect": "the display-name account write commits without an audit row in the same transaction"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Display-name changes mutate the identity audit snapshots attribute; recording them keeps the audit trail attribution-consistent. Repair with a display_name_changed action written in the same write transaction.",
+      "owner_field": "server/internal/identity/auth/account.go",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "frozen diff /tmp/nevix-101-frozen.diff",
+          "anchor": "account.go UpdateMe runner.Run callback contains only the UPDATE",
+          "consequence": "successful self-service renames leave no audit record although they are account writes",
+          "checks": []
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e082e4affb827de488e7da170066bf8e07c14eadbebf0d81928955156f3fd2a8",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0003",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/integrationtest/password_self_service_test.go",
+        "source": "#101 AC4–AC5 (显示名自助修改生效并见于用户目录; 卫生规则全部有 Seam A 集成测试)",
+        "anchor": "integrationtest/password_self_service_test.go:TestUpdateMeChangesDisplayNameVisibleInDirectory",
+        "defect": "database state is substituted for directory behavior: the test asserts the users table, not a directory endpoint"
+      },
+      "level": "blocker",
+      "disposition": "false-positive",
+      "dispositionReason": "The user-directory endpoint is issue #102's slice, not #101's: #102's own AC owns '用户列表分页 + 搜索；活跃用户全员互见目录（email + display_name）' and its Seam A tests. Adding the directory endpoint here would violate the one-vertical-slice delivery rule (root AGENTS.md) and duplicate #102. Within #101's boundary the criterion is verified against the directory's source of truth (the users row) plus the /users/me HTTP read; directory visibility over HTTP is accepted by #102's checkbox. Noted in the PR body and the issue comment for traceability.",
+      "owner_field": "server/internal/identity/integrationtest/password_self_service_test.go",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "issue tracker: wsgbwps/nevix-ai#102 acceptance criteria",
+          "anchor": "#102 '用户列表分页 + 搜索；活跃用户全员互见目录（email + display_name）'",
+          "consequence": "directory endpoint existence and visibility tests are #102's acceptance, verifiable only after that slice lands",
+          "checks": []
+        },
+        {
+          "source": "frozen diff /tmp/nevix-101-frozen.diff",
+          "anchor": "TestUpdateMeChangesDisplayNameVisibleInDirectory asserts storedDisplayName + /users/me",
+          "consequence": "the rename's effect is verified at every seam available in this slice",
+          "checks": []
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e082e4affb827de488e7da170066bf8e07c14eadbebf0d81928955156f3fd2a8",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0004",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/auth/account.go",
+        "source": "#99 Implementation Decisions (每个新端点必须进 OpenAPI 契约)",
+        "anchor": "server/internal/identity/auth/account.go:UpdateMeRequest.Validate",
+        "defect": "request-length semantics disagree between server (trimmed UTF-8 bytes) and contract (maxLength characters on the raw value)"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Spec-axis view of CR-STANDARDS-0003; repaired together via rune counting, an explicit contract rule for trimming/counting, and boundary tests.",
+      "owner_field": "server/internal/identity/auth/account.go",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "targeted re-review round 1 (digest sha256:189a33cf...)",
+          "anchor": "account.go UpdateMeRequest.Validate vs contracts/identity.yaml display_name maxLength",
+          "consequence": "raw-vs-trimmed mismatch remains: a 128-character name padded with spaces is contract-invalid (raw maxLength) yet the server trims first and answers 200",
+          "checks": []
+        }
+      ],
+      "reviewedDiffDigest": "sha256:189a33cfe48145b9797a25cdf5e835ea9e482a35407b95bada8d8f0c00c92235",
+      "unresolvedTargetedRounds": 1,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [
+    {
+      "repairId": "R2",
+      "fixFor": [
+        "CR-SPEC-0004"
+      ],
+      "beforeDigest": "sha256:189a33cfe48145b9797a25cdf5e835ea9e482a35407b95bada8d8f0c00c92235",
+      "afterDigest": "sha256:4c7b4eab00b7bfdb53a22e4e6b909702cf496b87f251abf303cbd6dd457f8e97",
+      "touchedPaths": [
+        "server/internal/identity/auth/account.go",
+        "server/internal/identity/integrationtest/password_self_service_test.go",
+        "contracts/identity.yaml"
+      ],
+      "hunks": [
+        "UpdateMeRequest.Validate: length now checked on the raw value (utf8.RuneCountInString(*r.DisplayName) > 128 → 400 invalid_display_name); trimming still normalizes storage and gates emptiness but never rescues an over-length value",
+        "TestUpdateMeCountsDisplayNameInCharactersNotBytes: padded-boundary case added — 128 chars + surrounding spaces rejected, stored name unchanged",
+        "contracts/identity.yaml: display_name rule rewritten to raw-value Unicode-character counting with trim-for-emptiness/storage"
+      ],
+      "checks": [
+        {
+          "name": "go vet ./... (server)",
+          "result": "PASS"
+        },
+        {
+          "name": "go test ./... (server)",
+          "result": "PASS"
+        },
+        {
+          "name": "scripts/test-identity-integration.sh",
+          "result": "PASS",
+          "coverage": "90 integration tests, zero skips"
+        }
+      ]
+    },
+    {
+      "repairId": "R1",
+      "fixFor": [
+        "CR-STANDARDS-0001",
+        "CR-STANDARDS-0002",
+        "CR-STANDARDS-0003",
+        "CR-SPEC-0001",
+        "CR-SPEC-0002",
+        "CR-SPEC-0004"
+      ],
+      "beforeDigest": "sha256:e082e4affb827de488e7da170066bf8e07c14eadbebf0d81928955156f3fd2a8",
+      "afterDigest": "sha256:189a33cfe48145b9797a25cdf5e835ea9e482a35407b95bada8d8f0c00c92235",
+      "touchedPaths": [
+        "server/internal/identity/auth/account.go",
+        "server/internal/identity/auth/password.go",
+        "server/internal/identity/audit/log.go",
+        "server/internal/identity/integrationtest/password_self_service_test.go",
+        "contracts/identity.yaml"
+      ],
+      "hunks": [
+        "ChangePassword: hash computed pre-transaction; in-transaction SELECT ... FOR UPDATE re-reads committed password_hash + must_change_password, verifies current password inside the lock, then update/revoke/audit unchanged in semantics",
+        "ChangePasswordRequest.Validate: reject new_password over maxPasswordBytes (72) with 400 invalid_password; constant documented in password.go",
+        "UpdateMeRequest.Validate: utf8.RuneCountInString replaces byte len; message states characters",
+        "UpdateMe: SELECT display_name FOR UPDATE reads previous name in-transaction; display_name_changed audit row (from/to metadata) added in the same write transaction; actor snapshot taken after the update",
+        "audit/log.go: DisplayNameChanged action added to vocabulary",
+        "tests: TestChangePasswordEnforcesPasswordByteBoundaries, TestChangePasswordSerializesConcurrentChanges, TestUpdateMeCountsDisplayNameInCharactersNotBytes added; rename test now asserts the display_name_changed audit row and documents the #102 directory boundary",
+        "contracts/identity.yaml: change-password description documents in-transaction serialization and 72-byte cap; PATCH display_name rule now '1–128 Unicode characters after trimming'"
+      ],
+      "checks": [
+        {
+          "name": "go vet ./... (server)",
+          "result": "PASS"
+        },
+        {
+          "name": "go test ./... (server)",
+          "result": "PASS"
+        },
+        {
+          "name": "scripts/test-identity-integration.sh",
+          "result": "PASS",
+          "coverage": "90 integration tests, zero skips, sentinels green"
+        }
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "name": "scripts/test-identity-integration.sh",
+    "result": "PASS",
+    "coverage": "90 integration tests executed with zero skips; representative sentinels incl. TestChangePasswordSerializesConcurrentChanges, TestFirstLoginChangePasswordClearsFlagAndActivatesAccount, TestPendingPasswordChangeBlocksBusinessEndpoints",
+    "diffDigest": "sha256:4c7b4eab00b7bfdb53a22e4e6b909702cf496b87f251abf303cbd6dd457f8e97"
+  },
+  "outcome": "closed"
+}
