@@ -27,16 +27,24 @@ _Avoid_: store, DAO, data layer
 ## 用户系统
 
 **User**:
-由管理员创建的登录主体，email 是唯一登录标识；含显示名、角色与状态，密码重置由管理员执行，无自助邮件通道。
+登录主体，email 是唯一登录标识；经管理员建号（初始密码由管理员设定）或凭加入码自注册（密码本人自设）进入实例；含显示名、角色与状态，无自助邮件通道，凭据找回依赖管理员重置。
 _Avoid_: Account, Member（指角色时）, Profile
 
 **Admin**:
-两级角色中的管理者：建号、停用、重置密码、改登录 email、读 Audit Log；最后一个活跃 Admin 不可自降级或自停用。
+两级角色中的管理者：建号、停用、重置密码、改登录 email、签发与吊销加入码、读 Audit Log；最后一个活跃 Admin 不可自降级或自停用。
 _Avoid_: Owner, Administrator, Manager
 
 **Member**:
 两级角色中的基础使用者；对业务数据与全体活跃用户目录团队共享可读。
 _Avoid_: User, Regular User
+
+**Join Code（加入码）**:
+Admin 签发的注册凭据，持有者凭它在登录屏自注册为 Member；多枚并存、可吊销、可复用（不随注册消耗），全部失效即自注册关闭，不设独立注册开关。
+_Avoid_: 邀请函（Invitation）, 注册开关, invite code
+
+**Setup Code（设置码）**:
+空实例（尚无任何 User）引导期的一次性凭据，经运维日志交付，持有者经首启向导自选登录凭据成为首个 Admin；实例拥有任何 User 后即不复存在。
+_Avoid_: 初始管理员密码, bootstrap 密码, 超级管理员
 
 **Session**:
 服务端可吊销的已认证状态：opaque token 仅以 hash 存于 Postgres，多设备并存、滑动过期；改密、停用或吊销即刻生效并断开该用户的 SSE 连接。
