@@ -5,9 +5,11 @@ import { installSettingsBackInterception } from '../../src/renderer/src/app/sett
 import {
   captureSettingsSource,
   createSettingsEntry,
+  isAdminSettingsSection,
   isMatchingSettingsSource,
   readSettingsEntry,
   replaceSettingsSection,
+  resolveSettingsSection,
   returnToSettingsSource,
   type SettingsSourceDescriptor
 } from '../../src/renderer/src/app/settings/settings-navigation.ts'
@@ -52,6 +54,20 @@ test('invalid or absent Settings state safely defaults to Profile without a sour
     section: 'profile',
     source: undefined
   })
+})
+
+test('Admin-only sections resolve to Profile for sessions without the Admin role', () => {
+  assert.equal(isAdminSettingsSection('users'), true)
+  assert.equal(isAdminSettingsSection('audit'), true)
+  assert.equal(isAdminSettingsSection('profile'), false)
+
+  const usersEntry = readSettingsEntry({ settings: { section: 'users' } })
+  assert.equal(resolveSettingsSection(usersEntry, false), 'profile')
+  assert.equal(resolveSettingsSection(usersEntry, true), 'users')
+
+  const profileEntry = readSettingsEntry(undefined)
+  assert.equal(resolveSettingsSection(profileEntry, false), 'profile')
+  assert.equal(resolveSettingsSection(profileEntry, true), 'profile')
 })
 
 function enterSettingsFromCurrentEntry(): {

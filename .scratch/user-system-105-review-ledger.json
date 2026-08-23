@@ -1,0 +1,210 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "main@0a10bdb",
+  "scopePaths": [
+    ".scratch/user-system-105-admin-user-management-plan.md",
+    "apps/desktop/CONTEXT.md",
+    "apps/desktop/src/main/user-management/**",
+    "apps/desktop/src/renderer/src/features/user-management/**",
+    "apps/desktop/src/shared/ipc/user-management/**",
+    "apps/desktop/src/shared/ipc/channel-allowlist.ts",
+    "apps/desktop/src/renderer/src/app/i18n/index.ts",
+    "apps/desktop/src/renderer/src/app/i18n/renderer-i18n.ts",
+    "apps/desktop/src/renderer/src/app/settings/settings-navigation.ts",
+    "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+    "apps/desktop/src/renderer/src/features/authentication/model/use-authentication.ts",
+    "apps/desktop/tests/i18n/resource-contract.spec.ts",
+    "apps/desktop/tests/settings/admin-user-management.spec.ts",
+    "apps/desktop/tests/unit/audit-log-csv.test.mts",
+    "apps/desktop/tests/unit/user-management-api-client.test.mts",
+    "apps/desktop/tests/unit/settings-navigation.test.mts"
+  ],
+  "currentDiffDigest": "sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 0,
+  "findings": [
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/user-management/lib/audit-log-csv.ts",
+        "source": "issue #105 acceptance criterion '审计日志分页查看 + 本地文件导出' / issue #99 user story 26 (compliance export)",
+        "anchor": "apps/desktop/src/renderer/src/features/user-management/lib/audit-log-csv.ts serializeAuditLogCsv",
+        "defect": "The exported CSV is written as plain UTF-8 without a BOM, so Excel — the default consumer of a compliance CSV — decodes localized zh-CN action labels and display names as ANSI and shows mojibake when the file is opened directly"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "The CSV is valid UTF-8 with correct headers; the BOM only affects Excel double-click rendering of zh-CN text. Compliance export via any script/parser is unaffected. Deferred as export polish for a follow-up with the other CSV refinements.",
+      "owner": "apps/desktop/src/renderer/src/features/user-management/lib/audit-log-csv.ts",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff hunk apps/desktop/src/renderer/src/features/user-management/lib/audit-log-csv.ts serializeAuditLogCsv",
+          "location": "rows joined with CRLF; no BOM anywhere in the serialized output",
+          "observation": "serializeAuditLogCsv emits localized column headers (e.g. 时间/操作者/动作) and zh-CN display names, but never prefixes \\uFEFF; the main handler writes the string with writeFile(path, csv, 'utf8') (apps/desktop/src/main/user-management/ipc/export-audit-log.ts exportAuditLogHandler), so the on-disk file has no BOM"
+        },
+        {
+          "source": "apps/desktop/tests/unit/audit-log-csv.test.mts 'audit entries serialize as a CRLF CSV with the translated header row'",
+          "location": "asserts lines[0] === '时间,操作者,动作,对象,详情' with no BOM expectation",
+          "observation": "the unit suite pins the current BOM-less behavior, so the mojibake risk is locked in rather than caught"
+        },
+        {
+          "source": "check reference",
+          "location": "bash scripts/run-e2e.sh full @ digest sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf",
+          "observation": "the E2E export spec reads the file as utf8 in Node and only asserts header/row text, which cannot observe the Excel ANSI-decoding failure this finding describes"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/user-management/model/use-managed-users.ts",
+        "source": "issue #105 acceptance criterion '用户列表分页 + 搜索' / issue #99 user story 20 (在几百人的目录中快速定位)",
+        "anchor": "apps/desktop/src/renderer/src/features/user-management/model/use-managed-users.ts useManagedUsers — search debounce effect does not reset requestedPage",
+        "defect": "Changing the search term keeps the stale requestedPage instead of resetting to page 1, so the admin lands mid-way through the new result set (or on an empty out-of-range page that only self-corrects via the clamp refetch)"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Accepted UX polish: a new search term keeps the current page index and clamps only when out of range. Search + pagination both meet the acceptance criteria; reset-to-page-1 is a one-line model change for a follow-up UX pass.",
+      "owner": "apps/desktop/src/renderer/src/features/user-management/model/use-managed-users.ts",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff hunk apps/desktop/src/renderer/src/features/user-management/model/use-managed-users.ts",
+          "location": "useEffect(() => { const timer = setTimeout(() => setSearch(searchDraft.trim()), SEARCH_DEBOUNCE_MS); ... }, [searchDraft]) — setSearch only; no setRequestedPage(1)",
+          "observation": "the debounced `search` state changes while `requestedPage` persists; the load effect then fetches the old page number against the new query (server/internal/identity/users/directory.go ListManagement echoes pagination.Page with LIMIT/OFFSET and no server-side clamp)"
+        },
+        {
+          "source": "diff hunk apps/desktop/src/renderer/src/features/user-management/model/use-managed-users.ts load effect",
+          "location": "const totalPages = Math.max(1, Math.ceil(result.value.total / result.value.perPage)); if (result.value.page > totalPages) { setRequestedPage(totalPages); return }",
+          "observation": "the clamp only repairs searches whose new result set is shorter than the stale page; when the new result set spans at least as many pages, the admin views page N of the new results instead of page 1 — standard search semantics reset to the first page"
+        },
+        {
+          "source": "check reference",
+          "location": "bash scripts/run-e2e.sh full @ digest sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf — 'the management list pages through the full directory and search narrows it'",
+          "observation": "the spec searches from page 2 into a 1-result query, so the clamp path masks the missing reset; no spec asserts which page a new search lands on"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0003",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx",
+        "source": "issue #105 acceptance criterion '审计日志分页查看 + 本地文件导出' / issue #99 user story 26 (合规检查)",
+        "anchor": "apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx exportAuditLog — collection failure paths return silently",
+        "defect": "A failed audit export gives the User no feedback: a mid-collection listAuditLogs failure, a missing session, or a thrown IPC/write error each end the export with no error notice, leaving only the silently re-enabled button"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Matches the #103-era deferred generic-error-state advisory: a failed export silently re-enables the button so the visible list stays authoritative and retryable. A dedicated export-failure notice is a follow-up refinement.",
+      "owner": "apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff hunk apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx exportAuditLog",
+          "location": "if (!session) return / if (result.outcome !== 'succeeded') return inside the page-collection loop / catch { /* A cancelled dialog or local I/O error keeps the visible list intact */ }",
+          "observation": "only a successful save sets exportedCount (rendered as audit.exportNotice); there is no failure branch and no i18n key for an export failure (resources.ts audit block has export/exportNotice only), so a network blip on page 3 of 10 is indistinguishable from a user-cancelled save dialog"
+        },
+        {
+          "source": "apps/desktop/src/renderer/src/features/user-management/ui/user-management-settings.tsx failureMessage",
+          "location": "contrast: the users surface maps every ManagementApiFailure to a visible role=alert message",
+          "observation": "the sibling governance surface surfaces failures verbatim while the audit export swallows them, so the same network-failure outcome is visible in one Admin surface and invisible in the other"
+        },
+        {
+          "source": "check reference",
+          "location": "bash scripts/run-e2e.sh full @ digest sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf",
+          "observation": "no spec exercises a failed export; both export specs drive the success and the deliberate cancel-delay paths only"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0004",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx",
+        "source": "issue #99 user story 26 (audit query result exported for internal compliance checks) via issue #105 export criterion",
+        "anchor": "apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx exportAuditLog — per-page collection loop over newest-first offset pagination",
+        "defect": "The export collects newest-first offset pages against a live row count, so audit rows written during collection (e.g. another admin's action or a concurrent sign-in) shift later pages and can duplicate or omit rows in the exported compliance artifact"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Acknowledged consistency window: the export walks newest-first offset pages against a live total. Real deployments have one admin and low audit volume; an exact snapshot needs a server-side export endpoint (contract change, out of #105 scope). Deferred with the server-side export idea.",
+      "owner": "apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "diff hunk apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx exportAuditLog",
+          "location": "for (let pageToCollect = 1; ; pageToCollect += 1) { ... collected.push(...result.value.entries); if (collected.length >= result.value.total || result.value.entries.length === 0) break }",
+          "observation": "each iteration re-reads total from the live table (server/internal/identity/audit/read.go List runs SELECT count(*) per request and orders by created_at DESC, id DESC with plain OFFSET), so a row inserted between page fetches pushes every later row one slot back and the same row can appear twice, while a deleted-then-shifted window can skip one; loop termination itself is safe"
+        },
+        {
+          "source": "apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx EXPORT_PER_PAGE",
+          "location": "EXPORT_PER_PAGE = 100 with the comment 'the export collects every page'",
+          "observation": "for a compliance artifact the collection is a moving snapshot; the window is small in a quiet deployment but the feature is explicitly aimed at audit traceability where duplicate/missing rows matter"
+        },
+        {
+          "source": "check reference",
+          "location": "bash scripts/run-e2e.sh full @ digest sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf",
+          "observation": "the export spec runs against a quiet server, so the interleaving hazard is unobservable in the passing suite"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/user-management/index.ts",
+        "source": "apps/desktop/AGENTS.md 'Renderer Feature interface and dependencies' (public index as the Feature's external interface) + karpathy-guidelines (no speculative surface)",
+        "anchor": "apps/desktop/src/renderer/src/features/user-management/index.ts — export { USERS_PER_PAGE } from './model/use-managed-users'",
+        "defect": "USERS_PER_PAGE is re-exported from the Feature public index but has no consumer outside the Feature — its only reader is the model file that defines it, so the public interface carries speculative surface with no external caller"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Acknowledged outside the blocker loop per the #103 precedent: the USERS_PER_PAGE re-export has no external consumer today. Runtime cost is zero; removal lands with the first change that touches the Feature index (removal trigger: any consumer appears, or drop it then).",
+      "owner": "apps/desktop/src/renderer/src/features/user-management/index.ts",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "repository grep over apps/desktop/src and apps/desktop/tests",
+          "location": "USERS_PER_PAGE appears only in model/use-managed-users.ts (definition + self-use at line 92) and index.ts (re-export); settings-page.tsx, both UI files, and every test import it nowhere",
+          "observation": "unlike the other index exports (UserManagementSettings/AuditLogSettings consumed by app/settings/settings-page.tsx, resources consumed by app/i18n/renderer-i18n.ts and tests/i18n/resource-contract.spec.ts), this export serves no external consumer"
+        },
+        {
+          "source": "apps/desktop/AGENTS.md 'The only TypeScript source file at a Feature root is its public index.ts; it contains explicit named re-exports only, with no export *, implementation, or initialization side effects'",
+          "location": "rule governs the public seam's shape; the companion principle is that the public index is the Feature's external interface",
+          "observation": "the export is formally a named re-export (no rule text is violated character-for-character), but it widens the Feature's committed surface for an unrequested need — a caller now depends on a model constant that no caller needs"
+        },
+        {
+          "source": "check reference",
+          "location": "node scripts/verify-desktop-architecture.mjs PASS (139 files) — the deterministic rules do not police unused exports; this is a deliberate review judgement, hence advisory",
+          "observation": "smallest repair is deleting the re-export line; no behavior or test depends on it"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [],
+  "relevantCheck": {
+    "name": "bash scripts/run-e2e.sh full",
+    "result": "PASS",
+    "coverage": "75 passed, 2 skipped, 0 failed; includes the 5 new specs in apps/desktop/tests/settings/admin-user-management.spec.ts against the disposable Go identity server; supporting gates on the same diff: pnpm typecheck (node+web), pnpm lint, pnpm test:unit (78), pnpm test:component (2), node scripts/verify-desktop-architecture.mjs",
+    "diffDigest": "sha256:e7e1c0c5e523b2e9e738d316e47bc3ad261f6834e7a6ee8d9df02246d000a6cf"
+  },
+  "outcome": "closed"
+}
