@@ -12,7 +12,7 @@ AI 媒体创作 SaaS 桌面应用。
 | 数据获取 | TanStack Query |
 | UI 状态 | Zustand |
 | 样式 & 组件 | Tailwind CSS v4 + shadcn/ui |
-| 身份、数据与对象存储 | Supabase (Auth / PostgreSQL / Storage / Realtime) |
+| 身份与数据 | 自建 Go server（唯一可信数据面）+ PostgreSQL（单租户，私有化部署） |
 | 后端 | Go — API 服务 / Agent 编排 |
 | Monorepo | Turborepo + pnpm Workspaces |
 | 打包 | electron-builder |
@@ -30,7 +30,6 @@ nevix-ai/
 │       └── renderer/      # 渲染进程（React + Feature-Sliced）
 ├── server/                # Go 后端（独立于 Node workspace）
 ├── contracts/             # 前后端共享的 API 契约（OpenAPI）
-├── supabase/              # 版本钉定的本地/CI Supabase 栈定义（config、migrations、seed）
 ├── docs/adr/              # 架构决策记录
 ├── scripts/               # 构建和部署脚本
 ├── .github/workflows/     # CI/CD
@@ -47,7 +46,7 @@ nevix-ai/
 
 AI 创作使用跨 Desktop、Server 与 OpenAPI 的唯一 canonical owner `creation`；图片、视频、灵感页、创作工作台与资产库不拆分独立 Domain/Module。详见 [ADR-0012](docs/adr/0012-unified-ai-creation-owner.md)。
 
-数据平面默认由 Desktop 使用用户 JWT 直连受策略保护的 Supabase；只有密钥、额度/支付、Webhook、管理员权限、事务或异步编排需要跨入 Go 的可信执行 seam。Go 不是 Supabase 的通用代理层；完整决策见 [ADR-0004](docs/adr/0004-supabase-go-trusted-execution-seam.md)。
+数据平面收敛为 Go server 唯一可信数据面：桌面端不持有任何数据库凭据，登录、会话、用户与审计等全部数据访问都走 Go API，持久层为 PostgreSQL；授权在 Go 层以两个路由 guard（`RequireActiveUser` / `RequireAdmin`）加 handler 内行级检查落位。完整决策见 [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md) 与 [ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md)。
 
 领域术语详见 `CONTEXT-MAP.md` → 各子 context 的 `CONTEXT.md`；Codex 的持久开发与评审规则详见 [`AGENTS.md`](AGENTS.md)。
 
@@ -71,9 +70,11 @@ src/shared/ipc/
 ├── channels.ts                   # IPC 类型基座（空 interface，各 owner 通过 declaration merging 扩展）
 ├── authentication/
 │   └── types.ts                  # declare module '@ipc/channels' 扩展 + 具名 req/res 类型
+├── connection/
+│   └── types.ts
 ├── language/
 │   └── types.ts
-├── organization/
+├── user-management/
 │   └── types.ts
 └── window/                       # 唯一 platform-owned typed IPC 例外
     └── types.ts
@@ -224,8 +225,8 @@ server/
 
 测试摆放按**边界**决定，不按是否使用真实数据库决定：
 
-- 验证 Module 公开 seam（`LoadConfig`/`NewModule`/`Register`/`RunWorkers` 装配、GoTrue/PostgREST 数据平面、SMTP 投递、OpenAPI 契约）的测试归该 Module 的 `integrationtest/`（Identity 即 `internal/identity/integrationtest/`）
-- 验证 owning package 内部责任（SQL、query plan、事务、catalog）的测试留在该 package；依赖真实数据库等外部资源的以 `*_integration_test.go` 命名（资源标签，非 build tag），如 `writetx/`、`invitations/`、`verification/`、`outbox/` 内
+- 验证 Module 公开 seam（`LoadConfig`/`NewModule`/`Register`/`RunWorkers` 装配、登录/会话/用户管理 HTTP 面、OpenAPI 契约）的测试归该 Module 的 `integrationtest/`（Identity 即 `internal/identity/integrationtest/`）
+- 验证 owning package 内部责任（SQL、query plan、事务、catalog）的测试留在该 package；依赖真实数据库等外部资源的以 `*_integration_test.go` 命名（资源标签，非 build tag），如 `writetx/`、`auth/`、`users/` 内
 - 测试支持代码只存在于 `*_test.go` 测试编译单元；不提前创建跨 Module 共享 testkit（出现第二个真实 Module consumer 且语义一致时再议）
 - 缺环境的真库测试：普通 `go test ./...` skip；专用入口（`make test-identity-integration`）设 `NEVIX_IDENTITY_INTEGRATION_REQUESTED=1`，缺环境即 fail，并以零 skip + 代表性 sentinel 证明关键保障实际执行
 
@@ -267,7 +268,7 @@ Server 已迁移到单租户用户系统（登录/会话走 Go API，纯 Postgre
 1. 首次运行 `cp server/.env.example server/.env.local`，按注释填入两条数据库凭据：`MIGRATION_DATABASE_URL`（owner/DDL，启动时自动执行 up-only migration）与 `DATABASE_URL`（必须直接以 `identity_app` LOGIN 角色登录），以及 `ADMIN_EMAIL` / `ADMIN_INITIAL_PASSWORD`（仅空库 bootstrap 生效）。
 2. 本地启动一个 PostgreSQL（例如 `docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres:17.5-alpine`），并在首次启动 Server 前预置应用角色：`CREATE ROLE identity_app LOGIN PASSWORD '…'`（migration 只会采用已存在的角色、绝不重置密码；全新库上该角色要等首启的 migration 才被创建，若不预置，首启时应用池认证即失败）。
 3. 运行 `make server`：启动时自动执行 migration、空库时 bootstrap 首个 admin。
-4. 运行 `make dev`，启动 Desktop（注意：桌面端登录流仍在迁移中，当前渲染端依旧面向旧 Supabase 面）。
+4. 运行 `make dev`，启动 Desktop（首次启动通过连接屏配置 server URL 并测试连通，详见桌面端文档）。
 
 Server 集成测试：`./scripts/test-identity-integration.sh` 拉起一次性 pinned PostgreSQL 容器并运行整套真库集成测试。
 

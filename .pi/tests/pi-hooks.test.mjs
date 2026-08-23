@@ -25,7 +25,6 @@ test("protects lock files and real environment files, not templates", () => {
     ".envexample",
     "src/config.ts",
     "server/.env.example",
-    "supabase/auth-policy.env.example",
     "config.env.example",
   ]) {
     assert.equal(isProtectedEditPath(path), false, path);

@@ -1,0 +1,61 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "610686b",
+  "scopePaths": [
+    ".github/actions/supabase-image-cache/",
+    ".github/workflows/desktop-ci.yml",
+    ".github/workflows/desktop-e2e-ci.yml",
+    ".pi/extensions/pi-hooks.ts",
+    ".pi/tests/pi-hooks.test.mjs",
+    ".scratch/user-system-106-test-stack-ci-plan.md",
+    "Makefile",
+    "README.md",
+    "apps/desktop/README.md",
+    "package.json",
+    "pnpm-lock.yaml",
+    "scripts/auth-policy-harness.mjs",
+    "scripts/classify-ci-changes.mjs",
+    "scripts/lib/supabase-local-harness.sh",
+    "scripts/test-auth-policy.sh",
+    "scripts/tests/auth-policy-harness.test.mjs",
+    "scripts/tests/classify-ci-changes.test.mjs",
+    "scripts/tests/supabase-local-harness.test.sh",
+    "supabase/"
+  ],
+  "currentDiffDigest": "sha256:f0db1eca55d647be75debeefab8b93a27fcf1fb9a4e37c16e71a6bf8cc955158",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 0,
+  "reviewMode": "initial",
+  "specSource": "issue #106 (parent spec #99), https://github.com/wsgbwps/nevix-ai/issues/106",
+  "standardsSources": [
+    "AGENTS.md",
+    "apps/desktop/AGENTS.md",
+    "docs/agents/delivery.md"
+  ],
+  "bundle": {
+    "command": "git diff --binary 610686b..1825135 > $TMPDIR/nevix-106-review-bundle.patch",
+    "bytes": 133293
+  },
+  "commits": ["1825135"],
+  "findings": [],
+  "repairRecords": [],
+  "relevantCheck": {
+    "name": "make harness-test + classify dry-run + desktop E2E (smoke & full)",
+    "result": "PASS",
+    "coverage": "harness inline tests 36/36; classifier dry-run main..HEAD zero unclassified (desktop+e2e+harness); E2E smoke 17/17; E2E full 75 passed / 2 skipped (Linux-only) with verify:auth-artifacts PASS; pnpm-lock.yaml contains zero supabase entries",
+    "diffDigest": "sha256:f0db1eca55d647be75debeefab8b93a27fcf1fb9a4e37c16e71a6bf8cc955158"
+  },
+  "axisVerdicts": {
+    "standards": {
+      "candidates": 0,
+      "verdict": "correct; no documented-standard breach or material baseline smell",
+      "confidence": 0.94
+    },
+    "spec": {
+      "candidates": 0,
+      "verdict": "correct; all acceptance criteria satisfied with verification evidence",
+      "confidence": 0.98
+    }
+  },
+  "outcome": "closed"
+}

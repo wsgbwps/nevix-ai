@@ -1,4 +1,4 @@
-.PHONY: dev build lint server supabase test-identity-integration harness-test setup
+.PHONY: dev build lint server test-identity-integration harness-test setup
 
 dev:
 	pnpm dev
@@ -14,9 +14,6 @@ server:
 
 # Local server run: expects .env.local in server/ to define MIGRATION_DATABASE_URL
 # (DDL credential) and DATABASE_URL (identity_app runtime credential).
-
-supabase:
-	pnpm exec supabase start
 
 test-identity-integration:
 	./scripts/test-identity-integration.sh

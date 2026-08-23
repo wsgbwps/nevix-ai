@@ -16,7 +16,8 @@ function isOneOf(path, values) {
 
 // apps/desktop 下不改变应用运行时行为的路径:文档与根级 markdown、
 // 本地测试产物,以及只由 Desktop CI 自己执行的 unit/component 测试。
-// 它们不值得为一次 PR 启动整套 Supabase 栈 + Electron 的 Smoke E2E。
+// 它们不值得为一次 PR 启动整套 E2E 栈(Go server + PostgreSQL + Electron)
+// 的 Smoke E2E。
 function isDesktopNonRuntimePath(path) {
   if (
     startsWith(path, "apps/desktop/docs") ||
@@ -63,23 +64,9 @@ export function classifyPaths(paths) {
       checks.add("server");
       checks.add("e2e");
     }
-    if (startsWith(path, "supabase")) {
-      checks.add("e2e");
-    }
 
     if (isOneOf(path, ["scripts/test-identity-integration.sh"])) {
       checks.add("server");
-    }
-    if (
-      isOneOf(path, [
-        "scripts/auth-policy-harness.mjs",
-        "scripts/test-auth-policy.sh",
-        "scripts/lib/supabase-local-harness.sh",
-        "scripts/tests/auth-policy-harness.test.mjs",
-        "scripts/tests/supabase-local-harness.test.sh",
-      ])
-    ) {
-      checks.add("e2e");
     }
 
     if (
@@ -98,10 +85,6 @@ export function classifyPaths(paths) {
     if (path === ".github/workflows/desktop-ci.yml") checks.add("desktop");
     if (path === ".github/workflows/server-ci.yml") checks.add("server");
     if (path === ".github/workflows/desktop-e2e-ci.yml") checks.add("e2e");
-    if (startsWith(path, ".github/actions")) {
-      // Composite actions back the E2E harness jobs that call them.
-      checks.add("e2e");
-    }
     if (
       startsWith(path, ".codegraph") ||
       startsWith(path, ".agents") ||
