@@ -33,6 +33,12 @@ export interface IdentityClient {
     email: string,
     password: string
   ) => Promise<IdentityApiResult<SessionCredentials>>
+  readonly register: (
+    email: string,
+    password: string,
+    joinCode: string,
+    displayName?: string
+  ) => Promise<IdentityApiResult<SessionCredentials>>
   readonly me: (token: string) => Promise<IdentityApiResult<UserAccount>>
   readonly logout: (token: string) => Promise<IdentityApiResult<void>>
   readonly changePassword: (
@@ -95,6 +101,26 @@ export function createIdentityClient(serverUrl: string): IdentityClient {
         method: 'POST',
         path: '/identity/auth/login',
         body: { email, password }
+      })
+      if (result.outcome !== 'succeeded') return result
+
+      const credentials = toSessionCredentials(result.value)
+      return credentials
+        ? { outcome: 'succeeded', value: credentials }
+        : { outcome: 'network-failure' }
+    },
+
+    async register(email, password, joinCode, displayName) {
+      const trimmedDisplayName = displayName?.trim()
+      const result = await request<unknown>({
+        method: 'POST',
+        path: '/identity/register',
+        body: {
+          email,
+          password,
+          join_code: joinCode,
+          ...(trimmedDisplayName ? { display_name: trimmedDisplayName } : {})
+        }
       })
       if (result.outcome !== 'succeeded') return result
 

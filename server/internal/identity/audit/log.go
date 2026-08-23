@@ -55,6 +55,10 @@ const (
 	// JoinCodeRevoked records an admin revoking a join code; the metadata
 	// names the code row whose registration window just closed.
 	JoinCodeRevoked Action = "join_code_revoked"
+	// UserSelfRegistered records a member redeeming an active join code for
+	// their own account; the metadata names the email and the code redeemed,
+	// and the session issued with it rides this same row (issue #121).
+	UserSelfRegistered Action = "user_self_registered"
 )
 
 var validActions = map[Action]struct{}{
@@ -71,6 +75,7 @@ var validActions = map[Action]struct{}{
 	UserDeleted:           {},
 	JoinCodeCreated:       {},
 	JoinCodeRevoked:       {},
+	UserSelfRegistered:    {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id

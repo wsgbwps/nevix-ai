@@ -134,8 +134,9 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 // Register mounts the Module's trusted commands from the static route table:
 // the CORS whitelist gates the Module surface, every path's OPTIONS preflight
 // twin and Allow-Methods value derive from the same table, and every route
-// runs behind its declared authz guard (only login is public). The Module
-// publishes no Domain Events yet; the bus is part of the Module contract.
+// runs behind its declared authz guard (login and self-registration are the
+// public entries). The Module publishes no Domain Events yet; the bus is part
+// of the Module contract.
 func (m *Module) Register(r chi.Router, _ event.Bus) {
 	routes := m.routes()
 	r.Use(corsMiddleware(m.corsOrigins, command.MethodsByPath(routes)))

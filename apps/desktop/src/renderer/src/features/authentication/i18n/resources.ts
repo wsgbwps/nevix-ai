@@ -46,6 +46,22 @@ export const authenticationTranslations = defineResourceTranslations({
       rateLimited: '尝试过于频繁，请稍后重试。',
       serviceError: '无法连接服务器，请检查网络后重试。'
     },
+    register: {
+      heading: '注册 Nevix AI',
+      description: '凭管理员发放的加入码注册你的账号。',
+      email: '邮箱',
+      password: '密码',
+      joinCode: '加入码',
+      displayName: '显示名（可选）',
+      submit: '注册',
+      submitting: '正在注册…',
+      backToLogin: '返回登录',
+      switchToRegister: '凭加入码注册账号',
+      invalidJoinCode: '加入码无效或已失效，请联系管理员。',
+      emailTaken: '该邮箱已被注册。',
+      rateLimited: '尝试过于频繁，请稍后重试。',
+      serviceError: '无法连接服务器，请检查网络后重试。'
+    },
     passwordChange: {
       heading: '设置新密码',
       description: '管理员为你设置了初始密码。首次登录需要设置自己的新密码后继续使用。',
@@ -112,6 +128,22 @@ export const authenticationTranslations = defineResourceTranslations({
       submitting: 'Signing in…',
       invalidCredentials: 'Email or password is incorrect',
       accountDisabled: 'This account has been disabled. Contact your administrator.',
+      rateLimited: 'Too many attempts. Try again later.',
+      serviceError: 'The server cannot be reached. Check your network and try again.'
+    },
+    register: {
+      heading: 'Register with Nevix AI',
+      description: 'Register your account with the join code your administrator shared.',
+      email: 'Email',
+      password: 'Password',
+      joinCode: 'Join code',
+      displayName: 'Display name (optional)',
+      submit: 'Register',
+      submitting: 'Registering…',
+      backToLogin: 'Back to sign in',
+      switchToRegister: 'Register with a join code',
+      invalidJoinCode: 'The join code is not valid. Contact your administrator.',
+      emailTaken: 'This email is already registered.',
       rateLimited: 'Too many attempts. Try again later.',
       serviceError: 'The server cannot be reached. Check your network and try again.'
     },

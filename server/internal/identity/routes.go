@@ -1,12 +1,13 @@
 // The Module's trusted-command route table. The zero-value guard is
 // RequireActiveUser: the team directory and the personal reads declare
 // nothing; every governance command and the admin reads declare GuardAdmin;
-// only the login command declares GuardPublic. Every path's OPTIONS preflight
-// twin and Allow-Methods value derive from this single table (see
-// command.Mount and command.AllowMethods). The zero-value password gate
-// blocks a route while the caller owes the forced first-login change; me,
-// logout, and the change itself declare PasswordGateOpen (issue #101); the
-// governance surface stays gated (issue #102).
+// the two public entry commands — login and join-code self-registration —
+// declare GuardPublic. Every path's OPTIONS preflight twin and Allow-Methods
+// value derive from this single table (see command.Mount and
+// command.AllowMethods). The zero-value password gate blocks a route while
+// the caller owes the forced first-login change; me, logout, and the change
+// itself declare PasswordGateOpen (issue #101); the governance surface stays
+// gated (issue #102).
 package identity
 
 import (
@@ -29,6 +30,16 @@ func (m *Module) routes() []command.Route {
 			Path:    "/identity/auth/login",
 			Guard:   command.GuardPublic,
 			Handler: command.Handle(m.auth.Login, auth.MapError, http.StatusOK),
+		},
+		{
+			// Self-registration (issue #121): redeem an active join code for a
+			// new active-member account and its first session. Public like
+			// login — the join code is the credential; a wrong or revoked code
+			// and a closed registration (no active codes) are one answer.
+			Method:  http.MethodPost,
+			Path:    "/identity/register",
+			Guard:   command.GuardPublic,
+			Handler: command.Handle(m.auth.Register, auth.MapRegisterError, http.StatusCreated),
 		},
 		{
 			Method:       http.MethodPost,

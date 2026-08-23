@@ -32,6 +32,8 @@ export type AuthenticationError =
   | 'invalid-password'
   | 'password-too-short'
   | 'password-too-long'
+  | 'invalid-join-code'
+  | 'email-taken'
   | 'rate-limited'
   | 'service-unavailable'
 
@@ -61,8 +63,15 @@ interface Authentication {
   readonly getSession: () => Promise<AuthenticatedSession | undefined>
   readonly setRememberEmailSelected: (selected: boolean) => void
   readonly consumeRememberedEmailPersistenceNotice: () => void
+  readonly dismissError: () => void
   readonly retryRestore: () => Promise<void>
   readonly signIn: (email: string, password: string) => Promise<void>
+  readonly register: (
+    email: string,
+    password: string,
+    joinCode: string,
+    displayName: string
+  ) => Promise<void>
   readonly completePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
   readonly signOut: () => Promise<void>
 }
@@ -124,6 +133,10 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const consumeRememberedEmailPersistenceNotice = useCallback((): void => {
     if (hasShownRememberedEmailPersistenceNoticeRef.current) return
     hasShownRememberedEmailPersistenceNoticeRef.current = true
+  }, [])
+
+  const clearError = useCallback((): void => {
+    setError(undefined)
   }, [])
 
   const retireRememberedEmailPersistenceNotice = useCallback((): void => {
@@ -394,6 +407,41 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     [rememberLoginEmail, settleSession]
   )
 
+  const register = useCallback(
+    async (
+      email: string,
+      password: string,
+      joinCode: string,
+      displayName: string
+    ): Promise<void> => {
+      const client = clientRef.current
+      if (!client || submissionRef.current) return
+
+      submissionRef.current = true
+      setIsSubmitting(true)
+      setError(undefined)
+
+      try {
+        const registration = await client.register(email, password, joinCode, displayName)
+        if (registration.outcome !== 'succeeded') {
+          setError(mapRequestFailure(registration))
+          return
+        }
+
+        // A registered member already owns their password, so the new session settles
+        // straight into the shell; the encrypted slot is written before it opens.
+        await replacePersistedCredentials(registration.value)
+        settleSession(registration.value)
+      } catch {
+        setError('service-unavailable')
+      } finally {
+        submissionRef.current = false
+        setIsSubmitting(false)
+      }
+    },
+    [settleSession]
+  )
+
   const completePasswordChange = useCallback(
     async (currentPassword: string, newPassword: string): Promise<void> => {
       const client = clientRef.current
@@ -477,8 +525,10 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     getSession,
     setRememberEmailSelected,
     consumeRememberedEmailPersistenceNotice,
+    dismissError: clearError,
     retryRestore: restore,
     signIn,
+    register,
     completePasswordChange,
     signOut
   }
@@ -495,6 +545,12 @@ function mapRequestFailure(failure: IdentityApiFailure): AuthenticationError {
       return 'account-disabled'
     case 'invalid_password':
       return 'invalid-password'
+    case 'password_too_short':
+      return 'password-too-short'
+    case 'invalid_join_code':
+      return 'invalid-join-code'
+    case 'email_taken':
+      return 'email-taken'
     default:
       return 'service-unavailable'
   }
