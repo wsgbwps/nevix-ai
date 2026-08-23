@@ -271,7 +271,7 @@ Server 已迁移到单租户用户系统（登录/会话走 Go API，纯 Postgre
 > **一次性重建（Goose migration 切换，issue #108）**：migration 引擎已从自研 runner 切换到 Goose（版本账本 `goose_db_version`）。如果你的本地库还在用 #100 时代的自研 runner（存在 `public.schema_migrations` 表），必须**一次性删除并重建本地数据库**（例如 `DROP DATABASE ... WITH (FORCE)` 后重新 `CREATE DATABASE`）再启动 Server；clean cut、不做兼容桥，旧库上 Goose 会重新执行 0001 并因对象已存在而启动失败。
 
 1. 首次运行 `cp server/.env.example server/.env.local`，按注释填入两条数据库凭据：`MIGRATION_DATABASE_URL`（owner/DDL，启动时自动执行 up-only migration）与 `DATABASE_URL`（必须直接以 `identity_app` LOGIN 角色登录），以及 `ADMIN_EMAIL` / `ADMIN_INITIAL_PASSWORD`（仅空库 bootstrap 生效）。
-2. 本地启动一个 PostgreSQL：`make postgres`（幂等，数据持久化在 `nevix-dev-postgres-data` 卷；彻底重置用 `make postgres-down && docker volume rm nevix-dev-postgres-data`），并在首次启动 Server 前预置应用角色：`CREATE ROLE identity_app LOGIN PASSWORD '…'`（migration 只会采用已存在的角色、绝不重置密码；全新库上该角色要等首启的 migration 才被创建，若不预置，首启时应用池认证即失败）。`make postgres` 初始化的 postgres 超级用户密码固定为 `dev`（卷重建后仍是 `dev`）——`MIGRATION_DATABASE_URL` 的密码须与库内实际密码匹配：沿用自己已有密码时先 `ALTER USER postgres PASSWORD '…'` 对齐，或直接把 `.env.local` 中该密码改为 `dev`。注意：容器内 loopback 连接是 trust 免密，验证密码要从宿主机连。
+2. 本地启动一个 PostgreSQL：`make postgres`（幂等，数据持久化在 `nevix-dev-postgres-data` 卷；彻底重置用 `make postgres-down && docker volume rm nevix-dev-postgres-data`）。该命令同时幂等预置 `identity_app` 应用角色（密码 `dev`，不存在时创建，已存在则保持不动）与 postgres 超级用户（密码固定 `dev`）。全新卷上 `.env.local` 两条 DSN 的密码直接用 `dev` 即可；migration 只会采用已存在的角色、绝不重置密码——若你的卷里已有自己改过的密码，以库内实际密码为准（或删卷重置回到 `dev`），不要单边改任一侧。注意：容器内 loopback 连接是 trust 免密，验证密码要从宿主机连。
 3. 运行 `make server`：启动时自动执行 migration、空库时 bootstrap 首个 admin。
 4. 运行 `make dev`，启动 Desktop（首次启动通过连接屏配置 server URL 并测试连通，详见桌面端文档）。
 

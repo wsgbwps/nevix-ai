@@ -19,6 +19,10 @@ server:
 # nevix-dev-postgres-data volume across make postgres-down/up; reset the
 # database by also removing that volume. server/.env.local credentials must
 # match (see README 本地开发启动顺序).
+#
+# Also provisions the identity_app LOGIN role (password dev) when missing so a
+# volume reset needs no manual step; an existing role is adopted untouched —
+# migrations never reset credentials and neither does this target.
 postgres:
 	@if docker container inspect nevix-dev-postgres >/dev/null 2>&1; then \
 		docker start nevix-dev-postgres >/dev/null; \
@@ -34,6 +38,14 @@ postgres:
 		sleep 1; \
 	done; \
 	[ "$$ready" = 1 ] || { echo "error: nevix-dev-postgres 未在 30s 内就绪" >&2; exit 1; }
+	@if docker exec nevix-dev-postgres psql -U postgres -d postgres -tAc \
+		"select 1 from pg_roles where rolname='identity_app'" | grep -q 1; then \
+		echo "ok - identity_app 角色已存在，保持不动"; \
+	else \
+		docker exec nevix-dev-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+			-c "CREATE ROLE identity_app LOGIN PASSWORD 'dev'" \
+			&& echo "ok - identity_app 角色已创建（密码 dev）"; \
+	fi
 	@echo "ok - nevix-dev-postgres ready on 127.0.0.1:5432 (postgres superuser password: dev)"
 
 postgres-down: docker-ready

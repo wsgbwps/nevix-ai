@@ -1,0 +1,125 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "4985440",
+  "scopePaths": [
+    "Makefile",
+    "README.md",
+    "server/.env.example",
+    ".scratch/postgres-role-provisioning-plan.md"
+  ],
+  "currentDiffDigest": "sha256:b2f8507cad18ef8fa369956dbd8d5fd2d4cb3a024237d4aaebff7c5f2d1668fc",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 1,
+  "reviewMode": "closed",
+  "specSource": "用户会话请求：把 CREATE ROLE identity_app 收进 make postgres，删卷重置后零手工步骤",
+  "standardsSources": [
+    "AGENTS.md（高风险条目：认证/持久数据需 .scratch 计划）",
+    "docs/agents/delivery.md",
+    "server/internal/migration/migrations/0001_baseline_user_system.sql（角色采用语义）"
+  ],
+  "commits": [
+    "6b6bac6",
+    "b0cded6"
+  ],
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": ".scratch/",
+        "source": "AGENTS.md High-risk changes 条款（authentication / persistent data 需先行书面计划）",
+        "anchor": "Makefile:postgres identity_app 预置 hunk",
+        "defect": "持久 LOGIN 凭据预置变更在实施前缺少 .scratch/ 任务计划，高风险条目的边界与验证不可审计"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "规则适用成立：固定密码 LOGIN 角色属凭据预置。修复为补记任务计划（dev-only/loopback 边界、采用不变式、固定密码风险接受、三场景验证与假绿教训）。",
+      "owner": ".scratch/",
+      "status": "closed",
+      "evidence": [
+        "初始 diff（digest 4f1dfcea…）无任何任务计划文件",
+        "修复新增 .scratch/postgres-role-provisioning-plan.md，覆盖高风险条款要求的边界与验证记录"
+      ],
+      "reviewedDiffDigest": "sha256:4f1dfcea2ecadb7e802f71a02d51b4505534037473b572ee1069a6a1e9740ebf",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "README.md",
+        "source": "目标语义「已存在角色原样采用」",
+        "anchor": "README.md#本地开发启动顺序-step-2",
+        "defect": "「两条 DSN 密码直接用 dev 即可全程自足」未限定为全新卷；已改过密码的存量卷上按此指引必撞 28P01"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "advisory；已在同任务修复批内一并修正（限定「全新卷」，存量卷以库内实际密码为准/删卷重置，禁止单边修改），非 blocker 环内容。",
+      "owner": "README.md",
+      "status": "closed",
+      "evidence": [
+        "修复后 step-2 明确区分全新卷（dev 三处自足）与存量卷（以库内为准）"
+      ],
+      "reviewedDiffDigest": "sha256:4f1dfcea2ecadb7e802f71a02d51b4505534037473b572ee1069a6a1e9740ebf",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/.env.example",
+        "source": "需求「卷重置后全自动自足」",
+        "anchor": "server/.env.example#数据库凭据模板",
+        "defect": "模板仍教手工 CREATE ROLE 并用 replace-me 占位密码，与 make postgres 自动预置（dev）矛盾，新开发者照抄必撞认证失败"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "advisory；已在同任务修复批内一并修正：模板默认 dev 并注明 make postgres 自动预置、migration 采用语义与两侧同步铁律。",
+      "owner": "server/.env.example",
+      "status": "closed",
+      "evidence": [
+        "修复后模板两条 DSN 默认 dev，注释指向 make postgres 与存量卷同步规则"
+      ],
+      "reviewedDiffDigest": "sha256:4f1dfcea2ecadb7e802f71a02d51b4505534037473b572ee1069a6a1e9740ebf",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [
+    {
+      "fixFor": [
+        "CR-STANDARDS-0001"
+      ],
+      "beforeDigest": "sha256:4f1dfcea2ecadb7e802f71a02d51b4505534037473b572ee1069a6a1e9740ebf",
+      "afterDigest": "sha256:b2f8507cad18ef8fa369956dbd8d5fd2d4cb3a024237d4aaebff7c5f2d1668fc",
+      "touchedPaths": [
+        ".scratch/postgres-role-provisioning-plan.md（新增，CR-STANDARDS-0001 修复）",
+        "README.md（advisory CR-SPEC-0001 一并修正）",
+        "server/.env.example（advisory CR-SPEC-0002 一并修正）"
+      ],
+      "checks": [
+        "make harness-test 36/36 PASS",
+        "Makefile 自 6b6bac6 后未改动，三场景实测证据（fresh 卷建角色/存量 no-op/dev 凭据端到端）仍绑定当前树"
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "name": "make harness-test + make postgres 三场景实测",
+    "result": "PASS",
+    "coverage": "harness 36/36；场景① 删卷重置自动建角色（pg_roles identity_app|t）；场景② 存量 no-op；场景③ dev 凭据端到端 listening+health+四表落库（过程曾识破孤儿进程假绿并重验）",
+    "diffDigest": "sha256:b2f8507cad18ef8fa369956dbd8d5fd2d4cb3a024237d4aaebff7c5f2d1668fc"
+  },
+  "axisVerdicts": {
+    "standards": {
+      "candidates": 1,
+      "verdict": "1 blocker 经修复+定向复审 closed（round 1，无引入问题）"
+    },
+    "spec": {
+      "candidates": 2,
+      "verdict": "2 advisory 均已同批修正"
+    }
+  },
+  "outcome": "closed"
+}
