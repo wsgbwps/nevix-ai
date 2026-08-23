@@ -16,7 +16,7 @@
   ],
   "currentDiffDigest": "sha256:116516772af0a40e5bc4027d3ed62666a4db36f562ad6588d376b0cab253189b",
   "fullReviewCount": 1,
-  "targetedReviewRound": 0,
+  "targetedReviewRound": 1,
   "findings": [
     {
       "id": "CR-STANDARDS-0001",
@@ -54,7 +54,7 @@
       "disposition": "accepted",
       "dispositionReason": "Documented-ADR behavior breakage observable on the desktop surface: the wizard (the setup channel's UI) must not exist once any User exists; the success path is the one place the state is known synchronously. Repair: set instanceSetup='initialized' in the initialize success branch; pin with an E2E assertion that sign-out after initialization lands on the login boundary, not the wizard.",
       "owner": "apps/desktop/src/renderer/src/features/authentication/model",
-      "status": "fixed-pending-review",
+      "status": "closed",
       "evidence": [
         "use-authentication.ts initialize: success branch calls replacePersistedCredentials + settleSession only",
         "settleUnauthenticated fires probeSetupStatus asynchronously; a network-failed probe leaves instanceSetup at its previous value",
@@ -77,7 +77,7 @@
       "disposition": "accepted",
       "dispositionReason": "The slice's own new audit vocabulary must be carried through its Desktop display surface; every other action in the vocabulary is localized here. Repair: add setup_admin_created to AUDIT_ACTION_KEYS and both locale resources. (user_self_registered is missing from the same map since #121 — pre-existing, out of this slice's diff, reported in the PR description.)",
       "owner": "apps/desktop/src/renderer/src/features/user-management",
-      "status": "fixed-pending-review",
+      "status": "closed",
       "evidence": [
         "audit-log-settings.tsx AUDIT_ACTION_KEYS enumerates all actions except user_self_registered (pre-existing) and setup_admin_created (this slice)",
         "i18n/resources.ts audit.actions maps each key to zh/en labels",
@@ -122,7 +122,7 @@
       "disposition": "accepted",
       "dispositionReason": "Partial implementation of acceptance criterion 7: the criterion covers every device after initialization, including the initializing one. Same repair as CR-STANDARDS-0002.",
       "owner": "apps/desktop/src/renderer/src/features/authentication/model",
-      "status": "fixed-pending-review",
+      "status": "closed",
       "evidence": [
         "initialize success branch does not set instanceSetup",
         "settleUnauthenticated probes asynchronously; wizard renders while instanceSetup === 'uninitialized'"
@@ -178,7 +178,11 @@
   ],
   "repairRecords": [
     {
-      "fixFor": ["CR-STANDARDS-0002", "CR-STANDARDS-0003", "CR-SPEC-0001"],
+      "fixFor": [
+        "CR-STANDARDS-0002",
+        "CR-STANDARDS-0003",
+        "CR-SPEC-0001"
+      ],
       "beforeDiffDigest": "sha256:ea4b7dc6a395c09ae1316597ed503f57484ef58c8d4759aef3954a15951b8246",
       "afterDiffDigest": "sha256:116516772af0a40e5bc4027d3ed62666a4db36f562ad6588d376b0cab253189b",
       "commit": "0dbc448",
@@ -191,7 +195,9 @@
         },
         {
           "path": "apps/desktop/src/renderer/src/features/user-management/ui/audit-log-settings.tsx",
-          "hunks": ["AUDIT_ACTION_KEYS: add setup_admin_created"]
+          "hunks": [
+            "AUDIT_ACTION_KEYS: add setup_admin_created"
+          ]
         },
         {
           "path": "apps/desktop/src/renderer/src/features/user-management/i18n/resources.ts",
@@ -207,9 +213,18 @@
         }
       ],
       "checks": [
-        { "name": "pnpm typecheck (node+web)", "result": "PASS" },
-        { "name": "pnpm lint", "result": "PASS" },
-        { "name": "node --test tests/unit/*.mts", "result": "PASS (84 tests)" },
+        {
+          "name": "pnpm typecheck (node+web)",
+          "result": "PASS"
+        },
+        {
+          "name": "pnpm lint",
+          "result": "PASS"
+        },
+        {
+          "name": "node --test tests/unit/*.mts",
+          "result": "PASS (84 tests)"
+        },
         {
           "name": "run-e2e.sh full (Electron + identity server + empty-instance server + TLS terminator)",
           "result": "PASS (79 passed, 2 skipped, verify-auth-artifacts clean)"
@@ -223,5 +238,5 @@
     "coverage": "81 specs (79 passed, 2 pre-existing env skips) including setup-wizard E2E, i18n resource-contract, auth suite; verify-auth-artifacts clean",
     "diffDigest": "sha256:116516772af0a40e5bc4027d3ed62666a4db36f562ad6588d376b0cab253189b"
   },
-  "outcome": "needs-targeted-review"
+  "outcome": "closed"
 }
