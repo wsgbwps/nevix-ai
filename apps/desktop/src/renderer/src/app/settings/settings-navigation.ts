@@ -1,6 +1,21 @@
-export const SETTINGS_SECTIONS = ['profile', 'language', 'connection'] as const
+export const SETTINGS_SECTIONS = ['profile', 'language', 'connection', 'users', 'audit'] as const
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
+
+/** Sections the Settings Page offers only to an Admin session (ADR-0015 visibility). */
+export const ADMIN_SETTINGS_SECTIONS: readonly SettingsSection[] = ['users', 'audit']
+
+export function isAdminSettingsSection(section: SettingsSection): boolean {
+  return ADMIN_SETTINGS_SECTIONS.includes(section)
+}
+
+/** The section a session may render: Admin-only sections fall back to Profile for everyone else. */
+export function resolveSettingsSection(
+  entry: SettingsEntry,
+  canSeeAdminSections: boolean
+): SettingsSection {
+  return !canSeeAdminSections && isAdminSettingsSection(entry.section) ? 'profile' : entry.section
+}
 
 export interface SettingsSourceDescriptor {
   readonly entryKey: string

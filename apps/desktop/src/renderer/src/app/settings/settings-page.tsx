@@ -1,6 +1,13 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useLocation } from '@tanstack/react-router'
-import { ArrowLeftIcon, LanguagesIcon, ServerIcon, UserRoundIcon } from 'lucide-react'
+import {
+  ArrowLeftIcon,
+  LanguagesIcon,
+  ScrollTextIcon,
+  ServerIcon,
+  UserRoundIcon,
+  UsersIcon
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/ui/button'
 import {
@@ -14,10 +21,15 @@ import {
 import { LanguageModeSettings } from '../../features/language'
 import { ProfileSettings } from '../../features/profile'
 import { ServerConnectionSettings } from '../../features/connection'
+import { AuditLogSettings, UserManagementSettings } from '../../features/user-management'
 import { useAuthenticationState } from '../authentication-state'
 import { useServerConnectionState } from '../connection-state'
 import { useSettingsCoordinator, type SettingsContribution } from './settings-coordinator'
-import { readSettingsEntry, type SettingsSection } from './settings-navigation'
+import {
+  readSettingsEntry,
+  resolveSettingsSection,
+  type SettingsSection
+} from './settings-navigation'
 import { CLEAN_LEAVE_SEMANTICS } from './settings-leave-semantics'
 
 /**
@@ -29,7 +41,9 @@ import { CLEAN_LEAVE_SEMANTICS } from './settings-leave-semantics'
 const SETTINGS_SECTION_REGISTRY: Record<SettingsSection, SettingsContribution> = {
   profile: CLEAN_LEAVE_SEMANTICS,
   language: CLEAN_LEAVE_SEMANTICS,
-  connection: CLEAN_LEAVE_SEMANTICS
+  connection: CLEAN_LEAVE_SEMANTICS,
+  users: CLEAN_LEAVE_SEMANTICS,
+  audit: CLEAN_LEAVE_SEMANTICS
 }
 
 export function SettingsPage(): React.JSX.Element | null {
@@ -38,6 +52,10 @@ export function SettingsPage(): React.JSX.Element | null {
   const connection = useServerConnectionState()
   const location = useLocation()
   const entry = readSettingsEntry(location.state)
+  // The governance sections exist only for an Admin session; a stale history entry
+  // for them falls back to Profile instead of mounting an admin surface.
+  const isAdmin = authentication.userRole === 'admin'
+  const section = resolveSettingsSection(entry, isAdmin)
   const [contributions, setContributions] = useState<
     Partial<Record<SettingsSection, SettingsContribution>>
   >({})
@@ -52,8 +70,8 @@ export function SettingsPage(): React.JSX.Element | null {
     }
     return reporters
   }, [])
-  const contribution = contributions[entry.section] ?? SETTINGS_SECTION_REGISTRY[entry.section]
-  const coordinator = useSettingsCoordinator({ entry, contribution })
+  const contribution = contributions[section] ?? SETTINGS_SECTION_REGISTRY[section]
+  const coordinator = useSettingsCoordinator({ entry: { ...entry, section }, contribution })
   const handleServerConnectionSaved = useCallback(async (): Promise<void> => {
     // A new URL becomes the renderer's runtime connect-src only after a
     // document reload; the previous server's session cannot carry over, so it
@@ -94,6 +112,25 @@ export function SettingsPage(): React.JSX.Element | null {
           />
         </div>
       </section>
+    ),
+    users: () => (
+      <div className="bg-card rounded-lg border">
+        <UserManagementSettings
+          getSession={authentication.getSession}
+          serverUrl={connection.url ?? ''}
+          currentUserId={authentication.userId}
+          onContributionChange={contributionReporters.users}
+        />
+      </div>
+    ),
+    audit: () => (
+      <div className="bg-card rounded-lg border">
+        <AuditLogSettings
+          getSession={authentication.getSession}
+          serverUrl={connection.url ?? ''}
+          onContributionChange={contributionReporters.audit}
+        />
+      </div>
     )
   }
   if (authentication.status !== 'authenticated') {
@@ -157,11 +194,38 @@ export function SettingsPage(): React.JSX.Element | null {
                 {t('settings.connection')}
               </button>
             </div>
+            {isAdmin ? (
+              <div className="grid gap-1">
+                <p className="text-muted-foreground px-2.5 text-xs font-medium tracking-wide uppercase">
+                  {t('settings.administration')}
+                </p>
+                <button
+                  type="button"
+                  aria-pressed={coordinator.section === 'users'}
+                  disabled={coordinator.navigationDisabled}
+                  onClick={() => coordinator.switchSection('users')}
+                  className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium"
+                >
+                  <UsersIcon className="size-4" />
+                  {t('settings.users')}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={coordinator.section === 'audit'}
+                  disabled={coordinator.navigationDisabled}
+                  onClick={() => coordinator.switchSection('audit')}
+                  className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium"
+                >
+                  <ScrollTextIcon className="size-4" />
+                  {t('settings.audit')}
+                </button>
+              </div>
+            ) : null}
           </nav>
         </aside>
         <main className="max-h-svh flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-8 py-10">
-            {sectionRenderers[entry.section]()}
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-8 py-10">
+            {sectionRenderers[section]()}
           </div>
         </main>
       </div>

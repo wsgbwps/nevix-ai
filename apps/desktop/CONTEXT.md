@@ -4,7 +4,7 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 
 ## Language
 
-> 2026-08-22：用户系统迁移（#99）已落地到桌面端：组织时代词群随 Organization Feature 一并移除，本词典只剩单租户词汇；账号治理词汇（Admin/Member 等）见 [Server 词典](../../server/CONTEXT.md)，待桌面端 Admin 界面（#105）落地时按需入册。
+> 2026-08-22：用户系统迁移（#99）已落地到桌面端：组织时代词群随 Organization Feature 一并移除，本词典只剩单租户词汇；账号治理词汇（User Management Domain / Audit Log）已随桌面端 Admin 界面（#105）入册，其余账号治理词群（Admin/Member 等）见 [Server 词典](../../server/CONTEXT.md)。
 > 2026-08-23：连接基座（#104）落地，新增 Server URL / Connection Screen / Connection Probe / Certificate Fingerprint Pin 词群，取代已消亡的「构建期服务器配置」概念。
 
 **User**:
@@ -79,6 +79,14 @@ _Avoid_: Media Asset Domain, Asset Workspace
 以凭据验证和当前设备 Session 生命周期为范围的 Desktop Domain，不包含 User 或账号管理。
 _Avoid_: Identity Domain, Account Domain
 
+**User Management Domain**:
+以 Admin 治理面为范围的 Desktop Domain：全员账号目录（含已停用账号）、六个治理命令（建号/停用/重置密码/改登录 email/调角色/删号）与 Audit Log 的分页查看与导出；仅 Admin 会话可见，授权真相在 server（guard 拒 403），桌面端门控只是可见性。
+_Avoid_: Account Domain, Identity Domain, Admin Domain, Governance Domain
+
+**Audit Log**:
+服务端不可变审计记录（ADR-0009）在桌面端的 Admin-only 分页视图；导出把查询结果序列化为 CSV 并经 `user-management:export-audit-log` IPC 的原生保存对话框写入本地文件，动作词表随服务端单一写入方演进。
+_Avoid_: Activity Log, Event Log（与 push event 混淆）
+
 **Profile Domain**:
 仅拥有全局 Profile 读写与显示名称编辑的窄 Desktop Domain；不承担凭据、Session 或账号安全职责。
 _Avoid_: Account Domain, Identity Domain, User Domain
@@ -113,7 +121,7 @@ _Avoid_: Dashboard, Home Screen, Main Window
 _Avoid_: Settings Domain, Preferences Center, Settings Dialog
 
 **Settings Section**:
-Settings Page 中可独立选择并单独呈现的一级设置范围；一个 Settings Section 可以包含多个下属设置块或内部 Tab，但这些内容不成为同级导航入口。
+Settings Page 中可独立选择并单独呈现的一级设置范围；一个 Settings Section 可以包含多个下属设置块或内部 Tab，但这些内容不成为同级导航入口。Admin-only Section（用户管理 / 审计日志）仅在 Admin 会话的导航中呈现，非 Admin 的陈旧导航状态回退到 Profile。
 _Avoid_: Settings Route, Settings Domain, Anchor Section
 
 **Settings Flow**:

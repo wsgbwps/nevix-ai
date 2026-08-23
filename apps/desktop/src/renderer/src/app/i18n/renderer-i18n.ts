@@ -6,6 +6,7 @@ import { authenticationResources } from '../../features/authentication'
 import { connectionResources } from '../../features/connection'
 import { languageResources } from '../../features/language'
 import { profileResources } from '../../features/profile'
+import { userManagementResources } from '../../features/user-management'
 import { appResources } from '.'
 
 export const rendererI18n = i18next.createInstance()
@@ -16,14 +17,16 @@ export const rendererResources = {
     ...authenticationResources['zh-CN'],
     ...connectionResources['zh-CN'],
     ...languageResources['zh-CN'],
-    ...profileResources['zh-CN']
+    ...profileResources['zh-CN'],
+    ...userManagementResources['zh-CN']
   },
   en: {
     ...appResources.en,
     ...authenticationResources.en,
     ...connectionResources.en,
     ...languageResources.en,
-    ...profileResources.en
+    ...profileResources.en,
+    ...userManagementResources.en
   }
 } as const
 

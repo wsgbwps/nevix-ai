@@ -54,6 +54,10 @@ interface Authentication {
   readonly isRememberedEmailPersistenceUnavailable: boolean
   readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   readonly userEmail: string | undefined
+  /** The session user's stable id; governance surfaces mark the current account with it. */
+  readonly userId: string | undefined
+  /** The session user's role; Admin-only surfaces key on it while the session stays authoritative. */
+  readonly userRole: UserAccount['role'] | undefined
   readonly getSession: () => Promise<AuthenticatedSession | undefined>
   readonly setRememberEmailSelected: (selected: boolean) => void
   readonly consumeRememberedEmailPersistenceNotice: () => void
@@ -78,6 +82,8 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const [rememberedEmailPersistenceNoticeSurface, setRememberedEmailPersistenceNoticeSurface] =
     useState<'login' | 'authenticated'>()
   const [userEmail, setUserEmail] = useState<string | undefined>()
+  const [userId, setUserId] = useState<string | undefined>()
+  const [userRole, setUserRole] = useState<UserAccount['role'] | undefined>()
   const clientRef = useRef<IdentityClient | null>(null)
   const credentialsRef = useRef<SessionCredentials | undefined>(undefined)
   const submissionRef = useRef(false)
@@ -133,6 +139,8 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       setNotice(nextNotice)
       setPersistenceUnavailable(false)
       setUserEmail(undefined)
+      setUserId(undefined)
+      setUserRole(undefined)
       rememberEmailSelectedRef.current = true
       rememberEmailSelectionGenerationRef.current += 1
       setRememberEmailSelectedState(true)
@@ -159,6 +167,8 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       setPersistenceUnavailable(isSessionPersistenceUnavailable())
       setNotice(undefined)
       setUserEmail(credentials.user.email)
+      setUserId(credentials.user.id)
+      setUserRole(credentials.user.role)
       const nextStatus: AuthenticationStatus = credentials.user.mustChangePassword
         ? 'password-change-required'
         : 'authenticated'
@@ -462,6 +472,8 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     isRememberedEmailPersistenceUnavailable: rememberedEmailPersistenceUnavailable,
     rememberedEmailPersistenceNoticeSurface,
     userEmail,
+    userId,
+    userRole,
     getSession,
     setRememberEmailSelected,
     consumeRememberedEmailPersistenceNotice,
