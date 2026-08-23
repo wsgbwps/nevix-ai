@@ -509,7 +509,10 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
         // The first administrator owns the chosen password from the first
         // moment, so the new session settles straight into the shell; the
-        // encrypted slot is written before it opens.
+        // encrypted slot is written before it opens. The instance is now
+        // initialized for every later boundary on this device too — the
+        // wizard never renders again, whatever a later status probe answers.
+        setInstanceSetup('initialized')
         await replacePersistedCredentials(initialization.value)
         settleSession(initialization.value)
       } catch {

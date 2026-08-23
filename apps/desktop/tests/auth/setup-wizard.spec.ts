@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchTestApp } from '../helpers/electron-app'
+import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
 import { readSetupServerConfig } from './helpers/identity-server'
 
 const setupServer = readSetupServerConfig()
@@ -47,6 +47,17 @@ test('the first-run wizard initializes an empty server; later devices see only s
       ).toBeVisible()
       await expect(
         firstDevice.page.getByRole('heading', { name: 'Set a new password' })
+      ).toHaveCount(0)
+
+      // Ending the session on the initializing device lands on the ordinary
+      // sign-in boundary, never back on the wizard: the instance has its
+      // administrator now.
+      await signOutFromUserMenu(firstDevice.page)
+      await expect(
+        firstDevice.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
+      ).toBeVisible()
+      await expect(
+        firstDevice.page.getByRole('heading', { name: 'Initialize Nevix AI' })
       ).toHaveCount(0)
     } finally {
       await firstDevice.electronApp.close()

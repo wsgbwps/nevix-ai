@@ -91,6 +91,7 @@ export const userManagementTranslations = defineResourceTranslations({
       colMetadata: '详情',
       actions: {
         bootstrap_admin_created: '引导创建首个管理员',
+        setup_admin_created: '首启向导创建首个管理员',
         session_created: '登录',
         session_revoked: '退出登录',
         password_changed: '修改密码',
@@ -253,6 +254,7 @@ export const userManagementTranslations = defineResourceTranslations({
       colMetadata: 'Detail',
       actions: {
         bootstrap_admin_created: 'Bootstrap admin created',
+        setup_admin_created: 'Setup wizard admin created',
         session_created: 'Sign-in',
         session_revoked: 'Sign-out',
         password_changed: 'Password changed',
