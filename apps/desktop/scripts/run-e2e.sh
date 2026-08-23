@@ -266,7 +266,7 @@ SQL
   # The setup-wizard spec needs an instance that has never had a first admin:
   # a second database on the same PostgreSQL, migrated and bootstrapped (or
   # not) by its own server process.
-  docker exec "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
+  docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
 SELECT 'CREATE DATABASE $setup_wizard_database'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$setup_wizard_database')\gexec
 SQL
@@ -301,7 +301,9 @@ start_setup_server() {
       -o "$identity_server_binary_dir/server-linux" ./cmd/server)
 
   setup_server_container="nevix-desktop-e2e-setup-$$"
-  docker run --rm -d \
+  # No --rm: an early exit keeps its logs for the failure report; cleanup
+  # removes the container either way.
+  docker run -d \
     --name "$setup_server_container" \
     --network "$e2e_network" \
     -p "127.0.0.1:$setup_server_port:8080" \

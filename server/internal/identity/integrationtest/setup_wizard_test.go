@@ -260,16 +260,17 @@ func TestInitializeCreatesFirstAdminAndSession(t *testing.T) {
 		t.Fatalf("setup_admin_created metadata email = %q, want the chosen email", metadata["email"])
 	}
 
-	// A lowercase typing of a rotated code still initializes (Crockford
-	// base32 is case-insensitive; the server canonicalizes before
-	// comparing), and an omitted display name derives from the local part.
+	// A lowercase, grouped typing of a rotated code still initializes (the
+	// server canonicalizes exactly what its log disclosed: case-insensitive,
+	// hyphen-stripped), and an omitted display name derives from the local part.
 	h.resetUserState(t)
 	handler, codes = constructSetupInstance(t, h, emptyInstanceConfig(h))
 	lower := strings.ToLower(codes[len(codes)-1])
 	if lower == codes[len(codes)-1] {
 		t.Fatalf("test setup: generated code %q has no lowercase form", codes[len(codes)-1])
 	}
-	status, raw = doSetupInitialize(t, handler, setupInitializeBody("second.boot@nevix.test", "another-self-pass-1", lower, ""))
+	grouped := lower[:4] + "-" + lower[4:]
+	status, raw = doSetupInitialize(t, handler, setupInitializeBody("second.boot@nevix.test", "another-self-pass-1", grouped, ""))
 	assertContractResponse(t, http.MethodPost, "/identity/setup/initialize", status, raw)
 	if status != http.StatusCreated {
 		t.Fatalf("lowercase code initialize: status %d body %s, want 201", status, raw)

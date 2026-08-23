@@ -176,8 +176,11 @@ func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginR
 		return LoginResponse{}, errPasswordTooShort
 	}
 	// Crockford base32 is case-insensitive and codes are generated uppercase;
-	// a code read aloud and typed lowercase still initializes.
+	// a code read aloud and typed lowercase still initializes. The operations
+	// log discloses the code grouped (XXXX-XXXX), so the comparison runs on the
+	// bare form: hyphens and spaces are stripped before the uppercase fold.
 	setupCode := strings.ToUpper(strings.TrimSpace(*req.SetupCode))
+	setupCode = strings.NewReplacer("-", "", " ", "").Replace(setupCode)
 	displayName := strings.TrimSpace(req.DisplayName)
 	if displayName == "" {
 		displayName = bootstrapDisplayName(email)

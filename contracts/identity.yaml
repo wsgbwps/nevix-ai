@@ -468,7 +468,7 @@ paths:
       operationId: initializeInstance
       summary: 凭设置码创建首个 Admin 并直接进入应用
       description: |-
-        首启设置码通道（issue #122，ADR-0015 2026-08-23 修订）：空库上持有设置码者自选 email、密码、显示名（可选）成为首个 Admin，`must_change_password=false`（密码自设），响应携带 session token，形态与登录相同，直接进入应用。设置码为 8 位 Crockford base32，由服务进程在空库启动时生成并以 `XXXX-XXXX` 分组打入运维日志一次，仅存进程内存；进程重启且仍空库则换新码、旧码作废；实例存在任何 User 后该码不复存在。服务端比对前统一 trim 与大写化（大小写不敏感）。
+        首启设置码通道（issue #122，ADR-0015 2026-08-23 修订）：空库上持有设置码者自选 email、密码、显示名（可选）成为首个 Admin，`must_change_password=false`（密码自设），响应携带 session token，形态与登录相同，直接进入应用。设置码为 8 位 Crockford base32，由服务进程在空库启动时生成并以 `XXXX-XXXX` 分组打入运维日志一次，仅存进程内存；进程重启且仍空库则换新码、旧码作废；实例存在任何 User 后该码不复存在。服务端比对前统一 trim、去连字符与空格、大写化（大小写不敏感，分组形态可直接粘贴）。
 
         单一写事务：首启 advisory lock → 复检空库（与 ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD 环境变量通道先到先得，输家 409）→ 常量时间比对设置码 → INSERT 首个 admin → 写 setup_admin_created 审计行 → 发 session。码错计入与登录共享的 per-email 进程内限速，达到上限回答 429（数值为信息性，客户端依赖 Retry-After）。
       security: []
@@ -492,7 +492,7 @@ paths:
                   description: 本人自选的明文密码，经 TLS（或内网 http）传输，服务端只存哈希；最小长度 8。
                 setup_code:
                   type: string
-                  description: 运维日志披露的一次性 8 位 Crockford base32 设置码；服务端比对前统一大写化。任意不匹配的字符串（含超长值）统一按 403 invalid_setup_code 回答。
+                  description: 运维日志披露的一次性 8 位 Crockford base32 设置码（分组形态 XXXX-XXXX 可直接粘贴）；服务端比对前统一 trim、去连字符与空格、大写化。任意不匹配的字符串（含超长值）统一按 403 invalid_setup_code 回答。
                 display_name:
                   type: string
                   maxLength: 128
