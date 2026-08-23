@@ -24,6 +24,7 @@ import (
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/joincodes"
 	"github.com/nevix-ai/server/internal/identity/users"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
@@ -78,11 +79,13 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 }
 
 // Module is the identity Module's composition surface: it owns the auth
-// service, the user-account governance service, the audit read service, the
-// guard vocabulary, and registers the Module's HTTP routes.
+// service, the user-account governance service, the join-code governance
+// service, the audit read service, the guard vocabulary, and registers the
+// Module's HTTP routes.
 type Module struct {
 	auth        *auth.Service
 	users       *users.Service
+	joinCodes   *joincodes.Service
 	auditRead   *audit.ReadService
 	guard       *authz.Guard
 	corsOrigins []string
@@ -121,6 +124,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 	return &Module{
 		auth:        service,
 		users:       users.NewService(pool, tx),
+		joinCodes:   joincodes.NewService(pool, tx),
 		auditRead:   audit.NewReadService(pool),
 		guard:       authz.NewGuard(service),
 		corsOrigins: cfg.CORSAllowedOrigins,

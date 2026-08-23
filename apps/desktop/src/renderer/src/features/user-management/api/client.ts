@@ -259,6 +259,70 @@ export async function deleteUser(
   return { outcome: 'succeeded', value: undefined }
 }
 
+/** One active join code the Admin card shows: the plaintext credential with its note. */
+export interface JoinCode {
+  readonly id: string
+  readonly code: string
+  readonly label: string
+  readonly createdBy: string
+  readonly createdAt: string
+}
+
+export interface CreateJoinCodeInput {
+  /** Omitted when blank; the server then stores the empty string. */
+  readonly label?: string
+}
+
+export async function listJoinCodes(
+  session: AuthenticatedManagementSession,
+  serverUrl: string
+): Promise<ManagementApiResult<readonly JoinCode[]>> {
+  const result = await commandRequest(session, serverUrl, {
+    method: 'GET',
+    path: '/identity/admin/join-codes'
+  })
+  if (result.outcome !== 'succeeded') return result
+
+  const rawList = readField(result.payload, 'join_codes')
+  if (!Array.isArray(rawList)) return { outcome: 'network-failure' }
+  const joinCodes = rawList.map(parseJoinCode)
+  return joinCodes.some((code) => code === undefined)
+    ? { outcome: 'network-failure' }
+    : { outcome: 'succeeded', value: joinCodes as readonly JoinCode[] }
+}
+
+export async function createJoinCode(
+  session: AuthenticatedManagementSession,
+  serverUrl: string,
+  input: CreateJoinCodeInput
+): Promise<ManagementApiResult<JoinCode>> {
+  const label = input.label?.trim()
+  const result = await commandRequest(session, serverUrl, {
+    method: 'POST',
+    path: '/identity/admin/join-codes',
+    body: { ...(label ? { label } : {}) }
+  })
+  if (result.outcome !== 'succeeded') return result
+
+  const joinCode = parseJoinCode(readField(result.payload, 'join_code'))
+  return joinCode ? { outcome: 'succeeded', value: joinCode } : { outcome: 'network-failure' }
+}
+
+export async function revokeJoinCode(
+  session: AuthenticatedManagementSession,
+  serverUrl: string,
+  joinCodeId: string
+): Promise<ManagementApiResult<void>> {
+  const result = await commandRequest(session, serverUrl, {
+    method: 'DELETE',
+    path: `/identity/admin/join-codes/${encodeURIComponent(joinCodeId)}`
+  })
+  if (result.outcome !== 'succeeded') return result
+  if (readField(result.payload, 'status') !== 'revoked') return { outcome: 'network-failure' }
+
+  return { outcome: 'succeeded', value: undefined }
+}
+
 export async function listAuditLogs(
   session: AuthenticatedManagementSession,
   serverUrl: string,
@@ -342,6 +406,29 @@ interface PageFields {
   readonly page: number
   readonly perPage: number
   readonly total: number
+}
+
+function parseJoinCode(payload: unknown): JoinCode | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined
+
+  const id = readId(payload)
+  const code = readRequiredString(payload, 'code')
+  const label = readRequiredString(payload, 'label')
+  const createdBy = readRequiredString(payload, 'created_by')
+  const createdAt = readTimestamp(payload, 'created_at')
+  if (
+    id === undefined ||
+    code === undefined ||
+    code.length === 0 ||
+    label === undefined ||
+    createdBy === undefined ||
+    createdBy.length === 0 ||
+    createdAt === undefined
+  ) {
+    return undefined
+  }
+
+  return { id, code, label, createdBy, createdAt }
 }
 
 function parsePageFields(payload: unknown): PageFields | undefined {

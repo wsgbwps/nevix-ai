@@ -21,7 +21,11 @@ import {
 import { LanguageModeSettings } from '../../features/language'
 import { ProfileSettings } from '../../features/profile'
 import { ServerConnectionSettings } from '../../features/connection'
-import { AuditLogSettings, UserManagementSettings } from '../../features/user-management'
+import {
+  AuditLogSettings,
+  JoinCodesSettings,
+  UserManagementSettings
+} from '../../features/user-management'
 import { useAuthenticationState } from '../authentication-state'
 import { useServerConnectionState } from '../connection-state'
 import { useSettingsCoordinator, type SettingsContribution } from './settings-coordinator'
@@ -114,14 +118,23 @@ export function SettingsPage(): React.JSX.Element | null {
       </section>
     ),
     users: () => (
-      <div className="bg-card rounded-lg border">
-        <UserManagementSettings
-          getSession={authentication.getSession}
-          serverUrl={connection.url ?? ''}
-          currentUserId={authentication.userId}
-          onContributionChange={contributionReporters.users}
-        />
-      </div>
+      <>
+        <div className="bg-card rounded-lg border">
+          <UserManagementSettings
+            getSession={authentication.getSession}
+            serverUrl={connection.url ?? ''}
+            currentUserId={authentication.userId}
+            onContributionChange={contributionReporters.users}
+          />
+        </div>
+        <div className="bg-card rounded-lg border">
+          <JoinCodesSettings
+            getSession={authentication.getSession}
+            serverUrl={connection.url ?? ''}
+            onContributionChange={contributionReporters.users}
+          />
+        </div>
+      </>
     ),
     audit: () => (
       <div className="bg-card rounded-lg border">

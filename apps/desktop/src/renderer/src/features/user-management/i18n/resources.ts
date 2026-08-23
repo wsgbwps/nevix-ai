@@ -100,7 +100,38 @@ export const userManagementTranslations = defineResourceTranslations({
         user_password_reset: '重置密码',
         user_email_changed: '修改登录邮箱',
         user_role_changed: '调整角色',
-        user_deleted: '删除账号'
+        user_deleted: '删除账号',
+        join_code_created: '签发加入码',
+        join_code_revoked: '吊销加入码'
+      }
+    },
+    joinCodes: {
+      title: '加入码',
+      description:
+        '签发可复用的注册凭据，新成员凭它在登录屏自注册；码不随注册消耗，吊销即失效，全部活跃码被吊销则自注册关闭。',
+      activeCount: '当前 {{count}} 枚活跃加入码（上限 3）',
+      listLabel: '活跃加入码列表',
+      empty: '暂无活跃加入码，自注册已关闭。',
+      loading: '正在读取加入码…',
+      loadFailed: '无法读取加入码。',
+      retry: '重试',
+      unlabeled: '无备注',
+      createdAt: '签发于 {{time}}',
+      issue: {
+        title: '签发加入码',
+        description: '生成一枚 8 位加入码，签发后立即可见明文，可直接分发给新成员。',
+        labelLabel: '备注（可选，如码贴到哪个群）',
+        submit: '签发加入码'
+      },
+      revoke: {
+        title: '吊销加入码 {{code}}',
+        description: '吊销后该码立即失效且不可恢复；列表不再显示，审计记录保留。',
+        submit: '吊销',
+        actionLabel: '吊销 {{code}}'
+      },
+      notice: {
+        created: '已签发加入码 {{code}}，明文见下方列表。',
+        revoked: '已吊销该加入码，其注册通道立即关闭。'
       }
     },
     common: { cancel: '取消' },
@@ -121,6 +152,9 @@ export const userManagementTranslations = defineResourceTranslations({
         user_not_found: '目标账号不存在，请刷新列表。',
         last_admin_protected: '不能停用或降级最后一个活跃管理员。',
         user_has_logged_in: '该账号登录过，不能删除；请改用停用。',
+        too_many_active_join_codes: '活跃加入码已达上限（3），请先吊销一枚再签发。',
+        join_code_not_found: '目标加入码不存在或已吊销，请刷新列表。',
+        invalid_label: '备注过长（最多 128 个字符）。',
         internal_error: '服务器内部错误，请重试。'
       }
     }
@@ -228,7 +262,40 @@ export const userManagementTranslations = defineResourceTranslations({
         user_password_reset: 'Password reset',
         user_email_changed: 'Sign-in email changed',
         user_role_changed: 'Role changed',
-        user_deleted: 'Account deleted'
+        user_deleted: 'Account deleted',
+        join_code_created: 'Join code issued',
+        join_code_revoked: 'Join code revoked'
+      }
+    },
+    joinCodes: {
+      title: 'Join codes',
+      description:
+        'Issue reusable registration credentials new members redeem at the sign-in screen; codes are not consumed by registration, only revocation ends one, and with no active code self-registration is closed.',
+      activeCount: '{{count}} active join codes (limit 3)',
+      listLabel: 'Active join codes',
+      empty: 'No active join codes; self-registration is closed.',
+      loading: 'Loading join codes…',
+      loadFailed: 'The join codes could not be loaded.',
+      retry: 'Try again',
+      unlabeled: 'No note',
+      createdAt: 'Issued {{time}}',
+      issue: {
+        title: 'Issue join code',
+        description:
+          'Generates an 8-character code; the plaintext is visible immediately and can be shared with new members.',
+        labelLabel: 'Note (optional, e.g. which group the code was posted to)',
+        submit: 'Issue join code'
+      },
+      revoke: {
+        title: 'Revoke join code {{code}}',
+        description:
+          'Revocation takes effect immediately and cannot be undone; the code leaves the list while audit history stays.',
+        submit: 'Revoke',
+        actionLabel: 'Revoke {{code}}'
+      },
+      notice: {
+        created: 'Issued join code {{code}}; the plaintext is in the list below.',
+        revoked: 'The join code was revoked; its registration path is closed.'
       }
     },
     common: { cancel: 'Cancel' },
@@ -249,6 +316,10 @@ export const userManagementTranslations = defineResourceTranslations({
         user_not_found: 'The target account no longer exists. Refresh the list.',
         last_admin_protected: 'The last active administrator cannot be disabled or demoted.',
         user_has_logged_in: 'This account has signed in and cannot be deleted; disable it instead.',
+        too_many_active_join_codes:
+          'The active join codes are at their limit (3); revoke one before issuing another.',
+        join_code_not_found: 'The join code no longer exists or is already revoked. Refresh.',
+        invalid_label: 'The note is too long (128 characters at most).',
         internal_error: 'Internal server error. Try again.'
       }
     }

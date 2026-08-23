@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Nevix AI API
-  version: 0.5.0
+  version: 0.6.0
   description: |-
     API contract between desktop client and backend server.
 
@@ -34,6 +34,10 @@ paths:
     $ref: "./identity.yaml#/paths/~1identity~1users~1{userID}~1role"
   /identity/users/{userID}:
     $ref: "./identity.yaml#/paths/~1identity~1users~1{userID}"
+  /identity/admin/join-codes:
+    $ref: "./identity.yaml#/paths/~1identity~1admin~1join-codes"
+  /identity/admin/join-codes/{joinCodeID}:
+    $ref: "./identity.yaml#/paths/~1identity~1admin~1join-codes~1{joinCodeID}"
   /identity/audit-logs:
     $ref: "./identity.yaml#/paths/~1identity~1audit-logs"
 components:

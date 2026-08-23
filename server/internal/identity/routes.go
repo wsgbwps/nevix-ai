@@ -18,6 +18,7 @@ import (
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/joincodes"
 	"github.com/nevix-ai/server/internal/identity/users"
 )
 
@@ -161,6 +162,41 @@ func (m *Module) routes() []command.Route {
 				}
 				return m.users.Delete(ctx, principal, chi.URLParam(r, "userID"))
 			}, users.MapError, http.StatusOK),
+		},
+		{
+			// Join-code governance (issue #120): issue, list, and revoke the
+			// registration credentials; all three stay behind GuardAdmin and
+			// the default password gate.
+			Method: http.MethodPost,
+			Path:   "/identity/admin/join-codes",
+			Guard:  command.GuardAdmin,
+			Handler: command.HandleWithRequest(func(ctx context.Context, r *http.Request, req joincodes.CreateRequest) (joincodes.CreateResponse, error) {
+				principal, err := auth.PrincipalFrom(r)
+				if err != nil {
+					return joincodes.CreateResponse{}, err
+				}
+				return m.joinCodes.Create(ctx, principal, req)
+			}, joincodes.MapError, http.StatusCreated),
+		},
+		{
+			Method: http.MethodGet,
+			Path:   "/identity/admin/join-codes",
+			Guard:  command.GuardAdmin,
+			Handler: command.HandleNoBody(func(ctx context.Context, _ *http.Request) (joincodes.ListResponse, error) {
+				return m.joinCodes.List(ctx)
+			}, joincodes.MapError, http.StatusOK),
+		},
+		{
+			Method: http.MethodDelete,
+			Path:   "/identity/admin/join-codes/{joinCodeID}",
+			Guard:  command.GuardAdmin,
+			Handler: command.HandleNoBody(func(ctx context.Context, r *http.Request) (joincodes.RevokeResponse, error) {
+				principal, err := auth.PrincipalFrom(r)
+				if err != nil {
+					return joincodes.RevokeResponse{}, err
+				}
+				return m.joinCodes.Revoke(ctx, principal, chi.URLParam(r, "joinCodeID"))
+			}, joincodes.MapError, http.StatusOK),
 		},
 		{
 			Method:  http.MethodGet,
