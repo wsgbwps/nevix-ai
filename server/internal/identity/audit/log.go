@@ -22,6 +22,10 @@ const (
 	// BootstrapAdminCreated records the environment-driven creation of the
 	// first admin on an empty deployment (ADR-0015 bootstrap).
 	BootstrapAdminCreated Action = "bootstrap_admin_created"
+	// SetupAdminCreated records the setup-wizard creation of the first
+	// admin (issue #122): the holder of the one-time setup code chose the
+	// credentials themselves, distinct from the environment-driven channel.
+	SetupAdminCreated Action = "setup_admin_created"
 	// SessionCreated records a successful login issuing an opaque session.
 	SessionCreated Action = "session_created"
 	// SessionRevoked records a logout ending exactly one session.
@@ -63,6 +67,7 @@ const (
 
 var validActions = map[Action]struct{}{
 	BootstrapAdminCreated: {},
+	SetupAdminCreated:     {},
 	SessionCreated:        {},
 	SessionRevoked:        {},
 	PasswordChanged:       {},

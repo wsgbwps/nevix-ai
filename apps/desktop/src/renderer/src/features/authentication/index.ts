@@ -6,5 +6,6 @@ export {
   type AuthenticatedSession,
   type AuthenticationError,
   type AuthenticationNotice,
-  type AuthenticationStatus
+  type AuthenticationStatus,
+  type InstanceSetupState
 } from './model/use-authentication'

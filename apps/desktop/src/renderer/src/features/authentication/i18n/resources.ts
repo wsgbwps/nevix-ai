@@ -62,6 +62,22 @@ export const authenticationTranslations = defineResourceTranslations({
       rateLimited: '尝试过于频繁，请稍后重试。',
       serviceError: '无法连接服务器，请检查网络后重试。'
     },
+    setupWizard: {
+      heading: '初始化 Nevix AI',
+      description: '该部署还没有管理员。输入服务端运维日志中的一次性设置码，创建你的管理员账号。',
+      email: '邮箱',
+      password: '密码',
+      confirmPassword: '确认密码',
+      setupCode: '设置码',
+      displayName: '显示名（可选）',
+      submit: '创建管理员并进入',
+      submitting: '正在初始化…',
+      confirmPasswordMismatch: '两次输入的密码不一致',
+      invalidSetupCode: '设置码无效。请对照服务端运维日志中最新的设置码。',
+      instanceAlreadyInitialized: '该实例已初始化，请直接登录。',
+      rateLimited: '尝试过于频繁，请稍后重试。',
+      serviceError: '无法连接服务器，请检查网络后重试。'
+    },
     passwordChange: {
       heading: '设置新密码',
       description: '管理员为你设置了初始密码。首次登录需要设置自己的新密码后继续使用。',
@@ -144,6 +160,24 @@ export const authenticationTranslations = defineResourceTranslations({
       switchToRegister: 'Register with a join code',
       invalidJoinCode: 'The join code is not valid. Contact your administrator.',
       emailTaken: 'This email is already registered.',
+      rateLimited: 'Too many attempts. Try again later.',
+      serviceError: 'The server cannot be reached. Check your network and try again.'
+    },
+    setupWizard: {
+      heading: 'Initialize Nevix AI',
+      description:
+        'This deployment has no administrator yet. Enter the one-time setup code from the server operations log to create yours.',
+      email: 'Email',
+      password: 'Password',
+      confirmPassword: 'Confirm password',
+      setupCode: 'Setup code',
+      displayName: 'Display name (optional)',
+      submit: 'Create administrator and continue',
+      submitting: 'Initializing…',
+      confirmPasswordMismatch: 'Passwords do not match',
+      invalidSetupCode:
+        'The setup code is not valid. Check the latest code in the server operations log.',
+      instanceAlreadyInitialized: 'This instance was already initialized. Sign in below.',
       rateLimited: 'Too many attempts. Try again later.',
       serviceError: 'The server cannot be reached. Check your network and try again.'
     },

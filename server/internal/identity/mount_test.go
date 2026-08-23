@@ -57,6 +57,8 @@ func TestRegisterDerivesPreflightSurfaceFromRouteTable(t *testing.T) {
 	for path, wantMethods := range map[string]string{
 		"/identity/auth/login":                    "POST, OPTIONS",
 		"/identity/register":                      "POST, OPTIONS",
+		"/identity/setup/status":                  "GET, OPTIONS",
+		"/identity/setup/initialize":              "POST, OPTIONS",
 		"/identity/auth/logout":                   "POST, OPTIONS",
 		"/identity/auth/change-password":          "POST, OPTIONS",
 		"/identity/users/me":                      "GET, PATCH, OPTIONS",
@@ -153,10 +155,16 @@ func TestRegisterGuardsEveryRouteExceptThePublicEntries(t *testing.T) {
 		}
 	}
 
-	// The two public entry commands — login and join-code self-registration —
-	// reach their handlers without a session, which reject the empty body
-	// with the request-shape 400 envelope.
-	for _, path := range []string{"/identity/auth/login", "/identity/register"} {
+	// The public entry commands — login, join-code self-registration, and
+	// setup initialize — reach their handlers without a session, which reject
+	// the empty body with the request-shape 400 envelope. Setup status is
+	// public too but carries no request body to validate; its behavior is
+	// covered by the integration suite against the real database.
+	for _, path := range []string{
+		"/identity/auth/login",
+		"/identity/register",
+		"/identity/setup/initialize",
+	} {
 		rec := doMountedRequest(handler, http.MethodPost, path, "")
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("public %s: status %d body %s, want 400", path, rec.Code, rec.Body.String())

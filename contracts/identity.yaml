@@ -431,6 +431,184 @@ paths:
                       error:
                         enum:
                           - internal_error
+  /identity/setup/status:
+    get:
+      operationId: getSetupStatus
+      summary: 查询实例是否已初始化
+      description: |-
+        首启向导的探测端点（issue #122）：登录屏挂载时请求，仅返回 `initialized` 布尔——实例是否已存在任何 User，实时读库。未初始化（`false`）时登录屏切换首启向导；已初始化时一切设备只见常规登录。除该布尔外不返回任何信息。
+      security: []
+      responses:
+        "200":
+          description: 实例初始化状态，仅一个布尔字段。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - initialized
+                properties:
+                  initialized:
+                    type: boolean
+                    description: true 表示实例已存在任何 User（两连首启通道任一已胜出）；false 表示空库，首启向导可用。
+        "500":
+          description: 服务端内部错误。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/setup/initialize:
+    post:
+      operationId: initializeInstance
+      summary: 凭设置码创建首个 Admin 并直接进入应用
+      description: |-
+        首启设置码通道（issue #122，ADR-0015 2026-08-23 修订）：空库上持有设置码者自选 email、密码、显示名（可选）成为首个 Admin，`must_change_password=false`（密码自设），响应携带 session token，形态与登录相同，直接进入应用。设置码为 8 位 Crockford base32，由服务进程在空库启动时生成并以 `XXXX-XXXX` 分组打入运维日志一次，仅存进程内存；进程重启且仍空库则换新码、旧码作废；实例存在任何 User 后该码不复存在。服务端比对前统一 trim 与大写化（大小写不敏感）。
+
+        单一写事务：首启 advisory lock → 复检空库（与 ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD 环境变量通道先到先得，输家 409）→ 常量时间比对设置码 → INSERT 首个 admin → 写 setup_admin_created 审计行 → 发 session。码错计入与登录共享的 per-email 进程内限速，达到上限回答 429（数值为信息性，客户端依赖 Retry-After）。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+                - setup_code
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 裸 RFC 5322 地址，服务端统一按小写规范化；空库事务内已证无冲突，该端点不回答 email_taken。
+                password:
+                  type: string
+                  description: 本人自选的明文密码，经 TLS（或内网 http）传输，服务端只存哈希；最小长度 8。
+                setup_code:
+                  type: string
+                  description: 运维日志披露的一次性 8 位 Crockford base32 设置码；服务端比对前统一大写化。任意不匹配的字符串（含超长值）统一按 403 invalid_setup_code 回答。
+                display_name:
+                  type: string
+                  maxLength: 128
+                  description: 可选显示名；缺省时服务端以 email 本地部分派生。
+      responses:
+        "201":
+          description: 初始化成功，返回首个会话 token 与账号信息（形态同登录 200），用户为首个 Admin。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - token
+                  - expires_at
+                  - user
+                properties:
+                  token:
+                    type: string
+                    description: opaque session token；客户端持有本体，服务端只存 hash，经 Authorization Bearer 头携带，永不进 URL。
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: 会话过期时刻（30 天滑动过期）。
+                  user:
+                    type: object
+                    required:
+                      - id
+                      - email
+                      - display_name
+                      - role
+                      - must_change_password
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      display_name:
+                        type: string
+                      role:
+                        type: string
+                        enum:
+                          - admin
+                      must_change_password:
+                        type: boolean
+                        description: 设置码通道密码本人自设，恒为 false。
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体缺少 email/password/setup_code 或不是 JSON；invalid_email 指 email 不是裸地址；password_too_short 指密码低于最小长度；invalid_password 指密码超过 72 字节（bcrypt 容量上限）；invalid_display_name 指显示名超长。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_email
+                          - password_too_short
+                          - invalid_password
+                          - invalid_display_name
+        "403":
+          description: 设置码无效 —— 不匹配本进程生成的一次性码的统一答案。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_setup_code
+        "409":
+          description: 实例已初始化 —— 写事务内 advisory lock 下复检空库发现已有 User：环境变量通道或另一并发 initialize 已胜出。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - instance_already_initialized
+        "429":
+          description: 同一 email 的失败尝试（码错）达到与登录共享的进程内限速上限；窗口与上限数值为信息性，客户端以 Retry-After 为准。
+          headers:
+            Retry-After:
+              description: 距允许再次尝试的剩余秒数（整数）。
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - setup_rate_limited
+        "500":
+          description: 服务端内部错误，账号与 session 均未创建。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
   /identity/users/me:
     get:
       operationId: getCurrentUser

@@ -1,8 +1,8 @@
 // The Module's trusted-command route table. The zero-value guard is
 // RequireActiveUser: the team directory and the personal reads declare
 // nothing; every governance command and the admin reads declare GuardAdmin;
-// the two public entry commands — login and join-code self-registration —
-// declare GuardPublic. Every path's OPTIONS preflight twin and Allow-Methods
+// the public entry commands — login, join-code self-registration, and the
+// first-run setup pair (status and initialize) — declare GuardPublic. Every path's OPTIONS preflight twin and Allow-Methods
 // value derive from this single table (see command.Mount and
 // command.AllowMethods). The zero-value password gate blocks a route while
 // the caller owes the forced first-login change; me, logout, and the change
@@ -40,6 +40,25 @@ func (m *Module) routes() []command.Route {
 			Path:    "/identity/register",
 			Guard:   command.GuardPublic,
 			Handler: command.Handle(m.auth.Register, auth.MapRegisterError, http.StatusCreated),
+		},
+		{
+			// First-run setup (issue #122): the public status probe the login
+			// screen switches on — one boolean, nothing else — and the
+			// initialize command that redeems the one-time setup code for the
+			// first admin. Both are public like login: an uninitialized
+			// instance has no credentials to authenticate with yet.
+			Method: http.MethodGet,
+			Path:   "/identity/setup/status",
+			Guard:  command.GuardPublic,
+			Handler: command.HandleNoBody(func(ctx context.Context, _ *http.Request) (auth.SetupStatusResponse, error) {
+				return m.auth.SetupStatus(ctx)
+			}, auth.MapSetupError, http.StatusOK),
+		},
+		{
+			Method:  http.MethodPost,
+			Path:    "/identity/setup/initialize",
+			Guard:   command.GuardPublic,
+			Handler: command.Handle(m.auth.Initialize, auth.MapSetupError, http.StatusCreated),
 		},
 		{
 			Method:       http.MethodPost,

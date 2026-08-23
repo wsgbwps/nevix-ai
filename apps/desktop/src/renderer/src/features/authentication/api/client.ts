@@ -39,6 +39,13 @@ export interface IdentityClient {
     joinCode: string,
     displayName?: string
   ) => Promise<IdentityApiResult<SessionCredentials>>
+  readonly setupStatus: () => Promise<IdentityApiResult<SetupStatus>>
+  readonly initialize: (
+    email: string,
+    password: string,
+    setupCode: string,
+    displayName?: string
+  ) => Promise<IdentityApiResult<SessionCredentials>>
   readonly me: (token: string) => Promise<IdentityApiResult<UserAccount>>
   readonly logout: (token: string) => Promise<IdentityApiResult<void>>
   readonly changePassword: (
@@ -46,6 +53,11 @@ export interface IdentityClient {
     currentPassword: string,
     newPassword: string
   ) => Promise<IdentityApiResult<void>>
+}
+
+/** The one boolean the public setup-status probe answers (contracts/identity.yaml). */
+export interface SetupStatus {
+  readonly initialized: boolean
 }
 
 interface RequestInput {
@@ -119,6 +131,41 @@ export function createIdentityClient(serverUrl: string): IdentityClient {
           email,
           password,
           join_code: joinCode,
+          ...(trimmedDisplayName ? { display_name: trimmedDisplayName } : {})
+        }
+      })
+      if (result.outcome !== 'succeeded') return result
+
+      const credentials = toSessionCredentials(result.value)
+      return credentials
+        ? { outcome: 'succeeded', value: credentials }
+        : { outcome: 'network-failure' }
+    },
+
+    async setupStatus() {
+      const result = await request<unknown>({
+        method: 'GET',
+        path: '/identity/setup/status'
+      })
+      if (result.outcome !== 'succeeded') return result
+
+      // A body without the boolean is an unreachable-or-broken server, never a
+      // setup verdict.
+      const initialized = readField(result.value, 'initialized')
+      return typeof initialized === 'boolean'
+        ? { outcome: 'succeeded', value: { initialized } as SetupStatus }
+        : { outcome: 'network-failure' }
+    },
+
+    async initialize(email, password, setupCode, displayName) {
+      const trimmedDisplayName = displayName?.trim()
+      const result = await request<unknown>({
+        method: 'POST',
+        path: '/identity/setup/initialize',
+        body: {
+          email,
+          password,
+          setup_code: setupCode,
           ...(trimmedDisplayName ? { display_name: trimmedDisplayName } : {})
         }
       })
