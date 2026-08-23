@@ -256,7 +256,12 @@ make server       # 启动 Go 后端（读取 server/.env.local）
 make build        # 构建所有
 make lint         # lint 所有
 
-./scripts/test-identity-integration.sh  # 起一次性 PostgreSQL 跑 Server 集成测试
+make postgres     # 幂等启动本地开发 PostgreSQL（数据持久化在 named volume，重装不丢）
+make postgres-down # 停止并移除本地开发 PostgreSQL 容器（数据卷保留）
+
+make test-e2e-smoke  # 桌面端 Smoke E2E（自动拉起一次性 PostgreSQL + 临时 Go server + Electron）
+make test-e2e        # 桌面端全量 E2E（typecheck + 全部 spec）
+make test-identity-integration  # 起一次性 PostgreSQL 跑 Server 集成测试
 ```
 
 ### 本地开发启动顺序（Server 侧）
@@ -266,7 +271,7 @@ Server 已迁移到单租户用户系统（登录/会话走 Go API，纯 Postgre
 > **一次性重建（Goose migration 切换，issue #108）**：migration 引擎已从自研 runner 切换到 Goose（版本账本 `goose_db_version`）。如果你的本地库还在用 #100 时代的自研 runner（存在 `public.schema_migrations` 表），必须**一次性删除并重建本地数据库**（例如 `DROP DATABASE ... WITH (FORCE)` 后重新 `CREATE DATABASE`）再启动 Server；clean cut、不做兼容桥，旧库上 Goose 会重新执行 0001 并因对象已存在而启动失败。
 
 1. 首次运行 `cp server/.env.example server/.env.local`，按注释填入两条数据库凭据：`MIGRATION_DATABASE_URL`（owner/DDL，启动时自动执行 up-only migration）与 `DATABASE_URL`（必须直接以 `identity_app` LOGIN 角色登录），以及 `ADMIN_EMAIL` / `ADMIN_INITIAL_PASSWORD`（仅空库 bootstrap 生效）。
-2. 本地启动一个 PostgreSQL（例如 `docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres:17.5-alpine`），并在首次启动 Server 前预置应用角色：`CREATE ROLE identity_app LOGIN PASSWORD '…'`（migration 只会采用已存在的角色、绝不重置密码；全新库上该角色要等首启的 migration 才被创建，若不预置，首启时应用池认证即失败）。
+2. 本地启动一个 PostgreSQL：`make postgres`（幂等，数据持久化在 `nevix-dev-postgres-data` 卷；彻底重置用 `make postgres-down && docker volume rm nevix-dev-postgres-data`），并在首次启动 Server 前预置应用角色：`CREATE ROLE identity_app LOGIN PASSWORD '…'`（migration 只会采用已存在的角色、绝不重置密码；全新库上该角色要等首启的 migration 才被创建，若不预置，首启时应用池认证即失败）。
 3. 运行 `make server`：启动时自动执行 migration、空库时 bootstrap 首个 admin。
 4. 运行 `make dev`，启动 Desktop（首次启动通过连接屏配置 server URL 并测试连通，详见桌面端文档）。
 
