@@ -77,10 +77,6 @@ test("API contracts require Server CI and Desktop E2E", () => {
   );
 });
 
-test("the Supabase desktop stack is an E2E concern only", () => {
-  assert.deepEqual(selected(["supabase/config.toml"]), { e2e: true });
-});
-
 test("the server integration harness entry runs Server CI", () => {
   assert.deepEqual(selected(["scripts/test-identity-integration.sh"]), {
     server: true,
@@ -110,13 +106,6 @@ test("Pi agent definitions, extension code, and tests require inline harness val
       ".pi/tests/pi-hooks.test.mjs",
     ]),
     { harness: true },
-  );
-});
-
-test("shared composite actions run the harness jobs they back", () => {
-  assert.deepEqual(
-    selected([".github/actions/supabase-image-cache/action.yml"]),
-    { e2e: true },
   );
 });
 

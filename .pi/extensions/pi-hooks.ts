@@ -8,8 +8,7 @@ const MAIN_PUSH_COMMAND =
 
 const FAST_LANE_PATH =
   /^(\.(?:pi|codex|agents|omp|scratch)\/|docs\/|(?:apps\/desktop|server)\/AGENTS\.md$|[^/]+\.md$)/;
-const FAST_LANE_NOTE =
-  "（仅 agent 配置与文档改动可直提直推）";
+const FAST_LANE_NOTE = "（仅 agent 配置与文档改动可直提直推）";
 
 export function isFastLanePath(path: string): boolean {
   return FAST_LANE_PATH.test(path);
@@ -28,7 +27,7 @@ export function isProtectedEditPath(value: unknown): boolean {
   const path = normalizeToolPath(value);
   if (path.endsWith("pnpm-lock.yaml")) return true;
   // `.env.example` 类模板是供人复制的文档（server/.env.example、
-  // supabase/auth-policy.env.example），不承载机密，保持可编辑；
+  // config.env.example），不承载机密，保持可编辑；
   // 真实 dotenv 文件（.env、.env.local、.env.production、*.env）仍被拦截。
   if (path.endsWith(".env.example")) return false;
   return /\.env(?:\.[^/]*)?$/.test(path);

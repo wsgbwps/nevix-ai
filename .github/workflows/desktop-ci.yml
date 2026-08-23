@@ -81,6 +81,3 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @nevix/desktop ${{ matrix.script }}
-        env:
-          VITE_SUPABASE_URL: ${{ vars.NEVIX_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEVIX_SUPABASE_PUBLISHABLE_KEY }}

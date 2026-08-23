@@ -25,46 +25,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  auth-policy:
-    name: Supabase Auth Policy Harness
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.21.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - uses: ./.github/actions/supabase-image-cache
-        id: supabase-images
-        with:
-          phase: restore
-      - run: pnpm test:auth-policy
-      - uses: ./.github/actions/supabase-image-cache
-        if: steps.supabase-images.outputs.cache-hit != 'true'
-        with:
-          phase: save
-      - name: Tear down Auth policy stack
-        if: always()
-        run: |
-          docker rm --force \
-            supabase_auth_nevix-auth-policy \
-            nevix_auth_policy_hibp_fixture \
-            2>/dev/null || true
-          pnpm exec supabase stop --project-id nevix-auth-policy --no-backup || true
-
   e2e-smoke:
     name: E2E Smoke Suite
     if: inputs.suite == 'smoke'
     # Pinned runner image so an unannounced runner switch cannot change the stack.
     runs-on: ubuntu-24.04
-    # #72's image-cache save (docker save of the whole stack) runs as a post-step
-    # after the suite; 10m cut the job mid-snapshot and reported an all-green
-    # suite as cancelled. Budget the save phase explicitly.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

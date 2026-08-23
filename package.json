@@ -5,7 +5,6 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
-    "test:auth-policy": "bash scripts/test-auth-policy.sh",
     "prepare": "husky"
   },
   "devDependencies": {
@@ -13,7 +12,6 @@
     "lint-staged": "^17.0.8",
     "prettier": "^3.8.4",
     "prettier-plugin-tailwindcss": "^0.8.0",
-    "supabase": "2.110.0",
     "turbo": "^2.5.0"
   },
   "packageManager": "pnpm@11.21.0",

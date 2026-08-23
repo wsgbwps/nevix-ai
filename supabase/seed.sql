@@ -1,2 +1,0 @@
--- Test-only seed data applied after migrations by `supabase db reset`.
--- Intentionally empty: the harness starts from a clean schema.
