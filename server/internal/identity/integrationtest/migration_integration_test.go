@@ -33,7 +33,8 @@ func TestBaselineSchemaIsTheSingleTenantUserSystem(t *testing.T) {
 	h := newHarness(t, ctx)
 
 	// The new baseline tables exist; the dropped world does not come back.
-	for _, table := range []string{"users", "sessions", "audit_logs"} {
+	// join_codes arrives with issue #120 on the same up-only ladder.
+	for _, table := range []string{"users", "sessions", "audit_logs", "join_codes"} {
 		var exists bool
 		if err := h.fixturePool.QueryRow(ctx,
 			`SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = $1)`, table,
@@ -86,11 +87,14 @@ func TestIdentityAppGrantsMatchTheLeastPrivilegeContract(t *testing.T) {
 	// has_table_privilege proves the effective grant surface behaviorally.
 	// users carries DELETE since issue #102 (deletion of never-logged-in
 	// accounts); audit stays without UPDATE (immutability by grant,
-	// ADR-0009).
+	// ADR-0009); join_codes carries SELECT/INSERT/UPDATE and no DELETE since
+	// issue #120 (revocation is UPDATE revoked_at; the revoked row is the
+	// record the audit trail corroborates).
 	for table, want := range map[string][]string{
 		"public.users":      {"SELECT", "INSERT", "UPDATE", "DELETE"},
 		"public.sessions":   {"SELECT", "INSERT", "UPDATE", "DELETE"},
 		"public.audit_logs": {"SELECT", "INSERT", "DELETE"},
+		"public.join_codes": {"SELECT", "INSERT", "UPDATE"},
 	} {
 		for _, privilege := range []string{"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"} {
 			var has bool

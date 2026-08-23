@@ -135,6 +135,11 @@ assert_identity_integration_executed() {
     TestResetPasswordRevokesAllSessionsAndRearmsChange
     TestChangeEmailMovesTheLoginIdentifier
     TestChangeRoleAdjustsAdminAccessBothWays
+    TestCreateJoinCodeReturnsPlaintextAndWritesAudit
+    TestActiveJoinCodeCapBlocksTheFourthCreateUntilRevoked
+    TestConcurrentCreatesCannotExceedTheActiveCap
+    TestRevokeRemovesCodeFromListAndKeepsTheRow
+    TestJoinCodeSurfaceIsAdminOnlyAndShapeChecked
     TestDirectoryShowsActiveUsersToEveryActiveUser
     TestManagementListShowsEveryAccountToAdminsOnly
     TestAuditListIsAdminOnlyAndNewestFirst

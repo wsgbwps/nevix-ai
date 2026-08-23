@@ -1495,6 +1495,244 @@ paths:
                       error:
                         enum:
                           - internal_error
+  /identity/admin/join-codes:
+    post:
+      operationId: createJoinCode
+      summary: 签发加入码（Admin）
+      description: |-
+        签发一枚可复用的注册凭据（ADR-0015 2026-08-23 修订）：码为 8 位 Crockford base32 明文，不随注册消耗，仅吊销失效；全部活跃码被吊销即自注册关闭（不设独立注册开关）。活跃上限 3，由写事务内锁行计数强制，同一事务写入 join_code_created 审计行。member 调用被 RequireAdmin 拒 403。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                  maxLength: 128
+                  description: 可选备注（如码贴到哪个群）；留空存空串。
+      responses:
+        "201":
+          description: 加入码已签发；扁平形态（id、code、label、created_at），明文码立即可见；created_by 归列表端点。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - code
+                  - label
+                  - created_at
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  code:
+                    type: string
+                    description: 8 位 Crockford base32 明文码（无 I/L/O/U）。
+                    pattern: "^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}$"
+                  label:
+                    type: string
+                    description: 签发时选填的备注；未填为空串。
+                  created_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: 请求体非 JSON 对象，或 label 超过 128 字符。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_label
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "409":
+          description: 活跃码已达上限（3）；吊销任一枚后可再签发。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - too_many_active_join_codes
+        "500":
+          description: 服务端内部错误，签发未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+    get:
+      operationId: listJoinCodes
+      summary: 活跃加入码列表（Admin）
+      description: |-
+        返回全部活跃（未吊销）加入码的明文与备注，按创建时间倒序；供 Admin 设置区卡片直接读出分亨。member 调用被 RequireAdmin 拒 403。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 活跃码列表（可能为空）。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - join_codes
+                properties:
+                  join_codes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/JoinCodeEntry"
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "500":
+          description: 服务端内部错误。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/admin/join-codes/{joinCodeID}:
+    delete:
+      operationId: revokeJoinCode
+      summary: 吊销加入码（Admin）
+      description: |-
+        吊销一枚活跃码：吊销即失效、不可恢复，行不删除（审计佐证）；同一事务写入 join_code_revoked 审计行。不存在或已吊销的 id（含非 UUID）一律 404，不做区分。member 调用被 RequireAdmin 拒 403。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/joinCodeID"
+      responses:
+        "200":
+          description: 加入码已吊销。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - revoked
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝，#101）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "404":
+          description: 目标码不存在或已吊销（或 id 非 UUID），两者不区分。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - join_code_not_found
+        "500":
+          description: 服务端内部错误，吊销未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
   /identity/audit-logs:
     get:
       operationId: listAuditLogs
@@ -1628,6 +1866,14 @@ components:
       schema:
         type: string
         format: uuid
+    joinCodeID:
+      name: joinCodeID
+      in: path
+      required: true
+      description: 目标加入码 id（UUID）。
+      schema:
+        type: string
+        format: uuid
     page:
       name: page
       in: query
@@ -1650,3 +1896,29 @@ components:
   schemas:
     Error:
       $ref: "./openapi.yaml#/components/schemas/Error"
+    JoinCodeEntry:
+      type: object
+      required:
+        - id
+        - code
+        - label
+        - created_by
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          description: 8 位 Crockford base32 明文码（无 I/L/O/U）；明文存储是有意决策（ADR-0015）。
+          pattern: "^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}$"
+        label:
+          type: string
+          description: 签发时选填的备注；未填为空串。
+        created_by:
+          type: string
+          format: uuid
+          description: 签发者（Admin）账号 id。
+        created_at:
+          type: string
+          format: date-time

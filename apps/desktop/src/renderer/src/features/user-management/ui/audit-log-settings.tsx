@@ -50,7 +50,9 @@ const AUDIT_ACTION_KEYS = [
   'user_password_reset',
   'user_email_changed',
   'user_role_changed',
-  'user_deleted'
+  'user_deleted',
+  'join_code_created',
+  'join_code_revoked'
 ] as const
 
 type AuditActionKey = (typeof AUDIT_ACTION_KEYS)[number]

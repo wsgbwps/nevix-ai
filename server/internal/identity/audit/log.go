@@ -49,6 +49,12 @@ const (
 	UserRoleChanged Action = "user_role_changed"
 	// UserDeleted records an admin deleting an account that never logged in.
 	UserDeleted Action = "user_deleted"
+	// JoinCodeCreated records an admin issuing a join code; the metadata
+	// names the code row and carries the label the admin noted for it.
+	JoinCodeCreated Action = "join_code_created"
+	// JoinCodeRevoked records an admin revoking a join code; the metadata
+	// names the code row whose registration window just closed.
+	JoinCodeRevoked Action = "join_code_revoked"
 )
 
 var validActions = map[Action]struct{}{
@@ -63,6 +69,8 @@ var validActions = map[Action]struct{}{
 	UserEmailChanged:      {},
 	UserRoleChanged:       {},
 	UserDeleted:           {},
+	JoinCodeCreated:       {},
+	JoinCodeRevoked:       {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id

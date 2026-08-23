@@ -55,7 +55,7 @@ func raceHarness(t *testing.T, ctx context.Context) (owner, runtime *pgxpool.Poo
 		t.Fatalf("connect runtime database: %v", err)
 	}
 	t.Cleanup(runtime.Close)
-	if _, err := owner.Exec(ctx, `TRUNCATE public.audit_logs, public.sessions, public.users`); err != nil {
+	if _, err := owner.Exec(ctx, `TRUNCATE public.audit_logs, public.sessions, public.join_codes, public.users`); err != nil {
 		t.Fatalf("truncate user-system tables: %v", err)
 	}
 	return owner, runtime, NewService(runtime, writetx.New(runtime))
