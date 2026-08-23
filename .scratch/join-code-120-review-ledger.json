@@ -12,9 +12,9 @@
     "server/internal/identity/**",
     "server/internal/migration/**"
   ],
-  "currentDiffDigest": "sha256:6af2331e2ef79d96a9f7f31b55d182b64cbef4454681543cb4edb27bf54e879c",
+  "currentDiffDigest": "sha256:c0625cd661273d3ac9851e6d9cc29bd07e1f0f2ce1543014ea3bbc3ac670456e",
   "fullReviewCount": 1,
-  "targetedReviewRound": 0,
+  "targetedReviewRound": 1,
   "findings": [
     {
       "id": "CR-STANDARDS-0001",
@@ -29,7 +29,7 @@
       "disposition": "accepted",
       "dispositionReason": "Modal dialogs make overlap unlikely today, but the section now has two independent writers with no aggregate; the Settings Flow contract (one contributor per section) is broken by construction and the reducer fix is small and in-scope.",
       "owner": "apps/desktop/src/renderer/src/app/settings",
-      "status": "fixed-pending-review",
+      "status": "closed",
       "evidence": [
         {
           "path": "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
@@ -55,7 +55,7 @@
       "disposition": "accepted",
       "dispositionReason": "Verified in source: resolveRef walks only the root spec (identity.yaml-local JoinCodeEntry unresolvable → nil → silent skip) and assertMatchesSchema recurses only into map values, never []any items. The new endpoints lean on this dead gate, so the promised drift defense does not cover them.",
       "owner": "server/internal/identity/integrationtest",
-      "status": "fixed-pending-review",
+      "status": "closed",
       "evidence": [
         {
           "path": "server/internal/identity/integrationtest/contract_conformance_test.go",
@@ -87,7 +87,7 @@
       "disposition": "accepted",
       "dispositionReason": "Verified: the counted rows are never mutated by a concurrent create (the mutation is an INSERT), so EvalPlanQual recheck never applies and the newly inserted row stays invisible to the waiter's statement snapshot. The last-active-admin FOR UPDATE analogy does not transfer because there the counted rows are the mutated rows. The cap can genuinely be exceeded under concurrency.",
       "owner": "server/internal/identity/joincodes",
-      "status": "fixed-pending-review",
+      "status": "closed",
       "evidence": [
         {
           "path": "server/internal/identity/joincodes/lifecycle.go",
@@ -139,7 +139,7 @@
       "disposition": "accepted",
       "dispositionReason": "The plan is the decision record the issue cites and it literally freezes the flat 201 shape. The nested shape was my consistency choice, silently diverging from the written contract; unwrapping restores the planned public shape.",
       "owner": "server/internal/identity/joincodes",
-      "status": "fixed-pending-review",
+      "status": "closed",
       "evidence": [
         {
           "path": "server/internal/identity/joincodes/joincodes.go",
@@ -165,7 +165,7 @@
       "disposition": "accepted",
       "dispositionReason": "Same defect as CR-STANDARDS-0003 observed from the spec axis; spec records stay separate per the lifecycle contract. Repairing once under both IDs.",
       "owner": "server/internal/identity/joincodes",
-      "status": "fixed-pending-review",
+      "status": "closed",
       "evidence": [
         {
           "path": "server/internal/identity/joincodes/lifecycle.go",
@@ -230,6 +230,11 @@
       ]
     }
   ],
-  "relevantCheck": null,
-  "outcome": "needs-targeted-review"
+  "relevantCheck": {
+    "name": "./scripts/test-identity-integration.sh + desktop typecheck/lint/test:unit(82)/verify:architecture/test:component + make test-e2e (full)",
+    "result": "PASS",
+    "coverage": "Seam A integration with sentinels on HEAD tree; desktop gates; full E2E 76 passed / 2 skipped (TLS env)",
+    "diffDigest": "sha256:c0625cd661273d3ac9851e6d9cc29bd07e1f0f2ce1543014ea3bbc3ac670456e"
+  },
+  "outcome": "closed"
 }
