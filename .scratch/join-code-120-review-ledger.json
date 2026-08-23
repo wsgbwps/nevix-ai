@@ -12,7 +12,7 @@
     "server/internal/identity/**",
     "server/internal/migration/**"
   ],
-  "currentDiffDigest": "sha256:3aeb40ab1da14d459a45564a419b84e7bc246c55c4aeb88e79ee29ac0596e48f",
+  "currentDiffDigest": "sha256:6af2331e2ef79d96a9f7f31b55d182b64cbef4454681543cb4edb27bf54e879c",
   "fullReviewCount": 1,
   "targetedReviewRound": 0,
   "findings": [
@@ -29,7 +29,7 @@
       "disposition": "accepted",
       "dispositionReason": "Modal dialogs make overlap unlikely today, but the section now has two independent writers with no aggregate; the Settings Flow contract (one contributor per section) is broken by construction and the reducer fix is small and in-scope.",
       "owner": "apps/desktop/src/renderer/src/app/settings",
-      "status": "open",
+      "status": "fixed-pending-review",
       "evidence": [
         {
           "path": "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
@@ -55,7 +55,7 @@
       "disposition": "accepted",
       "dispositionReason": "Verified in source: resolveRef walks only the root spec (identity.yaml-local JoinCodeEntry unresolvable → nil → silent skip) and assertMatchesSchema recurses only into map values, never []any items. The new endpoints lean on this dead gate, so the promised drift defense does not cover them.",
       "owner": "server/internal/identity/integrationtest",
-      "status": "open",
+      "status": "fixed-pending-review",
       "evidence": [
         {
           "path": "server/internal/identity/integrationtest/contract_conformance_test.go",
@@ -87,7 +87,7 @@
       "disposition": "accepted",
       "dispositionReason": "Verified: the counted rows are never mutated by a concurrent create (the mutation is an INSERT), so EvalPlanQual recheck never applies and the newly inserted row stays invisible to the waiter's statement snapshot. The last-active-admin FOR UPDATE analogy does not transfer because there the counted rows are the mutated rows. The cap can genuinely be exceeded under concurrency.",
       "owner": "server/internal/identity/joincodes",
-      "status": "open",
+      "status": "fixed-pending-review",
       "evidence": [
         {
           "path": "server/internal/identity/joincodes/lifecycle.go",
@@ -139,7 +139,7 @@
       "disposition": "accepted",
       "dispositionReason": "The plan is the decision record the issue cites and it literally freezes the flat 201 shape. The nested shape was my consistency choice, silently diverging from the written contract; unwrapping restores the planned public shape.",
       "owner": "server/internal/identity/joincodes",
-      "status": "open",
+      "status": "fixed-pending-review",
       "evidence": [
         {
           "path": "server/internal/identity/joincodes/joincodes.go",
@@ -165,7 +165,7 @@
       "disposition": "accepted",
       "dispositionReason": "Same defect as CR-STANDARDS-0003 observed from the spec axis; spec records stay separate per the lifecycle contract. Repairing once under both IDs.",
       "owner": "server/internal/identity/joincodes",
-      "status": "open",
+      "status": "fixed-pending-review",
       "evidence": [
         {
           "path": "server/internal/identity/joincodes/lifecycle.go",
@@ -179,7 +179,57 @@
       "introducedBy": null
     }
   ],
-  "repairRecords": [],
+  "repairRecords": [
+    {
+      "repairId": "R1",
+      "fixFor": [
+        "CR-SPEC-0001",
+        "CR-SPEC-0002",
+        "CR-STANDARDS-0001",
+        "CR-STANDARDS-0002",
+        "CR-STANDARDS-0003"
+      ],
+      "beforeDigest": "sha256:3aeb40ab1da14d459a45564a419b84e7bc246c55c4aeb88e79ee29ac0596e48f",
+      "afterDigest": "sha256:6af2331e2ef79d96a9f7f31b55d182b64cbef4454681543cb4edb27bf54e879c",
+      "touchedPaths": [
+        "server/internal/identity/joincodes/lifecycle.go",
+        "server/internal/identity/joincodes/joincodes.go",
+        "server/internal/identity/integrationtest/contract_conformance_test.go",
+        "server/internal/identity/integrationtest/join_codes_test.go",
+        "contracts/identity.yaml",
+        "apps/desktop/src/renderer/src/features/user-management/api/client.ts",
+        "apps/desktop/src/renderer/src/app/settings/settings-leave-semantics.ts",
+        "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+        "apps/desktop/tests/unit/settings-leave-semantics.test.mts",
+        "scripts/test-identity-integration.sh"
+      ],
+      "hunks": [
+        "R1a (CR-STANDARDS-0003, CR-SPEC-0002): Create 取数改为 SELECT pg_advisory_xact_lock(0x4A4F494E434F4445) 后 count 活跃码，删除 FOR UPDATE 行锁方案",
+        "R1b (CR-SPEC-0001): CreateResponse 改为扁平 {id, code, label, created_at}；契约 201 schema、桌面端 CreatedJoinCode 解析、Seam A 解码同步",
+        "R1c (CR-STANDARDS-0001): settings-leave-semantics.ts 新增 reduceLeaveSemantics（最严者胜、discard 组合、不变量保持）+ 4 条单元测试；settings-page 双槽位贡献经 useMemo 稳定回调上报后归约",
+        "R1d (CR-STANDARDS-0002): contractPathEntry 返回属主模块 spec；resolveRef 支持 ./file#/pointer 跨文件引用；assertMatchesSchema 对数组 items 逐项下钻",
+        "R1e: 新增 TestConcurrentCreatesCannotExceedTheActiveCap（2 存活 + 4 并发建 → 恰 1×201 + 3×409 + 列表 3）；harness 哨兵清单登记"
+      ],
+      "checks": [
+        {
+          "name": "./scripts/test-identity-integration.sh (Seam A, -race, all sentinels)",
+          "result": "PASS"
+        },
+        {
+          "name": "checker negative verification: bogus required field in JoinCodeEntry → contract violation at GET ...join_codes[0], then reverted",
+          "result": "PASS (gate bites)"
+        },
+        {
+          "name": "desktop typecheck / lint / verify:architecture / test:unit (82) / test:component",
+          "result": "PASS"
+        },
+        {
+          "name": "make test-e2e (full, incl. admin-join-codes.spec)",
+          "result": "PASS 76 passed / 2 skipped"
+        }
+      ]
+    }
+  ],
   "relevantCheck": null,
-  "outcome": "needs-fix"
+  "outcome": "needs-targeted-review"
 }
