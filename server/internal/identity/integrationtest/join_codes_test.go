@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -31,18 +32,24 @@ type joinCodeListResponse struct {
 	JoinCodes []joinCodeEntry `json:"join_codes"`
 }
 
+// createdJoinCode mirrors the create command's flat 201 body.
+type createdJoinCode struct {
+	ID        string    `json:"id"`
+	Code      string    `json:"code"`
+	Label     string    `json:"label"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // createJoinCode issues one code with an optional label.
-func createJoinCode(t *testing.T, handler http.Handler, token, label string) (int, []byte, joinCodeEntry) {
+func createJoinCode(t *testing.T, handler http.Handler, token, label string) (int, []byte, createdJoinCode) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"label": label})
 	status, raw := doJSON(t, handler, http.MethodPost, "/identity/admin/join-codes", token, body)
-	var decoded joinCodeEntry
+	var decoded createdJoinCode
 	if status == http.StatusCreated {
-		var envelope joinCodeEnvelope
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			t.Fatalf("create join code 201 body is not the entry shape: %v (%s)", err, raw)
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("create join code 201 body is not the flat entry shape: %v (%s)", err, raw)
 		}
-		decoded = envelope.JoinCode
 	}
 	return status, raw, decoded
 }
@@ -87,8 +94,8 @@ func TestCreateJoinCodeReturnsPlaintextAndWritesAudit(t *testing.T) {
 	h, handler, adminToken := governanceReady(t, ctx)
 	adminID := h.userIDByEmail(t, "admin@nevix.test")
 
-	// Issue with a label: the plaintext comes back immediately, in the same
-	// shape the list keeps showing it.
+	// Issue with a label: the plaintext comes back immediately in the flat
+	// plan-frozen shape.
 	status, raw, first := createJoinCode(t, handler, adminToken, "  市场群  ")
 	assertContractResponse(t, http.MethodPost, "/identity/admin/join-codes", status, raw)
 	if status != http.StatusCreated {
@@ -99,9 +106,6 @@ func TestCreateJoinCodeReturnsPlaintextAndWritesAudit(t *testing.T) {
 	}
 	if first.Label != "市场群" {
 		t.Fatalf("label = %q, want the trimmed label", first.Label)
-	}
-	if first.CreatedBy != adminID {
-		t.Fatalf("created_by = %s, want the issuing admin %s", first.CreatedBy, adminID)
 	}
 	if first.CreatedAt.IsZero() {
 		t.Fatal("created_at is zero; the response must carry the issue time")
@@ -146,7 +150,7 @@ func TestActiveJoinCodeCapBlocksTheFourthCreateUntilRevoked(t *testing.T) {
 	defer cancel()
 	_, handler, adminToken := governanceReady(t, ctx)
 
-	issued := []joinCodeEntry{}
+	issued := []createdJoinCode{}
 	for i := 0; i < 3; i++ {
 		status, raw, entry := createJoinCode(t, handler, adminToken, "")
 		assertContractResponse(t, http.MethodPost, "/identity/admin/join-codes", status, raw)
@@ -184,6 +188,58 @@ func TestActiveJoinCodeCapBlocksTheFourthCreateUntilRevoked(t *testing.T) {
 	_, _, list = listJoinCodes(t, handler, adminToken)
 	if len(list.JoinCodes) != 3 {
 		t.Fatalf("list after revoke-and-recreate = %d entries, want 3", len(list.JoinCodes))
+	}
+}
+
+func TestConcurrentCreatesCannotExceedTheActiveCap(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	_, handler, adminToken := governanceReady(t, ctx)
+
+	// Two codes are active; four creates race for the single free slot. The
+	// advisory lock inside the create transaction must serialize them: exactly
+	// one 201, three 409, and the list still holds three codes — not four.
+	for i := 0; i < 2; i++ {
+		if status, raw, _ := createJoinCode(t, handler, adminToken, ""); status != http.StatusCreated {
+			t.Fatalf("seed create #%d: status %d body %s", i+1, status, raw)
+		}
+	}
+
+	const attempts = 4
+	statuses := make([]int, attempts)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			status, _, _ := createJoinCode(t, handler, adminToken, "")
+			statuses[i] = status
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	created, refused := 0, 0
+	for _, status := range statuses {
+		switch status {
+		case http.StatusCreated:
+			created++
+		case http.StatusConflict:
+			refused++
+		default:
+			t.Fatalf("concurrent create answered %d, want 201 or 409", status)
+		}
+	}
+	if created != 1 || refused != attempts-1 {
+		t.Fatalf("concurrent creates at cap: %d created / %d refused, want 1 / %d (statuses %v)", created, refused, attempts-1, statuses)
+	}
+
+	status, raw, list := listJoinCodes(t, handler, adminToken)
+	assertContractResponse(t, http.MethodGet, "/identity/admin/join-codes", status, raw)
+	if status != http.StatusOK || len(list.JoinCodes) != 3 {
+		t.Fatalf("list after concurrent creates: status %d len %d, want exactly 3 at the cap (body %s)", status, len(list.JoinCodes), raw)
 	}
 }
 

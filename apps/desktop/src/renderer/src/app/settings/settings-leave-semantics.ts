@@ -20,6 +20,55 @@ export const CLEAN_LEAVE_SEMANTICS: SettingsLeaveSemantics = {
   close: 'allow'
 }
 
+// Restriction ranks for {@link reduceLeaveSemantics}: the higher, the more a
+// value refuses to let leaving happen.
+const NAVIGATE_RESTRICTION: Record<SettingsNavigateSemantics, number> = {
+  navigable: 0,
+  'confirm-discard': 1,
+  blocked: 2
+}
+
+const CLOSE_RESTRICTION: Record<SettingsCloseSemantics, number> = {
+  allow: 0,
+  defer: 1,
+  confirm: 2,
+  deny: 3
+}
+
+/**
+ * Combine the leave semantics of two independent contributors that share one
+ * Settings surface (for example two cards mounted in one section): the most
+ * restrictive intent wins on each axis, and discard callbacks compose so a
+ * discard settles every contributor that offered one. The discard invariant
+ * above survives: a composed discard is carried only while the reduced
+ * navigate stays `confirm-discard` (a blocked surface has nothing to leave,
+ * so the pending discards wait for the contributor that blocks to clear).
+ */
+export function reduceLeaveSemantics(
+  a: SettingsLeaveSemantics,
+  b: SettingsLeaveSemantics
+): SettingsLeaveSemantics {
+  const navigate =
+    NAVIGATE_RESTRICTION[a.navigate] >= NAVIGATE_RESTRICTION[b.navigate] ? a.navigate : b.navigate
+  const close = CLOSE_RESTRICTION[a.close] >= CLOSE_RESTRICTION[b.close] ? a.close : b.close
+  if (navigate !== 'confirm-discard') return { navigate, close }
+
+  const discard = composeDiscards(a.discard, b.discard)
+  return discard === undefined ? { navigate, close } : { navigate, close, discard }
+}
+
+function composeDiscards(
+  a: (() => void) | undefined,
+  b: (() => void) | undefined
+): (() => void) | undefined {
+  if (a === undefined) return b
+  if (b === undefined) return a
+  return () => {
+    a()
+    b()
+  }
+}
+
 export interface PendingSettingsDiscardPrompt {
   readonly continueEditing: () => void
   readonly discardChanges: () => void

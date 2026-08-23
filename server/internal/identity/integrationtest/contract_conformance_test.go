@@ -52,12 +52,15 @@ func loadContractSpec(t *testing.T) map[string]any {
 }
 
 // assertContractResponse asserts one observed response against the contract.
+// Schema references resolve in the module that owns the path item (the root
+// spec has no schemas of its own beyond Error), so module-local components
+// like JoinCodeEntry validate instead of silently skipping.
 func assertContractResponse(t *testing.T, method, path string, status int, body []byte) {
 	t.Helper()
 	spec := loadContractSpec(t)
 
 	paths, _ := spec["paths"].(map[string]any)
-	entry := contractPathEntry(t, paths, path)
+	entry, owner := contractPathEntry(t, paths, path)
 	operation, _ := entry[strings.ToLower(method)].(map[string]any)
 	if operation == nil {
 		t.Fatalf("contract gap: %s %s has no entry in contracts/openapi.yaml", strings.ToUpper(method), path)
@@ -83,14 +86,18 @@ func assertContractResponse(t *testing.T, method, path string, status int, body 
 			t.Fatalf("%s %s status %d: body is not JSON: %v", strings.ToUpper(method), path, status, err)
 		}
 	}
-	assertMatchesSchema(t, spec, schema, decoded, fmt.Sprintf("%s %s %d", strings.ToUpper(method), path, status))
+	assertMatchesSchema(t, owner, schema, decoded, fmt.Sprintf("%s %s %d", strings.ToUpper(method), path, status))
 }
 
-// contractPathEntry resolves an observed path to its OpenAPI Path Item. Exact
-// paths win; parameter segments then match exactly one path segment. A master
-// contract may delegate the item to its owning module through an external $ref.
-func contractPathEntry(t *testing.T, paths map[string]any, observedPath string) map[string]any {
+// contractPathEntry resolves an observed path to its OpenAPI Path Item and
+// the spec that owns it (a module file for referenced paths, the root spec
+// otherwise), so later reference resolution starts in the right document.
+// Exact paths win; parameter segments then match exactly one path segment. A
+// master contract may delegate the item to its owning module through an
+// external $ref.
+func contractPathEntry(t *testing.T, paths map[string]any, observedPath string) (map[string]any, map[string]any) {
 	t.Helper()
+	spec := loadContractSpec(t)
 	if exact, _ := paths[observedPath].(map[string]any); exact != nil {
 		return resolveContractPathItem(t, exact)
 	}
@@ -113,14 +120,14 @@ func contractPathEntry(t *testing.T, paths map[string]any, observedPath string) 
 			return resolveContractPathItem(t, entry)
 		}
 	}
-	return nil
+	return nil, spec
 }
 
-func resolveContractPathItem(t *testing.T, entry map[string]any) map[string]any {
+func resolveContractPathItem(t *testing.T, entry map[string]any) (map[string]any, map[string]any) {
 	t.Helper()
 	ref, ok := entry["$ref"].(string)
 	if !ok {
-		return entry
+		return entry, loadContractSpec(t)
 	}
 	module, pointer, ok := strings.Cut(ref, "#")
 	if !ok || module == "" || pointer == "" {
@@ -139,7 +146,7 @@ func resolveContractPathItem(t *testing.T, entry map[string]any) map[string]any 
 	if !ok {
 		t.Fatalf("contract path reference %q does not resolve to an object", ref)
 	}
-	return resolved
+	return resolved, spec
 }
 
 func loadContractModule(t *testing.T, module string) map[string]any {
@@ -161,10 +168,10 @@ func loadContractModule(t *testing.T, module string) map[string]any {
 
 // assertMatchesSchema checks one decoded body against one flattened schema:
 // required fields exist, enum-constrained properties hold a documented value,
-// and nested objects are checked recursively.
+// nested objects and array items are checked recursively.
 func assertMatchesSchema(t *testing.T, spec, schema, value map[string]any, where string) {
 	t.Helper()
-	flat := flattenSchema(spec, schema, map[string]bool{})
+	flat := flattenSchema(t, spec, schema, map[string]bool{})
 
 	for _, required := range flat["required"].([]any) {
 		name := fmt.Sprint(required)
@@ -179,7 +186,7 @@ func assertMatchesSchema(t *testing.T, spec, schema, value map[string]any, where
 			continue
 		}
 		propertySchema, _ := propertyNode.(map[string]any)
-		propertyFlat := flattenSchema(spec, propertySchema, map[string]bool{})
+		propertyFlat := flattenSchema(t, spec, propertySchema, map[string]bool{})
 		if enum, ok := propertyFlat["enum"].([]any); ok {
 			matched := false
 			for _, allowed := range enum {
@@ -195,26 +202,37 @@ func assertMatchesSchema(t *testing.T, spec, schema, value map[string]any, where
 		if nested, ok := propertyValue.(map[string]any); ok && len(propertyFlat["properties"].(map[string]any)) > 0 {
 			assertMatchesSchema(t, spec, propertySchema, nested, where+"."+name)
 		}
+		// Array-valued properties validate every element against the item
+		// schema (which may itself be a $ref into the owning module).
+		if items, _ := propertySchema["items"].(map[string]any); items != nil {
+			if array, ok := propertyValue.([]any); ok {
+				for index, element := range array {
+					if elementMap, ok := element.(map[string]any); ok {
+						assertMatchesSchema(t, spec, items, elementMap, fmt.Sprintf("%s.%s[%d]", where, name, index))
+					}
+				}
+			}
+		}
 	}
 }
 
 // flattenSchema merges $ref targets, allOf parts, and the node's own keys into
 // one object schema with accumulated "required" and "properties".
-func flattenSchema(spec map[string]any, node map[string]any, visited map[string]bool) map[string]any {
+func flattenSchema(t *testing.T, spec map[string]any, node map[string]any, visited map[string]bool) map[string]any {
 	flat := map[string]any{"required": []any{}, "properties": map[string]any{}}
 	if node == nil {
 		return flat
 	}
 	if ref, ok := node["$ref"].(string); ok && !visited[ref] {
-		if target := resolveRef(spec, ref); target != nil {
+		if target := resolveRef(t, spec, ref); target != nil {
 			visited[ref] = true
-			mergeSchema(flat, flattenSchema(spec, target, visited))
+			mergeSchema(flat, flattenSchema(t, spec, target, visited))
 		}
 	}
 	if allOf, ok := node["allOf"].([]any); ok {
 		for _, part := range allOf {
 			if partSchema, ok := part.(map[string]any); ok {
-				mergeSchema(flat, flattenSchema(spec, partSchema, visited))
+				mergeSchema(flat, flattenSchema(t, spec, partSchema, visited))
 			}
 		}
 	}
@@ -239,10 +257,20 @@ func mergeSchema(flat, node map[string]any) {
 	}
 }
 
-// resolveRef follows an internal "#/components/..." pointer.
-func resolveRef(spec map[string]any, ref string) map[string]any {
-	node := any(spec)
-	for _, segment := range strings.Split(strings.TrimPrefix(ref, "#/"), "/") {
+// resolveRef follows an internal "#/components/..." pointer in the owning
+// spec, or an external module reference like "./openapi.yaml#/components/..."
+// through the cached module loader. An unresolvable reference returns nil —
+// the caller's merge is skipped — but contract-owned pointers above fatal
+// loudly rather than let a typo disable validation.
+func resolveRef(t *testing.T, spec map[string]any, ref string) map[string]any {
+	target := spec
+	pointer := ref
+	if file, rest, ok := strings.Cut(ref, "#"); ok && file != "" {
+		target = loadContractModule(t, file)
+		pointer = "#" + rest
+	}
+	node := any(target)
+	for _, segment := range strings.Split(strings.TrimPrefix(pointer, "#/"), "/") {
 		m, ok := node.(map[string]any)
 		if !ok {
 			return nil

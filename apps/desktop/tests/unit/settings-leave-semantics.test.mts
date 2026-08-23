@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { suite, test } from 'node:test'
 import {
   CLEAN_LEAVE_SEMANTICS,
+  reduceLeaveSemantics,
   resolveDeferredSettingsClose,
   settingsCloseDecision,
   settingsLeaveIntent,
@@ -132,4 +133,52 @@ test('a deferred close is allowed only once the contribution allows closing', ()
   assert.equal(resolveDeferredSettingsClose(CLEAN_LEAVE_SEMANTICS), 'allow')
   assert.equal(resolveDeferredSettingsClose(discardable), 'cancel')
   assert.equal(resolveDeferredSettingsClose({ navigate: 'blocked', close: 'deny' }), 'cancel')
+})
+
+suite('reduceLeaveSemantics combines two contributors of one surface', () => {
+  test('two clean contributors stay clean', () => {
+    assert.deepEqual(
+      reduceLeaveSemantics(CLEAN_LEAVE_SEMANTICS, CLEAN_LEAVE_SEMANTICS),
+      CLEAN_LEAVE_SEMANTICS
+    )
+  })
+
+  test('a command in flight on either card blocks leaving and closes', () => {
+    const unresolved: SettingsLeaveSemantics = { navigate: 'blocked', close: 'deny' }
+    assert.deepEqual(reduceLeaveSemantics(unresolved, CLEAN_LEAVE_SEMANTICS), unresolved)
+    assert.deepEqual(reduceLeaveSemantics(CLEAN_LEAVE_SEMANTICS, unresolved), unresolved)
+  })
+
+  test('a blocked contributor outranks a pending discard prompt', () => {
+    const reduced = reduceLeaveSemantics(discardable, { navigate: 'blocked', close: 'deny' })
+    assert.deepEqual(
+      { navigate: reduced.navigate, close: reduced.close },
+      { navigate: 'blocked', close: 'deny' }
+    )
+    // The discard invariant survives: no discard while navigate is not confirm-discard.
+    assert.equal(reduced.discard, undefined)
+  })
+
+  test('a pending discard survives next to a clean contributor and composes both discards', () => {
+    const calls: string[] = []
+    const first: SettingsLeaveSemantics = {
+      navigate: 'confirm-discard',
+      close: 'confirm',
+      discard: () => calls.push('first')
+    }
+    const second: SettingsLeaveSemantics = {
+      navigate: 'confirm-discard',
+      close: 'confirm',
+      discard: () => calls.push('second')
+    }
+    const reducedBoth = reduceLeaveSemantics(first, second)
+    assert.equal(reducedBoth.navigate, 'confirm-discard')
+    assert.equal(reducedBoth.close, 'confirm')
+    reducedBoth.discard?.()
+    assert.deepEqual(calls, ['first', 'second'])
+
+    const reducedWithClean = reduceLeaveSemantics(first, CLEAN_LEAVE_SEMANTICS)
+    reducedWithClean.discard?.()
+    assert.deepEqual(calls, ['first', 'second', 'first'])
+  })
 })

@@ -22,6 +22,15 @@ import (
 // reusable, so three cover every onboarding wave; revoking frees a slot.
 const maxActiveJoinCodes = 3
 
+// joinCodeCapLockKey is the advisory-lock key serializing join-code creates
+// (0x4A4F494E434F4445 spells "JOINCODE"). Row locks cannot enforce the cap:
+// under READ COMMITTED a concurrent create's INSERT is a phantom the waiter's
+// count never re-reads, so two waiters could both count below the cap and
+// commit past it. The transaction-scoped advisory lock serializes the
+// count-then-insert decision; with at most three active codes on a
+// single-instance deployment it is effectively uncontended.
+const joinCodeCapLockKey = 0x4A4F494E434F4445
+
 // joinCodeLength is the generated code's length: 8 Crockford base32
 // characters, ~1.07e12 equally likely codes — far beyond any guessing budget
 // an on-prem deployment faces, while staying readable over a phone call.
@@ -46,29 +55,23 @@ func generateJoinCode() (string, error) {
 }
 
 // Create issues one join code. The active cap is enforced inside the write
-// transaction: the create locks every active row FOR UPDATE, so concurrent
-// creates serialize and the second one re-reads the count including the first
-// one's committed row (the same pattern the last-active-admin protection
-// uses). The plaintext is returned once here and stays visible in the list.
+// transaction: a transaction-scoped advisory lock serializes every create,
+// so the count-then-insert decision sees every committed predecessor. The
+// plaintext is returned once here and stays visible in the list.
 func (s *Service) Create(ctx context.Context, principal authz.Principal, req CreateRequest) (CreateResponse, error) {
 	label := strings.TrimSpace(req.Label)
 
 	var created JoinCodeEntry
 	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx,
-			`SELECT id FROM public.join_codes WHERE revoked_at IS NULL FOR UPDATE`)
-		if err != nil {
-			return fmt.Errorf("joincodes: lock active codes: %w", err)
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, joinCodeCapLockKey); err != nil {
+			return fmt.Errorf("joincodes: serialize create: %w", err)
 		}
-		active := 0
-		for rows.Next() {
-			active++
+		var active int
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM public.join_codes WHERE revoked_at IS NULL`,
+		).Scan(&active); err != nil {
+			return fmt.Errorf("joincodes: count active codes: %w", err)
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return fmt.Errorf("joincodes: read active codes: %w", err)
-		}
-		rows.Close()
 		if active >= maxActiveJoinCodes {
 			return errTooManyActiveJoinCodes
 		}
@@ -102,7 +105,9 @@ func (s *Service) Create(ctx context.Context, principal authz.Principal, req Cre
 	if err != nil {
 		return CreateResponse{}, err
 	}
-	return CreateResponse{JoinCode: created}, nil
+	// The flat shape is the plan-frozen public contract for this endpoint;
+	// provenance (created_by) is the list's to carry.
+	return CreateResponse{ID: created.ID, Code: created.Code, Label: created.Label, CreatedAt: created.CreatedAt}, nil
 }
 
 // List returns the active codes newest first: the plaintext, the note, and

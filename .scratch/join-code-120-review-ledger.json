@@ -1,0 +1,185 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "23f9737 (tree-identical to origin/main 89a85da)",
+  "scopePaths": [
+    ".scratch/join-code-admin-lifecycle-plan.md",
+    "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+    "apps/desktop/src/renderer/src/features/user-management/**",
+    "apps/desktop/tests/settings/admin-join-codes.spec.ts",
+    "contracts/identity.yaml",
+    "contracts/openapi.yaml",
+    "scripts/test-identity-integration.sh",
+    "server/internal/identity/**",
+    "server/internal/migration/**"
+  ],
+  "currentDiffDigest": "sha256:3aeb40ab1da14d459a45564a419b84e7bc246c55c4aeb88e79ee29ac0596e48f",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 0,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/app/settings",
+        "source": "apps/desktop/CONTEXT.md §Settings Flow (leave-semantics contract)",
+        "anchor": "settings-page.tsx:SettingsPage.users section renderer",
+        "defect": "two Feature cards report through one last-write-wins contribution slot; overlapping reporters can clear blocked/deny while a command is unresolved"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Modal dialogs make overlap unlikely today, but the section now has two independent writers with no aggregate; the Settings Flow contract (one contributor per section) is broken by construction and the reducer fix is small and in-scope.",
+      "owner": "apps/desktop/src/renderer/src/app/settings",
+      "status": "open",
+      "evidence": [
+        {
+          "path": "apps/desktop/src/renderer/src/app/settings/settings-page.tsx",
+          "symbol": "sectionRenderers.users",
+          "consequence": "UserManagementSettings and JoinCodesSettings both receive contributionReporters.users; whichever effect runs last overwrites the other's report",
+          "references": "apps/desktop/CONTEXT.md Settings Flow leave-semantics"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:3aeb40ab1da14d459a45564a419b84e7bc246c55c4aeb88e79ee29ac0596e48f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/integrationtest",
+        "source": "contracts/openapi.yaml header §漂移防线",
+        "anchor": "contract_conformance_test.go:assertMatchesSchema/flattenSchema/resolveRef",
+        "defect": "contract checker resolves #/components refs only against the root spec and never descends into array items, so module-local schemas (JoinCodeEntry) and per-item required fields are silently unvalidated"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Verified in source: resolveRef walks only the root spec (identity.yaml-local JoinCodeEntry unresolvable → nil → silent skip) and assertMatchesSchema recurses only into map values, never []any items. The new endpoints lean on this dead gate, so the promised drift defense does not cover them.",
+      "owner": "server/internal/identity/integrationtest",
+      "status": "open",
+      "evidence": [
+        {
+          "path": "server/internal/identity/integrationtest/contract_conformance_test.go",
+          "symbol": "resolveRef",
+          "consequence": "identity.yaml#/components/schemas/JoinCodeEntry resolves to nil in the root spec; flattenSchema merges nothing; join_code/join_codes required-field checks are dead",
+          "references": "contracts/openapi.yaml header 漂移防线 paragraph"
+        },
+        {
+          "path": "server/internal/identity/integrationtest/contract_conformance_test.go",
+          "symbol": "assertMatchesSchema",
+          "consequence": "array-valued properties (join_codes, users, entries) never validate per-item required fields",
+          "references": "contracts/openapi.yaml header 漂移防线 paragraph"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:3aeb40ab1da14d459a45564a419b84e7bc246c55c4aeb88e79ee29ac0596e48f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0003",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/joincodes",
+        "source": "ADR-0015 §账号生命周期（2026-08-23 修订：活跃上限 3）",
+        "anchor": "lifecycle.go:Service.Create active-count SELECT ... FOR UPDATE",
+        "defect": "row locks do not serialize concurrent creates against the active cap; READ COMMITTED has no predicate locking, so two concurrent creates at two active codes both count two and commit four"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Verified: the counted rows are never mutated by a concurrent create (the mutation is an INSERT), so EvalPlanQual recheck never applies and the newly inserted row stays invisible to the waiter's statement snapshot. The last-active-admin FOR UPDATE analogy does not transfer because there the counted rows are the mutated rows. The cap can genuinely be exceeded under concurrency.",
+      "owner": "server/internal/identity/joincodes",
+      "status": "open",
+      "evidence": [
+        {
+          "path": "server/internal/identity/joincodes/lifecycle.go",
+          "symbol": "Service.Create",
+          "consequence": "SELECT id ... FOR UPDATE followed by count+INSERT does not prevent two waiters from both counting below the cap and inserting; acceptance criterion 活跃码上限 3 is raceable",
+          "references": "ADR-0015 修订; .scratch/join-code-self-registration-plan.md (上限 3 由 service 层在写事务内计数强制)"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:3aeb40ab1da14d459a45564a419b84e7bc246c55c4aeb88e79ee29ac0596e48f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0004",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/user-management/model",
+        "source": "Fowler: Duplicated Code",
+        "anchor": "use-join-codes.ts:runCommand",
+        "defect": "the session/pending/failure/notice command lifecycle duplicates useManagedUsers' runCommand"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Acknowledged duplication of a proven pattern within one Feature (two occurrences). Extracting a shared model helper is a Feature-local refactor that does not belong in this vertical slice; file for the next user-management touch.",
+      "owner": "apps/desktop/src/renderer/src/features/user-management/model",
+      "status": "closed",
+      "evidence": [
+        {
+          "path": "apps/desktop/src/renderer/src/features/user-management/model/use-join-codes.ts",
+          "symbol": "runCommand",
+          "consequence": "future fixes to the command lifecycle require synchronized edits in two hooks",
+          "references": "Fowler smell baseline: Duplicated Code"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:3aeb40ab1da14d459a45564a419b84e7bc246c55c4aeb88e79ee29ac0596e48f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/joincodes",
+        "source": ".scratch/join-code-self-registration-plan.md §Server endpoints",
+        "anchor": "joincodes.go:CreateResponse",
+        "defect": "create answers 201 {\"join_code\":{...}} but the frozen plan specifies the flat {id, code, label, created_at}"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "The plan is the decision record the issue cites and it literally freezes the flat 201 shape. The nested shape was my consistency choice, silently diverging from the written contract; unwrapping restores the planned public shape.",
+      "owner": "server/internal/identity/joincodes",
+      "status": "open",
+      "evidence": [
+        {
+          "path": "server/internal/identity/joincodes/joincodes.go",
+          "symbol": "CreateResponse",
+          "consequence": "clients implementing the planned shape read top-level id/code and get a join_code envelope; OpenAPI and Desktop parsing codify the divergence",
+          "references": ".scratch/join-code-self-registration-plan.md: POST /identity/admin/join-codes（RequireAdmin）：{label?} → 201 {id, code, label, created_at}"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:3aeb40ab1da14d459a45564a419b84e7bc246c55c4aeb88e79ee29ac0596e48f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/joincodes",
+        "source": "ADR-0015 / .scratch/join-code-self-registration-plan.md（活跃上限 3 由 service 层在写事务内计数强制）",
+        "anchor": "lifecycle.go:Service.Create",
+        "defect": "concurrent creates can exceed the active cap: FOR UPDATE does not serialize phantom inserts"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Same defect as CR-STANDARDS-0003 observed from the spec axis; spec records stay separate per the lifecycle contract. Repairing once under both IDs.",
+      "owner": "server/internal/identity/joincodes",
+      "status": "open",
+      "evidence": [
+        {
+          "path": "server/internal/identity/joincodes/lifecycle.go",
+          "symbol": "Service.Create",
+          "consequence": "acceptance criterion 活跃码上限 3 can be violated by concurrent creates",
+          "references": "issue #120 acceptance criterion 2"
+        }
+      ],
+      "reviewedDiffDigest": "sha256:3aeb40ab1da14d459a45564a419b84e7bc246c55c4aeb88e79ee29ac0596e48f",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [],
+  "relevantCheck": null,
+  "outcome": "needs-fix"
+}

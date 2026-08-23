@@ -1516,16 +1516,30 @@ paths:
                   description: 可选备注（如码贴到哪个群）；留空存空串。
       responses:
         "201":
-          description: 加入码已签发；响应与列表同形，明文码立即可见。
+          description: 加入码已签发；扁平形态（id、code、label、created_at），明文码立即可见；created_by 归列表端点。
           content:
             application/json:
               schema:
                 type: object
                 required:
-                  - join_code
+                  - id
+                  - code
+                  - label
+                  - created_at
                 properties:
-                  join_code:
-                    $ref: "#/components/schemas/JoinCodeEntry"
+                  id:
+                    type: string
+                    format: uuid
+                  code:
+                    type: string
+                    description: 8 位 Crockford base32 明文码（无 I/L/O/U）。
+                    pattern: "^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}$"
+                  label:
+                    type: string
+                    description: 签发时选填的备注；未填为空串。
+                  created_at:
+                    type: string
+                    format: date-time
         "400":
           description: 请求体非 JSON 对象，或 label 超过 128 字符。
           content:

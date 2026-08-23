@@ -87,10 +87,14 @@ type JoinCodeEntry struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// CreateResponse is the issue command's success body: the freshly issued code
-// in the same shape the list will keep showing it.
+// CreateResponse is the issue command's success body: the flat plan-frozen
+// shape (id, code, label, created_at). Provenance (created_by) lives in the
+// list entries.
 type CreateResponse struct {
-	JoinCode JoinCodeEntry `json:"join_code"`
+	ID        string    `json:"id"`
+	Code      string    `json:"code"`
+	Label     string    `json:"label"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // ListResponse is the active-codes list body.

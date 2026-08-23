@@ -137,6 +137,7 @@ assert_identity_integration_executed() {
     TestChangeRoleAdjustsAdminAccessBothWays
     TestCreateJoinCodeReturnsPlaintextAndWritesAudit
     TestActiveJoinCodeCapBlocksTheFourthCreateUntilRevoked
+    TestConcurrentCreatesCannotExceedTheActiveCap
     TestRevokeRemovesCodeFromListAndKeepsTheRow
     TestJoinCodeSurfaceIsAdminOnlyAndShapeChecked
     TestDirectoryShowsActiveUsersToEveryActiveUser

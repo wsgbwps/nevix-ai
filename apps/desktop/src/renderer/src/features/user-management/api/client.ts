@@ -268,6 +268,14 @@ export interface JoinCode {
   readonly createdAt: string
 }
 
+/** The create command's flat success body (id, code, label, created_at). */
+export interface CreatedJoinCode {
+  readonly id: string
+  readonly code: string
+  readonly label: string
+  readonly createdAt: string
+}
+
 export interface CreateJoinCodeInput {
   /** Omitted when blank; the server then stores the empty string. */
   readonly label?: string
@@ -295,7 +303,7 @@ export async function createJoinCode(
   session: AuthenticatedManagementSession,
   serverUrl: string,
   input: CreateJoinCodeInput
-): Promise<ManagementApiResult<JoinCode>> {
+): Promise<ManagementApiResult<CreatedJoinCode>> {
   const label = input.label?.trim()
   const result = await commandRequest(session, serverUrl, {
     method: 'POST',
@@ -304,8 +312,20 @@ export async function createJoinCode(
   })
   if (result.outcome !== 'succeeded') return result
 
-  const joinCode = parseJoinCode(readField(result.payload, 'join_code'))
-  return joinCode ? { outcome: 'succeeded', value: joinCode } : { outcome: 'network-failure' }
+  const id = readId(result.payload)
+  const code = readRequiredString(result.payload, 'code')
+  const createdLabel = readRequiredString(result.payload, 'label')
+  const createdAt = readTimestamp(result.payload, 'created_at')
+  if (
+    id === undefined ||
+    code === undefined ||
+    code.length === 0 ||
+    createdLabel === undefined ||
+    createdAt === undefined
+  ) {
+    return { outcome: 'network-failure' }
+  }
+  return { outcome: 'succeeded', value: { id, code, label: createdLabel, createdAt } }
 }
 
 export async function revokeJoinCode(

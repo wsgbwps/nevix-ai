@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from '@tanstack/react-router'
 import {
   ArrowLeftIcon,
@@ -34,7 +34,7 @@ import {
   resolveSettingsSection,
   type SettingsSection
 } from './settings-navigation'
-import { CLEAN_LEAVE_SEMANTICS } from './settings-leave-semantics'
+import { CLEAN_LEAVE_SEMANTICS, reduceLeaveSemantics } from './settings-leave-semantics'
 
 /**
  * One row per Settings Section: the contribution semantics it reports before
@@ -49,6 +49,9 @@ const SETTINGS_SECTION_REGISTRY: Record<SettingsSection, SettingsContribution> =
   users: CLEAN_LEAVE_SEMANTICS,
   audit: CLEAN_LEAVE_SEMANTICS
 }
+
+/** One governance card inside the Users section; each reports its own leave semantics. */
+type UsersSectionSlot = 'userManagement' | 'joinCodes'
 
 export function SettingsPage(): React.JSX.Element | null {
   const { t } = useTranslation('app')
@@ -75,6 +78,30 @@ export function SettingsPage(): React.JSX.Element | null {
     return reporters
   }, [])
   const contribution = contributions[section] ?? SETTINGS_SECTION_REGISTRY[section]
+  // The Users section mounts two governance cards; the section's reported
+  // semantics are the reduction of the two slots' independent reports, so a
+  // command in flight on either card blocks leaving (and an ordinary close)
+  // no matter which card reported last.
+  const [usersSlotContributions, setUsersSlotContributions] = useState<
+    Partial<Record<UsersSectionSlot, SettingsContribution>>
+  >({})
+  const usersSlotReporters = useMemo(
+    () => ({
+      userManagement: (next: SettingsContribution): void =>
+        setUsersSlotContributions((previous) => ({ ...previous, userManagement: next })),
+      joinCodes: (next: SettingsContribution): void =>
+        setUsersSlotContributions((previous) => ({ ...previous, joinCodes: next }))
+    }),
+    []
+  )
+  useEffect(() => {
+    contributionReporters.users(
+      reduceLeaveSemantics(
+        usersSlotContributions.userManagement ?? CLEAN_LEAVE_SEMANTICS,
+        usersSlotContributions.joinCodes ?? CLEAN_LEAVE_SEMANTICS
+      )
+    )
+  }, [contributionReporters, usersSlotContributions])
   const coordinator = useSettingsCoordinator({ entry: { ...entry, section }, contribution })
   const handleServerConnectionSaved = useCallback(async (): Promise<void> => {
     // A new URL becomes the renderer's runtime connect-src only after a
@@ -124,14 +151,14 @@ export function SettingsPage(): React.JSX.Element | null {
             getSession={authentication.getSession}
             serverUrl={connection.url ?? ''}
             currentUserId={authentication.userId}
-            onContributionChange={contributionReporters.users}
+            onContributionChange={usersSlotReporters.userManagement}
           />
         </div>
         <div className="bg-card rounded-lg border">
           <JoinCodesSettings
             getSession={authentication.getSession}
             serverUrl={connection.url ?? ''}
-            onContributionChange={contributionReporters.users}
+            onContributionChange={usersSlotReporters.joinCodes}
           />
         </div>
       </>
