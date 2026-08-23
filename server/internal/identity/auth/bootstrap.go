@@ -2,6 +2,10 @@
 // variables ADMIN_EMAIL / ADMIN_INITIAL_PASSWORD create the first admin with
 // must_change_password set; a non-empty table ignores the variables with a
 // warning so existing accounts are never overwritten by the environment.
+// The insert serializes with the setup-code initialize channel on the
+// first-admin advisory lock and re-proves emptiness inside the transaction
+// (issue #122): whichever channel commits first creates the only first
+// admin, and this channel's loss keeps the inert-with-warning semantics.
 package auth
 
 import (
@@ -15,6 +19,12 @@ import (
 
 	"github.com/nevix-ai/server/internal/identity/audit"
 )
+
+// errBootstrapPreempted reports that users appeared between the
+// construction-time emptiness read and the write transaction — the setup-code
+// channel won the first-admin race. It maps to the same warn-and-ignore
+// outcome as a populated table, never an error.
+var errBootstrapPreempted = errors.New("auth: bootstrap preempted by a first admin")
 
 // Bootstrap runs once at Module construction. A partially configured pair on
 // an empty table is a deployment error and fails construction; on a non-empty
@@ -50,6 +60,18 @@ func (s *Service) Bootstrap(ctx context.Context, adminEmail, adminPassword strin
 
 	var userID string
 	err = s.runner.Run(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, setupAdvisoryLockKey); err != nil {
+			return fmt.Errorf("auth: serialize bootstrap: %w", err)
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM public.users)`).Scan(&exists); err != nil {
+			return fmt.Errorf("auth: re-check users for bootstrap: %w", err)
+		}
+		if exists {
+			// The setup-code channel won the first-admin race while this
+			// module constructed; the environment pair stays inert.
+			return errBootstrapPreempted
+		}
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO public.users (email, password_hash, display_name, role, status, must_change_password)
 			 VALUES ($1, $2, $3, 'admin', 'active', true)
@@ -64,6 +86,10 @@ func (s *Service) Bootstrap(ctx context.Context, adminEmail, adminPassword strin
 			Metadata: map[string]string{"email": email},
 		})
 	})
+	if errors.Is(err, errBootstrapPreempted) {
+		slog.Warn("identity: bootstrap variables ignored because users already exist", "admin_email", adminEmail)
+		return nil
+	}
 	if err != nil {
 		return err
 	}

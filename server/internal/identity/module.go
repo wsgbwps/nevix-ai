@@ -112,6 +112,10 @@ var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 // listener or workers. Construction then runs the first-admin bootstrap: on
 // an empty users table the ADMIN_EMAIL / ADMIN_INITIAL_PASSWORD pair creates
 // the first admin; on a non-empty table the pair is ignored with a warning.
+// Finally, on a still-empty table the first-run setup code is generated and
+// disclosed to the operations log once (issue #122) — the wizard channel the
+// initialize command redeems; the two channels race first-wins on one
+// advisory lock inside their write transactions.
 func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, error) {
 	tx := writetx.New(pool)
 	if err := tx.VerifyStartupIdentity(ctx); err != nil {
@@ -119,6 +123,9 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 	}
 	service := auth.NewService(pool, tx)
 	if err := service.Bootstrap(ctx, cfg.AdminEmail, cfg.AdminInitialPassword); err != nil {
+		return nil, err
+	}
+	if err := service.GenerateSetupCode(ctx); err != nil {
 		return nil, err
 	}
 	return &Module{

@@ -22,12 +22,20 @@ identity_server_binary_dir=""
 identity_server_failure_injector_pid=""
 identity_server_artifact="$desktop_root/test-results/identity-server.log"
 identity_server_failure_marker_dir=""
+setup_server_container=""
+setup_server_port=8081
+setup_server_url=""
+setup_code=""
+e2e_network=""
+setup_wizard_database="setup_wizard"
 tls_terminator_pid=""
 tls_terminator_dir=""
 tls_terminator_log=""
 postgres_container=""
 database_url=""
 identity_database_url=""
+postgres_password=""
+identity_app_password=""
 admin_email="bootstrap.admin@nevix.test"
 admin_initial_password="initial-horse-battery-staple"
 tls_host=127.0.0.1
@@ -49,6 +57,7 @@ export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
 export no_proxy="${NO_PROXY}"
 
 postgres_image="postgres:17.5-alpine"
+setup_server_image="alpine:3.21"
 postgres_host_port=54391
 lock_dir="${TMPDIR:-/tmp}/nevix-ai-desktop-e2e-postgres.lock"
 
@@ -81,6 +90,26 @@ stop_identity_server_process() {
     wait "$identity_server_pid" >/dev/null 2>&1 || true
   fi
   identity_server_pid=""
+}
+
+# The empty-instance server for the setup-wizard spec (issue #122): a second
+# server binary in a container — the port is hardcoded :8080 in the product and
+# PORT configurability belongs to the Docker-delivery issue — against a second,
+# never-bootstrapped database on the same PostgreSQL. Its operations log holds
+# the one-time setup code the spec redeems.
+stop_setup_server() {
+  if [[ -n "$setup_server_container" ]]; then
+    docker logs "$setup_server_container" >>"$identity_server_log" 2>&1 || true
+    docker rm -f "$setup_server_container" >/dev/null 2>&1 || true
+    setup_server_container=""
+  fi
+  if [[ -n "$e2e_network" ]]; then
+    if [[ -n "$postgres_container" ]]; then
+      docker network disconnect -f "$e2e_network" "$postgres_container" >/dev/null 2>&1 || true
+    fi
+    docker network rm "$e2e_network" >/dev/null 2>&1 || true
+    e2e_network=""
+  fi
 }
 
 stop_identity_server_failure_injector() {
@@ -150,6 +179,7 @@ cleanup() {
 
   stop_identity_server_failure_injector
   stop_tls_terminator
+  stop_setup_server
   stop_identity_server_process
   if [[ -n "$identity_server_log" ]]; then
     if ! NEVIX_E2E_REDACT_DATABASE_URL="$database_url" \
@@ -198,10 +228,24 @@ wait_for_identity_server() {
   return 1
 }
 
-start_postgres() {
-  local postgres_password
-  local identity_app_password
+# The postgres entrypoint's initdb phase briefly runs a temporary server that
+# accepts connections before shutting down; pg_isready can answer from it, so
+# provisioning SQL retries until any accepting server commits it. Provisioning
+# committed against the temporary server persists — the data directory carries
+# it into the real one.
+psql_until_ready() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "error: PostgreSQL never accepted provisioning SQL" >&2
+  return 1
+}
 
+start_postgres() {
   postgres_password="$(openssl rand -hex 32)"
   identity_app_password="$(openssl rand -hex 32)"
   postgres_container="nevix-desktop-e2e-pg-$$"
@@ -225,7 +269,7 @@ start_postgres() {
   done
 
   echo "==> Provisioning the identity_app runtime credential"
-  docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
+  psql_until_ready >/dev/null <<SQL
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'identity_app') THEN
@@ -236,11 +280,80 @@ END
 ALTER ROLE identity_app PASSWORD '$identity_app_password';
 SQL
 
+  # The setup-wizard spec needs an instance that has never had a first admin:
+  # a second database on the same PostgreSQL, migrated and bootstrapped (or
+  # not) by its own server process.
+  psql_until_ready >/dev/null <<SQL
+SELECT 'CREATE DATABASE $setup_wizard_database'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$setup_wizard_database')\gexec
+SQL
+
+  # The empty-instance server runs as a container (its port is the product's
+  # hardcoded :8080); a user-defined bridge network lets it reach this
+  # PostgreSQL by name.
+  e2e_network="nevix-desktop-e2e-net-$$"
+  docker network create "$e2e_network" >/dev/null
+  docker network connect --alias postgres "$e2e_network" "$postgres_container" >/dev/null
+
   # MIGRATION_DATABASE_URL stays with the Goose owner credential; the runtime
   # DATABASE_URL authenticates directly as identity_app — the same startup
   # contract as production (ADR-0015).
   database_url="postgresql://identity_app:${identity_app_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
   identity_database_url="postgresql://postgres:${postgres_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
+}
+
+# Builds and boots the empty-instance server: same source, linux binary, never
+# given ADMIN_EMAIL — so its startup generates the one-time setup code, printed
+# once to its log, which this function parses and exports for the spec.
+start_setup_server() {
+  local docker_arch goarch
+
+  docker_arch="$(docker version --format '{{.Server.Arch}}')"
+  case "$docker_arch" in
+    arm64 | aarch64) goarch=arm64 ;;
+    *) goarch=amd64 ;;
+  esac
+  (cd "$repo_root/server" &&
+    CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build \
+      -o "$identity_server_binary_dir/server-linux" ./cmd/server)
+
+  setup_server_container="nevix-desktop-e2e-setup-$$"
+  # No --rm: an early exit keeps its logs for the failure report; cleanup
+  # removes the container either way.
+  docker run -d \
+    --name "$setup_server_container" \
+    --network "$e2e_network" \
+    -p "127.0.0.1:$setup_server_port:8080" \
+    -e DATABASE_URL="postgresql://identity_app:${identity_app_password}@postgres:5432/${setup_wizard_database}?sslmode=disable" \
+    -e MIGRATION_DATABASE_URL="postgresql://postgres:${postgres_password}@postgres:5432/${setup_wizard_database}?sslmode=disable" \
+    -e CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
+    -v "$identity_server_binary_dir:/binaries:ro" \
+    "$setup_server_image" /binaries/server-linux >/dev/null
+
+  for _ in $(seq 1 120); do
+    if curl -fsS "http://127.0.0.1:$setup_server_port/health" >/dev/null 2>&1; then
+      setup_code="$(docker logs "$setup_server_container" 2>&1 \
+        | grep -oE 'setup_code=[0-9A-Z]{4}-[0-9A-Z]{4}' | head -1 | cut -d= -f2)"
+      if [[ -n "$setup_code" ]]; then
+        setup_server_url="http://127.0.0.1:$setup_server_port"
+        echo "==> Empty-instance server ready on $setup_server_url (setup wizard target)"
+        return
+      fi
+      echo "error: empty-instance server started without disclosing a setup code" >&2
+      docker logs "$setup_server_container" >&2 || true
+      return 1
+    fi
+    if ! docker container inspect "$setup_server_container" >/dev/null 2>&1; then
+      echo "error: empty-instance server stopped before its health endpoint was ready" >&2
+      docker logs "$setup_server_container" >&2 || true
+      return 1
+    fi
+    sleep 0.5
+  done
+
+  echo "error: empty-instance server did not become ready" >&2
+  docker logs "$setup_server_container" >&2 || true
+  return 1
 }
 
 start_identity_server() {
@@ -343,12 +456,18 @@ acquire_lock
 require_free_port "$postgres_host_port"
 require_free_port 8080
 require_free_port "$tls_port"
+require_free_port "$setup_server_port"
 
 start_postgres
 start_identity_server
 stabilize_bootstrap_admin
 start_tls_terminator
 server_url="http://127.0.0.1:8080"
+# The empty-instance server exists for the setup-wizard spec, which runs in the
+# full suite only.
+if [[ "$mode" == "full" ]]; then
+  start_setup_server
+fi
 
 pnpm exec electron-vite build --mode test
 
@@ -377,6 +496,8 @@ fi
 NEVIX_TEST_SERVER_URL="$server_url" \
   NEVIX_TEST_ADMIN_EMAIL="$admin_email" \
   NEVIX_TEST_ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
+  NEVIX_TEST_SETUP_SERVER_URL="$setup_server_url" \
+  NEVIX_TEST_SETUP_CODE="$setup_code" \
   NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR="$identity_server_failure_marker_dir" \
   NEVIX_TEST_TLS_URL="https://$tls_host:$tls_port" \
   NEVIX_TEST_TLS_DIR="$tls_terminator_dir" \

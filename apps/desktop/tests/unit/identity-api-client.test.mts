@@ -236,3 +236,144 @@ test('unreachable servers and unreadable bodies degrade to network failures, nev
     }
   )
 })
+
+test('setupStatus reads the one boolean and nothing else, degrading instead of guessing', async () => {
+  await withFetch(
+    (async (input, init) => {
+      assert.equal(input.toString(), 'https://server.example/identity/setup/status')
+      assert.equal(init?.method, 'GET')
+      assert.equal(init?.body, undefined)
+      return jsonResponse({ initialized: false })
+    }) as typeof fetch,
+    async () => {
+      const result = await createIdentityClient(serverUrl).setupStatus()
+      assert.deepEqual(result, { outcome: 'succeeded', value: { initialized: false } })
+    }
+  )
+
+  await withFetch((async () => jsonResponse({ initialized: true })) as typeof fetch, async () => {
+    const result = await createIdentityClient(serverUrl).setupStatus()
+    assert.deepEqual(result, { outcome: 'succeeded', value: { initialized: true } })
+  })
+
+  // A body without the boolean is a broken server, never a setup verdict.
+  await withFetch((async () => jsonResponse({})) as typeof fetch, async () => {
+    const result = await createIdentityClient(serverUrl).setupStatus()
+    assert.deepEqual(result, { outcome: 'network-failure' })
+  })
+})
+
+test('initialize sends the setup-code shape and parses the first-admin session', async () => {
+  const initializeSuccessBody = {
+    token: 'opaque-setup-session-token',
+    expires_at: '2026-01-01T00:00:00Z',
+    user: {
+      id: 'first-admin',
+      email: 'first.admin@example.com',
+      display_name: 'First Admin',
+      role: 'admin',
+      must_change_password: false
+    }
+  }
+
+  await withFetch(
+    (async (input, init) => {
+      assert.equal(input.toString(), 'https://server.example/identity/setup/initialize')
+      assert.equal(init?.method, 'POST')
+      assert.equal(init?.redirect, 'error')
+      assert.deepEqual(init?.headers, { 'Content-Type': 'application/json' })
+      assert.equal(
+        init?.body,
+        JSON.stringify({
+          email: 'first.admin@example.com',
+          password: 'self-chosen-pass-1',
+          setup_code: 'AB23CD45',
+          display_name: 'First Admin'
+        })
+      )
+      return jsonResponse(initializeSuccessBody, 201)
+    }) as typeof fetch,
+    () =>
+      createIdentityClient(serverUrl).initialize(
+        'first.admin@example.com',
+        'self-chosen-pass-1',
+        'AB23CD45',
+        'First Admin'
+      )
+  ).then((result) =>
+    assert.deepEqual(result, {
+      outcome: 'succeeded',
+      value: {
+        token: 'opaque-setup-session-token',
+        expiresAt: '2026-01-01T00:00:00Z',
+        user: {
+          id: 'first-admin',
+          email: 'first.admin@example.com',
+          displayName: 'First Admin',
+          role: 'admin',
+          mustChangePassword: false
+        }
+      }
+    })
+  )
+
+  // A blank display name stays absent from the wire shape.
+  await withFetch(
+    (async (input, init) => {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        email: 'first.admin@example.com',
+        password: 'self-chosen-pass-1',
+        setup_code: 'AB23CD45'
+      })
+      return jsonResponse(initializeSuccessBody, 201)
+    }) as typeof fetch,
+    () =>
+      createIdentityClient(serverUrl).initialize(
+        'first.admin@example.com',
+        'self-chosen-pass-1',
+        'AB23CD45',
+        '  '
+      )
+  ).then((result) => assert.equal(result.outcome, 'succeeded'))
+
+  // The wizard's failure codes keep their machine identities.
+  await withFetch(
+    (async () =>
+      jsonResponse(
+        { error: 'invalid_setup_code', message: 'The setup code is not valid.' },
+        403
+      )) as typeof fetch,
+    async () => {
+      const result = await createIdentityClient(serverUrl).initialize(
+        'first.admin@example.com',
+        'self-chosen-pass-1',
+        '00000000',
+        ''
+      )
+      assert.deepEqual(result, { outcome: 'request-rejected', code: 'invalid_setup_code' })
+    }
+  )
+
+  await withFetch(
+    (async () =>
+      jsonResponse(
+        {
+          error: 'instance_already_initialized',
+          message: 'This instance already has an administrator.'
+        },
+        409
+      )) as typeof fetch,
+    async () => {
+      const result = await createIdentityClient(serverUrl).initialize(
+        'first.admin@example.com',
+        'self-chosen-pass-1',
+        'AB23CD45',
+        ''
+      )
+      assert.deepEqual(result, {
+        outcome: 'request-rejected',
+        code: 'instance_already_initialized'
+      })
+    }
+  )
+})

@@ -34,10 +34,15 @@ export type AuthenticationError =
   | 'password-too-long'
   | 'invalid-join-code'
   | 'email-taken'
+  | 'invalid-setup-code'
+  | 'instance-already-initialized'
   | 'rate-limited'
   | 'service-unavailable'
 
 export type AuthenticationNotice = 'session-expired' | 'remote-sign-out-delayed'
+
+/** The instance's first-run state as the public setup probe answers it. */
+export type InstanceSetupState = 'unknown' | 'uninitialized' | 'initialized'
 
 /** The session handed to authenticated consumers; the token stays out of URLs and storage except the encrypted slot. */
 export interface AuthenticatedSession {
@@ -51,6 +56,8 @@ interface Authentication {
   readonly notice: AuthenticationNotice | undefined
   readonly isSubmitting: boolean
   readonly isSessionPersistenceUnavailable: boolean
+  /** Whether the instance still awaits its first administrator; 'uninitialized' swaps the login boundary for the setup wizard. */
+  readonly instanceSetup: InstanceSetupState
   readonly rememberedEmail: string | undefined
   readonly rememberEmailSelected: boolean
   readonly isRememberedEmailPersistenceUnavailable: boolean
@@ -72,6 +79,12 @@ interface Authentication {
     joinCode: string,
     displayName: string
   ) => Promise<void>
+  readonly initialize: (
+    email: string,
+    password: string,
+    setupCode: string,
+    displayName: string
+  ) => Promise<void>
   readonly completePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
   readonly signOut: () => Promise<void>
 }
@@ -84,6 +97,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const [notice, setNotice] = useState<AuthenticationNotice>()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [persistenceUnavailable, setPersistenceUnavailable] = useState(false)
+  const [instanceSetup, setInstanceSetup] = useState<InstanceSetupState>('unknown')
   const [rememberedEmail, setRememberedEmail] = useState<string>()
   const [rememberEmailSelected, setRememberEmailSelectedState] = useState(true)
   const [rememberedEmailPersistenceUnavailable, setRememberedEmailPersistenceUnavailable] =
@@ -103,6 +117,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const hasShownRememberedEmailPersistenceNoticeRef = useRef(false)
   const hasInitializedRef = useRef(false)
   const restoreInProgressRef = useRef(false)
+  const setupProbeGenerationRef = useRef(0)
 
   const enqueueRememberedEmailMutation = useCallback(
     <Result>(mutation: () => Promise<Result>): Promise<Result> => {
@@ -144,6 +159,19 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     setRememberedEmailPersistenceNoticeSurface(undefined)
   }, [])
 
+  /** Refreshes the instance's first-run state whenever the sign-in boundary settles onto the screen. */
+  const probeSetupStatus = useCallback((): void => {
+    const client = clientRef.current
+    if (!client) return
+    const generation = ++setupProbeGenerationRef.current
+    void client.setupStatus().then((result) => {
+      // A probe from an earlier server URL never overwrites the boundary's state.
+      if (generation !== setupProbeGenerationRef.current) return
+      if (result.outcome !== 'succeeded') return
+      setInstanceSetup(result.value.initialized ? 'initialized' : 'uninitialized')
+    })
+  }, [])
+
   const settleUnauthenticated = useCallback(
     (nextNotice: AuthenticationNotice | undefined): void => {
       credentialsRef.current = undefined
@@ -159,8 +187,9 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       setRememberEmailSelectedState(true)
       statusRef.current = 'unauthenticated'
       setStatus('unauthenticated')
+      probeSetupStatus()
     },
-    [retireRememberedEmailPersistenceNotice]
+    [probeSetupStatus, retireRememberedEmailPersistenceNotice]
   )
 
   /** Ends a session the server has rejected: local credentials die, the login screen explains why. */
@@ -210,6 +239,11 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
     try {
       clientRef.current = createIdentityClient(serverUrl)
+      // A boundary for a new server starts from the unknown setup state until
+      // its own probe answers; a stale wizard from the previous server must
+      // not survive the switch.
+      setupProbeGenerationRef.current += 1
+      setInstanceSetup('unknown')
 
       const [stored, remembered] = await Promise.all([
         readPersistedCredentials(),
@@ -442,6 +476,55 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     [settleSession]
   )
 
+  const initialize = useCallback(
+    async (
+      email: string,
+      password: string,
+      setupCode: string,
+      displayName: string
+    ): Promise<void> => {
+      const client = clientRef.current
+      if (!client || submissionRef.current) return
+
+      submissionRef.current = true
+      setIsSubmitting(true)
+      setError(undefined)
+
+      try {
+        const initialization = await client.initialize(email, password, setupCode, displayName)
+        if (initialization.outcome !== 'succeeded') {
+          if (
+            initialization.outcome === 'request-rejected' &&
+            initialization.code === 'instance_already_initialized'
+          ) {
+            // Another device won the first-admin race: the wizard is over and
+            // the sign-in boundary explains what happened.
+            setInstanceSetup('initialized')
+            setError('instance-already-initialized')
+            return
+          }
+          setError(mapRequestFailure(initialization))
+          return
+        }
+
+        // The first administrator owns the chosen password from the first
+        // moment, so the new session settles straight into the shell; the
+        // encrypted slot is written before it opens. The instance is now
+        // initialized for every later boundary on this device too — the
+        // wizard never renders again, whatever a later status probe answers.
+        setInstanceSetup('initialized')
+        await replacePersistedCredentials(initialization.value)
+        settleSession(initialization.value)
+      } catch {
+        setError('service-unavailable')
+      } finally {
+        submissionRef.current = false
+        setIsSubmitting(false)
+      }
+    },
+    [settleSession]
+  )
+
   const completePasswordChange = useCallback(
     async (currentPassword: string, newPassword: string): Promise<void> => {
       const client = clientRef.current
@@ -515,6 +598,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     notice,
     isSubmitting,
     isSessionPersistenceUnavailable: persistenceUnavailable,
+    instanceSetup,
     rememberedEmail,
     rememberEmailSelected,
     isRememberedEmailPersistenceUnavailable: rememberedEmailPersistenceUnavailable,
@@ -529,6 +613,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     retryRestore: restore,
     signIn,
     register,
+    initialize,
     completePasswordChange,
     signOut
   }
@@ -551,6 +636,8 @@ function mapRequestFailure(failure: IdentityApiFailure): AuthenticationError {
       return 'invalid-join-code'
     case 'email_taken':
       return 'email-taken'
+    case 'invalid_setup_code':
+      return 'invalid-setup-code'
     default:
       return 'service-unavailable'
   }

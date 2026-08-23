@@ -7,7 +7,11 @@ import { Button } from '../../../components/ui/button'
 import { Field, FieldError, FieldGroup, FieldLabel } from '../../../components/ui/field'
 import { Input } from '../../../components/ui/input'
 import { cn } from '../../../lib/utils'
-import type { AuthenticationError, AuthenticationNotice } from '../model/use-authentication'
+import type {
+  AuthenticationError,
+  AuthenticationNotice,
+  InstanceSetupState
+} from '../model/use-authentication'
 import { isPasswordByteLengthValid, passwordByteLengthError } from '../policy/password'
 import { RememberedEmailPersistenceNotice } from './remembered-email-persistence-notice'
 
@@ -16,6 +20,7 @@ interface AuthenticationScreenProps {
   readonly error?: AuthenticationError
   readonly notice?: AuthenticationNotice
   readonly isSubmitting?: boolean
+  readonly instanceSetup: InstanceSetupState
   readonly rememberedEmail?: string
   readonly rememberEmailSelected: boolean
   readonly isRememberedEmailPersistenceUnavailable: boolean
@@ -31,6 +36,12 @@ interface AuthenticationScreenProps {
     joinCode: string,
     displayName: string
   ) => Promise<void>
+  readonly onInitialize: (
+    email: string,
+    password: string,
+    setupCode: string,
+    displayName: string
+  ) => Promise<void>
   readonly onCompletePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
   readonly onSignOut: () => Promise<void>
 }
@@ -40,6 +51,7 @@ export function AuthenticationScreen({
   error,
   notice,
   isSubmitting = false,
+  instanceSetup,
   rememberedEmail,
   rememberEmailSelected,
   isRememberedEmailPersistenceUnavailable,
@@ -50,6 +62,7 @@ export function AuthenticationScreen({
   onDismissError,
   onSignIn,
   onRegister,
+  onInitialize,
   onCompletePasswordChange,
   onSignOut
 }: AuthenticationScreenProps): React.JSX.Element {
@@ -78,7 +91,13 @@ export function AuthenticationScreen({
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-xs">
             {status === 'unauthenticated' ? (
-              mode === 'register' ? (
+              instanceSetup === 'uninitialized' ? (
+                <SetupWizardForm
+                  error={error}
+                  isSubmitting={isSubmitting}
+                  onInitialize={onInitialize}
+                />
+              ) : mode === 'register' ? (
                 <RegistrationForm
                   error={error}
                   isSubmitting={isSubmitting}
@@ -258,6 +277,132 @@ function LoginForm({
             {t('register.switchToRegister')}
           </button>
         </div>
+      </FieldGroup>
+    </form>
+  )
+}
+
+function SetupWizardForm({
+  error,
+  isSubmitting,
+  onInitialize
+}: {
+  readonly error?: AuthenticationError
+  readonly isSubmitting: boolean
+  readonly onInitialize: (
+    email: string,
+    password: string,
+    setupCode: string,
+    displayName: string
+  ) => Promise<void>
+}): React.JSX.Element {
+  const { t } = useTranslation('authentication')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [setupCode, setSetupCode] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const isPasswordValid = isPasswordByteLengthValid(password)
+  const isConfirmMismatch = confirmPassword !== '' && confirmPassword !== password
+  const isSetupCodeReady = setupCode.trim() !== ''
+  const canSubmit =
+    email.trim() !== '' &&
+    isPasswordValid &&
+    confirmPassword !== '' &&
+    confirmPassword === password &&
+    isSetupCodeReady
+
+  function submit(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+    if (isSubmitting || !canSubmit) return
+
+    void onInitialize(email, password, setupCode.trim(), displayName)
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <FormHeader heading={t('setupWizard.heading')} description={t('setupWizard.description')} />
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="setup-wizard-email">{t('setupWizard.email')}</FieldLabel>
+          <Input
+            id="setup-wizard-email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            disabled={isSubmitting}
+            autoFocus
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="setup-wizard-password">{t('setupWizard.password')}</FieldLabel>
+          <PasswordInput
+            id="setup-wizard-password"
+            name="password"
+            autoComplete="new-password"
+            required
+            disabled={isSubmitting}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <PasswordPolicyFeedback password={password} />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="setup-wizard-confirm-password">
+            {t('setupWizard.confirmPassword')}
+          </FieldLabel>
+          <PasswordInput
+            id="setup-wizard-confirm-password"
+            name="confirmPassword"
+            autoComplete="new-password"
+            required
+            disabled={isSubmitting}
+            aria-invalid={isConfirmMismatch || undefined}
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+          />
+          {isConfirmMismatch ? (
+            <FieldError>{t('setupWizard.confirmPasswordMismatch')}</FieldError>
+          ) : null}
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="setup-wizard-code">{t('setupWizard.setupCode')}</FieldLabel>
+          <Input
+            id="setup-wizard-code"
+            name="setupCode"
+            type="text"
+            inputMode="text"
+            autoCapitalize="characters"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={64}
+            required
+            disabled={isSubmitting}
+            value={setupCode}
+            onChange={(event) => setSetupCode(event.target.value)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="setup-wizard-display-name">
+            {t('setupWizard.displayName')}
+          </FieldLabel>
+          <Input
+            id="setup-wizard-display-name"
+            name="displayName"
+            type="text"
+            maxLength={128}
+            disabled={isSubmitting}
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
+        </Field>
+        {error ? <AuthenticationErrorMessage error={error} context="setup-wizard" /> : null}
+        <Button type="submit" disabled={isSubmitting || !canSubmit}>
+          {t(isSubmitting ? 'setupWizard.submitting' : 'setupWizard.submit')}
+        </Button>
       </FieldGroup>
     </form>
   )
@@ -550,12 +695,13 @@ function PasswordPolicyFeedback({
   )
 }
 
-type AuthenticationErrorContext = 'login' | 'password-change' | 'register'
+type AuthenticationErrorContext = 'login' | 'password-change' | 'register' | 'setup-wizard'
 
 const ERROR_CONTEXT_KEYS = {
   login: 'login',
   'password-change': 'passwordChange',
-  register: 'register'
+  register: 'register',
+  'setup-wizard': 'setupWizard'
 } as const
 
 function AuthenticationErrorMessage({
@@ -585,6 +731,10 @@ function AuthenticationErrorMessage({
     message = t('register.invalidJoinCode')
   } else if (error === 'email-taken') {
     message = t('register.emailTaken')
+  } else if (error === 'invalid-setup-code') {
+    message = t('setupWizard.invalidSetupCode')
+  } else if (error === 'instance-already-initialized') {
+    message = t('setupWizard.instanceAlreadyInitialized')
   } else if (error === 'rate-limited') {
     message = t(`${ERROR_CONTEXT_KEYS[context]}.rateLimited`)
   } else {

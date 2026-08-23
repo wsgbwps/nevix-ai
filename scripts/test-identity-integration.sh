@@ -140,6 +140,14 @@ assert_identity_integration_executed() {
     TestConcurrentCreatesCannotExceedTheActiveCap
     TestRevokeRemovesCodeFromListAndKeepsTheRow
     TestJoinCodeSurfaceIsAdminOnlyAndShapeChecked
+    TestSetupCodeGeneratedAndLoggedOnceOnEmptyDatabase
+    TestSetupStatusReturnsOnlyTheInitializedBoolean
+    TestInitializeCreatesFirstAdminAndSession
+    TestInitializeRejectsWrongCodeAndRateLimits
+    TestInitializeAnswersConflictOnceInitialized
+    TestRestartRotatesTheSetupCode
+    TestConcurrentInitializeIsFirstWins
+    TestBootstrapAndInitializeRaceCreatesExactlyOneAdmin
     TestDirectoryShowsActiveUsersToEveryActiveUser
     TestManagementListShowsEveryAccountToAdminsOnly
     TestAuditListIsAdminOnlyAndNewestFirst

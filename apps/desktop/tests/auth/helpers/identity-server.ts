@@ -12,6 +12,15 @@ export interface IdentityServerConfig {
   readonly adminPassword: string
 }
 
+/**
+ * The disposable empty-instance server the setup-wizard spec drives: never bootstrapped by
+ * environment variables, initialized by the spec itself through the wizard.
+ */
+export interface SetupServerConfig {
+  readonly serverUrl: string
+  readonly setupCode: string
+}
+
 export interface TestIdentity {
   readonly email: string
   readonly password: string
@@ -44,6 +53,18 @@ export function readIdentityServerConfig(): IdentityServerConfig | undefined {
   const adminPassword = process.env.NEVIX_TEST_ADMIN_INITIAL_PASSWORD
   if (!serverUrl || !adminEmail || !adminPassword) return undefined
   return { serverUrl, adminEmail, adminPassword }
+}
+
+/**
+ * Reads the empty-instance server exported by the E2E command: its URL plus the one-time
+ * setup code parsed from that server's operations log. The code is only live until the
+ * spec initializes the instance with it.
+ */
+export function readSetupServerConfig(): SetupServerConfig | undefined {
+  const serverUrl = process.env.NEVIX_TEST_SETUP_SERVER_URL
+  const setupCode = process.env.NEVIX_TEST_SETUP_CODE
+  if (!serverUrl || !setupCode) return undefined
+  return { serverUrl, setupCode }
 }
 
 export function uniqueIdentity(prefix: string): TestIdentity {

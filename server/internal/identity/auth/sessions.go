@@ -266,11 +266,15 @@ func (s *Service) loadUserByID(ctx context.Context, userID string) (userRecord, 
 
 // Service owns authentication: session lifecycle, login/logout/me commands,
 // bootstrap, and the maintenance sweep. Reads use the pool; every write runs
-// through the Write Transaction Module.
+// through the Write Transaction Module. setupCode holds the first-run setup
+// code (issue #122): written once by GenerateSetupCode on construction over
+// an empty users table and never mutated after, its lifetime is the process —
+// the initialize transaction's empty-table re-check is what retires it.
 type Service struct {
-	db      *pgxpool.Pool
-	runner  *writetx.Runner
-	limiter *LoginRateLimiter
+	db        *pgxpool.Pool
+	runner    *writetx.Runner
+	limiter   *LoginRateLimiter
+	setupCode string
 }
 
 // NewService builds the service over the runtime pool and the shared write

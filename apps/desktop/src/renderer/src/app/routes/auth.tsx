@@ -26,6 +26,7 @@ function AuthenticationView(): React.JSX.Element | null {
       error={authentication.error}
       notice={authentication.notice}
       isSubmitting={authentication.isSubmitting}
+      instanceSetup={authentication.instanceSetup}
       rememberedEmail={authentication.rememberedEmail}
       rememberEmailSelected={authentication.rememberEmailSelected}
       isRememberedEmailPersistenceUnavailable={
@@ -42,6 +43,7 @@ function AuthenticationView(): React.JSX.Element | null {
       onDismissError={authentication.dismissError}
       onSignIn={authentication.signIn}
       onRegister={authentication.register}
+      onInitialize={authentication.initialize}
       onCompletePasswordChange={authentication.completePasswordChange}
       onSignOut={authentication.signOut}
     />
