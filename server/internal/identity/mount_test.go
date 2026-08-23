@@ -56,6 +56,7 @@ func TestRegisterDerivesPreflightSurfaceFromRouteTable(t *testing.T) {
 	// command.
 	for path, wantMethods := range map[string]string{
 		"/identity/auth/login":                    "POST, OPTIONS",
+		"/identity/register":                      "POST, OPTIONS",
 		"/identity/auth/logout":                   "POST, OPTIONS",
 		"/identity/auth/change-password":          "POST, OPTIONS",
 		"/identity/users/me":                      "GET, PATCH, OPTIONS",
@@ -123,7 +124,7 @@ func TestDerivedPreflightMatchesParameterizedRoutePattern(t *testing.T) {
 	}
 }
 
-func TestRegisterGuardsEveryRouteExceptLogin(t *testing.T) {
+func TestRegisterGuardsEveryRouteExceptThePublicEntries(t *testing.T) {
 	handler := mountedRegister()
 
 	// The guarded commands without a session never reach the handler: the
@@ -152,13 +153,16 @@ func TestRegisterGuardsEveryRouteExceptLogin(t *testing.T) {
 		}
 	}
 
-	// The public login command without a session reaches the handler, which
-	// rejects the empty body with the request-shape 400 envelope.
-	rec := doMountedRequest(handler, http.MethodPost, "/identity/auth/login", "")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("public login: status %d body %s, want 400", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); !strings.Contains(got, `"invalid_request"`) {
-		t.Fatalf("public login envelope %q, want invalid_request", got)
+	// The two public entry commands — login and join-code self-registration —
+	// reach their handlers without a session, which reject the empty body
+	// with the request-shape 400 envelope.
+	for _, path := range []string{"/identity/auth/login", "/identity/register"} {
+		rec := doMountedRequest(handler, http.MethodPost, path, "")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("public %s: status %d body %s, want 400", path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Body.String(); !strings.Contains(got, `"invalid_request"`) {
+			t.Fatalf("public %s envelope %q, want invalid_request", path, got)
+		}
 	}
 }

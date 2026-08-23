@@ -352,13 +352,17 @@ server_url="http://127.0.0.1:8080"
 
 pnpm exec electron-vite build --mode test
 
-playwright_args=(--workers=2)
+# The suite shares one identity server: join-code state is global to it, and
+# settings specs assert the active-code list's emptiness. Registration specs
+# (tests/auth) mint and revoke codes too, so parallel files could expose an
+# active code to those assertions — the suite runs serially, keeping every
+# global-state assertion deterministic.
+playwright_args=(--workers=1)
 if [[ "$mode" == "smoke" ]]; then
   playwright_args+=(--grep '@smoke')
 elif [[ "$mode" == "settings" ]]; then
-  playwright_args=(
+  playwright_args+=(
     tests/settings/settings-page.spec.ts
-    --workers=1
   )
 fi
 if [[ "$failure_injection" == "after-renderer-launch" ]]; then

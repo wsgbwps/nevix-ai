@@ -153,6 +153,73 @@ export async function disableTeamUser(config: IdentityServerConfig, userId: stri
 }
 
 /**
+ * Creates one active join code via the Admin API and returns its plaintext form (issue #120
+ * governance surface). Codes are reusable; revocation is the only lifecycle end.
+ */
+export interface JoinCodeView {
+  readonly id: string
+  readonly code: string
+  readonly label: string
+  readonly created_at: string
+}
+
+export async function createJoinCode(
+  config: IdentityServerConfig,
+  label = ''
+): Promise<JoinCodeView> {
+  const token = await adminToken(config)
+  const response = await fetch(new URL('/identity/admin/join-codes', config.serverUrl), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ label })
+  })
+  expect(response.status, await response.clone().text()).toBe(201)
+  return (await response.json()) as JoinCodeView
+}
+
+/** Revokes a join code: redemption attempts on it fail from that commit on. */
+export async function revokeJoinCode(
+  config: IdentityServerConfig,
+  joinCodeId: string
+): Promise<void> {
+  const token = await adminToken(config)
+  const response = await fetch(
+    new URL(`/identity/admin/join-codes/${joinCodeId}`, config.serverUrl),
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    }
+  )
+  expect(response.status, await response.clone().text()).toBe(200)
+}
+
+/**
+ * Suite-cleanup revocation for join codes. The suite shares one identity server, and
+ * settings specs assert the active-code list's emptiness, so a leaked active code must
+ * never be silent: 200 (revoked now) and 404 (already revoked) are success; any other
+ * outcome — or a network failure — fails the test that leaked it.
+ */
+export async function revokeJoinCodeForCleanup(
+  config: IdentityServerConfig,
+  joinCodeId: string
+): Promise<void> {
+  const token = await adminToken(config)
+  const response = await fetch(
+    new URL(`/identity/admin/join-codes/${joinCodeId}`, config.serverUrl),
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    }
+  )
+  if (response.status !== 200 && response.status !== 404) {
+    expect(response.status, await response.clone().text()).toBe(200)
+  }
+}
+
+/**
  * Resets a member's password via the Admin API. The server revokes every session of that
  * user in the same write transaction, so this doubles as the out-of-band revocation path.
  */

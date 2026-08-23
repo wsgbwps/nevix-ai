@@ -39,7 +39,9 @@ function AuthenticationView(): React.JSX.Element | null {
       onRememberedEmailPersistenceNoticeShown={
         authentication.consumeRememberedEmailPersistenceNotice
       }
+      onDismissError={authentication.dismissError}
       onSignIn={authentication.signIn}
+      onRegister={authentication.register}
       onCompletePasswordChange={authentication.completePasswordChange}
       onSignOut={authentication.signOut}
     />

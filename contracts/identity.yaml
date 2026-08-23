@@ -285,6 +285,152 @@ paths:
                       error:
                         enum:
                           - internal_error
+  /identity/register:
+    post:
+      operationId: registerWithJoinCode
+      summary: 凭加入码自注册并直接进入应用
+      description: |-
+        拿到 server URL 与活跃加入码的人自选 email、密码、显示名（可选）完成注册（ADR-0015 2026-08-23 修订）：账号落地即 active member，must_change_password=false（密码本人自设，无强制改密），响应携带首个 session token，形态与登录相同。单一写事务：锁定活跃码行校验 → INSERT 用户 → 写 user_self_registered 审计行 → 发 session。码可复用，不随注册消耗。
+
+        码错、已吊销的码与无活跃码（自注册关闭）统一回答 403 invalid_join_code，不做区分（不给枚举面）；注册入口始终可见，是否关闭由提交时的该答案揭示。email 已被占用回答 409 email_taken。同一 email 的失败尝试（码错/邮箱占用）计入与登录共享的进程内限速，达到上限回答 429（数值为信息性，客户端依赖 Retry-After）。加入码为 8 位 Crockford base32，服务端比对前统一 trim 与大写化（大小写不敏感）。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+                - join_code
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 裸 RFC 5322 地址，服务端统一按小写规范化；必须是未被占用的 email。
+                password:
+                  type: string
+                  description: 本人自设的明文密码，经 TLS（或内网 http）传输，服务端只存哈希；最小长度 8。
+                join_code:
+                  type: string
+                  description: Admin 签发的 8 位 Crockford base32 注册码；服务端比对前统一大写化。任意不匹配的字符串（含超长值）统一按 403 invalid_join_code 回答，不设长度上限（受请求体 4KB 上限约束）。
+                display_name:
+                  type: string
+                  maxLength: 128
+                  description: 可选显示名；缺省时服务端以 email 本地部分派生。
+      responses:
+        "201":
+          description: 注册成功，返回首个会话 token 与账号信息（形态同登录 200）。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - token
+                  - expires_at
+                  - user
+                properties:
+                  token:
+                    type: string
+                    description: opaque session token；客户端持有本体，服务端只存 hash，经 Authorization Bearer 头携带，永不进 URL。
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: 会话过期时刻（30 天滑动过期）。
+                  user:
+                    type: object
+                    required:
+                      - id
+                      - email
+                      - display_name
+                      - role
+                      - must_change_password
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      display_name:
+                        type: string
+                      role:
+                        type: string
+                        enum:
+                          - member
+                      must_change_password:
+                        type: boolean
+                        description: 自注册密码本人自设，恒为 false。
+        "400":
+          description: 请求不合法 —— invalid_request 指请求体缺少 email/password/join_code 或不是 JSON；invalid_email 指 email 不是裸地址；password_too_short 指密码低于最小长度；invalid_password 指密码超过 72 字节（bcrypt 容量上限，与改密面同码）；invalid_display_name 指显示名超长。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_email
+                          - password_too_short
+                          - invalid_password
+                          - invalid_display_name
+        "403":
+          description: 加入码无效 —— 码错、已吊销与无活跃码（自注册关闭）的统一答案，不区分。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_join_code
+        "409":
+          description: email 已被其他账号占用。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - email_taken
+        "429":
+          description: 同一 email 的注册失败次数达到与登录共享的进程内限速上限；窗口与上限数值为信息性，客户端以 Retry-After 为准。
+          headers:
+            Retry-After:
+              description: 距允许再次尝试的剩余秒数（整数）。
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - register_rate_limited
+        "500":
+          description: 服务端内部错误，账号与 session 均未创建。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
   /identity/users/me:
     get:
       operationId: getCurrentUser

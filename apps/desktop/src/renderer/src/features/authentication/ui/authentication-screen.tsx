@@ -23,7 +23,14 @@ interface AuthenticationScreenProps {
   readonly onRetryRestore: () => Promise<void>
   readonly onRememberEmailSelectedChange: (selected: boolean) => void
   readonly onRememberedEmailPersistenceNoticeShown: () => void
+  readonly onDismissError: () => void
   readonly onSignIn: (email: string, password: string) => Promise<void>
+  readonly onRegister: (
+    email: string,
+    password: string,
+    joinCode: string,
+    displayName: string
+  ) => Promise<void>
   readonly onCompletePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
   readonly onSignOut: () => Promise<void>
 }
@@ -40,12 +47,22 @@ export function AuthenticationScreen({
   onRetryRestore,
   onRememberEmailSelectedChange,
   onRememberedEmailPersistenceNoticeShown,
+  onDismissError,
   onSignIn,
+  onRegister,
   onCompletePasswordChange,
   onSignOut
 }: AuthenticationScreenProps): React.JSX.Element {
   const { t } = useTranslation('authentication')
   const { theme } = useTheme()
+  // Both unauthenticated surfaces share the model-owned error slot; switching modes dismisses
+  // the stale verdict so one form's failure never shows inside the other.
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+
+  function switchMode(nextMode: 'login' | 'register'): void {
+    onDismissError()
+    setMode(nextMode)
+  }
 
   return (
     <main className="bg-card relative grid h-svh lg:grid-cols-2">
@@ -61,18 +78,28 @@ export function AuthenticationScreen({
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-xs">
             {status === 'unauthenticated' ? (
-              <LoginForm
-                error={error}
-                notice={notice}
-                isSubmitting={isSubmitting}
-                rememberedEmail={rememberedEmail}
-                rememberEmailSelected={rememberEmailSelected}
-                isRememberedEmailPersistenceUnavailable={isRememberedEmailPersistenceUnavailable}
-                rememberedEmailPersistenceNoticeSurface={rememberedEmailPersistenceNoticeSurface}
-                onSignIn={onSignIn}
-                onRememberEmailSelectedChange={onRememberEmailSelectedChange}
-                onRememberedEmailPersistenceNoticeShown={onRememberedEmailPersistenceNoticeShown}
-              />
+              mode === 'register' ? (
+                <RegistrationForm
+                  error={error}
+                  isSubmitting={isSubmitting}
+                  onRegister={onRegister}
+                  onBackToLogin={() => switchMode('login')}
+                />
+              ) : (
+                <LoginForm
+                  error={error}
+                  notice={notice}
+                  isSubmitting={isSubmitting}
+                  rememberedEmail={rememberedEmail}
+                  rememberEmailSelected={rememberEmailSelected}
+                  isRememberedEmailPersistenceUnavailable={isRememberedEmailPersistenceUnavailable}
+                  rememberedEmailPersistenceNoticeSurface={rememberedEmailPersistenceNoticeSurface}
+                  onSignIn={onSignIn}
+                  onSwitchToRegister={() => switchMode('register')}
+                  onRememberEmailSelectedChange={onRememberEmailSelectedChange}
+                  onRememberedEmailPersistenceNoticeShown={onRememberedEmailPersistenceNoticeShown}
+                />
+              )
             ) : status === 'password-change-required' ? (
               <FirstLoginPasswordChangeForm
                 error={error}
@@ -141,6 +168,7 @@ function LoginForm({
   isRememberedEmailPersistenceUnavailable,
   rememberedEmailPersistenceNoticeSurface,
   onSignIn,
+  onSwitchToRegister,
   onRememberEmailSelectedChange,
   onRememberedEmailPersistenceNoticeShown
 }: {
@@ -152,6 +180,7 @@ function LoginForm({
   readonly isRememberedEmailPersistenceUnavailable: boolean
   readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   readonly onSignIn: (email: string, password: string) => Promise<void>
+  readonly onSwitchToRegister: () => void
   readonly onRememberEmailSelectedChange: (selected: boolean) => void
   readonly onRememberedEmailPersistenceNoticeShown: () => void
 }): React.JSX.Element {
@@ -219,6 +248,127 @@ function LoginForm({
         <Button type="submit" disabled={isSubmitting}>
           {t(isSubmitting ? 'login.submitting' : 'login.submit')}
         </Button>
+        <div className="flex justify-center text-sm">
+          <button
+            type="button"
+            className="font-medium underline underline-offset-4"
+            disabled={isSubmitting}
+            onClick={onSwitchToRegister}
+          >
+            {t('register.switchToRegister')}
+          </button>
+        </div>
+      </FieldGroup>
+    </form>
+  )
+}
+
+function RegistrationForm({
+  error,
+  isSubmitting,
+  onRegister,
+  onBackToLogin
+}: {
+  readonly error?: AuthenticationError
+  readonly isSubmitting: boolean
+  readonly onRegister: (
+    email: string,
+    password: string,
+    joinCode: string,
+    displayName: string
+  ) => Promise<void>
+  readonly onBackToLogin: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation('authentication')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const isPasswordValid = isPasswordByteLengthValid(password)
+  const isJoinCodeReady = joinCode.trim() !== ''
+  const canSubmit = email.trim() !== '' && isPasswordValid && isJoinCodeReady
+
+  function submit(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+    if (isSubmitting || !canSubmit) return
+
+    void onRegister(email, password, joinCode.trim(), displayName)
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <FormHeader heading={t('register.heading')} description={t('register.description')} />
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="registration-email">{t('register.email')}</FieldLabel>
+          <Input
+            id="registration-email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            disabled={isSubmitting}
+            autoFocus
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="registration-password">{t('register.password')}</FieldLabel>
+          <PasswordInput
+            id="registration-password"
+            name="password"
+            autoComplete="new-password"
+            required
+            disabled={isSubmitting}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <PasswordPolicyFeedback password={password} />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="registration-join-code">{t('register.joinCode')}</FieldLabel>
+          <Input
+            id="registration-join-code"
+            name="joinCode"
+            type="text"
+            inputMode="text"
+            autoCapitalize="characters"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={64}
+            required
+            disabled={isSubmitting}
+            value={joinCode}
+            onChange={(event) => setJoinCode(event.target.value)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="registration-display-name">{t('register.displayName')}</FieldLabel>
+          <Input
+            id="registration-display-name"
+            name="displayName"
+            type="text"
+            maxLength={128}
+            disabled={isSubmitting}
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
+        </Field>
+        {error ? <AuthenticationErrorMessage error={error} context="register" /> : null}
+        <Button type="submit" disabled={isSubmitting || !canSubmit}>
+          {t(isSubmitting ? 'register.submitting' : 'register.submit')}
+        </Button>
+        <div className="flex justify-center text-sm">
+          <button
+            type="button"
+            className="font-medium underline underline-offset-4"
+            disabled={isSubmitting}
+            onClick={onBackToLogin}
+          >
+            {t('register.backToLogin')}
+          </button>
+        </div>
       </FieldGroup>
     </form>
   )
@@ -400,7 +550,13 @@ function PasswordPolicyFeedback({
   )
 }
 
-type AuthenticationErrorContext = 'login' | 'password-change'
+type AuthenticationErrorContext = 'login' | 'password-change' | 'register'
+
+const ERROR_CONTEXT_KEYS = {
+  login: 'login',
+  'password-change': 'passwordChange',
+  register: 'register'
+} as const
 
 function AuthenticationErrorMessage({
   error,
@@ -425,10 +581,14 @@ function AuthenticationErrorMessage({
     message = t('passwordPolicy.tooShort')
   } else if (error === 'password-too-long') {
     message = t('passwordPolicy.tooLong')
+  } else if (error === 'invalid-join-code') {
+    message = t('register.invalidJoinCode')
+  } else if (error === 'email-taken') {
+    message = t('register.emailTaken')
   } else if (error === 'rate-limited') {
-    message = t(context === 'login' ? 'login.rateLimited' : 'passwordChange.rateLimited')
+    message = t(`${ERROR_CONTEXT_KEYS[context]}.rateLimited`)
   } else {
-    message = t(context === 'login' ? 'login.serviceError' : 'passwordChange.serviceError')
+    message = t(`${ERROR_CONTEXT_KEYS[context]}.serviceError`)
   }
 
   return (
