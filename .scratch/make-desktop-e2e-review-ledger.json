@@ -1,0 +1,69 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "e09f9d7",
+  "scopePaths": ["Makefile", "README.md"],
+  "currentDiffDigest": "sha256:e438bff9155dc11ca2bd91e8ca4cdf2426d9f13fb1e51c376217dabed51ea48b",
+  "reviewedDiffDigest": "sha256:cbd1c59deb2dcf99096b7f706005233ea4de8e9f3e56a522ce548a256351556c",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 0,
+  "reviewMode": "initial",
+  "specSource": "用户会话请求：桌面端测试改为 make 入口（Docker 手工操作麻烦）；边界：E2E pinned 容器栈设计不变，只做包装 + 前置检查 + 本地开发 Postgres 生命周期",
+  "standardsSources": [
+    "AGENTS.md",
+    "docs/agents/delivery.md",
+    "Makefile 既有风格"
+  ],
+  "commits": ["c827be6", "1a96e84"],
+  "findings": [
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "Makefile",
+        "source": "postgres/postgres-down 生命周期语义（用户请求：make 命令管理 Docker 烦琐项）",
+        "anchor": "Makefile:postgres-down",
+        "defect": "旧实现 `docker rm -f … || true` 吞掉所有错误而非仅容忍容器不存在；Docker 不可用或移除被拒时假报成功"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "advisory 级失败路径缺陷；评审后当即在本任务范围内修复（commit 1a96e84：仅容忍不存在并复用 docker-ready 前置，真实移除失败如实非零退出），并在修复后的树上重新验证（不存在→如实 no-op 提示；up→down→0 残留）。非 blocker，不进入 targeted 修复环。",
+      "owner": "Makefile",
+      "status": "closed",
+      "evidence": [
+        "初始评审 bundle（digest cbd1c59d…）中 postgres-down 为 `|| true` 全吞错误",
+        "修复后验证：`make postgres-down`（容器不存在）→ 'ok - nevix-dev-postgres 不存在，无需清理'；`make postgres && make postgres-down` → 容器移除、docker ps -a 计数 0"
+      ],
+      "reviewedDiffDigest": "sha256:cbd1c59deb2dcf99096b7f706005233ea4de8e9f3e56a522ce548a256351556c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [
+    {
+      "fixFor": ["CR-SPEC-0001"],
+      "note": "advisory 的范围内顺手修复（非 blocker 收敛环）；见 finding dispositionReason",
+      "beforeDigest": "sha256:cbd1c59deb2dcf99096b7f706005233ea4de8e9f3e56a522ce548a256351556c",
+      "afterDigest": "sha256:e438bff9155dc11ca2bd91e8ca4cdf2426d9f13fb1e51c376217dabed51ea48b",
+      "touchedPaths": ["Makefile"],
+      "checks": [
+        "make postgres-down（不存在）ok 提示",
+        "make postgres && make postgres-down → 0 容器残留",
+        "make -n test-e2e-smoke / docker-ready / postgres 语法正确"
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "name": "make 目标实测（修复后树, digest e438bff9…）",
+    "result": "PASS",
+    "coverage": "make docker-ready 通过；make postgres 起容器含就绪等待、二次运行幂等；make postgres-down 不存在→如实提示、存在→移除后 0 残留；make test-e2e-smoke 真实跑通 17/17（pinned PostgreSQL 容器 + 临时 Go server + Electron 全链路）",
+    "diffDigest": "sha256:e438bff9155dc11ca2bd91e8ca4cdf2426d9f13fb1e51c376217dabed51ea48b"
+  },
+  "axisVerdicts": {
+    "standards": {
+      "candidates": 0,
+      "verdict": "correct; 无标准违背或材料性 smell"
+    },
+    "spec": { "candidates": 1, "verdict": "1 advisory（已在范围内修复并复验）" }
+  },
+  "outcome": "closed"
+}
