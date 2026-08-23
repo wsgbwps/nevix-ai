@@ -228,6 +228,23 @@ wait_for_identity_server() {
   return 1
 }
 
+# The postgres entrypoint's initdb phase briefly runs a temporary server that
+# accepts connections before shutting down; pg_isready can answer from it, so
+# provisioning SQL retries until any accepting server commits it. Provisioning
+# committed against the temporary server persists — the data directory carries
+# it into the real one.
+psql_until_ready() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "error: PostgreSQL never accepted provisioning SQL" >&2
+  return 1
+}
+
 start_postgres() {
   postgres_password="$(openssl rand -hex 32)"
   identity_app_password="$(openssl rand -hex 32)"
@@ -252,7 +269,7 @@ start_postgres() {
   done
 
   echo "==> Provisioning the identity_app runtime credential"
-  docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
+  psql_until_ready >/dev/null <<SQL
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'identity_app') THEN
@@ -266,7 +283,7 @@ SQL
   # The setup-wizard spec needs an instance that has never had a first admin:
   # a second database on the same PostgreSQL, migrated and bootstrapped (or
   # not) by its own server process.
-  docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
+  psql_until_ready >/dev/null <<SQL
 SELECT 'CREATE DATABASE $setup_wizard_database'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$setup_wizard_database')\gexec
 SQL
