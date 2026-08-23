@@ -36,8 +36,12 @@ postgres:
 	[ "$$ready" = 1 ] || { echo "error: nevix-dev-postgres 未在 30s 内就绪" >&2; exit 1; }
 	@echo "ok - nevix-dev-postgres ready on 127.0.0.1:5432 (postgres superuser password: dev)"
 
-postgres-down:
-	@docker rm -f nevix-dev-postgres >/dev/null 2>&1 || true
+postgres-down: docker-ready
+	@if docker container inspect nevix-dev-postgres >/dev/null 2>&1; then \
+		docker rm -f nevix-dev-postgres; \
+	else \
+		echo "ok - nevix-dev-postgres 不存在，无需清理"; \
+	fi
 
 docker-ready:
 	@docker info >/dev/null 2>&1 || { echo "error: Docker 未运行 —— 测试栈需要它拉起 PostgreSQL；先启动 Docker Desktop 再重试" >&2; exit 1; }
