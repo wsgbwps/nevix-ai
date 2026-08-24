@@ -46,7 +46,7 @@ test('a join-code holder registers from the login screen and enters the app', as
         ).toBeVisible()
 
         await launched.page.getByLabel('Email').fill(identity.email)
-        await launched.page.getByLabel('Password').fill(identity.password)
+        await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
         await launched.page.getByLabel('Confirm password').fill(identity.password)
         await launched.page.getByLabel('Join code').fill(code.code)
         await launched.page.getByLabel('Display name (optional)').fill('Self Registered')
@@ -94,7 +94,7 @@ test('a revoked join code keeps the register form on the boundary with its error
       try {
         await launched.page.getByRole('button', { name: 'Register with a join code' }).click()
         await launched.page.getByLabel('Email').fill(identity.email)
-        await launched.page.getByLabel('Password').fill(identity.password)
+        await launched.page.getByLabel('Password', { exact: true }).fill(identity.password)
         await launched.page.getByLabel('Confirm password').fill(identity.password)
         await launched.page.getByLabel('Join code').fill(code.code)
         await launched.page.getByRole('button', { name: 'Register', exact: true }).click()

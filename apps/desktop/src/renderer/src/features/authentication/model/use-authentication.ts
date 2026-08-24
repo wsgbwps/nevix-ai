@@ -1,23 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  createIdentityClient,
-  type IdentityApiFailure,
-  type IdentityClient,
-  type SessionCredentials,
-  type UserAccount
-} from '../api/client'
-import {
-  clearRememberedEmail,
-  readRememberedEmail,
-  replaceRememberedEmail
-} from '../api/remembered-email'
+import type { GoAuthentication, SessionCredentials, UserAccount } from '../api/go-authentication'
+import { createGoAuthenticationOverHttp } from '../api/go-authentication-http'
+import { createRememberedEmailPersistenceOverIpc } from '../api/remembered-email'
+import type { RememberedEmailPersistence } from '../api/remembered-email-persistence'
 import { isPasswordByteLengthValid } from '../policy/password'
-import {
-  clearPersistedSession,
-  isSessionPersistenceUnavailable,
-  readPersistedCredentials,
-  replacePersistedCredentials
-} from '../session/persisted-session'
+import { createSessionPersistenceOverIpc } from '../session/persisted-session'
+import type { SessionPersistence } from '../session/session-persistence'
 
 export type AuthenticationStatus =
   | 'restoring'
@@ -116,7 +104,9 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const [userEmail, setUserEmail] = useState<string | undefined>()
   const [userId, setUserId] = useState<string | undefined>()
   const [userRole, setUserRole] = useState<UserAccount['role'] | undefined>()
-  const clientRef = useRef<IdentityClient | null>(null)
+  const goAuthenticationRef = useRef<GoAuthentication | null>(null)
+  const sessionPersistenceRef = useRef<SessionPersistence | undefined>(undefined)
+  const rememberedEmailPersistenceRef = useRef<RememberedEmailPersistence | undefined>(undefined)
   const credentialsRef = useRef<SessionCredentials | undefined>(undefined)
   const submissionRef = useRef(false)
   const statusRef = useRef<AuthenticationStatus>('restoring')
@@ -127,6 +117,17 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const hasInitializedRef = useRef(false)
   const restoreInProgressRef = useRef(false)
   const setupProbeGenerationRef = useRef(0)
+  const sessionPersistenceDegradedRef = useRef(false)
+  if (sessionPersistenceRef.current === undefined) {
+    sessionPersistenceRef.current = createSessionPersistenceOverIpc()
+  }
+  if (rememberedEmailPersistenceRef.current === undefined) {
+    rememberedEmailPersistenceRef.current = createRememberedEmailPersistenceOverIpc()
+  }
+  // Both persistence adapters are created once per runtime and never replaced; the
+  // consts keep every callback free of null-handling for a lifetime invariant.
+  const sessionPersistence = sessionPersistenceRef.current
+  const rememberedEmailPersistence = rememberedEmailPersistenceRef.current
 
   const enqueueRememberedEmailMutation = useCallback(
     <Result>(mutation: () => Promise<Result>): Promise<Result> => {
@@ -170,20 +171,20 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
   /** Refreshes the instance's first-run state whenever the sign-in boundary settles onto the screen. */
   const probeSetupStatus = useCallback((): void => {
-    const client = clientRef.current
-    if (!client) return
+    const goAuthentication = goAuthenticationRef.current
+    if (!goAuthentication) return
     const generation = ++setupProbeGenerationRef.current
-    void client.setupStatus().then((result) => {
+    void goAuthentication.probeSetup().then((probe) => {
       // A probe from an earlier server URL never overwrites the boundary's state.
       if (generation !== setupProbeGenerationRef.current) return
-      if (result.outcome !== 'succeeded') {
+      if (probe.outcome !== 'succeeded') {
         // The state is unknowable: a retryable error, never a fallback to a
         // login that cannot succeed on an empty instance.
         setInstanceSetup('probe-failed')
         return
       }
-      setSetupCodeRequired(result.value.setupCodeRequired)
-      setInstanceSetup(result.value.initialized ? 'initialized' : 'uninitialized')
+      setSetupCodeRequired(probe.setupCodeRequired)
+      setInstanceSetup(probe.initialized ? 'initialized' : 'uninitialized')
     })
   }, [])
 
@@ -210,18 +211,19 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   /** Ends a session the server has rejected: local credentials die, the login screen explains why. */
   const abandonRejectedSession = useCallback(
     (nextNotice: AuthenticationNotice): void => {
-      void clearPersistedSession()
+      void sessionPersistence
+        .clear()
         .catch(() => undefined)
         .finally(() => settleUnauthenticated(nextNotice))
     },
-    [settleUnauthenticated]
+    [sessionPersistence, settleUnauthenticated]
   )
 
   const settleSession = useCallback(
     (credentials: SessionCredentials): void => {
       credentialsRef.current = credentials
       retireRememberedEmailPersistenceNotice()
-      setPersistenceUnavailable(isSessionPersistenceUnavailable())
+      setPersistenceUnavailable(sessionPersistenceDegradedRef.current)
       setNotice(undefined)
       setUserEmail(credentials.user.email)
       setUserId(credentials.user.id)
@@ -233,6 +235,15 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       setStatus(nextStatus)
     },
     [retireRememberedEmailPersistenceNotice]
+  )
+
+  /** Keeps the encrypted slot for the next launch; its outcome decides whether the shell must warn about persistence degradation. */
+  const persistSession = useCallback(
+    async (credentials: SessionCredentials): Promise<void> => {
+      const replacement = await sessionPersistence.replace(credentials)
+      sessionPersistenceDegradedRef.current = replacement.outcome !== 'persisted'
+    },
+    [sessionPersistence]
   )
 
   const getSession = useCallback(async (): Promise<AuthenticatedSession | undefined> => {
@@ -253,22 +264,23 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     setError(undefined)
 
     try {
-      clientRef.current = createIdentityClient(serverUrl)
+      goAuthenticationRef.current = createGoAuthenticationOverHttp(serverUrl)
       // A boundary for a new server starts from the unknown setup state until
       // its own probe answers; a stale wizard from the previous server must
       // not survive the switch.
       setupProbeGenerationRef.current += 1
       setInstanceSetup('unknown')
       setSetupCodeRequired(false)
+      sessionPersistenceDegradedRef.current = false
 
       const [stored, remembered] = await Promise.all([
-        readPersistedCredentials(),
-        readRememberedEmail().catch(() => ({ outcome: 'storage-unavailable' as const }))
+        sessionPersistence.read(),
+        rememberedEmailPersistence.read()
       ])
-      setRememberedEmail(remembered.outcome === 'email' ? remembered.email : undefined)
+      setRememberedEmail(remembered.outcome === 'remembered' ? remembered.email : undefined)
       if (
-        remembered.outcome === 'storage-unavailable' ||
-        (remembered.outcome === 'email' && remembered.persistence === 'memory-only')
+        remembered.outcome === 'unavailable' ||
+        (remembered.outcome === 'remembered' && remembered.persistence === 'memory-only')
       ) {
         reportRememberedEmailPersistenceUnavailable('login')
       } else {
@@ -277,14 +289,14 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
       // The envelope may still hold a valid token, so nothing is deleted; the retry boundary
       // re-reads the store once the secure-storage backend recovers.
-      if (stored.outcome === 'storage-unavailable') {
+      if (stored.outcome === 'unavailable') {
         statusRef.current = 'restore-failure'
         setStatus('restore-failure')
         return
       }
 
       if (stored.outcome === 'unreadable') {
-        await clearPersistedSession().catch(() => undefined)
+        await sessionPersistence.clear().catch(() => undefined)
         settleUnauthenticated('session-expired')
         return
       }
@@ -294,25 +306,25 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
         return
       }
 
-      const client = clientRef.current
-      const me = await client.me(stored.credentials.token)
-      if (me.outcome === 'succeeded') {
-        // /me is the authority for account facts: display name, role, and any password
+      const validation = await goAuthenticationRef.current.validateSession(stored.credentials.token)
+      if (validation.outcome === 'succeeded') {
+        // Validation is the authority for account facts: display name, role, and any password
         // change the server started demanding since the session was stored.
         settleSession({
           token: stored.credentials.token,
           expiresAt: stored.credentials.expiresAt,
-          user: me.value
+          user: validation.user
         })
         return
       }
 
-      if (me.outcome === 'unauthorized') {
+      if (validation.outcome === 'session-rejected') {
         abandonRejectedSession('session-expired')
         return
       }
 
-      // Network and server failures stay retryable: a temporary outage is never a logout.
+      // An unreachable or broken server keeps the restore retryable: a temporary
+      // outage is never a logout.
       statusRef.current = 'restore-failure'
       setStatus('restore-failure')
     } catch {
@@ -323,9 +335,11 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     }
   }, [
     abandonRejectedSession,
+    rememberedEmailPersistence,
     reportRememberedEmailPersistenceAvailable,
     reportRememberedEmailPersistenceUnavailable,
     serverUrl,
+    sessionPersistence,
     settleSession,
     settleUnauthenticated
   ])
@@ -354,7 +368,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
       const previousRememberedEmail = rememberedEmail
       setRememberedEmail(undefined)
-      void enqueueRememberedEmailMutation(clearRememberedEmail)
+      void enqueueRememberedEmailMutation(() => rememberedEmailPersistence.clear())
         .then((result) => {
           if (
             selectionGeneration !== rememberEmailSelectionGenerationRef.current ||
@@ -393,6 +407,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     [
       enqueueRememberedEmailMutation,
       rememberedEmail,
+      rememberedEmailPersistence,
       reportRememberedEmailPersistenceAvailable,
       reportRememberedEmailPersistenceUnavailable
     ]
@@ -401,9 +416,9 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const rememberLoginEmail = useCallback(
     (email: string): void => {
       setRememberedEmail(email)
-      void enqueueRememberedEmailMutation(() => replaceRememberedEmail(email))
+      void enqueueRememberedEmailMutation(() => rememberedEmailPersistence.replace(email))
         .then((result) => {
-          if (result.outcome === 'memory-only') {
+          if (result.outcome === 'memory-only' || result.outcome === 'replace-failed') {
             reportRememberedEmailPersistenceUnavailable(
               statusRef.current === 'authenticated' ? 'authenticated' : 'login'
             )
@@ -419,6 +434,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     },
     [
       enqueueRememberedEmailMutation,
+      rememberedEmailPersistence,
       reportRememberedEmailPersistenceAvailable,
       reportRememberedEmailPersistenceUnavailable
     ]
@@ -426,27 +442,33 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
   const signIn = useCallback(
     async (email: string, password: string): Promise<void> => {
-      const client = clientRef.current
-      if (!client || submissionRef.current) return
+      const goAuthentication = goAuthenticationRef.current
+      if (!goAuthentication || submissionRef.current) return
 
       submissionRef.current = true
       setIsSubmitting(true)
       setError(undefined)
 
       try {
-        const login = await client.login(email, password)
+        const login = await goAuthentication.signIn(email, password)
         if (login.outcome !== 'succeeded') {
-          setError(mapRequestFailure(login))
+          setError(
+            login.outcome === 'invalid-credentials' ||
+              login.outcome === 'account-disabled' ||
+              login.outcome === 'rate-limited'
+              ? login.outcome
+              : 'service-unavailable'
+          )
           return
         }
 
         // The encrypted slot is written before the shell opens, so a crash right after
         // login still restores this session on the next launch.
-        await replacePersistedCredentials(login.value)
-        if (rememberEmailSelectedRef.current && login.value.user.email) {
-          rememberLoginEmail(login.value.user.email)
+        await persistSession(login.session)
+        if (rememberEmailSelectedRef.current && login.session.user.email) {
+          rememberLoginEmail(login.session.user.email)
         }
-        settleSession(login.value)
+        settleSession(login.session)
       } catch {
         setError('service-unavailable')
       } finally {
@@ -454,7 +476,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
         setIsSubmitting(false)
       }
     },
-    [rememberLoginEmail, settleSession]
+    [persistSession, rememberLoginEmail, settleSession]
   )
 
   const register = useCallback(
@@ -464,24 +486,34 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       joinCode: string,
       displayName: string
     ): Promise<void> => {
-      const client = clientRef.current
-      if (!client || submissionRef.current) return
+      const goAuthentication = goAuthenticationRef.current
+      if (!goAuthentication || submissionRef.current) return
 
       submissionRef.current = true
       setIsSubmitting(true)
       setError(undefined)
 
       try {
-        const registration = await client.register(email, password, joinCode, displayName)
+        const registration = await goAuthentication.register(email, password, joinCode, displayName)
         if (registration.outcome !== 'succeeded') {
-          setError(mapRequestFailure(registration))
+          setError(
+            registration.outcome === 'invalid-join-code' ||
+              registration.outcome === 'email-taken' ||
+              registration.outcome === 'rate-limited'
+              ? registration.outcome
+              : registration.outcome === 'new-password-too-short'
+                ? 'password-too-short'
+                : registration.outcome === 'new-password-over-limit'
+                  ? 'invalid-password'
+                  : 'service-unavailable'
+          )
           return
         }
 
         // A registered member already owns their password, so the new session settles
         // straight into the shell; the encrypted slot is written before it opens.
-        await replacePersistedCredentials(registration.value)
-        settleSession(registration.value)
+        await persistSession(registration.session)
+        settleSession(registration.session)
       } catch {
         setError('service-unavailable')
       } finally {
@@ -489,7 +521,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
         setIsSubmitting(false)
       }
     },
-    [settleSession]
+    [persistSession, settleSession]
   )
 
   const initialize = useCallback(
@@ -499,27 +531,32 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       setupCode: string | undefined,
       displayName: string
     ): Promise<void> => {
-      const client = clientRef.current
-      if (!client || submissionRef.current) return
+      const goAuthentication = goAuthenticationRef.current
+      if (!goAuthentication || submissionRef.current) return
 
       submissionRef.current = true
       setIsSubmitting(true)
       setError(undefined)
 
       try {
-        const initialization = await client.initialize(email, password, setupCode, displayName)
-        if (initialization.outcome !== 'succeeded') {
-          if (
-            initialization.outcome === 'request-rejected' &&
-            initialization.code === 'instance_already_initialized'
-          ) {
-            // Another device won the first-admin race: the wizard is over and
+        const claim = await goAuthentication.claimInstance(email, password, setupCode, displayName)
+        if (claim.outcome !== 'succeeded') {
+          if (claim.outcome === 'already-claimed') {
+            // Another request won the first-admin race: the wizard is over and
             // the sign-in boundary explains what happened.
             setInstanceSetup('initialized')
             setError('instance-already-initialized')
             return
           }
-          setError(mapRequestFailure(initialization))
+          setError(
+            claim.outcome === 'invalid-setup-code' || claim.outcome === 'rate-limited'
+              ? claim.outcome
+              : claim.outcome === 'new-password-too-short'
+                ? 'password-too-short'
+                : claim.outcome === 'new-password-over-limit'
+                  ? 'invalid-password'
+                  : 'service-unavailable'
+          )
           return
         }
 
@@ -529,8 +566,8 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
         // initialized for every later boundary on this device too — the
         // wizard never renders again, whatever a later status probe answers.
         setInstanceSetup('initialized')
-        await replacePersistedCredentials(initialization.value)
-        settleSession(initialization.value)
+        await persistSession(claim.session)
+        settleSession(claim.session)
       } catch {
         setError('service-unavailable')
       } finally {
@@ -538,14 +575,14 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
         setIsSubmitting(false)
       }
     },
-    [settleSession]
+    [persistSession, settleSession]
   )
 
   const completePasswordChange = useCallback(
     async (currentPassword: string, newPassword: string): Promise<void> => {
-      const client = clientRef.current
+      const goAuthentication = goAuthenticationRef.current
       const credentials = credentialsRef.current
-      if (!client || !credentials || submissionRef.current) return
+      if (!goAuthentication || !credentials || submissionRef.current) return
       if (!isPasswordByteLengthValid(newPassword)) return
 
       submissionRef.current = true
@@ -553,13 +590,25 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       setError(undefined)
 
       try {
-        const change = await client.changePassword(credentials.token, currentPassword, newPassword)
+        const change = await goAuthentication.changePassword(
+          credentials.token,
+          currentPassword,
+          newPassword
+        )
         if (change.outcome !== 'succeeded') {
-          if (change.outcome === 'unauthorized') {
+          if (change.outcome === 'session-rejected') {
             abandonRejectedSession('session-expired')
             return
           }
-          setError(mapRequestFailure(change))
+          setError(
+            change.outcome === 'invalid-current-password'
+              ? 'invalid-credentials'
+              : change.outcome === 'new-password-rejected'
+                ? 'invalid-password'
+                : change.outcome === 'rate-limited'
+                  ? 'rate-limited'
+                  : 'service-unavailable'
+          )
           return
         }
 
@@ -569,7 +618,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
           expiresAt: credentials.expiresAt,
           user: { ...credentials.user, mustChangePassword: false }
         }
-        await replacePersistedCredentials(changed)
+        await persistSession(changed)
         settleSession(changed)
       } catch {
         setError('service-unavailable')
@@ -578,13 +627,13 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
         setIsSubmitting(false)
       }
     },
-    [abandonRejectedSession, settleSession]
+    [abandonRejectedSession, persistSession, settleSession]
   )
 
   const signOut = useCallback(async (): Promise<void> => {
-    const client = clientRef.current
+    const goAuthentication = goAuthenticationRef.current
     const credentials = credentialsRef.current
-    if (!client || submissionRef.current) return
+    if (!goAuthentication || submissionRef.current) return
 
     submissionRef.current = true
     setIsSubmitting(true)
@@ -592,8 +641,8 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
     try {
       if (credentials) {
-        const logout = await client.logout(credentials.token)
-        remoteRevocationConfirmed = logout.outcome === 'succeeded'
+        const end = await goAuthentication.endSession(credentials.token)
+        remoteRevocationConfirmed = end.outcome === 'revoked'
       } else {
         remoteRevocationConfirmed = true
       }
@@ -601,12 +650,12 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       remoteRevocationConfirmed = false
     } finally {
       // Local access ends now even when the Desktop could not confirm remote revocation.
-      await clearPersistedSession().catch(() => undefined)
+      await sessionPersistence.clear().catch(() => undefined)
       settleUnauthenticated(remoteRevocationConfirmed ? undefined : 'remote-sign-out-delayed')
       submissionRef.current = false
       setIsSubmitting(false)
     }
-  }, [settleUnauthenticated])
+  }, [sessionPersistence, settleUnauthenticated])
 
   return {
     status,
@@ -634,29 +683,5 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     initialize,
     completePasswordChange,
     signOut
-  }
-}
-
-function mapRequestFailure(failure: IdentityApiFailure): AuthenticationError {
-  if (failure.outcome === 'rate-limited') return 'rate-limited'
-  if (failure.outcome !== 'request-rejected') return 'service-unavailable'
-
-  switch (failure.code) {
-    case 'invalid_credentials':
-      return 'invalid-credentials'
-    case 'account_disabled':
-      return 'account-disabled'
-    case 'invalid_password':
-      return 'invalid-password'
-    case 'password_too_short':
-      return 'password-too-short'
-    case 'invalid_join_code':
-      return 'invalid-join-code'
-    case 'email_taken':
-      return 'email-taken'
-    case 'invalid_setup_code':
-      return 'invalid-setup-code'
-    default:
-      return 'service-unavailable'
   }
 }

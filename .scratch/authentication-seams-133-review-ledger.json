@@ -1,0 +1,53 @@
+{
+  "schema": "code-review-findings/v1",
+  "task": "#133 Authentication internal seams — semantic ports and substitutable adapters",
+  "fixedPoint": "b451934",
+  "scopePaths": [
+    ".scratch/authentication-seams-133-plan.md",
+    "apps/desktop/src/renderer/src/features/authentication/",
+    "apps/desktop/tests/unit/authentication-in-memory-seams.test.mts",
+    "apps/desktop/tests/unit/go-authentication-http-adapter.test.mts",
+    "apps/desktop/tests/unit/remembered-email-adapter.test.mts",
+    "apps/desktop/tests/unit/persisted-session.test.mts",
+    "apps/desktop/tests/auth/register.spec.ts"
+  ],
+  "frozenBundle": "/tmp/133-review-bundle.XXXXXX.patch",
+  "currentDiffDigest": "sha256:22c4f649ecd6d73eba94c79358b97a4f393d078c826fc8751ba6480bc6e7d9dc",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 0,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/tests/auth/register.spec.ts",
+        "source": "AGENTS.md — one cohesive vertical slice / no unrelated cleanup",
+        "anchor": "apps/desktop/tests/auth/register.spec.ts:49,97 — getByLabel('Password', { exact: true })",
+        "defect": "Exact-match selector edits judged unrelated test cleanup folded into the seam-refactor slice; reviewer proposed reverting and delivering separately"
+      },
+      "level": "advisory",
+      "disposition": "false-positive",
+      "dispositionReason": "Counter-evidence: the premise of unrelatedness is factually wrong. The two register.spec tests fail on clean main b451934 — reproduced by running the full E2E suite on stashed-clean main (2 failed: register.spec.ts:16 and :74, strict-mode getByLabel('Password') ambiguity between the Password and Confirm password fields introduced by PR #131). Issue #133 acceptance criterion 13 requires '现有 Authentication component/Electron tests … 通过', and docs/agents/delivery.md requires watching the PR E2E gate green before squash-merge; renderer-path changes trigger E2E in the PR gate. The two-line, test-only repair inside the Authentication test area is therefore causally necessary for this slice to close its own gate — not unrelated cleanup.",
+      "owner": "apps/desktop/tests/auth/register.spec.ts",
+      "status": "closed",
+      "evidence": [
+        "main@b451934 full E2E: '2 failed' — tests/auth/register.spec.ts:16:5 and :74:5 (getByLabel('Password') resolved to 2 elements: Password + Confirm password from #131), 79 passed",
+        "git show b451934:apps/desktop/tests/auth/register.spec.ts — PR #131 added the 'Confirm password' fill next to the substring getByLabel('Password') locator",
+        "Issue #133 acceptance criterion 13: 'targeted adapter/unit tests、现有 Authentication component/Electron tests、Desktop typecheck 与 lint 通过'",
+        "Post-fix full E2E on this exact diff: 81 passed, 2 skipped"
+      ],
+      "reviewedDiffDigest": "sha256:22c4f649ecd6d73eba94c79358b97a4f393d078c826fc8751ba6480bc6e7d9dc",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "specFindings": [],
+  "repairRecords": [],
+  "relevantCheck": {
+    "name": "apps/desktop full verification: npm run typecheck; npm run lint; npm run test:unit; npm run test:component; npm run verify:architecture; bash scripts/run-e2e.sh full",
+    "result": "PASS",
+    "coverage": "typecheck node+web clean; eslint 0 problems; 105/105 unit tests; 2/2 component tests; architecture 148 source files clean; E2E 81 passed / 2 skipped (expected classifications) + verify-auth-artifacts clean",
+    "diffDigest": "sha256:22c4f649ecd6d73eba94c79358b97a4f393d078c826fc8751ba6480bc6e7d9dc"
+  },
+  "outcome": "closed"
+}
