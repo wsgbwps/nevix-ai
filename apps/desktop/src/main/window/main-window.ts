@@ -55,10 +55,17 @@ export function createWindow(
   mainWindow.webContents.on('did-start-loading', handleOrdinaryCloseRendererUnavailable)
   mainWindow.webContents.on('render-process-gone', handleOrdinaryCloseRendererUnavailable)
 
-  mainWindow.webContents.session.setPermissionCheckHandler(() => false)
-  mainWindow.webContents.session.setPermissionRequestHandler((_, __, callback) => {
-    callback(false)
-  })
+  // Deny-all except sanitized clipboard writes: navigator.clipboard.writeText (join-code
+  // copy) needs the clipboard-sanitized-write check, which writes only — clipboard reads
+  // and every other permission stay denied.
+  mainWindow.webContents.session.setPermissionCheckHandler(
+    (_webContents, permission) => permission === 'clipboard-sanitized-write'
+  )
+  mainWindow.webContents.session.setPermissionRequestHandler(
+    (_webContents, permission, callback) => {
+      callback(permission === 'clipboard-sanitized-write')
+    }
+  )
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
     if (state.isMaximized) mainWindow.maximize()
