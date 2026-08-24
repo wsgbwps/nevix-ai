@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
-import { KeyRoundIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon, KeyRoundIcon } from 'lucide-react'
 import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
 import {
@@ -188,6 +188,7 @@ export function JoinCodesSettings({
                   <span className="font-mono text-base font-semibold tracking-wide select-all">
                     {joinCode.code}
                   </span>
+                  <CopyJoinCodeButton code={joinCode.code} translate={t} />
                   {joinCode.label === '' ? (
                     <Badge variant="secondary">{t('joinCodes.unlabeled')}</Badge>
                   ) : (
@@ -247,6 +248,41 @@ export function JoinCodesSettings({
         translate={t}
       />
     </section>
+  )
+}
+
+/** Copies one join-code plaintext to the system clipboard (the renderer has no native copy path). */
+function CopyJoinCodeButton({
+  code,
+  translate: t
+}: {
+  readonly code: string
+  readonly translate: TFunction<'userManagement'>
+}): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 2000)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      aria-label={t(copied ? 'joinCodes.copy.copiedLabel' : 'joinCodes.copy.actionLabel', { code })}
+      onClick={() => {
+        // Clipboard write from a user gesture; a rejection leaves the icon unchanged.
+        void navigator.clipboard.writeText(code).then(
+          () => setCopied(true),
+          () => undefined
+        )
+      }}
+    >
+      {copied ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
+    </Button>
   )
 }
 

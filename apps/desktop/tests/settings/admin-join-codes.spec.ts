@@ -75,6 +75,15 @@ test('Admin issues a join code, sees its plaintext, and revokes it', async () =>
       const listedCode = (await row.locator('.font-mono').textContent())?.trim()
       expect(listedCode).toBe(noticedCode)
 
+      // 复制：one click writes the plaintext to the system clipboard (Cmd+C and
+      // right-click have no effect in this renderer) and the button flips to a
+      // copied confirmation.
+      await row.getByRole('button', { name: `复制 ${listedCode}` }).click()
+      await expect(row.getByRole('button', { name: `已复制 ${listedCode}` })).toBeVisible()
+      await expect
+        .poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+        .toBe(listedCode)
+
       // 吊销：confirmation names the code; the row leaves the list and the
       // card reports self-registration closed again.
       await row.getByRole('button', { name: `吊销 ${noticedCode}` }).click()

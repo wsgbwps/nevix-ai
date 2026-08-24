@@ -117,6 +117,10 @@ export const userManagementTranslations = defineResourceTranslations({
       retry: '重试',
       unlabeled: '无备注',
       createdAt: '签发于 {{time}}',
+      copy: {
+        actionLabel: '复制 {{code}}',
+        copiedLabel: '已复制 {{code}}'
+      },
       issue: {
         title: '签发加入码',
         description: '生成一枚 8 位加入码，签发后立即可见明文，可直接分发给新成员。',
@@ -279,6 +283,10 @@ export const userManagementTranslations = defineResourceTranslations({
       retry: 'Try again',
       unlabeled: 'No note',
       createdAt: 'Issued {{time}}',
+      copy: {
+        actionLabel: 'Copy {{code}}',
+        copiedLabel: 'Copied {{code}}'
+      },
       issue: {
         title: 'Issue join code',
         description:
