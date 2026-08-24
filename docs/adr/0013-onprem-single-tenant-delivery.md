@@ -4,6 +4,8 @@
 
 已接受 — 2026-08-22
 
+2026-08-24 修订：首次管理员改由默认无凭据的实例认领产生，设置码降为可选部署保护；移除环境变量管理员 Bootstrap 与离线管理员恢复通道。
+
 ## 背景
 
 Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付到客户内网，一套部署对应一个客户。无生产数据，旧表直接删掉重建（旧世界经 `saas-final` tag 存档），不开新仓库。Supabase 整体退场，只留 Postgres，auth 收进 Go server。
@@ -15,14 +17,21 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 ### 单租户与账号模型
 
 - 单租户：无多组织概念，一套部署内的全体用户构成一个团队。
-- 管理员建号 + 密码，无邮件通道：验证码、邀请函、邮件找回密码全部移除；密码重置由管理员执行。账号系统细节见 ADR-0015。
+- 空实例由首个认领者自选凭据成为首个 Admin；初始化后通过 Admin 建号或加入码自注册增加 User。无邮件通道：验证码、邀请函、邮件找回密码全部移除；密码重置仅由仍可登录的 Admin 执行。账号系统细节见 ADR-0015。
 
 ### 部署形状
 
 - 单一 docker compose：Go server + 捆绑 postgres 官方镜像（钉 major.minor）+ named volume（`pgdata`、`blobs`）。
 - V1 只支持捆绑 Postgres；客户强制使用自有数据库平台时再加外部 DSN 支持（届期为兼容矩阵问题）。
 - PG 大版本升级是文档化的人工 dump/restore 维护操作，不做自动升级。
-- 配置 env-only，延续现状：`PORT`、`DATABASE_URL`（compose 内部生成，不外暴露）、`ADMIN_EMAIL`/`ADMIN_INITIAL_PASSWORD`（仅空库 bootstrap 时生效，见 ADR-0015）、Storage 选择（见下）。无 CLI flag、无 config 文件解析。
+- 服务启动配置 env-only：`PORT`、`DATABASE_URL`（compose 内部生成，不外暴露）、`NEVIX_SETUP_CODE_REQUIRED=true|false`（默认 `false`，见 ADR-0015）、Storage 选择（见下）。无 CLI flag、无 config 文件解析。
+- `ADMIN_EMAIL` / `ADMIN_INITIAL_PASSWORD` 管理员 Bootstrap 通道删除；检测到任一旧变量即以明确配置错误拒绝启动，防止旧配置被静默忽略后意外开放实例认领。
+
+### 首次部署与管理员连续性
+
+- 默认实例认领不要求授权凭据；部署方必须在向无关人员广泛暴露 Server URL 前完成认领。产品不以端口未知作为安全边界，也不增加 IP 白名单、网段判断或监听地址推断。
+- 上线前认领错误时直接重建尚无业务数据的空实例；实例拥有任何 User 后不允许重新认领。
+- V1 不提供离线 Admin 恢复命令、恢复码或其他旁路。部署验收清单与运维手册建议客户保留至少两名 Admin，但产品不强制、不弹窗提醒；所有 Admin 均失联是明确接受的低概率运维风险。
 
 ### Storage 双后端
 
@@ -71,9 +80,11 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 - **捆绑 Postgres vs 支持外部 DSN**：V1 捆绑覆盖绝大多数客户且测试路径唯一；两者都支持是把兼容矩阵提前搬进 v1。否决。
 - **electron-updater vs 版本配对协议**：见「升级」。air-gap 分发下 updater 的基础设施成本高于其价值。
 - **License V1 实现**：当前无正式产品与用户，提前写校验代码无合同可执行；但年订阅已定，故将执行语义冻结于此 + 硬截止点，防止补做时重新设计。
+- **环境变量直接创建首个 Admin**（2026-08-24）：需要部署方预填、传递并轮换初始凭据，与“安装后由客户自选管理员凭据”的交付体验相悖；可选设置码已经覆盖需要额外保护的部署，故删除。
+- **离线 Admin 恢复或强制双 Admin**（2026-08-24）：前者新增第二条高权限写通道，后者把低概率运维风险变成所有客户的硬门槛；V1 均不采用，以验收建议和客户运维责任承接剩余风险。
 
 ## 后果
 
 - `supabase/` 目录、Supabase 相关 E2E/CI harness 随用户系统迁移拆除。
-- 部署手册（compose 样例、.env 模板、备份/恢复、nginx TLS 样例、PG 大版本升级步骤）随交付工作落地。
+- 部署手册（compose 样例、.env 模板、实例认领顺序、双 Admin 建议、备份/恢复、nginx TLS 样例、PG 大版本升级步骤）随交付工作落地。
 - README 中 electron-updater 的不实表述已修正（仓库从未实现 auto-updater）。

@@ -27,7 +27,7 @@ _Avoid_: store, DAO, data layer
 ## 用户系统
 
 **User**:
-登录主体，email 是唯一登录标识；经管理员建号（初始密码由管理员设定）或凭加入码自注册（密码本人自设）进入实例；含显示名、角色与状态，无自助邮件通道，凭据找回依赖管理员重置。
+登录主体，email 是唯一登录标识；可在实例认领时成为首个 Admin、由 Admin 建号（初始密码由 Admin 设定），或凭加入码自注册为 Member（密码本人自设）；含显示名、角色与状态，无自助邮件通道，凭据找回依赖 Admin 重置。
 _Avoid_: Account, Member（指角色时）, Profile
 
 **Admin**:
@@ -42,9 +42,17 @@ _Avoid_: User, Regular User
 Admin 签发的注册凭据，持有者凭它在登录屏自注册为 Member；多枚并存、可吊销、可复用（不随注册消耗），全部失效即自注册关闭，不设独立注册开关。
 _Avoid_: 邀请函（Invitation）, 注册开关, invite code
 
+**Instance Claim（实例认领）**:
+空实例的首个 User 自选凭据并成为首个 Admin 的一次性状态转换；只有首个成功请求生效，实例拥有任何 User 后不可再次认领，主动重建空数据库等同创建全新实例。
+_Avoid_: 首次登录, 管理员登录, 开放注册
+
 **Setup Code（设置码）**:
-空实例（尚无任何 User）引导期的一次性凭据，经运维日志交付，持有者经首启向导自选登录凭据成为首个 Admin；实例拥有任何 User 后即不复存在。
+实例认领的可选部署凭据；启用时只有持有者可认领空实例，默认认领流程不要求该凭据，实例拥有任何 User 后即不复存在。
 _Avoid_: 初始管理员密码, bootstrap 密码, 超级管理员
+
+**Audit Actor（审计操作者）**:
+实际执行受审计操作的 User，其标识与显示名在写入 Audit Log 时形成历史快照；V1 不把主机运维者或系统进程建模为 Audit Actor。
+_Avoid_: Host Operator, System Actor, Service Account
 
 **Session**:
 服务端可吊销的已认证状态：opaque token 仅以 hash 存于 Postgres，多设备并存、滑动过期；改密、停用或吊销即刻生效并断开该用户的 SSE 连接。
