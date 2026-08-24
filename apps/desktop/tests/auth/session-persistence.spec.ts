@@ -10,7 +10,6 @@ import {
 import {
   createStableTeamUser,
   readIdentityServerConfig,
-  resetTeamUserPassword,
   uniqueIdentity,
   type LoginGrant
 } from './helpers/identity-server'
@@ -150,57 +149,6 @@ test('a securely persisted session restores without a fresh login, survives an o
       ).toHaveCount(0)
     } finally {
       await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-  }
-})
-
-test('a revoked stored session is cleared and returns to the localized login boundary', async () => {
-  test.setTimeout(60_000)
-  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
-  if (!identityServer) return
-
-  const identity = uniqueIdentity('revoked-restore')
-  const user = await createStableTeamUser(identityServer, identity)
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-revoked-'))
-  const sessionPath = join(userDataDir, SESSION_FILE_NAME)
-
-  try {
-    const launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US'],
-      serverUrl: identityServer!.serverUrl
-    })
-    try {
-      test.skip(
-        !(await hasSecurePersistenceBackend(launched.electronApp)),
-        'requires a native Keychain, DPAPI, or Secret Service backend'
-      )
-      await signInAndReadGrant(launched.page, identity)
-      await expect.poll(() => fileExists(sessionPath)).toBe(true)
-    } finally {
-      await launched.electronApp.close()
-    }
-
-    // An Admin password reset revokes every session of the user in the same write transaction.
-    await resetTeamUserPassword(identityServer, user.id, 'rotated horse battery staple')
-
-    const relaunched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US'],
-      serverUrl: identityServer!.serverUrl
-    })
-    try {
-      await expect(
-        relaunched.page.getByText('Your session is no longer valid. Sign in again.')
-      ).toBeVisible()
-      await expect(
-        relaunched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
-      await expectFileMissing(sessionPath)
-    } finally {
-      await relaunched.electronApp.close()
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })

@@ -26,7 +26,7 @@ import {
   JoinCodesSettings,
   UserManagementSettings
 } from '../../features/user-management'
-import { useAuthenticationState } from '../authentication-state'
+import { useCurrentSession } from '../../features/authentication'
 import { useServerConnectionState } from '../connection-state'
 import { useSettingsCoordinator, type SettingsContribution } from './settings-coordinator'
 import {
@@ -55,13 +55,15 @@ type UsersSectionSlot = 'userManagement' | 'joinCodes'
 
 export function SettingsPage(): React.JSX.Element | null {
   const { t } = useTranslation('app')
-  const authentication = useAuthenticationState()
+  const session = useCurrentSession()
   const connection = useServerConnectionState()
   const location = useLocation()
   const entry = readSettingsEntry(location.state)
   // The governance sections exist only for an Admin session; a stale history entry
-  // for them falls back to Profile instead of mounting an admin surface.
-  const isAdmin = authentication.userRole === 'admin'
+  // for them falls back to Profile instead of mounting an admin surface. The
+  // session role is the last server-validated snapshot for visibility only —
+  // the Go server stays the authorization truth.
+  const isAdmin = session.status === 'available' && session.user.role === 'admin'
   const section = resolveSettingsSection(entry, isAdmin)
   const [contributions, setContributions] = useState<
     Partial<Record<SettingsSection, SettingsContribution>>
@@ -110,11 +112,16 @@ export function SettingsPage(): React.JSX.Element | null {
     await window.api.invoke('authentication:clear-session').catch(() => undefined)
     window.location.reload()
   }, [])
+  if (session.status !== 'available') {
+    // The root route is already navigating to the authentication view; render nothing on the
+    // transient frame so the Settings Page never shows for a signed-out user.
+    return null
+  }
   const sectionRenderers: Record<SettingsSection, () => React.JSX.Element | null> = {
     profile: () => (
       <div className="bg-card rounded-lg border">
         <ProfileSettings
-          getSession={authentication.getSession}
+          getSession={session.acquireSession}
           serverUrl={connection.url ?? ''}
           onContributionChange={contributionReporters.profile}
         />
@@ -148,15 +155,15 @@ export function SettingsPage(): React.JSX.Element | null {
       <>
         <div className="bg-card rounded-lg border">
           <UserManagementSettings
-            getSession={authentication.getSession}
+            getSession={session.acquireSession}
             serverUrl={connection.url ?? ''}
-            currentUserId={authentication.userId}
+            currentUserId={session.user.id}
             onContributionChange={usersSlotReporters.userManagement}
           />
         </div>
         <div className="bg-card rounded-lg border">
           <JoinCodesSettings
-            getSession={authentication.getSession}
+            getSession={session.acquireSession}
             serverUrl={connection.url ?? ''}
             onContributionChange={usersSlotReporters.joinCodes}
           />
@@ -166,17 +173,12 @@ export function SettingsPage(): React.JSX.Element | null {
     audit: () => (
       <div className="bg-card rounded-lg border">
         <AuditLogSettings
-          getSession={authentication.getSession}
+          getSession={session.acquireSession}
           serverUrl={connection.url ?? ''}
           onContributionChange={contributionReporters.audit}
         />
       </div>
     )
-  }
-  if (authentication.status !== 'authenticated') {
-    // The root route is already navigating to the authentication view; render nothing on the
-    // transient frame so the Settings Page never shows for a signed-out user.
-    return null
   }
 
   return (

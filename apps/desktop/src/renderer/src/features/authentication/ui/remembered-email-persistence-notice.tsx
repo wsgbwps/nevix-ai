@@ -32,7 +32,7 @@ export function RememberedEmailPersistenceNotice({
       role="status"
       className={
         surface === 'authenticated'
-          ? 'bg-card text-muted-foreground fixed right-6 bottom-6 z-50 max-w-sm rounded-lg border px-4 py-3 text-sm shadow-sm'
+          ? 'bg-card text-muted-foreground max-w-sm rounded-lg border px-4 py-3 text-sm shadow-sm'
           : 'text-muted-foreground text-sm'
       }
     >

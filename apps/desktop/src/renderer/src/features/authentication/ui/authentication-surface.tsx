@@ -7,69 +7,44 @@ import { Button } from '../../../components/ui/button'
 import { Field, FieldError, FieldGroup, FieldLabel } from '../../../components/ui/field'
 import { Input } from '../../../components/ui/input'
 import { cn } from '../../../lib/utils'
-import type {
-  AuthenticationError,
-  AuthenticationNotice,
-  InstanceSetupState
-} from '../model/use-authentication'
+import type { AuthenticationError, AuthenticationNotice } from '../model/use-authentication-runtime'
+import { useAuthenticationRuntimeContext } from '../model/runtime-context'
 import { isPasswordByteLengthValid, passwordByteLengthError } from '../policy/password'
 import { RememberedEmailPersistenceNotice } from './remembered-email-persistence-notice'
 
-interface AuthenticationScreenProps {
-  readonly status: 'restoring' | 'restore-failure' | 'unauthenticated' | 'password-change-required'
-  readonly error?: AuthenticationError
-  readonly notice?: AuthenticationNotice
-  readonly isSubmitting?: boolean
-  readonly instanceSetup: InstanceSetupState
-  readonly setupCodeRequired?: boolean
-  readonly rememberedEmail?: string
-  readonly rememberEmailSelected: boolean
-  readonly isRememberedEmailPersistenceUnavailable: boolean
-  readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
-  readonly onRetryRestore: () => Promise<void>
-  readonly onRetrySetupProbe: () => void
-  readonly onRememberEmailSelectedChange: (selected: boolean) => void
-  readonly onRememberedEmailPersistenceNoticeShown: () => void
-  readonly onDismissError: () => void
-  readonly onSignIn: (email: string, password: string) => Promise<void>
-  readonly onRegister: (
-    email: string,
-    password: string,
-    joinCode: string,
-    displayName: string
-  ) => Promise<void>
-  readonly onInitialize: (
-    email: string,
-    password: string,
-    setupCode: string | undefined,
-    displayName: string
-  ) => Promise<void>
-  readonly onCompletePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
-  readonly onSignOut: () => Promise<void>
-}
-
-export function AuthenticationScreen({
-  status,
-  error,
-  notice,
-  isSubmitting = false,
-  instanceSetup,
-  setupCodeRequired = false,
-  rememberedEmail,
-  rememberEmailSelected,
-  isRememberedEmailPersistenceUnavailable,
-  rememberedEmailPersistenceNoticeSurface,
-  onRetryRestore,
-  onRetrySetupProbe,
-  onRememberEmailSelectedChange,
-  onRememberedEmailPersistenceNoticeShown,
-  onDismissError,
-  onSignIn,
-  onRegister,
-  onInitialize,
-  onCompletePasswordChange,
-  onSignOut
-}: AuthenticationScreenProps): React.JSX.Element {
+/**
+ * The zero-parameter, Authentication-owned surface: it renders the whole
+ * pre-authentication workflow — restore, restore failure, setup probe, Instance
+ * Claim, sign-in, self-registration, forced password change, form validation,
+ * errors, retries, pending states, Remembered Email behavior, and
+ * unauthenticated notices — by reading the runtime directly. It renders no
+ * authenticated business surface: an available current session renders
+ * nothing here at all.
+ */
+export function AuthenticationSurface(): React.JSX.Element | null {
+  const runtime = useAuthenticationRuntimeContext()
+  const {
+    status,
+    error,
+    notice,
+    isSubmitting,
+    instanceSetup,
+    setupCodeRequired,
+    rememberedEmail,
+    rememberEmailSelected,
+    isRememberedEmailPersistenceUnavailable,
+    rememberedEmailPersistenceNoticeSurface,
+    retryRestore: onRetryRestore,
+    retrySetupProbe: onRetrySetupProbe,
+    setRememberEmailSelected: onRememberEmailSelectedChange,
+    consumeRememberedEmailPersistenceNotice: onRememberedEmailPersistenceNoticeShown,
+    dismissError: onDismissError,
+    signIn: onSignIn,
+    register: onRegister,
+    initialize: onInitialize,
+    completePasswordChange: onCompletePasswordChange,
+    signOut: onSignOut
+  } = runtime
   const { t } = useTranslation('authentication')
   const { theme } = useTheme()
   // Both unauthenticated surfaces share the model-owned error slot; switching modes dismisses
@@ -79,6 +54,12 @@ export function AuthenticationScreen({
   function switchMode(nextMode: 'login' | 'register'): void {
     onDismissError()
     setMode(nextMode)
+  }
+
+  if (status === 'authenticated') {
+    // The router is already leaving the authentication surface; render
+    // nothing on the transient frame so no authenticated content flashes here.
+    return null
   }
 
   return (

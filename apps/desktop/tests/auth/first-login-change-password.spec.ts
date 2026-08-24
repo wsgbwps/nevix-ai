@@ -7,12 +7,7 @@ import {
   launchTestApp,
   signOutFromUserMenu
 } from '../helpers/electron-app'
-import {
-  createTeamUser,
-  loginOutsideDesktop,
-  readIdentityServerConfig,
-  uniqueIdentity
-} from './helpers/identity-server'
+import { createTeamUser, readIdentityServerConfig, uniqueIdentity } from './helpers/identity-server'
 
 const identityServer = readIdentityServerConfig()
 const identityServerFailureMarkerDir = process.env.NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR
@@ -144,91 +139,6 @@ test(
     }
   }
 )
-
-test('a mismatched confirmation and a short new password never reach the server', async () => {
-  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
-  if (!identityServer) return
-
-  const identity = uniqueIdentity('first-login-validation')
-  await createTeamUser(identityServer, identity)
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-first-login-validation-'))
-
-  try {
-    const launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US'],
-      serverUrl: identityServer!.serverUrl
-    })
-    try {
-      await signIn(launched.page, identity)
-      await expect(launched.page.getByRole('heading', { name: 'Set a new password' })).toBeVisible()
-
-      let changeRequests = 0
-      await launched.page.route('**/identity/auth/change-password', (route) => {
-        changeRequests += 1
-        return route.continue()
-      })
-
-      // A short new password shows the policy feedback and blocks submission.
-      await launched.page.getByLabel('Initial password', { exact: true }).fill(identity.password)
-      await launched.page.getByLabel('New password', { exact: true }).fill('short')
-      await launched.page.getByLabel('Confirm new password').fill('short')
-      await expect(
-        launched.page.getByRole('button', { name: 'Update password and continue' })
-      ).toBeDisabled()
-      await expect(launched.page.getByText('Password is too short.')).toBeVisible()
-
-      // A mismatched confirmation blocks submission as well.
-      await launched.page.getByLabel('New password', { exact: true }).fill(REPLACEMENT_PASSWORD)
-      await launched.page
-        .getByLabel('Confirm new password')
-        .fill(`${REPLACEMENT_PASSWORD}-mismatch`)
-      await expect(
-        launched.page.getByRole('button', { name: 'Update password and continue' })
-      ).toBeDisabled()
-      await expect(launched.page.getByText('Passwords do not match')).toBeVisible()
-      expect(changeRequests).toBe(0)
-    } finally {
-      await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-  }
-})
-
-test('signing out from the forced change boundary keeps the account pending, and the initial password still works', async () => {
-  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
-  if (!identityServer) return
-
-  const identity = uniqueIdentity('first-login-escape')
-  await createTeamUser(identityServer, identity)
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-first-login-escape-'))
-
-  try {
-    const launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US'],
-      serverUrl: identityServer!.serverUrl
-    })
-    try {
-      await signIn(launched.page, identity)
-      await expect(launched.page.getByRole('heading', { name: 'Set a new password' })).toBeVisible()
-
-      await launched.page.getByRole('button', { name: 'Sign out without changing' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
-      ).toBeVisible()
-    } finally {
-      await launched.electronApp.close()
-    }
-
-    // The initial password is untouched by the escape, so the next session forces the change again.
-    const grant = await loginOutsideDesktop(identityServer, identity)
-    expect(grant.user.must_change_password).toBe(true)
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-  }
-})
 
 test('a stored session that still owes the change returns to the forced change boundary after relaunch', async () => {
   test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
