@@ -464,11 +464,18 @@ function RegistrationForm({
   const { t } = useTranslation('authentication')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [joinCode, setJoinCode] = useState('')
   const [displayName, setDisplayName] = useState('')
   const isPasswordValid = isPasswordByteLengthValid(password)
+  const isConfirmMismatch = confirmPassword !== '' && confirmPassword !== password
   const isJoinCodeReady = joinCode.trim() !== ''
-  const canSubmit = email.trim() !== '' && isPasswordValid && isJoinCodeReady
+  const canSubmit =
+    email.trim() !== '' &&
+    isPasswordValid &&
+    confirmPassword !== '' &&
+    confirmPassword === password &&
+    isJoinCodeReady
 
   function submit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault()
@@ -507,6 +514,24 @@ function RegistrationForm({
             onChange={(event) => setPassword(event.target.value)}
           />
           <PasswordPolicyFeedback password={password} />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="registration-confirm-password">
+            {t('register.confirmPassword')}
+          </FieldLabel>
+          <PasswordInput
+            id="registration-confirm-password"
+            name="confirmPassword"
+            autoComplete="new-password"
+            required
+            disabled={isSubmitting}
+            aria-invalid={isConfirmMismatch || undefined}
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+          />
+          {isConfirmMismatch ? (
+            <FieldError>{t('register.confirmPasswordMismatch')}</FieldError>
+          ) : null}
         </Field>
         <Field>
           <FieldLabel htmlFor="registration-join-code">{t('register.joinCode')}</FieldLabel>
