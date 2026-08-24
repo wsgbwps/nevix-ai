@@ -51,6 +51,7 @@ export const authenticationTranslations = defineResourceTranslations({
       description: '凭管理员发放的加入码注册你的账号。',
       email: '邮箱',
       password: '密码',
+      confirmPassword: '确认密码',
       joinCode: '加入码',
       displayName: '显示名（可选）',
       submit: '注册',
@@ -59,6 +60,7 @@ export const authenticationTranslations = defineResourceTranslations({
       switchToRegister: '凭加入码注册账号',
       invalidJoinCode: '加入码无效或已失效，请联系管理员。',
       emailTaken: '该邮箱已被注册。',
+      confirmPasswordMismatch: '两次输入的密码不一致',
       rateLimited: '尝试过于频繁，请稍后重试。',
       serviceError: '无法连接服务器，请检查网络后重试。'
     },
@@ -159,6 +161,7 @@ export const authenticationTranslations = defineResourceTranslations({
       description: 'Register your account with the join code your administrator shared.',
       email: 'Email',
       password: 'Password',
+      confirmPassword: 'Confirm password',
       joinCode: 'Join code',
       displayName: 'Display name (optional)',
       submit: 'Register',
@@ -167,6 +170,7 @@ export const authenticationTranslations = defineResourceTranslations({
       switchToRegister: 'Register with a join code',
       invalidJoinCode: 'The join code is not valid. Contact your administrator.',
       emailTaken: 'This email is already registered.',
+      confirmPasswordMismatch: 'Passwords do not match',
       rateLimited: 'Too many attempts. Try again later.',
       serviceError: 'The server cannot be reached. Check your network and try again.'
     },
