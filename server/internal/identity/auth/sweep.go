@@ -1,7 +1,7 @@
 // The module's background maintenance: a daily sweep that deletes expired
 // sessions, prunes the login limiter, and re-logs the standing reminder while
-// any user still carries a pending initial password (ADR-0015: the log keeps
-// nagging until the bootstrap credential is changed).
+// any user still carries a pending initial password an admin issued
+// (ADR-0015: the log keeps nagging until the initial credential is changed).
 package auth
 
 import (

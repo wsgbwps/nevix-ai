@@ -194,7 +194,7 @@ test('Admin completes the remaining governance actions: role, email, reset, dele
         .filter({ hasText: subjectIdentity.email })
       await expect(subjectRow).toBeVisible()
 
-      // 调角色：member → admin → member（bootstrap admin 保持活跃，末位保护不触发）。
+      // 调角色：member → admin → member（E2E 管理员保持活跃，末位保护不触发）。
       const roleSelect = subjectRow.getByRole('combobox', {
         name: `更改 ${subjectDisplayName} 的角色`
       })
@@ -376,7 +376,7 @@ test('the audit log lists governance events, paginates, and exports a local CSV 
       const createdEntry = entries.getByRole('listitem').filter({ hasText: '建号' }).first()
       await expect(createdEntry).toBeVisible()
       await expect(createdEntry).toContainText(auditedName)
-      await expect(createdEntry).toContainText('bootstrap.admin')
+      await expect(createdEntry).toContainText('e2e.admin')
       await expect(launched.page.getByText(/第 1 \/ \d+ 页 · 共 \d+ 条/)).toBeVisible()
 
       await launched.page.getByRole('button', { name: '导出 CSV' }).click()

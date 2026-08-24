@@ -41,8 +41,13 @@ export type AuthenticationError =
 
 export type AuthenticationNotice = 'session-expired' | 'remote-sign-out-delayed'
 
-/** The instance's first-run state as the public setup probe answers it. */
-export type InstanceSetupState = 'unknown' | 'uninitialized' | 'initialized'
+/**
+ * The instance's first-run state as the public setup probe answers it.
+ * 'probe-failed' means the server could not be asked: the boundary shows a
+ * retryable error instead of the login form, because an unreachable verdict
+ * must never fall back to a login that may be doomed on an empty instance.
+ */
+export type InstanceSetupState = 'unknown' | 'uninitialized' | 'initialized' | 'probe-failed'
 
 /** The session handed to authenticated consumers; the token stays out of URLs and storage except the encrypted slot. */
 export interface AuthenticatedSession {
@@ -56,8 +61,10 @@ interface Authentication {
   readonly notice: AuthenticationNotice | undefined
   readonly isSubmitting: boolean
   readonly isSessionPersistenceUnavailable: boolean
-  /** Whether the instance still awaits its first administrator; 'uninitialized' swaps the login boundary for the setup wizard. */
+  /** Whether the instance still awaits its first administrator; 'uninitialized' swaps the login boundary for the first-admin wizard. */
   readonly instanceSetup: InstanceSetupState
+  /** Whether the awaiting claim demands a setup code (protected deployment); drives the wizard's setup-code field. */
+  readonly setupCodeRequired: boolean
   readonly rememberedEmail: string | undefined
   readonly rememberEmailSelected: boolean
   readonly isRememberedEmailPersistenceUnavailable: boolean
@@ -82,9 +89,10 @@ interface Authentication {
   readonly initialize: (
     email: string,
     password: string,
-    setupCode: string,
+    setupCode: string | undefined,
     displayName: string
   ) => Promise<void>
+  readonly retrySetupProbe: () => void
   readonly completePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
   readonly signOut: () => Promise<void>
 }
@@ -98,6 +106,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [persistenceUnavailable, setPersistenceUnavailable] = useState(false)
   const [instanceSetup, setInstanceSetup] = useState<InstanceSetupState>('unknown')
+  const [setupCodeRequired, setSetupCodeRequired] = useState(false)
   const [rememberedEmail, setRememberedEmail] = useState<string>()
   const [rememberEmailSelected, setRememberEmailSelectedState] = useState(true)
   const [rememberedEmailPersistenceUnavailable, setRememberedEmailPersistenceUnavailable] =
@@ -167,7 +176,13 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     void client.setupStatus().then((result) => {
       // A probe from an earlier server URL never overwrites the boundary's state.
       if (generation !== setupProbeGenerationRef.current) return
-      if (result.outcome !== 'succeeded') return
+      if (result.outcome !== 'succeeded') {
+        // The state is unknowable: a retryable error, never a fallback to a
+        // login that cannot succeed on an empty instance.
+        setInstanceSetup('probe-failed')
+        return
+      }
+      setSetupCodeRequired(result.value.setupCodeRequired)
       setInstanceSetup(result.value.initialized ? 'initialized' : 'uninitialized')
     })
   }, [])
@@ -244,6 +259,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       // not survive the switch.
       setupProbeGenerationRef.current += 1
       setInstanceSetup('unknown')
+      setSetupCodeRequired(false)
 
       const [stored, remembered] = await Promise.all([
         readPersistedCredentials(),
@@ -480,7 +496,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     async (
       email: string,
       password: string,
-      setupCode: string,
+      setupCode: string | undefined,
       displayName: string
     ): Promise<void> => {
       const client = clientRef.current
@@ -599,6 +615,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     isSubmitting,
     isSessionPersistenceUnavailable: persistenceUnavailable,
     instanceSetup,
+    setupCodeRequired,
     rememberedEmail,
     rememberEmailSelected,
     isRememberedEmailPersistenceUnavailable: rememberedEmailPersistenceUnavailable,
@@ -611,6 +628,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     consumeRememberedEmailPersistenceNotice,
     dismissError: clearError,
     retryRestore: restore,
+    retrySetupProbe: probeSetupStatus,
     signIn,
     register,
     initialize,

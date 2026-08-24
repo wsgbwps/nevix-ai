@@ -64,7 +64,9 @@ export const authenticationTranslations = defineResourceTranslations({
     },
     setupWizard: {
       heading: '初始化 Nevix AI',
-      description: '该部署还没有管理员。输入服务端运维日志中的一次性设置码，创建你的管理员账号。',
+      openDescription: '该部署还没有管理员。创建你的管理员账号，即可完成初始化。',
+      protectedDescription:
+        '该部署还没有管理员。输入服务端运维日志中的一次性设置码，创建你的管理员账号。',
       email: '邮箱',
       password: '密码',
       confirmPassword: '确认密码',
@@ -77,6 +79,11 @@ export const authenticationTranslations = defineResourceTranslations({
       instanceAlreadyInitialized: '该实例已初始化，请直接登录。',
       rateLimited: '尝试过于频繁，请稍后重试。',
       serviceError: '无法连接服务器，请检查网络后重试。'
+    },
+    setupProbeFailure: {
+      heading: '无法确认服务器初始化状态',
+      description: '暂时无法连接服务器确认初始化状态，请稍后重试。',
+      retry: '重试'
     },
     passwordChange: {
       heading: '设置新密码',
@@ -165,7 +172,9 @@ export const authenticationTranslations = defineResourceTranslations({
     },
     setupWizard: {
       heading: 'Initialize Nevix AI',
-      description:
+      openDescription:
+        'This deployment has no administrator yet. Create yours to initialize the instance.',
+      protectedDescription:
         'This deployment has no administrator yet. Enter the one-time setup code from the server operations log to create yours.',
       email: 'Email',
       password: 'Password',
@@ -180,6 +189,12 @@ export const authenticationTranslations = defineResourceTranslations({
       instanceAlreadyInitialized: 'This instance was already initialized. Sign in below.',
       rateLimited: 'Too many attempts. Try again later.',
       serviceError: 'The server cannot be reached. Check your network and try again.'
+    },
+    setupProbeFailure: {
+      heading: 'Server status unavailable',
+      description:
+        'The server cannot be reached to confirm its initialization status. Try again later.',
+      retry: 'Try again'
     },
     passwordChange: {
       heading: 'Set a new password',

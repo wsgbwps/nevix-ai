@@ -42,11 +42,11 @@ func (m *Module) routes() []command.Route {
 			Handler: command.Handle(m.auth.Register, auth.MapRegisterError, http.StatusCreated),
 		},
 		{
-			// First-run setup (issue #122): the public status probe the login
-			// screen switches on — one boolean, nothing else — and the
-			// initialize command that redeems the one-time setup code for the
-			// first admin. Both are public like login: an uninitialized
-			// instance has no credentials to authenticate with yet.
+			// Instance Claim (issue #128): the public status probe the login
+			// screen switches on — initialized plus whether the claim demands a
+			// setup code — and the initialize command that claims the empty
+			// instance for its first admin. Both are public like login: an
+			// uninitialized instance has no credentials to authenticate with yet.
 			Method: http.MethodGet,
 			Path:   "/identity/setup/status",
 			Guard:  command.GuardPublic,

@@ -26,14 +26,12 @@ const (
 
 // forcedChangeModule resets state and creates an active member whose
 // must_change_password flag is set — the first-login shape an admin-created
-// account (or the bootstrap admin) has.
+// account has.
 func (h *harness) forcedChangeModule(t *testing.T) (*identity.Module, http.Handler) {
 	t.Helper()
 	h.resetUserState(t)
 	h.insertUser(t, loginEmail, initialPassword, "member", "active", true)
 	cfg := h.cfg
-	cfg.AdminEmail = ""
-	cfg.AdminInitialPassword = ""
 	return h.moduleWithConfig(t, cfg)
 }
 

@@ -26,14 +26,12 @@ const (
 
 // loginReadyModule resets state, creates an active user through the owner
 // credential, and returns a module + router constructed afterwards (so the
-// module's limiter is fresh and bootstrap is inert).
+// module's limiter is fresh).
 func (h *harness) loginReadyModule(t *testing.T) (*identity.Module, http.Handler) {
 	t.Helper()
 	h.resetUserState(t)
 	h.insertUser(t, loginEmail, loginPassword, "admin", "active", false)
 	cfg := h.cfg
-	cfg.AdminEmail = ""
-	cfg.AdminInitialPassword = ""
 	return h.moduleWithConfig(t, cfg)
 }
 
@@ -148,8 +146,6 @@ func TestLoginAnswersDisabledAccountWithAccountDisabled(t *testing.T) {
 	h.resetUserState(t)
 	h.insertUser(t, loginEmail, loginPassword, "member", "disabled", false)
 	cfg := h.cfg
-	cfg.AdminEmail = ""
-	cfg.AdminInitialPassword = ""
 	_, handler := h.moduleWithConfig(t, cfg)
 
 	status, body, _ := doLogin(t, handler, loginEmail, loginPassword)
@@ -313,8 +309,6 @@ func TestSessionSurvivesModuleReconstruction(t *testing.T) {
 	// A reconstructed Module is a restarted process: session truth lives in
 	// PostgreSQL, never in memory.
 	cfg := h.cfg
-	cfg.AdminEmail = ""
-	cfg.AdminInitialPassword = ""
 	_, restartedHandler := h.moduleWithConfig(t, cfg)
 	status, body := doAuthenticated(t, restartedHandler, http.MethodGet, "/identity/users/me", login.Token)
 	if status != http.StatusOK {

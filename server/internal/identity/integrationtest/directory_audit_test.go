@@ -71,8 +71,6 @@ func directoryWorld(t *testing.T, ctx context.Context) (h *harness, handler http
 	h.setDisplayName(t, "bob@nevix.test", "Bob Basin")
 	h.setDisplayName(t, "ghost@nevix.test", "Ghost Gone")
 	cfg := h.cfg
-	cfg.AdminEmail = ""
-	cfg.AdminInitialPassword = ""
 	_, handler = h.moduleWithConfig(t, cfg)
 	_, _, adminLogin := doLogin(t, handler, "admin@nevix.test", "admin-password-1")
 	_, _, memberLogin := doLogin(t, handler, "alice@nevix.test", "alice-password-1")

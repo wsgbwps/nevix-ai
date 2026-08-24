@@ -265,16 +265,19 @@ func (s *Service) loadUserByID(ctx context.Context, userID string) (userRecord, 
 }
 
 // Service owns authentication: session lifecycle, login/logout/me commands,
-// bootstrap, and the maintenance sweep. Reads use the pool; every write runs
-// through the Write Transaction Module. setupCode holds the first-run setup
-// code (issue #122): written once by GenerateSetupCode on construction over
-// an empty users table and never mutated after, its lifetime is the process —
-// the initialize transaction's empty-table re-check is what retires it.
+// the Instance Claim, and the maintenance sweep. Reads use the pool; every
+// write runs through the Write Transaction Module. setupCodeRequired mirrors
+// the deployment's claim protection; setupCode holds the one-time code an
+// armed protected claim demands (issue #128): written once by
+// ArmInstanceClaim on construction over an empty users table, cleared the
+// moment a claim succeeds, and never persisted — its lifetime is the empty
+// instance's lifetime with this process.
 type Service struct {
-	db        *pgxpool.Pool
-	runner    *writetx.Runner
-	limiter   *LoginRateLimiter
-	setupCode string
+	db                *pgxpool.Pool
+	runner            *writetx.Runner
+	limiter           *LoginRateLimiter
+	setupCodeRequired bool
+	setupCode         string
 }
 
 // NewService builds the service over the runtime pool and the shared write

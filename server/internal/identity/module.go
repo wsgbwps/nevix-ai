@@ -29,32 +29,70 @@ import (
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
-// Config is the identity Module's deployment configuration. AdminEmail and
-// AdminInitialPassword bootstrap the first admin on an empty database and are
-// inert once any user exists (ADR-0015); CORSAllowedOrigins is the
-// per-environment browser origin whitelist.
+// Config is the identity Module's deployment configuration.
+// SetupCodeRequired arms the optional setup-code protection on the Instance
+// Claim (ADR-0015 2026-08-24 revision); the environment-variable admin
+// bootstrap is gone, and its old variables refuse startup. CORSAllowedOrigins
+// is the per-environment browser origin whitelist.
 type Config struct {
-	AdminEmail           string
-	AdminInitialPassword string
-	CORSAllowedOrigins   []string
+	SetupCodeRequired  bool
+	CORSAllowedOrigins []string
 }
 
-// LoadConfig reads the Module's deployment variables via getenv. A missing or
+// LoadConfig reads the Module's deployment variables via a presence-aware
+// lookup (os.LookupEnv at the composition root, so a variable explicitly set
+// to an empty string is distinguishable from one never set). A missing or
 // invalid variable is an error naming that variable; the composition root
 // loads configuration before opening the database pool, so a misconfigured
-// process fails before touching infrastructure. Bootstrap credentials are
-// optional at load time: whether they matter depends on the database being
-// empty, which only NewModule can observe.
-func LoadConfig(getenv func(string) string) (Config, error) {
-	corsOrigins, err := loadCORSAllowedOrigins(getenv("CORS_ALLOWED_ORIGINS"))
+// process fails before touching infrastructure. NEVIX_SETUP_CODE_REQUIRED is
+// parsed strictly — unset, empty, "true", or "false"; anything else refuses
+// startup — and a set ADMIN_EMAIL or ADMIN_INITIAL_PASSWORD (the deleted
+// first-admin bootstrap pair, even when set to an empty value) refuses
+// startup with the migration hint instead of silently changing how an empty
+// instance is claimed.
+func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
+	corsOrigins, err := loadCORSAllowedOrigins(lookupValue(lookup, "CORS_ALLOWED_ORIGINS"))
+	if err != nil {
+		return Config{}, err
+	}
+	for _, legacy := range []string{"ADMIN_EMAIL", "ADMIN_INITIAL_PASSWORD"} {
+		if _, present := lookup(legacy); present {
+			return Config{}, fmt.Errorf("identity: %s is no longer supported; the first admin is created through the Instance Claim wizard — remove it and use NEVIX_SETUP_CODE_REQUIRED for optional claim protection", legacy)
+		}
+	}
+	setupCodeRequired, err := loadSetupCodeRequired(lookupValue(lookup, "NEVIX_SETUP_CODE_REQUIRED"))
 	if err != nil {
 		return Config{}, err
 	}
 	return Config{
-		AdminEmail:           strings.TrimSpace(getenv("ADMIN_EMAIL")),
-		AdminInitialPassword: getenv("ADMIN_INITIAL_PASSWORD"),
-		CORSAllowedOrigins:   corsOrigins,
+		SetupCodeRequired:  setupCodeRequired,
+		CORSAllowedOrigins: corsOrigins,
 	}, nil
+}
+
+// lookupValue reads one variable through the presence-aware lookup,
+// collapsing unset and set-to-empty; callers that must distinguish the two
+// read the lookup directly.
+func lookupValue(lookup func(string) (string, bool), key string) string {
+	v, _ := lookup(key)
+	return v
+}
+
+// loadSetupCodeRequired parses the Instance Claim protection flag strictly:
+// unset or empty claims open (no credential), "true" requires the one-time
+// setup code, "false" claims open explicitly, and every other value — TRUE,
+// 1, yes, even padded spellings — is a configuration error, not a guess.
+func loadSetupCodeRequired(raw string) (bool, error) {
+	switch raw {
+	case "":
+		return false, nil
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("identity: NEVIX_SETUP_CODE_REQUIRED must be true or false, got %q", raw)
+	}
 }
 
 // loadCORSAllowedOrigins parses the comma-separated whitelist. It must name
@@ -109,23 +147,19 @@ var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 // owner, a migration role, or any other role is rejected even when it could
 // SET ROLE identity_app, and an unreachable database fails the round trip, so
 // either way construction fails before the composition root starts the HTTP
-// listener or workers. Construction then runs the first-admin bootstrap: on
-// an empty users table the ADMIN_EMAIL / ADMIN_INITIAL_PASSWORD pair creates
-// the first admin; on a non-empty table the pair is ignored with a warning.
-// Finally, on a still-empty table the first-run setup code is generated and
-// disclosed to the operations log once (issue #122) — the wizard channel the
-// initialize command redeems; the two channels race first-wins on one
-// advisory lock inside their write transactions.
+// listener or workers. Construction then arms the Instance Claim (ADR-0015
+// 2026-08-24 revision): an empty instance is claimed through the public
+// initialize command with credentials the claimer chooses; when the
+// deployment enabled setup-code protection, construction generates the
+// one-time code and discloses it to the operations log exactly once, while an
+// open instance generates and logs nothing.
 func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, error) {
 	tx := writetx.New(pool)
 	if err := tx.VerifyStartupIdentity(ctx); err != nil {
 		return nil, err
 	}
 	service := auth.NewService(pool, tx)
-	if err := service.Bootstrap(ctx, cfg.AdminEmail, cfg.AdminInitialPassword); err != nil {
-		return nil, err
-	}
-	if err := service.GenerateSetupCode(ctx); err != nil {
+	if err := service.ArmInstanceClaim(ctx, cfg.SetupCodeRequired); err != nil {
 		return nil, err
 	}
 	return &Module{

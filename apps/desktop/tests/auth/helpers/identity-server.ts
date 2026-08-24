@@ -13,12 +13,18 @@ export interface IdentityServerConfig {
 }
 
 /**
- * The disposable empty-instance server the setup-wizard spec drives: never bootstrapped by
- * environment variables, initialized by the spec itself through the wizard.
+ * The disposable protected empty-instance server the setup-wizard spec drives: initialized
+ * by the spec itself through the wizard, using the one-time setup code parsed from that
+ * server's operations log.
  */
 export interface SetupServerConfig {
   readonly serverUrl: string
   readonly setupCode: string
+}
+
+/** The disposable open empty-instance server the instance-claim spec drives: no credential. */
+export interface OpenServerConfig {
+  readonly serverUrl: string
 }
 
 export interface TestIdentity {
@@ -56,15 +62,48 @@ export function readIdentityServerConfig(): IdentityServerConfig | undefined {
 }
 
 /**
- * Reads the empty-instance server exported by the E2E command: its URL plus the one-time
- * setup code parsed from that server's operations log. The code is only live until the
- * spec initializes the instance with it.
+ * Reads the protected empty-instance server exported by the E2E command: its URL plus the
+ * one-time setup code parsed from that server's operations log. The code is only live until
+ * the spec initializes the instance with it.
  */
 export function readSetupServerConfig(): SetupServerConfig | undefined {
   const serverUrl = process.env.NEVIX_TEST_SETUP_SERVER_URL
   const setupCode = process.env.NEVIX_TEST_SETUP_CODE
   if (!serverUrl || !setupCode) return undefined
   return { serverUrl, setupCode }
+}
+
+/** Reads the open empty-instance server exported by the E2E command. */
+export function readOpenServerConfig(): OpenServerConfig | undefined {
+  const serverUrl = process.env.NEVIX_TEST_OPEN_SERVER_URL
+  if (!serverUrl) return undefined
+  return { serverUrl }
+}
+
+/**
+ * Claims an empty instance over raw HTTP — the same public Instance Claim the wizard drives —
+ * optionally with the setup code a protected deployment demands. Fails the test on anything
+ * but the 201 first-admin response.
+ */
+export async function claimInstance(
+  serverUrl: string,
+  email: string,
+  password: string,
+  setupCode?: string,
+  displayName?: string
+): Promise<LoginGrant> {
+  const response = await fetch(new URL('/identity/setup/initialize', serverUrl), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      password,
+      ...(setupCode !== undefined ? { setup_code: setupCode } : {}),
+      ...(displayName !== undefined ? { display_name: displayName } : {})
+    })
+  })
+  expect(response.status, await response.clone().text()).toBe(201)
+  return (await response.json()) as LoginGrant
 }
 
 export function uniqueIdentity(prefix: string): TestIdentity {

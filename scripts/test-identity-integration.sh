@@ -112,8 +112,7 @@ assert_identity_integration_executed() {
   local skipped_count
   local test_name
   local -a representative_tests=(
-    TestBootstrapCreatesFirstAdminOnEmptyDatabase
-    TestBootstrapIgnoresVariablesWhenUsersExist
+    TestOpenClaimStatusAndSilentConstruction
     TestLoginIssuesOpaqueSessionStoredOnlyAsHash
     TestLoginRejectsBadCredentialsUniformly
     TestLoginAnswersDisabledAccountWithAccountDisabled
@@ -140,14 +139,13 @@ assert_identity_integration_executed() {
     TestConcurrentCreatesCannotExceedTheActiveCap
     TestRevokeRemovesCodeFromListAndKeepsTheRow
     TestJoinCodeSurfaceIsAdminOnlyAndShapeChecked
-    TestSetupCodeGeneratedAndLoggedOnceOnEmptyDatabase
-    TestSetupStatusReturnsOnlyTheInitializedBoolean
-    TestInitializeCreatesFirstAdminAndSession
-    TestInitializeRejectsWrongCodeAndRateLimits
-    TestInitializeAnswersConflictOnceInitialized
+    TestProtectedClaimStatusAndCodeDisclosure
+    TestSetupStatusReturnsOnlyTheTwoBooleans
+    TestOpenClaimCreatesFirstAdminWithoutACredential
+    TestProtectedClaimDemandsTheCode
+    TestClaimAnswersConflictOnceInitialized
     TestRestartRotatesTheSetupCode
-    TestConcurrentInitializeIsFirstWins
-    TestBootstrapAndInitializeRaceCreatesExactlyOneAdmin
+    TestConcurrentClaimIsFirstWins
     TestDirectoryShowsActiveUsersToEveryActiveUser
     TestManagementListShowsEveryAccountToAdminsOnly
     TestAuditListIsAdminOnlyAndNewestFirst
@@ -197,14 +195,12 @@ echo "==> Running Go Identity integration tests"
 # The harness DSNs: NEVIX_DATABASE_URL is the owner (DDL + fixtures +
 # assertions); NEVIX_IDENTITY_DATABASE_URL authenticates directly as
 # identity_app — the production runtime credential the Module must see.
-# NEVIX_ADMIN_EMAIL / NEVIX_ADMIN_INITIAL_PASSWORD exercise the bootstrap
-# contract; the per-test state resets run inside the suite.
+# The first admin is created through the public Instance Claim inside the
+# suite; the per-test state resets run inside it.
 export NEVIX_IDENTITY_INTEGRATION_REQUESTED=1
 export NEVIX_DATABASE_URL="postgresql://postgres:${postgres_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
 export NEVIX_IDENTITY_DATABASE_URL="postgresql://identity_app:${identity_app_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
 export NEVIX_CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173"
-export NEVIX_ADMIN_EMAIL="bootstrap.admin@nevix.test"
-export NEVIX_ADMIN_INITIAL_PASSWORD="initial-password-123"
 
 identity_test_log="$(mktemp -t nevix-identity-integration.XXXXXX)"
 set +e

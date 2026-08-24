@@ -114,7 +114,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (LoginRespo
 	joinCode := strings.ToUpper(strings.TrimSpace(*req.JoinCode))
 	displayName := strings.TrimSpace(req.DisplayName)
 	if displayName == "" {
-		displayName = bootstrapDisplayName(email)
+		displayName = derivedDisplayName(email)
 	}
 
 	token, tokenHash, err := newSessionToken()

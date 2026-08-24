@@ -17,8 +17,6 @@ interface LaunchTestAppOptions {
 }
 
 const FORBIDDEN_CHILD_ENVIRONMENT_KEYS = [
-  'ADMIN_EMAIL',
-  'ADMIN_INITIAL_PASSWORD',
   'DATABASE_URL',
   'DB_URL',
   'JWT_SECRET',

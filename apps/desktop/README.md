@@ -51,9 +51,10 @@ repository Desktop E2E harness lock and refuses to run if another E2E stack alre
 when a required loopback port (PostgreSQL, the identity server's port 8080, or the TLS
 terminator) is already in use, so tests cannot silently connect to an unowned local service. On
 a clean host, the command owns the stack it starts and tears it down on success, failure, SIGINT,
-or SIGTERM. The bootstrap Admin completes the forced first-login password change over raw HTTP
-before the suite, leaving a stable administrative credential; it exists only in the Playwright
-process, and the Electron launcher removes it from the Desktop process environment.
+or SIGTERM. The suite's test admin is created through the public Instance Claim over raw HTTP
+before the specs run — the same open channel an operator's first administrator uses — so it owes
+no first-login password change; its credentials exist only in the Playwright process, and the
+Electron launcher removes them from the Desktop process environment.
 
 Platform-native Session persistence must also pass the
 [native credential-backend smoke](docs/authentication-session-native-smoke.md) before support is

@@ -34,7 +34,7 @@ func main() {
 func run() error {
 	// Module configuration loads before the database pool opens, so a
 	// misconfigured process fails before touching infrastructure.
-	identityConfig, err := identity.LoadConfig(os.Getenv)
+	identityConfig, err := identity.LoadConfig(os.LookupEnv)
 	if err != nil {
 		return err
 	}

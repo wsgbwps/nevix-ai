@@ -21,11 +21,13 @@ interface AuthenticationScreenProps {
   readonly notice?: AuthenticationNotice
   readonly isSubmitting?: boolean
   readonly instanceSetup: InstanceSetupState
+  readonly setupCodeRequired?: boolean
   readonly rememberedEmail?: string
   readonly rememberEmailSelected: boolean
   readonly isRememberedEmailPersistenceUnavailable: boolean
   readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   readonly onRetryRestore: () => Promise<void>
+  readonly onRetrySetupProbe: () => void
   readonly onRememberEmailSelectedChange: (selected: boolean) => void
   readonly onRememberedEmailPersistenceNoticeShown: () => void
   readonly onDismissError: () => void
@@ -39,7 +41,7 @@ interface AuthenticationScreenProps {
   readonly onInitialize: (
     email: string,
     password: string,
-    setupCode: string,
+    setupCode: string | undefined,
     displayName: string
   ) => Promise<void>
   readonly onCompletePasswordChange: (currentPassword: string, newPassword: string) => Promise<void>
@@ -52,11 +54,13 @@ export function AuthenticationScreen({
   notice,
   isSubmitting = false,
   instanceSetup,
+  setupCodeRequired = false,
   rememberedEmail,
   rememberEmailSelected,
   isRememberedEmailPersistenceUnavailable,
   rememberedEmailPersistenceNoticeSurface,
   onRetryRestore,
+  onRetrySetupProbe,
   onRememberEmailSelectedChange,
   onRememberedEmailPersistenceNoticeShown,
   onDismissError,
@@ -95,8 +99,11 @@ export function AuthenticationScreen({
                 <SetupWizardForm
                   error={error}
                   isSubmitting={isSubmitting}
+                  setupCodeRequired={setupCodeRequired}
                   onInitialize={onInitialize}
                 />
+              ) : instanceSetup === 'probe-failed' ? (
+                <SetupProbeFailurePanel onRetry={onRetrySetupProbe} />
               ) : mode === 'register' ? (
                 <RegistrationForm
                   error={error}
@@ -282,17 +289,33 @@ function LoginForm({
   )
 }
 
+function SetupProbeFailurePanel({ onRetry }: { readonly onRetry: () => void }): React.JSX.Element {
+  const { t } = useTranslation('authentication')
+
+  return (
+    <div className="text-center">
+      <h1 className="text-2xl font-bold">{t('setupProbeFailure.heading')}</h1>
+      <p className="text-muted-foreground mt-2 text-sm">{t('setupProbeFailure.description')}</p>
+      <Button className="mt-6" onClick={onRetry}>
+        {t('setupProbeFailure.retry')}
+      </Button>
+    </div>
+  )
+}
+
 function SetupWizardForm({
   error,
   isSubmitting,
+  setupCodeRequired,
   onInitialize
 }: {
   readonly error?: AuthenticationError
   readonly isSubmitting: boolean
+  readonly setupCodeRequired: boolean
   readonly onInitialize: (
     email: string,
     password: string,
-    setupCode: string,
+    setupCode: string | undefined,
     displayName: string
   ) => Promise<void>
 }): React.JSX.Element {
@@ -305,23 +328,35 @@ function SetupWizardForm({
   const isPasswordValid = isPasswordByteLengthValid(password)
   const isConfirmMismatch = confirmPassword !== '' && confirmPassword !== password
   const isSetupCodeReady = setupCode.trim() !== ''
+  // A protected deployment demands the one-time code the operations log
+  // disclosed; an open claim has no code field at all.
   const canSubmit =
     email.trim() !== '' &&
     isPasswordValid &&
     confirmPassword !== '' &&
     confirmPassword === password &&
-    isSetupCodeReady
+    (!setupCodeRequired || isSetupCodeReady)
 
   function submit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault()
     if (isSubmitting || !canSubmit) return
 
-    void onInitialize(email, password, setupCode.trim(), displayName)
+    void onInitialize(
+      email,
+      password,
+      setupCodeRequired ? setupCode.trim() : undefined,
+      displayName
+    )
   }
 
   return (
     <form onSubmit={submit}>
-      <FormHeader heading={t('setupWizard.heading')} description={t('setupWizard.description')} />
+      <FormHeader
+        heading={t('setupWizard.heading')}
+        description={t(
+          setupCodeRequired ? 'setupWizard.protectedDescription' : 'setupWizard.openDescription'
+        )}
+      />
       <FieldGroup>
         <Field>
           <FieldLabel htmlFor="setup-wizard-email">{t('setupWizard.email')}</FieldLabel>
@@ -368,23 +403,25 @@ function SetupWizardForm({
             <FieldError>{t('setupWizard.confirmPasswordMismatch')}</FieldError>
           ) : null}
         </Field>
-        <Field>
-          <FieldLabel htmlFor="setup-wizard-code">{t('setupWizard.setupCode')}</FieldLabel>
-          <Input
-            id="setup-wizard-code"
-            name="setupCode"
-            type="text"
-            inputMode="text"
-            autoCapitalize="characters"
-            autoComplete="off"
-            spellCheck={false}
-            maxLength={64}
-            required
-            disabled={isSubmitting}
-            value={setupCode}
-            onChange={(event) => setSetupCode(event.target.value)}
-          />
-        </Field>
+        {setupCodeRequired ? (
+          <Field>
+            <FieldLabel htmlFor="setup-wizard-code">{t('setupWizard.setupCode')}</FieldLabel>
+            <Input
+              id="setup-wizard-code"
+              name="setupCode"
+              type="text"
+              inputMode="text"
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={64}
+              required
+              disabled={isSubmitting}
+              value={setupCode}
+              onChange={(event) => setSetupCode(event.target.value)}
+            />
+          </Field>
+        ) : null}
         <Field>
           <FieldLabel htmlFor="setup-wizard-display-name">
             {t('setupWizard.displayName')}
