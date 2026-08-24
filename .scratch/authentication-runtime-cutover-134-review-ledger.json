@@ -5,9 +5,9 @@
     "apps/desktop",
     ".scratch/authentication-runtime-cutover-134-plan.md"
   ],
-  "currentDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+  "currentDiffDigest": "sha256:7c7ccec220f87ebcbeca8d983b3d771c49395d2fbf47fb46a5784a88b8713f03",
   "fullReviewCount": 1,
-  "targetedReviewRound": 0,
+  "targetedReviewRound": 2,
   "findings": [
     {
       "id": "CR-STANDARDS-0001",
@@ -46,7 +46,9 @@
       "dispositionReason": "Acknowledged maintainability judgement call. Each site differs in the credentials settled and the surrounding verdict mapping; the duplication was introduced deliberately to keep the generation guard adjacent to each command's settlement rather than hiding it behind a helper. Deferred to a follow-up inside the Authentication Domain; not repaired inside this convergence loop per the lifecycle contract.",
       "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication-runtime.ts",
       "status": "closed",
-      "evidence": ["frozen diff hunks at the four command settlement sites"],
+      "evidence": [
+        "frozen diff hunks at the four command settlement sites"
+      ],
       "reviewedDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
       "unresolvedTargetedRounds": 0,
       "introducedBy": null
@@ -64,7 +66,7 @@
       "disposition": "accepted",
       "dispositionReason": "Verified: settleSession leaves probeSequenceRef untouched, so a probe that started before sign-in can still write instanceSetup while authenticated; after sign-out the boundary renders with that stale value (wizard flash) until the newer probe answers. Violates 'stale result 不能覆盖新 surface' (story 22: a stale setup-probe result must be ignored). Repair: settleSession retires in-flight probes; module test drives the exact scenario.",
       "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication-runtime.ts",
-      "status": "open",
+      "status": "closed",
       "evidence": [
         "use-authentication-runtime.ts settleSession: no probe retirement",
         "probeSetupStatus completion guard checks generation and probeSequence only"
@@ -110,7 +112,7 @@
       "disposition": "accepted",
       "dispositionReason": "The listed verdict/failure outcomes are deterministically coverable through the public interface and required by '#132: The module suite covers ... sign-in verdicts, self-registration verdicts, forced password change ... persistence failures'. Repair adds them. The stale restore/command completion sub-item is structurally unreachable through the required black-box seam: generations advance only at restore start, single-flight plus UI gating prevents a command from spanning a generation advance, and the spec mandates driving visible user behavior — this boundary is recorded in delivery notes instead of faked through internals.",
       "owner": "apps/desktop/tests/component",
-      "status": "open",
+      "status": "closed",
       "evidence": [
         "spec files contain no scripted email-taken / new-password-rejected / replace-failed / clear-failed outcomes",
         "no sign-in service-unavailable case"
@@ -130,19 +132,114 @@
       },
       "level": "blocker",
       "disposition": "accepted",
-      "dispositionReason": "Verified: no existing spec on main covers signed-in server-URL change (connection-screen covers initial configuration only). Although '保留' is retention wording, this migration makes the reload path load-bearing for the new permanent-binding contract (a URL change without reload is now a composition error), and the criterion lists Connection reload among canaries. A compact canary (sign in → Settings connection section → switch to the empty setup server → assert session cleared, renderer reloaded, wizard boundary) is added in tests/connection/server-change.spec.ts.",
+      "dispositionReason": "Accepted. Round 1 added the canary but it was CI-unusable (see CR-SPEC-0005, now closed). Round 2 made it full-suite and backend-independent: the canary now proves settings save, renderer reload, new-server rebinding, the claim boundary, shell absence, and (with a secure backend) envelope deletion — all green in the full suite (69 passed). Remaining defect per round-2 review: the end state does not UNIQUELY attribute the clearing to the Connection-save clear-session IPC, because restore-time session rejection would independently clear the envelope and satisfy the same assertions. The two-round targeted bound is reached; escalated for an owner decision (accept the canary as sufficient coverage, or require request/IPC-attribution refinement before merge).",
       "owner": "apps/desktop/tests/connection/server-change.spec.ts",
-      "status": "open",
+      "status": "escalated",
       "evidence": [
         "grep over tests/connection + tests/settings: only initial-configuration flows exist",
         "settings-page.tsx handleServerConnectionSaved: clear-session IPC + window.location.reload"
       ],
       "reviewedDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
-      "unresolvedTargetedRounds": 0,
+      "unresolvedTargetedRounds": 2,
       "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0005",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/tests/connection/server-change.spec.ts",
+        "source": "issue #134 criterion 20 (canary must run where it is classified) / repair-introduced",
+        "anchor": "tests/connection/server-change.spec.ts:server-change canary",
+        "defect": "Round-1 canary carried @smoke but smoke mode starts no open-claim server (skip), and its unconditional stored-session poll cannot succeed under CI-forced basic_text storage (fail) — unusable in official CI"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Repair-introduced by dfb723c: the canary asserted the stored envelope unconditionally, which fails on CI basic_text, and was @smoke-tagged although the empty instances only start in full mode. Repaired in 47fe09c: canary is full-suite (no @smoke) and guards every stored-envelope assertion behind hasSecurePersistenceBackend while the reload→claim-boundary and shell-absent assertions stay backend-independent.",
+      "owner": "apps/desktop/tests/connection/server-change.spec.ts",
+      "status": "closed",
+      "evidence": [
+        "run-e2e.sh: start_setup_server/start_open_server run only in full mode",
+        "session-persistence spec precedent: stored-envelope assertions skip without a secure backend"
+      ],
+      "reviewedDiffDigest": "sha256:1b16d9feb303fd04a8d3c342064fe3a98588838a90fc8780a0d68e6754b27cc6",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": {
+        "kind": "repair",
+        "findingIds": [
+          "CR-SPEC-0004"
+        ],
+        "repairDiffDigest": "sha256:1b16d9feb303fd04a8d3c342064fe3a98588838a90fc8780a0d68e6754b27cc6"
+      }
     }
   ],
-  "repairRecords": [],
-  "relevantCheck": null,
-  "outcome": "needs-fix"
+  "repairRecords": [
+    {
+      "fixFor": [
+        "CR-SPEC-0001",
+        "CR-SPEC-0003",
+        "CR-SPEC-0004"
+      ],
+      "beforeDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+      "afterDiffDigest": "sha256:1b16d9feb303fd04a8d3c342064fe3a98588838a90fc8780a0d68e6754b27cc6",
+      "commit": "dfb723c",
+      "touchedPaths": [
+        "apps/desktop/src/renderer/src/features/authentication/model/use-authentication-runtime.ts (settleSession: probe retirement)",
+        "apps/desktop/tests/component/authentication-runtime-commands.spec.tsx (+5 tests)",
+        "apps/desktop/tests/component/authentication-runtime-setup.spec.tsx (+1 test)",
+        "apps/desktop/tests/component/authentication-runtime-concurrency.spec.tsx (+1 test)",
+        "apps/desktop/tests/connection/server-change.spec.ts (new canary)"
+      ],
+      "checks": [
+        {
+          "name": "desktop typecheck",
+          "result": "PASS"
+        },
+        {
+          "name": "desktop lint (auth + tests)",
+          "result": "PASS"
+        },
+        {
+          "name": "desktop component tests",
+          "result": "PASS",
+          "coverage": "37 passed"
+        },
+        {
+          "name": "desktop full E2E suite (run-e2e.sh full + verify-auth-artifacts)",
+          "result": "PASS",
+          "coverage": "69 passed, 2 skipped (Linux-only)"
+        }
+      ]
+    },
+    {
+      "fixFor": [
+        "CR-SPEC-0004",
+        "CR-SPEC-0005"
+      ],
+      "beforeDiffDigest": "sha256:1b16d9feb303fd04a8d3c342064fe3a98588838a90fc8780a0d68e6754b27cc6",
+      "afterDiffDigest": "sha256:7c7ccec220f87ebcbeca8d983b3d771c49395d2fbf47fb46a5784a88b8713f03",
+      "commit": "47fe09c",
+      "touchedPaths": [
+        "apps/desktop/tests/connection/server-change.spec.ts (full-suite only, backend-guarded envelope assertions)",
+        "apps/desktop/scripts/run-e2e.sh (stale comment about deleted Instance Claim specs)"
+      ],
+      "checks": [
+        {
+          "name": "desktop lint",
+          "result": "PASS"
+        },
+        {
+          "name": "desktop full E2E suite (run-e2e.sh full + verify-auth-artifacts)",
+          "result": "PASS",
+          "coverage": "69 passed, 2 skipped (Linux-only)"
+        }
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "name": "desktop full E2E suite (run-e2e.sh full) + verify-auth-artifacts, on top of typecheck/lint/unit(105)/component(37)/architecture",
+    "result": "PASS",
+    "coverage": "69 passed, 2 skipped (Linux-only); all suites green on branch tip 47fe09c",
+    "diffDigest": "sha256:7c7ccec220f87ebcbeca8d983b3d771c49395d2fbf47fb46a5784a88b8713f03"
+  },
+  "outcome": "escalated"
 }
