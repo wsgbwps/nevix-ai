@@ -154,6 +154,51 @@ test('a claim submission stays single-flight while the server decides', async ({
   await expectLoginBoundary(page)
 })
 
+test('a probe answered after sign-in cannot flash the claim wizard after sign-out', async ({
+  mount,
+  page
+}) => {
+  // The initial probe stays pending while the user signs in; establishing the
+  // session retires it, so its late "uninitialized" answer must not survive to
+  // the post-sign-out boundary.
+  await prepareAuthenticationRuntime(page, {
+    sessionRead: { outcome: 'empty' },
+    rememberedRead: { outcome: 'empty' },
+    probeSetup: DEFER
+  })
+  const component = await mount(<AuthenticationRuntimeStory />)
+
+  await expect(component.getByRole('heading', { name: 'Sign in to Nevix AI' })).toBeVisible()
+
+  await enqueue(page, 'go', 'signIn', { outcome: 'succeeded', session: memberSession(memberUser) })
+  await enqueue(page, 'sessions', 'replace', { outcome: 'persisted' })
+  await enqueue(page, 'remembered', 'replace', { outcome: 'persisted' })
+  await component.getByLabel('Email', { exact: true }).fill(memberUser.email)
+  await component.getByLabel('Password', { exact: true }).fill('correct horse battery staple')
+  await component.getByRole('button', { name: 'Sign in' }).click()
+  await expect(component.getByTestId('session-status')).toHaveText('available')
+
+  // The retired probe answers "uninitialized" while the session is open.
+  await settle(page, 0, {
+    outcome: 'succeeded',
+    initialized: false,
+    setupCodeRequired: true
+  })
+  await page.waitForTimeout(150)
+
+  await enqueue(page, 'go', 'endSession', { outcome: 'revoked' })
+  await enqueue(page, 'sessions', 'clear', { outcome: 'cleared' })
+  await enqueue(page, 'go', 'probeSetup', {
+    outcome: 'succeeded',
+    initialized: true,
+    setupCodeRequired: false
+  })
+  await component.getByTestId('sign-out').click()
+
+  await expectLoginBoundary(page)
+  await expect(component.getByRole('heading', { name: 'Initialize Nevix AI' })).toHaveCount(0)
+})
+
 test('a stale probe answer never overwrites a newer boundary', async ({ mount, page }) => {
   // The first probe stays pending while the user signs in; after sign-out a
   // newer probe settles the boundary, and the stale answer must not reopen

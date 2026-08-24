@@ -179,3 +179,30 @@ test('a clear that fails after sign-in explains itself once on the authenticated
   await expect(notice).toBeVisible()
   await expect(notice).toHaveCount(1)
 })
+
+test('a failed remembered-email replacement after login explains itself once on the authenticated surface', async ({
+  mount,
+  page
+}) => {
+  await prepareAuthenticationRuntime(page, {
+    sessionRead: { outcome: 'empty' },
+    rememberedRead: { outcome: 'empty' },
+    probeSetup: { outcome: 'succeeded', initialized: true, setupCodeRequired: false }
+  })
+  const component = await mount(<AuthenticationRuntimeStory />)
+  await expectLoginBoundary(page)
+
+  await enqueue(page, 'go', 'signIn', { outcome: 'succeeded', session: memberSession(memberUser) })
+  await enqueue(page, 'sessions', 'replace', { outcome: 'persisted' })
+  await enqueue(page, 'remembered', 'replace', { outcome: 'replace-failed' })
+  await component.getByLabel('Email', { exact: true }).fill(memberUser.email)
+  await component.getByLabel('Password', { exact: true }).fill('correct horse battery staple')
+  await component.getByRole('button', { name: 'Sign in' }).click()
+  await expect(component.getByTestId('session-status')).toHaveText('available')
+
+  const notice = component.getByText(
+    'This device cannot store a remembered email securely. The current choice lasts only until you close the application.'
+  )
+  await expect(notice).toBeVisible()
+  await expect(notice).toHaveCount(1)
+})

@@ -260,6 +260,9 @@ export function useAuthenticationRuntime(
       setPersistenceUnavailable(sessionPersistenceDegradedRef.current)
       setNotice(undefined)
       setSessionUser(credentials.user)
+      // A session boundary supersedes any earlier setup probe: its answer
+      // must not survive to flash the claim wizard on a later boundary.
+      probeSequenceRef.current += 1
       const nextStatus: AuthenticationStatus = credentials.user.mustChangePassword
         ? 'password-change-required'
         : 'authenticated'

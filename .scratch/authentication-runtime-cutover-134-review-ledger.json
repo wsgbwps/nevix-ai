@@ -1,0 +1,148 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "f71ddb7",
+  "scopePaths": [
+    "apps/desktop",
+    ".scratch/authentication-runtime-cutover-134-plan.md"
+  ],
+  "currentDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 0,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/tests/component/fixtures/authentication-runtime.story.tsx",
+        "source": "apps/desktop/AGENTS.md — code outside a Feature imports it only through its public index.ts",
+        "anchor": "tests/component/fixtures/authentication-runtime.story.tsx:AuthenticationRuntimeStory imports",
+        "defect": "Test composition deep-imports TestAuthenticationProvider and the in-memory adapters from Authentication internals instead of the public index"
+      },
+      "level": "blocker",
+      "disposition": "false-positive",
+      "dispositionReason": "Parent spec #132 (Implementation + Testing Decisions) mandates both that 'Authentication-owned test composition supplies in-memory adapters while tests still drive and assert through the public module interface' AND that 'the dependency ports and adapter topology are not exported through the Authentication Feature public interface'. Satisfying both requires Authentication-owned tests to reach internal adapters directly; the merged #133 precedent (tests/unit/authentication-in-memory-seams.test.mts, PR #135, on main) established exactly this deep-import pattern for Authentication-owned tests. The AGENTS.md public-index rule's enforcement scope (scripts/verify-desktop-architecture.mjs) covers src/ production code; the story drives the public interface (AuthenticationSurface + useCurrentSession) and only injects adapters at the composition point the spec reserves for that purpose. Exporting the test provider through index.ts would violate the spec decision the migration exists to enforce.",
+      "owner": "apps/desktop/tests/component/fixtures/authentication-runtime.story.tsx",
+      "status": "closed",
+      "evidence": [
+        "issue #132 Testing Decisions: 'Authentication-owned test composition supplies in-memory adapters while tests still drive and assert through the public module interface'",
+        "issue #132 Implementation Decisions: 'The dependency ports and adapter topology are not exported through the Authentication Feature public interface'",
+        "main @ f71ddb7 tests/unit/authentication-in-memory-seams.test.mts deep-imports features/authentication/api/in-memory-*.ts (merged PR #135)"
+      ],
+      "reviewedDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication-runtime.ts",
+        "source": "Fowler smell baseline — Duplicated Code",
+        "anchor": "use-authentication-runtime.ts:signIn/register/initialize/completePasswordChange persistence settlement",
+        "defect": "The replace→generation-check→degradation-update sequence repeats in four command bodies and can drift"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Acknowledged maintainability judgement call. Each site differs in the credentials settled and the surrounding verdict mapping; the duplication was introduced deliberately to keep the generation guard adjacent to each command's settlement rather than hiding it behind a helper. Deferred to a follow-up inside the Authentication Domain; not repaired inside this convergence loop per the lifecycle contract.",
+      "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication-runtime.ts",
+      "status": "closed",
+      "evidence": ["frozen diff hunks at the four command settlement sites"],
+      "reviewedDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication-runtime.ts",
+        "source": "issue #134 criterion 14 / issue #132 stale-generation decision (story 22)",
+        "anchor": "use-authentication-runtime.ts:settleSession",
+        "defect": "Establishing a session does not retire an earlier setup probe; a stale probe answer can later flash the Instance Claim wizard after sign-out"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Verified: settleSession leaves probeSequenceRef untouched, so a probe that started before sign-in can still write instanceSetup while authenticated; after sign-out the boundary renders with that stale value (wizard flash) until the newer probe answers. Violates 'stale result 不能覆盖新 surface' (story 22: a stale setup-probe result must be ignored). Repair: settleSession retires in-flight probes; module test drives the exact scenario.",
+      "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication-runtime.ts",
+      "status": "open",
+      "evidence": [
+        "use-authentication-runtime.ts settleSession: no probe retirement",
+        "probeSetupStatus completion guard checks generation and probeSequence only"
+      ],
+      "reviewedDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication-runtime.ts",
+        "source": "issue #134 criteria 9/13 / issue #132 sign-out decision",
+        "anchor": "use-authentication-runtime.ts:signOut",
+        "defect": "signOut awaits endSession and persistence clearing before invalidating credentials, so a hung remote call leaves the shell and captured capabilities usable"
+      },
+      "level": "blocker",
+      "disposition": "false-positive",
+      "dispositionReason": "The spec defines local-first sign-out as COMPLETION semantics: '#134: sign-out single-flight，完成即表示本地 Session access 已结束；remote revoke failure 保留既有 notice，而不会延长本地访问' — i.e., no completion path keeps local access alive when remote revocation fails or throws, which the implementation satisfies (settle runs on every path, including catch). The spec's compatibility requirements pin existing user-visible and concurrency behavior ('Existing user-visible copy, ... and concurrency behavior are compatibility requirements'); the shipped flow on main awaits revocation then settles, and retained E2E canaries assert exactly that ordering (logout request awaited before boundary transition; offline sign-out shows the delayed notice). Reordering local termination before the remote call would change observable slow-server behavior without a spec mandate. The hung-remote exposure during the await is identical to every other command on main and the spec explicitly excludes timers ('No timer ... is introduced'). Criterion 9 requires unavailable acquisition only AFTER sign-out, which holds.",
+      "owner": "apps/desktop/src/renderer/src/features/authentication/model/use-authentication-runtime.ts",
+      "status": "closed",
+      "evidence": [
+        "issue #132 Implementation Decisions: 'Sign-out is single-flight. Its completion means local Session access has ended even if remote revocation was not confirmed'",
+        "issue #132 compatibility: 'Existing user-visible copy, ... persistence semantics, and concurrency behavior are compatibility requirements'",
+        "main @ f71ddb7 model/use-authentication.ts signOut had the identical await-then-settle ordering",
+        "tests/auth/session-persistence.spec.ts offline sign-out canary asserts notice + login boundary under the shipped ordering"
+      ],
+      "reviewedDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0003",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/tests/component",
+        "source": "issue #134 criterion 18 / issue #132 Testing Decisions module-suite matrix",
+        "anchor": "tests/component/authentication-runtime-*.spec.tsx",
+        "defect": "Module-test matrix missing several scripted verdicts and failure outcomes: sign-in service-unavailable, registration email-taken/rate-limited, password-change new-password-rejected/rate-limited, remembered-email replace-failed, session-clear failure; stale restore/command completion unreachable via the public seam is undocumented"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "The listed verdict/failure outcomes are deterministically coverable through the public interface and required by '#132: The module suite covers ... sign-in verdicts, self-registration verdicts, forced password change ... persistence failures'. Repair adds them. The stale restore/command completion sub-item is structurally unreachable through the required black-box seam: generations advance only at restore start, single-flight plus UI gating prevents a command from spanning a generation advance, and the spec mandates driving visible user behavior — this boundary is recorded in delivery notes instead of faked through internals.",
+      "owner": "apps/desktop/tests/component",
+      "status": "open",
+      "evidence": [
+        "spec files contain no scripted email-taken / new-password-rejected / replace-failed / clear-failed outcomes",
+        "no sign-in service-unavailable case"
+      ],
+      "reviewedDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0004",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/tests/connection",
+        "source": "issue #134 criterion 20 / issue #132 canary list",
+        "anchor": "tests/connection (no spec covers a configured device changing the server URL)",
+        "defect": "No E2E canary proves Connection-triggered Session clearing and renderer reload while signed in — the exact flow the runtime's permanent server binding depends on"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Verified: no existing spec on main covers signed-in server-URL change (connection-screen covers initial configuration only). Although '保留' is retention wording, this migration makes the reload path load-bearing for the new permanent-binding contract (a URL change without reload is now a composition error), and the criterion lists Connection reload among canaries. A compact canary (sign in → Settings connection section → switch to the empty setup server → assert session cleared, renderer reloaded, wizard boundary) is added in tests/connection/server-change.spec.ts.",
+      "owner": "apps/desktop/tests/connection/server-change.spec.ts",
+      "status": "open",
+      "evidence": [
+        "grep over tests/connection + tests/settings: only initial-configuration flows exist",
+        "settings-page.tsx handleServerConnectionSaved: clear-session IPC + window.location.reload"
+      ],
+      "reviewedDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [],
+  "relevantCheck": null,
+  "outcome": "needs-fix"
+}
