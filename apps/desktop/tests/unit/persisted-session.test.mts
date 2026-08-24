@@ -22,13 +22,16 @@ function installWindowApi(handler: (channel: string, request?: unknown) => Promi
   ;(globalThis as { window?: unknown }).window = {
     api: {
       invoke: (channel: string, request?: unknown) => {
-        calls.push({ channel, request })
+        calls.push(request === undefined ? { channel } : { channel, request })
         return handler(channel, request)
       }
     }
   }
   return { calls }
 }
+
+const { createSessionPersistenceOverIpc } =
+  await import('../../src/renderer/src/features/authentication/session/persisted-session.ts')
 
 const credentials = {
   token: 'opaque-session-token',
@@ -69,8 +72,7 @@ test.afterEach(() => {
 })
 
 test('reading a stored session yields the canonical credentials', async () => {
-  const { clearPersistedSession, readPersistedCredentials } =
-    await import('../../src/renderer/src/features/authentication/session/persisted-session.ts')
+  const sessions = createSessionPersistenceOverIpc()
   installWindowApi(async (channel) => {
     if (channel === 'authentication:read-session') {
       return { outcome: 'session', session: serializedCredentials }
@@ -78,33 +80,28 @@ test('reading a stored session yields the canonical credentials', async () => {
     return undefined
   })
 
-  const stored = await readPersistedCredentials()
-  assert.deepEqual(stored, { outcome: 'session', credentials: storedCredentials })
-  await clearPersistedSession()
+  assert.deepEqual(await sessions.read(), { outcome: 'stored', credentials: storedCredentials })
 })
 
 test('a session that is not the canonical schema is unreadable', async () => {
-  const { readPersistedCredentials } =
-    await import('../../src/renderer/src/features/authentication/session/persisted-session.ts')
+  const sessions = createSessionPersistenceOverIpc()
   installWindowApi(async () => ({ outcome: 'session', session: JSON.stringify({ token: 42 }) }))
 
-  assert.deepEqual(await readPersistedCredentials(), { outcome: 'unreadable' })
+  assert.deepEqual(await sessions.read(), { outcome: 'unreadable' })
 })
 
 test('a session missing its expiry is unreadable', async () => {
-  const { readPersistedCredentials } =
-    await import('../../src/renderer/src/features/authentication/session/persisted-session.ts')
+  const sessions = createSessionPersistenceOverIpc()
   installWindowApi(async () => ({
     outcome: 'session',
     session: JSON.stringify({ token: 'opaque-session-token' })
   }))
 
-  assert.deepEqual(await readPersistedCredentials(), { outcome: 'unreadable' })
+  assert.deepEqual(await sessions.read(), { outcome: 'unreadable' })
 })
 
 test('a Supabase-era session shape no longer restores', async () => {
-  const { readPersistedCredentials } =
-    await import('../../src/renderer/src/features/authentication/session/persisted-session.ts')
+  const sessions = createSessionPersistenceOverIpc()
   installWindowApi(async () => ({
     outcome: 'session',
     session: JSON.stringify({
@@ -115,15 +112,25 @@ test('a Supabase-era session shape no longer restores', async () => {
     })
   }))
 
-  assert.deepEqual(await readPersistedCredentials(), { outcome: 'unreadable' })
+  assert.deepEqual(await sessions.read(), { outcome: 'unreadable' })
+})
+
+test('an unreachable or reporting-unavailable store stays retryable', async () => {
+  const sessions = createSessionPersistenceOverIpc()
+  installWindowApi(async () => ({ outcome: 'storage-unavailable' }))
+  assert.deepEqual(await sessions.read(), { outcome: 'unavailable' })
+
+  installWindowApi(async () => {
+    throw new Error('ipc failed')
+  })
+  assert.deepEqual(await sessions.read(), { outcome: 'unavailable' })
 })
 
 test('replacing credentials writes the canonical JSON through the encrypted IPC slot', async () => {
-  const { replacePersistedCredentials } =
-    await import('../../src/renderer/src/features/authentication/session/persisted-session.ts')
+  const sessions = createSessionPersistenceOverIpc()
   const { calls } = installWindowApi(async () => ({ outcome: 'persisted' }))
 
-  assert.equal(await replacePersistedCredentials(credentials), true)
+  assert.deepEqual(await sessions.replace(credentials), { outcome: 'persisted' })
   assert.deepEqual(calls, [
     {
       channel: 'authentication:replace-session',
@@ -133,15 +140,24 @@ test('replacing credentials writes the canonical JSON through the encrypted IPC 
 })
 
 test('an unavailable or throwing secure store is reported, not silently swallowed', async () => {
-  const { isSessionPersistenceUnavailable, replacePersistedCredentials } =
-    await import('../../src/renderer/src/features/authentication/session/persisted-session.ts')
+  const sessions = createSessionPersistenceOverIpc()
   installWindowApi(async () => ({ outcome: 'unavailable' }))
-  assert.equal(await replacePersistedCredentials(credentials), false)
-  assert.equal(isSessionPersistenceUnavailable(), true)
+  assert.deepEqual(await sessions.replace(credentials), { outcome: 'unavailable' })
 
   installWindowApi(async () => {
     throw new Error('ipc failed')
   })
-  assert.equal(await replacePersistedCredentials(credentials), false)
-  assert.equal(isSessionPersistenceUnavailable(), true)
+  assert.deepEqual(await sessions.replace(credentials), { outcome: 'unavailable' })
+})
+
+test('clearing the slot reports whether the local credentials ended', async () => {
+  const sessions = createSessionPersistenceOverIpc()
+  const { calls } = installWindowApi(async () => undefined)
+  assert.deepEqual(await sessions.clear(), { outcome: 'cleared' })
+  assert.deepEqual(calls, [{ channel: 'authentication:clear-session' }])
+
+  installWindowApi(async () => {
+    throw new Error('ipc failed')
+  })
+  assert.deepEqual(await sessions.clear(), { outcome: 'clear-failed' })
 })

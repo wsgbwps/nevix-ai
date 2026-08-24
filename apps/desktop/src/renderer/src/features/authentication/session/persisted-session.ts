@@ -1,55 +1,63 @@
-import type { SessionCredentials } from '../api/client'
+/**
+ * The production Session persistence adapter: the Domain port over the
+ * main-process encrypted slot. IPC Channels, the window bridge, and the
+ * stored JSON shape stay here; callers see only Domain outcomes.
+ */
+import type { SessionCredentials } from '../api/go-authentication'
+import type {
+  SessionClearance,
+  SessionPersistence,
+  SessionReplacement,
+  StoredSessionCredentials,
+  StoredSessionRead
+} from './session-persistence'
 import type { PersistedSessionRead } from '../../../../../shared/ipc/authentication/types'
 
-/**
- * The single credential slot the main process owns: the opaque session token and its
- * server-computed expiry, encrypted at rest by the main process. The canonical stored
- * shape carries only an `{id,email}` user snapshot — the authoritative account facts
- * always come back from `/me` on restore — so reading tolerates that minimal form.
- */
-export interface StoredCredentials {
-  readonly token: string
-  readonly expiresAt: string
-}
+export function createSessionPersistenceOverIpc(): SessionPersistence {
+  return {
+    async read(): Promise<StoredSessionRead> {
+      const stored: PersistedSessionRead = await readOverIpc()
+      if (stored.outcome !== 'session') {
+        if (stored.outcome === 'storage-unavailable') return { outcome: 'unavailable' }
+        return stored
+      }
 
-export type PersistedCredentialsRead =
-  | { readonly outcome: 'session'; readonly credentials: StoredCredentials }
-  | { readonly outcome: 'empty' }
-  | { readonly outcome: 'storage-unavailable' }
-  | { readonly outcome: 'unreadable' }
+      const credentials = parseStoredSession(stored.session)
+      return credentials ? { outcome: 'stored', credentials } : { outcome: 'unreadable' }
+    },
 
-let persistenceUnavailable = false
+    async replace(session: SessionCredentials): Promise<SessionReplacement> {
+      try {
+        const written = await window.api.invoke('authentication:replace-session', {
+          session: serializeSession(session)
+        })
+        // The current runtime keeps its in-memory session; the next launch requires signing in again.
+        return written.outcome === 'persisted'
+          ? { outcome: 'persisted' }
+          : { outcome: 'unavailable' }
+      } catch {
+        return { outcome: 'unavailable' }
+      }
+    },
 
-export async function readPersistedCredentials(): Promise<PersistedCredentialsRead> {
-  persistenceUnavailable = false
-  const stored: PersistedSessionRead = await window.api.invoke('authentication:read-session')
-  if (stored.outcome !== 'session') return stored
-
-  const credentials = parseStoredSession(stored.session)
-  return credentials ? { outcome: 'session', credentials } : { outcome: 'unreadable' }
-}
-export async function replacePersistedCredentials(
-  credentials: SessionCredentials
-): Promise<boolean> {
-  try {
-    const written = await window.api.invoke('authentication:replace-session', {
-      session: serializeSession(credentials)
-    })
-    persistenceUnavailable = written.outcome === 'unavailable'
-  } catch {
-    // The current runtime keeps its in-memory session; the next launch requires signing in again.
-    persistenceUnavailable = true
+    async clear(): Promise<SessionClearance> {
+      try {
+        await window.api.invoke('authentication:clear-session')
+        return { outcome: 'cleared' }
+      } catch {
+        return { outcome: 'clear-failed' }
+      }
+    }
   }
-  return !persistenceUnavailable
 }
 
-export async function clearPersistedSession(): Promise<void> {
-  persistenceUnavailable = false
-  await window.api.invoke('authentication:clear-session')
-}
-
-export function isSessionPersistenceUnavailable(): boolean {
-  return persistenceUnavailable
+async function readOverIpc(): Promise<PersistedSessionRead> {
+  try {
+    return await window.api.invoke('authentication:read-session')
+  } catch {
+    // An unreachable store is retryable: the stored session is kept, never guessed.
+    return { outcome: 'storage-unavailable' }
+  }
 }
 
 function serializeSession(credentials: SessionCredentials): string {
@@ -66,7 +74,7 @@ function serializeSession(credentials: SessionCredentials): string {
   })
 }
 
-function parseStoredSession(session: string): StoredCredentials | undefined {
+function parseStoredSession(session: string): StoredSessionCredentials | undefined {
   let parsed: unknown
   try {
     parsed = JSON.parse(session)

@@ -1,18 +1,4 @@
-/** The account half of the server's user object (contracts/identity.yaml). */
-export interface UserAccount {
-  readonly id: string
-  readonly email: string
-  readonly displayName: string
-  readonly role: 'admin' | 'member'
-  readonly mustChangePassword: boolean
-}
-
-/** The credentials a login hands to the Desktop; the token never enters a URL. */
-export interface SessionCredentials {
-  readonly token: string
-  readonly expiresAt: string
-  readonly user: UserAccount
-}
+import type { SessionCredentials, UserAccount } from './go-authentication'
 
 /**
  * Every trusted-command failure the Desktop can observe. Clients branch on the
