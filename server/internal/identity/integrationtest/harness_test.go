@@ -11,6 +11,7 @@ package integrationtest
 import (
 	"context"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -66,12 +67,19 @@ func newHarness(t *testing.T, ctx context.Context) *harness {
 	t.Helper()
 	ownerURL := requireEnv(t, "NEVIX_DATABASE_URL")
 	runtimeDatabaseURL := requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL")
-	for _, key := range []string{"NEVIX_CORS_ALLOWED_ORIGINS", "NEVIX_ADMIN_EMAIL", "NEVIX_ADMIN_INITIAL_PASSWORD"} {
+	for _, key := range []string{"NEVIX_CORS_ALLOWED_ORIGINS"} {
 		requireEnv(t, key)
 	}
 	// The harness assembles the Module through the same seam as the
-	// composition root: LoadConfig + NewModule + Register/RunWorkers.
-	cfg, err := identity.LoadConfig(func(key string) string { return os.Getenv("NEVIX_" + key) })
+	// composition root: LoadConfig + NewModule + Register/RunWorkers. The
+	// environment mapping prefixes the module's unprefixed keys with NEVIX_
+	// and passes the module's own NEVIX_-prefixed keys through verbatim.
+	cfg, err := identity.LoadConfig(func(key string) (string, bool) {
+		if strings.HasPrefix(key, "NEVIX_") {
+			return os.LookupEnv(key)
+		}
+		return os.LookupEnv("NEVIX_" + key)
+	})
 	if err != nil {
 		t.Fatalf("load identity module config from NEVIX_-prefixed environment: %v", err)
 	}

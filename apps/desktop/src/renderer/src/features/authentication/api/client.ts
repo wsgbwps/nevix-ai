@@ -43,7 +43,7 @@ export interface IdentityClient {
   readonly initialize: (
     email: string,
     password: string,
-    setupCode: string,
+    setupCode: string | undefined,
     displayName?: string
   ) => Promise<IdentityApiResult<SessionCredentials>>
   readonly me: (token: string) => Promise<IdentityApiResult<UserAccount>>
@@ -55,9 +55,10 @@ export interface IdentityClient {
   ) => Promise<IdentityApiResult<void>>
 }
 
-/** The one boolean the public setup-status probe answers (contracts/identity.yaml). */
+/** The two booleans the public setup-status probe answers (contracts/identity.yaml). */
 export interface SetupStatus {
   readonly initialized: boolean
+  readonly setupCodeRequired: boolean
 }
 
 interface RequestInput {
@@ -149,23 +150,30 @@ export function createIdentityClient(serverUrl: string): IdentityClient {
       })
       if (result.outcome !== 'succeeded') return result
 
-      // A body without the boolean is an unreachable-or-broken server, never a
-      // setup verdict.
+      // A body without both booleans is an unreachable-or-broken server, never
+      // a setup verdict.
       const initialized = readField(result.value, 'initialized')
-      return typeof initialized === 'boolean'
-        ? { outcome: 'succeeded', value: { initialized } as SetupStatus }
+      const setupCodeRequired = readField(result.value, 'setup_code_required')
+      return typeof initialized === 'boolean' && typeof setupCodeRequired === 'boolean'
+        ? {
+            outcome: 'succeeded',
+            value: { initialized, setupCodeRequired } as SetupStatus
+          }
         : { outcome: 'network-failure' }
     },
 
     async initialize(email, password, setupCode, displayName) {
       const trimmedDisplayName = displayName?.trim()
+      const trimmedSetupCode = setupCode?.trim()
+      // Only a protected deployment evaluates the setup code; an open claim
+      // omits the field entirely (the server ignores it either way).
       const result = await request<unknown>({
         method: 'POST',
         path: '/identity/setup/initialize',
         body: {
           email,
           password,
-          setup_code: setupCode,
+          ...(trimmedSetupCode ? { setup_code: trimmedSetupCode } : {}),
           ...(trimmedDisplayName ? { display_name: trimmedDisplayName } : {})
         }
       })

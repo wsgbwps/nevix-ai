@@ -434,23 +434,27 @@ paths:
   /identity/setup/status:
     get:
       operationId: getSetupStatus
-      summary: 查询实例是否已初始化
+      summary: 查询实例是否已初始化及认领是否要求设置码
       description: |-
-        首启向导的探测端点（issue #122）：登录屏挂载时请求，仅返回 `initialized` 布尔——实例是否已存在任何 User，实时读库。未初始化（`false`）时登录屏切换首启向导；已初始化时一切设备只见常规登录。除该布尔外不返回任何信息。
+        Instance Claim 探测端点（issue #128，ADR-0015 2026-08-24 修订）：登录屏挂载时请求，返回两个布尔——`initialized`（实例是否已存在任何 User，实时读库）与 `setup_code_required`（本次认领是否要求设置码：仅当部署以 NEVIX_SETUP_CODE_REQUIRED=true 启用保护且实例尚未认领时为 true；实例拥有任何 User 后设置码不复存在，恒为 false）。未初始化时登录屏切换首位管理员向导；已初始化时一切设备只见常规登录。除这两个布尔外不返回任何信息。
       security: []
       responses:
         "200":
-          description: 实例初始化状态，仅一个布尔字段。
+          description: 实例初始化状态与认领保护方式，仅两个布尔字段。
           content:
             application/json:
               schema:
                 type: object
                 required:
                   - initialized
+                  - setup_code_required
                 properties:
                   initialized:
                     type: boolean
-                    description: true 表示实例已存在任何 User（两连首启通道任一已胜出）；false 表示空库，首启向导可用。
+                    description: true 表示实例已存在任何 User；false 表示空库，Instance Claim 可用。
+                  setup_code_required:
+                    type: boolean
+                    description: true 表示该次认领必须携带有效设置码（保护模式且实例未认领）；false 表示开放认领或实例已初始化（设置码已不存在）。
         "500":
           description: 服务端内部错误。
           content:
@@ -466,11 +470,11 @@ paths:
   /identity/setup/initialize:
     post:
       operationId: initializeInstance
-      summary: 凭设置码创建首个 Admin 并直接进入应用
+      summary: 认领实例：创建首个 Admin 并直接进入应用
       description: |-
-        首启设置码通道（issue #122，ADR-0015 2026-08-23 修订）：空库上持有设置码者自选 email、密码、显示名（可选）成为首个 Admin，`must_change_password=false`（密码自设），响应携带 session token，形态与登录相同，直接进入应用。设置码为 8 位 Crockford base32，由服务进程在空库启动时生成并以 `XXXX-XXXX` 分组打入运维日志一次，仅存进程内存；进程重启且仍空库则换新码、旧码作废；实例存在任何 User 后该码不复存在。服务端比对前统一 trim、去连字符与空格、大写化（大小写不敏感，分组形态可直接粘贴）。
+        Instance Claim（issue #128，ADR-0015 2026-08-24 修订）：空实例由首个成功认领请求创建首个 Admin，认领者自选 email、密码、显示名（可选），`must_change_password=false`（密码自设），响应携带 session token，形态与登录相同，直接进入应用；并发输家收到 409 后回到普通登录。默认部署为开放认领（无凭据）；部署可经 NEVIX_SETUP_CODE_REQUIRED=true（严格布尔，非法值拒绝启动）启用设置码保护：此时服务进程仅在空实例启动时生成 8 位 Crockford base32 一次性设置码，以 `XXXX-XXXX` 分组打入运维日志一次、仅存进程内存；空实例重启即换码，认领成功立即清除；实例存在任何 User 后该码不复存在。已被删除的环境变量管理员通道（ADMIN_EMAIL / ADMIN_INITIAL_PASSWORD）检测到即拒绝启动。
 
-        单一写事务：首启 advisory lock → 复检空库（与 ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD 环境变量通道先到先得，输家 409）→ 常量时间比对设置码 → INSERT 首个 admin → 写 setup_admin_created 审计行 → 发 session。码错计入与登录共享的 per-email 进程内限速，达到上限回答 429（数值为信息性，客户端依赖 Retry-After）。
+        单一写事务：认领 advisory lock → 复检空库（非空即 409）→ [仅保护模式] 常量时间比对设置码 → INSERT 首个 admin + last_login_at + session + 写 instance_claimed 审计行（metadata 记录 email 与 setup_code_required: "true"|"false"）。开放模式不评估 setup_code（提供与否均忽略）。保护模式码错计入与登录共享的 per-email 进程内限速，达到上限回答 429（数值为信息性，客户端依赖 Retry-After）。
       security: []
       requestBody:
         required: true
@@ -481,7 +485,6 @@ paths:
               required:
                 - email
                 - password
-                - setup_code
               properties:
                 email:
                   type: string
@@ -492,7 +495,7 @@ paths:
                   description: 本人自选的明文密码，经 TLS（或内网 http）传输，服务端只存哈希；最小长度 8。
                 setup_code:
                   type: string
-                  description: 运维日志披露的一次性 8 位 Crockford base32 设置码（分组形态 XXXX-XXXX 可直接粘贴）；服务端比对前统一 trim、去连字符与空格、大写化。任意不匹配的字符串（含超长值）统一按 403 invalid_setup_code 回答。
+                  description: 仅保护模式必填：运维日志披露的一次性 8 位 Crockford base32 设置码（分组形态 XXXX-XXXX 可直接粘贴）；服务端比对前统一 trim、去连字符与空格、大写化。保护模式缺失该字段回答 400 invalid_request；不匹配回答 403 invalid_setup_code（含超长值）。开放模式完全忽略该字段。
                 display_name:
                   type: string
                   maxLength: 128
@@ -539,9 +542,9 @@ paths:
                           - admin
                       must_change_password:
                         type: boolean
-                        description: 设置码通道密码本人自设，恒为 false。
+                        description: 认领者密码自设，恒为 false。
         "400":
-          description: 请求不合法 —— invalid_request 指请求体缺少 email/password/setup_code 或不是 JSON；invalid_email 指 email 不是裸地址；password_too_short 指密码低于最小长度；invalid_password 指密码超过 72 字节（bcrypt 容量上限）；invalid_display_name 指显示名超长。
+          description: 请求不合法 —— invalid_request 指请求体缺少 email/password 或不是 JSON，或保护模式且实例尚未认领时缺少 setup_code；invalid_email 指 email 不是裸地址；password_too_short 指密码低于最小长度；invalid_password 指密码超过 72 字节（bcrypt 容量上限）；invalid_display_name 指显示名超长。
           content:
             application/json:
               schema:
@@ -557,7 +560,7 @@ paths:
                           - invalid_password
                           - invalid_display_name
         "403":
-          description: 设置码无效 —— 不匹配本进程生成的一次性码的统一答案。
+          description: 设置码无效 —— 保护模式下不匹配本进程生成的一次性码的统一答案。
           content:
             application/json:
               schema:
@@ -569,7 +572,7 @@ paths:
                         enum:
                           - invalid_setup_code
         "409":
-          description: 实例已初始化 —— 写事务内 advisory lock 下复检空库发现已有 User：环境变量通道或另一并发 initialize 已胜出。
+          description: 实例已初始化 —— 写事务内 advisory lock 下复检空库发现已有 User：另一并发认领已胜出。保护模式的设置码要求仅在空实例上生效，实例初始化后任何认领（含缺码/错码）一律 409。
           content:
             application/json:
               schema:

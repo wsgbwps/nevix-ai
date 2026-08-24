@@ -89,14 +89,20 @@ func TestCORSPreflightServesAllowedOriginsOnly(t *testing.T) {
 	}
 }
 
-func fullTransportEnv(overrides map[string]string) func(string) string {
+func fullTransportEnv(overrides map[string]string) func(string) (string, bool) {
 	values := map[string]string{
 		"CORS_ALLOWED_ORIGINS": "https://app.nevix.test,http://127.0.0.1:5173",
 	}
 	for key, value := range overrides {
 		values[key] = value
 	}
-	return func(key string) string { return values[key] }
+	// Present-in-map is present-in-environment, so an override set to ""
+	// models a variable explicitly emptied — the exact case the legacy
+	// rejection must still catch.
+	return func(key string) (string, bool) {
+		v, ok := values[key]
+		return v, ok
+	}
 }
 
 func TestLoadConfigParsesTransportVariables(t *testing.T) {
@@ -115,25 +121,50 @@ func TestLoadConfigParsesTransportVariables(t *testing.T) {
 	}
 }
 
-func TestLoadConfigCarriesBootstrapVariablesVerbatim(t *testing.T) {
-	cfg, err := LoadConfig(func(key string) string {
-		values := map[string]string{
-			"CORS_ALLOWED_ORIGINS":   "https://app.nevix.test",
-			"ADMIN_EMAIL":            "  Admin@Example.com ",
-			"ADMIN_INITIAL_PASSWORD": "initial-password",
+func TestLoadConfigParsesSetupCodeRequiredStrictly(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"unset claims open", "", false},
+		{"explicit false claims open", "false", false},
+		{"true requires the code", "true", true},
+	}
+	for _, tc := range cases {
+		cfg, err := LoadConfig(fullTransportEnv(map[string]string{"NEVIX_SETUP_CODE_REQUIRED": tc.raw}))
+		if err != nil {
+			t.Fatalf("%s: load config: %v", tc.name, err)
 		}
-		return values[key]
-	})
-	if err != nil {
-		t.Fatalf("load config: %v", err)
+		if cfg.SetupCodeRequired != tc.want {
+			t.Fatalf("%s: SetupCodeRequired = %v, want %v", tc.name, cfg.SetupCodeRequired, tc.want)
+		}
 	}
-	// LoadConfig only trims surrounding whitespace; canonicalization and the
-	// empty-table decision belong to Bootstrap, which can see the database.
-	if cfg.AdminEmail != "Admin@Example.com" {
-		t.Fatalf("AdminEmail %q, want the trimmed value", cfg.AdminEmail)
+
+	for _, raw := range []string{"TRUE", "1", "yes", "on", " true", "false "} {
+		if _, err := LoadConfig(fullTransportEnv(map[string]string{"NEVIX_SETUP_CODE_REQUIRED": raw})); err == nil {
+			t.Fatalf("NEVIX_SETUP_CODE_REQUIRED=%q: config loaded, want a strict refusal", raw)
+		}
 	}
-	if cfg.AdminInitialPassword != "initial-password" {
-		t.Fatalf("AdminInitialPassword %q, want the verbatim value", cfg.AdminInitialPassword)
+}
+
+func TestLoadConfigRejectsLegacyBootstrapVariables(t *testing.T) {
+	cases := map[string]map[string]string{
+		"ADMIN_EMAIL set":                 {"ADMIN_EMAIL": "admin@example.com"},
+		"ADMIN_INITIAL_PASSWORD set":      {"ADMIN_INITIAL_PASSWORD": "initial-password"},
+		"both set":                        {"ADMIN_EMAIL": "admin@example.com", "ADMIN_INITIAL_PASSWORD": "initial-password"},
+		"whitespace only counts as set":   {"ADMIN_EMAIL": "  "},
+		"empty value still counts as set": {"ADMIN_EMAIL": ""},
+		"empty password counts as set":    {"ADMIN_INITIAL_PASSWORD": ""},
+	}
+	for name, overrides := range cases {
+		_, err := LoadConfig(fullTransportEnv(overrides))
+		if err == nil {
+			t.Fatalf("%s: config loaded, want an explicit refusal naming the deleted channel", name)
+		}
+		if !strings.Contains(err.Error(), "ADMIN_") {
+			t.Fatalf("%s: error %q does not name the legacy variable", name, err)
+		}
 	}
 }
 

@@ -19,13 +19,12 @@ import (
 type Action string
 
 const (
-	// BootstrapAdminCreated records the environment-driven creation of the
-	// first admin on an empty deployment (ADR-0015 bootstrap).
-	BootstrapAdminCreated Action = "bootstrap_admin_created"
-	// SetupAdminCreated records the setup-wizard creation of the first
-	// admin (issue #122): the holder of the one-time setup code chose the
-	// credentials themselves, distinct from the environment-driven channel.
-	SetupAdminCreated Action = "setup_admin_created"
+	// InstanceClaimed records the one-time Instance Claim: the request that
+	// created the instance's first admin (and the session it entered the
+	// application with); metadata records the claimed email and whether the
+	// deployment demanded a setup code (issue #128, ADR-0015 2026-08-24
+	// revision).
+	InstanceClaimed Action = "instance_claimed"
 	// SessionCreated records a successful login issuing an opaque session.
 	SessionCreated Action = "session_created"
 	// SessionRevoked records a logout ending exactly one session.
@@ -66,21 +65,20 @@ const (
 )
 
 var validActions = map[Action]struct{}{
-	BootstrapAdminCreated: {},
-	SetupAdminCreated:     {},
-	SessionCreated:        {},
-	SessionRevoked:        {},
-	PasswordChanged:       {},
-	DisplayNameChanged:    {},
-	UserCreated:           {},
-	UserDisabled:          {},
-	UserPasswordReset:     {},
-	UserEmailChanged:      {},
-	UserRoleChanged:       {},
-	UserDeleted:           {},
-	JoinCodeCreated:       {},
-	JoinCodeRevoked:       {},
-	UserSelfRegistered:    {},
+	InstanceClaimed:    {},
+	SessionCreated:     {},
+	SessionRevoked:     {},
+	PasswordChanged:    {},
+	DisplayNameChanged: {},
+	UserCreated:        {},
+	UserDisabled:       {},
+	UserPasswordReset:  {},
+	UserEmailChanged:   {},
+	UserRoleChanged:    {},
+	UserDeleted:        {},
+	JoinCodeCreated:    {},
+	JoinCodeRevoked:    {},
+	UserSelfRegistered: {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id

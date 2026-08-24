@@ -42,7 +42,11 @@ test('no language switch control is rendered anywhere on the unauthenticated bou
   try {
     const launched = await launchForSystemLanguages(userDataDir, ['zh-CN'])
     try {
-      await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
+      // Offline, the unauthenticated boundary is the setup-probe failure
+      // panel — localized like every boundary surface.
+      await expect(
+        launched.page.getByRole('heading', { name: '无法确认服务器初始化状态' })
+      ).toBeVisible()
       await expectNoLanguageSwitchControl(launched.page)
     } finally {
       await launched.electronApp.close()
@@ -57,13 +61,13 @@ test('a corrupt or unknown saved Language Mode falls back to follow-system', asy
     {
       storedValue: '{',
       systemLanguages: ['en-US'],
-      heading: 'Sign in to Nevix AI',
+      heading: 'Server status unavailable',
       title: 'Nevix AI — Desktop'
     },
     {
       storedValue: JSON.stringify({ languageMode: 'fr' }),
       systemLanguages: ['zh-CN'],
-      heading: '登录 Nevix AI',
+      heading: '无法确认服务器初始化状态',
       title: 'Nevix AI — 桌面端'
     }
   ] as const
@@ -87,7 +91,7 @@ test('a corrupt or unknown saved Language Mode falls back to follow-system', asy
   }
 })
 
-test('a saved per-device Language Mode still resolves the login screen it cannot be changed from', async () => {
+test('a saved per-device Language Mode still resolves the unauthenticated boundary it cannot be changed from', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-saved-language-mode-'))
   await writeFile(
     join(userDataDir, LANGUAGE_MODE_FILE_NAME),
@@ -99,7 +103,7 @@ test('a saved per-device Language Mode still resolves the login screen it cannot
     const launched = await launchForSystemLanguages(userDataDir, ['zh-CN'])
     try {
       await expect(
-        launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
+        launched.page.getByRole('heading', { name: 'Server status unavailable' })
       ).toBeVisible()
       await expectWindowTitle(launched.electronApp, 'Nevix AI — Desktop')
       await expectNoLanguageSwitchControl(launched.page)

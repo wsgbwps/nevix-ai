@@ -23,8 +23,6 @@ func governanceReady(t *testing.T, ctx context.Context) (*harness, http.Handler,
 	h.resetUserState(t)
 	h.insertUser(t, "admin@nevix.test", "admin-password-1", "admin", "active", false)
 	cfg := h.cfg
-	cfg.AdminEmail = ""
-	cfg.AdminInitialPassword = ""
 	_, handler := h.moduleWithConfig(t, cfg)
 	status, _, login := doLogin(t, handler, "admin@nevix.test", "admin-password-1")
 	if status != http.StatusOK {

@@ -26,8 +26,12 @@ setup_server_container=""
 setup_server_port=8081
 setup_server_url=""
 setup_code=""
+open_server_container=""
+open_server_port=8082
+open_server_url=""
 e2e_network=""
 setup_wizard_database="setup_wizard"
+open_claim_database="instance_claim"
 tls_terminator_pid=""
 tls_terminator_dir=""
 tls_terminator_log=""
@@ -36,7 +40,7 @@ database_url=""
 identity_database_url=""
 postgres_password=""
 identity_app_password=""
-admin_email="bootstrap.admin@nevix.test"
+admin_email="e2e.admin@nevix.test"
 admin_initial_password="initial-horse-battery-staple"
 tls_host=127.0.0.1
 tls_port=8443
@@ -92,16 +96,23 @@ stop_identity_server_process() {
   identity_server_pid=""
 }
 
-# The empty-instance server for the setup-wizard spec (issue #122): a second
-# server binary in a container — the port is hardcoded :8080 in the product and
-# PORT configurability belongs to the Docker-delivery issue — against a second,
-# never-bootstrapped database on the same PostgreSQL. Its operations log holds
-# the one-time setup code the spec redeems.
+# The two disposable empty-instance servers for the Instance Claim specs (issue
+# #128): each is a second server binary in a container — the port is hardcoded
+# :8080 in the product and PORT configurability belongs to the Docker-delivery
+# issue — against its own never-claimed database on the same PostgreSQL. One
+# runs protected (NEVIX_SETUP_CODE_REQUIRED=true; its operations log holds the
+# one-time setup code the spec redeems), the other runs the default open
+# claim.
 stop_setup_server() {
   if [[ -n "$setup_server_container" ]]; then
     docker logs "$setup_server_container" >>"$identity_server_log" 2>&1 || true
     docker rm -f "$setup_server_container" >/dev/null 2>&1 || true
     setup_server_container=""
+  fi
+  if [[ -n "$open_server_container" ]]; then
+    docker logs "$open_server_container" >>"$identity_server_log" 2>&1 || true
+    docker rm -f "$open_server_container" >/dev/null 2>&1 || true
+    open_server_container=""
   fi
   if [[ -n "$e2e_network" ]]; then
     if [[ -n "$postgres_container" ]]; then
@@ -280,12 +291,14 @@ END
 ALTER ROLE identity_app PASSWORD '$identity_app_password';
 SQL
 
-  # The setup-wizard spec needs an instance that has never had a first admin:
-  # a second database on the same PostgreSQL, migrated and bootstrapped (or
-  # not) by its own server process.
+  # The Instance Claim specs need instances that have never been claimed: two
+  # more databases on the same PostgreSQL, migrated (and protected or not) by
+  # their own server processes.
   psql_until_ready >/dev/null <<SQL
 SELECT 'CREATE DATABASE $setup_wizard_database'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$setup_wizard_database')\gexec
+SELECT 'CREATE DATABASE $open_claim_database'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$open_claim_database')\gexec
 SQL
 
   # The empty-instance server runs as a container (its port is the product's
@@ -302,10 +315,11 @@ SQL
   identity_database_url="postgresql://postgres:${postgres_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
 }
 
-# Builds and boots the empty-instance server: same source, linux binary, never
-# given ADMIN_EMAIL — so its startup generates the one-time setup code, printed
-# once to its log, which this function parses and exports for the spec.
-start_setup_server() {
+# Builds the linux server binary both disposable instances share, then boots
+# one of them. run_disposable_server takes container name, host port, target
+# database, and extra env (KEY=VALUE strings); it waits for health and echoes
+# nothing on success.
+build_linux_server_binary() {
   local docker_arch goarch
 
   docker_arch="$(docker version --format '{{.Server.Arch}}')"
@@ -316,44 +330,72 @@ start_setup_server() {
   (cd "$repo_root/server" &&
     CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build \
       -o "$identity_server_binary_dir/server-linux" ./cmd/server)
+}
 
-  setup_server_container="nevix-desktop-e2e-setup-$$"
-  # No --rm: an early exit keeps its logs for the failure report; cleanup
-  # removes the container either way.
+run_disposable_server() {
+  local container="$1"
+  local host_port="$2"
+  local target_database="$3"
+  shift 3
+
   docker run -d \
-    --name "$setup_server_container" \
+    --name "$container" \
     --network "$e2e_network" \
-    -p "127.0.0.1:$setup_server_port:8080" \
-    -e DATABASE_URL="postgresql://identity_app:${identity_app_password}@postgres:5432/${setup_wizard_database}?sslmode=disable" \
-    -e MIGRATION_DATABASE_URL="postgresql://postgres:${postgres_password}@postgres:5432/${setup_wizard_database}?sslmode=disable" \
+    -p "127.0.0.1:$host_port:8080" \
+    -e DATABASE_URL="postgresql://identity_app:${identity_app_password}@postgres:5432/${target_database}?sslmode=disable" \
+    -e MIGRATION_DATABASE_URL="postgresql://postgres:${postgres_password}@postgres:5432/${target_database}?sslmode=disable" \
     -e CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
+    "$@" \
     -v "$identity_server_binary_dir:/binaries:ro" \
     "$setup_server_image" /binaries/server-linux >/dev/null
 
   for _ in $(seq 1 120); do
-    if curl -fsS "http://127.0.0.1:$setup_server_port/health" >/dev/null 2>&1; then
-      setup_code="$(docker logs "$setup_server_container" 2>&1 \
-        | grep -oE 'setup_code=[0-9A-Z]{4}-[0-9A-Z]{4}' | head -1 | cut -d= -f2)"
-      if [[ -n "$setup_code" ]]; then
-        setup_server_url="http://127.0.0.1:$setup_server_port"
-        echo "==> Empty-instance server ready on $setup_server_url (setup wizard target)"
-        return
-      fi
-      echo "error: empty-instance server started without disclosing a setup code" >&2
-      docker logs "$setup_server_container" >&2 || true
-      return 1
+    if curl -fsS "http://127.0.0.1:$host_port/health" >/dev/null 2>&1; then
+      return
     fi
-    if ! docker container inspect "$setup_server_container" >/dev/null 2>&1; then
-      echo "error: empty-instance server stopped before its health endpoint was ready" >&2
-      docker logs "$setup_server_container" >&2 || true
+    if ! docker container inspect "$container" >/dev/null 2>&1; then
+      echo "error: disposable server $container stopped before its health endpoint was ready" >&2
+      docker logs "$container" >&2 || true
       return 1
     fi
     sleep 0.5
   done
 
-  echo "error: empty-instance server did not become ready" >&2
-  docker logs "$setup_server_container" >&2 || true
+  echo "error: disposable server $container did not become ready" >&2
+  docker logs "$container" >&2 || true
   return 1
+}
+
+# The protected empty instance: NEVIX_SETUP_CODE_REQUIRED=true makes its
+# startup generate the one-time setup code, printed once to its log, which
+# this function parses and exports for the setup-wizard spec.
+start_setup_server() {
+  build_linux_server_binary
+
+  # No --rm: an early exit keeps its logs for the failure report; cleanup
+  # removes the container either way.
+  setup_server_container="nevix-desktop-e2e-setup-$$"
+  run_disposable_server "$setup_server_container" "$setup_server_port" "$setup_wizard_database" \
+    -e NEVIX_SETUP_CODE_REQUIRED=true || return 1
+
+  setup_code="$(docker logs "$setup_server_container" 2>&1 \
+    | grep -oE 'setup_code=[0-9A-Z]{4}-[0-9A-Z]{4}' | head -1 | cut -d= -f2)"
+  if [[ -z "$setup_code" ]]; then
+    echo "error: protected empty-instance server started without disclosing a setup code" >&2
+    docker logs "$setup_server_container" >&2 || true
+    return 1
+  fi
+  setup_server_url="http://127.0.0.1:$setup_server_port"
+  echo "==> Protected empty-instance server ready on $setup_server_url (setup wizard target)"
+}
+
+# The open empty instance: default claim, no credential and no log line.
+start_open_server() {
+  open_server_container="nevix-desktop-e2e-open-$$"
+  run_disposable_server "$open_server_container" "$open_server_port" "$open_claim_database" \
+    || return 1
+  open_server_url="http://127.0.0.1:$open_server_port"
+  echo "==> Open empty-instance server ready on $open_server_url (instance claim target)"
 }
 
 start_identity_server() {
@@ -370,33 +412,21 @@ start_identity_server() {
   DATABASE_URL="$database_url" \
     MIGRATION_DATABASE_URL="$identity_database_url" \
     CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
-    ADMIN_EMAIL="$admin_email" \
-    ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
     "$identity_server_binary" >"$identity_server_log" 2>&1 &
   identity_server_pid=$!
   wait_for_identity_server
 }
 
-# The bootstrap admin owes the first-login password change; completing it once over
-# raw HTTP leaves a stable administrative credential for the whole suite, exactly
-# like an operator would after first boot.
-stabilize_bootstrap_admin() {
-  local login_body
-  local admin_token
-
-  login_body="$(curl -fsS -X POST http://127.0.0.1:8080/identity/auth/login \
+# The suite's test admin comes from the public Instance Claim — the same open
+# channel an operator's first administrator uses — never from deleted
+# environment bootstrap variables. The claimer chose the password, so no
+# first-login change is owed: the credential is stable for the whole suite.
+# The display name derives from the email local part, as the audit list's
+# actor column shows it.
+claim_main_instance() {
+  curl -fsS -X POST http://127.0.0.1:8080/identity/setup/initialize \
     -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}")"
-  admin_token="$(LOGIN_BODY="$login_body" node -e '
-    const body = JSON.parse(process.env.LOGIN_BODY)
-    if (typeof body.token !== "string" || body.token.length === 0) process.exit(1)
-    process.stdout.write(body.token)
-  ')"
-
-  curl -fsS -X POST http://127.0.0.1:8080/identity/auth/change-password \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer $admin_token" \
-    -d "{\"current_password\":\"$admin_initial_password\",\"new_password\":\"$admin_initial_password\"}" \
+    -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}" \
     >/dev/null
 }
 
@@ -457,16 +487,18 @@ require_free_port "$postgres_host_port"
 require_free_port 8080
 require_free_port "$tls_port"
 require_free_port "$setup_server_port"
+require_free_port "$open_server_port"
 
 start_postgres
 start_identity_server
-stabilize_bootstrap_admin
+claim_main_instance
 start_tls_terminator
 server_url="http://127.0.0.1:8080"
-# The empty-instance server exists for the setup-wizard spec, which runs in the
-# full suite only.
+# The disposable empty instances exist for the Instance Claim specs, which run
+# in the full suite only.
 if [[ "$mode" == "full" ]]; then
   start_setup_server
+  start_open_server
 fi
 
 pnpm exec electron-vite build --mode test
@@ -498,6 +530,7 @@ NEVIX_TEST_SERVER_URL="$server_url" \
   NEVIX_TEST_ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
   NEVIX_TEST_SETUP_SERVER_URL="$setup_server_url" \
   NEVIX_TEST_SETUP_CODE="$setup_code" \
+  NEVIX_TEST_OPEN_SERVER_URL="$open_server_url" \
   NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR="$identity_server_failure_marker_dir" \
   NEVIX_TEST_TLS_URL="https://$tls_host:$tls_port" \
   NEVIX_TEST_TLS_DIR="$tls_terminator_dir" \

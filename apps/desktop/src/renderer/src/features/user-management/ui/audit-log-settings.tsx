@@ -40,8 +40,7 @@ const EXPORT_ACTIVE_CONTRIBUTION: AuditLogSettingsContribution = {
 }
 
 const AUDIT_ACTION_KEYS = [
-  'bootstrap_admin_created',
-  'setup_admin_created',
+  'instance_claimed',
   'session_created',
   'session_revoked',
   'password_changed',

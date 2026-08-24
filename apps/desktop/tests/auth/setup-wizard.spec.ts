@@ -34,8 +34,23 @@ test('the first-run wizard initializes an empty server; later devices see only s
       await firstDevice.page.getByLabel('Email').fill(FIRST_ADMIN_EMAIL)
       await firstDevice.page.getByLabel('Password', { exact: true }).fill(FIRST_ADMIN_PASSWORD)
       await firstDevice.page.getByLabel('Confirm password').fill(FIRST_ADMIN_PASSWORD)
-      await firstDevice.page.getByLabel('Setup code').fill(setupServer!.setupCode)
       await firstDevice.page.getByLabel('Display name (optional)').fill('First Admin')
+      // A protected deployment validates the code: a wrong one answers the
+      // dedicated error and the wizard stays up.
+      await firstDevice.page.getByLabel('Setup code').fill('00000000')
+      await firstDevice.page
+        .getByRole('button', { name: 'Create administrator and continue' })
+        .click()
+      await expect(
+        firstDevice.page.getByText(
+          'The setup code is not valid. Check the latest code in the server operations log.'
+        )
+      ).toBeVisible()
+      await expect(
+        firstDevice.page.getByRole('heading', { name: 'Initialize Nevix AI' })
+      ).toBeVisible()
+
+      await firstDevice.page.getByLabel('Setup code').fill(setupServer!.setupCode)
       await firstDevice.page
         .getByRole('button', { name: 'Create administrator and continue' })
         .click()

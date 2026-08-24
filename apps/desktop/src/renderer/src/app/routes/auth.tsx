@@ -27,6 +27,7 @@ function AuthenticationView(): React.JSX.Element | null {
       notice={authentication.notice}
       isSubmitting={authentication.isSubmitting}
       instanceSetup={authentication.instanceSetup}
+      setupCodeRequired={authentication.setupCodeRequired}
       rememberedEmail={authentication.rememberedEmail}
       rememberEmailSelected={authentication.rememberEmailSelected}
       isRememberedEmailPersistenceUnavailable={
@@ -36,6 +37,7 @@ function AuthenticationView(): React.JSX.Element | null {
         authentication.rememberedEmailPersistenceNoticeSurface
       }
       onRetryRestore={authentication.retryRestore}
+      onRetrySetupProbe={authentication.retrySetupProbe}
       onRememberEmailSelectedChange={authentication.setRememberEmailSelected}
       onRememberedEmailPersistenceNoticeShown={
         authentication.consumeRememberedEmailPersistenceNotice

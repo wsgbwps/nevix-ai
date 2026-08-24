@@ -237,30 +237,46 @@ test('unreachable servers and unreadable bodies degrade to network failures, nev
   )
 })
 
-test('setupStatus reads the one boolean and nothing else, degrading instead of guessing', async () => {
+test('setupStatus reads the two booleans and nothing else, degrading instead of guessing', async () => {
   await withFetch(
     (async (input, init) => {
       assert.equal(input.toString(), 'https://server.example/identity/setup/status')
       assert.equal(init?.method, 'GET')
       assert.equal(init?.body, undefined)
-      return jsonResponse({ initialized: false })
+      return jsonResponse({ initialized: false, setup_code_required: true })
     }) as typeof fetch,
     async () => {
       const result = await createIdentityClient(serverUrl).setupStatus()
-      assert.deepEqual(result, { outcome: 'succeeded', value: { initialized: false } })
+      assert.deepEqual(result, {
+        outcome: 'succeeded',
+        value: { initialized: false, setupCodeRequired: true }
+      })
     }
   )
 
-  await withFetch((async () => jsonResponse({ initialized: true })) as typeof fetch, async () => {
-    const result = await createIdentityClient(serverUrl).setupStatus()
-    assert.deepEqual(result, { outcome: 'succeeded', value: { initialized: true } })
-  })
+  await withFetch(
+    (async () => jsonResponse({ initialized: true, setup_code_required: false })) as typeof fetch,
+    async () => {
+      const result = await createIdentityClient(serverUrl).setupStatus()
+      assert.deepEqual(result, {
+        outcome: 'succeeded',
+        value: { initialized: true, setupCodeRequired: false }
+      })
+    }
+  )
 
-  // A body without the boolean is a broken server, never a setup verdict.
-  await withFetch((async () => jsonResponse({})) as typeof fetch, async () => {
+  // A body without both booleans is a broken server, never a setup verdict.
+  await withFetch((async () => jsonResponse({ initialized: true })) as typeof fetch, async () => {
     const result = await createIdentityClient(serverUrl).setupStatus()
     assert.deepEqual(result, { outcome: 'network-failure' })
   })
+  await withFetch(
+    (async () => jsonResponse({ initialized: 'yes', setup_code_required: false })) as typeof fetch,
+    async () => {
+      const result = await createIdentityClient(serverUrl).setupStatus()
+      assert.deepEqual(result, { outcome: 'network-failure' })
+    }
+  )
 })
 
 test('initialize sends the setup-code shape and parses the first-admin session', async () => {
@@ -333,6 +349,25 @@ test('initialize sends the setup-code shape and parses the first-admin session',
         'self-chosen-pass-1',
         'AB23CD45',
         '  '
+      )
+  ).then((result) => assert.equal(result.outcome, 'succeeded'))
+
+  // An open claim sends no setup code at all: the field is only for a
+  // protected deployment, and the server ignores it either way.
+  await withFetch(
+    (async (input, init) => {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        email: 'first.admin@example.com',
+        password: 'self-chosen-pass-1'
+      })
+      return jsonResponse(initializeSuccessBody, 201)
+    }) as typeof fetch,
+    () =>
+      createIdentityClient(serverUrl).initialize(
+        'first.admin@example.com',
+        'self-chosen-pass-1',
+        undefined,
+        ''
       )
   ).then((result) => assert.equal(result.outcome, 'succeeded'))
 

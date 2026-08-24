@@ -1,0 +1,166 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "main@f03b70e (working tree; no branch commits at initial review)",
+  "scopePaths": [
+    "README.md",
+    "apps/desktop/README.md",
+    "apps/desktop/scripts/run-e2e.sh",
+    "apps/desktop/src/renderer/src",
+    "apps/desktop/tests",
+    "contracts/identity.yaml",
+    "scripts/test-identity-integration.sh",
+    "server/.env.example",
+    "server/internal/identity",
+    ".scratch/instance-claim-128-plan.md"
+  ],
+  "currentDiffDigest": "sha256:b2d3e19d03fde991d7791602318ad2168105816e0905a267088201ae8daa128b",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 0,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/module.go",
+        "source": "ADR-0013 部署形状 / ADR-0015 Instance Claim（旧变量检测拒绝启动）",
+        "anchor": "identity.LoadConfig legacy-variable rejection",
+        "defect": "Legacy ADMIN_EMAIL / ADMIN_INITIAL_PASSWORD are detected by non-empty value, so variables explicitly set to an empty string pass as unset instead of refusing startup"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Confirmed: the getenv seam cannot observe presence, and ADR-0013's harm model (old config silently ignored, instance unexpectedly open) applies to explicitly-set-but-empty values. Repair: presence-aware lookup seam.",
+      "owner": "server/internal/identity/module.go",
+      "status": "closed",
+      "evidence": [
+        "server/internal/identity/module.go:50-57 — `if getenv(legacy) != \"\"` treats ADMIN_EMAIL=\"\" as unset",
+        "ADR-0013: 检测到任一旧变量即以明确配置错误拒绝启动，防止旧配置被静默忽略后意外开放实例认领"
+      ],
+      "reviewedDiffDigest": "sha256:94cd68beef878f5b93a52cd369a01eecf57e9066a6fe5b6fc2f91923e4394aa7",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/auth/setup.go",
+        "source": "ADR-0015 Instance Claim（实例初始化后该配置不再产生效果）+ contracts/identity.yaml 事务顺序",
+        "anchor": "auth.Service.Initialize missing-code evaluation",
+        "defect": "Protected-mode missing-setup-code check runs before the advisory-lock emptiness recheck, so an initialized protected instance answers 400 invalid_request instead of 409 instance_already_initialized"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Confirmed: configuration must have no effect after initialization; status already answers setup_code_required=false there, so the 400 contradicts the public contract.",
+      "owner": "server/internal/identity/auth/setup.go",
+      "status": "closed",
+      "evidence": [
+        "server/internal/identity/auth/setup.go:205-211 — errSetupCodeRequired returned before the transaction's users-existence recheck",
+        "SetupStatus answers setup_code_required=false once initialized, but Initialize still enforces the code request shape"
+      ],
+      "reviewedDiffDigest": "sha256:94cd68beef878f5b93a52cd369a01eecf57e9066a6fe5b6fc2f91923e4394aa7",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/auth/setup.go",
+        "source": "ADR-0015 2026-08-24 修订「实例拥有任何 User 后该配置不再产生效果或设置码」；issue #128 验收 7（并发输家 409）",
+        "anchor": "auth.Service.Initialize missing-code evaluation",
+        "defect": "Initialized protected instances still enforce the setup-code request shape: codeless claims answer 400 where the spec's terminal answer is 409"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Same defect observed independently on the spec axis; spec text makes 409-after-initialization unconditional.",
+      "owner": "server/internal/identity/auth/setup.go",
+      "status": "closed",
+      "evidence": [
+        "ADR-0015: 认领写事务以 advisory lock 串行化，并在锁内复检空表；只有首个请求能创建 Admin，任何 User 存在后均不可再次认领",
+        "Issue #128 criterion 7: 并发输家收到 409 后回到普通登录"
+      ],
+      "reviewedDiffDigest": "sha256:94cd68beef878f5b93a52cd369a01eecf57e9066a6fe5b6fc2f91923e4394aa7",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/integrationtest/harness_test.go",
+        "source": "issue #128 criterion 11（集成测试基础设施）",
+        "anchor": "newHarness LoadConfig environment mapping",
+        "defect": "Harness prefixes every requested key with NEVIX_, so LoadConfig's NEVIX_SETUP_CODE_REQUIRED request reads NEVIX_NEVIX_SETUP_CODE_REQUIRED and silently drops the documented value"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "No integration test consumes the harness cfg's SetupCodeRequired (protected-mode tests construct explicit Configs; invalid-config coverage lives in transport_test.go's LoadConfig unit tests), so acceptance is unaffected. Note: the CR-STANDARDS-0001 repair rewrites this exact mapping function and will handle NEVIX_-prefixed keys correctly as part of that hunk; verification rides the targeted re-review of CR-STANDARDS-0001.",
+      "owner": "server/internal/identity/integrationtest/harness_test.go",
+      "status": "closed",
+      "evidence": [
+        "harness_test.go:74 — `identity.LoadConfig(func(key string) string { return os.Getenv(\"NEVIX_\" + key) })`"
+      ],
+      "reviewedDiffDigest": "sha256:94cd68beef878f5b93a52cd369a01eecf57e9066a6fe5b6fc2f91923e4394aa7",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0003",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/README.md",
+        "source": "issue #128 What to build（「并同步 Server、OpenAPI、Desktop、测试与部署说明」）",
+        "anchor": "apps/desktop/README.md E2E harness overview paragraph",
+        "defect": "The E2E overview still describes the deleted bootstrap Admin and its forced first-login change over raw HTTP, contradicting the implemented claim_main_instance flow"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Re-graded from the reviewer's advisory: the issue makes Desktop 说明 synchronization an explicit in-slice requirement, so a task-owned doc describing the removed channel is a partial requirement, not style polish.",
+      "owner": "apps/desktop/README.md",
+      "status": "closed",
+      "evidence": [
+        "apps/desktop/README.md:54-56 — \"The bootstrap Admin completes the forced first-login password change over raw HTTP before the suite\"",
+        "Issue #128: 在同一完整切片中……并同步 Server、OpenAPI、Desktop、测试与部署说明"
+      ],
+      "reviewedDiffDigest": "sha256:94cd68beef878f5b93a52cd369a01eecf57e9066a6fe5b6fc2f91923e4394aa7",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [
+    {
+      "fixFor": [
+        "CR-STANDARDS-0001",
+        "CR-STANDARDS-0002",
+        "CR-SPEC-0001",
+        "CR-SPEC-0003"
+      ],
+      "beforeDigest": "sha256:94cd68beef878f5b93a52cd369a01eecf57e9066a6fe5b6fc2f91923e4394aa7",
+      "afterDigest": "sha256:b2d3e19d03fde991d7791602318ad2168105816e0905a267088201ae8daa128b",
+      "touchedPaths": [
+        "server/internal/identity/module.go — LoadConfig seam becomes a presence-aware lookup func(string) (string, bool); legacy ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD rejected on presence (any value, including empty); lookupValue helper collapses unset/empty for value-shaped reads",
+        "server/cmd/server/main.go — LoadConfig(os.LookupEnv)",
+        "server/internal/identity/auth/setup.go — missing-code check moved inside the write transaction after the advisory-lock emptiness recheck; codeless/wrong-code claims on an initialized protected instance now answer 409",
+        "server/internal/identity/integrationtest/harness_test.go — lookup seam + NEVIX_ prefix passthrough (also resolves deferred CR-SPEC-0002's defect)",
+        "server/internal/identity/transport_test.go — lookup-based env builder; empty-value legacy cases added",
+        "server/internal/identity/integrationtest/instance_claim_test.go — initialized-protected-instance codeless and wrong-code attempts assert 409",
+        "apps/desktop/README.md — E2E overview paragraph now describes claim_main_instance (Instance Claim, no forced first-login change)",
+        "contracts/identity.yaml — 400/409 descriptions state that the setup-code demand applies only to an unclaimed protected instance",
+        "README.md / server/.env.example — legacy-variable wording updated to include empty values"
+      ],
+      "checks": [
+        "go build ./... && go vet ./... — PASS",
+        "go test ./internal/identity/ — PASS",
+        "scripts/test-identity-integration.sh — PASS (134 tests, zero skips)",
+        "desktop typecheck + unit tests — PASS"
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "name": "full desktop E2E suite (pnpm test:e2e: typecheck + Electron Playwright, disposable PostgreSQL + claimed main instance + protected/open empty-instance servers) preceded by server integration suite",
+    "result": "PASS — 81 passed / 0 failed / 2 skipped (pre-existing Linux-only skips); server integration 134 tests zero skips; desktop unit 84 tests",
+    "coverage": "server identity + migration trees; desktop unit + full Playwright E2E including instance-claim, setup-wizard, setup-probe-failure specs",
+    "diffDigest": "sha256:b2d3e19d03fde991d7791602318ad2168105816e0905a267088201ae8daa128b"
+  },
+  "outcome": "closed"
+}
