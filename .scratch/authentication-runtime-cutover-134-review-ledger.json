@@ -5,7 +5,7 @@
     "apps/desktop",
     ".scratch/authentication-runtime-cutover-134-plan.md"
   ],
-  "currentDiffDigest": "sha256:7c7ccec220f87ebcbeca8d983b3d771c49395d2fbf47fb46a5784a88b8713f03",
+  "currentDiffDigest": "sha256:bf7fa4965340878200ac31bf320b05c34653e0f9ee83a9ebc21bee00aa762d14",
   "fullReviewCount": 1,
   "targetedReviewRound": 2,
   "findings": [
@@ -132,14 +132,16 @@
       },
       "level": "blocker",
       "disposition": "accepted",
-      "dispositionReason": "Accepted. Round 1 added the canary but it was CI-unusable (see CR-SPEC-0005, now closed). Round 2 made it full-suite and backend-independent: the canary now proves settings save, renderer reload, new-server rebinding, the claim boundary, shell absence, and (with a secure backend) envelope deletion — all green in the full suite (69 passed). Remaining defect per round-2 review: the end state does not UNIQUELY attribute the clearing to the Connection-save clear-session IPC, because restore-time session rejection would independently clear the envelope and satisfy the same assertions. The two-round targeted bound is reached; escalated for an owner decision (accept the canary as sufficient coverage, or require request/IPC-attribution refinement before merge).",
+      "dispositionReason": "Accepted. Round 1 added the canary but it was CI-unusable (see CR-SPEC-0005, now closed). Round 2 made it full-suite and backend-independent: the canary now proves settings save, renderer reload, new-server rebinding, the claim boundary, shell absence, and (with a secure backend) envelope deletion — all green in the full suite (69 passed). Remaining defect per round-2 review: the end state does not UNIQUELY attribute the clearing to the Connection-save clear-session IPC, because restore-time session rejection would independently clear the envelope and satisfy the same assertions. The two-round targeted bound is reached; escalated for an owner decision (accept the canary as sufficient coverage, or require request/IPC-attribution refinement before merge). Post-escalation owner decision: the user explicitly instructed '继续', authorizing the bounded attribution repair without a new full review. Commit c535303 records GET /identity/users/me requests to the new server after save/reload; under the secure-backend precondition a missing clear would produce one request before the claim boundary, while the repaired canary requires zero. An independent narrow verifier returned PASS; all final checks passed. Finding closed by this explicit owner-directed resolution.",
       "owner": "apps/desktop/tests/connection/server-change.spec.ts",
-      "status": "escalated",
+      "status": "closed",
       "evidence": [
         "grep over tests/connection + tests/settings: only initial-configuration flows exist",
-        "settings-page.tsx handleServerConnectionSaved: clear-session IPC + window.location.reload"
+        "settings-page.tsx handleServerConnectionSaved: clear-session IPC + window.location.reload",
+        "post-escalation verifier: clear-session canary PASS — missing clear with a persisted session necessarily invokes GET /identity/users/me on the new server before setup probe",
+        "c535303 server-change canary counts the exact origin/path only after installing the listener before Settings save"
       ],
-      "reviewedDiffDigest": "sha256:942956f917e90607d456ca206dc690c3096a324d10ec358dcb02947090a6a92c",
+      "reviewedDiffDigest": "sha256:bf7fa4965340878200ac31bf320b05c34653e0f9ee83a9ebc21bee00aa762d14",
       "unresolvedTargetedRounds": 2,
       "introducedBy": null
     },
@@ -233,13 +235,60 @@
           "coverage": "69 passed, 2 skipped (Linux-only)"
         }
       ]
+    },
+    {
+      "fixFor": [
+        "CR-SPEC-0004"
+      ],
+      "beforeDiffDigest": "sha256:7c7ccec220f87ebcbeca8d983b3d771c49395d2fbf47fb46a5784a88b8713f03",
+      "afterDiffDigest": "sha256:bf7fa4965340878200ac31bf320b05c34653e0f9ee83a9ebc21bee00aa762d14",
+      "commit": "c535303",
+      "kind": "post-escalation owner-directed remediation",
+      "ownerDecision": "User explicitly instructed '继续' after escalation, selecting the IPC-attribution remediation.",
+      "touchedPaths": [
+        "apps/desktop/tests/connection/server-change.spec.ts (observe exact new-server GET /identity/users/me after Settings save/reload; secure-backend precondition proves a stored old token)"
+      ],
+      "checks": [
+        {
+          "name": "desktop typecheck",
+          "result": "PASS"
+        },
+        {
+          "name": "desktop lint",
+          "result": "PASS"
+        },
+        {
+          "name": "desktop unit tests",
+          "result": "PASS",
+          "coverage": "105 passed"
+        },
+        {
+          "name": "desktop component tests",
+          "result": "PASS",
+          "coverage": "37 passed"
+        },
+        {
+          "name": "desktop architecture verification",
+          "result": "PASS"
+        },
+        {
+          "name": "desktop auth-artifact verification",
+          "result": "PASS"
+        },
+        {
+          "name": "desktop full E2E suite (run-e2e.sh full)",
+          "result": "PASS",
+          "coverage": "69 passed, 2 skipped (Linux-only)"
+        }
+      ],
+      "verification": "Independent narrow verifier PASS: clear failure would send GET /identity/users/me before the claim boundary; editor health probe and setup probe use different paths."
     }
   ],
   "relevantCheck": {
-    "name": "desktop full E2E suite (run-e2e.sh full) + verify-auth-artifacts, on top of typecheck/lint/unit(105)/component(37)/architecture",
+    "name": "Desktop final gates: typecheck + lint + unit + component + architecture + auth artifacts + full E2E",
     "result": "PASS",
-    "coverage": "69 passed, 2 skipped (Linux-only); all suites green on branch tip 47fe09c",
-    "diffDigest": "sha256:7c7ccec220f87ebcbeca8d983b3d771c49395d2fbf47fb46a5784a88b8713f03"
+    "coverage": "typecheck PASS; lint PASS; unit 105 passed; component 37 passed; architecture PASS; auth artifacts PASS; full E2E 69 passed / 2 Linux-only skipped",
+    "diffDigest": "sha256:bf7fa4965340878200ac31bf320b05c34653e0f9ee83a9ebc21bee00aa762d14"
   },
-  "outcome": "escalated"
+  "outcome": "closed"
 }
