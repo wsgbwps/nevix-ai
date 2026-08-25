@@ -92,10 +92,15 @@ wait_for_postgres() {
 echo "==> Waiting for PostgreSQL readiness"
 wait_for_postgres
 
-echo "==> Provisioning the identity_app runtime credential"
-# The migration baseline creates the role when missing; provisioning it here
-# (with a password) lets the tests connect as identity_app from the start.
-docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
+# The readiness probe can observe the initdb temporary server: on a fresh
+# volume pg_isready succeeds while the entrypoint is still initializing, and
+# the first real connection then races the temp server's shutdown (socket
+# gone) before the final server recreates it. Provisioning is idempotent, so
+# a bounded retry closes that startup window deterministically.
+provision_identity_app() {
+  local attempt
+  for attempt in $(seq 1 10); do
+    if docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'identity_app') THEN
@@ -105,6 +110,20 @@ END
 \$\$;
 ALTER ROLE identity_app PASSWORD '$identity_app_password';
 SQL
+    then
+      return 0
+    fi
+    echo "==> identity_app provisioning not reachable yet (attempt ${attempt}/10); retrying" >&2
+    sleep 1
+  done
+  echo "error: could not provision the identity_app credential after 10 attempts" >&2
+  return 1
+}
+
+echo "==> Provisioning the identity_app runtime credential"
+# The migration baseline creates the role when missing; provisioning it here
+# (with a password) lets the tests connect as identity_app from the start.
+provision_identity_app
 
 assert_identity_integration_executed() {
   local output_file="$1"

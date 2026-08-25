@@ -117,7 +117,8 @@ func (s *Service) Authenticate(r *http.Request) (authz.Principal, error) {
 // Best effort: the session stays valid per its committed row even if the
 // refresh write fails, so the failure is logged, not propagated.
 func (s *Service) refreshSession(ctx context.Context, tokenHash []byte) {
-	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		_, err := tx.Exec(ctx,
 			`UPDATE public.sessions
 			 SET expires_at = now() + make_interval(secs => $1), last_used_at = now()
@@ -143,7 +144,8 @@ func (s *Service) refreshSession(ctx context.Context, tokenHash []byte) {
 // write time, not one read before the transaction.
 func (s *Service) issueSession(ctx context.Context, user userRecord, tokenHash []byte, deviceName string) (time.Time, error) {
 	var expiresAt time.Time
-	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		var currentHash, status string
 		if err := tx.QueryRow(ctx,
 			`SELECT password_hash, status FROM public.users WHERE id = $1 FOR UPDATE`, user.ID,
@@ -199,7 +201,8 @@ func (s *Service) issueSession(ctx context.Context, user userRecord, tokenHash [
 // when a row was actually removed; revoking an already-gone session is a
 // successful no-op logout.
 func (s *Service) revokeSession(ctx context.Context, principal authz.Principal) error {
-	return s.runner.Run(ctx, func(tx pgx.Tx) error {
+	return s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		tag, err := tx.Exec(ctx, `DELETE FROM public.sessions WHERE token_hash = $1`, principal.SessionTokenHash)
 		if err != nil {
 			return fmt.Errorf("auth: delete session: %w", err)
@@ -222,7 +225,8 @@ func (s *Service) revokeSession(ctx context.Context, principal authz.Principal) 
 // retention window (ADR-0009), and prunes the login limiter — the daily
 // maintenance owned by the module's worker loop.
 func (s *Service) sweepOnce(ctx context.Context) {
-	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		if _, err := tx.Exec(ctx, `DELETE FROM public.sessions WHERE expires_at < now()`); err != nil {
 			return fmt.Errorf("auth: sweep expired sessions: %w", err)
 		}

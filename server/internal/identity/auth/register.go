@@ -27,6 +27,7 @@ import (
 
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
 // errInvalidJoinCode is the uniform answer for a wrong code, a revoked code,
@@ -124,7 +125,8 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (LoginRespo
 
 	var registered userRecord
 	var expiresAt time.Time
-	err = s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		// Lock the active code row: the validation decision holds until
 		// commit, so a revocation racing this registration either waits or
 		// has already closed the door.

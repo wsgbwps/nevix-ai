@@ -21,6 +21,7 @@ import (
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
 // maxDisplayNameLength bounds an explicit display name on account creation,
@@ -75,7 +76,8 @@ func (s *Service) Create(ctx context.Context, principal authz.Principal, req Cre
 	}
 
 	var created userRecord
-	err = s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO public.users (email, password_hash, display_name, role, status, must_change_password)
 			 VALUES ($1, $2, $3, 'member', 'active', true)
@@ -107,7 +109,8 @@ type DisableRequest struct{}
 // including the caller's own account — is refused.
 func (s *Service) Disable(ctx context.Context, principal authz.Principal, userID string) (UserResponse, error) {
 	var user userRecord
-	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		loaded, err := s.loadUserForUpdate(ctx, tx, userID)
 		if err != nil {
 			return err
@@ -164,7 +167,8 @@ func (s *Service) ResetPassword(ctx context.Context, principal authz.Principal, 
 	}
 
 	var user userRecord
-	err = s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		loaded, err := s.loadUserForUpdate(ctx, tx, userID)
 		if err != nil {
 			return err
@@ -218,7 +222,8 @@ func (s *Service) ChangeEmail(ctx context.Context, principal authz.Principal, us
 	}
 
 	var user userRecord
-	err = s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		loaded, err := s.loadUserForUpdate(ctx, tx, userID)
 		if err != nil {
 			return err
@@ -265,7 +270,8 @@ func (r *ChangeRoleRequest) Validate() *command.Error {
 // deployment always keeps a usable admin (ADR-0015).
 func (s *Service) ChangeRole(ctx context.Context, principal authz.Principal, userID string, req ChangeRoleRequest) (UserResponse, error) {
 	var user userRecord
-	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		loaded, err := s.loadUserForUpdate(ctx, tx, userID)
 		if err != nil {
 			return err
@@ -304,7 +310,8 @@ type DeleteResponse struct {
 // someone else (the caller remains) or the caller, whom the never-logged-in
 // rule already rejects.
 func (s *Service) Delete(ctx context.Context, principal authz.Principal, userID string) (DeleteResponse, error) {
-	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		user, err := s.loadUserForUpdate(ctx, tx, userID)
 		if err != nil {
 			return err

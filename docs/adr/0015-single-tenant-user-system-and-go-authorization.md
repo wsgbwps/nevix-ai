@@ -8,6 +8,8 @@
 
 2026-08-24 修订：Bootstrap 收敛为独立的 Instance Claim（实例认领）；默认无凭据，设置码成为可选部署保护，环境变量管理员通道删除。V1 不提供离线 Admin 恢复，也不保留旧 Bootstrap 审计动作。
 
+2026-08-25 修订：Write Transaction Module 回调契约升级为 narrow scope（当前事务 + AfterCommit 登记提交后 effect）；见「写事务纪律」。
+
 ## 背景
 
 ADR-0008 以多租户 Organization 与 Supabase Auth（anon/authenticated JWT）为前提：客户端直读受 RLS 保护的表，Go 以 `identity_app` 执行 trusted writes。私有化单租户后，Supabase Auth 退场、auth 收进 Go server，客户端直读消失——RLS 失去评估主体，授权必须在 Go 层重建，数据库 GRANT 成为唯一 DB 侧防线。
@@ -71,6 +73,7 @@ ADR-0008 以多租户 Organization 与 Supabase Auth（anon/authenticated JWT）
 
 - 单一最小权限 LOGIN 角色（沿袭 `identity_app` 命名）直接登录；`session_user = current_user` 在构造时真实数据库往返验证、每个写事务开始后复验，失败即回滚且不执行业务代码。
 - Write Transaction Module 独占事务开始、commit 与 rollback 的契约不变；覆盖面改为用户、会话与审计写路径。
+- 2026-08-25 修订（#139）：写事务回调收到的不再是裸事务参数，而是 narrow scope——只暴露当前活动事务（`pgx.Tx`）与 AfterCommit effect 登记两个能力；Module 仍独占 begin、执行身份验证、commit、rollback、取消与 panic 处理，调用方不得自行 begin/commit/rollback/重试或嵌套事务。AfterCommit effect 仅在成功 commit 后各执行一次、按登记顺序同步执行；回调错误、取消阻止提交、panic、rollback 或 commit failure 时一律不执行。effect 运行时事务已提交：effect 失败不改变已提交结果，effect panic 按编程错误原样传播、其后 effect 不再运行。提交后断流等物理 effect 由各自 owner 在未来引入（#138：Session 确定受影响 Session，Write Transaction 保证 commit-before-effect）；在此之前不冻结任何投机性 SSE hub 接口。
 
 ### 实例认领审计
 
