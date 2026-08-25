@@ -2,8 +2,9 @@
 // one trusted implementation of production session state transitions. It owns
 // opaque token generation and hashing, the TTL/sliding-refresh/expiry policy,
 // interactive session issuance with the atomic last-login projection, session
-// validation, best-effort sliding refresh, and the current/others/all
-// revocation dispositions with their post-commit connection effects. Callers
+// validation, best-effort sliding refresh, the current/others/all revocation
+// dispositions with their post-commit connection effects, and the expired-
+// session sweep. Callers
 // keep command rules, authorization, business locks, audit semantics, and
 // HTTP mapping: issuance and revocation participate in the caller's
 // already-open Write Transaction through the writetx.Scope they receive, and
@@ -212,6 +213,25 @@ func (s *Service) refresh(ctx context.Context, sessionID string) {
 	if err != nil {
 		slog.Warn("identity: sliding session refresh failed; session keeps its current expiry", "error", err)
 	}
+}
+
+// SweepExpired deletes the expired sessions — the physical cleanup half of
+// the expiry policy. It runs as its own write transaction through the Write
+// Transaction Module exactly like the refresh maintenance write; the sweep
+// worker owns only when to call it. Logical expiry never depends on this
+// cleanup: Validate already rejects expired sessions at lookup, so a sweep
+// failure is reported to the caller and never extends validity, and the
+// worker simply retries on its next tick. It writes no audit row and
+// registers no post-commit effect — those semantics belong to revocation.
+func (s *Service) SweepExpired(ctx context.Context) error {
+	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		_, err := sc.Tx().Exec(ctx, `DELETE FROM public.sessions WHERE expires_at < now()`)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("session: sweep expired sessions: %w", err)
+	}
+	return nil
 }
 
 // RevocationTarget names the exact durable sessions one revocation covers.

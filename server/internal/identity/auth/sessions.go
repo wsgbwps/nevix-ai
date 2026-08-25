@@ -1,9 +1,10 @@
 // The authentication adapter and the auth-owned session surfaces that remain
 // after the Session responsibility module cutover: bearer parsing in front of
-// session validation, the retention sweep, and the user loads the auth
-// commands read. Token mechanics, issuance, validation, sliding refresh, and
-// revocation live in the identity Module's session package (spec #138); all
-// writes run through the Write Transaction Module (ADR-0015).
+// session validation, the maintenance worker's audit-retention sweep, and the
+// user loads the auth commands read. Token mechanics, issuance, validation,
+// sliding refresh, revocation, and expired-session cleanup live in the
+// identity Module's session package (spec #138); all writes run through the
+// Write Transaction Module (ADR-0015).
 package auth
 
 import (
@@ -79,15 +80,19 @@ func (s *Service) Authenticate(r *http.Request) (authz.Principal, error) {
 	}, nil
 }
 
-// sweepOnce deletes expired sessions, sweeps audit rows past the 365-day
-// retention window (ADR-0009), and prunes the login limiter — the daily
-// maintenance owned by the module's worker loop.
+// sweepOnce delegates expired-session cleanup to the Session responsibility
+// module, sweeps audit rows past the 365-day retention window (ADR-0009),
+// and prunes the login limiter — the daily maintenance owned by the module's
+// worker loop. The two durable cleanups are independent maintenance
+// transactions: a partial failure is logged and retried whole on the next
+// tick, and neither session validity nor audit visibility ever depends on
+// the other's success.
 func (s *Service) sweepOnce(ctx context.Context) {
+	if err := s.sessions.SweepExpired(ctx); err != nil {
+		slog.Error("identity: expired session sweep failed; expired sessions stay rejected at lookup", "error", err)
+	}
 	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
 		tx := sc.Tx()
-		if _, err := tx.Exec(ctx, `DELETE FROM public.sessions WHERE expires_at < now()`); err != nil {
-			return fmt.Errorf("auth: sweep expired sessions: %w", err)
-		}
 		if _, err := tx.Exec(ctx, `DELETE FROM public.audit_logs WHERE created_at < now() - make_interval(secs => $1)`, auditRetention.Seconds()); err != nil {
 			return fmt.Errorf("auth: sweep expired audit rows: %w", err)
 		}

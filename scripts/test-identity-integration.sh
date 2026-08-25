@@ -185,6 +185,8 @@ assert_identity_integration_executed() {
     TestRevokeIsANoOpForAbsentTargets
     TestRevokeRollsBackWithTheCallerTransactionAndSkipsTheEffect
     TestRevocationTargetConstructorsRefuseAbsentIdentities
+    TestSweepDeletesOnlyExpiredSessionsAndWritesNoAudit
+    TestSweepFailureIsReportedAndDoesNotExtendValidity
     TestSequentialDeviceLogoutsEachRevokeOnlyTheirOwnSession
     TestLoginAdvancesLastLoginAtAndRefreshDoesNot
     TestRegisterWithActiveCodeCreatesMemberAndSession

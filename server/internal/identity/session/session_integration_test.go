@@ -5,11 +5,13 @@
 // validation's one invalid-session answer, sliding refresh — including the
 // best-effort path under forced refresh failure versus fail-closed lookup
 // failure — the current/others/all revocation dispositions with their exact
-// post-commit effect (changed/no-op, rollback safety), and the absence of
-// automatic audit writes. Opt-in like the
-// auth/writetx suites: the harness (scripts/test-identity-integration.sh)
-// exports NEVIX_DATABASE_URL (owner) and NEVIX_IDENTITY_DATABASE_URL (the
-// identity_app runtime credential); without the harness these tests skip.
+// post-commit effect (changed/no-op, rollback safety), the expired-session
+// sweep (expiry enforced before deletion; a forced cleanup outage never
+// extends validity), and the absence of automatic audit writes. Opt-in like
+// the auth/writetx suites: the harness
+// (scripts/test-identity-integration.sh) exports NEVIX_DATABASE_URL (owner)
+// and NEVIX_IDENTITY_DATABASE_URL (the identity_app runtime credential);
+// without the harness these tests skip.
 package session
 
 import (
@@ -733,5 +735,120 @@ func TestRevokeRollsBackWithTheCallerTransactionAndSkipsTheEffect(t *testing.T) 
 	}
 	if got := countAuditRows(t, owner, ctx); got != 0 {
 		t.Fatalf("audit rows after rolled-back revocations = %d, want 0", got)
+	}
+}
+
+// Logical expiry precedes physical deletion: an expired session is already
+// rejected by validation while its row still exists, and the sweep — the
+// physical cleanup half — then deletes exactly the expired rows, keeps live
+// sessions, writes no audit row, and is a clean no-op once nothing is
+// expired.
+func TestSweepDeletesOnlyExpiredSessionsAndWritesNoAudit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	owner, _, store, runner := storeHarness(t, ctx)
+	userID, stamp := seedActiveUser(t, owner, ctx, "sweeper@nevix.test")
+
+	live, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "live", CredentialStamp: stamp})
+	if err != nil {
+		t.Fatalf("issue live session: %v", err)
+	}
+	stale, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "stale", CredentialStamp: stamp})
+	if err != nil {
+		t.Fatalf("issue stale session: %v", err)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE public.sessions SET expires_at = now() - interval '1 hour' WHERE device_name = 'stale'`); err != nil {
+		t.Fatalf("expire stale session: %v", err)
+	}
+
+	// Before any cleanup: the expired token is already rejected while its row
+	// is still durably present — expiry correctness never waits for the sweep.
+	if _, err := store.Validate(ctx, stale.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expired session before sweep: error %v, want ErrInvalid", err)
+	}
+	if got := countSessions(t, owner, ctx); got != 2 {
+		t.Fatalf("sessions before sweep = %d, want 2", got)
+	}
+
+	if err := store.SweepExpired(ctx); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if got := countSessions(t, owner, ctx); got != 1 {
+		t.Fatalf("sessions after sweep = %d, want 1 (only the live one)", got)
+	}
+	if _, err := store.Validate(ctx, live.Token); err != nil {
+		t.Fatalf("live session after sweep: %v, want still valid", err)
+	}
+	if _, err := store.Validate(ctx, stale.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("swept session: error %v, want ErrInvalid", err)
+	}
+	if got := countAuditRows(t, owner, ctx); got != 0 {
+		t.Fatalf("audit rows after sweep = %d, want 0 (sweep writes no audit)", got)
+	}
+
+	// Nothing left to clean: the sweep is a clean no-op.
+	if err := store.SweepExpired(ctx); err != nil {
+		t.Fatalf("empty sweep: %v", err)
+	}
+	if _, err := store.Validate(ctx, live.Token); err != nil {
+		t.Fatalf("live session after empty sweep: %v, want still valid", err)
+	}
+}
+
+// Sweep failure is reported and never extends validity: with DELETE on
+// sessions denied to the runtime credential — a forced infrastructure
+// outage — the sweep answers an error, the expired session stays rejected at
+// lookup and its row survives, and once the privilege is restored the next
+// sweep cleans up.
+func TestSweepFailureIsReportedAndDoesNotExtendValidity(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	owner, _, store, runner := storeHarness(t, ctx)
+	userID, stamp := seedActiveUser(t, owner, ctx, "sweep-outage@nevix.test")
+
+	stale, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "outage", CredentialStamp: stamp})
+	if err != nil {
+		t.Fatalf("issue session: %v", err)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE public.sessions SET expires_at = now() - interval '1 hour'`); err != nil {
+		t.Fatalf("expire session: %v", err)
+	}
+	if _, err := store.Validate(ctx, stale.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expired session before outage: error %v, want ErrInvalid", err)
+	}
+
+	// The outage: the runtime credential loses DELETE on sessions, so the
+	// sweep's write transaction fails on permission; reads stay privileged
+	// and validation keeps answering.
+	if _, err := owner.Exec(ctx, `REVOKE DELETE ON public.sessions FROM identity_app`); err != nil {
+		t.Fatalf("revoke delete for the outage: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := owner.Exec(context.Background(), `GRANT DELETE ON public.sessions TO identity_app`); err != nil {
+			t.Errorf("restore delete privilege: %v", err)
+		}
+	})
+	if err := store.SweepExpired(ctx); err == nil {
+		t.Fatal("sweep under the outage succeeded, want the infrastructure failure reported")
+	}
+	if _, err := store.Validate(ctx, stale.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expired session during outage: error %v, want ErrInvalid (cleanup outage never extends validity)", err)
+	}
+	if got := countSessions(t, owner, ctx); got != 1 {
+		t.Fatalf("sessions during outage = %d, want 1 (the failed sweep deleted nothing)", got)
+	}
+
+	// The outage ends: the next sweep succeeds and reclaims the row.
+	if _, err := owner.Exec(ctx, `GRANT DELETE ON public.sessions TO identity_app`); err != nil {
+		t.Fatalf("restore delete privilege: %v", err)
+	}
+	if err := store.SweepExpired(ctx); err != nil {
+		t.Fatalf("sweep after the outage: %v", err)
+	}
+	if got := countSessions(t, owner, ctx); got != 0 {
+		t.Fatalf("sessions after the outage = %d, want 0", got)
+	}
+	if got := countAuditRows(t, owner, ctx); got != 0 {
+		t.Fatalf("audit rows after the failed and successful sweeps = %d, want 0", got)
 	}
 }
