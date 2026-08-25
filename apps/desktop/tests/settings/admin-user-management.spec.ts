@@ -49,7 +49,9 @@ async function createAccountThroughUi(
   await createDialog.getByLabel('初始密码').fill(identity.password)
   await createDialog.getByLabel(/显示名/).fill(displayName)
   await createDialog.getByRole('button', { name: '创建账号' }).click()
-  await expect(page.getByRole('status')).toContainText(`已创建 ${identity.email}`)
+  await expect(
+    page.getByRole('status').filter({ hasText: `已创建 ${identity.email}` })
+  ).toContainText(`已创建 ${identity.email}`)
 }
 
 async function openRowActions(page: Page, email: string): Promise<void> {
@@ -142,7 +144,9 @@ test('Admin manages the full lifecycle: create, forced first-login change, disab
       await expect(disableDialog).toBeVisible()
       await disableDialog.getByRole('button', { name: '停用账号' }).click()
       await expect(memberRow.getByText('已停用')).toBeVisible()
-      await expect(adminApp.page.getByRole('status')).toContainText('已停用')
+      await expect(adminApp.page.getByRole('status').filter({ hasText: '已停用' })).toContainText(
+        '已停用'
+      )
 
       const loginResponse = await fetch(
         new URL('/identity/auth/login', identityServer!.serverUrl),
@@ -200,11 +204,15 @@ test('Admin completes the remaining governance actions: role, email, reset, dele
       })
       await roleSelect.click()
       await launched.page.getByRole('option', { name: '管理员' }).click()
-      await expect(launched.page.getByRole('status')).toContainText('角色已改为 管理员')
+      await expect(
+        launched.page.getByRole('status').filter({ hasText: '角色已改为 管理员' })
+      ).toContainText('角色已改为 管理员')
       await expect(subjectRow.getByText('管理员')).toBeVisible()
       await roleSelect.click()
       await launched.page.getByRole('option', { name: '成员' }).click()
-      await expect(launched.page.getByRole('status')).toContainText('角色已改为 成员')
+      await expect(
+        launched.page.getByRole('status').filter({ hasText: '角色已改为 成员' })
+      ).toContainText('角色已改为 成员')
 
       // 改 email：the row reflects the new unique login identifier.
       await openRowActions(launched.page, subjectIdentity.email)
@@ -214,7 +222,9 @@ test('Admin completes the remaining governance actions: role, email, reset, dele
       })
       await emailDialog.getByLabel('新登录邮箱').fill(nextEmail)
       await emailDialog.getByRole('button', { name: '保存邮箱' }).click()
-      await expect(launched.page.getByRole('status')).toContainText(nextEmail)
+      await expect(launched.page.getByRole('status').filter({ hasText: nextEmail })).toContainText(
+        nextEmail
+      )
 
       // 重置密码：the raw API confirms the new initial password forces a change.
       await search.fill(nextEmail)
@@ -231,7 +241,9 @@ test('Admin completes the remaining governance actions: role, email, reset, dele
       })
       await resetDialog.getByLabel('新初始密码').fill(nextInitialPassword)
       await resetDialog.getByRole('button', { name: '重置密码' }).click()
-      await expect(launched.page.getByRole('status')).toContainText('已重置')
+      await expect(launched.page.getByRole('status').filter({ hasText: '已重置' })).toContainText(
+        '已重置'
+      )
 
       const grant = await loginOutsideDesktop(identityServer!, {
         email: nextEmail,
@@ -265,7 +277,9 @@ test('Admin completes the remaining governance actions: role, email, reset, dele
       await launched.page.getByRole('menuitem', { name: '删除', exact: true }).click()
       const deleteDialog = launched.page.getByRole('dialog', { name: `删除 ${deletableName}` })
       await deleteDialog.getByRole('button', { name: '删除账号' }).click()
-      await expect(launched.page.getByRole('status')).toContainText('已删除')
+      await expect(launched.page.getByRole('status').filter({ hasText: '已删除' })).toContainText(
+        '已删除'
+      )
       await expect(
         launched.page
           .getByRole('list', { name: '用户列表' })
@@ -380,7 +394,9 @@ test('the audit log lists governance events, paginates, and exports a local CSV 
       await expect(launched.page.getByText(/第 1 \/ \d+ 页 · 共 \d+ 条/)).toBeVisible()
 
       await launched.page.getByRole('button', { name: '导出 CSV' }).click()
-      await expect(launched.page.getByRole('status')).toContainText('已导出')
+      await expect(launched.page.getByRole('status').filter({ hasText: '已导出' })).toContainText(
+        '已导出'
+      )
 
       const csv = await readFile(exportPath, 'utf8')
       expect(csv).toContain('时间,操作者,动作,对象,详情')
