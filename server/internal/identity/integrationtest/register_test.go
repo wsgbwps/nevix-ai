@@ -9,6 +9,8 @@ package integrationtest
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -82,6 +84,27 @@ func TestRegisterWithActiveCodeCreatesMemberAndSession(t *testing.T) {
 		t.Fatalf("registered account sessions = %d, want exactly the issued one", got)
 	}
 
+	// The issued session is stored only as its SHA-256 hash: the bearer
+	// token exists once, in the response.
+	digest := sha256.Sum256([]byte(registered.Token))
+	var storedHash string
+	if err := h.fixturePool.QueryRow(context.Background(),
+		`SELECT encode(token_hash, 'hex') FROM public.sessions WHERE user_id = $1`, registered.User.ID,
+	).Scan(&storedHash); err != nil {
+		t.Fatalf("read stored registration token hash: %v", err)
+	}
+	if storedHash != hex.EncodeToString(digest[:]) {
+		t.Fatal("stored registration session hash is not the SHA-256 of the issued token")
+	}
+	// Registration is one business command, so its audit trail is exactly
+	// the setup's session_created + join_code_created plus one
+	// user_self_registered — never an additional session_created for the
+	// issued session.
+	if actions := h.auditActions(t); len(actions) != 3 ||
+		actions[0] != "session_created" || actions[1] != "join_code_created" || actions[2] != "user_self_registered" {
+		t.Fatalf("audit actions after register = %v, want [session_created join_code_created user_self_registered] (no extra session_created)", actions)
+	}
+
 	// The issued session works on its very next request — the register
 	// response is a working entry into the application, not a promise.
 	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", registered.Token); status != http.StatusOK {
@@ -127,6 +150,129 @@ func TestRegisterWithActiveCodeCreatesMemberAndSession(t *testing.T) {
 	assertContractResponse(t, http.MethodPost, "/identity/register", status, raw)
 	if status != http.StatusCreated {
 		t.Fatalf("lowercase code register: status %d body %s, want 201", status, raw)
+	}
+}
+
+func TestRegisterRollsBackAccountSessionAuditAndLastLoginTogether(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	h, handler, adminToken := governanceReady(t, ctx)
+	_, _, code := createJoinCode(t, handler, adminToken, "")
+
+	// A failure at the transaction's last participant — the audit write,
+	// broken here by a fixture-installed trigger — rolls the whole
+	// registration back: no member, no session, no last-login stamp, no
+	// audit row.
+	restore := h.failAuditWritesFor(t, "user_self_registered")
+	status, raw := doRegister(t, handler, registerBody("rollback.member@nevix.test", "self-chosen-pass-1", code.Code, ""))
+	assertContractResponse(t, http.MethodPost, "/identity/register", status, raw)
+	if status != http.StatusInternalServerError || !contains(raw, "internal_error") {
+		t.Fatalf("register with a broken audit sink: status %d body %s, want 500 internal_error", status, raw)
+	}
+	if got := h.countUsers(t); got != 1 {
+		t.Fatalf("users after rolled-back register = %d, want only the admin", got)
+	}
+	if got := countSessions(t, h); got != 1 {
+		t.Fatalf("sessions after rolled-back register = %d, want only the admin login session", got)
+	}
+	for _, action := range h.auditActions(t) {
+		if action == "user_self_registered" {
+			t.Fatal("a rolled-back registration left a user_self_registered audit row")
+		}
+	}
+
+	// Repair the audit sink: the same registration now succeeds end to end,
+	// so the earlier failure rolled everything back.
+	restore()
+	status, raw = doRegister(t, handler, registerBody("rollback.member@nevix.test", "self-chosen-pass-1", code.Code, ""))
+	assertContractResponse(t, http.MethodPost, "/identity/register", status, raw)
+	if status != http.StatusCreated {
+		t.Fatalf("register after audit repair: status %d body %s, want 201", status, raw)
+	}
+	var registered loginResponse
+	if err := json.Unmarshal(raw, &registered); err != nil {
+		t.Fatalf("repaired register body is not the login shape: %v (%s)", err, raw)
+	}
+	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", registered.Token); status != http.StatusOK {
+		t.Fatalf("me with the repaired registration session: status %d body %s, want 200", status, body)
+	}
+	if _, _, _, _, metadata := h.latestAuditEntry(t, "user_self_registered"); metadata["email"] != "rollback.member@nevix.test" {
+		t.Fatalf("repaired registration audit metadata = %v, want the registered email", metadata)
+	}
+}
+
+// TestRegisterHoldsTheJoinCodeRowLockUntilCommit: registration's code
+// validation runs under the caller-owned FOR UPDATE row lock, so its
+// decision holds until commit. A second database session holding that lock
+// blocks the registration; when the holder revokes the code and commits
+// first, the waiting registration finds the door closed and nothing is
+// persisted.
+func TestRegisterHoldsTheJoinCodeRowLockUntilCommit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	h, handler, adminToken := governanceReady(t, ctx)
+	_, _, code := createJoinCode(t, handler, adminToken, "")
+
+	conn, err := h.fixturePool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire fixture connection: %v", err)
+	}
+	t.Cleanup(conn.Release)
+	blocker, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin blocker transaction: %v", err)
+	}
+	if _, err := blocker.Exec(ctx,
+		`SELECT id FROM public.join_codes WHERE code = $1 FOR UPDATE`, code.Code,
+	); err != nil {
+		t.Fatalf("hold the code row lock: %v", err)
+	}
+
+	type outcome struct {
+		status int
+		body   []byte
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		status, body := doRegister(t, handler, registerBody("locked.member@nevix.test", "self-chosen-pass-1", code.Code, ""))
+		done <- outcome{status: status, body: body}
+	}()
+
+	// The registration must wait behind the holder, not proceed on an
+	// unlocked validation.
+	select {
+	case <-done:
+		t.Fatal("registration completed while another transaction held the join-code row lock")
+	case <-time.After(1500 * time.Millisecond):
+	}
+
+	// The holder revokes and commits first: the blocked registration then
+	// re-reads the row under its own lock and answers the uniform closed
+	// door — no member, no session, no audit row.
+	if _, err := blocker.Exec(ctx,
+		`UPDATE public.join_codes SET revoked_at = now() WHERE code = $1`, code.Code,
+	); err != nil {
+		t.Fatalf("revoke the code inside the blocker: %v", err)
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatalf("commit the blocker: %v", err)
+	}
+
+	select {
+	case out := <-done:
+		if out.status != http.StatusForbidden || !contains(out.body, "invalid_join_code") {
+			t.Fatalf("register after the racing revocation committed: status %d body %s, want 403 invalid_join_code", out.status, out.body)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("registration did not finish after the lock holder committed")
+	}
+	if got := h.countUsers(t); got != 1 {
+		t.Fatalf("users after the lock-lost registration = %d, want only the admin", got)
+	}
+	for _, action := range h.auditActions(t) {
+		if action == "user_self_registered" {
+			t.Fatal("the lock-lost registration wrote a user_self_registered audit row")
+		}
 	}
 }
 

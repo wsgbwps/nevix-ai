@@ -35,15 +35,6 @@ func (h *harness) loginReadyModule(t *testing.T) (*identity.Module, http.Handler
 	return h.moduleWithConfig(t, cfg)
 }
 
-func sessionCount(t *testing.T, h *harness) int {
-	t.Helper()
-	var count int
-	if err := h.fixturePool.QueryRow(context.Background(), `SELECT count(*) FROM public.sessions`).Scan(&count); err != nil {
-		t.Fatalf("count sessions: %v", err)
-	}
-	return count
-}
-
 func TestLoginIssuesOpaqueSessionStoredOnlyAsHash(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -66,7 +57,7 @@ func TestLoginIssuesOpaqueSessionStoredOnlyAsHash(t *testing.T) {
 	}
 
 	// The server stores only the SHA-256 hash; the token bytes never persist.
-	if got := sessionCount(t, h); got != 1 {
+	if got := countSessions(t, h); got != 1 {
 		t.Fatalf("sessions after login = %d, want 1", got)
 	}
 	digest := sha256.Sum256([]byte(login.Token))
@@ -156,7 +147,7 @@ func TestLoginAnswersDisabledAccountWithAccountDisabled(t *testing.T) {
 	if !contains(body, `"account_disabled"`) {
 		t.Fatalf("disabled login body %s, want account_disabled", body)
 	}
-	if got := sessionCount(t, h); got != 0 {
+	if got := countSessions(t, h); got != 0 {
 		t.Fatalf("disabled login created %d sessions", got)
 	}
 }
@@ -191,7 +182,7 @@ func TestLoginRateLimitsAfterWindowedFailures(t *testing.T) {
 	if err != nil || retryAfter <= 0 {
 		t.Fatalf("Retry-After header %q, want a positive integer", rec.Header().Get("Retry-After"))
 	}
-	if got := sessionCount(t, h); got != 0 {
+	if got := countSessions(t, h); got != 0 {
 		t.Fatalf("locked-out attempts created %d sessions", got)
 	}
 
@@ -267,7 +258,7 @@ func TestLogoutRevokesOnlyTheCallingSession(t *testing.T) {
 	if first.Token == second.Token {
 		t.Fatal("two logins issued the same token; sessions are not independent")
 	}
-	if got := sessionCount(t, h); got != 2 {
+	if got := countSessions(t, h); got != 2 {
 		t.Fatalf("sessions for two devices = %d, want 2", got)
 	}
 
@@ -282,7 +273,7 @@ func TestLogoutRevokesOnlyTheCallingSession(t *testing.T) {
 	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", second.Token); status != http.StatusOK {
 		t.Fatalf("other device after logout: status %d body %s, want 200 (only the calling session ends)", status, body)
 	}
-	if got := sessionCount(t, h); got != 1 {
+	if got := countSessions(t, h); got != 1 {
 		t.Fatalf("sessions after one logout = %d, want 1", got)
 	}
 	if actions := h.auditActions(t); len(actions) != 3 || actions[2] != "session_revoked" {
@@ -387,16 +378,16 @@ func TestSweepDeletesExpiredSessions(t *testing.T) {
 		 FROM public.users WHERE email = 'other@nevix.test'`); err != nil {
 		t.Fatalf("insert expired session: %v", err)
 	}
-	if got := sessionCount(t, h); got != 2 {
+	if got := countSessions(t, h); got != 2 {
 		t.Fatalf("sessions before sweep = %d, want 2", got)
 	}
 
 	h.startWorkers(t, m) // runs the sweep immediately
 	deadline := time.Now().Add(10 * time.Second)
-	for sessionCount(t, h) == 2 && time.Now().Before(deadline) {
+	for countSessions(t, h) == 2 && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
-	if got := sessionCount(t, h); got != 1 {
+	if got := countSessions(t, h); got != 1 {
 		t.Fatalf("sessions after sweep = %d, want 1 (only the live session)", got)
 	}
 	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", login.Token); status != http.StatusOK {
@@ -431,5 +422,110 @@ func TestSweepDeletesAuditRowsPastRetention(t *testing.T) {
 	}
 	if actions := h.auditActions(t); len(actions) != 1 || actions[0] != "session_created" {
 		t.Fatalf("audit actions after sweep = %v, want only the in-window login row", actions)
+	}
+}
+
+// last_login_at is the projection of the most recent successful interactive
+// session issuance (server/CONTEXT.md): Login advances it, and the sliding
+// refresh a near-expiry use triggers never does.
+func TestLoginAdvancesLastLoginAtAndRefreshDoesNot(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	h := newHarness(t, ctx)
+	_, handler := h.loginReadyModule(t)
+	status, _, login := doLogin(t, handler, loginEmail, loginPassword)
+	if status != http.StatusOK {
+		t.Fatalf("login: status %d", status)
+	}
+
+	var lastLogin *time.Time
+	if err := h.fixturePool.QueryRow(ctx,
+		`SELECT last_login_at FROM public.users WHERE id = $1`, login.User.ID,
+	).Scan(&lastLogin); err != nil {
+		t.Fatalf("read last_login_at after login: %v", err)
+	}
+	if lastLogin == nil {
+		t.Fatal("login did not stamp last_login_at")
+	}
+
+	// A second login moves the projection forward.
+	before := *lastLogin
+	status, _, _ = doLogin(t, handler, loginEmail, loginPassword)
+	if status != http.StatusOK {
+		t.Fatalf("second login: status %d", status)
+	}
+	if err := h.fixturePool.QueryRow(ctx,
+		`SELECT last_login_at FROM public.users WHERE id = $1`, login.User.ID,
+	).Scan(&lastLogin); err != nil {
+		t.Fatalf("re-read last_login_at after second login: %v", err)
+	}
+	if !lastLogin.After(before) {
+		t.Fatalf("second login did not advance last_login_at: %v -> %v", before, *lastLogin)
+	}
+	stamped := *lastLogin
+
+	// Sliding refresh on the first session: the use re-arms the expiry but
+	// must leave the projection at the last interactive issuance.
+	digest := sha256.Sum256([]byte(login.Token))
+	if _, err := h.fixturePool.Exec(ctx,
+		`UPDATE public.sessions SET expires_at = now() + interval '2 days' WHERE token_hash = $1`, digest[:],
+	); err != nil {
+		t.Fatalf("age session: %v", err)
+	}
+	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", login.Token); status != http.StatusOK {
+		t.Fatalf("me on nearly-expired session: status %d body %s", status, body)
+	}
+	if err := h.fixturePool.QueryRow(ctx,
+		`SELECT last_login_at FROM public.users WHERE id = $1`, login.User.ID,
+	).Scan(&lastLogin); err != nil {
+		t.Fatalf("re-read last_login_at after refresh: %v", err)
+	}
+	if !lastLogin.Equal(stamped) {
+		t.Fatalf("sliding refresh moved last_login_at: %v -> %v", stamped, *lastLogin)
+	}
+}
+
+// Logging out on each of two devices ends exactly that device's session,
+// keeps the other device working until its own logout, and records one
+// session_revoked row per device — no duplicates and no no-op rows.
+func TestSequentialDeviceLogoutsEachRevokeOnlyTheirOwnSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	h := newHarness(t, ctx)
+	_, handler := h.loginReadyModule(t)
+
+	status, _, first := doLogin(t, handler, loginEmail, loginPassword)
+	if status != http.StatusOK {
+		t.Fatalf("first login: status %d", status)
+	}
+	status, _, second := doLogin(t, handler, loginEmail, loginPassword)
+	if status != http.StatusOK {
+		t.Fatalf("second login: status %d", status)
+	}
+
+	if status, body := doLogout(t, handler, first.Token); status != http.StatusOK {
+		t.Fatalf("first logout: status %d body %s", status, body)
+	}
+	// The second device never noticed the first device's logout.
+	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", second.Token); status != http.StatusOK {
+		t.Fatalf("second device after first logout: status %d body %s, want 200", status, body)
+	}
+	if status, body := doLogout(t, handler, second.Token); status != http.StatusOK {
+		t.Fatalf("second logout: status %d body %s", status, body)
+	}
+
+	if status, _ := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", first.Token); status != http.StatusUnauthorized {
+		t.Fatalf("first device after both logouts: status %d, want 401", status)
+	}
+	if status, _ := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", second.Token); status != http.StatusUnauthorized {
+		t.Fatalf("second device after both logouts: status %d, want 401", status)
+	}
+	if got := countSessions(t, h); got != 0 {
+		t.Fatalf("sessions after both logouts = %d, want 0", got)
+	}
+	actions := h.auditActions(t)
+	if len(actions) != 4 || actions[0] != "session_created" || actions[1] != "session_created" ||
+		actions[2] != "session_revoked" || actions[3] != "session_revoked" {
+		t.Fatalf("audit actions = %v, want two logins then two session_revoked", actions)
 	}
 }

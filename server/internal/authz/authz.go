@@ -26,12 +26,14 @@ var ErrNotAuthenticated = errors.New("authz: no active session")
 // It exists only for active users; a disabled account never becomes a
 // Principal.
 type Principal struct {
-	// SessionTokenHash identifies the session row (logout revokes exactly it).
-	SessionTokenHash []byte
-	UserID           string
-	Email            string
-	DisplayName      string
-	Role             string // "admin" | "member"
+	// SessionID is the session row's identity (sessions.id) — the
+	// non-sensitive key logout and revocation route on. The bearer-derived
+	// token hash never crosses this seam (spec #138).
+	SessionID   string
+	UserID      string
+	Email       string
+	DisplayName string
+	Role        string // "admin" | "member"
 	// MustChangePassword reports that the account still owes the forced
 	// first-login password change. It is account state resolved with the
 	// session — not authorization vocabulary: the two guards below never

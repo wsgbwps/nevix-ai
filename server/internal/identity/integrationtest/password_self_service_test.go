@@ -188,7 +188,7 @@ func TestChangePasswordRevokesAllOtherSessions(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("second login: status %d", status)
 	}
-	if got := sessionCount(t, h); got != 2 {
+	if got := countSessions(t, h); got != 2 {
 		t.Fatalf("sessions before change = %d, want 2", got)
 	}
 
@@ -208,7 +208,7 @@ func TestChangePasswordRevokesAllOtherSessions(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("calling session after change: status %d body %s, want 200", status, body)
 	}
-	if got := sessionCount(t, h); got != 1 {
+	if got := countSessions(t, h); got != 1 {
 		t.Fatalf("sessions after change = %d, want only the caller's", got)
 	}
 	if last := h.lastAuditAction(t); last != "password_changed" {
@@ -237,7 +237,7 @@ func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
 	if status, _, _ := doLogin(t, handler, loginEmail, loginPassword); status != http.StatusOK {
 		t.Fatalf("old password after failed change: status %d, want 200", status)
 	}
-	if got := sessionCount(t, h); got != 2 {
+	if got := countSessions(t, h); got != 2 {
 		t.Fatalf("sessions after failed change = %d, want 2", got)
 	}
 	for _, action := range h.auditActions(t) {
@@ -340,7 +340,7 @@ func TestChangePasswordSerializesConcurrentChanges(t *testing.T) {
 	if status, _ := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", loser.Token); status != http.StatusUnauthorized {
 		t.Fatalf("loser session: status %d, want 401", status)
 	}
-	if got := sessionCount(t, h); got != 1 {
+	if got := countSessions(t, h); got != 1 {
 		t.Fatalf("sessions after concurrent change = %d, want only the winner's", got)
 	}
 	if status, _, _ := doLogin(t, handler, loginEmail, winnerPassword); status != http.StatusOK {

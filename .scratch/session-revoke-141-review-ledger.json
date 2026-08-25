@@ -1,0 +1,220 @@
+{
+  "schema": "code-review-findings/v1",
+  "review": {
+    "task": "issue #141 — Session current/others/all 吊销核心：Logout tracer",
+    "branch": "identity-session-cutover",
+    "specSources": [
+      "https://github.com/wsgbwps/nevix-ai/issues/141",
+      "https://github.com/wsgbwps/nevix-ai/issues/138"
+    ]
+  },
+  "fixedPoint": "4e378c3",
+  "scopePaths": [
+    ".scratch/session-revoke-141-plan.md",
+    "scripts/test-identity-integration.sh",
+    "server/internal/identity/auth/commands.go",
+    "server/internal/identity/auth/sessions.go",
+    "server/internal/identity/integrationtest/login_session_test.go",
+    "server/internal/identity/module.go",
+    "server/internal/identity/mount_test.go",
+    "server/internal/identity/session/session.go",
+    "server/internal/identity/session/session_integration_test.go",
+    "server/internal/identity/session/session_test.go"
+  ],
+  "currentDiffDigest": "sha256:84e8632dff8732e6a259321f8b2d40e8c4147bd88617ed74d8a59ae9c899c460",
+  "diffBundle": {
+    "command": "git diff 4e378c3 -- <scopePaths> > /tmp/session141-diff-final.bundle",
+    "path": "/tmp/session141-diff-final.bundle",
+    "lines": 1178,
+    "gitLog": "4e378c3..HEAD: concurrent ticket #142 landed as cd63d22 on the shared integration branch during this review; this ticket's hunks were mechanically rebased onto it (sessionCount→countSessions helper rename adoption in the new contract test; sentinel list merge) and the full suite re-validated the combined state"
+  },
+  "fullReviewCount": 1,
+  "targetedReviewRound": 1,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/session/session.go",
+        "source": "server/AGENTS.md test-support rule; spec #138 / #141 AC7 no-speculative-port rule; Fowler Speculative Generality",
+        "anchor": "server/internal/identity/session/session.go — Service.dropConnections field and Service.Revoke effect closure",
+        "defect": "Production carried a mutable callback (dropConnections) that its own comment admitted is never wired in production and existed solely so package-local tests could replace the post-commit effect, leaving the real production dispatch branch untested."
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Verified: the field was set nowhere in production wiring and every test assertion went through the replacement, not the real branch — a test-only production seam that AC7 (no speculative port for the not-yet-existing SSE hub) and the Fowler baseline both flag. Repair: field removed; the AfterCommit effect unconditionally records the exact committed set via slog; tests now observe the real production dispatch by swapping the default logger (captureLogs/logRecorder in session_integration_test.go), including effect-time visibility queries proving commit-before-effect.",
+      "owner": "server/internal/identity/session",
+      "status": "closed",
+      "evidence": [
+        "pre-repair session.go: dropConnections field doc stated 'production wiring never sets it' while tests assigned store.dropConnections in all three revocation tests",
+        "spec #141 AC7: 不为尚不存在的物理 SSE hub 预造 transport adapter、跨 Module event contract 或假想 production port",
+        "post-repair session.go Revoke: single unconditional slog.Info(\"identity: session revocation committed\", \"session_ids\", revoked) inside sc.AfterCommit; no field remains"
+      ],
+      "reviewedDiffDigest": "sha256:10dab76f079f501e671942872e0253460af395df967a53ccf0c6636599adcf41",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/session/session_integration_test.go",
+        "source": "server/CONTEXT.md — Repository avoid-list (store, DAO, data layer); Fowler Mysterious Name",
+        "anchor": "server/internal/identity/session/session_integration_test.go — storeHarness / store locals",
+        "defect": "The Store→Service rename leaves storeHarness, local variables named store, and matching comments throughout the test file, preserving the prohibited Repository-shaped vocabulary inside the package whose type-level rename this ticket performed."
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Test-local vocabulary only, zero behavioral risk. The type-level rename (the actual #140 deferred item CR-STANDARDS-0003) is complete. Renaming the harness/locals is cheap mechanical churn best folded into #143, which extends these same disposition tests with the password-change dispositions on this integration branch before any merge to main.",
+      "owner": "server/internal/identity/session/session_integration_test.go",
+      "status": "closed",
+      "evidence": [
+        "server/CONTEXT.md:23-25: Repository entry's avoid-list includes 'store'",
+        "session_integration_test.go still names the harness storeHarness and locals store after the Service rename"
+      ],
+      "reviewedDiffDigest": "sha256:10dab76f079f501e671942872e0253460af395df967a53ccf0c6636599adcf41",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0003",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/session/session_integration_test.go",
+        "source": "server/CONTEXT.md — Authentication Identity vocabulary (reserved for the session_user database concept)",
+        "anchor": "session_integration_test.go — TestValidateResolvesIdentityAndSlidesNearExpiryWithoutTouchingLastLogin + its sentinel in scripts/test-identity-integration.sh",
+        "defect": "The Identity→ValidatedSession type rename leaves the covering test's name using 'Identity' for the validated-session concept, retaining part of the ambiguity the rename was deferred to remove."
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Naming-only, zero behavioral risk; the reserved-term collision existed at the type level and is resolved there. The test-name (+ sentinel) rename lands with #143's extension of this package on the same integration branch, before any merge to main.",
+      "owner": "server/internal/identity/session/session_integration_test.go",
+      "status": "closed",
+      "evidence": [
+        "server/CONTEXT.md:65-68: Authentication Identity = the session_user observed login principal",
+        "type renamed to ValidatedSession; test name and script sentinel still carry 'ResolvesIdentity'"
+      ],
+      "reviewedDiffDigest": "sha256:10dab76f079f501e671942872e0253460af395df967a53ccf0c6636599adcf41",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0004",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/session/session_integration_test.go",
+        "source": "Fowler Duplicated Code",
+        "anchor": "session_integration_test.go — TestRevokeCoversCurrentOthersAndAllDispositions no-op tail vs TestRevokeIsANoOpForAbsentTargets",
+        "defect": "Both blocks execute the same three absent-target revocations with overlapping changed/effect/audit assertions, adding redundant real-PostgreSQL work."
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Judgement-call overlap between two distinct state-dependent scenarios (post-exhaustion no-op after prior dispositions vs absent-from-start including foreign uuids). Consolidation is reasonable but is mechanical test churn; fold into #143 when the disposition test surface grows for the password-change dispositions, before any merge to main.",
+      "owner": "server/internal/identity/session/session_integration_test.go",
+      "status": "closed",
+      "evidence": [
+        "disposition-test tail: Current/Others/All no-ops after the table was emptied by earlier dispositions",
+        "standalone test: Current(foreign-uuid)/Others(user, foreign-uuid)/All(user) from a pristine state"
+      ],
+      "reviewedDiffDigest": "sha256:10dab76f079f501e671942872e0253460af395df967a53ccf0c6636599adcf41",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0005",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/integrationtest/login_session_test.go",
+        "source": "Fowler Duplicated Code",
+        "anchor": "login_session_test.go — TestSequentialDeviceLogoutsEachRevokeOnlyTheirOwnSession vs TestLogoutRevokesOnlyTheCallingSession",
+        "defect": "The new contract test repeats most of the existing logout scenario merely to append a second logout, duplicating setup and contract assertions."
+      },
+      "level": "advisory",
+      "disposition": "false-positive",
+      "dispositionReason": "The two-device fixture is already shared (doLogin/doLogout/doAuthenticated/sessionCount/auditActions helpers); the residual overlap is scenario setup inherent to named contract scenarios. The tests assert different acceptance evidence: the existing sentinel pins one-device logout with the other surviving (final audit assertion is exactly 3 actions), while the new test pins the sequential tracer's terminal state — both devices logged out, table empty, both 401, and the exact 4-action audit order with two session_revoked rows. Merging them would alter an established sentinel's shape and couple two failure diagnoses.",
+      "owner": "server/internal/identity/integrationtest/login_session_test.go",
+      "status": "closed",
+      "evidence": [
+        "TestLogoutRevokesOnlyTheCallingSession: asserts actions len==3 and other-device survival",
+        "TestSequentialDeviceLogoutsEachRevokeOnlyTheirOwnSession: asserts terminal empty table, both 401, actions [session_created, session_created, session_revoked, session_revoked]"
+      ],
+      "reviewedDiffDigest": "sha256:10dab76f079f501e671942872e0253460af395df967a53ccf0c6636599adcf41",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "server/internal/identity/session/session.go",
+        "source": "#141 AC1–2 (closed representation, 只能构造有效 target); #138 Revocation-target decision",
+        "anchor": "server/internal/identity/session/session.go — Current / Others / All constructors",
+        "defect": "The constructors accepted unrestricted strings: Current(\"\") constructed a current target without a session identity and Others with an empty user or empty exception silently widened the disposition to all, contradicting the package's own documented closed-validity claim that 'a current without a session identity' is unexpressable."
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Verified against the pre-repair code and the package's own RevocationTarget doc comment, which promised that a current without a session identity cannot be expressed while Current(\"\") expressed exactly that. AC1 requires 只能构造有效 target. Repair: all three constructors now validate and return (RevocationTarget, error), refusing absent identities; Logout constructs before the transaction and maps refusal to the command error surface; a pure unit test (TestRevocationTargetConstructorsRefuseAbsentIdentities) pins refusal and the three valid forms. The finding's cross-user Others case is not a field-combination violation (both ids always derive from one guard-validated session row at every call site) and is documented as out of the constructible-invariant scope.",
+      "owner": "server/internal/identity/session/session.go",
+      "status": "closed",
+      "evidence": [
+        "pre-repair session.go RevocationTarget doc: 'can never express an invalid combination such as an all with an exception or a current without a session identity' — while Current(\"\") compiled and constructed",
+        "spec #141 AC1: 只能构造有效 target，不存在 enum 与 optional field 的非法组合",
+        "post-repair: Current/Others/All return errors on empty required identities; auth.Logout validates before runner.Run; session_test.go refuses all four absent-identity forms"
+      ],
+      "reviewedDiffDigest": "sha256:10dab76f079f501e671942872e0253460af395df967a53ccf0c6636599adcf41",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [
+    {
+      "fixFor": [
+        "CR-STANDARDS-0001",
+        "CR-SPEC-0001"
+      ],
+      "beforeDigest": "sha256:10dab76f079f501e671942872e0253460af395df967a53ccf0c6636599adcf41",
+      "afterDigest": "sha256:e4d812a7f53400389cf9fcaf80e3de6576f9e71b55199f0a392facd8020c7b00",
+      "touchedPaths": [
+        "server/internal/identity/session/session.go",
+        "server/internal/identity/session/session_integration_test.go",
+        "server/internal/identity/session/session_test.go",
+        "server/internal/identity/auth/commands.go",
+        "scripts/test-identity-integration.sh"
+      ],
+      "hunks": [
+        "session.go Service: dropConnections field and its doc removed; struct is again {db, runner} only",
+        "session.go Revoke: AfterCommit effect is one unconditional slog.Info with the exact sorted revoked ids",
+        "session.go Current/Others/All: constructors now return (RevocationTarget, error) and refuse absent identities (empty session/user/exception)",
+        "auth/commands.go Logout: constructs session.Current before the transaction and returns the refusal as the command error (500 wiring-bug surface), unchanged happy path",
+        "session_integration_test.go: logRecorder/captureLogs observe the real production dispatch through the default logger (exact session_ids attr, effect-time visibility query proving commit-before-effect); revoke/assertNoOp closures consume the (target, error) constructors; mustTarget removed",
+        "session_test.go (new): TestRevocationTargetConstructorsRefuseAbsentIdentities pure unit test for refusal + valid forms",
+        "scripts/test-identity-integration.sh: TestRevocationTargetConstructorsRefuseAbsentIdentities added to representative sentinels"
+      ],
+      "checks": [
+        "go build ./... — PASS",
+        "go vet ./... — PASS",
+        "go test -race ./... (10 packages) — PASS",
+        "scripts/test-identity-integration.sh — Verified 156 Identity integration tests executed with zero skips"
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "check": "server: go build ./... && go vet ./... && go test -race ./... ; identity real-PostgreSQL suite via scripts/test-identity-integration.sh",
+    "result": "PASS",
+    "coverage": "go test -race ./... 10/10 packages ok; identity integration 159 tests, 0 skips on the combined #141+#142 branch state, all representative sentinels incl. 5 new for this ticket (TestRevokeCoversCurrentOthersAndAllDispositions, TestRevokeIsANoOpForAbsentTargets, TestRevokeRollsBackWithTheCallerTransactionAndSkipsTheEffect, TestRevocationTargetConstructorsRefuseAbsentIdentities, TestSequentialDeviceLogoutsEachRevokeOnlyTheirOwnSession)",
+    "diffDigest": "sha256:84e8632dff8732e6a259321f8b2d40e8c4147bd88617ed74d8a59ae9c899c460"
+  },
+  "targetedReviews": [
+    {
+      "round": 1,
+      "agent": "targeted-review-141-r1",
+      "digest": "sha256:e4d812a7f53400389cf9fcaf80e3de6576f9e71b55199f0a392facd8020c7b00",
+      "targets": [
+        "CR-STANDARDS-0001",
+        "CR-SPEC-0001"
+      ],
+      "result": "Both closed: dropConnections removed with the production dispatch now unconditionally logged and observed by tests through the default logger (commit-before-effect proven); constructors refuse absent identities with (target, error), Logout validates before its transaction, unit + integration callers consume the errors. No repair-introduced findings. Post-review note: the concurrent #142 commit (cd63d22) landed on the shared integration branch after round 1; this ticket's two shared-file hunks were mechanically rebased onto it (helper-rename adoption, sentinel merge) with identical reviewed semantics, re-validated by the full suite on digest sha256:84e8632dff8732e6a259321f8b2d40e8c4147bd88617ed74d8a59ae9c899c460."
+    }
+  ],
+  "outcome": "closed"
+}

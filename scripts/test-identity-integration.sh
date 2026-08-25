@@ -161,6 +161,7 @@ assert_identity_integration_executed() {
     TestProtectedClaimStatusAndCodeDisclosure
     TestSetupStatusReturnsOnlyTheTwoBooleans
     TestOpenClaimCreatesFirstAdminWithoutACredential
+    TestClaimRollsBackAccountSessionAuditAndLastLoginTogether
     TestProtectedClaimDemandsTheCode
     TestClaimAnswersConflictOnceInitialized
     TestRestartRotatesTheSetupCode
@@ -175,6 +176,30 @@ assert_identity_integration_executed() {
     TestBaselineDropsTheLegacyWorldAndRebuilds
     TestRunRejectsOwnerCredential
     TestRunAcceptsDirectIdentityAppCredential
+    TestIssueInsertsSessionStampsLastLoginAndWritesNoAudit
+    TestIssueRechecksActiveStatusAndCredentialStampUnderLock
+    TestIssueRollsBackWithTheCallerTransaction
+    TestValidateResolvesIdentityAndSlidesNearExpiryWithoutTouchingLastLogin
+    TestValidateFailuresAndBestEffortRefresh
+    TestRevokeCoversCurrentOthersAndAllDispositions
+    TestRevokeIsANoOpForAbsentTargets
+    TestRevokeRollsBackWithTheCallerTransactionAndSkipsTheEffect
+    TestRevocationTargetConstructorsRefuseAbsentIdentities
+    TestSweepDeletesOnlyExpiredSessionsAndWritesNoAudit
+    TestSweepFailureIsReportedAndDoesNotExtendValidity
+    TestSequentialDeviceLogoutsEachRevokeOnlyTheirOwnSession
+    TestLoginAdvancesLastLoginAtAndRefreshDoesNot
+    TestRegisterWithActiveCodeCreatesMemberAndSession
+    TestRegisterRollsBackAccountSessionAuditAndLastLoginTogether
+    TestRegisterHoldsTheJoinCodeRowLockUntilCommit
+    TestChangePasswordWritesOnlyPasswordChangedAudit
+    TestDisableWritesOnlyUserDisabledAudit
+    TestResetPasswordWritesOnlyUserPasswordResetAudit
+    TestDisableCommittedBeforeWaitingPasswordChangeFailsIt
+    TestDisableAfterCommittedPasswordChangeRevokesEverySession
+    TestChangePasswordRollsBackRevocationWithItsAuditRow
+    TestDisableRollsBackRevocationWithItsAuditRow
+    TestResetPasswordRollsBackRevocationWithItsAuditRow
   )
   # Goose migration-engine sentinels live in the migration package.
   local -a migration_tests=(

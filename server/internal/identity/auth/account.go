@@ -19,6 +19,7 @@ import (
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
@@ -59,14 +60,16 @@ type ChangePasswordResponse struct {
 }
 
 // ChangePassword verifies the current password and rotates it in one write
-// transaction: the users row is locked and the committed hash re-read inside
-// the transaction, so a concurrent change that committed first makes this
-// verification fail (exactly one concurrent change succeeds); on success the
+// transaction: the users row is locked and the committed hash and active
+// status re-read inside the transaction, so a concurrent change that
+// committed first makes this verification fail (exactly one concurrent
+// change succeeds) and a disable that committed while this change waited
+// on the lock fails the change with no partial write; on success the
 // transaction stores the new hash, clears must_change_password, revokes
-// every OTHER session of the user (the calling session survives — the
-// current-session disposition the contract defines), and writes the
-// password_changed audit row. A wrong current password answers
-// errInvalidCredentials exactly like login.
+// every OTHER session of the user through the Session module's others
+// disposition (the calling session survives — the contract's current-
+// session carve-out), and writes the password_changed audit row. A wrong
+// current password answers errInvalidCredentials exactly like login.
 func (s *Service) ChangePassword(ctx context.Context, principal authz.Principal, req ChangePasswordRequest) (ChangePasswordResponse, error) {
 	newHash, err := HashPassword(*req.NewPassword)
 	if err != nil {
@@ -74,16 +77,33 @@ func (s *Service) ChangePassword(ctx context.Context, principal authz.Principal,
 		// through HTTP and still must not proceed unhashed.
 		return ChangePasswordResponse{}, fmt.Errorf("auth: hash new password: %w", err)
 	}
+	// Input validation, not transactional work: a principal without its
+	// user or session identity is a wiring bug, refused before the
+	// transaction (the same seam Logout uses).
+	others, err := session.Others(principal.UserID, principal.SessionID)
+	if err != nil {
+		return ChangePasswordResponse{}, err
+	}
 
 	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
 		tx := sc.Tx()
 		var storedHash string
 		var owesInitialChange bool
+		var status string
 		if err := tx.QueryRow(ctx,
-			`SELECT password_hash, must_change_password FROM public.users WHERE id = $1 FOR UPDATE`,
+			`SELECT password_hash, must_change_password, status FROM public.users WHERE id = $1 FOR UPDATE`,
 			principal.UserID,
-		).Scan(&storedHash, &owesInitialChange); err != nil {
+		).Scan(&storedHash, &owesInitialChange, &status); err != nil {
 			return fmt.Errorf("auth: load user for change-password: %w", err)
+		}
+		// The caller-owned lock is the recheck point: a disable committed
+		// while this change waited must end the change here, before any
+		// write, so the rolled-back attempt leaves nothing behind. The
+		// answer is the command's uniform credential failure — the endpoint
+		// documents no account-disabled shape, and the account's next
+		// request is 401 at the guard regardless.
+		if status != "active" {
+			return errInvalidCredentials
 		}
 		if !verifyPassword(storedHash, *req.CurrentPassword) {
 			return errInvalidCredentials
@@ -96,11 +116,10 @@ func (s *Service) ChangePassword(ctx context.Context, principal authz.Principal,
 		); err != nil {
 			return fmt.Errorf("auth: update password: %w", err)
 		}
-		if _, err := tx.Exec(ctx,
-			`DELETE FROM public.sessions WHERE user_id = $1 AND token_hash <> $2`,
-			principal.UserID, principal.SessionTokenHash,
-		); err != nil {
-			return fmt.Errorf("auth: revoke other sessions on password change: %w", err)
+		// Revocation is the session module's one trusted step inside this
+		// command's write transaction; the command decides its own audit.
+		if _, err := s.sessions.Revoke(ctx, sc, others); err != nil {
+			return err
 		}
 		actor, err := audit.SnapshotSubject(ctx, tx, principal.UserID)
 		if err != nil {

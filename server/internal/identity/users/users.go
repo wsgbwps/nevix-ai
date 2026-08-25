@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
@@ -64,17 +65,21 @@ func MapError(err error) *command.Error {
 	}
 }
 
-// Service owns the user-account reads and governance commands. Reads use the
-// pool; every write runs through the Write Transaction Module.
+// Service owns the user-account reads and governance commands. Reads use
+// the pool; every write runs through the Write Transaction Module, and
+// session revocation is delegated to the identity Module's session
+// responsibility module (spec #138).
 type Service struct {
-	db     *pgxpool.Pool
-	runner *writetx.Runner
+	db       *pgxpool.Pool
+	runner   *writetx.Runner
+	sessions *session.Service
 }
 
-// NewService builds the service over the runtime pool and the shared write
-// transaction runner.
-func NewService(db *pgxpool.Pool, runner *writetx.Runner) *Service {
-	return &Service{db: db, runner: runner}
+// NewService builds the service over the runtime pool, the shared write
+// transaction runner, and the Module-constructed session responsibility
+// module.
+func NewService(db *pgxpool.Pool, runner *writetx.Runner, sessions *session.Service) *Service {
+	return &Service{db: db, runner: runner, sessions: sessions}
 }
 
 // userRecord mirrors the users columns the user surface reads. A nil

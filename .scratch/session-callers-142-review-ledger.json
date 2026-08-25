@@ -1,0 +1,135 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "4e378c3",
+  "scopePaths": [
+    ".scratch/session-callers-142-plan.md",
+    "scripts/test-identity-integration.sh",
+    "server/internal/identity/auth/setup.go",
+    "server/internal/identity/auth/register.go",
+    "server/internal/identity/integrationtest/harness_test.go",
+    "server/internal/identity/integrationtest/instance_claim_test.go",
+    "server/internal/identity/integrationtest/register_test.go"
+  ],
+  "currentDiffDigest": "sha256:b6013a32382369443624eb379ff03f0ad4d7799ec60e4376f5218393e2502e3b",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 1,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/integrationtest/harness_test.go",
+        "source": "server/AGENTS.md — shared infrastructure helpers live in named test-support files (harness_test.go), scenario fixtures stay with their scenario tests",
+        "anchor": "server/internal/identity/integrationtest/instance_claim_test.go:TestClaimRollsBackAccountSessionAuditAndLastLoginTogether + register_test.go:TestRegisterRollsBackAccountSessionAuditAndLastLoginTogether — cross-scenario calls to sessionCount",
+        "defect": "sessionCount is defined in the login-session scenario file but the new claim/register tests call it across files, turning it into shared support owned by an unrelated scenario file"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Documented test-support ownership rule breached by this diff; trivial, in-scope repair (relocate the helper to harness_test.go). Repaired in batch 1; targeted re-review round 1 closed it.",
+      "owner": "server/internal/identity/integrationtest/harness_test.go",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "server/AGENTS.md",
+          "location": "test placement rule",
+          "observation": "shared helpers must live in named test-support files; sessionCount stayed in login_session_test.go while gaining cross-file callers",
+          "check": null
+        },
+        {
+          "source": "diff bundle sha256:913acc…",
+          "location": "instance_claim_test.go / register_test.go new tests",
+          "observation": "sessionCount(t, h) called from two new scenario files",
+          "check": null
+        }
+      ],
+      "reviewedDiffDigest": "sha256:913acc4b9b9c177c68529d8ff3a26e217c360852009a2d5b2ef1ca0395ab0b0c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/auth",
+        "source": "server/CONTEXT.md — User (Avoid: Account); Module is the top-level unit, Session is a responsibility module inside Identity",
+        "anchor": "server/internal/identity/auth/register.go:Register new comment block + setup.go:Initialize new comment block",
+        "defect": "new comments say “Session module” and “account” where the canonical vocabulary is “session responsibility module” and “User”"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Genuine minor vocabulary drift, but the surrounding pre-existing comments in both files already use “account” extensively (11 occurrences in register.go outside this diff); renaming only the new lines would make neighboring sentences inconsistent. A whole-file vocabulary cleanup is out of this ticket's surgical scope; tracked for the #138 closeout pass.",
+      "owner": "server/internal/identity/auth",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "server/CONTEXT.md",
+          "location": "User definition, Avoid: Account",
+          "observation": "new comment lines use “account”/“Session module” instead of “User”/“session responsibility module”",
+          "check": null
+        }
+      ],
+      "reviewedDiffDigest": "sha256:913acc4b9b9c177c68529d8ff3a26e217c360852009a2d5b2ef1ca0395ab0b0c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0003",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/internal/identity/integrationtest",
+        "source": "Fowler smell baseline — Duplicated Code",
+        "anchor": "instance_claim_test.go:TestOpenClaimCreatesFirstAdminWithoutACredential + register_test.go:TestRegisterWithActiveCodeCreatesMemberAndSession token-hash assertions",
+        "defect": "the SHA-256 digest/query/compare sequence now exists three times (login, claim, register) and can drift"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Deliberate per-surface contract pinning in scenario tests; the duplication is 8 lines of straight-line assertion. Extracting a shared helper is a reasonable follow-up but advisories are not repaired inside this convergence loop; noted for the #138 closeout.",
+      "owner": "server/internal/identity/integrationtest",
+      "status": "closed",
+      "evidence": [
+        {
+          "source": "Fowler Duplicated Code",
+          "location": "three scenario files",
+          "observation": "same hash-only persistence assertion shape repeated",
+          "check": null
+        }
+      ],
+      "reviewedDiffDigest": "sha256:913acc4b9b9c177c68529d8ff3a26e217c360852009a2d5b2ef1ca0395ab0b0c",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [
+    {
+      "fixFor": ["CR-STANDARDS-0001"],
+      "beforeDigest": "sha256:913acc4b9b9c177c68529d8ff3a26e217c360852009a2d5b2ef1ca0395ab0b0c",
+      "afterDigest": "sha256:b6013a32382369443624eb379ff03f0ad4d7799ec60e4376f5218393e2502e3b",
+      "touchedPaths": [
+        "server/internal/identity/integrationtest/harness_test.go (added countSessions)",
+        "server/internal/identity/integrationtest/login_session_test.go (removed sessionCount)",
+        "server/internal/identity/integrationtest/password_self_service_test.go (mechanical rename sessionCount→countSessions)",
+        "server/internal/identity/integrationtest/instance_claim_test.go (mechanical rename)",
+        "server/internal/identity/integrationtest/register_test.go (mechanical rename)"
+      ],
+      "hunks": "sessionCount relocated from the login-session scenario file into harness_test.go as countSessions (same free-function signature, documented as shared support); pre-existing cross-file callers in password_self_service_test.go mechanically renamed; grep shows zero sessionCount references left",
+      "checks": [
+        {
+          "name": "go build ./... && go vet ./... && gofmt -l",
+          "result": "PASS"
+        },
+        {
+          "name": "./scripts/test-identity-integration.sh",
+          "result": "PASS — Verified 154 Identity integration tests executed with zero skips (PASS=154 SKIP=0 FAIL=0)",
+          "diffDigest": "sha256:b6013a32382369443624eb379ff03f0ad4d7799ec60e4376f5218393e2502e3b"
+        }
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "name": "./scripts/test-identity-integration.sh",
+    "result": "PASS",
+    "coverage": "154 Identity integration tests (identity + migration trees, race detector, zero skips) on the current diff",
+    "diffDigest": "sha256:b6013a32382369443624eb379ff03f0ad4d7799ec60e4376f5218393e2502e3b"
+  },
+  "outcome": "closed"
+}

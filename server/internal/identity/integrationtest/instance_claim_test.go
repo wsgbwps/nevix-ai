@@ -14,6 +14,8 @@ package integrationtest
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -294,6 +296,24 @@ func TestOpenClaimCreatesFirstAdminWithoutACredential(t *testing.T) {
 		t.Fatalf("claiming admin sessions = %d, want exactly the issued one", got)
 	}
 
+	// The issued session is stored only as its SHA-256 hash: the bearer
+	// token exists once, in the response.
+	digest := sha256.Sum256([]byte(claimed.Token))
+	var storedHash string
+	if err := h.fixturePool.QueryRow(context.Background(),
+		`SELECT encode(token_hash, 'hex') FROM public.sessions WHERE user_id = $1`, claimed.User.ID,
+	).Scan(&storedHash); err != nil {
+		t.Fatalf("read stored claim token hash: %v", err)
+	}
+	if storedHash != hex.EncodeToString(digest[:]) {
+		t.Fatal("stored claim session hash is not the SHA-256 of the issued token")
+	}
+	// The claim is one business command, so it writes exactly one audit row:
+	// instance_claimed, never an additional low-level session_created.
+	if actions := h.auditActions(t); len(actions) != 1 || actions[0] != "instance_claimed" {
+		t.Fatalf("audit actions after claim = %v, want exactly one instance_claimed (no session_created)", actions)
+	}
+
 	// The issued session works on its very next request, and the admin
 	// reads the management surface its role unlocks.
 	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", claimed.Token); status != http.StatusOK {
@@ -451,6 +471,56 @@ func TestClaimAnswersConflictOnceInitialized(t *testing.T) {
 	status, raw = doSetupInitialize(t, handler, claimBody("ghost@nevix.test", "some-self-pass-1", "", ""))
 	if status != http.StatusBadRequest || !contains(raw, "invalid_request") {
 		t.Fatalf("codeless protected claim after wipe: status %d body %s, want 400 invalid_request", status, raw)
+	}
+}
+
+// TestClaimRollsBackAccountSessionAuditAndLastLoginTogether: a failure at
+// the transaction's last participant — the audit write, broken here by a
+// fixture-installed trigger — rolls the whole claim back: no admin, no
+// session, no last-login stamp, no audit row. The same command succeeds
+// once the sink is repaired, proving the failure rolled back rather than
+// left partial state behind.
+func TestClaimRollsBackAccountSessionAuditAndLastLoginTogether(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	h := newHarness(t, ctx)
+	h.resetUserState(t)
+	handler, _ := constructClaimInstance(t, h, openClaimConfig(h))
+
+	restore := h.failAuditWritesFor(t, "instance_claimed")
+	status, raw := doSetupInitialize(t, handler, claimBody("rollback.admin@nevix.test", "self-chosen-pass-1", "", ""))
+	assertContractResponse(t, http.MethodPost, "/identity/setup/initialize", status, raw)
+	if status != http.StatusInternalServerError || !contains(raw, "internal_error") {
+		t.Fatalf("claim with a broken audit sink: status %d body %s, want 500 internal_error", status, raw)
+	}
+	if got := h.countUsers(t); got != 0 {
+		t.Fatalf("users after rolled-back claim = %d, want 0", got)
+	}
+	if got := countSessions(t, h); got != 0 {
+		t.Fatalf("sessions after rolled-back claim = %d, want 0", got)
+	}
+	if actions := h.auditActions(t); len(actions) != 0 {
+		t.Fatalf("audit actions after rolled-back claim = %v, want none", actions)
+	}
+
+	// Repair the audit sink: the same claim now succeeds end to end, so the
+	// earlier failure rolled everything back instead of poisoning the
+	// instance.
+	restore()
+	status, raw = doSetupInitialize(t, handler, claimBody("rollback.admin@nevix.test", "self-chosen-pass-1", "", ""))
+	assertContractResponse(t, http.MethodPost, "/identity/setup/initialize", status, raw)
+	if status != http.StatusCreated {
+		t.Fatalf("claim after audit repair: status %d body %s, want 201", status, raw)
+	}
+	var claimed loginResponse
+	if err := json.Unmarshal(raw, &claimed); err != nil {
+		t.Fatalf("repaired claim body is not the login shape: %v (%s)", err, raw)
+	}
+	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", claimed.Token); status != http.StatusOK {
+		t.Fatalf("me with the repaired claim session: status %d body %s, want 200", status, body)
+	}
+	if actions := h.auditActions(t); len(actions) != 1 || actions[0] != "instance_claimed" {
+		t.Fatalf("audit actions after repaired claim = %v, want exactly one instance_claimed", actions)
 	}
 }
 

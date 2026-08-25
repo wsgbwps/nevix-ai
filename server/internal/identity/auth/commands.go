@@ -17,7 +17,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/nevix-ai/server/internal/authz"
+	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/session"
+	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
 // errInvalidCredentials is the uniform answer for an unknown email and a wrong
@@ -131,11 +134,52 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (LoginResponse, e
 		return LoginResponse{}, errInvalidCredentials
 	}
 
-	token, tokenHash, err := newSessionToken()
-	if err != nil {
-		return LoginResponse{}, err
-	}
-	expiresAt, err := s.issueSession(ctx, user, tokenHash, req.DeviceName)
+	// Credential verification is done; issuance is the session module's one
+	// trusted step inside this command's write transaction. The stamp is the
+	// verified credential state, re-checked for equality under the account's
+	// row lock so a concurrent disable or password reset that committed first
+	// cannot leave a stale session behind. Login owns the audit action.
+	var token string
+	var expiresAt time.Time
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		issued, err := s.sessions.Issue(ctx, sc, session.IssueInput{
+			UserID:          user.ID,
+			DeviceName:      req.DeviceName,
+			CredentialStamp: user.PasswordHash,
+		})
+		if errors.Is(err, session.ErrInactiveUser) {
+			return errAccountDisabled
+		}
+		if errors.Is(err, session.ErrStaleCredential) {
+			// The credential changed between verification and the issuance
+			// lock point (an admin reset landed in between): the same uniform
+			// answer as any other wrong password.
+			return errInvalidCredentials
+		}
+		if err != nil {
+			return err
+		}
+		// The audit actor is snapshotted inside the transaction (ADR-0009):
+		// the display name recorded is the one committed at write time, not
+		// one read before the transaction.
+		actor, err := audit.SnapshotSubject(ctx, sc.Tx(), user.ID)
+		if err != nil {
+			return err
+		}
+		metadata := map[string]string{}
+		if req.DeviceName != "" {
+			metadata["device_name"] = req.DeviceName
+		}
+		if err := audit.Write(ctx, sc.Tx(), audit.Entry{
+			Actor:    actor,
+			Action:   audit.SessionCreated,
+			Metadata: metadata,
+		}); err != nil {
+			return err
+		}
+		token, expiresAt = issued.Token, issued.ExpiresAt
+		return nil
+	})
 	if err != nil {
 		return LoginResponse{}, err
 	}
@@ -155,9 +199,38 @@ type LogoutResponse struct {
 }
 
 // Logout revokes the caller's session only; every other device session stays
-// valid (user story 5). Revoking an already-ended session is a success.
+// valid (user story 5). Revocation is the session module's one trusted step
+// inside this command's write transaction: only a revocation that actually
+// ended the calling session writes the session_revoked audit row, so retries
+// never duplicate history, and revoking an already-ended session stays a
+// successful no-op.
 func (s *Service) Logout(ctx context.Context, principal authz.Principal) (LogoutResponse, error) {
-	if err := s.revokeSession(ctx, principal); err != nil {
+	// Input validation, not transactional work: a principal without a
+	// session identity is a wiring bug, refused before the transaction.
+	current, err := session.Current(principal.SessionID)
+	if err != nil {
+		return LogoutResponse{}, err
+	}
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		changed, err := s.sessions.Revoke(ctx, sc, current)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return nil
+		}
+		// The audit actor is snapshotted inside the transaction (ADR-0009):
+		// the display name recorded is the one committed at write time.
+		actor, err := audit.SnapshotSubject(ctx, sc.Tx(), principal.UserID)
+		if err != nil {
+			return err
+		}
+		return audit.Write(ctx, sc.Tx(), audit.Entry{
+			Actor:  actor,
+			Action: audit.SessionRevoked,
+		})
+	})
+	if err != nil {
 		return LogoutResponse{}, err
 	}
 	return LogoutResponse{Status: "logged_out"}, nil

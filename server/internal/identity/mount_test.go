@@ -18,12 +18,13 @@ import (
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/session"
 )
 
 // testModule builds a Module with nil pool dependencies: Register needs only
 // the transport wiring, and no command here reaches the database.
 func testModule() *Module {
-	service := auth.NewService(nil, nil)
+	service := auth.NewService(nil, nil, session.NewService(nil, nil))
 	return &Module{
 		auth:        service,
 		guard:       authz.NewGuard(service),
