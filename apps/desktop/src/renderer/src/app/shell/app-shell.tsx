@@ -8,7 +8,7 @@ import {
   SettingsIcon,
   SunIcon
 } from 'lucide-react'
-import { useAuthenticationState } from '../authentication-state'
+import { useCurrentSession } from '../../features/authentication'
 import { type Theme, useTheme } from '../../hooks/use-theme'
 import { createSettingsEntry } from '../settings'
 import { Avatar, AvatarFallback } from '../../components/ui/avatar'
@@ -74,17 +74,17 @@ export function AppShell({
 }): React.JSX.Element | null {
   const { t } = useTranslation('app')
   const { t: authenticationT } = useTranslation('authentication')
-  const authentication = useAuthenticationState()
+  const session = useCurrentSession()
   const location = useLocation()
   const { theme, setTheme } = useTheme()
 
-  if (authentication.status !== 'authenticated') {
+  if (session.status !== 'available') {
     // The root route is already navigating to the authentication view; render nothing on the
     // transient frame so the App Shell never shows for a signed-out user.
     return null
   }
 
-  const userInitial = initialOf(authentication.userEmail)
+  const userInitial = initialOf(session.user.email)
   // The App Shell currently hosts a single real entry; future business Features gain routes in
   // the content area and extend this mapping from the current pathname.
   const breadcrumbLabel = location.pathname === '/' ? t('shell.home') : undefined
@@ -149,7 +149,7 @@ export function AppShell({
                         <AvatarFallback className="rounded-lg">{userInitial}</AvatarFallback>
                       </Avatar>
                       <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                        <span className="truncate font-medium">{authentication.userEmail}</span>
+                        <span className="truncate font-medium">{session.user.email}</span>
                       </div>
                       <ChevronsUpDownIcon className="ml-auto size-4" />
                     </SidebarMenuButton>
@@ -165,7 +165,7 @@ export function AppShell({
                           <AvatarFallback className="rounded-lg">{userInitial}</AvatarFallback>
                         </Avatar>
                         <div className="grid flex-1 text-left text-sm leading-tight">
-                          <span className="truncate font-medium">{authentication.userEmail}</span>
+                          <span className="truncate font-medium">{session.user.email}</span>
                         </div>
                       </div>
                     </DropdownMenuLabel>
@@ -205,12 +205,12 @@ export function AppShell({
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className="cursor-pointer"
-                      disabled={authentication.isSubmitting}
-                      onClick={() => void authentication.signOut()}
+                      disabled={session.isSigningOut}
+                      onClick={() => void session.signOut()}
                     >
                       <LogOutIcon />
                       {authenticationT(
-                        authentication.isSubmitting ? 'logout.submitting' : 'logout.submit'
+                        session.isSigningOut ? 'logout.submitting' : 'logout.submit'
                       )}
                     </DropdownMenuItem>
                   </DropdownMenuContent>

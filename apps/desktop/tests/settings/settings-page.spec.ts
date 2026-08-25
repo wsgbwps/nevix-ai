@@ -115,7 +115,9 @@ test('Profile display-name editing saves through the identity server and reloads
 
       await displayName.fill('Renamed Member')
       await launched.page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(launched.page.getByRole('status')).toContainText('Display name updated.')
+      await expect(
+        launched.page.getByRole('status').filter({ hasText: 'Display name updated.' })
+      ).toContainText('Display name updated.')
 
       // Re-entering the Section rereads the authoritative value from the server.
       await launched.page
@@ -349,7 +351,9 @@ test('ordinary close waits for Profile save failure and resumes after a successf
       const successfulName = '最后一次成功写入'
       await displayName.fill(successfulName)
       await launched.page.getByRole('button', { name: '保存', exact: true }).click()
-      await expect(launched.page.getByRole('status')).toContainText('显示名已更新。')
+      await expect(
+        launched.page.getByRole('status').filter({ hasText: '显示名已更新。' })
+      ).toContainText('显示名已更新。')
 
       let activeWrite: ControlledProfileWrite | undefined
       await launched.page.route('**/identity/users/me', async (route) => {

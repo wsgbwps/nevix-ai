@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { createRootRoute, Outlet, useLocation, useRouter } from '@tanstack/react-router'
-import { useAuthenticationState } from '../authentication-state'
+import { useCurrentSession } from '../../features/authentication'
 import { useServerConnectionState } from '../connection-state'
 import { resolveStartupSurface } from '../startup-surface'
 
@@ -8,15 +8,15 @@ function RootView(): React.JSX.Element {
   const router = useRouter()
   const location = useLocation()
   const { status: connectionStatus } = useServerConnectionState()
-  const { status: authenticationStatus } = useAuthenticationState()
+  const session = useCurrentSession()
   const startupSurface = useMemo(
     () =>
       resolveStartupSurface({
         connectionStatus,
-        authenticationStatus,
+        sessionAvailable: session.status === 'available',
         pathname: location.pathname
       }),
-    [connectionStatus, authenticationStatus, location.pathname]
+    [connectionStatus, session, location.pathname]
   )
 
   useEffect(() => {

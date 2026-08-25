@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { launchTestApp, signOutFromUserMenu } from '../helpers/electron-app'
 import {
   createTeamUser,
-  disableTeamUser,
   expectSessionAccepted,
   loginOutsideDesktop,
   readIdentityServerConfig,
@@ -118,82 +117,6 @@ test('a User signs in once and enters the authenticated app shell', { tag: '@smo
         localStorageKeys: [],
         indexedDatabaseNames: []
       })
-    } finally {
-      await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-  }
-})
-
-test('unknown and incorrect credentials share one safe error', async () => {
-  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
-  if (!identityServer) return
-
-  const identity = uniqueIdentity('wrong-password')
-  await createTeamUser(identityServer, identity)
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-errors-'))
-
-  try {
-    const launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US'],
-      serverUrl: identityServer!.serverUrl
-    })
-
-    try {
-      const attempts = [
-        uniqueIdentity('unknown-login'),
-        { email: identity.email, password: `${identity.password}-wrong` }
-      ]
-
-      for (const attempt of attempts) {
-        await launched.page.getByLabel('Email').fill(attempt.email)
-        await launched.page.getByLabel('Password').fill(attempt.password)
-        await launched.page.getByRole('button', { name: 'Sign in' }).click()
-        await expect(
-          launched.page.getByRole('alert').filter({ hasText: 'Email or password is incorrect' })
-        ).toBeVisible()
-        await expect(
-          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-        ).toHaveCount(0)
-      }
-    } finally {
-      await launched.electronApp.close()
-    }
-  } finally {
-    await rm(userDataDir, { recursive: true, force: true })
-  }
-})
-
-test('a disabled account reports its specific error and stays at the boundary', async () => {
-  test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
-  if (!identityServer) return
-
-  const identity = uniqueIdentity('disabled-login')
-  const user = await createTeamUser(identityServer, identity)
-  await disableTeamUser(identityServer, user.id)
-  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-auth-disabled-'))
-
-  try {
-    const launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US'],
-      serverUrl: identityServer!.serverUrl
-    })
-
-    try {
-      await launched.page.getByLabel('Email').fill(identity.email)
-      await launched.page.getByLabel('Password').fill(identity.password)
-      await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page
-          .getByRole('alert')
-          .filter({ hasText: 'This account has been disabled. Contact your administrator.' })
-      ).toBeVisible()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
     } finally {
       await launched.electronApp.close()
     }

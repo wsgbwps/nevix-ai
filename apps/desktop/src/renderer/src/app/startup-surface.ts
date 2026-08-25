@@ -1,5 +1,4 @@
 import type { ServerConnectionStatus } from '../features/connection'
-import type { AuthenticationStatus } from '../features/authentication'
 
 export const STARTUP_ROUTES = {
   connection: '/connect',
@@ -9,7 +8,8 @@ export const STARTUP_ROUTES = {
 
 export interface StartupSurfaceInput {
   readonly connectionStatus: ServerConnectionStatus
-  readonly authenticationStatus: AuthenticationStatus
+  /** Coarse current-session availability: every pre-authentication state counts as unavailable. */
+  readonly sessionAvailable: boolean
   readonly pathname: string
 }
 
@@ -20,13 +20,14 @@ export type StartupSurfaceDecision =
 /**
  * The whole pre-business decision: a device without a configured server
  * connection belongs on the Connection Screen; once configured, every
- * authentication status but `authenticated` — including the forced first-login
- * password change — belongs on the authentication surface; an authenticated
- * session never stays on either pre-business surface.
+ * pre-authenticated state — including the forced first-login password change,
+ * which the current-session reader reports as unavailable — belongs on the
+ * authentication surface; an available session never stays on either
+ * pre-business surface.
  */
 export function resolveStartupSurface({
   connectionStatus,
-  authenticationStatus,
+  sessionAvailable,
   pathname
 }: StartupSurfaceInput): StartupSurfaceDecision {
   if (connectionStatus === 'unconfigured') {
@@ -35,7 +36,7 @@ export function resolveStartupSurface({
       : { navigate: STARTUP_ROUTES.connection }
   }
 
-  if (authenticationStatus !== 'authenticated') {
+  if (!sessionAvailable) {
     return pathname === STARTUP_ROUTES.authentication
       ? { render: 'outlet' }
       : { navigate: STARTUP_ROUTES.authentication }

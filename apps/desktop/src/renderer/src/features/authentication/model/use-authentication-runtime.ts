@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GoAuthentication, SessionCredentials, UserAccount } from '../api/go-authentication'
-import { createGoAuthenticationOverHttp } from '../api/go-authentication-http'
-import { createRememberedEmailPersistenceOverIpc } from '../api/remembered-email'
 import type { RememberedEmailPersistence } from '../api/remembered-email-persistence'
 import { isPasswordByteLengthValid } from '../policy/password'
-import { createSessionPersistenceOverIpc } from '../session/persisted-session'
 import type { SessionPersistence } from '../session/session-persistence'
+import type { SessionAcquisition } from './current-session'
 
 export type AuthenticationStatus =
   | 'restoring'
@@ -37,17 +35,31 @@ export type AuthenticationNotice = 'session-expired' | 'remote-sign-out-delayed'
  */
 export type InstanceSetupState = 'unknown' | 'uninitialized' | 'initialized' | 'probe-failed'
 
-/** The session handed to authenticated consumers; the token stays out of URLs and storage except the encrypted slot. */
-export interface AuthenticatedSession {
-  readonly token: string
-  readonly user: UserAccount
+/**
+ * The internal seams the runtime owns (#133). Production composition supplies
+ * the HTTP and IPC adapters; Authentication-owned test composition supplies
+ * the in-memory adapters. Neither the ports nor the adapters appear on the
+ * Feature's public interface.
+ */
+export interface AuthenticationRuntimeDependencies {
+  /** Binds the Go Authentication port to the runtime's server URL exactly once per document. */
+  readonly connectGoAuthentication: (serverUrl: string) => GoAuthentication
+  readonly sessionPersistence: SessionPersistence
+  readonly rememberedEmailPersistence: RememberedEmailPersistence
 }
 
-interface Authentication {
+/**
+ * The Authentication runtime's owned facts and commands. This whole object is
+ * internal to the Feature: the owned surface consumes it to render the
+ * pre-authentication workflow, and `useCurrentSession` projects the narrow
+ * two-state view app code is allowed to see.
+ */
+export interface AuthenticationRuntime {
   readonly status: AuthenticationStatus
   readonly error: AuthenticationError | undefined
   readonly notice: AuthenticationNotice | undefined
   readonly isSubmitting: boolean
+  readonly isSigningOut: boolean
   readonly isSessionPersistenceUnavailable: boolean
   /** Whether the instance still awaits its first administrator; 'uninitialized' swaps the login boundary for the first-admin wizard. */
   readonly instanceSetup: InstanceSetupState
@@ -57,12 +69,10 @@ interface Authentication {
   readonly rememberEmailSelected: boolean
   readonly isRememberedEmailPersistenceUnavailable: boolean
   readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
-  readonly userEmail: string | undefined
-  /** The session user's stable id; governance surfaces mark the current account with it. */
-  readonly userId: string | undefined
-  /** The session user's role; Admin-only surfaces key on it while the session stays authoritative. */
-  readonly userRole: UserAccount['role'] | undefined
-  readonly getSession: () => Promise<AuthenticatedSession | undefined>
+  /** The last server-validated session user; undefined whenever no session is open. */
+  readonly sessionUser: UserAccount | undefined
+  /** Reads the live runtime at each invocation; only a currently authenticated session answers. */
+  readonly acquireSession: () => Promise<SessionAcquisition | undefined>
   readonly setRememberEmailSelected: (selected: boolean) => void
   readonly consumeRememberedEmailPersistenceNotice: () => void
   readonly dismissError: () => void
@@ -87,11 +97,26 @@ interface Authentication {
 
 const MINIMUM_INITIALIZATION_DISPLAY_MS = 500
 
-export function useAuthentication(serverUrl: string | undefined): Authentication {
+/**
+ * The deep Authentication runtime: pre-authentication state machine, Go
+ * Authentication calls, Session and Remembered Email persistence
+ * orchestration, single-flight commands, and stale-generation retirement.
+ *
+ * The runtime starts dormant — no Authentication or persistence I/O — until a
+ * server URL exists, then binds permanently to it: a different URL inside the
+ * same renderer document is a composition error, because server changes clear
+ * the session and reload the renderer instead of hot-swapping the runtime.
+ */
+export function useAuthenticationRuntime(
+  dependencies: AuthenticationRuntimeDependencies,
+  serverUrl: string | undefined
+): AuthenticationRuntime {
+  const { connectGoAuthentication, sessionPersistence, rememberedEmailPersistence } = dependencies
   const [status, setStatus] = useState<AuthenticationStatus>('restoring')
   const [error, setError] = useState<AuthenticationError>()
   const [notice, setNotice] = useState<AuthenticationNotice>()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
   const [persistenceUnavailable, setPersistenceUnavailable] = useState(false)
   const [instanceSetup, setInstanceSetup] = useState<InstanceSetupState>('unknown')
   const [setupCodeRequired, setSetupCodeRequired] = useState(false)
@@ -101,12 +126,23 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     useState(false)
   const [rememberedEmailPersistenceNoticeSurface, setRememberedEmailPersistenceNoticeSurface] =
     useState<'login' | 'authenticated'>()
-  const [userEmail, setUserEmail] = useState<string | undefined>()
-  const [userId, setUserId] = useState<string | undefined>()
-  const [userRole, setUserRole] = useState<UserAccount['role'] | undefined>()
+  const [sessionUser, setSessionUser] = useState<UserAccount>()
+  // Bind permanently to the first configured server URL in this renderer
+  // document; a different URL (or losing it) afterwards is a composition
+  // error — server changes clear the session and reload the renderer instead
+  // of hot-swapping the runtime.
+  const [boundServerUrl, setBoundServerUrl] = useState<string | undefined>(serverUrl)
+  if (serverUrl !== boundServerUrl) {
+    if (boundServerUrl === undefined) {
+      setBoundServerUrl(serverUrl)
+    } else {
+      throw new Error(
+        'The Authentication runtime binds permanently to the first configured server URL ' +
+          'in a renderer document; switching servers must clear the session and reload the renderer.'
+      )
+    }
+  }
   const goAuthenticationRef = useRef<GoAuthentication | null>(null)
-  const sessionPersistenceRef = useRef<SessionPersistence | undefined>(undefined)
-  const rememberedEmailPersistenceRef = useRef<RememberedEmailPersistence | undefined>(undefined)
   const credentialsRef = useRef<SessionCredentials | undefined>(undefined)
   const submissionRef = useRef(false)
   const statusRef = useRef<AuthenticationStatus>('restoring')
@@ -114,20 +150,13 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const rememberEmailSelectionGenerationRef = useRef(0)
   const rememberedEmailMutationRef = useRef<Promise<void>>(Promise.resolve())
   const hasShownRememberedEmailPersistenceNoticeRef = useRef(false)
-  const hasInitializedRef = useRef(false)
+  const hasBoundRef = useRef(false)
   const restoreInProgressRef = useRef(false)
-  const setupProbeGenerationRef = useRef(0)
+  /** Every restore cycle opens a new generation; older completions retire instead of landing. */
+  const generationRef = useRef(0)
+  /** Probes within one generation still complete in order; the sequence retires an older probe answer. */
+  const probeSequenceRef = useRef(0)
   const sessionPersistenceDegradedRef = useRef(false)
-  if (sessionPersistenceRef.current === undefined) {
-    sessionPersistenceRef.current = createSessionPersistenceOverIpc()
-  }
-  if (rememberedEmailPersistenceRef.current === undefined) {
-    rememberedEmailPersistenceRef.current = createRememberedEmailPersistenceOverIpc()
-  }
-  // Both persistence adapters are created once per runtime and never replaced; the
-  // consts keep every callback free of null-handling for a lifetime invariant.
-  const sessionPersistence = sessionPersistenceRef.current
-  const rememberedEmailPersistence = rememberedEmailPersistenceRef.current
 
   const enqueueRememberedEmailMutation = useCallback(
     <Result>(mutation: () => Promise<Result>): Promise<Result> => {
@@ -173,10 +202,13 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const probeSetupStatus = useCallback((): void => {
     const goAuthentication = goAuthenticationRef.current
     if (!goAuthentication) return
-    const generation = ++setupProbeGenerationRef.current
+    const generation = generationRef.current
+    const probeSequence = ++probeSequenceRef.current
     void goAuthentication.probeSetup().then((probe) => {
-      // A probe from an earlier server URL never overwrites the boundary's state.
-      if (generation !== setupProbeGenerationRef.current) return
+      // A probe from an earlier cycle or superseded by a newer probe never
+      // overwrites the boundary's state.
+      if (generation !== generationRef.current) return
+      if (probeSequence !== probeSequenceRef.current) return
       if (probe.outcome !== 'succeeded') {
         // The state is unknowable: a retryable error, never a fallback to a
         // login that cannot succeed on an empty instance.
@@ -191,13 +223,11 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
   const settleUnauthenticated = useCallback(
     (nextNotice: AuthenticationNotice | undefined): void => {
       credentialsRef.current = undefined
+      setSessionUser(undefined)
       retireRememberedEmailPersistenceNotice()
       setError(undefined)
       setNotice(nextNotice)
       setPersistenceUnavailable(false)
-      setUserEmail(undefined)
-      setUserId(undefined)
-      setUserRole(undefined)
       rememberEmailSelectedRef.current = true
       rememberEmailSelectionGenerationRef.current += 1
       setRememberEmailSelectedState(true)
@@ -210,11 +240,15 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
   /** Ends a session the server has rejected: local credentials die, the login screen explains why. */
   const abandonRejectedSession = useCallback(
-    (nextNotice: AuthenticationNotice): void => {
+    (generation: number, nextNotice: AuthenticationNotice): void => {
       void sessionPersistence
         .clear()
         .catch(() => undefined)
-        .finally(() => settleUnauthenticated(nextNotice))
+        .then(() => {
+          // A generation retired mid-rejection leaves the newer state untouched.
+          if (generation !== generationRef.current) return
+          settleUnauthenticated(nextNotice)
+        })
     },
     [sessionPersistence, settleUnauthenticated]
   )
@@ -225,9 +259,10 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       retireRememberedEmailPersistenceNotice()
       setPersistenceUnavailable(sessionPersistenceDegradedRef.current)
       setNotice(undefined)
-      setUserEmail(credentials.user.email)
-      setUserId(credentials.user.id)
-      setUserRole(credentials.user.role)
+      setSessionUser(credentials.user)
+      // A session boundary supersedes any earlier setup probe: its answer
+      // must not survive to flash the claim wizard on a later boundary.
+      probeSequenceRef.current += 1
       const nextStatus: AuthenticationStatus = credentials.user.mustChangePassword
         ? 'password-change-required'
         : 'authenticated'
@@ -237,38 +272,35 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     [retireRememberedEmailPersistenceNotice]
   )
 
-  /** Keeps the encrypted slot for the next launch; its outcome decides whether the shell must warn about persistence degradation. */
-  const persistSession = useCallback(
-    async (credentials: SessionCredentials): Promise<void> => {
-      const replacement = await sessionPersistence.replace(credentials)
-      sessionPersistenceDegradedRef.current = replacement.outcome !== 'persisted'
-    },
-    [sessionPersistence]
-  )
-
-  const getSession = useCallback(async (): Promise<AuthenticatedSession | undefined> => {
+  const acquireSession = useCallback(async (): Promise<SessionAcquisition | undefined> => {
     if (statusRef.current !== 'authenticated') return undefined
     const credentials = credentialsRef.current
     if (!credentials) return undefined
 
-    return { token: credentials.token, user: credentials.user }
+    return { token: credentials.token }
   }, [])
 
   const restore = useCallback(async (): Promise<void> => {
+    if (boundServerUrl === undefined) return
     if (restoreInProgressRef.current) return
-    if (serverUrl === undefined) return
     restoreInProgressRef.current = true
+    const generation = ++generationRef.current
+    // The new generation retires every in-flight command claim from the cycle
+    // it replaces.
+    submissionRef.current = false
+    setIsSubmitting(false)
+    setIsSigningOut(false)
 
     statusRef.current = 'restoring'
     setStatus('restoring')
     setError(undefined)
 
     try {
-      goAuthenticationRef.current = createGoAuthenticationOverHttp(serverUrl)
-      // A boundary for a new server starts from the unknown setup state until
-      // its own probe answers; a stale wizard from the previous server must
-      // not survive the switch.
-      setupProbeGenerationRef.current += 1
+      goAuthenticationRef.current = connectGoAuthentication(boundServerUrl)
+      // A boundary for a new cycle starts from the unknown setup state until
+      // its own probe answers; a stale wizard from the previous cycle must not
+      // survive the switch.
+      probeSequenceRef.current += 1
       setInstanceSetup('unknown')
       setSetupCodeRequired(false)
       sessionPersistenceDegradedRef.current = false
@@ -277,6 +309,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
         sessionPersistence.read(),
         rememberedEmailPersistence.read()
       ])
+      if (generation !== generationRef.current) return
       setRememberedEmail(remembered.outcome === 'remembered' ? remembered.email : undefined)
       if (
         remembered.outcome === 'unavailable' ||
@@ -297,6 +330,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
       if (stored.outcome === 'unreadable') {
         await sessionPersistence.clear().catch(() => undefined)
+        if (generation !== generationRef.current) return
         settleUnauthenticated('session-expired')
         return
       }
@@ -307,6 +341,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       }
 
       const validation = await goAuthenticationRef.current.validateSession(stored.credentials.token)
+      if (generation !== generationRef.current) return
       if (validation.outcome === 'succeeded') {
         // Validation is the authority for account facts: display name, role, and any password
         // change the server started demanding since the session was stored.
@@ -319,7 +354,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       }
 
       if (validation.outcome === 'session-rejected') {
-        abandonRejectedSession('session-expired')
+        abandonRejectedSession(generation, 'session-expired')
         return
       }
 
@@ -328,6 +363,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       statusRef.current = 'restore-failure'
       setStatus('restore-failure')
     } catch {
+      if (generation !== generationRef.current) return
       statusRef.current = 'restore-failure'
       setStatus('restore-failure')
     } finally {
@@ -335,10 +371,11 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     }
   }, [
     abandonRejectedSession,
+    boundServerUrl,
+    connectGoAuthentication,
     rememberedEmailPersistence,
     reportRememberedEmailPersistenceAvailable,
     reportRememberedEmailPersistenceUnavailable,
-    serverUrl,
     sessionPersistence,
     settleSession,
     settleUnauthenticated
@@ -346,11 +383,8 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
   useEffect(() => {
     if (serverUrl === undefined) return
-    if (hasInitializedRef.current) {
-      void restore()
-      return
-    }
-    hasInitializedRef.current = true
+    if (hasBoundRef.current) return
+    hasBoundRef.current = true
 
     // The restoring boundary stays visible long enough that no launch flashes another boundary.
     const initialized = new Promise<void>((resolve) => {
@@ -444,6 +478,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     async (email: string, password: string): Promise<void> => {
       const goAuthentication = goAuthenticationRef.current
       if (!goAuthentication || submissionRef.current) return
+      const generation = generationRef.current
 
       submissionRef.current = true
       setIsSubmitting(true)
@@ -451,6 +486,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
       try {
         const login = await goAuthentication.signIn(email, password)
+        if (generation !== generationRef.current) return
         if (login.outcome !== 'succeeded') {
           setError(
             login.outcome === 'invalid-credentials' ||
@@ -464,19 +500,24 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
         // The encrypted slot is written before the shell opens, so a crash right after
         // login still restores this session on the next launch.
-        await persistSession(login.session)
+        const replacement = await sessionPersistence.replace(login.session)
+        if (generation !== generationRef.current) return
+        sessionPersistenceDegradedRef.current = replacement.outcome !== 'persisted'
         if (rememberEmailSelectedRef.current && login.session.user.email) {
           rememberLoginEmail(login.session.user.email)
         }
         settleSession(login.session)
       } catch {
+        if (generation !== generationRef.current) return
         setError('service-unavailable')
       } finally {
-        submissionRef.current = false
-        setIsSubmitting(false)
+        if (generation === generationRef.current) {
+          submissionRef.current = false
+          setIsSubmitting(false)
+        }
       }
     },
-    [persistSession, rememberLoginEmail, settleSession]
+    [rememberLoginEmail, sessionPersistence, settleSession]
   )
 
   const register = useCallback(
@@ -488,6 +529,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     ): Promise<void> => {
       const goAuthentication = goAuthenticationRef.current
       if (!goAuthentication || submissionRef.current) return
+      const generation = generationRef.current
 
       submissionRef.current = true
       setIsSubmitting(true)
@@ -495,6 +537,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
       try {
         const registration = await goAuthentication.register(email, password, joinCode, displayName)
+        if (generation !== generationRef.current) return
         if (registration.outcome !== 'succeeded') {
           setError(
             registration.outcome === 'invalid-join-code' ||
@@ -512,16 +555,21 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
         // A registered member already owns their password, so the new session settles
         // straight into the shell; the encrypted slot is written before it opens.
-        await persistSession(registration.session)
+        const replacement = await sessionPersistence.replace(registration.session)
+        if (generation !== generationRef.current) return
+        sessionPersistenceDegradedRef.current = replacement.outcome !== 'persisted'
         settleSession(registration.session)
       } catch {
+        if (generation !== generationRef.current) return
         setError('service-unavailable')
       } finally {
-        submissionRef.current = false
-        setIsSubmitting(false)
+        if (generation === generationRef.current) {
+          submissionRef.current = false
+          setIsSubmitting(false)
+        }
       }
     },
-    [persistSession, settleSession]
+    [sessionPersistence, settleSession]
   )
 
   const initialize = useCallback(
@@ -533,6 +581,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     ): Promise<void> => {
       const goAuthentication = goAuthenticationRef.current
       if (!goAuthentication || submissionRef.current) return
+      const generation = generationRef.current
 
       submissionRef.current = true
       setIsSubmitting(true)
@@ -540,6 +589,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
 
       try {
         const claim = await goAuthentication.claimInstance(email, password, setupCode, displayName)
+        if (generation !== generationRef.current) return
         if (claim.outcome !== 'succeeded') {
           if (claim.outcome === 'already-claimed') {
             // Another request won the first-admin race: the wizard is over and
@@ -566,16 +616,21 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
         // initialized for every later boundary on this device too — the
         // wizard never renders again, whatever a later status probe answers.
         setInstanceSetup('initialized')
-        await persistSession(claim.session)
+        const replacement = await sessionPersistence.replace(claim.session)
+        if (generation !== generationRef.current) return
+        sessionPersistenceDegradedRef.current = replacement.outcome !== 'persisted'
         settleSession(claim.session)
       } catch {
+        if (generation !== generationRef.current) return
         setError('service-unavailable')
       } finally {
-        submissionRef.current = false
-        setIsSubmitting(false)
+        if (generation === generationRef.current) {
+          submissionRef.current = false
+          setIsSubmitting(false)
+        }
       }
     },
-    [persistSession, settleSession]
+    [sessionPersistence, settleSession]
   )
 
   const completePasswordChange = useCallback(
@@ -584,6 +639,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
       const credentials = credentialsRef.current
       if (!goAuthentication || !credentials || submissionRef.current) return
       if (!isPasswordByteLengthValid(newPassword)) return
+      const generation = generationRef.current
 
       submissionRef.current = true
       setIsSubmitting(true)
@@ -595,9 +651,10 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
           currentPassword,
           newPassword
         )
+        if (generation !== generationRef.current) return
         if (change.outcome !== 'succeeded') {
           if (change.outcome === 'session-rejected') {
-            abandonRejectedSession('session-expired')
+            abandonRejectedSession(generation, 'session-expired')
             return
           }
           setError(
@@ -618,43 +675,53 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
           expiresAt: credentials.expiresAt,
           user: { ...credentials.user, mustChangePassword: false }
         }
-        await persistSession(changed)
+        const replacement = await sessionPersistence.replace(changed)
+        if (generation !== generationRef.current) return
+        sessionPersistenceDegradedRef.current = replacement.outcome !== 'persisted'
         settleSession(changed)
       } catch {
+        if (generation !== generationRef.current) return
         setError('service-unavailable')
       } finally {
-        submissionRef.current = false
-        setIsSubmitting(false)
+        if (generation === generationRef.current) {
+          submissionRef.current = false
+          setIsSubmitting(false)
+        }
       }
     },
-    [abandonRejectedSession, persistSession, settleSession]
+    [abandonRejectedSession, sessionPersistence, settleSession]
   )
 
   const signOut = useCallback(async (): Promise<void> => {
     const goAuthentication = goAuthenticationRef.current
     const credentials = credentialsRef.current
     if (!goAuthentication || submissionRef.current) return
+    const generation = generationRef.current
 
     submissionRef.current = true
     setIsSubmitting(true)
+    setIsSigningOut(true)
     let remoteRevocationConfirmed = false
 
     try {
       if (credentials) {
         const end = await goAuthentication.endSession(credentials.token)
+        if (generation !== generationRef.current) return
         remoteRevocationConfirmed = end.outcome === 'revoked'
       } else {
         remoteRevocationConfirmed = true
       }
     } catch {
       remoteRevocationConfirmed = false
-    } finally {
-      // Local access ends now even when the Desktop could not confirm remote revocation.
-      await sessionPersistence.clear().catch(() => undefined)
-      settleUnauthenticated(remoteRevocationConfirmed ? undefined : 'remote-sign-out-delayed')
-      submissionRef.current = false
-      setIsSubmitting(false)
     }
+    if (generation !== generationRef.current) return
+    // Local access ends now even when the Desktop could not confirm remote revocation.
+    await sessionPersistence.clear().catch(() => undefined)
+    if (generation !== generationRef.current) return
+    settleUnauthenticated(remoteRevocationConfirmed ? undefined : 'remote-sign-out-delayed')
+    submissionRef.current = false
+    setIsSubmitting(false)
+    setIsSigningOut(false)
   }, [sessionPersistence, settleUnauthenticated])
 
   return {
@@ -662,6 +729,7 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     error,
     notice,
     isSubmitting,
+    isSigningOut,
     isSessionPersistenceUnavailable: persistenceUnavailable,
     instanceSetup,
     setupCodeRequired,
@@ -669,10 +737,8 @@ export function useAuthentication(serverUrl: string | undefined): Authentication
     rememberEmailSelected,
     isRememberedEmailPersistenceUnavailable: rememberedEmailPersistenceUnavailable,
     rememberedEmailPersistenceNoticeSurface,
-    userEmail,
-    userId,
-    userRole,
-    getSession,
+    sessionUser,
+    acquireSession,
     setRememberEmailSelected,
     consumeRememberedEmailPersistenceNotice,
     dismissError: clearError,

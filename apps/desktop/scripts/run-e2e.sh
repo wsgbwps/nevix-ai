@@ -494,8 +494,8 @@ start_identity_server
 claim_main_instance
 start_tls_terminator
 server_url="http://127.0.0.1:8080"
-# The disposable empty instances exist for the Instance Claim specs, which run
-# in the full suite only.
+# The disposable empty instances exist for the setup-wizard spec and the
+# connection server-change canary, which run in the full suite only.
 if [[ "$mode" == "full" ]]; then
   start_setup_server
   start_open_server
