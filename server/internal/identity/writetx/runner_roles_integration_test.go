@@ -11,6 +11,7 @@ package writetx
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -64,7 +65,7 @@ func TestRunRejectsOwnerCredential(t *testing.T) {
 	}
 
 	invoked := false
-	err := New(owner).Run(ctx, func(pgx.Tx) error {
+	err := New(owner).Run(ctx, func(*Scope) error {
 		invoked = true
 		return nil
 	})
@@ -99,7 +100,7 @@ func TestRunRejectsAssumedIdentityAppRole(t *testing.T) {
 	}
 
 	invoked := false
-	err := New(assumed).Run(ctx, func(pgx.Tx) error {
+	err := New(assumed).Run(ctx, func(*Scope) error {
 		invoked = true
 		return nil
 	})
@@ -120,12 +121,171 @@ func TestRunAcceptsDirectIdentityAppCredential(t *testing.T) {
 	runtime := connectPool(t, ctx, requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL"), nil)
 
 	var observedSession, observedCurrent string
-	if err := New(runtime).Run(ctx, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, "SELECT session_user, current_user").Scan(&observedSession, &observedCurrent)
+	if err := New(runtime).Run(ctx, func(sc *Scope) error {
+		return sc.Tx().QueryRow(ctx, "SELECT session_user, current_user").Scan(&observedSession, &observedCurrent)
 	}); err != nil {
 		t.Fatalf("direct identity_app run failed: %v", err)
 	}
 	if observedSession != "identity_app" || observedCurrent != "identity_app" {
 		t.Fatalf("callback observed session_user=%q current_user=%q, want identity_app", observedSession, observedCurrent)
+	}
+}
+
+// effectTable is the throwaway owner-provisioned table the after-commit
+// lifecycle evidence writes to: one row per test, dropped on cleanup. The
+// owner connection provisions DDL; the runtime credential only needs the
+// INSERT/SELECT grants it gets here.
+func effectTable(t *testing.T, ctx context.Context, owner *pgxpool.Pool) string {
+	t.Helper()
+	name := fmt.Sprintf("writetx_effects_%d", time.Now().UnixNano())
+	if _, err := owner.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE public.%[1]s (id integer PRIMARY KEY);
+		GRANT INSERT, SELECT ON public.%[1]s TO identity_app`, name)); err != nil {
+		t.Fatalf("provision effect table: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = owner.Exec(context.WithoutCancel(ctx), fmt.Sprintf("DROP TABLE IF EXISTS public.%s", name))
+	})
+	return name
+}
+
+// rowCount reads the effect table over a fresh pool connection, so the read
+// observes the committed database state, not this transaction.
+func rowCount(t *testing.T, ctx context.Context, runtime *pgxpool.Pool, table string) int {
+	t.Helper()
+	var count int
+	if err := runtime.QueryRow(ctx, fmt.Sprintf("SELECT count(*) FROM public.%s", table)).Scan(&count); err != nil {
+		t.Fatalf("count effect rows: %v", err)
+	}
+	return count
+}
+
+// The after-commit contract against real PostgreSQL: a successful commit
+// runs the registered effects exactly once, in registration order, and the
+// first effect already observes the write as committed from another
+// connection.
+func TestRunExecutesAfterCommitEffectsAgainstCommittedState(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	owner := connectPool(t, ctx, requireEnv(t, "NEVIX_DATABASE_URL"), nil)
+	runtime := connectPool(t, ctx, requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL"), nil)
+	table := effectTable(t, ctx, owner)
+
+	var order []string
+	commitsSeenByFirstEffect := -1
+	if err := New(runtime).Run(ctx, func(sc *Scope) error {
+		if _, err := sc.Tx().Exec(ctx, fmt.Sprintf("INSERT INTO public.%s (id) VALUES (1)", table)); err != nil {
+			return fmt.Errorf("seed effect row: %w", err)
+		}
+		sc.AfterCommit(func() {
+			if commitsSeenByFirstEffect < 0 {
+				commitsSeenByFirstEffect = rowCount(t, ctx, runtime, table)
+			}
+			order = append(order, "first")
+		})
+		sc.AfterCommit(func() { order = append(order, "second") })
+		return nil
+	}); err != nil {
+		t.Fatalf("successful run: %v", err)
+	}
+	if len(order) != 2 || order[0] != "first" || order[1] != "second" {
+		t.Fatalf("effects ran as %v, want first,second each exactly once", order)
+	}
+	if commitsSeenByFirstEffect != 1 {
+		t.Fatalf("first effect saw %d committed rows, want 1: effects must run after the commit", commitsSeenByFirstEffect)
+	}
+}
+
+// A callback error against real PostgreSQL rolls the transaction back and
+// runs no effect: neither the row nor the trigger survives the failure.
+func TestRunSkipsAfterCommitEffectsOnCallbackErrorAgainstPostgreSQL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	owner := connectPool(t, ctx, requireEnv(t, "NEVIX_DATABASE_URL"), nil)
+	runtime := connectPool(t, ctx, requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL"), nil)
+	table := effectTable(t, ctx, owner)
+
+	var ran int
+	err := New(runtime).Run(ctx, func(sc *Scope) error {
+		if _, err := sc.Tx().Exec(ctx, fmt.Sprintf("INSERT INTO public.%s (id) VALUES (1)", table)); err != nil {
+			return fmt.Errorf("seed effect row: %w", err)
+		}
+		sc.AfterCommit(func() { ran++ })
+		return errors.New("business failure")
+	})
+	if err == nil {
+		t.Fatal("callback error was swallowed")
+	}
+	if ran != 0 {
+		t.Fatalf("effects ran %d times on the rollback path", ran)
+	}
+	if got := rowCount(t, ctx, runtime, table); got != 0 {
+		t.Fatalf("rolled-back run left %d rows, want 0", got)
+	}
+}
+
+// Cancellation completing the callback prevents the commit against real
+// PostgreSQL: the write rolls back and no effect runs.
+func TestRunSkipsAfterCommitEffectsOnCancellationAgainstPostgreSQL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	owner := connectPool(t, ctx, requireEnv(t, "NEVIX_DATABASE_URL"), nil)
+	runtime := connectPool(t, ctx, requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL"), nil)
+	table := effectTable(t, ctx, owner)
+
+	var ran int
+	ctx2, cancelInCallback := context.WithCancel(ctx)
+	err := New(runtime).Run(ctx2, func(sc *Scope) error {
+		if _, err := sc.Tx().Exec(ctx2, fmt.Sprintf("INSERT INTO public.%s (id) VALUES (1)", table)); err != nil {
+			return fmt.Errorf("seed effect row: %w", err)
+		}
+		sc.AfterCommit(func() { ran++ })
+		// The callback swallows the cancellation, so only the runner's
+		// completion check stands between the abandoned operation and the
+		// commit — and the effects that would follow it.
+		cancelInCallback()
+		return nil
+	})
+	cancelInCallback()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled run: %v, want the context error", err)
+	}
+	if ran != 0 {
+		t.Fatalf("effects ran %d times on the cancellation path", ran)
+	}
+	if got := rowCount(t, ctx, runtime, table); got != 0 {
+		t.Fatalf("canceled run left %d rows, want 0", got)
+	}
+}
+
+// A callback panic against real PostgreSQL triggers the best-effort
+// rollback and propagates; no effect runs on the panic path.
+func TestRunSkipsAfterCommitEffectsOnCallbackPanicAgainstPostgreSQL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	owner := connectPool(t, ctx, requireEnv(t, "NEVIX_DATABASE_URL"), nil)
+	runtime := connectPool(t, ctx, requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL"), nil)
+	table := effectTable(t, ctx, owner)
+
+	var ran int
+	func() {
+		defer func() {
+			if r := recover(); r != "programming fault" {
+				t.Fatalf("panic altered: %v", r)
+			}
+		}()
+		_ = New(runtime).Run(ctx, func(sc *Scope) error {
+			if _, err := sc.Tx().Exec(ctx, fmt.Sprintf("INSERT INTO public.%s (id) VALUES (1)", table)); err != nil {
+				return fmt.Errorf("seed effect row: %w", err)
+			}
+			sc.AfterCommit(func() { ran++ })
+			panic("programming fault")
+		})
+	}()
+	if ran != 0 {
+		t.Fatalf("effects ran %d times on the panic path", ran)
+	}
+	if got := rowCount(t, ctx, runtime, table); got != 0 {
+		t.Fatalf("panicked run left %d rows, want 0", got)
 	}
 }

@@ -28,10 +28,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
 // claimAdvisoryLockKey serializes concurrent claim attempts
@@ -221,7 +220,8 @@ func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginR
 
 	var claimed userRecord
 	var expiresAt time.Time
-	err = s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, claimAdvisoryLockKey); err != nil {
 			return fmt.Errorf("auth: serialize instance claim: %w", err)
 		}

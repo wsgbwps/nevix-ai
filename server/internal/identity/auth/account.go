@@ -16,11 +16,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
 // maxDisplayNameLength bounds display names in Unicode characters — the
@@ -76,7 +75,8 @@ func (s *Service) ChangePassword(ctx context.Context, principal authz.Principal,
 		return ChangePasswordResponse{}, fmt.Errorf("auth: hash new password: %w", err)
 	}
 
-	err = s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		var storedHash string
 		var owesInitialChange bool
 		if err := tx.QueryRow(ctx,
@@ -154,7 +154,8 @@ func (s *Service) UpdateMe(ctx context.Context, principal authz.Principal, req U
 	name := strings.TrimSpace(*req.DisplayName)
 
 	var updated userRecord
-	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		var previous string
 		if err := tx.QueryRow(ctx,
 			`SELECT display_name FROM public.users WHERE id = $1 FOR UPDATE`,

@@ -16,6 +16,7 @@ import (
 
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/identity/audit"
+	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
 // maxActiveJoinCodes caps the concurrently active set (ADR-0015): codes are
@@ -62,7 +63,8 @@ func (s *Service) Create(ctx context.Context, principal authz.Principal, req Cre
 	label := strings.TrimSpace(req.Label)
 
 	var created JoinCodeEntry
-	err := s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, joinCodeCapLockKey); err != nil {
 			return fmt.Errorf("joincodes: serialize create: %w", err)
 		}
@@ -145,7 +147,8 @@ func (s *Service) Revoke(ctx context.Context, principal authz.Principal, joinCod
 		return RevokeResponse{}, errJoinCodeNotFound
 	}
 
-	err = s.runner.Run(ctx, func(tx pgx.Tx) error {
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		tx := sc.Tx()
 		tag, err := tx.Exec(ctx,
 			`UPDATE public.join_codes SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, id)
 		if err != nil {
