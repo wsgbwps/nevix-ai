@@ -190,6 +190,14 @@ assert_identity_integration_executed() {
     TestRegisterWithActiveCodeCreatesMemberAndSession
     TestRegisterRollsBackAccountSessionAuditAndLastLoginTogether
     TestRegisterHoldsTheJoinCodeRowLockUntilCommit
+    TestChangePasswordWritesOnlyPasswordChangedAudit
+    TestDisableWritesOnlyUserDisabledAudit
+    TestResetPasswordWritesOnlyUserPasswordResetAudit
+    TestDisableCommittedBeforeWaitingPasswordChangeFailsIt
+    TestDisableAfterCommittedPasswordChangeRevokesEverySession
+    TestChangePasswordRollsBackRevocationWithItsAuditRow
+    TestDisableRollsBackRevocationWithItsAuditRow
+    TestResetPasswordRollsBackRevocationWithItsAuditRow
   )
   # Goose migration-engine sentinels live in the migration package.
   local -a migration_tests=(

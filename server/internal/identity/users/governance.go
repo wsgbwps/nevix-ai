@@ -21,6 +21,7 @@ import (
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
@@ -127,7 +128,15 @@ func (s *Service) Disable(ctx context.Context, principal authz.Principal, userID
 		); err != nil {
 			return fmt.Errorf("users: disable account: %w", err)
 		}
-		if err := revokeAllSessions(ctx, tx, user.ID); err != nil {
+		// Revocation is the session module's one trusted step inside this
+		// command's write transaction: every session of the account — the
+		// all disposition — with the exact affected identities driving the
+		// post-commit connection effect; the command decides its own audit.
+		all, err := session.All(user.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := s.sessions.Revoke(ctx, sc, all); err != nil {
 			return err
 		}
 		user.Status = "disabled"
@@ -182,7 +191,14 @@ func (s *Service) ResetPassword(ctx context.Context, principal authz.Principal, 
 		); err != nil {
 			return fmt.Errorf("users: reset password: %w", err)
 		}
-		if err := revokeAllSessions(ctx, tx, user.ID); err != nil {
+		// The same all disposition as disable: a reset credential must not
+		// coexist with stale authenticated state (ADR-0015 credential
+		// hygiene), and revocation rides this command's write transaction.
+		all, err := session.All(user.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := s.sessions.Revoke(ctx, sc, all); err != nil {
 			return err
 		}
 		user.MustChangePassword = true
@@ -345,16 +361,6 @@ func (s *Service) refuseLastActiveAdminReduction(ctx context.Context, tx pgx.Tx,
 	}
 	if others == 0 {
 		return errLastAdminProtected
-	}
-	return nil
-}
-
-// revokeAllSessions deletes every session row of one account inside the
-// caller's transaction. Disabled or credential-reset accounts lose access on
-// their very next request, not at token expiry.
-func revokeAllSessions(ctx context.Context, tx pgx.Tx, userID string) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM public.sessions WHERE user_id = $1`, userID); err != nil {
-		return fmt.Errorf("users: revoke sessions: %w", err)
 	}
 	return nil
 }

@@ -169,7 +169,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 	}
 	return &Module{
 		auth:        service,
-		users:       users.NewService(pool, tx),
+		users:       users.NewService(pool, tx, sessions),
 		joinCodes:   joincodes.NewService(pool, tx),
 		auditRead:   audit.NewReadService(pool),
 		guard:       authz.NewGuard(service),

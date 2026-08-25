@@ -1,0 +1,48 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "identity-session-cutover@e332c9b",
+  "scopePaths": [
+    "scripts/test-identity-integration.sh",
+    "server/internal/identity/auth/account.go",
+    "server/internal/identity/module.go",
+    "server/internal/identity/users/governance.go",
+    "server/internal/identity/users/users.go",
+    "server/internal/identity/integrationtest/session_revocation_cutover_test.go"
+  ],
+  "currentDiffDigest": "sha256:8e72fdcdfc42a446d6058c4c60085fa8b915261a9385b4ee6eb50cf08e490e53",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 0,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": ".scratch/session-revocation-cutover-143-plan.md",
+        "source": "AGENTS.md high-risk plan rule; parent spec #138 Further Notes",
+        "anchor": "server/internal/identity/auth/account.go — ChangePassword revocation cutover",
+        "defect": "The high-risk authentication and session-revocation change was implemented without the required brief plan under .scratch or a link from issue #143."
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Valid process gap observed at review time. Remediated immediately after the initial review, outside the blocker repair loop (advisories are not repaired inside the convergence loop per the lifecycle contract): the plan now exists at .scratch/session-revocation-cutover-143-plan.md, committed with the task branch and linked from issue #143 before any merge. No code change was required.",
+      "owner": ".scratch/session-revocation-cutover-143-plan.md",
+      "status": "closed",
+      "evidence": [
+        "server/internal/identity/auth/account.go:80-88 introduces the Session revocation target at the authentication write boundary.",
+        "AGENTS.md requires a brief written plan under .scratch for authentication, authorization, and security-boundary changes; #138 repeats that requirement and requires linking it to the issue.",
+        "No #143 plan existed under .scratch and issue #143 had no comments linking one at review time; ./scripts/test-identity-integration.sh PASS does not cover this delivery artifact."
+      ],
+      "reviewedDiffDigest": "sha256:8e72fdcdfc42a446d6058c4c60085fa8b915261a9385b4ee6eb50cf08e490e53",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    }
+  ],
+  "repairRecords": [],
+  "relevantCheck": {
+    "name": "./scripts/test-identity-integration.sh",
+    "result": "PASS",
+    "coverage": "167 Identity integration tests, zero skips",
+    "diffDigest": "sha256:8e72fdcdfc42a446d6058c4c60085fa8b915261a9385b4ee6eb50cf08e490e53"
+  },
+  "outcome": "closed"
+}
