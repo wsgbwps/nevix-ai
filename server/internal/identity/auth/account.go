@@ -97,8 +97,8 @@ func (s *Service) ChangePassword(ctx context.Context, principal authz.Principal,
 			return fmt.Errorf("auth: update password: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
-			`DELETE FROM public.sessions WHERE user_id = $1 AND token_hash <> $2`,
-			principal.UserID, principal.SessionTokenHash,
+			`DELETE FROM public.sessions WHERE user_id = $1 AND id <> $2`,
+			principal.UserID, principal.SessionID,
 		); err != nil {
 			return fmt.Errorf("auth: revoke other sessions on password change: %w", err)
 		}

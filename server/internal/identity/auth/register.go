@@ -27,6 +27,7 @@ import (
 
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
@@ -118,7 +119,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (LoginRespo
 		displayName = derivedDisplayName(email)
 	}
 
-	token, tokenHash, err := newSessionToken()
+	token, tokenHash, err := session.NewToken()
 	if err != nil {
 		return LoginResponse{}, err
 	}
@@ -166,7 +167,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (LoginRespo
 			`INSERT INTO public.sessions (user_id, token_hash, expires_at)
 			 VALUES ($1, $2, now() + make_interval(secs => $3))
 			 RETURNING expires_at`,
-			registered.ID, tokenHash, sessionTTL.Seconds(),
+			registered.ID, tokenHash, session.TTL.Seconds(),
 		).Scan(&expiresAt); err != nil {
 			return fmt.Errorf("auth: insert registered session: %w", err)
 		}

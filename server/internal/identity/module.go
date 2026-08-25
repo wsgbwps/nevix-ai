@@ -1,8 +1,10 @@
 // Package identity is the identity Module's composition surface. The command
 // skeleton (unified error envelope, decode-validate-map pipeline, guard-policy
 // route table machinery) lives in command; the auth service (passwords,
-// sessions, login/logout/me, bootstrap, the maintenance sweep) lives in auth;
-// the user-account surface beyond self (team directory, admin governance
+// login/logout/me, bootstrap, the maintenance sweep) lives in auth; the
+// session responsibility module (token mechanics, issuance with the atomic
+// last-login projection, validation, sliding refresh) lives in session; the
+// user-account surface beyond self (team directory, admin governance
 // commands) lives in users; audit log writes and the admin-only paginated
 // read live in audit; and the Write Transaction Module lives in writetx.
 // Callers outside the Module — the composition root and the integration test
@@ -25,6 +27,7 @@ import (
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/joincodes"
+	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/users"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
@@ -158,7 +161,8 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 	if err := tx.VerifyStartupIdentity(ctx); err != nil {
 		return nil, err
 	}
-	service := auth.NewService(pool, tx)
+	sessions := session.NewStore(pool, tx)
+	service := auth.NewService(pool, tx, sessions)
 	if err := service.ArmInstanceClaim(ctx, cfg.SetupCodeRequired); err != nil {
 		return nil, err
 	}

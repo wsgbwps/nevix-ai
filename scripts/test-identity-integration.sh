@@ -175,6 +175,12 @@ assert_identity_integration_executed() {
     TestBaselineDropsTheLegacyWorldAndRebuilds
     TestRunRejectsOwnerCredential
     TestRunAcceptsDirectIdentityAppCredential
+    TestIssueInsertsSessionStampsLastLoginAndWritesNoAudit
+    TestIssueRechecksActiveStatusAndCredentialStampUnderLock
+    TestIssueRollsBackWithTheCallerTransaction
+    TestValidateResolvesIdentityAndSlidesNearExpiryWithoutTouchingLastLogin
+    TestValidateFailuresAndBestEffortRefresh
+    TestLoginAdvancesLastLoginAtAndRefreshDoesNot
   )
   # Goose migration-engine sentinels live in the migration package.
   local -a migration_tests=(

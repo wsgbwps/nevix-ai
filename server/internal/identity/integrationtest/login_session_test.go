@@ -433,3 +433,63 @@ func TestSweepDeletesAuditRowsPastRetention(t *testing.T) {
 		t.Fatalf("audit actions after sweep = %v, want only the in-window login row", actions)
 	}
 }
+
+// last_login_at is the projection of the most recent successful interactive
+// session issuance (server/CONTEXT.md): Login advances it, and the sliding
+// refresh a near-expiry use triggers never does.
+func TestLoginAdvancesLastLoginAtAndRefreshDoesNot(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	h := newHarness(t, ctx)
+	_, handler := h.loginReadyModule(t)
+	status, _, login := doLogin(t, handler, loginEmail, loginPassword)
+	if status != http.StatusOK {
+		t.Fatalf("login: status %d", status)
+	}
+
+	var lastLogin *time.Time
+	if err := h.fixturePool.QueryRow(ctx,
+		`SELECT last_login_at FROM public.users WHERE id = $1`, login.User.ID,
+	).Scan(&lastLogin); err != nil {
+		t.Fatalf("read last_login_at after login: %v", err)
+	}
+	if lastLogin == nil {
+		t.Fatal("login did not stamp last_login_at")
+	}
+
+	// A second login moves the projection forward.
+	before := *lastLogin
+	status, _, _ = doLogin(t, handler, loginEmail, loginPassword)
+	if status != http.StatusOK {
+		t.Fatalf("second login: status %d", status)
+	}
+	if err := h.fixturePool.QueryRow(ctx,
+		`SELECT last_login_at FROM public.users WHERE id = $1`, login.User.ID,
+	).Scan(&lastLogin); err != nil {
+		t.Fatalf("re-read last_login_at after second login: %v", err)
+	}
+	if !lastLogin.After(before) {
+		t.Fatalf("second login did not advance last_login_at: %v -> %v", before, *lastLogin)
+	}
+	stamped := *lastLogin
+
+	// Sliding refresh on the first session: the use re-arms the expiry but
+	// must leave the projection at the last interactive issuance.
+	digest := sha256.Sum256([]byte(login.Token))
+	if _, err := h.fixturePool.Exec(ctx,
+		`UPDATE public.sessions SET expires_at = now() + interval '2 days' WHERE token_hash = $1`, digest[:],
+	); err != nil {
+		t.Fatalf("age session: %v", err)
+	}
+	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", login.Token); status != http.StatusOK {
+		t.Fatalf("me on nearly-expired session: status %d body %s", status, body)
+	}
+	if err := h.fixturePool.QueryRow(ctx,
+		`SELECT last_login_at FROM public.users WHERE id = $1`, login.User.ID,
+	).Scan(&lastLogin); err != nil {
+		t.Fatalf("re-read last_login_at after refresh: %v", err)
+	}
+	if !lastLogin.Equal(stamped) {
+		t.Fatalf("sliding refresh moved last_login_at: %v -> %v", stamped, *lastLogin)
+	}
+}
