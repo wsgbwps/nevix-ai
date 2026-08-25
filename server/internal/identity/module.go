@@ -1,16 +1,6 @@
-// Package identity is the identity Module's composition surface. The command
-// skeleton (unified error envelope, decode-validate-map pipeline, guard-policy
-// route table machinery) lives in command; the auth service (passwords,
-// login/logout/me, bootstrap, the maintenance sweep) lives in auth; the
-// session responsibility module (token mechanics, issuance with the atomic
-// last-login projection, validation, sliding refresh, revocation with
-// post-commit connection effects) lives in session; the
-// user-account surface beyond self (team directory, admin governance
-// commands) lives in users; audit log writes and the admin-only paginated
-// read live in audit; and the Write Transaction Module lives in writetx.
-// Callers outside the Module — the composition root and the integration test
-// harness — see only this package: LoadConfig, NewModule, Register, and
-// RunWorkers.
+// Package identity exposes the Identity Module's composition contract.
+// External callers use only LoadConfig, NewModule, Register, and RunWorkers;
+// its responsibility packages remain internal.
 package identity
 
 import (
@@ -33,27 +23,17 @@ import (
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
-// Config is the identity Module's deployment configuration.
-// SetupCodeRequired arms the optional setup-code protection on the Instance
-// Claim (ADR-0015 2026-08-24 revision); the environment-variable admin
-// bootstrap is gone, and its old variables refuse startup. CORSAllowedOrigins
-// is the per-environment browser origin whitelist.
+// Config is the Identity Module's deployment configuration.
+// SetupCodeRequired enables optional Instance Claim protection, and
+// CORSAllowedOrigins is the browser origin whitelist.
 type Config struct {
 	SetupCodeRequired  bool
 	CORSAllowedOrigins []string
 }
 
-// LoadConfig reads the Module's deployment variables via a presence-aware
-// lookup (os.LookupEnv at the composition root, so a variable explicitly set
-// to an empty string is distinguishable from one never set). A missing or
-// invalid variable is an error naming that variable; the composition root
-// loads configuration before opening the database pool, so a misconfigured
-// process fails before touching infrastructure. NEVIX_SETUP_CODE_REQUIRED is
-// parsed strictly — unset, empty, "true", or "false"; anything else refuses
-// startup — and a set ADMIN_EMAIL or ADMIN_INITIAL_PASSWORD (the deleted
-// first-admin bootstrap pair, even when set to an empty value) refuses
-// startup with the migration hint instead of silently changing how an empty
-// instance is claimed.
+// LoadConfig validates the Module's deployment variables. It rejects legacy
+// admin-bootstrap variables even when empty, preventing an old deployment
+// configuration from silently changing Instance Claim protection.
 func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	corsOrigins, err := loadCORSAllowedOrigins(lookupValue(lookup, "CORS_ALLOWED_ORIGINS"))
 	if err != nil {
@@ -120,10 +100,7 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 	return origins, nil
 }
 
-// Module is the identity Module's composition surface: it owns the auth
-// service, the user-account governance service, the join-code governance
-// service, the audit read service, the guard vocabulary, and registers the
-// Module's HTTP routes.
+// Module is the Identity Module's composition surface.
 type Module struct {
 	auth        *auth.Service
 	users       *users.Service
@@ -141,22 +118,11 @@ type Module struct {
 // failure from other database errors.
 var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 
-// NewModule constructs the auth service and the guard vocabulary around one
-// Write Transaction Module (writetx.Runner): after proving the runtime
-// database identity with a real round trip — session_user (the authenticated
-// principal) and current_user (the role actually used for permission checks)
-// must both be exactly identity_app — every user, session, and audit write
-// transaction runs through the same runner, which re-proves the identity per
-// transaction and owns commit and rollback. A pool authenticated as the
-// owner, a migration role, or any other role is rejected even when it could
-// SET ROLE identity_app, and an unreachable database fails the round trip, so
-// either way construction fails before the composition root starts the HTTP
-// listener or workers. Construction then arms the Instance Claim (ADR-0015
-// 2026-08-24 revision): an empty instance is claimed through the public
-// initialize command with credentials the claimer chooses; when the
-// deployment enabled setup-code protection, construction generates the
-// one-time code and discloses it to the operations log exactly once, while an
-// open instance generates and logs nothing.
+// NewModule constructs Identity around one Write Transaction Module. A real
+// database round trip must prove both session_user and current_user are
+// identity_app; owner, migration, SET ROLE-capable, and unreachable
+// connections all fail construction. Every Identity write shares the runner,
+// which repeats the execution-identity check and owns transaction completion.
 func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, error) {
 	tx := writetx.New(pool)
 	if err := tx.VerifyStartupIdentity(ctx); err != nil {
@@ -177,12 +143,9 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 	}, nil
 }
 
-// Register mounts the Module's trusted commands from the static route table:
-// the CORS whitelist gates the Module surface, every path's OPTIONS preflight
-// twin and Allow-Methods value derive from the same table, and every route
-// runs behind its declared authz guard (login and self-registration are the
-// public entries). The Module publishes no Domain Events yet; the bus is part
-// of the Module contract.
+// Register mounts the static route table behind its CORS and authorization
+// declarations. The Module publishes no Domain Events yet; the bus remains
+// part of the Module contract.
 func (m *Module) Register(r chi.Router, _ event.Bus) {
 	routes := m.routes()
 	r.Use(corsMiddleware(m.corsOrigins, command.MethodsByPath(routes)))

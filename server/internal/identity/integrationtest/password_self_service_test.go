@@ -1,11 +1,3 @@
-// Self-service and first-login password change hygiene (issue #101): a
-// session whose account still owes the forced initial-password change can
-// only complete the change (other business endpoints answer 403
-// password_change_required); the first-login change clears the flag and
-// activates the account; a self-service change revokes every OTHER session
-// while the calling session survives; the display name is self-service and
-// lands in the users table the directory reads. Every observed response is
-// asserted against the OpenAPI contract.
 package integrationtest
 
 import (
@@ -24,9 +16,6 @@ const (
 	rotatedPassword = "rotated-password-1"
 )
 
-// forcedChangeModule resets state and creates an active member whose
-// must_change_password flag is set — the first-login shape an admin-created
-// account has.
 func (h *harness) forcedChangeModule(t *testing.T) (*identity.Module, http.Handler) {
 	t.Helper()
 	h.resetUserState(t)
@@ -35,15 +24,12 @@ func (h *harness) forcedChangeModule(t *testing.T) (*identity.Module, http.Handl
 	return h.moduleWithConfig(t, cfg)
 }
 
-// rotationModule resets state and creates an active user with no pending
-// change — the everyday self-service rotation shape.
 func (h *harness) rotationModule(t *testing.T) (*identity.Module, http.Handler) {
 	t.Helper()
 	module, handler := h.loginReadyModule(t)
 	return module, handler
 }
 
-// mustChangeFlag reads the users-table flag for one email.
 func (h *harness) mustChangeFlag(t *testing.T, email string) bool {
 	t.Helper()
 	var flag bool
@@ -55,8 +41,6 @@ func (h *harness) mustChangeFlag(t *testing.T, email string) bool {
 	return flag
 }
 
-// storedDisplayName reads the users-table display name for one email — the
-// row the (issue #102) user-directory endpoint will list.
 func (h *harness) storedDisplayName(t *testing.T, email string) string {
 	t.Helper()
 	var name string
@@ -68,7 +52,6 @@ func (h *harness) storedDisplayName(t *testing.T, email string) string {
 	return name
 }
 
-// lastAuditAction returns the newest audit action.
 func (h *harness) lastAuditAction(t *testing.T) string {
 	t.Helper()
 	actions := h.auditActions(t)
@@ -84,15 +67,12 @@ func TestPendingPasswordChangeBlocksBusinessEndpoints(t *testing.T) {
 	h := newHarness(t, ctx)
 	_, handler := h.forcedChangeModule(t)
 
-	// Login still succeeds and flags the pending change in the response.
 	status, body, login := doLogin(t, handler, loginEmail, initialPassword)
 	assertContractResponse(t, http.MethodPost, "/identity/auth/login", status, body)
 	if status != http.StatusOK || !login.User.MustChangePassword {
 		t.Fatalf("forced-change login: status %d flag %v, want 200 with must_change_password=true", status, login.User.MustChangePassword)
 	}
 
-	// A business endpoint is gated: the display-name update answers 403
-	// password_change_required, never reaching the command.
 	status, body = doUpdateMe(t, handler, login.Token, "Renamed Too Early")
 	assertContractResponse(t, http.MethodPatch, "/identity/users/me", status, body)
 	if status != http.StatusForbidden || !contains(body, `"password_change_required"`) {
@@ -102,22 +82,18 @@ func TestPendingPasswordChangeBlocksBusinessEndpoints(t *testing.T) {
 		t.Fatalf("display name changed during forced change: %q", got)
 	}
 
-	// The auth-scoped routes stay usable: me reads the flagged account…
 	status, body = doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", login.Token)
 	assertContractResponse(t, http.MethodGet, "/identity/users/me", status, body)
 	if status != http.StatusOK || !contains(body, `"must_change_password":true`) {
 		t.Fatalf("me during forced change: status %d body %s, want the flagged account", status, body)
 	}
 
-	// …the change command itself runs (a wrong current password reaches the
-	// command and answers invalid_credentials, not the gate)…
 	status, body = doChangePassword(t, handler, login.Token, "wrong-current", rotatedPassword)
 	assertContractResponse(t, http.MethodPost, "/identity/auth/change-password", status, body)
 	if status != http.StatusUnauthorized || !contains(body, `"invalid_credentials"`) {
 		t.Fatalf("change-password with wrong current during forced change: status %d body %s, want 401 invalid_credentials", status, body)
 	}
 
-	// …and logout still ends the session.
 	status, body = doLogout(t, handler, login.Token)
 	assertContractResponse(t, http.MethodPost, "/identity/auth/logout", status, body)
 	if status != http.StatusOK {
@@ -149,21 +125,18 @@ func TestFirstLoginChangePasswordClearsFlagAndActivatesAccount(t *testing.T) {
 		t.Fatalf("audit after first-login change = %q, want password_changed", last)
 	}
 
-	// The calling session survives and reads the cleared flag.
 	status, body = doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", login.Token)
 	assertContractResponse(t, http.MethodGet, "/identity/users/me", status, body)
 	if status != http.StatusOK || !contains(body, `"must_change_password":false`) {
 		t.Fatalf("me after first-login change: status %d body %s, want the cleared flag", status, body)
 	}
 
-	// The gated business endpoint is usable again.
 	status, body = doUpdateMe(t, handler, login.Token, "Activated Member")
 	assertContractResponse(t, http.MethodPatch, "/identity/users/me", status, body)
 	if status != http.StatusOK {
 		t.Fatalf("display-name update after first-login change: status %d body %s, want 200", status, body)
 	}
 
-	// The old password no longer works; the new one does, unflagged.
 	if status, body, _ := doLogin(t, handler, loginEmail, initialPassword); status != http.StatusUnauthorized {
 		t.Fatalf("old password after change: status %d body %s, want 401", status, body)
 	}
@@ -198,8 +171,6 @@ func TestChangePasswordRevokesAllOtherSessions(t *testing.T) {
 		t.Fatalf("change-password: status %d body %s", status, body)
 	}
 
-	// The other device's session is gone; the calling session survives —
-	// the current-session disposition the contract defines.
 	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", second.Token); status != http.StatusUnauthorized {
 		t.Fatalf("other session after change: status %d body %s, want 401", status, body)
 	}
@@ -232,8 +203,6 @@ func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
 		t.Fatalf("wrong current password: status %d body %s, want 401 invalid_credentials", status, body)
 	}
 
-	// Nothing changed: the old password still verifies, sessions survive,
-	// and no password_changed audit row appears.
 	if status, _, _ := doLogin(t, handler, loginEmail, loginPassword); status != http.StatusOK {
 		t.Fatalf("old password after failed change: status %d, want 200", status)
 	}
@@ -263,7 +232,6 @@ func TestChangePasswordRejectsPolicyViolatingNewPassword(t *testing.T) {
 		t.Fatalf("short new password: status %d body %s, want 400 invalid_password", status, body)
 	}
 
-	// A body missing a required field is invalid_request.
 	status, body = doAuthenticatedJSON(t, handler, http.MethodPost, "/identity/auth/change-password", login.Token, []byte(`{"current_password":"x"}`))
 	assertContractResponse(t, http.MethodPost, "/identity/auth/change-password", status, body)
 	if status != http.StatusBadRequest || !contains(body, `"invalid_request"`) {
@@ -281,14 +249,12 @@ func TestChangePasswordEnforcesPasswordByteBoundaries(t *testing.T) {
 		t.Fatalf("login: status %d", status)
 	}
 
-	// Exactly at the bcrypt capacity the change succeeds…
 	boundary := strings.Repeat("a", 72)
 	status, body := doChangePassword(t, handler, login.Token, loginPassword, boundary)
 	assertContractResponse(t, http.MethodPost, "/identity/auth/change-password", status, body)
 	if status != http.StatusOK {
 		t.Fatalf("72-byte new password: status %d body %s, want 200", status, body)
 	}
-	// …and one byte past it is a documented client error, never a 500.
 	status, body = doChangePassword(t, handler, login.Token, boundary, boundary+"a")
 	assertContractResponse(t, http.MethodPost, "/identity/auth/change-password", status, body)
 	if status != http.StatusBadRequest || !contains(body, `"invalid_password"`) {
@@ -310,9 +276,6 @@ func TestChangePasswordSerializesConcurrentChanges(t *testing.T) {
 		t.Fatalf("second login: status %d", status)
 	}
 
-	// Two devices rotate concurrently: verification runs inside the write
-	// transaction against the committed hash, so exactly one succeeds and
-	// the loser answers 401 — never two 200s with an order-dependent result.
 	const newA = "winner-password-1"
 	const newB = "loser-password-1"
 	results := make(chan int, 2)
@@ -330,8 +293,7 @@ func TestChangePasswordSerializesConcurrentChanges(t *testing.T) {
 		t.Fatalf("concurrent change statuses = %v, want exactly one 200 and one 401", statuses)
 	}
 
-	// The winner is whichever device got the 200: its session survives, the
-	// loser's is revoked, and only the winner's new password verifies.
+	// The surviving session identifies which concurrent request committed.
 	loser, loserPassword := second, newB
 	winnerPassword := newA
 	if status, _ := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", first.Token); status != http.StatusOK {
@@ -380,20 +342,16 @@ func TestUpdateMeChangesDisplayNameVisibleInDirectory(t *testing.T) {
 		t.Fatalf("display-name update: status %d body %s, want the trimmed new name", status, body)
 	}
 
-	// The read reflects it…
 	status, body = doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", login.Token)
 	assertContractResponse(t, http.MethodGet, "/identity/users/me", status, body)
 	if status != http.StatusOK || !contains(body, `"display_name":"Elio Renamed"`) {
 		t.Fatalf("me after rename: status %d body %s, want the new name", status, body)
 	}
 
-	// …the rename rides the same write transaction as its audit row…
 	if last := h.lastAuditAction(t); last != "display_name_changed" {
 		t.Fatalf("audit after rename = %q, want display_name_changed", last)
 	}
 
-	// …and the users table — the directory's source of truth (the directory
-	// endpoint itself lands with #102 and its own visibility tests) — carries it.
 	if got := h.storedDisplayName(t, loginEmail); got != "Elio Renamed" {
 		t.Fatalf("stored display name = %q, want %q", got, "Elio Renamed")
 	}
@@ -409,9 +367,6 @@ func TestUpdateMeCountsDisplayNameInCharactersNotBytes(t *testing.T) {
 		t.Fatalf("login: status %d", status)
 	}
 
-	// Length follows the contract's maxLength semantics — Unicode
-	// characters, not bytes: 128 CJK characters are 384 UTF-8 bytes yet
-	// within the documented bound…
 	cjkName := strings.Repeat("深", 128)
 	status, body := doUpdateMe(t, handler, login.Token, cjkName)
 	assertContractResponse(t, http.MethodPatch, "/identity/users/me", status, body)
@@ -422,17 +377,12 @@ func TestUpdateMeCountsDisplayNameInCharactersNotBytes(t *testing.T) {
 		t.Fatalf("stored CJK name mismatch: %d runes", len([]rune(got)))
 	}
 
-	// …while one character past the bound is rejected — ASCII, so the byte
-	// and character counts agree on the rejection boundary.
 	status, body = doUpdateMe(t, handler, login.Token, strings.Repeat("x", 129))
 	assertContractResponse(t, http.MethodPatch, "/identity/users/me", status, body)
 	if status != http.StatusBadRequest || !contains(body, `"invalid_display_name"`) {
 		t.Fatalf("129-character name: status %d body %s, want 400 invalid_display_name", status, body)
 	}
 
-	// Trimming normalizes storage but never rescues an over-length value:
-	// 128 characters plus padding exceeds the contract's raw maxLength and
-	// is rejected even though the trimmed value would fit.
 	padded := "  " + strings.Repeat("y", 128) + "  "
 	status, body = doUpdateMe(t, handler, login.Token, padded)
 	assertContractResponse(t, http.MethodPatch, "/identity/users/me", status, body)

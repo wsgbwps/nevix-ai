@@ -85,8 +85,6 @@ export function AppShell({
   }
 
   const userInitial = initialOf(session.user.email)
-  // The App Shell currently hosts a single real entry; future business Features gain routes in
-  // the content area and extend this mapping from the current pathname.
   const breadcrumbLabel = location.pathname === '/' ? t('shell.home') : undefined
 
   return (
@@ -96,8 +94,6 @@ export function AppShell({
           <SidebarHeader>
             <SidebarMenu>
               <SidebarMenuItem>
-                {/* Brand slot: the product mark placeholder stays until a workspace
-                  identity lands. */}
                 <SidebarMenuButton
                   size="lg"
                   disabled

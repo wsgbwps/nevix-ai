@@ -1,8 +1,5 @@
-// The auth Module commands: login (issue an opaque session), logout (revoke
-// exactly the caller's session), and me (read the caller's account). Request
-// validation, domain errors, and the error mapping follow the command
-// skeleton's layering: request-shape failures answer 400 directly, domain
-// errors pass through MapError.
+// Authentication commands keep request-shape validation separate from
+// domain-to-HTTP error mapping.
 package auth
 
 import (
@@ -134,11 +131,9 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (LoginResponse, e
 		return LoginResponse{}, errInvalidCredentials
 	}
 
-	// Credential verification is done; issuance is the session module's one
-	// trusted step inside this command's write transaction. The stamp is the
-	// verified credential state, re-checked for equality under the account's
-	// row lock so a concurrent disable or password reset that committed first
-	// cannot leave a stale session behind. Login owns the audit action.
+	// The account row lock re-checks this verified password hash before issuing,
+	// so a concurrent disable or reset that commits first cannot leave a stale
+	// session behind.
 	var token string
 	var expiresAt time.Time
 	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
@@ -198,12 +193,8 @@ type LogoutResponse struct {
 	Status string `json:"status"`
 }
 
-// Logout revokes the caller's session only; every other device session stays
-// valid (user story 5). Revocation is the session module's one trusted step
-// inside this command's write transaction: only a revocation that actually
-// ended the calling session writes the session_revoked audit row, so retries
-// never duplicate history, and revoking an already-ended session stays a
-// successful no-op.
+// Logout revokes only the caller's session. An already-ended session is a
+// successful no-op; only an actual revocation writes an audit entry.
 func (s *Service) Logout(ctx context.Context, principal authz.Principal) (LogoutResponse, error) {
 	// Input validation, not transactional work: a principal without a
 	// session identity is a wiring bug, refused before the transaction.

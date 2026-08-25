@@ -42,9 +42,8 @@ export async function readPersistedSession(): Promise<PersistedSessionRead> {
   const session = canonicalizeSession(storedSession)
   if (!session) return discardUnreadableSession()
 
-  // Supabase-era sessions no longer match the canonical schema and were discarded above; a
-  // decryptable session that merely carries extra fields is rewritten to the strict
-  // Authentication-owned schema as soon as it is successfully decrypted.
+  // Successfully decrypted sessions with extra fields are rewritten to the strict
+  // Authentication-owned schema.
   if (session !== storedSession) {
     const rewrite = await replacePersistedSession(session)
     if (rewrite.outcome === 'unavailable') return { outcome: 'storage-unavailable' }

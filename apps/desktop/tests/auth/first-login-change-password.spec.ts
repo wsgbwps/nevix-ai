@@ -31,7 +31,6 @@ async function injectIdentityServerFailureAfterRendererLaunch(): Promise<void> {
     .toBe(true)
 }
 
-/** The full closed loop this migration ships: login → forced change → App Shell → sign out. */
 test(
   'a first login forces the initial password change before the App Shell opens',
   { tag: '@smoke' },

@@ -12,6 +12,15 @@
 - If a responsibility has no canonical owner, or its placement would change a documented boundary or ADR, stop implementation and resolve it through a dedicated architecture task first
 - Before completing work, check `git diff --name-status` still matches the declared Domain and canonical directories
 
+## Code comments
+
+- Use comments for non-obvious reasons, constraints, and contracts, especially security, authorization, transactions, concurrency, ordering, and compatibility
+- Express behavior and control flow through names, types, functions, and tests; remove comments that only narrate the next statement or restate a test name
+- Keep each explanation at its narrowest authoritative location; reference a canonical ADR, `CONTEXT.md`, or issue instead of repeating architecture or history across package, type, function, and test comments
+- Put migration stories and future work in ADRs or tracked issues; write TODOs with an issue reference or a concrete removal condition
+- Keep Go documentation comments for exported identifiers focused on the public contract; let semantic need, including safety guarantees, determine length
+- Before completing a change, verify touched comments still match behavior and that the change did not duplicate an invariant already documented at a stronger owner
+
 ## Shared areas and delivery
 
 - `apps/desktop/src/renderer/src/components/ui/`, `apps/desktop/src/renderer/src/lib/`, `apps/desktop/src/renderer/src/hooks/`, `server/internal/` shared sub-packages (e.g. `internal/event`), and root `contracts/` are shared areas; call out their changes with impact and tests in the PR description

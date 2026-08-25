@@ -1,7 +1,3 @@
-// The user reads (issue #102): the team directory every active user sees,
-// the admin management list, and the admin-only audit pagination — the
-// visibility model of the deployment (ADR-0015) observed through the HTTP
-// surface: what each audience may see, search, and page through.
 package integrationtest
 
 import (
@@ -14,7 +10,6 @@ import (
 	"time"
 )
 
-// directoryUser is one directory entry as the API shapes it.
 type directoryUser struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
@@ -28,7 +23,6 @@ type directoryResponse struct {
 	Total   int             `json:"total"`
 }
 
-// managementListUser mirrors the management list entry.
 type managementListUser struct {
 	ID                 string     `json:"id"`
 	Email              string     `json:"email"`
@@ -46,7 +40,6 @@ type managementListResponse struct {
 	Total   int                  `json:"total"`
 }
 
-// setDisplayName points a fixture account's display name at a chosen value.
 func (h *harness) setDisplayName(t *testing.T, email, name string) {
 	t.Helper()
 	if _, err := h.fixturePool.Exec(context.Background(),
@@ -82,8 +75,6 @@ func TestDirectoryShowsActiveUsersToEveryActiveUser(t *testing.T) {
 	defer cancel()
 	_, handler, adminToken, memberToken := directoryWorld(t, ctx)
 
-	// A member sees exactly the three active accounts (admin included) with
-	// only id, email, and display name — nothing else leaks.
 	status, raw := doAuthenticated(t, handler, http.MethodGet, "/identity/users", memberToken)
 	assertContractResponse(t, http.MethodGet, "/identity/users", status, raw)
 	if status != http.StatusOK {
@@ -105,15 +96,12 @@ func TestDirectoryShowsActiveUsersToEveryActiveUser(t *testing.T) {
 		}
 	}
 
-	// The admin sees the same directory — the visibility rule does not fork
-	// by audience here, only the admin list does.
 	status, raw = doAuthenticated(t, handler, http.MethodGet, "/identity/users", adminToken)
 	assertContractResponse(t, http.MethodGet, "/identity/users", status, raw)
 	if status != http.StatusOK {
 		t.Fatalf("directory as admin: status %d body %s", status, raw)
 	}
 
-	// Unauthenticated reads never reach the query.
 	status, raw = doAuthenticated(t, handler, http.MethodGet, "/identity/users", "")
 	assertContractResponse(t, http.MethodGet, "/identity/users", status, raw)
 	if status != http.StatusUnauthorized {
@@ -191,7 +179,6 @@ func TestDirectoryPaginates(t *testing.T) {
 		t.Fatal("page 2 repeats page 1 rows; pagination overlaps")
 	}
 
-	// Query-shape violations are named 400s.
 	for name, query := range map[string]string{
 		"page zero":     "page=0",
 		"page junk":     "page=abc",
@@ -212,15 +199,12 @@ func TestManagementListShowsEveryAccountToAdminsOnly(t *testing.T) {
 	defer cancel()
 	_, handler, adminToken, memberToken := directoryWorld(t, ctx)
 
-	// The member is behind the RequireAdmin guard.
 	status, raw := doAuthenticated(t, handler, http.MethodGet, "/identity/admin/users", memberToken)
 	assertContractResponse(t, http.MethodGet, "/identity/admin/users", status, raw)
 	if status != http.StatusForbidden || !contains(raw, `"forbidden"`) {
 		t.Fatalf("management list as member: status %d body %s, want 403 forbidden", status, raw)
 	}
 
-	// The admin sees all four accounts — disabled included — with the full
-	// governance field set.
 	status, raw = doAuthenticated(t, handler, http.MethodGet, "/identity/admin/users", adminToken)
 	assertContractResponse(t, http.MethodGet, "/identity/admin/users", status, raw)
 	if status != http.StatusOK {
@@ -252,7 +236,6 @@ func TestManagementListShowsEveryAccountToAdminsOnly(t *testing.T) {
 		t.Fatal("never-logged-in bob has a last_login_at; the delete rule keys on null")
 	}
 
-	// Search applies to the management list too.
 	status, raw = doAuthenticated(t, handler, http.MethodGet, "/identity/admin/users?q=ghost", adminToken)
 	assertContractResponse(t, http.MethodGet, "/identity/admin/users", status, raw)
 	var filtered managementListResponse
@@ -261,7 +244,6 @@ func TestManagementListShowsEveryAccountToAdminsOnly(t *testing.T) {
 		t.Fatalf("management search result = %+v, want ghost", filtered.Users)
 	}
 
-	// The never-logged-in marker is real: after bob logs in, his row flips.
 	if status, _, _ := doLogin(t, handler, "bob@nevix.test", "bob-password-1"); status != http.StatusOK {
 		t.Fatalf("bob login: status %d", status)
 	}
@@ -296,7 +278,6 @@ func TestAuditListIsAdminOnlyAndNewestFirst(t *testing.T) {
 	defer cancel()
 	h, handler, adminToken, memberToken := directoryWorld(t, ctx)
 
-	// Generate governance history: one creation, one disable.
 	status, raw := doJSON(t, handler, http.MethodPost, "/identity/users", adminToken,
 		[]byte(`{"email":"new@nevix.test","initial_password":"initial-pass-1"}`))
 	if status != http.StatusCreated {
@@ -308,14 +289,12 @@ func TestAuditListIsAdminOnlyAndNewestFirst(t *testing.T) {
 		t.Fatalf("disable bob: status %d body %s", status, raw)
 	}
 
-	// Members never see the audit log: the RequireAdmin guard answers 403.
 	status, raw = doAuthenticated(t, handler, http.MethodGet, "/identity/audit-logs", memberToken)
 	assertContractResponse(t, http.MethodGet, "/identity/audit-logs", status, raw)
 	if status != http.StatusForbidden || !contains(raw, `"forbidden"`) {
 		t.Fatalf("audit list as member: status %d body %s, want 403 forbidden", status, raw)
 	}
 
-	// The admin reads newest-first pages with snapshots and metadata.
 	status, raw = doAuthenticated(t, handler, http.MethodGet, "/identity/audit-logs?per_page=2&page=1", adminToken)
 	assertContractResponse(t, http.MethodGet, "/identity/audit-logs", status, raw)
 	if status != http.StatusOK {
@@ -332,7 +311,6 @@ func TestAuditListIsAdminOnlyAndNewestFirst(t *testing.T) {
 	if len(page.Entries) != 2 || page.PerPage != 2 || page.Page != 1 {
 		t.Fatalf("audit page = %+v, want 2 rows at page 1 size 2", page)
 	}
-	// Newest first: the disable, then the creation.
 	if page.Entries[0].Action != "user_disabled" || page.Entries[1].Action != "user_created" {
 		t.Fatalf("audit order = [%s, %s], want newest-first user_disabled then user_created",
 			page.Entries[0].Action, page.Entries[1].Action)
@@ -340,7 +318,6 @@ func TestAuditListIsAdminOnlyAndNewestFirst(t *testing.T) {
 	if !page.Entries[0].CreatedAt.After(page.Entries[1].CreatedAt) {
 		t.Fatal("audit timestamps are not descending")
 	}
-	// Snapshots: the admin acted on Bob; the metadata carries the email.
 	disabled := page.Entries[0]
 	if disabled.ActorDisplayName != "Elio Admin" || disabled.TargetDisplayName == nil || *disabled.TargetDisplayName != "Bob Basin" {
 		t.Fatalf("user_disabled snapshots = %q -> %v, want Elio Admin -> Bob Basin", disabled.ActorDisplayName, disabled.TargetDisplayName)
@@ -353,7 +330,6 @@ func TestAuditListIsAdminOnlyAndNewestFirst(t *testing.T) {
 		t.Fatalf("user_created metadata = %v, want the email", created.Metadata)
 	}
 
-	// Page 2 continues strictly backward without overlap.
 	status, raw = doAuthenticated(t, handler, http.MethodGet, "/identity/audit-logs?per_page=2&page=2", adminToken)
 	assertContractResponse(t, http.MethodGet, "/identity/audit-logs", status, raw)
 	var page2 auditListResponse
@@ -365,7 +341,6 @@ func TestAuditListIsAdminOnlyAndNewestFirst(t *testing.T) {
 		t.Fatal("audit pages are not strictly ordered")
 	}
 
-	// Query-shape violations are named 400s.
 	status, raw = doAuthenticated(t, handler, http.MethodGet, "/identity/audit-logs?page=0", adminToken)
 	assertContractResponse(t, http.MethodGet, "/identity/audit-logs", status, raw)
 	if status != http.StatusBadRequest || !contains(raw, `"invalid_pagination"`) {

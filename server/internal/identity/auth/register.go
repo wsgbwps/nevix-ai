@@ -1,16 +1,6 @@
-// The self-registration command (issue #121, ADR-0015 2026-08-23 revision):
-// someone holding a server URL and an active join code registers themselves
-// an account — email and password of their own choosing, an optional display
-// name, and the code an admin issued (issue #120). The account lands as an
-// active member with no must_change_password (the credential is theirs from
-// the first moment) and carries a session straight into the application. One
-// write transaction holds the whole decision: the active code row is locked
-// and validated, the account is inserted, the Session module issues the
-// entry session with its atomic last-login stamp, and the user_self_registered
-// audit row commits with it — all or nothing. Failures feed the same
-// per-email limiter login uses; a wrong code and a locked-out deployment
-// (no active codes) are the same answer, so the surface offers no
-// enumeration gap.
+// Self-registration atomically redeems an active join code, creates an active
+// Member, issues its first session, and records the audit entry. Wrong,
+// revoked, and unavailable join codes share one response to avoid enumeration.
 package auth
 
 import (
@@ -152,14 +142,8 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (LoginRespo
 			return fmt.Errorf("auth: insert registered account: %w", err)
 		}
 
-		// The entry session is issued by the Session module inside this same
-		// transaction, atomically with the account creation: the equality
-		// stamp is the credential state this command just created, so the
-		// issuance lock-point recheck confirms it by construction and its
-		// inactive/stale sentinels are unreachable here — they stay unmapped
-		// internal errors. Issuance also advances last_login_at: the account
-		// enters the application with this session, so the never-logged-in
-		// deletion protection starts here too.
+		// Issue the entry session and last-login projection in the same
+		// transaction, using the credential state created above as its stamp.
 		issued, err = s.sessions.Issue(ctx, sc, session.IssueInput{
 			UserID:          registered.ID,
 			CredentialStamp: passwordHash,
@@ -196,10 +180,7 @@ func isUsersEmailKeyViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "users_email_key"
 }
 
-// MapRegisterError maps the registration surface's domain errors to the
-// public error envelope. It shares login's sentinels for the rate limit (the
-// same limiter, its own machine code) and the account-disabled shape is
-// unreachable here — registration creates the active account it answers with.
+// MapRegisterError maps registration domain errors to its public envelope.
 func MapRegisterError(err error) *command.Error {
 	var limited errRateLimited
 	if errors.As(err, &limited) {

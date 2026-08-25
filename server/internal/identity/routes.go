@@ -1,13 +1,7 @@
-// The Module's trusted-command route table. The zero-value guard is
-// RequireActiveUser: the team directory and the personal reads declare
-// nothing; every governance command and the admin reads declare GuardAdmin;
-// the public entry commands — login, join-code self-registration, and the
-// first-run setup pair (status and initialize) — declare GuardPublic. Every path's OPTIONS preflight twin and Allow-Methods
-// value derive from this single table (see command.Mount and
-// command.AllowMethods). The zero-value password gate blocks a route while
-// the caller owes the forced first-login change; me, logout, and the change
-// itself declare PasswordGateOpen (issue #101); the governance surface stays
-// gated (issue #102).
+// This table is the authoritative guard and password-gate declaration for the
+// Identity HTTP surface. Their zero values require an active user and a
+// completed initial password change; exceptions must be explicit. OPTIONS and
+// Allow-Methods derive from the same table.
 package identity
 
 import (
@@ -32,21 +26,12 @@ func (m *Module) routes() []command.Route {
 			Handler: command.Handle(m.auth.Login, auth.MapError, http.StatusOK),
 		},
 		{
-			// Self-registration (issue #121): redeem an active join code for a
-			// new active-member account and its first session. Public like
-			// login — the join code is the credential; a wrong or revoked code
-			// and a closed registration (no active codes) are one answer.
 			Method:  http.MethodPost,
 			Path:    "/identity/register",
 			Guard:   command.GuardPublic,
 			Handler: command.Handle(m.auth.Register, auth.MapRegisterError, http.StatusCreated),
 		},
 		{
-			// Instance Claim (issue #128): the public status probe the login
-			// screen switches on — initialized plus whether the claim demands a
-			// setup code — and the initialize command that claims the empty
-			// instance for its first admin. Both are public like login: an
-			// uninitialized instance has no credentials to authenticate with yet.
 			Method: http.MethodGet,
 			Path:   "/identity/setup/status",
 			Guard:  command.GuardPublic,
@@ -108,9 +93,6 @@ func (m *Module) routes() []command.Route {
 			}, auth.MapError, http.StatusOK),
 		},
 		{
-			// The team directory (issue #102): every active user reads the
-			// active accounts' email and display name; the zero-value guard
-			// carries that visibility decision.
 			Method:  http.MethodGet,
 			Path:    "/identity/users",
 			Handler: command.HandleNoBody(m.users.ListDirectory, users.MapError, http.StatusOK),
@@ -194,9 +176,6 @@ func (m *Module) routes() []command.Route {
 			}, users.MapError, http.StatusOK),
 		},
 		{
-			// Join-code governance (issue #120): issue, list, and revoke the
-			// registration credentials; all three stay behind GuardAdmin and
-			// the default password gate.
 			Method: http.MethodPost,
 			Path:   "/identity/admin/join-codes",
 			Guard:  command.GuardAdmin,

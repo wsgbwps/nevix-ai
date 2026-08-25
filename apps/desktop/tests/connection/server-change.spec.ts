@@ -15,9 +15,7 @@ import {
 } from '../auth/helpers/identity-server'
 
 const identityServer = readIdentityServerConfig()
-// The open claim server stays empty for the whole suite: the deleted
-// orchestration-only claim specs no longer consume it, so switching a signed-in
-// device onto it deterministically lands on the first-admin claim boundary.
+// The empty target server makes a switched device land on the first-admin claim boundary.
 const openServer = readOpenServerConfig()
 const SESSION_FILE_NAME = 'authentication-session.enc'
 
