@@ -199,9 +199,38 @@ type LogoutResponse struct {
 }
 
 // Logout revokes the caller's session only; every other device session stays
-// valid (user story 5). Revoking an already-ended session is a success.
+// valid (user story 5). Revocation is the session module's one trusted step
+// inside this command's write transaction: only a revocation that actually
+// ended the calling session writes the session_revoked audit row, so retries
+// never duplicate history, and revoking an already-ended session stays a
+// successful no-op.
 func (s *Service) Logout(ctx context.Context, principal authz.Principal) (LogoutResponse, error) {
-	if err := s.revokeSession(ctx, principal); err != nil {
+	// Input validation, not transactional work: a principal without a
+	// session identity is a wiring bug, refused before the transaction.
+	current, err := session.Current(principal.SessionID)
+	if err != nil {
+		return LogoutResponse{}, err
+	}
+	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
+		changed, err := s.sessions.Revoke(ctx, sc, current)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return nil
+		}
+		// The audit actor is snapshotted inside the transaction (ADR-0009):
+		// the display name recorded is the one committed at write time.
+		actor, err := audit.SnapshotSubject(ctx, sc.Tx(), principal.UserID)
+		if err != nil {
+			return err
+		}
+		return audit.Write(ctx, sc.Tx(), audit.Entry{
+			Actor:  actor,
+			Action: audit.SessionRevoked,
+		})
+	})
+	if err != nil {
 		return LogoutResponse{}, err
 	}
 	return LogoutResponse{Status: "logged_out"}, nil

@@ -1,10 +1,9 @@
 // The authentication adapter and the auth-owned session surfaces that remain
 // after the Session responsibility module cutover: bearer parsing in front of
-// session validation, logout's current-session revocation, the retention
-// sweep, and the user loads the auth commands read. Token mechanics, issuance,
-// validation, and sliding refresh live in the identity Module's session
-// package (spec #138); all writes run through the Write Transaction Module
-// (ADR-0015).
+// session validation, the retention sweep, and the user loads the auth
+// commands read. Token mechanics, issuance, validation, sliding refresh, and
+// revocation live in the identity Module's session package (spec #138); all
+// writes run through the Write Transaction Module (ADR-0015).
 package auth
 
 import (
@@ -19,7 +18,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/authz"
-	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
@@ -64,7 +62,7 @@ func (s *Service) Authenticate(r *http.Request) (authz.Principal, error) {
 	if !ok {
 		return authz.Principal{}, authz.ErrNotAuthenticated
 	}
-	identity, err := s.sessions.Validate(r.Context(), token)
+	validated, err := s.sessions.Validate(r.Context(), token)
 	if errors.Is(err, session.ErrInvalid) {
 		return authz.Principal{}, authz.ErrNotAuthenticated
 	}
@@ -72,38 +70,13 @@ func (s *Service) Authenticate(r *http.Request) (authz.Principal, error) {
 		return authz.Principal{}, fmt.Errorf("auth: validate session: %w", err)
 	}
 	return authz.Principal{
-		SessionID:          identity.SessionID,
-		UserID:             identity.UserID,
-		Email:              identity.Email,
-		DisplayName:        identity.DisplayName,
-		Role:               identity.Role,
-		MustChangePassword: identity.MustChangePassword,
+		SessionID:          validated.SessionID,
+		UserID:             validated.UserID,
+		Email:              validated.Email,
+		DisplayName:        validated.DisplayName,
+		Role:               validated.Role,
+		MustChangePassword: validated.MustChangePassword,
 	}, nil
-}
-
-// revokeSession deletes exactly one session row and writes its audit entry
-// when a row was actually removed; revoking an already-gone session is a
-// successful no-op logout. The principal's non-sensitive SessionID — not the
-// bearer-derived hash — identifies the row.
-func (s *Service) revokeSession(ctx context.Context, principal authz.Principal) error {
-	return s.runner.Run(ctx, func(sc *writetx.Scope) error {
-		tx := sc.Tx()
-		tag, err := tx.Exec(ctx, `DELETE FROM public.sessions WHERE id = $1`, principal.SessionID)
-		if err != nil {
-			return fmt.Errorf("auth: delete session: %w", err)
-		}
-		if tag.RowsAffected() == 0 {
-			return nil
-		}
-		actor, err := audit.SnapshotSubject(ctx, tx, principal.UserID)
-		if err != nil {
-			return err
-		}
-		return audit.Write(ctx, tx, audit.Entry{
-			Actor:  actor,
-			Action: audit.SessionRevoked,
-		})
-	})
 }
 
 // sweepOnce deletes expired sessions, sweeps audit rows past the 365-day
@@ -166,7 +139,7 @@ func (s *Service) loadUserByID(ctx context.Context, userID string) (userRecord, 
 type Service struct {
 	db                *pgxpool.Pool
 	runner            *writetx.Runner
-	sessions          *session.Store
+	sessions          *session.Service
 	limiter           *LoginRateLimiter
 	setupCodeRequired bool
 	setupCode         string
@@ -175,6 +148,6 @@ type Service struct {
 // NewService builds the service over the runtime pool, the shared write
 // transaction runner, and the Module-constructed session responsibility
 // module.
-func NewService(db *pgxpool.Pool, runner *writetx.Runner, sessions *session.Store) *Service {
+func NewService(db *pgxpool.Pool, runner *writetx.Runner, sessions *session.Service) *Service {
 	return &Service{db: db, runner: runner, sessions: sessions, limiter: NewLoginRateLimiter()}
 }

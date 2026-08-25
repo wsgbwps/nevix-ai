@@ -484,3 +484,48 @@ func TestLoginAdvancesLastLoginAtAndRefreshDoesNot(t *testing.T) {
 		t.Fatalf("sliding refresh moved last_login_at: %v -> %v", stamped, *lastLogin)
 	}
 }
+
+// Logging out on each of two devices ends exactly that device's session,
+// keeps the other device working until its own logout, and records one
+// session_revoked row per device — no duplicates and no no-op rows.
+func TestSequentialDeviceLogoutsEachRevokeOnlyTheirOwnSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	h := newHarness(t, ctx)
+	_, handler := h.loginReadyModule(t)
+
+	status, _, first := doLogin(t, handler, loginEmail, loginPassword)
+	if status != http.StatusOK {
+		t.Fatalf("first login: status %d", status)
+	}
+	status, _, second := doLogin(t, handler, loginEmail, loginPassword)
+	if status != http.StatusOK {
+		t.Fatalf("second login: status %d", status)
+	}
+
+	if status, body := doLogout(t, handler, first.Token); status != http.StatusOK {
+		t.Fatalf("first logout: status %d body %s", status, body)
+	}
+	// The second device never noticed the first device's logout.
+	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", second.Token); status != http.StatusOK {
+		t.Fatalf("second device after first logout: status %d body %s, want 200", status, body)
+	}
+	if status, body := doLogout(t, handler, second.Token); status != http.StatusOK {
+		t.Fatalf("second logout: status %d body %s", status, body)
+	}
+
+	if status, _ := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", first.Token); status != http.StatusUnauthorized {
+		t.Fatalf("first device after both logouts: status %d, want 401", status)
+	}
+	if status, _ := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", second.Token); status != http.StatusUnauthorized {
+		t.Fatalf("second device after both logouts: status %d, want 401", status)
+	}
+	if got := countSessions(t, h); got != 0 {
+		t.Fatalf("sessions after both logouts = %d, want 0", got)
+	}
+	actions := h.auditActions(t)
+	if len(actions) != 4 || actions[0] != "session_created" || actions[1] != "session_created" ||
+		actions[2] != "session_revoked" || actions[3] != "session_revoked" {
+		t.Fatalf("audit actions = %v, want two logins then two session_revoked", actions)
+	}
+}

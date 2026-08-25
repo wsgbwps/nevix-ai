@@ -181,6 +181,11 @@ assert_identity_integration_executed() {
     TestIssueRollsBackWithTheCallerTransaction
     TestValidateResolvesIdentityAndSlidesNearExpiryWithoutTouchingLastLogin
     TestValidateFailuresAndBestEffortRefresh
+    TestRevokeCoversCurrentOthersAndAllDispositions
+    TestRevokeIsANoOpForAbsentTargets
+    TestRevokeRollsBackWithTheCallerTransactionAndSkipsTheEffect
+    TestRevocationTargetConstructorsRefuseAbsentIdentities
+    TestSequentialDeviceLogoutsEachRevokeOnlyTheirOwnSession
     TestLoginAdvancesLastLoginAtAndRefreshDoesNot
     TestRegisterWithActiveCodeCreatesMemberAndSession
     TestRegisterRollsBackAccountSessionAuditAndLastLoginTogether

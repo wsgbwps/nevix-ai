@@ -3,7 +3,8 @@
 // route table machinery) lives in command; the auth service (passwords,
 // login/logout/me, bootstrap, the maintenance sweep) lives in auth; the
 // session responsibility module (token mechanics, issuance with the atomic
-// last-login projection, validation, sliding refresh) lives in session; the
+// last-login projection, validation, sliding refresh, revocation with
+// post-commit connection effects) lives in session; the
 // user-account surface beyond self (team directory, admin governance
 // commands) lives in users; audit log writes and the admin-only paginated
 // read live in audit; and the Write Transaction Module lives in writetx.
@@ -161,7 +162,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 	if err := tx.VerifyStartupIdentity(ctx); err != nil {
 		return nil, err
 	}
-	sessions := session.NewStore(pool, tx)
+	sessions := session.NewService(pool, tx)
 	service := auth.NewService(pool, tx, sessions)
 	if err := service.ArmInstanceClaim(ctx, cfg.SetupCodeRequired); err != nil {
 		return nil, err

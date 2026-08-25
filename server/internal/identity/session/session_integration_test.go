@@ -1,10 +1,12 @@
 // Real-PostgreSQL evidence for the session responsibility module (spec
-// #138, ticket #140): interactive issuance with the atomic last-login
+// #138, tickets #140/#141): interactive issuance with the atomic last-login
 // projection, the lock-point recheck of active status and the credential
 // stamp, participation in the caller's transaction (commit and rollback),
 // validation's one invalid-session answer, sliding refresh — including the
 // best-effort path under forced refresh failure versus fail-closed lookup
-// failure — and the absence of automatic audit writes. Opt-in like the
+// failure — the current/others/all revocation dispositions with their exact
+// post-commit effect (changed/no-op, rollback safety), and the absence of
+// automatic audit writes. Opt-in like the
 // auth/writetx suites: the harness (scripts/test-identity-integration.sh)
 // exports NEVIX_DATABASE_URL (owner) and NEVIX_IDENTITY_DATABASE_URL (the
 // identity_app runtime credential); without the harness these tests skip.
@@ -15,7 +17,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -41,7 +45,7 @@ func requireEnv(t *testing.T, key string) string {
 // storeHarness owns the two credentials and a store plus a caller-side
 // runner, built exactly as the Module builds them, with the schema already
 // at the newest version and user-system state truncated.
-func storeHarness(t *testing.T, ctx context.Context) (owner, runtime *pgxpool.Pool, store *Store, runner *writetx.Runner) {
+func storeHarness(t *testing.T, ctx context.Context) (owner, runtime *pgxpool.Pool, store *Service, runner *writetx.Runner) {
 	t.Helper()
 	ownerURL := requireEnv(t, "NEVIX_DATABASE_URL")
 	runtimeURL := requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL")
@@ -62,7 +66,7 @@ func storeHarness(t *testing.T, ctx context.Context) (owner, runtime *pgxpool.Po
 		t.Fatalf("truncate user-system tables: %v", err)
 	}
 	runner = writetx.New(runtime)
-	return owner, runtime, NewStore(runtime, runner), runner
+	return owner, runtime, NewService(runtime, runner), runner
 }
 
 // seedActiveUser inserts one active account and returns the id and the
@@ -110,7 +114,7 @@ func hexSHA256(token string) string {
 
 // issue runs one caller-owned write transaction whose only business work is
 // issuance — the Login shape with the audit step removed.
-func issue(t *testing.T, runner *writetx.Runner, ctx context.Context, store *Store, in IssueInput) (IssuedSession, error) {
+func issue(t *testing.T, runner *writetx.Runner, ctx context.Context, store *Service, in IssueInput) (IssuedSession, error) {
 	t.Helper()
 	var issued IssuedSession
 	err := runner.Run(ctx, func(sc *writetx.Scope) error {
@@ -262,7 +266,7 @@ func TestValidateResolvesIdentityAndSlidesNearExpiryWithoutTouchingLastLogin(t *
 		t.Fatalf("issue: %v", err)
 	}
 
-	identity, err := store.Validate(ctx, issued.Token)
+	validated, err := store.Validate(ctx, issued.Token)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -270,11 +274,11 @@ func TestValidateResolvesIdentityAndSlidesNearExpiryWithoutTouchingLastLogin(t *
 	if err := owner.QueryRow(ctx, `SELECT id FROM public.sessions WHERE device_name = 'laptop'`).Scan(&dbSessionID); err != nil {
 		t.Fatalf("read session id: %v", err)
 	}
-	if identity.SessionID != dbSessionID {
-		t.Fatalf("identity SessionID %s, want the sessions row id %s", identity.SessionID, dbSessionID)
+	if validated.SessionID != dbSessionID {
+		t.Fatalf("validated SessionID %s, want the sessions row id %s", validated.SessionID, dbSessionID)
 	}
-	if identity.UserID != userID || identity.Email != "validator@nevix.test" || identity.Role != "member" || identity.DisplayName != "validator@nevix.test" || identity.MustChangePassword {
-		t.Fatalf("identity user facts = %+v, want the seeded account", identity)
+	if validated.UserID != userID || validated.Email != "validator@nevix.test" || validated.Role != "member" || validated.DisplayName != "validator@nevix.test" || validated.MustChangePassword {
+		t.Fatalf("validated user facts = %+v, want the seeded account", validated)
 	}
 
 	var lastLoginAfterIssue time.Time
@@ -331,7 +335,7 @@ func TestValidateFailuresAndBestEffortRefresh(t *testing.T) {
 		t.Fatalf("connect refresh pool: %v", err)
 	}
 	t.Cleanup(refreshPool.Close)
-	store := NewStore(readPool, writetx.New(refreshPool))
+	store := NewService(readPool, writetx.New(refreshPool))
 
 	if _, err := store.Validate(ctx, "unknown-token"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unknown token: error %v, want ErrInvalid", err)
@@ -393,5 +397,341 @@ func TestValidateFailuresAndBestEffortRefresh(t *testing.T) {
 	readPool.Close()
 	if _, err := store.Validate(ctx, issued.Token); err == nil || errors.Is(err, ErrInvalid) {
 		t.Fatalf("validate with dead lookup: error %v, want a non-ErrInvalid infrastructure error", err)
+	}
+}
+
+// committedEffect is one post-commit revocation dispatch observed through
+// the real production log: the exact affected session identities and how
+// many of their rows were still visible when the effect ran (zero: the
+// commit precedes the effect).
+type committedEffect struct {
+	sessionIDs []string
+	visible    int
+}
+
+// logRecorder captures the default logger's records so package tests
+// observe the real production effect dispatch — no production seam exists
+// for it, and none is added for tests. It also proves timing: at dispatch
+// time it queries the committed table through the owner pool.
+type logRecorder struct {
+	owner   *pgxpool.Pool
+	effects []committedEffect
+}
+
+// captureLogs swaps the default logger for the recorder and restores it on
+// cleanup. Tests in this package run sequentially, so the swap is safe.
+func captureLogs(t *testing.T, owner *pgxpool.Pool) *logRecorder {
+	t.Helper()
+	recorder := &logRecorder{owner: owner}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(recorder))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return recorder
+}
+
+// Handle records the session-revocation dispatches; other records are
+// ignored.
+func (r *logRecorder) Handle(_ context.Context, rec slog.Record) error {
+	if rec.Message != "identity: session revocation committed" {
+		return nil
+	}
+	var ids []string
+	rec.Attrs(func(a slog.Attr) bool {
+		if a.Key == "session_ids" {
+			if value, ok := a.Value.Any().([]string); ok {
+				ids = value
+			}
+		}
+		return true
+	})
+	if ids == nil {
+		return nil
+	}
+	var visible int
+	if err := r.owner.QueryRow(context.Background(),
+		`SELECT count(*) FROM public.sessions WHERE id::text = ANY($1)`, ids,
+	).Scan(&visible); err != nil {
+		return err
+	}
+	r.effects = append(r.effects, committedEffect{sessionIDs: ids, visible: visible})
+	return nil
+}
+
+func (r *logRecorder) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (r *logRecorder) WithAttrs([]slog.Attr) slog.Handler           { return r }
+func (r *logRecorder) WithGroup(string) slog.Handler                { return r }
+
+// sessionIDByDevice reads one durable session identity by its device name.
+func sessionIDByDevice(t *testing.T, owner *pgxpool.Pool, ctx context.Context, deviceName string) string {
+	t.Helper()
+	var id string
+	if err := owner.QueryRow(ctx, `SELECT id FROM public.sessions WHERE device_name = $1`, deviceName).Scan(&id); err != nil {
+		t.Fatalf("read session id for %q: %v", deviceName, err)
+	}
+	return id
+}
+
+// The three dispositions delete exactly their closed target, answer changed
+// only when durable state moved, write no audit row of their own, and hand
+// the exact revoked identities to the post-commit effect — which observes
+// the rows already gone, proving the effect runs after the commit.
+func TestRevokeCoversCurrentOthersAndAllDispositions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	owner, _, store, runner := storeHarness(t, ctx)
+	userID, stamp := seedActiveUser(t, owner, ctx, "revoker@nevix.test")
+
+	laptop, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "laptop", CredentialStamp: stamp})
+	if err != nil {
+		t.Fatalf("issue laptop: %v", err)
+	}
+	tablet, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "tablet", CredentialStamp: stamp})
+	if err != nil {
+		t.Fatalf("issue tablet: %v", err)
+	}
+	phone, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "phone", CredentialStamp: stamp})
+	if err != nil {
+		t.Fatalf("issue phone: %v", err)
+	}
+	laptopID := sessionIDByDevice(t, owner, ctx, "laptop")
+	tabletID := sessionIDByDevice(t, owner, ctx, "tablet")
+	phoneID := sessionIDByDevice(t, owner, ctx, "phone")
+
+	// The real production dispatch is observed through the default logger:
+	// each committed batch and the rows still visible at effect time (must
+	// be zero: commit precedes the effect).
+	logs := captureLogs(t, owner)
+	batches := func() [][]string {
+		var ids [][]string
+		for _, effect := range logs.effects {
+			ids = append(ids, effect.sessionIDs)
+		}
+		return ids
+	}
+	revoke := func(target RevocationTarget, err error) bool {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("construct revocation target: %v", err)
+		}
+		var changed bool
+		if err := runner.Run(ctx, func(sc *writetx.Scope) error {
+			var err error
+			changed, err = store.Revoke(ctx, sc, target)
+			return err
+		}); err != nil {
+			t.Fatalf("revoke %T: %v", target, err)
+		}
+		return changed
+	}
+	countUserSessions := func() int {
+		t.Helper()
+		var count int
+		if err := owner.QueryRow(ctx, `SELECT count(*) FROM public.sessions WHERE user_id = $1`, userID).Scan(&count); err != nil {
+			t.Fatalf("count user sessions: %v", err)
+		}
+		return count
+	}
+
+	// others: every session of the user except the named current one.
+	if !revoke(Others(userID, laptopID)) {
+		t.Fatal("others revocation of two live sessions reported no change")
+	}
+	if got := countUserSessions(); got != 1 {
+		t.Fatalf("sessions after others = %d, want 1 (the current one)", got)
+	}
+	if _, err := store.Validate(ctx, laptop.Token); err != nil {
+		t.Fatalf("current session after others: %v, want still valid", err)
+	}
+	if _, err := store.Validate(ctx, tablet.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("tablet after others: error %v, want ErrInvalid", err)
+	}
+	if _, err := store.Validate(ctx, phone.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("phone after others: error %v, want ErrInvalid", err)
+	}
+	if got := len(batches()); got != 1 {
+		t.Fatalf("effect batches after others = %d, want 1", got)
+	} else {
+		want := []string{phoneID, tabletID}
+		slices.Sort(want)
+		if !slices.Equal(batches()[0], want) {
+			t.Fatalf("others effect batch = %v, want exactly %v", batches()[0], want)
+		}
+		if logs.effects[0].visible != 0 {
+			t.Fatalf("others effect saw %d affected rows still present, want 0 (commit precedes effect)", logs.effects[0].visible)
+		}
+	}
+
+	// current: exactly the one named session.
+	if !revoke(Current(laptopID)) {
+		t.Fatal("current revocation of the live session reported no change")
+	}
+	if got := countUserSessions(); got != 0 {
+		t.Fatalf("sessions after current = %d, want 0", got)
+	}
+	if _, err := store.Validate(ctx, laptop.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("laptop after current: error %v, want ErrInvalid", err)
+	}
+	if got := len(batches()); got != 2 {
+		t.Fatalf("effect batches after current = %d, want 2", got)
+	} else if !slices.Equal(batches()[1], []string{laptopID}) {
+		t.Fatalf("current effect batch = %v, want exactly [%s]", batches()[1], laptopID)
+	}
+
+	// all: every session of the user.
+	if _, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "desktop", CredentialStamp: stamp}); err != nil {
+		t.Fatalf("issue desktop: %v", err)
+	}
+	if _, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "kiosk", CredentialStamp: stamp}); err != nil {
+		t.Fatalf("issue kiosk: %v", err)
+	}
+	desktopID := sessionIDByDevice(t, owner, ctx, "desktop")
+	kioskID := sessionIDByDevice(t, owner, ctx, "kiosk")
+	if !revoke(All(userID)) {
+		t.Fatal("all revocation of two live sessions reported no change")
+	}
+	if got := countUserSessions(); got != 0 {
+		t.Fatalf("sessions after all = %d, want 0", got)
+	}
+	if got := len(batches()); got != 3 {
+		t.Fatalf("effect batches after all = %d, want 3", got)
+	} else {
+		want := []string{desktopID, kioskID}
+		slices.Sort(want)
+		if !slices.Equal(batches()[2], want) {
+			t.Fatalf("all effect batch = %v, want exactly %v", batches()[2], want)
+		}
+		if logs.effects[2].visible != 0 {
+			t.Fatalf("all effect saw %d affected rows still present, want 0 (commit precedes effect)", logs.effects[2].visible)
+		}
+	}
+
+	// Empty targets: every disposition is a successful no-op — no change, no
+	// effect, no audit row.
+	if revoke(Current(laptopID)) {
+		t.Fatal("current revocation of an absent session reported a change")
+	}
+	if revoke(Others(userID, laptopID)) {
+		t.Fatal("others revocation with no other sessions reported a change")
+	}
+	if revoke(All(userID)) {
+		t.Fatal("all revocation of a sessionless user reported a change")
+	}
+	if got := len(batches()); got != 3 {
+		t.Fatalf("effect batches after no-ops = %d, want still 3", got)
+	}
+	if got := countAuditRows(t, owner, ctx); got != 0 {
+		t.Fatalf("audit rows after revocations = %d, want 0 (audit is caller-owned)", got)
+	}
+}
+
+// Revoking an absent target from the start stays the defined no-op: no
+// durable change, no registered effect, no audit write.
+func TestRevokeIsANoOpForAbsentTargets(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	owner, _, store, runner := storeHarness(t, ctx)
+	userID, _ := seedActiveUser(t, owner, ctx, "absent@nevix.test")
+
+	logs := captureLogs(t, owner)
+	assertNoOp := func(target RevocationTarget, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("construct revocation target: %v", err)
+		}
+		var changed bool
+		if err := runner.Run(ctx, func(sc *writetx.Scope) error {
+			var err error
+			changed, err = store.Revoke(ctx, sc, target)
+			return err
+		}); err != nil {
+			t.Fatalf("revoke %T: %v", target, err)
+		}
+		if changed {
+			t.Fatalf("revocation of absent target %T reported a change", target)
+		}
+	}
+	assertNoOp(Current("00000000-0000-0000-0000-000000000001"))
+	assertNoOp(Others(userID, "00000000-0000-0000-0000-000000000002"))
+	assertNoOp(All(userID))
+	if got := len(logs.effects); got != 0 {
+		t.Fatalf("absent targets dispatched %d effects, want 0", got)
+	}
+	if got := countSessions(t, owner, ctx); got != 0 {
+		t.Fatalf("sessions after no-op revocations = %d, want 0", got)
+	}
+	if got := countAuditRows(t, owner, ctx); got != 0 {
+		t.Fatalf("audit rows after no-op revocations = %d, want 0", got)
+	}
+}
+
+// Revocation participates in the caller's transaction: a later failure or
+// panic in the same callback rolls the deletion back — the sessions survive,
+// the post-commit effect never runs, and no audit row appears.
+func TestRevokeRollsBackWithTheCallerTransactionAndSkipsTheEffect(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	owner, _, store, runner := storeHarness(t, ctx)
+	userID, stamp := seedActiveUser(t, owner, ctx, "rollback-revoker@nevix.test")
+
+	first, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "stay-a", CredentialStamp: stamp})
+	if err != nil {
+		t.Fatalf("issue first: %v", err)
+	}
+	if _, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "stay-b", CredentialStamp: stamp}); err != nil {
+		t.Fatalf("issue second: %v", err)
+	}
+	firstID := sessionIDByDevice(t, owner, ctx, "stay-a")
+
+	logs := captureLogs(t, owner)
+	current, err := Current(firstID)
+	if err != nil {
+		t.Fatalf("construct current target: %v", err)
+	}
+
+	sentinel := errors.New("caller command failed after revocation")
+	changedInTx := false
+	err = runner.Run(ctx, func(sc *writetx.Scope) error {
+		changed, err := store.Revoke(ctx, sc, current)
+		changedInTx = changed
+		if err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("rolled-back run: error %v, want the caller sentinel", err)
+	}
+	if !changedInTx {
+		t.Fatal("revocation inside the aborted transaction reported no change; the deletion must have run pre-rollback")
+	}
+	if got := countSessions(t, owner, ctx); got != 2 {
+		t.Fatalf("sessions after rollback = %d, want 2", got)
+	}
+	if _, err := store.Validate(ctx, first.Token); err != nil {
+		t.Fatalf("revoked-then-rolled-back session: %v, want still valid", err)
+	}
+	if got := len(logs.effects); got != 0 {
+		t.Fatalf("rollback dispatched %d effects, want 0", got)
+	}
+
+	// The panic path: writetx rolls back best-effort and re-panics; the
+	// effect still never runs.
+	func() {
+		defer func() { _ = recover() }()
+		_ = runner.Run(ctx, func(sc *writetx.Scope) error {
+			if _, err := store.Revoke(ctx, sc, current); err != nil {
+				return err
+			}
+			panic("caller panic after revocation")
+		})
+	}()
+	if got := countSessions(t, owner, ctx); got != 2 {
+		t.Fatalf("sessions after panicking run = %d, want 2", got)
+	}
+	if got := len(logs.effects); got != 0 {
+		t.Fatalf("panicking run dispatched %d effects, want 0", got)
+	}
+	if got := countAuditRows(t, owner, ctx); got != 0 {
+		t.Fatalf("audit rows after rolled-back revocations = %d, want 0", got)
 	}
 }
