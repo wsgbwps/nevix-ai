@@ -1,20 +1,32 @@
-# Delivery: pull requests
+# Delivery: direct-main fast lanes and pull requests
 
-`main` receives work through pull requests. The GitHub Free private
-repository has no server-side branch protection, so the PR checks are watched
-locally before merging; local hooks block direct `main` commits and pushes
-that fall outside the config/docs fast lane.
+Pure documentation and repository-tooling changes may be committed and pushed
+directly to `main` without a pull request or CI. All other work reaches `main`
+through pull requests. The GitHub Free private repository has no server-side
+branch protection, so local hooks enforce this boundary and PR checks are
+watched locally before merging.
 
-## Config and docs fast lane
+## Direct-main fast lanes
 
-Changes confined to `.pi/`, `.codex/`, `.agents/`, `.omp/`, `.scratch/`,
-`docs/`, root-level `*.md` files, and the nested `AGENTS.md` files
-(`apps/desktop/AGENTS.md`, `server/AGENTS.md`) may be committed and pushed
-directly to `main`. The push skips the CI gate (`paths-ignore`), and the
-local hooks allow it only when every tracked change in the push stays inside
-those paths. A push that mixes them with anything else must go through a PR.
+A tracked path is eligible for a direct-main fast lane when it is either:
 
-## Task flow
+- documentation: an `*.md` file at any depth or a file inside any `docs/`
+  directory, including context-scoped ADRs and documentation assets; or
+- repository tooling: a file inside `.pi/`, `.codex/`, `.agents/`, `.omp/`,
+  `.scratch/`, `.codegraph/`, `.github/`, or `.husky/`; the root `.mcp.json`
+  or `skills-lock.json`; or one of the delivery-harness files
+  `scripts/classify-ci-changes.mjs`,
+  `scripts/tests/classify-ci-changes.test.mjs`,
+  `scripts/post-merge-dedup.mjs`, and
+  `scripts/tests/post-merge-dedup.test.mjs`.
+
+Fast-lane changes may be committed on `main` and pushed directly. They skip
+the CI gate through `paths-ignore`; no PR or CI run is required. Before
+pushing, confirm the complete commit and push range contains only fast-lane
+paths; documentation and repository-tooling paths may be mixed. A change that
+includes any other path must use the PR flow below.
+
+## Pull-request flow
 
 1. Work on one short-lived task branch. Keep the slice independently buildable
    and revertible.

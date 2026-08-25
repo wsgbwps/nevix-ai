@@ -15,8 +15,8 @@
 ## Shared areas and delivery
 
 - `apps/desktop/src/renderer/src/components/ui/`, `apps/desktop/src/renderer/src/lib/`, `apps/desktop/src/renderer/src/hooks/`, `server/internal/` shared sub-packages (e.g. `internal/event`), and root `contracts/` are shared areas; call out their changes with impact and tests in the PR description
-- One task delivers one cohesive vertical slice for one primary Domain on a short-lived task branch; no unrelated cleanup or generalized refactors
-- Delivery is PR-based — read [docs/agents/delivery.md](docs/agents/delivery.md) before pushing, opening a PR, or merging; it owns the task flow (branch → PR → `CI gate` → squash-merge) and the config/docs fast lane that may push `main` directly
+- Outside the direct-main fast lanes, one task delivers one cohesive vertical slice for one primary Domain on a short-lived task branch; no unrelated cleanup or generalized refactors
+- Delivery uses PRs except for the direct-main documentation and repository-tooling fast lanes — read [docs/agents/delivery.md](docs/agents/delivery.md) before committing or pushing on `main`, opening a PR, or merging; it owns the path rules and both delivery flows
 - Changes to responsibilities across contexts or modules, trusted-execution seams, or architectural decisions require an ADR before implementation — update the one whose decision changes, or write a new one when none covers it
 - High-risk changes — authentication or authorization, security boundaries, public contracts such as root `contracts/`, and persistent data or migrations — require a brief written plan under `.scratch/` before implementation
 

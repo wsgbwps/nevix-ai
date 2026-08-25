@@ -5,15 +5,24 @@ on:
     branches:
       - main
     paths-ignore:
+      - ".codegraph/**"
       - ".pi/**"
       - ".codex/**"
       - ".agents/**"
       - ".omp/**"
       - ".scratch/**"
+      - ".github/**"
+      - ".husky/**"
+      - ".mcp.json"
+      - "skills-lock.json"
+      - "scripts/classify-ci-changes.mjs"
+      - "scripts/tests/classify-ci-changes.test.mjs"
+      - "scripts/post-merge-dedup.mjs"
+      - "scripts/tests/post-merge-dedup.test.mjs"
       - "docs/**"
       - "*.md"
-      - "apps/desktop/AGENTS.md"
-      - "server/AGENTS.md"
+      - "**/*.md"
+      - "**/docs/**"
   pull_request:
     branches:
       - main

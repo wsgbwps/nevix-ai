@@ -153,6 +153,67 @@ test("the CI gate runs harness tests inline without a separate job", () => {
   assert.doesNotMatch(workflow, /HARNESS_(?:REQUIRED|RESULT)/);
 });
 
+test("main pushes containing only fast-lane paths skip the CI workflow", () => {
+  const workflow = readFileSync(
+    join(REPOSITORY, ".github/workflows/ci-gate.yml"),
+    "utf8",
+  );
+
+  assert.match(workflow, /- "\*\*\/\*\.md"/);
+  assert.match(workflow, /- "\*\*\/docs\/\*\*"/);
+  for (const fastLanePath of [
+    ".codegraph/**",
+    ".pi/**",
+    ".github/**",
+    ".husky/**",
+    ".mcp.json",
+    "skills-lock.json",
+    "scripts/classify-ci-changes.mjs",
+    "scripts/tests/classify-ci-changes.test.mjs",
+    "scripts/post-merge-dedup.mjs",
+    "scripts/tests/post-merge-dedup.test.mjs",
+  ]) {
+    assert.match(
+      workflow,
+      new RegExp(
+        `- "${fastLanePath.replaceAll(".", "\\.").replaceAll("*", "\\*")}"`,
+      ),
+    );
+  }
+});
+
+test("the pre-push hook allows only documentation and repository tooling", () => {
+  const hook = readFileSync(join(REPOSITORY, ".husky/pre-push"), "utf8");
+  const pattern = hook.match(/grep -qvE '([^']+)'/)?.[1];
+  assert.ok(pattern, "pre-push fast-lane pattern is missing");
+
+  const isFastLanePath = (candidate) => new RegExp(pattern).test(candidate);
+  for (const candidate of [
+    "README.md",
+    "apps/desktop/docs/guide.png",
+    ".pi/extensions/pi-hooks.ts",
+    ".github/workflows/ci-gate.yml",
+    ".husky/pre-push",
+    ".mcp.json",
+    "skills-lock.json",
+    "scripts/classify-ci-changes.mjs",
+    "scripts/tests/post-merge-dedup.test.mjs",
+  ]) {
+    assert.equal(isFastLanePath(candidate), true, candidate);
+  }
+
+  for (const candidate of [
+    "Makefile",
+    "package.json",
+    "scripts/test-identity-integration.sh",
+    "apps/desktop/src/main/index.ts",
+    "server/cmd/server/main.go",
+    "contracts/openapi.yaml",
+  ]) {
+    assert.equal(isFastLanePath(candidate), false, candidate);
+  }
+});
+
 test("the e2e job and gate honor the skip-e2e label with full-e2e precedence", () => {
   const workflow = readFileSync(
     join(REPOSITORY, ".github/workflows/ci-gate.yml"),

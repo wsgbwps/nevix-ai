@@ -54,7 +54,7 @@ test("blocks commits on main and pushes to main", () => {
   );
 });
 
-test("fast-lane paths allow direct main commit and push", () => {
+test("repository-tooling paths allow direct main commit and push", () => {
   // 未提供路径（信息不可得）时 fail-safe 拦截
   assert.match(blockedBashReason("git commit -m x", "main") ?? "", /任务分支/);
   assert.match(
@@ -66,6 +66,16 @@ test("fast-lane paths allow direct main commit and push", () => {
   assert.equal(
     blockedBashReason("git commit -m 'tweak skill'", "main", [
       ".agents/skills/implement/SKILL.md",
+      ".pi/extensions/pi-hooks.ts",
+      ".codegraph/.gitignore",
+      ".github/workflows/ci-gate.yml",
+      ".husky/pre-push",
+      ".mcp.json",
+      "skills-lock.json",
+      "scripts/classify-ci-changes.mjs",
+      "scripts/tests/classify-ci-changes.test.mjs",
+      "scripts/post-merge-dedup.mjs",
+      "scripts/tests/post-merge-dedup.test.mjs",
       ".scratch/note.md",
     ]),
     undefined,
@@ -75,7 +85,7 @@ test("fast-lane paths allow direct main commit and push", () => {
   assert.match(
     blockedBashReason("git commit -m x", "main", [
       ".pi/extensions/pi-hooks.ts",
-      "server/main.go",
+      "scripts/test-identity-integration.sh",
     ]) ?? "",
     /任务分支/,
   );
@@ -102,25 +112,28 @@ test("fast-lane paths allow direct main commit and push", () => {
   );
 });
 
-test("documentation paths ride the fast lane, product docs do not", () => {
+test("documentation paths at any depth ride the fast lane", () => {
   assert.equal(
     blockedBashReason("git commit -m docs", "main", [
       "README.md",
       "AGENTS.md",
       "docs/adr/0012-x.md",
       "apps/desktop/AGENTS.md",
-      "server/AGENTS.md",
+      "apps/desktop/docs/guide.md",
+      "apps/desktop/docs/architecture.png",
+      "server/operations.md",
     ]),
     undefined,
   );
   assert.match(
-    blockedBashReason("git commit -m x", "main", [
-      "apps/desktop/docs/guide.md",
-    ]) ?? "",
+    blockedBashReason("git commit -m x", "main", ["Makefile"]) ?? "",
     /任务分支/,
   );
   assert.match(
-    blockedBashReason("git commit -m x", "main", ["Makefile"]) ?? "",
+    blockedBashReason("git commit -m x", "main", [
+      "apps/desktop/docs/guide.md",
+      "apps/desktop/src/main/index.ts",
+    ]) ?? "",
     /任务分支/,
   );
   assert.equal(

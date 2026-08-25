@@ -6,12 +6,19 @@ const GO_PATH = /\.go$/;
 const MAIN_PUSH_COMMAND =
   /git\s+push([^;&|]*)(\s+main(\s|$)|:refs\/heads\/main|:main(\s|$))/;
 
-const FAST_LANE_PATH =
-  /^(\.(?:pi|codex|agents|omp|scratch)\/|docs\/|(?:apps\/desktop|server)\/AGENTS\.md$|[^/]+\.md$)/;
-const FAST_LANE_NOTE = "（仅 agent 配置与文档改动可直提直推）";
+const REPOSITORY_TOOLING_DIRECTORY_PATH =
+  /^\.(?:pi|codex|agents|omp|scratch|codegraph|github|husky)\//;
+const REPOSITORY_TOOLING_FILE_PATH =
+  /^(?:\.mcp\.json|skills-lock\.json|scripts\/(?:classify-ci-changes|post-merge-dedup)\.mjs|scripts\/tests\/(?:classify-ci-changes|post-merge-dedup)\.test\.mjs)$/;
+const DOCUMENTATION_PATH = /(?:^|\/)docs\/|\.md$/;
+const FAST_LANE_NOTE = "（仅文档与非产品仓库工具改动可直提直推）";
 
 export function isFastLanePath(path: string): boolean {
-  return FAST_LANE_PATH.test(path);
+  return (
+    REPOSITORY_TOOLING_DIRECTORY_PATH.test(path) ||
+    REPOSITORY_TOOLING_FILE_PATH.test(path) ||
+    DOCUMENTATION_PATH.test(path)
+  );
 }
 
 function fastLaneOnly(paths: string[] | undefined): boolean {

@@ -36,3 +36,22 @@ PR head 相同,PR 已验证;合并后重跑只产生重复成本(实测每次约
 Full E2E 改为按需:给 PR 打 `full-e2e` 标签即在 PR 上升级为全量,
 `workflow_dispatch` 保留手动触发。交付机器自身(workflow + 分类器)的
 改动也只跑 harness 内联测试,不再触发产品套件。
+
+## 更新 — 2026-08-25:所有纯文档直提 `main`
+
+文档快道从根目录 `*.md`、根 `docs/**` 和两个嵌套 `AGENTS.md`
+扩展为任意深度的 `*.md` 与任意 `docs/` 目录下的文件。只要整个
+待提交及待推送范围全部属于文档快道,就可直接提交并推送
+`main`,无需 PR,且 push 通过 `paths-ignore` 不启动 CI。上述范围可覆盖
+Desktop 等 context 内的 ADR、说明文档与文档资产。任一非文档路径混入时,
+整个变更恢复 PR 与 CI 流程;非文档快道按下节另行扩展。
+
+## 更新 — 2026-08-25:非产品仓库工具直提 `main`
+
+agent-config 快道扩展并更名为 repository-tooling 快道。除原有
+`.pi/`、`.codex/`、`.agents/`、`.omp/` 与 `.scratch/` 外,新增
+`.codegraph/`、`.github/`、`.husky/`、根 `.mcp.json`、`skills-lock.json`
+以及 delivery harness 的分类与去重脚本及其测试。这些路径不进入
+产品运行时或构建产物;只要整个待提交及待推送范围都在文档或
+repository-tooling 快道内,就可直接推送 `main` 并跳过 CI。产品集成
+脚本、`Makefile`、依赖清单、Desktop、Server 与 `contracts/` 不在此范围。
