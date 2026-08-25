@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Request } from '@playwright/test'
 import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -63,27 +63,48 @@ test('changing the configured server while signed in clears the session and relo
       }
 
       // The Settings connection section rewrites the configured server URL;
-      // saving must clear the stored session and reload the renderer, so the
-      // fresh runtime binds to the new server instead of mixing two of them.
-      await openSettingsFromUserMenu(launched.page)
-      await launched.page.getByRole('button', { name: 'Server connection' }).click()
-      await launched.page.getByLabel('Server address').fill(openServer!.serverUrl)
-      await launched.page.getByRole('button', { name: 'Test connection' }).click()
-      await expect(launched.page.getByTestId('connection-probe-reachable')).toBeVisible()
-      await launched.page
-        .getByRole('button', { name: 'Save and continue' })
-        .click({ noWaitAfter: true })
+      // saving must clear the stored session before reloading the renderer.
+      // With a persisted old token, a missing clear would cause restore to
+      // validate it against the new server. Count that request so the canary
+      // proves the Connection-triggered clear instead of merely the later
+      // rejection cleanup path.
+      const openServerOrigin = new URL(openServer!.serverUrl).origin
+      let openServerSessionValidations = 0
+      const observeOpenServerRequest = (request: Request): void => {
+        const requestUrl = new URL(request.url())
+        if (
+          request.method() === 'GET' &&
+          requestUrl.origin === openServerOrigin &&
+          requestUrl.pathname === '/identity/users/me'
+        ) {
+          openServerSessionValidations += 1
+        }
+      }
+      launched.page.on('request', observeOpenServerRequest)
+      try {
+        await openSettingsFromUserMenu(launched.page)
+        await launched.page.getByRole('button', { name: 'Server connection' }).click()
+        await launched.page.getByLabel('Server address').fill(openServer!.serverUrl)
+        await launched.page.getByRole('button', { name: 'Test connection' }).click()
+        await expect(launched.page.getByTestId('connection-probe-reachable')).toBeVisible()
+        await launched.page
+          .getByRole('button', { name: 'Save and continue' })
+          .click({ noWaitAfter: true })
 
-      // The same window has reloaded against the still-empty new server: no
-      // stale shell, no stored session, and the claim boundary answers.
-      await expect(launched.page.getByRole('heading', { name: 'Initialize Nevix AI' })).toBeVisible(
-        { timeout: 20_000 }
-      )
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
-      if (hasSecureBackend) {
-        expect(await fileExists(sessionPath)).toBe(false)
+        // The same window has reloaded against the still-empty new server: no
+        // stale shell, no stored session, and the claim boundary answers.
+        await expect(
+          launched.page.getByRole('heading', { name: 'Initialize Nevix AI' })
+        ).toBeVisible({ timeout: 20_000 })
+        await expect(
+          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        ).toHaveCount(0)
+        if (hasSecureBackend) {
+          expect(openServerSessionValidations).toBe(0)
+          expect(await fileExists(sessionPath)).toBe(false)
+        }
+      } finally {
+        launched.page.off('request', observeOpenServerRequest)
       }
     } finally {
       await launched.electronApp.close()
