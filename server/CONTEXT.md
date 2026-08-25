@@ -55,8 +55,12 @@ _Avoid_: 初始管理员密码, bootstrap 密码, 超级管理员
 _Avoid_: Host Operator, System Actor, Service Account
 
 **Session**:
-服务端可吊销的已认证状态：opaque token 仅以 hash 存于 Postgres，多设备并存、滑动过期；改密、停用或吊销即刻生效并断开该用户的 SSE 连接。
+服务端可吊销的已认证状态：opaque token 仅以 hash 存于 Postgres，多设备并存、滑动过期。“即刻吊销”以吊销事务提交为界：提交后的认证失败并断开相应 SSE，已进入执行的 HTTP 请求不追溯取消，回滚不断开连接。
 _Avoid_: JWT, 登录态
+
+**Last Login At（最近登录时间）**:
+User 最近一次成功签发交互式 Session 的时间投影；Login、Instance Claim 与 Join Code 注册成功后推进，Session refresh 不推进。
+_Avoid_: 最后活跃时间, Session 刷新时间
 
 **Authentication Identity (认证身份)**:
 运行时数据库连接经 `session_user` 观察到的登录主体。Identity 运行时必须**直接以 `identity_app` 登录**；owner 等高权限凭据即使能 `SET ROLE identity_app` 也不是合法运行配置，认证身份不能用事务内角色切换替代。
