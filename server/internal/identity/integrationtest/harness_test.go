@@ -10,6 +10,7 @@ package integrationtest
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -143,6 +144,51 @@ func (h *harness) auditActions(t *testing.T) []string {
 		t.Fatalf("iterate audit actions: %v", err)
 	}
 	return actions
+}
+
+// countSessions asserts the total live session rows through the owner
+// credential. Shared support — login, claim, register, and password
+// scenarios all assert session storage — so it lives with the harness
+// rather than one scenario file.
+func countSessions(t *testing.T, h *harness) int {
+	t.Helper()
+	var count int
+	if err := h.fixturePool.QueryRow(context.Background(), `SELECT count(*) FROM public.sessions`).Scan(&count); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	return count
+}
+
+// failAuditWritesFor installs a temporary BEFORE INSERT trigger on
+// audit_logs that raises for exactly one action: the fixture (owner)
+// credential injects a failure at the audit participant — the last
+// participant of the claim and register write transactions — so a test can
+// observe the whole command transaction rolling back together. The returned
+// restore drops both objects; it also runs on test cleanup.
+func (h *harness) failAuditWritesFor(t *testing.T, action string) (restore func()) {
+	t.Helper()
+	trigger := "fail_audit_" + action
+	fn := trigger + "_fn"
+	if _, err := h.fixturePool.Exec(context.Background(), fmt.Sprintf(
+		`CREATE OR REPLACE FUNCTION public.%s() RETURNS trigger AS $fn$ BEGIN RAISE EXCEPTION 'injected audit failure for %s'; END $fn$ LANGUAGE plpgsql`,
+		fn, action)); err != nil {
+		t.Fatalf("install failing audit function: %v", err)
+	}
+	if _, err := h.fixturePool.Exec(context.Background(), fmt.Sprintf(
+		`CREATE TRIGGER %s BEFORE INSERT ON public.audit_logs FOR EACH ROW WHEN (NEW.action = '%s') EXECUTE FUNCTION public.%s()`,
+		trigger, action, fn)); err != nil {
+		t.Fatalf("install failing audit trigger: %v", err)
+	}
+	restore = func() {
+		if _, err := h.fixturePool.Exec(context.Background(), fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON public.audit_logs`, trigger)); err != nil {
+			t.Errorf("drop failing audit trigger: %v", err)
+		}
+		if _, err := h.fixturePool.Exec(context.Background(), fmt.Sprintf(`DROP FUNCTION IF EXISTS public.%s()`, fn)); err != nil {
+			t.Errorf("drop failing audit function: %v", err)
+		}
+	}
+	t.Cleanup(restore)
+	return restore
 }
 
 // startWorkers runs one Module's background workers for the duration of the

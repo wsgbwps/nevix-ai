@@ -35,15 +35,6 @@ func (h *harness) loginReadyModule(t *testing.T) (*identity.Module, http.Handler
 	return h.moduleWithConfig(t, cfg)
 }
 
-func sessionCount(t *testing.T, h *harness) int {
-	t.Helper()
-	var count int
-	if err := h.fixturePool.QueryRow(context.Background(), `SELECT count(*) FROM public.sessions`).Scan(&count); err != nil {
-		t.Fatalf("count sessions: %v", err)
-	}
-	return count
-}
-
 func TestLoginIssuesOpaqueSessionStoredOnlyAsHash(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -66,7 +57,7 @@ func TestLoginIssuesOpaqueSessionStoredOnlyAsHash(t *testing.T) {
 	}
 
 	// The server stores only the SHA-256 hash; the token bytes never persist.
-	if got := sessionCount(t, h); got != 1 {
+	if got := countSessions(t, h); got != 1 {
 		t.Fatalf("sessions after login = %d, want 1", got)
 	}
 	digest := sha256.Sum256([]byte(login.Token))
@@ -156,7 +147,7 @@ func TestLoginAnswersDisabledAccountWithAccountDisabled(t *testing.T) {
 	if !contains(body, `"account_disabled"`) {
 		t.Fatalf("disabled login body %s, want account_disabled", body)
 	}
-	if got := sessionCount(t, h); got != 0 {
+	if got := countSessions(t, h); got != 0 {
 		t.Fatalf("disabled login created %d sessions", got)
 	}
 }
@@ -191,7 +182,7 @@ func TestLoginRateLimitsAfterWindowedFailures(t *testing.T) {
 	if err != nil || retryAfter <= 0 {
 		t.Fatalf("Retry-After header %q, want a positive integer", rec.Header().Get("Retry-After"))
 	}
-	if got := sessionCount(t, h); got != 0 {
+	if got := countSessions(t, h); got != 0 {
 		t.Fatalf("locked-out attempts created %d sessions", got)
 	}
 
@@ -267,7 +258,7 @@ func TestLogoutRevokesOnlyTheCallingSession(t *testing.T) {
 	if first.Token == second.Token {
 		t.Fatal("two logins issued the same token; sessions are not independent")
 	}
-	if got := sessionCount(t, h); got != 2 {
+	if got := countSessions(t, h); got != 2 {
 		t.Fatalf("sessions for two devices = %d, want 2", got)
 	}
 
@@ -282,7 +273,7 @@ func TestLogoutRevokesOnlyTheCallingSession(t *testing.T) {
 	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", second.Token); status != http.StatusOK {
 		t.Fatalf("other device after logout: status %d body %s, want 200 (only the calling session ends)", status, body)
 	}
-	if got := sessionCount(t, h); got != 1 {
+	if got := countSessions(t, h); got != 1 {
 		t.Fatalf("sessions after one logout = %d, want 1", got)
 	}
 	if actions := h.auditActions(t); len(actions) != 3 || actions[2] != "session_revoked" {
@@ -387,16 +378,16 @@ func TestSweepDeletesExpiredSessions(t *testing.T) {
 		 FROM public.users WHERE email = 'other@nevix.test'`); err != nil {
 		t.Fatalf("insert expired session: %v", err)
 	}
-	if got := sessionCount(t, h); got != 2 {
+	if got := countSessions(t, h); got != 2 {
 		t.Fatalf("sessions before sweep = %d, want 2", got)
 	}
 
 	h.startWorkers(t, m) // runs the sweep immediately
 	deadline := time.Now().Add(10 * time.Second)
-	for sessionCount(t, h) == 2 && time.Now().Before(deadline) {
+	for countSessions(t, h) == 2 && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
-	if got := sessionCount(t, h); got != 1 {
+	if got := countSessions(t, h); got != 1 {
 		t.Fatalf("sessions after sweep = %d, want 1 (only the live session)", got)
 	}
 	if status, body := doAuthenticated(t, handler, http.MethodGet, "/identity/users/me", login.Token); status != http.StatusOK {

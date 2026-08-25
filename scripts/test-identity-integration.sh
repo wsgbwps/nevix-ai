@@ -161,6 +161,7 @@ assert_identity_integration_executed() {
     TestProtectedClaimStatusAndCodeDisclosure
     TestSetupStatusReturnsOnlyTheTwoBooleans
     TestOpenClaimCreatesFirstAdminWithoutACredential
+    TestClaimRollsBackAccountSessionAuditAndLastLoginTogether
     TestProtectedClaimDemandsTheCode
     TestClaimAnswersConflictOnceInitialized
     TestRestartRotatesTheSetupCode
@@ -181,6 +182,9 @@ assert_identity_integration_executed() {
     TestValidateResolvesIdentityAndSlidesNearExpiryWithoutTouchingLastLogin
     TestValidateFailuresAndBestEffortRefresh
     TestLoginAdvancesLastLoginAtAndRefreshDoesNot
+    TestRegisterWithActiveCodeCreatesMemberAndSession
+    TestRegisterRollsBackAccountSessionAuditAndLastLoginTogether
+    TestRegisterHoldsTheJoinCodeRowLockUntilCommit
   )
   # Goose migration-engine sentinels live in the migration package.
   local -a migration_tests=(

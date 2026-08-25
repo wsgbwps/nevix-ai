@@ -5,10 +5,11 @@
 // active member with no must_change_password (the credential is theirs from
 // the first moment) and carries a session straight into the application. One
 // write transaction holds the whole decision: the active code row is locked
-// and validated, the account is inserted, the user_self_registered audit row
-// commits with it, and the session is issued — all or nothing. Failures feed
-// the same per-email limiter login uses; a wrong code and a locked-out
-// deployment (no active codes) are the same answer, so the surface offers no
+// and validated, the account is inserted, the Session module issues the
+// entry session with its atomic last-login stamp, and the user_self_registered
+// audit row commits with it — all or nothing. Failures feed the same
+// per-email limiter login uses; a wrong code and a locked-out deployment
+// (no active codes) are the same answer, so the surface offers no
 // enumeration gap.
 package auth
 
@@ -119,13 +120,8 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (LoginRespo
 		displayName = derivedDisplayName(email)
 	}
 
-	token, tokenHash, err := session.NewToken()
-	if err != nil {
-		return LoginResponse{}, err
-	}
-
 	var registered userRecord
-	var expiresAt time.Time
+	var issued session.IssuedSession
 	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
 		tx := sc.Tx()
 		// Lock the active code row: the validation decision holds until
@@ -156,20 +152,20 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (LoginRespo
 			return fmt.Errorf("auth: insert registered account: %w", err)
 		}
 
-		// The account enters the application with this session, so the
-		// never-logged-in deletion protection starts here too.
-		if _, err := tx.Exec(ctx,
-			`UPDATE public.users SET last_login_at = now() WHERE id = $1`, registered.ID,
-		); err != nil {
-			return fmt.Errorf("auth: stamp registered first login: %w", err)
-		}
-		if err := tx.QueryRow(ctx,
-			`INSERT INTO public.sessions (user_id, token_hash, expires_at)
-			 VALUES ($1, $2, now() + make_interval(secs => $3))
-			 RETURNING expires_at`,
-			registered.ID, tokenHash, session.TTL.Seconds(),
-		).Scan(&expiresAt); err != nil {
-			return fmt.Errorf("auth: insert registered session: %w", err)
+		// The entry session is issued by the Session module inside this same
+		// transaction, atomically with the account creation: the equality
+		// stamp is the credential state this command just created, so the
+		// issuance lock-point recheck confirms it by construction and its
+		// inactive/stale sentinels are unreachable here — they stay unmapped
+		// internal errors. Issuance also advances last_login_at: the account
+		// enters the application with this session, so the never-logged-in
+		// deletion protection starts here too.
+		issued, err = s.sessions.Issue(ctx, sc, session.IssueInput{
+			UserID:          registered.ID,
+			CredentialStamp: passwordHash,
+		})
+		if err != nil {
+			return fmt.Errorf("auth: issue registered session: %w", err)
 		}
 
 		actor, err := audit.SnapshotSubject(ctx, tx, registered.ID)
@@ -189,7 +185,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (LoginRespo
 		return LoginResponse{}, err
 	}
 	s.limiter.RecordSuccess(email)
-	return LoginResponse{Token: token, ExpiresAt: expiresAt, User: userResponse(registered)}, nil
+	return LoginResponse{Token: issued.Token, ExpiresAt: issued.ExpiresAt, User: userResponse(registered)}, nil
 }
 
 // isUsersEmailKeyViolation reports whether err is the users email unique

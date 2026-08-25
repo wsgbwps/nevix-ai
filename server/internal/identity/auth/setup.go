@@ -173,11 +173,12 @@ func (r *InitializeRequest) Validate() *command.Error {
 // once any user exists the deployment's protection setting has no effect),
 // the protected mode's setup-code evaluation (a missing code is a 400 shape
 // failure; a wrong code feeds the per-email limiter login and registration
-// share), the admin insert with must_change_password=false, the last-login
-// stamp, the session, and the instance_claimed audit row whose metadata
-// records whether protection was on. An open claim never evaluates a code.
-// Success clears the in-memory setup code immediately: the claim surface is
-// closed by the committed user, and the code has no further use.
+// share), the admin insert with must_change_password=false, the Session
+// module's issuance of the entry session with its atomic last-login stamp,
+// and the instance_claimed audit row whose metadata records whether
+// protection was on. An open claim never evaluates a code. Success clears
+// the in-memory setup code immediately: the claim surface is closed by the
+// committed user, and the code has no further use.
 func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginResponse, error) {
 	if req.Email == nil || req.Password == nil {
 		// Unreachable through the HTTP pipeline (Validate rejects it first);
@@ -214,13 +215,8 @@ func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginR
 		displayName = derivedDisplayName(email)
 	}
 
-	token, tokenHash, err := session.NewToken()
-	if err != nil {
-		return LoginResponse{}, err
-	}
-
 	var claimed userRecord
-	var expiresAt time.Time
+	var issued session.IssuedSession
 	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
 		tx := sc.Tx()
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, claimAdvisoryLockKey); err != nil {
@@ -255,20 +251,21 @@ func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginR
 		).Scan(&claimed.ID, &claimed.Email, &claimed.DisplayName, &claimed.Role, &claimed.Status, &claimed.MustChangePassword); err != nil {
 			return fmt.Errorf("auth: insert claiming admin: %w", err)
 		}
-		// The account enters the application with this session, so the
-		// never-logged-in deletion protection starts here too.
-		if _, err := tx.Exec(ctx,
-			`UPDATE public.users SET last_login_at = now() WHERE id = $1`, claimed.ID,
-		); err != nil {
-			return fmt.Errorf("auth: stamp claim first login: %w", err)
-		}
-		if err := tx.QueryRow(ctx,
-			`INSERT INTO public.sessions (user_id, token_hash, expires_at)
-			 VALUES ($1, $2, now() + make_interval(secs => $3))
-			 RETURNING expires_at`,
-			claimed.ID, tokenHash, session.TTL.Seconds(),
-		).Scan(&expiresAt); err != nil {
-			return fmt.Errorf("auth: insert claim session: %w", err)
+		// The entry session is issued by the Session module inside this same
+		// transaction, atomically with the account creation: the equality
+		// stamp is the credential state this command just created, so the
+		// issuance lock-point recheck confirms it by construction and its
+		// inactive/stale sentinels are unreachable here — they stay unmapped
+		// internal errors. Issuance also advances last_login_at: the account
+		// enters the application with this session, so the never-logged-in
+		// deletion protection starts here too.
+		var err error
+		issued, err = s.sessions.Issue(ctx, sc, session.IssueInput{
+			UserID:          claimed.ID,
+			CredentialStamp: passwordHash,
+		})
+		if err != nil {
+			return fmt.Errorf("auth: issue claim session: %w", err)
 		}
 		actor, err := audit.SnapshotSubject(ctx, tx, claimed.ID)
 		if err != nil {
@@ -291,7 +288,7 @@ func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginR
 	}
 	s.setupCode = ""
 	s.limiter.RecordSuccess(email)
-	return LoginResponse{Token: token, ExpiresAt: expiresAt, User: userResponse(claimed)}, nil
+	return LoginResponse{Token: issued.Token, ExpiresAt: issued.ExpiresAt, User: userResponse(claimed)}, nil
 }
 
 // MapSetupError maps the claim surface's domain errors to the public error
