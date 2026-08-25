@@ -5,7 +5,7 @@
     "apps/desktop",
     ".scratch/authentication-runtime-cutover-134-plan.md"
   ],
-  "currentDiffDigest": "sha256:bf7fa4965340878200ac31bf320b05c34653e0f9ee83a9ebc21bee00aa762d14",
+  "currentDiffDigest": "sha256:1878be8781e091a788432b93613ad4f30e9a359dcdcddca84fd7a442e5cbd252",
   "fullReviewCount": 1,
   "targetedReviewRound": 2,
   "findings": [
@@ -285,10 +285,10 @@
     }
   ],
   "relevantCheck": {
-    "name": "Desktop final gates: typecheck + lint + unit + component + architecture + auth artifacts + full E2E",
+    "name": "PR #136 CI gate (Ubuntu basic_text Full E2E) plus final local static/unit/component gates",
     "result": "PASS",
-    "coverage": "typecheck PASS; lint PASS; unit 105 passed; component 37 passed; architecture PASS; auth artifacts PASS; full E2E 69 passed / 2 Linux-only skipped",
-    "diffDigest": "sha256:bf7fa4965340878200ac31bf320b05c34653e0f9ee83a9ebc21bee00aa762d14"
+    "coverage": "GitHub CI: Validate harness PASS; Desktop lint/unit PASS; typecheck/build PASS; Full E2E PASS (3m52s); CI gate PASS. Local: lint PASS; unit 105 passed; component 37 passed; architecture/auth artifacts PASS.",
+    "diffDigest": "sha256:1878be8781e091a788432b93613ad4f30e9a359dcdcddca84fd7a442e5cbd252"
   },
   "outcome": "closed"
 }
