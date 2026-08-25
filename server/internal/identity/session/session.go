@@ -1,18 +1,7 @@
-// Package session is the Identity Module's Session responsibility module: the
-// one trusted implementation of production session state transitions. It owns
-// opaque token generation and hashing, the TTL/sliding-refresh/expiry policy,
-// interactive session issuance with the atomic last-login projection, session
-// validation, best-effort sliding refresh, the current/others/all revocation
-// dispositions with their post-commit connection effects, and the expired-
-// session sweep. Callers
-// keep command rules, authorization, business locks, audit semantics, and
-// HTTP mapping: issuance and revocation participate in the caller's
-// already-open Write Transaction through the writetx.Scope they receive, and
-// the package never starts, commits, rolls back, or retries a transaction of
-// its own. Reads and the refresh write go through the pool and the Write
-// Transaction Module exactly like the callers it replaces. PostgreSQL is used
-// directly; there is deliberately no repository interface, DAO, or test
-// double (spec #138).
+// Package session owns production Session state transitions. Issuance and
+// revocation participate in the caller's open writetx.Scope and never begin,
+// commit, roll back, or retry that transaction. Command rules, authorization,
+// audit semantics, and HTTP mapping remain with callers.
 package session
 
 import (
@@ -215,14 +204,9 @@ func (s *Service) refresh(ctx context.Context, sessionID string) {
 	}
 }
 
-// SweepExpired deletes the expired sessions — the physical cleanup half of
-// the expiry policy. It runs as its own write transaction through the Write
-// Transaction Module exactly like the refresh maintenance write; the sweep
-// worker owns only when to call it. Logical expiry never depends on this
-// cleanup: Validate already rejects expired sessions at lookup, so a sweep
-// failure is reported to the caller and never extends validity, and the
-// worker simply retries on its next tick. It writes no audit row and
-// registers no post-commit effect — those semantics belong to revocation.
+// SweepExpired removes expired rows through the Write Transaction Module.
+// Logical expiry remains enforced by Validate, so cleanup failure cannot
+// extend a session's validity. The caller owns retry policy.
 func (s *Service) SweepExpired(ctx context.Context) error {
 	err := s.runner.Run(ctx, func(sc *writetx.Scope) error {
 		_, err := sc.Tx().Exec(ctx, `DELETE FROM public.sessions WHERE expires_at < now()`)
@@ -234,13 +218,9 @@ func (s *Service) SweepExpired(ctx context.Context) error {
 	return nil
 }
 
-// RevocationTarget names the exact durable sessions one revocation covers.
-// It is a closed set — the current session, a user's other sessions, or a
-// user's every session — constructible only through Current, Others, and
-// All, so an enum-plus-optional-fields shape can never express an invalid
-// combination such as an all with an exception or a current without a
-// session identity (spec #138). The future License's proven global case
-// extends this set with a fourth variant rather than bypassing it.
+// RevocationTarget is a closed set covering the current session, a user's
+// other sessions, or all of a user's sessions. Its constructors prevent
+// invalid or accidentally widened combinations.
 type RevocationTarget interface {
 	isRevocationTarget()
 }
@@ -293,15 +273,10 @@ func All(userID string) (RevocationTarget, error) {
 	return allUserSessions{userID: userID}, nil
 }
 
-// Revoke deletes exactly the target's durable sessions as one participant
-// in the caller's open Write Transaction — it never starts, commits, or
-// rolls a transaction back itself. The caller-visible result is only
-// whether durable session state changed: revoking an already-absent target
-// is a successful no-op that registers no effect and writes no audit row
-// (audit semantics belong to the command). The exact revoked session
-// identities stay internal facts: they drive the registered post-commit
-// connection effect, which the Write Transaction scope runs once and only
-// after the commit succeeds.
+// Revoke deletes exactly the target's durable sessions inside the caller's
+// open Write Transaction. An absent target is a successful no-op with no
+// post-commit effect; after a change, the exact session IDs are logged only
+// after commit. Audit semantics remain with the calling command.
 func (s *Service) Revoke(ctx context.Context, sc *writetx.Scope, target RevocationTarget) (bool, error) {
 	revoked, err := s.deleteTargeted(ctx, sc, target)
 	if err != nil {
@@ -311,11 +286,6 @@ func (s *Service) Revoke(ctx context.Context, sc *writetx.Scope, target Revocati
 		return false, nil
 	}
 	sort.Strings(revoked)
-	// The post-commit connection effect: no physical SSE hub owner exists
-	// yet, so none is frozen here (spec #138) — the committed revocation
-	// records its exact affected set, and when the hub's real owner arrives
-	// it replaces this single site without revisiting ordering, which the
-	// Write Transaction scope already guarantees.
 	sc.AfterCommit(func() {
 		slog.Info("identity: session revocation committed", "session_ids", revoked)
 	})

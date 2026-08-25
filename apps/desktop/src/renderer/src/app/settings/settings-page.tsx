@@ -36,12 +36,7 @@ import {
 } from './settings-navigation'
 import { CLEAN_LEAVE_SEMANTICS, reduceLeaveSemantics } from './settings-leave-semantics'
 
-/**
- * One row per Settings Section: the contribution semantics it reports before
- * its Feature has spoken. Adding a Section is one row here plus its renderer
- * below and the Feature-owned files that contribute it; the Record keyed by
- * SettingsSection makes a missing row a compile error.
- */
+// The Record makes missing default semantics for a Settings Section a compile error.
 const SETTINGS_SECTION_REGISTRY: Record<SettingsSection, SettingsContribution> = {
   profile: CLEAN_LEAVE_SEMANTICS,
   language: CLEAN_LEAVE_SEMANTICS,

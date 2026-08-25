@@ -1,18 +1,6 @@
-// The Instance Claim (issue #128, ADR-0015 2026-08-24 revision): the first
-// administrator of an empty instance is created by whoever claims it first —
-// through the public initialize command, with email, password, and display
-// name the claimer chooses (the password is theirs from the first moment, so
-// must_change_password stays false). By default claiming is open: no
-// credential is required, and the deployment is trusted to complete the claim
-// before the Server URL is widely exposed. A deployment that wants extra
-// protection sets NEVIX_SETUP_CODE_REQUIRED=true: Module construction then
-// generates a one-time setup code on an empty instance — eight Crockford
-// base32 characters disclosed once in the operations log and held only in
-// process memory — and only its holder can claim. Concurrent claims
-// serialize on one transaction-scoped advisory lock with an empty-table
-// re-check: the first request commits the admin, the losers answer 409, and
-// once any user exists the claim surface is closed and the code no longer
-// exists. A successful claim clears the code from memory immediately.
+// Instance Claim is the only path to the first Admin on an empty instance.
+// Concurrent claims serialize under an advisory lock and re-check emptiness;
+// optional setup codes exist only in process memory until a successful claim.
 package auth
 
 import (
@@ -34,12 +22,8 @@ import (
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
-// claimAdvisoryLockKey serializes concurrent claim attempts
-// (0x534554555041444D spells "SETUPADM"): every initialize re-proves the
-// empty users table inside this transaction-scoped lock, so exactly one
-// request can ever observe emptiness and commit the first admin; see
-// joinCodeCapLockKey for why row visibility alone cannot serialize a
-// count-then-insert decision.
+// claimAdvisoryLockKey serializes the empty-table check because row visibility
+// alone cannot make a concurrent check-then-insert claim first-wins.
 const claimAdvisoryLockKey = 0x534554555041444D
 
 // setupCodeLength is the generated code's length: 8 Crockford base32
@@ -66,9 +50,7 @@ var errInvalidSetupCode = errors.New("auth: invalid setup code")
 // a user — another claim won the race first.
 var errInstanceInitialized = errors.New("auth: instance already initialized")
 
-// generateSetupCode returns one uniformly random code string (the same
-// generator shape the join-code service owns; each package owns its own
-// credential format).
+// generateSetupCode returns a uniformly random code.
 func generateSetupCode() (string, error) {
 	raw := make([]byte, setupCodeLength)
 	if _, err := rand.Read(raw); err != nil {
@@ -166,19 +148,10 @@ func (r *InitializeRequest) Validate() *command.Error {
 	return nil
 }
 
-// Initialize claims the instance for its first admin and the session that
-// carries the wizard straight into the application. One write transaction
-// holds the whole decision: the claim advisory lock, the empty-table
-// re-check (concurrent claims serialize here — the loser answers 409, and
-// once any user exists the deployment's protection setting has no effect),
-// the protected mode's setup-code evaluation (a missing code is a 400 shape
-// failure; a wrong code feeds the per-email limiter login and registration
-// share), the admin insert with must_change_password=false, the Session
-// module's issuance of the entry session with its atomic last-login stamp,
-// and the instance_claimed audit row whose metadata records whether
-// protection was on. An open claim never evaluates a code. Success clears
-// the in-memory setup code immediately: the claim surface is closed by the
-// committed user, and the code has no further use.
+// Initialize atomically claims an empty instance for its first Admin and
+// issues the entry session. The advisory lock, emptiness re-check, optional
+// setup-code check, user/session writes, and audit entry share one transaction.
+// Success clears the in-memory setup code.
 func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginResponse, error) {
 	if req.Email == nil || req.Password == nil {
 		// Unreachable through the HTTP pipeline (Validate rejects it first);
@@ -198,13 +171,8 @@ func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginR
 	if err != nil {
 		return LoginResponse{}, errPasswordTooShort
 	}
-	// The setup code is only meaningful while the claim can succeed; whether
-	// one is required at all is decided inside the transaction, after the
-	// emptiness recheck, so an initialized instance always answers 409 no
-	// matter what the protected deployment used to demand. When present, the
-	// code is canonicalized the way the operations log discloses it — grouped
-	// (XXXX-XXXX), case-insensitively — so a code read aloud and typed
-	// lowercase still claims: hyphens and spaces stripped, uppercase folded.
+	// Match the logged Crockford form case-insensitively and without separators.
+	// Requirement is evaluated only after the transactional emptiness re-check.
 	setupCode := ""
 	if req.SetupCode != nil {
 		setupCode = strings.ToUpper(strings.TrimSpace(*req.SetupCode))
@@ -227,15 +195,11 @@ func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginR
 			return fmt.Errorf("auth: re-check users for claim: %w", err)
 		}
 		if exists {
-			// First-wins against concurrent attempts; the code is never
-			// evaluated on this path — once any user exists, the protected
-			// deployment's demand has no effect either.
+			// Never evaluate setup credentials after the instance has a user.
 			return errInstanceInitialized
 		}
 		if s.setupCodeRequired {
 			if req.SetupCode == nil {
-				// The emptiness recheck above proves this deployment still
-				// demands the code: a body without one is a shape failure.
 				return errSetupCodeRequired
 			}
 			if subtle.ConstantTimeCompare([]byte(setupCode), []byte(s.setupCode)) != 1 {
@@ -251,14 +215,8 @@ func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginR
 		).Scan(&claimed.ID, &claimed.Email, &claimed.DisplayName, &claimed.Role, &claimed.Status, &claimed.MustChangePassword); err != nil {
 			return fmt.Errorf("auth: insert claiming admin: %w", err)
 		}
-		// The entry session is issued by the Session module inside this same
-		// transaction, atomically with the account creation: the equality
-		// stamp is the credential state this command just created, so the
-		// issuance lock-point recheck confirms it by construction and its
-		// inactive/stale sentinels are unreachable here — they stay unmapped
-		// internal errors. Issuance also advances last_login_at: the account
-		// enters the application with this session, so the never-logged-in
-		// deletion protection starts here too.
+		// Issue the entry session and last-login projection in the same
+		// transaction, using the credential state created above as its stamp.
 		var err error
 		issued, err = s.sessions.Issue(ctx, sc, session.IssueInput{
 			UserID:          claimed.ID,
@@ -318,7 +276,6 @@ func MapSetupError(err error) *command.Error {
 	}
 }
 
-// usersEmpty reports whether the users table has no rows.
 func (s *Service) usersEmpty(ctx context.Context) (bool, error) {
 	var exists bool
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM public.users)`).Scan(&exists); err != nil {
@@ -327,8 +284,6 @@ func (s *Service) usersEmpty(ctx context.Context) (bool, error) {
 	return !exists, nil
 }
 
-// derivedDisplayName derives an initial display name from the email local
-// part; the user renames it later at will.
 func derivedDisplayName(email string) string {
 	local, _, _ := strings.Cut(email, "@")
 	return local
