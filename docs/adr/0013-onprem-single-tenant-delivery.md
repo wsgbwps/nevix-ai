@@ -6,6 +6,8 @@
 
 2026-08-24 修订：首次管理员改由默认无凭据的实例认领产生，设置码降为可选部署保护；移除环境变量管理员 Bootstrap 与离线管理员恢复通道。
 
+2026-08-26 修订（AI Creation V1 实施规格 [#150](https://github.com/wsgbwps/nevix-ai/issues/150)）：官方公网 Compose 形状定为「固定版本/摘要的 Nginx 只暴露 HTTPS 443」，客户部署只接受 https Server URL；主密钥与 TLS 材料纳入备份范围；交付资产 canonical owner 命名见「部署形状」与「备份」。
+
 ## 背景
 
 Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付到客户内网，一套部署对应一个客户。无生产数据，旧表直接删掉重建（旧世界经 `saas-final` tag 存档），不开新仓库。Supabase 整体退场，只留 Postgres，auth 收进 Go server。
@@ -22,10 +24,13 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 ### 部署形状
 
 - 单一 docker compose：Go server + 捆绑 postgres 官方镜像（钉 major.minor）+ named volume（`pgdata`、`blobs`）。
+- 官方公网 Compose（2026-08-26 修订）：面向客户固定公网 IP 的官方交付栈在同一 compose 内加入固定版本/摘要的 Nginx，只暴露 HTTPS 443；Go、PostgreSQL、Storage 与管理端口只在 internal network，不直接暴露。客户部署只接受 https Server URL，显式 development mode 才允许 loopback http（桌面侧连接规则见 [ADR-0014](0014-go-sole-trusted-data-plane.md)）；官方公网 Compose 强制 Setup Code，受隔离内网可显式关闭。
+- 自签证书生命周期：初次启动为固定公网 IP 生成含 IP SAN 的五年自签证书，持久化于独立 tls volume（私钥 0600）；重启/升级复用、不自动轮换，输出 SHA-256 指纹与可重复查询命令，到期前 90 天持续告警。Nginx 删除外部 Forwarded headers 后向 private-network Go 写可信 HTTPS 标记；Provider Key 与 Reauthentication endpoint 无法证明 HTTPS 时返回 `secure_transport_required`。
 - V1 只支持捆绑 Postgres；客户强制使用自有数据库平台时再加外部 DSN 支持（届期为兼容矩阵问题）。
 - PG 大版本升级是文档化的人工 dump/restore 维护操作，不做自动升级。
 - 服务启动配置 env-only：`PORT`、`DATABASE_URL`（compose 内部生成，不外暴露）、`NEVIX_SETUP_CODE_REQUIRED=true|false`（默认 `false`，见 ADR-0015）、Storage 选择（见下）。无 CLI flag、无 config 文件解析。
 - `ADMIN_EMAIL` / `ADMIN_INITIAL_PASSWORD` 管理员 Bootstrap 通道删除；检测到任一旧变量即以明确配置错误拒绝启动，防止旧配置被静默忽略后意外开放实例认领。
+- 交付资产 canonical owner（2026-08-26 修订，仓库目录契约同步）：官方公网 Compose、Nginx 配置、证书初始化与部署手册归 `deploy/`；备份与恢复脚本及手册归 `scripts/`；后续交付切片不得临时新建顶层 source owner。
 
 ### 首次部署与管理员连续性
 
@@ -55,6 +60,7 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 
 - `scripts/` 提供 pg_dump 到挂载卷与恢复验证的脚本及手册，备份策略归客户 IT；不做自动备份 sidecar。
 - filesystem 后端的 blob 卷必须与 pg_dump 同窗口备份；元数据与 blob 的一致性 V1 不做工具保证，手册写明风险。
+- 2026-08-26 修订：Provider Credential 主密钥所在的 secrets volume 与 Nginx tls volume 一并纳入备份范围；PostgreSQL、blob、主密钥与 TLS 材料能按手册组合备份与恢复（主密钥语义见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)，丢失后凭 Admin 重新认证恢复，不自动重建）。
 
 ### 规模画像
 
@@ -73,7 +79,7 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 ### 推迟与范围边界
 
 - 分发渠道（桌面安装包来源、server 镜像如何到客户）推迟到打包分发阶段另议，本 ADR 不预设。
-- AI 创作模块（Kapon 首发接入、BYO-key 可选性、egress 代理策略）全部归 [issue #77](https://github.com/wsgbwps/nevix-ai/issues/77) 轨道，本 ADR 组不设计创作域。
+- AI 创作域（Kapon 接入、凭据保护、生成编排）的产品合同归实施规格 [#150](https://github.com/wsgbwps/nevix-ai/issues/150)，跨 Module 可信 seam 基线见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)；本 ADR 组不展开创作域内部设计。
 
 ## Considered Options
 
@@ -86,5 +92,5 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 ## 后果
 
 - `supabase/` 目录、Supabase 相关 E2E/CI harness 随用户系统迁移拆除。
-- 部署手册（compose 样例、.env 模板、实例认领顺序、双 Admin 建议、备份/恢复、nginx TLS 样例、PG 大版本升级步骤）随交付工作落地。
+- 部署手册（compose 样例、.env 模板、实例认领顺序、双 Admin 建议、备份/恢复、nginx TLS 配置、PG 大版本升级步骤）随交付工作落地，归 `deploy/` 与 `scripts/` 的 canonical owner。
 - README 中 electron-updater 的不实表述已修正（仓库从未实现 auto-updater）。
