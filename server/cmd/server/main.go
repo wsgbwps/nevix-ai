@@ -81,9 +81,11 @@ func run() error {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
 	router.Use(middleware.Logger)
+	// The service field is the identity the Desktop connection probe checks
+	// (#153): an HTTP endpoint that answers anything else is not this server.
 	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"status":"ok"}`)
+		fmt.Fprint(w, `{"status":"ok","service":"nevix-server"}`)
 	})
 	router.Group(func(r chi.Router) {
 		identityModule.Register(r, bus)

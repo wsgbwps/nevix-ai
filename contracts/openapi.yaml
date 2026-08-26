@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Nevix AI API
-  version: 0.9.0
+  version: 0.10.0
   description: |-
     API contract between desktop client and backend server.
 
@@ -12,6 +12,34 @@ info:
     - **演进纪律**：只增不改 —— 新增命令加路径、响应只加字段，不改既有字段与错误码语义；不引入 /v1 版本前缀，直到出现真实的 breaking 需求。
     - **漂移防线**：响应级对照校验已作为测试断言落地：server 集成测试将其观察到的受信命令 HTTP 响应与本文件逐条对照 —— 状态码必须有文档条目、响应体必须含文档要求的必填字段、error 机器码必须属于该状态码文档化的枚举。
 paths:
+  /health:
+    get:
+      summary: 实例健康与身份自述
+      description: |-
+        进程级健康端点，由 Go composition root 直接挂载（不属于任何业务 Module）。
+        Desktop 连接探测以此响应判定目标是否为本产品的服务器（#153）：
+        `status` 与 `service` 两者都对才算兼容，否则客户端报告 incompatible-server。
+        响应字段是 Desktop ↔ Server 的受信 wire contract，修改即破坏兼容。
+      operationId: getHealth
+      responses:
+        "200":
+          description: 实例存活并自述为 Nevix 服务器。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - service
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - ok
+                  service:
+                    type: string
+                    enum:
+                      - nevix-server
   /identity/auth/login:
     $ref: "./identity.yaml#/paths/~1identity~1auth~1login"
   /identity/register:

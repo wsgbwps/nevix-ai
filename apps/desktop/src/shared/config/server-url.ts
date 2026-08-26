@@ -1,45 +1,36 @@
 /**
- * The single runtime policy for the server URL a device may connect to
- * (ADR-0014): https is valid on any host; plain http is reserved for
- * loopback and RFC1918 intranet hosts. Build-time URL injection and its
- * per-mode policy are gone — this validation guards both the persisted
- * connection store and the Connection Screen input.
+ * The structural origin parse and the plain-http destination policy for the
+ * server URL a device may connect to (ADR-0014, #153). Https is structurally
+ * valid on any host; plain http survives only as a loopback exception on an
+ * unpackaged (development) runtime — RFC1918 is no customer exception. The
+ * destination policy is enforced exclusively by the main process, which knows
+ * the runtime mode (`!app.isPackaged`); the renderer keeps this structural
+ * parse for immediate feedback and defers the http verdict to the probe.
  */
 
-/** RFC1918, loopback, and nothing else: the hosts a plain-http server URL may target. */
-export function isAllowedPrivateHttpHostname(hostname: string): boolean {
-  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') return true
+/** The hosts a plain-http server URL may target, before the mode check. */
+export function isLoopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+}
 
-  const octets = hostname.split('.').map(Number)
-  if (
-    octets.length !== 4 ||
-    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
-  ) {
-    return false
-  }
-
-  const [first, second] = octets
-  return (
-    first === 10 ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  )
+/**
+ * The runtime plain-http policy (#153): customer deployments accept https
+ * only; plain http is reserved for loopback addresses on an explicit
+ * development runtime.
+ */
+export function allowsPlainHttpServerUrl(hostname: string, developmentMode: boolean): boolean {
+  return developmentMode && isLoopbackHostname(hostname)
 }
 
 /**
  * Parses a server URL into its canonical origin, or `undefined` when the URL
- * is not an exact server origin under the runtime policy: no credentials,
- * path, query, or fragment, https anywhere, http only on private hosts.
+ * is not an exact http(s) origin: no credentials, path, query, or fragment.
  */
 export function parseServerUrl(url: string): string | undefined {
   try {
     const parsedUrl = new URL(url)
-    const isSecure = parsedUrl.protocol === 'https:'
-    const isAllowedPrivateHttp =
-      parsedUrl.protocol === 'http:' && isAllowedPrivateHttpHostname(parsedUrl.hostname)
-
     if (
-      (!isSecure && !isAllowedPrivateHttp) ||
+      (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') ||
       parsedUrl.username ||
       parsedUrl.password ||
       parsedUrl.pathname !== '/' ||

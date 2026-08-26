@@ -1,8 +1,25 @@
 import { useTranslation } from 'react-i18next'
+import { AlertTriangleIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '../../../components/ui/field'
 import { Input } from '../../../components/ui/input'
 import type { ServerConnectionEditorState } from '../model/use-server-connection-editor'
+
+/** The same rotation horizon the deployment's cert-init alert uses. */
+const NEAR_EXPIRY_WARNING_MS = 90 * 24 * 60 * 60 * 1000
+
+const FAILURE_MESSAGE_KEYS = {
+  'invalid-url': 'probe.invalidUrl',
+  unreachable: 'probe.unreachable',
+  'incompatible-server': 'probe.incompatibleServer',
+  'certificate-expired': 'probe.certificateExpired'
+} as const
+
+function isNearExpiry(validTo: string | undefined): boolean {
+  if (validTo === undefined) return false
+  const end = new Date(validTo).getTime()
+  return !Number.isNaN(end) && end - Date.now() <= NEAR_EXPIRY_WARNING_MS
+}
 
 /** The Connection Screen / Settings shared form: URL in, probe verdict out, save gated on a passed probe. */
 export function ServerConnectionEditorFields({
@@ -40,13 +57,30 @@ export function ServerConnectionEditorFields({
       </Field>
 
       {state.kind === 'reachable' ? (
-        <p role="status" className="text-sm" data-testid="connection-probe-reachable">
-          {t('probe.reachable')}
-        </p>
+        <div className="grid gap-2">
+          <p role="status" className="text-sm" data-testid="connection-probe-reachable">
+            {t('probe.reachable')}
+          </p>
+          {isNearExpiry(state.certificateValidTo) ? (
+            <p
+              role="status"
+              className="text-foreground flex items-start gap-2 text-sm"
+              data-testid="certificate-near-expiry"
+            >
+              <AlertTriangleIcon
+                className="text-destructive mt-0.5 size-4 shrink-0"
+                aria-hidden="true"
+              />
+              {t('probe.nearExpiry', { validTo: state.certificateValidTo })}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {state.kind === 'failed' ? (
         <p role="alert" className="text-destructive text-sm">
-          {t(state.error === 'invalid-url' ? 'probe.invalidUrl' : 'probe.unreachable')}
+          {state.error === 'certificate-expired' && state.validTo !== undefined
+            ? t('probe.certificateExpired', { validTo: state.validTo })
+            : t(FAILURE_MESSAGE_KEYS[state.error])}
         </p>
       ) : null}
 

@@ -3,9 +3,62 @@ import test from 'node:test'
 import { rendererConnectSourceCsp } from '../../src/main/connection/renderer-csp.ts'
 import {
   electronCertificateFingerprint,
+  isTrustworthyPin,
   sanitizeCertificatePins
 } from '../../src/main/connection/certificate-pins.ts'
 import { createHash } from 'node:crypto'
+
+const VALID_TO = new Date('2031-01-01T00:00:00Z')
+const NOW = new Date('2026-01-01T00:00:00Z')
+
+test('a pin trusts exactly its fingerprint on a not-yet-expired certificate', () => {
+  const fingerprint = 'a'.repeat(64)
+  assert.equal(
+    isTrustworthyPin({ pin: fingerprint, fingerprint, validTo: VALID_TO, now: NOW }),
+    true
+  )
+})
+
+test('a pin never overrides a changed fingerprint or an expired certificate', () => {
+  const fingerprint = 'a'.repeat(64)
+  // Changed fingerprint.
+  assert.equal(
+    isTrustworthyPin({
+      pin: fingerprint,
+      fingerprint: 'b'.repeat(64),
+      validTo: VALID_TO,
+      now: NOW
+    }),
+    false
+  )
+  // Expired exactly now or earlier.
+  assert.equal(isTrustworthyPin({ pin: fingerprint, fingerprint, validTo: NOW, now: NOW }), false)
+  assert.equal(
+    isTrustworthyPin({
+      pin: fingerprint,
+      fingerprint,
+      validTo: new Date('2025-12-31T23:59:59Z'),
+      now: NOW
+    }),
+    false
+  )
+})
+
+test('an absent pin or unknown validity fails closed', () => {
+  const fingerprint = 'a'.repeat(64)
+  assert.equal(
+    isTrustworthyPin({ pin: undefined, fingerprint, validTo: VALID_TO, now: NOW }),
+    false
+  )
+  assert.equal(
+    isTrustworthyPin({ pin: fingerprint, fingerprint, validTo: new Date('nonsense'), now: NOW }),
+    false
+  )
+  assert.equal(
+    isTrustworthyPin({ pin: fingerprint, fingerprint, validTo: undefined, now: NOW }),
+    false
+  )
+})
 
 test('connect-src CSP names exactly the persisted origin, or none at all', () => {
   assert.equal(

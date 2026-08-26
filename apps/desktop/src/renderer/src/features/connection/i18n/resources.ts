@@ -16,8 +16,12 @@ export const connectionTranslations = defineResourceTranslations({
     },
     probe: {
       reachable: '连接成功。',
-      invalidUrl: '地址无效：公网地址必须使用 https；内网地址可以使用 http。',
-      unreachable: '无法连接服务器，请检查地址与网络后重试。'
+      invalidUrl: '地址无效：客户部署必须使用 https；仅开发模式的本机回环地址可以使用 http。',
+      unreachable: '无法连接服务器，请检查地址与网络后重试。',
+      incompatibleServer: '服务器可达，但不是 Nevix 服务器。请确认地址指向部署实例。',
+      certificateExpired:
+        '服务器证书已于 {{validTo}} 过期，无法建立可信连接。请联系管理员轮换证书后重试。',
+      nearExpiry: '服务器证书将于 {{validTo}} 到期，请尽快安排轮换。'
     },
     certificate: {
       confirmTitle: '服务器证书不受信任',
@@ -55,8 +59,13 @@ export const connectionTranslations = defineResourceTranslations({
     probe: {
       reachable: 'Connection succeeded.',
       invalidUrl:
-        'Invalid address: public addresses require https; intranet addresses may use http.',
-      unreachable: 'Could not reach the server. Check the address and network, then retry.'
+        'Invalid address: customer deployments require https; only loopback addresses in development mode may use http.',
+      unreachable: 'Could not reach the server. Check the address and network, then retry.',
+      incompatibleServer:
+        'The server is reachable but is not a Nevix server. Check that the address points to your deployment.',
+      certificateExpired:
+        'The server certificate expired on {{validTo}}, so a trusted connection cannot be established. Ask your administrator to rotate it, then retry.',
+      nearExpiry: 'The server certificate expires on {{validTo}}; plan a rotation soon.'
     },
     certificate: {
       confirmTitle: 'Server certificate is not trusted',
