@@ -201,6 +201,15 @@ assert_identity_integration_executed() {
     TestDisableRollsBackRevocationWithItsAuditRow
     TestResetPasswordRollsBackRevocationWithItsAuditRow
   )
+  # Shared Audit Append sentinels live in the internal/auditlog package.
+  local -a auditlog_tests=(
+    TestAppendCommitsWithTheCallerBusinessWrite
+    TestAppendFailureRollsBackTheCallerBusinessWrite
+    TestAppendRejectsActionsOutsideTheVocabulary
+    TestCallerRollbackDiscardsTheAppendedRow
+    TestConcurrentAppendsAllLand
+    TestSnapshotSubjectRefusesUnknownUsers
+  )
   # Goose migration-engine sentinels live in the migration package.
   local -a migration_tests=(
     TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase
@@ -223,7 +232,7 @@ assert_identity_integration_executed() {
     return 1
   fi
 
-  for test_name in "${representative_tests[@]}" "${migration_tests[@]}"; do
+  for test_name in "${representative_tests[@]}" "${migration_tests[@]}" "${auditlog_tests[@]}"; do
     if ! grep -Fq -- "--- PASS: ${test_name} " "$output_file"; then
       echo "error: requested Identity integration sentinel '$test_name' did not pass." >&2
       echo "Run ./scripts/test-identity-integration.sh from the repository root and inspect the test output above." >&2
@@ -248,12 +257,13 @@ export NEVIX_CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173"
 
 identity_test_log="$(mktemp -t nevix-identity-integration.XXXXXX)"
 set +e
-# One recursive, serialized invocation covers the identity and migration
-# trees: the Module-seam integration suite, the writetx real-role evidence,
-# the Goose-backed migration engine, and the package-local tests all ride one
-# PostgreSQL stack. -p 1 serializes packages because they share one database
-# whose state the tests reset between cases.
-go test -C server -race -count=1 -p 1 -v ./internal/identity/... ./internal/migration/... | tee "$identity_test_log"
+# One recursive, serialized invocation covers the identity, auditlog, and
+# migration trees: the Module-seam integration suite, the shared Audit
+# Append seam evidence, the writetx real-role evidence, the Goose-backed
+# migration engine, and the package-local tests all ride one PostgreSQL
+# stack. -p 1 serializes packages because they share one database whose
+# state the tests reset between cases.
+go test -C server -race -count=1 -p 1 -v ./internal/identity/... ./internal/auditlog/... ./internal/migration/... | tee "$identity_test_log"
 test_status="${PIPESTATUS[0]}"
 set -e
 if [[ "$test_status" -ne 0 ]]; then

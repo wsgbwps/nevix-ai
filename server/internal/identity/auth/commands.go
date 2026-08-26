@@ -13,8 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/nevix-ai/server/internal/auditlog"
 	"github.com/nevix-ai/server/internal/authz"
-	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/writetx"
@@ -157,7 +157,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (LoginResponse, e
 		// The audit actor is snapshotted inside the transaction (ADR-0009):
 		// the display name recorded is the one committed at write time, not
 		// one read before the transaction.
-		actor, err := audit.SnapshotSubject(ctx, sc.Tx(), user.ID)
+		actor, err := auditlog.SnapshotSubject(ctx, sc.Tx(), user.ID)
 		if err != nil {
 			return err
 		}
@@ -165,9 +165,9 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (LoginResponse, e
 		if req.DeviceName != "" {
 			metadata["device_name"] = req.DeviceName
 		}
-		if err := audit.Write(ctx, sc.Tx(), audit.Entry{
+		if err := auditlog.Append(ctx, sc.Tx(), auditlog.Entry{
 			Actor:    actor,
-			Action:   audit.SessionCreated,
+			Action:   auditlog.SessionCreated,
 			Metadata: metadata,
 		}); err != nil {
 			return err
@@ -212,13 +212,13 @@ func (s *Service) Logout(ctx context.Context, principal authz.Principal) (Logout
 		}
 		// The audit actor is snapshotted inside the transaction (ADR-0009):
 		// the display name recorded is the one committed at write time.
-		actor, err := audit.SnapshotSubject(ctx, sc.Tx(), principal.UserID)
+		actor, err := auditlog.SnapshotSubject(ctx, sc.Tx(), principal.UserID)
 		if err != nil {
 			return err
 		}
-		return audit.Write(ctx, sc.Tx(), audit.Entry{
+		return auditlog.Append(ctx, sc.Tx(), auditlog.Entry{
 			Actor:  actor,
-			Action: audit.SessionRevoked,
+			Action: auditlog.SessionRevoked,
 		})
 	})
 	if err != nil {

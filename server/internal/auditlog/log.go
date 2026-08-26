@@ -1,10 +1,13 @@
-// Package audit owns the Identity Audit Log: immutable transactional writes
-// (commands construct entries from transaction-time user snapshots; this
-// package validates the action vocabulary and persists the row without
-// exposing a mutation seam to callers outside the identity Module) and the
-// admin-only paginated read. Rows carry no organization dimension
-// (ADR-0009 revision) and are immutable by grant, not by trigger.
-package audit
+// Package auditlog owns the shared transactional Audit Append seam
+// (ADR-0009 2026-08-26 revision, ADR-0016): every appending Module appends
+// actor/target snapshots, a legal action, and caller-sanitized metadata to
+// the immutable audit log inside its own business transaction. Append
+// receives that transaction and never owns its lifecycle: an append failure
+// returns an error so the caller's outer transaction rolls back, and a
+// commit makes the audit row and the caller's business facts visible
+// together. Sanitization discipline stays with the caller; the Identity
+// Module keeps the admin-only Audit Log read.
+package auditlog
 
 import (
 	"context"
@@ -14,8 +17,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Action is an application-owned Audit Log vocabulary. The schema deliberately
-// keeps action as text, so new actions extend this list without a migration.
+// Action is the application-owned Audit Log vocabulary shared by every
+// appending Module. The schema deliberately keeps action as text, so new
+// actions extend this list without a migration; this package is the single
+// writer that validates the vocabulary (ADR-0009).
 type Action string
 
 const (
@@ -84,13 +89,15 @@ var validActions = map[Action]struct{}{
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id
 // and display name exactly as they were at write time, deliberately without a
 // foreign key so history survives later renames and deletions (ADR-0009).
+// Subjects come from the single-tenant user registry, so an Audit Actor is
+// always a real User — V1 models no system or operator actor.
 type Subject struct {
 	UserID      string
 	DisplayName string
 }
 
-// Entry is one immutable Audit Log row. A nil Target records an action without
-// a second User involved.
+// Entry is one immutable Audit Log row. A nil Target records an action
+// without a second User involved.
 type Entry struct {
 	Actor    Subject
 	Target   *Subject
@@ -99,31 +106,33 @@ type Entry struct {
 }
 
 // SnapshotSubject reads the audit subject (id + display name) for one user
-// inside the caller's write transaction, so audit rows record the display
-// name committed at write time (ADR-0009). The shared snapshot seam for every
-// audit-writing command.
+// from the single-tenant user registry inside the caller's write
+// transaction, so audit rows record the display name committed at write time
+// (ADR-0009). The shared snapshot seam for every audit-writing command.
 func SnapshotSubject(ctx context.Context, tx pgx.Tx, userID string) (Subject, error) {
 	var subject Subject
 	if err := tx.QueryRow(ctx,
 		`SELECT id, display_name FROM public.users WHERE id = $1`, userID,
 	).Scan(&subject.UserID, &subject.DisplayName); err != nil {
-		return Subject{}, fmt.Errorf("identity audit: snapshot subject: %w", err)
+		return Subject{}, fmt.Errorf("auditlog: snapshot subject: %w", err)
 	}
 	return subject, nil
 }
 
-// Write validates and inserts one immutable Audit Log row in the caller's
-// transaction. Database grants, not a trigger, enforce the no-UPDATE rule.
-func Write(ctx context.Context, tx pgx.Tx, entry Entry) error {
+// Append validates and inserts one immutable Audit Log row in the caller's
+// transaction; the caller owns that transaction's commit and rollback, so an
+// error returned here rolls the caller's business writes back with it.
+// Database grants, not a trigger, enforce the no-UPDATE rule (ADR-0009).
+func Append(ctx context.Context, tx pgx.Tx, entry Entry) error {
 	if _, ok := validActions[entry.Action]; !ok {
-		return fmt.Errorf("identity audit: unsupported action %q", entry.Action)
+		return fmt.Errorf("auditlog: unsupported action %q", entry.Action)
 	}
 
 	metadata := "{}"
 	if entry.Metadata != nil {
 		encoded, err := json.Marshal(entry.Metadata)
 		if err != nil {
-			return fmt.Errorf("identity audit: encode metadata: %w", err)
+			return fmt.Errorf("auditlog: encode metadata: %w", err)
 		}
 		metadata = string(encoded)
 	}
@@ -145,7 +154,7 @@ func Write(ctx context.Context, tx pgx.Tx, entry Entry) error {
 		entry.Action,
 		metadata,
 	); err != nil {
-		return fmt.Errorf("identity audit: insert entry: %w", err)
+		return fmt.Errorf("auditlog: append entry: %w", err)
 	}
 	return nil
 }
