@@ -9,8 +9,13 @@ import { parseServerUrl } from '../../../../../shared/config/server-url'
 export type ServerConnectionEditorState =
   | { readonly kind: 'idle' }
   | { readonly kind: 'testing' }
-  | { readonly kind: 'reachable'; readonly url: string }
-  | { readonly kind: 'failed'; readonly error: 'invalid-url' | 'unreachable' }
+  | { readonly kind: 'reachable'; readonly url: string; readonly certificateValidTo?: string }
+  | {
+      readonly kind: 'failed'
+      readonly error: 'invalid-url' | 'unreachable' | 'incompatible-server' | 'certificate-expired'
+      /** The expired certificate's validity end; `certificate-expired` only. */
+      readonly validTo?: string
+    }
   | {
       readonly kind: 'certificate'
       readonly decision: 'confirm' | 'changed'
@@ -59,13 +64,23 @@ export function useServerConnectionEditor(initialUrl: string | undefined): Serve
   const settleProbe = useCallback((probe: ServerConnectionProbe, canonicalUrl: string): void => {
     switch (probe.outcome) {
       case 'reachable':
-        setState({ kind: 'reachable', url: canonicalUrl })
+        setState({
+          kind: 'reachable',
+          url: canonicalUrl,
+          certificateValidTo: probe.certificateValidTo
+        })
         return
       case 'invalid-url':
         setState({ kind: 'failed', error: 'invalid-url' })
         return
       case 'unreachable':
         setState({ kind: 'failed', error: 'unreachable' })
+        return
+      case 'incompatible-server':
+        setState({ kind: 'failed', error: 'incompatible-server' })
+        return
+      case 'certificate-expired':
+        setState({ kind: 'failed', error: 'certificate-expired', validTo: probe.validTo })
         return
       case 'certificate-confirmation-required':
         setState({ kind: 'certificate', decision: 'confirm', url: canonicalUrl, view: probe })

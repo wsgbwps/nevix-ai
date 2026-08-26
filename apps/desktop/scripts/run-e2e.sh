@@ -245,13 +245,21 @@ wait_for_identity_server() {
 # committed against the temporary server persists — the data directory carries
 # it into the real one.
 psql_until_ready() {
-  local attempt
+  local sql_file attempt
+  # Buffer the heredoc once and re-open it per attempt: `docker exec -i`
+  # eagerly consumes shared stdin, so a failed attempt during PostgreSQL's
+  # init restart window would otherwise leave the retry reading EOF and
+  # "succeeding" without executing anything.
+  sql_file="$(mktemp -t nevix-e2e-psql.XXXXXX.sql)"
+  cat >"$sql_file"
   for attempt in $(seq 1 30); do
-    if docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1; then
+    if docker exec -i "$postgres_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <"$sql_file"; then
+      rm -f "$sql_file"
       return 0
     fi
     sleep 1
   done
+  rm -f "$sql_file"
   echo "error: PostgreSQL never accepted provisioning SQL" >&2
   return 1
 }
@@ -442,6 +450,59 @@ start_tls_terminator() {
       -subj "/CN=localhost" \
       -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" >/dev/null 2>&1
   done
+  # The expired leaf (e) and the CA-valid leaf (c) are signed by a throwaway
+  # CA: `openssl req -not_after` needs OpenSSL >= 3.4 while the ubuntu-24.04
+  # CI runner supplies 3.0, and `openssl ca -startdate/-enddate` works
+  # everywhere. Leaf e carries a fixed past validity window so the probe's
+  # expiry handling meets a genuinely expired chain; leaf c proves that
+  # rotating a pinned self-signed deployment to a different CA-valid
+  # certificate still demands re-confirmation. Both leaves share the SAN so
+  # expiry or identity is the only defect beyond the chain itself.
+  tls_ca_dir="$tls_terminator_dir/ca"
+  mkdir -p "$tls_ca_dir/newcerts"
+  : >"$tls_ca_dir/index.txt"
+  echo 1000 >"$tls_ca_dir/serial"
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+    -keyout "$tls_ca_dir/ca-key.pem" \
+    -out "$tls_ca_dir/ca-cert.pem" \
+    -subj "/CN=nevix-e2e-test-ca" >/dev/null 2>&1
+  cat >"$tls_ca_dir/openssl.cnf" <<OPENSSL_CA_CONFIG
+[ ca ]
+default_ca = nevix_e2e_ca
+
+[ nevix_e2e_ca ]
+database = ${tls_ca_dir}/index.txt
+serial = ${tls_ca_dir}/serial
+new_certs_dir = ${tls_ca_dir}/newcerts
+certificate = ${tls_ca_dir}/ca-cert.pem
+private_key = ${tls_ca_dir}/ca-key.pem
+default_md = sha256
+policy = policy_any
+
+[ policy_any ]
+commonName = supplied
+
+[ nevix_leaf ]
+subjectAltName = IP:127.0.0.1,DNS:localhost
+OPENSSL_CA_CONFIG
+  # Distinct subject CNs: `openssl ca` enforces unique subjects in its
+  # database, and hostname matching comes from the SAN either way.
+  openssl req -new -newkey rsa:2048 -sha256 -nodes \
+    -keyout "$tls_terminator_dir/key-e.pem" \
+    -out "$tls_ca_dir/cert-e.csr" \
+    -subj "/CN=nevix-e2e-expired" >/dev/null 2>&1
+  openssl req -new -newkey rsa:2048 -sha256 -nodes \
+    -keyout "$tls_terminator_dir/key-c.pem" \
+    -out "$tls_ca_dir/cert-c.csr" \
+    -subj "/CN=nevix-e2e-rotation" >/dev/null 2>&1
+  openssl ca -batch -config "$tls_ca_dir/openssl.cnf" \
+    -startdate 20200101000000Z -enddate 20250101000000Z \
+    -extensions nevix_leaf -in "$tls_ca_dir/cert-e.csr" \
+    -out "$tls_terminator_dir/cert-e.pem" -notext >/dev/null 2>&1
+  openssl ca -batch -config "$tls_ca_dir/openssl.cnf" \
+    -startdate 20250101000000Z -enddate 20350101000000Z \
+    -extensions nevix_leaf -in "$tls_ca_dir/cert-c.csr" \
+    -out "$tls_terminator_dir/cert-c.pem" -notext >/dev/null 2>&1
   printf '{"cert":"cert-a.pem","key":"key-a.pem"}' >"$tls_terminator_dir/rotation.json"
 
   tls_terminator_log="$(mktemp -t nevix-desktop-e2e-tls.XXXXXX.log)"
@@ -536,6 +597,8 @@ NEVIX_TEST_SERVER_URL="$server_url" \
   NEVIX_TEST_TLS_DIR="$tls_terminator_dir" \
   NEVIX_TEST_TLS_FINGERPRINT_A="$(tls_fingerprint a)" \
   NEVIX_TEST_TLS_FINGERPRINT_B="$(tls_fingerprint b)" \
+  NEVIX_TEST_TLS_FINGERPRINT_C="$(tls_fingerprint c)" \
+  NEVIX_TEST_TLS_CA_CERT="$tls_ca_dir/ca-cert.pem" \
   NEVIX_E2E_RUN_ID="$(date +%s)-$$" \
   pnpm exec playwright test "${playwright_args[@]}"
 

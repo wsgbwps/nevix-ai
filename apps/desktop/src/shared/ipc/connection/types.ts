@@ -16,12 +16,20 @@ export interface CertificateFingerprintView {
   readonly validTo: string
 }
 
+/**
+ * What one probe observes about the connected server. `reachable` carries
+ * the presented certificate's validity end (https only) so the UI can warn
+ * before expiry; every certificate outcome that needs a user decision or
+ * names a defect carries the fingerprint view.
+ */
 export type ServerConnectionProbe =
-  | { readonly outcome: 'reachable' }
+  | { readonly outcome: 'reachable'; readonly certificateValidTo?: string }
   | { readonly outcome: 'invalid-url' }
   | { readonly outcome: 'unreachable' }
+  | { readonly outcome: 'incompatible-server' }
   | ({ readonly outcome: 'certificate-confirmation-required' } & CertificateFingerprintView)
   | ({ readonly outcome: 'certificate-changed' } & CertificateFingerprintView)
+  | ({ readonly outcome: 'certificate-expired' } & CertificateFingerprintView)
 
 export interface ServerConnectionSaveRequest {
   readonly url: string

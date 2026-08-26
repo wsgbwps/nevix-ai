@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { sanitizeCertificatePins } from './certificate-pins'
-import { parseServerUrl } from '../../shared/config/server-url'
+import { allowsPlainHttpServerUrl, parseServerUrl } from '../../shared/config/server-url'
 import type {
   ServerConnectionRead,
   ServerConnectionSaveResult,
@@ -42,7 +42,7 @@ export async function readServerConnection(): Promise<ServerConnectionRead> {
 
 export async function saveServerConnectionUrl(url: string): Promise<ServerConnectionSaveResult> {
   const canonicalUrl = parseServerUrl(url)
-  if (!canonicalUrl) return { outcome: 'invalid-url' }
+  if (!canonicalUrl || !permittedByRuntimePolicy(canonicalUrl)) return { outcome: 'invalid-url' }
 
   const write = await persist({ url: canonicalUrl, certificatePins: runtime.certificatePins })
   if (write !== 'persisted') return { outcome: 'unavailable' }
@@ -72,6 +72,12 @@ export async function trustServerCertificate(
 }
 
 type PersistOutcome = 'persisted' | 'unavailable'
+
+/** The plain-http destination policy under this runtime's mode (#153). */
+function permittedByRuntimePolicy(canonicalUrl: string): boolean {
+  const target = new URL(canonicalUrl)
+  return target.protocol !== 'http:' || allowsPlainHttpServerUrl(target.hostname, !app.isPackaged)
+}
 
 interface PersistableConnection {
   readonly url: string | undefined
@@ -121,7 +127,15 @@ async function loadIntoRuntime(): Promise<void> {
     const url = (stored as { url?: unknown }).url
     // The persisted URL is re-validated under the current runtime policy so a
     // hand-edited or policy-drifted entry cannot configure the device.
-    runtime.url = typeof url === 'string' ? parseServerUrl(url) : undefined
+    if (typeof url !== 'string') {
+      runtime.url = undefined
+    } else {
+      const canonicalUrl = parseServerUrl(url)
+      runtime.url =
+        canonicalUrl !== undefined && permittedByRuntimePolicy(canonicalUrl)
+          ? canonicalUrl
+          : undefined
+    }
     runtime.certificatePins = sanitizeCertificatePins(
       (stored as { certificatePins?: unknown }).certificatePins
     )

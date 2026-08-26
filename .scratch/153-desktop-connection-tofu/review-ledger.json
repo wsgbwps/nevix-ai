@@ -1,0 +1,418 @@
+{
+  "schema": "code-review-findings/v1",
+  "fixedPoint": "1713e05e5a80396795ea90093188d6ccb07d734b",
+  "scopePaths": [
+    "apps/desktop/scripts/run-e2e.sh",
+    "apps/desktop/src/main/connection",
+    "apps/desktop/src/renderer/src/features/connection",
+    "apps/desktop/src/shared/config/server-url.ts",
+    "apps/desktop/src/shared/ipc/connection/types.ts",
+    "apps/desktop/tests/component/connection-screen.spec.tsx",
+    "apps/desktop/tests/component/fixtures/connection-screen-story.tsx",
+    "apps/desktop/tests/connection",
+    "apps/desktop/tests/unit/connection-runtime.test.mts",
+    "apps/desktop/tests/unit/server-url.test.mts",
+    "deploy/README.md",
+    "server/cmd/server/main.go",
+    ".scratch/153-desktop-connection-tofu/plan.md",
+    "contracts/openapi.yaml"
+  ],
+  "currentDiffDigest": "sha256:7c856c4476291e4f09b95e7b36aa2bd515d901fff7b9b5555e3db008117232fd",
+  "fullReviewCount": 1,
+  "targetedReviewRound": 2,
+  "findings": [
+    {
+      "id": "CR-STANDARDS-0001",
+      "axis": "standards",
+      "identity": {
+        "owner": "server/cmd/server/main.go",
+        "source": "server/AGENTS.md composition-root rule",
+        "anchor": "server/cmd/server/main.go:run /health handler",
+        "defect": "Desktop-facing health identity behavior lives in the composition root instead of an approved server owner"
+      },
+      "level": "blocker",
+      "disposition": "false-positive",
+      "dispositionReason": "The /health closure predates this slice (present verbatim at the fixed point, git show 1713e05:server/cmd/server/main.go); this diff changes only its payload constant. No Module owns process-level health (identity owns identity routes), so relocating the handler would require creating a new owner — an architecture task per root AGENTS.md, out of a vertical slice's scope. With CR-STANDARDS-0002 the payload becomes contract-governed, leaving registration as wiring.",
+      "owner": "server/cmd/server/main.go",
+      "status": "closed",
+      "evidence": [
+        "git show 1713e05:server/cmd/server/main.go — /health handler with {\"status\":\"ok\"} already inline",
+        "server/AGENTS.md — composition root constructs dependencies and calls Module Register; no health Module exists"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0002",
+      "axis": "standards",
+      "identity": {
+        "owner": "contracts/openapi.yaml",
+        "source": "README.md API-contract boundary; contracts/openapi.yaml 演进纪律",
+        "anchor": "contracts/openapi.yaml paths + server/cmd/server/main.go:84 /health response",
+        "defect": "The /health service identity is a cross-process wire contract hard-coded independently in Go and the Desktop probe, absent from contracts/"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Two independent hard-coded copies of a security-relevant wire value will drift silently; the repo names contracts/ as the single source of truth for the Desktop↔Server seam.",
+      "owner": "contracts/openapi.yaml",
+      "status": "closed",
+      "evidence": [
+        "server/cmd/server/main.go prints {\"status\":\"ok\",\"service\":\"nevix-server\"}",
+        "apps/desktop/src/main/connection/probe.ts isNevixHealthPayload independently requires service === 'nevix-server'",
+        "contracts/openapi.yaml has no /health entry; 演进纪律: additive-only path additions"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0003",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/CONTEXT.md",
+        "source": "apps/desktop/CONTEXT.md Certificate Fingerprint Pin vocabulary",
+        "anchor": "apps/desktop/src/main/connection/certificate-pins.ts:isTrustworthyPin",
+        "defect": "CONTEXT.md still defines pin acceptance as an unchanged-fingerprint match; the implementation now also requires a not-yet-expired certificate with readable validity"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Domain-doc alignment; delivered through the documentation fast lane immediately after this PR merges (one-line vocabulary update), tracked in the PR body.",
+      "owner": "apps/desktop/CONTEXT.md",
+      "status": "closed",
+      "evidence": [
+        "apps/desktop/CONTEXT.md pin definition predates the expiry invariant",
+        "certificate-pins.ts:isTrustworthyPin rejects expired or unreadable validity"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0004",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/connection/model",
+        "source": "apps/desktop/AGENTS.md renderer Feature segment placement",
+        "anchor": "apps/desktop/src/renderer/src/features/connection/ui/server-connection-editor-fields.tsx:isNearExpiry",
+        "defect": "The 90-day near-expiry rule and clock computation live in the ui segment instead of model/"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Placement judgement; presentation remains correct and tested. Deferred to a small follow-up so this loop stays blocker-bounded; noted in the PR body.",
+      "owner": "apps/desktop/src/renderer/src/features/connection/model",
+      "status": "closed",
+      "evidence": [
+        "server-connection-editor-fields.tsx computes NEAR_EXPIRY_WARNING_MS and Date parsing",
+        "apps/desktop/AGENTS.md: business rules belong in model/"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0005",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/connection/model",
+        "source": "root AGENTS.md code-comments/types rule",
+        "anchor": "apps/desktop/src/renderer/src/features/connection/model/use-server-connection-editor.ts:ServerConnectionEditorState",
+        "defect": "failed state's optional validTo is documented as certificate-expired-only but the type permits it on every failed variant"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Cosmetic typing (runtime guards already check validity); deferred with the model follow-up in the PR body.",
+      "owner": "apps/desktop/src/renderer/src/features/connection/model",
+      "status": "closed",
+      "evidence": [
+        "use-server-connection-editor.ts failed variant comment vs optional validTo on the union",
+        "server-connection-editor-fields.tsx guards state.validTo !== undefined"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-STANDARDS-0006",
+      "axis": "standards",
+      "identity": {
+        "owner": "apps/desktop/tests/connection",
+        "source": "Fowler Duplicated Code baseline",
+        "anchor": "apps/desktop/tests/connection/connection-expiry.spec.ts:rotateCertificateTo and connection-tofu.spec.ts:rotateCertificateTo",
+        "defect": "Identical 12-line TLS rotation helper duplicated across two specs instead of tests/connection/helpers/"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Test-only duplication with independent specs; extraction deferred to the test-hygiene follow-up noted in the PR body.",
+      "owner": "apps/desktop/tests/connection",
+      "status": "closed",
+      "evidence": [
+        "connection-expiry.spec.ts lines 15-23 duplicate connection-tofu.spec.ts lines 21-29",
+        "tests/connection/helpers/ already hosts shared TLS support (tls-terminator.mjs)"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0001",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/main/connection/probe.ts",
+        "source": "#153 AC6 (Server 不兼容) via #150 health-identity intent",
+        "anchor": "apps/desktop/src/main/connection/probe.ts:probeServerConnection TOFU pin-match return",
+        "defect": "TOFU path skips the Nevix /health identity check: a pinned foreign HTTPS service returns reachable"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "True gap: requestHealth validates identity only on the standard-verification path; the pin-match branch returns reachable from capturePresentedCertificate alone. AC6 requires the incompatible-server state on every connection verdict.",
+      "owner": "apps/desktop/src/main/connection/probe.ts",
+      "status": "closed",
+      "evidence": [
+        "probe.ts: pin-match branch returns reachable without any /health body check",
+        "capturePresentedCertificate discards status and body"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0002",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/main/connection/certificate-verify.ts",
+        "source": "#153 AC2/AC5 (共用同一证书判定)",
+        "anchor": "apps/desktop/src/main/connection/certificate-verify.ts:registerPinnedCertificateVerification",
+        "defect": "Electron verify proc returns 0 for any matching unexpired pin regardless of Chromium's defect class, accepting certificates the probe rejects (revoked, hostname-invalid, etc.)"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "AC5 requires one shared verdict; the probe applies pins only to the untrusted-chain error class, the fetch side overrode every defect class. Restrict the override to the same untrusted-chain verification results.",
+      "owner": "apps/desktop/src/main/connection/certificate-verify.ts",
+      "status": "closed",
+      "evidence": [
+        "certificate-verify.ts ignores request.verificationResult",
+        "probe.ts UNTRUSTED_CHAIN_ERROR_CODES is the only class entering TOFU"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0003",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/main/connection/probe.ts",
+        "source": "#153 AC4 (变化…均告警并要求重新确认)",
+        "anchor": "apps/desktop/src/main/connection/probe.ts:probeServerConnection verified-success return",
+        "defect": "Standard-verification success returns reachable before comparing an existing host pin, so rotating a pinned self-signed deployment to a different CA-valid certificate silently bypasses reconfirmation"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "AC4 requires re-confirmation whenever the presented certificate changes relative to the pin; also a real probe/fetch divergence (verify proc would reject the changed cert while the probe said reachable).",
+      "owner": "apps/desktop/src/main/connection/probe.ts",
+      "status": "closed",
+      "evidence": [
+        "probe.ts: succeeded branch returns reachable with no pin comparison",
+        "certificate-verify.ts would answer -3 for the changed certificate, diverging from the probe"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0004",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/renderer/src/features/connection",
+        "source": "#153 AC6/AC7 (启动状态覆盖)",
+        "anchor": "apps/desktop/src/renderer/src/features/connection/model/use-server-connection.ts:restore",
+        "defect": "Startup never probes the connection, so an incompatible or expired server at boot surfaces only as the generic retryable restore-failure boundary"
+      },
+      "level": "advisory",
+      "disposition": "deferred",
+      "dispositionReason": "Downgraded from the proposed blocker: the AC's enumerated conditions are covered by the two existing state machines — first load (Connection Screen), incompatible server (probe verdict where the user acts on the URL), network interruption/recovery (restore-failure keeps the stored session, Retry re-runs the authoritative restore = refetch), session invalidation (session-expired notice + clear). Connection-class failures are never phrased as authentication failures (restore-failure copy: 'The network or the server is temporarily unavailable. Your session is still stored'), satisfying AC7's non-disguise clause. A boot-time TLS probe would add startup latency and a new pre-auth surface the spec text does not demand; recorded as a follow-up enhancement in the PR body.",
+      "owner": "apps/desktop/src/renderer/src/features/connection",
+      "status": "closed",
+      "evidence": [
+        "authentication i18n restoreFailure copy is network-framed and session-preserving",
+        "use-authentication-runtime.ts restore path: network failures stay retryable, only server-rejected sessions clear"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0005",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/scripts/run-e2e.sh",
+        "source": "#153 AC8 (Electron E2E 覆盖证书到期)",
+        "anchor": "apps/desktop/scripts/run-e2e.sh:start_tls_terminator expired-cert generation",
+        "defect": "openssl req -not_before/-not_after requires OpenSSL ≥3.4; the ubuntu-24.04 E2E CI runner supplies 3.0.13, so the harness exits before any E2E runs"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Empirically verified: ubuntu:24.04 container with OpenSSL 3.0.13 rejects -not_before (option not recognized), while openssl ca -startdate/-enddate works and preserves the SAN. Re-generate the expired certificate through the openssl ca flow for universal compatibility.",
+      "owner": "apps/desktop/scripts/run-e2e.sh",
+      "status": "closed",
+      "evidence": [
+        "docker run ubuntu:24.04 + apt openssl → OpenSSL 3.0.13; req rejects -not_before",
+        ".github/workflows/desktop-e2e-ci.yml runs on ubuntu-24.04",
+        "openssl ca -startdate 20200101000000Z -enddate 20250101000000Z verified working on 3.0.13 with IP/DNS SAN"
+      ],
+      "reviewedDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": null
+    },
+    {
+      "id": "CR-SPEC-0006",
+      "axis": "spec",
+      "identity": {
+        "owner": "apps/desktop/src/main/connection/probe.ts",
+        "source": "#153 AC6 + repair regression safety",
+        "anchor": "apps/desktop/src/main/connection/probe.ts:collectBody/requestHealth",
+        "defect": "Oversized /health body destroys the request after response start without handling IncomingMessage error/aborted events, allowing a reachable target to crash Electron main instead of returning incompatible-server"
+      },
+      "level": "blocker",
+      "disposition": "accepted",
+      "dispositionReason": "Validated repair-introduced gap. Both standard and pinned health readers destroy ClientRequest after response start without response error/aborted handlers or a shared settle-once guard. Repair with a bounded response reader that classifies overflow as incompatible and stream failures as network-failure; cover both plain and pinned paths by real Electron E2E.",
+      "owner": "apps/desktop/src/main/connection/probe.ts",
+      "status": "closed",
+      "evidence": [
+        "probe.ts collectBody calls request.destroy(error) from IncomingMessage data handler",
+        "requestHealth and requestHealthOverPinnedCertificate listen only for response end; neither handles response error/aborted",
+        "targeted spec review round 1 identified crash consequence at digest sha256:026811b4...64860"
+      ],
+      "reviewedDiffDigest": "sha256:026811b41c21e651ab8e3b15b6e92e265e1edb5a4d36bbb10ead70d94ad64860",
+      "unresolvedTargetedRounds": 0,
+      "introducedBy": {
+        "kind": "repair",
+        "findingIds": ["CR-SPEC-0001"],
+        "repairDiffDigest": "sha256:026811b41c21e651ab8e3b15b6e92e265e1edb5a4d36bbb10ead70d94ad64860"
+      }
+    }
+  ],
+  "repairRecords": [
+    {
+      "fixFor": [
+        "CR-SPEC-0001",
+        "CR-SPEC-0002",
+        "CR-SPEC-0003",
+        "CR-SPEC-0005",
+        "CR-STANDARDS-0002"
+      ],
+      "beforeDiffDigest": "sha256:0155acc0d27cd05a3b0144782928e853960049af0fc17a6f8a4b8219f30627ae",
+      "afterDiffDigest": "sha256:026811b41c21e651ab8e3b15b6e92e265e1edb5a4d36bbb10ead70d94ad64860",
+      "touchedPaths": [
+        "contracts/openapi.yaml",
+        "apps/desktop/src/main/connection/probe.ts",
+        "apps/desktop/src/main/connection/certificate-verify.ts",
+        "apps/desktop/scripts/run-e2e.sh",
+        "apps/desktop/tests/connection/connection-pinned-identity.spec.ts",
+        "apps/desktop/tests/connection/connection-rotation.spec.ts"
+      ],
+      "touchedHunks": [
+        "Declare GET /health response identity and bump OpenAPI 0.8.0 -> 0.9.0.",
+        "Require Nevix /health identity on TOFU pin-match via a fresh one-shot request that rechecks the pin on the same socket.",
+        "Compare an existing host pin against the certificate observed on standard-verification success.",
+        "Read peer certificates while TLS sockets are alive; avoid Connection: close teardown races.",
+        "Restrict Electron pin overrides to Chromium net::ERR_CERT_AUTHORITY_INVALID.",
+        "Generate expired and CA-valid E2E leaves with the OpenSSL-3.0-compatible openssl ca workflow.",
+        "Buffer PostgreSQL provisioning SQL so docker exec retry attempts cannot consume the shared heredoc and silently no-op.",
+        "Add real-TLS E2E regression coverage for pinned foreign HTTPS identity and self-signed -> CA-valid rotation."
+      ],
+      "checks": [
+        {
+          "name": "Desktop typecheck",
+          "result": "PASS",
+          "coverage": "node + renderer TypeScript"
+        },
+        {
+          "name": "Desktop unit",
+          "result": "PASS",
+          "coverage": "109/109 tests"
+        },
+        {
+          "name": "Desktop component",
+          "result": "PASS",
+          "coverage": "48/48 public-surface tests"
+        },
+        {
+          "name": "Desktop lint",
+          "result": "PASS",
+          "coverage": "ESLint on apps/desktop"
+        },
+        {
+          "name": "Desktop architecture",
+          "result": "PASS",
+          "coverage": "35 verifier tests; 152 source files"
+        },
+        {
+          "name": "Server Go suite",
+          "result": "PASS",
+          "coverage": "go test ./..."
+        },
+        {
+          "name": "Desktop full Electron E2E",
+          "result": "PASS",
+          "coverage": "73 passed; 2 existing platform-conditional skips; includes expiry, pinned foreign HTTPS, CA-valid rotation, TOFU persistence"
+        },
+        {
+          "name": "OpenSSL 3.0 compatibility",
+          "result": "PASS",
+          "coverage": "ubuntu:24.04 / OpenSSL 3.0.13 ca workflow produced past-validity + SAN leaf"
+        }
+      ]
+    },
+    {
+      "fixFor": ["CR-SPEC-0006"],
+      "beforeDiffDigest": "sha256:026811b41c21e651ab8e3b15b6e92e265e1edb5a4d36bbb10ead70d94ad64860",
+      "afterDiffDigest": "sha256:7c856c4476291e4f09b95e7b36aa2bd515d901fff7b9b5555e3db008117232fd",
+      "touchedPaths": [
+        "apps/desktop/src/main/connection/probe.ts",
+        "apps/desktop/tests/connection/connection-screen.spec.ts",
+        "apps/desktop/tests/connection/connection-pinned-identity.spec.ts"
+      ],
+      "touchedHunks": [
+        "Replace request.destroy(error)-based body collection with a settle-once bounded IncomingMessage reader handling end, aborted, and error.",
+        "Map >64 KiB health responses to incompatible and response-stream failures to network-failure on both standard and pinned request paths.",
+        "Add real Electron E2E oversized-body coverage on plain and pinned HTTPS foreign servers."
+      ],
+      "checks": [
+        {
+          "name": "Desktop typecheck",
+          "result": "PASS",
+          "coverage": "node + renderer TypeScript"
+        },
+        {
+          "name": "Desktop lint/format",
+          "result": "PASS",
+          "coverage": "ESLint + Prettier"
+        },
+        {
+          "name": "Desktop unit",
+          "result": "PASS",
+          "coverage": "109/109 tests"
+        },
+        {
+          "name": "Desktop component",
+          "result": "PASS",
+          "coverage": "48/48 tests"
+        },
+        {
+          "name": "Desktop full Electron E2E",
+          "result": "PASS",
+          "coverage": "73 passed; 2 existing platform-conditional skips; both oversized-body paths exercised"
+        }
+      ]
+    }
+  ],
+  "relevantCheck": {
+    "name": "#153 acceptance gate",
+    "result": "PASS",
+    "coverage": "Desktop typecheck; lint/format; unit 109/109; component 48/48; architecture 35/35; full Electron E2E 73 passed with 2 existing platform-conditional skips; server go test ./...; OpenSSL 3.0.13 fixture validation",
+    "diffDigest": "sha256:7c856c4476291e4f09b95e7b36aa2bd515d901fff7b9b5555e3db008117232fd"
+  },
+  "outcome": "closed"
+}

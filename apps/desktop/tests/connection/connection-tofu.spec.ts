@@ -15,13 +15,17 @@ const fingerprintA = process.env.NEVIX_TEST_TLS_FINGERPRINT_A
 const fingerprintB = process.env.NEVIX_TEST_TLS_FINGERPRINT_B
 
 /**
- * Rotates the TLS terminator onto certificate B by atomically replacing the
- * rotation pointer the terminator watches.
+ * Rotates the TLS terminator onto a named certificate by atomically replacing
+ * the rotation pointer the terminator watches.
  */
-async function rotateCertificateToB(): Promise<void> {
+async function rotateCertificateTo(name: 'a' | 'b'): Promise<void> {
   const pointerPath = join(tlsRotationDir!, 'rotation.json')
   const pendingPath = `${pointerPath}.pending`
-  await writeFile(pendingPath, JSON.stringify({ cert: 'cert-b.pem', key: 'key-b.pem' }), 'utf8')
+  await writeFile(
+    pendingPath,
+    JSON.stringify({ cert: `cert-${name}.pem`, key: `key-${name}.pem` }),
+    'utf8'
+  )
   await rename(pendingPath, pointerPath)
   // Let the terminator's directory watcher apply the new secure context before
   // the next handshake.
@@ -61,6 +65,9 @@ test(
         await expect(launched.page.getByTestId('connection-probe-reachable')).toBeVisible({
           timeout: 20_000
         })
+        // The harness certificate lives for two days, inside the 90-day
+        // rotation horizon: the reachable verdict carries the expiry warning.
+        await expect(launched.page.getByTestId('certificate-near-expiry')).toBeVisible()
         await launched.page
           .getByRole('button', { name: 'Save and continue' })
           .click({ noWaitAfter: true })
@@ -88,7 +95,7 @@ test(
         ).toBeVisible()
         await expect(launched.page.getByText(tlsUrl!)).toBeVisible()
 
-        await rotateCertificateToB()
+        await rotateCertificateTo('b')
         await launched.page.getByRole('button', { name: 'Test connection' }).click()
 
         const changed = launched.page.getByTestId('certificate-decision')

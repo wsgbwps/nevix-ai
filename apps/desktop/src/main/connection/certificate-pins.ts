@@ -21,6 +21,29 @@ export function electronCertificateFingerprint(pem: string): string {
 const FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
 const HOSTNAME_PATTERN = /^[a-z0-9.[\]-]+$/i
 
+/** The facts one TOFU verdict needs, shared by the probe and the fetch side. */
+export interface PinVerdictInput {
+  /** The persisted pin for the connected hostname, when one exists. */
+  readonly pin: string | undefined
+  readonly fingerprint: string
+  /** The presented certificate's validity end; unknown fails closed. */
+  readonly validTo: Date | undefined
+  readonly now?: Date
+}
+
+/**
+ * The one TOFU verdict shared by the Node probe and the Electron verify proc:
+ * exactly the pinned fingerprint on a certificate that has not expired. Expiry
+ * is decided here rather than by whichever TLS error code surfaces first, so a
+ * self-signed certificate whose untrusted-chain error masks its expiry can
+ * never be pinned, and pinning can never override an expiry rejection.
+ */
+export function isTrustworthyPin(input: PinVerdictInput): boolean {
+  if (input.pin === undefined || input.pin !== input.fingerprint) return false
+  if (input.validTo === undefined || Number.isNaN(input.validTo.getTime())) return false
+  return input.validTo.getTime() > (input.now ?? new Date()).getTime()
+}
+
 /** Keeps only structurally valid pins: a tampered store entry must fail closed, not poison verification. */
 export function sanitizeCertificatePins(record: unknown): ReadonlyMap<string, string> {
   const pins = new Map<string, string>()

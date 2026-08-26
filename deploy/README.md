@@ -55,7 +55,7 @@ docker compose logs server | grep -oE 'setup_code=[0-9A-Z]{4}-[0-9A-Z]{4}'
 ### 连通性验收
 
 ```bash
-curl -vk https://<NEVIX_PUBLIC_IP>/health        # {"status":"ok"}
+curl -vk https://<NEVIX_PUBLIC_IP>/health        # {"status":"ok","service":"nevix-server"}
 docker compose exec nginx ss -tlnp               # 容器内只有 443
 docker ps --format '{{.Names}} {{.Ports}}'       # 宿主机只有 nginx 0.0.0.0:443
 ```
@@ -146,23 +146,23 @@ docker compose logs cert-watch          # 关注 "expires within 90 days"
 
 ## 7. 失败排查
 
-| 症状 | 排查 |
-| --- | --- |
-| `cert-init` exited (1)，栈不起 | `.env` 缺 `NEVIX_PUBLIC_IP`；或已持久化证书损坏/过期/IP 变化被 fail closed 拒绝——日志给出原因与第 4 节轮换命令 |
-| 密码含 `/ @ : # %` 等字符后启动失败 | 两条数据库密码进入 URL，字符集只允许字母/数字/`-`/`_`（见 `.env.example` CHARSET CONTRACT）；改 .env 后空卷重建或 ALTER ROLE 对齐 |
-| 443 被占用 | 前置 nginx/云 LB 占用；释放后 `docker compose up -d`。改宿主端口需同步改 compose 的 ports 与 `X-Forwarded-Port` |
-| server 反复重启、数据库认证失败 | `NEVIX_IDENTITY_APP_PASSWORD` 与 pgdata 卷内实际角色密码不一致（首启后改过 .env）。进 postgres 容器 `ALTER ROLE identity_app PASSWORD '...'` 对齐；**不会**自动重置 |
-| 认领时提示 invalid_setup_code | 设置码只在空实例启动时打印一次；重启空实例会轮换新码，重新 `docker compose logs server` 取新值 |
-| 认领错误的人成了 Admin | 拥有任何用户后不能重新认领、V1 无离线恢复（ADR-0015）。尚无业务数据时整栈重建：`docker compose down -v` 后重做首次部署 |
-| Desktop 报证书指纹变化 | 预期行为：发生了轮换/IP 变化。核对第 3 节新指纹后确认；无法解释的变化按私钥泄露处理（第 4 节轮换） |
-| 重建 server 容器后 nginx 502 | nginx 启动时解析 server 容器地址；`docker compose restart nginx` 重新解析 |
-| 大量 429 | 触发 nginx 背压限速（登录面 2r/s/IP、一般面 200r/s/IP）；确认是否 NAT 出口聚合流量异常，必要时调整 `nginx/nginx.conf` 的 zone 参数后 `docker compose restart nginx` |
+| 症状                                | 排查                                                                                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cert-init` exited (1)，栈不起      | `.env` 缺 `NEVIX_PUBLIC_IP`；或已持久化证书损坏/过期/IP 变化被 fail closed 拒绝——日志给出原因与第 4 节轮换命令                                                      |
+| 密码含 `/ @ : # %` 等字符后启动失败 | 两条数据库密码进入 URL，字符集只允许字母/数字/`-`/`_`（见 `.env.example` CHARSET CONTRACT）；改 .env 后空卷重建或 ALTER ROLE 对齐                                   |
+| 443 被占用                          | 前置 nginx/云 LB 占用；释放后 `docker compose up -d`。改宿主端口需同步改 compose 的 ports 与 `X-Forwarded-Port`                                                     |
+| server 反复重启、数据库认证失败     | `NEVIX_IDENTITY_APP_PASSWORD` 与 pgdata 卷内实际角色密码不一致（首启后改过 .env）。进 postgres 容器 `ALTER ROLE identity_app PASSWORD '...'` 对齐；**不会**自动重置 |
+| 认领时提示 invalid_setup_code       | 设置码只在空实例启动时打印一次；重启空实例会轮换新码，重新 `docker compose logs server` 取新值                                                                      |
+| 认领错误的人成了 Admin              | 拥有任何用户后不能重新认领、V1 无离线恢复（ADR-0015）。尚无业务数据时整栈重建：`docker compose down -v` 后重做首次部署                                              |
+| Desktop 报证书指纹变化              | 预期行为：发生了轮换/IP 变化。核对第 3 节新指纹后确认；无法解释的变化按私钥泄露处理（第 4 节轮换）                                                                  |
+| 重建 server 容器后 nginx 502        | nginx 启动时解析 server 容器地址；`docker compose restart nginx` 重新解析                                                                                           |
+| 大量 429                            | 触发 nginx 背压限速（登录面 2r/s/IP、一般面 200r/s/IP）；确认是否 NAT 出口聚合流量异常，必要时调整 `nginx/nginx.conf` 的 zone 参数后 `docker compose restart nginx` |
 
 ## 8. 交付不变量（改动本目录前必读）
 
 - 宿主机唯一发布端口是 nginx 443；不得给 postgres/server 添加 `ports`。
 - 上游镜像引用必须带 digest；本地构建镜像的 FROM 必须带 digest。
-- nginx 必须删除外部 Forwarded/X-Forwarded-* 后只写可信 HTTPS 标记
+- nginx 必须删除外部 Forwarded/X-Forwarded-\* 后只写可信 HTTPS 标记
   （后续切片的 `secure_transport_required` 依赖它）。
 - 证书身份只允许两种变化：空卷首次生成，或 `CERT_FORCE_NEW=true` 显式轮换；
   其他一切持久化状态（损坏/过期/IP 变化）fail closed，绝不允许自动重建。
