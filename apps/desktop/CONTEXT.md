@@ -32,7 +32,7 @@ _Avoid_: Onboarding, Server Setup Wizard, Login Screen
 _Avoid_: Health Check（不承载信任决策）, Ping
 
 **Certificate Fingerprint Pin**:
-User 首次与部署管理员核对并确认自签证书时，设备按主机名或 IP 记下的 SHA-256 指纹；渲染层 fetch 与主进程探测共用同一 pin 判定，指纹不变则放行、变更则告警并要求重新确认，任何路径都不全局跳过验证。
+User 首次与部署管理员核对并确认自签证书时，设备按主机名或 IP 记下的 SHA-256 指纹；渲染层 fetch 与主进程探测共用同一 pin 判定，只有指纹不变、有效期可确认且尚未过期才可由 pin 放行，指纹变更则告警并要求重新确认，有效期不可确认或过期则 fail closed，任何路径都不全局跳过验证。
 _Avoid_: Certificate Bypass, Insecure TLS, Trust All Certificates
 
 **Remembered Email**:
