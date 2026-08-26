@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp, openSettingsSectionFromUserMenu } from '../helpers/electron-app'
@@ -8,29 +8,12 @@ import {
   readIdentityServerConfig,
   uniqueIdentity
 } from '../auth/helpers/identity-server'
+import { rotateCertificateTo } from './helpers/tls-rotation'
 
 const tlsUrl = process.env.NEVIX_TEST_TLS_URL
 const tlsRotationDir = process.env.NEVIX_TEST_TLS_DIR
 const fingerprintA = process.env.NEVIX_TEST_TLS_FINGERPRINT_A
 const fingerprintB = process.env.NEVIX_TEST_TLS_FINGERPRINT_B
-
-/**
- * Rotates the TLS terminator onto a named certificate by atomically replacing
- * the rotation pointer the terminator watches.
- */
-async function rotateCertificateTo(name: 'a' | 'b'): Promise<void> {
-  const pointerPath = join(tlsRotationDir!, 'rotation.json')
-  const pendingPath = `${pointerPath}.pending`
-  await writeFile(
-    pendingPath,
-    JSON.stringify({ cert: `cert-${name}.pem`, key: `key-${name}.pem` }),
-    'utf8'
-  )
-  await rename(pendingPath, pointerPath)
-  // Let the terminator's directory watcher apply the new secure context before
-  // the next handshake.
-  await new Promise((resolve) => setTimeout(resolve, 750))
-}
 
 test(
   'a self-signed server asks for first-use fingerprint confirmation, is remembered, and a changed fingerprint warns',
@@ -95,7 +78,7 @@ test(
         ).toBeVisible()
         await expect(launched.page.getByText(tlsUrl!)).toBeVisible()
 
-        await rotateCertificateTo('b')
+        await rotateCertificateTo(tlsRotationDir!, 'b')
         await launched.page.getByRole('button', { name: 'Test connection' }).click()
 
         const changed = launched.page.getByTestId('certificate-decision')

@@ -1,30 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp } from '../helpers/electron-app'
+import { rotateCertificateTo } from './helpers/tls-rotation'
 
 const tlsUrl = process.env.NEVIX_TEST_TLS_URL
 const tlsRotationDir = process.env.NEVIX_TEST_TLS_DIR
 const fingerprintA = process.env.NEVIX_TEST_TLS_FINGERPRINT_A
-
-/**
- * Rotates the TLS terminator onto a named certificate by atomically replacing
- * the rotation pointer the terminator watches.
- */
-async function rotateCertificateTo(name: 'a' | 'e'): Promise<void> {
-  const pointerPath = join(tlsRotationDir!, 'rotation.json')
-  const pendingPath = `${pointerPath}.pending`
-  await writeFile(
-    pendingPath,
-    JSON.stringify({ cert: `cert-${name}.pem`, key: `key-${name}.pem` }),
-    'utf8'
-  )
-  await rename(pendingPath, pointerPath)
-  // Let the terminator's directory watcher apply the new secure context before
-  // the next handshake.
-  await new Promise((resolve) => setTimeout(resolve, 750))
-}
 
 test(
   'an expired certificate is a named connection defect and recovers after rotation',
@@ -54,7 +37,7 @@ test(
         // The server now presents the expired certificate: the probe names the
         // defect instead of a generic connection failure, and never offers a
         // trust question for an expired chain.
-        await rotateCertificateTo('e')
+        await rotateCertificateTo(tlsRotationDir!, 'e')
         await launched.page.getByRole('button', { name: 'Test connection' }).click()
         await expect(launched.page.getByText(/The server certificate expired on/)).toBeVisible({
           timeout: 20_000
@@ -66,7 +49,7 @@ test(
 
         // Recovery: the operator rotates the certificate; the remembered pin
         // restores the connection without any new question.
-        await rotateCertificateTo('a')
+        await rotateCertificateTo(tlsRotationDir!, 'a')
         await launched.page.getByRole('button', { name: 'Test connection' }).click()
         await expect(launched.page.getByTestId('connection-probe-reachable')).toBeVisible({
           timeout: 20_000

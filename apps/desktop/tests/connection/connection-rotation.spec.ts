@@ -1,30 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp } from '../helpers/electron-app'
+import { rotateCertificateTo } from './helpers/tls-rotation'
 
 const tlsUrl = process.env.NEVIX_TEST_TLS_URL
 const tlsRotationDir = process.env.NEVIX_TEST_TLS_DIR
 const caCertPath = process.env.NEVIX_TEST_TLS_CA_CERT
-
-/**
- * Rotates the TLS terminator onto a named certificate by atomically replacing
- * the rotation pointer the terminator watches.
- */
-async function rotateCertificateTo(name: 'a' | 'c'): Promise<void> {
-  const pointerPath = join(tlsRotationDir!, 'rotation.json')
-  const pendingPath = `${pointerPath}.pending`
-  await writeFile(
-    pendingPath,
-    JSON.stringify({ cert: `cert-${name}.pem`, key: `key-${name}.pem` }),
-    'utf8'
-  )
-  await rename(pendingPath, pointerPath)
-  // Let the terminator's directory watcher apply the new secure context before
-  // the next handshake.
-  await new Promise((resolve) => setTimeout(resolve, 750))
-}
 
 test('rotating a pinned self-signed deployment to a CA-valid certificate still demands reconfirmation', async () => {
   test.skip(
@@ -59,7 +42,7 @@ test('rotating a pinned self-signed deployment to a CA-valid certificate still d
       // Rotation to the CA-valid certificate: standard verification would
       // pass on its own, but the pin changed — a warning, never a silent
       // pass.
-      await rotateCertificateTo('c')
+      await rotateCertificateTo(tlsRotationDir!, 'c')
       await launched.page.getByRole('button', { name: 'Test connection' }).click()
       const changed = launched.page.getByTestId('certificate-decision')
       await expect(changed).toBeVisible({ timeout: 20_000 })
@@ -78,7 +61,7 @@ test('rotating a pinned self-signed deployment to a CA-valid certificate still d
   } finally {
     // The TLS terminator is shared by the serial suite; leave the canonical
     // certificate active so later specs observe their declared baseline.
-    await rotateCertificateTo('a')
+    await rotateCertificateTo(tlsRotationDir!, 'a')
     await rm(userDataDir, { recursive: true, force: true })
   }
 })

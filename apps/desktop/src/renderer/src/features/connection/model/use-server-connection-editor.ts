@@ -6,16 +6,25 @@ import type {
 } from '../../../../../shared/ipc/connection/types'
 import { parseServerUrl } from '../../../../../shared/config/server-url'
 
+/** The same rotation horizon the deployment's cert-init alert uses. */
+const NEAR_EXPIRY_WARNING_MS = 90 * 24 * 60 * 60 * 1000
+
 export type ServerConnectionEditorState =
   | { readonly kind: 'idle' }
   | { readonly kind: 'testing' }
-  | { readonly kind: 'reachable'; readonly url: string; readonly certificateValidTo?: string }
+  | {
+      readonly kind: 'reachable'
+      readonly url: string
+      readonly warning?: {
+        readonly kind: 'certificate-near-expiry'
+        readonly validTo: string
+      }
+    }
   | {
       readonly kind: 'failed'
-      readonly error: 'invalid-url' | 'unreachable' | 'incompatible-server' | 'certificate-expired'
-      /** The expired certificate's validity end; `certificate-expired` only. */
-      readonly validTo?: string
+      readonly error: 'invalid-url' | 'unreachable' | 'incompatible-server'
     }
+  | { readonly kind: 'failed'; readonly error: 'certificate-expired'; readonly validTo: string }
   | {
       readonly kind: 'certificate'
       readonly decision: 'confirm' | 'changed'
@@ -24,6 +33,15 @@ export type ServerConnectionEditorState =
     }
   | { readonly kind: 'trusting' }
   | { readonly kind: 'saving' }
+
+function deriveCertificateWarning(
+  validTo: string | undefined
+): Extract<ServerConnectionEditorState, { kind: 'reachable' }>['warning'] {
+  if (validTo === undefined) return undefined
+  const end = new Date(validTo).getTime()
+  if (Number.isNaN(end) || end - Date.now() > NEAR_EXPIRY_WARNING_MS) return undefined
+  return { kind: 'certificate-near-expiry', validTo }
+}
 
 export interface ServerConnectionEditor {
   readonly draft: string
@@ -67,7 +85,7 @@ export function useServerConnectionEditor(initialUrl: string | undefined): Serve
         setState({
           kind: 'reachable',
           url: canonicalUrl,
-          certificateValidTo: probe.certificateValidTo
+          warning: deriveCertificateWarning(probe.certificateValidTo)
         })
         return
       case 'invalid-url':
