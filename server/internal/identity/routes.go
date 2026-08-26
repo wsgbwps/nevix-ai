@@ -14,6 +14,7 @@ import (
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/joincodes"
+	"github.com/nevix-ai/server/internal/identity/reauth"
 	"github.com/nevix-ai/server/internal/identity/users"
 )
 
@@ -212,6 +213,36 @@ func (m *Module) routes() []command.Route {
 			Path:    "/identity/audit-logs",
 			Guard:   command.GuardAdmin,
 			Handler: command.HandleNoBody(m.auditRead.List, audit.MapError, http.StatusOK),
+		},
+		{
+			Method: http.MethodPost,
+			Path:   "/identity/admin/reauth/proofs",
+			Guard:  command.GuardAdmin,
+			Handler: command.HandleWithRequest(func(ctx context.Context, r *http.Request, req reauth.IssueRequest) (reauth.IssueResponse, error) {
+				principal, err := auth.PrincipalFrom(r)
+				if err != nil {
+					return reauth.IssueResponse{}, err
+				}
+				if !reauth.SecureTransportProven(r) {
+					return reauth.IssueResponse{}, reauth.ErrInsecureTransport
+				}
+				return m.reauth.Issue(ctx, principal, req)
+			}, reauth.MapError, http.StatusOK),
+		},
+		{
+			Method: http.MethodPost,
+			Path:   "/identity/admin/reauth/proofs/consume",
+			Guard:  command.GuardAdmin,
+			Handler: command.HandleWithRequest(func(ctx context.Context, r *http.Request, req reauth.ConsumeRequest) (reauth.ConsumeResponse, error) {
+				principal, err := auth.PrincipalFrom(r)
+				if err != nil {
+					return reauth.ConsumeResponse{}, err
+				}
+				if !reauth.SecureTransportProven(r) {
+					return reauth.ConsumeResponse{}, reauth.ErrInsecureTransport
+				}
+				return m.reauth.Consume(ctx, principal, req)
+			}, reauth.MapError, http.StatusOK),
 		},
 	}
 }

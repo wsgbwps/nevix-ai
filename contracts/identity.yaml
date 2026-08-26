@@ -2183,6 +2183,254 @@ paths:
                       error:
                         enum:
                           - internal_error
+  /identity/admin/reauth/proofs:
+    post:
+      operationId: issueReauthProof
+      summary: 签发 exact-action 重验证 Proof（Admin）
+      description: |-
+        高风险凭据命令（Provider Connection 创建/替换/删除，#150 切片 4，ADR-0016）前的重新验证：active Admin 用当前密码换取一枚绑定单一精确动作的 Reauthentication Proof。proof 为高熵 opaque token（32 字节 CSPRNG，base64url），客户端只持本体，服务端仅存 SHA-256 hash；有效期固定五分钟；单次消费且消费后即使下游命令失败也不恢复。密码验证复用登录的同一凭据 owner 与同 email 限流；同一事务写入 reauth_proof_issued 审计行（metadata 只含动作名）。无法证明 HTTPS 传输（直连 TLS 或官方内网代理写入的 X-Forwarded-Proto: https 标记）时拒 400 secure_transport_required。member 调用被 RequireAdmin 拒 403。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+                - password
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - provider_connection.create
+                    - provider_connection.replace
+                    - provider_connection.delete
+                  description: 封闭的精确动作集（#154）；不预建其他高风险动作。
+                password:
+                  type: string
+                  description: 当前密码明文；错误时与登录同样统一回答 401 invalid_credentials。
+      responses:
+        "200":
+          description: 签发成功；proof 本体仅在本次响应出现一次，五分钟内可消费一次。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - proof
+                  - action
+                  - expires_at
+                properties:
+                  proof:
+                    type: string
+                    description: opaque proof token（base64url）；客户端持有本体，服务端只存 hash。
+                  action:
+                    type: string
+                    enum:
+                      - provider_connection.create
+                      - provider_connection.replace
+                      - provider_connection.delete
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: 过期时刻（签发 + 5 分钟，数据库时钟）。
+        "400":
+          description: 请求体非 JSON 对象；动作不在封闭集合；或无法证明 HTTPS 传输。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_action
+                          - secure_transport_required
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销；或当前密码错误。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+                          - invalid_credentials
+        "403":
+          description: 已认证但非 Admin 角色；账号 disabled；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - account_disabled
+                          - password_change_required
+        "429":
+          description: 同一 email 连续失败触发登录共享限流；客户端依赖 Retry-After。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - login_rate_limited
+        "500":
+          description: 服务端内部错误，签发未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
+  /identity/admin/reauth/proofs/consume:
+    post:
+      operationId: consumeReauthProof
+      summary: 消费 exact-action 重验证 Proof（Admin）
+      description: |-
+        原子单次消费一枚 Proof：按 token hash 锁行，校验签发者绑定与动作绑定，未过期且未消费时在同一事务内盖 consumed_at 并写入 reauth_proof_consumed 审计行。错误动作、过期、已消费、并发重复消费与未知 token 全部 fail closed 且不改动行。消费一旦提交永不恢复——即使下游高风险命令失败，Admin 也必须重新验证后再试。该端点是 Proof 生命周期的公开消费 seam；后续 Creation 高风险命令经注入的同一服务实现消费（ADR-0016），不另建第二实现。无法证明 HTTPS 传输时拒 400 secure_transport_required。member 调用被 RequireAdmin 拒 403。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - proof
+                - action
+              properties:
+                proof:
+                  type: string
+                  description: 签发响应返回的 opaque proof token 本体。
+                action:
+                  type: string
+                  enum:
+                    - provider_connection.create
+                    - provider_connection.replace
+                    - provider_connection.delete
+                  description: 请求授权的精确动作；必须与 Proof 绑定动作一致。
+      responses:
+        "200":
+          description: 消费成功；该 Proof 已永久用尽。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - action
+                  - consumed_at
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - consumed
+                  action:
+                    type: string
+                    enum:
+                      - provider_connection.create
+                      - provider_connection.replace
+                      - provider_connection.delete
+                  consumed_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: 请求体非 JSON 对象；动作不在封闭集合；token 无匹配行（未知/已清扫/非签发者）；或无法证明 HTTPS 传输。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - invalid_action
+                          - reauth_proof_invalid
+                          - secure_transport_required
+        "401":
+          description: Bearer token 缺失、无效、已过期或已吊销。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - unauthorized
+        "403":
+          description: 已认证但非 Admin 角色；或 must_change_password 为 true（首登改密完成前业务端点被门禁拒绝）。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - forbidden
+                          - password_change_required
+        "409":
+          description: Proof 绑定的动作与请求不一致（该 Proof 对自身动作仍可消费）；或 Proof 已被消费且永不恢复。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - reauth_proof_action_mismatch
+                          - reauth_proof_already_consumed
+        "410":
+          description: 五分钟有效期已过；需重新验证签发新 Proof。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - reauth_proof_expired
+        "500":
+          description: 服务端内部错误，消费未提交。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - internal_error
 components:
   parameters:
     userID:

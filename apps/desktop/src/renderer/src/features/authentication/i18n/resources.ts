@@ -105,6 +105,27 @@ export const authenticationTranslations = defineResourceTranslations({
       submit: '退出当前设备',
       submitting: '正在退出…'
     },
+    reauth: {
+      title: '确认当前密码',
+      description:
+        '执行「{{action}}」前需要重新验证你的当前密码。验证通过后签发的授权仅在 {{minutes}} 分钟内有效且只能使用一次。',
+      actionLabel: '将授权的操作',
+      actionProviderConnectionCreate: '首次配置供应商连接',
+      actionProviderConnectionReplace: '替换供应商密钥',
+      actionProviderConnectionDelete: '删除供应商连接',
+      currentPassword: '当前密码',
+      submit: '验证并继续',
+      submitting: '正在验证…',
+      cancel: '取消',
+      errors: {
+        invalidCredentials: '当前密码不正确。',
+        secureTransportRequired:
+          '当前连接无法证明是安全的 HTTPS 传输，无法执行此验证。请检查服务器连接方式。',
+        rateLimited: '尝试过于频繁，请稍后重试。',
+        sessionExpired: '登录状态已失效，请重新登录后再试。',
+        serviceError: '暂时无法完成验证，请稍后重试。'
+      }
+    },
     theme: {
       switchToLight: '切换到浅色主题',
       switchToDark: '切换到深色主题'
@@ -218,6 +239,27 @@ export const authenticationTranslations = defineResourceTranslations({
     logout: {
       submit: 'Sign out of this device',
       submitting: 'Signing out…'
+    },
+    reauth: {
+      title: 'Confirm your current password',
+      description:
+        'Before "{{action}}" runs, re-verify your current password. The authorization this issues is valid for {{minutes}} minutes and can be used once.',
+      actionLabel: 'Action to authorize',
+      actionProviderConnectionCreate: 'Set up the provider connection',
+      actionProviderConnectionReplace: 'Replace the provider key',
+      actionProviderConnectionDelete: 'Delete the provider connection',
+      currentPassword: 'Current password',
+      submit: 'Verify and continue',
+      submitting: 'Verifying…',
+      cancel: 'Cancel',
+      errors: {
+        invalidCredentials: 'The current password is incorrect.',
+        secureTransportRequired:
+          'This connection cannot be proven as secure HTTPS transport, so the verification cannot run. Check how the server is reached.',
+        rateLimited: 'Too many attempts. Try again later.',
+        sessionExpired: 'Your session has expired. Sign in again and retry.',
+        serviceError: 'The verification cannot be completed right now. Try again later.'
+      }
     },
     theme: {
       switchToLight: 'Switch to light theme',

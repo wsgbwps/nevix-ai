@@ -18,6 +18,7 @@ import (
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/joincodes"
+	"github.com/nevix-ai/server/internal/identity/reauth"
 	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/users"
 	"github.com/nevix-ai/server/internal/identity/writetx"
@@ -105,6 +106,7 @@ type Module struct {
 	auth        *auth.Service
 	users       *users.Service
 	joinCodes   *joincodes.Service
+	reauth      *reauth.Service
 	auditRead   *audit.ReadService
 	guard       *authz.Guard
 	corsOrigins []string
@@ -137,6 +139,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 		auth:        service,
 		users:       users.NewService(pool, tx, sessions),
 		joinCodes:   joincodes.NewService(pool, tx),
+		reauth:      reauth.NewService(tx, service),
 		auditRead:   audit.NewReadService(pool),
 		guard:       authz.NewGuard(service),
 		corsOrigins: cfg.CORSAllowedOrigins,
@@ -156,9 +159,19 @@ func (m *Module) Register(r chi.Router, _ event.Bus) {
 }
 
 // RunWorkers runs the Module's background maintenance until ctx is canceled,
-// then returns nil: the daily sweep deletes expired sessions, prunes the
-// login limiter, and re-logs the pending-initial-password reminder. Sweep
-// failures are logged and retried on the next tick, not propagated.
+// then returns nil: the daily sweeps delete expired sessions, prune the
+// login limiter, re-log the pending-initial-password reminder, and reclaim
+// expired reauth proofs. Sweep failures are logged and retried on the next
+// tick, not propagated.
 func (m *Module) RunWorkers(ctx context.Context) error {
-	return m.auth.RunSweepLoop(ctx)
+	done := make(chan error, 2)
+	go func() { done <- m.auth.RunSweepLoop(ctx) }()
+	go func() { done <- m.reauth.RunSweepLoop(ctx) }()
+	var firstErr error
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

@@ -102,7 +102,10 @@ export const userManagementTranslations = defineResourceTranslations({
         user_role_changed: '调整角色',
         user_deleted: '删除账号',
         join_code_created: '签发加入码',
-        join_code_revoked: '吊销加入码'
+        join_code_revoked: '吊销加入码',
+        user_self_registered: '凭加入码注册账号',
+        reauth_proof_issued: '签发重验证授权',
+        reauth_proof_consumed: '消费重验证授权'
       }
     },
     joinCodes: {
@@ -268,7 +271,10 @@ export const userManagementTranslations = defineResourceTranslations({
         user_role_changed: 'Role changed',
         user_deleted: 'Account deleted',
         join_code_created: 'Join code issued',
-        join_code_revoked: 'Join code revoked'
+        join_code_revoked: 'Join code revoked',
+        user_self_registered: 'Account self-registered with a join code',
+        reauth_proof_issued: 'Reauthentication proof issued',
+        reauth_proof_consumed: 'Reauthentication proof consumed'
       }
     },
     joinCodes: {

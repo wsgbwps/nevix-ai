@@ -64,7 +64,7 @@ func storeHarness(t *testing.T, ctx context.Context) (owner, runtime *pgxpool.Po
 		t.Fatalf("connect runtime database: %v", err)
 	}
 	t.Cleanup(runtime.Close)
-	if _, err := owner.Exec(ctx, `TRUNCATE public.audit_logs, public.sessions, public.join_codes, public.users`); err != nil {
+	if _, err := owner.Exec(ctx, `TRUNCATE public.audit_logs, public.sessions, public.join_codes, public.reauth_proofs, public.users`); err != nil {
 		t.Fatalf("truncate user-system tables: %v", err)
 	}
 	runner = writetx.New(runtime)

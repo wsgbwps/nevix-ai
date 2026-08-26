@@ -67,23 +67,34 @@ const (
 	// their own account; the metadata names the email and the code redeemed,
 	// and the session issued with it rides this same row (issue #121).
 	UserSelfRegistered Action = "user_self_registered"
+	// ReauthProofIssued records an admin passing current-password
+	// reverification and receiving one exact-action Reauthentication Proof;
+	// metadata names the bound action and never carries the password or the
+	// token (issue #154, ADR-0016).
+	ReauthProofIssued Action = "reauth_proof_issued"
+	// ReauthProofConsumed records the single no-restore consumption of one
+	// Reauthentication Proof; metadata names the action it authorized
+	// (issue #154, ADR-0016).
+	ReauthProofConsumed Action = "reauth_proof_consumed"
 )
 
 var validActions = map[Action]struct{}{
-	InstanceClaimed:    {},
-	SessionCreated:     {},
-	SessionRevoked:     {},
-	PasswordChanged:    {},
-	DisplayNameChanged: {},
-	UserCreated:        {},
-	UserDisabled:       {},
-	UserPasswordReset:  {},
-	UserEmailChanged:   {},
-	UserRoleChanged:    {},
-	UserDeleted:        {},
-	JoinCodeCreated:    {},
-	JoinCodeRevoked:    {},
-	UserSelfRegistered: {},
+	InstanceClaimed:     {},
+	SessionCreated:      {},
+	SessionRevoked:      {},
+	PasswordChanged:     {},
+	DisplayNameChanged:  {},
+	UserCreated:         {},
+	UserDisabled:        {},
+	UserPasswordReset:   {},
+	UserEmailChanged:    {},
+	UserRoleChanged:     {},
+	UserDeleted:         {},
+	JoinCodeCreated:     {},
+	JoinCodeRevoked:     {},
+	UserSelfRegistered:  {},
+	ReauthProofIssued:   {},
+	ReauthProofConsumed: {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id

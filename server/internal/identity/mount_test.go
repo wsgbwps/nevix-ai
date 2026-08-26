@@ -18,6 +18,7 @@ import (
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
+	"github.com/nevix-ai/server/internal/identity/reauth"
 	"github.com/nevix-ai/server/internal/identity/session"
 )
 
@@ -27,6 +28,7 @@ func testModule() *Module {
 	service := auth.NewService(nil, nil, session.NewService(nil, nil))
 	return &Module{
 		auth:        service,
+		reauth:      reauth.NewService(nil, service),
 		guard:       authz.NewGuard(service),
 		corsOrigins: []string{"https://app.nevix.test"},
 	}

@@ -27,8 +27,8 @@ func TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply on empty database: %v", err)
 	}
-	if len(applied) != 3 || applied[0].Source.Version != 1 || applied[1].Source.Version != 2 || applied[2].Source.Version != 3 {
-		t.Fatalf("applied %d migrations, want versions [1 2 3] in order", len(applied))
+	if len(applied) != 4 || applied[0].Source.Version != 1 || applied[1].Source.Version != 2 || applied[2].Source.Version != 3 || applied[3].Source.Version != 4 {
+		t.Fatalf("applied %d migrations, want versions [1 2 3 4] in order", len(applied))
 	}
 
 	db := openDB(t, ctx, scratchURL)
@@ -175,12 +175,12 @@ func TestConcurrentApplyRunsTheEmbeddedSetExactlyOnce(t *testing.T) {
 		}
 		totalApplied += len(results[i])
 	}
-	if totalApplied != 3 {
-		t.Fatalf("concurrent applies ran %d migrations in total, want exactly the 3 embedded ones (each once)", totalApplied)
+	if totalApplied != 4 {
+		t.Fatalf("concurrent applies ran %d migrations in total, want exactly the 4 embedded ones (each once)", totalApplied)
 	}
 
 	db := openDB(t, ctx, scratchURL)
-	for _, version := range []int64{1, 2, 3} {
+	for _, version := range []int64{1, 2, 3, 4} {
 		var recorded int
 		if err := db.QueryRowContext(ctx,
 			`SELECT count(*) FROM public.goose_db_version WHERE version_id = $1 AND is_applied`, version,
@@ -253,15 +253,15 @@ func TestUpgradeFromBaselineBackfillsLastLogin(t *testing.T) {
 		t.Fatalf("seed carol audit row: %v", err)
 	}
 
-	// The production startup path now applies 0002 and 0003 (v1 is
-	// recorded); the join-codes migration rides along without touching the
-	// backfill under test.
+	// The production startup path now applies 0002, 0003, and 0004 (v1 is
+	// recorded); the join-codes and reauth-proofs migrations ride along
+	// without touching the backfill under test.
 	applied, err := Apply(ctx, scratchURL)
 	if err != nil {
 		t.Fatalf("upgrade to v2: %v", err)
 	}
-	if len(applied) != 2 || applied[0].Source.Version != 2 || applied[1].Source.Version != 3 {
-		t.Fatalf("upgrade applied %+v, want exactly versions [2 3]", applied)
+	if len(applied) != 3 || applied[0].Source.Version != 2 || applied[1].Source.Version != 3 || applied[2].Source.Version != 4 {
+		t.Fatalf("upgrade applied %+v, want exactly versions [2 3 4]", applied)
 	}
 
 	lastLogin := func(userID string) (*time.Time, string) {
