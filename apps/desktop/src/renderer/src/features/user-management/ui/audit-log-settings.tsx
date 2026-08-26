@@ -10,6 +10,7 @@ import {
   type AuthenticatedManagementSession
 } from '../api/client'
 import { auditLogExportFileName, serializeAuditLogCsv } from '../lib/audit-log-csv'
+import { isAuditActionKey, type AuditActionKey } from '../lib/audit-actions'
 
 export const AUDIT_LOGS_PER_PAGE = 20
 /** The export collects every page; 100 is the contract's per_page ceiling. */
@@ -39,28 +40,8 @@ const EXPORT_ACTIVE_CONTRIBUTION: AuditLogSettingsContribution = {
   close: 'deny'
 }
 
-const AUDIT_ACTION_KEYS = [
-  'instance_claimed',
-  'session_created',
-  'session_revoked',
-  'password_changed',
-  'display_name_changed',
-  'user_created',
-  'user_disabled',
-  'user_password_reset',
-  'user_email_changed',
-  'user_role_changed',
-  'user_deleted',
-  'join_code_created',
-  'join_code_revoked'
-] as const
-
-type AuditActionKey = (typeof AUDIT_ACTION_KEYS)[number]
-
 function auditActionLabel(action: string, t: TFunction<'userManagement'>): string {
-  return (AUDIT_ACTION_KEYS as readonly string[]).includes(action)
-    ? t(`audit.actions.${action as AuditActionKey}`)
-    : action
+  return isAuditActionKey(action) ? t(`audit.actions.${action as AuditActionKey}`) : action
 }
 
 export function AuditLogSettings({

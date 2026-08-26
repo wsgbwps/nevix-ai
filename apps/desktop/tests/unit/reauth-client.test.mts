@@ -209,6 +209,35 @@ test('the stable secure-transport and rate-limit codes survive mapping; unknowns
   assert.deepEqual(unknown, { outcome: 'request-rejected', code: 'brand_new_code' })
 })
 
+test('a 200 body whose echoed action disagrees with the request is not a proof', async () => {
+  const mismatched = await withFetch(
+    (async () =>
+      jsonResponse({ ...issueSuccessBody, action: 'provider_connection.delete' })) as typeof fetch,
+    () =>
+      createReauthProofRequester(serverUrl).issue(
+        'opaque-session-token',
+        'provider_connection.replace',
+        'secret'
+      )
+  )
+  assert.deepEqual(mismatched, { outcome: 'network-failure' })
+
+  const missing = await withFetch(
+    (async () =>
+      jsonResponse({
+        proof: issueSuccessBody.proof,
+        expires_at: issueSuccessBody.expires_at
+      })) as typeof fetch,
+    () =>
+      createReauthProofRequester(serverUrl).issue(
+        'opaque-session-token',
+        'provider_connection.replace',
+        'secret'
+      )
+  )
+  assert.deepEqual(missing, { outcome: 'network-failure' })
+})
+
 test('an unreadable body is a network failure, never a credential verdict', async () => {
   const malformed = await withFetch(
     (async () => new Response('<html>not json</html>', { status: 200 })) as typeof fetch,

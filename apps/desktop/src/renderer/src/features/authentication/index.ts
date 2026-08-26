@@ -6,6 +6,7 @@ export {
   type IdentityApiFailure,
   type IssuedReauthProof,
   type ReauthAction,
+  type ReauthIssueResult,
   type ReauthProofRequester
 } from './api/reauth'
 export { AuthenticationProvider } from './ui/authentication-provider'

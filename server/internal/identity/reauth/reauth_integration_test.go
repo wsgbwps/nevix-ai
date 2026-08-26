@@ -44,9 +44,11 @@ func requireEnv(t *testing.T, key string) string {
 // shared write transaction runner and the auth service owning credential
 // reverification — over the runtime credential, with one active admin.
 type serviceHarness struct {
-	owner   *pgxpool.Pool
-	service *Service
-	admin   authz.Principal
+	owner       *pgxpool.Pool
+	runner      *writetx.Runner
+	credentials *auth.Service
+	service     *Service
+	admin       authz.Principal
 }
 
 func newServiceHarness(t *testing.T, ctx context.Context) *serviceHarness {
@@ -86,9 +88,11 @@ func newServiceHarness(t *testing.T, ctx context.Context) *serviceHarness {
 		t.Fatalf("insert fixture admin: %v", err)
 	}
 	return &serviceHarness{
-		owner:   owner,
-		service: NewService(runner, credentials),
-		admin:   authz.Principal{SessionID: "session-id", UserID: adminID, Email: "admin@nevix.test", DisplayName: "Admin", Role: "admin"},
+		owner:       owner,
+		runner:      runner,
+		credentials: credentials,
+		service:     NewService(runner, credentials),
+		admin:       authz.Principal{SessionID: "session-id", UserID: adminID, Email: "admin@nevix.test", DisplayName: "Admin", Role: "admin"},
 	}
 }
 
@@ -301,6 +305,62 @@ func TestConsumeRollsBackWithItsAuditRow(t *testing.T) {
 	}
 	if _, _, consumedAt := h.proofRow(t, ctx, issued.Proof); consumedAt != nil {
 		t.Fatal("a rolled-back consumption left its stamp behind")
+	}
+}
+
+func TestIssueRechecksCredentialStampAndStatusUnderLock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	h := newServiceHarness(t, ctx)
+
+	// The stamp the caller verified against the committed hash.
+	var verifiedStamp string
+	if err := h.owner.QueryRow(ctx, `SELECT password_hash FROM public.users WHERE id = $1`, h.admin.UserID).Scan(&verifiedStamp); err != nil {
+		t.Fatalf("read committed hash: %v", err)
+	}
+
+	recheck := func() error {
+		return h.runner.Run(ctx, func(sc *writetx.Scope) error {
+			return recheckIssuerUnderLock(ctx, sc.Tx(), h.admin.UserID, verifiedStamp)
+		})
+	}
+
+	// A committed password change between verification and the lock point
+	// fails issuance with the uniform credential answer — and no proof row
+	// is written.
+	if _, err := h.owner.Exec(ctx, `UPDATE public.users SET password_hash = 'rotated-hash' WHERE id = $1`, h.admin.UserID); err != nil {
+		t.Fatalf("rotate the credential: %v", err)
+	}
+	if err := recheck(); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("stale-stamp recheck error = %v, want auth.ErrInvalidCredentials", err)
+	}
+	action, password := ActionProviderConnectionCreate, "correct-password-1"
+	if _, err := h.service.Issue(ctx, h.admin, IssueRequest{Action: &action, Password: &password}); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("stale-stamp issue error = %v, want auth.ErrInvalidCredentials", err)
+	}
+	var rows int
+	if err := h.owner.QueryRow(ctx, `SELECT count(*) FROM public.reauth_proofs`).Scan(&rows); err != nil {
+		t.Fatalf("count proofs: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("refused issuance persisted %d proof rows", rows)
+	}
+
+	// A committed disable between verification and the lock point fails
+	// issuance with the disabled-account answer.
+	if _, err := h.owner.Exec(ctx, `UPDATE public.users SET password_hash = $2, status = 'disabled' WHERE id = $1`, h.admin.UserID, verifiedStamp); err != nil {
+		t.Fatalf("disable the account: %v", err)
+	}
+	if err := recheck(); !errors.Is(err, auth.ErrAccountDisabled) {
+		t.Fatalf("disabled recheck error = %v, want auth.ErrAccountDisabled", err)
+	}
+
+	// An unchanged credential and an active account pass the lock point.
+	if _, err := h.owner.Exec(ctx, `UPDATE public.users SET status = 'active' WHERE id = $1`, h.admin.UserID); err != nil {
+		t.Fatalf("re-enable the account: %v", err)
+	}
+	if err := recheck(); err != nil {
+		t.Fatalf("fresh recheck error = %v", err)
 	}
 }
 

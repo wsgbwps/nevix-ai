@@ -156,14 +156,19 @@ type IssueResponse struct {
 // Issue verifies the admin's current password and inserts one proof bound to
 // the exact action, with its audit row, in a single write transaction. The
 // five-minute expiry is computed from the database clock so issuance and
-// consumption share one time authority.
+// consumption share one time authority. Before inserting, the account row is
+// locked and the verified credential stamp and active status are rechecked —
+// the session-issuance discipline — so a concurrent password reset or
+// disable that committed while this issuance was in flight can never leave a
+// stale-credential proof behind.
 func (s *Service) Issue(ctx context.Context, principal authz.Principal, req IssueRequest) (IssueResponse, error) {
 	if req.Action == nil || req.Password == nil {
 		// Unreachable through the HTTP pipeline (Validate rejects it first);
 		// guards direct callers against a nil dereference.
 		return IssueResponse{}, fmt.Errorf("reauth: issue request missing action or password")
 	}
-	if err := s.credentials.ReverifyCurrentPassword(ctx, principal, *req.Password); err != nil {
+	credentialStamp, err := s.credentials.ReverifyCurrentPassword(ctx, principal, *req.Password)
+	if err != nil {
 		return IssueResponse{}, err
 	}
 	action := *req.Action
@@ -174,6 +179,9 @@ func (s *Service) Issue(ctx context.Context, principal authz.Principal, req Issu
 	var expiresAt time.Time
 	err = s.runner.Run(ctx, func(sc *writetx.Scope) error {
 		tx := sc.Tx()
+		if err := recheckIssuerUnderLock(ctx, tx, principal.UserID, credentialStamp); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO public.reauth_proofs (user_id, action, token_hash, expires_at)
 			 VALUES ($1, $2, $3, now() + make_interval(secs => $4))
@@ -196,6 +204,31 @@ func (s *Service) Issue(ctx context.Context, principal authz.Principal, req Issu
 		return IssueResponse{}, err
 	}
 	return IssueResponse{Proof: token, Action: action, ExpiresAt: expiresAt}, nil
+}
+
+// recheckIssuerUnderLock is issuance's lock point: under the account row
+// lock, the status must still be active and the stored credential state
+// must still equal the stamp the caller verified. Authorization vocabulary
+// (the admin role) deliberately stays with the route guard (ADR-0015); this
+// recheck owns credential freshness and account liveness, exactly as
+// session issuance does.
+func recheckIssuerUnderLock(ctx context.Context, tx pgx.Tx, userID, credentialStamp string) error {
+	var currentStamp, status string
+	if err := tx.QueryRow(ctx,
+		`SELECT password_hash, status FROM public.users WHERE id = $1 FOR UPDATE`, userID,
+	).Scan(&currentStamp, &status); err != nil {
+		return fmt.Errorf("reauth: lock issuer account for issuance: %w", err)
+	}
+	if status != "active" {
+		return auth.ErrAccountDisabled
+	}
+	if currentStamp != credentialStamp {
+		// The credential changed between verification and the issuance lock
+		// point (a self-service change or an admin reset landed in between):
+		// the same uniform answer as any other wrong password.
+		return auth.ErrInvalidCredentials
+	}
+	return nil
 }
 
 // ConsumeRequest is the consumption command body. Proof and Action are

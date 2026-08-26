@@ -20,14 +20,24 @@ import (
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
-// errInvalidCredentials is the uniform answer for an unknown email and a wrong
-// password alike: a failed login never reveals which one it was.
-var errInvalidCredentials = errors.New("auth: invalid credentials")
+// ErrInvalidCredentials is the uniform answer for an unknown email and a wrong
+// password alike: a failed login never reveals which one it was. Exported so
+// the reauth proof command can answer the same sentinel from its lock-point
+// credential recheck and map it through the same single error owner.
+var ErrInvalidCredentials = errors.New("auth: invalid credentials")
 
-// errAccountDisabled answers a correct login for a disabled account so the
+// errInvalidCredentials is retained as the internal spelling the auth
+// commands were written against.
+var errInvalidCredentials = ErrInvalidCredentials
+
+// ErrAccountDisabled answers a correct login for a disabled account so the
 // user learns the account is disabled rather than guessing their password
 // failed (single-tenant directory: account existence is not a secret).
-var errAccountDisabled = errors.New("auth: account disabled")
+var ErrAccountDisabled = errors.New("auth: account disabled")
+
+// errAccountDisabled is retained as the internal spelling the auth commands
+// were written against.
+var errAccountDisabled = ErrAccountDisabled
 
 // errRateLimited carries the lockout's remaining duration.
 type errRateLimited struct {
@@ -232,32 +242,36 @@ func (s *Service) Logout(ctx context.Context, principal authz.Principal) (Logout
 // the shared per-email login limiter, a fresh committed active-status read,
 // and bcrypt verification against the committed hash — the same single
 // credential owner as login, exported so the proof command cannot grow a
-// second verification path. Failures return the same sentinels login maps
-// (errRateLimited, errAccountDisabled, errInvalidCredentials), so callers
-// reuse auth.MapError for them; a successful verification clears the
-// email's counted failures exactly like a successful login.
-func (s *Service) ReverifyCurrentPassword(ctx context.Context, principal authz.Principal, password string) error {
+// second verification path. On success it returns the committed hash as the
+// credential stamp the caller must recheck under its issuance row lock, so a
+// concurrent change that commits first cannot leave a stale-credential proof
+// behind (the session issuance discipline). Failures return the same
+// sentinels login maps (errRateLimited, ErrAccountDisabled,
+// ErrInvalidCredentials), so callers reuse auth.MapError for them; a
+// successful verification clears the email's counted failures exactly like
+// a successful login.
+func (s *Service) ReverifyCurrentPassword(ctx context.Context, principal authz.Principal, password string) (string, error) {
 	if allowed, retryAfter := s.limiter.Allowed(principal.Email, time.Now()); !allowed {
-		return errRateLimited{retryAfter: retryAfter}
+		return "", errRateLimited{retryAfter: retryAfter}
 	}
 	user, err := s.loadUserByID(ctx, principal.UserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The guard proved an active user moments ago; a vanished row is a
 		// consistency break, not a client condition.
-		return fmt.Errorf("auth: session user %s no longer exists", principal.UserID)
+		return "", fmt.Errorf("auth: session user %s no longer exists", principal.UserID)
 	}
 	if err != nil {
-		return fmt.Errorf("auth: load user for reverification: %w", err)
+		return "", fmt.Errorf("auth: load user for reverification: %w", err)
 	}
 	if user.Status != "active" {
-		return errAccountDisabled
+		return "", errAccountDisabled
 	}
 	if !verifyPassword(user.PasswordHash, password) {
 		s.limiter.RecordFailure(principal.Email, time.Now())
-		return errInvalidCredentials
+		return "", errInvalidCredentials
 	}
 	s.limiter.RecordSuccess(principal.Email)
-	return nil
+	return user.PasswordHash, nil
 }
 
 // MeResponse is the /users/me body.

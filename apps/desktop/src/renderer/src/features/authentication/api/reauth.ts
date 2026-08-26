@@ -101,6 +101,12 @@ function readErrorCode(payload: unknown): string | undefined {
 
 function parseIssuedProof(payload: unknown, action: ReauthAction): IssuedReauthProof | undefined {
   if (typeof payload !== 'object' || payload === null) return undefined
+  // The success contract requires the server-echoed action, and it must
+  // equal the declared action the caller requested: a malformed or
+  // mismatched 200 body is an unreachable-or-broken server, never a proof
+  // to hand onward mislabeled.
+  const echoedAction = (payload as Record<string, unknown>)['action']
+  if (echoedAction !== action) return undefined
   const proof = (payload as Record<string, unknown>)['proof']
   const expiresAt = (payload as Record<string, unknown>)['expires_at']
   if (typeof proof !== 'string' || proof.length === 0) return undefined
