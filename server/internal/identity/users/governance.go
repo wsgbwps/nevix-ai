@@ -17,8 +17,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/nevix-ai/server/internal/auditlog"
 	"github.com/nevix-ai/server/internal/authz"
-	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/session"
@@ -91,8 +91,8 @@ func (s *Service) Create(ctx context.Context, principal authz.Principal, req Cre
 			}
 			return fmt.Errorf("users: insert account: %w", err)
 		}
-		return s.writeAudit(ctx, tx, principal.UserID, &audit.Subject{UserID: created.ID, DisplayName: created.DisplayName},
-			audit.UserCreated, map[string]string{"email": created.Email})
+		return s.writeAudit(ctx, tx, principal.UserID, &auditlog.Subject{UserID: created.ID, DisplayName: created.DisplayName},
+			auditlog.UserCreated, map[string]string{"email": created.Email})
 	})
 	if err != nil {
 		return UserResponse{}, err
@@ -140,8 +140,8 @@ func (s *Service) Disable(ctx context.Context, principal authz.Principal, userID
 			return err
 		}
 		user.Status = "disabled"
-		return s.writeAudit(ctx, tx, principal.UserID, &audit.Subject{UserID: user.ID, DisplayName: user.DisplayName},
-			audit.UserDisabled, nil)
+		return s.writeAudit(ctx, tx, principal.UserID, &auditlog.Subject{UserID: user.ID, DisplayName: user.DisplayName},
+			auditlog.UserDisabled, nil)
 	})
 	if err != nil {
 		return UserResponse{}, err
@@ -202,8 +202,8 @@ func (s *Service) ResetPassword(ctx context.Context, principal authz.Principal, 
 			return err
 		}
 		user.MustChangePassword = true
-		return s.writeAudit(ctx, tx, principal.UserID, &audit.Subject{UserID: user.ID, DisplayName: user.DisplayName},
-			audit.UserPasswordReset, nil)
+		return s.writeAudit(ctx, tx, principal.UserID, &auditlog.Subject{UserID: user.ID, DisplayName: user.DisplayName},
+			auditlog.UserPasswordReset, nil)
 	})
 	if err != nil {
 		return UserResponse{}, err
@@ -255,8 +255,8 @@ func (s *Service) ChangeEmail(ctx context.Context, principal authz.Principal, us
 			return fmt.Errorf("users: change email: %w", err)
 		}
 		user.Email = email
-		return s.writeAudit(ctx, tx, principal.UserID, &audit.Subject{UserID: user.ID, DisplayName: user.DisplayName},
-			audit.UserEmailChanged, map[string]string{"from": loaded.Email, "to": email})
+		return s.writeAudit(ctx, tx, principal.UserID, &auditlog.Subject{UserID: user.ID, DisplayName: user.DisplayName},
+			auditlog.UserEmailChanged, map[string]string{"from": loaded.Email, "to": email})
 	})
 	if err != nil {
 		return UserResponse{}, err
@@ -305,8 +305,8 @@ func (s *Service) ChangeRole(ctx context.Context, principal authz.Principal, use
 			return fmt.Errorf("users: change role: %w", err)
 		}
 		user.Role = *req.Role
-		return s.writeAudit(ctx, tx, principal.UserID, &audit.Subject{UserID: user.ID, DisplayName: user.DisplayName},
-			audit.UserRoleChanged, map[string]string{"from": loaded.Role, "to": *req.Role})
+		return s.writeAudit(ctx, tx, principal.UserID, &auditlog.Subject{UserID: user.ID, DisplayName: user.DisplayName},
+			auditlog.UserRoleChanged, map[string]string{"from": loaded.Role, "to": *req.Role})
 	})
 	if err != nil {
 		return UserResponse{}, err
@@ -341,8 +341,8 @@ func (s *Service) Delete(ctx context.Context, principal authz.Principal, userID 
 		// The audit row deliberately outlives the account row it names
 		// (ADR-0009): the target snapshot and the email recorded in metadata
 		// keep the trail readable after the deletion.
-		return s.writeAudit(ctx, tx, principal.UserID, &audit.Subject{UserID: user.ID, DisplayName: user.DisplayName},
-			audit.UserDeleted, map[string]string{"email": user.Email})
+		return s.writeAudit(ctx, tx, principal.UserID, &auditlog.Subject{UserID: user.ID, DisplayName: user.DisplayName},
+			auditlog.UserDeleted, map[string]string{"email": user.Email})
 	})
 	if err != nil {
 		return DeleteResponse{}, err
@@ -368,12 +368,12 @@ func (s *Service) refuseLastActiveAdminReduction(ctx context.Context, tx pgx.Tx,
 // writeAudit snapshots the acting admin inside the transaction and appends
 // the governance audit row (ADR-0009: snapshot at write time, same
 // transaction as the mutation).
-func (s *Service) writeAudit(ctx context.Context, tx pgx.Tx, actorUserID string, target *audit.Subject, action audit.Action, metadata map[string]string) error {
-	actor, err := audit.SnapshotSubject(ctx, tx, actorUserID)
+func (s *Service) writeAudit(ctx context.Context, tx pgx.Tx, actorUserID string, target *auditlog.Subject, action auditlog.Action, metadata map[string]string) error {
+	actor, err := auditlog.SnapshotSubject(ctx, tx, actorUserID)
 	if err != nil {
 		return err
 	}
-	return audit.Write(ctx, tx, audit.Entry{Actor: actor, Target: target, Action: action, Metadata: metadata})
+	return auditlog.Append(ctx, tx, auditlog.Entry{Actor: actor, Target: target, Action: action, Metadata: metadata})
 }
 
 // isUniqueViolation reports whether err is the named unique constraint

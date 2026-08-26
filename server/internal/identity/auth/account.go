@@ -16,8 +16,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/nevix-ai/server/internal/auditlog"
 	"github.com/nevix-ai/server/internal/authz"
-	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/writetx"
@@ -121,7 +121,7 @@ func (s *Service) ChangePassword(ctx context.Context, principal authz.Principal,
 		if _, err := s.sessions.Revoke(ctx, sc, others); err != nil {
 			return err
 		}
-		actor, err := audit.SnapshotSubject(ctx, tx, principal.UserID)
+		actor, err := auditlog.SnapshotSubject(ctx, tx, principal.UserID)
 		if err != nil {
 			return err
 		}
@@ -129,9 +129,9 @@ func (s *Service) ChangePassword(ctx context.Context, principal authz.Principal,
 		if owesInitialChange {
 			metadata["initial"] = "true"
 		}
-		return audit.Write(ctx, tx, audit.Entry{
+		return auditlog.Append(ctx, tx, auditlog.Entry{
 			Actor:    actor,
-			Action:   audit.PasswordChanged,
+			Action:   auditlog.PasswordChanged,
 			Metadata: metadata,
 		})
 	})
@@ -191,13 +191,13 @@ func (s *Service) UpdateMe(ctx context.Context, principal authz.Principal, req U
 		).Scan(&updated.ID, &updated.Email, &updated.PasswordHash, &updated.DisplayName, &updated.Role, &updated.Status, &updated.MustChangePassword); err != nil {
 			return fmt.Errorf("auth: update display name: %w", err)
 		}
-		actor, err := audit.SnapshotSubject(ctx, tx, principal.UserID)
+		actor, err := auditlog.SnapshotSubject(ctx, tx, principal.UserID)
 		if err != nil {
 			return err
 		}
-		return audit.Write(ctx, tx, audit.Entry{
+		return auditlog.Append(ctx, tx, auditlog.Entry{
 			Actor:    actor,
-			Action:   audit.DisplayNameChanged,
+			Action:   auditlog.DisplayNameChanged,
 			Metadata: map[string]string{"from": previous, "to": name},
 		})
 	})

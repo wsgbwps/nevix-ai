@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/nevix-ai/server/internal/identity/audit"
+	"github.com/nevix-ai/server/internal/auditlog"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/writetx"
@@ -225,13 +225,13 @@ func (s *Service) Initialize(ctx context.Context, req InitializeRequest) (LoginR
 		if err != nil {
 			return fmt.Errorf("auth: issue claim session: %w", err)
 		}
-		actor, err := audit.SnapshotSubject(ctx, tx, claimed.ID)
+		actor, err := auditlog.SnapshotSubject(ctx, tx, claimed.ID)
 		if err != nil {
 			return err
 		}
-		return audit.Write(ctx, tx, audit.Entry{
+		return auditlog.Append(ctx, tx, auditlog.Entry{
 			Actor:  actor,
-			Action: audit.InstanceClaimed,
+			Action: auditlog.InstanceClaimed,
 			Metadata: map[string]string{
 				"email":               claimed.Email,
 				"setup_code_required": fmt.Sprintf("%t", s.setupCodeRequired),

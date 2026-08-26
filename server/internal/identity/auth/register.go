@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/nevix-ai/server/internal/identity/audit"
+	"github.com/nevix-ai/server/internal/auditlog"
 	"github.com/nevix-ai/server/internal/identity/command"
 	"github.com/nevix-ai/server/internal/identity/session"
 	"github.com/nevix-ai/server/internal/identity/writetx"
@@ -152,13 +152,13 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (LoginRespo
 			return fmt.Errorf("auth: issue registered session: %w", err)
 		}
 
-		actor, err := audit.SnapshotSubject(ctx, tx, registered.ID)
+		actor, err := auditlog.SnapshotSubject(ctx, tx, registered.ID)
 		if err != nil {
 			return err
 		}
-		return audit.Write(ctx, tx, audit.Entry{
+		return auditlog.Append(ctx, tx, auditlog.Entry{
 			Actor:    actor,
-			Action:   audit.UserSelfRegistered,
+			Action:   auditlog.UserSelfRegistered,
 			Metadata: map[string]string{"email": registered.Email, "join_code_id": codeID},
 		})
 	})

@@ -1,7 +1,7 @@
-// The admin-only Audit Log read (ADR-0009 revision): newest-first pagination
-// through the Go API, the replacement for the retired client-side RLS read.
-// Reads use the pool directly; this package writes only through the Write
-// Transaction Module, which never gains a mutation seam here.
+// Package audit is the Identity Module's Audit Log query surface: the
+// admin-only paginated read (ADR-0009 revision), newest-first through the
+// Go API. Audit appends go through the shared transactional seam in
+// internal/auditlog; this package never gains a mutation seam.
 package audit
 
 import (

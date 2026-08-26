@@ -14,8 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/nevix-ai/server/internal/auditlog"
 	"github.com/nevix-ai/server/internal/authz"
-	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/writetx"
 )
 
@@ -101,7 +101,7 @@ func (s *Service) Create(ctx context.Context, principal authz.Principal, req Cre
 			break
 		}
 
-		return writeAudit(ctx, tx, principal.UserID, audit.JoinCodeCreated,
+		return writeAudit(ctx, tx, principal.UserID, auditlog.JoinCodeCreated,
 			map[string]string{"join_code_id": created.ID, "label": label})
 	})
 	if err != nil {
@@ -157,7 +157,7 @@ func (s *Service) Revoke(ctx context.Context, principal authz.Principal, joinCod
 		if tag.RowsAffected() == 0 {
 			return errJoinCodeNotFound
 		}
-		return writeAudit(ctx, tx, principal.UserID, audit.JoinCodeRevoked,
+		return writeAudit(ctx, tx, principal.UserID, auditlog.JoinCodeRevoked,
 			map[string]string{"join_code_id": joinCodeID})
 	})
 	if err != nil {
@@ -179,12 +179,12 @@ func parseJoinCodeID(raw string) (pgtype.UUID, error) {
 // writeAudit snapshots the acting admin inside the transaction and appends
 // the join-code audit row. The target is nil — a join code is not a User —
 // and the row names the code by id, with the label as issued context.
-func writeAudit(ctx context.Context, tx pgx.Tx, actorUserID string, action audit.Action, metadata map[string]string) error {
-	actor, err := audit.SnapshotSubject(ctx, tx, actorUserID)
+func writeAudit(ctx context.Context, tx pgx.Tx, actorUserID string, action auditlog.Action, metadata map[string]string) error {
+	actor, err := auditlog.SnapshotSubject(ctx, tx, actorUserID)
 	if err != nil {
 		return err
 	}
-	return audit.Write(ctx, tx, audit.Entry{Actor: actor, Action: action, Metadata: metadata})
+	return auditlog.Append(ctx, tx, auditlog.Entry{Actor: actor, Action: action, Metadata: metadata})
 }
 
 // isUniqueViolation reports whether err is the named unique constraint
