@@ -12,6 +12,14 @@ _Avoid_: service, package, domain
 Server 中 canonical owner 名为 `creation`、与 Desktop AI Creation Domain 共享同一 AI 创作业务 owner 的 Module，边界覆盖图片与视频生成的可信命令、供应商连接和异步编排；媒体类型和供应商 adapter 不单独构成 Module。
 _Avoid_: Video Generation Module, Image Generation Module, Provider Module, videogen
 
+**Provider Credential Master Key（供应商凭据主密钥）**:
+Deployment Instance 用于加密 AI Provider Connection 凭据的本地主密钥，持久化在 PostgreSQL 之外；丢失或不可用只使供应商连接 fail closed，不影响其他业务数据。
+_Avoid_: Kapon API Key, Database Encryption Key, Secret Store
+
+**Encrypted Provider Credential（加密供应商凭据）**:
+由 Provider Credential Master Key 保护并随 AI Provider Connection 存入 PostgreSQL 的密文；明文只在 Server 完成受信操作期间存在，不向 Desktop 回传。
+_Avoid_: API Key, Provider Credential Reference, Plaintext Secret
+
 **Aggregate Root**:
 拥有一致性边界的领域实体，仅在复杂 module 中使用（如 AI Creation Module）。
 _Avoid_: model, record
@@ -47,7 +55,7 @@ _Avoid_: 邀请函（Invitation）, 注册开关, invite code
 _Avoid_: 首次登录, 管理员登录, 开放注册
 
 **Setup Code（设置码）**:
-实例认领的可选部署凭据；启用时只有持有者可认领空实例，默认认领流程不要求该凭据，实例拥有任何 User 后即不复存在。
+实例认领的部署凭据；公网部署强制要求，受隔离的内网部署可显式关闭，实例拥有任何 User 后即不复存在。
 _Avoid_: 初始管理员密码, bootstrap 密码, 超级管理员
 
 **Audit Actor（审计操作者）**:
@@ -57,6 +65,10 @@ _Avoid_: Host Operator, System Actor, Service Account
 **Session**:
 服务端可吊销的已认证状态：opaque token 仅以 hash 存于 Postgres，多设备并存、滑动过期。“即刻吊销”以吊销事务提交为界：提交后的认证失败并断开相应 SSE，已进入执行的 HTTP 请求不追溯取消，回滚不断开连接。
 _Avoid_: JWT, 登录态
+
+**Reauthentication Proof（重新认证证明）**:
+Admin 重新验证当前密码后由 Identity 签发、供一个高风险 exact action 在五分钟内单次消费的 opaque 授权证明；它不延长 Session，也不能授权另一项操作。
+_Avoid_: Fresh Session, Password Confirmation Flag, Reauth Token（未表达作用域）
 
 **Last Login At（最近登录时间）**:
 User 最近一次成功签发交互式 Session 的时间投影；Login、Instance Claim 与 Join Code 注册成功后推进，Session refresh 不推进。
