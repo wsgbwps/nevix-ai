@@ -5,7 +5,7 @@
   "schema": "code-review-findings/v1",
   "fixedPoint": "main @ 744a5b9",
   "scopePaths": ["server/internal/auditlog", "server/internal/identity", "scripts/test-identity-integration.sh", ".scratch"],
-  "currentDiffDigest": "sha256:bae48937be11a0362778dc509c6aa8c70659176d165a1503efa378e15bc205e1",
+  "currentDiffDigest": "sha256:251d0d78a92c4dd27b92371fb2ba15ea4e7cdeb907350edcfb15a6fbb0d2d375",
   "fullReviewCount": 1,
   "targetedReviewRound": 0,
   "findings": [
@@ -109,15 +109,27 @@
     }
   ],
   "repairRecords": [],
-  "relevantCheck": null,
-  "outcome": "needs-disposition"
+  "relevantCheck": {
+    "check": "server vet + go test ./... + ./scripts/test-identity-integration.sh",
+    "result": "PASS",
+    "coverage": "175 top-level real-PostgreSQL integration tests, zero skips, zero FAIL (identity contract surface + shared auditlog seam + migration tree); go vet clean; gofmt clean; unit tree green",
+    "diffDigest": "sha256:251d0d78a92c4dd27b92371fb2ba15ea4e7cdeb907350edcfb15a6fbb0d2d375"
+  },
+  "outcome": "closed"
 }
 ```
 
 ## Review summary
 
 ### Standards (4 advisories, 0 blockers)
-Verdict "correct"; all findings are documentation/test-organization advisories with one-line remediations.
+Verdict "correct"; all findings were documentation/test-organization advisories, each resolved in scope before commit (outside the blocker loop — none was opened): harness support split into `harness_test.go`, package docs rewritten to stable contracts, test comments tightened.
 
 ### Spec (1 advisory, 0 blockers)
-Verdict "incorrect" solely on AC8 partial satisfaction (planned vs executed verification results in the delivery record); AC1–AC7 assessed consistent.
+AC1–AC7 assessed consistent; AC8's executed-results gap closed by recording verification outcomes in the delivery plan and PR acceptance record.
+
+### Stop gate (final digest sha256:251d0d78…)
+- Blockers open/fixed-pending-review/escalated: 0.
+- Advisories: 5, all disposition `deferred` with in-scope resolution notes, status `closed`.
+- False-positives: 0.
+- Final relevant check: PASS on the final digest (server/scripts tree byte-identical to the validated run; post-run edits were `.scratch` records only).
+- No code edits after the check ran.
