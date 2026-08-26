@@ -124,6 +124,19 @@ test("delivery-harness changes run only the inline harness tests", () => {
   });
 });
 
+test("deploy delivery assets run only the inline harness tests", () => {
+  assert.deepEqual(
+    selected([
+      "deploy/docker-compose.yml",
+      "deploy/nginx/nginx.conf",
+      "deploy/cert-init/cert-init.sh",
+      "deploy/README.md",
+      "scripts/tests/deploy-stack.test.mjs",
+    ]),
+    { harness: true },
+  );
+});
+
 test("unknown paths fail closed", () => {
   assert.deepEqual(classifyPaths(["new-runtime/module.ts"]).unknownPaths, [
     "new-runtime/module.ts",

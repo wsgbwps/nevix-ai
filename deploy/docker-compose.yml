@@ -1,0 +1,118 @@
+# Official public-internet Nevix deployment (issue #152, ADR-0013).
+#
+# The only host-published port is nginx 443; PostgreSQL, the Go server, and
+# the TLS provisioning assets live exclusively on the internal Docker network.
+# Upstream images are pinned by digest, and the locally built server and
+# cert-init images derive from digest-pinned bases in their Dockerfiles.
+#
+# Required configuration lives in deploy/.env (see .env.example). The public
+# baseline forces the one-time setup code (NEVIX_SETUP_CODE_REQUIRED defaults
+# to true) so an unclaimed instance cannot be taken over by whoever learns the
+# URL first; only an explicitly isolated intranet deployment turns it off.
+#
+# NOTE on the network shape: one plain bridge network named "internal", not a
+# Docker "internal: true" network — the Go server needs outbound provider
+# access in later slices (Kapon), which an internal network would block.
+name: nevix
+
+services:
+  cert-init:
+    build:
+      context: ./cert-init
+    image: nevix-cert-init:1
+    environment:
+      NEVIX_PUBLIC_IP: ${NEVIX_PUBLIC_IP:?set the deployment's fixed public IP in deploy/.env}
+      CERT_FORCE_NEW: ${CERT_FORCE_NEW:-false}
+    volumes:
+      - tls:/etc/nginx/tls
+    networks:
+      - internal
+    restart: "no"
+
+  # Daily loop keeping the <90-day certificate expiry warning visible in
+  # operations logs; same image as cert-init, read-only view of the volume.
+  cert-watch:
+    image: nevix-cert-init:1
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+    environment:
+      CERT_MODE: watch
+    volumes:
+      - tls:/etc/nginx/tls:ro
+    networks:
+      - internal
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17.5-alpine@sha256:6567bca8d7bc8c82c5922425a0baee57be8402df92bae5eacad5f01ae9544daa
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set the PostgreSQL superuser password in deploy/.env}
+      NEVIX_IDENTITY_APP_PASSWORD: ${NEVIX_IDENTITY_APP_PASSWORD:?set the identity_app password in deploy/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # First-boot provisioning of the identity_app credential; the migrations
+      # create the role without a password, deployment owns credentials.
+      - ./postgres/init-identity-app.sh:/docker-entrypoint-initdb.d/00-init-identity-app.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks:
+      - internal
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ../server
+      dockerfile: ../deploy/Dockerfile.server
+    image: nevix-server:1
+    environment:
+      DATABASE_URL: postgresql://identity_app:${NEVIX_IDENTITY_APP_PASSWORD:?}@postgres:5432/postgres?sslmode=disable
+      MIGRATION_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/postgres?sslmode=disable
+      NEVIX_SETUP_CODE_REQUIRED: ${NEVIX_SETUP_CODE_REQUIRED:-true}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-null}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - internal
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.28.0-alpine@sha256:30f1c0d78e0ad60901648be663a710bdadf19e4c10ac6782c235200619158284
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - tls:/etc/nginx/tls:ro
+    networks:
+      - internal
+    restart: unless-stopped
+    # Hardened edge: read-only root filesystem with only the cache and pid
+    # directories writable (nginx still starts its master as root because it
+    # binds the privileged 443).
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pgdata:
+  tls:
