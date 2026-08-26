@@ -20,7 +20,7 @@ User 在单台设备上的已认证使用状态；opaque token 存于本设备�
 _Avoid_: Organization Session, Login State
 
 **Server URL**:
-设备运行时配置的 Go server 基地址（origin），不再构建期烧死；经 IPC 持久化于本机 userData，仅 https 任意主机或 RFC1918/loopback 内网 http 可接受，公网明文 http 被拒绝。
+设备运行时配置的 Go server 基地址（origin），不再构建期烧死；经 IPC 持久化于本机 userData，客户部署只接受 https，显式开发模式才允许 loopback http。
 _Avoid_: Build-time Server Config, API Endpoint（指单个端点而非基地址）
 
 **Connection Screen**:
@@ -32,7 +32,7 @@ _Avoid_: Onboarding, Server Setup Wizard, Login Screen
 _Avoid_: Health Check（不承载信任决策）, Ping
 
 **Certificate Fingerprint Pin**:
-User 首次确认自签证书时按主机名记下的 SHA-256 指纹；渲染层 fetch 与主进程探测共用同一 pin 判定，指纹不变则放行、变更则告警并要求重新确认，任何路径都不全局跳过验证。
+User 首次与部署管理员核对并确认自签证书时，设备按主机名或 IP 记下的 SHA-256 指纹；渲染层 fetch 与主进程探测共用同一 pin 判定，指纹不变则放行、变更则告警并要求重新确认，任何路径都不全局跳过验证。
 _Avoid_: Certificate Bypass, Insecure TLS, Trust All Certificates
 
 **Remembered Email**:
