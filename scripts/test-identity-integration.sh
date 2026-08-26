@@ -200,6 +200,18 @@ assert_identity_integration_executed() {
     TestChangePasswordRollsBackRevocationWithItsAuditRow
     TestDisableRollsBackRevocationWithItsAuditRow
     TestResetPasswordRollsBackRevocationWithItsAuditRow
+    TestIssueReauthProofAdmitsOnlyActiveAdminsWithTheCurrentPassword
+    TestReauthProofEndpointsRequireProvenHTTPSTransport
+    TestIssueReauthProofValidatesTheClosedActionSet
+    TestReauthProofLifecycleStoresHashWritesAuditAndConsumesOnce
+    TestConsumeReauthProofFailsClosedOnUnknownExpiredAndForeignProofs
+    TestIssueReauthProofSharesTheLoginFailureLimiter
+    TestReauthProofSweepReclaimsExpiredRows
+    TestIssueStoresOnlyTheHashWithAFiveMinuteWindow
+    TestConsumeFailsClosedWithoutBurningTheProof
+    TestConsumeIsExactlyOnceUnderConcurrencyAndNeverRestored
+    TestConsumeRollsBackWithItsAuditRow
+    TestSweepDeletesOnlyExpiredProofs
   )
   # Shared Audit Append sentinels live in the internal/auditlog package.
   local -a auditlog_tests=(

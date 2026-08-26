@@ -227,6 +227,39 @@ func (s *Service) Logout(ctx context.Context, principal authz.Principal) (Logout
 	return LogoutResponse{Status: "logged_out"}, nil
 }
 
+// ReverifyCurrentPassword re-verifies the caller's current password for a
+// re-verification command (Reauthentication Proof issuance, issue #154):
+// the shared per-email login limiter, a fresh committed active-status read,
+// and bcrypt verification against the committed hash — the same single
+// credential owner as login, exported so the proof command cannot grow a
+// second verification path. Failures return the same sentinels login maps
+// (errRateLimited, errAccountDisabled, errInvalidCredentials), so callers
+// reuse auth.MapError for them; a successful verification clears the
+// email's counted failures exactly like a successful login.
+func (s *Service) ReverifyCurrentPassword(ctx context.Context, principal authz.Principal, password string) error {
+	if allowed, retryAfter := s.limiter.Allowed(principal.Email, time.Now()); !allowed {
+		return errRateLimited{retryAfter: retryAfter}
+	}
+	user, err := s.loadUserByID(ctx, principal.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The guard proved an active user moments ago; a vanished row is a
+		// consistency break, not a client condition.
+		return fmt.Errorf("auth: session user %s no longer exists", principal.UserID)
+	}
+	if err != nil {
+		return fmt.Errorf("auth: load user for reverification: %w", err)
+	}
+	if user.Status != "active" {
+		return errAccountDisabled
+	}
+	if !verifyPassword(user.PasswordHash, password) {
+		s.limiter.RecordFailure(principal.Email, time.Now())
+		return errInvalidCredentials
+	}
+	s.limiter.RecordSuccess(principal.Email)
+	return nil
+}
+
 // MeResponse is the /users/me body.
 type MeResponse struct {
 	User UserResponse `json:"user"`

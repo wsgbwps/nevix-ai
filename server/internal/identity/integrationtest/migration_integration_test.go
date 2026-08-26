@@ -33,8 +33,9 @@ func TestBaselineSchemaIsTheSingleTenantUserSystem(t *testing.T) {
 	h := newHarness(t, ctx)
 
 	// The new baseline tables exist; the dropped world does not come back.
-	// join_codes arrives with issue #120 on the same up-only ladder.
-	for _, table := range []string{"users", "sessions", "audit_logs", "join_codes"} {
+	// join_codes arrives with issue #120 and reauth_proofs with issue #154
+	// on the same up-only ladder.
+	for _, table := range []string{"users", "sessions", "audit_logs", "join_codes", "reauth_proofs"} {
 		var exists bool
 		if err := h.fixturePool.QueryRow(ctx,
 			`SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = $1)`, table,
@@ -89,12 +90,14 @@ func TestIdentityAppGrantsMatchTheLeastPrivilegeContract(t *testing.T) {
 	// accounts); audit stays without UPDATE (immutability by grant,
 	// ADR-0009); join_codes carries SELECT/INSERT/UPDATE and no DELETE since
 	// issue #120 (revocation is UPDATE revoked_at; the revoked row is the
-	// record the audit trail corroborates).
+	// record the audit trail corroborates); reauth_proofs carries DELETE
+	// since issue #154 (the daily sweep reclaims expired rows).
 	for table, want := range map[string][]string{
-		"public.users":      {"SELECT", "INSERT", "UPDATE", "DELETE"},
-		"public.sessions":   {"SELECT", "INSERT", "UPDATE", "DELETE"},
-		"public.audit_logs": {"SELECT", "INSERT", "DELETE"},
-		"public.join_codes": {"SELECT", "INSERT", "UPDATE"},
+		"public.users":         {"SELECT", "INSERT", "UPDATE", "DELETE"},
+		"public.sessions":      {"SELECT", "INSERT", "UPDATE", "DELETE"},
+		"public.audit_logs":    {"SELECT", "INSERT", "DELETE"},
+		"public.join_codes":    {"SELECT", "INSERT", "UPDATE"},
+		"public.reauth_proofs": {"SELECT", "INSERT", "UPDATE", "DELETE"},
 	} {
 		for _, privilege := range []string{"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"} {
 			var has bool
