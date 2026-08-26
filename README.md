@@ -31,7 +31,8 @@ nevix-ai/
 ├── server/                # Go 后端（独立于 Node workspace）
 ├── contracts/             # 前后端共享的 API 契约（OpenAPI）
 ├── docs/adr/              # 架构决策记录
-├── scripts/               # 构建和部署脚本
+├── deploy/                # 官方公网交付资产：Compose、Nginx 配置、证书初始化与部署手册
+├── scripts/               # 构建/测试脚本与备份、恢复脚本及手册
 ├── .github/workflows/     # CI/CD
 ├── turbo.json
 ├── pnpm-workspace.yaml
@@ -48,11 +49,13 @@ AI 创作使用跨 Desktop、Server 与 OpenAPI 的唯一 canonical owner `creat
 
 数据平面收敛为 Go server 唯一可信数据面：桌面端不持有任何数据库凭据，登录、会话、用户与审计等全部数据访问都走 Go API，持久层为 PostgreSQL；授权在 Go 层以两个路由 guard（`RequireActiveUser` / `RequireAdmin`）加 handler 内行级检查落位。完整决策见 [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md) 与 [ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md)。
 
+AI Creation 的可见性基线是 creator-private：Creation Session、Reference Material、Generation Task 与其结果只对创建者可读，Admin 治理不是读取私有内容的旁路；只有成功 Media Asset 与有效 Team Publication 对全体 active User 可见。客户部署只接受 https（显式开发模式才允许 loopback http），官方公网 Compose 只由 Nginx 暴露 443。跨 Module 可信 seam（共享 Audit Append、Creation 写事务、认证注入、Session 吊销后断流、本地 AEAD）见 [ADR-0016](docs/adr/0016-ai-creation-v1-trusted-seams.md)，交付形状见 [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md)。
+
 领域术语详见 `CONTEXT-MAP.md` → 各子 context 的 `CONTEXT.md`；Codex 的持久开发与评审规则详见 [`AGENTS.md`](AGENTS.md)。
 
 ### 目录边界是架构契约
 
-本 README 的目录树和下方各层说明定义代码的归属边界；Domain、Feature、共享层和 composition root 是稳定约束，Feature 或 Module 内展示的职责子目录是参考而非穷举清单。开发时遵循以下规则：
+本 README 的目录树和下方各层说明定义代码的归属边界；Domain、Feature、共享层和 composition root 是稳定约束，Feature 或 Module 内展示的职责子目录是参考而非穷举清单。交付资产的 canonical owner（[ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md)）：官方公网 Compose、Nginx 配置、证书初始化与部署手册归 `deploy/`，备份与恢复脚本及手册归 `scripts/`；后续交付切片不得新建顶层 source owner。开发时遵循以下规则：
 
 1. 计划实现前先确定一个主要 Domain，并为每个新增或移动的源代码文件确定最窄的归属边界
 2. 固定 public seam、依赖方向和目录词汇；Feature 内部按实际职责受控演化，不要求不同 Feature 复制相同目录

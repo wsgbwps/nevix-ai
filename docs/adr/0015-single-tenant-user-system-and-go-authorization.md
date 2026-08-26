@@ -10,6 +10,8 @@
 
 2026-08-25 修订：Write Transaction Module 回调契约升级为 narrow scope（当前事务 + AfterCommit 登记提交后 effect）；见「写事务纪律」。
 
+2026-08-26 修订（AI Creation V1 实施规格 [#150](https://github.com/wsgbwps/nevix-ai/issues/150)）：可见性模型中「创作数据全体活跃用户可读」被 creator-private / team-readable 模型取代；Session 吊销后断流与 Creation 消费认证结果的 seam 定型；见「可见性模型」「Go 层授权词汇」与「写事务纪律」。
+
 ## 背景
 
 ADR-0008 以多租户 Organization 与 Supabase Auth（anon/authenticated JWT）为前提：客户端直读受 RLS 保护的表，Go 以 `identity_app` 执行 trusted writes。私有化单租户后，Supabase Auth 退场、auth 收进 Go server，客户端直读消失——RLS 失去评估主体，授权必须在 Go 层重建，数据库 GRANT 成为唯一 DB 侧防线。
@@ -58,22 +60,23 @@ ADR-0008 以多租户 Organization 与 Supabase Auth（anon/authenticated JWT）
 
 ### Go 层授权词汇
 
-- 两个路由 guard：`RequireActiveUser`（Session → users.status=active）、`RequireAdmin`（users.role=admin）；行级归属检查（如「只能改自己的行」）留在 handler 内。
+- 两个路由 guard：`RequireActiveUser`（Session → users.status=active）、`RequireAdmin`（users.role=admin）；行级归属检查（如「只能改自己的行」）不进入 guard 词汇，由 owning Module 自己执行——Identity 落在 handler 内，Creation 落在其查询层与命令层（[ADR-0016](0016-ai-creation-v1-trusted-seams.md)）。
+- 其他 Module（如 Creation）消费认证结果与 Reauthentication Proof 时不 deep-import Identity implementation：由 composition root 注入窄 public interface（authenticated principal 与 exact-action proof），Creation route 同样显式声明 guard；消费语义见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
 - 收敛在单一 authz 小包，全部路由声明式挂 guard；不建策略引擎、不建 allow-table。
 - 可见性规则单一落点：authz 包 + 查询层，不散落 handler——将来引入部门隔离时是改一处词汇的迁移，不是全库大扫荡。部门隔离 v1 不做（无实锤客户需求），立专项 issue。
 
-### 可见性模型（v1，团队共享）
+### 可见性模型（v1）
 
 - 用户目录：所有活跃用户可见全部活跃用户（email + display_name）。
 - Audit Log：admin-only。
-- 创作数据：全体活跃用户可读，owner 与 admin 可写删。
-- SSE hub 只推订阅者自己的任务事件。
+- 创作数据（2026-08-26 修订，取代「全体活跃用户可读」）：Creation Session、Reference Material、Generation Task、Generation Specification、Generation Result 与 Result Slot 对创建者私有，成功 Media Asset 与有效 Team Publication 对全体 active User 可见；Admin 治理不是读取私有内容的旁路。权威模型与聚合级规则见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
+- SSE hub 只推订阅者自己的事件。
 
 ### 写事务纪律（延续 ADR-0008）
 
 - 单一最小权限 LOGIN 角色（沿袭 `identity_app` 命名）直接登录；`session_user = current_user` 在构造时真实数据库往返验证、每个写事务开始后复验，失败即回滚且不执行业务代码。
 - Write Transaction Module 独占事务开始、commit 与 rollback 的契约不变；覆盖面改为用户、会话与审计写路径。
-- 2026-08-25 修订（#139）：写事务回调收到的不再是裸事务参数，而是 narrow scope——只暴露当前活动事务（`pgx.Tx`）与 AfterCommit effect 登记两个能力；Module 仍独占 begin、执行身份验证、commit、rollback、取消与 panic 处理，调用方不得自行 begin/commit/rollback/重试或嵌套事务。AfterCommit effect 仅在成功 commit 后各执行一次、按登记顺序同步执行；回调错误、取消阻止提交、panic、rollback 或 commit failure 时一律不执行。effect 运行时事务已提交：effect 失败不改变已提交结果，effect panic 按编程错误原样传播、其后 effect 不再运行。提交后断流等物理 effect 由各自 owner 在未来引入（#138：Session 确定受影响 Session，Write Transaction 保证 commit-before-effect）；在此之前不冻结任何投机性 SSE hub 接口。
+- 2026-08-25 修订（#139）：写事务回调收到的不再是裸事务参数，而是 narrow scope——只暴露当前活动事务（`pgx.Tx`）与 AfterCommit effect 登记两个能力；Module 仍独占 begin、执行身份验证、commit、rollback、取消与 panic 处理，调用方不得自行 begin/commit/rollback/重试或嵌套事务。AfterCommit effect 仅在成功 commit 后各执行一次、按登记顺序同步执行；回调错误、取消阻止提交、panic、rollback 或 commit failure 时一律不执行。effect 运行时事务已提交：effect 失败不改变已提交结果，effect panic 按编程错误原样传播、其后 effect 不再运行。提交后断流等物理 effect 由各自 owner 引入（#138：Session 确定受影响 Session，Write Transaction 保证 commit-before-effect）；Creation 侧断流 seam 已定型——Identity 在 Session 吊销事务成功提交后经共享 Domain Event 发布受影响的非敏感 Session identity，Creation 的 SSE hub 订阅并断开精确流，回滚不发布，见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
 
 ### 实例认领审计
 
@@ -88,7 +91,7 @@ ADR-0008 以多租户 Organization 与 Supabase Auth（anon/authenticated JWT）
 - **DB 触发器写审计**：沿袭 ADR-0008 的否决理由——审计语义须与写事务同编排，触发器表达不了。否决。
 - **保留 RLS 作为纵深防御**：无客户端直读后 RLS 无评估主体（单一应用角色下策略只能放行），guard + GRANT 已覆盖；否决。
 - **内置不可删除的超级管理员**（2026-08-23）：变相恢复已否决的第三级角色，且制造一个永久已知的暴力破解靶子；否决。
-- **永久开放的 Member 注册（无凭据门槛）**（2026-08-23）：v1 可见性为全体成员可读全部业务数据，等于向任何拿到 Server URL 的人持续敞开；否决。只在无任何 User 时存在且成功一次后永久关闭的 Instance Claim 不属于普通注册。
+- **永久开放的 Member 注册（无凭据门槛）**（2026-08-23）：当时 v1 可见性为全体成员可读全部业务数据，等于向任何拿到 Server URL 的人持续敞开；否决。该可见性前提已被 2026-08-26 creator-private 修订取代，但开放注册仍因用户目录与 team-readable 资产的暴露继续否决。只在无任何 User 时存在且成功一次后永久关闭的 Instance Claim 不属于普通注册。
 - **邮箱域名白名单 / 注册后待审批 / CSV 批量建号**（2026-08-23）：分别败于客户邮箱域不统一、审批队列在无邮件通道下无通知手段、初始密码仍需人工逐个传递；均否决。
 - **设置码持久化到库**（2026-08-23）：换来「重启不换码」这一无人需要的性质，却新增一张表与清理语义；否决。
 - **设置码强制必填**（2026-08-24）：要求部署方查看日志并向客户传码，为常规内网部署增加交接步骤；默认无凭据认领，设置码仅作为显式启用的额外保护。

@@ -21,6 +21,12 @@ Audit Log 行需要呈现 actor 与 target 的显示名。直觉设计是存 use
 - 客户端 RLS 直读取消：读取与导出改为经 Go API 的 admin-only 分页端点；导出仍是 Desktop 本地写文件，不建服务端导出接口。
 - 背景见 [ADR-0013](0013-onprem-single-tenant-delivery.md) 与 [ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)。
 
+## 修订 — 2026-08-26（AI Creation V1 共享 Audit Append）
+
+- 审计写入 seam 提升为 Server 共享深 Module（Audit Append）：各 Module 在自己的业务事务内 append actor/target 快照、合法 action 与脱敏 metadata；append 失败回滚业务写。Identity 保留 Admin Audit Log 查询 surface（admin-only 分页与导出不变）。
+- 快照、无 actor/target FK、无 UPDATE 授权、action 由写入方校验、365 天滚动 sweep 等既有决策继续有效；Creation 写入不放宽敏感信息纪律——Provider Key、prompt、私有媒体与可访问 URL 不进 Audit Log。
+- 跨 Module 责任 seam 见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。背景：[ADR-0013](0013-onprem-single-tenant-delivery.md) 与 [ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)。
+
 ## Considered Options
 
 - **FK + join 派生显示名**：改名会回改历史、删用户留下悬空引用或级联删历史，与审计语义冲突；否决。

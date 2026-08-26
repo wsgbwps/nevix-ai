@@ -43,7 +43,7 @@ _Avoid_: Account, Member（指角色时）, Profile
 _Avoid_: Owner, Administrator, Manager
 
 **Member**:
-两级角色中的基础使用者；对业务数据与全体活跃用户目录团队共享可读。
+两级角色中的基础使用者；可见全体活跃用户目录，业务数据按所属域的可见性模型受限（AI Creation 下仅成功 Media Asset 与有效 Team Publication 对 Team 可见，创作者私有内容不可见）。
 _Avoid_: User, Regular User
 
 **Join Code（加入码）**:
