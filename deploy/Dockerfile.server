@@ -1,0 +1,22 @@
+# Server image for the official public deployment (issue #152, ADR-0013).
+# Build context is the server/ module (compose sets context: ../server with
+# this Dockerfile); both stages are digest-pinned so the delivered image is
+# reproducible from the repository tree. The binary embeds the goose
+# migrations, so the runtime needs no extra files.
+FROM golang:1.26.3-alpine@sha256:91eda9776261207ea25fd06b5b7fed8d397dd2c0a283e77f2ab6e91bfa71079d AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/nevix-server ./cmd/server
+
+FROM alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1
+
+RUN addgroup -S nevix && adduser -S -G nevix -H nevix
+COPY --from=build /out/nevix-server /usr/local/bin/nevix-server
+
+# Unprivileged; 8080 is internal-network only (nginx is the sole publisher).
+USER nevix
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/nevix-server"]

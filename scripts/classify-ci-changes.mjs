@@ -58,6 +58,11 @@ export function classifyPaths(paths) {
     }
     if (startsWith(path, "server/cmd/server")) checks.add("e2e");
 
+    // deploy 交付资产（公网 Compose/Nginx/证书生命周期）由 harness 内联的
+    // deploy-stack 结构测试验证：端口暴露、摘要钉扎、TLS 与流式合同。
+    // 不改产品运行时代码，无需产品套件。
+    if (startsWith(path, "deploy")) checks.add("harness");
+
     // contracts 是 Desktop ↔ Server 的 seam:server 契约一致性测试与 Desktop
     // 消费端都依赖它。
     if (startsWith(path, "contracts")) {
@@ -108,6 +113,7 @@ export function classifyPaths(paths) {
         "scripts/.gitkeep",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
+        "scripts/tests/deploy-stack.test.mjs",
       ])
     ) {
       checks.add("harness");
