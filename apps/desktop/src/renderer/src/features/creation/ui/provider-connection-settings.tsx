@@ -120,6 +120,7 @@ export function ProviderConnectionSettings({
   const [commandInFlight, setCommandInFlight] = useState(false)
   const [keyDialogOpen, setKeyDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [heldProof, setHeldProof] = useState<{ readonly proof: string } | undefined>()
 
   useEffect(() => {
     onContributionChange?.(
@@ -199,9 +200,7 @@ export function ProviderConnectionSettings({
 
   const submitCredential = useCallback(
     async (providerKey: string): Promise<boolean> => {
-      const action: ProviderConnectionProofAction = connection === null ? 'create' : 'replace'
-      const proof = await acquireProof(action)
-      if (proof === undefined) return false
+      if (heldProof === undefined) return false
       const submit = connection === null ? client.configure : client.replaceCredential
       const session = await getSession()
       if (!session) {
@@ -210,7 +209,7 @@ export function ProviderConnectionSettings({
       }
       setCommandInFlight(true)
       setCommandError(undefined)
-      const result = await submit(session.token, proof.proof, providerKey)
+      const result = await submit(session.token, heldProof.proof, providerKey)
       setCommandInFlight(false)
       if (result.outcome !== 'succeeded') {
         setCommandError(failureMessage(result, t))
@@ -219,8 +218,26 @@ export function ProviderConnectionSettings({
       setConnection(result.value)
       return true
     },
-    [acquireProof, client, connection, getSession, t]
+    [client, connection, getSession, heldProof, t]
   )
+
+  // The exact-action proof is acquired before the credential dialog opens:
+  // the confirmation dialog and the key dialog are never open together
+  // (stacked modal focus traps froze the packaged Electron renderer when
+  // they fought, and one-modal-at-a-time matches the command's real
+  // dependency order — identity first, then the secret).
+  const openCredentialDialog = useCallback(async (): Promise<void> => {
+    const action: ProviderConnectionProofAction = connection === null ? 'create' : 'replace'
+    const proof = await acquireProof(action)
+    if (proof === undefined) return
+    setHeldProof(proof)
+    setKeyDialogOpen(true)
+  }, [acquireProof, connection])
+
+  const closeCredentialDialog = useCallback((): void => {
+    setKeyDialogOpen(false)
+    setHeldProof(undefined)
+  }, [])
 
   const confirmDelete = useCallback(async (): Promise<void> => {
     const proof = await acquireProof('delete')
@@ -261,8 +278,8 @@ export function ProviderConnectionSettings({
           commandError={commandError}
           keyDialogOpen={keyDialogOpen}
           deleteDialogOpen={deleteDialogOpen}
-          onOpenKeyDialog={() => setKeyDialogOpen(true)}
-          onCloseKeyDialog={() => setKeyDialogOpen(false)}
+          onOpenKeyDialog={() => void openCredentialDialog()}
+          onCloseKeyDialog={closeCredentialDialog}
           onSubmitCredential={submitCredential}
           onRecheck={() => runCommand((token) => client.recheck(token))}
           onTogglePause={() =>

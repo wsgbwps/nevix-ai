@@ -93,6 +93,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
+      - blobs:/var/lib/nevix/storage
       - secrets:/var/lib/nevix/secrets
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
@@ -100,8 +101,6 @@ services:
       timeout: 5s
       retries: 12
       start_period: 15s
-    volumes:
-      - blobs:/var/lib/nevix/storage
     networks:
       - internal
     restart: unless-stopped

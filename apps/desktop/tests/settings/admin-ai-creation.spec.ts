@@ -36,7 +36,7 @@ async function openAiCreationSection(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'AI 创作', exact: true })).toBeVisible()
 }
 
-test('the Admin sees the not-configured surface and the proof gate answers secure transport over HTTP', async () => {
+test('the Admin reaches the proof gate and the server refuses non-HTTPS transport', async () => {
   test.setTimeout(120_000)
   test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
   if (!identityServer) return
@@ -56,28 +56,51 @@ test('the Admin sees the not-configured surface and the proof gate answers secur
       await openAiCreationSection(page)
       await expect(page.getByText('尚未配置 AI 供应商连接')).toBeVisible()
 
-      // Opening the credential dialog and submitting the key requests the
-      // exact-action proof; the disposable E2E server is plain HTTP, so the
+      // Requesting configuration demands the exact-action confirmation
+      // first; with the confirmation as the only open modal, its failure
+      // surfaces stably. The disposable E2E server is plain HTTP, so the
       // proof endpoint refuses with secure_transport_required and the
-      // confirmation dialog surfaces the stable guidance — no key leaves
-      // the desktop and no proof is consumed.
+      // dialog shows the stable guidance — no key was entered, no proof
+      // consumed, and the connection stays unconfigured.
       await page.getByRole('button', { name: '配置连接' }).click()
-      const keyDialog = page.getByRole('dialog', { name: '配置 AI 供应商连接' })
-      await keyDialog.getByLabel('Kapon 密钥').fill('e2e-candidate-key')
-      await keyDialog.getByRole('button', { name: '验证并保存' }).click()
       const reauthDialog = page.getByRole('dialog', { name: '确认当前密码' })
+      await expect(reauthDialog.getByText('首次配置供应商连接', { exact: true })).toBeVisible()
       await reauthDialog.getByLabel('当前密码').fill(identityServer!.adminPassword)
       await reauthDialog.getByRole('button', { name: '验证并继续' }).click()
       await expect(reauthDialog.getByText(/HTTPS/)).toBeVisible()
-      // Dismiss the confirmation before asserting the card again: the
-      // abandoned proof never resolved, so the card must still show the
-      // not-configured state behind the dismissed modal.
       await reauthDialog.getByRole('button', { name: '取消' }).click()
       await expect(reauthDialog).toHaveCount(0)
       await expect(page.getByText('尚未配置 AI 供应商连接')).toBeVisible()
     } finally {
       await app.electronApp.close()
     }
+
+    // The proof endpoint itself refuses the disposable server's plain HTTP
+    // transport — the same refusal the dialog would surface — proven here
+    // against the real Go server without depending on the renderer.
+    const login = await fetch(new URL('/identity/auth/login', identityServer!.serverUrl), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: identityServer!.adminEmail,
+        password: identityServer!.adminPassword
+      })
+    })
+    const loginBody = (await login.json()) as { token?: string }
+    expect(typeof loginBody.token).toBe('string')
+    const proof = await fetch(new URL('/identity/admin/reauth/proofs', identityServer!.serverUrl), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${loginBody.token}`
+      },
+      body: JSON.stringify({
+        action: 'provider_connection.create',
+        password: identityServer!.adminPassword
+      })
+    })
+    expect(proof.status).toBe(400)
+    expect(((await proof.json()) as { error: string }).error).toBe('secure_transport_required')
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
   }
