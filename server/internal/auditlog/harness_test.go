@@ -81,7 +81,7 @@ func newAppendHarness(t *testing.T) *appendHarness {
 		owner:   connectPool(t, ctx, ownerURL),
 		runtime: connectPool(t, ctx, runtimeURL),
 	}
-	if _, err := h.owner.Exec(ctx, `TRUNCATE public.audit_logs, public.sessions, public.join_codes, public.reauth_proofs, public.users`); err != nil {
+	if _, err := h.owner.Exec(ctx, `TRUNCATE public.audit_logs, public.sessions, public.join_codes, public.reauth_proofs, public.users CASCADE`); err != nil {
 		t.Fatalf("truncate user-system tables: %v", err)
 	}
 	return h

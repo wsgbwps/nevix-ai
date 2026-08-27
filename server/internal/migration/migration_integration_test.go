@@ -9,6 +9,8 @@ package migration
 import (
 	"context"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -27,8 +29,16 @@ func TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply on empty database: %v", err)
 	}
-	if len(applied) != 4 || applied[0].Source.Version != 1 || applied[1].Source.Version != 2 || applied[2].Source.Version != 3 || applied[3].Source.Version != 4 {
-		t.Fatalf("applied %d migrations, want versions [1 2 3 4] in order", len(applied))
+	// Expected set derives from the embedded files themselves so appending a
+	// future up-only migration never needs to touch this sentinel again.
+	expected := embeddedVersions(t)
+	if len(applied) != len(expected) {
+		t.Fatalf("applied %d migrations, want %d: %+v", len(applied), len(expected), applied)
+	}
+	for i, want := range expected {
+		if applied[i].Source.Version != want {
+			t.Fatalf("applied[%d].Version = %d, want %d (lexicographic order)", i, applied[i].Source.Version, want)
+		}
 	}
 
 	db := openDB(t, ctx, scratchURL)
@@ -175,8 +185,8 @@ func TestConcurrentApplyRunsTheEmbeddedSetExactlyOnce(t *testing.T) {
 		}
 		totalApplied += len(results[i])
 	}
-	if totalApplied != 4 {
-		t.Fatalf("concurrent applies ran %d migrations in total, want exactly the 4 embedded ones (each once)", totalApplied)
+	if expectedCount := len(embeddedVersions(t)); totalApplied != expectedCount {
+		t.Fatalf("concurrent applies ran %d migrations in total, want exactly the %d embedded ones (each once)", totalApplied, expectedCount)
 	}
 
 	db := openDB(t, ctx, scratchURL)
@@ -253,15 +263,22 @@ func TestUpgradeFromBaselineBackfillsLastLogin(t *testing.T) {
 		t.Fatalf("seed carol audit row: %v", err)
 	}
 
-	// The production startup path now applies 0002, 0003, and 0004 (v1 is
-	// recorded); the join-codes and reauth-proofs migrations ride along
-	// without touching the backfill under test.
+	// The production startup path now applies everything after the baseline
+	// (v1 is already recorded); later migrations ride along without touching
+	// the backfill under test. Expectations derive from the embedded set so
+	// appending future up-only migrations keeps this sentinel true.
 	applied, err := Apply(ctx, scratchURL)
 	if err != nil {
-		t.Fatalf("upgrade to v2: %v", err)
+		t.Fatalf("upgrade past baseline: %v", err)
 	}
-	if len(applied) != 3 || applied[0].Source.Version != 2 || applied[1].Source.Version != 3 || applied[2].Source.Version != 4 {
-		t.Fatalf("upgrade applied %+v, want exactly versions [2 3 4]", applied)
+	expected := embeddedVersions(t)[1:] // everything except baseline v1
+	if len(applied) != len(expected) {
+		t.Fatalf("upgrade applied %d migrations, want %d: %+v", len(applied), len(expected), applied)
+	}
+	for i, want := range expected {
+		if applied[i].Source.Version != want {
+			t.Fatalf("upgrade[%d].Version = %d, want %d", i, applied[i].Source.Version, want)
+		}
 	}
 
 	lastLogin := func(userID string) (*time.Time, string) {
@@ -283,4 +300,27 @@ func TestUpgradeFromBaselineBackfillsLastLogin(t *testing.T) {
 	if stamp, email := lastLogin(bob); stamp != nil {
 		t.Fatalf("%s upgraded with last_login_at %v despite never logging in", email, stamp)
 	}
+}
+
+// embeddedVersions lists the migration file numbers present under
+// migrations/, in lexicographic (application) order.
+func embeddedVersions(t *testing.T) []int64 {
+	t.Helper()
+	entries, err := os.ReadDir("migrations")
+	if err != nil {
+		t.Fatalf("read embedded migrations directory: %v", err)
+	}
+	var versions []int64
+	for _, entry := range entries {
+		stem, _, ok := strings.Cut(entry.Name(), "_")
+		if !ok {
+			continue
+		}
+		version, err := strconv.ParseInt(stem, 10, 64)
+		if err != nil {
+			continue
+		}
+		versions = append(versions, version)
+	}
+	return versions
 }

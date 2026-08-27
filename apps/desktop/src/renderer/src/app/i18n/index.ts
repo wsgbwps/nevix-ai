@@ -8,6 +8,7 @@ export const appTranslations = defineResourceTranslations({
     heading: '使用 Nevix AI 创作',
     shell: {
       home: '首页',
+      creation: 'AI 创作',
       toggleSidebar: '切换侧边栏',
       brand: 'Nevix AI',
       userMenu: '用户菜单',
@@ -40,6 +41,7 @@ export const appTranslations = defineResourceTranslations({
     heading: 'Create with Nevix AI',
     shell: {
       home: 'Home',
+      creation: 'AI Creation',
       toggleSidebar: 'Toggle sidebar',
       brand: 'Nevix AI',
       userMenu: 'User menu',

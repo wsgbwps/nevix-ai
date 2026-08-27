@@ -70,6 +70,24 @@ test("Identity server changes require Server CI and Desktop E2E", () => {
   );
 });
 
+test("Creation module changes require Server CI and Desktop E2E", () => {
+  assert.deepEqual(
+    selected(["server/internal/creation/module.go"]),
+    { server: true, e2e: true },
+  );
+  assert.deepEqual(
+    selected(["server/internal/creation/integrationtest/harness_test.go"]),
+    { server: true, e2e: true },
+  );
+});
+
+test("the Creation storage contract triggers Server CI and Desktop E2E", () => {
+  assert.deepEqual(selected(["contracts/creation.yaml"]), {
+    server: true,
+    e2e: true,
+  });
+});
+
 test("API contracts require Server CI and Desktop E2E", () => {
   assert.deepEqual(
     selected(["contracts/identity.yaml"]),
@@ -79,6 +97,9 @@ test("API contracts require Server CI and Desktop E2E", () => {
 
 test("the server integration harness entry runs Server CI", () => {
   assert.deepEqual(selected(["scripts/test-identity-integration.sh"]), {
+    server: true,
+  });
+  assert.deepEqual(selected(["scripts/test-creation-integration.sh"]), {
     server: true,
   });
 });

@@ -40,7 +40,7 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 
 ### Storage 双后端
 
-- 部署时经环境变量选择后端，不做应用内管理 UI：`STORAGE_BACKEND=filesystem|s3`、`STORAGE_FS_ROOT`（本地卷，NAS 以挂载路径方式覆盖）、`S3_ENDPOINT`/`S3_BUCKET`/`S3_REGION`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`（OSS/COS/MinIO 共用一个 S3 兼容 adapter）。
+- 部署时经环境变量选择后端，不做应用内管理 UI：`STORAGE_BACKEND=filesystem|s3`、`STORAGE_FS_ROOT`（本地卷，NAS 以挂载路径方式覆盖）、`S3_ENDPOINT`/`S3_BUCKET`/`S3_REGION`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`/`S3_SECURE`（OSS/COS/MinIO 共用一个 S3 兼容 adapter）。
 - 文件一律经 Go server 出口，不做预签名直连，避免绕过 Go 层授权（seam 论证见 ADR-0014）。
 - 元数据只在 Postgres，后端是纯 blob 仓。
 

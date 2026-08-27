@@ -417,9 +417,14 @@ start_identity_server() {
   )
 
   identity_server_log="$(mktemp -t nevix-identity-e2e.XXXXXX.log)"
+  # Reference-material storage rides the filesystem adapter in a private temp
+  # root; the suite only exercises creator-private flows through Go (ADR-0014).
+  CREATION_STORAGE_ROOT="$(mktemp -d -t nevix-creation-storage.XXXXXX)"
   DATABASE_URL="$database_url" \
     MIGRATION_DATABASE_URL="$identity_database_url" \
     CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
+    STORAGE_BACKEND=filesystem \
+    STORAGE_FS_ROOT="$CREATION_STORAGE_ROOT" \
     "$identity_server_binary" >"$identity_server_log" 2>&1 &
   identity_server_pid=$!
   wait_for_identity_server

@@ -69,6 +69,11 @@ test-e2e: docker-ready
 test-identity-integration: docker-ready
 	./scripts/test-identity-integration.sh
 
+# Creation Module integration: real PostgreSQL + MinIO, zero skips, sentinels
+# (issue #156). Also runs the short file-stream smoke.
+test-creation-integration: docker-ready
+	./scripts/test-creation-integration.sh
+
 harness-test:
 	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/post-merge-dedup.test.mjs scripts/tests/deploy-stack.test.mjs .pi/tests/pi-hooks.test.mjs
 

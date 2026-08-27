@@ -120,6 +120,11 @@ type Module struct {
 // failure from other database errors.
 var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 
+// SessionAuthenticator exposes the narrow seam other Modules consume through
+// the composition root (ADR-0016 认证注入): proof of the calling principal
+// without any credential-verification knowledge leaving Identity.
+func (m *Module) SessionAuthenticator() authz.SessionAuthenticator { return m.auth }
+
 // NewModule constructs Identity around one Write Transaction Module. A real
 // database round trip must prove both session_user and current_user are
 // identity_app; owner, migration, SET ROLE-capable, and unreachable

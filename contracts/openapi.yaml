@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Nevix AI API
-  version: 0.10.0
+  version: 0.11.0
   description: |-
     API contract between desktop client and backend server.
 
@@ -78,6 +78,14 @@ paths:
     $ref: "./identity.yaml#/paths/~1identity~1admin~1reauth~1proofs"
   /identity/admin/reauth/proofs/consume:
     $ref: "./identity.yaml#/paths/~1identity~1admin~1reauth~1proofs~1consume"
+  /creation/sessions:
+    $ref: "./creation.yaml#/paths/~1creation~1sessions"
+  /creation/sessions/{sessionID}:
+    $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}"
+  /creation/sessions/{sessionID}/materials:
+    $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}~1materials"
+  /creation/materials/{materialID}:
+    $ref: "./creation.yaml#/paths/~1creation~1materials~1{materialID}"
 components:
   securitySchemes:
     bearerAuth:

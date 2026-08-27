@@ -20,6 +20,7 @@ import { connectionResourceOwner } from '../../src/renderer/src/features/connect
 import { languageResourceOwner } from '../../src/renderer/src/features/language'
 import { profileResourceOwner } from '../../src/renderer/src/features/profile'
 import { userManagementResourceOwner } from '../../src/renderer/src/features/user-management'
+import { creationResourceOwner } from '../../src/renderer/src/features/creation'
 
 const resourceOwners = [
   windowResourceOwner,
@@ -28,7 +29,8 @@ const resourceOwners = [
   connectionResourceOwner,
   languageResourceOwner,
   profileResourceOwner,
-  userManagementResourceOwner
+  userManagementResourceOwner,
+  creationResourceOwner
 ]
 
 test('each Supported Language has complete non-empty resources for every namespace', () => {
