@@ -69,6 +69,11 @@ test('the Admin sees the not-configured surface and the proof gate answers secur
       await reauthDialog.getByLabel('当前密码').fill(identityServer!.adminPassword)
       await reauthDialog.getByRole('button', { name: '验证并继续' }).click()
       await expect(reauthDialog.getByText(/HTTPS/)).toBeVisible()
+      // Dismiss the confirmation before asserting the card again: the
+      // abandoned proof never resolved, so the card must still show the
+      // not-configured state behind the dismissed modal.
+      await reauthDialog.getByRole('button', { name: '取消' }).click()
+      await expect(reauthDialog).toHaveCount(0)
       await expect(page.getByText('尚未配置 AI 供应商连接')).toBeVisible()
     } finally {
       await app.electronApp.close()
