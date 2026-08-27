@@ -424,9 +424,11 @@ start_identity_server() {
   # root; the suite only exercises creator-private flows through Go (ADR-0014).
   CREATION_STORAGE_ROOT="$(mktemp -d -t nevix-creation-storage.XXXXXX)"
   CREATION_SECRETS_ROOT="$(mktemp -d -t nevix-creation-secrets.XXXXXX)"
-  # The fake Kapon route for AI Creation E2E (issue #157): a Node fixture in
-  # the desktop suite owns it; the server never contacts the real provider in
-  # automated tests. Loopback http is the sanctioned test-only exception.
+  # Optional fake Kapon route for AI Creation E2E (issue #157): point
+  # KAPON_E2E_BASE_URL at a local fake to exercise provider flows end to end;
+  # unset keeps the reviewed fixed route and the suite relies on the
+  # secure-transport gate instead of contacting it. Loopback http is the
+  # sanctioned test-only exception.
   KAPON_BASE_URL="${KAPON_E2E_BASE_URL:-}" \
   DATABASE_URL="$database_url" \
     MIGRATION_DATABASE_URL="$identity_database_url" \

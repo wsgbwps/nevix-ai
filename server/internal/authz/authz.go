@@ -77,6 +77,17 @@ type ReauthProofVerifier interface {
 	VerifyProof(ctx context.Context, principal Principal, action, proof string) error
 }
 
+// SecureTransportProven reports whether one request's transport is proven
+// HTTPS: a direct TLS connection, or exactly the X-Forwarded-Proto: https
+// marker the official private proxy writes after stripping every
+// client-supplied Forwarded header (deploy/nginx, ADR-0013/0014). The Go
+// server is reachable only inside the private network in the official
+// Compose topology, so that marker — and nothing else on the public path —
+// can certify HTTPS to proof-bearing commands.
+func SecureTransportProven(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
 // Guard is the mountable guard vocabulary. Construct it once per process with
 // the identity Module's authenticator and declare it on routes.
 type Guard struct {

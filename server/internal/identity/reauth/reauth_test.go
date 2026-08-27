@@ -1,15 +1,13 @@
 // Deterministic evidence for the reauth package's pure decisions: the closed
-// exact-action set, token entropy and hashing, the trusted-HTTPS marker rule,
-// and the error mapping. Real-PostgreSQL behavior lives in
-// reauth_integration_test.go.
+// exact-action set, token entropy and hashing, and the error mapping. The
+// trusted-HTTPS marker rule itself is shared authz vocabulary and tested
+// there. Real-PostgreSQL behavior lives in reauth_integration_test.go.
 package reauth
 
 import (
 	"crypto/sha256"
-	"crypto/tls"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -56,38 +54,6 @@ func TestNewProofTokenIsOpaqueAndHashed(t *testing.T) {
 		if string(hash) == token {
 			t.Fatal("hash equals the token body; the token would be stored verbatim")
 		}
-	}
-}
-
-func TestSecureTransportProvenAcceptsOnlyTrustedHTTPSProof(t *testing.T) {
-	cases := []struct {
-		name   string
-		tls    bool
-		header string
-		want   bool
-	}{
-		{"direct TLS", true, "", true},
-		{"proxy marker", false, "https", true},
-		{"no proof", false, "", false},
-		{"plaintext marker", false, "http", false},
-		{"list-valued spoof", false, "https, http", false},
-		{"case-altered spoof", false, "HTTPS", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/identity/admin/reauth/proofs", nil)
-			if tc.tls {
-				// httptest.NewRequest never populates TLS; the field is the
-				// direct-connection proof, set directly.
-				req.TLS = &tls.ConnectionState{}
-			}
-			if tc.header != "" {
-				req.Header.Set("X-Forwarded-Proto", tc.header)
-			}
-			if got := SecureTransportProven(req); got != tc.want {
-				t.Fatalf("SecureTransportProven = %v, want %v", got, tc.want)
-			}
-		})
 	}
 }
 

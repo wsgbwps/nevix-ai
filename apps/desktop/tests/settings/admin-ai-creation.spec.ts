@@ -71,7 +71,7 @@ test('the Admin sees the not-configured surface and the proof gate answers secur
       await expect(reauthDialog.getByText(/HTTPS/)).toBeVisible()
       await expect(page.getByText('尚未配置 AI 供应商连接')).toBeVisible()
     } finally {
-      await app.close()
+      await app.electronApp.close()
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })
@@ -106,7 +106,7 @@ test('a Member sees per-media status and advice only, with no management command
       await expect(page.getByRole('button', { name: '配置连接' })).toHaveCount(0)
       await expect(page.getByRole('button', { name: '暂停' })).toHaveCount(0)
     } finally {
-      await app.close()
+      await app.electronApp.close()
     }
   } finally {
     await rm(userDataDir, { recursive: true, force: true })

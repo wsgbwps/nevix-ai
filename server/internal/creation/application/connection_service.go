@@ -116,7 +116,9 @@ func (s *ConnectionService) Configure(ctx context.Context, principal authz.Princ
 	if err != nil {
 		return domain.ProviderConnection{}, err
 	}
-	return connection, nil
+	// Re-read so the response carries the persisted timestamps, not the
+	// pre-insert aggregate's zero values.
+	return s.connections.GetActive(ctx)
 }
 
 // Replace switches the Provider Key through a candidate: consume the replace

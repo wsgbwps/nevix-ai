@@ -90,7 +90,7 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusBadRequest, Code: CodeCredentialInvalid, Message: "The provider key was rejected; nothing was changed."}
 	case isError(err, domain.ErrCheckTemporarilyUnavailable):
 		return &Error{Status: http.StatusServiceUnavailable, Code: CodeCheckTemporarilyUnavailable, Message: "The provider check could not complete; try again later."}
-	case isError(err, domain.ErrInsecureTransport), isError(err, authz.ErrProofInsecureTransport):
+	case isError(err, authz.ErrProofInsecureTransport):
 		return &Error{Status: http.StatusBadRequest, Code: CodeSecureTransportRequired, Message: "A proven HTTPS transport is required for this command."}
 	case isError(err, domain.ErrInvalidAdminState):
 		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "Request body must be JSON with admin_state of enabled or paused."}
@@ -173,20 +173,11 @@ func Mount(r chi.Router, routes []Route, guards Guards) {
 	}
 }
 
-// SecureTransportProven reports whether one request's transport is proven
-// HTTPS: a direct TLS connection, or exactly the X-Forwarded-Proto: https
-// marker the official private proxy writes after stripping every
-// client-supplied Forwarded header (deploy/nginx, ADR-0013/0014). Key-bearing
-// provider connection commands refuse everything else.
-func SecureTransportProven(r *http.Request) bool {
-	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-}
-
 // requireSecureTransport answers secure_transport_required before any proof
 // is consumed: rejecting the command later would burn the admin's proof for
 // a transport that could never carry it.
 func requireSecureTransport(w http.ResponseWriter, r *http.Request) bool {
-	if SecureTransportProven(r) {
+	if authz.SecureTransportProven(r) {
 		return true
 	}
 	WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeSecureTransportRequired, Message: "A proven HTTPS transport is required for this command."})

@@ -82,17 +82,6 @@ var (
 	ErrProofAlreadyConsumed = errors.New("reauth: proof already consumed")
 )
 
-// SecureTransportProven reports whether one request's transport is proven
-// HTTPS: a direct TLS connection, or exactly the X-Forwarded-Proto: https
-// marker the official private proxy writes after stripping every
-// client-supplied Forwarded header (deploy/nginx, issue #152). The Go server
-// is reachable only inside the private network in the official Compose
-// topology, so that marker — and nothing else on the public path — can
-// certify HTTPS to these endpoints.
-func SecureTransportProven(r *http.Request) bool {
-	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-}
-
 // Service is the proof lifecycle over the Write Transaction Module and the
 // auth package's single credential-verification owner.
 type Service struct {

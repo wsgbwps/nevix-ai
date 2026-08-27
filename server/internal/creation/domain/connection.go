@@ -102,10 +102,6 @@ var (
 	// ErrCredentialSealed reports envelope decryption failed — the master
 	// key does not match, or nonce/ciphertext/AAD were tampered with.
 	ErrCredentialSealed = errors.New("provider credential envelope could not be opened")
-	// ErrInsecureTransport reports the command arrived without proven HTTPS
-	// transport (mirrors the identity reauth vocabulary at this Module's own
-	// transport seam).
-	ErrInsecureTransport = errors.New("secure transport not proven")
 	// ErrInvalidAdminState reports a PATCH body outside enabled|paused.
 	ErrInvalidAdminState = errors.New("invalid admin state")
 )

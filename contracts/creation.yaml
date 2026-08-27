@@ -985,7 +985,7 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: 最近一次完成的 Connection Check 时间；从未检查为 null。
+          description: 最近一次 Connection Check 的时间（包括以 temporarily_unavailable 结束的尝试）；从未检查为 null。
         last_check_outcome:
           type: string
           nullable: true

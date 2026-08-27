@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/identity/audit"
 	"github.com/nevix-ai/server/internal/identity/auth"
 	"github.com/nevix-ai/server/internal/identity/command"
@@ -223,7 +224,7 @@ func (m *Module) routes() []command.Route {
 				if err != nil {
 					return reauth.IssueResponse{}, err
 				}
-				if !reauth.SecureTransportProven(r) {
+				if !authz.SecureTransportProven(r) {
 					return reauth.IssueResponse{}, reauth.ErrInsecureTransport
 				}
 				return m.reauth.Issue(ctx, principal, req)
@@ -238,7 +239,7 @@ func (m *Module) routes() []command.Route {
 				if err != nil {
 					return reauth.ConsumeResponse{}, err
 				}
-				if !reauth.SecureTransportProven(r) {
+				if !authz.SecureTransportProven(r) {
 					return reauth.ConsumeResponse{}, reauth.ErrInsecureTransport
 				}
 				return m.reauth.Consume(ctx, principal, req)

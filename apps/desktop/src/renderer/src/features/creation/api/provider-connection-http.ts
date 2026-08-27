@@ -5,7 +5,7 @@
  * and is never persisted, echoed, or logged by this client.
  */
 
-import type { CreationApiResult } from './go-creation-http'
+import { request, type CreationApiFailure, type CreationApiResult } from './go-creation-http'
 
 export type ProviderAdminState = 'enabled' | 'paused'
 export type ProviderCredentialState = 'checking' | 'valid' | 'invalid' | 'credential_unavailable'
@@ -45,53 +45,17 @@ export type ProviderConnectionLookup =
   | { readonly outcome: 'load-failed' }
   | { readonly outcome: 'unauthorized' }
 
-type RequestFailure =
-  | { readonly outcome: 'network-failure' }
-  | { readonly outcome: 'unauthorized' }
-  | { readonly outcome: 'forbidden' }
-  | { readonly outcome: 'request-rejected'; readonly code: string }
+/** The segment's shared trusted-command failure shape. */
+type RequestFailure = CreationApiFailure
 
-async function request(
+async function commandRequest(
   serverUrl: string,
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   token: string,
   body?: unknown
 ): Promise<{ readonly outcome: 'succeeded'; readonly payload: unknown } | RequestFailure> {
-  const url = new URL(path, serverUrl)
-  let response: Response
-  try {
-    response = await fetch(url, {
-      method,
-      redirect: 'error',
-      headers: {
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        Authorization: `Bearer ${token}`
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined
-    })
-  } catch {
-    return { outcome: 'network-failure' }
-  }
-  let payload: unknown
-  try {
-    payload = await response.json()
-  } catch {
-    return { outcome: 'network-failure' }
-  }
-  if (response.ok) return { outcome: 'succeeded', payload }
-  const code = readErrorCode(payload)
-  if (response.status === 401) return { outcome: 'unauthorized' }
-  if (response.status === 403) return { outcome: 'forbidden' }
-  return { outcome: 'request-rejected', code: code ?? 'internal_error' }
-}
-
-function readErrorCode(payload: unknown): string | null {
-  if (typeof payload === 'object' && payload !== null && 'error' in payload) {
-    const value = (payload as Record<string, unknown>).error
-    if (typeof value === 'string') return value
-  }
-  return null
+  return request(serverUrl, { method, path, token, body })
 }
 
 function readString(source: unknown, field: string): string | null {
@@ -201,7 +165,7 @@ export function createProviderConnectionClient(serverUrl: string): {
 } {
   return {
     lookup: async (token) => {
-      const result = await request(serverUrl, 'GET', '/creation/provider-connection', token)
+      const result = await commandRequest(serverUrl, 'GET', '/creation/provider-connection', token)
       if (result.outcome === 'unauthorized') return { outcome: 'unauthorized' }
       if (
         result.outcome === 'request-rejected' &&
@@ -214,14 +178,20 @@ export function createProviderConnectionClient(serverUrl: string): {
       return view ? { outcome: 'configured', connection: view } : { outcome: 'load-failed' }
     },
     configure: async (token, proof, providerKey) => {
-      const result = await request(serverUrl, 'POST', '/creation/provider-connection', token, {
-        proof,
-        provider_key: providerKey
-      })
+      const result = await commandRequest(
+        serverUrl,
+        'POST',
+        '/creation/provider-connection',
+        token,
+        {
+          proof,
+          provider_key: providerKey
+        }
+      )
       return parseCommandResult(result, parseConnectionView)
     },
     replaceCredential: async (token, proof, providerKey) => {
-      const result = await request(
+      const result = await commandRequest(
         serverUrl,
         'PUT',
         '/creation/provider-connection/credential',
@@ -234,13 +204,19 @@ export function createProviderConnectionClient(serverUrl: string): {
       return parseCommandResult(result, parseConnectionView)
     },
     setAdminState: async (token, adminState) => {
-      const result = await request(serverUrl, 'PATCH', '/creation/provider-connection', token, {
-        admin_state: adminState
-      })
+      const result = await commandRequest(
+        serverUrl,
+        'PATCH',
+        '/creation/provider-connection',
+        token,
+        {
+          admin_state: adminState
+        }
+      )
       return parseCommandResult(result, parseConnectionView)
     },
     recheck: async (token) => {
-      const result = await request(
+      const result = await commandRequest(
         serverUrl,
         'POST',
         '/creation/provider-connection/recheck',
@@ -249,13 +225,19 @@ export function createProviderConnectionClient(serverUrl: string): {
       return parseCommandResult(result, parseConnectionView)
     },
     deleteConnection: async (token, proof) => {
-      const result = await request(serverUrl, 'DELETE', '/creation/provider-connection', token, {
-        proof
-      })
+      const result = await commandRequest(
+        serverUrl,
+        'DELETE',
+        '/creation/provider-connection',
+        token,
+        {
+          proof
+        }
+      )
       return parseCommandResult(result, parseConnectionView)
     },
     listMediaCapabilities: async (token) => {
-      const result = await request(serverUrl, 'GET', '/creation/media-capabilities', token)
+      const result = await commandRequest(serverUrl, 'GET', '/creation/media-capabilities', token)
       if (result.outcome === 'succeeded') {
         const view = parseMediaCapabilities(result.payload)
         return view ? { outcome: 'succeeded', value: view } : { outcome: 'network-failure' }

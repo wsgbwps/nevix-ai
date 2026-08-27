@@ -144,7 +144,6 @@ func TestProviderConnectionPermissionMatrix(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)
 	h.resetProviderConnections(t)
-	admin := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
 	member := h.loginToken(t, creatorEmail, harnessPassword)
 
 	adminPaths := []struct{ method, path string }{
@@ -165,7 +164,6 @@ func TestProviderConnectionPermissionMatrix(t *testing.T) {
 			t.Fatalf("%s %s as member: status=%d body=%s", route.method, route.path, status, body)
 		}
 	}
-	_ = admin
 
 	// The member surface is the one active-user route of this aggregate.
 	status, body := h.doRequest(t, http.MethodGet, "/creation/media-capabilities", member, nil)
@@ -194,7 +192,6 @@ func TestProviderConnectionPermissionMatrix(t *testing.T) {
 	if capabilities.Video.Status != "unavailable" || capabilities.Video.Reason == nil || *capabilities.Video.Reason != "not_configured" {
 		t.Fatalf("unconfigured video capability: %+v", capabilities.Video)
 	}
-	_ = admin
 }
 
 func TestConfigureProviderConnectionLifecycle(t *testing.T) {
