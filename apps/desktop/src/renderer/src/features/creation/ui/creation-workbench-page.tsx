@@ -30,13 +30,17 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
     pileThumbnails: {}
   })
   const [reloadAttempt, setReloadAttempt] = useState(0)
-  const mountedRef = useRef(true)
-  useEffect(
-    () => () => {
+  const mountedRef = useRef(false)
+  useEffect(() => {
+    // StrictMode's dev-only simulated unmount/remount re-runs this effect
+    // while the ref object persists, so liveness must be re-asserted on every
+    // run; initializing it once leaves it permanently false after the cycle
+    // and silently drops every async continuation (create, material loads).
+    mountedRef.current = true
+    return () => {
       mountedRef.current = false
-    },
-    []
-  )
+    }
+  }, [])
 
   useEffect(() => {
     if (!ports) return
@@ -66,8 +70,8 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
       if (!ports) return
       setState((current) => ({ ...current, selected: session, materials: [] }))
       const result = await ports.listMaterials(session.id).catch(() => null)
-      if (!mountedRef.current || result === null) return
-      if (result.outcome !== 'succeeded') {
+      if (!mountedRef.current) return
+      if (result === null || result.outcome !== 'succeeded') {
         setState((current) => ({ ...current, status: 'error', selected: null }))
         return
       }
@@ -118,8 +122,8 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   async function handleCreate(name: string): Promise<void> {
     if (!ports) return
     const result = await ports.createSession(name.trim()).catch(() => null)
-    if (!mountedRef.current || result === null) return
-    if (result.outcome !== 'succeeded') {
+    if (!mountedRef.current) return
+    if (result === null || result.outcome !== 'succeeded') {
       setState((current) => ({ ...current, status: 'error' }))
       return
     }
