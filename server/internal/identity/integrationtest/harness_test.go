@@ -106,10 +106,12 @@ func newHarness(t *testing.T, ctx context.Context) *harness {
 
 // resetUserState gives one test exclusive user-system state: the owner
 // credential truncates users (sessions and reauth proofs follow by foreign
-// key) and the audit log together.
+// key) and the audit log together. CASCADE extends the reset to any table
+// referencing users — e.g. creation_sessions from the Creation Module —
+// because user-owned rows elsewhere cannot survive their user disappearing.
 func (h *harness) resetUserState(t *testing.T) {
 	t.Helper()
-	if _, err := h.fixturePool.Exec(context.Background(), `TRUNCATE public.audit_logs, public.sessions, public.join_codes, public.reauth_proofs, public.users`); err != nil {
+	if _, err := h.fixturePool.Exec(context.Background(), `TRUNCATE public.audit_logs, public.sessions, public.join_codes, public.reauth_proofs, public.users CASCADE`); err != nil {
 		t.Fatalf("truncate user-system tables: %v", err)
 	}
 }
