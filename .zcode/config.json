@@ -4,10 +4,7 @@
       "codegraph": {
         "type": "stdio",
         "command": "codegraph",
-        "args": [
-          "serve",
-          "--mcp"
-        ]
+        "args": ["serve", "--mcp"]
       }
     }
   },
@@ -20,7 +17,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *pnpm-lock.yaml|*.env|*.env.*) echo 'BLOCKED: do not edit lock files or .env files directly' >&2; exit 2;; esac"
+              "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *pnpm-lock.yaml|*.env|*.env.*) case \"$fp\" in *.env.example) ;; *) echo 'BLOCKED: do not edit lock files or .env files directly (.env.example templates are editable)' >&2; exit 2;; esac;; esac"
             }
           ]
         },
