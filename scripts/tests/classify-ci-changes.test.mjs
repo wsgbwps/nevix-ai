@@ -109,6 +109,10 @@ test("Pi agent definitions, extension code, and tests require inline harness val
   );
 });
 
+test("ZCode workspace configuration requires inline harness validation", () => {
+  assert.deepEqual(selected([".zcode/config.json"]), { harness: true });
+});
+
 test("delivery-harness changes run only the inline harness tests", () => {
   assert.deepEqual(
     selected([
@@ -179,6 +183,7 @@ test("main pushes containing only fast-lane paths skip the CI workflow", () => {
     ".pi/**",
     ".github/**",
     ".husky/**",
+    ".zcode/**",
     ".mcp.json",
     "skills-lock.json",
     "scripts/classify-ci-changes.mjs",
@@ -207,6 +212,7 @@ test("the pre-push hook allows only documentation and repository tooling", () =>
     ".pi/extensions/pi-hooks.ts",
     ".github/workflows/ci-gate.yml",
     ".husky/pre-push",
+    ".zcode/config.json",
     ".mcp.json",
     "skills-lock.json",
     "scripts/classify-ci-changes.mjs",

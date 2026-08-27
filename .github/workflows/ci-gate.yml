@@ -11,6 +11,7 @@ on:
       - ".agents/**"
       - ".omp/**"
       - ".scratch/**"
+      - ".zcode/**"
       - ".github/**"
       - ".husky/**"
       - ".mcp.json"

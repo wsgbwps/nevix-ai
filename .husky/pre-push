@@ -13,7 +13,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       base=$(git rev-parse "$local_sha^") || exit 1
     fi
     files=$(git diff --no-renames --name-only "$base..$local_sha") || exit 1
-    if [ -n "$files" ] && echo "$files" | grep -qvE '^(\.(pi|codex|agents|omp|scratch|codegraph|github|husky)/|(.*/)?docs/|.*\.md$|\.mcp\.json$|skills-lock\.json$|scripts/(classify-ci-changes|post-merge-dedup)\.mjs$|scripts/tests/(classify-ci-changes|post-merge-dedup)\.test\.mjs$)'; then
+    if [ -n "$files" ] && echo "$files" | grep -qvE '^(\.(pi|codex|agents|omp|scratch|codegraph|github|husky|zcode)/|(.*/)?docs/|.*\.md$|\.mcp\.json$|skills-lock\.json$|scripts/(classify-ci-changes|post-merge-dedup)\.mjs$|scripts/tests/(classify-ci-changes|post-merge-dedup)\.test\.mjs$)'; then
       echo "BLOCKED: main 更新须走 PR squash merge;仅文档与非产品仓库工具改动可直推" >&2
       exit 1
     fi

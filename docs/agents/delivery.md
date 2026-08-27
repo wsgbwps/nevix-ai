@@ -13,7 +13,7 @@ A tracked path is eligible for a direct-main fast lane when it is either:
 - documentation: an `*.md` file at any depth or a file inside any `docs/`
   directory, including context-scoped ADRs and documentation assets; or
 - repository tooling: a file inside `.pi/`, `.codex/`, `.agents/`, `.omp/`,
-  `.scratch/`, `.codegraph/`, `.github/`, or `.husky/`; the root `.mcp.json`
+  `.scratch/`, `.zcode/`, `.codegraph/`, `.github/`, or `.husky/`; the root `.mcp.json`
   or `skills-lock.json`; or one of the delivery-harness files
   `scripts/classify-ci-changes.mjs`,
   `scripts/tests/classify-ci-changes.test.mjs`,

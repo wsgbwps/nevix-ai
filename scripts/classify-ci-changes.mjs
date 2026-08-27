@@ -98,6 +98,7 @@ export function classifyPaths(paths) {
       startsWith(path, ".omp") ||
       startsWith(path, ".pi") ||
       startsWith(path, ".scratch") ||
+      startsWith(path, ".zcode") ||
       startsWith(path, "docs") ||
       isOneOf(path, [
         ".gitignore",
