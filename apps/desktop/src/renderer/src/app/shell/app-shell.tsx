@@ -6,6 +6,7 @@ import {
   LogOutIcon,
   MoonIcon,
   SettingsIcon,
+  SparklesIcon,
   SunIcon
 } from 'lucide-react'
 import { useCurrentSession } from '../../features/authentication'
@@ -85,7 +86,12 @@ export function AppShell({
   }
 
   const userInitial = initialOf(session.user.email)
-  const breadcrumbLabel = location.pathname === '/' ? t('shell.home') : undefined
+  const breadcrumbLabel =
+    location.pathname === '/'
+      ? t('shell.home')
+      : location.pathname.startsWith('/creation')
+        ? t('shell.creation')
+        : undefined
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -123,6 +129,20 @@ export function AppShell({
                         <HomeIcon />
                         <span className="group-data-[collapsible=icon]:hidden">
                           {t('shell.home')}
+                        </span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={location.pathname === '/creation'}
+                      tooltip={t('shell.creation')}
+                    >
+                      <Link to="/creation">
+                        <SparklesIcon />
+                        <span className="group-data-[collapsible=icon]:hidden">
+                          {t('shell.creation')}
                         </span>
                       </Link>
                     </SidebarMenuButton>

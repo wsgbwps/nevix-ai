@@ -29,3 +29,8 @@ jobs:
       # tree against it with zero skips.
       - name: Identity integration (real PostgreSQL)
         run: ./scripts/test-identity-integration.sh
+      # Creation Module integration (#156): pinned postgres + MinIO, the real
+      # Module contract over HTTP, storage conformance on both adapters, and
+      # the short file-stream smoke — zero skips enforced by the harness.
+      - name: Creation integration (real PostgreSQL + MinIO)
+        run: ./scripts/test-creation-integration.sh

@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nevix-ai/server/internal/creation"
 	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity"
 	"github.com/nevix-ai/server/internal/migration"
@@ -74,8 +75,19 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	workerDone := make(chan error, 1)
+	creationConfig, err := creation.LoadConfig(os.LookupEnv)
+	if err != nil {
+		return err
+	}
+	creationModule, err := creation.NewModule(ctx, pool, creationConfig, creation.Deps{
+		SessionAuthenticator: identityModule.SessionAuthenticator(),
+	})
+	if err != nil {
+		return err
+	}
+	workerDone := make(chan error, 2)
 	go func() { workerDone <- identityModule.RunWorkers(ctx) }()
+	go func() { workerDone <- creationModule.RunWorkers(ctx) }()
 
 	bus := event.NewInMemoryBus()
 	router := chi.NewRouter()
@@ -87,8 +99,13 @@ func run() error {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"ok","service":"nevix-server"}`)
 	})
+	// Each business Module registers into its own group so its CORS gate and
+	// preflight twins scope exactly to its routes.
 	router.Group(func(r chi.Router) {
 		identityModule.Register(r, bus)
+	})
+	router.Group(func(r chi.Router) {
+		creationModule.Register(r, bus)
 	})
 	server := &http.Server{Addr: ":8080", Handler: router}
 	serverDone := make(chan error, 1)
@@ -106,8 +123,14 @@ func run() error {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("http server shutdown: %w", err)
 	}
-	if err := <-workerDone; err != nil {
-		return fmt.Errorf("identity worker shutdown: %w", err)
+	var workersErr error
+	for i := 0; i < cap(workerDone); i++ {
+		if err := <-workerDone; err != nil && workersErr == nil {
+			workersErr = err
+		}
+	}
+	if workersErr != nil {
+		return fmt.Errorf("module worker shutdown: %w", workersErr)
 	}
 	log.Println("shut down cleanly")
 	return nil

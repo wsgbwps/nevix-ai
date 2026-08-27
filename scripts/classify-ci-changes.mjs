@@ -48,10 +48,11 @@ export function classifyPaths(paths) {
     }
 
     if (startsWith(path, "server")) checks.add("server");
-    // identity 的服务端与契约变化跑 Server CI（集成套件在 server-ci 内联，
-    // 纯 Postgres）并触发 E2E（Desktop harness 会拉起真 server）。
+    // identity 与 creation 的服务端与契约变化跑 Server CI（集成套件在
+    // server-ci 内联）并触发 E2E（Desktop harness 会拉起真 server）。
     if (
       startsWith(path, "server/internal/identity") ||
+      startsWith(path, "server/internal/creation") ||
       isOneOf(path, ["server/go.mod", "server/go.sum"])
     ) {
       checks.add("e2e");
@@ -70,7 +71,13 @@ export function classifyPaths(paths) {
       checks.add("e2e");
     }
 
-    if (isOneOf(path, ["scripts/test-identity-integration.sh"])) {
+    // 专用集成 harness 入口随其服务端面一起触发 Server CI。
+    if (
+      isOneOf(path, [
+        "scripts/test-identity-integration.sh",
+        "scripts/test-creation-integration.sh",
+      ])
+    ) {
       checks.add("server");
     }
 

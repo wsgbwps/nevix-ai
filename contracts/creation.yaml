@@ -1,0 +1,560 @@
+# Creation Module API contract. The OpenAPI master references each Path Item here.
+#
+# 可见性基线（ADR-0016）：Creation Session 与 Reference Material 是 creator-private —— 只有创建者
+# 能读写自己的会话与素材；其他 Member 或 Admin 即使猜测 id 也得到与不存在完全一致的 404 not_found，
+# 不能读取 prompt、素材或私有媒体。本切片（AI Creation V1 06/16）不提供任何 Admin 治理路由。
+#
+# 文件流纪律（ADR-0014）：上传与下载一律经 Go 有界流式传输；Desktop 不获得 Storage 凭据或直传授权。
+paths:
+  /creation/sessions:
+    post:
+      operationId: createSession
+      summary: 创建私有 Creation Session
+      description: |-
+        为当前创建者原子创建一个空的私有 Creation Session（草稿）。name 可选：省略或空白时存为空串，
+        界面以本地化「未命名创作」兜底展示。成功即返回完整会话资源；失败不留任何半成品。
+        该动作不创建 Generation Task、Provider Job 或任何计费事实。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 128
+                  description: 会话名；去首尾空白后存储，最长 128 字符。
+      responses:
+        "201":
+          description: 会话已创建并立即可继续。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreationSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      operationId: listSessions
+      summary: 列出当前创建者的活跃 Creation Session
+      description: |-
+        只返回当前创建者自己的、未被逻辑删除的 Session，按 (created_at DESC, id DESC) 复合键序分页。
+        其他 Member 的会话永不出现。复合 cursor 是包含全部排序键的不透明 token；
+        next_cursor 为 null 表示没有下一页。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/pageLimit"
+        - $ref: "#/components/parameters/keysetCursor"
+      responses:
+        "200":
+          description: 当前页会话与下一页 cursor。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - sessions
+                  - next_cursor
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CreationSession"
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: 继续向后翻页的复合 keyset cursor；null 表示已是最后一页。
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/sessions/{sessionID}:
+    get:
+      operationId: getSession
+      summary: 读取当前创建者的单个 Session
+      description: |-
+        选择（继续创作）入口：只对创建者可见；不存在、他人所有或已逻辑删除一律 404 not_found。
+        已删除会话不因重新 GET 而复活。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+      responses:
+        "200":
+          description: 会话资源。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreationSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: renameSession
+      summary: 重命名当前创建者的 Session
+      description: |-
+        继续创作的轻量编辑：只有创建者可以重命名；目标不存在、他人所有或已删除一律 404。
+        改名是幂等的普通写命令，不产生生成或计费事实。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: 新名字；去首尾空白后必须非空。
+      responses:
+        "200":
+          description: 改名后的会话资源。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreationSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteSession
+      summary: 逻辑删除当前创建者的 Session
+      description: |-
+        删除立即从列表与选择路径隐藏会话，并阻止后续一切生成入口；保留既有记录用于追溯，
+        成功形成的媒体资产的生命周期独立于会话。重复 DELETE 视为目标已消失，回答 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+      responses:
+        "204":
+          description: 会话已逻辑删除且不再出现。
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/sessions/{sessionID}/materials:
+    get:
+      operationId: listSessionMaterials
+      summary: 列出会话内的 Reference Material
+      description: |-
+        牌堆数据源：只返回创建者自己该会话下的素材，按 (created_at ASC, id ASC) 复合键序分页
+        （牌堆顺序 = 上传顺序）。目标会话不存在、他人所有或已删除回答 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+        - $ref: "#/components/parameters/pageLimit"
+        - $ref: "#/components/parameters/keysetCursor"
+      responses:
+        "200":
+          description: 当前页素材与下一页 cursor。
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - materials
+                  - next_cursor
+                properties:
+                  materials:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ReferenceMaterial"
+                  next_cursor:
+                    type: string
+                    nullable: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: uploadReferenceMaterial
+      summary: 上传 Reference Material 并原子记录权利声明
+      description: |-
+        唯一 V1 入料动作：multipart/form-data 单一 file part。上传动作本身即为权利确认——
+        actor、时间、声明版本与素材 identity 在同一可信命令中原子落库；写库失败则素材完全不可用，
+        blob 一并清理。服务端权威验证 MIME、扩展名、大小、实际尺寸、像素数、时长与可读性；
+        客户端校验只用于即时反馈。声明版本升级不影响既有素材（不追溯阻塞）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 素材文件本体；filename 必填（≤255 字符），part 的 Content-Type 仅作提示，服务端按内容嗅探定论。
+            encoding:
+              file:
+                contentType: image/jpeg, image/png, image/webp, video/mp4, audio/mpeg, audio/x-wav, audio/mp4
+      responses:
+        "201":
+          description: 素材已入库并可立即在牌堆使用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferenceMaterial"
+        "400":
+          description: 请求不合法 —— invalid_request 指缺失 file part / 多余字段 / filename 违规；upload_malformed 指 multipart 结构损坏或在传输中被截断。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - upload_malformed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/MaterialTooLarge"
+        "415":
+          $ref: "#/components/responses/MaterialUnsupportedMedia"
+        "422":
+          $ref: "#/components/responses/MaterialUnreadableMedia"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/materials/{materialID}:
+    get:
+      operationId: downloadReferenceMaterial
+      summary: 流式下载参考素材文件
+      description: |-
+        经 Go 有界流式出口取回素材本体；支持单区间 Range 请求（206 + Content-Range），
+        不支持多区间与非法区间（416）。响应携带 X-Content-SHA-256：全量下发时服务端在下发
+        过程中即时校验 checksum，不一致将中断连接而非下发损坏数据；部分（206）下发无法从
+        全文 digest 反推区间校验，客户端可凭该头部自行核对。仅创建者可读；他人/Admin 猜测 id
+        得到 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/materialID"
+        - name: Range
+          in: header
+          required: false
+          description: 标准单区间字节范围（bytes=start-end | bytes=start- | bytes=-suffix）。
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 完整文件流，Content-Type 为素材的服务端定论 MIME。
+          headers:
+            Content-Length:
+              description: 完整字节数。
+              schema:
+                type: integer
+            X-Content-SHA-256:
+              description: 全文件 SHA-256 十六进制摘要。
+              schema:
+                type: string
+            Accept-Ranges:
+              description: 固定为 bytes。
+              schema:
+                type: string
+                enum:
+                  - bytes
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: 单区间部分内容，带 Content-Range 与 X-Content-SHA-256。
+          headers:
+            Content-Range:
+              description: 实际下发区间（bytes start-end/total）。
+              schema:
+                type: string
+            X-Content-SHA-256:
+              description: 全文件 SHA-256 十六进制摘要。
+              schema:
+                type: string
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "416":
+          $ref: "#/components/responses/RangeNotSatisfiable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteReferenceMaterial
+      summary: 删除当前创建者的 Reference Material
+      description: 删除素材记录及其 blob：仅创建者可删；行删除事务成功后再清理 blob。他人/已删除回答 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/materialID"
+      responses:
+        "204":
+          description: 素材记录已删除；blob 清理随 AfterCommit 执行。
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  parameters:
+    sessionID:
+      name: sessionID
+      in: path
+      required: true
+      description: 目标 Creation Session id（UUID）。
+      schema:
+        type: string
+        format: uuid
+    materialID:
+      name: materialID
+      in: path
+      required: true
+      description: 目标 Reference Material id（UUID）。
+      schema:
+        type: string
+        format: uuid
+    pageLimit:
+      name: limit
+      in: query
+      required: false
+      description: 页大小，1..200，默认 50。
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    keysetCursor:
+      name: cursor
+      in: query
+      required: false
+      description: 上页 next_cursor 原样回传的复合 keyset 令牌；缺省从首页开始。
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: 请求不合法 —— invalid_request 指请求体不是约定形状的 JSON 或字段边界违规；invalid_cursor 指 cursor 不是合法的复合分页令牌。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - invalid_request
+                      - invalid_cursor
+    Unauthorized:
+      description: 未认证 —— 缺失、无效、过期或已吊销的 session token。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - unauthorized
+    NotFound:
+      description: |-
+        not_found —— 目标不存在、不属于当前创建者、已被逻辑删除，或路径 id 本身不是合法 UUID；
+        四者不可区分（防枚举与防格式探测），样式与 /identity 各目标路由一致。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - not_found
+    MaterialTooLarge:
+      description: material_too_large —— 上传体积超过该媒体类别的上限（image 10 MiB、audio 50 MiB、video 200 MiB）；超限流被服务端中断。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - material_too_large
+    MaterialUnsupportedMedia:
+      description: material_unsupported_media —— 内容嗅探出的媒体类别不在 image/video/audio 白名单内，或扩展名与内容类别不一致。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - material_unsupported_media
+    MaterialUnreadableMedia:
+      description: material_unreadable_media —— 结构可识别但无法权威解码（尺寸/像素/时长探测失败），素材不会被入库。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - material_unreadable_media
+    RangeNotSatisfiable:
+      description: 非法或不可满足的 Range（多区间、语法错误、start 越过 EOF）。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - range_not_satisfiable
+    InternalError:
+      description: 服务端内部错误，动作未完成。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - internal_error
+  schemas:
+    Error:
+      $ref: "./openapi.yaml#/components/schemas/Error"
+    CreationSession:
+      type: object
+      required:
+        - id
+        - name
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: 会话名；允许空串（界面以本地化「未命名创作」兜底）。
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ReferenceMaterial:
+      type: object
+      required:
+        - id
+        - kind
+        - file_name
+        - mime_type
+        - byte_size
+        - checksum_sha256
+        - claims_version
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+            - image
+            - video
+            - audio
+        file_name:
+          type: string
+          maxLength: 255
+          description: 上传时声明的原始文件名，仅供创建者本人展示。
+        mime_type:
+          type: string
+          description: 服务端嗅探定论的 MIME（权威）。
+        byte_size:
+          type: integer
+          minimum: 1
+        width_px:
+          type: integer
+          nullable: true
+          description: 图像/视频实际像素宽；音频为 null。
+        height_px:
+          type: integer
+          nullable: true
+          description: 图像/视频实际像素高；音频为 null。
+        pixel_count:
+          type: integer
+          nullable: true
+          description: 图像总像素数；其余为 null。
+        duration_ms:
+          type: integer
+          nullable: true
+          description: 音频/视频实际时长（毫秒）；图像为 null。
+        checksum_sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: 全文件 SHA-256 十六进制摘要。
+        claims_version:
+          type: integer
+          minimum: 1
+          description: 上传动作确认的权利声明版本；升级只作用于以后新建的素材，不追溯阻塞既有素材。
+        created_at:
+          type: string
+          format: date-time
