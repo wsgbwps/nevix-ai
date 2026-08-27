@@ -1,176 +1,87 @@
 ---
 name: code-review
-description: Review changes since a fixed point against Standards and Spec, producing a stable finding ledger; use the same Skill for targeted re-review of unresolved finding IDs after repair. Use for branch, PR, work-in-progress, or "review since X" requests.
+description: "Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\"."
 ---
 
-Review the diff between a fixed point and the task-owned current state along two
-independent axes:
+Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
-- **Standards** — does the change conform to this repo's documented standards?
-- **Spec** — does it faithfully implement the originating issue or spec?
+- **Standards**: does the code conform to this repo's documented coding standards?
+- **Spec**: does the code faithfully implement the originating issue / spec?
 
-Read [Finding lifecycle](references/finding-lifecycle.md) completely before
-reviewing. It is the shared contract with `/implement` for IDs, state,
-disposition, evidence, repair provenance, stopping, and escalation.
+Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
-Choose exactly one mode:
+The issue tracker should have been provided to you. If `docs/agents/issue-tracker.md` is missing, tell the user to run `/setup-matt-pocock-skills`.
 
-- **Initial review** when no finding ledger exists. Run both applicable axes and
-  create the ledger once.
-- **Targeted re-review** when a prior ledger and repair record exist. Review only
-  unresolved IDs and their repair hunks. This mode never falls back to another
-  full review.
+## Process
 
-The issue tracker should have been provided to you — run
-`/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing.
+### 1. Pin the fixed point
 
-## Shared review boundary
+Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main`, `HEAD~5`, etc.). If they didn't specify one, ask for it.
 
-### 1. Pin and freeze the diff
+Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
-The user-supplied commit SHA, branch, tag, or merge-base is the fixed point. If
-none was supplied, ask for it. Resolve it before delegation and stop on a bad
-ref.
-
-Resolve the merge-base once. Include the task's committed, staged, and tracked
-working-tree changes relative to that base; require every task-owned new file to
-be tracked before freezing. Exclude unrelated dirty-worktree paths with an
-explicit pathspec. Freeze the exact binary diff in an OS temporary file, compute
-its `sha256:<64-hex>` digest, and record the full command, pathspec, and
-`git log <fixed-point>..HEAD --oneline`. No edits may occur while reviewers read
-that bundle. A missing or empty task diff stops the review.
-
-Every finding and review result cites this digest. The final relevant check must
-later bind to the current digest; a code edit makes the prior check stale.
-
-## Initial review
+Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents.
 
 ### 2. Identify the spec source
 
-Look for the originating spec in this order:
+Look for the originating spec, in this order:
 
-1. Issue references in commit messages; fetch them through
-   `docs/agents/issue-tracker.md`.
-2. A path supplied by the user.
-3. A matching file under `docs/`, `specs/`, or `.scratch/`.
-4. If none exists, ask where it is. If the user confirms there is no spec, skip
-   the Spec agent and record `no spec available`.
+1. Issue references in the commit messages (`#123`, `Closes #45`, GitLab `!67`, etc.), fetched via the workflow in `docs/agents/issue-tracker.md`.
+2. A path the user passed as an argument.
+3. A spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
+4. If nothing is found, ask the user where the spec is. If they say there isn't one, the **Spec** sub-agent will skip and report "no spec available".
 
-### 3. Identify Standards sources
+### 3. Identify the standards sources
 
-Collect repository instructions and files that govern the changed paths, such
-as `AGENTS.md`, `CONTRIBUTING.md`, or `CODING_STANDARDS.md`.
+Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
-The Standards axis also carries this Fowler smell baseline. The repository
-overrides it, each smell is only a judgement call, and anything already enforced
-by tooling is skipped:
+On top of whatever the repo documents, the Standards axis always carries the **smell baseline** below: a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing. Two rules bind it:
 
-- **Mysterious Name** — a name does not reveal what it does or holds.
-- **Duplicated Code** — the same logic shape appears in multiple changed places.
-- **Feature Envy** — code reaches into another object's data more than its own.
-- **Data Clumps** — the same fields or parameters keep travelling together.
-- **Primitive Obsession** — a primitive substitutes for a domain concept.
-- **Repeated Switches** — the same type cascade recurs across the change.
-- **Shotgun Surgery** — one logical change requires scattered edits.
-- **Divergent Change** — one module changes for unrelated reasons.
-- **Speculative Generality** — abstraction exists for an unrequested need.
-- **Message Chains** — callers navigate a long object chain.
-- **Middle Man** — a layer mostly delegates to the real owner.
-- **Refused Bequest** — an implementer ignores most inherited behavior.
+- **The repo overrides.** A documented repo standard always wins; where it endorses something the baseline would flag, suppress the smell.
+- **Always a judgement call.** Each smell is a labelled heuristic ("possible Feature Envy"), never a hard violation. Like any standard here, skip anything tooling already enforces.
 
-### 4. Run the independent axes in parallel
+Each smell reads *what it is* → *how to fix*; match it against the diff:
 
-Spawn the Standards and Spec sub-agents together. They are fresh, read-only,
-receive the frozen bundle rather than a live diff command, and do not delegate.
+- **Mysterious Name**: a function, variable, or type whose name doesn't reveal what it does or holds. → rename it; if no honest name comes, the design's murky.
+- **Duplicated Code**: the same logic shape appears in more than one hunk or file in the change. → extract the shared shape, call it from both.
+- **Feature Envy**: a method that reaches into another object's data more than its own. → move the method onto the data it envies.
+- **Data Clumps**: the same few fields or params keep travelling together (a type wanting to be born). → bundle them into one type, pass that.
+- **Primitive Obsession**: a primitive or string standing in for a domain concept that deserves its own type. → give the concept its own small type.
+- **Repeated Switches**: the same `switch`/`if`-cascade on the same type recurs across the change. → replace with polymorphism, or one map both sites share.
+- **Shotgun Surgery**: one logical change forces scattered edits across many files in the diff. → gather what changes together into one module.
+- **Divergent Change**: one file or module is edited for several unrelated reasons. → split so each module changes for one reason.
+- **Speculative Generality**: abstraction, parameters, or hooks added for needs the spec doesn't have. → delete it; inline back until a real need shows.
+- **Message Chains**: long `a.b().c().d()` navigation the caller shouldn't depend on. → hide the walk behind one method on the first object.
+- **Middle Man**: a class or function that mostly just delegates onward. → cut it, call the real target direct.
+- **Refused Bequest**: a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-Give the Standards agent the digest, commits, Standards-source list and content,
-the smell baseline above, and this brief:
+### 4. Spawn both sub-agents in parallel
 
-> Return every documented-standard breach and material baseline smell by
-> file/hunk. Cite the governing rule or name the smell, describe the observed
-> consequence, propose `blocker` or `advisory`, name the smallest owner, and give
-> stable identity fields: source, path-and-symbol anchor, and defect. Baseline
-> smells are always advisory judgement calls; repository rules win. Skip tooling
-> findings. Return candidates only, under 400 words.
+**Standards sub-agent prompt** should include:
 
-Give the Spec agent the digest, commits, spec contents, and this brief:
+- The full diff command and commit list.
+- The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full (the sub-agent has no other access to it).
+- The brief: "Report, per file/hunk where relevant, (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls: documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
 
-> Return missing or partial requirements, unrequested scope, and implemented-but-
-> wrong behavior. Quote the requirement, describe the observed consequence,
-> propose `blocker` or `advisory`, name the smallest owner, and give stable
-> identity fields: source, path-and-symbol anchor, and defect. Return candidates
-> only, under 400 words.
+**Spec sub-agent prompt** should include:
 
-### 5. Create the ledger once
+- The diff command and commit list.
+- The path or fetched contents of the spec.
+- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
 
-Keep Standards and Spec findings under their original axes; do not merge or
-rerank them across axes. Validate each candidate's consequence, owner, level,
-evidence, and stable identity, then allocate IDs exactly as the lifecycle
-reference specifies. Each initial record has `status: open`,
-`disposition: pending`, the frozen digest, and
-`unresolvedTargetedRounds: 0`. The reviewer records the disposition field but
-does not invent the implementer or user's decision.
+If the spec is missing, skip the Spec sub-agent and note this in the final report.
 
-Set `fullReviewCount: 1`, `targetedReviewRound: 0`, and an outcome of
-`needs-disposition` when any finding exists. An empty result may close only after
-the final relevant check passes on the same digest; low-risk candidates
-(documentation or a single dependency-only change) may close on check `PASS`
-alone without a finding ledger.
+### 5. Aggregate
 
-## Targeted re-review
+Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings, because the two axes are deliberately separate (see _Why two axes_).
 
-### 2. Validate the prior ledger
-
-Require `schema: code-review-findings/v1`, `fullReviewCount: 1`, the prior
-immutable identity fields, a repair record, and a target list containing every
-and only accepted blocker in `open` or `fixed-pending-review` state. Closed,
-deferred, and false-positive IDs stay in the ledger but never enter the target
-list. A missing or inconsistent ledger stops for correction; it never triggers
-a fresh independent review.
-
-### 3. Review unresolved IDs and repair hunks
-
-Group target IDs by their original axis. Spawn only the agent or agents needed
-for non-empty groups, in parallel when both axes remain. Give each agent the
-current frozen diff, its digest, the exact prior records, their bounded evidence,
-and the repair record. Do not provide unrelated findings or ask it to rediscover
-the whole diff.
-
-The agent decides for each supplied ID whether evidence now supports `closed`
-or it remains `open`, preserving the ID even when lines moved. It may report a
-new problem only when the repair hunk caused it; that record gets the next ID
-and the required `introducedBy` provenance. Observations outside those targets
-are out of scope for this pass.
-
-### 4. Update state and enforce the bound
-
-Update records in place, append properly attributed repair-introduced findings,
-and increment `targetedReviewRound`. Increment
-`unresolvedTargetedRounds` only for an accepted blocker returned open. At two,
-set that finding to `escalated`. The second targeted round is the global limit;
-escalate every remaining blocker and return control to the user or named owner.
-Keep `fullReviewCount: 1` throughout.
-
-## Output
-
-Present readable `## Standards` and `## Spec` sections, preserving the two axes,
-then emit the complete machine-readable ledger. For each finding show ID, level,
-disposition, owner, status, evidence, and reviewed diff digest. On targeted
-re-review, also show the exact target IDs, state transitions, and any
-`introducedBy` provenance.
-
-End with counts by axis and one outcome:
-
-- `needs-disposition`, `needs-fix`, or `needs-targeted-review` while work remains;
-- `closed` only when every lifecycle stop gate holds on the final digest; or
-- `escalated` with blocker IDs, owners, evidence, attempts, and checks when the
-  round bound is reached.
-
-Never replace an escalation with another full review.
+End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
 
 ## Why two axes
 
-A change may follow every standard but implement the wrong requirement, or
-implement the requirement while breaking repository conventions. Keeping the
-axes separate prevents either result from masking the other; the shared ledger
-adds lifecycle state without collapsing that distinction.
+A change can pass one axis and fail the other:
+
+- Code that follows every standard but implements the wrong thing → **Standards pass, Spec fail.**
+- Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
+
+Reporting them separately stops one axis from masking the other.
