@@ -29,6 +29,79 @@ export const creationTranslations = defineResourceTranslations({
         loading: '正在读取创作数据…',
         loadFailed: '无法读取创作数据。',
         retry: '重试'
+      },
+      provider: {
+        title: 'AI 创作能力',
+        description:
+          '配置团队唯一的 Kapon 图像与视频生成连接。密钥加密保存在服务器，任何人都无法取回已保存的密钥。',
+        empty: '尚未配置 AI 供应商连接，配置后团队成员即可生成图片与视频。',
+        configure: '配置连接',
+        replace: '替换密钥',
+        recheck: '立即重检',
+        pause: '暂停',
+        resume: '恢复',
+        delete: '删除连接',
+        adminState: { enabled: '已启用', paused: '已暂停' },
+        credential: {
+          checking: '检查中',
+          valid: '有效',
+          invalid: '无效',
+          credential_unavailable: '密钥不可用'
+        },
+        media: { checking: '检查中', available: '可用', unavailable: '不可用' },
+        fields: { credential: '供应商凭据', image: '图片生成', video: '视频生成' },
+        attention: {
+          credentialUnavailable:
+            '服务器无法解密已保存的密钥（主密钥丢失或损坏）。重新输入 Kapon 密钥即可恢复，恢复前连接保持关闭。',
+          credentialInvalid: 'Kapon 已拒绝当前密钥。请更换新密钥后重试。',
+          generic: '连接需要处理：凭据、暂停状态或媒体能力存在异常。'
+        },
+        member: {
+          unavailable: '暂时无法读取创作能力状态。',
+          wait: '正在检查，请稍候。',
+          contactAdmin: '请联系管理员处理。'
+        },
+        state: {
+          loading: '正在读取连接状态…',
+          loadFailed: '无法读取 AI 创作能力状态。',
+          retry: '重试'
+        },
+        dialog: {
+          createTitle: '配置 AI 供应商连接',
+          replaceTitle: '替换供应商密钥',
+          description:
+            '输入 Kapon 模型调用密钥。提交前需要重新确认你的管理员密码；密钥仅在验证与加密期间短暂存在于服务器内存。',
+          keyLabel: 'Kapon 密钥',
+          cancel: '取消',
+          submit: '验证并保存',
+          submitting: '正在验证…'
+        },
+        deleteDialog: {
+          title: '删除 AI 供应商连接？',
+          description:
+            '删除将清除已保存的密钥并停止新的生成任务，此操作需要重新确认管理员密码且不可撤销。',
+          cancel: '取消',
+          confirm: '确认删除'
+        },
+        errors: {
+          networkFailure: '网络错误，请稍后重试。',
+          unauthorized: '登录已过期，请重新登录后再试。',
+          forbidden: '需要管理员权限。',
+          codeFallback: '操作失败（{{code}}）。',
+          codes: {
+            invalid_request: '请求不合法，请检查输入。',
+            secure_transport_required: '该操作要求已确认的 HTTPS 连接，请通过正式部署地址访问。',
+            reauth_proof_invalid: '身份确认无效，请重新验证密码。',
+            reauth_proof_expired: '身份确认已过期，请重新验证密码。',
+            reauth_proof_action_mismatch: '身份确认与该操作不匹配，请重新验证。',
+            reauth_proof_already_consumed: '身份确认已被使用，请重新验证密码。',
+            provider_connection_exists: '已存在启用的连接，无需重复配置。',
+            provider_connection_not_configured: '尚未配置连接。',
+            provider_credential_invalid: 'Kapon 拒绝了这个密钥，未做任何更改；请核对后重试。',
+            provider_check_temporarily_unavailable: '供应商暂时不可用，稍后重试即可。',
+            internal_error: '服务器内部错误，请稍后重试。'
+          }
+        }
       }
     }
   },
@@ -57,6 +130,90 @@ export const creationTranslations = defineResourceTranslations({
         loading: 'Loading creation data…',
         loadFailed: 'Creation data could not be loaded.',
         retry: 'Retry'
+      },
+      provider: {
+        title: 'AI creation capability',
+        description:
+          "Configure the team's single Kapon connection for image and video generation. Keys are encrypted on the server; a saved key can never be retrieved.",
+        empty:
+          'No AI provider connection is configured yet; configure one so the team can generate images and video.',
+        configure: 'Configure connection',
+        replace: 'Replace key',
+        recheck: 'Recheck now',
+        pause: 'Pause',
+        resume: 'Resume',
+        delete: 'Delete connection',
+        adminState: { enabled: 'Enabled', paused: 'Paused' },
+        credential: {
+          checking: 'Checking',
+          valid: 'Valid',
+          invalid: 'Invalid',
+          credential_unavailable: 'Key unavailable'
+        },
+        media: { checking: 'Checking', available: 'Available', unavailable: 'Unavailable' },
+        fields: {
+          credential: 'Provider credential',
+          image: 'Image generation',
+          video: 'Video generation'
+        },
+        attention: {
+          credentialUnavailable:
+            'The server cannot decrypt the saved key (master key lost or damaged). Re-entering the Kapon key recovers the connection; it stays closed until then.',
+          credentialInvalid: 'Kapon rejected the current key. Replace it with a new one.',
+          generic:
+            'The connection needs attention: credential, pause state, or a media capability is unhealthy.'
+        },
+        member: {
+          unavailable: 'Creation capability status is unavailable right now.',
+          wait: 'Checking, please wait.',
+          contactAdmin: 'Please contact your administrator.'
+        },
+        state: {
+          loading: 'Loading connection status…',
+          loadFailed: 'AI creation capability status could not be loaded.',
+          retry: 'Retry'
+        },
+        dialog: {
+          createTitle: 'Configure AI provider connection',
+          replaceTitle: 'Replace provider key',
+          description:
+            'Enter the Kapon model-calling key. You will re-confirm your admin password before submitting; the key exists in server memory only during verification and encryption.',
+          keyLabel: 'Kapon key',
+          cancel: 'Cancel',
+          submit: 'Verify and save',
+          submitting: 'Verifying…'
+        },
+        deleteDialog: {
+          title: 'Delete the AI provider connection?',
+          description:
+            'Deleting clears the saved key and stops new generation tasks. It requires re-confirming your admin password and cannot be undone.',
+          cancel: 'Cancel',
+          confirm: 'Delete connection'
+        },
+        errors: {
+          networkFailure: 'A network error occurred; try again shortly.',
+          unauthorized: 'Your session expired; sign in again and retry.',
+          forbidden: 'Administrator role required.',
+          codeFallback: 'The command failed ({{code}}).',
+          codes: {
+            invalid_request: 'The request is invalid; check the input.',
+            secure_transport_required:
+              'This command requires a proven HTTPS connection; use the official deployment address.',
+            reauth_proof_invalid: 'The confirmation is invalid; verify your password again.',
+            reauth_proof_expired: 'The confirmation expired; verify your password again.',
+            reauth_proof_action_mismatch:
+              'The confirmation authorizes a different action; verify again.',
+            reauth_proof_already_consumed:
+              'The confirmation was already used; verify your password again.',
+            provider_connection_exists: 'An enabled connection already exists.',
+            provider_connection_not_configured: 'No connection is configured yet.',
+            provider_credential_invalid:
+              'Kapon rejected this key; nothing was changed. Check it and retry.',
+            provider_check_temporarily_unavailable:
+              'The provider is temporarily unavailable; retry shortly.',
+            internal_error: 'A server error occurred; try again later.'
+          }
+        }
       }
     }
   }

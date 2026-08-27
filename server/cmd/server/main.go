@@ -81,6 +81,7 @@ func run() error {
 	}
 	creationModule, err := creation.NewModule(ctx, pool, creationConfig, creation.Deps{
 		SessionAuthenticator: identityModule.SessionAuthenticator(),
+		ReauthVerifier:       identityModule.ReauthProofs(),
 	})
 	if err != nil {
 		return err

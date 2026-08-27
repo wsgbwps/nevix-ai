@@ -17,8 +17,10 @@ import (
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/creation/application"
 	"github.com/nevix-ai/server/internal/creation/domain"
+	"github.com/nevix-ai/server/internal/creation/infrastructure/kapon"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/media"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/postgres"
+	"github.com/nevix-ai/server/internal/creation/infrastructure/secrets"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/storage"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/writetx"
 	creationhttp "github.com/nevix-ai/server/internal/creation/interface/http"
@@ -31,7 +33,9 @@ import (
 var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 
 // Config is the Module's deployment configuration: which blob adapter backs
-// reference materials plus the browser-origin whitelist shared with Identity.
+// reference materials, where the Provider Credential master key lives, the
+// process-wide Kapon route, and the browser-origin whitelist shared with
+// Identity.
 type Config struct {
 	StorageDriver      string // "filesystem" or "s3"
 	StorageRoot        string // filesystem driver: absolute blob root
@@ -41,6 +45,8 @@ type Config struct {
 	S3AccessKeyID      string
 	S3SecretAccessKey  string
 	S3Secure           bool
+	SecretsDir         string // secrets volume root holding the master key file
+	KaponBaseURL       string // reviewed fixed route; unset means the default
 	CORSAllowedOrigins []string
 }
 
@@ -100,6 +106,20 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("creation: STORAGE_BACKEND must be filesystem or s3, got %q", driver)
 	}
+	secretsDir, ok := lookup("NEVIX_CREATION_SECRETS_DIR")
+	if !ok || strings.TrimSpace(secretsDir) == "" {
+		return Config{}, errors.New("creation: missing required deployment variable: NEVIX_CREATION_SECRETS_DIR (the secrets volume holding the Provider Credential master key)")
+	}
+	cfg.SecretsDir = secretsDir
+	kaponBaseURL, ok := lookup("KAPON_BASE_URL")
+	if ok && strings.TrimSpace(kaponBaseURL) != "" {
+		if err := kapon.ValidateBaseURL(kaponBaseURL); err != nil {
+			return Config{}, err
+		}
+		cfg.KaponBaseURL = kaponBaseURL
+	} else {
+		cfg.KaponBaseURL = kapon.DefaultBaseURL
+	}
 	return cfg, nil
 }
 
@@ -130,16 +150,20 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 }
 
 // Deps carries what the composition root injects (ADR-0016 认证注入): the
-// Identity-owned session authenticator proves every caller's principal. It is
-// deliberately narrow — Creation never touches credential verification.
+// Identity-owned session authenticator proves every caller's principal, and
+// the Identity-owned proof verifier consumes the exact-action
+// Reauthentication Proofs the high-risk connection commands require. Both
+// are deliberately narrow — Creation never touches credential verification.
 type Deps struct {
 	SessionAuthenticator authz.SessionAuthenticator
+	ReauthVerifier       authz.ReauthProofVerifier
 }
 
 // Module is the Creation Module's composition surface.
 type Module struct {
 	sessions    *creationhttp.SessionHandler
 	materials   *creationhttp.MaterialHandler
+	connection  *creationhttp.ProviderConnectionHandler
 	guard       *authz.Guard
 	corsOrigins []string
 	store       domain.BlobStore
@@ -152,6 +176,9 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	if deps.SessionAuthenticator == nil {
 		return nil, errors.New("creation: NewModule requires a SessionAuthenticator from the composition root")
 	}
+	if deps.ReauthVerifier == nil {
+		return nil, errors.New("creation: NewModule requires a ReauthVerifier from the composition root")
+	}
 	tx := writetx.New(pool)
 	if err := tx.VerifyStartupIdentity(ctx); err != nil {
 		return nil, err
@@ -162,11 +189,14 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	}
 	sessionRepos := postgres.NewSessionRepository(pool)
 	materialRepos := postgres.NewMaterialRepository(pool)
+	connectionRepos := postgres.NewConnectionRepository(pool)
 	sessionService := application.NewSessionService(sessionRepos, tx)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
+	connectionService := application.NewConnectionService(connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
 	return &Module{
 		sessions:    creationhttp.NewSessionHandler(sessionService),
 		materials:   creationhttp.NewMaterialHandler(materialService),
+		connection:  creationhttp.NewProviderConnectionHandler(connectionService),
 		guard:       authz.NewGuard(deps.SessionAuthenticator),
 		corsOrigins: cfg.CORSAllowedOrigins,
 		store:       store,
@@ -205,5 +235,5 @@ func (m *Module) RunWorkers(ctx context.Context) error {
 
 // httpGuards adapts the shared guard to the transport table.
 func httpGuards(guard *authz.Guard) creationhttp.Guards {
-	return creationhttp.Guards{ActiveUser: guard.RequireActiveUser}
+	return creationhttp.Guards{ActiveUser: guard.RequireActiveUser, Admin: guard.RequireAdmin}
 }

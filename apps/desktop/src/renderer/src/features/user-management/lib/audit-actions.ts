@@ -22,7 +22,13 @@ export const AUDIT_ACTION_KEYS = [
   'join_code_revoked',
   'user_self_registered',
   'reauth_proof_issued',
-  'reauth_proof_consumed'
+  'reauth_proof_consumed',
+  'provider_connection_created',
+  'provider_connection_replaced',
+  'provider_connection_paused',
+  'provider_connection_resumed',
+  'provider_connection_checked',
+  'provider_connection_deleted'
 ] as const
 
 // NOTE: user_self_registered (issue #121) is included because the same

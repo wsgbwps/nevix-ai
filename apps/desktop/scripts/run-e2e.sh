@@ -353,6 +353,9 @@ run_disposable_server() {
     -e DATABASE_URL="postgresql://identity_app:${identity_app_password}@postgres:5432/${target_database}?sslmode=disable" \
     -e MIGRATION_DATABASE_URL="postgresql://postgres:${postgres_password}@postgres:5432/${target_database}?sslmode=disable" \
     -e CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
+    -e STORAGE_BACKEND=filesystem \
+    -e STORAGE_FS_ROOT=/tmp/nevix-creation-storage \
+    -e NEVIX_CREATION_SECRETS_DIR=/tmp/nevix-creation-secrets \
     "$@" \
     -v "$identity_server_binary_dir:/binaries:ro" \
     "$setup_server_image" /binaries/server-linux >/dev/null
@@ -420,11 +423,17 @@ start_identity_server() {
   # Reference-material storage rides the filesystem adapter in a private temp
   # root; the suite only exercises creator-private flows through Go (ADR-0014).
   CREATION_STORAGE_ROOT="$(mktemp -d -t nevix-creation-storage.XXXXXX)"
+  CREATION_SECRETS_ROOT="$(mktemp -d -t nevix-creation-secrets.XXXXXX)"
+  # The fake Kapon route for AI Creation E2E (issue #157): a Node fixture in
+  # the desktop suite owns it; the server never contacts the real provider in
+  # automated tests. Loopback http is the sanctioned test-only exception.
+  KAPON_BASE_URL="${KAPON_E2E_BASE_URL:-}" \
   DATABASE_URL="$database_url" \
     MIGRATION_DATABASE_URL="$identity_database_url" \
     CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
     STORAGE_BACKEND=filesystem \
     STORAGE_FS_ROOT="$CREATION_STORAGE_ROOT" \
+    NEVIX_CREATION_SECRETS_DIR="$CREATION_SECRETS_ROOT" \
     "$identity_server_binary" >"$identity_server_log" 2>&1 &
   identity_server_pid=$!
   wait_for_identity_server

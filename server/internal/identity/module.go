@@ -125,6 +125,45 @@ var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 // without any credential-verification knowledge leaving Identity.
 func (m *Module) SessionAuthenticator() authz.SessionAuthenticator { return m.auth }
 
+// ReauthProofs exposes the narrow exact-action proof consumption seam other
+// Modules consume through the composition root (ADR-0016 认证注入): one
+// single-use, no-restore consumption inside Identity's own committed write
+// transaction with its audit row. The caller checks proven HTTPS transport
+// before invoking it, so consumption only ever happens for a transport that
+// could carry the high-risk command.
+func (m *Module) ReauthProofs() authz.ReauthProofVerifier {
+	return reauthVerifier{service: m.reauth}
+}
+
+// reauthVerifier adapts the reauth service to the shared authz vocabulary,
+// translating its sentinels so consuming Modules never import Identity.
+type reauthVerifier struct {
+	service *reauth.Service
+}
+
+// VerifyProof consumes one exact-action proof for the calling principal.
+// Failures are fail-closed and leave the proof row exactly as it was.
+func (v reauthVerifier) VerifyProof(ctx context.Context, principal authz.Principal, action, proof string) error {
+	_, err := v.service.Consume(ctx, principal, reauth.ConsumeRequest{Proof: &proof, Action: &action})
+	if err != nil {
+		switch {
+		case errors.Is(err, reauth.ErrProofInvalid):
+			return authz.ErrProofInvalid
+		case errors.Is(err, reauth.ErrProofExpired):
+			return authz.ErrProofExpired
+		case errors.Is(err, reauth.ErrProofActionMismatch):
+			return authz.ErrProofActionMismatch
+		case errors.Is(err, reauth.ErrProofAlreadyConsumed):
+			return authz.ErrProofAlreadyConsumed
+		case errors.Is(err, reauth.ErrInsecureTransport):
+			return authz.ErrProofInsecureTransport
+		default:
+			return fmt.Errorf("identity: consume reauth proof: %w", err)
+		}
+	}
+	return nil
+}
+
 // NewModule constructs Identity around one Write Transaction Module. A real
 // database round trip must prove both session_user and current_user are
 // identity_app; owner, migration, SET ROLE-capable, and unreachable

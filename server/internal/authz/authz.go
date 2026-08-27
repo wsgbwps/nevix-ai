@@ -49,6 +49,34 @@ type SessionAuthenticator interface {
 	Authenticate(r *http.Request) (Principal, error)
 }
 
+// Exact-action Reauthentication Proof sentinels (ADR-0016 认证注入): the
+// identity Module owns issuance and single consumption; a consuming Module
+// discriminates these shared outcomes and maps them to its own transport
+// vocabulary. Consumption commits on its own — once verified, a later
+// failure of the consuming command never restores the proof.
+var (
+	// ErrProofInsecureTransport reports the consuming command arrived without
+	// proven HTTPS transport.
+	ErrProofInsecureTransport = errors.New("authz: proof command needs secure transport")
+	// ErrProofInvalid reports a proof with no matching row for this caller.
+	ErrProofInvalid = errors.New("authz: proof is invalid")
+	// ErrProofExpired reports the proof's validity window has passed.
+	ErrProofExpired = errors.New("authz: proof has expired")
+	// ErrProofActionMismatch reports the proof is bound to a different exact
+	// action; it stays consumable for its own action.
+	ErrProofActionMismatch = errors.New("authz: proof action mismatch")
+	// ErrProofAlreadyConsumed reports the proof's single use has happened.
+	ErrProofAlreadyConsumed = errors.New("authz: proof already consumed")
+)
+
+// ReauthProofVerifier consumes one exact-action Reauthentication Proof for
+// the calling principal: the identity Module provides the production
+// implementation through the composition root, a consuming Module (Creation)
+// never touches credential verification (ADR-0016).
+type ReauthProofVerifier interface {
+	VerifyProof(ctx context.Context, principal Principal, action, proof string) error
+}
+
 // Guard is the mountable guard vocabulary. Construct it once per process with
 // the identity Module's authenticator and declare it on routes.
 type Guard struct {

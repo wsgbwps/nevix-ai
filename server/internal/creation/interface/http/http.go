@@ -50,6 +50,16 @@ const (
 	CodeUnreadableMedia     = "material_unreadable_media"
 	CodeRangeNotSatisfiable = "range_not_satisfiable"
 	CodeInternalError       = "internal_error"
+
+	CodeNotConfigured               = "provider_connection_not_configured"
+	CodeConnectionExists            = "provider_connection_exists"
+	CodeCredentialInvalid           = "provider_credential_invalid"
+	CodeCheckTemporarilyUnavailable = "provider_check_temporarily_unavailable"
+	CodeSecureTransportRequired     = "secure_transport_required"
+	CodeReauthProofInvalid          = "reauth_proof_invalid"
+	CodeReauthProofExpired          = "reauth_proof_expired"
+	CodeReauthProofActionMismatch   = "reauth_proof_action_mismatch"
+	CodeReauthProofAlreadyConsumed  = "reauth_proof_already_consumed"
 )
 
 // MapError translates domain outcomes onto the stable codes; nil collapses
@@ -72,6 +82,26 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusUnprocessableEntity, Code: CodeUnreadableMedia, Message: "The media could not be decoded by the server."}
 	case isError(err, domain.ErrRangeNotSatisfiable):
 		return &Error{Status: http.StatusRequestedRangeNotSatisfiable, Code: CodeRangeNotSatisfiable, Message: "The requested range cannot be satisfied."}
+	case isError(err, domain.ErrConnectionNotConfigured):
+		return &Error{Status: http.StatusNotFound, Code: CodeNotConfigured, Message: "No AI provider connection is configured."}
+	case isError(err, domain.ErrConnectionExists):
+		return &Error{Status: http.StatusConflict, Code: CodeConnectionExists, Message: "An AI provider connection already exists."}
+	case isError(err, domain.ErrCandidateCredentialInvalid):
+		return &Error{Status: http.StatusBadRequest, Code: CodeCredentialInvalid, Message: "The provider key was rejected; nothing was changed."}
+	case isError(err, domain.ErrCheckTemporarilyUnavailable):
+		return &Error{Status: http.StatusServiceUnavailable, Code: CodeCheckTemporarilyUnavailable, Message: "The provider check could not complete; try again later."}
+	case isError(err, domain.ErrInsecureTransport), isError(err, authz.ErrProofInsecureTransport):
+		return &Error{Status: http.StatusBadRequest, Code: CodeSecureTransportRequired, Message: "A proven HTTPS transport is required for this command."}
+	case isError(err, domain.ErrInvalidAdminState):
+		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "Request body must be JSON with admin_state of enabled or paused."}
+	case isError(err, authz.ErrProofInvalid):
+		return &Error{Status: http.StatusBadRequest, Code: CodeReauthProofInvalid, Message: "The reauthentication proof is invalid."}
+	case isError(err, authz.ErrProofExpired):
+		return &Error{Status: http.StatusGone, Code: CodeReauthProofExpired, Message: "The reauthentication proof has expired."}
+	case isError(err, authz.ErrProofActionMismatch):
+		return &Error{Status: http.StatusConflict, Code: CodeReauthProofActionMismatch, Message: "The reauthentication proof authorizes a different action."}
+	case isError(err, authz.ErrProofAlreadyConsumed):
+		return &Error{Status: http.StatusConflict, Code: CodeReauthProofAlreadyConsumed, Message: "The reauthentication proof has already been used."}
 	default:
 		return nil
 	}
@@ -93,12 +123,25 @@ func isError(err, target error) bool {
 	return false
 }
 
-// Route declares one trusted command in the Module's static table. Every
-// Creation route in V1 is creator-private, so GuardActiveUser is the only
-// guard policy this slice needs.
+// GuardPolicy selects the declared authorization vocabulary of one route
+// (ADR-0015); it stays route-local so the static table remains the single
+// place each command's guard is declared.
+type GuardPolicy string
+
+const (
+	// GuardActiveUser is the zero value: a route that does not declare its
+	// guard explicitly requires an active user session.
+	GuardActiveUser GuardPolicy = ""
+	// GuardAdmin additionally requires the admin role.
+	GuardAdmin GuardPolicy = "admin"
+)
+
+// Route declares one trusted command in the Module's static table with its
+// declared guard policy.
 type Route struct {
 	Method  string
 	Path    string
+	Guard   GuardPolicy
 	Handler http.HandlerFunc
 }
 
@@ -106,19 +149,48 @@ type Route struct {
 // the shared authz vocabulary.
 type Guards struct {
 	ActiveUser func(http.Handler) http.Handler
+	Admin      func(http.Handler) http.Handler
 }
 
-// Mount registers the route table: each handler runs behind RequireActiveUser
-// and the must-change-password gate, and every path receives an automatic
-// OPTIONS twin so browser preflights stay answerable inside a chi Group.
+// Mount registers the route table: each handler runs behind its declared
+// guard plus the must-change-password gate, and every path receives an
+// automatic OPTIONS twin so browser preflights stay answerable inside a chi
+// Group.
 func Mount(r chi.Router, routes []Route, guards Guards) {
 	if guards.ActiveUser == nil {
 		panic("creationhttp: Mount requires the ActiveUser guard")
 	}
+	if guards.Admin == nil {
+		panic("creationhttp: Mount requires the Admin guard")
+	}
 	for _, route := range routes {
-		r.Method(route.Method, route.Path, guards.ActiveUser(rejectPendingPasswordChange(route.Handler)))
+		guard := guards.ActiveUser
+		if route.Guard == GuardAdmin {
+			guard = guards.Admin
+		}
+		r.Method(route.Method, route.Path, guard(rejectPendingPasswordChange(route.Handler)))
 		r.Options(route.Path, preflightEndpoint)
 	}
+}
+
+// SecureTransportProven reports whether one request's transport is proven
+// HTTPS: a direct TLS connection, or exactly the X-Forwarded-Proto: https
+// marker the official private proxy writes after stripping every
+// client-supplied Forwarded header (deploy/nginx, ADR-0013/0014). Key-bearing
+// provider connection commands refuse everything else.
+func SecureTransportProven(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+// requireSecureTransport answers secure_transport_required before any proof
+// is consumed: rejecting the command later would burn the admin's proof for
+// a transport that could never carry it.
+func requireSecureTransport(w http.ResponseWriter, r *http.Request) bool {
+	if SecureTransportProven(r) {
+		return true
+	}
+	WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeSecureTransportRequired, Message: "A proven HTTPS transport is required for this command."})
+	return false
 }
 
 // rejectPendingPasswordChange answers 403 password_change_required while the

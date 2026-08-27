@@ -141,8 +141,12 @@ docker compose logs cert-watch          # 关注 "expires within 90 days"
   docker compose cp ./tls-backup/server.pem cert-watch:/etc/nginx/tls/   # 示例；
   # 实际用临时容器或 volume 操作写回，并保持 key 0600
   ```
-- 未来 Provider 主密钥 secrets 卷、参考素材 blob 卷纳入同一备份窗口；组合备份
-  与恢复的正式脚本及手册归仓库 `scripts/`，随对应切片交付（ADR-0013）。
+- **Provider 主密钥 secrets 卷**（issue #157）：`secrets` 卷内的
+  `provider-credential-master.key`（32 字节，0600，目录 0700）。与数据库同窗口备份；
+  丢失后连接进入 credential_unavailable，只能由 Admin 重新认证并重输 Provider Key
+  恢复（ADR-0016），服务器绝不静默重建该文件。恢复时写回卷内并保持 0600。
+- 未来参考素材 blob 卷纳入同一备份窗口；组合备份与恢复的正式脚本及手册归仓库
+  `scripts/`，随对应切片交付（ADR-0013）。
 
 ## 7. 失败排查
 
