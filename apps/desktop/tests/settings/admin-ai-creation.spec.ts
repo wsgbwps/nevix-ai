@@ -33,7 +33,7 @@ async function openAiCreationSection(page: Page): Promise<void> {
     .getByRole('navigation', { name: '设置' })
     .getByRole('button', { name: 'AI 创作' })
     .click()
-  await expect(page.getByRole('heading', { name: 'AI 创作' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'AI 创作', exact: true })).toBeVisible()
 }
 
 test('the Admin sees the not-configured surface and the proof gate answers secure transport over HTTP', async () => {
