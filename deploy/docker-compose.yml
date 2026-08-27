@@ -78,6 +78,11 @@ services:
       # S3_* variables instead (issue #156, ADR-0013 storage seam).
       STORAGE_BACKEND: ${STORAGE_BACKEND:-filesystem}
       STORAGE_FS_ROOT: /var/lib/nevix/storage
+      # Provider Credential master key (issue #157, ADR-0016 local AEAD):
+      # the out-of-database secrets volume; 0700/0600 discipline is enforced
+      # by the server, and the volume belongs in the documented backup set
+      # together with pgdata, blobs, and tls materials (ADR-0013).
+      NEVIX_CREATION_SECRETS_DIR: /var/lib/nevix/secrets
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET: ${S3_BUCKET:-}
@@ -87,14 +92,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - blobs:/var/lib/nevix/storage
+      - secrets:/var/lib/nevix/secrets
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 15s
-    volumes:
-      - blobs:/var/lib/nevix/storage
     networks:
       - internal
     restart: unless-stopped
@@ -130,3 +136,4 @@ volumes:
   pgdata:
   tls:
   blobs:
+  secrets:

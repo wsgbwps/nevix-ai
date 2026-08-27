@@ -105,7 +105,13 @@ export const userManagementTranslations = defineResourceTranslations({
         join_code_revoked: '吊销加入码',
         user_self_registered: '凭加入码注册账号',
         reauth_proof_issued: '签发重验证授权',
-        reauth_proof_consumed: '消费重验证授权'
+        reauth_proof_consumed: '消费重验证授权',
+        provider_connection_created: '创建 AI 供应商连接',
+        provider_connection_replaced: '替换 AI 供应商密钥',
+        provider_connection_paused: '暂停 AI 供应商连接',
+        provider_connection_resumed: '恢复 AI 供应商连接',
+        provider_connection_checked: '重检 AI 供应商连接',
+        provider_connection_deleted: '删除 AI 供应商连接'
       }
     },
     joinCodes: {
@@ -274,7 +280,13 @@ export const userManagementTranslations = defineResourceTranslations({
         join_code_revoked: 'Join code revoked',
         user_self_registered: 'Account self-registered with a join code',
         reauth_proof_issued: 'Reauthentication proof issued',
-        reauth_proof_consumed: 'Reauthentication proof consumed'
+        reauth_proof_consumed: 'Reauthentication proof consumed',
+        provider_connection_created: 'AI provider connection created',
+        provider_connection_replaced: 'AI provider key replaced',
+        provider_connection_paused: 'AI provider connection paused',
+        provider_connection_resumed: 'AI provider connection resumed',
+        provider_connection_checked: 'AI provider connection rechecked',
+        provider_connection_deleted: 'AI provider connection deleted'
       }
     },
     joinCodes: {

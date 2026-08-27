@@ -58,6 +58,9 @@ cleanup() {
   if [[ -n "${storage_root:-}" ]]; then
     rm -rf "$storage_root"
   fi
+  if [[ -n "${secrets_dir:-}" ]]; then
+    rm -rf "$secrets_dir"
+  fi
   if [[ -n "$test_log" ]] && ! rm -f "$test_log"; then
     echo "error: failed to remove temporary Creation integration output '$test_log'" >&2
     [[ "$exit_status" == "0" ]] && exit_status=1
@@ -81,6 +84,7 @@ require_free_port "$s3_host_port"
 postgres_password="$(openssl rand -hex 32)"
 identity_app_password="$(openssl rand -hex 32)"
 storage_root="$(mktemp -d "${TMPDIR:-/tmp}/nevix-creation-storage.XXXXXX")"
+secrets_dir="$(mktemp -d "${TMPDIR:-/tmp}/nevix-creation-secrets.XXXXXX")"
 
 echo "==> Starting pinned PostgreSQL ($postgres_image) on 127.0.0.1:$postgres_host_port"
 docker run --rm -d \
@@ -163,6 +167,11 @@ assert_creation_integration_executed() {
     TestDownloadServesRangeAndChecksumHeaders
     TestDeleteMaterialRemovesRowAndBlobCleanupSchedules
     TestContractErrorEnvelopeShapeOnEveryCreationErrorPath
+    TestProviderConnectionPermissionMatrix
+    TestConfigureProviderConnectionLifecycle
+    TestReplaceCandidateFailureKeepsOldCredentialAndSuccessSwitchesIndependently
+    TestMasterKeyFailureFailsClosedWithoutSilentRegeneration
+    TestProviderConnectionSingletonConstraintRejectsSecondActiveRow
     TestStreamSmokeParallelFileFlows
     TestFilesystemConformance
     TestS3ConformanceSuiteAgainstMinIO
@@ -202,6 +211,7 @@ export NEVIX_DATABASE_URL="postgresql://postgres:${postgres_password}@127.0.0.1:
 export NEVIX_IDENTITY_DATABASE_URL="postgresql://identity_app:${identity_app_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
 export NEVIX_CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173"
 export STORAGE_FS_ROOT="$storage_root"
+export NEVIX_CREATION_SECRETS_DIR="$secrets_dir"
 export NEVIX_CREATION_TEST_S3_ENDPOINT="127.0.0.1:$s3_host_port"
 export NEVIX_CREATION_TEST_S3_ACCESS_KEY_ID="nevix-creation-test"
 export NEVIX_CREATION_TEST_S3_SECRET_ACCESS_KEY="$s3_secret"

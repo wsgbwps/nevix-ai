@@ -342,6 +342,238 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /creation/provider-connection:
+    get:
+      operationId: getProviderConnection
+      summary: 查看实例唯一 AI Provider Connection（脱敏）
+      description: |-
+        Admin 治理视图：只返回管理状态、凭据状态、图片/视频独立 capability 与时间戳；
+        不返回 Provider Key、Endpoint、模型 ID、供应商 request ID 或原始错误。实例尚无
+        active Connection 时回答 404 provider_connection_not_configured。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 当前 active Connection 的脱敏治理视图。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderConnection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProviderConnectionNotConfigured"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: configureProviderConnection
+      summary: 首次配置 Kapon Provider Connection
+      description: |-
+        消费 exact-action Reauthentication Proof（provider_connection.create）后，以候选
+        Provider Key 执行一次 Connection Check（固定国内 Kapon 路由的 GET /v1/models，不生成
+        真实媒体）。候选无效或临时不可用时丢弃候选且不落任何连接事实（Proof 已消费，不恢复）；
+        通过则在主密钥 AEAD 保护下原子写入唯一 active Connection。每个实例最多一个 active
+        Connection（数据库单例约束）。请求必须经已证明的 HTTPS 传输。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderConnectionCredentialInput"
+      responses:
+        "201":
+          description: Connection 已建立并返回脱敏视图。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderConnection"
+        "400":
+          $ref: "#/components/responses/ProviderConnectionConfigureRejected"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/ProviderConnectionConfigureConflict"
+        "410":
+          $ref: "#/components/responses/ReauthProofExpired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ProviderCheckTemporarilyUnavailable"
+    patch:
+      operationId: updateProviderConnectionAdminState
+      summary: 暂停或恢复 Connection
+      description: |-
+        只需有效 Admin Session（不消费 Proof）：enabled 允许后续新任务，paused 阻止新任务
+        与尚未开始的 Provider 调用；已接受的外部工作继续收敛。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - admin_state
+              properties:
+                admin_state:
+                  type: string
+                  enum:
+                    - enabled
+                    - paused
+            description: 目标管理状态。
+      responses:
+        "200":
+          description: 管理状态已更新并返回脱敏视图。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderConnection"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProviderConnectionNotConfigured"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteProviderConnection
+      summary: 删除（终止）Connection
+      description: |-
+        消费 exact-action Reauthentication Proof（provider_connection.delete）后终止当前
+        Connection：清除 Encrypted Provider Credential、释放「最多一个 active Connection」
+        约束，但保留供既有事实与 Audit Log 追溯的非敏感历史 identity；此后重新配置产生新的
+        Connection identity，不复活旧聚合。请求必须经已证明的 HTTPS 传输。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - proof
+              properties:
+                proof:
+                  type: string
+                  description: exact-action Reauthentication Proof（provider_connection.delete）。
+      responses:
+        "200":
+          description: Connection 已终止；返回终止时的脱敏视图（密文已清除）。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderConnection"
+        "400":
+          $ref: "#/components/responses/ProviderConnectionDeleteRejected"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProviderConnectionNotConfigured"
+        "409":
+          $ref: "#/components/responses/ReauthProofActionMismatch"
+        "410":
+          $ref: "#/components/responses/ReauthProofExpired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/provider-connection/credential:
+    put:
+      operationId: replaceProviderConnectionCredential
+      summary: 替换 Provider Key（候选先行）
+      description: |-
+        消费 exact-action Reauthentication Proof（provider_connection.replace）后，以候选
+        Provider Key 完成 Connection Check。候选失败即丢弃：旧密文与能力保持原样（Proof 已
+        消费，不恢复）；候选通过则原子切换密文与状态 —— 即使只看到一个媒体的模型也可切换，
+        另一媒体独立置为 unavailable。主密钥不可用时本命令同时是恢复通道：先安全建立新主密钥
+        文件，再写入新密文。请求必须经已证明的 HTTPS 传输。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderConnectionCredentialInput"
+      responses:
+        "200":
+          description: 候选已切换为当前凭据；返回脱敏视图。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderConnection"
+        "400":
+          $ref: "#/components/responses/ProviderConnectionReplaceRejected"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProviderConnectionNotConfigured"
+        "409":
+          $ref: "#/components/responses/ReauthProofActionMismatch"
+        "410":
+          $ref: "#/components/responses/ReauthProofExpired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ProviderCheckTemporarilyUnavailable"
+  /creation/provider-connection/recheck:
+    post:
+      operationId: recheckProviderConnection
+      summary: 手动重检 Connection
+      description: |-
+        只需有效 Admin Session（不消费 Proof）。解密当前凭据并重新执行 Connection Check：
+        临时故障（超时/429/5xx）不改写既有状态，只在视图中记录 temporarily_unavailable；
+        主密钥不可用则置 credential_unavailable 并 fail closed，绝不静默重建主密钥。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 重检完成（或因临时故障保持原状态）；返回脱敏视图。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderConnection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProviderConnectionNotConfigured"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/media-capabilities:
+    get:
+      operationId: listMediaCapabilities
+      summary: 按媒体归一化的能力可用性（Member surface）
+      description: |-
+        全体 active User 可读：只返回图片/视频各自的可用性、稳定原因与行动建议；
+        不泄露 Endpoint、模型 ID、凭据细节、诊断或 Provider payload。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 分媒体能力状态。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaCapabilities"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   parameters:
     sessionID:
@@ -465,6 +697,138 @@ components:
                   error:
                     enum:
                       - range_not_satisfiable
+    Forbidden:
+      description: forbidden —— 认证有效但该命令要求 Admin 角色（ADR-0015 guard 词汇）。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - forbidden
+    ProviderConnectionNotConfigured:
+      description: provider_connection_not_configured —— 实例尚无 active AI Provider Connection。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - provider_connection_not_configured
+    ProviderConnectionConfigureRejected:
+      description: |-
+        首次配置被拒绝 —— invalid_request（形状/字段边界）、secure_transport_required（未证明
+        HTTPS）、reauth_proof_invalid（Proof 未知或不属于该 Admin）、provider_credential_invalid
+        （候选 Key 被固定国内 Kapon 路由的 /v1/models 判定无效；候选被丢弃，无连接事实落库）。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - invalid_request
+                      - secure_transport_required
+                      - reauth_proof_invalid
+                      - provider_credential_invalid
+    ProviderConnectionConfigureConflict:
+      description: |-
+        409 —— provider_connection_exists（实例已有 active Connection，单例约束）；
+        reauth_proof_action_mismatch（Proof 绑定其他 action）；reauth_proof_already_consumed
+        （Proof 单次消费已用掉，不恢复）。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - provider_connection_exists
+                      - reauth_proof_action_mismatch
+                      - reauth_proof_already_consumed
+    ProviderConnectionReplaceRejected:
+      description: |-
+        替换被拒绝且旧凭据/能力保持原样 —— invalid_request、secure_transport_required、
+        reauth_proof_invalid、provider_credential_invalid（候选被丢弃）。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - invalid_request
+                      - secure_transport_required
+                      - reauth_proof_invalid
+                      - provider_credential_invalid
+    ProviderConnectionDeleteRejected:
+      description: |-
+        删除被拒绝 —— invalid_request、secure_transport_required、reauth_proof_invalid。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - invalid_request
+                      - secure_transport_required
+                      - reauth_proof_invalid
+    ReauthProofActionMismatch:
+      description: |-
+        409 —— reauth_proof_action_mismatch（Proof 绑定其他 action，仍可用于其自身 action）；
+        reauth_proof_already_consumed（单次消费已发生，不恢复）。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - reauth_proof_action_mismatch
+                      - reauth_proof_already_consumed
+    ReauthProofExpired:
+      description: reauth_proof_expired —— 五分钟有效期已过。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - reauth_proof_expired
+    ProviderCheckTemporarilyUnavailable:
+      description: |-
+        provider_check_temporarily_unavailable —— 固定国内 Kapon 路由对 /v1/models 的检查
+        遇到超时、429 或临时 5xx：候选被丢弃、既有状态不被永久改写，稍后重试。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - provider_check_temporarily_unavailable
     InternalError:
       description: 服务端内部错误，动作未完成。
       content:
@@ -558,3 +922,118 @@ components:
         created_at:
           type: string
           format: date-time
+    ProviderConnectionCredentialInput:
+      type: object
+      required:
+        - proof
+        - provider_key
+      properties:
+        proof:
+          type: string
+          description: exact-action Reauthentication Proof（create 或 replace 视命令而定）。
+        provider_key:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: 候选 Kapon Provider Key；只在服务端检查/加密期间短暂存在，永不回显。
+    ProviderConnection:
+      type: object
+      required:
+        - id
+        - admin_state
+        - credential_state
+        - image_capability
+        - video_capability
+        - created_at
+        - updated_at
+        - needs_attention
+      properties:
+        id:
+          type: string
+          format: uuid
+        admin_state:
+          type: string
+          enum:
+            - enabled
+            - paused
+        credential_state:
+          type: string
+          enum:
+            - checking
+            - valid
+            - invalid
+            - credential_unavailable
+        image_capability:
+          type: string
+          enum:
+            - checking
+            - available
+            - unavailable
+        video_capability:
+          type: string
+          enum:
+            - checking
+            - available
+            - unavailable
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近一次 Connection Check 的时间（包括以 temporarily_unavailable 结束的尝试）；从未检查为 null。
+        last_check_outcome:
+          type: string
+          nullable: true
+          enum:
+            - completed
+            - temporarily_unavailable
+          description: 最近一次检查的结局；临时故障不永久改写既有状态。
+        needs_attention:
+          type: boolean
+          description: 派生提示（非持久状态）：凭据无效/不可用、暂停或任一媒体不可用时为 true。
+    MediaCapabilities:
+      type: object
+      required:
+        - image
+        - video
+      properties:
+        image:
+          $ref: "#/components/schemas/MediaCapabilityStatus"
+        video:
+          $ref: "#/components/schemas/MediaCapabilityStatus"
+    MediaCapabilityStatus:
+      type: object
+      required:
+        - status
+        - reason
+        - action
+      properties:
+        status:
+          type: string
+          enum:
+            - checking
+            - available
+            - unavailable
+        reason:
+          type: string
+          nullable: true
+          enum:
+            - not_configured
+            - connection_paused
+            - credential_invalid
+            - credential_unavailable
+            - model_unavailable
+            - checking
+          description: 不可用/检查中的稳定机器原因；可用时为 null。
+        action:
+          type: string
+          nullable: true
+          enum:
+            - wait
+            - contact_admin
+          description: 稳定行动建议；可用时为 null。

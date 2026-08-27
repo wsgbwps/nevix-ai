@@ -59,6 +59,8 @@ type harness struct {
 	runtimePool *pgxpool.Pool // authenticates directly as identity_app
 	serverURL   string
 	closeServer func()
+	secretsDir  string
+	kapon       *fakeKapon
 	// Bounded client for smoke flows so an accidental server stall fails
 	// fast instead of hanging the whole package past the go-test alarm.
 	smokeClient *http.Client
@@ -72,6 +74,7 @@ func newHarness(t *testing.T) *harness {
 	runtimeURL := requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL")
 	corsOrigin := requireEnv(t, "NEVIX_CORS_ALLOWED_ORIGINS")
 	storageRoot := requireEnv(t, "STORAGE_FS_ROOT")
+	secretsDir := requireEnv(t, "NEVIX_CREATION_SECRETS_DIR")
 
 	ownerPool, err := pgxpool.New(ctx, ownerURL)
 	if err != nil {
@@ -91,9 +94,12 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(runtimePool.Close)
 
 	identityConfig := identity.Config{CORSAllowedOrigins: []string{corsOrigin}}
+	kapon := newFakeKapon(t)
 	creationConfig := creation.Config{
 		StorageDriver:      "filesystem",
 		StorageRoot:        storageRoot,
+		SecretsDir:         secretsDir,
+		KaponBaseURL:       kapon.URL(),
 		CORSAllowedOrigins: []string{corsOrigin},
 	}
 	// The identity Module is constructed before both registrations so its
@@ -112,6 +118,10 @@ func newHarness(t *testing.T) *harness {
 			return "filesystem", true
 		case "STORAGE_FS_ROOT":
 			return storageRoot, true
+		case "NEVIX_CREATION_SECRETS_DIR":
+			return secretsDir, true
+		case "KAPON_BASE_URL":
+			return kapon.URL(), true
 		default:
 			return "", false
 		}
@@ -119,7 +129,10 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("harness config must pass LoadConfig: %v", err)
 	}
-	creationConfigDeps := creation.Deps{SessionAuthenticator: identityModule.SessionAuthenticator()}
+	creationConfigDeps := creation.Deps{
+		SessionAuthenticator: identityModule.SessionAuthenticator(),
+		ReauthVerifier:       identityModule.ReauthProofs(),
+	}
 
 	bus := event.NewInMemoryBus()
 	router := chi.NewRouter()
@@ -132,7 +145,7 @@ func newHarness(t *testing.T) *harness {
 		creationModule.Register(r, bus)
 	})
 
-	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool}
+	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon}
 	h.startServer(router)
 	t.Cleanup(h.closeServer)
 	return h

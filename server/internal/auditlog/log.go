@@ -76,25 +76,40 @@ const (
 	// Reauthentication Proof; metadata names the action it authorized
 	// (issue #154, ADR-0016).
 	ReauthProofConsumed Action = "reauth_proof_consumed"
+	// The Provider Connection lifecycle (issue #157, ADR-0016): metadata
+	// carries the connection id and outcome states only — never the key,
+	// endpoints, model ids, provider request ids, or raw errors.
+	ProviderConnectionCreated  Action = "provider_connection_created"
+	ProviderConnectionReplaced Action = "provider_connection_replaced"
+	ProviderConnectionPaused   Action = "provider_connection_paused"
+	ProviderConnectionResumed  Action = "provider_connection_resumed"
+	ProviderConnectionChecked  Action = "provider_connection_checked"
+	ProviderConnectionDeleted  Action = "provider_connection_deleted"
 )
 
 var validActions = map[Action]struct{}{
-	InstanceClaimed:     {},
-	SessionCreated:      {},
-	SessionRevoked:      {},
-	PasswordChanged:     {},
-	DisplayNameChanged:  {},
-	UserCreated:         {},
-	UserDisabled:        {},
-	UserPasswordReset:   {},
-	UserEmailChanged:    {},
-	UserRoleChanged:     {},
-	UserDeleted:         {},
-	JoinCodeCreated:     {},
-	JoinCodeRevoked:     {},
-	UserSelfRegistered:  {},
-	ReauthProofIssued:   {},
-	ReauthProofConsumed: {},
+	InstanceClaimed:            {},
+	SessionCreated:             {},
+	SessionRevoked:             {},
+	PasswordChanged:            {},
+	DisplayNameChanged:         {},
+	UserCreated:                {},
+	UserDisabled:               {},
+	UserPasswordReset:          {},
+	UserEmailChanged:           {},
+	UserRoleChanged:            {},
+	UserDeleted:                {},
+	JoinCodeCreated:            {},
+	JoinCodeRevoked:            {},
+	UserSelfRegistered:         {},
+	ReauthProofIssued:          {},
+	ReauthProofConsumed:        {},
+	ProviderConnectionCreated:  {},
+	ProviderConnectionReplaced: {},
+	ProviderConnectionPaused:   {},
+	ProviderConnectionResumed:  {},
+	ProviderConnectionChecked:  {},
+	ProviderConnectionDeleted:  {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id

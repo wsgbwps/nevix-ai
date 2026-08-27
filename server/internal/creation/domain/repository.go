@@ -46,6 +46,31 @@ type CompoundCursor struct {
 	ID        UUID
 }
 
+// ProviderConnectionRepository is the persistence port for the instance's
+// single AI Provider Connection aggregate. Every method addresses the active
+// (non-terminated) row; the singleton partial unique index is the durable
+// backstop for concurrent creates.
+type ProviderConnectionRepository interface {
+	// Insert persists the first active connection inside the caller's write
+	// transaction; a concurrent winner surfaces ErrConnectionExists.
+	Insert(ctx context.Context, tx TxExecutor, c *ProviderConnection) error
+	// GetActive resolves the active connection or ErrConnectionNotConfigured.
+	GetActive(ctx context.Context) (ProviderConnection, error)
+	// ReplaceCredential atomically switches the envelope and the credential/
+	// media states inside the caller's write transaction.
+	ReplaceCredential(ctx context.Context, tx TxExecutor, id UUID, envelope *ProviderCredentialEnvelope, credentialState CredentialState, image, video MediaCapability, checkedAt time.Time, outcome CheckOutcome) error
+	// SetAdminState flips enabled/paused and returns the updated aggregate.
+	SetAdminState(ctx context.Context, tx TxExecutor, id UUID, state AdminState) (ProviderConnection, error)
+	// SetCheckResult persists a recheck's credential/media verdicts.
+	SetCheckResult(ctx context.Context, tx TxExecutor, id UUID, credentialState CredentialState, image, video MediaCapability, checkedAt time.Time, outcome CheckOutcome) error
+	// MarkCredentialUnavailable fails the connection closed (master key or
+	// envelope failure) with both media unavailable.
+	MarkCredentialUnavailable(ctx context.Context, tx TxExecutor, id UUID) error
+	// Terminate clears the envelope columns and stamps terminated_at inside
+	// the caller's write transaction; the identity row is retained.
+	Terminate(ctx context.Context, tx TxExecutor, id UUID) error
+}
+
 // WriteScope is the domain view of one in-flight verified write
 // transaction: statement execution plus after-commit effect registration.
 // Application callbacks see only this; begin/commit/rollback discipline

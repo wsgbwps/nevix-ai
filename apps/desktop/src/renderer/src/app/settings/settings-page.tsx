@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from '@tanstack/react-router'
 import {
   ArrowLeftIcon,
   LanguagesIcon,
   ScrollTextIcon,
   ServerIcon,
+  SparklesIcon,
   UserRoundIcon,
   UsersIcon
 } from 'lucide-react'
@@ -26,7 +27,14 @@ import {
   JoinCodesSettings,
   UserManagementSettings
 } from '../../features/user-management'
-import { useCurrentSession } from '../../features/authentication'
+import {
+  ReauthenticationDialog,
+  useCurrentSession,
+  type IssuedReauthProof,
+  type ReauthAction
+} from '../../features/authentication'
+import { ProviderConnectionSettings } from '../../features/creation'
+import type { ProviderConnectionProofAction } from '../../features/creation'
 import { useServerConnectionState } from '../connection-state'
 import { useSettingsCoordinator, type SettingsContribution } from './settings-coordinator'
 import {
@@ -41,9 +49,18 @@ const SETTINGS_SECTION_REGISTRY: Record<SettingsSection, SettingsContribution> =
   profile: CLEAN_LEAVE_SEMANTICS,
   language: CLEAN_LEAVE_SEMANTICS,
   connection: CLEAN_LEAVE_SEMANTICS,
+  aiCreation: CLEAN_LEAVE_SEMANTICS,
   users: CLEAN_LEAVE_SEMANTICS,
   audit: CLEAN_LEAVE_SEMANTICS
 }
+
+// The exact-action ids the AI Creation Settings commands request, mapped onto
+// the Authentication-owned closed action set at the composition point.
+const PROVIDER_CONNECTION_REAUTH_ACTIONS = {
+  create: 'provider_connection.create',
+  replace: 'provider_connection.replace',
+  delete: 'provider_connection.delete'
+} as const satisfies Record<ProviderConnectionProofAction, ReauthAction>
 
 /** One governance card inside the Users section; each reports its own leave semantics. */
 type UsersSectionSlot = 'userManagement' | 'joinCodes'
@@ -100,6 +117,25 @@ export function SettingsPage(): React.JSX.Element | null {
     )
   }, [contributionReporters, usersSlotContributions])
   const coordinator = useSettingsCoordinator({ entry: { ...entry, section }, contribution })
+  // The AI Creation Settings card asks for one exact-action proof; the
+  // Authentication-owned confirmation dialog renders here so peer Features
+  // never import each other (app/settings is the composition point).
+  const [proofAction, setProofAction] = useState<ProviderConnectionProofAction | undefined>()
+  const proofResolver = useRef<((proof: IssuedReauthProof | undefined) => void) | undefined>(
+    undefined
+  )
+  const acquireProof = useCallback(
+    (action: ProviderConnectionProofAction) =>
+      new Promise<{ readonly proof: string } | undefined>((resolve) => {
+        proofResolver.current = (issued) => {
+          proofResolver.current = undefined
+          setProofAction(undefined)
+          resolve(issued ?? undefined)
+        }
+        setProofAction(action)
+      }),
+    []
+  )
   const handleServerConnectionSaved = useCallback(async (): Promise<void> => {
     // A new URL becomes the renderer's runtime connect-src only after a
     // document reload; the previous server's session cannot carry over, so it
@@ -142,6 +178,22 @@ export function SettingsPage(): React.JSX.Element | null {
             serverUrl={connection.url}
             onSaved={handleServerConnectionSaved}
             onContributionChange={contributionReporters.connection}
+          />
+        </div>
+      </section>
+    ),
+    aiCreation: () => (
+      <section aria-labelledby="settings-ai-creation-heading" className="grid gap-3">
+        <h2 id="settings-ai-creation-heading" className="text-base font-semibold">
+          {t('settings.aiCreation')}
+        </h2>
+        <div className="bg-card rounded-lg border">
+          <ProviderConnectionSettings
+            isAdmin={isAdmin}
+            getSession={session.acquireSession}
+            serverUrl={connection.url ?? ''}
+            acquireProof={acquireProof}
+            onContributionChange={contributionReporters.aiCreation}
           />
         </div>
       </section>
@@ -230,6 +282,16 @@ export function SettingsPage(): React.JSX.Element | null {
                 <ServerIcon className="size-4" />
                 {t('settings.connection')}
               </button>
+              <button
+                type="button"
+                aria-pressed={coordinator.section === 'aiCreation'}
+                disabled={coordinator.navigationDisabled}
+                onClick={() => coordinator.switchSection('aiCreation')}
+                className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium"
+              >
+                <SparklesIcon className="size-4" />
+                {t('settings.aiCreation')}
+              </button>
             </div>
             {isAdmin ? (
               <div className="grid gap-1">
@@ -266,6 +328,17 @@ export function SettingsPage(): React.JSX.Element | null {
           </div>
         </main>
       </div>
+
+      {proofAction !== undefined ? (
+        <ReauthenticationDialog
+          open
+          action={PROVIDER_CONNECTION_REAUTH_ACTIONS[proofAction]}
+          serverUrl={connection.url ?? ''}
+          acquireSession={session.acquireSession}
+          onProof={(issued) => proofResolver.current?.(issued)}
+          onCancel={() => proofResolver.current?.(undefined)}
+        />
+      ) : null}
 
       <Dialog open={coordinator.discardPromptOpen}>
         <DialogContent

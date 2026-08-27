@@ -60,14 +60,20 @@ export type CreationApiResult<T> =
   | CreationApiFailure
 
 interface RequestInput {
-  readonly method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   readonly path: string
   readonly query?: Readonly<Record<string, string>>
   readonly body?: unknown
   readonly token: string
 }
 
-async function request(
+/**
+ * One trusted-command round trip shared by every Creation api client in this
+ * segment: bearer header, no-redirect, JSON-only failure mapping. Exported
+ * for the sibling provider-connection client so the contract-failure
+ * semantics cannot drift between copies.
+ */
+export async function request(
   serverUrl: string,
   input: RequestInput
 ): Promise<{ readonly outcome: 'succeeded'; readonly payload: unknown } | CreationApiFailure> {
@@ -107,7 +113,7 @@ async function request(
   return { outcome: 'request-rejected', code: code ?? 'internal_error' }
 }
 
-function readErrorCode(payload: unknown): string | null {
+export function readErrorCode(payload: unknown): string | null {
   if (typeof payload === 'object' && payload !== null && 'error' in payload) {
     const value = (payload as Record<string, unknown>).error
     if (typeof value === 'string') return value
