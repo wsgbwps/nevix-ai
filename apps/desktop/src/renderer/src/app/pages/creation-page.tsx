@@ -6,11 +6,13 @@ import {
   createCreationWorkspacePorts,
   CreationWorkbenchPage
 } from '../../features/creation'
+import { AppShell } from '../shell/app-shell'
 
 /**
  * App-layer composition for the AI Creation route: joins the connected
- * session + server URL to the feature's runtime provider. All business logic
- * stays inside the creation Feature.
+ * session + server URL to the feature's runtime provider and mounts the
+ * Workbench inside the App Shell content area. All business logic stays
+ * inside the creation Feature.
  */
 export function CreationPage(): React.JSX.Element | null {
   const session = useCurrentSession()
@@ -36,9 +38,11 @@ export function CreationPage(): React.JSX.Element | null {
 
   return (
     <CreationRuntimeContext.Provider value={ports}>
-      <div className="h-full min-h-0 overflow-hidden">
-        <CreationWorkbenchPage />
-      </div>
+      <AppShell>
+        <div className="h-full min-h-0 overflow-hidden">
+          <CreationWorkbenchPage />
+        </div>
+      </AppShell>
     </CreationRuntimeContext.Provider>
   )
 }

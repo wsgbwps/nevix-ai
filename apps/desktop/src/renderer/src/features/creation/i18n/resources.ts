@@ -13,17 +13,74 @@ export const creationTranslations = defineResourceTranslations({
         remove: '删除会话 {{name}}',
         newLabel: '新会话名称（可选）',
         newPlaceholder: '新会话…',
-        newSubmit: '创建'
+        newSubmit: '创建',
+        private: 'Creation Session 由创建者私有'
       },
       workspace: {
         label: '工作区',
         empty: '选择或创建一个创作会话开始你的作品',
         generationPending: '图片与视频生成将在此处呈现'
       },
-      pile: {
-        label: '参考素材牌堆',
-        add: '添加参考素材',
-        kind: { image: '图', video: '视频', audio: '音' }
+      composer: {
+        label: '创作输入',
+        promptLabel: '提示词',
+        promptPlaceholder: '描述你想生成的画面或视频…',
+        promptPlaceholderWithRefs: '描述如何使用这些参考素材…',
+        submit: '生成',
+        submitPending: '生成提交将在后续版本开放，草稿会自动保存。',
+        media: { label: '媒体', image: '图片生成', video: '视频生成' },
+        model: { label: '模型' },
+        mode: {
+          label: '模式',
+          'text-to-image': '文生图片',
+          'reference-image': '参考图片',
+          'text-to-video': '文生视频',
+          'first-frame': '首帧',
+          'first-last-frame': '首尾帧',
+          'omni-reference': '全能参考'
+        },
+        params: {
+          label: '参数',
+          ratio: '比例',
+          resolution: '分辨率',
+          quantity: '数量',
+          duration: '时长',
+          seconds: '{{n}} 秒'
+        },
+        stale: {
+          badge: '能力已变化',
+          note: '当前能力清单已不含该值；原值已保留，提交前需要更换。',
+          references: '当前模式下的参考素材数量或类型已超出能力清单；已原样保留，提交前需要调整。'
+        },
+        manifestUnavailable: '能力清单暂时不可用；草稿仍可编辑并自动保存。',
+        unavailable: {
+          template: '当前没有可用的生成能力：{{reason}}，{{action}}',
+          reasons: {
+            production_readiness_pending: '能力尚未通过发布验收',
+            not_configured: '尚未配置 AI 供应商连接',
+            checking: '正在检查连接',
+            credential_invalid: '供应商拒绝了当前密钥',
+            credential_unavailable: '供应商密钥暂不可用',
+            connection_paused: '连接已暂停',
+            model_unavailable: '供应商模型暂不可用'
+          },
+          actions: {
+            wait: '请稍候再试。',
+            await_release: '等待版本发布后即可使用。',
+            contact_admin: '请联系管理员处理。'
+          }
+        },
+        save: {
+          saving: '草稿保存中…',
+          saved: '草稿已保存',
+          failed: '草稿保存失败，点击重试'
+        },
+        deck: {
+          label: '参考素材牌堆',
+          add: '添加参考素材',
+          remove: '移除 {{name}}',
+          kind: { image: '图', video: '视频', audio: '音' }
+        }
       },
       state: {
         loading: '正在读取创作数据…',
@@ -114,17 +171,76 @@ export const creationTranslations = defineResourceTranslations({
         remove: 'Delete session {{name}}',
         newLabel: 'New session name (optional)',
         newPlaceholder: 'New session…',
-        newSubmit: 'Create'
+        newSubmit: 'Create',
+        private: 'Creation Sessions are private to their creator'
       },
       workspace: {
         label: 'Workspace',
         empty: 'Pick or create a session to start your work',
         generationPending: 'Image and video generation will appear here'
       },
-      pile: {
-        label: 'Reference material pile',
-        add: 'Add reference material',
-        kind: { image: 'IMG', video: 'VID', audio: 'AUD' }
+      composer: {
+        label: 'Creation input',
+        promptLabel: 'Prompt',
+        promptPlaceholder: 'Describe the image or video you want to generate…',
+        promptPlaceholderWithRefs: 'Describe how to use these reference materials…',
+        submit: 'Generate',
+        submitPending: 'Generation submission arrives in a later release; the draft autosaves.',
+        media: { label: 'Media', image: 'Image generation', video: 'Video generation' },
+        model: { label: 'Model' },
+        mode: {
+          label: 'Mode',
+          'text-to-image': 'Text to image',
+          'reference-image': 'Reference image',
+          'text-to-video': 'Text to video',
+          'first-frame': 'First frame',
+          'first-last-frame': 'First & last frame',
+          'omni-reference': 'Omni reference'
+        },
+        params: {
+          label: 'Parameters',
+          ratio: 'Ratio',
+          resolution: 'Resolution',
+          quantity: 'Quantity',
+          duration: 'Duration',
+          seconds: '{{n}}s'
+        },
+        stale: {
+          badge: 'Capability changed',
+          note: 'The current capability manifest no longer includes this value; it is preserved until you replace it before submission.',
+          references:
+            'The reference count or kinds under the current mode exceed the capability manifest; they are preserved until you adjust before submission.'
+        },
+        manifestUnavailable:
+          'The capability manifest is unavailable right now; drafting and autosave keep working.',
+        unavailable: {
+          template: 'No generation capability is available right now: {{reason}}. {{action}}',
+          reasons: {
+            production_readiness_pending: 'the capability has not passed release acceptance yet',
+            not_configured: 'no AI provider connection is configured',
+            checking: 'the connection is being checked',
+            credential_invalid: 'the provider rejected the current key',
+            credential_unavailable: 'the provider key is temporarily unavailable',
+            connection_paused: 'the connection is paused',
+            model_unavailable: 'the provider model is temporarily unavailable'
+          },
+          actions: {
+            wait: 'Please wait and try again later.',
+            await_release: 'It becomes usable after the next release.',
+            contact_admin: 'Please contact your administrator.'
+          }
+        },
+        save: {
+          saving: 'Saving draft…',
+          saved: 'Draft saved',
+          failed: 'Draft save failed; click to retry'
+        },
+        deck: {
+          label: 'Reference material deck',
+          add: 'Add reference material',
+          remove: 'Remove {{name}}',
+          kind: { image: 'IMG', video: 'VID', audio: 'AUD' }
+        }
       },
       state: {
         loading: 'Loading creation data…',

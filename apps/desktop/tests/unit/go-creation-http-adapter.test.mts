@@ -134,3 +134,151 @@ test('malformed payloads fail closed as network-failure instead of inventing sha
   )
   assert.equal(result.outcome, 'network-failure')
 })
+
+const sessionId = '00000000-0000-4000-8000-000000000042'
+
+test('saveSessionDraft PUTs the snake_case draft with the bearer header', async () => {
+  const calls: Array<{ method: string; url: string; bearer: string | null; body: string | null }> =
+    []
+  const client = createCreationClient(serverUrl)
+  const stored = await withFetch(
+    capturedFetch(calls, () =>
+      jsonResponse({
+        prompt: '暖光跑鞋',
+        media_type: 'image',
+        manifest_version: 1,
+        model: 'doubao-seedream-5.0-lite',
+        mode: 'reference-image',
+        ratio: '4:5',
+        resolution: '2K',
+        quantity: 2,
+        duration_seconds: null,
+        references: [
+          { material_id: 'cccccccc-0000-4000-8000-000000000003', role: 'reference' },
+          { material_id: 'dddddddd-0000-4000-8000-000000000004', role: 'reference' }
+        ]
+      })
+    ),
+    () =>
+      client.saveSessionDraft('token-1', sessionId, {
+        prompt: '暖光跑鞋',
+        mediaType: 'image',
+        manifestVersion: 1,
+        model: 'doubao-seedream-5.0-lite',
+        mode: 'reference-image',
+        ratio: '4:5',
+        resolution: '2K',
+        quantity: 2,
+        durationSeconds: null,
+        references: [
+          { materialId: 'cccccccc-0000-4000-8000-000000000003', role: 'reference' },
+          { materialId: 'dddddddd-0000-4000-8000-000000000004', role: 'reference' }
+        ]
+      })
+  )
+
+  assert.equal(calls[0].method, 'PUT')
+  assert.equal(calls[0].url, `/creation/sessions/${sessionId}/draft`)
+  assert.equal(calls[0].bearer, 'Bearer token-1')
+  assert.deepEqual(JSON.parse(calls[0].body ?? '{}'), {
+    prompt: '暖光跑鞋',
+    media_type: 'image',
+    manifest_version: 1,
+    model: 'doubao-seedream-5.0-lite',
+    mode: 'reference-image',
+    ratio: '4:5',
+    resolution: '2K',
+    quantity: 2,
+    duration_seconds: null,
+    references: [
+      { material_id: 'cccccccc-0000-4000-8000-000000000003', role: 'reference' },
+      { material_id: 'dddddddd-0000-4000-8000-000000000004', role: 'reference' }
+    ]
+  })
+  assert.equal(stored.outcome, 'succeeded')
+})
+
+test('getSessionDetail recovers the stored draft and passes null through', async () => {
+  const client = createCreationClient(serverUrl)
+
+  const withDraft = await withFetch(
+    () =>
+      jsonResponse({
+        id: sessionId,
+        name: 'campaign',
+        created_at: '2026-08-27T09:00:00Z',
+        updated_at: '2026-08-27T09:30:00Z',
+        draft: {
+          prompt: 'p',
+          media_type: null,
+          manifest_version: 3,
+          model: null,
+          mode: null,
+          ratio: null,
+          resolution: '2K',
+          quantity: null,
+          duration_seconds: null,
+          references: []
+        }
+      }),
+    () => client.getSessionDetail('tok', sessionId)
+  )
+  assert.ok(withDraft.outcome === 'succeeded')
+  assert.equal(withDraft.value.draft?.manifestVersion, 3)
+  assert.equal(withDraft.value.draft?.mediaType, null)
+
+  const withoutDraft = await withFetch(
+    () =>
+      jsonResponse({
+        id: sessionId,
+        name: 'campaign',
+        created_at: '2026-08-27T09:00:00Z',
+        updated_at: '2026-08-27T09:30:00Z',
+        draft: null
+      }),
+    () => client.getSessionDetail('tok', sessionId)
+  )
+  assert.ok(withoutDraft.outcome === 'succeeded')
+  assert.equal(withoutDraft.value.draft, null)
+})
+
+test('draft responses with unknown shapes fail closed', async () => {
+  const client = createCreationClient(serverUrl)
+
+  const unknownRole = await withFetch(
+    () =>
+      jsonResponse({
+        id: sessionId,
+        name: 'campaign',
+        created_at: '2026-08-27T09:00:00Z',
+        updated_at: '2026-08-27T09:30:00Z',
+        draft: {
+          prompt: '',
+          media_type: 'image',
+          manifest_version: 1,
+          model: null,
+          mode: null,
+          ratio: null,
+          resolution: null,
+          quantity: null,
+          duration_seconds: null,
+          references: [{ material_id: 'cccccccc-0000-4000-8000-000000000003', role: 'hero' }]
+        }
+      }),
+    () => client.getSessionDetail('tok', sessionId)
+  )
+  assert.equal(unknownRole.outcome, 'network-failure')
+
+  const missingField = await withFetch(
+    () =>
+      jsonResponse({
+        id: sessionId,
+        name: 'campaign',
+        created_at: '2026-08-27T09:00:00Z',
+        updated_at: '2026-08-27T09:30:00Z',
+        draft: { prompt: '', manifest_version: 1, references: [] }
+      }),
+    () => client.getSessionDetail('tok', sessionId)
+  )
+  assert.equal(missingField.outcome, 'network-failure')
+})

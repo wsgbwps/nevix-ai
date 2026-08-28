@@ -82,6 +82,8 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusUnprocessableEntity, Code: CodeUnreadableMedia, Message: "The media could not be decoded by the server."}
 	case isError(err, domain.ErrRangeNotSatisfiable):
 		return &Error{Status: http.StatusRequestedRangeNotSatisfiable, Code: CodeRangeNotSatisfiable, Message: "The requested range cannot be satisfied."}
+	case isError(err, domain.ErrInvalidDraft):
+		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The draft violates the structural envelope or references materials outside the session."}
 	case isError(err, domain.ErrConnectionNotConfigured):
 		return &Error{Status: http.StatusNotFound, Code: CodeNotConfigured, Message: "No AI provider connection is configured."}
 	case isError(err, domain.ErrConnectionExists):
@@ -260,4 +262,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
-const maxJSONBodyBytes = 4096
+// The bound must carry the widest legal draft save: a 2000-Unicode-char
+// prompt is up to 8 KiB of UTF-8 plus the envelope — 4 KiB would reject a
+// contract-legal body.
+const maxJSONBodyBytes = 16384

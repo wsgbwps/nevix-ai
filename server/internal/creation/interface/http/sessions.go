@@ -91,18 +91,132 @@ type listSessionsResponse struct {
 	NextCursor *string           `json:"next_cursor"`
 }
 
-// GetSession answers GET /creation/sessions/{sessionID}.
+// GetSession answers GET /creation/sessions/{sessionID} with the session and
+// its recoverable draft (null when never saved).
 func (h *SessionHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathUUID(w, r, "sessionID")
 	if !ok {
 		return
 	}
-	session, err := h.sessions.Get(r.Context(), creatorID(w, r), id)
+	session, draft, err := h.sessions.GetWithDraft(r.Context(), creatorID(w, r), id)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	encodeJSON(w, http.StatusOK, toSessionResource(session))
+	encodeJSON(w, http.StatusOK, sessionDetailResource{
+		sessionResource: toSessionResource(session),
+		Draft:           toDraftResource(draft),
+	})
+}
+
+// sessionDetailResource is the getSession wire shape: the session plus its
+// recoverable draft.
+type sessionDetailResource struct {
+	sessionResource
+	Draft *draftResource `json:"draft"`
+}
+
+// draftResource is the wire shape of one stored draft.
+type draftResource struct {
+	Prompt          string                   `json:"prompt"`
+	MediaType       *string                  `json:"media_type"`
+	ManifestVersion int                      `json:"manifest_version"`
+	Model           *string                  `json:"model"`
+	Mode            *string                  `json:"mode"`
+	Ratio           *string                  `json:"ratio"`
+	Resolution      *string                  `json:"resolution"`
+	Quantity        *int                     `json:"quantity"`
+	DurationSeconds *int                     `json:"duration_seconds"`
+	References      []draftReferenceResource `json:"references"`
+}
+
+type draftReferenceResource struct {
+	MaterialID string `json:"material_id"`
+	Role       string `json:"role"`
+}
+
+func toDraftResource(draft *domain.SessionDraft) *draftResource {
+	if draft == nil {
+		return nil
+	}
+	resource := &draftResource{
+		Prompt:          draft.Prompt,
+		ManifestVersion: draft.ManifestVersion,
+		References:      make([]draftReferenceResource, 0, len(draft.References)),
+	}
+	if draft.MediaType != nil {
+		media := string(*draft.MediaType)
+		resource.MediaType = &media
+	}
+	resource.Model, resource.Mode, resource.Ratio, resource.Resolution = draft.Model, draft.Mode, draft.Ratio, draft.Resolution
+	resource.Quantity, resource.DurationSeconds = draft.Quantity, draft.DurationSeconds
+	for _, reference := range draft.References {
+		resource.References = append(resource.References, draftReferenceResource{
+			MaterialID: reference.MaterialID.String(),
+			Role:       string(reference.Role),
+		})
+	}
+	return resource
+}
+
+type saveDraftRequest struct {
+	Prompt          *string                  `json:"prompt"`
+	MediaType       *string                  `json:"media_type"`
+	ManifestVersion int                      `json:"manifest_version"`
+	Model           *string                  `json:"model"`
+	Mode            *string                  `json:"mode"`
+	Ratio           *string                  `json:"ratio"`
+	Resolution      *string                  `json:"resolution"`
+	Quantity        *int                     `json:"quantity"`
+	DurationSeconds *int                     `json:"duration_seconds"`
+	References      []draftReferenceResource `json:"references"`
+}
+
+// SaveDraft answers PUT /creation/sessions/{sessionID}/draft with the stored
+// draft. The references field is required per contract; a missing field is
+// rejected exactly like any other envelope violation.
+func (h *SessionHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "sessionID")
+	if !ok {
+		return
+	}
+	var req saveDraftRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.References == nil {
+		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The references field is required."})
+		return
+	}
+	draft := &domain.SessionDraft{
+		ManifestVersion: req.ManifestVersion,
+		References:      make([]domain.DraftReference, 0, len(req.References)),
+	}
+	if req.Prompt != nil {
+		draft.Prompt = *req.Prompt
+	}
+	if req.MediaType != nil {
+		media := domain.DraftMediaType(*req.MediaType)
+		draft.MediaType = &media
+	}
+	draft.Model, draft.Mode, draft.Ratio, draft.Resolution = req.Model, req.Mode, req.Ratio, req.Resolution
+	draft.Quantity, draft.DurationSeconds = req.Quantity, req.DurationSeconds
+	for _, reference := range req.References {
+		materialID, err := domain.ParseUUID(reference.MaterialID)
+		if err != nil {
+			WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "Every reference must carry a material_id uuid."})
+			return
+		}
+		draft.References = append(draft.References, domain.DraftReference{
+			MaterialID: materialID,
+			Role:       domain.DraftRole(reference.Role),
+		})
+	}
+	if err := h.sessions.SaveDraft(r.Context(), creatorID(w, r), id, draft); err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, toDraftResource(draft))
 }
 
 type renameSessionRequest struct {

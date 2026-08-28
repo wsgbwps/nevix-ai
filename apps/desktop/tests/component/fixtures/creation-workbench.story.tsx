@@ -10,12 +10,18 @@ import {
 import type {
   CreationApiResult,
   CreationSessionView,
-  ReferenceMaterialView
+  ReferenceMaterialView,
+  SessionDraftInput
 } from '../../../src/renderer/src/features/creation/api/go-creation-http'
+import type {
+  CapabilityManifest,
+  ImageReferenceEnvelope
+} from '../../../src/renderer/src/features/creation/api/capability-manifest-http'
 
 /**
- * Black-box composition for the Creation Workbench public surface (issue
- * #156): the exported page mounted with scripted in-memory ports. Tests drive
+ * Black-box composition for the Creation Workbench public surface (issues
+ * #156 / #177): the exported page mounted with scripted in-memory ports —
+ * including the session draft store and the Capability Manifest. Tests drive
  * visible UI and observe caller-visible port calls; no internal store or hook
  * is exposed beyond a narrow assertion handle.
  */
@@ -52,12 +58,17 @@ function material(partial: {
     id: partial.id,
     kind: partial.kind,
     fileName: partial.fileName,
-    mimeType: partial.kind === 'image' ? 'image/png' : 'audio/mpeg',
+    mimeType:
+      partial.kind === 'image'
+        ? 'image/png'
+        : partial.kind === 'video'
+          ? 'video/mp4'
+          : 'audio/mpeg',
     byteSize: 1024,
-    widthPx: partial.kind === 'image' ? 24 : null,
-    heightPx: partial.kind === 'image' ? 16 : null,
+    widthPx: partial.kind === 'audio' ? null : 24,
+    heightPx: partial.kind === 'audio' ? null : 16,
     pixelCount: partial.kind === 'image' ? 384 : null,
-    durationMs: null,
+    durationMs: partial.kind === 'image' ? null : 3000,
     checksumSha256: 'aa'.repeat(32),
     claimsVersion: 1,
     createdAt: '2026-08-23T08:00:00Z'
@@ -74,28 +85,117 @@ const materialTwo = material({
   kind: 'image',
   fileName: 'banner.png'
 })
-const materialThree = material({
-  id: '77777777-0000-4000-8000-000000000005',
-  kind: 'image',
-  fileName: 'hero.png'
-})
 
 const thumbnailUrl =
   'data:image/svg+xml;utf8,' +
   encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="48"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
   )
 
-interface PileTestControls {
-  uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
+function imageEnvelope(min: number, max: number): ImageReferenceEnvelope {
+  return {
+    count: { min, max },
+    formats: ['jpeg', 'png', 'webp'],
+    maxBytes: 8 * 1024 * 1024,
+    minPx: 256,
+    maxPx: 6000,
+    maxPixels: 36_000_000,
+    minAspect: 1 / 3,
+    maxAspect: 3
+  }
+}
+
+const noReferences = { total: { min: 0, max: 0 } }
+
+/** The V1 manifest as the server publishes it with both media active. */
+const activeManifest: CapabilityManifest = {
+  schemaVersion: 1,
+  manifestVersion: 1,
+  image: {
+    available: true,
+    reason: null,
+    action: null,
+    model: 'doubao-seedream-5.0-lite',
+    modes: [
+      { id: 'text-to-image', referenceMaterial: noReferences },
+      {
+        id: 'reference-image',
+        referenceMaterial: { total: { min: 1, max: 4 }, image: imageEnvelope(1, 4) }
+      }
+    ],
+    ratios: ['1:1', '4:3', '4:5', '16:9', '9:16'],
+    resolutions: ['1K', '2K', '4K'],
+    quantities: [1, 2, 3, 4],
+    defaults: { resolution: '2K', ratio: '1:1', quantity: 1 },
+    prompt: { minChars: 1, maxChars: 2000 }
+  },
+  video: {
+    available: true,
+    reason: null,
+    action: null,
+    model: 'doubao-seedance-2-5',
+    modes: [
+      { id: 'text-to-video', referenceMaterial: noReferences },
+      {
+        id: 'first-frame',
+        referenceMaterial: { total: { min: 1, max: 1 }, image: imageEnvelope(1, 1) }
+      },
+      {
+        id: 'first-last-frame',
+        referenceMaterial: { total: { min: 1, max: 2 }, image: imageEnvelope(1, 2) }
+      },
+      {
+        id: 'omni-reference',
+        referenceMaterial: {
+          total: { min: 1, max: 4 },
+          image: imageEnvelope(0, 4),
+          video: {
+            count: { min: 0, max: 1 },
+            formats: ['mp4'],
+            maxBytes: 200 * 1024 * 1024,
+            minSeconds: 2,
+            maxSeconds: 30
+          },
+          audio: {
+            count: { min: 0, max: 1 },
+            formats: ['mp3', 'wav', 'm4a'],
+            maxBytes: 50 * 1024 * 1024,
+            minSeconds: 2,
+            maxSeconds: 30
+          }
+        }
+      }
+    ],
+    resolutions: ['480p', '720p', '1080p'],
+    durations: [5, 10],
+    defaults: { resolution: '720p', duration: 5 },
+    prompt: { minChars: 1, maxChars: 2000 }
+  }
+}
+
+/** A stored draft carrying values the current manifest has removed. */
+const staleDraft: SessionDraftInput = {
+  prompt: 'legacy campaign draft',
+  mediaType: 'image',
+  manifestVersion: 1,
+  model: 'removed-legacy-model',
+  mode: 'reference-image',
+  ratio: '7:3',
+  resolution: '2K',
+  quantity: 2,
+  durationSeconds: null,
+  references: [{ materialId: materialOne.id, role: 'reference' }]
+}
+
+export interface DeckTestControls {
+  saveDraftCalls(): ReadonlyArray<{ sessionId: string; draft: unknown }>
   deleteMaterialCalls(): string[]
-  thumbRequests(): string[]
-  createCalls(): ReadonlyArray<string>
+  uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
 }
 
 declare global {
   interface Window {
-    __creationPileTest?: PileTestControls
+    __creationDeckTest?: DeckTestControls
   }
 }
 
@@ -103,90 +203,138 @@ function succeeded<T>(value: T): CreationApiResult<T> {
   return { outcome: 'succeeded', value }
 }
 
-// Builds the standard story's ports and installs the assertion handle.
-// Window writes live here, in a plain module function outside component
-// scope, matching the established fixture pattern.
-function installStandardRuntime(): CreationWorkspacePorts {
-  const uploadCalls: Array<{ sessionId: string; name: string }> = []
-  const deletedIds: string[] = []
-  const thumbIds: string[] = []
-  const createdNames: string[] = []
+interface RuntimeOptions {
+  readonly manifest: CapabilityManifest | null
+  /** When true the manifest call fails like an unreachable server. */
+  readonly manifestFails?: boolean
+  readonly sessions: readonly CreationSessionView[]
+  readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
+  readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
+}
 
-  const ports: CreationWorkspacePorts = {
-    listSessions: async () => succeeded({ sessions: [sessionA, sessionB], nextCursor: null }),
-    createSession: async (name) => {
-      createdNames.push(name ?? '')
-      return succeeded({ ...sessionB, id: sessionB.id, name: name ?? '' })
-    },
+// Builds the story's ports: an in-memory draft store behind the same
+// operations the production wire uses, plus the assertion handle.
+function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePorts {
+  const drafts = new Map(Object.entries(options.drafts ?? {}))
+  const materials = new Map(Object.entries(options.materials ?? {}))
+  const savedDrafts = new Map<string, SessionDraftInput>()
+  const saveCalls: Array<{ sessionId: string; draft: SessionDraftInput }> = []
+  const deletedIds: string[] = []
+  const uploadCalls: Array<{ sessionId: string; name: string }> = []
+
+  window.__creationDeckTest = {
+    saveDraftCalls: () => saveCalls,
+    deleteMaterialCalls: () => deletedIds,
+    uploadCalls: () => uploadCalls
+  }
+
+  return {
+    listSessions: async () => succeeded({ sessions: options.sessions, nextCursor: null }),
+    createSession: async (name) =>
+      succeeded({
+        ...sessionB,
+        id: 'eeeeeeee-0000-4000-8000-000000000007',
+        name: name ?? ''
+      }),
     renameSession: async () => succeeded(sessionA),
     deleteSession: async () => succeeded(undefined),
-    listMaterials: async () =>
-      succeeded({ materials: [materialOne, materialTwo, materialThree], nextCursor: null }),
+    getSessionDetail: async (sessionId) => {
+      const session = options.sessions.find((entry) => entry.id === sessionId)
+      if (!session) return { outcome: 'request-rejected', code: 'not_found' }
+      const stored = savedDrafts.get(sessionId) ?? drafts.get(sessionId) ?? null
+      return succeeded({
+        id: session.id,
+        name: session.name,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        draft: stored === null ? null : { ...stored, references: [...stored.references] }
+      })
+    },
+    saveSessionDraft: async (sessionId, draft) => {
+      saveCalls.push({ sessionId, draft: { ...draft, references: [...draft.references] } })
+      savedDrafts.set(sessionId, draft)
+      return succeeded({ ...draft, references: [...draft.references] })
+    },
+    listMaterials: async (sessionId) =>
+      succeeded({ materials: materials.get(sessionId) ?? [], nextCursor: null }),
     uploadMaterial: async (sessionId, file) => {
       uploadCalls.push({ sessionId, name: file.name })
-      return succeeded(
-        material({ id: 'ffffffff-0000-4000-8000-000000000006', kind: 'image', fileName: file.name })
-      )
+      const uploaded = material({
+        id: 'ffffffff-0000-4000-8000-000000000006',
+        kind: 'image',
+        fileName: file.name
+      })
+      materials.set(sessionId, [...(materials.get(sessionId) ?? []), uploaded])
+      return succeeded(uploaded)
     },
     deleteMaterial: async (materialId) => {
       deletedIds.push(materialId)
+      for (const [sessionId, list] of materials) {
+        materials.set(
+          sessionId,
+          list.filter((entry) => entry.id !== materialId)
+        )
+      }
       return succeeded(undefined)
     },
-    loadImageBlobUrl: async (materialId) => {
-      thumbIds.push(materialId)
-      return thumbnailUrl
-    }
+    loadImageBlobUrl: async () => thumbnailUrl,
+    loadCapabilityManifest: async () =>
+      options.manifestFails || options.manifest === null
+        ? { outcome: 'network-failure' }
+        : succeeded(options.manifest)
   }
-
-  window.__creationPileTest = {
-    uploadCalls: () => uploadCalls,
-    deleteMaterialCalls: () => deletedIds,
-    thumbRequests: () => thumbIds,
-    createCalls: () => createdNames
-  }
-  return ports
-}
-
-/** The standard story: two sessions, one selected with three image materials. */
-export function CreationWorkbenchStory(): React.JSX.Element {
-  return (
-    <CreationRuntimeContext.Provider value={installStandardRuntime()}>
-      <Frame>
-        <CreationWorkbenchPage />
-      </Frame>
-    </CreationRuntimeContext.Provider>
-  )
-}
-
-/** The connected creator's very first visit: zero sessions. */
-export function CreationWorkbenchEmptyStory(): React.JSX.Element {
-  const ports: CreationWorkspacePorts = {
-    listSessions: async () => succeeded({ sessions: [], nextCursor: null }),
-    createSession: async (name) =>
-      succeeded({ ...sessionB, id: 'eeeeeeee-0000-4000-8000-000000000007', name: name ?? '' }),
-    renameSession: async () => succeeded(sessionB),
-    deleteSession: async () => succeeded(undefined),
-    listMaterials: async () => succeeded({ materials: [], nextCursor: null }),
-    uploadMaterial: async (_sessionId, file) =>
-      succeeded(
-        material({ id: 'ffffffff-0000-4000-8000-000000000099', kind: 'image', fileName: file.name })
-      ),
-    deleteMaterial: async () => succeeded(undefined),
-    loadImageBlobUrl: async () => null
-  }
-  return (
-    <CreationRuntimeContext.Provider value={ports}>
-      <Frame>
-        <CreationWorkbenchPage />
-      </Frame>
-    </CreationRuntimeContext.Provider>
-  )
 }
 
 function Frame({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   return (
     <I18nextProvider i18n={testI18n}>
-      <div style={{ height: 480 }}>{children}</div>
+      <div style={{ height: 600, display: 'flex' }}>{children}</div>
     </I18nextProvider>
+  )
+}
+
+interface StoryOptions {
+  readonly manifest?: CapabilityManifest | null
+  readonly manifestFails?: boolean
+  readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
+  readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
+  readonly sessions?: readonly CreationSessionView[]
+}
+
+/** The standard story: an active manifest and one session holding materials. */
+export function CreationWorkbenchStory(options: StoryOptions = {}): React.JSX.Element {
+  const sessions = options.sessions ?? [sessionA, sessionB]
+  return (
+    <CreationRuntimeContext.Provider
+      value={installWorkbenchRuntime({
+        manifest: options.manifest === undefined ? activeManifest : options.manifest,
+        manifestFails: options.manifestFails,
+        sessions,
+        drafts: options.drafts ?? {
+          [sessionA.id]: {
+            prompt: '夏季跑鞋主图，暖光背景',
+            mediaType: 'image',
+            manifestVersion: 1,
+            model: 'doubao-seedream-5.0-lite',
+            mode: 'reference-image',
+            ratio: '4:5',
+            resolution: '2K',
+            quantity: 2,
+            durationSeconds: null,
+            references: [
+              { materialId: materialOne.id, role: 'reference' },
+              { materialId: materialTwo.id, role: 'reference' }
+            ]
+          }
+        },
+        materials: options.materials ?? {
+          [sessionA.id]: [materialOne, materialTwo]
+        }
+      })}
+    >
+      <Frame>
+        <CreationWorkbenchPage />
+      </Frame>
+    </CreationRuntimeContext.Provider>
   )
 }

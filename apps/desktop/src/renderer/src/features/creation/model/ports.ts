@@ -1,9 +1,16 @@
 import {
+  createCapabilityManifestClient,
+  type CapabilityManifest
+} from '../api/capability-manifest-http'
+import {
   createCreationClient,
   type CreationApiResult,
   type CreationSessionView,
   type MaterialPage,
   type ReferenceMaterialView,
+  type SessionDetailView,
+  type SessionDraftInput,
+  type SessionDraftView,
   type SessionPage
 } from '../api/go-creation-http'
 
@@ -56,6 +63,11 @@ export interface CreationWorkspacePorts {
     name: string
   ) => Promise<CreationApiResult<CreationSessionView>>
   readonly deleteSession: (sessionId: string) => Promise<CreationApiResult<void>>
+  readonly getSessionDetail: (sessionId: string) => Promise<CreationApiResult<SessionDetailView>>
+  readonly saveSessionDraft: (
+    sessionId: string,
+    draft: SessionDraftInput
+  ) => Promise<CreationApiResult<SessionDraftView>>
   readonly listMaterials: (
     sessionId: string,
     cursor?: string | null
@@ -66,6 +78,7 @@ export interface CreationWorkspacePorts {
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
   readonly loadImageBlobUrl: (materialId: string) => Promise<string | null>
+  readonly loadCapabilityManifest: () => Promise<CreationApiResult<CapabilityManifest>>
 }
 
 /**
@@ -101,6 +114,10 @@ export function createCreationWorkspacePorts(
       withToken((client, token) => client.renameSession(token, sessionId, name)),
     deleteSession: (sessionId) =>
       withToken((client, token) => client.deleteSession(token, sessionId)),
+    getSessionDetail: (sessionId) =>
+      withToken((client, token) => client.getSessionDetail(token, sessionId)),
+    saveSessionDraft: (sessionId, draft) =>
+      withToken((client, token) => client.saveSessionDraft(token, sessionId, draft)),
     listMaterials: (sessionId, cursor) =>
       withToken(async (client, token) => {
         if (cursor) return client.listMaterials(token, sessionId, cursor)
@@ -114,7 +131,11 @@ export function createCreationWorkspacePorts(
     deleteMaterial: (materialId) =>
       withToken((client, token) => client.deleteMaterial(token, materialId)),
     loadImageBlobUrl: (materialId) =>
-      withToken((client, token) => client.loadImageBlobUrl(token, materialId))
+      withToken((client, token) => client.loadImageBlobUrl(token, materialId)),
+    // The manifest client shares the request helper's failure mapping; only
+    // the parser differs, so it rides the same per-call token acquisition.
+    loadCapabilityManifest: () =>
+      withToken((_client, token) => createCapabilityManifestClient(serverUrl).lookup(token))
   }
 }
 

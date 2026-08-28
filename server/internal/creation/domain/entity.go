@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"time"
+	"unicode/utf8"
+)
 
 // Session is a creator-private Creation Session aggregate root. Its only
 // state transitions are creation, rename, and the logical delete that hides
@@ -12,6 +15,120 @@ type Session struct {
 	Name      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Draft media type is the generation target media of the composer. The
+// database CHECK mirrors this closed set.
+type DraftMediaType string
+
+const (
+	DraftMediaImage DraftMediaType = "image"
+	DraftMediaVideo DraftMediaType = "video"
+)
+
+// DraftRole is the part one reference material plays in the draft intent.
+// Image references and the video frame slots only take images; omni
+// references accept every material kind. The database CHECK mirrors the
+// closed set.
+type DraftRole string
+
+const (
+	RoleReference  DraftRole = "reference"
+	RoleFirstFrame DraftRole = "first_frame"
+	RoleLastFrame  DraftRole = "last_frame"
+	RoleOmni       DraftRole = "omni"
+)
+
+// AcceptsKind reports whether a material kind can fill the role.
+func (r DraftRole) AcceptsKind(k Kind) bool {
+	switch r {
+	case RoleReference, RoleFirstFrame, RoleLastFrame:
+		return k == KindImage
+	case RoleOmni:
+		return k == KindImage || k == KindVideo || k == KindAudio
+	default:
+		return false
+	}
+}
+
+// Structural draft envelope (contracts/creation.yaml SessionDraftInput). The
+// bounds here are deliberately wider than any single manifest version: values
+// the current manifest has removed must round-trip untouched so a stale draft
+// is preserved, never silently rewritten; manifest conformance belongs to
+// submission time.
+const (
+	DraftPromptMaxChars     = 2000
+	DraftModelMaxChars      = 128
+	DraftModeMaxChars       = 64
+	DraftValueMaxChars      = 16
+	DraftMaxReferenceFrames = 4
+)
+
+// DraftReference is one ordered material binding of the draft; slice order in
+// SessionDraft.References is the pile order persisted as position.
+type DraftReference struct {
+	MaterialID UUID
+	Role       DraftRole
+}
+
+// SessionDraft is the recoverable generation intent of a session: prompt,
+// target media, the manifest version the composer rendered when saving, the
+// model/mode/parameters as chosen, and the ordered reference bindings.
+// Nil pointers mean the field is unset, not empty — an unset value and a
+// stored zero are different draft facts.
+type SessionDraft struct {
+	Prompt          string
+	MediaType       *DraftMediaType
+	ManifestVersion int
+	Model           *string
+	Mode            *string
+	Ratio           *string
+	Resolution      *string
+	Quantity        *int
+	DurationSeconds *int
+	References      []DraftReference
+}
+
+// Validate enforces the structural draft envelope. It never consults the
+// capability manifest: stale-but-wellformed values stay preserved.
+func (d *SessionDraft) Validate() error {
+	if utf8.RuneCountInString(d.Prompt) > DraftPromptMaxChars {
+		return ErrInvalidDraft
+	}
+	if d.MediaType != nil && *d.MediaType != DraftMediaImage && *d.MediaType != DraftMediaVideo {
+		return ErrInvalidDraft
+	}
+	if d.ManifestVersion < 1 {
+		return ErrInvalidDraft
+	}
+	// Each field checks against its own named bound — never via pointer
+	// identity — so aliased pointers cannot swap one field's limit for
+	// another's and turn a 400 into a database-check 500.
+	if overLimit(d.Model, DraftModelMaxChars) || overLimit(d.Mode, DraftModeMaxChars) ||
+		overLimit(d.Ratio, DraftValueMaxChars) || overLimit(d.Resolution, DraftValueMaxChars) {
+		return ErrInvalidDraft
+	}
+	if d.Quantity != nil && (*d.Quantity < 1 || *d.Quantity > 4) {
+		return ErrInvalidDraft
+	}
+	if d.DurationSeconds != nil && *d.DurationSeconds < 1 {
+		return ErrInvalidDraft
+	}
+	if len(d.References) > DraftMaxReferenceFrames {
+		return ErrInvalidDraft
+	}
+	for _, reference := range d.References {
+		switch reference.Role {
+		case RoleReference, RoleFirstFrame, RoleLastFrame, RoleOmni:
+		default:
+			return ErrInvalidDraft
+		}
+	}
+	return nil
+}
+
+func overLimit(text *string, limit int) bool {
+	return text != nil && utf8.RuneCountInString(*text) > limit
 }
 
 // ReferenceMaterial is one creator-private reference asset: a verified media
