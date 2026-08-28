@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Nevix AI API
-  version: 0.12.0
+  version: 0.13.0
   description: |-
     API contract between desktop client and backend server.
 
@@ -94,6 +94,8 @@ paths:
     $ref: "./creation.yaml#/paths/~1creation~1provider-connection~1recheck"
   /creation/media-capabilities:
     $ref: "./creation.yaml#/paths/~1creation~1media-capabilities"
+  /creation/capability-manifest:
+    $ref: "./creation.yaml#/paths/~1creation~1capability-manifest"
 components:
   securitySchemes:
     bearerAuth:

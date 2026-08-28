@@ -23,9 +23,11 @@ import (
 const DefaultBaseURL = "https://models.kapon.cloud"
 
 // Allowlisted models (spec #150): image and video each have exactly one.
+// The values live on the domain manifest so the catalog check and the
+// published Capability Manifest can never drift apart.
 const (
-	ImageModel = "doubao-seedream-5.0-lite"
-	VideoModel = "doubao-seedance-2-5"
+	ImageModel = domain.ImageModelID
+	VideoModel = domain.VideoModelID
 )
 
 // checkTimeout bounds one catalog call; a timeout is a transient outcome,

@@ -148,7 +148,34 @@ docker compose logs cert-watch          # 关注 "expires within 90 days"
 - 未来参考素材 blob 卷纳入同一备份窗口；组合备份与恢复的正式脚本及手册归仓库
   `scripts/`，随对应切片交付（ADR-0013）。
 
-## 7. 失败排查
+## 7. AI Creation 生产能力激活（Production Readiness）
+
+AI Creation 的生成能力在 Nevix 发布级真实调用验收（Production Readiness，
+issue #158）通过后才对用户可提交；实例的 Provider Connection 配置（#157）只
+证明本实例凭据与模型可见性，两者正交。出厂状态 = 全部媒体未激活：
+`GET /creation/capability-manifest` 对每个媒体返回
+`production_readiness_pending / await_release`，且不发布任何可提交值。
+
+激活步骤（由 Nevix 侧执行 T16 checklist，部署方放置证据）：
+
+1. 依据 readiness checklist（`server/internal/creation/domain/readiness-checklist.json`）
+   逐 slot 真实执行；通过的证据记录为 evidence 文档 —— 手动工具
+   `scripts/production-readiness/probe.mjs`（凭据只经 `KAPON_API_KEY` 环境变量
+   注入，普通 CI 不持有）。
+2. 将 evidence 文档放入 server 容器 secrets 卷内的固定路径：
+   `/var/lib/nevix/secrets/production-readiness.json`
+   （`docker cp production-readiness.evidence.json <server容器>:/var/lib/nevix/secrets/production-readiness.json`）。
+3. 重启 server：`docker compose restart server`。Manifest 即发布已激活媒体的
+   可提交值（图片与视频独立激活）。
+
+注意：
+
+- 证据文档缺失 = 回到出厂未激活状态（合法）；**存在但损坏或引用未知 slot 会
+  拒绝启动**（fail loud），删除或更换文档后重启即可。
+- 该文件在 secrets 卷内，随第 6 节备份集一并备份；丢失只导致能力回到未激活，
+  重新执行 checklist 生成新文档即可恢复，无安全影响。
+
+## 8. 失败排查
 
 | 症状                                | 排查                                                                                                                                                                |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -162,7 +189,7 @@ docker compose logs cert-watch          # 关注 "expires within 90 days"
 | 重建 server 容器后 nginx 502        | nginx 启动时解析 server 容器地址；`docker compose restart nginx` 重新解析                                                                                           |
 | 大量 429                            | 触发 nginx 背压限速（登录面 2r/s/IP、一般面 200r/s/IP）；确认是否 NAT 出口聚合流量异常，必要时调整 `nginx/nginx.conf` 的 zone 参数后 `docker compose restart nginx` |
 
-## 8. 交付不变量（改动本目录前必读）
+## 9. 交付不变量（改动本目录前必读）
 
 - 宿主机唯一发布端口是 nginx 443；不得给 postgres/server 添加 `ports`。
 - 上游镜像引用必须带 digest；本地构建镜像的 FROM 必须带 digest。

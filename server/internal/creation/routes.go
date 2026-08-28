@@ -26,5 +26,6 @@ func (m *Module) routes() []creationhttp.Route {
 		{Method: "POST", Path: "/creation/provider-connection/recheck", Guard: creationhttp.GuardAdmin, Handler: m.connection.Recheck},
 		{Method: "DELETE", Path: "/creation/provider-connection", Guard: creationhttp.GuardAdmin, Handler: m.connection.Delete},
 		{Method: "GET", Path: "/creation/media-capabilities", Handler: m.connection.ListMediaCapabilities},
+		{Method: "GET", Path: "/creation/capability-manifest", Handler: m.manifest.GetManifest},
 	}
 }

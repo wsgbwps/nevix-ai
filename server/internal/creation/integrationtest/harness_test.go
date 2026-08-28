@@ -61,12 +61,24 @@ type harness struct {
 	closeServer func()
 	secretsDir  string
 	kapon       *fakeKapon
+	identity    *identity.Module // narrow seams injected into Creation, exposed for direct NewModule scenarios
 	// Bounded client for smoke flows so an accidental server stall fails
 	// fast instead of hanging the whole package past the go-test alarm.
 	smokeClient *http.Client
 }
 
+// harnessOptions selects per-scenario module configuration.
+type harnessOptions struct {
+	// readinessPath points at a scenario's Production Readiness evidence
+	// file; empty keeps the deployment default of nothing activated.
+	readinessPath string
+}
+
 func newHarness(t *testing.T) *harness {
+	return newHarnessWithOptions(t, harnessOptions{})
+}
+
+func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 	t.Helper()
 	ctx := context.Background()
 
@@ -101,6 +113,7 @@ func newHarness(t *testing.T) *harness {
 		SecretsDir:         secretsDir,
 		KaponBaseURL:       kapon.URL(),
 		CORSAllowedOrigins: []string{corsOrigin},
+		ReadinessFile:      opts.readinessPath,
 	}
 	// The identity Module is constructed before both registrations so its
 	// narrow SessionAuthenticator seam can be injected into Creation, exactly
@@ -122,6 +135,11 @@ func newHarness(t *testing.T) *harness {
 			return secretsDir, true
 		case "KAPON_BASE_URL":
 			return kapon.URL(), true
+		case "NEVIX_CREATION_READINESS_FILE":
+			if opts.readinessPath != "" {
+				return opts.readinessPath, true
+			}
+			return "", false
 		default:
 			return "", false
 		}
@@ -145,7 +163,7 @@ func newHarness(t *testing.T) *harness {
 		creationModule.Register(r, bus)
 	})
 
-	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon}
+	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon, identity: identityModule}
 	h.startServer(router)
 	t.Cleanup(h.closeServer)
 	return h
