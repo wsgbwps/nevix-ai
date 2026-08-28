@@ -255,7 +255,7 @@ pnpm lint         # 运行 lint
 cd server && go run ./cmd/server  # 启动后端
 
 make dev          # 同 pnpm dev
-make server       # 启动 Go 后端（读取 server/.env.local）
+make server       # 启动 Go 后端 + 可选 Caddy TLS / fake Kapon sidecar（见 scripts/dev/README.md）
 make build        # 构建所有
 make lint         # lint 所有
 
@@ -275,7 +275,7 @@ Server 已迁移到单租户用户系统（登录/会话走 Go API，纯 Postgre
 
 1. 首次运行 `cp server/.env.example server/.env.local`，按注释填入两条数据库凭据：`MIGRATION_DATABASE_URL`（owner/DDL，启动时自动执行 up-only migration）与 `DATABASE_URL`（必须直接以 `identity_app` LOGIN 角色登录）。首个管理员不再由环境变量创建：空实例由首位认领者通过首启向导自选凭据创建（Instance Claim）；需要额外保护的部署可设 `NEVIX_SETUP_CODE_REQUIRED=true`（严格布尔：`true`/`false`，其他值拒绝启动），启用后空实例启动时在运维日志打印一次性设置码。
 2. 本地启动一个 PostgreSQL：`make postgres`（幂等，数据持久化在 `nevix-dev-postgres-data` 卷；彻底重置用 `make postgres-down && docker volume rm nevix-dev-postgres-data`）。该命令同时幂等预置 `identity_app` 应用角色（密码 `dev`，不存在时创建，已存在则保持不动）与 postgres 超级用户（密码固定 `dev`）。全新卷上 `.env.local` 两条 DSN 的密码直接用 `dev` 即可；migration 只会采用已存在的角色、绝不重置密码——若你的卷里已有自己改过的密码，以库内实际密码为准（或删卷重置回到 `dev`），不要单边改任一侧。注意：容器内 loopback 连接是 trust 免密，验证密码要从宿主机连。
-3. 运行 `make server`：启动时自动执行 migration；空库时保持未初始化，等待首个管理员认领。
+3. 运行 `make server`：启动时自动执行 migration；空库时保持未初始化，等待首个管理员认领。已安装 caddy 时，它还会在 https://127.0.0.1:8443 终结 TLS（自签，Desktop 首连需确认一次证书指纹），并按 `KAPON_BASE_URL` 按需拉起 fake Kapon——详见 `scripts/dev/README.md`。
 4. 运行 `make dev`，启动 Desktop（首次启动通过连接屏配置 server URL 并测试连通，详见桌面端文档）；指向空实例时登录屏切换为首位管理员向导，自选 email/密码/显示名完成初始化并直接进入应用。
 
 私有化部署与管理员初始化注意事项（ADR-0013 / ADR-0015）：

@@ -9,11 +9,14 @@ build:
 lint:
 	pnpm lint
 
+# Local server run (scripts/dev/dev-server.sh): sources server/.env.local when
+# present — it must define MIGRATION_DATABASE_URL (DDL credential) and
+# DATABASE_URL (identity_app runtime credential) — then runs the Go server on
+# plaintext :8080. With caddy installed it also terminates TLS on
+# https://127.0.0.1:8443 (internal CA) and may start the fake Kapon sidecar;
+# see scripts/dev/README.md.
 server:
-	cd server && if [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi; go run ./cmd/server
-
-# Local server run: expects .env.local in server/ to define MIGRATION_DATABASE_URL
-# (DDL credential) and DATABASE_URL (identity_app runtime credential).
+	./scripts/dev/dev-server.sh
 
 # Idempotent local-development PostgreSQL. Data persists in the
 # nevix-dev-postgres-data volume across make postgres-down/up; reset the
