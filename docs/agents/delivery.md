@@ -20,11 +20,13 @@ A tracked path is eligible for a direct-main fast lane when it is either:
   `scripts/post-merge-dedup.mjs`, and
   `scripts/tests/post-merge-dedup.test.mjs`.
 
-Fast-lane changes may be committed on `main` and pushed directly. They skip
-the CI gate through `paths-ignore`; no PR or CI run is required. Before
-pushing, confirm the complete commit and push range contains only fast-lane
-paths; documentation and repository-tooling paths may be mixed. A change that
-includes any other path must use the PR flow below.
+Fast-lane changes may be committed on `main` and pushed directly; they skip
+the CI gate through `paths-ignore`, and no PR or CI run is required. The
+commit is still the delivery checkpoint: stop after committing, and push only
+when the user explicitly asks. Before pushing, confirm the complete commit
+and push range contains only fast-lane paths; documentation and
+repository-tooling paths may be mixed. A change that includes any other path
+must use the PR flow below.
 
 ## Pull-request flow
 
