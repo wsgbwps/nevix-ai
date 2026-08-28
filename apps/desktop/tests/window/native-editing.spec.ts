@@ -77,17 +77,46 @@ test('the app exposes only managed hidden native edit accelerators', async () =>
     try {
       const applicationMenuItems = await launched.electronApp.evaluate(({ Menu }) => {
         const menu = Menu.getApplicationMenu()
-        return menu?.items.map((item) => ({ role: item.role, visible: item.visible })) ?? []
+        return (
+          menu?.items.map((item) => ({
+            role: item.role,
+            visible: item.visible,
+            submenu:
+              item.submenu?.items.map((sub) => ({ role: sub.role, visible: sub.visible })) ?? null
+          })) ?? []
+        )
       })
 
-      expect(applicationMenuItems).toEqual([
-        { role: 'undo', visible: false },
-        { role: 'cut', visible: false },
-        { role: 'copy', visible: false },
-        { role: 'paste', visible: false },
-        { role: 'delete', visible: false },
-        { role: 'selectall', visible: false }
-      ])
+      if (process.platform === 'darwin') {
+        // macOS dispatches real keystrokes through NSMenu key equivalents and
+        // skips invisible items, so the roles must stay visible inside the
+        // Edit submenu or Cmd+X/C/V never fire.
+        expect(applicationMenuItems).toEqual([
+          {
+            role: null,
+            visible: true,
+            submenu: [
+              { role: 'undo', visible: true },
+              { role: null, visible: true },
+              { role: 'cut', visible: true },
+              { role: 'copy', visible: true },
+              { role: 'paste', visible: true },
+              { role: 'delete', visible: true },
+              { role: null, visible: true },
+              { role: 'selectall', visible: true }
+            ]
+          }
+        ])
+      } else {
+        expect(applicationMenuItems).toEqual([
+          { role: 'undo', visible: false, submenu: null },
+          { role: 'cut', visible: false, submenu: null },
+          { role: 'copy', visible: false, submenu: null },
+          { role: 'paste', visible: false, submenu: null },
+          { role: 'delete', visible: false, submenu: null },
+          { role: 'selectall', visible: false, submenu: null }
+        ])
+      }
     } finally {
       await launched.electronApp.close()
     }

@@ -4,6 +4,7 @@ export const windowTranslations = defineResourceTranslations({
   'zh-CN': {
     title: 'Nevix AI — 桌面端',
     nativeEditing: {
+      menu: '编辑',
       undo: '撤销',
       cut: '剪切',
       copy: '复制',
@@ -15,6 +16,7 @@ export const windowTranslations = defineResourceTranslations({
   en: {
     title: 'Nevix AI — Desktop',
     nativeEditing: {
+      menu: 'Edit',
       undo: 'Undo',
       cut: 'Cut',
       copy: 'Copy',
