@@ -74,6 +74,30 @@ test('an empty library shows every explicit state: list, empty note, workspace e
   await expect(page.getByTestId('composer')).toHaveCount(0)
 })
 
+test('an empty draft greets with the hero and a template card fills the prompt', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory />)
+  await page.getByRole('button', { name: 'Untitled creation', exact: true }).click()
+  await expect(page.getByTestId('composer')).toBeVisible()
+
+  const hero = page.getByTestId('workspace-hero')
+  await expect(hero).toBeVisible()
+  await expect(page.getByTestId('composer-prompt')).toHaveValue('')
+
+  // A starter template writes the draft prompt; the save keeps autosaving.
+  await hero.getByTestId('template-card-scene').click()
+  const scenePrompt =
+    'Place the product into a clean, bright lifestyle scene that highlights its real materials and key selling points.'
+  await expect(page.getByTestId('composer-prompt')).toHaveValue(scenePrompt)
+  // The hero yields once the draft holds a prompt.
+  await expect(page.getByTestId('workspace-hero')).toHaveCount(0)
+  await expect
+    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.prompt, { timeout: 5_000 })
+    .toBe(scenePrompt)
+})
+
 test('selecting a session recovers its stored draft verbatim', async ({ mount, page }) => {
   await mount(<CreationWorkbenchStory />)
   await selectFirstSession(page)

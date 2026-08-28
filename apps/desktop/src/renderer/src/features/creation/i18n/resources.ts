@@ -14,12 +14,38 @@ export const creationTranslations = defineResourceTranslations({
         newLabel: '新会话名称（可选）',
         newPlaceholder: '新会话…',
         newSubmit: '创建',
-        private: 'Creation Session 由创建者私有'
+        private: 'Creation Session 由创建者私有',
+        meta: {
+          justNow: '刚刚',
+          minutesAgo: '{{n}} 分钟前',
+          hoursAgo: '{{n}} 小时前',
+          daysAgo: '{{n}} 天前'
+        }
       },
       workspace: {
         label: '工作区',
         empty: '选择或创建一个创作会话开始你的作品',
-        generationPending: '图片与视频生成将在此处呈现'
+        generationPending: '图片与视频生成将在此处呈现',
+        heroTitle: '你好，想创作什么？',
+        heroSubtitle: '从描述开始，或选一个创作起点',
+        templateTry: '试一试',
+        templates: {
+          scene: {
+            title: '商品场景合成',
+            detail: '将商品自然放入真实使用场景',
+            prompt: '将商品放入干净明亮的生活方式场景，突出真实材质与核心卖点。'
+          },
+          series: {
+            title: '系列主图变体',
+            detail: '统一风格，快速探索多种构图',
+            prompt: '围绕同一商品生成一组视觉统一、构图不同的主图。'
+          },
+          videoAd: {
+            title: '短视频广告创意',
+            detail: '用清晰节奏展示商品使用价值',
+            prompt: '为商品制作一支节奏明快的短视频广告，包含开场钩子、卖点展示和结尾定格。'
+          }
+        }
       },
       composer: {
         label: '创作输入',
@@ -172,12 +198,41 @@ export const creationTranslations = defineResourceTranslations({
         newLabel: 'New session name (optional)',
         newPlaceholder: 'New session…',
         newSubmit: 'Create',
-        private: 'Creation Sessions are private to their creator'
+        private: 'Creation Sessions are private to their creator',
+        meta: {
+          justNow: 'just now',
+          minutesAgo: '{{n}} min ago',
+          hoursAgo: '{{n}} h ago',
+          daysAgo: '{{n}} d ago'
+        }
       },
       workspace: {
         label: 'Workspace',
         empty: 'Pick or create a session to start your work',
-        generationPending: 'Image and video generation will appear here'
+        generationPending: 'Image and video generation will appear here',
+        heroTitle: 'Hello — what will you create?',
+        heroSubtitle: 'Start from a description, or pick a starting point',
+        templateTry: 'Try it',
+        templates: {
+          scene: {
+            title: 'Product scene composite',
+            detail: 'Place a product naturally into a real usage scene',
+            prompt:
+              'Place the product into a clean, bright lifestyle scene that highlights its real materials and key selling points.'
+          },
+          series: {
+            title: 'Listing image variants',
+            detail: 'One style, many compositions to explore quickly',
+            prompt:
+              'Generate a set of visually unified listing images with different compositions around the same product.'
+          },
+          videoAd: {
+            title: 'Short video ad concept',
+            detail: 'Show the product value with a clear rhythm',
+            prompt:
+              'Create a brisk short-video ad for the product with an opening hook, a selling-point showcase, and a closing freeze frame.'
+          }
+        }
       },
       composer: {
         label: 'Creation input',

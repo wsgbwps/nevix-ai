@@ -1,5 +1,12 @@
 import { useTranslation } from 'react-i18next'
-import { CheckIcon, ChevronDownIcon, SendIcon, TriangleAlertIcon } from 'lucide-react'
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  ImageIcon,
+  SendIcon,
+  TriangleAlertIcon,
+  VideoIcon
+} from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,7 +78,7 @@ export function CreationComposer({
     !manifest.image.available &&
     !manifest.video.available
 
-  const unavailableLine = (() => {
+  const unavailableLine = ((): string | null => {
     if (manifestStatus === 'unavailable') return String(t('composer.manifestUnavailable'))
     if (noMediaAvailable && manifest !== null) {
       const worst = manifest.image.available === false ? manifest.image : manifest.video
@@ -89,7 +96,7 @@ export function CreationComposer({
   const triggerClass =
     'flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] outline-none transition-colors data-[state=open]:bg-accent'
 
-  const staleTrigger = (stale: boolean) =>
+  const staleTrigger = (stale: boolean): string =>
     stale
       ? 'border-warning/70 text-warning'
       : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted'
@@ -214,6 +221,11 @@ function MediaMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger data-testid="composer-media" className={triggerClass}>
+        {draft.mediaType === 'video' ? (
+          <VideoIcon className="size-3.5 text-cyan-600 dark:text-cyan-300" aria-hidden />
+        ) : draft.mediaType === 'image' ? (
+          <ImageIcon className="size-3.5 text-cyan-600 dark:text-cyan-300" aria-hidden />
+        ) : null}
         <span className={draft.mediaType === null ? '' : 'text-cyan-600 dark:text-cyan-300'}>
           {label}
         </span>
