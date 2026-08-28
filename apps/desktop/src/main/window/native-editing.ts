@@ -1,28 +1,17 @@
-import { Menu, type BrowserWindow, type EditFlags, type MenuItemConstructorOptions } from 'electron'
-import { getNativeEditMenuLabels, type NativeEditMenuLabels } from '../language'
+import { Menu, type BrowserWindow } from 'electron'
+import { getNativeEditMenuLabels } from '../language'
+import { applicationMenuTemplate, nativeEditItems } from './application-menu'
 
-function nativeEditItems(
-  editFlags?: EditFlags,
-  labels?: NativeEditMenuLabels
-): MenuItemConstructorOptions[] {
-  return [
-    { role: 'undo', label: labels?.undo, enabled: editFlags?.canUndo ?? true },
-    { type: 'separator' },
-    { role: 'cut', label: labels?.cut, enabled: editFlags?.canCut ?? true },
-    { role: 'copy', label: labels?.copy, enabled: editFlags?.canCopy ?? true },
-    { role: 'paste', label: labels?.paste, enabled: editFlags?.canPaste ?? true },
-    { role: 'delete', label: labels?.delete, enabled: editFlags?.canDelete ?? true },
-    { type: 'separator' },
-    { role: 'selectAll', label: labels?.selectAll, enabled: editFlags?.canSelectAll ?? true }
-  ]
+// 键等价键必须挂在可见菜单项上（原因见 application-menu.ts 的模板注释）；
+// 语言切换时由 refreshApplicationMenu 重建以更新标签。
+function installNativeEditAccelerators(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(applicationMenuTemplate(process.platform, getNativeEditMenuLabels()))
+  )
 }
 
-function installNativeEditAccelerators(): void {
-  const hiddenEditItems = nativeEditItems()
-    .filter((item) => item.type !== 'separator')
-    .map((item) => ({ ...item, visible: false }))
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate(hiddenEditItems))
+export function refreshApplicationMenu(): void {
+  installNativeEditAccelerators()
 }
 
 export function enableNativeEditing(window: BrowserWindow): void {

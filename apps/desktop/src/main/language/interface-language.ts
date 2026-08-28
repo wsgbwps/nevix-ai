@@ -18,6 +18,7 @@ let interfaceLanguage: SupportedLanguage | undefined
 let systemLanguagesAtStartup: readonly string[] | undefined
 
 export interface NativeEditMenuLabels {
+  readonly editMenu: string
   readonly undo: string
   readonly cut: string
   readonly copy: string
@@ -69,6 +70,7 @@ export function getMainWindowTitle(): string {
 
 export function getNativeEditMenuLabels(): NativeEditMenuLabels {
   return {
+    editMenu: mainI18n.t('nativeEditing.editMenu', { ns: 'window' }),
     undo: mainI18n.t('nativeEditing.undo', { ns: 'window' }),
     cut: mainI18n.t('nativeEditing.cut', { ns: 'window' }),
     copy: mainI18n.t('nativeEditing.copy', { ns: 'window' }),
