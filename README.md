@@ -296,6 +296,7 @@ Server 集成测试：`./scripts/test-identity-integration.sh` 拉起一次性 p
 ## 分支与交付规范
 
 - 非快道改动在短命任务分支完成；保持线性、可独立回滚的历史
+- 任务分支上的提交是本轮实现的停靠点：先交由用户检验，检验通过且明确要求后才推送并开 PR
 - 推送该任务分支并开 PR（`gh pr create --fill --base main`），用 `gh pr checks --watch --fail-fast` 等待路径感知的 `CI gate`（E2E 相关改动跑 Smoke，文档/markdown 与 unit/component 测试不触发；需要全量 E2E 时给 PR 打 `full-e2e` 标签，确无必要时可打 `skip-e2e` 跳过，`full-e2e` 优先）
 - 检查通过后 squash merge 并删除分支（`gh pr merge --squash --delete-branch`）；每个任务在 `main` 上一个 commit，PR 页面即验收记录
 - 本地 hooks 拦截对 `main` 的非快道提交与推送；文档与非产品仓库工具的纯快道改动可直提直推并跳过 CI；完整路径边界见 [`docs/agents/delivery.md`](docs/agents/delivery.md)

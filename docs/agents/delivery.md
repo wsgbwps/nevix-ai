@@ -29,8 +29,10 @@ includes any other path must use the PR flow below.
 ## Pull-request flow
 
 1. Work on one short-lived task branch. Keep the slice independently buildable
-   and revertible.
-2. Push the branch and open a PR against `main` (`gh pr create --fill --base
+   and revertible. The commit on the task branch is the implementation
+   hand-off: stop there and leave the branch unpushed.
+2. Only after the user has verified the committed work and explicitly asks,
+   push the branch and open a PR against `main` (`gh pr create --fill --base
    main`). Describe shared-area changes with their impact and tests in the PR
    body.
 3. Wait for the path-aware `CI gate`: `gh pr checks --watch --fail-fast`. PRs
