@@ -162,6 +162,17 @@ test("deploy delivery assets run only the inline harness tests", () => {
   );
 });
 
+test("local dev tooling under scripts/dev runs only the inline harness tests", () => {
+  assert.deepEqual(
+    selected([
+      "scripts/dev/dev-server.sh",
+      "scripts/dev/fake-kapon.mjs",
+      "scripts/dev/README.md",
+    ]),
+    { harness: true },
+  );
+});
+
 test("unknown paths fail closed", () => {
   assert.deepEqual(classifyPaths(["new-runtime/module.ts"]).unknownPaths, [
     "new-runtime/module.ts",

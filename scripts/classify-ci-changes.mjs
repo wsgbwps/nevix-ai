@@ -81,6 +81,11 @@ export function classifyPaths(paths) {
       checks.add("server");
     }
 
+    // scripts/dev 是本地开发工具（make server 的 TLS 终结与 fake Kapon
+    // sidecar 拉起），不进生产、不触产品运行时，与 Makefile 同类只跑
+    // harness 内联自检。
+    if (startsWith(path, "scripts/dev")) checks.add("harness");
+
     if (
       isOneOf(path, ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"])
     ) {
