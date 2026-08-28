@@ -61,8 +61,46 @@ const availableVideo = {
   available: true,
   model: 'doubao-seedance-2-5',
   modes: [
-    { id: 'first-last-frame', reference_material: { total: { min: 1, max: 2 }, per_media: { image: { count: { min: 1, max: 2 }, formats: ['jpeg', 'png', 'webp'], max_bytes: 10485760, min_px: 256, max_px: 6000, max_pixels: 36000000, min_aspect: 0.3333, max_aspect: 3 } } } },
-    { id: 'omni-reference', reference_material: { total: { min: 1, max: 4 }, per_media: { video: { count: { min: 0, max: 1 }, formats: ['mp4'], max_bytes: 209715200, min_seconds: 2, max_seconds: 30 }, audio: { count: { min: 0, max: 1 }, formats: ['mp3', 'wav', 'm4a'], max_bytes: 52428800, min_seconds: 2, max_seconds: 30 } } } }
+    {
+      id: 'first-last-frame',
+      reference_material: {
+        total: { min: 1, max: 2 },
+        per_media: {
+          image: {
+            count: { min: 1, max: 2 },
+            formats: ['jpeg', 'png', 'webp'],
+            max_bytes: 10485760,
+            min_px: 256,
+            max_px: 6000,
+            max_pixels: 36000000,
+            min_aspect: 0.3333,
+            max_aspect: 3
+          }
+        }
+      }
+    },
+    {
+      id: 'omni-reference',
+      reference_material: {
+        total: { min: 1, max: 4 },
+        per_media: {
+          video: {
+            count: { min: 0, max: 1 },
+            formats: ['mp4'],
+            max_bytes: 209715200,
+            min_seconds: 2,
+            max_seconds: 30
+          },
+          audio: {
+            count: { min: 0, max: 1 },
+            formats: ['mp3', 'wav', 'm4a'],
+            max_bytes: 52428800,
+            min_seconds: 2,
+            max_seconds: 30
+          }
+        }
+      }
+    }
   ],
   resolutions: ['720p'],
   durations: [5],
@@ -126,10 +164,10 @@ describe('capability manifest client', () => {
         assert.equal(result.value.manifestVersion, 3)
         assert.equal(result.value.image.available, true)
         assert.equal(result.value.image.model, 'doubao-seedream-5.0-lite')
-        assert.deepEqual(result.value.image.modes?.map((mode) => mode.id), [
-          'text-to-image',
-          'reference-image'
-        ])
+        assert.deepEqual(
+          result.value.image.modes?.map((mode) => mode.id),
+          ['text-to-image', 'reference-image']
+        )
         assert.deepEqual(result.value.image.defaults, {
           ratio: '1:1',
           resolution: '2K',
@@ -198,7 +236,10 @@ describe('capability manifest client', () => {
         modes: [
           {
             id: 'first-last-frame',
-            reference_material: { total: { min: 1, max: 2 }, per_media: { image: { count: 'two' } } }
+            reference_material: {
+              total: { min: 1, max: 2 },
+              per_media: { image: { count: 'two' } }
+            }
           }
         ]
       }
@@ -285,6 +326,10 @@ describe('capability manifest client', () => {
   })
 })
 
-function pendingImage() {
+function pendingImage(): {
+  available: boolean
+  reason: string
+  action: string
+} {
   return { available: false, reason: 'production_readiness_pending', action: 'await_release' }
 }
