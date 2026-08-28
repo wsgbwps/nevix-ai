@@ -18,6 +18,20 @@ function nativeEditItems(
 }
 
 function installNativeEditAccelerators(): void {
+  // macOS matches real keystrokes against NSMenu key equivalents and skips
+  // invisible items, so the edit roles must sit in a visible Edit submenu for
+  // the accelerators to reach the focused editable. The hidden root-level items
+  // below only work on platforms where Chromium dispatches menu accelerators
+  // internally, never through NSMenu.
+  if (process.platform === 'darwin') {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        { label: getNativeEditMenuLabels().menu, submenu: nativeEditItems() }
+      ])
+    )
+    return
+  }
+
   const hiddenEditItems = nativeEditItems()
     .filter((item) => item.type !== 'separator')
     .map((item) => ({ ...item, visible: false }))
