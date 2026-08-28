@@ -28,11 +28,50 @@ export type CapabilityReason =
 /** Stable action advice paired with each reason. */
 export type CapabilityAction = 'wait' | 'await_release' | 'contact_admin'
 
+/** Inclusive min..max count. */
+export interface CapabilityCountRange {
+  readonly min: number
+  readonly max: number
+}
+
+/** Ordered-image reference envelope (spec 图片合同). */
+export interface ImageReferenceEnvelope {
+  readonly count: CapabilityCountRange
+  readonly formats: readonly string[]
+  readonly maxBytes: number
+  readonly minPx: number
+  readonly maxPx: number
+  readonly maxPixels: number
+  readonly minAspect: number
+  readonly maxAspect: number
+}
+
+/** Input-video reference envelope (spec 视频合同). */
+export interface VideoReferenceEnvelope {
+  readonly count: CapabilityCountRange
+  readonly formats: readonly string[]
+  readonly maxBytes: number
+  readonly minSeconds: number
+  readonly maxSeconds: number
+}
+
+/** Input-audio reference envelope (spec 视频合同). */
+export interface AudioReferenceEnvelope {
+  readonly count: CapabilityCountRange
+  readonly formats: readonly string[]
+  readonly maxBytes: number
+  readonly minSeconds: number
+  readonly maxSeconds: number
+}
+
 /** One submittable mode with its reference-material bounds. */
 export interface CapabilityMode {
   readonly id: CapabilityMediaMode
   readonly referenceMaterial: {
-    readonly total: { readonly min: number; readonly max: number }
+    readonly total: CapabilityCountRange
+    readonly image?: ImageReferenceEnvelope
+    readonly video?: VideoReferenceEnvelope
+    readonly audio?: AudioReferenceEnvelope
   }
 }
 
@@ -42,6 +81,12 @@ export interface CapabilityDefaults {
   readonly ratio?: string
   readonly quantity?: number
   readonly duration?: number
+}
+
+/** Prompt length envelope in Unicode characters. */
+export interface PromptEnvelope {
+  readonly minChars: number
+  readonly maxChars: number
 }
 
 /**
@@ -59,6 +104,7 @@ export interface CapabilityMedia {
   readonly quantities?: readonly number[]
   readonly durations?: readonly number[]
   readonly defaults?: CapabilityDefaults
+  readonly prompt?: PromptEnvelope
 }
 
 /** The manifest payload; versions let draft consumers detect staleness. */
@@ -164,46 +210,81 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
   if (model === null) return null
 
   const modes: CapabilityMode[] = []
-  if (
-    typeof (entry as Record<string, unknown>).modes !== 'object' ||
-    (entry as Record<string, unknown>).modes === null
-  ) {
-    return null
-  }
-  for (const raw of (entry as Record<string, unknown>).modes as unknown[]) {
+  if (!Array.isArray(readObjectField(entry, 'modes'))) return null
+  for (const raw of readObjectField(entry, 'modes') as unknown[]) {
     const id = readEnum(raw, 'id', CAPABILITY_MODES)
-    const total = readCountRange(readObjectField(raw, 'reference_material'), 'total')
-    if (id === null || total === null) return null
-    modes.push({ id, referenceMaterial: { total } })
+    if (id === null) return null
+    const reference = readObjectField(raw, 'reference_material')
+    const total = readCountRange(reference, 'total')
+    if (total === null) return null
+    // per_media appears exactly on the reference-bearing modes; an envelope
+    // that is present but malformed fails the mode instead of shrinking it.
+    const perMedia = readObjectField(reference, 'per_media')
+    const image = parseImageEnvelope(perMedia, 'image')
+    const video = parseVideoEnvelope(perMedia, 'video')
+    const audio = parseAudioEnvelope(perMedia, 'audio')
+    if (
+      (hasField(perMedia, 'image') && image === null) ||
+      (hasField(perMedia, 'video') && video === null) ||
+      (hasField(perMedia, 'audio') && audio === null)
+    ) {
+      return null
+    }
+    modes.push({
+      id,
+      referenceMaterial: {
+        total,
+        ...(image ? { image } : {}),
+        ...(video ? { video } : {}),
+        ...(audio ? { audio } : {})
+      }
+    })
   }
   if (modes.length === 0) return null
 
   const resolutions = readStringList(entry, 'resolutions')
-  if (resolutions === null || resolutions.length === 0) return null
+  if (resolutions === undefined || resolutions === MALFORMED_LIST || resolutions.length === 0)
+    return null
 
   const defaults = parseDefaults(entry)
   if (defaults === null) return null
 
-  const media: {
-    available: true
-    reason: null
-    action: null
-    model: string
-    modes: CapabilityMode[]
-    resolutions: string[]
-    defaults: CapabilityDefaults
-    ratios?: string[]
-    quantities?: number[]
-    durations?: number[]
-  } = { available: true, reason: null, action: null, model, modes, resolutions, defaults }
+  const prompt = parsePrompt(entry)
+  if (prompt === null) return null
 
+  // Optional list fields distinguish absent (skip) from malformed (reject):
+  // a corrupted ratios array can never shrink into a smaller capability set.
   const ratios = readStringList(entry, 'ratios')
-  if (ratios !== null) media.ratios = ratios
+  if (ratios === MALFORMED_LIST) return null
   const quantities = readNumberList(entry, 'quantities')
-  if (quantities !== null) media.quantities = quantities
+  if (quantities === MALFORMED_LIST) return null
   const durations = readNumberList(entry, 'durations')
-  if (durations !== null) media.durations = durations
-  return media
+  if (durations === MALFORMED_LIST) return null
+
+  return {
+    available: true,
+    reason: null,
+    action: null,
+    model,
+    modes,
+    resolutions,
+    defaults,
+    prompt,
+    ...(ratios !== undefined ? { ratios } : {}),
+    ...(quantities !== undefined ? { quantities } : {}),
+    ...(durations !== undefined ? { durations } : {})
+  }
+}
+
+// Sentinel for "the field is present but is not the documented list shape" —
+// distinct from undefined ("the field is absent"), so a malformed optional
+// field fails closed instead of reading as a smaller capability set.
+const MALFORMED_LIST = Symbol('malformed-list')
+
+type MalformedList = typeof MALFORMED_LIST
+
+function hasField(source: unknown, field: string): boolean {
+  return typeof source === 'object' && source !== null && field in source
 }
 
 function readObjectField(source: unknown, field: string): unknown {
@@ -212,36 +293,112 @@ function readObjectField(source: unknown, field: string): unknown {
 }
 
 function readCountRange(entry: unknown, field: string): { min: number; max: number } | null {
-  if (typeof entry !== 'object' || entry === null) return null
-  const value = (entry as Record<string, unknown>)[field]
+  const value = readObjectField(entry, field)
   const min = readNumber(value, 'min')
   const max = readNumber(value, 'max')
   if (min === null || max === null || min > max) return null
   return { min, max }
 }
 
-function readStringList(source: unknown, field: string): string[] | null {
+// List readers return undefined when the field is absent and MALFORMED_LIST
+// when present but not a list of the documented item type.
+function readStringList(source: unknown, field: string): string[] | MalformedList | undefined {
+  if (!hasField(source, field)) return undefined
   const value = (source as Record<string, unknown>)[field]
-  if (value === undefined) return null
-  if (!Array.isArray(value)) return null
+  if (!Array.isArray(value)) return MALFORMED_LIST
   const list: string[] = []
   for (const item of value) {
-    if (typeof item !== 'string') return null
+    if (typeof item !== 'string') return MALFORMED_LIST
     list.push(item)
   }
   return list
 }
 
-function readNumberList(source: unknown, field: string): number[] | null {
+function readNumberList(source: unknown, field: string): number[] | MalformedList | undefined {
+  if (!hasField(source, field)) return undefined
   const value = (source as Record<string, unknown>)[field]
-  if (value === undefined) return null
-  if (!Array.isArray(value)) return null
+  if (!Array.isArray(value)) return MALFORMED_LIST
   const list: number[] = []
   for (const item of value) {
-    if (typeof item !== 'number' || !Number.isFinite(item)) return null
+    if (typeof item !== 'number' || !Number.isFinite(item)) return MALFORMED_LIST
     list.push(item)
   }
   return list
+}
+
+function parseImageEnvelope(source: unknown, field: string): ImageReferenceEnvelope | null {
+  if (!hasField(source, field)) return null
+  const raw = (source as Record<string, unknown>)[field]
+  const count = readCountRange(raw, 'count')
+  const formats = readStringList(raw, 'formats')
+  const maxBytes = readNumber(raw, 'max_bytes')
+  const minPx = readNumber(raw, 'min_px')
+  const maxPx = readNumber(raw, 'max_px')
+  const maxPixels = readNumber(raw, 'max_pixels')
+  const minAspect = readNumber(raw, 'min_aspect')
+  const maxAspect = readNumber(raw, 'max_aspect')
+  if (
+    count === null ||
+    formats === undefined ||
+    formats === MALFORMED_LIST ||
+    formats.length === 0 ||
+    maxBytes === null ||
+    minPx === null ||
+    maxPx === null ||
+    maxPixels === null ||
+    minAspect === null ||
+    maxAspect === null
+  ) {
+    return null
+  }
+  return { count, formats, maxBytes, minPx, maxPx, maxPixels, minAspect, maxAspect }
+}
+
+function parseTimedEnvelope(
+  source: unknown,
+  field: string
+): {
+  count: CapabilityCountRange
+  formats: string[]
+  maxBytes: number
+  minSeconds: number
+  maxSeconds: number
+} | null {
+  if (!hasField(source, field)) return null
+  const raw = (source as Record<string, unknown>)[field]
+  const count = readCountRange(raw, 'count')
+  const formats = readStringList(raw, 'formats')
+  const maxBytes = readNumber(raw, 'max_bytes')
+  const minSeconds = readNumber(raw, 'min_seconds')
+  const maxSeconds = readNumber(raw, 'max_seconds')
+  if (
+    count === null ||
+    formats === undefined ||
+    formats === MALFORMED_LIST ||
+    formats.length === 0 ||
+    maxBytes === null ||
+    minSeconds === null ||
+    maxSeconds === null
+  ) {
+    return null
+  }
+  return { count, formats, maxBytes, minSeconds, maxSeconds }
+}
+
+function parseVideoEnvelope(source: unknown, field: string): VideoReferenceEnvelope | null {
+  return parseTimedEnvelope(source, field)
+}
+
+function parseAudioEnvelope(source: unknown, field: string): AudioReferenceEnvelope | null {
+  return parseTimedEnvelope(source, field)
+}
+
+function parsePrompt(entry: unknown): PromptEnvelope | null {
+  const raw = readObjectField(entry, 'prompt')
+  const minChars = readNumber(raw, 'min_chars')
+  const maxChars = readNumber(raw, 'max_chars')
+  if (minChars === null || maxChars === null || minChars > maxChars) return null
+  return { minChars, maxChars }
 }
 
 function parseDefaults(entry: unknown): CapabilityDefaults | null {

@@ -46,9 +46,10 @@ const (
 	EvidenceFailed EvidenceStatus = "failed"
 )
 
-// The checklist document's own schema version; a foreign document must be
-// rejected loudly, never partially trusted.
-const ReadinessChecklistSchemaVersion = 1
+// readinessSchemaVersion is the schema version of the readiness document
+// family — the embedded checklist and the evidence documents it produces.
+// A foreign document must be rejected loudly, never partially trusted.
+const readinessSchemaVersion = 1
 
 // Evidence errors. Loaders map these onto loud startup failures — a malformed
 // authority document must never silently deactivate every media.
@@ -88,10 +89,10 @@ var (
 //go:embed readiness-checklist.json
 var readinessChecklistJSON []byte
 
-// ReadinessChecklist returns the embedded checklist slots. The document is
+// readinessChecklist returns the embedded checklist slots. The document is
 // build data: a malformed checklist is a programming error and fails every
 // subsequent call identically.
-func ReadinessChecklist() ([]ReadinessSlot, error) {
+func readinessChecklist() ([]ReadinessSlot, error) {
 	parseReadinessRegistry()
 	if registryErr != nil {
 		return nil, registryErr
@@ -110,8 +111,8 @@ func parseReadinessRegistry() {
 			registryErr = fmt.Errorf("creation: embedded readiness checklist is not valid JSON: %w", err)
 			return
 		}
-		if doc.SchemaVersion != ReadinessChecklistSchemaVersion {
-			registryErr = fmt.Errorf("creation: embedded readiness checklist schema version %d, want %d", doc.SchemaVersion, ReadinessChecklistSchemaVersion)
+		if doc.SchemaVersion != readinessSchemaVersion {
+			registryErr = fmt.Errorf("creation: embedded readiness checklist schema version %d, want %d", doc.SchemaVersion, readinessSchemaVersion)
 			return
 		}
 		reg := &readinessRegistry{byID: map[string]ReadinessSlot{}, binding: map[string]string{}}
@@ -141,10 +142,10 @@ func readinessBindingKey(media, dimension, value string) string {
 	return media + "|" + dimension + "|" + value
 }
 
-// ReadinessSlotForValue resolves the slot that activates one capability
+// readinessSlotForValue resolves the slot that activates one capability
 // value; ok is false when the manifest content and checklist disagree (a
 // build-time invariant enforced by tests).
-func ReadinessSlotForValue(media, dimension, value string) (ReadinessSlot, bool) {
+func readinessSlotForValue(media, dimension, value string) (ReadinessSlot, bool) {
 	parseReadinessRegistry()
 	if registryErr != nil {
 		return ReadinessSlot{}, false
@@ -194,7 +195,7 @@ func ParseReadinessEvidence(raw []byte) (ReadinessEvidence, error) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return ReadinessEvidence{}, fmt.Errorf("%w: %s", ErrEvidenceShape, err)
 	}
-	if doc.SchemaVersion != ReadinessChecklistSchemaVersion {
+	if doc.SchemaVersion != readinessSchemaVersion {
 		return ReadinessEvidence{}, fmt.Errorf("%w: %d", ErrEvidenceSchema, doc.SchemaVersion)
 	}
 	parseReadinessRegistry()

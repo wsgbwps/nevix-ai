@@ -10,7 +10,7 @@ import (
 // fullEvidence returns evidence passing every checklist slot (the state a
 // deployment reaches once T16 has executed the whole checklist).
 func fullEvidence() ReadinessEvidence {
-	slots, err := ReadinessChecklist()
+	slots, err := readinessChecklist()
 	if err != nil {
 		panic(err)
 	}
@@ -25,7 +25,7 @@ func fullEvidence() ReadinessEvidence {
 func evidencePassing(bindings ...[3]string) ReadinessEvidence {
 	e := ReadinessEvidence{}
 	for _, b := range bindings {
-		slot, ok := ReadinessSlotForValue(b[0], b[1], b[2])
+		slot, ok := readinessSlotForValue(b[0], b[1], b[2])
 		if !ok {
 			panic("test binding has no slot: " + b[0] + "/" + b[1] + "/" + b[2])
 		}
@@ -35,7 +35,7 @@ func evidencePassing(bindings ...[3]string) ReadinessEvidence {
 }
 
 func TestReadinessChecklistRegistryParses(t *testing.T) {
-	slots, err := ReadinessChecklist()
+	slots, err := readinessChecklist()
 	if err != nil {
 		t.Fatalf("embedded checklist must parse: %v", err)
 	}
@@ -59,13 +59,13 @@ func TestReadinessChecklistRegistryParses(t *testing.T) {
 // exactly one slot. A typo on either side fails here instead of shipping an
 // unstated capability.
 func TestManifestContentBindsEveryChecklistValue(t *testing.T) {
-	slots, err := ReadinessChecklist()
+	slots, err := readinessChecklist()
 	if err != nil {
 		t.Fatalf("embedded checklist must parse: %v", err)
 	}
 	bound := map[string]bool{}
 	for _, slot := range slots {
-		got, ok := ReadinessSlotForValue(slot.Media, slot.Dimension, slot.Value)
+		got, ok := readinessSlotForValue(slot.Media, slot.Dimension, slot.Value)
 		if !ok || got.ID != slot.ID {
 			t.Fatalf("slot %q does not resolve from its own binding", slot.ID)
 		}
@@ -306,9 +306,10 @@ func imageModeIDs(modes []CapabilityModeView) []string {
 }
 
 // TestDeriveManifestDefaultsFallBackWhenSpecDefaultUnpassed proves the
-// fallback is deterministic and never publishes an unverified default.
+// fallback is deterministic and never publishes an unverified default: with
+// 720p unpassed but every other video dimension ready, the manifest is
+// available and its default resolution is the first passed value (480p).
 func TestDeriveManifestDefaultsFallBackWhenSpecDefaultUnpassed(t *testing.T) {
-	// Video ready except 720p: default resolution must fall back to 480p.
 	bindings := [][3]string{
 		{"video", "mode", ModeTextToVideo},
 		{"video", "resolution", "480p"},
@@ -317,10 +318,38 @@ func TestDeriveManifestDefaultsFallBackWhenSpecDefaultUnpassed(t *testing.T) {
 		{"video", "async_query", "poll"},
 		{"video", "transfer", "temp-url"},
 		{"video", "probe", "mp4"},
+		{"video", "probe", "audio-track"},
 	}
-	manifest := DeriveCapabilityManifest(evidencePassing(bindings...), nil)
-	if manifest.Video.Available {
-		t.Fatal("video without instance must still be unavailable")
+	connection := &ProviderConnection{
+		ID: NewUUID(), AdminState: AdminStateEnabled, CredentialState: CredentialStateValid,
+		ImageCapability: MediaCapabilityUnavailable, VideoCapability: MediaCapabilityAvailable,
+	}
+	manifest := DeriveCapabilityManifest(evidencePassing(bindings...), connection)
+	assertAvailableShape(t, "video", manifest.Video)
+	if containsString(manifest.Video.Resolutions, "720p") || !containsString(manifest.Video.Resolutions, "480p") {
+		t.Fatalf("video must publish only the passed resolutions, got %v", manifest.Video.Resolutions)
+	}
+	if manifest.Video.Defaults.Resolution != "480p" {
+		t.Fatalf("video default resolution must fall back to the first passed value, got %q", manifest.Video.Defaults.Resolution)
+	}
+	assertUnavailableShape(t, "image", manifest.Image)
+}
+
+// TestManifestDimensionsCoverEveryChecklistDimension closes the drift gap
+// between the checklist document and the activation gate: a dimension that
+// exists in the checklist must participate in its media's gate, or adding a
+// checklist dimension would silently gate nothing.
+func TestManifestDimensionsCoverEveryChecklistDimension(t *testing.T) {
+	slots, err := readinessChecklist()
+	if err != nil {
+		t.Fatalf("embedded checklist must parse: %v", err)
+	}
+	for _, slot := range slots {
+		dimensions := manifestDimensions(slot.Media)
+		if !containsString(dimensions, slot.Dimension) {
+			t.Fatalf("checklist dimension %q (slot %s) is not part of the %s activation gate %v",
+				slot.Dimension, slot.ID, slot.Media, dimensions)
+		}
 	}
 }
 
@@ -406,7 +435,7 @@ func TestDeriveManifestNilConnectionMeansNotConfigured(t *testing.T) {
 // the merged projections, and keeps the two media independent.
 func TestDeriveManifestRandomizedProperties(t *testing.T) {
 	rng := rand.New(rand.NewSource(158)) // fixed seed: failures reproduce
-	slots, err := ReadinessChecklist()
+	slots, err := readinessChecklist()
 	if err != nil {
 		t.Fatalf("embedded checklist must parse: %v", err)
 	}
@@ -463,7 +492,7 @@ func assertValuesPassed(t *testing.T, round int, media string, evidence Readines
 	t.Helper()
 	check := func(dimension, value string) {
 		t.Helper()
-		if _, ok := ReadinessSlotForValue(media, dimension, value); !ok {
+		if _, ok := readinessSlotForValue(media, dimension, value); !ok {
 			t.Fatalf("round %d: %s %s %q has no slot", round, media, dimension, value)
 		}
 		if !evidence.passedValues(media, dimension)[value] {

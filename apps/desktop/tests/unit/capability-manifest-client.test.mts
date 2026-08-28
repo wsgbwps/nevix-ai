@@ -57,6 +57,20 @@ const availableImage = {
   reference_material: { total: { min: 0, max: 4 } }
 }
 
+const availableVideo = {
+  available: true,
+  model: 'doubao-seedance-2-5',
+  modes: [
+    { id: 'first-last-frame', reference_material: { total: { min: 1, max: 2 }, per_media: { image: { count: { min: 1, max: 2 }, formats: ['jpeg', 'png', 'webp'], max_bytes: 10485760, min_px: 256, max_px: 6000, max_pixels: 36000000, min_aspect: 0.3333, max_aspect: 3 } } } },
+    { id: 'omni-reference', reference_material: { total: { min: 1, max: 4 }, per_media: { video: { count: { min: 0, max: 1 }, formats: ['mp4'], max_bytes: 209715200, min_seconds: 2, max_seconds: 30 }, audio: { count: { min: 0, max: 1 }, formats: ['mp3', 'wav', 'm4a'], max_bytes: 52428800, min_seconds: 2, max_seconds: 30 } } } }
+  ],
+  resolutions: ['720p'],
+  durations: [5],
+  defaults: { resolution: '720p', duration: 5 },
+  prompt: { min_chars: 1, max_chars: 2000 },
+  reference_material: { total: { min: 0, max: 4 } }
+}
+
 const pendingVideo = {
   available: false,
   reason: 'production_readiness_pending',
@@ -128,6 +142,68 @@ describe('capability manifest client', () => {
         assert.equal(result.value.video.model, undefined)
       }
     )
+  })
+
+  it('mirrors prompt and per-media reference envelopes for the composer', async () => {
+    await withFetch(
+      () =>
+        Promise.resolve(
+          jsonResponse({
+            schema_version: 1,
+            manifest_version: 1,
+            image: availableImage,
+            video: availableVideo
+          })
+        ),
+      async () => {
+        const client = createCapabilityManifestClient(serverUrl)
+        const result = await client.lookup('token-a')
+        assert.equal(result.outcome, 'succeeded')
+        if (result.outcome !== 'succeeded') return
+        assert.deepEqual(result.value.image.prompt, { minChars: 1, maxChars: 2000 })
+        const omni = result.value.video.modes?.find((mode) => mode.id === 'omni-reference')
+        assert.ok(omni)
+        assert.deepEqual(omni.referenceMaterial.video, {
+          count: { min: 0, max: 1 },
+          formats: ['mp4'],
+          maxBytes: 209715200,
+          minSeconds: 2,
+          maxSeconds: 30
+        })
+        assert.deepEqual(omni.referenceMaterial.audio?.formats, ['mp3', 'wav', 'm4a'])
+        const firstLast = result.value.video.modes?.find((mode) => mode.id === 'first-last-frame')
+        assert.equal(firstLast?.referenceMaterial.image?.maxBytes, 10485760)
+        assert.equal(firstLast?.referenceMaterial.video, undefined)
+      }
+    )
+  })
+
+  it('rejects a malformed optional list instead of reading a smaller set', () => {
+    // A corrupted ratios array must fail closed, not silently parse as "no
+    // ratios published".
+    const corrupted = parseCapabilityManifest({
+      schema_version: 1,
+      manifest_version: 1,
+      image: { ...availableImage, ratios: 'everything' },
+      video: pendingVideo
+    })
+    assert.equal(corrupted, null)
+    // A malformed per_media envelope fails the whole payload too.
+    const badEnvelope = parseCapabilityManifest({
+      schema_version: 1,
+      manifest_version: 1,
+      image: availableImage,
+      video: {
+        ...availableVideo,
+        modes: [
+          {
+            id: 'first-last-frame',
+            reference_material: { total: { min: 1, max: 2 }, per_media: { image: { count: 'two' } } }
+          }
+        ]
+      }
+    })
+    assert.equal(badEnvelope, null)
   })
 
   it('maps stable failures without inventing verdicts', async () => {

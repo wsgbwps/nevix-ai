@@ -65,7 +65,7 @@ func TestParseReadinessEvidenceRejectsMalformedJSON(t *testing.T) {
 // earlier pass (or the reverse) must be honored by run order, so evidence
 // reflects the latest truth per slot.
 func TestReadinessEvidenceRerunOverridesByRunOrder(t *testing.T) {
-	slot, ok := ReadinessSlotForValue("image", "resolution", "2K")
+	slot, ok := readinessSlotForValue("image", "resolution", "2K")
 	if !ok {
 		t.Fatal("image 2K slot must exist")
 	}

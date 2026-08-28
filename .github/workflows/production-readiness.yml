@@ -41,12 +41,20 @@ jobs:
         if: ${{ inputs.slots != '' }}
         env:
           KAPON_API_KEY: ${{ secrets.KAPON_API_KEY }}
+          # Inputs pass through the environment — never interpolated into the
+          # shell — so a crafted dispatch input cannot reach a runner that
+          # holds the production credential.
+          SLOT_LIST: ${{ inputs.slots }}
+          CHECK_CREDENTIAL: ${{ inputs.check_credential }}
         run: |
           ARGS=""
-          if [ "${{ inputs.check_credential }}" = "true" ]; then
+          if [ "$CHECK_CREDENTIAL" = "true" ]; then
             ARGS="$ARGS --check-credential"
           fi
-          for slot in ${{ inputs.slots }}; do
+          for slot in $SLOT_LIST; do
+            case "$slot" in
+              *[!A-Za-z0-9._-]*) echo "rejecting suspicious slot id: $slot" >&2; exit 1 ;;
+            esac
             ARGS="$ARGS --slot $slot"
           done
           node scripts/production-readiness/probe.mjs $ARGS

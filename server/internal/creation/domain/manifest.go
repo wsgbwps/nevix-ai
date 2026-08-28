@@ -282,9 +282,13 @@ func mediaReferenceEnvelope(media string) ReferenceMaterialPolicy {
 }
 
 // mediaReadinessActive reports whether the evidence activates a media:
-// every required dimension has at least one passed slot. Nothing partial
-// ships — a media whose default resolution never passed stays deactivated
-// even when other resolutions passed.
+// every required dimension has at least one passed slot — including the
+// persistence and probe slots, because an output that cannot be verified and
+// transferred never ships as a capability. Nothing partial ships: with the
+// full dimension active but the spec default unpassed, the published default
+// falls back to the first passed value in canonical order (never an
+// unverified default, never a silent rewrite of a submitted draft — the
+// manifest simply publishes exactly what is submittable today).
 func mediaReadinessActive(evidence ReadinessEvidence, media string) bool {
 	for _, dimension := range manifestDimensions(media) {
 		if len(evidence.passedValues(media, dimension)) == 0 {
