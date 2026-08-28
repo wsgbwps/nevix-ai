@@ -1,0 +1,60 @@
+# Production Readiness release gate (manual only, spec #150 / ticket #158).
+#
+# 该 workflow 永不由 push/PR 触发:真实 Kapon 调用与生产凭据只存在于这个
+# 手动 release gate 中。凭据来自 repository secret KAPON_API_KEY,普通 CI
+# 不读取它;证据作为 artifact 上传,由部署方放置到实例 secrets 卷并重启
+# Server 激活 Capability Manifest。
+name: production-readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      slots:
+        description: 'Checklist slot ids to execute (space separated; empty = list only)'
+        required: false
+        default: ''
+      check_credential:
+        description: 'Run the catalog sanity probe first (true/false)'
+        required: false
+        default: 'true'
+
+permissions: {}
+
+jobs:
+  probe:
+    name: Execute readiness checklist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enumerate checklist
+        if: ${{ inputs.slots == '' }}
+        run: node scripts/production-readiness/probe.mjs --list
+
+      - name: Execute checklist slots
+        if: ${{ inputs.slots != '' }}
+        env:
+          KAPON_API_KEY: ${{ secrets.KAPON_API_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.check_credential }}" = "true" ]; then
+            ARGS="$ARGS --check-credential"
+          fi
+          for slot in ${{ inputs.slots }}; do
+            ARGS="$ARGS --slot $slot"
+          done
+          node scripts/production-readiness/probe.mjs $ARGS
+
+      - name: Upload evidence artifact
+        if: ${{ inputs.slots != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-readiness-evidence
+          path: production-readiness.evidence.json
+          if-no-files-found: ignore

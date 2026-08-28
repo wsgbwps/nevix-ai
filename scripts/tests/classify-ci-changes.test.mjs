@@ -173,6 +173,17 @@ test("local dev tooling under scripts/dev runs only the inline harness tests", (
   );
 });
 
+test("manual production-readiness tooling runs only the inline harness tests", () => {
+  assert.deepEqual(
+    selected([
+      "scripts/production-readiness/probe.mjs",
+      "scripts/production-readiness/README.md",
+      ".github/workflows/production-readiness.yml",
+    ]),
+    { harness: true },
+  );
+});
+
 test("unknown paths fail closed", () => {
   assert.deepEqual(classifyPaths(["new-runtime/module.ts"]).unknownPaths, [
     "new-runtime/module.ts",

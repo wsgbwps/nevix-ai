@@ -78,7 +78,7 @@ test-creation-integration: docker-ready
 	./scripts/test-creation-integration.sh
 
 harness-test:
-	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/post-merge-dedup.test.mjs scripts/tests/deploy-stack.test.mjs .pi/tests/pi-hooks.test.mjs
+	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/post-merge-dedup.test.mjs scripts/tests/deploy-stack.test.mjs scripts/tests/production-readiness-probe.test.mjs .pi/tests/pi-hooks.test.mjs
 
 setup:
 	pnpm install

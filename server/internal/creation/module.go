@@ -20,6 +20,7 @@ import (
 	"github.com/nevix-ai/server/internal/creation/infrastructure/kapon"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/media"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/postgres"
+	"github.com/nevix-ai/server/internal/creation/infrastructure/readiness"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/secrets"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/storage"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/writetx"
@@ -48,6 +49,7 @@ type Config struct {
 	SecretsDir         string // secrets volume root holding the master key file
 	KaponBaseURL       string // reviewed fixed route; unset means the default
 	CORSAllowedOrigins []string
+	ReadinessFile      string // optional Production Readiness evidence document
 }
 
 // LoadConfig validates the Module's deployment variables strictly: unknown
@@ -111,6 +113,12 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, errors.New("creation: missing required deployment variable: NEVIX_CREATION_SECRETS_DIR (the secrets volume holding the Provider Credential master key)")
 	}
 	cfg.SecretsDir = secretsDir
+	// Optional: an unset variable (or a not-yet-existing file) is the valid
+	// factory state where nothing is Production Ready; a present-but-invalid
+	// document fails startup loudly instead.
+	if readinessFile, ok := lookup("NEVIX_CREATION_READINESS_FILE"); ok && strings.TrimSpace(readinessFile) != "" {
+		cfg.ReadinessFile = readinessFile
+	}
 	kaponBaseURL, ok := lookup("KAPON_BASE_URL")
 	if ok && strings.TrimSpace(kaponBaseURL) != "" {
 		if err := kapon.ValidateBaseURL(kaponBaseURL); err != nil {
@@ -164,6 +172,7 @@ type Module struct {
 	sessions    *creationhttp.SessionHandler
 	materials   *creationhttp.MaterialHandler
 	connection  *creationhttp.ProviderConnectionHandler
+	manifest    *creationhttp.CapabilityManifestHandler
 	guard       *authz.Guard
 	corsOrigins []string
 	store       domain.BlobStore
@@ -193,10 +202,18 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	sessionService := application.NewSessionService(sessionRepos, tx)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
 	connectionService := application.NewConnectionService(connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
+	// The readiness evidence is a startup-loaded deployment asset: an invalid
+	// document refuses to boot rather than silently deactivating capabilities.
+	evidence, err := readiness.LoadEvidenceFile(cfg.ReadinessFile)
+	if err != nil {
+		return nil, err
+	}
+	manifestService := application.NewManifestService(connectionRepos, evidence)
 	return &Module{
 		sessions:    creationhttp.NewSessionHandler(sessionService),
 		materials:   creationhttp.NewMaterialHandler(materialService),
 		connection:  creationhttp.NewProviderConnectionHandler(connectionService),
+		manifest:    creationhttp.NewCapabilityManifestHandler(manifestService),
 		guard:       authz.NewGuard(deps.SessionAuthenticator),
 		corsOrigins: cfg.CORSAllowedOrigins,
 		store:       store,
