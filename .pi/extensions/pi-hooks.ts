@@ -9,7 +9,7 @@ const MAIN_PUSH_COMMAND =
 const REPOSITORY_TOOLING_DIRECTORY_PATH =
   /^\.(?:pi|codex|agents|omp|scratch|codegraph|github|husky)\//;
 const REPOSITORY_TOOLING_FILE_PATH =
-  /^(?:\.mcp\.json|skills-lock\.json|scripts\/(?:classify-ci-changes|post-merge-dedup)\.mjs|scripts\/tests\/(?:classify-ci-changes|post-merge-dedup)\.test\.mjs)$/;
+  /^(?:\.mcp\.json|skills-lock\.json|\.gitignore|scripts\/(?:classify-ci-changes|post-merge-dedup)\.mjs|scripts\/tests\/(?:classify-ci-changes|post-merge-dedup)\.test\.mjs)$/;
 const DOCUMENTATION_PATH = /(?:^|\/)docs\/|\.md$/;
 const FAST_LANE_NOTE = "（仅文档与非产品仓库工具改动可直提直推）";
 

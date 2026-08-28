@@ -71,6 +71,7 @@ test("repository-tooling paths allow direct main commit and push", () => {
       ".github/workflows/ci-gate.yml",
       ".husky/pre-push",
       ".mcp.json",
+      ".gitignore",
       "skills-lock.json",
       "scripts/classify-ci-changes.mjs",
       "scripts/tests/classify-ci-changes.test.mjs",

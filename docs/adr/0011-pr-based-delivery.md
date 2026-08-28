@@ -55,3 +55,11 @@ agent-config 快道扩展并更名为 repository-tooling 快道。除原有
 产品运行时或构建产物;只要整个待提交及待推送范围都在文档或
 repository-tooling 快道内,就可直接推送 `main` 并跳过 CI。产品集成
 脚本、`Makefile`、依赖清单、Desktop、Server 与 `contracts/` 不在此范围。
+
+## 更新 — 2026-08-28:根 `.gitignore` 纳入 repository-tooling 快道
+
+根 `.gitignore` 只影响版本控制的忽略行为,不进入产品运行时或构建产物,
+CI 分类器本就将其归为 harness,pre-push 与 agent 工具 hook 却未放行,
+属于规则遗漏。此次把根 `.gitignore` 并入 repository-tooling 快道:
+待提交/待推送范围含根 `.gitignore` 且其余路径均在快道内时,可直接提交
+并推送 `main`。嵌套目录下的 `.gitignore` 不随之放行,仍走 PR。
