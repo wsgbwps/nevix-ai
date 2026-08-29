@@ -48,6 +48,45 @@ export const creationTranslations = defineResourceTranslations({
           }
         }
       },
+      gallery: {
+        resultAlt: '已验证的生成结果',
+        slotCount: '{{n}} 个结果位',
+        taskLabel: '生成任务',
+        submitFailed: '提交被拒绝：{{code}}',
+        status: {
+          queued: '排队中',
+          generating: '生成中',
+          persisting: '转存中',
+          cancelling: '取消中',
+          succeeded: '成功',
+          partially_succeeded: '部分成功',
+          failed: '失败',
+          cancelled: '已取消',
+          timed_out: '已超时',
+          indeterminate: '结果未知'
+        },
+        reasons: {
+          invalid_input: '输入不合法',
+          rights_confirmation_required: '缺少权利声明',
+          input_policy_rejected: '输入未通过安全审核',
+          output_policy_rejected: '输出未通过安全审核',
+          action_required: '需要管理员处理',
+          temporarily_unavailable: '供应商暂时不可用，可重试',
+          processing_indeterminate: '结局未知，重做可能重复计费',
+          internal_error: '内部错误'
+        },
+        actions: {
+          cancel: '取消',
+          regenerate: '再次生成',
+          retryUncompleted: '只重试未完成项'
+        },
+        indeterminate: {
+          title: '重做结果未知的任务',
+          body: '该任务的供应商结局未知。重做会创建新任务，可能产生重复生成与重复计费。',
+          confirm: '确认重做',
+          cancel: '暂不'
+        }
+      },
       composer: {
         label: '创作输入',
         promptLabel: '提示词',
@@ -237,6 +276,45 @@ export const creationTranslations = defineResourceTranslations({
             prompt:
               'Create a brisk short-video ad for the product with an opening hook, a selling-point showcase, and a closing freeze frame.'
           }
+        }
+      },
+      gallery: {
+        resultAlt: 'Verified generation result',
+        slotCount: '{{n}} result slots',
+        taskLabel: 'Generation task',
+        submitFailed: 'Submission rejected: {{code}}',
+        status: {
+          queued: 'Queued',
+          generating: 'Generating',
+          persisting: 'Persisting',
+          cancelling: 'Cancelling',
+          succeeded: 'Succeeded',
+          partially_succeeded: 'Partially succeeded',
+          failed: 'Failed',
+          cancelled: 'Cancelled',
+          timed_out: 'Timed out',
+          indeterminate: 'Outcome unknown'
+        },
+        reasons: {
+          invalid_input: 'Invalid input',
+          rights_confirmation_required: 'Missing rights declaration',
+          input_policy_rejected: 'Input rejected by safety review',
+          output_policy_rejected: 'Output rejected by safety review',
+          action_required: 'Admin action required',
+          temporarily_unavailable: 'Provider temporarily unavailable; retry possible',
+          processing_indeterminate: 'Outcome unknown; a redo may repeat billing',
+          internal_error: 'Internal error'
+        },
+        actions: {
+          cancel: 'Cancel',
+          regenerate: 'Regenerate',
+          retryUncompleted: 'Retry uncompleted'
+        },
+        indeterminate: {
+          title: 'Redo a task with unknown outcome',
+          body: 'The provider outcome is unknown. A redo creates a new task and may repeat generation and billing.',
+          confirm: 'Confirm redo',
+          cancel: 'Not now'
         }
       },
       composer: {

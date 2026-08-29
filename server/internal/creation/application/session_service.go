@@ -6,6 +6,7 @@ package application
 
 import (
 	"context"
+	"time"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
@@ -56,11 +57,12 @@ func (s *SessionService) GetWithDraft(ctx context.Context, owner, id domain.UUID
 // here — stale values must round-trip untouched until submission validates
 // them (spec #150). Session deletion makes the draft unreachable like every
 // other session access.
-func (s *SessionService) SaveDraft(ctx context.Context, owner, id domain.UUID, draft *domain.SessionDraft) error {
+func (s *SessionService) SaveDraft(ctx context.Context, owner, id domain.UUID, draft *domain.SessionDraft) (time.Time, error) {
 	if err := draft.Validate(); err != nil {
-		return err
+		return time.Time{}, err
 	}
-	return s.runner.Run(ctx, func(scope domain.WriteScope) error {
+	var revision time.Time
+	err := s.runner.Run(ctx, func(scope domain.WriteScope) error {
 		// Role/kind compatibility resolves inside the transaction: a material
 		// deleted between validation and write fails the whole save instead of
 		// persisting a dangling binding.
@@ -78,8 +80,11 @@ func (s *SessionService) SaveDraft(ctx context.Context, owner, id domain.UUID, d
 				return domain.ErrInvalidDraft
 			}
 		}
-		return s.repos.SaveDraft(ctx, scope.Tx(), owner, id, draft)
+		var err2 error
+		revision, err2 = s.repos.SaveDraft(ctx, scope.Tx(), owner, id, draft)
+		return err2
 	})
+	return revision, err
 }
 
 // List pages the actor's active sessions.

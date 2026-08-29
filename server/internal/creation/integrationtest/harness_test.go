@@ -72,6 +72,9 @@ type harnessOptions struct {
 	// readinessPath points at a scenario's Production Readiness evidence
 	// file; empty keeps the deployment default of nothing activated.
 	readinessPath string
+	// runWorkers starts the module's queue worker alongside the HTTP
+	// surface so task-lifecycle scenarios observe real convergence.
+	runWorkers bool
 }
 
 func newHarness(t *testing.T) *harness {
@@ -161,6 +164,18 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 			t.Fatalf("construct creation module: %v", err)
 		}
 		creationModule.Register(r, bus)
+		if opts.runWorkers {
+			workerCtx, cancelWorker := context.WithCancel(ctx)
+			workersDone := make(chan struct{})
+			go func() {
+				defer close(workersDone)
+				_ = creationModule.RunWorkers(workerCtx)
+			}()
+			t.Cleanup(func() {
+				cancelWorker()
+				<-workersDone
+			})
+		}
 	})
 
 	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon, identity: identityModule}

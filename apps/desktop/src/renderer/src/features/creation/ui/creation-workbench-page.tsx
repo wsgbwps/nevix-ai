@@ -11,6 +11,7 @@ import {
 import type { CreationSessionView } from '../api/go-creation-http'
 import { useCreationWorkbench } from '../model/use-workbench'
 import { CreationComposer } from './composer'
+import { ResultGallery } from './result-gallery'
 
 /**
  * The production Creation Workbench (issue #177): the accepted prototype
@@ -114,9 +115,23 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                   <p className="text-foreground/70 mb-3 text-xs leading-5">
                     {workbench.draft.prompt}
                   </p>
-                  <p className="text-muted-foreground text-xs" role="status">
-                    {t('workspace.generationPending')}
-                  </p>
+                  {workbench.submitError !== null && (
+                    <p
+                      role="alert"
+                      data-testid="gallery-submit-error"
+                      className="text-destructive mb-3 text-[11px]"
+                    >
+                      {t('gallery.submitFailed', { code: workbench.submitError })}
+                      <button
+                        type="button"
+                        onClick={workbench.dismissSubmitError}
+                        className="text-muted-foreground ml-2 underline outline-none"
+                      >
+                        {t('gallery.indeterminate.cancel')}
+                      </button>
+                    </p>
+                  )}
+                  <ResultGallery workbench={workbench} />
                 </div>
               )}
             </div>

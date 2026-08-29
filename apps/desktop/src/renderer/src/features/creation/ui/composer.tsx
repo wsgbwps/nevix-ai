@@ -178,12 +178,24 @@ export function CreationComposer({
             <SaveStatus workbench={workbench} />
             <button
               type="button"
-              disabled
-              title={String(t('composer.submitPending'))}
+              disabled={workbench.submitDisabled}
+              title={
+                workbench.submitBlockedReason === 'stale'
+                  ? String(t('composer.stale.badge'))
+                  : workbench.submitBlockedReason === 'unavailable'
+                    ? String(t('composer.unavailable.template', { reason: '', action: '' }))
+                    : String(t('composer.submit'))
+              }
               aria-label={String(t('composer.submit'))}
-              aria-disabled="true"
+              aria-disabled={workbench.submitDisabled}
               data-testid="composer-submit"
-              className="bg-accent text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-full"
+              onClick={workbench.submit}
+              className={
+                'flex size-8 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ' +
+                (workbench.submitDisabled
+                  ? 'bg-accent text-muted-foreground'
+                  : 'bg-cyan-600 text-white hover:bg-cyan-500 dark:bg-cyan-500 dark:hover:bg-cyan-400')
+              }
             >
               <SendIcon className="size-4" aria-hidden />
             </button>

@@ -173,6 +173,14 @@ assert_creation_integration_executed() {
     TestMasterKeyFailureFailsClosedWithoutSilentRegeneration
     TestProviderConnectionSingletonConstraintRejectsSecondActiveRow
     TestStreamSmokeParallelFileFlows
+    TestTaskAdmissionAtomicityAndIdempotency
+    TestTaskGovernanceMatrix
+    TestTaskSubmissionLatencyP95
+    TestImageTaskLifecycleReachesSucceeded
+    TestVideoTaskLifecycleRunsAsync
+    TestIndeterminateSubmitNeverAutoRetries
+    TestProvider402PersistsCreditBlock
+    TestSSEInvalidationIsCommitScopedAndCreatorScoped
     TestFilesystemConformance
     TestS3ConformanceSuiteAgainstMinIO
     TestApplyIsIdempotentWhenAlreadyCurrent

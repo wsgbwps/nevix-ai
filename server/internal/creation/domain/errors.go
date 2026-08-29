@@ -40,3 +40,58 @@ var (
 	// round-trip — so this is always a request-shape fault, not staleness.
 	ErrInvalidDraft = errors.New("invalid session draft")
 )
+
+// Task-command errors. The interface layer maps these onto the stable codes
+// documented in contracts/creation.yaml; governance rejections carry their
+// machine reason so one evaluation yields one stable answer.
+var (
+	// ErrTaskNotFound applies the same indistinguishability as sessions:
+	// foreign tasks and absent tasks look identical.
+	ErrTaskNotFound = errors.New("generation task not found")
+	// ErrIdempotencyPayloadConflict reports a reused idempotency key whose
+	// frozen payload differs from the stored task's payload hash.
+	ErrIdempotencyPayloadConflict = errors.New("idempotency key reused with a different payload")
+	// ErrDraftRevisionConflict reports a submission based on a stale draft
+	// revision; the stored draft is never silently rewritten.
+	ErrDraftRevisionConflict = errors.New("draft changed since the submitted revision")
+	// ErrDraftNotReady reports a draft that cannot form a generation intent
+	// at all: never saved, missing target media, or structurally invalid.
+	ErrDraftNotReady = errors.New("draft is not ready for submission")
+	// ErrDraftCapabilityStale reports draft values outside the current
+	// capability manifest; the draft keeps its values and blocks submission.
+	ErrDraftCapabilityStale = errors.New("draft values are outside the current capability manifest")
+	// ErrTaskNotTerminal reports a retry against a task that still owes work.
+	ErrTaskNotTerminal = errors.New("generation task is not terminal")
+	// ErrNoIncompleteSlots reports a retry against a task with nothing left
+	// to retry — every slot already succeeded.
+	ErrNoIncompleteSlots = errors.New("no incomplete slots to retry")
+	// ErrTaskStateConflict reports a lost guarded transition race; workers
+	// treat it as an expected serialization signal, never a 5xx.
+	ErrTaskStateConflict = errors.New("task state transition lost the race")
+)
+
+// MediaUnavailableError reports admission blocked because the target media
+// is not submittable on this instance right now. Reason mirrors the
+// capability/manifest vocabulary the Workbench already displays.
+type MediaUnavailableError struct {
+	Reason string
+	Action string
+}
+
+func (e *MediaUnavailableError) Error() string {
+	return "media is not available for generation: " + e.Reason
+}
+
+// GovernanceBlockedError reports admission rejected by the fixed-order
+// governance evaluation; Reason is one of the stable machine reasons.
+type GovernanceBlockedError struct {
+	Reason GovernanceReason
+}
+
+func (e *GovernanceBlockedError) Error() string {
+	return "generation governance blocked: " + string(e.Reason)
+}
+
+// ErrGovernanceUserNotFound reports a user governance target that does not
+// exist; the FK constraint is the durable twin.
+var ErrGovernanceUserNotFound = errors.New("governance target user not found")

@@ -26,7 +26,7 @@ func NewConnectionRepository(pool *pgxpool.Pool) *ConnectionRepository {
 
 const connectionColumns = `id, admin_state, credential_state, image_capability, video_capability,
 	envelope_version, credential_key_id, credential_nonce, credential_ciphertext,
-	last_checked_at, last_check_outcome, created_by_user_id, created_at, updated_at, terminated_at`
+	last_checked_at, last_check_outcome, credit_blocked_at, created_by_user_id, created_at, updated_at, terminated_at`
 
 // Insert persists the first active connection inside the caller's write
 // transaction. A concurrent winner on the singleton index surfaces
@@ -138,7 +138,7 @@ func scanConnection(row pgx.Row) (domain.ProviderConnection, error) {
 	if err := row.Scan(
 		&c.ID, &adminState, &credentialState, &imageCapability, &videoCapability,
 		&envelopeVersion, &keyID, &nonce, &ciphertext,
-		&c.LastCheckedAt, &lastCheckOutcome,
+		&c.LastCheckedAt, &lastCheckOutcome, &c.CreditBlockedAt,
 		&c.CreatedByUserID, &c.CreatedAt, &c.UpdatedAt, &c.TerminatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -173,4 +173,36 @@ func checkOutcomeValue(outcome *domain.CheckOutcome) any {
 		return nil
 	}
 	return string(*outcome)
+}
+
+// MarkCreditBlocked stamps the persistent 402 credit block on the active
+// connection; already-blocked rows stay untouched (idempotent re-block).
+func (r *ConnectionRepository) MarkCreditBlocked(ctx context.Context, tx domain.TxExecutor) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE provider_connections SET credit_blocked_at = now(), updated_at = now()
+		WHERE terminated_at IS NULL AND credit_blocked_at IS NULL`)
+	if err != nil {
+		return fmt.Errorf("creation: mark provider credit blocked: %w", err)
+	}
+	_ = tag
+	return nil
+}
+
+// ClearCreditBlocked lifts the persistent credit block; the next explicit
+// submission probes the provider again.
+func (r *ConnectionRepository) ClearCreditBlocked(ctx context.Context, tx domain.TxExecutor) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE provider_connections SET credit_blocked_at = NULL, updated_at = now()
+		WHERE terminated_at IS NULL AND credit_blocked_at IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("creation: clear provider credit block: %w", err)
+	}
+	return nil
+}
+
+// GetActiveInTx reads the active connection on the caller's transaction so
+// admission's manifest projection shares the admission snapshot.
+func (r *ConnectionRepository) GetActiveInTx(ctx context.Context, tx domain.TxExecutor) (domain.ProviderConnection, error) {
+	return scanConnection(tx.QueryRow(ctx,
+		`SELECT `+connectionColumns+` FROM provider_connections WHERE terminated_at IS NULL`))
 }

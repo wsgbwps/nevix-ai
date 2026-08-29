@@ -51,8 +51,15 @@ const (
 	CodeRangeNotSatisfiable = "range_not_satisfiable"
 	CodeInternalError       = "internal_error"
 
+	CodeIdempotencyConflict   = "idempotency_payload_conflict"
+	CodeDraftRevisionConflict = "draft_revision_conflict"
+	CodeDraftNotReady         = "draft_not_ready"
+	CodeDraftCapabilityStale  = "draft_capability_stale"
+	CodeMediaUnavailable      = "media_unavailable"
+
 	CodeNotConfigured               = "provider_connection_not_configured"
 	CodeConnectionExists            = "provider_connection_exists"
+	CodeActiveGenerationTasks       = "active_generation_tasks_exist"
 	CodeCredentialInvalid           = "provider_credential_invalid"
 	CodeCheckTemporarilyUnavailable = "provider_check_temporarily_unavailable"
 	CodeSecureTransportRequired     = "secure_transport_required"
@@ -68,7 +75,8 @@ func MapError(err error) *Error {
 	switch {
 	case err == nil:
 		return nil
-	case isError(err, domain.ErrSessionNotFound), isError(err, domain.ErrMaterialNotFound):
+	case isError(err, domain.ErrSessionNotFound), isError(err, domain.ErrMaterialNotFound),
+		isError(err, domain.ErrTaskNotFound), isError(err, domain.ErrNoIncompleteSlots):
 		return &Error{Status: http.StatusNotFound, Code: CodeNotFound, Message: "The requested resource was not found."}
 	case isError(err, domain.ErrInvalidCursor):
 		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidCursor, Message: "The pagination cursor is not valid."}
@@ -88,6 +96,10 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusNotFound, Code: CodeNotConfigured, Message: "No AI provider connection is configured."}
 	case isError(err, domain.ErrConnectionExists):
 		return &Error{Status: http.StatusConflict, Code: CodeConnectionExists, Message: "An AI provider connection already exists."}
+	case isError(err, domain.ErrActiveGenerationTasksExist):
+		return &Error{Status: http.StatusConflict, Code: CodeActiveGenerationTasks, Message: "The connection cannot be deleted while generation tasks are still active."}
+	case isError(err, domain.ErrGovernanceUserNotFound):
+		return &Error{Status: http.StatusNotFound, Code: CodeNotFound, Message: "The governance target user was not found."}
 	case isError(err, domain.ErrCandidateCredentialInvalid):
 		return &Error{Status: http.StatusBadRequest, Code: CodeCredentialInvalid, Message: "The provider key was rejected; nothing was changed."}
 	case isError(err, domain.ErrCheckTemporarilyUnavailable):

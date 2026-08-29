@@ -28,6 +28,8 @@ const (
 // its sanitized audit row in the same transaction (ADR-0016).
 type ConnectionService struct {
 	connections domain.ProviderConnectionRepository
+	tasks       domain.GenerationTaskRepository
+	signals     domain.ConnectionSignals
 	runner      domain.WriteRunner
 	vault       domain.CredentialVault
 	checker     domain.ProviderCheckClient
@@ -36,12 +38,14 @@ type ConnectionService struct {
 
 func NewConnectionService(
 	connections domain.ProviderConnectionRepository,
+	tasks domain.GenerationTaskRepository,
+	signals domain.ConnectionSignals,
 	runner domain.WriteRunner,
 	vault domain.CredentialVault,
 	checker domain.ProviderCheckClient,
 	proofs authz.ReauthProofVerifier,
 ) *ConnectionService {
-	return &ConnectionService{connections: connections, runner: runner, vault: vault, checker: checker, proofs: proofs}
+	return &ConnectionService{connections: connections, tasks: tasks, signals: signals, runner: runner, vault: vault, checker: checker, proofs: proofs}
 }
 
 // GetActive returns the active connection for the admin view.
@@ -181,6 +185,15 @@ func (s *ConnectionService) Delete(ctx context.Context, principal authz.Principa
 	if err != nil {
 		return domain.ProviderConnection{}, err
 	}
+	// Fail closed while any task still owes work: credential termination
+	// must never destroy the convergence of accepted external work.
+	active, err := s.tasks.ExistsNonTerminal(ctx)
+	if err != nil {
+		return domain.ProviderConnection{}, err
+	}
+	if active {
+		return domain.ProviderConnection{}, domain.ErrActiveGenerationTasksExist
+	}
 	err = s.runner.Run(ctx, func(sc domain.WriteScope) error {
 		if err := s.connections.Terminate(ctx, sc.Tx(), connection.ID); err != nil {
 			return err
@@ -195,6 +208,24 @@ func (s *ConnectionService) Delete(ctx context.Context, principal authz.Principa
 	terminated.TerminatedAt = &terminatedAt
 	terminated.Envelope = nil
 	return terminated, nil
+}
+
+// ClearCreditBlock lifts the persistent provider 402 credit block after an
+// admin has resolved the balance with Kapon. The next explicit submission
+// probes the provider; a renewed 402 re-blocks. Audited like every other
+// connection lifecycle command.
+func (s *ConnectionService) ClearCreditBlock(ctx context.Context, principal authz.Principal) error {
+	err := s.runner.Run(ctx, func(sc domain.WriteScope) error {
+		if err := s.signals.ClearCreditBlocked(ctx, sc.Tx()); err != nil {
+			return err
+		}
+		connection, err := s.connections.GetActive(ctx)
+		if err != nil {
+			return err
+		}
+		return appendConnectionAudit(ctx, sc.Tx(), principal, auditlog.ProviderCreditCleared, &connection)
+	})
+	return err
 }
 
 // Pause blocks new tasks and not-yet-started provider calls; Resume lifts

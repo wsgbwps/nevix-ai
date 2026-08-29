@@ -24,10 +24,12 @@ type SessionRepository interface {
 	List(ctx context.Context, owner UUID, cursor *CompoundCursor, limit int) ([]Session, *CompoundCursor, error)
 	Rename(ctx context.Context, tx TxExecutor, owner, id UUID, name string) (Session, error)
 	// SaveDraft atomically replaces the draft scalars and the ordered
-	// reference bindings inside the caller's write transaction. Missing
-	// session collapses into ErrSessionNotFound; a reference to a material
-	// outside the session collapses into ErrInvalidDraft.
-	SaveDraft(ctx context.Context, tx TxExecutor, owner, id UUID, draft *SessionDraft) error
+	// reference bindings inside the caller's write transaction and returns
+	// the database's authoritative new revision (draft_updated_at), the
+	// value submitters echo back as draft_revision. Missing session
+	// collapses into ErrSessionNotFound; a reference to a material outside
+	// the session collapses into ErrInvalidDraft.
+	SaveDraft(ctx context.Context, tx TxExecutor, owner, id UUID, draft *SessionDraft) (time.Time, error)
 	Delete(ctx context.Context, tx TxExecutor, owner, id UUID) error
 }
 
@@ -45,6 +47,10 @@ type MaterialRepository interface {
 	// session belong to the acting creator and the session is still active.
 	// The returned blob key schedules after-commit cleanup.
 	Delete(ctx context.Context, tx TxExecutor, owner, id UUID) (blobKey string, err error)
+	// LoadMaterialsInSession resolves the requested materials with full facts
+	// inside the caller's transaction; materials outside the session are
+	// absent, and admission treats absence as a rejection fact.
+	LoadMaterialsInSession(ctx context.Context, tx TxExecutor, owner, sessionID UUID, ids []UUID) ([]ReferenceMaterial, error)
 	// ResolveKindsInSession returns the kinds of the requested materials that
 	// live under one active owned session; materials outside it are simply
 	// absent from the result. Runs inside the caller's transaction so a
@@ -107,3 +113,126 @@ type (
 	Row        = pgx.Row
 	TxExecutor = pgx.Tx
 )
+
+// GenerationTaskRepository is the persistence port for the generation task
+// kernel. Admission methods run inside the caller's verified write
+// transaction so specification, task, slots, job, queue item, and
+// reservation commit or roll back together; queries are creator-scoped by
+// the SQL predicates themselves; guarded transitions return false when the
+// one-way migration loses a race so callers can never fabricate state.
+type GenerationTaskRepository interface {
+	// LoadSessionDraftForAdmission resolves the active owned session and its
+	// draft inside the admission transaction, so the frozen specification
+	// and the revision check share one snapshot.
+	LoadSessionDraftForAdmission(ctx context.Context, tx TxExecutor, owner, sessionID UUID) (Session, *SessionDraft, error)
+	// FindByIdempotencyKey resolves a prior admitted task for the same
+	// creator-scoped key inside the admission transaction; ok is false when
+	// the key is fresh.
+	FindByIdempotencyKey(ctx context.Context, tx TxExecutor, owner UUID, key string) (GenerationTask, bool, error)
+	// InsertAttempt records one structurally valid submission attempt for
+	// the rolling rate window (including attempts later rejected by other
+	// governance rules).
+	InsertAttempt(ctx context.Context, tx TxExecutor, userID UUID) error
+	// CountAttemptsSince counts structurally valid attempts inside the
+	// rolling window; a nil user counts the whole instance.
+	CountAttemptsSince(ctx context.Context, tx TxExecutor, userID *UUID, since time.Time) (int, error)
+	// CountTasksCreatedSince counts admitted tasks since the given instant;
+	// a nil user counts the whole instance (Asia/Shanghai monthly window).
+	CountTasksCreatedSince(ctx context.Context, tx TxExecutor, userID *UUID, since time.Time) (int, error)
+	// CountActiveReservations counts the creator's unreleased concurrency
+	// reservations for one media pool.
+	CountActiveReservations(ctx context.Context, tx TxExecutor, owner UUID, media MediaType) (int, error)
+	// InsertAdmittedTask persists task, all slots, the first pending job,
+	// the queue item, and the reservation atomically in the caller's
+	// transaction. Any failure rolls the whole admission back.
+	InsertAdmittedTask(ctx context.Context, tx TxExecutor, admitted *AdmittedTask) error
+
+	// ListBySession pages one session's tasks newest-first (creator-scoped).
+	ListBySession(ctx context.Context, owner, sessionID UUID, cursor *CompoundCursor, limit int) ([]GenerationTask, *CompoundCursor, error)
+	// GetForOwner resolves one task and its slots for its creator; every
+	// miss collapses into ErrTaskNotFound.
+	GetForOwner(ctx context.Context, owner, taskID UUID) (GenerationTask, []GenerationSlot, error)
+	// GetForWorker resolves one task with its slots outside any transaction
+	// for the queue worker; ownership is already proven by the queue row.
+	GetForWorker(ctx context.Context, taskID UUID) (GenerationTask, []GenerationSlot, ProviderJob, error)
+	// GetForOwnerInTx resolves one owned task plus slots on the caller's
+	// transaction (cancel convergence reads the exact state it mutates).
+	GetForOwnerInTx(ctx context.Context, tx TxExecutor, owner, taskID UUID) (GenerationTask, []GenerationSlot, ProviderJob, error)
+	// ExistsNonTerminal reports whether any task still owes work — the
+	// durable connection-delete guard.
+	ExistsNonTerminal(ctx context.Context) (bool, error)
+
+	// TransitionTask performs one guarded one-way migration and stamps
+	// terminal_at on terminal arrivals. It returns false when the current
+	// status is not in from — an expected race, not an error.
+	TransitionTask(ctx context.Context, tx TxExecutor, taskID UUID, from []TaskStatus, to TaskStatus, cause *TerminalCause) (bool, error)
+	// ReleaseReservation marks the task's reservation released exactly once
+	// (guarded by released_at IS NULL) inside the caller's transaction; the
+	// boolean is the release fact.
+	ReleaseReservation(ctx context.Context, tx TxExecutor, taskID UUID) (bool, error)
+	// RequestCancel records the cancel intent on an owned task (idempotent)
+	// and returns its current status; ok is false when the task is not the
+	// caller's at all.
+	RequestCancel(ctx context.Context, tx TxExecutor, owner, taskID UUID) (TaskStatus, bool, error)
+	// TransitionJob performs one guarded job migration, optionally binding
+	// the external reference on first submission.
+	TransitionJob(ctx context.Context, tx TxExecutor, jobID UUID, from []JobStatus, to JobStatus, externalRef *string) (bool, error)
+	// MarkJobSubmitRetryable records that the in-flight submit ended in a
+	// definitively identified transient rejection (explicit 429/503), which
+	// makes a bounded re-submit safe; the next submit attempt clears it.
+	MarkJobSubmitRetryable(ctx context.Context, tx TxExecutor, jobID UUID) error
+	// WriteSlotVerdict writes one slot's terminal verdict write-once; an
+	// already-settled slot keeps its first verdict and returns false.
+	WriteSlotVerdict(ctx context.Context, tx TxExecutor, taskID UUID, index int, status SlotStatus, reason *FailureReason, result *SlotResult) (bool, error)
+	// LoadSlotOutcomes reads every slot's current verdict (nil for pending).
+	LoadSlotOutcomes(ctx context.Context, tx TxExecutor, taskID UUID) ([]SlotOutcome, error)
+
+	// ClaimNextQueueItem atomically claims the next runnable queue item with
+	// FOR UPDATE SKIP LOCKED outside any long transaction; ok is false when
+	// nothing is runnable. The lease bounds the claim; worker crashes
+	// release it by expiry.
+	ClaimNextQueueItem(ctx context.Context, leaseOwner string, lease time.Duration) (ClaimedQueueItem, bool, error)
+	// ReleaseQueueItem makes a claimed item runnable again at runAfter and
+	// drops the lease, inside the caller's transaction.
+	ReleaseQueueItem(ctx context.Context, tx TxExecutor, queueID UUID, runAfter time.Time) error
+	// ResetQueueBudget zeroes a claimed item's attempt counter for holds
+	// that must not consume the bounded retry budget (pause, pressure).
+	ResetQueueBudget(ctx context.Context, tx TxExecutor, queueID UUID) error
+	// RetireQueueItem saturates a finished item's attempts so the claim
+	// predicate skips it forever without deleting history.
+	RetireQueueItem(ctx context.Context, tx TxExecutor, queueID UUID) error
+	// GetQueueItemByTask resolves the queue row for one task (worker paths).
+	GetQueueItemByTask(ctx context.Context, tx TxExecutor, taskID UUID) (UUID, int, int, error)
+}
+
+// GovernanceRepository is the persistence port for the governance policy
+// rows. Limits are independently optional: nil means unset (unlimited) and
+// zero explicitly forbids.
+type GovernanceRepository interface {
+	// LoadPolicies resolves the instance row and the per-user overrides for
+	// admission inside the caller's transaction.
+	LoadPolicies(ctx context.Context, tx TxExecutor) (*GovernancePolicy, map[UUID]GovernancePolicy, error)
+	// PutInstancePolicy upserts the instance row (full-row replacement).
+	PutInstancePolicy(ctx context.Context, tx TxExecutor, policy GovernancePolicy, updatedBy UUID) error
+	// PutUserPolicy upserts one user's override row (full-row replacement).
+	PutUserPolicy(ctx context.Context, tx TxExecutor, policy GovernancePolicy, updatedBy UUID) error
+	// ListPolicies resolves every policy row for the admin view (pool read).
+	ListPolicies(ctx context.Context) (*GovernancePolicy, []GovernancePolicy, error)
+}
+
+// ConnectionSignals is the narrow port the task kernel uses to persist
+// provider signals on the connection aggregate: the persistent 402 credit
+// block. Pause/resume stays on the connection commands; this port only
+// records and clears the block inside the caller's transaction.
+type ConnectionSignals interface {
+	// MarkCreditBlocked stamps credit_blocked_at on the active connection;
+	// idempotent when already blocked.
+	MarkCreditBlocked(ctx context.Context, tx TxExecutor) error
+	// ClearCreditBlocked lifts the persistent credit block.
+	ClearCreditBlocked(ctx context.Context, tx TxExecutor) error
+	// GetActive re-exported read for worker admission checks.
+	GetActive(ctx context.Context) (ProviderConnection, error)
+	// GetActiveInTx reads the active connection on the caller's transaction
+	// so admission's manifest projection shares the admission snapshot.
+	GetActiveInTx(ctx context.Context, tx TxExecutor) (ProviderConnection, error)
+}

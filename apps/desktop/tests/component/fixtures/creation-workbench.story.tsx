@@ -17,6 +17,10 @@ import type {
   CapabilityManifest,
   ImageReferenceEnvelope
 } from '../../../src/renderer/src/features/creation/api/capability-manifest-http'
+import type {
+  GenerationTaskDetail,
+  GenerationTaskView
+} from '../../../src/renderer/src/features/creation/api/generation-task-http'
 
 /**
  * Black-box composition for the Creation Workbench public surface (issues
@@ -111,6 +115,7 @@ const noReferences = { total: { min: 0, max: 0 } }
 const activeManifest: CapabilityManifest = {
   schemaVersion: 1,
   manifestVersion: 1,
+  updatedAt: '2026-08-29T10:00:00Z',
   image: {
     available: true,
     reason: null,
@@ -177,6 +182,11 @@ export interface DeckTestControls {
   saveDraftCalls(): ReadonlyArray<{ sessionId: string; draft: unknown }>
   deleteMaterialCalls(): string[]
   uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
+  taskCalls(): ReadonlyArray<{ sessionId: string; idempotencyKey: string }>
+  retryCalls(): ReadonlyArray<{ taskId: string; idempotencyKey: string }>
+  cancelledIds(): string[]
+  fireInvalidation(): void
+  pushTask(task: ScriptedTask): void
 }
 
 declare global {
@@ -189,6 +199,17 @@ function succeeded<T>(value: T): CreationApiResult<T> {
   return { outcome: 'succeeded', value }
 }
 
+/** Scripted task behavior: what submitTask does and which tasks pre-exist. */
+export interface ScriptedTask extends GenerationTaskView {
+  readonly slots: GenerationTaskDetail['slots']
+}
+
+export interface TaskScript {
+  readonly tasks?: readonly ScriptedTask[]
+  /** When set, submitTask rejects with this stable code. */
+  readonly submitRejection?: string
+}
+
 interface RuntimeOptions {
   readonly manifest: CapabilityManifest | null
   /** When true the manifest call fails like an unreachable server. */
@@ -196,6 +217,7 @@ interface RuntimeOptions {
   readonly sessions: readonly CreationSessionView[]
   readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
+  readonly taskScript?: TaskScript
 }
 
 // Builds the story's ports: an in-memory draft store behind the same
@@ -207,11 +229,35 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
   const saveCalls: Array<{ sessionId: string; draft: SessionDraftInput }> = []
   const deletedIds: string[] = []
   const uploadCalls: Array<{ sessionId: string; name: string }> = []
+  const taskState: {
+    tasks: ScriptedTask[]
+    submitCalls: Array<{ sessionId: string; idempotencyKey: string }>
+    retryCalls: Array<{ taskId: string; idempotencyKey: string }>
+    cancelledIds: string[]
+    eventHandlers: { onInvalidation: () => void; onStateChange: (live: boolean) => void } | null
+  } = {
+    tasks: [],
+    submitCalls: [],
+    retryCalls: [],
+    cancelledIds: [],
+    eventHandlers: null
+  }
+  for (const scripted of options.taskScript?.tasks ?? []) {
+    taskState.tasks.push({ ...scripted })
+  }
 
   window.__creationDeckTest = {
     saveDraftCalls: () => saveCalls,
     deleteMaterialCalls: () => deletedIds,
-    uploadCalls: () => uploadCalls
+    uploadCalls: () => uploadCalls,
+    taskCalls: () => taskState.submitCalls,
+    retryCalls: () => taskState.retryCalls,
+    cancelledIds: () => taskState.cancelledIds,
+    fireInvalidation: () => taskState.eventHandlers?.onInvalidation(),
+    pushTask: (task) => {
+      taskState.tasks = [task, ...taskState.tasks]
+      taskState.eventHandlers?.onInvalidation()
+    }
   }
 
   return {
@@ -267,7 +313,91 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     loadCapabilityManifest: async () =>
       options.manifestFails || options.manifest === null
         ? { outcome: 'network-failure' }
-        : succeeded(options.manifest)
+        : succeeded(options.manifest),
+    // Generation task kernel (issue #159): in-memory task store behind the
+    // same operations, plus an invalidation handle for SSE scenarios.
+    submitTask: async (sessionId, input) => {
+      taskState.submitCalls.push({ sessionId, idempotencyKey: input.idempotencyKey })
+      if (options.taskScript?.submitRejection !== undefined) {
+        return { outcome: 'request-rejected', code: options.taskScript.submitRejection }
+      }
+      const task: ScriptedTask = {
+        id: 'dddddddd-0000-4000-8000-000000000004',
+        sessionId,
+        status: 'queued',
+        mediaType: 'image',
+        slotCount: 2,
+        cancelRequested: false,
+        terminalCause: null,
+        createdAt: '2026-08-29T10:00:00Z',
+        updatedAt: '2026-08-29T10:00:00Z',
+        terminalAt: null,
+        slots: [
+          { index: 0, status: 'queued', failureReason: null, result: null },
+          { index: 1, status: 'queued', failureReason: null, result: null }
+        ]
+      }
+      taskState.tasks = [task, ...taskState.tasks]
+      return succeeded({ task, slots: task.slots })
+    },
+    listTasks: async (sessionId) =>
+      succeeded({
+        tasks: taskState.tasks
+          .filter((task) => task.sessionId === sessionId)
+          .map(
+            (task): GenerationTaskView => ({
+              id: task.id,
+              sessionId: task.sessionId,
+              status: task.status,
+              mediaType: task.mediaType,
+              slotCount: task.slotCount,
+              cancelRequested: task.cancelRequested,
+              terminalCause: task.terminalCause,
+              createdAt: task.createdAt,
+              updatedAt: task.updatedAt,
+              terminalAt: task.terminalAt
+            })
+          ),
+        nextCursor: null
+      }),
+    getTask: async (taskId) => {
+      const task = taskState.tasks.find((entry) => entry.id === taskId)
+      if (!task) return { outcome: 'request-rejected', code: 'not_found' }
+      return succeeded({ task, slots: task.slots })
+    },
+    cancelTask: async (taskId) => {
+      taskState.cancelledIds.push(taskId)
+      const task = taskState.tasks.find((entry) => entry.id === taskId)
+      if (!task) return { outcome: 'request-rejected', code: 'not_found' }
+      return succeeded({ task, slots: task.slots })
+    },
+    retryTask: async (taskId, idempotencyKey) => {
+      taskState.retryCalls.push({ taskId, idempotencyKey })
+      const task = taskState.tasks.find((entry) => entry.id === taskId)
+      if (!task) return { outcome: 'request-rejected', code: 'not_found' }
+      const retried: ScriptedTask = {
+        ...task,
+        id: 'dddddddd-0000-4000-8000-000000000005',
+        status: 'queued',
+        terminalCause: null,
+        terminalAt: null,
+        slots: task.slots.map((slot) => ({
+          ...slot,
+          status: 'queued',
+          failureReason: null,
+          result: null
+        }))
+      }
+      taskState.tasks = [retried, ...taskState.tasks]
+      return succeeded({ task: retried, slots: retried.slots })
+    },
+    loadResultBlobUrl: async () => thumbnailUrl,
+    subscribeEvents: (handlers) => {
+      taskState.eventHandlers = handlers
+      return () => {
+        taskState.eventHandlers = null
+      }
+    }
   }
 }
 
@@ -285,6 +415,7 @@ interface StoryOptions {
   readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
   readonly sessions?: readonly CreationSessionView[]
+  readonly taskScript?: TaskScript
 }
 
 function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): React.JSX.Element {
@@ -295,11 +426,13 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
         manifest: options.manifest === undefined ? activeManifest : options.manifest,
         manifestFails: options.manifestFails,
         sessions,
+        taskScript: options.taskScript,
         drafts: options.drafts ?? {
           [sessionA.id]: {
             prompt: '夏季跑鞋主图，暖光背景',
             mediaType: 'image',
             manifestVersion: 1,
+            updatedAt: '2026-08-29T10:00:00Z',
             model: 'doubao-seedream-5.0-lite',
             mode: 'reference-image',
             ratio: '4:5',

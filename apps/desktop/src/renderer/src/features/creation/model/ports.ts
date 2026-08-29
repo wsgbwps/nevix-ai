@@ -13,6 +13,13 @@ import {
   type SessionDraftView,
   type SessionPage
 } from '../api/go-creation-http'
+import {
+  createGenerationTaskClient,
+  openCreationEventStream,
+  type GenerationTaskDetail,
+  type TaskPage,
+  type TaskSubmitInput
+} from '../api/generation-task-http'
 
 /** How every trusted call sources its credential: per operation, never cached.
  * Structurally matches the authentication Feature's session acquisition so
@@ -79,6 +86,28 @@ export interface CreationWorkspacePorts {
   readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
   readonly loadImageBlobUrl: (materialId: string) => Promise<string | null>
   readonly loadCapabilityManifest: () => Promise<CreationApiResult<CapabilityManifest>>
+  /** Submits one idempotent generation task from the stored draft. */
+  readonly submitTask: (
+    sessionId: string,
+    input: TaskSubmitInput
+  ) => Promise<CreationApiResult<GenerationTaskDetail>>
+  readonly listTasks: (sessionId: string) => Promise<CreationApiResult<TaskPage>>
+  readonly getTask: (taskId: string) => Promise<CreationApiResult<GenerationTaskDetail>>
+  readonly cancelTask: (taskId: string) => Promise<CreationApiResult<GenerationTaskDetail>>
+  readonly retryTask: (
+    taskId: string,
+    idempotencyKey: string
+  ) => Promise<CreationApiResult<GenerationTaskDetail>>
+  /** Streams one succeeded slot's verified output for display. */
+  readonly loadResultBlobUrl: (taskId: string, slotIndex: number) => Promise<string | null>
+  /**
+   * Opens the creator-scoped SSE invalidation stream; returns unsubscribe.
+   * onStateChange mirrors liveness so the caller can poll while it is down.
+   */
+  readonly subscribeEvents: (handlers: {
+    onInvalidation: () => void
+    onStateChange: (live: boolean) => void
+  }) => () => void
 }
 
 /**
@@ -96,6 +125,14 @@ export function createCreationWorkspacePorts(
     if (!acquisition) throw new Error('creation: session became unavailable')
     const client = createCreationClient(serverUrl)
     return run(client, acquisition.token)
+  }
+
+  async function withTaskToken<T>(
+    run: (client: ReturnType<typeof createGenerationTaskClient>, token: string) => Promise<T>
+  ): Promise<T> {
+    const acquisition = await acquireSession()
+    if (!acquisition) throw new Error('creation: session became unavailable')
+    return run(createGenerationTaskClient(serverUrl), acquisition.token)
   }
 
   return {
@@ -135,7 +172,25 @@ export function createCreationWorkspacePorts(
     // The manifest client shares the request helper's failure mapping; only
     // the parser differs, so it rides the same per-call token acquisition.
     loadCapabilityManifest: () =>
-      withToken((_client, token) => createCapabilityManifestClient(serverUrl).lookup(token))
+      withToken((_client, token) => createCapabilityManifestClient(serverUrl).lookup(token)),
+    submitTask: (sessionId, input) =>
+      withTaskToken((client, token) => client.submitTask(token, sessionId, input)),
+    listTasks: (sessionId) => withTaskToken((client, token) => client.listTasks(token, sessionId)),
+    getTask: (taskId) => withTaskToken((client, token) => client.getTask(token, taskId)),
+    cancelTask: (taskId) => withTaskToken((client, token) => client.cancelTask(token, taskId)),
+    retryTask: (taskId, idempotencyKey) =>
+      withTaskToken((client, token) => client.retryTask(token, taskId, idempotencyKey)),
+    loadResultBlobUrl: (taskId, slotIndex) =>
+      withTaskToken((client, token) => client.loadResultBlobUrl(token, taskId, slotIndex)),
+    subscribeEvents: (handlers) =>
+      openCreationEventStream(
+        serverUrl,
+        async () => {
+          const acquisition = await acquireSession()
+          return acquisition?.token ?? null
+        },
+        handlers
+      )
   }
 }
 

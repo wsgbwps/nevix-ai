@@ -173,6 +173,10 @@ type Module struct {
 	materials   *creationhttp.MaterialHandler
 	connection  *creationhttp.ProviderConnectionHandler
 	manifest    *creationhttp.CapabilityManifestHandler
+	tasks       *creationhttp.GenerationTaskHandler
+	governance  *creationhttp.GovernanceHandler
+	hub         *creationhttp.InvalidationHub
+	worker      *application.TaskWorker
 	guard       *authz.Guard
 	corsOrigins []string
 	store       domain.BlobStore
@@ -199,9 +203,12 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	sessionRepos := postgres.NewSessionRepository(pool)
 	materialRepos := postgres.NewMaterialRepository(pool)
 	connectionRepos := postgres.NewConnectionRepository(pool)
+	taskRepos := postgres.NewGenerationTaskRepository(pool)
+	governanceRepos := postgres.NewGovernanceRepository(pool)
+	hub := creationhttp.NewInvalidationHub()
 	sessionService := application.NewSessionService(sessionRepos, materialRepos, tx)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
-	connectionService := application.NewConnectionService(connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
+	connectionService := application.NewConnectionService(connectionRepos, taskRepos, connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
 	// The readiness evidence is a startup-loaded deployment asset: an invalid
 	// document refuses to boot rather than silently deactivating capabilities.
 	evidence, err := readiness.LoadEvidenceFile(cfg.ReadinessFile)
@@ -209,15 +216,31 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 		return nil, err
 	}
 	manifestService := application.NewManifestService(connectionRepos, evidence)
+	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, governanceRepos, manifestService, tx, hub)
+	governanceService := application.NewGovernanceService(governanceRepos, tx)
+	// The worker shares the module's storage adapter and speaks the fixed
+	// Kapon generation route; both stay behind the domain gateway seam.
+	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL)
+	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, store, media.Prober{}, gateway, hub, tx, workerLeaseOwner())
 	return &Module{
 		sessions:    creationhttp.NewSessionHandler(sessionService),
 		materials:   creationhttp.NewMaterialHandler(materialService),
 		connection:  creationhttp.NewProviderConnectionHandler(connectionService),
 		manifest:    creationhttp.NewCapabilityManifestHandler(manifestService),
+		tasks:       creationhttp.NewGenerationTaskHandler(taskService, store),
+		governance:  creationhttp.NewGovernanceHandler(governanceService, connectionService),
+		hub:         hub,
+		worker:      worker,
 		guard:       authz.NewGuard(deps.SessionAuthenticator),
 		corsOrigins: cfg.CORSAllowedOrigins,
 		store:       store,
 	}, nil
+}
+
+// workerLeaseOwner namespaces this process's queue leases so a restart's new
+// leases never collide with a stale predecessor's.
+func workerLeaseOwner() string {
+	return "creation-worker-" + domain.NewUUID().String()[:8]
 }
 
 // buildStore instantiates the configured production adapter; nothing else in
@@ -234,20 +257,20 @@ func buildStore(ctx context.Context, cfg Config) (domain.BlobStore, error) {
 }
 
 // Register mounts the static route table inside one chi group with this
-// Module's own CORS gate and OPTIONS twins. No Domain Events exist yet; the
-// bus stays part of the lifecycle contract for later slices.
+// Module's own CORS gate and OPTIONS twins. The generation invalidation fan
+// out stays intra-module through the SSE hub; the bus remains the seam for
+// the cross-Module revocation stream (ADR-0016 跨 Module 断流).
 func (m *Module) Register(r chi.Router, _ event.Bus) {
 	routes := m.routes()
 	r.Use(corsMiddleware(m.corsOrigins, creationhttp.MethodsByPath(routes)))
 	creationhttp.Mount(r, routes, httpGuards(m.guard))
 }
 
-// RunWorkers owns no asynchronous work in this slice, so it idles until
-// context cancellation — the Module lifecycle contract keeps a workerless
-// Module alive instead of returning while the server keeps serving.
+// RunWorkers drives the PostgreSQL generation queue until context
+// cancellation; the worker's error (if any) is surfaced to the composition
+// root's lifecycle contract.
 func (m *Module) RunWorkers(ctx context.Context) error {
-	<-ctx.Done()
-	return nil
+	return m.worker.Run(ctx)
 }
 
 // httpGuards adapts the shared guard to the transport table.

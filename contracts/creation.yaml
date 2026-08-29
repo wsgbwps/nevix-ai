@@ -638,6 +638,316 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
+  /creation/sessions/{sessionID}/tasks:
+    post:
+      operationId: submitGenerationTask
+      summary: 从当前草稿幂等提交不可变 Generation Task
+      description: |-
+        唯一的 Task 准入入口。Server 从**当前存储的可编辑草稿**生成意图构造并冻结不可变
+        Generation Specification；请求只携带 creator-scoped idempotency_key 与 draft_revision
+        （提交者所依据的 draft 更新时刻）。准入在同一短事务内原子复验草稿 revision、
+        manifest 版本、Reference identity/role/kind 与参数，并按固定顺序执行治理检查
+        （provider credit → instance 月度 → member 月度 → instance 频率 → member 频率 →
+        member 分媒体并发）；一次成功提交原子创建 Specification、Task、N 个稳定有序 slot、
+        首个 pending Provider Job、queue item 与并发 reservation。
+        同 key 同 payload 幂等返回既有 Task（200，不重复计数）；同 key 不同 payload 返回 409
+        idempotency_payload_conflict。治理拒绝只持久化本次结构有效尝试事实，不创建
+        Task/Job/queue/reservation，也不改写草稿。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskSubmitInput"
+      responses:
+        "201":
+          description: Task 已原子创建；slot 以派生投影状态返回。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationTaskDetail"
+        "200":
+          description: 幂等重放 —— 同 key 同 payload 返回既有 Task，不重复计数。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationTaskDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/TaskGovernanceForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/TaskConflict"
+        "422":
+          $ref: "#/components/responses/TaskDraftRejected"
+        "429":
+          $ref: "#/components/responses/TaskGovernanceRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      operationId: listSessionGenerationTasks
+      summary: 列出本 Session 的 Generation Task（creator-private）
+      description: |-
+        只返回当前创建者自己的该 Session 任务，按 (created_at DESC, id DESC) 复合 keyset 序分页。
+        每次 quantity=N 的提交永远稳定呈现 N 个有序 slot；部分失败不重排结果。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+        - $ref: "#/components/parameters/pageLimit"
+        - $ref: "#/components/parameters/keysetCursor"
+      responses:
+        "200":
+          description: 当前页任务与下一页 cursor。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationTaskList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/tasks/{taskID}:
+    get:
+      operationId: getGenerationTask
+      summary: 查看 Generation Task 详情（creator-private）
+      description: |-
+        返回任务、全部 slot 的派生/终态、以及创建者私有的冻结 Generation Specification。
+        其他 Member 的任务与不存在完全一致地 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/taskID"
+      responses:
+        "200":
+          description: 任务详情（含 slot 与冻结规格）。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationTaskDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/tasks/{taskID}/cancel:
+    post:
+      operationId: cancelGenerationTask
+      summary: 请求取消 Generation Task（best effort）
+      description: |-
+        记录取消意图并立即收敛可立即取消的工作：未提交外部调用的任务直接 cancelled；
+        已接受的外部工作继续按权威结果收敛（cancelling），已取得的有效输出保留并继续转存。
+        幂等：对已终态任务重复取消返回其当前状态。取消不丢弃任何已形成的成功槽位。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/taskID"
+      responses:
+        "200":
+          description: 已记录取消意图后的任务状态。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationTaskDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/tasks/{taskID}/retry:
+    post:
+      operationId: retryUncompletedSlots
+      summary: 只重试未完成项 —— 以原冻结规格创建新 Task
+      description: |-
+        原 Task 保持不可变。新 Task 复制原冻结规格但 quantity 仅覆盖未完成槽位
+        （成功槽位不被重复生成或重复计费），并按与首次提交完全相同的治理准入
+        （新 idempotency_key、月计数、reservation）执行。仅终态且存在未完成槽位的任务可重试。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/taskID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskRetryInput"
+      responses:
+        "201":
+          description: 新 Task 已原子创建。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationTaskDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/TaskGovernanceForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/TaskRetryConflict"
+        "422":
+          $ref: "#/components/responses/TaskDraftRejected"
+        "429":
+          $ref: "#/components/responses/TaskGovernanceRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/tasks/{taskID}/slots/{slotIndex}/result:
+    get:
+      operationId: downloadGenerationSlotResult
+      summary: 下载成功槽位的已验证输出（creator-private 有界流）
+      description: |-
+        只对创建者开放；流式经 Go 有界传输，不暴露 Storage 凭据。仅成功槽位携带输出；
+        其他槽位与外来任务一律 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/taskID"
+        - $ref: "#/components/parameters/slotIndex"
+      responses:
+        "200":
+          description: 输出字节流（Content-Type 为转存时验证的 MIME）。
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/events:
+    get:
+      operationId: streamCreationEvents
+      summary: creator-scoped 失效通知流（SSE）
+      description: |-
+        text/event-stream。事件只表示"当前 User 的 creation 状态已失效"，不携带任何私有
+        payload；持久状态 commit 之后才发布。约 20 秒一次 heartbeat 注释行。Authorization
+        走 header，token 不进 URL；不实现 Last-Event-ID —— 客户端断流后先全量 refetch，
+        再恢复流并由轮询在 10 秒内收敛。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: SSE 事件流。
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /creation/generation-governance:
+    get:
+      operationId: getGenerationGovernance
+      summary: 查看实例与 User 治理配置（Admin）
+      description: |-
+        返回 instance 默认与全部 User 覆盖。未设置字段不限，显式 0 禁止相应范围的新 Task。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 治理配置视图。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationGovernanceView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/generation-governance/instance:
+    put:
+      operationId: putInstanceGovernance
+      summary: 配置实例级治理（Admin）
+      description: |-
+        整行替换四个可选上限（null 表示清除为未设置）。变更立即影响新提交，不取消已接受
+        Task，不清空滚动窗口或当月计数。每次变更写入脱敏 Audit Log。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceLimits"
+      responses:
+        "200":
+          description: 已保存的实例配置。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceLimits"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/generation-governance/users/{userID}:
+    put:
+      operationId: putUserGovernance
+      summary: 配置任意 active User 的治理覆盖（Admin，含自己与其他 Admin）
+      description: 整行替换四个可选上限；User 覆盖逐字段优先于 instance 默认。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/userID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceLimits"
+      responses:
+        "200":
+          description: 已保存的 User 覆盖。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceLimits"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/provider-connection/credit-block:
+    delete:
+      operationId: clearProviderCreditBlock
+      summary: 手动解除 provider_credit_blocked（Admin）
+      description: |-
+        Provider 402 建立的持久额度阻止只能由 Admin 在 Kapon 处理完成后手动解除；
+        下一次显式提交探测，若仍 402 则重新阻止。解除与建立均写入脱敏 Audit Log。
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: 已解除。
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ProviderConnectionNotConfigured"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   parameters:
     sessionID:
@@ -673,6 +983,31 @@ components:
       description: 上页 next_cursor 原样回传的复合 keyset 令牌；缺省从首页开始。
       schema:
         type: string
+    taskID:
+      name: taskID
+      in: path
+      required: true
+      description: 目标 Generation Task id（UUID）。
+      schema:
+        type: string
+        format: uuid
+    slotIndex:
+      name: slotIndex
+      in: path
+      required: true
+      description: 稳定有序 slot 序号（0 起始）。
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 3
+    userID:
+      name: userID
+      in: path
+      required: true
+      description: 目标 active User id（UUID）。
+      schema:
+        type: string
+        format: uuid
   responses:
     BadRequest:
       description: 请求不合法 —— invalid_request 指请求体不是约定形状的 JSON 或字段边界违规；invalid_cursor 指 cursor 不是合法的复合分页令牌。
@@ -893,6 +1228,80 @@ components:
                   error:
                     enum:
                       - provider_check_temporarily_unavailable
+    TaskGovernanceForbidden:
+      description: 治理阻止（持久类）—— 固定 machine reason，按 provider credit、instance 月度、member 月度的稳定顺序返回第一个命中项。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - provider_credit_blocked
+                      - instance_monthly_generation_limit_reached
+                      - member_monthly_generation_limit_reached
+    TaskGovernanceRateLimited:
+      description: 治理阻止（可重试类）—— instance/member 频率（滚动 60 秒跨媒体）与 member 分媒体并发；响应携带 Retry-After。
+      headers:
+        Retry-After:
+          description: 建议的重试等待秒数（频率窗口剩余时间或固定建议值）。
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - instance_generation_rate_limited
+                      - member_generation_rate_limited
+                      - member_generation_concurrency_limited
+    TaskConflict:
+      description: 幂等/草稿冲突 —— 同 key 不同 payload，或 draft_revision 落后于当前草稿；既有草稿值永不被静默改写。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - idempotency_payload_conflict
+                      - draft_revision_conflict
+    TaskRetryConflict:
+      description: 重试条件不满足 —— 任务未终态，或没有未完成槽位可重试。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - task_not_terminal
+                      - no_incomplete_slots
+    TaskDraftRejected:
+      description: 准入复验拒绝 —— 结构不完整/非法的草稿、草稿值超出当前 manifest，或目标媒体当前不可用；过期或非法草稿不创建 Task，原值保留。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - draft_not_ready
+                      - draft_capability_stale
+                      - media_unavailable
+                      - invalid_request
     InternalError:
       description: 服务端内部错误，动作未完成。
       content:
@@ -1004,7 +1413,12 @@ components:
         - quantity
         - duration_seconds
         - references
+        - updated_at
       properties:
+        updated_at:
+          type: string
+          format: date-time
+          description: 草稿最近保存时刻（revision）；提交 Task 时作为 draft_revision 原样回传。
         prompt:
           type: string
           maxLength: 2000
@@ -1211,7 +1625,12 @@ components:
           description: 最近一次检查的结局；临时故障不永久改写既有状态。
         needs_attention:
           type: boolean
-          description: 派生提示（非持久状态）：凭据无效/不可用、暂停或任一媒体不可用时为 true。
+          description: 派生提示（非持久状态）：凭据无效/不可用、暂停、任一媒体不可用或存在持久额度阻止时为 true。
+        credit_blocked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Provider 402 建立的连接级持久额度阻止时刻；仅 Admin 可见，只能手动解除。
     MediaCapabilities:
       type: object
       required:
@@ -1526,3 +1945,262 @@ components:
           type: integer
         max_seconds:
           type: integer
+    TaskSubmitInput:
+      type: object
+      required:
+        - idempotency_key
+        - draft_revision
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: creator-scoped 幂等键；"再次生成"与"只重试未完成项"必须使用新键。
+        draft_revision:
+          type: string
+          format: date-time
+          description: 提交者所依据的草稿更新时刻（draft 更新时间戳）；Server 在准入边界复验。
+    TaskRetryInput:
+      type: object
+      required:
+        - idempotency_key
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+    GenerationTask:
+      type: object
+      required:
+        - id
+        - session_id
+        - status
+        - media_type
+        - slot_count
+        - cancel_requested
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - queued
+            - submitting
+            - processing
+            - persisting
+            - cancelling
+            - succeeded
+            - partially_succeeded
+            - failed
+            - cancelled
+            - timed_out
+          description: 单向状态机；终态永不重开，内部 retry 不回 queued。
+        media_type:
+          type: string
+          enum: [image, video]
+        slot_count:
+          type: integer
+          minimum: 1
+          maximum: 4
+        cancel_requested:
+          type: boolean
+          description: 取消是 best effort —— 已接受的外部工作继续权威收敛，已取得输出保留。
+        terminal_cause:
+          type: string
+          nullable: true
+          enum: [provider_outcome_indeterminate]
+          description: 零成功且含 indeterminate 槽位时的内部原因；对外映射 processing_indeterminate。
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        terminal_at:
+          type: string
+          format: date-time
+          nullable: true
+    GenerationSlot:
+      type: object
+      required:
+        - index
+        - status
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          maximum: 3
+        status:
+          type: string
+          enum:
+            - queued
+            - generating
+            - persisting
+            - cancelling
+            - succeeded
+            - failed
+            - cancelled
+            - timed_out
+            - indeterminate
+          description: queued/generating/persisting/cancelling 是 task/job/queue 的派生投影；后五者为写入一次的槽位终态。
+        failure_reason:
+          type: string
+          nullable: true
+          enum:
+            - invalid_input
+            - rights_confirmation_required
+            - input_policy_rejected
+            - output_policy_rejected
+            - action_required
+            - temporarily_unavailable
+            - processing_indeterminate
+            - internal_error
+          description: 稳定失败 taxonomy；部分成功逐槽位显示 reason。
+        result:
+          type: object
+          nullable: true
+          description: 仅成功槽位携带；输出已转存自有 Storage 并通过验证。
+          required:
+            - mime_type
+            - byte_size
+            - checksum_sha256
+          properties:
+            mime_type:
+              type: string
+            byte_size:
+              type: integer
+              format: int64
+            checksum_sha256:
+              type: string
+              description: 转存时计算并验证的 SHA-256（hex）。
+            width_px:
+              type: integer
+            height_px:
+              type: integer
+            duration_ms:
+              type: integer
+    GenerationTaskDetail:
+      type: object
+      required:
+        - task
+        - slots
+      properties:
+        task:
+          $ref: "#/components/schemas/GenerationTask"
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenerationSlot"
+        specification:
+          type: object
+          description: 创建者私有的冻结 Generation Specification（仅详情返回）。
+          required:
+            - schema_version
+            - media_type
+            - prompt
+            - model
+            - mode
+            - manifest_version
+            - quantity
+            - references
+          properties:
+            schema_version:
+              type: integer
+            media_type:
+              type: string
+              enum: [image, video]
+            prompt:
+              type: string
+            model:
+              type: string
+            mode:
+              type: string
+            manifest_version:
+              type: integer
+            ratio:
+              type: string
+              nullable: true
+            resolution:
+              type: string
+              nullable: true
+            quantity:
+              type: integer
+            duration_seconds:
+              type: integer
+              nullable: true
+            references:
+              type: array
+              items:
+                type: object
+                required: [material_id, role, kind, claims_version]
+                properties:
+                  material_id:
+                    type: string
+                    format: uuid
+                  role:
+                    type: string
+                  kind:
+                    type: string
+                    enum: [image, video, audio]
+                  claims_version:
+                    type: integer
+    GenerationTaskList:
+      type: object
+      required:
+        - tasks
+        - next_cursor
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenerationTask"
+        next_cursor:
+          type: string
+          nullable: true
+    GovernanceLimits:
+      type: object
+      description: 四个可选上限；null/缺省 = 未设置（不限），显式 0 = 禁止相应范围新 Task。
+      properties:
+        image_concurrency:
+          type: integer
+          nullable: true
+          minimum: 0
+        video_concurrency:
+          type: integer
+          nullable: true
+          minimum: 0
+        rate_limit:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: 滚动 60 秒内结构有效提交尝试上限（跨媒体）。
+        monthly_task_limit:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: Asia/Shanghai 自然月已准入 Task 上限（跨媒体）。
+    GovernanceUserEntry:
+      type: object
+      required: [user_id, limits]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        limits:
+          $ref: "#/components/schemas/GovernanceLimits"
+    GenerationGovernanceView:
+      type: object
+      required: [instance, users]
+      properties:
+        instance:
+          $ref: "#/components/schemas/GovernanceLimits"
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/GovernanceUserEntry"

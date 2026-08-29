@@ -6,6 +6,8 @@ import type {
   ReferenceMaterialView,
   SessionDraftInput
 } from '../api/go-creation-http'
+import type { GenerationTaskDetail, GenerationTaskView } from '../api/generation-task-http'
+import { isTerminalTaskStatus } from '../api/generation-task-http'
 import {
   allowedReferenceKinds,
   mediaCapability,
@@ -89,6 +91,22 @@ export interface CreationWorkbenchController {
   staleFields: ReadonlySet<DraftStaleField>
   deckCap: ReturnType<typeof referenceCap>
   allowedKinds: ReturnType<typeof allowedReferenceKinds>
+  tasks: readonly GenerationTaskView[]
+  taskDetails: Readonly<Record<string, GenerationTaskDetail>>
+  submitDisabled: boolean
+  submitBlockedReason: 'unavailable' | 'stale' | 'saving' | null
+  submit: () => void
+  cancelTask: (taskId: string) => void
+  retryTask: (taskId: string) => void
+  submitError: string | null
+  dismissSubmitError: () => void
+  /** Streams one succeeded slot's verified output for display. */
+  loadResultBlobUrl: (taskId: string, slotIndex: number) => Promise<string | null>
+  /** Retry of indeterminate work requires the creator's explicit risk confirm. */
+  requestIndeterminateRedo: (taskId: string) => void
+  confirmIndeterminateRedo: (taskId: string) => void
+  indeterminateTaskId: string | null
+  dismissIndeterminate: () => void
 }
 
 export function useCreationWorkbench(): CreationWorkbenchController {
@@ -105,6 +123,17 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const [saveStatus, setSaveStatus] = useState<DraftSaveStatus>('idle')
   const [manifest, setManifest] = useState<CapabilityManifest | null>(null)
   const [manifestStatus, setManifestStatus] = useState<ManifestStatus>('loading')
+  const [tasks, setTasks] = useState<readonly GenerationTaskView[]>([])
+  const [taskDetails, setTaskDetails] = useState<Readonly<Record<string, GenerationTaskDetail>>>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [indeterminateTaskId, setIndeterminateTaskId] = useState<string | null>(null)
+  const [eventStreamLive, setEventStreamLive] = useState(false)
+  const [invalidationTick, setInvalidationTick] = useState(0)
+  // Render-visible submission facts: the revision a submit would echo (null
+  // until a stored or freshly saved draft is authoritative) and whether a
+  // submission round trip is in flight.
+  const [draftRevision, setDraftRevision] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   // The manifest version the composer last saw — the save payload records it
   // verbatim; with no manifest ever seen, the stored draft's version stands.
@@ -114,6 +143,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const baselineRef = useRef<string>(JSON.stringify(emptyComposerDraft()))
   const draftRef = useRef<ComposerDraft>(draft)
   const selectedIdRef = useRef<string | null>(selectedId)
+  const draftRevisionRef = useRef<string | null>(null)
+  const submittingRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(false)
 
@@ -142,7 +173,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const toInput = useCallback(
     (value: ComposerDraft): SessionDraftInput => ({
       ...value,
-      manifestVersion: seenManifestVersion ?? 1
+      manifestVersion: seenManifestVersion ?? 1,
+      updatedAt: draftRevisionRef.current ?? ''
     }),
     [seenManifestVersion]
   )
@@ -158,6 +190,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       if (selectedIdRef.current !== sessionId) return
       if (result !== null && result.outcome === 'succeeded') {
         baselineRef.current = JSON.stringify(value)
+        draftRevisionRef.current = result.value.updatedAt
+        setDraftRevision(result.value.updatedAt)
         setSaveStatus('saved')
       } else {
         setSaveStatus('failed')
@@ -316,6 +350,40 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     setSaveStatus('idle')
   }, [])
 
+  // --- Generation Task kernel (issue #159) ---------------------------------
+
+  const loadTasks = useCallback(
+    async (sessionId: string) => {
+      if (!ports) return
+      const result = await ports.listTasks(sessionId).catch(() => null)
+      if (!mountedRef.current) return
+      if (selectedIdRef.current !== sessionId) return
+      if (result !== null && result.outcome === 'succeeded') {
+        setTasks(result.value.tasks)
+        const page = result.value.tasks
+        const details: Record<string, GenerationTaskDetail> = {}
+        await Promise.all(
+          page.map(async (task) => {
+            const detail = await ports.getTask(task.id).catch(() => null)
+            if (detail !== null && detail.outcome === 'succeeded') {
+              details[task.id] = detail.value
+            }
+          })
+        )
+        if (!mountedRef.current || selectedIdRef.current !== sessionId) return
+        setTaskDetails(details)
+      } else {
+        setTasks([])
+      }
+    },
+    [ports]
+  )
+
+  const refreshTasks = useCallback(() => {
+    const sessionId = selectedIdRef.current
+    if (sessionId !== null) void loadTasks(sessionId)
+  }, [loadTasks])
+
   const selectSession = useCallback(
     async (session: CreationSessionView) => {
       if (!ports) return
@@ -344,6 +412,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       }
       setMaterials(materialPage.value.materials)
       const stored = detail.value.draft
+      draftRevisionRef.current = stored?.updatedAt ?? null
+      setDraftRevision(stored?.updatedAt ?? null)
+      void loadTasks(session.id)
       applyLoadedDraft(
         stored === null
           ? // A never-saved session starts from the manifest defaults when the
@@ -368,7 +439,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       }
       await loadThumbnails(materialPage.value.materials)
     },
-    [applyLoadedDraft, flushSave, loadThumbnails, manifest, manifestDefaultDraft, ports]
+    [applyLoadedDraft, flushSave, loadTasks, loadThumbnails, manifest, manifestDefaultDraft, ports]
   )
 
   const setMediaType = useCallback(
@@ -501,8 +572,120 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     if (sessionId !== null) void persistDraft(sessionId, draftRef.current)
   }, [persistDraft])
 
+  // SSE invalidation after every persisted task change; while the stream is
+  // down, polling converges the view within the ten-second contract window.
+  useEffect(() => {
+    if (!ports) return
+    const unsubscribe = ports.subscribeEvents({
+      onInvalidation: () => {
+        setInvalidationTick((tick) => tick + 1)
+      },
+      onStateChange: setEventStreamLive
+    })
+    return unsubscribe
+  }, [ports])
+
+  useEffect(() => {
+    if (invalidationTick > 0) refreshTasks()
+  }, [invalidationTick, refreshTasks])
+
+  const hasActiveTasks = useMemo(
+    () => tasks.some((task) => !isTerminalTaskStatus(task.status)),
+    [tasks]
+  )
+
+  useEffect(() => {
+    if (eventStreamLive || !hasActiveTasks) return
+    const interval = setInterval(refreshTasks, 5000)
+    return () => clearInterval(interval)
+  }, [eventStreamLive, hasActiveTasks, refreshTasks])
+
+  const submit = useCallback(() => {
+    const sessionId = selectedIdRef.current
+    const revision = draftRevisionRef.current
+    if (!ports || sessionId === null || revision === null) return
+    if (submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
+    setSubmitError(null)
+    const run = async (): Promise<void> => {
+      // The submission freezes the SERVER-stored draft: flush any unsaved
+      // edit first so the frozen intent is exactly what the composer shows.
+      await flushSave()
+      const result = await ports
+        .submitTask(sessionId, {
+          idempotencyKey: crypto.randomUUID(),
+          draftRevision: draftRevisionRef.current ?? revision
+        })
+        .catch(() => null)
+      submittingRef.current = false
+      setSubmitting(false)
+      if (!mountedRef.current) return
+      if (selectedIdRef.current !== sessionId) return
+      if (result !== null && result.outcome === 'succeeded') {
+        setSubmitError(null)
+        setIndeterminateTaskId(null)
+        await loadTasks(sessionId)
+      } else if (result !== null && result.outcome === 'request-rejected') {
+        setSubmitError(result.code)
+      } else {
+        setSubmitError('network-failure')
+      }
+    }
+    void run()
+  }, [flushSave, loadTasks, ports])
+
+  // The composer's submit affordance: a void adapter so the JSX handler can
+  // stay a plain reference.
+  const submitCallback = useCallback(() => {
+    submit()
+  }, [submit])
+
+  const cancelTaskById = useCallback(
+    (taskId: string) => {
+      void ports
+        ?.cancelTask(taskId)
+        .then(() => refreshTasks())
+        .catch(() => undefined)
+    },
+    [ports, refreshTasks]
+  )
+
+  const retryTaskById = useCallback(
+    (taskId: string) => {
+      void ports
+        ?.retryTask(taskId, crypto.randomUUID())
+        .then((result) => {
+          if (result.outcome === 'succeeded') {
+            setIndeterminateTaskId(null)
+            refreshTasks()
+          } else {
+            setSubmitError(result.outcome === 'request-rejected' ? result.code : 'network-failure')
+          }
+        })
+        .catch(() => undefined)
+    },
+    [ports, refreshTasks]
+  )
+
+  const confirmIndeterminateRedo = useCallback(
+    (taskId: string) => retryTaskById(taskId),
+    [retryTaskById]
+  )
+
+  const loadResultBlobUrlFor = useCallback(
+    (taskId: string, slotIndex: number) =>
+      ports?.loadResultBlobUrl(taskId, slotIndex) ?? Promise.resolve(null),
+    [ports]
+  )
+
   const staleFields: ReadonlySet<DraftStaleField> = useMemo(
-    () => staleDraftFields(manifest, { ...draft, manifestVersion: seenManifestVersion ?? 1 }),
+    () =>
+      staleDraftFields(manifest, {
+        ...draft,
+        manifestVersion: seenManifestVersion ?? 1,
+        updatedAt: ''
+      }),
     [draft, manifest, seenManifestVersion]
   )
 
@@ -511,13 +694,28 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [selectedId, sessions]
   )
 
+  const submitBlocked: 'unavailable' | 'stale' | 'saving' | null = (() => {
+    if (draft.mediaType === null || draft.model === null || draft.mode === null)
+      return 'unavailable'
+    // Submission freezes a manifest-conformant intent: without the current
+    // manifest the client cannot vouch for the draft, so the command stays
+    // inert (the server would reject it as stale or unavailable anyway).
+    const capability = mediaCapability(manifest, draft.mediaType)
+    if (manifestStatus !== 'ready' || capability === null || !capability.available) {
+      return 'unavailable'
+    }
+    if (staleFields.size > 0) return 'stale'
+    if (saveStatus === 'saving' || saveStatus === 'failed') return 'saving'
+    return null
+  })()
+
   const deckCap = referenceCap(manifest, draft.mediaType ?? 'image', draft.mode)
   const allowedKinds = allowedReferenceKinds(manifest, draft.mediaType, draft.mode)
 
   return {
     ports,
     status,
-    reload: () => setReloadAttempt((attempt) => attempt + 1),
+    reload: (): void => setReloadAttempt((attempt) => attempt + 1),
     sessions,
     selected,
     selectedId,
@@ -548,6 +746,20 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     manifestStatus,
     staleFields,
     deckCap,
-    allowedKinds
+    allowedKinds,
+    tasks,
+    taskDetails,
+    submitDisabled: submitBlocked !== null || draftRevision === null || submitting,
+    submitBlockedReason: submitBlocked,
+    submit: submitCallback,
+    cancelTask: cancelTaskById,
+    retryTask: retryTaskById,
+    submitError,
+    dismissSubmitError: () => setSubmitError(null),
+    loadResultBlobUrl: loadResultBlobUrlFor,
+    requestIndeterminateRedo: (taskId: string) => setIndeterminateTaskId(taskId),
+    confirmIndeterminateRedo,
+    indeterminateTaskId,
+    dismissIndeterminate: () => setIndeterminateTaskId(null)
   }
 }
