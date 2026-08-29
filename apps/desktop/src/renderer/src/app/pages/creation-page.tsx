@@ -39,9 +39,7 @@ export function CreationPage(): React.JSX.Element | null {
   return (
     <CreationRuntimeContext.Provider value={ports}>
       <AppShell>
-        <div className="h-full min-h-0 overflow-hidden">
-          <CreationWorkbenchPage />
-        </div>
+        <CreationWorkbenchPage />
       </AppShell>
     </CreationRuntimeContext.Provider>
   )

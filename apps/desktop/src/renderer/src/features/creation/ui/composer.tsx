@@ -1,9 +1,13 @@
 import { useTranslation } from 'react-i18next'
 import {
+  BoxIcon,
   CheckIcon,
   ChevronDownIcon,
+  Clock3Icon,
   ImageIcon,
   SendIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
   TriangleAlertIcon,
   VideoIcon
 } from 'lucide-react'
@@ -52,6 +56,19 @@ const modeKeys = {
   'omni-reference': 'composer.mode.omni-reference'
 } as const
 
+// Control-row and menu surfaces from the accepted prototype (6e465e8),
+// expressed through theme tokens: an h-8 pill per capability, menus opening
+// upward as large rounded-2xl touch surfaces.
+const controlClass =
+  'group flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-accent px-2.5 text-[10px] text-foreground/80 outline-none transition-colors hover:bg-input data-[state=open]:bg-input'
+
+const staleTriggerClass = 'border-warning/70 bg-accent text-warning'
+
+const menuClass = 'w-52 rounded-2xl p-2 shadow-2xl'
+const menuLabelClass = 'text-muted-foreground px-2 pb-2 text-[10px]'
+const menuItemClass = 'h-11 cursor-pointer rounded-xl px-3 text-xs'
+const accentIconClass = 'size-3 text-cyan-600 dark:text-cyan-300'
+
 /**
  * The fixed bottom Composer (issue #177, prototype 6e465e8): prompt text
  * area, the inline reference deck, and the capability controls expanding
@@ -93,16 +110,6 @@ export function CreationComposer({
     capability?.available === true && capability.prompt ? capability.prompt.maxChars : 2000
   const controls = media !== null && mediaAvailable && manifestStatus === 'ready'
 
-  const triggerClass =
-    'flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] outline-none transition-colors data-[state=open]:bg-accent'
-
-  const staleTrigger = (stale: boolean): string =>
-    stale
-      ? 'border-warning/70 text-warning'
-      : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted'
-
-  const deckMaterials = workbench.materials
-
   return (
     <div
       className="absolute right-6 bottom-5 left-6 z-20 mx-auto max-w-[760px]"
@@ -122,7 +129,7 @@ export function CreationComposer({
           <div className="min-w-0 shrink">
             <ReferenceDeck
               bindings={draft.references}
-              materials={deckMaterials}
+              materials={workbench.materials}
               thumbnails={workbench.thumbnails}
               cap={workbench.deckCap}
               allowedKinds={workbench.allowedKinds}
@@ -161,23 +168,12 @@ export function CreationComposer({
         <div className="mt-2 flex min-w-0 items-center gap-1.5 border-t pt-2">
           <MediaMenu
             workbench={workbench}
-            triggerClass={`${triggerClass} ${staleTrigger(staleFields.has('mediaType'))}`}
+            triggerClass={`${controlClass} ${draft.mediaType !== null && !staleFields.has('mediaType') ? 'text-cyan-600 dark:text-cyan-300' : ''} ${staleFields.has('mediaType') ? staleTriggerClass : ''}`}
           />
-          {media !== null && (
-            <ModelMenu
-              workbench={workbench}
-              triggerClass={`${triggerClass} ${staleTrigger(staleFields.has('model'))}`}
-            />
-          )}
-          {media === 'video' && controls && (
-            <ModeMenu
-              workbench={workbench}
-              triggerClass={`${triggerClass} ${staleTrigger(staleFields.has('mode'))}`}
-            />
-          )}
-          {media !== null && controls && (
-            <ParamsMenu workbench={workbench} triggerClass={triggerClass} />
-          )}
+          {media !== null && <ModelMenu workbench={workbench} triggerClass={controlClass} />}
+          {media === 'video' && controls && <ModeMenu workbench={workbench} />}
+          {media !== null && controls && <ParamsMenu workbench={workbench} />}
+          {media === 'video' && controls && <DurationMenu workbench={workbench} />}
           <div className="ml-auto flex items-center gap-2">
             <SaveStatus workbench={workbench} />
             <button
@@ -187,7 +183,7 @@ export function CreationComposer({
               aria-label={String(t('composer.submit'))}
               aria-disabled="true"
               data-testid="composer-submit"
-              className="bg-muted text-muted-foreground flex size-8 items-center justify-center rounded-full"
+              className="bg-accent text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-full"
             >
               <SendIcon className="size-4" aria-hidden />
             </button>
@@ -206,7 +202,7 @@ function MediaMenu({
   readonly triggerClass: string
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { manifest, manifestStatus, draft } = workbench
+  const { manifest, manifestStatus, draft, staleFields } = workbench
   const options: ReadonlyArray<{
     readonly media: DraftMediaType
     readonly available: boolean | null
@@ -218,39 +214,50 @@ function MediaMenu({
     draft.mediaType === null
       ? String(t('composer.media.label'))
       : String(t(`composer.media.${draft.mediaType}`))
+  const stale = staleFields.has('mediaType')
   return (
     <DropdownMenu>
       <DropdownMenuTrigger data-testid="composer-media" className={triggerClass}>
         {draft.mediaType === 'video' ? (
-          <VideoIcon className="size-3.5 text-cyan-600 dark:text-cyan-300" aria-hidden />
+          <VideoIcon className="size-3.5" aria-hidden />
         ) : draft.mediaType === 'image' ? (
-          <ImageIcon className="size-3.5 text-cyan-600 dark:text-cyan-300" aria-hidden />
+          <ImageIcon className="size-3.5" aria-hidden />
         ) : null}
-        <span className={draft.mediaType === null ? '' : 'text-cyan-600 dark:text-cyan-300'}>
-          {label}
-        </span>
-        <ChevronDownIcon className="size-3 opacity-60" aria-hidden />
+        <span className="max-w-40 truncate">{label}</span>
+        {stale && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
+        <ChevronDownIcon
+          className="size-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+          aria-hidden
+        />
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="min-w-[180px]">
+      <DropdownMenuContent side="top" sideOffset={10} align="start" className={menuClass}>
+        <DropdownMenuLabel className={menuLabelClass}>
+          {t('composer.media.label')}
+        </DropdownMenuLabel>
         {options.map(({ media, available }) => {
           const reason = manifest === null ? null : manifestImageVideoReason(manifest, media)
           return (
             <DropdownMenuItem
               key={media}
               disabled={available === false}
+              className={menuItemClass}
               onSelect={() => workbench.setMediaType(media)}
             >
-              <span className="flex items-center gap-1.5">
-                {available === false ? (
+              {media === 'video' ? (
+                <VideoIcon className="size-4" aria-hidden />
+              ) : (
+                <ImageIcon className="size-4" aria-hidden />
+              )}
+              {t(`composer.media.${media}`)}
+              {available === false && reason !== null && (
+                <span className="text-muted-foreground ml-auto flex items-center gap-1 text-[10px]">
                   <TriangleAlertIcon className="text-warning size-3" aria-hidden />
-                ) : draft.mediaType === media ? (
-                  <CheckIcon className="size-3" aria-hidden />
-                ) : null}
-                {t(`composer.media.${media}`)}
-                {reason !== null && (
-                  <span className="text-muted-foreground">{t(reasonKeys[reason])}</span>
-                )}
-              </span>
+                  {t(reasonKeys[reason])}
+                </span>
+              )}
+              {draft.mediaType === media && available !== false && (
+                <CheckIcon className="ml-auto size-4" aria-hidden />
+              )}
             </DropdownMenuItem>
           )
         })}
@@ -288,18 +295,35 @@ function ModelMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger data-testid="composer-model" className={triggerClass}>
+        <BoxIcon className="size-3.5 shrink-0" aria-hidden />
         <span className="max-w-40 truncate">{draft.model ?? t('composer.model.label')}</span>
-        {staleModel !== null && <TriangleAlertIcon className="text-warning size-3" aria-hidden />}
-        <ChevronDownIcon className="size-3 opacity-60" aria-hidden />
+        {staleModel !== null && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
+        <SparklesIcon className={accentIconClass} aria-hidden />
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="min-w-[220px]">
+      <DropdownMenuContent
+        side="top"
+        sideOffset={10}
+        align="start"
+        className="w-[360px] rounded-2xl p-2 shadow-2xl"
+      >
+        <DropdownMenuLabel className={menuLabelClass}>
+          {t('composer.model.label')}
+          {draft.model !== null ? ` · ${draft.model}` : ''}
+        </DropdownMenuLabel>
         {staleModel !== null && <StaleRow value={staleModel} />}
         {candidates.map((model) => (
-          <DropdownMenuItem key={model} onSelect={() => workbench.patchDraft({ model })}>
-            <span className="flex items-center gap-1.5">
-              {draft.model === model ? <CheckIcon className="size-3" aria-hidden /> : null}
-              {model}
+          <DropdownMenuItem
+            key={model}
+            className="min-h-14 cursor-pointer rounded-xl px-3 py-2"
+            onSelect={() => workbench.patchDraft({ model })}
+          >
+            <span className="border-border bg-accent grid size-9 shrink-0 place-items-center rounded-lg border">
+              <SparklesIcon className="size-4" aria-hidden />
             </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium">{model}</span>
+            </span>
+            {draft.model === model ? <CheckIcon className="size-4" aria-hidden /> : null}
           </DropdownMenuItem>
         ))}
         {candidates.length === 0 && staleModel === null && (
@@ -313,11 +337,9 @@ function ModelMenu({
 }
 
 function ModeMenu({
-  workbench,
-  triggerClass
+  workbench
 }: {
   readonly workbench: CreationWorkbenchController
-  readonly triggerClass: string
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const { manifest, draft, staleFields } = workbench
@@ -325,25 +347,36 @@ function ModeMenu({
   if (media === null) return <></>
   const candidates = modeCandidates(manifest, media)
   const staleMode = staleFields.has('mode') ? draft.mode : null
+  const label =
+    draft.mode !== null && draft.mode in modeKeys
+      ? t(modeKeys[draft.mode as CapabilityMediaMode])
+      : (draft.mode ?? t('composer.mode.label'))
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger data-testid="composer-mode" className={triggerClass}>
-        <span>
-          {draft.mode !== null && draft.mode in modeKeys
-            ? t(modeKeys[draft.mode as CapabilityMediaMode])
-            : (draft.mode ?? t('composer.mode.label'))}
-        </span>
-        {staleMode !== null && <TriangleAlertIcon className="text-warning size-3" aria-hidden />}
-        <ChevronDownIcon className="size-3 opacity-60" aria-hidden />
+      <DropdownMenuTrigger
+        data-testid="composer-mode"
+        className={`${controlClass} ${staleMode !== null ? staleTriggerClass : ''}`}
+      >
+        <SlidersHorizontalIcon className="size-3.5 shrink-0" aria-hidden />
+        <span className="max-w-40 truncate">{label}</span>
+        {staleMode !== null && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
+        <ChevronDownIcon
+          className="size-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+          aria-hidden
+        />
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="min-w-[160px]">
+      <DropdownMenuContent side="top" sideOffset={10} align="start" className={menuClass}>
+        <DropdownMenuLabel className={menuLabelClass}>{t('composer.mode.label')}</DropdownMenuLabel>
         {staleMode !== null && <StaleRow value={staleMode} />}
         {candidates.map((mode) => (
-          <DropdownMenuItem key={mode} onSelect={() => workbench.setMode(mode)}>
-            <span className="flex items-center gap-1.5">
-              {draft.mode === mode ? <CheckIcon className="size-3" aria-hidden /> : null}
-              {t(modeKeys[mode])}
-            </span>
+          <DropdownMenuItem
+            key={mode}
+            className={menuItemClass}
+            onSelect={() => workbench.setMode(mode)}
+          >
+            <SlidersHorizontalIcon className="size-4" aria-hidden />
+            {t(modeKeys[mode])}
+            {draft.mode === mode ? <CheckIcon className="ml-auto size-4" aria-hidden /> : null}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -352,11 +385,9 @@ function ModeMenu({
 }
 
 function ParamsMenu({
-  workbench,
-  triggerClass
+  workbench
 }: {
   readonly workbench: CreationWorkbenchController
-  readonly triggerClass: string
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const { draft, manifest, staleFields } = workbench
@@ -367,98 +398,89 @@ function ParamsMenu({
   const ratios = capability.ratios ?? []
   const resolutions = capability.resolutions ?? []
   const quantities = capability.quantities ?? []
-  const durations = capability.durations ?? []
   const staleRatio = staleFields.has('ratio') ? draft.ratio : null
   const staleResolution = staleFields.has('resolution') ? draft.resolution : null
   const staleQuantity = staleFields.has('quantity') ? draft.quantity : null
-  const staleDuration = staleFields.has('durationSeconds') ? draft.durationSeconds : null
-
-  const summary =
-    media === 'image'
-      ? [draft.ratio, draft.resolution, draft.quantity === null ? null : `×${draft.quantity}`]
-      : [
-          draft.resolution,
-          draft.durationSeconds === null
-            ? null
-            : t('composer.params.seconds', { n: draft.durationSeconds })
-        ]
-  const staleParams =
-    staleRatio !== null ||
-    staleResolution !== null ||
-    staleQuantity !== null ||
-    staleDuration !== null
-  const triggerWithStale =
-    triggerClass +
-    ' ' +
-    (staleParams
-      ? 'border-warning/70 text-warning'
-      : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted')
+  const staleParams = staleRatio !== null || staleResolution !== null || staleQuantity !== null
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger data-testid="composer-params" className={triggerWithStale}>
-        <span className="max-w-52 truncate">
-          {summary.filter((entry) => entry !== null).join(' · ') || t('composer.params.label')}
-        </span>
-        {staleParams && <TriangleAlertIcon className="text-warning size-3" aria-hidden />}
-        <ChevronDownIcon className="size-3 opacity-60" aria-hidden />
+      <DropdownMenuTrigger
+        data-testid="composer-params"
+        aria-label={t('composer.params.label')}
+        className={`${controlClass} ${staleParams ? staleTriggerClass : ''}`}
+      >
+        <span className="block size-3 shrink-0 rounded-[3px] border border-current" aria-hidden />
+        {media === 'image' && draft.ratio !== null && <span>{draft.ratio}</span>}
+        {media === 'image' && draft.ratio !== null && draft.resolution !== null && <Separator />}
+        {draft.resolution !== null && <span>{draft.resolution}</span>}
+        <SparklesIcon className={accentIconClass} aria-hidden />
+        {media === 'image' && draft.quantity !== null && (
+          <>
+            <Separator />
+            <span>{draft.quantity}</span>
+          </>
+        )}
+        {staleParams && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="end" className="w-[320px] p-3">
-        <div className="grid gap-3">
-          {media === 'image' && (
+      <DropdownMenuContent
+        side="top"
+        sideOffset={10}
+        align="end"
+        className="w-[420px] rounded-2xl p-4 shadow-2xl"
+      >
+        <div className="grid gap-4">
+          {media === 'image' && ratios.length > 0 && (
             <ParamGroup label={t('composer.params.ratio')}>
               {staleRatio !== null && <StaleRow value={staleRatio} />}
-              <div className="grid grid-cols-5 gap-1">
+              <div className="bg-accent/60 grid [grid-template-columns:repeat(auto-fit,minmax(64px,1fr))] gap-1 rounded-xl p-1">
                 {ratios.map((ratio) => (
-                  <ParamOption
+                  <button
                     key={ratio}
-                    selected={draft.ratio === ratio}
-                    onSelect={() => workbench.patchDraft({ ratio })}
-                    label={ratio}
-                  />
+                    type="button"
+                    aria-pressed={draft.ratio === ratio}
+                    onClick={() => workbench.patchDraft({ ratio })}
+                    className={paramOptionClass(ratio === draft.ratio, 'h-11')}
+                  >
+                    <span className="mx-auto mb-1 block h-2.5 w-4 rounded-[3px] border border-current" />
+                    {ratio}
+                  </button>
                 ))}
               </div>
             </ParamGroup>
           )}
-          <ParamGroup label={t('composer.params.resolution')}>
-            {staleResolution !== null && <StaleRow value={staleResolution} />}
-            <div className="grid grid-cols-3 gap-1">
-              {resolutions.map((resolution) => (
-                <ParamOption
-                  key={resolution}
-                  selected={draft.resolution === resolution}
-                  onSelect={() => workbench.patchDraft({ resolution })}
-                  label={resolution}
-                />
-              ))}
-            </div>
-          </ParamGroup>
-          {media === 'image' && (
+          {resolutions.length > 0 && (
+            <ParamGroup label={t('composer.params.resolution')}>
+              {staleResolution !== null && <StaleRow value={staleResolution} />}
+              <div className="bg-accent/60 grid grid-cols-3 gap-1 rounded-xl p-1">
+                {resolutions.map((resolution) => (
+                  <button
+                    key={resolution}
+                    type="button"
+                    aria-pressed={draft.resolution === resolution}
+                    onClick={() => workbench.patchDraft({ resolution })}
+                    className={paramOptionClass(resolution === draft.resolution, 'h-9')}
+                  >
+                    {resolution}
+                  </button>
+                ))}
+              </div>
+            </ParamGroup>
+          )}
+          {media === 'image' && quantities.length > 0 && (
             <ParamGroup label={t('composer.params.quantity')}>
               {staleQuantity !== null && <StaleRow value={String(staleQuantity)} />}
-              <div className="grid grid-cols-4 gap-1">
+              <div className="bg-accent/60 grid grid-cols-4 gap-1 rounded-xl p-1">
                 {quantities.map((quantity) => (
-                  <ParamOption
+                  <button
                     key={quantity}
-                    selected={draft.quantity === quantity}
-                    onSelect={() => workbench.patchDraft({ quantity })}
-                    label={String(quantity)}
-                  />
-                ))}
-              </div>
-            </ParamGroup>
-          )}
-          {media === 'video' && durations.length > 0 && (
-            <ParamGroup label={t('composer.params.duration')}>
-              {staleDuration !== null && <StaleRow value={`${staleDuration}s`} />}
-              <div className="grid grid-cols-4 gap-1">
-                {durations.map((duration) => (
-                  <ParamOption
-                    key={duration}
-                    selected={draft.durationSeconds === duration}
-                    onSelect={() => workbench.patchDraft({ durationSeconds: duration })}
-                    label={t('composer.params.seconds', { n: duration })}
-                  />
+                    type="button"
+                    aria-pressed={draft.quantity === quantity}
+                    onClick={() => workbench.patchDraft({ quantity })}
+                    className={paramOptionClass(draft.quantity === quantity, 'h-9')}
+                  >
+                    {quantity}
+                  </button>
                 ))}
               </div>
             </ParamGroup>
@@ -466,6 +488,83 @@ function ParamsMenu({
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/** The prototype's dedicated video-length control, fed by manifest options. */
+function DurationMenu({
+  workbench
+}: {
+  readonly workbench: CreationWorkbenchController
+}): React.JSX.Element {
+  const { t } = useTranslation('creation')
+  const { draft, manifest, staleFields } = workbench
+  const capability = mediaCapability(manifest, 'video')
+  if (capability === null || !capability.available) return <></>
+  const durations = capability.durations ?? []
+  if (durations.length === 0) return <></>
+  const staleDuration = staleFields.has('durationSeconds') ? draft.durationSeconds : null
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        data-testid="composer-duration"
+        aria-label={t('composer.params.duration')}
+        className={`${controlClass} ${staleDuration !== null ? staleTriggerClass : ''}`}
+      >
+        <Clock3Icon className="size-3.5 shrink-0" aria-hidden />
+        <span>
+          {draft.durationSeconds !== null
+            ? t('composer.params.durationShort', { n: draft.durationSeconds })
+            : t('composer.params.duration')}
+        </span>
+        {staleDuration !== null && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side="top"
+        sideOffset={10}
+        align="end"
+        className="w-[400px] rounded-2xl p-4 shadow-2xl"
+      >
+        <p className="text-muted-foreground mb-4 text-xs font-medium">
+          {t('composer.params.duration')}
+        </p>
+        {staleDuration !== null && (
+          <div className="mb-3">
+            <StaleRow value={t('composer.params.durationShort', { n: staleDuration })} />
+          </div>
+        )}
+        <div className="bg-accent/60 grid [grid-template-columns:repeat(auto-fit,minmax(64px,1fr))] gap-1 rounded-xl p-1">
+          {durations.map((duration) => (
+            <button
+              key={duration}
+              type="button"
+              aria-pressed={draft.durationSeconds === duration}
+              onClick={() => workbench.patchDraft({ durationSeconds: duration })}
+              className={paramOptionClass(draft.durationSeconds === duration, 'h-9')}
+            >
+              {t('composer.params.seconds', { n: duration })}
+            </button>
+          ))}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function Separator(): React.JSX.Element {
+  return (
+    <span className="text-muted-foreground/60" aria-hidden>
+      |
+    </span>
+  )
+}
+
+function paramOptionClass(selected: boolean, height: string): string {
+  return (
+    `${height} rounded-lg text-[11px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ` +
+    (selected
+      ? 'bg-accent text-foreground font-medium'
+      : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground')
   )
 }
 
@@ -478,35 +577,9 @@ function ParamGroup({
 }): React.JSX.Element {
   return (
     <div className="grid gap-1.5">
-      <p className="text-muted-foreground text-[10px] uppercase">{label}</p>
+      <p className="text-muted-foreground text-[10px]">{label}</p>
       {children}
     </div>
-  )
-}
-
-function ParamOption({
-  label,
-  selected,
-  onSelect
-}: {
-  readonly label: string
-  readonly selected: boolean
-  readonly onSelect: () => void
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className={
-        'rounded-md px-2 py-1.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ' +
-        (selected
-          ? 'bg-accent text-accent-foreground font-medium'
-          : 'bg-muted/60 text-muted-foreground hover:bg-muted')
-      }
-    >
-      {label}
-    </button>
   )
 }
 

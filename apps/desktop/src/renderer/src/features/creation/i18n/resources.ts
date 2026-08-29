@@ -7,12 +7,12 @@ export const creationTranslations = defineResourceTranslations({
   'zh-CN': {
     creation: {
       sessions: {
-        label: '我的创作',
+        label: '开启创作',
         empty: '还没有创作会话，从一个空白草稿开始',
         unnamed: '未命名创作',
         remove: '删除会话 {{name}}',
         newLabel: '新会话名称（可选）',
-        newPlaceholder: '新会话…',
+        newPlaceholder: '新对话',
         newSubmit: '创建',
         private: 'Creation Session 由创建者私有',
         meta: {
@@ -25,9 +25,10 @@ export const creationTranslations = defineResourceTranslations({
       workspace: {
         label: '工作区',
         empty: '选择或创建一个创作会话开始你的作品',
+        draftMeta: '草稿',
         generationPending: '图片与视频生成将在此处呈现',
         heroTitle: '你好，想创作什么？',
-        heroSubtitle: '从描述开始，或选一个创作起点',
+        heroSubtitle: '从描述开始，或选一个电商创作起点',
         templateTry: '试一试',
         templates: {
           scene: {
@@ -50,8 +51,8 @@ export const creationTranslations = defineResourceTranslations({
       composer: {
         label: '创作输入',
         promptLabel: '提示词',
-        promptPlaceholder: '描述你想生成的画面或视频…',
-        promptPlaceholderWithRefs: '描述如何使用这些参考素材…',
+        promptPlaceholder: '输入想法，或添加参考内容开始创作',
+        promptPlaceholderWithRefs: '继续添加参考内容，或输入你想创作的画面',
         submit: '生成',
         submitPending: '生成提交将在后续版本开放，草稿会自动保存。',
         media: { label: '媒体', image: '图片生成', video: '视频生成' },
@@ -71,7 +72,8 @@ export const creationTranslations = defineResourceTranslations({
           resolution: '分辨率',
           quantity: '数量',
           duration: '时长',
-          seconds: '{{n}} 秒'
+          seconds: '{{n}} 秒',
+          durationShort: '{{n}}s'
         },
         stale: {
           badge: '能力已变化',
@@ -104,6 +106,8 @@ export const creationTranslations = defineResourceTranslations({
         deck: {
           label: '参考素材牌堆',
           add: '添加参考素材',
+          tile: '参考内容',
+          count: '{{n}} 张参考图片',
           remove: '移除 {{name}}',
           kind: { image: '图', video: '视频', audio: '音' }
         }
@@ -191,12 +195,12 @@ export const creationTranslations = defineResourceTranslations({
   en: {
     creation: {
       sessions: {
-        label: 'My creations',
+        label: 'Start creating',
         empty: 'No creation sessions yet; start from a blank draft',
         unnamed: 'Untitled creation',
         remove: 'Delete session {{name}}',
         newLabel: 'New session name (optional)',
-        newPlaceholder: 'New session…',
+        newPlaceholder: 'New conversation',
         newSubmit: 'Create',
         private: 'Creation Sessions are private to their creator',
         meta: {
@@ -209,6 +213,7 @@ export const creationTranslations = defineResourceTranslations({
       workspace: {
         label: 'Workspace',
         empty: 'Pick or create a session to start your work',
+        draftMeta: 'Draft',
         generationPending: 'Image and video generation will appear here',
         heroTitle: 'Hello — what will you create?',
         heroSubtitle: 'Start from a description, or pick a starting point',
@@ -237,8 +242,8 @@ export const creationTranslations = defineResourceTranslations({
       composer: {
         label: 'Creation input',
         promptLabel: 'Prompt',
-        promptPlaceholder: 'Describe the image or video you want to generate…',
-        promptPlaceholderWithRefs: 'Describe how to use these reference materials…',
+        promptPlaceholder: 'Describe an idea, or add reference material to start',
+        promptPlaceholderWithRefs: 'Add more reference material, or describe the image you want',
         submit: 'Generate',
         submitPending: 'Generation submission arrives in a later release; the draft autosaves.',
         media: { label: 'Media', image: 'Image generation', video: 'Video generation' },
@@ -258,7 +263,8 @@ export const creationTranslations = defineResourceTranslations({
           resolution: 'Resolution',
           quantity: 'Quantity',
           duration: 'Duration',
-          seconds: '{{n}}s'
+          seconds: '{{n}}s',
+          durationShort: '{{n}}s'
         },
         stale: {
           badge: 'Capability changed',
@@ -293,6 +299,8 @@ export const creationTranslations = defineResourceTranslations({
         deck: {
           label: 'Reference material deck',
           add: 'Add reference material',
+          tile: 'Reference',
+          count: '{{n}} reference images',
           remove: 'Remove {{name}}',
           kind: { image: 'IMG', video: 'VID', audio: 'AUD' }
         }

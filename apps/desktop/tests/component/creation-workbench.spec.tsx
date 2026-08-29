@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/experimental-ct-react'
-import { CreationWorkbenchStory } from './fixtures/creation-workbench.story'
+import {
+  CreationWorkbenchShellStory,
+  CreationWorkbenchStory
+} from './fixtures/creation-workbench.story'
 import type { SessionDraftInput } from '../src/renderer/src/features/creation/api/go-creation-http'
 import type { CapabilityManifest } from '../src/renderer/src/features/creation/api/capability-manifest-http'
 
@@ -107,7 +110,7 @@ test('selecting a session recovers its stored draft verbatim', async ({ mount, p
   await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-lite')
   await expect(page.getByTestId('composer-params')).toContainText('4:5')
   await expect(page.getByTestId('composer-params')).toContainText('2K')
-  await expect(page.getByTestId('composer-params')).toContainText('×2')
+  await expect(page.getByTestId('composer-params').getByText('2', { exact: true })).toBeVisible()
 })
 
 test('editing the prompt autosaves the full draft with its ordered references', async ({
@@ -229,18 +232,22 @@ test('the reference deck expands on focus with full keyboard equivalence', async
     .toContain('dddddddd-0000-4000-8000-000000000004')
 })
 
-test('the deck strip is the only horizontal overflow layer in the composer', async ({
+test('the expanded deck overlays in place instead of squeezing the prompt', async ({
   mount,
   page
 }) => {
   await mount(<CreationWorkbenchStory />)
   await selectFirstSession(page)
 
-  // CT has no Tailwind runtime, so the structural contract is asserted on
-  // class names: only the expanded deck strip scrolls horizontally.
+  // The prototype expands the pile over the workspace: the prompt's geometry
+  // must not shift when the fan opens (bounded by the 4-reference cap).
+  const prompt = page.getByTestId('composer-prompt')
+  const before = await prompt.boundingBox()
   await page.getByTestId('reference-deck').hover()
-  const strip = await page.getByTestId('deck-strip').getAttribute('class')
-  expect(strip).toContain('overflow-x-auto')
+  await expect(page.getByTestId('deck-strip')).toBeVisible()
+  const after = await prompt.boundingBox()
+  expect(after?.x).toBe(before?.x)
+  expect(after?.width).toBe(before?.width)
 })
 
 test('submitting stays disabled without faking success', async ({ mount, page }) => {
@@ -250,4 +257,22 @@ test('submitting stays disabled without faking success', async ({ mount, page })
   const submit = page.getByTestId('composer-submit')
   await expect(submit).toBeDisabled()
   await expect(submit).toHaveAttribute('aria-disabled', 'true')
+})
+
+test('the workbench fills the shell content area it is mounted in', async ({ mount, page }) => {
+  // Regression for the desktop fill bug: the page used to sit behind a plain
+  // block wrapper in app/pages/creation-page.tsx, which made the section's
+  // flex-1 inert and left dead space under the composer. The story mounts the
+  // real page exactly as the App Shell does — direct child of the shell's
+  // flex-col content container inside a definite-height inset. Seam note: the
+  // real CreationPage composition (auth + connection providers) is not
+  // CT-mountable, so this pins the shell↔page fill contract, not that file's
+  // own JSX; keep creation-page.tsx wrapper-free.
+  await mount(<CreationWorkbenchShellStory />)
+  await selectFirstSession(page)
+
+  const section = await page.getByTestId('creation-workbench').boundingBox()
+  const shell = await page.getByTestId('shell-content').boundingBox()
+  expect(section!.y).toBeCloseTo(shell!.y, 0)
+  expect(section!.height).toBeGreaterThanOrEqual(shell!.height - 1)
 })

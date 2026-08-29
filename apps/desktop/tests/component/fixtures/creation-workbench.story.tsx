@@ -173,20 +173,6 @@ const activeManifest: CapabilityManifest = {
   }
 }
 
-/** A stored draft carrying values the current manifest has removed. */
-const staleDraft: SessionDraftInput = {
-  prompt: 'legacy campaign draft',
-  mediaType: 'image',
-  manifestVersion: 1,
-  model: 'removed-legacy-model',
-  mode: 'reference-image',
-  ratio: '7:3',
-  resolution: '2K',
-  quantity: 2,
-  durationSeconds: null,
-  references: [{ materialId: materialOne.id, role: 'reference' }]
-}
-
 export interface DeckTestControls {
   saveDraftCalls(): ReadonlyArray<{ sessionId: string; draft: unknown }>
   deleteMaterialCalls(): string[]
@@ -301,8 +287,7 @@ interface StoryOptions {
   readonly sessions?: readonly CreationSessionView[]
 }
 
-/** The standard story: an active manifest and one session holding materials. */
-export function CreationWorkbenchStory(options: StoryOptions = {}): React.JSX.Element {
+function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): React.JSX.Element {
   const sessions = options.sessions ?? [sessionA, sessionB]
   return (
     <CreationRuntimeContext.Provider
@@ -332,9 +317,35 @@ export function CreationWorkbenchStory(options: StoryOptions = {}): React.JSX.El
         }
       })}
     >
-      <Frame>
-        <CreationWorkbenchPage />
-      </Frame>
+      <CreationWorkbenchPage />
     </CreationRuntimeContext.Provider>
+  )
+}
+
+/** The standard story: an active manifest and one session holding materials. */
+export function CreationWorkbenchStory(options: StoryOptions = {}): React.JSX.Element {
+  return (
+    <Frame>
+      <RuntimeWorkbenchPage options={options} />
+    </Frame>
+  )
+}
+
+/**
+ * Layout-contract story: the real page mounted exactly as the App Shell
+ * composes it — a direct child of the shell's flex-col content container
+ * (see app/pages/creation-page.tsx). Used to pin that the workbench fills
+ * the shell area; it cannot mount the real CreationPage composition because
+ * the authentication/connection providers are not CT-mountable.
+ */
+export function CreationWorkbenchShellStory(options: StoryOptions = {}): React.JSX.Element {
+  return (
+    <I18nextProvider i18n={testI18n}>
+      <div style={{ height: 600 }} className="flex w-full flex-col">
+        <div className="flex flex-1 flex-col overflow-auto" data-testid="shell-content">
+          <RuntimeWorkbenchPage options={options} />
+        </div>
+      </div>
+    </I18nextProvider>
   )
 }
