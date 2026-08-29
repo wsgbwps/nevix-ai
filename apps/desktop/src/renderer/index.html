@@ -4,9 +4,11 @@
     <meta charset="UTF-8" />
     <title>Electron</title>
     <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
+    <!-- blob: carries the reference-material thumbnails the Go data plane
+         already streamed into the renderer (object URLs), never a fetch origin. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'"
+      content="script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-src 'none'"
     />
   </head>
 

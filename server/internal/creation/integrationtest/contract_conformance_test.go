@@ -244,6 +244,14 @@ func assertSchema(t *testing.T, schema map[string]any, value any, where string) 
 	flat := flatten(t, schema)
 	typeName, _ := flat["type"].(string)
 
+	// A documented nullable schema accepts null whatever the composed type —
+	// the embedded draft on a never-saved session is the live example.
+	if value == nil {
+		if nullable, _ := flat["nullable"].(bool); nullable {
+			return
+		}
+	}
+
 	if typeName == "array" {
 		items, _ := flat["items"].(map[string]any)
 		list, ok := value.([]any)

@@ -17,8 +17,17 @@ type SessionRepository interface {
 	// Get resolves one active (non-deleted) session owned by the acting user.
 	// Ingestion reuses it to fail before streaming bytes.
 	Get(ctx context.Context, owner, id UUID) (Session, error)
+	// GetWithDraft resolves the session together with its recoverable draft
+	// (nil when never saved); both shapes collapse misses into
+	// ErrSessionNotFound.
+	GetWithDraft(ctx context.Context, owner, id UUID) (Session, *SessionDraft, error)
 	List(ctx context.Context, owner UUID, cursor *CompoundCursor, limit int) ([]Session, *CompoundCursor, error)
 	Rename(ctx context.Context, tx TxExecutor, owner, id UUID, name string) (Session, error)
+	// SaveDraft atomically replaces the draft scalars and the ordered
+	// reference bindings inside the caller's write transaction. Missing
+	// session collapses into ErrSessionNotFound; a reference to a material
+	// outside the session collapses into ErrInvalidDraft.
+	SaveDraft(ctx context.Context, tx TxExecutor, owner, id UUID, draft *SessionDraft) error
 	Delete(ctx context.Context, tx TxExecutor, owner, id UUID) error
 }
 
@@ -36,6 +45,11 @@ type MaterialRepository interface {
 	// session belong to the acting creator and the session is still active.
 	// The returned blob key schedules after-commit cleanup.
 	Delete(ctx context.Context, tx TxExecutor, owner, id UUID) (blobKey string, err error)
+	// ResolveKindsInSession returns the kinds of the requested materials that
+	// live under one active owned session; materials outside it are simply
+	// absent from the result. Runs inside the caller's transaction so a
+	// concurrent delete cannot slip between validation and draft write.
+	ResolveKindsInSession(ctx context.Context, tx TxExecutor, owner, sessionID UUID, ids []UUID) (map[UUID]Kind, error)
 }
 
 // CompoundCursor is one opaque compound keyset token over (created_at, id).

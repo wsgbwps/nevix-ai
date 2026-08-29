@@ -10,14 +10,16 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// SessionService handles the session aggregate's lifecycle commands.
+// SessionService handles the session aggregate's lifecycle commands and its
+// recoverable generation-intent draft.
 type SessionService struct {
-	repos  domain.SessionRepository
-	runner domain.WriteRunner
+	repos     domain.SessionRepository
+	materials domain.MaterialRepository
+	runner    domain.WriteRunner
 }
 
-func NewSessionService(repos domain.SessionRepository, runner domain.WriteRunner) *SessionService {
-	return &SessionService{repos: repos, runner: runner}
+func NewSessionService(repos domain.SessionRepository, materials domain.MaterialRepository, runner domain.WriteRunner) *SessionService {
+	return &SessionService{repos: repos, materials: materials, runner: runner}
 }
 
 // Create opens one empty private draft session. NormalizeSessionName keeps
@@ -38,6 +40,46 @@ func (s *SessionService) Create(ctx context.Context, owner domain.UUID, rawName 
 // Get resolves one active owned session.
 func (s *SessionService) Get(ctx context.Context, owner, id domain.UUID) (domain.Session, error) {
 	return s.repos.Get(ctx, owner, id)
+}
+
+// GetWithDraft resolves the session together with its recoverable draft
+// (nil when never saved). The draft is part of the session aggregate — never
+// a second business owner.
+func (s *SessionService) GetWithDraft(ctx context.Context, owner, id domain.UUID) (domain.Session, *domain.SessionDraft, error) {
+	return s.repos.GetWithDraft(ctx, owner, id)
+}
+
+// SaveDraft atomically replaces the session's recoverable generation intent:
+// prompt, target media, manifest version, model/mode/parameters, and the
+// ordered reference bindings land in one verified transaction, so a failure
+// leaves no partial update. Manifest conformance is deliberately out of scope
+// here — stale values must round-trip untouched until submission validates
+// them (spec #150). Session deletion makes the draft unreachable like every
+// other session access.
+func (s *SessionService) SaveDraft(ctx context.Context, owner, id domain.UUID, draft *domain.SessionDraft) error {
+	if err := draft.Validate(); err != nil {
+		return err
+	}
+	return s.runner.Run(ctx, func(scope domain.WriteScope) error {
+		// Role/kind compatibility resolves inside the transaction: a material
+		// deleted between validation and write fails the whole save instead of
+		// persisting a dangling binding.
+		ids := make([]domain.UUID, 0, len(draft.References))
+		for _, reference := range draft.References {
+			ids = append(ids, reference.MaterialID)
+		}
+		kinds, err := s.materials.ResolveKindsInSession(ctx, scope.Tx(), owner, id, ids)
+		if err != nil {
+			return err
+		}
+		for _, reference := range draft.References {
+			kind, ok := kinds[reference.MaterialID]
+			if !ok || !reference.Role.AcceptsKind(kind) {
+				return domain.ErrInvalidDraft
+			}
+		}
+		return s.repos.SaveDraft(ctx, scope.Tx(), owner, id, draft)
+	})
 }
 
 // List pages the actor's active sessions.

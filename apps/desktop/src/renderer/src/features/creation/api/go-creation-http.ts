@@ -22,6 +22,49 @@ export interface SessionPage {
   readonly nextCursor: string | null
 }
 
+/** The part one reference material plays in the draft intent. */
+export type DraftReferenceRole = 'reference' | 'first_frame' | 'last_frame' | 'omni'
+
+export interface DraftReferenceView {
+  readonly materialId: string
+  readonly role: DraftReferenceRole
+}
+
+/**
+ * The session's recoverable generation intent as stored by the server
+ * (contracts/creation.yaml SessionDraft). Values the current Capability
+ * Manifest has removed round-trip untouched — staleness is surfaced, never
+ * rewritten.
+ */
+export interface SessionDraftView {
+  readonly prompt: string
+  readonly mediaType: 'image' | 'video' | null
+  readonly manifestVersion: number
+  readonly model: string | null
+  readonly mode: string | null
+  readonly ratio: string | null
+  readonly resolution: string | null
+  readonly quantity: number | null
+  readonly durationSeconds: number | null
+  readonly references: readonly DraftReferenceView[]
+}
+
+/**
+ * The editable draft shape the Workbench saves back. Saving is whole-draft
+ * replacement, so the input is exactly the stored shape (SessionDraftInput on
+ * the wire); the alias keeps the two from drifting apart.
+ */
+export type SessionDraftInput = SessionDraftView
+
+/** One session with its recoverable draft (getSession). */
+export interface SessionDetailView {
+  readonly id: string
+  readonly name: string
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly draft: SessionDraftView | null
+}
+
 /** One verified reference material record. */
 export interface ReferenceMaterialView {
   readonly id: string
@@ -151,6 +194,12 @@ export function createCreationClient(serverUrl: string): {
     name: string
   ): Promise<CreationApiResult<CreationSessionView>>
   deleteSession(token: string, sessionId: string): Promise<CreationApiResult<void>>
+  getSessionDetail(token: string, sessionId: string): Promise<CreationApiResult<SessionDetailView>>
+  saveSessionDraft(
+    token: string,
+    sessionId: string,
+    draft: SessionDraftInput
+  ): Promise<CreationApiResult<SessionDraftView>>
   listMaterials(
     token: string,
     sessionId: string,
@@ -221,6 +270,93 @@ export function createCreationClient(serverUrl: string): {
     return typeof value === 'string' ? value : null
   }
 
+  const DRAFT_ROLES: readonly DraftReferenceRole[] = [
+    'reference',
+    'first_frame',
+    'last_frame',
+    'omni'
+  ]
+
+  // Nullable wire scalars distinguish null (stored unset) from undefined
+  // (field absent — never legal on the draft, fails closed).
+  function readNullableString(source: unknown, field: string): string | null | undefined {
+    if (typeof source !== 'object' || source === null || !(field in source)) return undefined
+    const value = (source as Record<string, unknown>)[field]
+    if (value === null) return null
+    return typeof value === 'string' ? value : undefined
+  }
+
+  function readNullableNumber(source: unknown, field: string): number | null | undefined {
+    if (typeof source !== 'object' || source === null || !(field in source)) return undefined
+    const value = (source as Record<string, unknown>)[field]
+    if (value === null) return null
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  }
+
+  function parseSessionDraft(payload: unknown): SessionDraftView | null {
+    if (typeof payload !== 'object' || payload === null) return null
+    const prompt = readStringField(payload, 'prompt')
+    const manifestVersion = readNumberOrNullField(payload, 'manifest_version')
+    if (prompt === null || manifestVersion === null || manifestVersion < 1) return null
+    const mediaType = readNullableString(payload, 'media_type')
+    if (mediaType === undefined) return null
+    if (mediaType !== null && mediaType !== 'image' && mediaType !== 'video') return null
+    const referencesRaw =
+      'references' in payload ? (payload as Record<string, unknown>).references : undefined
+    if (!Array.isArray(referencesRaw)) return null
+    const references: DraftReferenceView[] = []
+    for (const entry of referencesRaw) {
+      const materialId = readStringField(entry, 'material_id')
+      const role = readStringField(entry, 'role')
+      if (!materialId || role === null || !DRAFT_ROLES.includes(role as DraftReferenceRole)) {
+        return null
+      }
+      references.push({ materialId, role: role as DraftReferenceRole })
+    }
+    const model = readNullableString(payload, 'model')
+    const mode = readNullableString(payload, 'mode')
+    const ratio = readNullableString(payload, 'ratio')
+    const resolution = readNullableString(payload, 'resolution')
+    const quantity = readNullableNumber(payload, 'quantity')
+    const durationSeconds = readNullableNumber(payload, 'duration_seconds')
+    if (
+      model === undefined ||
+      mode === undefined ||
+      ratio === undefined ||
+      resolution === undefined ||
+      quantity === undefined ||
+      durationSeconds === undefined
+    ) {
+      return null
+    }
+    return {
+      prompt,
+      mediaType,
+      manifestVersion,
+      model,
+      mode,
+      ratio,
+      resolution,
+      quantity,
+      durationSeconds,
+      references
+    }
+  }
+
+  function parseSessionDetail(payload: unknown): SessionDetailView | null {
+    if (typeof payload !== 'object' || payload === null) return null
+    const id = readStringField(payload, 'id')
+    const name = readStringField(payload, 'name')
+    const createdAt = readStringField(payload, 'created_at')
+    const updatedAt = readStringField(payload, 'updated_at')
+    if (!id || name === null || !createdAt || !updatedAt) return null
+    if (!('draft' in payload)) return null
+    const draftRaw = (payload as Record<string, unknown>).draft
+    if (draftRaw === null) return { id, name, createdAt, updatedAt, draft: null }
+    const draft = parseSessionDraft(draftRaw)
+    return draft === null ? null : { id, name, createdAt, updatedAt, draft }
+  }
+
   function parseMaterial(entry: unknown): ReferenceMaterialView | null {
     const id = readStringField(entry, 'id')
     const kindRaw = readStringField(entry, 'kind')
@@ -262,6 +398,41 @@ export function createCreationClient(serverUrl: string): {
   return {
     listSessions: (token, cursor) =>
       listPage(parseSessionPage, '/creation/sessions', token, cursor),
+    getSessionDetail: async (token, sessionId) => {
+      const result = await request(serverUrl, {
+        method: 'GET',
+        path: `/creation/sessions/${sessionId}`,
+        token
+      })
+      if (result.outcome !== 'succeeded') return result
+      const detail = parseSessionDetail(result.payload)
+      return detail ? { outcome: 'succeeded', value: detail } : { outcome: 'network-failure' }
+    },
+    saveSessionDraft: async (token, sessionId, draft) => {
+      const result = await request(serverUrl, {
+        method: 'PUT',
+        path: `/creation/sessions/${sessionId}/draft`,
+        body: {
+          prompt: draft.prompt,
+          media_type: draft.mediaType,
+          manifest_version: draft.manifestVersion,
+          model: draft.model,
+          mode: draft.mode,
+          ratio: draft.ratio,
+          resolution: draft.resolution,
+          quantity: draft.quantity,
+          duration_seconds: draft.durationSeconds,
+          references: draft.references.map((reference) => ({
+            material_id: reference.materialId,
+            role: reference.role
+          }))
+        },
+        token
+      })
+      if (result.outcome !== 'succeeded') return result
+      const stored = parseSessionDraft(result.payload)
+      return stored ? { outcome: 'succeeded', value: stored } : { outcome: 'network-failure' }
+    },
     createSession: async (token, name) => {
       const result = await request(serverUrl, {
         method: 'POST',

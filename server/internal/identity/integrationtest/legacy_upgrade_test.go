@@ -77,8 +77,8 @@ func TestBaselineDropsTheLegacyWorldAndRebuilds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply baseline over legacy schema: %v", err)
 	}
-	if len(applied) != 6 {
-		t.Fatalf("applied %d migrations on the legacy scratch database, want the 6 embedded ones", len(applied))
+	if len(applied) != 7 {
+		t.Fatalf("applied %d migrations on the legacy scratch database, want the 7 embedded ones", len(applied))
 	}
 
 	conn, err = pgx.Connect(ctx, scratchURL)

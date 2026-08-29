@@ -7,23 +7,110 @@ export const creationTranslations = defineResourceTranslations({
   'zh-CN': {
     creation: {
       sessions: {
-        label: '我的创作',
+        label: '开启创作',
         empty: '还没有创作会话，从一个空白草稿开始',
         unnamed: '未命名创作',
         remove: '删除会话 {{name}}',
         newLabel: '新会话名称（可选）',
-        newPlaceholder: '新会话…',
-        newSubmit: '创建'
+        newPlaceholder: '新对话',
+        newSubmit: '创建',
+        private: 'Creation Session 由创建者私有',
+        meta: {
+          justNow: '刚刚',
+          minutesAgo: '{{n}} 分钟前',
+          hoursAgo: '{{n}} 小时前',
+          daysAgo: '{{n}} 天前'
+        }
       },
       workspace: {
         label: '工作区',
         empty: '选择或创建一个创作会话开始你的作品',
-        generationPending: '图片与视频生成将在此处呈现'
+        draftMeta: '草稿',
+        generationPending: '图片与视频生成将在此处呈现',
+        heroTitle: '你好，想创作什么？',
+        heroSubtitle: '从描述开始，或选一个电商创作起点',
+        templateTry: '试一试',
+        templates: {
+          scene: {
+            title: '商品场景合成',
+            detail: '将商品自然放入真实使用场景',
+            prompt: '将商品放入干净明亮的生活方式场景，突出真实材质与核心卖点。'
+          },
+          series: {
+            title: '系列主图变体',
+            detail: '统一风格，快速探索多种构图',
+            prompt: '围绕同一商品生成一组视觉统一、构图不同的主图。'
+          },
+          videoAd: {
+            title: '短视频广告创意',
+            detail: '用清晰节奏展示商品使用价值',
+            prompt: '为商品制作一支节奏明快的短视频广告，包含开场钩子、卖点展示和结尾定格。'
+          }
+        }
       },
-      pile: {
-        label: '参考素材牌堆',
-        add: '添加参考素材',
-        kind: { image: '图', video: '视频', audio: '音' }
+      composer: {
+        label: '创作输入',
+        promptLabel: '提示词',
+        promptPlaceholder: '输入想法，或添加参考内容开始创作',
+        promptPlaceholderWithRefs: '继续添加参考内容，或输入你想创作的画面',
+        submit: '生成',
+        submitPending: '生成提交将在后续版本开放，草稿会自动保存。',
+        media: { label: '媒体', image: '图片生成', video: '视频生成' },
+        model: { label: '模型' },
+        mode: {
+          label: '模式',
+          'text-to-image': '文生图片',
+          'reference-image': '参考图片',
+          'text-to-video': '文生视频',
+          'first-frame': '首帧',
+          'first-last-frame': '首尾帧',
+          'omni-reference': '全能参考'
+        },
+        params: {
+          label: '参数',
+          ratio: '比例',
+          resolution: '分辨率',
+          quantity: '数量',
+          duration: '时长',
+          seconds: '{{n}} 秒',
+          durationShort: '{{n}}s'
+        },
+        stale: {
+          badge: '能力已变化',
+          note: '当前能力清单已不含该值；原值已保留，提交前需要更换。',
+          references: '当前模式下的参考素材数量或类型已超出能力清单；已原样保留，提交前需要调整。'
+        },
+        manifestUnavailable: '能力清单暂时不可用；草稿仍可编辑并自动保存。',
+        unavailable: {
+          template: '当前没有可用的生成能力：{{reason}}，{{action}}',
+          reasons: {
+            production_readiness_pending: '能力尚未通过发布验收',
+            not_configured: '尚未配置 AI 供应商连接',
+            checking: '正在检查连接',
+            credential_invalid: '供应商拒绝了当前密钥',
+            credential_unavailable: '供应商密钥暂不可用',
+            connection_paused: '连接已暂停',
+            model_unavailable: '供应商模型暂不可用'
+          },
+          actions: {
+            wait: '请稍候再试。',
+            await_release: '等待版本发布后即可使用。',
+            contact_admin: '请联系管理员处理。'
+          }
+        },
+        save: {
+          saving: '草稿保存中…',
+          saved: '草稿已保存',
+          failed: '草稿保存失败，点击重试'
+        },
+        deck: {
+          label: '参考素材牌堆',
+          add: '添加参考素材',
+          tile: '参考内容',
+          count: '{{n}} 张参考图片',
+          remove: '移除 {{name}}',
+          kind: { image: '图', video: '视频', audio: '音' }
+        }
       },
       state: {
         loading: '正在读取创作数据…',
@@ -108,23 +195,115 @@ export const creationTranslations = defineResourceTranslations({
   en: {
     creation: {
       sessions: {
-        label: 'My creations',
+        label: 'Start creating',
         empty: 'No creation sessions yet; start from a blank draft',
         unnamed: 'Untitled creation',
         remove: 'Delete session {{name}}',
         newLabel: 'New session name (optional)',
-        newPlaceholder: 'New session…',
-        newSubmit: 'Create'
+        newPlaceholder: 'New conversation',
+        newSubmit: 'Create',
+        private: 'Creation Sessions are private to their creator',
+        meta: {
+          justNow: 'just now',
+          minutesAgo: '{{n}} min ago',
+          hoursAgo: '{{n}} h ago',
+          daysAgo: '{{n}} d ago'
+        }
       },
       workspace: {
         label: 'Workspace',
         empty: 'Pick or create a session to start your work',
-        generationPending: 'Image and video generation will appear here'
+        draftMeta: 'Draft',
+        generationPending: 'Image and video generation will appear here',
+        heroTitle: 'Hello — what will you create?',
+        heroSubtitle: 'Start from a description, or pick a starting point',
+        templateTry: 'Try it',
+        templates: {
+          scene: {
+            title: 'Product scene composite',
+            detail: 'Place a product naturally into a real usage scene',
+            prompt:
+              'Place the product into a clean, bright lifestyle scene that highlights its real materials and key selling points.'
+          },
+          series: {
+            title: 'Listing image variants',
+            detail: 'One style, many compositions to explore quickly',
+            prompt:
+              'Generate a set of visually unified listing images with different compositions around the same product.'
+          },
+          videoAd: {
+            title: 'Short video ad concept',
+            detail: 'Show the product value with a clear rhythm',
+            prompt:
+              'Create a brisk short-video ad for the product with an opening hook, a selling-point showcase, and a closing freeze frame.'
+          }
+        }
       },
-      pile: {
-        label: 'Reference material pile',
-        add: 'Add reference material',
-        kind: { image: 'IMG', video: 'VID', audio: 'AUD' }
+      composer: {
+        label: 'Creation input',
+        promptLabel: 'Prompt',
+        promptPlaceholder: 'Describe an idea, or add reference material to start',
+        promptPlaceholderWithRefs: 'Add more reference material, or describe the image you want',
+        submit: 'Generate',
+        submitPending: 'Generation submission arrives in a later release; the draft autosaves.',
+        media: { label: 'Media', image: 'Image generation', video: 'Video generation' },
+        model: { label: 'Model' },
+        mode: {
+          label: 'Mode',
+          'text-to-image': 'Text to image',
+          'reference-image': 'Reference image',
+          'text-to-video': 'Text to video',
+          'first-frame': 'First frame',
+          'first-last-frame': 'First & last frame',
+          'omni-reference': 'Omni reference'
+        },
+        params: {
+          label: 'Parameters',
+          ratio: 'Ratio',
+          resolution: 'Resolution',
+          quantity: 'Quantity',
+          duration: 'Duration',
+          seconds: '{{n}}s',
+          durationShort: '{{n}}s'
+        },
+        stale: {
+          badge: 'Capability changed',
+          note: 'The current capability manifest no longer includes this value; it is preserved until you replace it before submission.',
+          references:
+            'The reference count or kinds under the current mode exceed the capability manifest; they are preserved until you adjust before submission.'
+        },
+        manifestUnavailable:
+          'The capability manifest is unavailable right now; drafting and autosave keep working.',
+        unavailable: {
+          template: 'No generation capability is available right now: {{reason}}. {{action}}',
+          reasons: {
+            production_readiness_pending: 'the capability has not passed release acceptance yet',
+            not_configured: 'no AI provider connection is configured',
+            checking: 'the connection is being checked',
+            credential_invalid: 'the provider rejected the current key',
+            credential_unavailable: 'the provider key is temporarily unavailable',
+            connection_paused: 'the connection is paused',
+            model_unavailable: 'the provider model is temporarily unavailable'
+          },
+          actions: {
+            wait: 'Please wait and try again later.',
+            await_release: 'It becomes usable after the next release.',
+            contact_admin: 'Please contact your administrator.'
+          }
+        },
+        save: {
+          saving: 'Saving draft…',
+          saved: 'Draft saved',
+          failed: 'Draft save failed; click to retry'
+        },
+        deck: {
+          label: 'Reference material deck',
+          add: 'Add reference material',
+          tile: 'Reference',
+          count: '{{n}} reference images',
+          remove: 'Remove {{name}}',
+          kind: { image: 'IMG', video: 'VID', audio: 'AUD' }
+        }
       },
       state: {
         loading: 'Loading creation data…',

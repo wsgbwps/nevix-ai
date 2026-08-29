@@ -199,7 +199,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	sessionRepos := postgres.NewSessionRepository(pool)
 	materialRepos := postgres.NewMaterialRepository(pool)
 	connectionRepos := postgres.NewConnectionRepository(pool)
-	sessionService := application.NewSessionService(sessionRepos, tx)
+	sessionService := application.NewSessionService(sessionRepos, materialRepos, tx)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
 	connectionService := application.NewConnectionService(connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
 	// The readiness evidence is a startup-loaded deployment asset: an invalid

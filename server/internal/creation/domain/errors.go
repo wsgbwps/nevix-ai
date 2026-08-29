@@ -33,4 +33,10 @@ var (
 	// ErrRangeNotSatisfiable reports a Range header that is syntactically
 	// invalid, spans multiple ranges, or starts past the end of the blob.
 	ErrRangeNotSatisfiable = errors.New("range not satisfiable")
+	// ErrInvalidDraft reports a draft that violates the structural envelope:
+	// a bound overflow, an unknown media type or role, or a reference binding
+	// to a material outside the session (or of an incompatible kind). The
+	// capability manifest is deliberately not consulted — stale values must
+	// round-trip — so this is always a request-shape fault, not staleness.
+	ErrInvalidDraft = errors.New("invalid session draft")
 )

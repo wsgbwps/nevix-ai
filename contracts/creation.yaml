@@ -83,18 +83,19 @@ paths:
       summary: 读取当前创建者的单个 Session
       description: |-
         选择（继续创作）入口：只对创建者可见；不存在、他人所有或已逻辑删除一律 404 not_found。
-        已删除会话不因重新 GET 而复活。
+        已删除会话不因重新 GET 而复活。响应内嵌当前可恢复草稿（从未保存过草稿时为 null），
+        重新加载后以此恢复生成意图。
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/sessionID"
       responses:
         "200":
-          description: 会话资源。
+          description: 会话资源与当前草稿。
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreationSession"
+                $ref: "#/components/schemas/CreationSessionDetail"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -153,6 +154,42 @@ paths:
       responses:
         "204":
           description: 会话已逻辑删除且不再出现。
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/sessions/{sessionID}/draft:
+    put:
+      operationId: saveSessionDraft
+      summary: 原子保存当前创建者的可恢复草稿
+      description: |-
+        以整体替换语义原子保存 Session 的生成意图：prompt、目标媒体、manifest version、
+        模型/模式/参数与有序 Reference Material identity/role 在同一写事务内落库；
+        任何失败回滚，不留部分更新。只允许创建者操作；目标不存在、他人所有或已删除
+        一律 404 not_found。值域校验刻意宽松于当前 Capability Manifest——manifest 已移除的
+        历史值必须能原样保留（不静默替换或降级），提交时（后续切片）才按 manifest 权威校验。
+        references 数组顺序即牌堆顺序；引用的素材必须属于本会话。该动作不创建 Generation Task。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionDraftInput"
+      responses:
+        "200":
+          description: 草稿已原子保存，返回存储后的完整草稿。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -891,6 +928,158 @@ components:
         updated_at:
           type: string
           format: date-time
+    CreationSessionDetail:
+      type: object
+      allOf:
+        - $ref: "#/components/schemas/CreationSession"
+        - type: object
+          required:
+            - draft
+          properties:
+            draft:
+              description: 当前可恢复草稿；从未保存过草稿时为 null。
+              allOf:
+                - $ref: "#/components/schemas/SessionDraft"
+              nullable: true
+    SessionDraftInput:
+      type: object
+      required:
+        - manifest_version
+        - references
+      properties:
+        prompt:
+          type: string
+          maxLength: 2000
+          description: 生成意图提示词；省略时存为空串。
+        media_type:
+          type: string
+          nullable: true
+          enum:
+            - image
+            - video
+        manifest_version:
+          type: integer
+          minimum: 1
+          description: 保存时工作台所见 Capability Manifest 的 manifest_version，按原值记录。
+        model:
+          type: string
+          nullable: true
+          maxLength: 128
+        mode:
+          type: string
+          nullable: true
+          maxLength: 64
+        ratio:
+          type: string
+          nullable: true
+          maxLength: 16
+        resolution:
+          type: string
+          nullable: true
+          maxLength: 16
+        quantity:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 4
+        duration_seconds:
+          type: integer
+          nullable: true
+          minimum: 1
+        references:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/DraftReferenceInput"
+    SessionDraft:
+      type: object
+      required:
+        - prompt
+        - media_type
+        - manifest_version
+        - model
+        - mode
+        - ratio
+        - resolution
+        - quantity
+        - duration_seconds
+        - references
+      properties:
+        prompt:
+          type: string
+          maxLength: 2000
+        media_type:
+          type: string
+          nullable: true
+          enum:
+            - image
+            - video
+        manifest_version:
+          type: integer
+          minimum: 1
+        model:
+          type: string
+          nullable: true
+          maxLength: 128
+        mode:
+          type: string
+          nullable: true
+          maxLength: 64
+        ratio:
+          type: string
+          nullable: true
+          maxLength: 16
+        resolution:
+          type: string
+          nullable: true
+          maxLength: 16
+        quantity:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 4
+        duration_seconds:
+          type: integer
+          nullable: true
+          minimum: 1
+        references:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/DraftReference"
+    DraftReferenceInput:
+      type: object
+      required:
+        - material_id
+        - role
+      properties:
+        material_id:
+          type: string
+          format: uuid
+          description: 引用的 Reference Material identity；必须属于本会话。
+        role:
+          type: string
+          enum:
+            - reference
+            - first_frame
+            - last_frame
+            - omni
+    DraftReference:
+      type: object
+      required:
+        - material_id
+        - role
+      properties:
+        material_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum:
+            - reference
+            - first_frame
+            - last_frame
+            - omni
     ReferenceMaterial:
       type: object
       required:

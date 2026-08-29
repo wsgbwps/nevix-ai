@@ -108,6 +108,39 @@ func (r *MaterialRepository) Delete(ctx context.Context, tx domain.TxExecutor, o
 	return blobKey, nil
 }
 
+// ResolveKindsInSession returns the kinds of the requested materials that
+// live under one active owned session; materials outside it are absent from
+// the result. Runs inside the caller's transaction so a concurrent delete
+// cannot slip between draft validation and the draft write.
+func (r *MaterialRepository) ResolveKindsInSession(ctx context.Context, tx domain.TxExecutor, owner, sessionID domain.UUID, ids []domain.UUID) (map[domain.UUID]domain.Kind, error) {
+	kinds := make(map[domain.UUID]domain.Kind, len(ids))
+	if len(ids) == 0 {
+		return kinds, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT m.id, m.kind
+		FROM creation_reference_materials m
+		JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $1 AND s.deleted_at IS NULL
+		WHERE m.session_id = $2 AND m.id = ANY($3)`,
+		owner, sessionID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("creation: resolve draft material kinds: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id domain.UUID
+		var kind string
+		if err := rows.Scan(&id, &kind); err != nil {
+			return nil, fmt.Errorf("creation: scan draft material kind: %w", err)
+		}
+		kinds[id] = domain.Kind(kind)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("creation: resolve draft material kinds rows: %w", err)
+	}
+	return kinds, nil
+}
+
 func scanMaterial(row rowScanner) (domain.ReferenceMaterial, error) {
 	var m domain.ReferenceMaterial
 	var kind string
