@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CapabilityManifest } from '../api/capability-manifest-http'
 import type {
   CreationSessionView,
@@ -16,7 +16,7 @@ import {
   type DraftMediaType,
   type DraftStaleField
 } from './capability'
-import { useCreationRuntime } from './runtime-context'
+import { useCreationRuntime, type CreationRuntime } from './runtime-context'
 
 export type WorkbenchStatus = 'loading' | 'ready' | 'error'
 
@@ -64,7 +64,34 @@ const autosaveDebounceMs = 800
  * or saving — only the candidate menus and stale verdicts come from the
  * manifest.
  */
-export function useCreationWorkbench() {
+export interface CreationWorkbenchController {
+  ports: CreationRuntime
+  status: WorkbenchStatus
+  reload: () => void
+  sessions: readonly CreationSessionView[]
+  selected: CreationSessionView | null
+  selectedId: string | null
+  selectSession: (session: CreationSessionView) => void
+  createSession: (name: string) => void
+  deleteSession: (sessionId: string) => void
+  materials: readonly ReferenceMaterialView[]
+  thumbnails: Readonly<Record<string, string>>
+  draft: ComposerDraft
+  patchDraft: (patch: Partial<ComposerDraft>) => void
+  setMediaType: (media: DraftMediaType) => void
+  setMode: (mode: string) => void
+  addMaterial: (file: File) => void
+  removeMaterial: (materialId: string) => void
+  saveStatus: DraftSaveStatus
+  retrySave: () => void
+  manifest: CapabilityManifest | null
+  manifestStatus: ManifestStatus
+  staleFields: ReadonlySet<DraftStaleField>
+  deckCap: ReturnType<typeof referenceCap>
+  allowedKinds: ReturnType<typeof allowedReferenceKinds>
+}
+
+export function useCreationWorkbench(): CreationWorkbenchController {
   const ports = useCreationRuntime()
 
   const [status, setStatus] = useState<WorkbenchStatus>('loading')
@@ -81,14 +108,25 @@ export function useCreationWorkbench() {
 
   // The manifest version the composer last saw — the save payload records it
   // verbatim; with no manifest ever seen, the stored draft's version stands.
-  const seenManifestVersionRef = useRef<number | null>(null)
+  // State rather than a ref because the stale verdicts derive from it in
+  // render; the autosave callbacks read it through their fresh closures.
+  const [seenManifestVersion, setSeenManifestVersion] = useState<number | null>(null)
   const baselineRef = useRef<string>(JSON.stringify(emptyComposerDraft()))
   const draftRef = useRef<ComposerDraft>(draft)
-  draftRef.current = draft
   const selectedIdRef = useRef<string | null>(selectedId)
-  selectedIdRef.current = selectedId
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(false)
+
+  // Render cannot write refs; mirror the committed values after commit so the
+  // autosave pipeline (timer, flush, unmount cleanup) always reads the latest
+  // state without stale closures. Layout timing is load-bearing: the flush
+  // effect below tears down in the same commit's passive-cleanup phase, which
+  // runs BEFORE passive setups — a passive mirror there would let the flush
+  // compare a one-render-stale draft against the new baseline and save it.
+  useLayoutEffect(() => {
+    draftRef.current = draft
+    selectedIdRef.current = selectedId
+  })
 
   useEffect(() => {
     // StrictMode's dev-only unmount/remount re-runs this effect while the ref
@@ -101,10 +139,13 @@ export function useCreationWorkbench() {
 
   const isDirty = useCallback(() => JSON.stringify(draftRef.current) !== baselineRef.current, [])
 
-  const toInput = useCallback((value: ComposerDraft): SessionDraftInput => {
-    const manifestVersion = seenManifestVersionRef.current ?? 1
-    return { ...value, manifestVersion }
-  }, [])
+  const toInput = useCallback(
+    (value: ComposerDraft): SessionDraftInput => ({
+      ...value,
+      manifestVersion: seenManifestVersion ?? 1
+    }),
+    [seenManifestVersion]
+  )
 
   const persistDraft = useCallback(
     async (sessionId: string, value: ComposerDraft) => {
@@ -144,6 +185,53 @@ export function useCreationWorkbench() {
     if (sessionId !== null && isDirty()) await persistDraft(sessionId, draftRef.current)
   }, [isDirty, persistDraft])
 
+  const patchDraft = useCallback(
+    (patch: Partial<ComposerDraft>) => {
+      setDraft((current) => ({ ...current, ...patch }))
+      setSaveStatus('idle')
+      scheduleSave()
+    },
+    [scheduleSave]
+  )
+
+  /** The manifest-seeded draft a brand-new empty session starts from. */
+  const manifestDefaultDraft = useCallback((value: CapabilityManifest): ComposerDraft | null => {
+    const media: DraftMediaType | null = value.image.available
+      ? 'image'
+      : value.video.available
+        ? 'video'
+        : null
+    if (media === null) return null
+    const capability = mediaCapability(value, media)
+    if (capability === null || !capability.available) return null
+    const first = (capability.modes ?? [])[0]
+    return {
+      prompt: '',
+      mediaType: media,
+      model: capability.model ?? null,
+      mode: first ? first.id : null,
+      ratio: capability.defaults?.ratio ?? null,
+      resolution: capability.defaults?.resolution ?? null,
+      quantity: capability.defaults?.quantity ?? null,
+      durationSeconds: capability.defaults?.duration ?? null,
+      references: []
+    }
+  }, [])
+
+  /** A brand-new draft adopts the manifest defaults exactly once. */
+  const adoptManifestDefaults = useCallback(
+    (value: CapabilityManifest) => {
+      // Only an untouched empty draft is auto-configured; anything the
+      // creator (or a stored draft) holds is never rewritten.
+      if (JSON.stringify(draftRef.current) !== JSON.stringify(emptyComposerDraft())) return
+      if (selectedIdRef.current === null) return
+      const seeded = manifestDefaultDraft(value)
+      if (seeded === null) return
+      patchDraft(seeded)
+    },
+    [manifestDefaultDraft, patchDraft]
+  )
+
   // The Workbench reloads its session list whenever the ports identity
   // changes; loading/empty/error stay explicit so cached data can never
   // masquerade as authoritative server facts.
@@ -174,9 +262,10 @@ export function useCreationWorkbench() {
       const result = await ports.loadCapabilityManifest().catch(() => null)
       if (!active) return
       if (result !== null && result.outcome === 'succeeded') {
-        seenManifestVersionRef.current = result.value.manifestVersion
+        setSeenManifestVersion(result.value.manifestVersion)
         setManifest(result.value)
         setManifestStatus('ready')
+        adoptManifestDefaults(result.value)
       } else {
         setManifestStatus('unavailable')
       }
@@ -184,7 +273,7 @@ export function useCreationWorkbench() {
     return () => {
       active = false
     }
-  }, [ports])
+  }, [adoptManifestDefaults, ports])
 
   // Flush an unsaved draft before the surface goes away. Reuses the same
   // dirty check and input mapping as the debounced pipeline; the save itself
@@ -225,30 +314,6 @@ export function useCreationWorkbench() {
     baselineRef.current = JSON.stringify(value)
     setDraft(value)
     setSaveStatus('idle')
-  }, [])
-
-  /** The manifest-seeded draft a brand-new empty session starts from. */
-  const manifestDefaultDraft = useCallback((value: CapabilityManifest): ComposerDraft | null => {
-    const media: DraftMediaType | null = value.image.available
-      ? 'image'
-      : value.video.available
-        ? 'video'
-        : null
-    if (media === null) return null
-    const capability = mediaCapability(value, media)
-    if (capability === null || !capability.available) return null
-    const first = (capability.modes ?? [])[0]
-    return {
-      prompt: '',
-      mediaType: media,
-      model: capability.model ?? null,
-      mode: first ? first.id : null,
-      ratio: capability.defaults?.ratio ?? null,
-      resolution: capability.defaults?.resolution ?? null,
-      quantity: capability.defaults?.quantity ?? null,
-      durationSeconds: capability.defaults?.duration ?? null,
-      references: []
-    }
   }, [])
 
   const selectSession = useCallback(
@@ -298,40 +363,13 @@ export function useCreationWorkbench() {
               references: [...stored.references]
             }
       )
-      if (stored !== null && seenManifestVersionRef.current === null) {
-        seenManifestVersionRef.current = stored.manifestVersion
+      if (stored !== null) {
+        setSeenManifestVersion((previous) => previous ?? stored.manifestVersion)
       }
       await loadThumbnails(materialPage.value.materials)
     },
     [applyLoadedDraft, flushSave, loadThumbnails, manifest, manifestDefaultDraft, ports]
   )
-
-  const patchDraft = useCallback(
-    (patch: Partial<ComposerDraft>) => {
-      setDraft((current) => ({ ...current, ...patch }))
-      setSaveStatus('idle')
-      scheduleSave()
-    },
-    [scheduleSave]
-  )
-
-  /** A brand-new draft adopts the manifest defaults exactly once. */
-  const adoptManifestDefaults = useCallback(
-    (value: CapabilityManifest) => {
-      // Only an untouched empty draft is auto-configured; anything the
-      // creator (or a stored draft) holds is never rewritten.
-      if (JSON.stringify(draftRef.current) !== JSON.stringify(emptyComposerDraft())) return
-      if (selectedIdRef.current === null) return
-      const seeded = manifestDefaultDraft(value)
-      if (seeded === null) return
-      patchDraft(seeded)
-    },
-    [manifestDefaultDraft, patchDraft]
-  )
-
-  useEffect(() => {
-    if (manifestStatus === 'ready' && manifest !== null) adoptManifestDefaults(manifest)
-  }, [adoptManifestDefaults, manifest, manifestStatus])
 
   const setMediaType = useCallback(
     (media: DraftMediaType) => {
@@ -463,10 +501,10 @@ export function useCreationWorkbench() {
     if (sessionId !== null) void persistDraft(sessionId, draftRef.current)
   }, [persistDraft])
 
-  const staleFields: ReadonlySet<DraftStaleField> = useMemo(() => {
-    const version = seenManifestVersionRef.current ?? 1
-    return staleDraftFields(manifest, { ...draft, manifestVersion: version })
-  }, [draft, manifest])
+  const staleFields: ReadonlySet<DraftStaleField> = useMemo(
+    () => staleDraftFields(manifest, { ...draft, manifestVersion: seenManifestVersion ?? 1 }),
+    [draft, manifest, seenManifestVersion]
+  )
 
   const selected = useMemo(
     () => sessions.find((session) => session.id === selectedId) ?? null,
@@ -513,5 +551,3 @@ export function useCreationWorkbench() {
     allowedKinds
   }
 }
-
-export type CreationWorkbenchController = ReturnType<typeof useCreationWorkbench>

@@ -36,7 +36,7 @@ test(
 
     type LaunchedApp = Awaited<ReturnType<typeof launchTestApp>>
 
-    const signIn = async (app: LaunchedApp) => {
+    const signIn = async (app: LaunchedApp): Promise<void> => {
       await expect(app.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
       await app.page.getByLabel('邮箱').fill(identity.email)
       await app.page.getByLabel('密码').fill(identity.password)
