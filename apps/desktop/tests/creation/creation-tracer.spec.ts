@@ -88,11 +88,13 @@ test(
         // 重启：草稿经 Go API 从服务端恢复，而不是本地缓存。
         const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
         try {
-          const loginVisible = await relaunched.page
-            .getByRole('heading', { name: '登录 Nevix AI' })
-            .isVisible()
-          if (loginVisible) await signIn(relaunched)
-          await relaunched.page.getByRole('link', { name: 'AI 创作' }).click()
+          const login = relaunched.page.getByRole('heading', { name: '登录 Nevix AI' })
+          const toCreation = relaunched.page.getByRole('link', { name: 'AI 创作' })
+          // The renderer mounts its restored surface asynchronously; an instant
+          // isVisible() raced the boot and skipped a needed re-sign-in.
+          await login.or(toCreation).first().waitFor({ state: 'visible', timeout: 15_000 })
+          if (await login.isVisible()) await signIn(relaunched)
+          await toCreation.click()
           const restored = relaunched.page.getByTestId('creation-workbench')
           await restored.getByRole('button', { name: 'E2E 会话', exact: true }).click()
           await expect(restored.getByTestId('composer')).toBeVisible()
