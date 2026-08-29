@@ -3,9 +3,9 @@
 #
 # 不变量与约束：
 # - Go 服务器只监听明文 http://127.0.0.1:8080 —— "Go 不终结 TLS" 是 ADR-0014
-#   不变量；HTTPS 由本脚本按需拉起的 Caddy sidecar 在边缘终结（tls internal
-#   自签，注入 X-Forwarded-Proto: https，与 deploy/nginx 的入站纪律一致）。
-#   Desktop 一律连 https://127.0.0.1:8443。
+#   不变量；HTTPS 由本脚本按需拉起的 Caddy sidecar 在边缘终结（加载本脚本签发
+#   的长期自签证书，注入 X-Forwarded-Proto: https，与 deploy/nginx 的入站纪律
+#   一致）。Desktop 一律连 https://127.0.0.1:8443。
 # - Provider Key / 重认证端点要求"已证明的 HTTPS"（authz.SecureTransportProven），
 #   没有开发旁路；未装 caddy 时只有 8080，这些命令会被 secure_transport_required 拒绝。
 # - fake Kapon 仅在 server/.env.local 的 KAPON_BASE_URL 指向本机 :9399 时启动；
@@ -91,6 +91,34 @@ if command -v caddy >/dev/null 2>&1; then
   if port_busy "$tls_port"; then
     warn "端口 $tls_port 已被占用，跳过 Caddy，本次没有 HTTPS。"
   else
+    # Dev TLS 身份是本脚本自签的长期证书对，caddy 只负责加载。不用 caddy
+    # `tls internal`：它的叶子证书只有 12 小时寿命，续期即换指纹，Desktop 的
+    # TOFU pin 每半天就要重新确认。证书只在缺失或已过期时重签，SAN 仅含回环
+    # 地址；清空 $cache_dir 才会换新身份，届时 Desktop 需重新确认一次指纹。
+    tls_dir="$cache_dir/tls"
+    tls_cert="$tls_dir/dev-server.pem"
+    tls_key="$tls_dir/dev-server.key"
+    mkdir -p "$tls_dir"
+    if [ ! -f "$tls_cert" ] || ! openssl x509 -in "$tls_cert" -noout -checkend 0 >/dev/null 2>&1; then
+      log "生成长期自签证书（10 年，SAN 仅回环）：$tls_cert"
+      openssl_config="$tls_dir/openssl.cnf"
+      cat >"$openssl_config" <<EOF
+[req]
+prompt = no
+distinguished_name = dn
+x509_extensions = v3_tls
+[dn]
+CN = Nevix Dev
+[v3_tls]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = serverAuth
+subjectAltName = IP:127.0.0.1,IP:::1,DNS:localhost
+EOF
+      openssl req -x509 -newkey rsa:2048 -nodes -config "$openssl_config" -days 3650 \
+        -keyout "$tls_key" -out "$tls_cert" >/dev/null 2>&1
+      chmod 600 "$tls_key"
+    fi
     caddyfile="$cache_dir/Caddyfile"
     cat >"$caddyfile" <<EOF
 {
@@ -98,11 +126,10 @@ if command -v caddy >/dev/null 2>&1; then
 }
 
 https://127.0.0.1:$tls_port {
-    tls internal
+    tls "$tls_cert" "$tls_key"
     reverse_proxy 127.0.0.1:$server_port
 }
 EOF
-    # 私有 CA 与证书状态落在本缓存目录，跨重启指纹稳定，Desktop TOFU 只需确认一次。
     XDG_DATA_HOME="$cache_dir/caddy-data" XDG_CONFIG_HOME="$cache_dir/caddy-config" \
       caddy run --config "$caddyfile" --adapter caddyfile >"$log_dir/caddy.log" 2>&1 &
     caddy_pid=$!
