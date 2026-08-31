@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,9 +26,11 @@ type TaskWorker struct {
 	tasks       domain.GenerationTaskRepository
 	materials   domain.MaterialRepository
 	connections domain.ConnectionSignals
+	credentials domain.CallCredentialSource
 	store       domain.BlobStore
 	prober      domain.MediaProber
 	gateway     domain.ProviderGateway
+	assets      domain.MediaAssetRepository
 	notify      InvalidationSink
 	runner      domain.WriteRunner
 	fetch       *http.Client
@@ -44,16 +47,18 @@ func NewTaskWorker(
 	tasks domain.GenerationTaskRepository,
 	materials domain.MaterialRepository,
 	connections domain.ConnectionSignals,
+	credentials domain.CallCredentialSource,
 	store domain.BlobStore,
 	prober domain.MediaProber,
 	gateway domain.ProviderGateway,
+	assets domain.MediaAssetRepository,
 	notify InvalidationSink,
 	runner domain.WriteRunner,
 	leaseOwner string,
 ) *TaskWorker {
 	return &TaskWorker{
-		tasks: tasks, materials: materials, connections: connections, store: store,
-		prober: prober, gateway: gateway, notify: notify, runner: runner,
+		tasks: tasks, materials: materials, connections: connections, credentials: credentials,
+		store: store, prober: prober, gateway: gateway, assets: assets, notify: notify, runner: runner,
 		fetch:      &http.Client{Timeout: 5 * time.Minute},
 		leaseOwner: leaseOwner,
 		lease:      30 * time.Second,
@@ -213,6 +218,14 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	if until := w.holdUntil(pressure); until.After(time.Now()) {
 		return w.reschedule(ctx, queueID, until, true)
 	}
+	// Resolve the decrypted Provider Key before the marker transaction: a
+	// resolution failure means nothing external executed, so the item holds
+	// like a pause (budget not consumed) instead of converging as
+	// indeterminate. The plaintext exists only until the call returns.
+	credential, err := w.credentials.ActiveCallCredential(ctx)
+	if err != nil {
+		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
+	}
 
 	// Marker transaction: job pending→submitting (first attempt) or the
 	// transient-rejection marker cleared (bounded re-submit), plus the
@@ -252,7 +265,7 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	}
 
 	// External submit, outside any transaction.
-	outcome, submitErr := w.gateway.Submit(ctx, w.buildSubmitRequest(ctx, task, media))
+	outcome, submitErr := w.gateway.Submit(ctx, credential, w.buildSubmitRequest(ctx, task, media))
 	switch {
 	case submitErr == nil:
 		w.recordSuccess(pressure)
@@ -363,7 +376,13 @@ func (w *TaskWorker) drivePoll(ctx context.Context, queueID domain.UUID, task do
 	if ok {
 		pressureName = pressureKey(pressure, media)
 	}
-	outcome, err := w.gateway.Poll(ctx, *job.ExternalRef)
+	// Polling is provably side-effect free, so a credential resolution
+	// failure is a plain transient reschedule.
+	credential, err := w.credentials.ActiveCallCredential(ctx)
+	if err != nil {
+		return w.reschedule(ctx, queueID, time.Now().Add(w.pollEvery), false)
+	}
+	outcome, err := w.gateway.Poll(ctx, credential, *job.ExternalRef)
 	if err != nil {
 		if domain.IsCreditBlocked(err) {
 			return w.convergeCreditBlocked(ctx, queueID, task.ID)
@@ -447,11 +466,16 @@ func (w *TaskWorker) driveCancel(ctx context.Context, queueID domain.UUID, task 
 // polling until the authoritative verdict lands. Outputs obtained before or
 // during cancelling still transfer (best-effort cancel, never discard work).
 func (w *TaskWorker) driveCancellingJob(ctx context.Context, queueID domain.UUID, task domain.GenerationTask, slots []domain.GenerationSlot, job domain.ProviderJob, media domain.MediaType) error {
-	if err := w.gateway.Cancel(ctx, *job.ExternalRef); err != nil && !domain.IsProviderUnavailable(err) {
-		// Cancel requests are best effort; provider-side rejection of the
-		// cancel leaves polling as the authoritative convergence.
-		_ = err
+	credential, err := w.credentials.ActiveCallCredential(ctx)
+	if err == nil {
+		if cancelErr := w.gateway.Cancel(ctx, credential, *job.ExternalRef); cancelErr != nil && !domain.IsProviderUnavailable(cancelErr) {
+			// Cancel requests are best effort; provider-side rejection of the
+			// cancel leaves polling as the authoritative convergence.
+			_ = cancelErr
+		}
 	}
+	// A credential resolution failure only skips the best-effort cancel
+	// request; the authoritative poll below still converges the job.
 	return w.drivePoll(ctx, queueID, task, slots, job, media)
 }
 
@@ -595,6 +619,26 @@ func (w *TaskWorker) transferAndPersist(ctx context.Context, queueID domain.UUID
 			if _, err := w.tasks.WriteSlotVerdict(ctx, sc.Tx(), task.ID, update.Index, update.Status, update.Reason, update.Result); err != nil {
 				return err
 			}
+			// The verified output becomes the slot's unique Media Asset in
+			// the same transaction; a repeated convergence lands on the
+			// (task, slot) unique constraint and must not duplicate it.
+			if update.Status == domain.SlotSucceeded && update.Result != nil {
+				if _, err := w.assets.InsertMediaAsset(ctx, sc.Tx(), domain.MediaAssetFormation{
+					OwnerID:    task.OwnerID,
+					TaskID:     task.ID,
+					SlotIndex:  update.Index,
+					MediaType:  task.Spec.MediaType,
+					Mime:       update.Result.Mime,
+					BlobKey:    update.Result.BlobKey,
+					ByteSize:   update.Result.ByteSize,
+					Checksum:   update.Result.Checksum,
+					WidthPx:    update.Result.WidthPx,
+					HeightPx:   update.Result.HeightPx,
+					DurationMS: update.Result.DurationMS,
+				}); err != nil {
+					return err
+				}
+			}
 		}
 		if err := w.aggregateAndFinalize(ctx, sc.Tx(), task.ID); err != nil {
 			return err
@@ -633,7 +677,7 @@ func (w *TaskWorker) transferOutputs(ctx context.Context, task domain.Generation
 			break // provider over-supply: never form extra results
 		}
 		claimed[index] = true
-		result, err := w.transferOne(ctx, task.ID, index, output)
+		result, err := w.transferOne(ctx, task.Spec.MediaType, task.ID, index, output)
 		if err != nil {
 			reason := domain.ReasonTemporarilyUnavailable
 			updates = append(updates, slotUpdate{Index: index, Status: domain.SlotFailed, Reason: &reason})
@@ -654,8 +698,10 @@ func (w *TaskWorker) transferOutputs(ctx context.Context, task domain.Generation
 
 // transferOne streams one output into storage and probes it. The blob key
 // is deterministic per (task, slot), so a lease-expiry retry overwrites the
-// same object instead of duplicating results.
-func (w *TaskWorker) transferOne(ctx context.Context, taskID domain.UUID, index int, output domain.GatewayOutput) (*domain.SlotResult, error) {
+// same object instead of duplicating results. The probe's facts must match
+// the media's output contract (image outputs are PNG); a mismatch is a
+// transfer verification failure, never an accepted result.
+func (w *TaskWorker) transferOne(ctx context.Context, media domain.MediaType, taskID domain.UUID, index int, output domain.GatewayOutput) (*domain.SlotResult, error) {
 	blobKey := domain.GenerationResultBlobKey(taskID, index)
 	// The download stream is bounded by the defensive per-output ceiling;
 	// the blob store enforces the same limit on its side.
@@ -678,6 +724,9 @@ func (w *TaskWorker) transferOne(ctx context.Context, taskID domain.UUID, index 
 		return nil, err
 	}
 	_ = size
+	if expected := domain.ExpectedOutputMime(media); expected != "" && identified.Facts.MimeType != expected {
+		return nil, fmt.Errorf("creation: provider output failed output verification")
+	}
 	return &domain.SlotResult{
 		Mime:       identified.Facts.MimeType,
 		ByteSize:   put.ByteSize,
@@ -695,9 +744,11 @@ func (w *TaskWorker) convergeFromTerminalJob(ctx context.Context, queueID domain
 	if job.Status == domain.JobCompleted && job.ExternalRef != nil {
 		// A completed async job's outputs stay re-pollable; a persist-phase
 		// crash can retry the transfer without a new external generation.
-		if outcome, err := w.gateway.Poll(ctx, *job.ExternalRef); err == nil &&
-			outcome.Status == domain.PollCompleted && len(outcome.Outputs) > 0 {
-			return w.transferAndPersist(ctx, queueID, task.ID, job.ID, domain.JobCompleted, domain.JobCompleted, outcome.Outputs, nil)
+		if credential, credErr := w.credentials.ActiveCallCredential(ctx); credErr == nil {
+			if outcome, err := w.gateway.Poll(ctx, credential, *job.ExternalRef); err == nil &&
+				outcome.Status == domain.PollCompleted && len(outcome.Outputs) > 0 {
+				return w.transferAndPersist(ctx, queueID, task.ID, job.ID, domain.JobCompleted, domain.JobCompleted, outcome.Outputs, nil)
+			}
 		}
 	}
 	return w.persistJobTerminal(ctx, queueID, task, slots, job, job.Status, nil)
@@ -909,15 +960,20 @@ func (p *providerPressure) recordUnavailable(key string) (time.Time, bool) {
 
 // openProviderOutput streams one provider temporary URL for transfer. The
 // reader is consumed under the defensive per-output ceiling by the blob
-// store's bounded copy loop; the URL never reaches logs or responses.
+// store's bounded copy loop; the URL never reaches logs or responses. The
+// transport error is deliberately unwrapped: *url.Error embeds the URL, so
+// only its class survives to the worker's failure log.
 func (w *TaskWorker) openProviderOutput(ctx context.Context, url string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("creation: build provider output request: %w", err)
+		return nil, fmt.Errorf("creation: build provider output request")
 	}
 	resp, err := w.fetch.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("creation: fetch provider output: %w", err)
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			return nil, fmt.Errorf("creation: fetch provider output canceled")
+		}
+		return nil, fmt.Errorf("creation: fetch provider output failed")
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()

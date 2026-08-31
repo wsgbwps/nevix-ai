@@ -545,3 +545,41 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+// The published image reference envelope (spec 图片合同) is the authoritative
+// upload gate: 256–6000 px per side, ≤36 MP, aspect within 1:3..3:1.
+func TestCheckImageReferenceEnvelope(t *testing.T) {
+	ptr := func(v int) *int { return &v }
+
+	if err := CheckImageReferenceEnvelope(MediaFacts{WidthPx: ptr(2048), HeightPx: ptr(2048)}); err != nil {
+		t.Fatalf("standard square image must pass: %v", err)
+	}
+	// The 36 MP bound is inclusive; one extra pixel row overflows it.
+	if err := CheckImageReferenceEnvelope(MediaFacts{WidthPx: ptr(6000), HeightPx: ptr(6000)}); err != nil {
+		t.Fatalf("exactly 36MP must pass: %v", err)
+	}
+	if err := CheckImageReferenceEnvelope(MediaFacts{WidthPx: ptr(6000), HeightPx: ptr(6001)}); err == nil {
+		t.Fatal("above 36MP must fail")
+	}
+	// The aspect bounds are inclusive at 1:3 and 3:1.
+	if err := CheckImageReferenceEnvelope(MediaFacts{WidthPx: ptr(6000), HeightPx: ptr(2000)}); err != nil {
+		t.Fatalf("aspect 3:1 must pass: %v", err)
+	}
+	if err := CheckImageReferenceEnvelope(MediaFacts{WidthPx: ptr(6001), HeightPx: ptr(2000)}); err == nil {
+		t.Fatal("aspect beyond 3:1 must fail")
+	}
+	if err := CheckImageReferenceEnvelope(MediaFacts{WidthPx: ptr(100), HeightPx: ptr(400)}); err == nil {
+		t.Fatal("aspect narrower than 1:3 must fail")
+	}
+	// Sides outside [256, 6000] fail regardless of aspect.
+	if err := CheckImageReferenceEnvelope(MediaFacts{WidthPx: ptr(255), HeightPx: ptr(765)}); err == nil {
+		t.Fatal("side below 256px must fail")
+	}
+	if err := CheckImageReferenceEnvelope(MediaFacts{WidthPx: ptr(6001), HeightPx: ptr(256)}); err == nil {
+		t.Fatal("side above 6000px must fail")
+	}
+	// Unprobed facts never pass the gate.
+	if err := CheckImageReferenceEnvelope(MediaFacts{}); err == nil {
+		t.Fatal("missing dimensions must fail")
+	}
+}

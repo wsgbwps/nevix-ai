@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { BanIcon, RefreshCwIcon, RepeatIcon, TriangleAlertIcon } from 'lucide-react'
+import { BanIcon, DownloadIcon, RefreshCwIcon, RepeatIcon, TriangleAlertIcon } from 'lucide-react'
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import type {
   GenerationSlotView,
+  GenerationTaskDetail,
   GenerationTaskView,
   SlotFailureReason
 } from '../api/generation-task-http'
@@ -143,7 +144,8 @@ function TaskCard({
         {terminal &&
           !indeterminate &&
           task.status !== 'succeeded' &&
-          task.status !== 'cancelled' && (
+          task.status !== 'cancelled' &&
+          !hasPolicyRejectedSlot(detail) && (
             <button
               type="button"
               data-testid={`task-retry-${task.id}`}
@@ -209,6 +211,20 @@ function placeholderSlots(count: number): GenerationSlotView[] {
   }))
 }
 
+// A policy-rejected slot forbids the quick "retry uncompleted" affordance:
+// the retry re-runs the frozen specification verbatim, so identical input or
+// output content would be rejected again (spec #150 安全拒绝). Editing the
+// draft and regenerating stays available.
+function hasPolicyRejectedSlot(detail: GenerationTaskDetail | undefined): boolean {
+  return (
+    detail?.slots.some(
+      (slot) =>
+        slot.failureReason === 'input_policy_rejected' ||
+        slot.failureReason === 'output_policy_rejected'
+    ) ?? false
+  )
+}
+
 function SlotCard({
   workbench,
   taskId,
@@ -240,6 +256,23 @@ function SlotCard({
     }
   }, [mediaType, succeeded, slot.index, taskId, workbench])
 
+  // The download reuses the already-verified bytes (or loads them on demand)
+  // and names the file after its task slot.
+  const download = (): void => {
+    void workbench
+      .loadResultBlobUrl(taskId, slot.index)
+      .then((blobUrl) => {
+        if (blobUrl === null) return
+        const anchor = document.createElement('a')
+        anchor.href = blobUrl
+        anchor.download = downloadFilename(taskId, slot.index, mediaType)
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+      })
+      .catch(() => undefined)
+  }
+
   return (
     <div
       data-testid={`slot-${taskId}-${slot.index}`}
@@ -264,8 +297,25 @@ function SlotCard({
           </span>
         </span>
       )}
+      {succeeded && (
+        <button
+          type="button"
+          data-testid={`slot-download-${taskId}-${slot.index}`}
+          aria-label={String(t('gallery.actions.download'))}
+          title={downloadFilename(taskId, slot.index, mediaType)}
+          onClick={download}
+          className="absolute right-1 bottom-1 z-10 grid size-6 place-items-center rounded-md border border-white/25 bg-black/50 text-white outline-none hover:bg-black/65 focus-visible:ring-2 focus-visible:ring-sky-400/70"
+        >
+          <DownloadIcon className="size-3" aria-hidden />
+        </button>
+      )}
     </div>
   )
+}
+
+function downloadFilename(taskId: string, index: number, mediaType: 'image' | 'video'): string {
+  const extension = mediaType === 'video' ? 'mp4' : 'png'
+  return `nevix-${taskId.slice(0, 8)}-${index + 1}.${extension}`
 }
 
 export type { SlotFailureReason }

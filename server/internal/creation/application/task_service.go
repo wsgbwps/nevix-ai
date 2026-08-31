@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
@@ -245,6 +246,7 @@ func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteSco
 		OwnerID:        owner,
 		IdempotencyKey: idempotencyKey,
 		PayloadHash:    spec.PayloadHash(),
+		Media:          spec.MediaType,
 		Spec:           *spec,
 		Status:         domain.TaskQueued,
 		SlotCount:      spec.Quantity,
@@ -426,8 +428,11 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 	if draft == nil {
 		return nil, domain.ErrDraftNotReady
 	}
+	// The prompt envelope counts Unicode characters (spec 图片合同) — the
+	// same rune rule the draft gate applies — not bytes.
+	promptRunes := utf8.RuneCountInString(draft.Prompt)
 	if draft.MediaType == nil || draft.Model == nil || draft.Mode == nil ||
-		draft.Prompt == "" || len(draft.Prompt) > domain.PromptMaxChars {
+		draft.Prompt == "" || promptRunes > domain.PromptMaxChars {
 		return nil, domain.ErrDraftNotReady
 	}
 	media := *draft.MediaType

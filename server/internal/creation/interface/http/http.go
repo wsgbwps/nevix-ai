@@ -88,6 +88,8 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusUnsupportedMediaType, Code: CodeUnsupportedMedia, Message: "The media kind or file extension is not supported."}
 	case isError(err, domain.ErrUnreadableMedia):
 		return &Error{Status: http.StatusUnprocessableEntity, Code: CodeUnreadableMedia, Message: "The media could not be decoded by the server."}
+	case isError(err, domain.ErrReferenceOutsideEnvelope):
+		return &Error{Status: http.StatusUnprocessableEntity, Code: CodeUnreadableMedia, Message: "The media's dimensions fall outside the accepted reference envelope."}
 	case isError(err, domain.ErrRangeNotSatisfiable):
 		return &Error{Status: http.StatusRequestedRangeNotSatisfiable, Code: CodeRangeNotSatisfiable, Message: "The requested range cannot be satisfied."}
 	case isError(err, domain.ErrInvalidDraft):

@@ -22,8 +22,8 @@ import (
 //
 // The wire shapes below (OpenAI-style /v1/images/generations and the async
 // /v1/contents/generations/tasks family) are the kernel's adapter contract,
-// pinned by the fake-Kapon tests; the image/video slices (#160/#161) refine
-// the exact vendor payload mapping during their real-invocation acceptance.
+// pinned by the fake-Kapon tests; the video slice (#161) refines the exact
+// vendor payload mapping during its real-invocation acceptance.
 type GenerationsClient struct {
 	baseURL string
 	http    *http.Client
@@ -33,6 +33,52 @@ type GenerationsClient struct {
 	imageSubmitTimeout time.Duration
 	pollTimeout        time.Duration
 	cancelTimeout      time.Duration
+}
+
+// imageSizeKey is one accepted (ratio, resolution) combination. The frozen
+// specification's manifest-validated cross product is the key set.
+type imageSizeKey struct {
+	ratio      string
+	resolution string
+}
+
+// imageSizes pins the vendor wire mapping from the frozen (ratio,
+// resolution) pair to the explicit pixel size (spec #150: 比例只来自
+// supported ratios,分辨率只允许已验收的 1K/2K/4K). The long edge is the
+// resolution base (1024/2048/4096); the short edge scales by the ratio,
+// snapped to the nearest multiple of 8. This literal table is the slice-10
+// wire contract that the release gate's real-invocation acceptance verifies
+// (issue #160); a combination outside the accepted cross product fails
+// closed rather than guessing a substitute.
+var imageSizes = map[imageSizeKey]string{
+	{"1:1", "1K"}:  "1024x1024",
+	{"1:1", "2K"}:  "2048x2048",
+	{"1:1", "4K"}:  "4096x4096",
+	{"4:3", "1K"}:  "1024x768",
+	{"4:3", "2K"}:  "2048x1536",
+	{"4:3", "4K"}:  "4096x3072",
+	{"4:5", "1K"}:  "816x1024",
+	{"4:5", "2K"}:  "1640x2048",
+	{"4:5", "4K"}:  "3280x4096",
+	{"16:9", "1K"}: "1024x576",
+	{"16:9", "2K"}: "2048x1152",
+	{"16:9", "4K"}: "4096x2304",
+	{"9:16", "1K"}: "576x1024",
+	{"9:16", "2K"}: "1152x2048",
+	{"9:16", "4K"}: "2304x4096",
+}
+
+// imageSize resolves the frozen pair onto the vendor size string. A missing
+// combination is an internal contract violation, never a silent downgrade.
+func imageSize(req domain.SubmitRequest) (string, error) {
+	if req.Ratio == nil || req.Resolution == nil {
+		return "", &domain.ProviderRejectedError{Reason: domain.ReasonInternalError}
+	}
+	size, ok := imageSizes[imageSizeKey{ratio: *req.Ratio, resolution: *req.Resolution}]
+	if !ok {
+		return "", &domain.ProviderRejectedError{Reason: domain.ReasonInternalError}
+	}
+	return size, nil
 }
 
 // NewGenerationsClient binds the generation adapter to the validated route.
@@ -52,23 +98,25 @@ var _ domain.ProviderGateway = (*GenerationsClient)(nil)
 // Submit starts one external generation. Image media is synchronous (the
 // call returns outputs; a lost response is indeterminate); video media is
 // asynchronous (returns the external reference to poll).
-func (c *GenerationsClient) Submit(ctx context.Context, req domain.SubmitRequest) (domain.SubmitOutcome, error) {
+func (c *GenerationsClient) Submit(ctx context.Context, credential string, req domain.SubmitRequest) (domain.SubmitOutcome, error) {
 	if req.Media == domain.MediaImage {
-		return c.submitImage(ctx, req)
+		return c.submitImage(ctx, credential, req)
 	}
-	return c.submitVideo(ctx, req)
+	return c.submitVideo(ctx, credential, req)
 }
 
-func (c *GenerationsClient) submitImage(ctx context.Context, req domain.SubmitRequest) (domain.SubmitOutcome, error) {
+func (c *GenerationsClient) submitImage(ctx context.Context, credential string, req domain.SubmitRequest) (domain.SubmitOutcome, error) {
+	size, err := imageSize(req)
+	if err != nil {
+		return domain.SubmitOutcome{}, err
+	}
 	body := map[string]any{
 		"model":           req.Model,
 		"prompt":          req.Prompt,
 		"n":               req.Quantity,
+		"size":            size,
 		"response_format": "url",
 		"watermark":       false,
-	}
-	if req.Resolution != nil {
-		body["size"] = *req.Resolution
 	}
 	if len(req.References) > 0 {
 		images := make([]string, 0, len(req.References))
@@ -84,7 +132,7 @@ func (c *GenerationsClient) submitImage(ctx context.Context, req domain.SubmitRe
 			URL string `json:"url"`
 		} `json:"data"`
 	}
-	if err := c.call(callCtx, http.MethodPost, "/v1/images/generations", body, &parsed); err != nil {
+	if err := c.call(callCtx, credential, http.MethodPost, "/v1/images/generations", body, &parsed); err != nil {
 		if errors.Is(err, errTransportLost) {
 			// A lost synchronous answer cannot be distinguished from an
 			// executed generation: the outcome is indeterminate and the
@@ -105,7 +153,7 @@ func (c *GenerationsClient) submitImage(ctx context.Context, req domain.SubmitRe
 	return outcome, nil
 }
 
-func (c *GenerationsClient) submitVideo(ctx context.Context, req domain.SubmitRequest) (domain.SubmitOutcome, error) {
+func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, req domain.SubmitRequest) (domain.SubmitOutcome, error) {
 	command := req.Prompt
 	if req.Resolution != nil {
 		command += " --resolution " + *req.Resolution
@@ -132,7 +180,7 @@ func (c *GenerationsClient) submitVideo(ctx context.Context, req domain.SubmitRe
 	var parsed struct {
 		ID string `json:"id"`
 	}
-	if err := c.call(callCtx, http.MethodPost, "/v1/contents/generations/tasks", body, &parsed); err != nil {
+	if err := c.call(callCtx, credential, http.MethodPost, "/v1/contents/generations/tasks", body, &parsed); err != nil {
 		if errors.Is(err, errTransportLost) {
 			// The async task may or may not exist; without an external
 			// identity there is nothing safe to poll or retry.
@@ -150,7 +198,7 @@ func (c *GenerationsClient) submitVideo(ctx context.Context, req domain.SubmitRe
 
 // Poll queries one external job. Polling is provably side-effect free, so
 // every transport failure here is transient, never indeterminate.
-func (c *GenerationsClient) Poll(ctx context.Context, ref string) (domain.PollOutcome, error) {
+func (c *GenerationsClient) Poll(ctx context.Context, credential string, ref string) (domain.PollOutcome, error) {
 	callCtx, cancel := context.WithTimeout(ctx, c.pollTimeout)
 	defer cancel()
 	var parsed struct {
@@ -163,7 +211,7 @@ func (c *GenerationsClient) Poll(ctx context.Context, ref string) (domain.PollOu
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := c.call(callCtx, http.MethodGet, "/v1/contents/generations/tasks/"+ref, nil, &parsed); err != nil {
+	if err := c.call(callCtx, credential, http.MethodGet, "/v1/contents/generations/tasks/"+ref, nil, &parsed); err != nil {
 		if errors.Is(err, errTransportLost) {
 			return domain.PollOutcome{}, domain.ErrProviderUnavailable
 		}
@@ -195,10 +243,10 @@ func (c *GenerationsClient) Poll(ctx context.Context, ref string) (domain.PollOu
 
 // Cancel asks the provider to stop one accepted job. Convergence stays
 // authoritative: the worker polls after every cancel request.
-func (c *GenerationsClient) Cancel(ctx context.Context, ref string) error {
+func (c *GenerationsClient) Cancel(ctx context.Context, credential string, ref string) error {
 	callCtx, cancel := context.WithTimeout(ctx, c.cancelTimeout)
 	defer cancel()
-	if err := c.call(callCtx, http.MethodPost, "/v1/contents/generations/tasks/"+ref,
+	if err := c.call(callCtx, credential, http.MethodPost, "/v1/contents/generations/tasks/"+ref,
 		map[string]any{"action": "cancel"}, nil); err != nil {
 		if errors.Is(err, errTransportLost) {
 			return domain.ErrProviderUnavailable
@@ -214,11 +262,13 @@ func (c *GenerationsClient) Cancel(ctx context.Context, ref string) error {
 // transient.
 var errTransportLost = errors.New("kapon: transport lost")
 
-// call performs one classified HTTP round trip. The error mapping is the
-// adapter's whole opinion about the provider: 402 is the definitive credit
-// block, 429 carries Retry-After, 5xx/timeouts are transient, and the
-// decoded payload (when the caller wants one) is parsed only on 200.
-func (c *GenerationsClient) call(ctx context.Context, method, path string, body any, decode any) error {
+// call performs one classified HTTP round trip carrying the call's Provider
+// Key in the Authorization header only — the credential is never persisted,
+// logged, or wrapped into an error. The error mapping is the adapter's whole
+// opinion about the provider: 402 is the definitive credit block, 429
+// carries Retry-After, 5xx/timeouts are transient, and the decoded payload
+// (when the caller wants one) is parsed only on 200.
+func (c *GenerationsClient) call(ctx context.Context, credential, method, path string, body any, decode any) error {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -233,6 +283,9 @@ func (c *GenerationsClient) call(ctx context.Context, method, path string, body 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if credential != "" {
+		req.Header.Set("Authorization", "Bearer "+credential)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

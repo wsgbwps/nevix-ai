@@ -175,6 +175,7 @@ func scanTaskSummary(row pgx.Row) (domain.GenerationTask, error) {
 		&cause, &t.CancelRequested, &t.CreatedAt, &t.UpdatedAt, &t.TerminalAt); err != nil {
 		return domain.GenerationTask{}, err
 	}
+	t.Media = domain.MediaType(media)
 	t.Status = domain.TaskStatus(status)
 	if cause != nil {
 		marked := domain.TerminalCause(*cause)
@@ -195,6 +196,7 @@ func scanTaskFull(row pgx.Row) (domain.GenerationTask, error) {
 	if err != nil {
 		return domain.GenerationTask{}, err
 	}
+	t.Media = domain.MediaType(media)
 	t.Status = domain.TaskStatus(status)
 	if cause != nil {
 		marked := domain.TerminalCause(*cause)

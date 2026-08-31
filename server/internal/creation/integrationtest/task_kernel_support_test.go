@@ -1,6 +1,7 @@
 package integrationtest
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,6 +19,18 @@ type imageScript struct {
 	outputs int    // number of output URLs returned when status == 0
 	abort   bool   // drop the connection mid-response (outcome unknown)
 	code    string // error code for policy rejections (400 answers)
+	jpeg    bool   // serve JPEG output bytes (output-verification failure path)
+}
+
+// recordedImageCall is the adapter-conformance record of one image submit:
+// the pinned wire contract's observable shape (issue #160).
+type recordedImageCall struct {
+	bearer string
+	size   string
+	n      int
+	model  string
+	prompt string
+	images int
 }
 
 // videoTaskScript drives the async video task family.
@@ -33,17 +46,19 @@ type videoTaskScript struct {
 }
 
 type generationFake struct {
-	mu        sync.Mutex
-	servedPNG []byte
-	servedMP4 []byte
-	image     imageScript
-	video     videoTaskScript
-	nextID    int
-	outputReq int
+	mu         sync.Mutex
+	servedPNG  []byte
+	servedJPEG []byte
+	servedMP4  []byte
+	image      imageScript
+	video      videoTaskScript
+	nextID     int
+	outputReq  int
+	lastImage  *recordedImageCall
 }
 
-func newGenerationFake(png, mp4 []byte) *generationFake {
-	return &generationFake{servedPNG: png, servedMP4: mp4, video: videoTaskScript{succeedAfter: 1}}
+func newGenerationFake(png, jpeg, mp4 []byte) *generationFake {
+	return &generationFake{servedPNG: png, servedJPEG: jpeg, servedMP4: mp4, video: videoTaskScript{succeedAfter: 1}}
 }
 
 func (g *generationFake) setImage(script imageScript) {
@@ -64,6 +79,17 @@ func (g *generationFake) imageRequests() int {
 	return g.outputReq
 }
 
+// lastImageCall reports the recorded image submit (nil before the first).
+func (g *generationFake) lastImageCall() *recordedImageCall {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.lastImage == nil {
+		return nil
+	}
+	recorded := *g.lastImage
+	return &recorded
+}
+
 func (g *generationFake) videoRequests() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -79,6 +105,28 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/images/generations":
 		g.outputReq++
+		// The generation call must carry the Provider Key; without it the
+		// provider would reject the request (slice-10 credential seam).
+		if r.Header.Get("Authorization") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return true
+		}
+		var payload struct {
+			Model  string   `json:"model"`
+			Prompt string   `json:"prompt"`
+			N      int      `json:"n"`
+			Size   string   `json:"size"`
+			Image  []string `json:"image"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		g.lastImage = &recordedImageCall{
+			bearer: r.Header.Get("Authorization"),
+			size:   payload.Size,
+			n:      payload.N,
+			model:  payload.Model,
+			prompt: payload.Prompt,
+			images: len(payload.Image),
+		}
 		script := g.image
 		if script.status != 0 {
 			w.WriteHeader(script.status)
@@ -154,6 +202,11 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		return true
 
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/provider-outputs/image/"):
+		if g.image.jpeg {
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Write(g.servedJPEG)
+			return true
+		}
 		w.Header().Set("Content-Type", "image/png")
 		w.Write(g.servedPNG)
 		return true

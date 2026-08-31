@@ -31,7 +31,7 @@ func newFakeKapon(t *testing.T) *fakeKapon {
 		acceptedKeys: map[string]bool{},
 		imageModel:   true,
 		videoModel:   true,
-		generation:   newGenerationFake(pngBytes(t), mp4Fixture()),
+		generation:   newGenerationFake(pngBytes(t), jpegBytes(t), mp4Fixture()),
 	}
 	fake.server = httptest.NewServer(http.HandlerFunc(fake.serve))
 	t.Cleanup(fake.server.Close)

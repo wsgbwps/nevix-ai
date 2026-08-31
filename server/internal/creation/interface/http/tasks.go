@@ -246,7 +246,7 @@ func toTaskResource(task domain.GenerationTask) generationTaskResource {
 		ID:              task.ID.String(),
 		SessionID:       task.SessionID.String(),
 		Status:          string(task.Status),
-		MediaType:       string(task.Spec.MediaType),
+		MediaType:       string(task.Media),
 		SlotCount:       task.SlotCount,
 		CancelRequested: task.CancelRequested,
 		CreatedAt:       task.CreatedAt.UTC().Format(timeRFC3339),
@@ -357,7 +357,7 @@ func toTaskDetail(task domain.GenerationTask, slots []domain.GenerationSlot) gen
 	}
 	detail.Specification = &generationSpecResource{
 		SchemaVersion:   task.Spec.SchemaVersion,
-		MediaType:       string(task.Spec.MediaType),
+		MediaType:       string(task.Media),
 		Prompt:          task.Spec.Prompt,
 		Model:           task.Spec.Model,
 		Mode:            task.Spec.Mode,

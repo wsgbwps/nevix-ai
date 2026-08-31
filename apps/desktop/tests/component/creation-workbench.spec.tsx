@@ -443,3 +443,75 @@ test('the workbench fills the shell content area it is mounted in', async ({ mou
   expect(section!.y).toBeCloseTo(shell!.y, 0)
   expect(section!.height).toBeGreaterThanOrEqual(shell!.height - 1)
 })
+
+test('a succeeded image slot offers a keyboard-reachable download', async ({ mount, page }) => {
+  const doneTask: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000dl00',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [doneTask] }} />)
+  await selectFirstSession(page)
+
+  // Record programmatic anchor activations instead of navigating the CT page.
+  await page.evaluate(() => {
+    const calls: Array<{ href: string; download: string }> = []
+    ;(window as unknown as { __downloadCalls: typeof calls }).__downloadCalls = calls
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      calls.push({ href: this.href, download: this.download })
+    }
+  })
+
+  const button = page.getByTestId(`slot-download-${doneTask.id}-0`)
+  await expect(button).toBeVisible()
+  await button.focus()
+  await button.click()
+
+  const calls = await page.evaluate(
+    () =>
+      (window as unknown as { __downloadCalls?: Array<{ href: string; download: string }> })
+        .__downloadCalls ?? []
+  )
+  expect(calls).toHaveLength(1)
+  expect(calls[0].download).toBe(`nevix-${doneTask.id.slice(0, 8)}-1.png`)
+  expect(calls[0].href).toContain('data:image')
+})
+
+test('a policy-rejected task keeps editing paths but no identical quick retry', async ({
+  mount,
+  page
+}) => {
+  const rejectedTask: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000p0li',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 2,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [
+      { index: 0, status: 'failed', failureReason: 'input_policy_rejected', result: null },
+      { index: 1, status: 'failed', failureReason: 'input_policy_rejected', result: null }
+    ]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [rejectedTask] }} />)
+  await selectFirstSession(page)
+
+  // The identical-content retry is forbidden; editing and regenerating stays.
+  await expect(page.getByTestId(`task-retry-${rejectedTask.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`task-regenerate-${rejectedTask.id}`)).toBeVisible()
+  await expect(page.getByTestId(`slot-${rejectedTask.id}-0`)).toContainText(
+    'Input rejected by safety review'
+  )
+})

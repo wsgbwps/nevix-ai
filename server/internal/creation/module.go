@@ -205,6 +205,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	connectionRepos := postgres.NewConnectionRepository(pool)
 	taskRepos := postgres.NewGenerationTaskRepository(pool)
 	governanceRepos := postgres.NewGovernanceRepository(pool)
+	assetRepos := postgres.NewMediaAssetRepository(pool)
 	hub := creationhttp.NewInvalidationHub()
 	sessionService := application.NewSessionService(sessionRepos, materialRepos, tx)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
@@ -219,9 +220,12 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, governanceRepos, manifestService, tx, hub)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
 	// The worker shares the module's storage adapter and speaks the fixed
-	// Kapon generation route; both stay behind the domain gateway seam.
+	// Kapon generation route; both stay behind the domain gateway seam. The
+	// connection service is the call-time credential source: the decrypted
+	// Provider Key exists only between its resolve and the adapter's
+	// Authorization header.
 	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL)
-	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, store, media.Prober{}, gateway, hub, tx, workerLeaseOwner())
+	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, store, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
 	return &Module{
 		sessions:    creationhttp.NewSessionHandler(sessionService),
 		materials:   creationhttp.NewMaterialHandler(materialService),

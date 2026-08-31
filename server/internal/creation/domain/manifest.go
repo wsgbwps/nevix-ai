@@ -191,16 +191,53 @@ const (
 	audioRefMaxBytes      = 50 << 20
 )
 
+// Image reference dimension envelope (spec 图片合同, Server 为权威校验方).
+// The same bounds the manifest publishes gate every image upload.
+const (
+	ImageRefMinPx     = 256
+	ImageRefMaxPx     = 6000
+	ImageRefMaxPixels = 36_000_000
+	ImageRefMinAspect = 1.0 / 3.0
+	ImageRefMaxAspect = 3.0
+)
+
+// CheckImageReferenceEnvelope applies the published image reference
+// dimension envelope to probed facts: each side within
+// [ImageRefMinPx, ImageRefMaxPx], total pixels within [ImageRefMaxPixels],
+// and aspect (width/height) within [ImageRefMinAspect, ImageRefMaxAspect].
+// Byte caps and per-mode counts are gated separately (kind ceiling on
+// upload, per-mode policy at admission). Facts that failed probing never
+// reach this gate — callers reject them as unreadable.
+func CheckImageReferenceEnvelope(facts MediaFacts) error {
+	if facts.WidthPx == nil || facts.HeightPx == nil {
+		return ErrReferenceOutsideEnvelope
+	}
+	width, height := *facts.WidthPx, *facts.HeightPx
+	if width < ImageRefMinPx || width > ImageRefMaxPx ||
+		height < ImageRefMinPx || height > ImageRefMaxPx {
+		return ErrReferenceOutsideEnvelope
+	}
+	pixels := int64(width) * int64(height)
+	if pixels > ImageRefMaxPixels {
+		return ErrReferenceOutsideEnvelope
+	}
+	aspect := float64(width) / float64(height)
+	if aspect < ImageRefMinAspect || aspect > ImageRefMaxAspect {
+		return ErrReferenceOutsideEnvelope
+	}
+	return nil
+}
+
 func imageReferencePolicy(min, max, maxBytes int) ImageReferencePolicy {
 	return ImageReferencePolicy{
 		Count:     CountRange{Min: min, Max: max},
 		Formats:   []string{"jpeg", "png", "webp"},
 		MaxBytes:  maxBytes,
-		MinPx:     256,
-		MaxPx:     6000,
-		MaxPixels: 36_000_000,
-		MinAspect: 1.0 / 3.0,
-		MaxAspect: 3.0,
+		MinPx:     ImageRefMinPx,
+		MaxPx:     ImageRefMaxPx,
+		MaxPixels: ImageRefMaxPixels,
+		MinAspect: ImageRefMinAspect,
+		MaxAspect: ImageRefMaxAspect,
 	}
 }
 

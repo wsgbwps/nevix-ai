@@ -21,10 +21,14 @@ func readyTaskHarness(t *testing.T, opts harnessOptions) (*harness, string, stri
 	h.ensureAccounts(t)
 	adminToken := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
 	h.resetProviderConnections(t)
-	// Governance rows persist across scenarios (one shared database), so a
-	// ready harness always starts from the unset baseline.
+	// Governance rows and attempt counters persist across scenarios (one
+	// shared database), so a ready harness always starts from the unset,
+	// uncounted baseline.
 	if _, err := h.ownerPool.Exec(h.ctx, `DELETE FROM creation_generation_policies`); err != nil {
 		t.Fatalf("clear governance policies: %v", err)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `DELETE FROM creation_generation_attempts`); err != nil {
+		t.Fatalf("clear generation attempts: %v", err)
 	}
 	h.kapon.acceptKey("task-kernel-key")
 	status, body := h.configureConnection(t, adminToken, "task-kernel-key")

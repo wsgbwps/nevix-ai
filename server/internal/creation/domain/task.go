@@ -243,11 +243,15 @@ func (s *GenerationSpecification) PayloadHash() string {
 // is the one-way status machine, the cancel intent, and the per-slot
 // verdicts.
 type GenerationTask struct {
-	ID              UUID
-	SessionID       UUID
-	OwnerID         UUID
-	IdempotencyKey  string
-	PayloadHash     string
+	ID             UUID
+	SessionID      UUID
+	OwnerID        UUID
+	IdempotencyKey string
+	PayloadHash    string
+	// Media mirrors the row's media_type so summary projections (which do
+	// not decode the frozen specification) still carry it; Spec.MediaType is
+	// the authoritative freeze.
+	Media           MediaType
 	Spec            GenerationSpecification
 	Status          TaskStatus
 	SlotCount       int

@@ -30,6 +30,11 @@ var (
 	// decoding: dimensions, pixel count, duration, or sample structure could
 	// not be established.
 	ErrUnreadableMedia = errors.New("unreadable media")
+	// ErrReferenceOutsideEnvelope reports decodable media whose probed facts
+	// fall outside the reference envelope the manifest publishes (image:
+	// 256–6000 px per side, ≤36 MP, aspect 1:3..3:1). The material is never
+	// persisted.
+	ErrReferenceOutsideEnvelope = errors.New("reference media outside the published envelope")
 	// ErrRangeNotSatisfiable reports a Range header that is syntactically
 	// invalid, spans multiple ranges, or starts past the end of the blob.
 	ErrRangeNotSatisfiable = errors.New("range not satisfiable")

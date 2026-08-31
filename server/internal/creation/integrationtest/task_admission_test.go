@@ -94,7 +94,9 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_attempts`) != 1 {
 		t.Fatal("a replayed submission must not count a second attempt")
 	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks`) != 1 {
+	// Task/reservation counts scope to this scenario: other integration
+	// scenarios legitimately own tasks in the same shared database.
+	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks WHERE session_id = $1::uuid`, draft.SessionID) != 1 {
 		t.Fatal("a replayed submission must not create a second task")
 	}
 
@@ -114,10 +116,10 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	if status != http.StatusCreated {
 		t.Fatalf("second key must admit, got %d: %s", status, body)
 	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks`) != 2 {
+	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks WHERE session_id = $1::uuid`, draft.SessionID) != 2 {
 		t.Fatal("a fresh key must create a new task")
 	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_reservations WHERE released_at IS NULL`) != 2 {
+	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_reservations WHERE released_at IS NULL AND task_id = ANY (SELECT id FROM creation_generation_tasks WHERE session_id = $1::uuid)`, draft.SessionID) != 2 {
 		t.Fatal("each admitted task owns exactly one active reservation")
 	}
 }

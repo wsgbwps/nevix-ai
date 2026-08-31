@@ -78,7 +78,8 @@ export const creationTranslations = defineResourceTranslations({
         actions: {
           cancel: '取消',
           regenerate: '再次生成',
-          retryUncompleted: '只重试未完成项'
+          retryUncompleted: '只重试未完成项',
+          download: '下载'
         },
         indeterminate: {
           title: '重做结果未知的任务',
@@ -308,7 +309,8 @@ export const creationTranslations = defineResourceTranslations({
         actions: {
           cancel: 'Cancel',
           regenerate: 'Regenerate',
-          retryUncompleted: 'Retry uncompleted'
+          retryUncompleted: 'Retry uncompleted',
+          download: 'Download'
         },
         indeterminate: {
           title: 'Redo a task with unknown outcome',

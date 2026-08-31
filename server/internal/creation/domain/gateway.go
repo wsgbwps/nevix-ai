@@ -113,6 +113,27 @@ type SubmitRequest struct {
 	References []GatewayReference
 }
 
+// CallCredentialSource resolves the active connection's decrypted Provider
+// Key for exactly one provider call. The plaintext exists only between the
+// resolve and the adapter's Authorization header (spec #150 敏感信息纪律) —
+// never in rows, logs, errors, or responses.
+type CallCredentialSource interface {
+	// ActiveCallCredential returns the active connection's plaintext key,
+	// or an error when no usable credential exists (not configured, not
+	// valid, or the envelope/master key is unavailable) — the caller must
+	// fail closed and hold without fabricating an external outcome.
+	ActiveCallCredential(ctx context.Context) (string, error)
+}
+
+// ExpectedOutputMime is the verified output contract per media (spec #150
+// 图片/视频合同): image outputs are PNG; video MP4 lands with slice 11.
+func ExpectedOutputMime(media MediaType) string {
+	if media == MediaImage {
+		return "image/png"
+	}
+	return ""
+}
+
 // GatewayReference is one ordered reference with its role and data URL.
 type GatewayReference struct {
 	Role DraftRole
@@ -145,16 +166,18 @@ type PollOutcome struct {
 	Reason  *FailureReason // classified, when Status == PollFailed
 }
 
-// ProviderGateway is the external generation seam.
+// ProviderGateway is the external generation seam. The credential argument
+// authenticates one call; adapters set the Authorization header from it and
+// never persist, log, or wrap it into an error.
 type ProviderGateway interface {
 	// Submit starts one external generation. A lost outcome returns
 	// ErrSubmitIndeterminate; classified errors otherwise.
-	Submit(ctx context.Context, req SubmitRequest) (SubmitOutcome, error)
+	Submit(ctx context.Context, credential string, req SubmitRequest) (SubmitOutcome, error)
 	// Poll queries one external job. Polling is provably safe to retry.
-	Poll(ctx context.Context, ref string) (PollOutcome, error)
+	Poll(ctx context.Context, credential string, ref string) (PollOutcome, error)
 	// Cancel asks the provider to stop one accepted job; convergence stays
 	// authoritative via Poll (best-effort cancel contract).
-	Cancel(ctx context.Context, ref string) error
+	Cancel(ctx context.Context, credential string, ref string) error
 }
 
 // BackoffSchedule is the bounded 429 backoff ladder (spec: 5s, 15s, 30s,
