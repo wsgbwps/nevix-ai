@@ -72,6 +72,22 @@ else
   warn "未找到 server/.env.local，按当前 shell 环境变量启动。"
 fi
 
+# 媒体能力受 Production Readiness 门控（规格 #150，#158）：NEVIX_CREATION_
+# READINESS_FILE 未设置时两个媒体都停在"尚未通过发布验收"，Workbench 不能
+# 提交。变量已设置但文件尚不存在时，用本地合成证据生成一份（仅本地开发；
+# 生产证据只能来自 scripts/production-readiness 对真实 Kapon 的执行）。
+if [ -n "${NEVIX_CREATION_READINESS_FILE:-}" ] && [ ! -f "$NEVIX_CREATION_READINESS_FILE" ]; then
+  node "$repo_root/scripts/dev/dev-readiness-evidence.mjs" --out "$NEVIX_CREATION_READINESS_FILE" \
+    >"$log_dir/dev-readiness.log" 2>&1 || true
+  if [ -f "$NEVIX_CREATION_READINESS_FILE" ]; then
+    log "本地 readiness 证据已生成：$NEVIX_CREATION_READINESS_FILE（本地合成，非发布验收事实；详见 $log_dir/dev-readiness.log）"
+  else
+    warn "readiness 证据生成失败（见 $log_dir/dev-readiness.log），媒体能力将停在发布验收未通过。"
+  fi
+elif [ -z "${NEVIX_CREATION_READINESS_FILE:-}" ]; then
+  warn "NEVIX_CREATION_READINESS_FILE 未设置：媒体能力将停在「尚未通过发布验收」，Workbench 无法提交（在 server/.env.local 设置该变量可获得本地合成证据）。"
+fi
+
 case "${KAPON_BASE_URL:-}" in
   "http://127.0.0.1:$fake_kapon_port" | "http://localhost:$fake_kapon_port")
     if port_busy "$fake_kapon_port"; then
