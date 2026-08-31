@@ -471,7 +471,6 @@ func (w *TaskWorker) driveCancellingJob(ctx context.Context, queueID domain.UUID
 		if cancelErr := w.gateway.Cancel(ctx, credential, *job.ExternalRef); cancelErr != nil && !domain.IsProviderUnavailable(cancelErr) {
 			// Cancel requests are best effort; provider-side rejection of the
 			// cancel leaves polling as the authoritative convergence.
-			_ = cancelErr
 		}
 	}
 	// A credential resolution failure only skips the best-effort cancel
@@ -744,11 +743,17 @@ func (w *TaskWorker) convergeFromTerminalJob(ctx context.Context, queueID domain
 	if job.Status == domain.JobCompleted && job.ExternalRef != nil {
 		// A completed async job's outputs stay re-pollable; a persist-phase
 		// crash can retry the transfer without a new external generation.
-		if credential, credErr := w.credentials.ActiveCallCredential(ctx); credErr == nil {
-			if outcome, err := w.gateway.Poll(ctx, credential, *job.ExternalRef); err == nil &&
-				outcome.Status == domain.PollCompleted && len(outcome.Outputs) > 0 {
-				return w.transferAndPersist(ctx, queueID, task.ID, job.ID, domain.JobCompleted, domain.JobCompleted, outcome.Outputs, nil)
-			}
+		credential, credErr := w.credentials.ActiveCallCredential(ctx)
+		if credErr != nil {
+			// A credential failure is transient for convergence (the same
+			// policy drivePoll applies): settling the slots terminal here
+			// would discard a completed job's transferable outputs as a
+			// nil-reason failure outside the stable taxonomy.
+			return w.reschedule(ctx, queueID, time.Now().Add(w.pollEvery), false)
+		}
+		if outcome, err := w.gateway.Poll(ctx, credential, *job.ExternalRef); err == nil &&
+			outcome.Status == domain.PollCompleted && len(outcome.Outputs) > 0 {
+			return w.transferAndPersist(ctx, queueID, task.ID, job.ID, domain.JobCompleted, domain.JobCompleted, outcome.Outputs, nil)
 		}
 	}
 	return w.persistJobTerminal(ctx, queueID, task, slots, job, job.Status, nil)

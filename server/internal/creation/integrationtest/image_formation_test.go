@@ -132,7 +132,9 @@ func TestImageOutputsFormUniqueMediaAssets(t *testing.T) {
 	}
 }
 
-// TestPartialSuccessFormsAssetsOnlyForSucceededSlots.
+// TestPartialSuccessFormsAssetsOnlyForSucceededSlots: a provider shortfall
+// fails only the missing slots; their absence from the asset table keeps the
+// aggregate's succeeded-only invariant.
 func TestPartialSuccessFormsAssetsOnlyForSucceededSlots(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)

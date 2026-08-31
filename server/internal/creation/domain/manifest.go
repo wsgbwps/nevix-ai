@@ -65,6 +65,15 @@ var (
 	videoDurations   = []int{5, 10}
 )
 
+// AcceptedImageRatios and AcceptedImageResolutions expose the accepted
+// value sets the manifest publishes, so downstream contracts (e.g. the
+// adapter's wire mapping conformance) can derive their coverage from the
+// same source instead of hand-copying the lists.
+func AcceptedImageRatios() []string { return imageRatios }
+
+// AcceptedImageResolutions returns the accepted resolution values.
+func AcceptedImageResolutions() []string { return imageResolutions }
+
 // Spec defaults: used when active, else the first active value in the fixed
 // order above.
 const (

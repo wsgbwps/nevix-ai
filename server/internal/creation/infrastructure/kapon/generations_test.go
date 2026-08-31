@@ -30,18 +30,25 @@ func newGenerationsClient(t *testing.T, handler http.HandlerFunc) *GenerationsCl
 	return NewGenerationsClient(server.URL)
 }
 
-// acceptedCrossProduct mirrors the domain manifest's accepted image values
-// (manifest.go imageRatios × imageResolutions) so the adapter table and the
-// manifest cannot drift apart silently.
-var acceptedCrossProduct = []struct {
+// imageSizeCase is one accepted (ratio, resolution) combination.
+type imageSizeCase struct {
 	ratio      string
 	resolution string
-}{
-	{"1:1", "1K"}, {"1:1", "2K"}, {"1:1", "4K"},
-	{"4:3", "1K"}, {"4:3", "2K"}, {"4:3", "4K"},
-	{"4:5", "1K"}, {"4:5", "2K"}, {"4:5", "4K"},
-	{"16:9", "1K"}, {"16:9", "2K"}, {"16:9", "4K"},
-	{"9:16", "1K"}, {"9:16", "2K"}, {"9:16", "4K"},
+}
+
+// acceptedCrossProduct derives the manifest's accepted image values from the
+// domain itself, so a ratio/resolution added there makes this conformance
+// test demand a mapping entry (the adapter table cannot drift silently).
+var acceptedCrossProduct = buildAcceptedCrossProduct()
+
+func buildAcceptedCrossProduct() []imageSizeCase {
+	cases := make([]imageSizeCase, 0)
+	for _, ratio := range domain.AcceptedImageRatios() {
+		for _, resolution := range domain.AcceptedImageResolutions() {
+			cases = append(cases, imageSizeCase{ratio: ratio, resolution: resolution})
+		}
+	}
+	return cases
 }
 
 // TestImageSizeTableCoversAcceptedCrossProduct: every manifest-validated

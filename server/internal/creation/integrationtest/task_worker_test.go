@@ -3,6 +3,7 @@ package integrationtest
 import (
 	"context"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -431,4 +432,92 @@ func TestLocalCrashNeverFabricatesTimeout(t *testing.T) {
 		t.Fatal("local waiting must never end as business timed_out")
 	}
 	_ = context.Background()
+}
+
+// TestCompletedJobSurvivesCredentialUnavailability: a job that already
+// settled provider-side (persist-phase crash recovery) holds as transient
+// while the call credential is unresolvable, and its outputs still form
+// assets once the credential returns — the completed job's outputs are never
+// discarded as a nil-reason terminal failure (issue #160 review).
+func TestCompletedJobSurvivesCredentialUnavailability(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 1 << 30})
+
+	status, body := h.doRequest(t, "POST", "/creation/sessions", token, map[string]any{"name": "sealed"})
+	if status != http.StatusCreated {
+		t.Fatalf("create session: %d", status)
+	}
+	sessionID := extractField(t, body, "id")
+	draft := h.saveDraftOn(t, token, sessionID, taskDraft{
+		MediaType: "video", Model: "doubao-seedance-2-5", Mode: "text-to-video",
+		Resolution: "720p", Duration: 5, Prompt: "凭据恢复后继续收敛",
+	})
+	status, body = h.submitTask(t, token, sessionID, "sealed-1", draft.Revision)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+
+	// Wait until the job is mid-flight (processing with an external ref).
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _, view := h.getTask(t, token, taskID)
+		if view.Task.Status == "processing" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'processing' AND external_ref IS NOT NULL`, taskID); got != 1 {
+		t.Fatalf("processing job with external ref expected, got %d", got)
+	}
+
+	// Simulate the persist-phase crash state: the job settled provider-side
+	// (completed) while the task's slots never landed.
+	if _, err := h.ownerPool.Exec(h.ctx,
+		`UPDATE creation_provider_jobs SET status = 'completed', terminal_at = now() WHERE task_id = $1::uuid`, taskID); err != nil {
+		t.Fatalf("mark job completed: %v", err)
+	}
+
+	// Seal the master key: the call credential cannot be resolved, so the
+	// completed job must hold transiently instead of converging to a
+	// nil-reason failure that would discard its transferable outputs.
+	if err := os.Chmod(h.secretsDir, 0o000); err != nil {
+		t.Fatalf("seal secrets dir: %v", err)
+	}
+	holdDeadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(holdDeadline) {
+		_, _, view := h.getTask(t, token, taskID)
+		if isTerminalStatus(view.Task.Status) {
+			t.Fatalf("sealed credential must hold the task open, got %s (%s)", view.Task.Status, slotVerdicts(view))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// The credential returns and the provider answers with its outputs: the
+	// same job converges succeeded with a formed asset — no new generation.
+	if err := os.Chmod(h.secretsDir, 0o700); err != nil {
+		t.Fatalf("unseal secrets dir: %v", err)
+	}
+	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 0})
+	view := h.awaitTaskTerminal(t, token, taskID)
+	if view.Task.Status != "succeeded" {
+		t.Fatalf("recovered job must succeed, got %s (%s)", view.Task.Status, slotVerdicts(view))
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid`, taskID); got != 1 {
+		t.Fatalf("recovery must not create a second external attempt, got %d jobs", got)
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, taskID); got != 1 {
+		t.Fatalf("the completed job's output must form its asset, got %d", got)
+	}
+}
+
+// isTerminalStatus reports whether a wire task status is one of the five
+// terminal states.
+func isTerminalStatus(status string) bool {
+	switch status {
+	case "succeeded", "partially_succeeded", "failed", "cancelled", "timed_out":
+		return true
+	}
+	return false
 }
