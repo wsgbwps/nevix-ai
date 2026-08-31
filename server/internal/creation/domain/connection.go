@@ -64,6 +64,7 @@ type ProviderConnection struct {
 	Envelope         *ProviderCredentialEnvelope
 	LastCheckedAt    *time.Time
 	LastCheckOutcome *CheckOutcome
+	CreditBlockedAt  *time.Time
 	CreatedByUserID  UUID
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
@@ -77,7 +78,8 @@ func (c *ProviderConnection) NeedsAttention() bool {
 	if c.TerminatedAt != nil {
 		return false
 	}
-	return c.CredentialState != CredentialStateValid ||
+	return c.CreditBlockedAt != nil ||
+		c.CredentialState != CredentialStateValid ||
 		c.AdminState != AdminStateEnabled ||
 		c.ImageCapability != MediaCapabilityAvailable ||
 		c.VideoCapability != MediaCapabilityAvailable
@@ -104,6 +106,10 @@ var (
 	ErrCredentialSealed = errors.New("provider credential envelope could not be opened")
 	// ErrInvalidAdminState reports a PATCH body outside enabled|paused.
 	ErrInvalidAdminState = errors.New("invalid admin state")
+	// ErrActiveGenerationTasksExist reports a connection delete refused
+	// because non-terminal tasks or jobs still owe provider work; the
+	// machine code is active_generation_tasks_exist.
+	ErrActiveGenerationTasksExist = errors.New("active generation tasks exist")
 )
 
 // Credential states and media capabilities are closed enumerations; helpers

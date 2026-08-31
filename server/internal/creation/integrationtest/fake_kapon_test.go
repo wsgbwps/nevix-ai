@@ -15,6 +15,8 @@ import (
 type fakeKapon struct {
 	server *httptest.Server
 
+	generation *generationFake
+
 	mu           sync.Mutex
 	acceptedKeys map[string]bool
 	forcedStatus int // 0 = normal catalog behavior
@@ -29,6 +31,7 @@ func newFakeKapon(t *testing.T) *fakeKapon {
 		acceptedKeys: map[string]bool{},
 		imageModel:   true,
 		videoModel:   true,
+		generation:   newGenerationFake(pngBytes(t), mp4Fixture()),
 	}
 	fake.server = httptest.NewServer(http.HandlerFunc(fake.serve))
 	t.Cleanup(fake.server.Close)
@@ -80,7 +83,9 @@ func (f *fakeKapon) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 
 	if r.URL.Path != "/v1/models" || r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusNotFound)
+		if !f.generation.serveGeneration(w, r) {
+			w.WriteHeader(http.StatusNotFound)
+		}
 		return
 	}
 	if forcedStatus != 0 {

@@ -85,31 +85,40 @@ const (
 	ProviderConnectionResumed  Action = "provider_connection_resumed"
 	ProviderConnectionChecked  Action = "provider_connection_checked"
 	ProviderConnectionDeleted  Action = "provider_connection_deleted"
+	// The generation task kernel (issue #159): governance limit changes and
+	// the persistent provider credit block carry scope/target metadata only
+	// — never prompts, task payloads, or provider errors.
+	GenerationGovernanceUpdated Action = "generation_governance_updated"
+	ProviderCreditBlocked       Action = "provider_credit_blocked"
+	ProviderCreditCleared       Action = "provider_credit_cleared"
 )
 
 var validActions = map[Action]struct{}{
-	InstanceClaimed:            {},
-	SessionCreated:             {},
-	SessionRevoked:             {},
-	PasswordChanged:            {},
-	DisplayNameChanged:         {},
-	UserCreated:                {},
-	UserDisabled:               {},
-	UserPasswordReset:          {},
-	UserEmailChanged:           {},
-	UserRoleChanged:            {},
-	UserDeleted:                {},
-	JoinCodeCreated:            {},
-	JoinCodeRevoked:            {},
-	UserSelfRegistered:         {},
-	ReauthProofIssued:          {},
-	ReauthProofConsumed:        {},
-	ProviderConnectionCreated:  {},
-	ProviderConnectionReplaced: {},
-	ProviderConnectionPaused:   {},
-	ProviderConnectionResumed:  {},
-	ProviderConnectionChecked:  {},
-	ProviderConnectionDeleted:  {},
+	InstanceClaimed:             {},
+	SessionCreated:              {},
+	SessionRevoked:              {},
+	PasswordChanged:             {},
+	DisplayNameChanged:          {},
+	UserCreated:                 {},
+	UserDisabled:                {},
+	UserPasswordReset:           {},
+	UserEmailChanged:            {},
+	UserRoleChanged:             {},
+	UserDeleted:                 {},
+	JoinCodeCreated:             {},
+	JoinCodeRevoked:             {},
+	UserSelfRegistered:          {},
+	ReauthProofIssued:           {},
+	ReauthProofConsumed:         {},
+	ProviderConnectionCreated:   {},
+	GenerationGovernanceUpdated: {},
+	ProviderCreditBlocked:       {},
+	ProviderCreditCleared:       {},
+	ProviderConnectionReplaced:  {},
+	ProviderConnectionPaused:    {},
+	ProviderConnectionResumed:   {},
+	ProviderConnectionChecked:   {},
+	ProviderConnectionDeleted:   {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id

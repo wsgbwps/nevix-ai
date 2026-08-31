@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
@@ -54,17 +55,19 @@ func (r *SessionRepository) Get(ctx context.Context, owner, id domain.UUID) (dom
 	return scanSession(row)
 }
 
-// GetWithDraft resolves the session plus its recoverable draft inside one
-// read transaction, so a concurrent save can never pair stale scalars with
-// new reference bindings: the two reads share one snapshot.
-func (r *SessionRepository) GetWithDraft(ctx context.Context, owner, id domain.UUID) (domain.Session, *domain.SessionDraft, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return domain.Session{}, nil, fmt.Errorf("creation: begin draft read: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+// draftReadExec is the statement surface a session+draft read needs; both
+// the pool and a caller's write transaction satisfy it.
+type draftReadExec interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
 
-	row := tx.QueryRow(ctx,
+// readSessionWithDraft resolves the session plus its recoverable draft over
+// any executor. Callers guarantee the snapshot discipline: GetWithDraft
+// wraps a read transaction, admission passes its write transaction so the
+// frozen specification and the revision check share one snapshot.
+func readSessionWithDraft(ctx context.Context, exec draftReadExec, owner, id domain.UUID) (domain.Session, *domain.SessionDraft, error) {
+	row := exec.QueryRow(ctx,
 		`SELECT `+sessionColumns+`, owner_user_id, `+sessionDraftColumns+`
 		 FROM creation_sessions WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL`,
 		id, owner)
@@ -83,7 +86,7 @@ func (r *SessionRepository) GetWithDraft(ctx context.Context, owner, id domain.U
 		updatedAt       *time.Time
 	)
 	draft := &domain.SessionDraft{}
-	err = row.Scan(&s.ID, &s.Name, &s.CreatedAt, &s.UpdatedAt, &s.OwnerID,
+	err := row.Scan(&s.ID, &s.Name, &s.CreatedAt, &s.UpdatedAt, &s.OwnerID,
 		&draft.Prompt, &mediaType, &manifestVersion, &model, &mode, &ratio,
 		&resolution, &quantity, &durationSeconds, &updatedAt)
 	if errors.Is(err, noRowsErr) {
@@ -106,9 +109,10 @@ func (r *SessionRepository) GetWithDraft(ctx context.Context, owner, id domain.U
 	if updatedAt == nil {
 		return s, nil, nil
 	}
+	draft.Revision = *updatedAt
 
 	draft.References = []domain.DraftReference{}
-	bindingRows, err := tx.Query(ctx, `
+	bindingRows, err := exec.Query(ctx, `
 		SELECT material_id, role FROM creation_session_draft_references
 		WHERE session_id = $1 ORDER BY position ASC`, id)
 	if err != nil {
@@ -129,41 +133,55 @@ func (r *SessionRepository) GetWithDraft(ctx context.Context, owner, id domain.U
 	return s, draft, nil
 }
 
+// GetWithDraft resolves the session plus its recoverable draft inside one
+// read transaction, so a concurrent save can never pair stale scalars with
+// new reference bindings: the two reads share one snapshot.
+func (r *SessionRepository) GetWithDraft(ctx context.Context, owner, id domain.UUID) (domain.Session, *domain.SessionDraft, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.Session{}, nil, fmt.Errorf("creation: begin draft read: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	return readSessionWithDraft(ctx, tx, owner, id)
+}
+
 // SaveDraft atomically replaces the draft: scalars update first (which also
 // proves ownership and liveness, and serializes concurrent saves on the same
 // session), then the reference bindings are rewritten row by row. Any failure
 // rolls the whole replacement back in the caller's transaction.
-func (r *SessionRepository) SaveDraft(ctx context.Context, tx domain.TxExecutor, owner, id domain.UUID, draft *domain.SessionDraft) error {
-	tag, err := execTx(tx, ctx, `
+func (r *SessionRepository) SaveDraft(ctx context.Context, tx domain.TxExecutor, owner, id domain.UUID, draft *domain.SessionDraft) (time.Time, error) {
+	row := tx.QueryRow(ctx, `
 		UPDATE creation_sessions SET
 			draft_prompt = $3, draft_media_type = $4, draft_manifest_version = $5,
 			draft_model = $6, draft_mode = $7, draft_ratio = $8, draft_resolution = $9,
 			draft_quantity = $10, draft_duration_seconds = $11,
 			draft_updated_at = now(), updated_at = now()
-		WHERE id = $2 AND owner_user_id = $1 AND deleted_at IS NULL`,
+		WHERE id = $2 AND owner_user_id = $1 AND deleted_at IS NULL
+		RETURNING draft_updated_at`,
 		owner, id, draft.Prompt, mediaTypeArg(draft.MediaType), draft.ManifestVersion,
 		draft.Model, draft.Mode, draft.Ratio, draft.Resolution,
 		draft.Quantity, draft.DurationSeconds)
-	if err != nil {
-		return fmt.Errorf("creation: save session draft: %w", err)
-	}
-	if tag == 0 {
-		return domain.ErrSessionNotFound
+	var revision time.Time
+	if err := row.Scan(&revision); err != nil {
+		if errors.Is(err, noRowsErr) {
+			return time.Time{}, domain.ErrSessionNotFound
+		}
+		return time.Time{}, fmt.Errorf("creation: save session draft: %w", err)
 	}
 
 	if _, err := execTx(tx, ctx,
 		`DELETE FROM creation_session_draft_references WHERE session_id = $1`, id); err != nil {
-		return fmt.Errorf("creation: clear draft references: %w", err)
+		return time.Time{}, fmt.Errorf("creation: clear draft references: %w", err)
 	}
 	for position, reference := range draft.References {
 		if _, err := execTx(tx, ctx, `
 			INSERT INTO creation_session_draft_references (session_id, position, material_id, role)
 			VALUES ($1, $2, $3, $4)`,
 			id, position, reference.MaterialID, string(reference.Role)); err != nil {
-			return fmt.Errorf("creation: insert draft reference: %w", err)
+			return time.Time{}, fmt.Errorf("creation: insert draft reference: %w", err)
 		}
 	}
-	return nil
+	return revision, nil
 }
 
 // mediaTypeArg keeps the typed draft media pointer column-honest: a nil

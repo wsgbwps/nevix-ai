@@ -168,3 +168,15 @@ func ReferenceBlobKey(id UUID) string {
 
 // Time aliases time.Time for entity signatures in this package's files.
 type Time = time.Time
+
+// GenerationResultBlobKey derives the stable blob-store object key for one
+// slot's transferred output — the single place a (task, slot) pair becomes a
+// Storage address, shared by transfer and download.
+func GenerationResultBlobKey(taskID UUID, index int) string {
+	hexed := taskID.String()
+	return fmt.Sprintf("generation-results/%s/%s/%s-slot-%d", hexed[0:2], hexed[2:4], hexed, index)
+}
+
+// GenerationResultMaxBytes is the defensive per-output transfer ceiling
+// (spec #150 输出持久化).
+const GenerationResultMaxBytes int64 = 1 << 30

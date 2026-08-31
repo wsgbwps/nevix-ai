@@ -5,6 +5,7 @@ node_modules/
 dist/
 out/
 build/
+*.tsbuildinfo
 !apps/desktop/build/
 apps/desktop/build/*
 !apps/desktop/build/locales/

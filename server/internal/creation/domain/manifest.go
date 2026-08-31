@@ -419,3 +419,10 @@ func DeriveCapabilityManifest(evidence ReadinessEvidence, connection *ProviderCo
 	manifest.Video = derive(ReadinessMediaVideo, VideoModelID, videoModes, instance.Video)
 	return manifest
 }
+
+// MediaReferenceEnvelope returns the media-level widest reference policy so
+// admission validates material facts against the same numbers the manifest
+// publishes — one source, never a duplicated constant.
+func MediaReferenceEnvelope(media MediaType) ReferenceMaterialPolicy {
+	return mediaReferenceEnvelope(string(media))
+}

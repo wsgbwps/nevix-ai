@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/experimental-ct-react'
 import {
   CreationWorkbenchShellStory,
-  CreationWorkbenchStory
+  CreationWorkbenchStory,
+  type ScriptedTask
 } from './fixtures/creation-workbench.story'
 import type { SessionDraftInput } from '../src/renderer/src/features/creation/api/go-creation-http'
 import type { CapabilityManifest } from '../src/renderer/src/features/creation/api/capability-manifest-http'
@@ -20,6 +21,7 @@ import type { CapabilityManifest } from '../src/renderer/src/features/creation/a
 const noCapabilityManifest: CapabilityManifest = {
   schemaVersion: 1,
   manifestVersion: 1,
+  updatedAt: '2026-08-29T10:00:00Z',
   image: { available: false, reason: 'not_configured', action: 'contact_admin' },
   video: { available: false, reason: 'not_configured', action: 'contact_admin' }
 }
@@ -29,6 +31,7 @@ const staleDraft: SessionDraftInput = {
   prompt: 'legacy campaign draft',
   mediaType: 'image',
   manifestVersion: 1,
+  updatedAt: '2026-08-29T10:00:00Z',
   model: 'removed-legacy-model',
   mode: 'reference-image',
   ratio: '7:3',
@@ -37,6 +40,10 @@ const staleDraft: SessionDraftInput = {
   durationSeconds: null,
   references: [{ materialId: 'cccccccc-0000-4000-8000-000000000003', role: 'reference' }]
 }
+
+// The scripted session id the fixture mounts by default (kept local: the
+// fixture file carries top-level await and must not leak runtime values here).
+const scriptedSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'
 
 interface SaveCall {
   sessionId: string
@@ -250,13 +257,173 @@ test('the expanded deck overlays in place instead of squeezing the prompt', asyn
   expect(after?.width).toBe(before?.width)
 })
 
-test('submitting stays disabled without faking success', async ({ mount, page }) => {
-  await mount(<CreationWorkbenchStory />)
+test('submitting stays disabled while capability context is missing', async ({ mount, page }) => {
+  // The submit command freezes a manifest-conformant intent: without a live
+  // manifest (or without a complete draft) the affordance stays inert rather
+  // than guessing a submission the server would have to reject.
+  await mount(<CreationWorkbenchStory manifestFails />)
   await selectFirstSession(page)
 
   const submit = page.getByTestId('composer-submit')
   await expect(submit).toBeDisabled()
   await expect(submit).toHaveAttribute('aria-disabled', 'true')
+})
+
+test('submitting creates a generation task and renders the slot gallery', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  const submit = page.getByTestId('composer-submit')
+  await expect(submit).toBeEnabled()
+  await submit.click()
+
+  const taskCalls = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(taskCalls).toHaveLength(1)
+  expect(taskCalls[0].idempotencyKey).not.toBe('')
+
+  // The gallery shows the admitted task with its stable ordered slots.
+  await expect(page.getByTestId('result-gallery')).toBeVisible()
+  const slots = page.locator('[data-testid^="slot-dddddddd"]')
+  await expect(slots).toHaveCount(2)
+  await expect(slots.first()).toHaveAttribute('data-slot-status', 'queued')
+})
+
+test('slot states, failure reasons, and task actions render inline', async ({ mount, page }) => {
+  const failedTask: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000face',
+    sessionId: scriptedSessionId,
+    status: 'partially_succeeded',
+    mediaType: 'image',
+    slotCount: 2,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [
+      { index: 0, status: 'succeeded', failureReason: null, result: null },
+      {
+        index: 1,
+        status: 'failed',
+        failureReason: 'temporarily_unavailable',
+        result: null
+      }
+    ]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [failedTask] }} />)
+  await selectFirstSession(page)
+
+  // States render inside the slots — no separate banner.
+  await expect(page.getByTestId(`slot-${failedTask.id}-0`)).toHaveAttribute(
+    'data-slot-status',
+    'succeeded'
+  )
+  await expect(page.getByTestId(`slot-${failedTask.id}-1`)).toHaveAttribute(
+    'data-slot-status',
+    'failed'
+  )
+  await expect(page.getByTestId(`slot-${failedTask.id}-1`)).toContainText(
+    'Provider temporarily unavailable'
+  )
+
+  // Partial success keeps retrying exactly the uncompleted slots.
+  await page.getByTestId(`task-retry-${failedTask.id}`).click()
+  const retries = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
+  expect(retries).toHaveLength(1)
+  expect(retries[0].taskId).toBe(failedTask.id)
+})
+
+test('cancel requests best-effort convergence on a running task', async ({ mount, page }) => {
+  const runningTask: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000run1',
+    sessionId: scriptedSessionId,
+    status: 'processing',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:00:01Z',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [runningTask] }} />)
+  await selectFirstSession(page)
+
+  await page.getByTestId(`task-cancel-${runningTask.id}`).click()
+  const cancelled = await page.evaluate(() => window.__creationDeckTest?.cancelledIds() ?? [])
+  expect(cancelled).toEqual([runningTask.id])
+})
+
+test('indeterminate outcomes require an explicit risk confirmation before redo', async ({
+  mount,
+  page
+}) => {
+  const unknownTask: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000unk1',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: 'provider_outcome_indeterminate',
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:00:02Z',
+    terminalAt: '2026-08-29T09:00:02Z',
+    slots: [
+      {
+        index: 0,
+        status: 'indeterminate',
+        failureReason: 'processing_indeterminate',
+        result: null
+      }
+    ]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [unknownTask] }} />)
+  await selectFirstSession(page)
+
+  // The redo affordance opens the risk dialog; the retry fires only after the
+  // creator confirms the repeat-generation/billing risk.
+  await page.getByTestId(`task-retry-indeterminate-${unknownTask.id}`).click()
+  const before = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
+  expect(before).toHaveLength(0)
+  await expect(page.getByTestId(`indeterminate-confirm-${unknownTask.id}`)).toBeVisible()
+  await page.getByTestId(`indeterminate-confirm-button-${unknownTask.id}`).click()
+  const after = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
+  expect(after).toHaveLength(1)
+  expect(after[0].taskId).toBe(unknownTask.id)
+})
+
+test('an SSE invalidation refetches the task list', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  const pushed: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000pus1',
+    sessionId: scriptedSessionId,
+    status: 'processing',
+    mediaType: 'video',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:05:00Z',
+    updatedAt: '2026-08-29T09:05:01Z',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  // The scripted server commits the task and fires the invalidation in the
+  // same instant — commit-before-notify from the fixture's point of view.
+  await page.evaluate((task) => {
+    window.__creationDeckTest?.pushTask(task as never)
+  }, pushed as never)
+  await expect(page.getByTestId(`task-${pushed.id}`)).toBeVisible()
+  await expect(page.getByTestId(`slot-${pushed.id}-0`)).toHaveAttribute(
+    'data-slot-status',
+    'generating'
+  )
 })
 
 test('the workbench fills the shell content area it is mounted in', async ({ mount, page }) => {

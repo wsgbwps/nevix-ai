@@ -172,3 +172,38 @@ func scanMaterialRows(rows interface {
 	m.Kind = domain.Kind(kind)
 	return m, nil
 }
+
+// LoadMaterialsInSession resolves the requested materials with full facts on
+// the caller's transaction; materials outside the (active, owned) session are
+// simply absent so admission can treat absence as a rejection fact.
+func (r *MaterialRepository) LoadMaterialsInSession(ctx context.Context, tx domain.TxExecutor, owner, sessionID domain.UUID, ids []domain.UUID) ([]domain.ReferenceMaterial, error) {
+	if len(ids) == 0 {
+		return []domain.ReferenceMaterial{}, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT m.id, m.session_id, m.kind, m.file_name, m.mime_type, m.byte_size, m.checksum_sha256,
+		       m.blob_key, m.width_px, m.height_px, m.pixel_count, m.duration_ms, m.claims_version, m.created_at
+		FROM creation_reference_materials m
+		JOIN creation_sessions s ON s.id = m.session_id
+		WHERE m.session_id = $1 AND s.owner_user_id = $2 AND s.deleted_at IS NULL
+		  AND m.id = ANY($3::uuid[])`,
+		sessionID, owner, ids)
+	if err != nil {
+		return nil, fmt.Errorf("creation: load materials in session: %w", err)
+	}
+	defer rows.Close()
+	materials := []domain.ReferenceMaterial{}
+	for rows.Next() {
+		var m domain.ReferenceMaterial
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Kind, &m.FileName, &m.MimeType, &m.ByteSize,
+			&m.ChecksumSHA256, &m.BlobKey, &m.WidthPx, &m.HeightPx, &m.PixelCount, &m.DurationMS,
+			&m.ClaimsVersion, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("creation: scan material: %w", err)
+		}
+		materials = append(materials, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("creation: load materials in session rows: %w", err)
+	}
+	return materials, nil
+}

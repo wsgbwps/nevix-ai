@@ -46,6 +46,10 @@ func toSessionResource(s domain.Session) sessionResource {
 
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
+// timeRFC3339Nano preserves the draft revision's full precision so a
+// submitted draft_revision compares equal to the stored timestamp.
+const timeRFC3339Nano = "2006-01-02T15:04:05.999999999Z07:00"
+
 type createSessionRequest struct {
 	Name *string `json:"name"`
 }
@@ -116,7 +120,8 @@ type sessionDetailResource struct {
 	Draft *draftResource `json:"draft"`
 }
 
-// draftResource is the wire shape of one stored draft.
+// draftResource is the wire shape of one stored draft. UpdatedAt is the
+// revision the submitter echoes back as draft_revision at task admission.
 type draftResource struct {
 	Prompt          string                   `json:"prompt"`
 	MediaType       *string                  `json:"media_type"`
@@ -128,6 +133,7 @@ type draftResource struct {
 	Quantity        *int                     `json:"quantity"`
 	DurationSeconds *int                     `json:"duration_seconds"`
 	References      []draftReferenceResource `json:"references"`
+	UpdatedAt       string                   `json:"updated_at"`
 }
 
 type draftReferenceResource struct {
@@ -143,6 +149,7 @@ func toDraftResource(draft *domain.SessionDraft) *draftResource {
 		Prompt:          draft.Prompt,
 		ManifestVersion: draft.ManifestVersion,
 		References:      make([]draftReferenceResource, 0, len(draft.References)),
+		UpdatedAt:       draft.Revision.UTC().Format(timeRFC3339Nano),
 	}
 	if draft.MediaType != nil {
 		media := string(*draft.MediaType)
@@ -212,10 +219,12 @@ func (h *SessionHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 			Role:       domain.DraftRole(reference.Role),
 		})
 	}
-	if err := h.sessions.SaveDraft(r.Context(), creatorID(w, r), id, draft); err != nil {
+	revision, err := h.sessions.SaveDraft(r.Context(), creatorID(w, r), id, draft)
+	if err != nil {
 		fail(w, r, err)
 		return
 	}
+	draft.Revision = revision
 	encodeJSON(w, http.StatusOK, toDraftResource(draft))
 }
 

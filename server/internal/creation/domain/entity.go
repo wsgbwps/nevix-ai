@@ -75,8 +75,11 @@ type DraftReference struct {
 // target media, the manifest version the composer rendered when saving, the
 // model/mode/parameters as chosen, and the ordered reference bindings.
 // Nil pointers mean the field is unset, not empty — an unset value and a
-// stored zero are different draft facts.
+// stored zero are different draft facts. Revision is the draft's last save
+// timestamp (zero on a never-saved draft); admission compares it against the
+// submitter's draft_revision to reject stale submissions.
 type SessionDraft struct {
+	Revision        time.Time
 	Prompt          string
 	MediaType       *DraftMediaType
 	ManifestVersion int

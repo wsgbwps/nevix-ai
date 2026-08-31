@@ -47,6 +47,8 @@ export interface SessionDraftView {
   readonly quantity: number | null
   readonly durationSeconds: number | null
   readonly references: readonly DraftReferenceView[]
+  /** The draft revision (updated_at) echoed back as draft_revision on submit. */
+  readonly updatedAt: string
 }
 
 /**
@@ -297,7 +299,8 @@ export function createCreationClient(serverUrl: string): {
     if (typeof payload !== 'object' || payload === null) return null
     const prompt = readStringField(payload, 'prompt')
     const manifestVersion = readNumberOrNullField(payload, 'manifest_version')
-    if (prompt === null || manifestVersion === null || manifestVersion < 1) return null
+    const revision = readStringField(payload, 'updated_at')
+    if (prompt === null || manifestVersion === null || manifestVersion < 1 || !revision) return null
     const mediaType = readNullableString(payload, 'media_type')
     if (mediaType === undefined) return null
     if (mediaType !== null && mediaType !== 'image' && mediaType !== 'video') return null
@@ -339,7 +342,8 @@ export function createCreationClient(serverUrl: string): {
       resolution,
       quantity,
       durationSeconds,
-      references
+      references,
+      updatedAt: revision
     }
   }
 
@@ -409,20 +413,24 @@ export function createCreationClient(serverUrl: string): {
       return detail ? { outcome: 'succeeded', value: detail } : { outcome: 'network-failure' }
     },
     saveSessionDraft: async (token, sessionId, draft) => {
+      // The PUT body stays the contract's SessionDraftInput shape; updated_at
+      // rides the view only — it is the revision the submitter echoes back.
+      const { updatedAt: _revision, ...draftBody } = draft
+      void _revision
       const result = await request(serverUrl, {
         method: 'PUT',
         path: `/creation/sessions/${sessionId}/draft`,
         body: {
-          prompt: draft.prompt,
-          media_type: draft.mediaType,
-          manifest_version: draft.manifestVersion,
-          model: draft.model,
-          mode: draft.mode,
-          ratio: draft.ratio,
-          resolution: draft.resolution,
-          quantity: draft.quantity,
-          duration_seconds: draft.durationSeconds,
-          references: draft.references.map((reference) => ({
+          prompt: draftBody.prompt,
+          media_type: draftBody.mediaType,
+          manifest_version: draftBody.manifestVersion,
+          model: draftBody.model,
+          mode: draftBody.mode,
+          ratio: draftBody.ratio,
+          resolution: draftBody.resolution,
+          quantity: draftBody.quantity,
+          duration_seconds: draftBody.durationSeconds,
+          references: draftBody.references.map((reference) => ({
             material_id: reference.materialId,
             role: reference.role
           }))
