@@ -7,7 +7,8 @@ import type {
   GenerationTaskDetail,
   GenerationTaskView,
   SlotFailureDiagnosticSource,
-  SlotFailureReason
+  SlotFailureReason,
+  SlotResultView
 } from '../api/generation-task-http'
 import type { CreationWorkbenchController } from '../model/use-workbench'
 
@@ -280,7 +281,7 @@ function SlotCard({
         if (blobUrl === null) return
         const anchor = document.createElement('a')
         anchor.href = blobUrl
-        anchor.download = downloadFilename(taskId, slot.index, mediaType)
+        anchor.download = downloadFilename(taskId, slot.index, mediaType, slot.result)
         document.body.appendChild(anchor)
         anchor.click()
         anchor.remove()
@@ -342,7 +343,7 @@ function SlotCard({
           type="button"
           data-testid={`slot-download-${taskId}-${slot.index}`}
           aria-label={String(t('gallery.actions.download'))}
-          title={downloadFilename(taskId, slot.index, mediaType)}
+          title={downloadFilename(taskId, slot.index, mediaType, slot.result)}
           onClick={download}
           className="absolute right-1 bottom-1 z-10 grid size-6 place-items-center rounded-md border border-white/25 bg-black/50 text-white outline-none hover:bg-black/65 focus-visible:ring-2 focus-visible:ring-sky-400/70"
         >
@@ -353,8 +354,25 @@ function SlotCard({
   )
 }
 
-function downloadFilename(taskId: string, index: number, mediaType: 'image' | 'video'): string {
-  const extension = mediaType === 'video' ? 'mp4' : 'png'
+// Downloads keep the provider's original format: the extension follows the
+// verified result's mime type (the vendor commonly returns JPEG), never a
+// fixed png — the bytes themselves already pass through unmodified.
+const resultExtensions: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4'
+}
+
+function downloadFilename(
+  taskId: string,
+  index: number,
+  mediaType: 'image' | 'video',
+  result: SlotResultView | null
+): string {
+  const extension =
+    (result !== null ? resultExtensions[result.mimeType] : undefined) ??
+    (mediaType === 'video' ? 'mp4' : 'png')
   return `nevix-${taskId.slice(0, 8)}-${index + 1}.${extension}`
 }
 

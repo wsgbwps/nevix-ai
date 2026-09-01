@@ -124,7 +124,8 @@ export const creationTranslations = defineResourceTranslations({
           quantity: '数量',
           duration: '时长',
           seconds: '{{n}} 秒',
-          durationShort: '{{n}}s'
+          durationShort: '{{n}}s',
+          size: '尺寸'
         },
         stale: {
           badge: '能力已变化',
@@ -364,7 +365,8 @@ export const creationTranslations = defineResourceTranslations({
           quantity: 'Quantity',
           duration: 'Duration',
           seconds: '{{n}}s',
-          durationShort: '{{n}}s'
+          durationShort: '{{n}}s',
+          size: 'Size'
         },
         stale: {
           badge: 'Capability changed',

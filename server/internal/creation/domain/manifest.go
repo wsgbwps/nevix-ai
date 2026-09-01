@@ -13,16 +13,18 @@ const ManifestSchemaVersion = 2
 
 // ManifestVersion is the capability content version. Bump when the accepted
 // capability set changes, such as a model or vendor ratio/size contract
-// change.
-const ManifestVersion = 3
+// change. v4: the base image model id dropped the catalog alias's -n suffix
+// (doubao-seedream-5.0-n → doubao-seedream-5.0) — the vendor's versioned
+// backend id has no suffix, so -n reads like a distinct product.
+const ManifestVersion = 4
 
 // The V1 allowlisted models (spec #150). Declared here because the manifest
 // publishes them; the Kapon adapter reuses these constants so the catalog
 // check, the manifest, and the wire size table can never drift apart.
 const (
-	ImageModelID  = "doubao-seedream-5.0-pro"
-	ImageModelNID = "doubao-seedream-5.0-n"
-	VideoModelID  = "doubao-seedance-2-5"
+	ImageModelID     = "doubao-seedream-5.0-pro"
+	ImageModelBaseID = "doubao-seedream-5.0"
+	VideoModelID     = "doubao-seedance-2-5"
 )
 
 // Prompt length envelope shared by both media (spec 图片/视频合同).
@@ -50,10 +52,11 @@ var (
 	imageRatios = []string{"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"}
 	// imageModels declares the accepted image models and their resolution
 	// tiers (Kapon size contract, apifox 2026-09): pro covers 1K/1.5K/2K,
-	// n covers 2K/3K/4K; the tier labels overlap but the pixel sizes differ.
+	// the base model covers 2K/3K/4K; the tier labels overlap but the pixel
+	// sizes differ.
 	imageModels = []CapabilityModelView{
 		{Model: ImageModelID, Resolutions: []string{"1K", "1.5K", "2K"}, DefaultResolution: "2K"},
-		{Model: ImageModelNID, Resolutions: []string{"2K", "3K", "4K"}, DefaultResolution: "2K"},
+		{Model: ImageModelBaseID, Resolutions: []string{"2K", "3K", "4K"}, DefaultResolution: "2K"},
 	}
 	imageQuantities = []int{1, 2, 3, 4}
 
@@ -109,12 +112,24 @@ type (
 		ReferenceMaterial *ReferenceMaterialPolicy `json:"reference_material,omitempty"`
 	}
 	// CapabilityModelView is one allowlisted model and the resolution tiers
-	// it publishes. Image media carries two models with disjoint tier sets;
-	// video carries one.
+	// it publishes. Image media carries two models with disjoint tier sets
+	// plus the pixel size of every published (tier, ratio) combination;
+	// video carries one model and no pixel sizes.
 	CapabilityModelView struct {
-		Model             string   `json:"model"`
-		Resolutions       []string `json:"resolutions"`
-		DefaultResolution string   `json:"default_resolution"`
+		Model             string               `json:"model"`
+		Resolutions       []string             `json:"resolutions"`
+		DefaultResolution string               `json:"default_resolution"`
+		Sizes             []CapabilitySizeView `json:"sizes,omitempty"`
+	}
+	// CapabilitySizeView is the vendor pixel resolution of one published
+	// (resolution tier, ratio) combination — display metadata resolved from
+	// the same table the adapter submits, so the Workbench can show the
+	// exact output size without the desktop ever holding vendor knowledge.
+	CapabilitySizeView struct {
+		Resolution string `json:"resolution"`
+		Ratio      string `json:"ratio"`
+		Width      int    `json:"width"`
+		Height     int    `json:"height"`
 	}
 	// CapabilityModeView is one submittable mode and its reference bounds.
 	CapabilityModeView struct {
@@ -335,6 +350,7 @@ func deriveAvailableMedia(media string, models []CapabilityModelView, modes []st
 			Model:             model.Model,
 			Resolutions:       append([]string(nil), model.Resolutions...),
 			DefaultResolution: model.DefaultResolution,
+			Sizes:             modelSizes(media, model),
 		})
 	}
 
@@ -354,6 +370,31 @@ func deriveAvailableMedia(media string, models []CapabilityModelView, modes []st
 	envelope := mediaReferenceEnvelope(media)
 	view.ReferenceMaterial = &envelope
 	return view
+}
+
+// modelSizes publishes the vendor pixel size of every (tier, ratio)
+// combination of one image model, in fixed tier-then-ratio order. Video
+// models have no pixel contract, so they publish none.
+func modelSizes(media string, model CapabilityModelView) []CapabilitySizeView {
+	if media != string(MediaImage) {
+		return nil
+	}
+	sizes := make([]CapabilitySizeView, 0, len(model.Resolutions)*len(imageRatios))
+	for _, resolution := range model.Resolutions {
+		for _, ratio := range imageRatios {
+			size, ok := ImageSizeFor(model.Model, ratio, resolution)
+			if !ok {
+				continue
+			}
+			sizes = append(sizes, CapabilitySizeView{
+				Resolution: resolution,
+				Ratio:      ratio,
+				Width:      size.Width,
+				Height:     size.Height,
+			})
+		}
+	}
+	return sizes
 }
 
 // DeriveCapabilityManifest combines the source-controlled capability contract

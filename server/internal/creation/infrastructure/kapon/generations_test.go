@@ -1,15 +1,19 @@
 package kapon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,7 +90,7 @@ func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 		t.Fatalf("pro 16:9 2K = %q, %v; want 2816x1584", proSize, err)
 	}
 	nRatio, nTier := "16:9", "2K"
-	nSize, err := imageSize(domain.SubmitRequest{Media: domain.MediaImage, Model: domain.ImageModelNID, Ratio: &nRatio, Resolution: &nTier})
+	nSize, err := imageSize(domain.SubmitRequest{Media: domain.MediaImage, Model: domain.ImageModelBaseID, Ratio: &nRatio, Resolution: &nTier})
 	if err != nil || nSize != "2848x1600" {
 		t.Fatalf("n 16:9 2K = %q, %v; want 2848x1600", nSize, err)
 	}
@@ -107,17 +111,96 @@ func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 	}
 }
 
-// TestImageSubmitWireContract: the generation call authenticates with the
-// provided key, transmits the frozen parameters verbatim, and preserves the
-// references' order.
-func TestImageSubmitWireContract(t *testing.T) {
-	var gotAuth, gotBody string
-	client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
+// TestImageWireModelsPinsFieldReportedRequestIds: the wire mappings are pure
+// field-report data — drop one and the vendor starts answering 400s for a
+// model the manifest still publishes. They stay pinned here until Kapon's
+// alias routing is fixed and the mapping can be removed.
+func TestImageWireModelsPinsFieldReportedRequestIds(t *testing.T) {
+	if got := imageWireModel(domain.ImageModelID); got != "doubao-seedream-5-0-pro-260628" {
+		t.Fatalf("pro must travel as its versioned backend id (flaky alias), got %q", got)
+	}
+	if got := imageWireModel(domain.ImageModelBaseID); got != "doubao-seedream-5.0-n" {
+		t.Fatalf("the base display id must travel as its catalog alias, got %q", got)
+	}
+}
+
+// documentedImageRequestKeys is the vendor 豆包生图 OpenAPI request schema
+// (2026-09): exactly these body keys exist — notably there is no batch
+// parameter, so a quantity of Q must fan out into Q single-image requests.
+var documentedImageRequestKeys = map[string]bool{
+	"model": true, "prompt": true, "size": true, "response_format": true,
+	"image": true, "stream": true, "watermark": true,
+}
+
+// specFaithfulImageVendor stands in for the vendor endpoint with its
+// documented contract enforced: any body key outside the schema — such as
+// the "n" field the adapter once sent, which caused the provider's
+// invalid_request_error 400 — or a size outside the model's x-size-map enum
+// is rejected exactly like the real route rejects it. Each accepted model
+// answers under its manifest alias AND its mapped versioned backend id.
+func specFaithfulImageVendor(t *testing.T, onRequest func(seq int, auth string, body map[string]any)) *GenerationsClient {
+	specSizes := map[string]map[string]bool{}
+	for _, model := range domain.AcceptedImageModels() {
+		sizes := map[string]bool{}
+		for _, ratio := range domain.AcceptedImageRatios() {
+			for _, resolution := range model.Resolutions {
+				if size, ok := domain.ImageSizeFor(model.Model, ratio, resolution); ok {
+					sizes[fmt.Sprintf("%dx%d", size.Width, size.Height)] = true
+				}
+			}
+		}
+		specSizes[model.Model] = sizes
+		specSizes[imageWireModel(model.Model)] = sizes
+	}
+	var mu sync.Mutex
+	seq := 0
+	return newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
-		gotBody = string(raw)
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":{"code":"invalid_request_error","message":"malformed body"}}`))
+			return
+		}
+		for key := range body {
+			if !documentedImageRequestKeys[key] {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"error":{"code":"invalid_request_error","type":"invalid_request_error","message":"The request parameters or model capability are not supported."},"request_id":"spec-faithful-rejection"}`))
+				return
+			}
+		}
+		model, _ := body["model"].(string)
+		size, _ := body["size"].(string)
+		if !specSizes[model][size] {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":{"code":"invalid_request_error","message":"size is not in the model's x-size-map"}}`))
+			return
+		}
+		mu.Lock()
+		current := seq
+		seq++
+		mu.Unlock()
+		if onRequest != nil {
+			onRequest(current, r.Header.Get("Authorization"), body)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[{"url":"https://cdn.example/out-0.png"}]}`))
+		w.Write([]byte(fmt.Sprintf(`{"data":[{"url":"https://cdn.example/spec-out-%d.png"}]}`, current)))
+	})
+}
+
+// TestImageSubmitWireContract: the generation call authenticates with the
+// provided key, transmits only vendor-documented parameters (frozen values
+// verbatim, references in order), fans the quantity out into ordered
+// single-image requests, and never sends the undocumented batch field.
+func TestImageSubmitWireContract(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []map[string]any
+	auths := []string{}
+	client := specFaithfulImageVendor(t, func(seq int, auth string, body map[string]any) {
+		mu.Lock()
+		defer mu.Unlock()
+		bodies = append(bodies, body)
+		auths = append(auths, auth)
 	})
 	ratio, resolution := "4:3", "2K"
 	outcome, err := client.Submit(context.Background(), "kapon-key-1", domain.SubmitRequest{
@@ -135,34 +218,53 @@ func TestImageSubmitWireContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if gotAuth != "Bearer kapon-key-1" {
-		t.Fatalf("submit must authenticate, got %q", gotAuth)
+	if gotAuth := "Bearer kapon-key-1"; len(auths) != 2 || auths[0] != gotAuth || auths[1] != gotAuth {
+		t.Fatalf("every fan-out request must authenticate, got %v", auths)
 	}
-	if len(outcome.Outputs) != 1 || outcome.Outputs[0].URL != "https://cdn.example/out-0.png" {
-		t.Fatalf("outputs must map onto gateway outputs: %+v", outcome)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("quantity 2 must fan out into 2 single-image requests, got %d", len(bodies))
 	}
-	var payload struct {
-		Model          string   `json:"model"`
-		Prompt         string   `json:"prompt"`
-		N              int      `json:"n"`
-		Size           string   `json:"size"`
-		ResponseFormat string   `json:"response_format"`
-		Image          []string `json:"image"`
+	for _, body := range bodies {
+		if body["model"] != imageWireModel("doubao-seedream-5.0-pro") || body["prompt"] != "商品主图" {
+			t.Fatalf("the manifest alias must travel as its deterministic versioned backend id: %+v", body)
+		}
+		if body["size"] != "2368x1776" {
+			t.Fatalf("pro 4:3 2K must send the pixel size, got %v", body["size"])
+		}
+		if body["response_format"] != "url" {
+			t.Fatalf("V1 transfers temporary URLs, got response_format %v", body["response_format"])
+		}
+		// No batch parameter ever; watermark rides explicitly because the
+		// vendor default watermarks outputs and the product ships clean
+		// images.
+		if _, exists := body["n"]; exists {
+			t.Fatalf("the vendor schema has no batch parameter; got key n in %+v", body)
+		}
+		if body["watermark"] != false {
+			t.Fatalf("watermark must stay explicitly false, got %v", body["watermark"])
+		}
+		for key := range body {
+			if !documentedImageRequestKeys[key] {
+				t.Fatalf("undocumented request key %q in %+v", key, body)
+			}
+		}
+		image, ok := body["image"].([]any)
+		if !ok || len(image) != 2 ||
+			image[0] != "data:image/png;base64,AAA" || image[1] != "data:image/jpeg;base64,BBB" {
+			t.Fatalf("reference order must be preserved: %v", body["image"])
+		}
 	}
-	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
-		t.Fatalf("decode submit body: %v", err)
+	if len(outcome.Outputs) != 2 {
+		t.Fatalf("fan-out must yield one output per request: %+v", outcome)
 	}
-	if payload.Model != "doubao-seedream-5.0-pro" || payload.Prompt != "商品主图" || payload.N != 2 {
-		t.Fatalf("frozen parameters must travel verbatim: %+v", payload)
+	urls := map[string]bool{}
+	for _, output := range outcome.Outputs {
+		urls[output.URL] = true
 	}
-	if payload.Size != "2368x1776" {
-		t.Fatalf("pro 4:3 2K must send the pixel size, got %q", payload.Size)
-	}
-	if payload.ResponseFormat != "url" {
-		t.Fatalf("V1 transfers temporary URLs, got response_format %q", payload.ResponseFormat)
-	}
-	if len(payload.Image) != 2 || payload.Image[0] != "data:image/png;base64,AAA" || payload.Image[1] != "data:image/jpeg;base64,BBB" {
-		t.Fatalf("reference order must be preserved: %v", payload.Image)
+	if len(urls) != 2 || !urls["https://cdn.example/spec-out-0.png"] || !urls["https://cdn.example/spec-out-1.png"] {
+		t.Fatalf("each sub-request's answer must become one output: %+v", outcome)
 	}
 }
 
@@ -205,7 +307,9 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 			diagnostic := domain.FailureDiagnosticOf(err)
 			if diagnostic == nil || diagnostic.Source != domain.DiagnosticSourceProvider ||
 				diagnostic.Code != "MODEL_GROUP_ALL_UNAVAILABLE" ||
-				diagnostic.Message != "provider-private-detail" ||
+				!strings.HasPrefix(diagnostic.Message, "provider-private-detail") ||
+				!strings.Contains(diagnostic.Message, `"model":"doubao-seedream-5-0-pro-260628"`) ||
+				!strings.Contains(diagnostic.Message, `"size":"2048x2048"`) ||
 				diagnostic.ProviderType == nil || *diagnostic.ProviderType != "model_routing_error" ||
 				diagnostic.RequestID == nil || *diagnostic.RequestID != "kapon-private-request-id" ||
 				diagnostic.HTTPStatus == nil || *diagnostic.HTTPStatus != http.StatusServiceUnavailable {
@@ -224,7 +328,8 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 			}
 			diagnostic := domain.FailureDiagnosticOf(err)
 			if diagnostic == nil || diagnostic.Code != "MODEL_GROUP_SOME_UNAVAILABLE" ||
-				diagnostic.Message != "provider-private-detail" || diagnostic.RequestID == nil ||
+				!strings.HasPrefix(diagnostic.Message, "provider-private-detail") ||
+				!strings.Contains(diagnostic.Message, `"size":"2048x2048"`) || diagnostic.RequestID == nil ||
 				*diagnostic.RequestID != "kapon-private-request-id" {
 				t.Fatalf("unrecognized provider code must still remain diagnosable: %+v", diagnostic)
 			}
@@ -236,7 +341,8 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 			}
 			diagnostic := domain.FailureDiagnosticOf(err)
 			if diagnostic == nil || diagnostic.Code != "invalid_request_error" ||
-				diagnostic.Message != "The request parameters or model capability are not supported." ||
+				!strings.HasPrefix(diagnostic.Message, "The request parameters or model capability are not supported.") ||
+				!strings.Contains(diagnostic.Message, `"size":"2048x2048"`) ||
 				diagnostic.ProviderType == nil || *diagnostic.ProviderType != "invalid_request_error" ||
 				diagnostic.RequestID == nil || *diagnostic.RequestID != "kapon-top-level-request-id" ||
 				diagnostic.HTTPStatus == nil || *diagnostic.HTTPStatus != http.StatusBadRequest {
@@ -468,5 +574,118 @@ func TestPollPreservesTerminalDiagnostics(t *testing.T) {
 				t.Fatalf("request ID = %v, want %s", diagnostic.RequestID, test.requestID)
 			}
 		})
+	}
+}
+
+// TestImageSubmitFanOutFailureSemantics: the submit stays all-or-nothing —
+// one rejected sub-request fails the whole submit with its classified error,
+// and one lost sub-request dominates as indeterminate because the requests
+// may have executed.
+func TestImageSubmitFanOutFailureSemantics(t *testing.T) {
+	ratio, resolution := "1:1", "2K"
+	req := domain.SubmitRequest{
+		Media: domain.MediaImage, Model: domain.ImageModelID, Prompt: "p",
+		Quantity: 3, Ratio: &ratio, Resolution: &resolution,
+	}
+
+	t.Run("one definitive rejection fails the whole submit", func(t *testing.T) {
+		var calls atomic.Int64
+		client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if calls.Add(1) == 2 {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"error":{"code":"invalid_request_error","message":"x"}}`))
+				return
+			}
+			w.Write([]byte(`{"data":[{"url":"https://cdn.example/ok.png"}]}`))
+		})
+		_, err := client.Submit(context.Background(), "k", req)
+		var rejected *domain.ProviderRejectedError
+		if !errors.As(err, &rejected) {
+			t.Fatalf("one 400 among the fan-out must fail the whole submit, got %v", err)
+		}
+	})
+
+	t.Run("one lost sub-request stays indeterminate", func(t *testing.T) {
+		var calls atomic.Int64
+		client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if calls.Add(1) == 2 {
+				panic(http.ErrAbortHandler)
+			}
+			w.Write([]byte(`{"data":[{"url":"https://cdn.example/ok.png"}]}`))
+		})
+		_, err := client.Submit(context.Background(), "k", req)
+		if !domain.IsSubmitIndeterminate(err) {
+			t.Fatalf("one lost answer must make the outcome indeterminate, got %v", err)
+		}
+	})
+
+	t.Run("a lost answer dominates a definitive rejection", func(t *testing.T) {
+		var calls atomic.Int64
+		client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+			switch calls.Add(1) {
+			case 1:
+				panic(http.ErrAbortHandler)
+			case 2:
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"error":{"code":"invalid_request_error","message":"x"}}`))
+			default:
+				w.Write([]byte(`{"data":[{"url":"https://cdn.example/ok.png"}]}`))
+			}
+		})
+		_, err := client.Submit(context.Background(), "k", req)
+		if !domain.IsSubmitIndeterminate(err) {
+			t.Fatalf("a possibly-executed request must win the classification, got %v", err)
+		}
+	})
+}
+
+// TestImageSubmitRejectionCarriesRedactedRequestShape: a provider rejection
+// is diagnosable from the redacted request shape — in the server log and in
+// the creator-facing diagnostic message — without the prompt or references
+// ever leaving the adapter (ADR-0016).
+func TestImageSubmitRejectionCarriesRedactedRequestShape(t *testing.T) {
+	const prompt = "sensitive product prompt"
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"code":"invalid_request_error","type":"invalid_request_error","message":"The request parameters or model capability are not supported."},"request_id":"replay-1"}`))
+	})
+	ratio, resolution := "9:16", "1K"
+	_, err := client.Submit(context.Background(), "k", domain.SubmitRequest{
+		Media: domain.MediaImage, Model: domain.ImageModelID, Prompt: prompt,
+		Quantity: 2, Ratio: &ratio, Resolution: &resolution,
+	})
+	if err == nil {
+		t.Fatal("provider rejection expected")
+	}
+
+	diagnostic := domain.FailureDiagnosticOf(err)
+	if diagnostic == nil {
+		t.Fatal("diagnostic expected")
+	}
+	if !strings.Contains(diagnostic.Message, `"size":"800x1424"`) ||
+		!strings.Contains(diagnostic.Message, `"model":"doubao-seedream-5-0-pro-260628"`) ||
+		!strings.Contains(diagnostic.Message, `"prompt":"[redacted]"`) {
+		t.Fatalf("diagnostic must carry the redacted request shape: %s", diagnostic.Message)
+	}
+	if strings.Contains(diagnostic.Message, `"n"`) {
+		t.Fatalf("the undocumented batch field must never reappear: %s", diagnostic.Message)
+	}
+	if strings.Contains(diagnostic.Message, prompt) {
+		t.Fatalf("prompt leaked into the diagnostic: %s", diagnostic.Message)
+	}
+
+	logged := logs.String()
+	// slog's text handler escapes the JSON attrs; assert on the stable
+	// markers rather than the exact quoting.
+	if !strings.Contains(logged, "creation: kapon request rejected") ||
+		!strings.Contains(logged, `800x1424`) ||
+		!strings.Contains(logged, `[redacted]`) ||
+		strings.Contains(logged, prompt) {
+		t.Fatalf("server log must carry the redacted request shape only: %s", logged)
 	}
 }

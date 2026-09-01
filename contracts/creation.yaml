@@ -1796,7 +1796,7 @@ components:
         - model
         - resolutions
         - default_resolution
-      description: 一个版本化 allowlist 模型及其分辨率档位；图片为双模型（档位互不相同），视频为单条目。
+      description: 一个版本化 allowlist 模型及其分辨率档位；图片为双模型（档位互不相同），视频为单条目。图片模型额外发布各「档位×宽高比」的像素尺寸（展示用；提交时服务端按同一映射解析 size）。
       properties:
         model:
           type: string
@@ -1809,6 +1809,34 @@ components:
         default_resolution:
           type: string
           description: 该模型的推荐默认档；必属本条目 resolutions。
+        sizes:
+          type: array
+          description: 该模型每个「分辨率档位×宽高比」组合对应的供应商像素尺寸；仅图片模型发布。条目的 resolution 必属本条目 resolutions，ratio 必属媒体 ratios。
+          items:
+            $ref: "#/components/schemas/CapabilitySize"
+    CapabilitySize:
+      type: object
+      required:
+        - resolution
+        - ratio
+        - width
+        - height
+      description: 一个「分辨率档位×宽高比」组合的像素尺寸（与供应商 size 契约一一对应）。
+      properties:
+        resolution:
+          type: string
+          description: 分辨率档位（如 1K / 2K）。
+        ratio:
+          type: string
+          description: 宽高比（如 9:16）。
+        width:
+          type: integer
+          description: 输出宽度（像素）。
+          minimum: 1
+        height:
+          type: integer
+          description: 输出高度（像素）。
+          minimum: 1
     CapabilityMode:
       type: object
       required:

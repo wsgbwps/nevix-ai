@@ -19,7 +19,7 @@ import (
 func TestImageTaskLifecycleReachesSucceeded(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{outputs: 2})
+	h.kapon.generation.setImage(imageScript{outputs: 1})
 
 	draft := h.saveImageDraft(t, token, "两张输出", 2)
 	status, body := h.submitTask(t, token, draft.SessionID, "img-life", draft.Revision)
@@ -108,7 +108,7 @@ func TestVideoTaskLifecycleRunsAsync(t *testing.T) {
 func TestPartialSuccessKeepsEverySucceededSlotAndRetryCreatesNewTask(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{outputs: 2})
+	h.kapon.generation.setImage(imageScript{outputs: 1, emptyOutputsOn: 2})
 
 	draft := h.saveImageDraft(t, token, "部分成功", 3)
 	status, body := h.submitTask(t, token, draft.SessionID, "partial", draft.Revision)

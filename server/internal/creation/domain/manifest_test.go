@@ -84,6 +84,19 @@ func assertAvailableShape(t *testing.T, media string, view CapabilityMediaView) 
 		if model.Model == "" || len(model.Resolutions) == 0 || !containsString(model.Resolutions, model.DefaultResolution) {
 			t.Fatalf("%s: model must carry resolution tiers and an in-set default: %+v", media, model)
 		}
+		if media == string(MediaImage) {
+			if len(model.Sizes) != len(model.Resolutions)*len(imageRatios) {
+				t.Fatalf("%s: image model must publish a pixel size for every (tier, ratio): %+v", media, model)
+			}
+			for _, size := range model.Sizes {
+				if !containsString(model.Resolutions, size.Resolution) || !containsString(imageRatios, size.Ratio) ||
+					size.Width < 1 || size.Height < 1 {
+					t.Fatalf("%s: pixel size outside the published cross product: %+v", media, size)
+				}
+			}
+		} else if model.Sizes != nil {
+			t.Fatalf("%s: video models publish no pixel sizes: %+v", media, model)
+		}
 	}
 	if view.Prompt.MinChars != PromptMinChars || view.Prompt.MaxChars != PromptMaxChars {
 		t.Fatalf("%s: prompt envelope must mirror the spec contract", media)
@@ -112,11 +125,17 @@ func TestDeriveCapabilityManifestPublishesStaticContract(t *testing.T) {
 	if !reflect.DeepEqual(imageModeIDs(manifest.Image.Modes), imageModes) ||
 		!reflect.DeepEqual(manifest.Image.Ratios, imageRatios) ||
 		!reflect.DeepEqual(manifest.Image.Quantities, imageQuantities) ||
-		!reflect.DeepEqual(manifest.Image.Models, imageModels) {
+		!reflect.DeepEqual(manifest.Image.Models, expectedPublishedModels(string(MediaImage))) {
 		t.Fatalf("image manifest drifted from its source-controlled contract: %+v", manifest.Image)
 	}
 	if manifest.Image.Defaults.Ratio != defaultImageRatio || manifest.Image.Defaults.Quantity != defaultImageQuantity {
 		t.Fatalf("image defaults drifted: %+v", manifest.Image.Defaults)
+	}
+	// The published display sizes come from the same vendor table the adapter
+	// submits: the field-reported combination must appear verbatim.
+	if size := findPublishedSize(manifest.Image.Models, ImageModelID, "9:16", "1K"); size == nil ||
+		size.Width != 800 || size.Height != 1424 {
+		t.Fatalf("pro 9:16 1K must publish 800x1424, got %+v", size)
 	}
 
 	assertAvailableShape(t, string(MediaVideo), manifest.Video)
@@ -131,11 +150,47 @@ func TestDeriveCapabilityManifestPublishesStaticContract(t *testing.T) {
 
 	// Returned slices must not let a caller mutate the next projection.
 	manifest.Image.Models[0].Resolutions[0] = "mutated"
+	manifest.Image.Models[0].Sizes[0].Width = -1
 	manifest.Image.Ratios[0] = "mutated"
 	fresh := DeriveCapabilityManifest(availableConnection())
-	if fresh.Image.Models[0].Resolutions[0] == "mutated" || fresh.Image.Ratios[0] == "mutated" {
+	if fresh.Image.Models[0].Resolutions[0] == "mutated" || fresh.Image.Ratios[0] == "mutated" ||
+		fresh.Image.Models[0].Sizes[0].Width == -1 {
 		t.Fatal("a returned manifest must not alias the source-controlled contract")
 	}
+}
+
+// expectedPublishedModels projects the source-controlled models exactly as
+// derivation publishes them — image models carrying their pixel sizes.
+func expectedPublishedModels(media string) []CapabilityModelView {
+	source := imageModels
+	if media == string(MediaVideo) {
+		source = videoModels
+	}
+	expected := make([]CapabilityModelView, 0, len(source))
+	for _, model := range source {
+		published := CapabilityModelView{
+			Model:             model.Model,
+			Resolutions:       append([]string(nil), model.Resolutions...),
+			DefaultResolution: model.DefaultResolution,
+			Sizes:             modelSizes(media, model),
+		}
+		expected = append(expected, published)
+	}
+	return expected
+}
+
+func findPublishedSize(models []CapabilityModelView, model, ratio, resolution string) *CapabilitySizeView {
+	for _, entry := range models {
+		if entry.Model != model {
+			continue
+		}
+		for i, size := range entry.Sizes {
+			if size.Ratio == ratio && size.Resolution == resolution {
+				return &entry.Sizes[i]
+			}
+		}
+	}
+	return nil
 }
 
 // Across all instance states, the manifest verdict is exactly the Connection

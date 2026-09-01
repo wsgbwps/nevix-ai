@@ -23,6 +23,7 @@ import {
   mediaCapability,
   modeCandidates,
   modelCandidates,
+  publishedSize,
   resolutionCandidates,
   type DraftMediaType
 } from '../model/capability'
@@ -412,6 +413,12 @@ function ParamsMenu({
   // shows.
   const resolutions = resolutionCandidates(manifest, media, draft.model)
   const quantities = capability.quantities ?? []
+  // The exact pixel size the server will submit for this selection; hidden
+  // while any dimension is stale or the combination is unpublished.
+  const size =
+    media === 'image'
+      ? publishedSize(manifest, media, draft.model, draft.ratio, draft.resolution)
+      : null
   const staleRatio = staleFields.has('ratio') ? draft.ratio : null
   const staleResolution = staleFields.has('resolution') ? draft.resolution : null
   const staleQuantity = staleFields.has('quantity') ? draft.quantity : null
@@ -496,6 +503,27 @@ function ParamsMenu({
                     {quantity}
                   </button>
                 ))}
+              </div>
+            </ParamGroup>
+          )}
+          {size !== null && (
+            <ParamGroup label={t('composer.params.size')}>
+              <div
+                data-testid="composer-params-size"
+                className="bg-accent/60 flex items-center gap-2 rounded-xl p-1 text-xs"
+              >
+                <span className="bg-background/60 flex h-9 flex-1 items-center justify-between rounded-lg px-3">
+                  <span className="text-muted-foreground">W</span>
+                  <span className="font-medium">{size.width}</span>
+                </span>
+                <span className="text-muted-foreground" aria-hidden>
+                  ×
+                </span>
+                <span className="bg-background/60 flex h-9 flex-1 items-center justify-between rounded-lg px-3">
+                  <span className="text-muted-foreground">H</span>
+                  <span className="font-medium">{size.height}</span>
+                </span>
+                <span className="text-muted-foreground pr-1">px</span>
               </div>
             </ParamGroup>
           )}

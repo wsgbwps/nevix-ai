@@ -37,14 +37,14 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 	if call.bearer != "Bearer task-kernel-key" {
 		t.Fatalf("generation call must authenticate with the configured key, got %q", call.bearer)
 	}
-	if call.model != "doubao-seedream-5.0-pro" {
-		t.Fatalf("fixed image model must not be substituted, got %q", call.model)
+	if call.model != "doubao-seedream-5-0-pro-260628" {
+		t.Fatalf("the alias must travel as its deterministic versioned backend id (flaky alias routing, field report 2026-09-01), got %q", call.model)
 	}
 	if call.size != "2048x2048" {
 		t.Fatalf("Seedream 5.0 Pro 1:1 2K requires size=2048x2048, got %q", call.size)
 	}
-	if call.n != 1 || call.images != 0 {
-		t.Fatalf("text-to-image must send quantity without references, got n=%d images=%d", call.n, call.images)
+	if call.n != 0 || call.images != 0 {
+		t.Fatalf("text-to-image must send no undocumented batch field and no references, got n=%d images=%d", call.n, call.images)
 	}
 
 	// The provider receives the model-specific pixel size derived from the
@@ -68,7 +68,7 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 func TestImageOutputsFormUniqueMediaAssets(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{outputs: 2})
+	h.kapon.generation.setImage(imageScript{outputs: 1})
 
 	draft := h.saveImageDraft(t, token, "两张资产", 2)
 	status, body := h.submitTask(t, token, draft.SessionID, "img-assets", draft.Revision)
@@ -139,7 +139,7 @@ func TestImageOutputsFormUniqueMediaAssets(t *testing.T) {
 func TestPartialSuccessFormsAssetsOnlyForSucceededSlots(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{outputs: 2})
+	h.kapon.generation.setImage(imageScript{outputs: 1, emptyOutputsOn: 2})
 
 	draft := h.saveImageDraft(t, token, "部分资产", 3)
 	status, body := h.submitTask(t, token, draft.SessionID, "img-partial-assets", draft.Revision)

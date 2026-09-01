@@ -120,6 +120,27 @@ export function resolutionCandidates(
   return publishedModel(manifest, media, model)?.resolutions ?? []
 }
 
+/**
+ * The vendor pixel size the server submits for this exact (model, ratio,
+ * resolution) selection — the manifest publishes the same table the adapter
+ * resolves, so the composer can show the exact output size. `null` while any
+ * dimension is stale or the combination is unpublished (display only: it
+ * never gates submission).
+ */
+export function publishedSize(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType,
+  model: string | null,
+  ratio: string | null,
+  resolution: string | null
+): { width: number; height: number } | null {
+  if (model === null || ratio === null || resolution === null) return null
+  const size = publishedModel(manifest, media, model)?.sizes?.find(
+    (entry) => entry.ratio === ratio && entry.resolution === resolution
+  )
+  return size ? { width: size.width, height: size.height } : null
+}
+
 /** Candidate modes for one media in manifest order. */
 export function modeCandidates(
   manifest: CapabilityManifest | null,

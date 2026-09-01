@@ -74,11 +74,20 @@ export interface CapabilityMode {
   }
 }
 
+/** The vendor pixel size of one (resolution tier, ratio) combination. */
+export interface CapabilitySize {
+  readonly resolution: string
+  readonly ratio: string
+  readonly width: number
+  readonly height: number
+}
+
 /** One allowlisted model with its own resolution tiers. */
 export interface CapabilityModel {
   readonly model: string
   readonly resolutions: readonly string[]
   readonly defaultResolution: string
+  readonly sizes?: readonly CapabilitySize[]
 }
 
 /** The media-level recommended defaults; always inside published sets. */
@@ -210,7 +219,12 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
     return { available: false, reason, action }
   }
 
-  const models = parseModels(entry)
+  // Optional list fields distinguish absent (skip) from malformed (reject):
+  // a corrupted ratios array can never shrink into a smaller capability set.
+  const ratios = readStringList(entry, 'ratios')
+  if (ratios === MALFORMED_LIST) return null
+
+  const models = parseModels(entry, ratios)
   if (models === null) return null
 
   const modes: CapabilityMode[] = []
@@ -252,10 +266,6 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
   const prompt = parsePrompt(entry)
   if (prompt === null) return null
 
-  // Optional list fields distinguish absent (skip) from malformed (reject):
-  // a corrupted ratios array can never shrink into a smaller capability set.
-  const ratios = readStringList(entry, 'ratios')
-  if (ratios === MALFORMED_LIST) return null
   const quantities = readNumberList(entry, 'quantities')
   if (quantities === MALFORMED_LIST) return null
   const durations = readNumberList(entry, 'durations')
@@ -278,7 +288,10 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
 // parseModels reads the model list with its per-model resolution tiers. A
 // default outside the entry's own tiers fails closed: the composer may only
 // ever seed resolutions the model itself publishes.
-function parseModels(entry: unknown): CapabilityModel[] | null {
+function parseModels(
+  entry: unknown,
+  ratios: readonly string[] | undefined
+): CapabilityModel[] | null {
   const raw = readObjectField(entry, 'models')
   if (!Array.isArray(raw)) return null
   const models: CapabilityModel[] = []
@@ -296,10 +309,54 @@ function parseModels(entry: unknown): CapabilityModel[] | null {
     ) {
       return null
     }
-    models.push({ model, resolutions, defaultResolution })
+    const sizes = parseSizes(item, resolutions, ratios)
+    if (sizes === MALFORMED_LIST) return null
+    models.push({
+      model,
+      resolutions,
+      defaultResolution,
+      ...(sizes !== undefined ? { sizes } : {})
+    })
   }
   if (models.length === 0) return null
   return models
+}
+
+// parseSizes reads one model's published pixel sizes — display metadata for
+// the exact size the server submits. Every entry must sit inside the model's
+// own tiers and the media's published ratios, so a malformed or out-of-set
+// size can never impersonate a capability.
+function parseSizes(
+  item: unknown,
+  resolutions: readonly string[],
+  ratios: readonly string[] | undefined
+): CapabilitySize[] | MalformedList | undefined {
+  if (!hasField(item, 'sizes')) return undefined
+  const value = (item as Record<string, unknown>)['sizes']
+  if (!Array.isArray(value)) return MALFORMED_LIST
+  const sizes: CapabilitySize[] = []
+  for (const raw of value) {
+    const resolution = readString(raw, 'resolution')
+    const ratio = readString(raw, 'ratio')
+    const width = readNumber(raw, 'width')
+    const height = readNumber(raw, 'height')
+    if (
+      resolution === null ||
+      !resolutions.includes(resolution) ||
+      ratio === null ||
+      (ratios !== undefined && !ratios.includes(ratio)) ||
+      width === null ||
+      !Number.isInteger(width) ||
+      width < 1 ||
+      height === null ||
+      !Number.isInteger(height) ||
+      height < 1
+    ) {
+      return MALFORMED_LIST
+    }
+    sizes.push({ resolution, ratio, width, height })
+  }
+  return sizes
 }
 
 // Sentinel for "the field is present but is not the documented list shape" —

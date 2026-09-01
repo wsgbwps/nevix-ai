@@ -138,7 +138,7 @@ test('manifest defaults autosave with the version delivered in the same response
     .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.manifestVersion, {
       timeout: 5_000
     })
-    .toBe(3)
+    .toBe(4)
 })
 
 test('editing the prompt autosaves the full draft with its ordered references', async ({
@@ -175,6 +175,10 @@ test('a stale draft value is preserved verbatim and marked as capability-changed
   // The params trigger keeps the removed ratio while the legal 2K stands.
   await expect(page.getByTestId('composer-params')).toContainText('7:3')
   await expect(page.getByTestId('composer-params')).toContainText('2K')
+  // The size row needs a published (model, ratio, resolution); a stale draft
+  // has none, so it hides instead of showing a wrong pixel size.
+  await page.getByTestId('composer-params').click()
+  await expect(page.getByRole('menu').getByTestId('composer-params-size')).toHaveCount(0)
 })
 
 test('the model menu lists only manifest candidates plus the stale note', async ({
@@ -204,27 +208,57 @@ test('the resolution tiers follow the selected image model', async ({ mount, pag
   await mount(<CreationWorkbenchStory />)
   await selectFirstSession(page)
 
-  // The stored draft's model (pro) publishes only 1K/1.5K/2K; n's 3K/4K do
-  // not exist for it.
+  // The stored draft's model (pro) publishes only 1K/1.5K/2K; the base
+  // model's 3K/4K do not exist for it.
   await page.getByTestId('composer-params').click()
   const params = page.getByRole('menu')
   await expect(params.getByRole('button', { name: '1.5K' })).toBeVisible()
   await expect(params.getByRole('button', { name: '4K' })).toHaveCount(0)
+  // The size row reads the vendor pixels of the current selection (pro 4:3
+  // 2K) — exactly what the server submits.
+  await expect(params.getByTestId('composer-params-size')).toContainText('2368')
+  await expect(params.getByTestId('composer-params-size')).toContainText('1776')
   await page.keyboard.press('Escape')
 
   // The model menu lists both allowlisted image models; switching adopts the
-  // other model's tier set. The stored 2K stands because n also publishes it.
+  // other model's tier set. The stored 2K stands because the base model also
+  // publishes it.
   await page.getByTestId('composer-model').click()
   const menu = page.getByRole('menu')
-  await expect(menu.getByRole('menuitem', { name: /doubao-seedream-5.0-n/ })).toBeVisible()
-  await menu.getByRole('menuitem', { name: /doubao-seedream-5.0-n/ }).click()
-  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-n')
+  await expect(
+    menu.getByRole('menuitem', { name: 'doubao-seedream-5.0', exact: true })
+  ).toBeVisible()
+  await menu.getByRole('menuitem', { name: 'doubao-seedream-5.0', exact: true }).click()
+  // Exact text: the base id is a prefix of the pro id, so a substring
+  // assertion could not tell the switch from a no-op.
+  await expect(
+    page.getByTestId('composer-model').getByText('doubao-seedream-5.0', { exact: true })
+  ).toBeVisible()
   await expect(page.getByTestId('composer-params')).toContainText('2K')
 
   await page.getByTestId('composer-params').click()
   await expect(params.getByRole('button', { name: '1.5K' })).toHaveCount(0)
   await expect(params.getByRole('button', { name: '3K' })).toBeVisible()
   await expect(params.getByRole('button', { name: '4K' })).toBeVisible()
+  // The same tier label resolves to the base model's own pixels.
+  await expect(params.getByTestId('composer-params-size')).toContainText('2304')
+  await expect(params.getByTestId('composer-params-size')).toContainText('1728')
+})
+
+test('the size row follows the selected ratio and resolution', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  await page.getByTestId('composer-params').click()
+  const params = page.getByRole('menu')
+  await params.getByRole('button', { name: '9:16' }).click()
+  await params.getByRole('button', { name: '1K' }).click()
+  await expect(params.getByTestId('composer-params-size')).toContainText('800')
+  await expect(params.getByTestId('composer-params-size')).toContainText('1424')
+
+  await params.getByRole('button', { name: '1.5K' }).click()
+  await expect(params.getByTestId('composer-params-size')).toContainText('1152')
+  await expect(params.getByTestId('composer-params-size')).toContainText('2048')
 })
 
 test('an unreachable manifest still allows drafting and autosave', async ({ mount, page }) => {
@@ -574,7 +608,23 @@ test('a succeeded image slot offers a keyboard-reachable download', async ({ mou
     createdAt: '2026-08-29T09:00:00Z',
     updatedAt: '2026-08-29T09:01:00Z',
     terminalAt: '2026-08-29T09:01:00Z',
-    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }]
+    slots: [
+      {
+        index: 0,
+        status: 'succeeded',
+        failureReason: null,
+        // The vendor's real output shape: Seedream returns JPEG, and the
+        // download name must keep that format instead of forcing png.
+        result: {
+          mimeType: 'image/jpeg',
+          byteSize: 2048,
+          checksumSha256: 'ab'.repeat(32),
+          widthPx: 1568,
+          heightPx: 672,
+          durationMs: null
+        }
+      }
+    ]
   }
   await mount(<CreationWorkbenchStory taskScript={{ tasks: [doneTask] }} />)
   await selectFirstSession(page)
@@ -599,7 +649,9 @@ test('a succeeded image slot offers a keyboard-reachable download', async ({ mou
         .__downloadCalls ?? []
   )
   expect(calls).toHaveLength(1)
-  expect(calls[0].download).toBe(`nevix-${doneTask.id.slice(0, 8)}-1.png`)
+  // The download keeps the provider's original format (JPEG here), named by
+  // the verified result's mime instead of a fixed png extension.
+  expect(calls[0].download).toBe(`nevix-${doneTask.id.slice(0, 8)}-1.jpg`)
   expect(calls[0].href).toContain('data:image')
 })
 

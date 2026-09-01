@@ -15,6 +15,7 @@ import type {
 } from '../../../src/renderer/src/features/creation/api/go-creation-http'
 import type {
   CapabilityManifest,
+  CapabilityModel,
   ImageReferenceEnvelope
 } from '../../../src/renderer/src/features/creation/api/capability-manifest-http'
 import type {
@@ -111,10 +112,40 @@ function imageEnvelope(min: number, max: number): ImageReferenceEnvelope {
 
 const noReferences = { total: { min: 0, max: 0 } }
 
+/**
+ * Real vendor pixel sizes (豆包生图 OpenAPI x-size-map) for the ratios the
+ * tests exercise, so the composer's size row reads exactly what the server
+ * publishes for the same selection.
+ */
+function imageModelSizes(
+  tiers: readonly string[],
+  sizes: Record<string, Record<string, [number, number]>>
+): CapabilityModel['sizes'] {
+  return tiers.flatMap((resolution) =>
+    Object.entries(sizes[resolution] ?? {}).map(([ratio, [width, height]]) => ({
+      resolution,
+      ratio,
+      width,
+      height
+    }))
+  )
+}
+
+const proSizes = imageModelSizes(['1K', '1.5K', '2K'], {
+  '1K': { '4:3': [1152, 864], '9:16': [800, 1424] },
+  '1.5K': { '4:3': [1792, 1344], '9:16': [1152, 2048] },
+  '2K': { '4:3': [2368, 1776], '9:16': [1584, 2816] }
+})
+const nidSizes = imageModelSizes(['2K', '3K', '4K'], {
+  '2K': { '4:3': [2304, 1728], '9:16': [1600, 2848] },
+  '3K': { '4:3': [3456, 2592], '9:16': [2304, 4096] },
+  '4K': { '4:3': [4704, 3520], '9:16': [3040, 5504] }
+})
+
 /** The V1 manifest as the server publishes it with both media active. */
 const activeManifest: CapabilityManifest = {
   schemaVersion: 2,
-  manifestVersion: 3,
+  manifestVersion: 4,
   updatedAt: '2026-08-29T10:00:00Z',
   image: {
     available: true,
@@ -124,12 +155,14 @@ const activeManifest: CapabilityManifest = {
       {
         model: 'doubao-seedream-5.0-pro',
         resolutions: ['1K', '1.5K', '2K'],
-        defaultResolution: '2K'
+        defaultResolution: '2K',
+        sizes: proSizes
       },
       {
-        model: 'doubao-seedream-5.0-n',
+        model: 'doubao-seedream-5.0',
         resolutions: ['2K', '3K', '4K'],
-        defaultResolution: '2K'
+        defaultResolution: '2K',
+        sizes: nidSizes
       }
     ],
     modes: [
@@ -463,7 +496,7 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
           [sessionA.id]: {
             prompt: '夏季跑鞋主图，暖光背景',
             mediaType: 'image',
-            manifestVersion: 3,
+            manifestVersion: 4,
             updatedAt: '2026-08-29T10:00:00Z',
             model: 'doubao-seedream-5.0-pro',
             mode: 'reference-image',

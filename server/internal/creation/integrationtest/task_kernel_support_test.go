@@ -13,7 +13,11 @@ import (
 // fixtures. All bytes are locally synthesized fixtures — no production
 // token, request id, or payload is ever involved.
 
-// imageScript is one scripted synchronous image generation answer.
+// imageScript is one scripted synchronous image generation answer. Requests
+// arrive one per requested image (the vendor contract has no batch
+// parameter, so the adapter fans quantity out); `outputs` URLs ride every
+// normal answer, and `emptyOutputsOn` (1-based request ordinal) answers an
+// output-less success to model a vendor shortfall on one fanned-out request.
 type imageScript struct {
 	status            int    // forced HTTP status (0 = answer normally)
 	outputs           int    // number of output URLs returned when status == 0
@@ -22,10 +26,12 @@ type imageScript struct {
 	code              string // structured provider error code for scripted error answers
 	jpeg              bool   // serve JPEG output bytes (output-verification failure path)
 	retryAfterSeconds *int   // optional Retry-After header for 429 answers
+	emptyOutputsOn    int    // 1-based request ordinal answered with zero outputs
 }
 
 // recordedImageCall is the adapter-conformance record of one image submit:
-// the pinned wire contract's observable shape (issue #160).
+// the pinned wire contract's observable shape (issue #160). n echoes the
+// batch field the vendor contract does not define — it must stay absent.
 type recordedImageCall struct {
 	bearer string
 	size   string
@@ -144,6 +150,12 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 			// Drop the connection without an HTTP answer: from the client's
 			// side the outcome is unknowable.
 			panic(http.ErrAbortHandler)
+		}
+		if script.emptyOutputsOn == g.outputReq {
+			// A 200 without outputs on one fanned-out request: the submit
+			// succeeds but the provider delivered fewer images than asked.
+			w.Write([]byte(`{"data":[]}`))
+			return true
 		}
 		urls := make([]string, 0, script.outputs)
 		for i := 0; i < script.outputs; i++ {

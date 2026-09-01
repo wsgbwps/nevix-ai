@@ -48,10 +48,14 @@ const availableImage = {
     {
       model: 'doubao-seedream-5.0-pro',
       resolutions: ['1K', '1.5K', '2K'],
-      default_resolution: '2K'
+      default_resolution: '2K',
+      sizes: [
+        { resolution: '1K', ratio: '1:1', width: 1024, height: 1024 },
+        { resolution: '2K', ratio: '4:3', width: 2368, height: 1776 }
+      ]
     },
     {
-      model: 'doubao-seedream-5.0-n',
+      model: 'doubao-seedream-5.0',
       resolutions: ['2K', '3K', '4K'],
       default_resolution: '2K'
     }
@@ -180,10 +184,17 @@ describe('capability manifest client', () => {
         assert.equal(result.value.image.available, true)
         assert.deepEqual(
           result.value.image.models?.map((model) => model.model),
-          ['doubao-seedream-5.0-pro', 'doubao-seedream-5.0-n']
+          ['doubao-seedream-5.0-pro', 'doubao-seedream-5.0']
         )
         assert.deepEqual(result.value.image.models?.[0].resolutions, ['1K', '1.5K', '2K'])
         assert.equal(result.value.image.models?.[0].defaultResolution, '2K')
+        // The published pixel sizes arrive verbatim; a model without them
+        // (video) simply carries no sizes.
+        assert.deepEqual(result.value.image.models?.[0].sizes, [
+          { resolution: '1K', ratio: '1:1', width: 1024, height: 1024 },
+          { resolution: '2K', ratio: '4:3', width: 2368, height: 1776 }
+        ])
+        assert.equal(result.value.image.models?.[1].sizes, undefined)
         assert.deepEqual(
           result.value.image.modes?.map((mode) => mode.id),
           ['text-to-image', 'reference-image']
@@ -340,6 +351,37 @@ describe('capability manifest client', () => {
       }),
       null
     )
+    // A pixel size outside the model's own tiers, outside the published
+    // ratios, or with a non-positive dimension fails closed: display data
+    // must never impersonate a capability.
+    const sizeCases: Array<Record<string, unknown>> = [
+      { resolution: '4K', ratio: '1:1', width: 4096, height: 4096 },
+      { resolution: '1K', ratio: '9:16', width: 800, height: 1424 },
+      { resolution: '1K', ratio: '1:1', width: 0, height: 1024 },
+      { resolution: '1K', ratio: '1:1', width: 'wide', height: 1024 }
+    ]
+    for (const sizes of sizeCases) {
+      assert.equal(
+        parseCapabilityManifest({
+          schema_version: 1,
+          manifest_version: 1,
+          image: {
+            ...availableImage,
+            models: [
+              {
+                model: 'doubao-seedream-5.0-pro',
+                resolutions: ['1K', '1.5K', '2K'],
+                default_resolution: '2K',
+                sizes: [sizes]
+              }
+            ]
+          },
+          video: pendingVideo
+        }),
+        null,
+        `sizes entry must fail closed: ${JSON.stringify(sizes)}`
+      )
+    }
     // A truncated payload (missing video) fails closed.
     assert.equal(
       parseCapabilityManifest({ schema_version: 1, manifest_version: 1, image: availableImage }),

@@ -55,6 +55,7 @@ Identity 在 Session 吊销事务成功提交后，通过共享 Domain Event（`
 - Provider Key 以应用层 AEAD envelope 存入 PostgreSQL：数据库外 secrets volume（目录 0700、文件 0600、原子创建）保存 32-byte CSPRNG master key；AES-256-GCM + 每次随机 nonce；版本化 envelope 保存 key ID、nonce、ciphertext，AAD 绑定 Connection ID、Kapon 与凭据用途。
 - master key 权限过宽、损坏、不可读或解密失败时 Connection 进入 `credential_unavailable` 并 fail closed，Server 其他业务继续运行；已有密文时绝不静默生成替代 key。恢复只能由 Admin 经 exact-action Reauthentication 重新输入 Key：先安全建立新 master key 文件，再完成 Connection Check 与新密文写入，任一步失败保持 `credential_unavailable` 且可重试。
 - Provider Key 明文只在 Go 检查或调用期间短暂存在于内存；Key、prompt、私有媒体、Authorization header、可访问 URL 与任意原始 response body 不进入 Desktop、普通日志、Audit Log 或错误响应。Generation Task/Result Slot 已是 creator-private，因此失败结果位可持久化并向该任务创建者返回 Kapon 标准错误 envelope 中有界的 `code`、`type`、`message`、`request_id`，以及 Server 后处理阶段生成的明确安全诊断；可信适配器先对本次凭据、Authorization 形态、提交 body 中的 prompt/reference 与 URL/data URL 模式做脱敏，再丢弃控制字符、超长值和 envelope 外字段。稳定 Failure Reason 继续承担状态机、重试与治理判断，诊断对象只解释该 verdict，不参与控制流。首个稳定映射仍为 Kapon `MODEL_GROUP_ALL_UNAVAILABLE` → `provider_route_unavailable`，用于区分模型渠道不可用与一般临时故障；若同一响应携带标准错误 envelope，Desktop 同时显示其具体字段。Provider Connection 管理面、普通日志和 Audit Log 仍不返回这些 creator-private 诊断。
+- **2026-09-01 后续决定（供应商拒绝诊断）**：供应商返回非 2xx 或传输失败时，可信适配器把本次出站请求的**形状摘要**（`model`/`size`/`watermark` 等参数键值，prompt、reference、URL 一律替换为 `[redacted]`，有界截断）追加到该失败诊断 message，并以同一摘要写一条 Server 本地 slog WARN——普通日志因此只出现脱敏后的请求形状，不含上段列举的任何敏感值。这让「供应商为什么拒绝」可以在不接触 payload 的情况下被诊断（字段报告 2026-09-01：未记录的 `n` 参数导致 invalid_request_error 400）。
 
 ### Capability Manifest 与 Provider 验证
 

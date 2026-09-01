@@ -30,6 +30,12 @@ type manifestMedia struct {
 		Model             string   `json:"model"`
 		Resolutions       []string `json:"resolutions"`
 		DefaultResolution string   `json:"default_resolution"`
+		Sizes             []struct {
+			Resolution string `json:"resolution"`
+			Ratio      string `json:"ratio"`
+			Width      int    `json:"width"`
+			Height     int    `json:"height"`
+		} `json:"sizes"`
 	} `json:"models"`
 	Modes []struct {
 		ID string `json:"id"`
@@ -85,7 +91,7 @@ func TestCapabilityManifestWithoutConnectionIsUnavailable(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("manifest must answer 200, got %d: %s", status, body)
 	}
-	if payload.SchemaVersion != 2 || payload.ManifestVersion != 3 {
+	if payload.SchemaVersion != 2 || payload.ManifestVersion != 4 {
 		t.Fatalf("manifest must publish its schema and content versions: %+v", payload)
 	}
 	for media, view := range map[string]manifestMedia{"image": payload.Image, "video": payload.Video} {
@@ -127,10 +133,13 @@ func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
 	}
 
 	// expectedModelSpec is one manifest models entry the flow test demands.
+	// pixelSizes is the published size-entry count (tiers × ratios); 0 means
+	// the model must publish no sizes at all (video).
 	type expectedModelSpec struct {
 		model             string
 		resolutions       []string
 		defaultResolution string
+		pixelSizes        int
 	}
 	expectations := []struct {
 		media  string
@@ -139,11 +148,11 @@ func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
 		modes  []string
 	}{
 		{"image", payload.Image, []expectedModelSpec{
-			{"doubao-seedream-5.0-pro", []string{"1K", "1.5K", "2K"}, "2K"},
-			{"doubao-seedream-5.0-n", []string{"2K", "3K", "4K"}, "2K"},
+			{"doubao-seedream-5.0-pro", []string{"1K", "1.5K", "2K"}, "2K", 24},
+			{"doubao-seedream-5.0", []string{"2K", "3K", "4K"}, "2K", 24},
 		}, []string{"text-to-image", "reference-image"}},
 		{"video", payload.Video, []expectedModelSpec{
-			{"doubao-seedance-2-5", []string{"480p", "720p", "1080p"}, "720p"},
+			{"doubao-seedance-2-5", []string{"480p", "720p", "1080p"}, "720p", 0},
 		}, []string{"text-to-video", "first-frame", "first-last-frame", "omni-reference"}},
 	}
 	for _, want := range expectations {
@@ -164,6 +173,23 @@ func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
 			}
 			if gotModel.DefaultResolution != wantModel.defaultResolution {
 				t.Fatalf("%s %s default resolution = %q, want %q", want.media, gotModel.Model, gotModel.DefaultResolution, wantModel.defaultResolution)
+			}
+			if wantModel.pixelSizes == 0 {
+				if gotModel.Sizes != nil {
+					t.Fatalf("%s %s must publish no pixel sizes, got %d entries", want.media, gotModel.Model, len(gotModel.Sizes))
+				}
+				continue
+			}
+			if len(gotModel.Sizes) != wantModel.pixelSizes {
+				t.Fatalf("%s %s sizes = %d entries, want %d", want.media, gotModel.Model, len(gotModel.Sizes), wantModel.pixelSizes)
+			}
+			if gotModel.Model != "doubao-seedream-5.0-pro" {
+				continue
+			}
+			for _, size := range gotModel.Sizes {
+				if size.Resolution == "1K" && size.Ratio == "9:16" && (size.Width != 800 || size.Height != 1424) {
+					t.Fatalf("pro 9:16 1K must publish 800x1424, got %dx%d", size.Width, size.Height)
+				}
 			}
 		}
 		gotModes := make([]string, 0, len(view.Modes))

@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
@@ -21,7 +23,9 @@ import (
 // speaks the domain's classified outcomes plus the bounded standard Kapon
 // error envelope used to explain creator-private slot failures. Raw bodies,
 // arbitrary fields, output URLs, keys, headers, and prompts never leave this
-// package's error paths.
+// package's error paths; a redacted request SHAPE (creator content and
+// references replaced) may reach server logs and the failure diagnostic per
+// ADR-0016, so a provider rejection can be diagnosed without the payload.
 //
 // The wire shapes below (OpenAI-style /v1/images/generations and the async
 // /v1/contents/generations/tasks family) are the kernel's adapter contract,
@@ -38,86 +42,42 @@ type GenerationsClient struct {
 	cancelTimeout      time.Duration
 }
 
-// imageSizeKey is one accepted (model, ratio, resolution) combination. The
-// frozen specification's manifest-validated cross product is the key set.
-type imageSizeKey struct {
-	model      string
-	ratio      string
-	resolution string
-}
-
-// imageSizes pins the Kapon wire size ("宽x高" pixels, apifox 2026-09) for
-// every declared (model, ratio, resolution) pair. The tables are per model —
-// pro publishes 1K/1.5K/2K, n publishes 2K/3K/4K, and the overlapping tier
-// labels resolve to different pixels (2K at 16:9 is 2816x1584 on pro but
-// 2848x1600 on n) — so the key never drops the model. The pair table still
-// fails closed outside the manifest's accepted cross product.
-var imageSizes = map[imageSizeKey]string{
-	// doubao-seedream-5.0-pro
-	{domain.ImageModelID, "1:1", "1K"}:    "1024x1024",
-	{domain.ImageModelID, "1:1", "1.5K"}:  "1536x1536",
-	{domain.ImageModelID, "1:1", "2K"}:    "2048x2048",
-	{domain.ImageModelID, "4:3", "1K"}:    "1152x864",
-	{domain.ImageModelID, "4:3", "1.5K"}:  "1792x1344",
-	{domain.ImageModelID, "4:3", "2K"}:    "2368x1776",
-	{domain.ImageModelID, "3:4", "1K"}:    "864x1152",
-	{domain.ImageModelID, "3:4", "1.5K"}:  "1344x1792",
-	{domain.ImageModelID, "3:4", "2K"}:    "1776x2368",
-	{domain.ImageModelID, "16:9", "1K"}:   "1424x800",
-	{domain.ImageModelID, "16:9", "1.5K"}: "2048x1152",
-	{domain.ImageModelID, "16:9", "2K"}:   "2816x1584",
-	{domain.ImageModelID, "9:16", "1K"}:   "800x1424",
-	{domain.ImageModelID, "9:16", "1.5K"}: "1152x2048",
-	{domain.ImageModelID, "9:16", "2K"}:   "1584x2816",
-	{domain.ImageModelID, "3:2", "1K"}:    "1248x832",
-	{domain.ImageModelID, "3:2", "1.5K"}:  "1872x1248",
-	{domain.ImageModelID, "3:2", "2K"}:    "2496x1664",
-	{domain.ImageModelID, "2:3", "1K"}:    "832x1248",
-	{domain.ImageModelID, "2:3", "1.5K"}:  "1248x1872",
-	{domain.ImageModelID, "2:3", "2K"}:    "1664x2496",
-	{domain.ImageModelID, "21:9", "1K"}:   "1568x672",
-	{domain.ImageModelID, "21:9", "1.5K"}: "2352x1008",
-	{domain.ImageModelID, "21:9", "2K"}:   "3136x1344",
-
-	// doubao-seedream-5.0-n
-	{domain.ImageModelNID, "1:1", "2K"}:  "2048x2048",
-	{domain.ImageModelNID, "1:1", "3K"}:  "3072x3072",
-	{domain.ImageModelNID, "1:1", "4K"}:  "4096x4096",
-	{domain.ImageModelNID, "4:3", "2K"}:  "2304x1728",
-	{domain.ImageModelNID, "4:3", "3K"}:  "3456x2592",
-	{domain.ImageModelNID, "4:3", "4K"}:  "4704x3520",
-	{domain.ImageModelNID, "3:4", "2K"}:  "1728x2304",
-	{domain.ImageModelNID, "3:4", "3K"}:  "2592x3456",
-	{domain.ImageModelNID, "3:4", "4K"}:  "3520x4704",
-	{domain.ImageModelNID, "16:9", "2K"}: "2848x1600",
-	{domain.ImageModelNID, "16:9", "3K"}: "4096x2304",
-	{domain.ImageModelNID, "16:9", "4K"}: "5504x3040",
-	{domain.ImageModelNID, "9:16", "2K"}: "1600x2848",
-	{domain.ImageModelNID, "9:16", "3K"}: "2304x4096",
-	{domain.ImageModelNID, "9:16", "4K"}: "3040x5504",
-	{domain.ImageModelNID, "3:2", "2K"}:  "2496x1664",
-	{domain.ImageModelNID, "3:2", "3K"}:  "3744x2496",
-	{domain.ImageModelNID, "3:2", "4K"}:  "4992x3328",
-	{domain.ImageModelNID, "2:3", "2K"}:  "1664x2496",
-	{domain.ImageModelNID, "2:3", "3K"}:  "2496x3744",
-	{domain.ImageModelNID, "2:3", "4K"}:  "3328x4992",
-	{domain.ImageModelNID, "21:9", "2K"}: "3136x1344",
-	{domain.ImageModelNID, "21:9", "3K"}: "4704x2016",
-	{domain.ImageModelNID, "21:9", "4K"}: "6240x2656",
-}
-
 // imageSize resolves the frozen (model, ratio, resolution) triple onto the
-// vendor pixel size. A missing combination is an internal contract violation,
-// never a silent downgrade.
+// vendor pixel size from the shared domain table — the same table the
+// manifest publishes as display sizes, so the wire value can never drift
+// from what the Workbench showed. A missing combination is an internal
+// contract violation, never a silent downgrade.
 func imageSize(req domain.SubmitRequest) (string, error) {
 	if req.Ratio == nil || req.Resolution == nil {
 		return "", &domain.ProviderRejectedError{Reason: domain.ReasonInternalError}
 	}
-	size, ok := imageSizes[imageSizeKey{model: req.Model, ratio: *req.Ratio, resolution: *req.Resolution}]
+	size, ok := domain.ImageSizeFor(req.Model, *req.Ratio, *req.Resolution)
 	if !ok {
 		return "", &domain.ProviderRejectedError{Reason: domain.ReasonInternalError}
 	}
-	return size, nil
+	return fmt.Sprintf("%dx%d", size.Width, size.Height), nil
+}
+
+// imageWireModels maps a manifest model id onto the request model id the
+// gateway actually accepts. The pro manifest id needs its versioned backend
+// id: the dotted catalog alias resolves per-request across backend pools and
+// intermittently answers invalid_request_error 400 on an identical body
+// (field report 2026-09-01, both hosts; the versioned id 3/3 stable). The
+// base manifest id is a display name the vendor does not list at all — its
+// catalog alias doubao-seedream-5.0-n is the accepted request id, while the
+// versioned id its successes echo (doubao-seedream-5-0-260128) is rejected
+// as an input (user-verified 2026-09-01). Unmapped models travel under their
+// own id. Remove this mapping when Kapon fixes alias routing.
+var imageWireModels = map[string]string{
+	domain.ImageModelID:     "doubao-seedream-5-0-pro-260628",
+	domain.ImageModelBaseID: "doubao-seedream-5.0-n",
+}
+
+func imageWireModel(model string) string {
+	if wire, ok := imageWireModels[model]; ok {
+		return wire
+	}
+	return model
 }
 
 // NewGenerationsClient binds the generation adapter to the validated route.
@@ -149,10 +109,15 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 	if err != nil {
 		return domain.SubmitOutcome{}, err
 	}
+	// The vendor 豆包生图 contract (OpenAPI 2026-09) has no batch parameter:
+	// every request generates exactly one image, so a quantity of Q fans out
+	// into Q identical single-image requests, each slot receiving exactly
+	// its own request's answer. The submit stays all-or-nothing — any
+	// definitive rejection fails it, and a lost transport outcome dominates
+	// as indeterminate because those requests may have executed.
 	body := map[string]any{
-		"model":           req.Model,
+		"model":           imageWireModel(req.Model),
 		"prompt":          req.Prompt,
-		"n":               req.Quantity,
 		"size":            size,
 		"response_format": "url",
 		"watermark":       false,
@@ -164,26 +129,53 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 		}
 		body["image"] = images
 	}
-	callCtx, cancel := context.WithTimeout(ctx, c.imageSubmitTimeout)
-	defer cancel()
-	var parsed struct {
-		Data []struct {
-			URL string `json:"url"`
-		} `json:"data"`
+	quantity := req.Quantity
+	if quantity < 1 {
+		quantity = 1
 	}
-	if err := c.call(callCtx, credential, http.MethodPost, "/v1/images/generations", body, &parsed); err != nil {
+	urls := make([][]string, quantity)
+	errs := make([]error, quantity)
+	var wg sync.WaitGroup
+	for i := 0; i < quantity; i++ {
+		wg.Add(1)
+		go func(slot int) {
+			defer wg.Done()
+			callCtx, cancel := context.WithTimeout(ctx, c.imageSubmitTimeout)
+			defer cancel()
+			var parsed struct {
+				Data []struct {
+					URL string `json:"url"`
+				} `json:"data"`
+			}
+			errs[slot] = c.call(callCtx, credential, http.MethodPost, "/v1/images/generations", body, &parsed)
+			if errs[slot] != nil {
+				return
+			}
+			for _, item := range parsed.Data {
+				if item.URL != "" {
+					urls[slot] = append(urls[slot], item.URL)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
 		if errors.Is(err, errTransportLost) {
 			// A lost synchronous answer cannot be distinguished from an
 			// executed generation: the outcome is indeterminate and the
 			// system must never guess a re-submit.
 			return domain.SubmitOutcome{}, domain.WithFailureDiagnostic(domain.ErrSubmitIndeterminate, domain.FailureDiagnosticOf(err))
 		}
-		return domain.SubmitOutcome{}, err
+	}
+	for _, err := range errs {
+		if err != nil {
+			return domain.SubmitOutcome{}, err
+		}
 	}
 	outcome := domain.SubmitOutcome{}
-	for _, item := range parsed.Data {
-		if item.URL != "" {
-			outcome.Outputs = append(outcome.Outputs, domain.GatewayOutput{URL: item.URL})
+	for _, slot := range urls {
+		for _, url := range slot {
+			outcome.Outputs = append(outcome.Outputs, domain.GatewayOutput{URL: url})
 		}
 	}
 	if len(outcome.Outputs) == 0 {
@@ -362,10 +354,16 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		summary := redactedRequestSummary(body)
+		if summary != "" {
+			slog.Warn("creation: kapon request lost before a response",
+				"method", method, "path", path, "host", c.baseURL, "request", summary,
+			)
+		}
 		diagnostic := domain.NewFailureDiagnostic(
 			domain.DiagnosticSourceProvider,
 			"transport_error",
-			"Kapon request failed before a response was received",
+			"Kapon request failed before a response was received"+shapeSuffix(summary, c.baseURL),
 			nil, "", "",
 		)
 		return domain.WithFailureDiagnostic(errTransportLost, diagnostic)
@@ -376,10 +374,24 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 	if resp.StatusCode != http.StatusOK {
 		providerFailure = readProviderErrorEnvelope(resp.Body)
 	}
-	diagnostic := providerFailure.diagnostic(
-		resp.StatusCode,
-		providerDiagnosticRedactions(credential, body),
-	)
+	redactions := providerDiagnosticRedactions(credential, body)
+	summary := redactedRequestSummary(body)
+	if resp.StatusCode != http.StatusOK && summary != "" {
+		// ADR-0016: the redacted request shape — never the creator content —
+		// explains a rejection in server logs and the creator diagnostic. The
+		// target host rides along: the same body can behave differently per
+		// vendor route, and the host is configuration, not a secret.
+		slog.Warn("creation: kapon request rejected",
+			"method", method,
+			"path", path,
+			"host", c.baseURL,
+			"status", resp.StatusCode,
+			"code", redactProviderDiagnosticText(providerFailure.Code, redactions),
+			"provider_request_id", redactProviderDiagnosticText(providerFailure.RequestID, redactions),
+			"request", summary,
+		)
+	}
+	diagnostic := providerFailure.diagnostic(resp.StatusCode, redactions, shapeSuffix(summary, c.baseURL))
 
 	switch {
 	case resp.StatusCode == http.StatusOK:
@@ -495,7 +507,7 @@ type providerErrorEnvelope struct {
 	RequestID string
 }
 
-func (e providerErrorEnvelope) diagnostic(status int, redactions []string) *domain.FailureDiagnostic {
+func (e providerErrorEnvelope) diagnostic(status int, redactions []string, requestShape string) *domain.FailureDiagnostic {
 	code := e.Code
 	if code == "" {
 		code = fmt.Sprintf("http_%d", status)
@@ -503,11 +515,84 @@ func (e providerErrorEnvelope) diagnostic(status int, redactions []string) *doma
 	return domain.NewFailureDiagnostic(
 		domain.DiagnosticSourceProvider,
 		redactProviderDiagnosticText(code, redactions),
-		redactProviderDiagnosticText(providerMessage(e.Message, status), redactions),
+		redactProviderDiagnosticText(providerMessage(e.Message, status), redactions)+requestShape,
 		&status,
 		redactProviderDiagnosticText(e.Type, redactions),
 		redactProviderDiagnosticText(e.RequestID, redactions),
 	)
+}
+
+// providerRequestSummaryMax bounds the redacted request shape so the
+// diagnostic message it rides stays inside the domain's message budget.
+const providerRequestSummaryMax = 1024
+
+// shapeSuffix renders " | request: {…} | host: …" for the failure
+// diagnostic message. The host is the vendor route configuration, not a
+// secret, and the same body can be accepted on one route and rejected on
+// another — without it a reported shape cannot be attributed to a route.
+func shapeSuffix(summary, host string) string {
+	if summary == "" {
+		return ""
+	}
+	return " | request: " + summary + " | host: " + host
+}
+
+// redactedRequestSummary renders the outbound request body with every
+// sensitive value replaced, so a provider rejection can be diagnosed from
+// the request shape alone. Creator content (prompts, reference images,
+// URLs) never appears; the output is deterministic because encoding/json
+// sorts map keys.
+func redactedRequestSummary(body any) string {
+	if body == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(redactRequestBody(body, false))
+	if err != nil {
+		return ""
+	}
+	if len(encoded) > providerRequestSummaryMax {
+		encoded = append(encoded[:providerRequestSummaryMax], "..."...)
+	}
+	return string(encoded)
+}
+
+// redactRequestBody copies the request, replacing every string under a
+// sensitive key (prompt, reference images, URLs) with a marker while keeping
+// the shape — map keys, slice lengths, flags, numbers — intact.
+func redactRequestBody(value any, sensitive bool) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		redacted := make(map[string]any, len(typed))
+		for key, item := range typed {
+			redacted[key] = redactRequestBody(item, sensitive || providerDiagnosticSensitiveKey(key))
+		}
+		return redacted
+	case map[string]string:
+		redacted := make(map[string]any, len(typed))
+		for key, item := range typed {
+			redacted[key] = redactRequestBody(item, sensitive || providerDiagnosticSensitiveKey(key))
+		}
+		return redacted
+	case []string:
+		redacted := make([]any, len(typed))
+		for i, item := range typed {
+			redacted[i] = redactRequestBody(item, sensitive)
+		}
+		return redacted
+	case []map[string]any:
+		redacted := make([]any, len(typed))
+		for i, item := range typed {
+			redacted[i] = redactRequestBody(item, sensitive)
+		}
+		return redacted
+	case string:
+		if sensitive {
+			return "[redacted]"
+		}
+		return typed
+	default:
+		return value
+	}
 }
 
 var providerDiagnosticURLPattern = regexp.MustCompile(`(?i)(?:https?://|data:)[^\s"'<>]+`)
