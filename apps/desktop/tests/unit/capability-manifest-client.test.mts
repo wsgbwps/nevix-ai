@@ -126,8 +126,8 @@ const availableVideo = {
 
 const pendingVideo = {
   available: false,
-  reason: 'production_readiness_pending',
-  action: 'await_release'
+  reason: 'not_configured',
+  action: 'contact_admin'
 }
 
 describe('capability manifest client', () => {
@@ -159,7 +159,7 @@ describe('capability manifest client', () => {
     assert.equal(requests[0].headers.get('Authorization'), 'Bearer token-a')
   })
 
-  it('parses available and readiness-pending media into structured views', async () => {
+  it('parses available and connection-unavailable media into structured views', async () => {
     await withFetch(
       () =>
         Promise.resolve(
@@ -194,8 +194,8 @@ describe('capability manifest client', () => {
           duration: undefined
         })
         assert.equal(result.value.video.available, false)
-        assert.equal(result.value.video.reason, 'production_readiness_pending')
-        assert.equal(result.value.video.action, 'await_release')
+        assert.equal(result.value.video.reason, 'not_configured')
+        assert.equal(result.value.video.action, 'contact_admin')
         assert.equal(result.value.video.models, undefined)
       }
     )
@@ -295,7 +295,7 @@ describe('capability manifest client', () => {
       parseCapabilityManifest({
         schema_version: 1,
         manifest_version: 1,
-        image: { available: false, reason: 'kapon_says_meh', action: 'await_release' },
+        image: { available: false, reason: 'kapon_says_meh', action: 'contact_admin' },
         video: pendingVideo
       }),
       null
@@ -370,5 +370,5 @@ function pendingImage(): {
   reason: string
   action: string
 } {
-  return { available: false, reason: 'production_readiness_pending', action: 'await_release' }
+  return { available: false, reason: 'not_configured', action: 'contact_admin' }
 }

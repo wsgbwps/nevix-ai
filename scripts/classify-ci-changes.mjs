@@ -86,11 +86,6 @@ export function classifyPaths(paths) {
     // harness 内联自检。
     if (startsWith(path, "scripts/dev")) checks.add("harness");
 
-    // scripts/production-readiness 是手动 release-gate 工具（真实 Kapon
-    // 调用与生产凭据只在手动 workflow 中出现），与 scripts/dev 同类只跑
-    // harness 内联自检；手动 workflow 本身亦不由 push/PR 触发。
-    if (startsWith(path, "scripts/production-readiness")) checks.add("harness");
-
     if (
       isOneOf(path, ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"])
     ) {
@@ -107,7 +102,6 @@ export function classifyPaths(paths) {
     if (path === ".github/workflows/desktop-ci.yml") checks.add("desktop");
     if (path === ".github/workflows/server-ci.yml") checks.add("server");
     if (path === ".github/workflows/desktop-e2e-ci.yml") checks.add("e2e");
-    if (path === ".github/workflows/production-readiness.yml") checks.add("harness");
     if (
       startsWith(path, ".codegraph") ||
       startsWith(path, ".agents") ||
@@ -133,7 +127,6 @@ export function classifyPaths(paths) {
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
         "scripts/tests/deploy-stack.test.mjs",
-        "scripts/tests/production-readiness-probe.test.mjs",
       ])
     ) {
       checks.add("harness");

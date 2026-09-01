@@ -40,15 +40,15 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 	if call.model != "doubao-seedream-5.0-pro" {
 		t.Fatalf("fixed image model must not be substituted, got %q", call.model)
 	}
-	if call.size != "2K" {
-		t.Fatalf("Seedream 5.0 Pro requires size=2K, got %q", call.size)
+	if call.size != "2048x2048" {
+		t.Fatalf("Seedream 5.0 Pro 1:1 2K requires size=2048x2048, got %q", call.size)
 	}
 	if call.n != 1 || call.images != 0 {
 		t.Fatalf("text-to-image must send quantity without references, got n=%d images=%d", call.n, call.images)
 	}
 
-	// The provider receives the selected resolution label without silently
-	// converting it back to a ratio-specific pixel size.
+	// The provider receives the model-specific pixel size derived from the
+	// selected ratio and resolution tier.
 	draft16x9 := h.saveDraftOn(t, token, draft.SessionID, taskDraft{
 		SessionID: draft.SessionID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
 		Mode: "text-to-image", Ratio: "16:9", Resolution: "1K", Quantity: 1, Prompt: "横幅",
@@ -58,8 +58,8 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 		t.Fatalf("submit 16:9: %d %s", status, body)
 	}
 	h.awaitTaskTerminal(t, token, decodeTaskView(t, body).Task.ID)
-	if call := h.kapon.generation.lastImageCall(); call.size != "1K" {
-		t.Fatalf("Seedream 5.0 Pro requires size=1K, got %q", call.size)
+	if call := h.kapon.generation.lastImageCall(); call.size != "1424x800" {
+		t.Fatalf("Seedream 5.0 Pro 16:9 1K requires size=1424x800, got %q", call.size)
 	}
 }
 

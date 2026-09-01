@@ -8,15 +8,13 @@ import (
 	"time"
 )
 
-// Generation task kernel scenario support (issue #159): a ready deployment
-// (readiness evidence active for both media + configured provider
-// connection), a saved draft, and idempotent submission helpers.
+// Generation task kernel scenario support (issue #159): a configured provider
+// connection, a saved draft, and idempotent submission helpers.
 
 // readyTaskHarness builds a harness whose manifest is fully active and whose
 // provider connection is configured against the fake Kapon route.
 func readyTaskHarness(t *testing.T, opts harnessOptions) (*harness, string, string) {
 	t.Helper()
-	opts.readinessPath = writeEvidenceFile(t, append(append([]string{}, manifestImageSlots...), manifestVideoSlots...)...)
 	h := newHarnessWithOptions(t, opts)
 	h.ensureAccounts(t)
 	adminToken := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
@@ -72,7 +70,7 @@ func (h *harness) saveDraftOn(t *testing.T, token, sessionID string, draft taskD
 	payload := map[string]any{
 		"prompt":           draft.Prompt,
 		"media_type":       draft.MediaType,
-		"manifest_version": 2,
+		"manifest_version": 3,
 		"model":            draft.Model,
 		"mode":             draft.Mode,
 		"ratio":            nil,

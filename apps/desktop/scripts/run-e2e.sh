@@ -5,8 +5,8 @@ set -euo pipefail
 # full  — Full E2E Suite: configuration-failure builds, then every spec (default).
 # smoke — Smoke Suite: one test-mode build, then only specs tagged @smoke.
 # settings — Settings Information Architecture: one test-mode build, then the Settings spec.
-# image — Slice-10 image generation: fake Kapon generation route + readiness
-#   evidence + configured provider connection, then the shortest image spec.
+# image — Slice-10 image generation: fake Kapon generation route + configured
+#   provider connection, then the shortest image spec.
 mode="${1:-full}"
 case "$mode" in
   full | smoke | settings | image) ;;
@@ -49,7 +49,6 @@ tls_port=8443
 fake_kapon_pid=""
 fake_kapon_port=9399
 fake_kapon_log=""
-readiness_file=""
 failure_injection="${NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE:-}"
 
 case "$failure_injection" in
@@ -452,7 +451,6 @@ start_identity_server() {
   # secure-transport gate instead of contacting it. Loopback http is the
   # sanctioned test-only exception.
   KAPON_BASE_URL="${KAPON_E2E_BASE_URL:-}" \
-  NEVIX_CREATION_READINESS_FILE="${readiness_file:-}" \
   DATABASE_URL="$database_url" \
     MIGRATION_DATABASE_URL="$identity_database_url" \
     CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
@@ -477,19 +475,10 @@ claim_main_instance() {
     >/dev/null
 }
 
-# Slice-10 image harness (issue #160). The readiness evidence document is the
-# same release-evidence shape scripts/production-readiness records; passing
-# entries activate the image capability values for the fake-route run. The
-# provider connection is configured through the TLS terminator because the
+# Slice-10 image harness (issue #160). The provider connection is configured
+# through the TLS terminator because the
 # reauthentication and connection commands demand the trusted HTTPS transport
 # marker (plain loopback http answers secure_transport_required).
-write_image_readiness_evidence() {
-  readiness_file="$(mktemp -t nevix-creation-readiness.XXXXXX.json)"
-  node "$repo_root/scripts/dev/dev-readiness-evidence.mjs" \
-    --media image \
-    --out "$readiness_file"
-}
-
 start_fake_kapon() {
   fake_kapon_log="$(mktemp -t nevix-fake-kapon.XXXXXX.log)"
   node "$repo_root/scripts/dev/fake-kapon.mjs" >"$fake_kapon_log" 2>&1 &
@@ -635,11 +624,8 @@ require_free_port "$setup_server_port"
 require_free_port "$open_server_port"
 if [[ "$mode" == "image" ]]; then
   require_free_port "$fake_kapon_port"
-  # The evidence file and the fake generation route must both exist before
-  # the server boots: the module loads the evidence once at startup, and an
-  # unset KAPON_BASE_URL there would bind the real reviewed route instead of
-  # the fake.
-  write_image_readiness_evidence
+  # The fake generation route must exist before the server boots; an unset
+  # KAPON_BASE_URL there would bind the real reviewed route instead.
   start_fake_kapon
   export KAPON_E2E_BASE_URL="http://127.0.0.1:$fake_kapon_port"
 fi

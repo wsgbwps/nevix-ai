@@ -3,70 +3,14 @@ package integrationtest
 import (
 	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/nevix-ai/server/internal/creation"
 )
 
 // Capability Manifest flows (issue #158) through the Module's public HTTP
-// seams: the readiness gate, its orthogonality to the instance Connection
-// facts, per-media activation, transient-check stability, and the read
-// authorization matrix. The slot id fixtures below mirror the embedded
-// checklist (server/internal/creation/domain/readiness-checklist.json); a
-// rename on either side fails loudly — unknown ids refuse module startup,
-// missing ids keep a media readiness-pending and fail the assertions.
-
-var manifestImageSlots = []string{
-	"image.mode.text-to-image", "image.mode.reference-image",
-	"image.ratio.1-1", "image.ratio.4-3", "image.ratio.3-4", "image.ratio.16-9", "image.ratio.9-16",
-	"image.ratio.3-2", "image.ratio.2-3", "image.ratio.21-9",
-	"image.resolution.pro-1k", "image.resolution.pro-1-5k", "image.resolution.pro-2k",
-	"image.resolution.n-2k", "image.resolution.n-3k", "image.resolution.n-4k",
-	"image.quantity.1", "image.quantity.2", "image.quantity.3", "image.quantity.4",
-	"image.transfer.temp-url", "image.probe.png",
-}
-
-var manifestVideoSlots = []string{
-	"video.mode.text-to-video", "video.mode.first-frame", "video.mode.first-last-frame", "video.mode.omni-reference",
-	"video.resolution.480p", "video.resolution.720p", "video.resolution.1080p",
-	"video.duration.5s", "video.duration.10s",
-	"video.async.query", "video.transfer.temp-url",
-	"video.probe.mp4", "video.probe.audio-track", "video.reference.envelope",
-}
-
-// writeEvidenceFile records one scenario's readiness evidence document.
-func writeEvidenceFile(t *testing.T, slotIDs ...string) string {
-	t.Helper()
-	doc := map[string]any{
-		"schema_version":   3,
-		"manifest_version": 3,
-		"generated_at":     time.Now().UTC().Format(time.RFC3339),
-	}
-	entries := make([]map[string]any, 0, len(slotIDs))
-	for _, slotID := range slotIDs {
-		entries = append(entries, map[string]any{
-			"slot_id":      slotID,
-			"status":       "passed",
-			"checked_at":   time.Now().UTC().Format(time.RFC3339),
-			"evidence_ref": "harness/" + slotID,
-		})
-	}
-	doc["entries"] = entries
-	raw, err := json.Marshal(doc)
-	if err != nil {
-		t.Fatalf("marshal evidence: %v", err)
-	}
-	path := filepath.Join(t.TempDir(), "production-readiness.json")
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatalf("write evidence file: %v", err)
-	}
-	return path
-}
+// seams: the source-controlled contract, instance Connection facts,
+// per-media degradation, transient-check stability, and read authorization.
 
 // joinInts renders an int list for compact comparison.
 func joinInts(values []int) string {
@@ -129,12 +73,12 @@ func (h *harness) getManifest(t *testing.T, token string) (int, []byte, manifest
 	return status, body, payload
 }
 
-// TestCapabilityManifestWithoutEvidenceIsReadinessPending: a fresh
-// deployment publishes no submittable values for anyone, with the stable
-// pending reason and await-release advice.
-func TestCapabilityManifestWithoutEvidenceIsReadinessPending(t *testing.T) {
+// A fresh deployment has no Provider Connection, so both media fail closed
+// with the instance-owned action instead of requiring a separate release gate.
+func TestCapabilityManifestWithoutConnectionIsUnavailable(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)
+	h.resetProviderConnections(t)
 	token := h.loginToken(t, creatorEmail, harnessPassword)
 
 	status, body, payload := h.getManifest(t, token)
@@ -145,21 +89,20 @@ func TestCapabilityManifestWithoutEvidenceIsReadinessPending(t *testing.T) {
 		t.Fatalf("manifest must publish its schema and content versions: %+v", payload)
 	}
 	for media, view := range map[string]manifestMedia{"image": payload.Image, "video": payload.Video} {
-		if view.Available || view.Reason != "production_readiness_pending" || view.Action != "await_release" {
-			t.Fatalf("%s must be readiness-pending, got %+v", media, view)
+		if view.Available || view.Reason != "not_configured" || view.Action != "contact_admin" {
+			t.Fatalf("%s must be not-configured, got %+v", media, view)
 		}
 		if view.Models != nil || view.Modes != nil || view.Defaults != nil {
-			t.Fatalf("%s pending view must not publish values: %+v", media, view)
+			t.Fatalf("%s unavailable view must not publish values: %+v", media, view)
 		}
 	}
 	assertContractResponse(t, "GET", "/creation/capability-manifest", status, body)
 }
 
-// TestCapabilityManifestActivatesWithEvidenceAndConnection: full evidence
-// plus a working connection publishes the complete submittable sets with
+// A working connection publishes the complete source-controlled sets with
 // in-set defaults — and admins and members see the identical payload.
-func TestCapabilityManifestActivatesWithEvidenceAndConnection(t *testing.T) {
-	h := newHarnessWithOptions(t, harnessOptions{readinessPath: writeEvidenceFile(t, append(append([]string{}, manifestImageSlots...), manifestVideoSlots...)...)})
+func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
+	h := newHarness(t)
 	h.ensureAccounts(t)
 	h.resetProviderConnections(t)
 	t.Cleanup(func() { h.resetProviderConnections(t) })
@@ -206,7 +149,7 @@ func TestCapabilityManifestActivatesWithEvidenceAndConnection(t *testing.T) {
 	for _, want := range expectations {
 		view := want.view
 		if !view.Available || view.Reason != "" || view.Action != "" {
-			t.Fatalf("%s must be available with full evidence, got %+v", want.media, view)
+			t.Fatalf("%s must be available with a checked connection, got %+v", want.media, view)
 		}
 		if len(view.Models) != len(want.models) {
 			t.Fatalf("%s models = %+v, want %d entries", want.media, view.Models, len(want.models))
@@ -256,7 +199,7 @@ func TestCapabilityManifestActivatesWithEvidenceAndConnection(t *testing.T) {
 // TestCapabilityManifestIndependentMediaDegradation: one model disappearing
 // degrades only its own media in the manifest after an admin recheck.
 func TestCapabilityManifestIndependentMediaDegradation(t *testing.T) {
-	h := newHarnessWithOptions(t, harnessOptions{readinessPath: writeEvidenceFile(t, append(append([]string{}, manifestImageSlots...), manifestVideoSlots...)...)})
+	h := newHarness(t)
 	h.ensureAccounts(t)
 	h.resetProviderConnections(t)
 	t.Cleanup(func() { h.resetProviderConnections(t) })
@@ -290,7 +233,7 @@ func TestCapabilityManifestIndependentMediaDegradation(t *testing.T) {
 // transient — the manifest projection and the instance facts both keep
 // their previous verdicts.
 func TestCapabilityManifestTransientCheckNeverRewrites(t *testing.T) {
-	h := newHarnessWithOptions(t, harnessOptions{readinessPath: writeEvidenceFile(t, append(append([]string{}, manifestImageSlots...), manifestVideoSlots...)...)})
+	h := newHarness(t)
 	h.ensureAccounts(t)
 	h.resetProviderConnections(t)
 	t.Cleanup(func() { h.resetProviderConnections(t) })
@@ -320,58 +263,6 @@ func TestCapabilityManifestTransientCheckNeverRewrites(t *testing.T) {
 	}
 }
 
-// TestCapabilityManifestReadinessDoesNotRewriteConnectionFacts: readiness
-// pending blocks the manifest but the configured connection's own check
-// facts — admin view and member capabilities — stay exactly as recorded.
-func TestCapabilityManifestReadinessDoesNotRewriteConnectionFacts(t *testing.T) {
-	h := newHarness(t) // no evidence file
-	h.ensureAccounts(t)
-	h.resetProviderConnections(t)
-	t.Cleanup(func() { h.resetProviderConnections(t) })
-	h.kapon.acceptKey("kapon-manifest-key")
-	adminToken := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
-	memberToken := h.loginToken(t, creatorEmail, harnessPassword)
-
-	if status, body := h.configureConnection(t, adminToken, "kapon-manifest-key"); status != http.StatusCreated {
-		t.Fatalf("configure connection: status=%d body=%s", status, body)
-	}
-
-	status, body := h.doRequest(t, "GET", "/creation/provider-connection", adminToken, nil)
-	if status != http.StatusOK {
-		t.Fatalf("admin connection view: status=%d body=%s", status, body)
-	}
-	connection := decodeObject(t, body)
-	if connection["image_capability"] != "available" || connection["video_capability"] != "available" {
-		t.Fatalf("connection check facts must be untouched by readiness: %v", connection)
-	}
-
-	memberStatus, memberBody := h.doRequest(t, "GET", "/creation/media-capabilities", memberToken, nil)
-	if memberStatus != http.StatusOK {
-		t.Fatalf("member capabilities: status=%d body=%s", memberStatus, memberBody)
-	}
-	capabilities := decodeObject(t, memberBody)
-	image, _ := capabilities["image"].(map[string]any)
-	video, _ := capabilities["video"].(map[string]any)
-	if image["status"] != "available" || video["status"] != "available" {
-		t.Fatalf("member capability facts must be untouched by readiness: %v", capabilities)
-	}
-
-	_, _, payload := h.getManifest(t, memberToken)
-	if payload.Image.Available || payload.Image.Reason != "production_readiness_pending" {
-		t.Fatalf("manifest must stay readiness-pending: %+v", payload.Image)
-	}
-}
-
-// decodeObject reads one JSON response body into a generic object.
-func decodeObject(t *testing.T, body []byte) map[string]any {
-	t.Helper()
-	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("decode response object: %v (%s)", err, body)
-	}
-	return decoded
-}
-
 // TestCapabilityManifestAuthorizationMatrix: the manifest is active-user
 // wide — members and admins read it, unauthenticated callers get the stable
 // 401 envelope.
@@ -388,36 +279,5 @@ func TestCapabilityManifestAuthorizationMatrix(t *testing.T) {
 	adminToken := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
 	if adminStatus, _, _ := h.getManifest(t, adminToken); adminStatus != http.StatusOK {
 		t.Fatalf("admin must read the manifest, got %d", adminStatus)
-	}
-}
-
-// TestCapabilityManifestInvalidEvidenceRefusesStartup: a present-but-invalid
-// evidence document fails module construction loudly instead of silently
-// deactivating every media.
-func TestCapabilityManifestInvalidEvidenceRefusesStartup(t *testing.T) {
-	h := newHarness(t)
-	h.ensureAccounts(t)
-
-	path := filepath.Join(t.TempDir(), "production-readiness.json")
-	invalid := []byte(`{"schema_version": 3, "manifest_version": 3, "entries": [{"slot_id": "image.resolution.8k", "status": "passed"}]}`)
-	if err := os.WriteFile(path, invalid, 0o600); err != nil {
-		t.Fatalf("write invalid evidence: %v", err)
-	}
-	_, err := creation.NewModule(h.ctx, h.runtimePool, creation.Config{
-		StorageDriver:      "filesystem",
-		StorageRoot:        os.Getenv("STORAGE_FS_ROOT"),
-		SecretsDir:         h.secretsDir,
-		KaponBaseURL:       h.kapon.URL(),
-		CORSAllowedOrigins: []string{"https://test.local"},
-		ReadinessFile:      path,
-	}, creation.Deps{
-		SessionAuthenticator: h.identity.SessionAuthenticator(),
-		ReauthVerifier:       h.identity.ReauthProofs(),
-	})
-	if err == nil {
-		t.Fatal("module construction must fail on an evidence document citing an unknown slot")
-	}
-	if strings.Contains(err.Error(), "SessionAuthenticator") {
-		t.Fatalf("the failure must come from evidence validation, not a wiring gap: %v", err)
 	}
 }

@@ -1,23 +1,19 @@
 package domain
 
-import "strconv"
-
 // The versioned AI Provider Capability Manifest (spec #150): the server's
-// authoritative declaration of which generation capabilities have passed
-// real-invocation acceptance. Content is code-versioned — it changes only
-// with an accepted capability decision, which bumps ManifestVersion. The
-// derivation below is the single projection point merging the Nevix-global
-// Production Readiness evidence with the instance's Provider Connection
-// facts; it is a pure function and never rewrites either input.
+// authoritative declaration of supported generation capabilities. Content is
+// code-versioned — it changes only with an accepted capability decision, which
+// bumps ManifestVersion. The derivation below combines that static contract
+// with the instance's Provider Connection facts; it is a pure function and
+// never rewrites the connection.
 
 // ManifestSchemaVersion is the wire payload's shape version
 // (contracts/creation.yaml CapabilityManifest.schema_version).
 const ManifestSchemaVersion = 2
 
 // ManifestVersion is the capability content version. Bump when the accepted
-// capability set changes — by acceptance (T16 evidence activates values) or
-// by decision (a failed acceptance removes a value, e.g. 1080p, or the
-// vendor's ratio/size contract change that removed 4:5).
+// capability set changes, such as a model or vendor ratio/size contract
+// change.
 const ManifestVersion = 3
 
 // The V1 allowlisted models (spec #150). Declared here because the manifest
@@ -35,13 +31,6 @@ const (
 	PromptMaxChars = 2000
 )
 
-// Manifest-only reason/action vocabulary; instance reasons mirror
-// DeriveMediaCapabilities unchanged.
-const (
-	ManifestReasonReadinessPending = "production_readiness_pending"
-	ManifestActionAwaitRelease     = "await_release"
-)
-
 // Media mode ids as published on the wire.
 const (
 	ModeTextToImage    = "text-to-image"
@@ -52,12 +41,10 @@ const (
 	ModeOmniReference  = "omni-reference"
 )
 
-// Manifest content: every value binds to exactly one readiness checklist
-// slot (build-time invariant enforced by manifest_test.go). Order here is
-// the wire order — fixed, so one manifest version always serializes the same
-// sequence. Image resolution tiers are model-scoped: the vendor size table
-// differs per model, so a tier only exists on the models that declare it and
-// its checklist slots bind (model, tier).
+// Manifest content is the source-controlled capability contract. Order here
+// is the wire order — fixed, so one manifest version always serializes the
+// same sequence. Image resolution tiers are model-scoped because the vendor
+// size table differs per model.
 var (
 	imageModes  = []string{ModeTextToImage, ModeReferenceImage}
 	imageRatios = []string{"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"}
@@ -94,17 +81,6 @@ const (
 	defaultImageQuantity = 1
 	defaultVideoDuration = 5
 )
-
-// Checklist dimensions each media must have at least one passed value from
-// before it is submittable at all — including the persistence and probe
-// slots, because an output that cannot be verified and transferred never
-// ships as a capability.
-func manifestDimensions(media string) []string {
-	if media == ReadinessMediaImage {
-		return []string{"mode", "ratio", "resolution", "quantity", "transfer", "probe"}
-	}
-	return []string{"mode", "resolution", "duration", "reference_envelope", "async_query", "transfer", "probe"}
-}
 
 // Manifest view types (wire shapes per contracts/creation.yaml). Available
 // media carry every field; unavailable media carry only reason/action, so
@@ -296,9 +272,9 @@ func ptr[P any](p P) *P { return &p }
 // (story 28).
 func modeReferencePolicy(media, mode string) ReferenceMaterialPolicy {
 	switch {
-	case media == ReadinessMediaImage && mode == ModeTextToImage:
+	case media == string(MediaImage) && mode == ModeTextToImage:
 		return ReferenceMaterialPolicy{Total: CountRange{Min: 0, Max: 0}}
-	case media == ReadinessMediaImage: // reference-image
+	case media == string(MediaImage): // reference-image
 		return ReferenceMaterialPolicy{
 			Total:    CountRange{Min: 1, Max: 4},
 			PerMedia: &PerMediaReferences{Image: ptr(imageReferencePolicy(1, 4, imageRefMaxBytes))},
@@ -329,7 +305,7 @@ func modeReferencePolicy(media, mode string) ReferenceMaterialPolicy {
 
 // mediaReferenceEnvelope is the media-level widest reference policy.
 func mediaReferenceEnvelope(media string) ReferenceMaterialPolicy {
-	if media == ReadinessMediaImage {
+	if media == string(MediaImage) {
 		return ReferenceMaterialPolicy{
 			Total:    CountRange{Min: 0, Max: 4},
 			PerMedia: &PerMediaReferences{Image: ptr(imageReferencePolicy(0, 4, imageRefMaxBytes))},
@@ -345,111 +321,32 @@ func mediaReferenceEnvelope(media string) ReferenceMaterialPolicy {
 	}
 }
 
-// mediaReadinessActive reports whether the evidence activates a media:
-// every required dimension has at least one passed slot — including the
-// persistence and probe slots, because an output that cannot be verified and
-// transferred never ships as a capability. Resolution tiers are model-scoped,
-// so that dimension is active when any declared model has an accepted tier.
-// Nothing partial ships: with the full dimension active but the spec default
-// unpassed, the published default falls back to the first passed value in
-// canonical order (never an unverified default, never a silent rewrite of a
-// submitted draft — the manifest simply publishes exactly what is submittable
-// today).
-func mediaReadinessActive(evidence ReadinessEvidence, media string) bool {
-	for _, dimension := range manifestDimensions(media) {
-		if dimension == "resolution" {
-			if !evidence.anyModelPassed(media, dimension) {
-				return false
-			}
-			continue
-		}
-		if len(evidence.passedValues(media, dimension)) == 0 {
-			return false
-		}
-	}
-	return true
-}
-
-// pickDefault returns the spec default when active, else the first active
-// value in the fixed canonical order. Callers guarantee at least one active.
-func pickDefault(values []string, active map[string]bool, specDefault string) string {
-	if active[specDefault] {
-		return specDefault
-	}
-	for _, v := range values {
-		if active[v] {
-			return v
-		}
-	}
-	return specDefault
-}
-
-func pickDefaultInt(values []int, active map[string]bool, specDefault int) int {
-	if active[strconv.Itoa(specDefault)] {
-		return specDefault
-	}
-	for _, v := range values {
-		if active[strconv.Itoa(v)] {
-			return v
-		}
-	}
-	return specDefault
-}
-
-// deriveAvailableMedia builds one media's view when both the readiness gate
-// and the instance connection allow it, publishing exactly the passed values
-// in fixed order with in-set defaults. Each declared model publishes only its
-// own accepted resolution tiers; a model without any accepted tier is not
-// published at all.
-func deriveAvailableMedia(evidence ReadinessEvidence, media string, models []CapabilityModelView, modes []string) CapabilityMediaView {
+// deriveAvailableMedia publishes the complete source-controlled contract for
+// a media whose instance connection is available.
+func deriveAvailableMedia(media string, models []CapabilityModelView, modes []string) CapabilityMediaView {
 	view := CapabilityMediaView{Available: true}
 
-	modeActive := evidence.passedValues(media, "mode")
 	for _, mode := range modes {
-		if modeActive[mode] {
-			view.Modes = append(view.Modes, CapabilityModeView{ID: mode, ReferenceMaterial: modeReferencePolicy(media, mode)})
-		}
+		view.Modes = append(view.Modes, CapabilityModeView{ID: mode, ReferenceMaterial: modeReferencePolicy(media, mode)})
 	}
 
 	for _, model := range models {
-		tierActive := evidence.passedValuesForModel(media, "resolution", model.Model)
-		published := CapabilityModelView{Model: model.Model}
-		for _, tier := range model.Resolutions {
-			if tierActive[tier] {
-				published.Resolutions = append(published.Resolutions, tier)
-			}
-		}
-		if len(published.Resolutions) == 0 {
-			continue
-		}
-		published.DefaultResolution = pickDefault(model.Resolutions, tierActive, model.DefaultResolution)
-		view.Models = append(view.Models, published)
+		view.Models = append(view.Models, CapabilityModelView{
+			Model:             model.Model,
+			Resolutions:       append([]string(nil), model.Resolutions...),
+			DefaultResolution: model.DefaultResolution,
+		})
 	}
 
 	var defaults CapabilityDefaultsView
-	if media == ReadinessMediaImage {
-		ratioActive := evidence.passedValues(media, "ratio")
-		for _, r := range imageRatios {
-			if ratioActive[r] {
-				view.Ratios = append(view.Ratios, r)
-			}
-		}
-		quantityActive := evidence.passedValues(media, "quantity")
-		for _, q := range imageQuantities {
-			if quantityActive[strconv.Itoa(q)] {
-				view.Quantities = append(view.Quantities, q)
-			}
-		}
-		defaults.Ratio = pickDefault(imageRatios, ratioActive, defaultImageRatio)
-		defaults.Quantity = pickDefaultInt(imageQuantities, quantityActive, defaultImageQuantity)
+	if media == string(MediaImage) {
+		view.Ratios = append([]string(nil), imageRatios...)
+		view.Quantities = append([]int(nil), imageQuantities...)
+		defaults.Ratio = defaultImageRatio
+		defaults.Quantity = defaultImageQuantity
 	} else {
-		durationActive := evidence.passedValues(media, "duration")
-		for _, d := range videoDurations {
-			if durationActive[strconv.Itoa(d)] {
-				view.Durations = append(view.Durations, d)
-			}
-		}
-		defaults.Duration = pickDefaultInt(videoDurations, durationActive, defaultVideoDuration)
+		view.Durations = append([]int(nil), videoDurations...)
+		defaults.Duration = defaultVideoDuration
 	}
 
 	view.Defaults = &defaults
@@ -459,13 +356,10 @@ func deriveAvailableMedia(evidence ReadinessEvidence, media string, models []Cap
 	return view
 }
 
-// DeriveCapabilityManifest merges the Nevix-global readiness evidence with
-// the instance connection (nil when not configured) into the current
-// manifest view. Precedence is fixed so one state yields one stable answer:
-// the global readiness gate first, then the instance's own projection.
-// Instance check facts are read, never written — readiness cannot rewrite a
-// connection's credential or capability states.
-func DeriveCapabilityManifest(evidence ReadinessEvidence, connection *ProviderConnection) CapabilityManifestView {
+// DeriveCapabilityManifest combines the source-controlled capability contract
+// with the instance connection (nil when not configured). Connection check
+// facts are read, never written.
+func DeriveCapabilityManifest(connection *ProviderConnection) CapabilityManifestView {
 	var instance MediaCapabilitiesView
 	if connection == nil {
 		instance = DeriveMediaCapabilities(nil)
@@ -479,18 +373,14 @@ func DeriveCapabilityManifest(evidence ReadinessEvidence, connection *ProviderCo
 	}
 
 	derive := func(media string, models []CapabilityModelView, modes []string, instanceView MediaCapabilityView) CapabilityMediaView {
-		switch {
-		case !mediaReadinessActive(evidence, media):
-			return CapabilityMediaView{Reason: ManifestReasonReadinessPending, Action: ManifestActionAwaitRelease}
-		case instanceView.Status != MediaCapabilityAvailable:
+		if instanceView.Status != MediaCapabilityAvailable {
 			return CapabilityMediaView{Reason: instanceView.Reason, Action: instanceView.Action}
-		default:
-			return deriveAvailableMedia(evidence, media, models, modes)
 		}
+		return deriveAvailableMedia(media, models, modes)
 	}
 
-	manifest.Image = derive(ReadinessMediaImage, imageModels, imageModes, instance.Image)
-	manifest.Video = derive(ReadinessMediaVideo, videoModels, videoModes, instance.Video)
+	manifest.Image = derive(string(MediaImage), imageModels, imageModes, instance.Image)
+	manifest.Video = derive(string(MediaVideo), videoModels, videoModes, instance.Video)
 	return manifest
 }
 

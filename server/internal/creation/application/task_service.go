@@ -100,7 +100,7 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 		if connection.ID != (domain.UUID{}) {
 			connectionView = &connection
 		}
-		manifest := domain.DeriveCapabilityManifest(s.manifest.evidence, connectionView)
+		manifest := domain.DeriveCapabilityManifest(connectionView)
 
 		spec, err := freezeSpecification(draft, manifest)
 		if err != nil {
@@ -196,7 +196,7 @@ func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteSco
 	if connection.ID != (domain.UUID{}) {
 		connectionView = &connection
 	}
-	manifest := domain.DeriveCapabilityManifest(s.manifest.evidence, connectionView)
+	manifest := domain.DeriveCapabilityManifest(connectionView)
 	if err := mediaAvailability(manifest, media); err != nil {
 		return nil, err
 	}

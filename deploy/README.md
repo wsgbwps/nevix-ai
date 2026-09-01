@@ -148,32 +148,19 @@ docker compose logs cert-watch          # 关注 "expires within 90 days"
 - 未来参考素材 blob 卷纳入同一备份窗口；组合备份与恢复的正式脚本及手册归仓库
   `scripts/`，随对应切片交付（ADR-0013）。
 
-## 7. AI Creation 生产能力激活（Production Readiness）
+## 7. AI Creation 发布前 smoke
 
-AI Creation 的生成能力在 Nevix 发布级真实调用验收（Production Readiness，
-issue #158）通过后才对用户可提交；实例的 Provider Connection 配置（#157）只
-证明本实例凭据与模型可见性，两者正交。出厂状态 = 全部媒体未激活：
-`GET /creation/capability-manifest` 对每个媒体返回
-`production_readiness_pending / await_release`，且不发布任何可提交值。
+Capability Manifest 随 Nevix 代码版本发布；部署方无需复制能力证据或重启激活。
+实例 Admin 只需在产品内配置 AI Provider Connection，Connection Check 会确认
+Token 与固定模型是否可见，并独立控制图片、视频的运行时可用性。
 
-激活步骤（由 Nevix 侧执行 T16 checklist，部署方放置证据）：
+Nevix 开发者在首次正式发布、固定模型变化或供应商合同变化时执行一次轻量检查：
 
-1. 依据 readiness checklist（`server/internal/creation/domain/readiness-checklist.json`）
-   逐 slot 真实执行；通过的证据记录为 evidence 文档 —— 手动工具
-   `scripts/production-readiness/probe.mjs`（凭据只经 `KAPON_API_KEY` 环境变量
-   注入，普通 CI 不持有）。
-2. 将 evidence 文档放入 server 容器 secrets 卷内的固定路径：
-   `/var/lib/nevix/secrets/production-readiness.json`
-   （`docker cp production-readiness.evidence.json <server容器>:/var/lib/nevix/secrets/production-readiness.json`）。
-3. 重启 server：`docker compose restart server`。Manifest 即发布已激活媒体的
-   可提交值（图片与视频独立激活）。
-
-注意：
-
-- 证据文档缺失 = 回到出厂未激活状态（合法）；**存在但损坏或引用未知 slot 会
-  拒绝启动**（fail loud），删除或更换文档后重启即可。
-- 该文件在 secrets 卷内，随第 6 节备份集一并备份；丢失只导致能力回到未激活，
-  重新执行 checklist 生成新文档即可恢复，无安全影响。
+1. 确认 fake adapter 与契约测试通过。
+2. 使用受控测试实例和真实 Kapon 凭据，走产品路径提交受影响媒体的最短生成，确认
+   提交、异步查询、结果转存和媒体读取成功。
+3. 将结果记入 release checklist 或对应 issue。失败时停止本次发布并修复；检查结果
+   不作为部署文件，也不影响已部署 Server 启动。
 
 ## 8. 失败排查
 

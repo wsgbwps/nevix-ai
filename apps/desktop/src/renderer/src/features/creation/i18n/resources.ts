@@ -135,7 +135,6 @@ export const creationTranslations = defineResourceTranslations({
         unavailable: {
           template: '当前没有可用的生成能力：{{reason}}，{{action}}',
           reasons: {
-            production_readiness_pending: '能力尚未通过发布验收',
             not_configured: '尚未配置 AI 供应商连接',
             checking: '正在检查连接',
             credential_invalid: '供应商拒绝了当前密钥',
@@ -145,7 +144,6 @@ export const creationTranslations = defineResourceTranslations({
           },
           actions: {
             wait: '请稍候再试。',
-            await_release: '等待版本发布后即可使用。',
             contact_admin: '请联系管理员处理。'
           }
         },
@@ -379,7 +377,6 @@ export const creationTranslations = defineResourceTranslations({
         unavailable: {
           template: 'No generation capability is available right now: {{reason}}. {{action}}',
           reasons: {
-            production_readiness_pending: 'the capability has not passed release acceptance yet',
             not_configured: 'no AI provider connection is configured',
             checking: 'the connection is being checked',
             credential_invalid: 'the provider rejected the current key',
@@ -389,7 +386,6 @@ export const creationTranslations = defineResourceTranslations({
           },
           actions: {
             wait: 'Please wait and try again later.',
-            await_release: 'It becomes usable after the next release.',
             contact_admin: 'Please contact your administrator.'
           }
         },

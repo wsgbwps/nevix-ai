@@ -15,9 +15,8 @@ export type CapabilityMediaMode =
   | 'first-last-frame'
   | 'omni-reference'
 
-/** Stable unavailability causes; `production_readiness_pending` is global. */
+/** Stable instance-connection unavailability causes. */
 export type CapabilityReason =
-  | 'production_readiness_pending'
   | 'not_configured'
   | 'checking'
   | 'credential_invalid'
@@ -26,7 +25,7 @@ export type CapabilityReason =
   | 'model_unavailable'
 
 /** Stable action advice paired with each reason. */
-export type CapabilityAction = 'wait' | 'await_release' | 'contact_admin'
+export type CapabilityAction = 'wait' | 'contact_admin'
 
 /** Inclusive min..max count. */
 export interface CapabilityCountRange {
@@ -131,7 +130,6 @@ const CAPABILITY_MODES: readonly CapabilityMediaMode[] = [
 ]
 
 const CAPABILITY_REASONS: readonly CapabilityReason[] = [
-  'production_readiness_pending',
   'not_configured',
   'checking',
   'credential_invalid',
@@ -140,7 +138,7 @@ const CAPABILITY_REASONS: readonly CapabilityReason[] = [
   'model_unavailable'
 ]
 
-const CAPABILITY_ACTIONS: readonly CapabilityAction[] = ['wait', 'await_release', 'contact_admin']
+const CAPABILITY_ACTIONS: readonly CapabilityAction[] = ['wait', 'contact_admin']
 
 /** Every trust-command failure shape, for callers that need the union. */
 export type ManifestFailure = CreationApiFailure

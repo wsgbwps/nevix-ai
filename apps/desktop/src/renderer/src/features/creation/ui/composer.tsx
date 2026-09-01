@@ -33,7 +33,6 @@ import { ReferenceDeck } from './reference-deck'
 // shape the provider-connection surface uses for wire codes.
 
 const reasonKeys = {
-  production_readiness_pending: 'composer.unavailable.reasons.production_readiness_pending',
   not_configured: 'composer.unavailable.reasons.not_configured',
   checking: 'composer.unavailable.reasons.checking',
   credential_invalid: 'composer.unavailable.reasons.credential_invalid',
@@ -44,7 +43,6 @@ const reasonKeys = {
 
 const actionKeys = {
   wait: 'composer.unavailable.actions.wait',
-  await_release: 'composer.unavailable.actions.await_release',
   contact_admin: 'composer.unavailable.actions.contact_admin'
 } as const
 
