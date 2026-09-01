@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,7 +70,7 @@ func TestImageTaskLifecycleReachesSucceeded(t *testing.T) {
 func TestVideoTaskLifecycleRunsAsync(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 3})
+	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 5})
 
 	status, body := h.doRequest(t, "POST", "/creation/sessions", token, map[string]any{"name": "video"})
 	if status != http.StatusCreated {
@@ -95,6 +96,9 @@ func TestVideoTaskLifecycleRunsAsync(t *testing.T) {
 	}
 	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'completed'`, view.Task.ID); got != 1 {
 		t.Fatalf("one completed provider job expected, got %d", got)
+	}
+	if got := h.kapon.generation.videoRequests(); got < 6 {
+		t.Fatalf("accepted async work must retain its independent poll budget, got %d provider requests", got)
 	}
 }
 
@@ -229,6 +233,47 @@ func TestCancelConvergesBestEffort(t *testing.T) {
 	converged := h.awaitTaskTerminal(t, token, running.Task.ID)
 	if converged.Task.Status != "succeeded" {
 		t.Fatalf("accepted work with retained outputs must converge succeeded, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
+	}
+}
+
+// TestCancelOfReflessSubmitConverges: a cancel requested while the job is
+// held submitting without an external identity (transient-rejection backoff)
+// converges cancelled — the cancelling path never touches a missing
+// external ref.
+func TestCancelOfReflessSubmitConverges(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	h.kapon.generation.setImage(imageScript{status: http.StatusTooManyRequests})
+
+	draft := h.saveImageDraft(t, token, "取消未受理提交", 1)
+	status, body := h.submitTask(t, token, draft.SessionID, "cancel-refless", draft.Revision)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	view := decodeTaskView(t, body)
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'submitting' AND external_ref IS NULL AND last_outcome = 'transient_rejected'`, view.Task.ID); got == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("job never entered the ref-less submitting hold")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if status, body = h.doRequest(t, "POST", "/creation/tasks/"+view.Task.ID+"/cancel", token, nil); status != http.StatusOK {
+		t.Fatalf("cancel: %d %s", status, body)
+	}
+	converged := h.awaitTaskTerminal(t, token, view.Task.ID)
+	if converged.Task.Status != "cancelled" {
+		t.Fatalf("a submit that never obtained an external identity must cancel, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
+	}
+	for _, slot := range converged.Slots {
+		if slot.Status != "cancelled" {
+			t.Fatalf("every slot must end cancelled: %s", slotVerdicts(converged))
+		}
 	}
 }
 
@@ -509,6 +554,106 @@ func TestCompletedJobSurvivesCredentialUnavailability(t *testing.T) {
 	}
 	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, taskID); got != 1 {
 		t.Fatalf("the completed job's output must form its asset, got %d", got)
+	}
+}
+
+// TestTransientRejectionAttemptLimitConverges: the provider's four-step
+// transient-submit ladder is also the durable call budget. Once spent, the
+// task exposes a retryable terminal verdict instead of silently waiting on
+// the queue-wide 240-attempt allowance (issue #160 field report:
+// last_outcome=transient_rejected, no error).
+func TestTransientRejectionAttemptLimitConverges(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	one := 1
+	h.kapon.generation.setImage(imageScript{
+		status: http.StatusTooManyRequests, retryAfterSeconds: &one,
+	})
+
+	draft := h.saveImageDraft(t, token, "预算耗尽", 1)
+	status, body := h.submitTask(t, token, draft.SessionID, "exhaust-1", draft.Revision)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+
+	// Wait for exactly one provider call, then inflate the unrelated queue
+	// claim count. A correct implementation still permits three more submit
+	// calls because submit_attempts is the durable budget owner.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if got := countRows(t, h.ownerPool,
+			`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 1`, taskID); got == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the first transient rejection was never recorded")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx,
+		`UPDATE creation_generation_queue SET attempts = 200 WHERE task_id = $1::uuid`, taskID); err != nil {
+		t.Fatalf("inflate the independent queue-claim budget: %v", err)
+	}
+	// Keep the first three waits fast, then make the limiting answer match
+	// the real Kapon response observed for issue #160. The worker must retain
+	// retry semantics while preserving the allowlisted terminal diagnosis.
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		if got := countRows(t, h.ownerPool,
+			`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 3`, taskID); got == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the third transient rejection was never recorded")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	h.kapon.generation.setImage(imageScript{
+		status: http.StatusServiceUnavailable, code: "MODEL_GROUP_ALL_UNAVAILABLE",
+	})
+
+	converged := h.awaitTaskTerminal(t, token, taskID)
+	if converged.Task.Status != "failed" {
+		t.Fatalf("exhausted transient retries must converge failed, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
+	}
+	for _, slot := range converged.Slots {
+		if slot.Status != "failed" || slot.FailureReason == nil || *slot.FailureReason != "provider_route_unavailable" {
+			t.Fatalf("the limiting model-route 503 must retain its stable diagnosis: %s", slotVerdicts(converged))
+		}
+		diagnostic := slot.FailureDiagnostic
+		if diagnostic == nil || diagnostic.Source != "provider" ||
+			diagnostic.Code != "MODEL_GROUP_ALL_UNAVAILABLE" ||
+			diagnostic.Message != "provider-private-detail" ||
+			diagnostic.RequestID == nil || *diagnostic.RequestID != "kapon-private-request-id" ||
+			diagnostic.HTTPStatus == nil || *diagnostic.HTTPStatus != http.StatusServiceUnavailable {
+			t.Fatalf("the creator-private Kapon diagnostic must survive: %+v", diagnostic)
+		}
+	}
+	terminalStatus, terminalBody, _ := h.getTask(t, token, taskID)
+	if terminalStatus != http.StatusOK {
+		t.Fatalf("get terminal task: %d %s", terminalStatus, terminalBody)
+	}
+	assertContractResponse(t, http.MethodGet, "/creation/tasks/"+taskID, terminalStatus, terminalBody)
+	for _, required := range []string{"MODEL_GROUP_ALL_UNAVAILABLE", "provider-private-detail", "kapon-private-request-id"} {
+		if !strings.Contains(string(terminalBody), required) {
+			t.Fatalf("task API dropped creator-private provider response field %q: %s", required, terminalBody)
+		}
+	}
+	if got := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_generation_reservations WHERE task_id = $1::uuid AND released_at IS NOT NULL`, taskID); got != 1 {
+		t.Fatal("exhaustion must release the reservation exactly once")
+	}
+	if got := h.kapon.generation.imageRequests(); got != 4 {
+		t.Fatalf("the four-step transient-submit budget must make 4 provider calls, got %d", got)
+	}
+	if got := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'failed' AND submit_attempts = 4 AND last_outcome IS NULL`, taskID); got != 1 {
+		t.Fatal("the limiting rejection and terminal provider-job verdict must commit together")
+	}
+	if got := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_generation_queue WHERE task_id = $1::uuid AND attempts >= max_attempts`, taskID); got != 1 {
+		t.Fatal("the exhausted queue item must stay retired (attempts saturated)")
 	}
 }
 

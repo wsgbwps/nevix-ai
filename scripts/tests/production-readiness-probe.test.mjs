@@ -22,7 +22,7 @@ test('the runner enumerates the embedded checklist without credentials', () => {
 })
 
 test('the runner refuses to execute without an injected credential', () => {
-  const result = run(['--slot', 'image.resolution.2k'])
+  const result = run(['--slot', 'image.resolution.pro-2k'])
   assert.equal(result.status, 1)
   assert.match(result.stderr, /KAPON_API_KEY is not set/)
   // The refusal happens before any slot execution, so no evidence is written.
@@ -35,7 +35,7 @@ test('unknown slot ids are rejected instead of silently ignored', () => {
 })
 
 test('executing an unimplemented probe fails loudly without recording evidence', () => {
-  const result = run(['--slot', 'image.resolution.2k'], { KAPON_API_KEY: 'fixture-key' })
+  const result = run(['--slot', 'image.resolution.pro-2k'], { KAPON_API_KEY: 'fixture-key' })
   assert.equal(result.status, 1)
   assert.match(result.stderr, /T16 \(#166\)/)
   assert.match(result.stderr, /no evidence recorded/)

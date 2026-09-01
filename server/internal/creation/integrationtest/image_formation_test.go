@@ -9,7 +9,7 @@ import (
 
 // Slice-10 image-formation scenarios (issue #160): the generation call
 // carries the decrypted Provider Key and the pinned (ratio, resolution)
-// payload, and every verified output forms exactly one immutable PNG Media
+// payload, and every verified output forms exactly one immutable image Media
 // Asset while rejections and unverifiable outputs form none.
 
 // TestImageSubmitCarriesCredentialAndPinnedSize: the worker's generation
@@ -37,19 +37,20 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 	if call.bearer != "Bearer task-kernel-key" {
 		t.Fatalf("generation call must authenticate with the configured key, got %q", call.bearer)
 	}
-	if call.model != "doubao-seedream-5.0-lite" {
+	if call.model != "doubao-seedream-5.0-pro" {
 		t.Fatalf("fixed image model must not be substituted, got %q", call.model)
 	}
-	if call.size != "2048x2048" {
-		t.Fatalf("1:1 2K must map onto the pinned 2048x2048 size, got %q", call.size)
+	if call.size != "2K" {
+		t.Fatalf("Seedream 5.0 Pro requires size=2K, got %q", call.size)
 	}
 	if call.n != 1 || call.images != 0 {
 		t.Fatalf("text-to-image must send quantity without references, got n=%d images=%d", call.n, call.images)
 	}
 
-	// A second scenario proves the ratio reaches the vendor payload.
+	// The provider receives the selected resolution label without silently
+	// converting it back to a ratio-specific pixel size.
 	draft16x9 := h.saveDraftOn(t, token, draft.SessionID, taskDraft{
-		SessionID: draft.SessionID, MediaType: "image", Model: "doubao-seedream-5.0-lite",
+		SessionID: draft.SessionID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
 		Mode: "text-to-image", Ratio: "16:9", Resolution: "1K", Quantity: 1, Prompt: "横幅",
 	})
 	status, body = h.submitTask(t, token, draft16x9.SessionID, "img-wire-16x9", draft16x9.Revision)
@@ -57,8 +58,8 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 		t.Fatalf("submit 16:9: %d %s", status, body)
 	}
 	h.awaitTaskTerminal(t, token, decodeTaskView(t, body).Task.ID)
-	if call := h.kapon.generation.lastImageCall(); call.size != "1024x576" {
-		t.Fatalf("16:9 1K must map onto the pinned 1024x576 size, got %q", call.size)
+	if call := h.kapon.generation.lastImageCall(); call.size != "1K" {
+		t.Fatalf("Seedream 5.0 Pro requires size=1K, got %q", call.size)
 	}
 }
 
@@ -231,30 +232,63 @@ func TestImageIndeterminateFormsNoAsset(t *testing.T) {
 	}
 }
 
-// TestNonPNGImageOutputFailsVerification: an image task's output must be a
-// verifiable PNG; any other family is a failed transfer, not an asset.
-func TestNonPNGImageOutputFailsVerification(t *testing.T) {
+// TestJPEGImageOutputFormsVerifiedAsset reproduces Seedream 5.0 Pro's real
+// output shape: a successfully downloaded, probed JPEG is a valid image asset.
+func TestJPEGImageOutputFormsVerifiedAsset(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1, jpeg: true})
 
-	draft := h.saveImageDraft(t, token, "错误编码", 1)
+	draft := h.saveImageDraft(t, token, "JPEG 输出", 1)
 	status, body := h.submitTask(t, token, draft.SessionID, "img-jpeg-output", draft.Revision)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
 	view := decodeTaskView(t, body)
 	view = h.awaitTaskTerminal(t, token, view.Task.ID)
-	if view.Task.Status != "failed" {
-		t.Fatalf("unacceptable output must fail the task, got %s (%s)", view.Task.Status, slotVerdicts(view))
+	if view.Task.Status != "succeeded" {
+		t.Fatalf("verified JPEG output must succeed, got %s (%s)", view.Task.Status, slotVerdicts(view))
 	}
 	for _, slot := range view.Slots {
-		if slot.Status != "failed" || slot.FailureReason == nil || *slot.FailureReason != "temporarily_unavailable" {
-			t.Fatalf("verification failure must be retryable unavailable: %s", slotVerdicts(view))
+		if slot.Status != "succeeded" || slot.Result == nil || slot.Result.MimeType != "image/jpeg" {
+			t.Fatalf("JPEG result facts missing: %s", slotVerdicts(view))
 		}
 	}
-	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, view.Task.ID); got != 0 {
-		t.Fatalf("unverified output must form no asset, got %d", got)
+	if got := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid AND mime = 'image/jpeg'`, view.Task.ID); got != 1 {
+		t.Fatalf("verified JPEG output must form one JPEG asset, got %d", got)
+	}
+}
+
+// TestImageOutputHTTPFailureKeepsConcreteDiagnostic reproduces the field
+// failure where Kapon accepted generation but its temporary output URL could
+// not be downloaded. The creator must see the exact stage and HTTP status.
+func TestImageOutputHTTPFailureKeepsConcreteDiagnostic(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	h.kapon.generation.setImage(imageScript{
+		outputs: 1, outputStatus: http.StatusForbidden,
+	})
+
+	draft := h.saveImageDraft(t, token, "下载诊断", 1)
+	status, body := h.submitTask(t, token, draft.SessionID, "img-output-403", draft.Revision)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	view := h.awaitTaskTerminal(t, token, decodeTaskView(t, body).Task.ID)
+	if view.Task.Status != "failed" || len(view.Slots) != 1 {
+		t.Fatalf("output HTTP failure must fail one slot: %s (%s)", view.Task.Status, slotVerdicts(view))
+	}
+	slot := view.Slots[0]
+	if slot.FailureReason == nil || *slot.FailureReason != "temporarily_unavailable" {
+		t.Fatalf("stable reason changed: %s", slotVerdicts(view))
+	}
+	diagnostic := slot.FailureDiagnostic
+	if diagnostic == nil || diagnostic.Source != "output_transfer" ||
+		diagnostic.Code != "provider_output_http_status" ||
+		diagnostic.HTTPStatus == nil || *diagnostic.HTTPStatus != http.StatusForbidden ||
+		diagnostic.Message != "Provider output download returned HTTP 403" {
+		t.Fatalf("concrete output diagnostic missing: %+v", diagnostic)
 	}
 }
 

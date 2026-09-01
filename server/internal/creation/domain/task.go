@@ -4,9 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	// The governance month is fixed to Asia/Shanghai; embedding the tz
 	// database keeps that boundary correct on zoneinfo-less container images.
@@ -76,7 +78,7 @@ const (
 
 // FailureReason is the closed, externally stable result-reason taxonomy
 // (spec #150). Every failure a creator can observe maps onto exactly one of
-// these eight values plus a short action suggestion.
+// these values plus a short action suggestion.
 type FailureReason string
 
 const (
@@ -86,9 +88,107 @@ const (
 	ReasonOutputPolicyRejected       FailureReason = "output_policy_rejected"
 	ReasonActionRequired             FailureReason = "action_required"
 	ReasonTemporarilyUnavailable     FailureReason = "temporarily_unavailable"
+	ReasonProviderRouteUnavailable   FailureReason = "provider_route_unavailable"
 	ReasonProcessingIndeterminate    FailureReason = "processing_indeterminate"
 	ReasonInternalError              FailureReason = "internal_error"
 )
+
+// FailureDiagnosticSource names the authoritative boundary that produced a
+// concrete slot failure. The stable FailureReason still controls retry and
+// governance; this creator-private value only explains that verdict.
+type FailureDiagnosticSource string
+
+const (
+	DiagnosticSourceProvider       FailureDiagnosticSource = "provider"
+	DiagnosticSourceOutputTransfer FailureDiagnosticSource = "output_transfer"
+	DiagnosticSourceStorage        FailureDiagnosticSource = "storage"
+	DiagnosticSourceMediaProbe     FailureDiagnosticSource = "media_probe"
+)
+
+const (
+	failureDiagnosticCodeMax      = 128
+	failureDiagnosticMessageMax   = 2000
+	failureDiagnosticTypeMax      = 128
+	failureDiagnosticRequestIDMax = 256
+)
+
+// FailureDiagnostic is the bounded, creator-private explanation attached to
+// one terminal slot. Provider fields preserve Kapon's standard error envelope;
+// Server-owned stages use the same shape with a stable code and safe message.
+// Arbitrary response bodies, credentials, prompts, headers, and output URLs
+// never enter this value.
+type FailureDiagnostic struct {
+	Source       FailureDiagnosticSource
+	Code         string
+	Message      string
+	HTTPStatus   *int
+	ProviderType *string
+	RequestID    *string
+}
+
+// NewFailureDiagnostic bounds external strings and removes control characters
+// before a diagnostic can cross the trusted adapter boundary or be persisted.
+func NewFailureDiagnostic(source FailureDiagnosticSource, code, message string, httpStatus *int, providerType, requestID string) *FailureDiagnostic {
+	code = sanitizeFailureDiagnosticText(code, failureDiagnosticCodeMax)
+	message = sanitizeFailureDiagnosticText(message, failureDiagnosticMessageMax)
+	if code == "" || message == "" {
+		return nil
+	}
+	diagnostic := &FailureDiagnostic{Source: source, Code: code, Message: message}
+	if httpStatus != nil && *httpStatus >= 100 && *httpStatus <= 599 {
+		status := *httpStatus
+		diagnostic.HTTPStatus = &status
+	}
+	if value := sanitizeFailureDiagnosticText(providerType, failureDiagnosticTypeMax); value != "" {
+		diagnostic.ProviderType = &value
+	}
+	if value := sanitizeFailureDiagnosticText(requestID, failureDiagnosticRequestIDMax); value != "" {
+		diagnostic.RequestID = &value
+	}
+	return diagnostic
+}
+
+func sanitizeFailureDiagnosticText(value string, limit int) string {
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, value)
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if len(runes) > limit {
+		value = string(runes[:limit])
+	}
+	return value
+}
+
+type failureDiagnosticError struct {
+	err        error
+	diagnostic *FailureDiagnostic
+}
+
+func (e *failureDiagnosticError) Error() string { return e.err.Error() }
+func (e *failureDiagnosticError) Unwrap() error { return e.err }
+
+// WithFailureDiagnostic attaches a concrete explanation without changing the
+// wrapped error's classification under errors.Is/errors.As.
+func WithFailureDiagnostic(err error, diagnostic *FailureDiagnostic) error {
+	if err == nil || diagnostic == nil {
+		return err
+	}
+	return &failureDiagnosticError{err: err, diagnostic: diagnostic}
+}
+
+// FailureDiagnosticOf extracts the outermost concrete explanation from a
+// classified error; nil means the operation produced no safe diagnostic.
+func FailureDiagnosticOf(err error) *FailureDiagnostic {
+	var diagnosed *failureDiagnosticError
+	if errors.As(err, &diagnosed) {
+		return diagnosed.diagnostic
+	}
+	return nil
+}
 
 // taskTerminalStatus is the closed terminal set for aggregation checks.
 func taskTerminalStatus(s TaskStatus) bool {
@@ -267,10 +367,11 @@ type GenerationTask struct {
 // terminal verdict and (when succeeded) the verified output facts are
 // write-once; nil status means the slot is still a derived projection.
 type GenerationSlot struct {
-	TaskID UUID
-	Index  int
-	Status *SlotStatus
-	Reason *FailureReason
+	TaskID     UUID
+	Index      int
+	Status     *SlotStatus
+	Reason     *FailureReason
+	Diagnostic *FailureDiagnostic
 	// Result facts exist only for succeeded slots; they describe the
 	// transferred, verified output stored under the module's storage seam.
 	ResultMime       *string
@@ -298,9 +399,12 @@ type ProviderJob struct {
 	Media       MediaType
 	ExternalRef *string
 	Outcome     *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	TerminalAt  *time.Time
+	// SubmitAttempts counts only calls licensed by a committed submit marker;
+	// queue claims and accepted-job polls have separate retry semantics.
+	SubmitAttempts int
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	TerminalAt     *time.Time
 }
 
 // SlotOutcomes carries one slot's terminal verdict for aggregation.

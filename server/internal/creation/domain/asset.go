@@ -10,7 +10,7 @@ import (
 // the streamed transfer passed MIME, checksum, dimension, and size
 // verification, it is unique per (task, slot), and its lifecycle is
 // independent of the origin session, task, and slot projection. Slice 10
-// forms image (PNG) assets; team-readable browsing lands with slice 12.
+// forms image (JPEG or PNG) assets; team-readable browsing lands with slice 12.
 type MediaAsset struct {
 	ID         UUID
 	OwnerID    UUID // creator, snapshotted for later team-readable queries

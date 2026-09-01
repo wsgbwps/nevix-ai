@@ -61,7 +61,7 @@ func (h *harness) saveImageDraft(t *testing.T, token, prompt string, quantity in
 	}
 	sessionID := extractField(t, body, "id")
 	return h.saveDraftOn(t, token, sessionID, taskDraft{
-		SessionID: sessionID, MediaType: "image", Model: "doubao-seedream-5.0-lite",
+		SessionID: sessionID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
 		Mode: "text-to-image", Ratio: "1:1", Resolution: "2K", Quantity: quantity, Prompt: prompt,
 	})
 }
@@ -72,7 +72,7 @@ func (h *harness) saveDraftOn(t *testing.T, token, sessionID string, draft taskD
 	payload := map[string]any{
 		"prompt":           draft.Prompt,
 		"media_type":       draft.MediaType,
-		"manifest_version": 1,
+		"manifest_version": 2,
 		"model":            draft.Model,
 		"mode":             draft.Mode,
 		"ratio":            nil,
@@ -124,10 +124,18 @@ type taskView struct {
 		CreatedAt       string  `json:"created_at"`
 	} `json:"task"`
 	Slots []struct {
-		Index         int     `json:"index"`
-		Status        string  `json:"status"`
-		FailureReason *string `json:"failure_reason"`
-		Result        *struct {
+		Index             int     `json:"index"`
+		Status            string  `json:"status"`
+		FailureReason     *string `json:"failure_reason"`
+		FailureDiagnostic *struct {
+			Source       string  `json:"source"`
+			Code         string  `json:"code"`
+			Message      string  `json:"message"`
+			HTTPStatus   *int    `json:"http_status"`
+			ProviderType *string `json:"provider_type"`
+			RequestID    *string `json:"request_id"`
+		} `json:"failure_diagnostic"`
+		Result *struct {
 			MimeType   string `json:"mime_type"`
 			ByteSize   int64  `json:"byte_size"`
 			Checksum   string `json:"checksum_sha256"`

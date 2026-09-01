@@ -92,7 +92,9 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
         {workbench.selected ? (
           <>
             <div className="h-full overflow-y-auto px-6 pb-[190px]">
-              {workbench.draft.prompt.length === 0 ? (
+              {/* The greeting hero is the empty-session state: clearing the
+                  prompt must never hide a session that already holds tasks. */}
+              {workbench.draft.prompt.length === 0 && workbench.tasks.length === 0 ? (
                 <div className="mx-auto flex min-h-full max-w-[720px] flex-col items-center justify-center pb-10">
                   <EmptyDraftHero onUseTemplate={(prompt) => workbench.patchDraft({ prompt })} />
                 </div>

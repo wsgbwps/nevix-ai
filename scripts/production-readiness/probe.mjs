@@ -44,10 +44,15 @@ function loadChecklist() {
   } catch (error) {
     fail(`embedded checklist unreadable at ${CHECKLIST_PATH}: ${error.message}`);
   }
-  if (document.schema_version !== 1 || !Array.isArray(document.slots)) {
-    fail(`embedded checklist at ${CHECKLIST_PATH} has an unsupported shape`);
+  if (
+    document.schema_version !== 3 ||
+    !Number.isInteger(document.manifest_version) ||
+    document.manifest_version < 1 ||
+    !Array.isArray(document.slots)
+  ) {
+    fail(`embedded checklist at ${CHECKLIST_PATH} has an unsupported shape`)
   }
-  return document.slots;
+  return document;
 }
 
 function requireApiKey() {
@@ -87,7 +92,8 @@ async function checkCredential(baseUrl, key) {
   const models = (catalog?.data ?? []).map((entry) => entry?.id).filter(Boolean);
   console.log(
     `catalog check ok: ${models.length} models visible ` +
-      `(image=${models.includes("doubao-seedream-5.0-lite")}, video=${models.includes("doubao-seedance-2-5")})`,
+      `(image pro=${models.includes("doubao-seedream-5.0-pro")}, image n=${models.includes("doubao-seedream-5.0-n")}, ` +
+      `video=${models.includes("doubao-seedance-2-5")})`
   );
 }
 
@@ -104,12 +110,21 @@ async function runSlot(slot) {
   );
 }
 
-function readEvidence(path) {
+function readEvidence(path, schemaVersion, manifestVersion) {
   if (!existsSync(path)) {
-    return { schema_version: 1, generated_at: null, entries: [] };
+    return {
+      schema_version: schemaVersion,
+      manifest_version: manifestVersion,
+      generated_at: null,
+      entries: [],
+    };
   }
   const parsed = JSON.parse(readFileSync(path, "utf8"));
-  if (parsed.schema_version !== 1 || !Array.isArray(parsed.entries)) {
+  if (
+    parsed.schema_version !== schemaVersion ||
+    parsed.manifest_version !== manifestVersion ||
+    !Array.isArray(parsed.entries)
+  ) {
     fail(`existing evidence at ${path} has an unsupported shape`);
   }
   return parsed;
@@ -151,7 +166,8 @@ function parseArguments(argv) {
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
-  const slots = loadChecklist();
+  const checklist = loadChecklist();
+  const slots = checklist.slots;
 
   if (options.list) {
     for (const slot of slots) {
@@ -183,7 +199,11 @@ async function main() {
       if (typeof evidenceRef !== "string" || evidenceRef === "") {
         fail(`slot "${slot.id}" passed without an evidence reference; refusing to record it.`);
       }
-      evidence ??= readEvidence(options.evidenceOut);
+      evidence ??= readEvidence(
+        options.evidenceOut,
+        checklist.schema_version,
+        checklist.manifest_version,
+      );
       appendEvidence(evidence, slot, evidenceRef);
       console.log(`slot ${slot.id}: passed (evidence: ${evidenceRef})`);
     } catch (error) {

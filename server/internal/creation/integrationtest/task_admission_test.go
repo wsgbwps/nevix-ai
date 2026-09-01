@@ -102,7 +102,7 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 
 	// Same key, different payload (prompt changed → different frozen spec).
 	changed := h.saveDraftOn(t, token, draft.SessionID, taskDraft{
-		MediaType: "image", Model: "doubao-seedream-5.0-lite", Mode: "text-to-image",
+		MediaType: "image", Model: "doubao-seedream-5.0-pro", Mode: "text-to-image",
 		Ratio: "1:1", Resolution: "2K", Quantity: 3, Prompt: "另一个意图",
 	})
 	status, body = h.submitTask(t, token, draft.SessionID, "key-once", changed.Revision)
@@ -142,12 +142,12 @@ func TestTaskAdmissionRevalidatesDraft(t *testing.T) {
 	// A draft saved against a foreign manifest version blocks submission:
 	// the revision matches, the manifest version does not.
 	_ = h.saveDraftOn(t, token, draft.SessionID, taskDraft{
-		MediaType: "image", Model: "doubao-seedream-5.0-lite", Mode: "text-to-image",
+		MediaType: "image", Model: "doubao-seedream-5.0-pro", Mode: "text-to-image",
 		Ratio: "1:1", Resolution: "2K", Quantity: 1, Prompt: "版本校验",
 	})
 	_, foreignBody := h.doRequest(t, "PUT", "/creation/sessions/"+draft.SessionID+"/draft", token, map[string]any{
 		"prompt": "版本校验", "media_type": "image", "manifest_version": 99,
-		"model": "doubao-seedream-5.0-lite", "mode": "text-to-image",
+		"model": "doubao-seedream-5.0-pro", "mode": "text-to-image",
 		"ratio": "1:1", "resolution": "2K", "quantity": 1, "references": []any{},
 	})
 	foreignRevision := extractField(t, foreignBody, "updated_at")

@@ -98,6 +98,8 @@ paths:
     $ref: "./creation.yaml#/paths/~1creation~1media-capabilities"
   /creation/capability-manifest:
     $ref: "./creation.yaml#/paths/~1creation~1capability-manifest"
+  /creation/tasks/{taskID}:
+    $ref: "./creation.yaml#/paths/~1creation~1tasks~1{taskID}"
 components:
   securitySchemes:
     bearerAuth:

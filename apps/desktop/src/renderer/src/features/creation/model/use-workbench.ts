@@ -11,6 +11,7 @@ import { isTerminalTaskStatus } from '../api/generation-task-http'
 import {
   allowedReferenceKinds,
   mediaCapability,
+  publishedModel,
   referenceCap,
   roleAcceptsKind,
   roleForPosition,
@@ -81,6 +82,7 @@ export interface CreationWorkbenchController {
   draft: ComposerDraft
   patchDraft: (patch: Partial<ComposerDraft>) => void
   setMediaType: (media: DraftMediaType) => void
+  setModel: (model: string) => void
   setMode: (mode: string) => void
   addMaterial: (file: File) => void
   removeMaterial: (materialId: string) => void
@@ -137,9 +139,13 @@ export function useCreationWorkbench(): CreationWorkbenchController {
 
   // The manifest version the composer last saw — the save payload records it
   // verbatim; with no manifest ever seen, the stored draft's version stands.
-  // State rather than a ref because the stale verdicts derive from it in
-  // render; the autosave callbacks read it through their fresh closures.
+  // State drives stale verdicts in render; the ref below serves callbacks
+  // that can run before React commits the corresponding state update.
   const [seenManifestVersion, setSeenManifestVersion] = useState<number | null>(null)
+  // Manifest adoption can schedule an autosave in the same turn as the state
+  // update. The synchronous twin prevents that timer from persisting the
+  // previous render's fallback version.
+  const seenManifestVersionRef = useRef<number | null>(null)
   const baselineRef = useRef<string>(JSON.stringify(emptyComposerDraft()))
   const draftRef = useRef<ComposerDraft>(draft)
   const selectedIdRef = useRef<string | null>(selectedId)
@@ -173,10 +179,10 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const toInput = useCallback(
     (value: ComposerDraft): SessionDraftInput => ({
       ...value,
-      manifestVersion: seenManifestVersion ?? 1,
+      manifestVersion: seenManifestVersionRef.current ?? 1,
       updatedAt: draftRevisionRef.current ?? ''
     }),
-    [seenManifestVersion]
+    []
   )
 
   const persistDraft = useCallback(
@@ -239,13 +245,14 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     const capability = mediaCapability(value, media)
     if (capability === null || !capability.available) return null
     const first = (capability.modes ?? [])[0]
+    const model = (capability.models ?? [])[0]
     return {
       prompt: '',
       mediaType: media,
-      model: capability.model ?? null,
+      model: model?.model ?? null,
       mode: first ? first.id : null,
       ratio: capability.defaults?.ratio ?? null,
-      resolution: capability.defaults?.resolution ?? null,
+      resolution: model?.defaultResolution ?? null,
       quantity: capability.defaults?.quantity ?? null,
       durationSeconds: capability.defaults?.duration ?? null,
       references: []
@@ -296,6 +303,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       const result = await ports.loadCapabilityManifest().catch(() => null)
       if (!active) return
       if (result !== null && result.outcome === 'succeeded') {
+        seenManifestVersionRef.current = result.value.manifestVersion
         setSeenManifestVersion(result.value.manifestVersion)
         setManifest(result.value)
         setManifestStatus('ready')
@@ -392,8 +400,11 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       selectedIdRef.current = session.id
       setMaterials([])
       setThumbnails({})
-      // Optimistic empty draft until the authoritative copy arrives.
+      // Optimistic empty draft and task view until the authoritative
+      // copies arrive; stale entries must not leak across the switch.
       applyLoadedDraft(emptyComposerDraft())
+      setTasks([])
+      setTaskDetails({})
       const [detail, materialPage] = await Promise.all([
         ports.getSessionDetail(session.id).catch(() => null),
         ports.listMaterials(session.id).catch(() => null)
@@ -434,8 +445,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
               references: [...stored.references]
             }
       )
-      if (stored !== null) {
-        setSeenManifestVersion((previous) => previous ?? stored.manifestVersion)
+      if (stored !== null && seenManifestVersionRef.current === null) {
+        seenManifestVersionRef.current = stored.manifestVersion
+        setSeenManifestVersion(stored.manifestVersion)
       }
       await loadThumbnails(materialPage.value.materials)
     },
@@ -447,17 +459,40 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       if (!ports) return
       const capability = mediaCapability(manifest, media)
       const published = capability?.available ? capability : null
+      const model = (published?.models ?? [])[0]
       patchDraft({
         mediaType: media,
-        model: published?.model ?? null,
+        model: model?.model ?? null,
         mode: published ? ((published.modes ?? [])[0]?.id ?? null) : null,
-        resolution: published?.defaults?.resolution ?? null,
+        resolution: model?.defaultResolution ?? null,
         ratio: published?.defaults?.ratio ?? null,
         quantity: published?.defaults?.quantity ?? null,
         durationSeconds: published?.defaults?.duration ?? null
       })
     },
     [manifest, patchDraft, ports]
+  )
+
+  // A creator-initiated model switch keeps the selected resolution only when
+  // the new model publishes that tier; otherwise it adopts the new model's
+  // default. (The never-rewrite rule guards manifest removals of a stored
+  // draft, not the creator's own selection change.)
+  const setModel = useCallback(
+    (model: string) => {
+      const media = draftRef.current.mediaType
+      if (media === null) {
+        patchDraft({ model })
+        return
+      }
+      const entry = publishedModel(manifest, media, model)
+      const current = draftRef.current.resolution
+      const resolution =
+        entry !== null && current !== null && entry.resolutions.includes(current)
+          ? current
+          : (entry?.defaultResolution ?? null)
+      patchDraft({ model, resolution })
+    },
+    [manifest, patchDraft]
   )
 
   const setMode = useCallback(
@@ -733,6 +768,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     draft,
     patchDraft,
     setMediaType,
+    setModel,
     setMode,
     addMaterial: (file: File) => {
       void addMaterial(file)

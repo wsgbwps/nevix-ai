@@ -1683,8 +1683,8 @@ components:
         schema_version:
           type: integer
           enum:
-            - 1
-          description: 载荷形状版本；字段结构变化时递增。
+            - 2
+          description: 载荷形状版本；字段结构变化时递增。v2：媒体模型改为 models 列表（各带分辨率档位与默认档）。
         manifest_version:
           type: integer
           description: 能力内容版本；已验收能力集合变化（扩张或经决策移除）时递增。
@@ -1724,10 +1724,12 @@ components:
             - await_release
             - contact_admin
           description: 稳定行动建议；可用时省略。await_release 表示等待 Nevix 发布级验收，实例 Admin 无法就地修复。
-        model:
-          type: string
+        models:
+          type: array
           nullable: true
-          description: 该媒体已验收的唯一 allowlist 模型；可用时非空。
+          description: 该媒体已验收的 allowlist 模型（固定顺序）；各模型携带自己的分辨率档位与默认档。可用时非空。
+          items:
+            $ref: "#/components/schemas/CapabilityModel"
         modes:
           type: array
           nullable: true
@@ -1743,15 +1745,12 @@ components:
             enum:
               - "1:1"
               - "4:3"
-              - "4:5"
+              - "3:4"
               - "16:9"
               - "9:16"
-        resolutions:
-          type: array
-          nullable: true
-          description: 可提交分辨率（固定顺序）；可用时非空。图片为 1K/2K/4K，视频为 480p/720p/1080p。
-          items:
-            type: string
+              - "3:2"
+              - "2:3"
+              - "21:9"
         quantities:
           type: array
           nullable: true
@@ -1770,13 +1769,9 @@ components:
         defaults:
           type: object
           nullable: true
-          description: 每维度的推荐默认值；均属当前已发布集合。可用时非空。
-          required:
-            - resolution
+          description: 媒体级维度的推荐默认值（ratio/quantity/duration）；分辨率默认档在各 models 条目上。可用时非空。
           properties:
             ratio:
-              type: string
-            resolution:
               type: string
             quantity:
               type: integer
@@ -1798,6 +1793,25 @@ components:
           nullable: true
           description: 参考素材总包络（跨模式最宽边界）；逐模式边界见 CapabilityMode。可用时非空。
           $ref: "#/components/schemas/ReferenceMaterialPolicy"
+    CapabilityModel:
+      type: object
+      required:
+        - model
+        - resolutions
+        - default_resolution
+      description: 一个已验收 allowlist 模型及其分辨率档位；图片为双模型（档位互不相同），视频为单条目。
+      properties:
+        model:
+          type: string
+          description: 模型 ID（提交 Task 时的 model 值）。
+        resolutions:
+          type: array
+          description: 该模型可提交的分辨率档位（固定顺序）。
+          items:
+            type: string
+        default_resolution:
+          type: string
+          description: 该模型的推荐默认档；必属本条目 resolutions。
     CapabilityMode:
       type: object
       required:
@@ -2026,6 +2040,48 @@ components:
           type: string
           format: date-time
           nullable: true
+    GenerationFailureDiagnostic:
+      type: object
+      description: >-
+        创建者私有的具体失败诊断。provider 来源保留 Kapon 标准错误 envelope
+        中经过本次调用凭据/敏感输入与 URL 脱敏、控制字符清理及长度限制的字段；
+        其他来源由 Server 在下载、存储或媒体探测的权威失败点生成。不会包含 Provider Key、Authorization header、
+        prompt、参考素材、输出 URL 或任意原始响应体；该对象只解释 failure_reason，
+        不参与重试、治理或状态机判断。
+      required:
+        - source
+        - code
+        - message
+        - http_status
+        - provider_type
+        - request_id
+      properties:
+        source:
+          type: string
+          enum: [provider, output_transfer, storage, media_probe]
+        code:
+          type: string
+          minLength: 1
+          maxLength: 128
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        http_status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          nullable: true
+        provider_type:
+          type: string
+          minLength: 1
+          maxLength: 128
+          nullable: true
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          nullable: true
     GenerationSlot:
       type: object
       required:
@@ -2059,9 +2115,14 @@ components:
             - output_policy_rejected
             - action_required
             - temporarily_unavailable
+            - provider_route_unavailable
             - processing_indeterminate
             - internal_error
-          description: 稳定失败 taxonomy；部分成功逐槽位显示 reason。
+          description: 稳定失败 taxonomy；provider_route_unavailable 是 Server 对白名单模型渠道错误的归一化诊断；部分成功逐槽位显示 reason。具体诊断（若可获得）由 failure_diagnostic 携带。
+        failure_diagnostic:
+          allOf:
+            - $ref: "#/components/schemas/GenerationFailureDiagnostic"
+          nullable: true
         result:
           type: object
           nullable: true

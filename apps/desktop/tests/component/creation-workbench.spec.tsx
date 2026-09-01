@@ -114,10 +114,31 @@ test('selecting a session recovers its stored draft verbatim', async ({ mount, p
 
   await expect(page.getByTestId('composer-prompt')).toHaveValue('夏季跑鞋主图，暖光背景')
   await expect(page.getByTestId('composer-media')).toContainText('Image generation')
-  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-lite')
-  await expect(page.getByTestId('composer-params')).toContainText('4:5')
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-pro')
+  await expect(page.getByTestId('composer-params')).toContainText('4:3')
   await expect(page.getByTestId('composer-params')).toContainText('2K')
   await expect(page.getByTestId('composer-params').getByText('2', { exact: true })).toBeVisible()
+})
+
+test('manifest defaults autosave with the version delivered in the same response', async ({
+  mount,
+  page
+}) => {
+  await mount(
+    <CreationWorkbenchStory
+      manifestDeferred
+      drafts={{ 'aaaaaaaa-0000-4000-8000-000000000001': null }}
+    />
+  )
+  await selectFirstSession(page)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseManifest())
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-pro')
+  await expect
+    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.manifestVersion, {
+      timeout: 5_000
+    })
+    .toBe(3)
 })
 
 test('editing the prompt autosaves the full draft with its ordered references', async ({
@@ -169,7 +190,7 @@ test('the model menu lists only manifest candidates plus the stale note', async 
   // Legal candidates come from the manifest only; the removed model is not a
   // selectable candidate.
   const menu = page.getByRole('menu')
-  await expect(menu).toContainText('doubao-seedream-5.0-lite')
+  await expect(menu).toContainText('doubao-seedream-5.0-pro')
   await expect(menu.getByRole('menuitem').filter({ hasText: 'removed-legacy-model' })).toHaveCount(
     0
   )
@@ -177,6 +198,33 @@ test('the model menu lists only manifest candidates plus the stale note', async 
   await expect(menu.getByRole('note')).toContainText('removed-legacy-model')
   await expect(menu.getByRole('note')).toContainText('Capability changed')
   await page.keyboard.press('Escape')
+})
+
+test('the resolution tiers follow the selected image model', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  // The stored draft's model (pro) publishes only 1K/1.5K/2K; n's 3K/4K do
+  // not exist for it.
+  await page.getByTestId('composer-params').click()
+  const params = page.getByRole('menu')
+  await expect(params.getByRole('button', { name: '1.5K' })).toBeVisible()
+  await expect(params.getByRole('button', { name: '4K' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  // The model menu lists both allowlisted image models; switching adopts the
+  // other model's tier set. The stored 2K stands because n also publishes it.
+  await page.getByTestId('composer-model').click()
+  const menu = page.getByRole('menu')
+  await expect(menu.getByRole('menuitem', { name: /doubao-seedream-5.0-n/ })).toBeVisible()
+  await menu.getByRole('menuitem', { name: /doubao-seedream-5.0-n/ }).click()
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-n')
+  await expect(page.getByTestId('composer-params')).toContainText('2K')
+
+  await page.getByTestId('composer-params').click()
+  await expect(params.getByRole('button', { name: '1.5K' })).toHaveCount(0)
+  await expect(params.getByRole('button', { name: '3K' })).toBeVisible()
+  await expect(params.getByRole('button', { name: '4K' })).toBeVisible()
 })
 
 test('an unreachable manifest still allows drafting and autosave', async ({ mount, page }) => {
@@ -308,7 +356,7 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
       {
         index: 1,
         status: 'failed',
-        failureReason: 'temporarily_unavailable',
+        failureReason: 'provider_route_unavailable',
         result: null
       }
     ]
@@ -325,8 +373,10 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
     'data-slot-status',
     'failed'
   )
-  await expect(page.getByTestId(`slot-${failedTask.id}-1`)).toContainText(
-    'Provider temporarily unavailable'
+  const failedSlot = page.getByTestId(`slot-${failedTask.id}-1`)
+  await expect(failedSlot).toContainText('MODEL_GROUP_ALL_UNAVAILABLE')
+  await expect(failedSlot).toContainText(
+    'channel binding, permissions, balance, quota, or capacity'
   )
 
   // Partial success keeps retrying exactly the uncompleted slots.
@@ -334,6 +384,47 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
   const retries = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
   expect(retries).toHaveLength(1)
   expect(retries[0].taskId).toBe(failedTask.id)
+})
+
+test('a failed slot renders the concrete persisted diagnostic instead of only a generic reason', async ({
+  mount,
+  page
+}) => {
+  const failedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000diag',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-01T02:59:32Z',
+    updatedAt: '2026-09-01T03:00:00Z',
+    terminalAt: '2026-09-01T03:00:00Z',
+    slots: [
+      {
+        index: 0,
+        status: 'failed',
+        failureReason: 'temporarily_unavailable',
+        failureDiagnostic: {
+          source: 'output_transfer',
+          code: 'provider_output_http_status',
+          message: 'Provider output download returned HTTP 403',
+          httpStatus: 403,
+          providerType: null,
+          requestId: null
+        },
+        result: null
+      }
+    ]
+  } as unknown as ScriptedTask
+
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [failedTask] }} />)
+  await selectFirstSession(page)
+
+  const failedSlot = page.getByTestId(`slot-${failedTask.id}-0`)
+  await expect(failedSlot).toContainText('provider_output_http_status')
+  await expect(failedSlot).toContainText('Provider output download returned HTTP 403')
 })
 
 test('cancel requests best-effort convergence on a running task', async ({ mount, page }) => {
@@ -424,6 +515,33 @@ test('an SSE invalidation refetches the task list', async ({ mount, page }) => {
     'data-slot-status',
     'generating'
   )
+})
+
+test('clearing the prompt keeps the submitted tasks on screen', async ({ mount, page }) => {
+  const runningTask: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000kee1',
+    sessionId: scriptedSessionId,
+    status: 'processing',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:00:01Z',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [runningTask] }} />)
+  await selectFirstSession(page)
+
+  await expect(page.getByTestId('result-gallery')).toBeVisible()
+
+  // Emptying the draft only clears the prompt — the session's task view
+  // stays mounted (issue #160 field report: clearing the prompt reset the
+  // workspace to the empty hero and hid every submitted task).
+  await page.getByTestId('composer-prompt').fill('')
+  await expect(page.getByTestId('result-gallery')).toBeVisible()
+  await expect(page.getByTestId('workspace-hero')).toHaveCount(0)
 })
 
 test('the workbench fills the shell content area it is mounted in', async ({ mount, page }) => {

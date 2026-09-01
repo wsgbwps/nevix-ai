@@ -43,6 +43,13 @@ type TaskWorker struct {
 	pressure providerPressure
 }
 
+// transientSubmitAttemptLimit matches the four-step 429/503 pressure
+// ladders. The queue-wide allowance remains larger for accepted async jobs
+// that need many safe polls; an unaccepted submit must surface a retryable
+// verdict after this much provider pressure instead of waiting for that
+// unrelated polling budget.
+const transientSubmitAttemptLimit = 4
+
 func NewTaskWorker(
 	tasks domain.GenerationTaskRepository,
 	materials domain.MaterialRepository,
@@ -105,10 +112,11 @@ func (w *TaskWorker) freshTaskState(ctx context.Context, tx domain.TxExecutor, t
 
 // slotUpdate is one pending slot verdict for the persist transaction.
 type slotUpdate struct {
-	Index  int
-	Status domain.SlotStatus
-	Reason *domain.FailureReason
-	Result *domain.SlotResult
+	Index      int
+	Status     domain.SlotStatus
+	Reason     *domain.FailureReason
+	Diagnostic *domain.FailureDiagnostic
+	Result     *domain.SlotResult
 }
 
 // process drives one claimed item through at most one external step plus its
@@ -145,7 +153,7 @@ func (w *TaskWorker) process(ctx context.Context, item domain.ClaimedQueueItem) 
 		// A previous pass marked the submit as started but crashed before
 		// the outcome landed. The outcome can never be identified now — the
 		// honest convergence is indeterminate, never a guessed re-submit.
-		return w.convergeIndeterminate(ctx, item.QueueID, task.ID)
+		return w.convergeIndeterminate(ctx, item.QueueID, task.ID, nil)
 
 	case job.Status == domain.JobProcessing && job.ExternalRef != nil:
 		return w.drivePoll(ctx, item.QueueID, task, slots, job, media)
@@ -231,22 +239,8 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	// transient-rejection marker cleared (bounded re-submit), plus the
 	// task's own queued→submitting edge.
 	marked := false
+	submitAttempts := 0
 	err = w.runner.Run(ctx, func(sc domain.WriteScope) error {
-		if job.Status == domain.JobPending {
-			jobOK, err := w.tasks.TransitionJob(ctx, sc.Tx(), job.ID,
-				[]domain.JobStatus{domain.JobPending}, domain.JobSubmitting, nil)
-			if err != nil || !jobOK {
-				return err
-			}
-		} else {
-			// Bounded re-submit: the statement clears the transient-rejection
-			// marker, so a crash before the new call's answer still reads as
-			// an unidentified outcome.
-			if _, err := w.tasks.TransitionJob(ctx, sc.Tx(), job.ID,
-				[]domain.JobStatus{domain.JobSubmitting}, domain.JobSubmitting, nil); err != nil {
-				return err
-			}
-		}
 		taskOK, err := w.tasks.TransitionTask(ctx, sc.Tx(), task.ID,
 			[]domain.TaskStatus{task.Status}, domain.TaskSubmitting, nil)
 		if err != nil {
@@ -257,6 +251,17 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 			// reconcile from the intent marker on the next pass.
 			return nil
 		}
+		attempts, jobOK, err := w.tasks.BeginJobSubmitAttempt(ctx, sc.Tx(), job.ID,
+			[]domain.JobStatus{job.Status})
+		if err != nil {
+			return err
+		}
+		if !jobOK {
+			// Roll back the task transition too; a partial marker would make the
+			// next pass misclassify an unstarted call as indeterminate.
+			return errors.New("creation: provider job submit marker lost")
+		}
+		submitAttempts = attempts
 		marked = true
 		return nil
 	})
@@ -271,29 +276,35 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 		w.recordSuccess(pressure)
 		return w.persistSubmitOutcome(ctx, queueID, task.ID, job.ID, task.OwnerID, outcome)
 	case domain.IsSubmitIndeterminate(submitErr):
-		return w.convergeIndeterminate(ctx, queueID, task.ID)
+		return w.convergeIndeterminate(ctx, queueID, task.ID, domain.FailureDiagnosticOf(submitErr))
 	case domain.IsCreditBlocked(submitErr):
-		return w.convergeCreditBlocked(ctx, queueID, task.ID)
+		return w.convergeCreditBlocked(ctx, queueID, task.ID, domain.FailureDiagnosticOf(submitErr))
 	case domain.IsRateLimited(submitErr):
 		until := w.recordRateLimited(pressure, domain.RetryAfterOf(submitErr))
-		return w.parkTransientRejection(ctx, queueID, job.ID, until)
+		return w.parkTransientRejection(ctx, queueID, task.ID, job.ID, submitAttempts, domain.ClassifyFailureReason(submitErr), domain.FailureDiagnosticOf(submitErr), until)
 	case domain.IsProviderUnavailable(submitErr):
 		until, alert := w.recordUnavailable(pressure)
 		if alert {
 			slog.Error("creation: provider availability degraded — repeated 503 pressure", "media", string(media))
 		}
-		return w.parkTransientRejection(ctx, queueID, job.ID, until)
+		return w.parkTransientRejection(ctx, queueID, task.ID, job.ID, submitAttempts, domain.ClassifyFailureReason(submitErr), domain.FailureDiagnosticOf(submitErr), until)
 	default:
 		// Definitive rejection (classified reason) converges the task.
-		return w.persistFailure(ctx, queueID, task, job, submitErr)
+		return w.persistFailure(ctx, queueID, task.ID, submitErr)
 	}
 }
 
 // parkTransientRejection records the identified transient rejection and
 // reschedules the item: the job stays submitting but licensed for a bounded
-// re-submit at the backoff instant.
-func (w *TaskWorker) parkTransientRejection(ctx context.Context, queueID, jobID domain.UUID, until time.Time) error {
+// re-submit at the backoff instant. The four-step submit budget is narrower
+// than the queue allowance used by accepted async jobs; once either budget
+// is spent, the task converges with the stable retryable verdict instead of
+// waiting silently (issue #160 field report: last_outcome=transient_rejected).
+func (w *TaskWorker) parkTransientRejection(ctx context.Context, queueID, taskID, jobID domain.UUID, submitAttempts int, reason domain.FailureReason, diagnostic *domain.FailureDiagnostic, until time.Time) error {
 	return w.runner.Run(ctx, func(sc domain.WriteScope) error {
+		if submitAttempts >= transientSubmitAttemptLimit {
+			return w.persistJobTerminalInScope(ctx, sc, queueID, taskID, domain.JobFailed, &reason, diagnostic)
+		}
 		if err := w.tasks.MarkJobSubmitRetryable(ctx, sc.Tx(), jobID); err != nil {
 			return err
 		}
@@ -385,7 +396,7 @@ func (w *TaskWorker) drivePoll(ctx context.Context, queueID domain.UUID, task do
 	outcome, err := w.gateway.Poll(ctx, credential, *job.ExternalRef)
 	if err != nil {
 		if domain.IsCreditBlocked(err) {
-			return w.convergeCreditBlocked(ctx, queueID, task.ID)
+			return w.convergeCreditBlocked(ctx, queueID, task.ID, domain.FailureDiagnosticOf(err))
 		}
 		if domain.IsRateLimited(err) {
 			until := w.recordRateLimited(pressureName, domain.RetryAfterOf(err))
@@ -420,12 +431,12 @@ func (w *TaskWorker) drivePoll(ctx context.Context, queueID domain.UUID, task do
 	case domain.PollCompleted:
 		return w.transferAndPersist(ctx, queueID, task.ID, job.ID, job.Status, domain.JobCompleted, outcome.Outputs, nil)
 	case domain.PollFailed:
-		return w.persistJobFailure(ctx, queueID, task, slots, job, outcome.Reason)
+		return w.persistJobFailure(ctx, queueID, task.ID, outcome.Reason, outcome.Diagnostic)
 	case domain.PollCancelled:
-		return w.persistJobTerminal(ctx, queueID, task, slots, job, domain.JobCancelled, nil)
+		return w.persistJobTerminal(ctx, queueID, task.ID, domain.JobCancelled, nil, nil)
 	case domain.PollTimedOut:
 		// Provider-authoritative timeout is the only business timed_out.
-		return w.persistJobTerminal(ctx, queueID, task, slots, job, domain.JobTimedOut, nil)
+		return w.persistJobTerminal(ctx, queueID, task.ID, domain.JobTimedOut, nil, outcome.Diagnostic)
 	}
 	return w.reschedule(ctx, queueID, time.Now().Add(w.pollEvery), false)
 }
@@ -435,7 +446,15 @@ func (w *TaskWorker) driveCancel(ctx context.Context, queueID domain.UUID, task 
 	switch {
 	case job.Status == domain.JobPending:
 		// Nothing external started: cancel converges immediately.
-		return w.persistJobTerminal(ctx, queueID, task, slots, job, domain.JobCancelled, nil)
+		return w.persistJobTerminal(ctx, queueID, task.ID, domain.JobCancelled, nil, nil)
+	case job.Status == domain.JobSubmitting && job.ExternalRef == nil && job.Outcome != nil && *job.Outcome == domain.JobOutcomeTransientRejected:
+		// The provider definitively rejected the submit, so no external work
+		// exists and the creator's cancel can converge locally.
+		return w.persistJobTerminal(ctx, queueID, task.ID, domain.JobCancelled, nil, nil)
+	case job.Status == domain.JobSubmitting && job.ExternalRef == nil:
+		// A marker without a durable outcome may have been accepted before a
+		// crash. Cancellation cannot fabricate a provider-side non-execution.
+		return w.convergeIndeterminate(ctx, queueID, task.ID, nil)
 	case job.Status == domain.JobSubmitting || job.Status == domain.JobProcessing:
 		// Record the job-level cancel intent; the next pass drives the
 		// provider cancel and waits for the authoritative verdict.
@@ -454,8 +473,12 @@ func (w *TaskWorker) driveCancel(ctx context.Context, queueID domain.UUID, task 
 			notifyOwner(sc, w.notify, task.OwnerID)
 			return nil
 		})
-	case job.Status == domain.JobCancelling:
+	case job.Status == domain.JobCancelling && job.ExternalRef != nil:
 		return w.driveCancellingJob(ctx, queueID, task, slots, job, media)
+	case job.Status == domain.JobCancelling:
+		// Legacy/ref-less cancelling state has no durable proof that the
+		// provider rejected the submit; fail safe instead of inventing cancel.
+		return w.convergeIndeterminate(ctx, queueID, task.ID, nil)
 	default:
 		// Terminal job with cancel intent: finish the aggregation.
 		return w.convergeFromTerminalJob(ctx, queueID, task, slots, job, media)
@@ -482,7 +505,7 @@ func (w *TaskWorker) driveCancellingJob(ctx context.Context, queueID domain.UUID
 // all slots indeterminate, task failed with the indeterminate cause. The
 // system never retries it automatically; only the creator's explicit redo
 // (a new task) proceeds, after a repeat-risk confirmation.
-func (w *TaskWorker) convergeIndeterminate(ctx context.Context, queueID domain.UUID, taskID domain.UUID) error {
+func (w *TaskWorker) convergeIndeterminate(ctx context.Context, queueID domain.UUID, taskID domain.UUID, diagnostic *domain.FailureDiagnostic) error {
 	cause := domain.TerminalCauseProviderIndeterminate
 	return w.runner.Run(ctx, func(sc domain.WriteScope) error {
 		_, _, freshJob, err := w.freshTaskState(ctx, sc.Tx(), taskID)
@@ -499,7 +522,7 @@ func (w *TaskWorker) convergeIndeterminate(ctx context.Context, queueID domain.U
 			return err
 		}
 		indeterminateStatus, indeterminateReason := domain.SlotVerdictForJob(domain.JobIndeterminate, nil)
-		if err := w.settleUnsettledSlots(ctx, sc.Tx(), taskID, indeterminateStatus, indeterminateReason); err != nil {
+		if err := w.settleUnsettledSlots(ctx, sc.Tx(), taskID, indeterminateStatus, indeterminateReason, diagnostic); err != nil {
 			return err
 		}
 		if _, err := w.tasks.ReleaseReservation(ctx, sc.Tx(), taskID); err != nil {
@@ -516,7 +539,7 @@ func (w *TaskWorker) convergeIndeterminate(ctx context.Context, queueID domain.U
 // convergeCreditBlocked persists the connection-level 402 fact, then fails
 // the task with action_required slots. Older tasks keep converging through
 // their own lifecycle; admission blocks new ones until an admin clears it.
-func (w *TaskWorker) convergeCreditBlocked(ctx context.Context, queueID domain.UUID, taskID domain.UUID) error {
+func (w *TaskWorker) convergeCreditBlocked(ctx context.Context, queueID domain.UUID, taskID domain.UUID, diagnostic *domain.FailureDiagnostic) error {
 	err := w.runner.Run(ctx, func(sc domain.WriteScope) error {
 		if err := w.connections.MarkCreditBlocked(ctx, sc.Tx()); err != nil {
 			return err
@@ -535,7 +558,7 @@ func (w *TaskWorker) convergeCreditBlocked(ctx context.Context, queueID domain.U
 		if err := w.finalizeTask(ctx, sc.Tx(), taskID, domain.TaskFailed, nil); err != nil {
 			return err
 		}
-		if err := w.settleUnsettledSlots(ctx, sc.Tx(), taskID, domain.SlotFailed, &reason); err != nil {
+		if err := w.settleUnsettledSlots(ctx, sc.Tx(), taskID, domain.SlotFailed, &reason, diagnostic); err != nil {
 			return err
 		}
 		if _, err := w.tasks.ReleaseReservation(ctx, sc.Tx(), taskID); err != nil {
@@ -551,46 +574,66 @@ func (w *TaskWorker) convergeCreditBlocked(ctx context.Context, queueID domain.U
 }
 
 // persistFailure converges a definitive submit rejection onto the task.
-func (w *TaskWorker) persistFailure(ctx context.Context, queueID domain.UUID, task domain.GenerationTask, job domain.ProviderJob, submitErr error) error {
+func (w *TaskWorker) persistFailure(ctx context.Context, queueID, taskID domain.UUID, submitErr error) error {
 	reason := domain.ClassifyFailureReason(submitErr)
 	jobStatus := domain.JobFailed
 	if domain.IsProviderTimedOut(submitErr) {
 		jobStatus = domain.JobTimedOut
 	}
-	return w.persistJobTerminal(ctx, queueID, task, nil, job, jobStatus, &reason)
+	return w.persistJobTerminal(ctx, queueID, taskID, jobStatus, &reason, domain.FailureDiagnosticOf(submitErr))
 }
 
 // persistJobFailure converges a poll-answered failure with its classified
 // reason onto every unsettled slot.
-func (w *TaskWorker) persistJobFailure(ctx context.Context, queueID domain.UUID, task domain.GenerationTask, slots []domain.GenerationSlot, job domain.ProviderJob, reason *domain.FailureReason) error {
-	return w.persistJobTerminal(ctx, queueID, task, slots, job, domain.JobFailed, reason)
+func (w *TaskWorker) persistJobFailure(ctx context.Context, queueID, taskID domain.UUID, reason *domain.FailureReason, diagnostic *domain.FailureDiagnostic) error {
+	return w.persistJobTerminal(ctx, queueID, taskID, domain.JobFailed, reason, diagnostic)
 }
 
 // persistJobTerminal lands one terminal job verdict: job transition, slot
 // projection, task aggregation, reservation release, and queue retirement
 // in one transaction.
-func (w *TaskWorker) persistJobTerminal(ctx context.Context, queueID domain.UUID, task domain.GenerationTask, slots []domain.GenerationSlot, job domain.ProviderJob, jobStatus domain.JobStatus, reason *domain.FailureReason) error {
+func (w *TaskWorker) persistJobTerminal(ctx context.Context, queueID, taskID domain.UUID, jobStatus domain.JobStatus, reason *domain.FailureReason, diagnostic *domain.FailureDiagnostic) error {
 	return w.runner.Run(ctx, func(sc domain.WriteScope) error {
-		if _, err := w.tasks.TransitionJob(ctx, sc.Tx(), job.ID,
-			[]domain.JobStatus{job.Status}, jobStatus, nil); err != nil {
-			return err
-		}
-		slotStatus, slotReason := domain.SlotVerdictForJob(jobStatus, reason)
-		if err := w.settleUnsettledSlots(ctx, sc.Tx(), task.ID, slotStatus, slotReason); err != nil {
-			return err
-		}
-		if err := w.aggregateAndFinalize(ctx, sc.Tx(), task.ID); err != nil {
-			return err
-		}
-		if _, err := w.tasks.ReleaseReservation(ctx, sc.Tx(), task.ID); err != nil {
-			return err
-		}
-		if err := w.tasks.RetireQueueItem(ctx, sc.Tx(), queueID); err != nil {
-			return err
-		}
-		notifyOwner(sc, w.notify, task.OwnerID)
-		return nil
+		return w.persistJobTerminalInScope(ctx, sc, queueID, taskID, jobStatus, reason, diagnostic)
 	})
+}
+
+// persistJobTerminalInScope is the single atomic completion seam used when
+// the provider response and the limiting retry verdict must commit together.
+func (w *TaskWorker) persistJobTerminalInScope(ctx context.Context, sc domain.WriteScope, queueID, taskID domain.UUID, jobStatus domain.JobStatus, reason *domain.FailureReason, diagnostic *domain.FailureDiagnostic) error {
+	freshTask, _, freshJob, err := w.freshTaskState(ctx, sc.Tx(), taskID)
+	if err != nil {
+		return err
+	}
+	if domain.JobIsTerminal(freshJob.Status) {
+		if freshJob.Status != jobStatus {
+			return fmt.Errorf("creation: provider job already terminal as %s", freshJob.Status)
+		}
+	} else {
+		ok, err := w.tasks.TransitionJob(ctx, sc.Tx(), freshJob.ID,
+			[]domain.JobStatus{freshJob.Status}, jobStatus, nil)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("creation: provider job terminal transition lost")
+		}
+	}
+	slotStatus, slotReason := domain.SlotVerdictForJob(jobStatus, reason)
+	if err := w.settleUnsettledSlots(ctx, sc.Tx(), taskID, slotStatus, slotReason, diagnostic); err != nil {
+		return err
+	}
+	if err := w.aggregateAndFinalize(ctx, sc.Tx(), taskID); err != nil {
+		return err
+	}
+	if _, err := w.tasks.ReleaseReservation(ctx, sc.Tx(), taskID); err != nil {
+		return err
+	}
+	if err := w.tasks.RetireQueueItem(ctx, sc.Tx(), queueID); err != nil {
+		return err
+	}
+	notifyOwner(sc, w.notify, freshTask.OwnerID)
+	return nil
 }
 
 // transferAndPersist transfers provider outputs to the module's storage and
@@ -615,7 +658,7 @@ func (w *TaskWorker) transferAndPersist(ctx context.Context, queueID domain.UUID
 			return err
 		}
 		for _, update := range updates {
-			if _, err := w.tasks.WriteSlotVerdict(ctx, sc.Tx(), task.ID, update.Index, update.Status, update.Reason, update.Result); err != nil {
+			if _, err := w.tasks.WriteSlotVerdict(ctx, sc.Tx(), task.ID, update.Index, update.Status, update.Reason, update.Diagnostic, update.Result); err != nil {
 				return err
 			}
 			// The verified output becomes the slot's unique Media Asset in
@@ -679,7 +722,10 @@ func (w *TaskWorker) transferOutputs(ctx context.Context, task domain.Generation
 		result, err := w.transferOne(ctx, task.Spec.MediaType, task.ID, index, output)
 		if err != nil {
 			reason := domain.ReasonTemporarilyUnavailable
-			updates = append(updates, slotUpdate{Index: index, Status: domain.SlotFailed, Reason: &reason})
+			updates = append(updates, slotUpdate{
+				Index: index, Status: domain.SlotFailed, Reason: &reason,
+				Diagnostic: domain.FailureDiagnosticOf(err),
+			})
 			continue
 		}
 		updates = append(updates, slotUpdate{Index: index, Status: domain.SlotSucceeded, Result: result})
@@ -690,7 +736,15 @@ func (w *TaskWorker) transferOutputs(ctx context.Context, task domain.Generation
 			continue
 		}
 		reason := domain.ReasonTemporarilyUnavailable
-		updates = append(updates, slotUpdate{Index: slot.Index, Status: domain.SlotFailed, Reason: &reason})
+		updates = append(updates, slotUpdate{
+			Index: slot.Index, Status: domain.SlotFailed, Reason: &reason,
+			Diagnostic: domain.NewFailureDiagnostic(
+				domain.DiagnosticSourceProvider,
+				"provider_output_missing",
+				"Kapon returned fewer outputs than the requested quantity",
+				nil, "", "",
+			),
+		})
 	}
 	return updates, nil
 }
@@ -698,8 +752,8 @@ func (w *TaskWorker) transferOutputs(ctx context.Context, task domain.Generation
 // transferOne streams one output into storage and probes it. The blob key
 // is deterministic per (task, slot), so a lease-expiry retry overwrites the
 // same object instead of duplicating results. The probe's facts must match
-// the media's output contract (image outputs are PNG); a mismatch is a
-// transfer verification failure, never an accepted result.
+// the media's output contract (image outputs are JPEG or PNG); a mismatch is
+// a transfer verification failure, never an accepted result.
 func (w *TaskWorker) transferOne(ctx context.Context, media domain.MediaType, taskID domain.UUID, index int, output domain.GatewayOutput) (*domain.SlotResult, error) {
 	blobKey := domain.GenerationResultBlobKey(taskID, index)
 	// The download stream is bounded by the defensive per-output ceiling;
@@ -711,20 +765,44 @@ func (w *TaskWorker) transferOne(ctx context.Context, media domain.MediaType, ta
 	defer reader.Close()
 	put, err := w.store.Put(ctx, blobKey, reader, domain.GenerationResultMaxBytes)
 	if err != nil {
-		return nil, err
+		return nil, diagnosedFailure(
+			domain.DiagnosticSourceStorage,
+			"output_store_write_failed",
+			"Nevix could not store the downloaded provider output",
+			nil,
+			err,
+		)
 	}
 	stored, size, err := w.store.Open(ctx, blobKey, domain.FullBlobRange)
 	if err != nil {
-		return nil, err
+		return nil, diagnosedFailure(
+			domain.DiagnosticSourceStorage,
+			"output_store_read_failed",
+			"Nevix could not reopen the stored provider output for verification",
+			nil,
+			err,
+		)
 	}
 	defer stored.Close()
 	identified, err := w.prober.Identify(stored)
 	if err != nil {
-		return nil, err
+		return nil, diagnosedFailure(
+			domain.DiagnosticSourceMediaProbe,
+			"output_probe_failed",
+			"Nevix could not identify the downloaded provider output",
+			nil,
+			err,
+		)
 	}
 	_ = size
-	if expected := domain.ExpectedOutputMime(media); expected != "" && identified.Facts.MimeType != expected {
-		return nil, fmt.Errorf("creation: provider output failed output verification")
+	if !domain.OutputMimeAccepted(media, identified.Facts.MimeType) {
+		return nil, diagnosedFailure(
+			domain.DiagnosticSourceMediaProbe,
+			"output_mime_mismatch",
+			fmt.Sprintf("Provider output MIME type %q is not accepted for %s generation", identified.Facts.MimeType, media),
+			nil,
+			errors.New("creation: provider output failed output verification"),
+		)
 	}
 	return &domain.SlotResult{
 		Mime:       identified.Facts.MimeType,
@@ -756,11 +834,11 @@ func (w *TaskWorker) convergeFromTerminalJob(ctx context.Context, queueID domain
 			return w.transferAndPersist(ctx, queueID, task.ID, job.ID, domain.JobCompleted, domain.JobCompleted, outcome.Outputs, nil)
 		}
 	}
-	return w.persistJobTerminal(ctx, queueID, task, slots, job, job.Status, nil)
+	return w.persistJobTerminal(ctx, queueID, task.ID, job.Status, nil, nil)
 }
 
 // settleUnsettledSlots writes one verdict to every still-projected slot.
-func (w *TaskWorker) settleUnsettledSlots(ctx context.Context, tx domain.TxExecutor, taskID domain.UUID, status domain.SlotStatus, reason *domain.FailureReason) error {
+func (w *TaskWorker) settleUnsettledSlots(ctx context.Context, tx domain.TxExecutor, taskID domain.UUID, status domain.SlotStatus, reason *domain.FailureReason, diagnostic *domain.FailureDiagnostic) error {
 	rows, err := tx.Query(ctx, `
 		SELECT slot_index FROM creation_generation_slots WHERE task_id = $1 AND status IS NULL`, taskID)
 	if err != nil {
@@ -779,7 +857,7 @@ func (w *TaskWorker) settleUnsettledSlots(ctx context.Context, tx domain.TxExecu
 		return err
 	}
 	for _, index := range indexes {
-		if _, err := w.tasks.WriteSlotVerdict(ctx, tx, taskID, index, status, reason, nil); err != nil {
+		if _, err := w.tasks.WriteSlotVerdict(ctx, tx, taskID, index, status, reason, diagnostic, nil); err != nil {
 			return err
 		}
 	}
@@ -971,20 +1049,52 @@ func (p *providerPressure) recordUnavailable(key string) (time.Time, bool) {
 func (w *TaskWorker) openProviderOutput(ctx context.Context, url string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("creation: build provider output request")
+		return nil, diagnosedFailure(
+			domain.DiagnosticSourceOutputTransfer,
+			"provider_output_url_invalid",
+			"Kapon returned an invalid output URL",
+			nil,
+			errors.New("creation: build provider output request"),
+		)
 	}
 	resp, err := w.fetch.Do(req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-			return nil, fmt.Errorf("creation: fetch provider output canceled")
+			return nil, diagnosedFailure(
+				domain.DiagnosticSourceOutputTransfer,
+				"provider_output_fetch_cancelled",
+				"Provider output download was cancelled before completion",
+				nil,
+				errors.New("creation: fetch provider output canceled"),
+			)
 		}
-		return nil, fmt.Errorf("creation: fetch provider output failed")
+		return nil, diagnosedFailure(
+			domain.DiagnosticSourceOutputTransfer,
+			"provider_output_fetch_failed",
+			"Provider output download failed before an HTTP response was received",
+			nil,
+			errors.New("creation: fetch provider output failed"),
+		)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("creation: provider output fetch returned %d", resp.StatusCode)
+		status := resp.StatusCode
+		return nil, diagnosedFailure(
+			domain.DiagnosticSourceOutputTransfer,
+			"provider_output_http_status",
+			fmt.Sprintf("Provider output download returned HTTP %d", status),
+			&status,
+			fmt.Errorf("creation: provider output fetch returned %d", status),
+		)
 	}
 	return resp.Body, nil
+}
+
+func diagnosedFailure(source domain.FailureDiagnosticSource, code, message string, httpStatus *int, err error) error {
+	return domain.WithFailureDiagnostic(
+		err,
+		domain.NewFailureDiagnostic(source, code, message, httpStatus, "", ""),
+	)
 }
 
 func strPtr(value string) *string { return &value }

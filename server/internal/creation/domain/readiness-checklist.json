@@ -1,6 +1,7 @@
 {
-  "schema_version": 1,
-  "description": "Nevix 发布级 Production Readiness checklist（spec #150 / ticket #158）。每个公开模式、参数、分辨率、异步查询、临时 URL 转存与实际媒体探测各占一个可追溯 slot；slot 由手动 workflow（scripts/production-readiness）以真实 Kapon 调用逐个执行并记录证据，全部通过后该媒体的值才激活进 Capability Manifest。实际探针执行归 T16（#166）。本文件是 Server（go:embed）与 runner 的单一事实源：slot id、媒体、维度、取值绑定必须逐字一致。",
+  "schema_version": 3,
+  "manifest_version": 3,
+  "description": "Nevix 发布级 Production Readiness checklist（spec #150 / ticket #158）。每个公开模式、参数、分辨率、异步查询、临时 URL 转存与实际媒体探测各占一个可追溯 slot；slot 由手动 workflow（scripts/production-readiness）以真实 Kapon 调用逐个执行并记录证据，全部通过后该媒体的值才激活进 Capability Manifest。manifest_version 将证据绑定到接受测试时的模型与能力内容，模型切换必须重新验收。分辨率档位是 model-scoped 的（slot.model 字段）：供应商 size 契约按模型区分（图片 pro=1K/1.5K/2K，n=2K/3K/4K），证据必须按（模型, 档位）绑定。实际探针执行归 T16（#166）。本文件是 Server（go:embed）与 runner 的单一事实源：slot id、媒体、维度、取值、模型绑定必须逐字一致。",
   "slots": [
     {
       "id": "image.mode.text-to-image",
@@ -39,13 +40,13 @@
       "detail": "以 4:3 比例真实生成并验收实际输出宽高比。"
     },
     {
-      "id": "image.ratio.4-5",
+      "id": "image.ratio.3-4",
       "media": "image",
       "dimension": "ratio",
-      "value": "4:5",
+      "value": "3:4",
       "kind": "generation",
-      "title": "比例 4:5",
-      "detail": "以 4:5 比例真实生成并验收实际输出宽高比。"
+      "title": "比例 3:4",
+      "detail": "以 3:4 比例真实生成并验收实际输出宽高比。"
     },
     {
       "id": "image.ratio.16-9",
@@ -66,31 +67,91 @@
       "detail": "以 9:16 比例真实生成并验收实际输出宽高比。"
     },
     {
-      "id": "image.resolution.1k",
+      "id": "image.ratio.3-2",
+      "media": "image",
+      "dimension": "ratio",
+      "value": "3:2",
+      "kind": "generation",
+      "title": "比例 3:2",
+      "detail": "以 3:2 比例真实生成并验收实际输出宽高比。"
+    },
+    {
+      "id": "image.ratio.2-3",
+      "media": "image",
+      "dimension": "ratio",
+      "value": "2:3",
+      "kind": "generation",
+      "title": "比例 2:3",
+      "detail": "以 2:3 比例真实生成并验收实际输出宽高比。"
+    },
+    {
+      "id": "image.ratio.21-9",
+      "media": "image",
+      "dimension": "ratio",
+      "value": "21:9",
+      "kind": "generation",
+      "title": "比例 21:9",
+      "detail": "以 21:9 比例真实生成并验收实际输出宽高比。"
+    },
+    {
+      "id": "image.resolution.pro-1k",
       "media": "image",
       "dimension": "resolution",
       "value": "1K",
+      "model": "doubao-seedream-5.0-pro",
       "kind": "generation",
-      "title": "分辨率 1K",
-      "detail": "以 1K 分辨率真实生成并验收实际输出分辨率。"
+      "title": "分辨率 1K（pro）",
+      "detail": "以 doubao-seedream-5.0-pro 的 1K 档真实生成并验收实际输出分辨率与像素尺寸。"
     },
     {
-      "id": "image.resolution.2k",
+      "id": "image.resolution.pro-1-5k",
+      "media": "image",
+      "dimension": "resolution",
+      "value": "1.5K",
+      "model": "doubao-seedream-5.0-pro",
+      "kind": "generation",
+      "title": "分辨率 1.5K（pro）",
+      "detail": "以 doubao-seedream-5.0-pro 的 1.5K 档真实生成并验收实际输出分辨率与像素尺寸。"
+    },
+    {
+      "id": "image.resolution.pro-2k",
       "media": "image",
       "dimension": "resolution",
       "value": "2K",
+      "model": "doubao-seedream-5.0-pro",
       "kind": "generation",
-      "title": "分辨率 2K（默认）",
-      "detail": "以 2K 分辨率真实生成并验收实际输出分辨率；图片规格默认值。"
+      "title": "分辨率 2K（pro，默认）",
+      "detail": "以 doubao-seedream-5.0-pro 的 2K 档真实生成并验收实际输出分辨率与像素尺寸；图片规格默认档。"
     },
     {
-      "id": "image.resolution.4k",
+      "id": "image.resolution.n-2k",
+      "media": "image",
+      "dimension": "resolution",
+      "value": "2K",
+      "model": "doubao-seedream-5.0-n",
+      "kind": "generation",
+      "title": "分辨率 2K（n，默认）",
+      "detail": "以 doubao-seedream-5.0-n 的 2K 档真实生成并验收实际输出分辨率与像素尺寸；该模型默认档，像素尺寸与 pro 的 2K 不同。"
+    },
+    {
+      "id": "image.resolution.n-3k",
+      "media": "image",
+      "dimension": "resolution",
+      "value": "3K",
+      "model": "doubao-seedream-5.0-n",
+      "kind": "generation",
+      "title": "分辨率 3K（n）",
+      "detail": "以 doubao-seedream-5.0-n 的 3K 档真实生成并验收实际输出分辨率与像素尺寸。"
+    },
+    {
+      "id": "image.resolution.n-4k",
       "media": "image",
       "dimension": "resolution",
       "value": "4K",
+      "model": "doubao-seedream-5.0-n",
       "kind": "generation",
-      "title": "分辨率 4K",
-      "detail": "以 4K 分辨率真实生成并验收实际输出分辨率。"
+      "title": "分辨率 4K（n）",
+      "detail": "以 doubao-seedream-5.0-n 的 4K 档真实生成并验收实际输出分辨率与像素尺寸。"
     },
     {
       "id": "image.quantity.1",
@@ -144,7 +205,7 @@
       "value": "png",
       "kind": "inspection",
       "title": "图片实际媒体探测",
-      "detail": "对转存后的真实输出执行 MIME、checksum、实际宽高与 PNG 媒体可读性探测。"
+      "detail": "对转存后的真实输出执行 MIME、checksum、实际宽高与 JPEG/PNG 媒体可读性探测。"
     },
     {
       "id": "video.mode.text-to-video",
@@ -187,6 +248,7 @@
       "media": "video",
       "dimension": "resolution",
       "value": "480p",
+      "model": "doubao-seedance-2-5",
       "kind": "generation",
       "title": "分辨率 480p",
       "detail": "以 480p 真实生成并验收实际输出分辨率。"
@@ -196,6 +258,7 @@
       "media": "video",
       "dimension": "resolution",
       "value": "720p",
+      "model": "doubao-seedance-2-5",
       "kind": "generation",
       "title": "分辨率 720p（默认）",
       "detail": "以 720p 真实生成并验收实际输出分辨率；视频规格默认值。"
@@ -205,6 +268,7 @@
       "media": "video",
       "dimension": "resolution",
       "value": "1080p",
+      "model": "doubao-seedance-2-5",
       "kind": "generation",
       "title": "分辨率 1080p",
       "detail": "以 1080p 真实生成并验收实际输出分辨率；验收失败时重开决策移除，禁止静默降级。"

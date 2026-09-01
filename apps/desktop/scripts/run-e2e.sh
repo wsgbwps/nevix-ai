@@ -485,27 +485,9 @@ claim_main_instance() {
 # marker (plain loopback http answers secure_transport_required).
 write_image_readiness_evidence() {
   readiness_file="$(mktemp -t nevix-creation-readiness.XXXXXX.json)"
-  node - "$readiness_file" <<'NODE'
-const slots = [
-  "image.mode.text-to-image", "image.mode.reference-image",
-  "image.ratio.1-1", "image.ratio.4-3", "image.ratio.4-5", "image.ratio.16-9", "image.ratio.9-16",
-  "image.resolution.1k", "image.resolution.2k", "image.resolution.4k",
-  "image.quantity.1", "image.quantity.2", "image.quantity.3", "image.quantity.4",
-  "image.transfer.temp-url", "image.probe.png"
-]
-const now = new Date().toISOString()
-const evidence = {
-  schema_version: 1,
-  generated_at: now,
-  entries: slots.map((slot_id) => ({
-    slot_id,
-    status: "passed",
-    checked_at: now,
-    evidence_ref: "e2e/" + slot_id
-  }))
-}
-require("node:fs").writeFileSync(process.argv[2], JSON.stringify(evidence))
-NODE
+  node "$repo_root/scripts/dev/dev-readiness-evidence.mjs" \
+    --media image \
+    --out "$readiness_file"
 }
 
 start_fake_kapon() {

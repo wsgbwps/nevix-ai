@@ -43,7 +43,8 @@ if (slots.length === 0) {
 
 const now = new Date().toISOString()
 const evidence = {
-  schema_version: 1,
+  schema_version: checklist.schema_version,
+  manifest_version: checklist.manifest_version,
   generated_at: now,
   entries: slots.map((slot) => ({
     slot_id: slot.id,

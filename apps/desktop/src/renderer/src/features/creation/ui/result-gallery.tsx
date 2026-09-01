@@ -6,6 +6,7 @@ import type {
   GenerationSlotView,
   GenerationTaskDetail,
   GenerationTaskView,
+  SlotFailureDiagnosticSource,
   SlotFailureReason
 } from '../api/generation-task-http'
 import type { CreationWorkbenchController } from '../model/use-workbench'
@@ -32,6 +33,7 @@ const reasonKeys = {
   output_policy_rejected: 'gallery.reasons.output_policy_rejected',
   action_required: 'gallery.reasons.action_required',
   temporarily_unavailable: 'gallery.reasons.temporarily_unavailable',
+  provider_route_unavailable: 'gallery.reasons.provider_route_unavailable',
   processing_indeterminate: 'gallery.reasons.processing_indeterminate',
   internal_error: 'gallery.reasons.internal_error'
 } as const
@@ -42,6 +44,19 @@ function statusKey(status: string): (typeof statusKeys)[keyof typeof statusKeys]
 
 function reasonKey(reason: SlotFailureReason): (typeof reasonKeys)[keyof typeof reasonKeys] {
   return reason in reasonKeys ? reasonKeys[reason] : reasonKeys.internal_error
+}
+
+const diagnosticSourceKeys = {
+  provider: 'gallery.diagnostic.sources.provider',
+  output_transfer: 'gallery.diagnostic.sources.output_transfer',
+  storage: 'gallery.diagnostic.sources.storage',
+  media_probe: 'gallery.diagnostic.sources.media_probe'
+} as const
+
+function diagnosticSourceKey(
+  source: SlotFailureDiagnosticSource
+): (typeof diagnosticSourceKeys)[keyof typeof diagnosticSourceKeys] {
+  return diagnosticSourceKeys[source]
 }
 
 const mediaKeys = {
@@ -288,11 +303,36 @@ function SlotCard({
           <video src={url} controls className="size-full object-cover" />
         )
       ) : (
-        <span className="absolute inset-0 grid place-items-center">
-          <span className="text-muted-foreground px-2 text-center text-[10px] leading-4">
+        <span className="absolute inset-0 flex overflow-y-auto p-2">
+          <span className="text-muted-foreground my-auto w-full text-center text-[10px] leading-4">
             {t(statusKey(slot.status))}
             {slot.failureReason !== null && (
               <span className="block">{t(reasonKey(slot.failureReason))}</span>
+            )}
+            {slot.failureDiagnostic != null && (
+              <span
+                className="border-border/70 mt-1 block border-t pt-1 text-left break-words"
+                data-testid={`slot-diagnostic-${taskId}-${slot.index}`}
+              >
+                <span className="block font-medium">
+                  {t(diagnosticSourceKey(slot.failureDiagnostic.source))}
+                </span>
+                <span className="block font-mono">
+                  {slot.failureDiagnostic.code}
+                  {slot.failureDiagnostic.providerType !== null
+                    ? ` · ${slot.failureDiagnostic.providerType}`
+                    : ''}
+                  {slot.failureDiagnostic.httpStatus !== null
+                    ? ` · HTTP ${slot.failureDiagnostic.httpStatus}`
+                    : ''}
+                </span>
+                <span className="block">{slot.failureDiagnostic.message}</span>
+                {slot.failureDiagnostic.requestId !== null && (
+                  <span className="block font-mono">
+                    {t('gallery.diagnostic.requestId')}: {slot.failureDiagnostic.requestId}
+                  </span>
+                )}
+              </span>
             )}
           </span>
         </span>

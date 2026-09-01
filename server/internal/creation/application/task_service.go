@@ -387,7 +387,7 @@ func (s *TaskService) Cancel(ctx context.Context, owner, taskID domain.UUID) err
 		for _, slot := range slots {
 			if slot.Status == nil {
 				if _, err := s.tasks.WriteSlotVerdict(ctx, sc.Tx(), task.ID, slot.Index,
-					domain.SlotCancelled, nil, nil); err != nil {
+					domain.SlotCancelled, nil, nil, nil); err != nil {
 					return err
 				}
 			}
@@ -447,7 +447,10 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 		}
 		return nil, &domain.MediaUnavailableError{Reason: reason, Action: mediaView.Action}
 	}
-	if *draft.Model != mediaView.Model {
+	// Resolution tiers are model-scoped: the draft's model must be a
+	// published model and its resolution must be one of that model's tiers.
+	modelView := publishedModel(mediaView.Models, *draft.Model)
+	if modelView == nil || !valueInList(modelView.Resolutions, draft.Resolution) {
 		return nil, domain.ErrDraftCapabilityStale
 	}
 	modeKnown := false
@@ -461,9 +464,6 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 		}
 	}
 	if !modeKnown {
-		return nil, domain.ErrDraftCapabilityStale
-	}
-	if !valueInList(mediaView.Resolutions, draft.Resolution) {
 		return nil, domain.ErrDraftCapabilityStale
 	}
 	spec := &domain.GenerationSpecification{
@@ -486,9 +486,6 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 		spec.Resolution = draft.Resolution
 		spec.Quantity = *draft.Quantity
 	} else {
-		if !valueInList(mediaView.Resolutions, draft.Resolution) {
-			return nil, domain.ErrDraftCapabilityStale
-		}
 		if draft.DurationSeconds == nil || !intInList(mediaView.Durations, *draft.DurationSeconds) {
 			return nil, domain.ErrDraftCapabilityStale
 		}
@@ -583,6 +580,17 @@ func mediaAvailability(manifest domain.CapabilityManifestView, media domain.Medi
 		return nil
 	}
 	return &domain.MediaUnavailableError{Reason: view.Reason, Action: view.Action}
+}
+
+// publishedModel returns the media's published model entry for one model ID,
+// or nil when the model is not currently submittable.
+func publishedModel(models []domain.CapabilityModelView, model string) *domain.CapabilityModelView {
+	for index := range models {
+		if models[index].Model == model {
+			return &models[index]
+		}
+	}
+	return nil
 }
 
 func valueInList(values []string, value *string) bool {

@@ -10,7 +10,8 @@
 import type {
   CapabilityManifest,
   CapabilityMedia,
-  CapabilityMediaMode
+  CapabilityMediaMode,
+  CapabilityModel
 } from '../api/capability-manifest-http'
 import type { DraftReferenceRole, MaterialKind, SessionDraftView } from '../api/go-creation-http'
 
@@ -84,14 +85,39 @@ export function mediaCapability(
   return media === 'image' ? manifest.image : manifest.video
 }
 
-/** Candidate models for one media; empty when the manifest is unavailable. */
+/** Candidate models for one media, in manifest order; empty when unavailable. */
 export function modelCandidates(
   manifest: CapabilityManifest | null,
   media: DraftMediaType
 ): readonly string[] {
   const capability = mediaCapability(manifest, media)
-  if (capability === null || !capability.available || capability.model === undefined) return []
-  return [capability.model]
+  if (capability === null || !capability.available) return []
+  return (capability.models ?? []).map((model) => model.model)
+}
+
+/** The published model entry for one model ID; null when not submittable. */
+export function publishedModel(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType,
+  model: string
+): CapabilityModel | null {
+  const capability = mediaCapability(manifest, media)
+  if (capability === null || !capability.available) return null
+  return (capability.models ?? []).find((entry) => entry.model === model) ?? null
+}
+
+/**
+ * Resolution tiers of the selected model; empty while no (published) model
+ * is selected — the tiers are model-scoped, so a stale model legitimately
+ * publishes none.
+ */
+export function resolutionCandidates(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType,
+  model: string | null
+): readonly string[] {
+  if (model === null) return []
+  return publishedModel(manifest, media, model)?.resolutions ?? []
 }
 
 /** Candidate modes for one media in manifest order. */
@@ -203,7 +229,10 @@ export function staleDraftFields(
   ) {
     stale.add('durationSeconds')
   }
-  if (draft.resolution === null || !(capability.resolutions ?? []).includes(draft.resolution)) {
+  if (
+    draft.resolution === null ||
+    !resolutionCandidates(manifest, media, draft.model).includes(draft.resolution)
+  ) {
     stale.add('resolution')
   }
 

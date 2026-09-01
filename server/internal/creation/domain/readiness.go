@@ -27,11 +27,14 @@ const (
 // resolution, async query, temporary-URL transfer, or actual-media probe.
 // The embedded readiness-checklist.json is the single source of truth shared
 // verbatim with the manual readiness runner (scripts/production-readiness).
+// Model is empty for media-scoped dimensions; resolution slots carry the
+// model because the vendor tier set (and its pixel sizes) is model-specific.
 type ReadinessSlot struct {
 	ID        string `json:"id"`
 	Media     string `json:"media"`
 	Dimension string `json:"dimension"`
 	Value     string `json:"value"`
+	Model     string `json:"model,omitempty"`
 	Kind      string `json:"kind"`
 	Title     string `json:"title"`
 	Detail    string `json:"detail"`
@@ -49,7 +52,8 @@ const (
 // readinessSchemaVersion is the schema version of the readiness document
 // family — the embedded checklist and the evidence documents it produces.
 // A foreign document must be rejected loudly, never partially trusted.
-const readinessSchemaVersion = 1
+// v3 adds model-scoped resolution slots (slot.model).
+const readinessSchemaVersion = 3
 
 // Evidence errors. Loaders map these onto loud startup failures — a malformed
 // authority document must never silently deactivate every media.
@@ -57,6 +61,10 @@ var (
 	// ErrEvidenceSchema reports an evidence document whose schema_version is
 	// not the one this server understands.
 	ErrEvidenceSchema = errors.New("production readiness evidence has an unsupported schema version")
+	// ErrEvidenceManifestVersion reports evidence collected for a different
+	// capability content version. Model changes must rerun real-invocation
+	// acceptance instead of inheriting the previous model's results.
+	ErrEvidenceManifestVersion = errors.New("production readiness evidence targets a different manifest version")
 	// ErrEvidenceSlot reports an evidence entry citing a slot id outside the
 	// embedded checklist.
 	ErrEvidenceSlot = errors.New("production readiness evidence cites an unknown checklist slot")
@@ -69,14 +77,15 @@ var (
 
 // readinessChecklistDoc mirrors readiness-checklist.json's envelope.
 type readinessChecklistDoc struct {
-	SchemaVersion int             `json:"schema_version"`
-	Slots         []ReadinessSlot `json:"slots"`
+	SchemaVersion   int             `json:"schema_version"`
+	ManifestVersion int             `json:"manifest_version"`
+	Slots           []ReadinessSlot `json:"slots"`
 }
 
 // readinessRegistry is the parsed, index-checked checklist.
 type readinessRegistry struct {
 	byID      map[string]ReadinessSlot
-	binding   map[string]string // "media|dimension|value" -> slot id
+	binding   map[string]string // "media|dimension|value|model" -> slot id
 	slotOrder []string
 }
 
@@ -115,6 +124,10 @@ func parseReadinessRegistry() {
 			registryErr = fmt.Errorf("creation: embedded readiness checklist schema version %d, want %d", doc.SchemaVersion, readinessSchemaVersion)
 			return
 		}
+		if doc.ManifestVersion != ManifestVersion {
+			registryErr = fmt.Errorf("creation: embedded readiness checklist manifest version %d, want %d", doc.ManifestVersion, ManifestVersion)
+			return
+		}
 		reg := &readinessRegistry{byID: map[string]ReadinessSlot{}, binding: map[string]string{}}
 		for _, slot := range doc.Slots {
 			if slot.ID == "" {
@@ -125,7 +138,7 @@ func parseReadinessRegistry() {
 				registryErr = fmt.Errorf("creation: embedded readiness checklist duplicates slot %q", slot.ID)
 				return
 			}
-			key := readinessBindingKey(slot.Media, slot.Dimension, slot.Value)
+			key := readinessBindingKey(slot.Media, slot.Dimension, slot.Value, slot.Model)
 			if existing, clash := reg.binding[key]; clash {
 				registryErr = fmt.Errorf("creation: slots %s and %s bind the same capability value %s", existing, slot.ID, key)
 				return
@@ -138,19 +151,20 @@ func parseReadinessRegistry() {
 	})
 }
 
-func readinessBindingKey(media, dimension, value string) string {
-	return media + "|" + dimension + "|" + value
+func readinessBindingKey(media, dimension, value, model string) string {
+	return media + "|" + dimension + "|" + value + "|" + model
 }
 
 // readinessSlotForValue resolves the slot that activates one capability
-// value; ok is false when the manifest content and checklist disagree (a
-// build-time invariant enforced by tests).
-func readinessSlotForValue(media, dimension, value string) (ReadinessSlot, bool) {
+// value; model is empty for media-scoped dimensions. ok is false when the
+// manifest content and checklist disagree (a build-time invariant enforced
+// by tests).
+func readinessSlotForValue(media, dimension, value, model string) (ReadinessSlot, bool) {
 	parseReadinessRegistry()
 	if registryErr != nil {
 		return ReadinessSlot{}, false
 	}
-	id, ok := registry.binding[readinessBindingKey(media, dimension, value)]
+	id, ok := registry.binding[readinessBindingKey(media, dimension, value, model)]
 	if !ok {
 		return ReadinessSlot{}, false
 	}
@@ -174,9 +188,10 @@ type EvidenceEntry struct {
 
 // evidenceDoc mirrors the evidence file's JSON shape.
 type evidenceDoc struct {
-	SchemaVersion int                `json:"schema_version"`
-	GeneratedAt   time.Time          `json:"generated_at"`
-	Entries       []evidenceEntryDoc `json:"entries"`
+	SchemaVersion   int                `json:"schema_version"`
+	ManifestVersion int                `json:"manifest_version"`
+	GeneratedAt     time.Time          `json:"generated_at"`
+	Entries         []evidenceEntryDoc `json:"entries"`
 }
 
 type evidenceEntryDoc struct {
@@ -187,9 +202,10 @@ type evidenceEntryDoc struct {
 }
 
 // ParseReadinessEvidence validates a raw evidence document against the
-// embedded checklist. Unknown slot ids, foreign schema versions, and invalid
-// statuses are rejections, never ignored entries: the evidence file is an
-// authority document and a drifted runner must fail loudly.
+// embedded checklist and current capability content version. Unknown slot
+// ids, foreign schema/manifest versions, and invalid statuses are rejections,
+// never ignored entries: the evidence file is an authority document and a
+// drifted runner must fail loudly.
 func ParseReadinessEvidence(raw []byte) (ReadinessEvidence, error) {
 	var doc evidenceDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -197,6 +213,9 @@ func ParseReadinessEvidence(raw []byte) (ReadinessEvidence, error) {
 	}
 	if doc.SchemaVersion != readinessSchemaVersion {
 		return ReadinessEvidence{}, fmt.Errorf("%w: %d", ErrEvidenceSchema, doc.SchemaVersion)
+	}
+	if doc.ManifestVersion != ManifestVersion {
+		return ReadinessEvidence{}, fmt.Errorf("%w: got %d, want %d", ErrEvidenceManifestVersion, doc.ManifestVersion, ManifestVersion)
 	}
 	parseReadinessRegistry()
 	if registryErr != nil {
@@ -221,8 +240,10 @@ func ParseReadinessEvidence(raw []byte) (ReadinessEvidence, error) {
 }
 
 // passedValues returns the set of capability values whose slot has a passed
-// entry for one media dimension. Later duplicate entries override earlier
-// ones, so a re-run after a failure (or vice versa) is honored by run order.
+// entry for one media dimension's media-scoped slots (model-scoped slots are
+// only visible through passedValuesForModel). Later duplicate entries
+// override earlier ones, so a re-run after a failure (or vice versa) is
+// honored by run order.
 func (e ReadinessEvidence) passedValues(media, dimension string) map[string]bool {
 	parseReadinessRegistry()
 	passed := map[string]bool{}
@@ -231,10 +252,53 @@ func (e ReadinessEvidence) passedValues(media, dimension string) map[string]bool
 	}
 	for _, entry := range e.Entries {
 		slot, ok := registry.byID[entry.SlotID]
-		if !ok || slot.Media != media || slot.Dimension != dimension {
+		if !ok || slot.Media != media || slot.Dimension != dimension || slot.Model != "" {
 			continue
 		}
 		passed[slot.Value] = entry.Status == EvidencePassed
 	}
 	return passed
+}
+
+// passedValuesForModel returns the passed value set of one media dimension's
+// slots bound to one model — the resolution tiers, whose pixel sizes differ
+// per model. Run-order override follows passedValues.
+func (e ReadinessEvidence) passedValuesForModel(media, dimension, model string) map[string]bool {
+	parseReadinessRegistry()
+	passed := map[string]bool{}
+	if registryErr != nil {
+		return passed
+	}
+	for _, entry := range e.Entries {
+		slot, ok := registry.byID[entry.SlotID]
+		if !ok || slot.Media != media || slot.Dimension != dimension || slot.Model != model {
+			continue
+		}
+		passed[slot.Value] = entry.Status == EvidencePassed
+	}
+	return passed
+}
+
+// anyModelPassed reports whether any model-scoped slot of the dimension
+// currently holds a passed entry — the readiness gate for a media whose
+// resolution tiers are model-scoped. A later failed re-run of the same slot
+// overrides an earlier pass, matching the run-order rule above.
+func (e ReadinessEvidence) anyModelPassed(media, dimension string) bool {
+	parseReadinessRegistry()
+	if registryErr != nil {
+		return false
+	}
+	passedByModel := map[string]map[string]bool{}
+	for _, slot := range registry.byID {
+		if slot.Media != media || slot.Dimension != dimension || slot.Model == "" {
+			continue
+		}
+		if passedByModel[slot.Model] == nil {
+			passedByModel[slot.Model] = e.passedValuesForModel(media, dimension, slot.Model)
+		}
+		if passedByModel[slot.Model][slot.Value] {
+			return true
+		}
+	}
+	return false
 }

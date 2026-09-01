@@ -75,9 +75,15 @@ export interface CapabilityMode {
   }
 }
 
-/** The per-dimension recommended defaults; always inside published sets. */
+/** One allowlisted model with its own resolution tiers. */
+export interface CapabilityModel {
+  readonly model: string
+  readonly resolutions: readonly string[]
+  readonly defaultResolution: string
+}
+
+/** The media-level recommended defaults; always inside published sets. */
 export interface CapabilityDefaults {
-  readonly resolution: string
   readonly ratio?: string
   readonly quantity?: number
   readonly duration?: number
@@ -91,16 +97,16 @@ export interface PromptEnvelope {
 
 /**
  * One media's submittable capability set, or the structured unavailability
- * (reason/action) with every value field absent.
+ * (reason/action) with every value field absent. Resolution tiers are
+ * model-scoped: each published model carries its own tiers.
  */
 export interface CapabilityMedia {
   readonly available: boolean
   readonly reason: CapabilityReason | null
   readonly action: CapabilityAction | null
-  readonly model?: string
+  readonly models?: readonly CapabilityModel[]
   readonly modes?: readonly CapabilityMode[]
   readonly ratios?: readonly string[]
-  readonly resolutions?: readonly string[]
   readonly quantities?: readonly number[]
   readonly durations?: readonly number[]
   readonly defaults?: CapabilityDefaults
@@ -206,8 +212,8 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
     return { available: false, reason, action }
   }
 
-  const model = readString(entry, 'model')
-  if (model === null) return null
+  const models = parseModels(entry)
+  if (models === null) return null
 
   const modes: CapabilityMode[] = []
   if (!Array.isArray(readObjectField(entry, 'modes'))) return null
@@ -242,10 +248,6 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
   }
   if (modes.length === 0) return null
 
-  const resolutions = readStringList(entry, 'resolutions')
-  if (resolutions === undefined || resolutions === MALFORMED_LIST || resolutions.length === 0)
-    return null
-
   const defaults = parseDefaults(entry)
   if (defaults === null) return null
 
@@ -265,15 +267,41 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
     available: true,
     reason: null,
     action: null,
-    model,
+    models,
     modes,
-    resolutions,
     defaults,
     prompt,
     ...(ratios !== undefined ? { ratios } : {}),
     ...(quantities !== undefined ? { quantities } : {}),
     ...(durations !== undefined ? { durations } : {})
   }
+}
+
+// parseModels reads the model list with its per-model resolution tiers. A
+// default outside the entry's own tiers fails closed: the composer may only
+// ever seed resolutions the model itself publishes.
+function parseModels(entry: unknown): CapabilityModel[] | null {
+  const raw = readObjectField(entry, 'models')
+  if (!Array.isArray(raw)) return null
+  const models: CapabilityModel[] = []
+  for (const item of raw) {
+    const model = readString(item, 'model')
+    const resolutions = readStringList(item, 'resolutions')
+    const defaultResolution = readString(item, 'default_resolution')
+    if (
+      model === null ||
+      resolutions === undefined ||
+      resolutions === MALFORMED_LIST ||
+      resolutions.length === 0 ||
+      defaultResolution === null ||
+      !resolutions.includes(defaultResolution)
+    ) {
+      return null
+    }
+    models.push({ model, resolutions, defaultResolution })
+  }
+  if (models.length === 0) return null
+  return models
 }
 
 // Sentinel for "the field is present but is not the documented list shape" —
@@ -404,12 +432,10 @@ function parsePrompt(entry: unknown): PromptEnvelope | null {
 function parseDefaults(entry: unknown): CapabilityDefaults | null {
   const raw = (entry as Record<string, unknown>).defaults
   if (typeof raw !== 'object' || raw === null) return null
-  const resolution = readString(raw, 'resolution')
-  if (resolution === null) return null
   const ratio = readString(raw, 'ratio') ?? undefined
   const quantity = readNumber(raw, 'quantity') ?? undefined
   const duration = readNumber(raw, 'duration') ?? undefined
-  return { resolution, ratio, quantity, duration }
+  return { ratio, quantity, duration }
 }
 
 /**

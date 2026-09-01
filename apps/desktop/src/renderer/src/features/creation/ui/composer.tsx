@@ -23,6 +23,7 @@ import {
   mediaCapability,
   modeCandidates,
   modelCandidates,
+  resolutionCandidates,
   type DraftMediaType
 } from '../model/capability'
 import type { CreationWorkbenchController } from '../model/use-workbench'
@@ -327,7 +328,7 @@ function ModelMenu({
           <DropdownMenuItem
             key={model}
             className="min-h-14 cursor-pointer rounded-xl px-3 py-2"
-            onSelect={() => workbench.patchDraft({ model })}
+            onSelect={() => workbench.setModel(model)}
           >
             <span className="border-border bg-accent grid size-9 shrink-0 place-items-center rounded-lg border">
               <SparklesIcon className="size-4" aria-hidden />
@@ -408,7 +409,10 @@ function ParamsMenu({
   if (media === null || capability === null || !capability.available) return <></>
 
   const ratios = capability.ratios ?? []
-  const resolutions = capability.resolutions ?? []
+  // Resolution tiers are model-scoped: the selected model's own published
+  // tiers, empty while the draft's model is stale so only the stale note
+  // shows.
+  const resolutions = resolutionCandidates(manifest, media, draft.model)
   const quantities = capability.quantities ?? []
   const staleRatio = staleFields.has('ratio') ? draft.ratio : null
   const staleResolution = staleFields.has('resolution') ? draft.resolution : null

@@ -12,19 +12,21 @@ import "strconv"
 
 // ManifestSchemaVersion is the wire payload's shape version
 // (contracts/creation.yaml CapabilityManifest.schema_version).
-const ManifestSchemaVersion = 1
+const ManifestSchemaVersion = 2
 
 // ManifestVersion is the capability content version. Bump when the accepted
 // capability set changes — by acceptance (T16 evidence activates values) or
-// by decision (a failed acceptance removes a value, e.g. 1080p).
-const ManifestVersion = 1
+// by decision (a failed acceptance removes a value, e.g. 1080p, or the
+// vendor's ratio/size contract change that removed 4:5).
+const ManifestVersion = 3
 
 // The V1 allowlisted models (spec #150). Declared here because the manifest
 // publishes them; the Kapon adapter reuses these constants so the catalog
-// check and the manifest can never drift apart.
+// check, the manifest, and the wire size table can never drift apart.
 const (
-	ImageModelID = "doubao-seedream-5.0-lite"
-	VideoModelID = "doubao-seedance-2-5"
+	ImageModelID  = "doubao-seedream-5.0-pro"
+	ImageModelNID = "doubao-seedream-5.0-n"
+	VideoModelID  = "doubao-seedance-2-5"
 )
 
 // Prompt length envelope shared by both media (spec 图片/视频合同).
@@ -53,35 +55,44 @@ const (
 // Manifest content: every value binds to exactly one readiness checklist
 // slot (build-time invariant enforced by manifest_test.go). Order here is
 // the wire order — fixed, so one manifest version always serializes the same
-// sequence.
+// sequence. Image resolution tiers are model-scoped: the vendor size table
+// differs per model, so a tier only exists on the models that declare it and
+// its checklist slots bind (model, tier).
 var (
-	imageModes       = []string{ModeTextToImage, ModeReferenceImage}
-	imageRatios      = []string{"1:1", "4:3", "4:5", "16:9", "9:16"}
-	imageResolutions = []string{"1K", "2K", "4K"}
-	imageQuantities  = []int{1, 2, 3, 4}
+	imageModes  = []string{ModeTextToImage, ModeReferenceImage}
+	imageRatios = []string{"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"}
+	// imageModels declares the accepted image models and their resolution
+	// tiers (Kapon size contract, apifox 2026-09): pro covers 1K/1.5K/2K,
+	// n covers 2K/3K/4K; the tier labels overlap but the pixel sizes differ.
+	imageModels = []CapabilityModelView{
+		{Model: ImageModelID, Resolutions: []string{"1K", "1.5K", "2K"}, DefaultResolution: "2K"},
+		{Model: ImageModelNID, Resolutions: []string{"2K", "3K", "4K"}, DefaultResolution: "2K"},
+	}
+	imageQuantities = []int{1, 2, 3, 4}
 
-	videoModes       = []string{ModeTextToVideo, ModeFirstFrame, ModeFirstLastFrame, ModeOmniReference}
-	videoResolutions = []string{"480p", "720p", "1080p"}
-	videoDurations   = []int{5, 10}
+	videoModes  = []string{ModeTextToVideo, ModeFirstFrame, ModeFirstLastFrame, ModeOmniReference}
+	videoModels = []CapabilityModelView{
+		{Model: VideoModelID, Resolutions: []string{"480p", "720p", "1080p"}, DefaultResolution: "720p"},
+	}
+	videoDurations = []int{5, 10}
 )
 
-// AcceptedImageRatios and AcceptedImageResolutions expose the accepted
-// value sets the manifest publishes, so downstream contracts (e.g. the
-// adapter's wire mapping conformance) can derive their coverage from the
-// same source instead of hand-copying the lists.
+// AcceptedImageRatios and AcceptedImageModels expose the accepted value sets
+// the manifest publishes, so downstream contracts (e.g. the adapter's wire
+// mapping conformance) can derive their coverage from the same source
+// instead of hand-copying the lists.
 func AcceptedImageRatios() []string { return imageRatios }
 
-// AcceptedImageResolutions returns the accepted resolution values.
-func AcceptedImageResolutions() []string { return imageResolutions }
+// AcceptedImageModels returns the declared image models with their
+// resolution tiers.
+func AcceptedImageModels() []CapabilityModelView { return imageModels }
 
 // Spec defaults: used when active, else the first active value in the fixed
-// order above.
+// order above. The resolution defaults are declared per model.
 const (
-	defaultImageRatio      = "1:1"
-	defaultImageResolution = "2K"
-	defaultImageQuantity   = 1
-	defaultVideoResolution = "720p"
-	defaultVideoDuration   = 5
+	defaultImageRatio    = "1:1"
+	defaultImageQuantity = 1
+	defaultVideoDuration = 5
 )
 
 // Checklist dimensions each media must have at least one passed value from
@@ -112,28 +123,35 @@ type (
 		Available         bool                     `json:"available"`
 		Reason            string                   `json:"reason,omitempty"`
 		Action            string                   `json:"action,omitempty"`
-		Model             string                   `json:"model,omitempty"`
+		Models            []CapabilityModelView    `json:"models,omitempty"`
 		Modes             []CapabilityModeView     `json:"modes,omitempty"`
 		Ratios            []string                 `json:"ratios,omitempty"`
-		Resolutions       []string                 `json:"resolutions,omitempty"`
 		Quantities        []int                    `json:"quantities,omitempty"`
 		Durations         []int                    `json:"durations,omitempty"`
 		Defaults          *CapabilityDefaultsView  `json:"defaults,omitempty"`
 		Prompt            *PromptEnvelopeView      `json:"prompt,omitempty"`
 		ReferenceMaterial *ReferenceMaterialPolicy `json:"reference_material,omitempty"`
 	}
+	// CapabilityModelView is one allowlisted model and the resolution tiers
+	// it publishes. Image media carries two models with disjoint tier sets;
+	// video carries one.
+	CapabilityModelView struct {
+		Model             string   `json:"model"`
+		Resolutions       []string `json:"resolutions"`
+		DefaultResolution string   `json:"default_resolution"`
+	}
 	// CapabilityModeView is one submittable mode and its reference bounds.
 	CapabilityModeView struct {
 		ID                string                  `json:"id"`
 		ReferenceMaterial ReferenceMaterialPolicy `json:"reference_material"`
 	}
-	// CapabilityDefaultsView recommends one value per dimension; every value
-	// is always inside the published sets.
+	// CapabilityDefaultsView recommends one value per media-level dimension;
+	// every value is always inside the published sets. The resolution
+	// default lives on each CapabilityModelView.
 	CapabilityDefaultsView struct {
-		Ratio      string `json:"ratio,omitempty"`
-		Resolution string `json:"resolution"`
-		Quantity   int    `json:"quantity,omitempty"`
-		Duration   int    `json:"duration,omitempty"`
+		Ratio    string `json:"ratio,omitempty"`
+		Quantity int    `json:"quantity,omitempty"`
+		Duration int    `json:"duration,omitempty"`
 	}
 	// PromptEnvelopeView bounds the prompt length in Unicode characters.
 	PromptEnvelopeView struct {
@@ -330,13 +348,21 @@ func mediaReferenceEnvelope(media string) ReferenceMaterialPolicy {
 // mediaReadinessActive reports whether the evidence activates a media:
 // every required dimension has at least one passed slot — including the
 // persistence and probe slots, because an output that cannot be verified and
-// transferred never ships as a capability. Nothing partial ships: with the
-// full dimension active but the spec default unpassed, the published default
-// falls back to the first passed value in canonical order (never an
-// unverified default, never a silent rewrite of a submitted draft — the
-// manifest simply publishes exactly what is submittable today).
+// transferred never ships as a capability. Resolution tiers are model-scoped,
+// so that dimension is active when any declared model has an accepted tier.
+// Nothing partial ships: with the full dimension active but the spec default
+// unpassed, the published default falls back to the first passed value in
+// canonical order (never an unverified default, never a silent rewrite of a
+// submitted draft — the manifest simply publishes exactly what is submittable
+// today).
 func mediaReadinessActive(evidence ReadinessEvidence, media string) bool {
 	for _, dimension := range manifestDimensions(media) {
+		if dimension == "resolution" {
+			if !evidence.anyModelPassed(media, dimension) {
+				return false
+			}
+			continue
+		}
 		if len(evidence.passedValues(media, dimension)) == 0 {
 			return false
 		}
@@ -371,10 +397,12 @@ func pickDefaultInt(values []int, active map[string]bool, specDefault int) int {
 }
 
 // deriveAvailableMedia builds one media's view when both the readiness gate
-// and the instance connection allow it, publishing exactly the passed
-// values in fixed order with in-set defaults.
-func deriveAvailableMedia(evidence ReadinessEvidence, media, model string, modes []string) CapabilityMediaView {
-	view := CapabilityMediaView{Available: true, Model: model}
+// and the instance connection allow it, publishing exactly the passed values
+// in fixed order with in-set defaults. Each declared model publishes only its
+// own accepted resolution tiers; a model without any accepted tier is not
+// published at all.
+func deriveAvailableMedia(evidence ReadinessEvidence, media string, models []CapabilityModelView, modes []string) CapabilityMediaView {
+	view := CapabilityMediaView{Available: true}
 
 	modeActive := evidence.passedValues(media, "mode")
 	for _, mode := range modes {
@@ -383,22 +411,22 @@ func deriveAvailableMedia(evidence ReadinessEvidence, media, model string, modes
 		}
 	}
 
-	resolutions := imageResolutions
-	if media == ReadinessMediaVideo {
-		resolutions = videoResolutions
-	}
-	resolutionActive := evidence.passedValues(media, "resolution")
-	for _, r := range resolutions {
-		if resolutionActive[r] {
-			view.Resolutions = append(view.Resolutions, r)
+	for _, model := range models {
+		tierActive := evidence.passedValuesForModel(media, "resolution", model.Model)
+		published := CapabilityModelView{Model: model.Model}
+		for _, tier := range model.Resolutions {
+			if tierActive[tier] {
+				published.Resolutions = append(published.Resolutions, tier)
+			}
 		}
+		if len(published.Resolutions) == 0 {
+			continue
+		}
+		published.DefaultResolution = pickDefault(model.Resolutions, tierActive, model.DefaultResolution)
+		view.Models = append(view.Models, published)
 	}
-	defaultResolution := defaultImageResolution
-	if media == ReadinessMediaVideo {
-		defaultResolution = defaultVideoResolution
-	}
-	defaults := CapabilityDefaultsView{Resolution: pickDefault(resolutions, resolutionActive, defaultResolution)}
 
+	var defaults CapabilityDefaultsView
 	if media == ReadinessMediaImage {
 		ratioActive := evidence.passedValues(media, "ratio")
 		for _, r := range imageRatios {
@@ -450,19 +478,19 @@ func DeriveCapabilityManifest(evidence ReadinessEvidence, connection *ProviderCo
 		ManifestVersion: ManifestVersion,
 	}
 
-	derive := func(media, model string, modes []string, instanceView MediaCapabilityView) CapabilityMediaView {
+	derive := func(media string, models []CapabilityModelView, modes []string, instanceView MediaCapabilityView) CapabilityMediaView {
 		switch {
 		case !mediaReadinessActive(evidence, media):
 			return CapabilityMediaView{Reason: ManifestReasonReadinessPending, Action: ManifestActionAwaitRelease}
 		case instanceView.Status != MediaCapabilityAvailable:
 			return CapabilityMediaView{Reason: instanceView.Reason, Action: instanceView.Action}
 		default:
-			return deriveAvailableMedia(evidence, media, model, modes)
+			return deriveAvailableMedia(evidence, media, models, modes)
 		}
 	}
 
-	manifest.Image = derive(ReadinessMediaImage, ImageModelID, imageModes, instance.Image)
-	manifest.Video = derive(ReadinessMediaVideo, VideoModelID, videoModes, instance.Video)
+	manifest.Image = derive(ReadinessMediaImage, imageModels, imageModes, instance.Image)
+	manifest.Video = derive(ReadinessMediaVideo, videoModels, videoModes, instance.Video)
 	return manifest
 }
 

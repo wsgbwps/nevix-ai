@@ -71,7 +71,7 @@ createServer((req, res) => {
     res.setHeader('content-type', 'application/json')
     res.end(
       JSON.stringify({
-        data: [{ id: 'doubao-seedream-5.0-lite' }, { id: 'doubao-seedance-2-5' }]
+        data: [{ id: 'doubao-seedream-5.0-pro' }, { id: 'doubao-seedance-2-5' }]
       })
     )
     return

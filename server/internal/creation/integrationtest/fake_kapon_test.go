@@ -109,7 +109,7 @@ func catalogBody(imageModel, videoModel bool) string {
 		models += `{"id":"` + id + `"}`
 	}
 	if imageModel {
-		add("doubao-seedream-5.0-lite")
+		add("doubao-seedream-5.0-pro")
 	}
 	if videoModel {
 		add("doubao-seedance-2-5")

@@ -23,8 +23,10 @@ import (
 
 var manifestImageSlots = []string{
 	"image.mode.text-to-image", "image.mode.reference-image",
-	"image.ratio.1-1", "image.ratio.4-3", "image.ratio.4-5", "image.ratio.16-9", "image.ratio.9-16",
-	"image.resolution.1k", "image.resolution.2k", "image.resolution.4k",
+	"image.ratio.1-1", "image.ratio.4-3", "image.ratio.3-4", "image.ratio.16-9", "image.ratio.9-16",
+	"image.ratio.3-2", "image.ratio.2-3", "image.ratio.21-9",
+	"image.resolution.pro-1k", "image.resolution.pro-1-5k", "image.resolution.pro-2k",
+	"image.resolution.n-2k", "image.resolution.n-3k", "image.resolution.n-4k",
 	"image.quantity.1", "image.quantity.2", "image.quantity.3", "image.quantity.4",
 	"image.transfer.temp-url", "image.probe.png",
 }
@@ -41,8 +43,9 @@ var manifestVideoSlots = []string{
 func writeEvidenceFile(t *testing.T, slotIDs ...string) string {
 	t.Helper()
 	doc := map[string]any{
-		"schema_version": 1,
-		"generated_at":   time.Now().UTC().Format(time.RFC3339),
+		"schema_version":   3,
+		"manifest_version": 3,
+		"generated_at":     time.Now().UTC().Format(time.RFC3339),
 	}
 	entries := make([]map[string]any, 0, len(slotIDs))
 	for _, slotID := range slotIDs {
@@ -79,19 +82,21 @@ type manifestMedia struct {
 	Available bool   `json:"available"`
 	Reason    string `json:"reason"`
 	Action    string `json:"action"`
-	Model     string `json:"model"`
-	Modes     []struct {
+	Models    []struct {
+		Model             string   `json:"model"`
+		Resolutions       []string `json:"resolutions"`
+		DefaultResolution string   `json:"default_resolution"`
+	} `json:"models"`
+	Modes []struct {
 		ID string `json:"id"`
 	} `json:"modes"`
-	Ratios      []string `json:"ratios"`
-	Resolutions []string `json:"resolutions"`
-	Quantities  []int    `json:"quantities"`
-	Durations   []int    `json:"durations"`
-	Defaults    *struct {
-		Ratio      string `json:"ratio"`
-		Resolution string `json:"resolution"`
-		Quantity   int    `json:"quantity"`
-		Duration   int    `json:"duration"`
+	Ratios     []string `json:"ratios"`
+	Quantities []int    `json:"quantities"`
+	Durations  []int    `json:"durations"`
+	Defaults   *struct {
+		Ratio    string `json:"ratio"`
+		Quantity int    `json:"quantity"`
+		Duration int    `json:"duration"`
 	} `json:"defaults"`
 	Prompt *struct {
 		MinChars int `json:"min_chars"`
@@ -136,14 +141,14 @@ func TestCapabilityManifestWithoutEvidenceIsReadinessPending(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("manifest must answer 200, got %d: %s", status, body)
 	}
-	if payload.SchemaVersion != 1 || payload.ManifestVersion != 1 {
+	if payload.SchemaVersion != 2 || payload.ManifestVersion != 3 {
 		t.Fatalf("manifest must publish its schema and content versions: %+v", payload)
 	}
 	for media, view := range map[string]manifestMedia{"image": payload.Image, "video": payload.Video} {
 		if view.Available || view.Reason != "production_readiness_pending" || view.Action != "await_release" {
 			t.Fatalf("%s must be readiness-pending, got %+v", media, view)
 		}
-		if view.Model != "" || view.Modes != nil || view.Resolutions != nil || view.Defaults != nil {
+		if view.Models != nil || view.Modes != nil || view.Defaults != nil {
 			t.Fatalf("%s pending view must not publish values: %+v", media, view)
 		}
 	}
@@ -178,23 +183,45 @@ func TestCapabilityManifestActivatesWithEvidenceAndConnection(t *testing.T) {
 		t.Fatal("admin and member must receive the identical manifest payload")
 	}
 
+	// expectedModelSpec is one manifest models entry the flow test demands.
+	type expectedModelSpec struct {
+		model             string
+		resolutions       []string
+		defaultResolution string
+	}
 	expectations := []struct {
-		media       string
-		view        manifestMedia
-		model       string
-		modes       []string
-		resolutions []string
+		media  string
+		view   manifestMedia
+		models []expectedModelSpec
+		modes  []string
 	}{
-		{"image", payload.Image, "doubao-seedream-5.0-lite", []string{"text-to-image", "reference-image"}, []string{"1K", "2K", "4K"}},
-		{"video", payload.Video, "doubao-seedance-2-5", []string{"text-to-video", "first-frame", "first-last-frame", "omni-reference"}, []string{"480p", "720p", "1080p"}},
+		{"image", payload.Image, []expectedModelSpec{
+			{"doubao-seedream-5.0-pro", []string{"1K", "1.5K", "2K"}, "2K"},
+			{"doubao-seedream-5.0-n", []string{"2K", "3K", "4K"}, "2K"},
+		}, []string{"text-to-image", "reference-image"}},
+		{"video", payload.Video, []expectedModelSpec{
+			{"doubao-seedance-2-5", []string{"480p", "720p", "1080p"}, "720p"},
+		}, []string{"text-to-video", "first-frame", "first-last-frame", "omni-reference"}},
 	}
 	for _, want := range expectations {
 		view := want.view
 		if !view.Available || view.Reason != "" || view.Action != "" {
 			t.Fatalf("%s must be available with full evidence, got %+v", want.media, view)
 		}
-		if view.Model != want.model {
-			t.Fatalf("%s model = %q, want %q", want.media, view.Model, want.model)
+		if len(view.Models) != len(want.models) {
+			t.Fatalf("%s models = %+v, want %d entries", want.media, view.Models, len(want.models))
+		}
+		for index, wantModel := range want.models {
+			gotModel := view.Models[index]
+			if gotModel.Model != wantModel.model {
+				t.Fatalf("%s model[%d] = %q, want %q", want.media, index, gotModel.Model, wantModel.model)
+			}
+			if strings.Join(gotModel.Resolutions, ",") != strings.Join(wantModel.resolutions, ",") {
+				t.Fatalf("%s %s resolutions = %v, want %v", want.media, gotModel.Model, gotModel.Resolutions, wantModel.resolutions)
+			}
+			if gotModel.DefaultResolution != wantModel.defaultResolution {
+				t.Fatalf("%s %s default resolution = %q, want %q", want.media, gotModel.Model, gotModel.DefaultResolution, wantModel.defaultResolution)
+			}
 		}
 		gotModes := make([]string, 0, len(view.Modes))
 		for _, mode := range view.Modes {
@@ -203,9 +230,6 @@ func TestCapabilityManifestActivatesWithEvidenceAndConnection(t *testing.T) {
 		if strings.Join(gotModes, ",") != strings.Join(want.modes, ",") {
 			t.Fatalf("%s modes = %v, want %v", want.media, gotModes, want.modes)
 		}
-		if strings.Join(view.Resolutions, ",") != strings.Join(want.resolutions, ",") {
-			t.Fatalf("%s resolutions = %v, want %v", want.media, view.Resolutions, want.resolutions)
-		}
 		if view.Defaults == nil || view.Prompt == nil || view.ReferenceMaterial == nil {
 			t.Fatalf("%s must publish defaults, prompt and reference policy: %+v", want.media, view)
 		}
@@ -213,16 +237,16 @@ func TestCapabilityManifestActivatesWithEvidenceAndConnection(t *testing.T) {
 			t.Fatalf("%s prompt envelope must mirror the spec contract: %+v", want.media, view.Prompt)
 		}
 	}
-	if strings.Join(payload.Image.Ratios, ",") != "1:1,4:3,4:5,16:9,9:16" {
+	if strings.Join(payload.Image.Ratios, ",") != "1:1,4:3,3:4,16:9,9:16,3:2,2:3,21:9" {
 		t.Fatalf("image ratios = %v", payload.Image.Ratios)
 	}
 	if joinInts(payload.Image.Quantities) != "1,2,3,4" {
 		t.Fatalf("image quantities = %v", payload.Image.Quantities)
 	}
-	if payload.Image.Defaults.Quantity != 1 || payload.Image.Defaults.Ratio != "1:1" || payload.Image.Defaults.Resolution != "2K" {
+	if payload.Image.Defaults.Quantity != 1 || payload.Image.Defaults.Ratio != "1:1" {
 		t.Fatalf("image defaults = %+v", payload.Image.Defaults)
 	}
-	if joinInts(payload.Video.Durations) != "5,10" || payload.Video.Defaults.Duration != 5 || payload.Video.Defaults.Resolution != "720p" {
+	if joinInts(payload.Video.Durations) != "5,10" || payload.Video.Defaults.Duration != 5 {
 		t.Fatalf("video durations/defaults = %+v", payload.Video)
 	}
 	assertContractResponse(t, "GET", "/creation/capability-manifest", adminStatus, adminBody)
@@ -257,7 +281,7 @@ func TestCapabilityManifestIndependentMediaDegradation(t *testing.T) {
 	if payload.Video.Available || payload.Video.Reason != "model_unavailable" || payload.Video.Action != "contact_admin" {
 		t.Fatalf("video must degrade to model_unavailable/contact_admin, got %+v", payload.Video)
 	}
-	if payload.Video.Model != "" || payload.Video.Modes != nil {
+	if payload.Video.Models != nil || payload.Video.Modes != nil {
 		t.Fatalf("degraded video must not publish values: %+v", payload.Video)
 	}
 }
@@ -375,7 +399,7 @@ func TestCapabilityManifestInvalidEvidenceRefusesStartup(t *testing.T) {
 	h.ensureAccounts(t)
 
 	path := filepath.Join(t.TempDir(), "production-readiness.json")
-	invalid := []byte(`{"schema_version": 1, "entries": [{"slot_id": "image.resolution.8k", "status": "passed"}]}`)
+	invalid := []byte(`{"schema_version": 3, "manifest_version": 3, "entries": [{"slot_id": "image.resolution.8k", "status": "passed"}]}`)
 	if err := os.WriteFile(path, invalid, 0o600); err != nil {
 		t.Fatalf("write invalid evidence: %v", err)
 	}

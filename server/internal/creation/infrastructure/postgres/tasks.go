@@ -284,7 +284,10 @@ func readTaskWithSlotsAndJob(ctx context.Context, exec draftReadExec, owner, tas
 	}
 
 	slotRows, err := exec.Query(ctx, `
-		SELECT slot_index, status, failure_reason, result_mime, result_byte_size, result_checksum,
+		SELECT slot_index, status, failure_reason,
+		       failure_diagnostic_source, failure_diagnostic_code, failure_diagnostic_message,
+		       failure_diagnostic_http_status, failure_diagnostic_provider_type, failure_diagnostic_request_id,
+		       result_mime, result_byte_size, result_checksum,
 		       result_blob_key, result_width_px, result_height_px, result_duration_ms
 		FROM creation_generation_slots WHERE task_id = $1 ORDER BY slot_index ASC`, taskID)
 	if err != nil {
@@ -306,9 +309,9 @@ func readTaskWithSlotsAndJob(ctx context.Context, exec draftReadExec, owner, tas
 	var job domain.ProviderJob
 	var status *string
 	err = exec.QueryRow(ctx, `
-		SELECT id, task_id, media_type, status, external_ref, last_outcome, created_at, updated_at, terminal_at
+		SELECT id, task_id, media_type, status, external_ref, last_outcome, submit_attempts, created_at, updated_at, terminal_at
 		FROM creation_provider_jobs WHERE task_id = $1 ORDER BY created_at DESC LIMIT 1`, taskID).
-		Scan(&job.ID, &job.TaskID, &job.Media, &status, &job.ExternalRef, &job.Outcome, &job.CreatedAt, &job.UpdatedAt, &job.TerminalAt)
+		Scan(&job.ID, &job.TaskID, &job.Media, &status, &job.ExternalRef, &job.Outcome, &job.SubmitAttempts, &job.CreatedAt, &job.UpdatedAt, &job.TerminalAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return task, slots, domain.ProviderJob{}, nil
 	}
@@ -323,8 +326,14 @@ func readTaskWithSlotsAndJob(ctx context.Context, exec draftReadExec, owner, tas
 
 func scanSlot(row pgx.Row) (domain.GenerationSlot, error) {
 	var s domain.GenerationSlot
-	var status, reason *string
-	if err := row.Scan(&s.Index, &status, &reason, &s.ResultMime, &s.ResultByteSize,
+	var status, reason, diagnosticSource, diagnosticCode, diagnosticMessage *string
+	var diagnosticHTTPStatus *int
+	var diagnosticProviderType, diagnosticRequestID *string
+	if err := row.Scan(
+		&s.Index, &status, &reason,
+		&diagnosticSource, &diagnosticCode, &diagnosticMessage,
+		&diagnosticHTTPStatus, &diagnosticProviderType, &diagnosticRequestID,
+		&s.ResultMime, &s.ResultByteSize,
 		&s.ResultChecksum, &s.ResultBlobKey, &s.ResultWidthPx, &s.ResultHeightPx, &s.ResultDurationMS); err != nil {
 		return domain.GenerationSlot{}, fmt.Errorf("creation: scan slot: %w", err)
 	}
@@ -335,6 +344,16 @@ func scanSlot(row pgx.Row) (domain.GenerationSlot, error) {
 	if reason != nil {
 		parsed := domain.FailureReason(*reason)
 		s.Reason = &parsed
+	}
+	if diagnosticSource != nil && diagnosticCode != nil && diagnosticMessage != nil {
+		s.Diagnostic = &domain.FailureDiagnostic{
+			Source:       domain.FailureDiagnosticSource(*diagnosticSource),
+			Code:         *diagnosticCode,
+			Message:      *diagnosticMessage,
+			HTTPStatus:   diagnosticHTTPStatus,
+			ProviderType: diagnosticProviderType,
+			RequestID:    diagnosticRequestID,
+		}
 	}
 	return s, nil
 }
@@ -449,13 +468,42 @@ func (r *GenerationTaskRepository) TransitionJob(ctx context.Context, tx domain.
 	return tag.RowsAffected() == 1, nil
 }
 
+// BeginJobSubmitAttempt persists the crash-recovery marker and the dedicated
+// provider-call count in one short transaction immediately before Submit.
+func (r *GenerationTaskRepository) BeginJobSubmitAttempt(ctx context.Context, tx domain.TxExecutor, jobID domain.UUID, from []domain.JobStatus) (int, bool, error) {
+	var attempts int
+	err := tx.QueryRow(ctx, `
+		UPDATE creation_provider_jobs SET
+			status = 'submitting', submit_attempts = submit_attempts + 1,
+			last_outcome = NULL, terminal_at = NULL, updated_at = now()
+		WHERE id = $1 AND status = ANY($2::text[])
+		RETURNING submit_attempts`, jobID, statusesArg(from)).Scan(&attempts)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("creation: begin provider submit attempt: %w", err)
+	}
+	return attempts, true, nil
+}
+
 // WriteSlotVerdict writes one slot's terminal verdict write-once; an
 // already-settled slot keeps its first verdict and reports false.
-func (r *GenerationTaskRepository) WriteSlotVerdict(ctx context.Context, tx domain.TxExecutor, taskID domain.UUID, index int, status domain.SlotStatus, reason *domain.FailureReason, result *domain.SlotResult) (bool, error) {
+func (r *GenerationTaskRepository) WriteSlotVerdict(ctx context.Context, tx domain.TxExecutor, taskID domain.UUID, index int, status domain.SlotStatus, reason *domain.FailureReason, diagnostic *domain.FailureDiagnostic, result *domain.SlotResult) (bool, error) {
 	var mime, blobKey any
 	var size any
 	var checksum any
 	var width, height, duration any
+	var diagnosticSource, diagnosticCode, diagnosticMessage any
+	var diagnosticHTTPStatus, diagnosticProviderType, diagnosticRequestID any
+	if diagnostic != nil {
+		diagnosticSource = string(diagnostic.Source)
+		diagnosticCode = diagnostic.Code
+		diagnosticMessage = diagnostic.Message
+		diagnosticHTTPStatus = diagnostic.HTTPStatus
+		diagnosticProviderType = diagnostic.ProviderType
+		diagnosticRequestID = diagnostic.RequestID
+	}
 	if result != nil {
 		mime, size, checksum, blobKey = result.Mime, result.ByteSize, result.Checksum, result.BlobKey
 		width, height, duration = result.WidthPx, result.HeightPx, result.DurationMS
@@ -463,10 +511,16 @@ func (r *GenerationTaskRepository) WriteSlotVerdict(ctx context.Context, tx doma
 	tag, err := tx.Exec(ctx, `
 		UPDATE creation_generation_slots SET
 			status = $3, failure_reason = $4,
-			result_mime = $5, result_byte_size = $6, result_checksum = $7, result_blob_key = $8,
-			result_width_px = $9, result_height_px = $10, result_duration_ms = $11
+			failure_diagnostic_source = $5, failure_diagnostic_code = $6,
+			failure_diagnostic_message = $7, failure_diagnostic_http_status = $8,
+			failure_diagnostic_provider_type = $9, failure_diagnostic_request_id = $10,
+			result_mime = $11, result_byte_size = $12, result_checksum = $13, result_blob_key = $14,
+			result_width_px = $15, result_height_px = $16, result_duration_ms = $17
 		WHERE task_id = $1 AND slot_index = $2 AND status IS NULL`,
-		taskID, index, string(status), failureReasonArg(reason), mime, size, checksum, blobKey, width, height, duration)
+		taskID, index, string(status), failureReasonArg(reason),
+		diagnosticSource, diagnosticCode, diagnosticMessage, diagnosticHTTPStatus,
+		diagnosticProviderType, diagnosticRequestID,
+		mime, size, checksum, blobKey, width, height, duration)
 	if err != nil {
 		return false, fmt.Errorf("creation: write slot verdict: %w", err)
 	}

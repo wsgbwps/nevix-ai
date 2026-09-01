@@ -15,11 +15,13 @@ import (
 
 // imageScript is one scripted synchronous image generation answer.
 type imageScript struct {
-	status  int    // forced HTTP status (0 = answer normally)
-	outputs int    // number of output URLs returned when status == 0
-	abort   bool   // drop the connection mid-response (outcome unknown)
-	code    string // error code for policy rejections (400 answers)
-	jpeg    bool   // serve JPEG output bytes (output-verification failure path)
+	status            int    // forced HTTP status (0 = answer normally)
+	outputs           int    // number of output URLs returned when status == 0
+	outputStatus      int    // forced output-download status (0 = serve fixture bytes)
+	abort             bool   // drop the connection mid-response (outcome unknown)
+	code              string // structured provider error code for scripted error answers
+	jpeg              bool   // serve JPEG output bytes (output-verification failure path)
+	retryAfterSeconds *int   // optional Retry-After header for 429 answers
 }
 
 // recordedImageCall is the adapter-conformance record of one image submit:
@@ -129,9 +131,12 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		}
 		script := g.image
 		if script.status != 0 {
+			if script.retryAfterSeconds != nil {
+				w.Header().Set("Retry-After", itoaFixture(*script.retryAfterSeconds))
+			}
 			w.WriteHeader(script.status)
 			if script.code != "" {
-				w.Write([]byte(`{"error":{"code":"` + script.code + `","message":"rejected"}}`))
+				w.Write([]byte(`{"error":{"code":"` + script.code + `","message":"provider-private-detail","request_id":"kapon-private-request-id"}}`))
 			}
 			return true
 		}
@@ -202,6 +207,10 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		return true
 
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/provider-outputs/image/"):
+		if g.image.outputStatus != 0 {
+			w.WriteHeader(g.image.outputStatus)
+			return true
+		}
 		if g.image.jpeg {
 			w.Header().Set("Content-Type", "image/jpeg")
 			w.Write(g.servedJPEG)

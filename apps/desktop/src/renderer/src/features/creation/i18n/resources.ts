@@ -72,8 +72,19 @@ export const creationTranslations = defineResourceTranslations({
           output_policy_rejected: '输出未通过安全审核',
           action_required: '需要管理员处理',
           temporarily_unavailable: '供应商暂时不可用，可重试',
+          provider_route_unavailable:
+            '模型路由不可用（诊断代码：MODEL_GROUP_ALL_UNAVAILABLE）；请管理员检查渠道绑定、权限、余额、配额或容量',
           processing_indeterminate: '结局未知，重做可能重复计费',
           internal_error: '内部错误'
+        },
+        diagnostic: {
+          sources: {
+            provider: 'Kapon 响应',
+            output_transfer: '结果下载',
+            storage: '结果存储',
+            media_probe: '媒体校验'
+          },
+          requestId: '请求 ID'
         },
         actions: {
           cancel: '取消',
@@ -303,8 +314,19 @@ export const creationTranslations = defineResourceTranslations({
           output_policy_rejected: 'Output rejected by safety review',
           action_required: 'Admin action required',
           temporarily_unavailable: 'Provider temporarily unavailable; retry possible',
+          provider_route_unavailable:
+            'Model route unavailable (diagnostic code: MODEL_GROUP_ALL_UNAVAILABLE); ask an admin to check channel binding, permissions, balance, quota, or capacity',
           processing_indeterminate: 'Outcome unknown; a redo may repeat billing',
           internal_error: 'Internal error'
+        },
+        diagnostic: {
+          sources: {
+            provider: 'Kapon response',
+            output_transfer: 'Result download',
+            storage: 'Result storage',
+            media_probe: 'Media verification'
+          },
+          requestId: 'Request ID'
         },
         actions: {
           cancel: 'Cancel',

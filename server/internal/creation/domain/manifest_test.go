@@ -21,13 +21,14 @@ func fullEvidence() ReadinessEvidence {
 	return e
 }
 
-// evidencePassing builds evidence from (media, dimension, value) triples.
-func evidencePassing(bindings ...[3]string) ReadinessEvidence {
+// evidencePassing builds evidence from (media, dimension, value, model)
+// bindings; model is empty for media-scoped dimensions.
+func evidencePassing(bindings ...[4]string) ReadinessEvidence {
 	e := ReadinessEvidence{}
 	for _, b := range bindings {
-		slot, ok := readinessSlotForValue(b[0], b[1], b[2])
+		slot, ok := readinessSlotForValue(b[0], b[1], b[2], b[3])
 		if !ok {
-			panic("test binding has no slot: " + b[0] + "/" + b[1] + "/" + b[2])
+			panic("test binding has no slot: " + b[0] + "/" + b[1] + "/" + b[2] + "/" + b[3])
 		}
 		e.Entries = append(e.Entries, EvidenceEntry{SlotID: slot.ID, Status: EvidencePassed})
 	}
@@ -65,63 +66,82 @@ func TestManifestContentBindsEveryChecklistValue(t *testing.T) {
 	}
 	bound := map[string]bool{}
 	for _, slot := range slots {
-		got, ok := readinessSlotForValue(slot.Media, slot.Dimension, slot.Value)
+		got, ok := readinessSlotForValue(slot.Media, slot.Dimension, slot.Value, slot.Model)
 		if !ok || got.ID != slot.ID {
 			t.Fatalf("slot %q does not resolve from its own binding", slot.ID)
 		}
-		bound[slot.Media+"|"+slot.Dimension+"|"+slot.Value] = true
+		bound[slot.Media+"|"+slot.Dimension+"|"+slot.Value+"|"+slot.Model] = true
 	}
 
-	check := func(media, dimension string, values ...string) {
+	check := func(media, dimension, model string, values ...string) {
 		t.Helper()
 		for _, v := range values {
-			if !bound[media+"|"+dimension+"|"+v] {
-				t.Fatalf("%s %s %q has no checklist slot", media, dimension, v)
+			if !bound[media+"|"+dimension+"|"+v+"|"+model] {
+				t.Fatalf("%s %s %q (model %q) has no checklist slot", media, dimension, v, model)
 			}
 		}
 	}
-	check("image", "mode", imageModes...)
-	check("image", "ratio", imageRatios...)
-	check("image", "resolution", imageResolutions...)
-	for _, q := range imageQuantities {
-		check("image", "quantity", strconv.Itoa(q))
+	check("image", "mode", "", imageModes...)
+	check("image", "ratio", "", imageRatios...)
+	for _, model := range imageModels {
+		check("image", "resolution", model.Model, model.Resolutions...)
 	}
-	check("video", "mode", videoModes...)
-	check("video", "resolution", videoResolutions...)
+	for _, q := range imageQuantities {
+		check("image", "quantity", "", strconv.Itoa(q))
+	}
+	check("video", "mode", "", videoModes...)
+	for _, model := range videoModels {
+		check("video", "resolution", model.Model, model.Resolutions...)
+	}
 	for _, d := range videoDurations {
-		check("video", "duration", strconv.Itoa(d))
+		check("video", "duration", "", strconv.Itoa(d))
 	}
 
 	// Reverse direction: no slot may declare a value outside the manifest
-	// content (that would silently gate nothing).
+	// content (that would silently gate nothing), resolution slots must be
+	// model-scoped, and every other slot must be media-scoped.
 	declared := map[string]bool{}
-	remember := func(media, dimension string, values ...string) {
+	remember := func(media, dimension, model string, values ...string) {
 		for _, v := range values {
-			declared[media+"|"+dimension+"|"+v] = true
+			declared[media+"|"+dimension+"|"+v+"|"+model] = true
 		}
 	}
-	remember("image", "mode", imageModes...)
-	remember("image", "ratio", imageRatios...)
-	remember("image", "resolution", imageResolutions...)
-	remember("video", "mode", videoModes...)
-	remember("video", "resolution", videoResolutions...)
+	remember("image", "mode", "", imageModes...)
+	remember("image", "ratio", "", imageRatios...)
+	for _, model := range imageModels {
+		remember("image", "resolution", model.Model, model.Resolutions...)
+	}
+	remember("video", "mode", "", videoModes...)
+	for _, model := range videoModels {
+		remember("video", "resolution", model.Model, model.Resolutions...)
+	}
 	for _, slot := range slots {
 		switch slot.Dimension {
-		case "mode", "ratio", "resolution":
-			if !declared[slot.Media+"|"+slot.Dimension+"|"+slot.Value] {
+		case "mode", "ratio":
+			if slot.Model != "" {
+				t.Fatalf("slot %q must be media-scoped: %s slots carry no model", slot.ID, slot.Dimension)
+			}
+			if !declared[slot.Media+"|"+slot.Dimension+"|"+slot.Value+"|"+slot.Model] {
 				t.Fatalf("slot %q gates undeclared %s %s %q", slot.ID, slot.Media, slot.Dimension, slot.Value)
 			}
+		case "resolution":
+			if slot.Model == "" {
+				t.Fatalf("slot %q must be model-scoped: resolution tiers differ per model", slot.ID)
+			}
+			if !declared[slot.Media+"|"+slot.Dimension+"|"+slot.Value+"|"+slot.Model] {
+				t.Fatalf("slot %q gates undeclared %s %s %q (model %q)", slot.ID, slot.Media, slot.Dimension, slot.Value, slot.Model)
+			}
 		case "quantity":
-			if slot.Media != "image" {
-				t.Fatalf("quantity slots are image-only: %q", slot.ID)
+			if slot.Model != "" || slot.Media != "image" {
+				t.Fatalf("quantity slots are image-only and media-scoped: %q", slot.ID)
 			}
 			n, err := strconv.Atoi(slot.Value)
 			if err != nil || !containsInt(imageQuantities, n) {
 				t.Fatalf("slot %q gates undeclared quantity %q", slot.ID, slot.Value)
 			}
 		case "duration":
-			if slot.Media != "video" {
-				t.Fatalf("duration slots are video-only: %q", slot.ID)
+			if slot.Model != "" || slot.Media != "video" {
+				t.Fatalf("duration slots are video-only and media-scoped: %q", slot.ID)
 			}
 			n, err := strconv.Atoi(slot.Value)
 			if err != nil || !containsInt(videoDurations, n) {
@@ -172,7 +192,7 @@ func assertUnavailableShape(t *testing.T, media string, view CapabilityMediaView
 	if view.Reason == "" || view.Action == "" {
 		t.Fatalf("%s: unavailable view must carry reason and action, got %q/%q", media, view.Reason, view.Action)
 	}
-	if view.Model != "" || view.Modes != nil || view.Ratios != nil || view.Resolutions != nil ||
+	if view.Models != nil || view.Modes != nil || view.Ratios != nil ||
 		view.Quantities != nil || view.Durations != nil || view.Defaults != nil ||
 		view.Prompt != nil || view.ReferenceMaterial != nil {
 		t.Fatalf("%s: unavailable view must not publish capability values", media)
@@ -187,11 +207,19 @@ func assertAvailableShape(t *testing.T, media string, view CapabilityMediaView) 
 	if view.Reason != "" || view.Action != "" {
 		t.Fatalf("%s: available view must not carry reason/action", media)
 	}
-	if view.Model == "" {
-		t.Fatalf("%s: available view must publish its allowlisted model", media)
+	if len(view.Models) == 0 {
+		t.Fatalf("%s: available view must publish its allowlisted models", media)
 	}
-	if len(view.Modes) == 0 || len(view.Resolutions) == 0 || view.Defaults == nil || view.Prompt == nil || view.ReferenceMaterial == nil {
-		t.Fatalf("%s: available view must publish modes, resolutions, defaults, prompt and reference policy", media)
+	for _, model := range view.Models {
+		if model.Model == "" || len(model.Resolutions) == 0 {
+			t.Fatalf("%s: published model %q must carry its resolution tiers", media, model.Model)
+		}
+		if !containsString(model.Resolutions, model.DefaultResolution) {
+			t.Fatalf("%s: model %q default resolution %q is outside its published tiers", media, model.Model, model.DefaultResolution)
+		}
+	}
+	if len(view.Modes) == 0 || view.Defaults == nil || view.Prompt == nil || view.ReferenceMaterial == nil {
+		t.Fatalf("%s: available view must publish modes, defaults, prompt and reference policy", media)
 	}
 	if view.Prompt.MinChars != PromptMinChars || view.Prompt.MaxChars != PromptMaxChars {
 		t.Fatalf("%s: prompt envelope must mirror the spec contract", media)
@@ -246,19 +274,21 @@ func TestDeriveManifestNoReadinessProperties(t *testing.T) {
 
 // TestDeriveManifestPublishedValuesArePassed is the core manifest invariant:
 // with partial evidence, an available media publishes exactly the passed
-// values, in canonical order, with defaults inside the published sets.
+// values, in canonical order, with defaults inside the published sets. A
+// model without any passed tier is not published at all.
 func TestDeriveManifestPublishedValuesArePassed(t *testing.T) {
 	evidence := evidencePassing(
-		[3]string{"image", "mode", ModeTextToImage},
-		[3]string{"image", "mode", ModeReferenceImage},
-		[3]string{"image", "ratio", "1:1"},
-		[3]string{"image", "ratio", "4:5"},
-		[3]string{"image", "resolution", "1K"},
-		[3]string{"image", "resolution", "2K"},
-		[3]string{"image", "quantity", "1"},
-		[3]string{"image", "quantity", "3"},
-		[3]string{"image", "transfer", "temp-url"},
-		[3]string{"image", "probe", "png"},
+		[4]string{"image", "mode", ModeTextToImage, ""},
+		[4]string{"image", "mode", ModeReferenceImage, ""},
+		[4]string{"image", "ratio", "1:1", ""},
+		[4]string{"image", "ratio", "4:3", ""},
+		[4]string{"image", "resolution", "1K", ImageModelID},
+		[4]string{"image", "resolution", "2K", ImageModelID},
+		[4]string{"image", "resolution", "2K", ImageModelNID},
+		[4]string{"image", "quantity", "1", ""},
+		[4]string{"image", "quantity", "3", ""},
+		[4]string{"image", "transfer", "temp-url", ""},
+		[4]string{"image", "probe", "png", ""},
 		// video: not passed at all
 	)
 	connection := &ProviderConnection{
@@ -273,16 +303,24 @@ func TestDeriveManifestPublishedValuesArePassed(t *testing.T) {
 	if !reflect.DeepEqual(imageModeIDs(image.Modes), wantModes) {
 		t.Fatalf("image modes = %v, want %v", imageModeIDs(image.Modes), wantModes)
 	}
-	if !reflect.DeepEqual(image.Ratios, []string{"1:1", "4:5"}) {
+	if !reflect.DeepEqual(image.Ratios, []string{"1:1", "4:3"}) {
 		t.Fatalf("image ratios must publish exactly the passed values in canonical order, got %v", image.Ratios)
 	}
-	if !reflect.DeepEqual(image.Resolutions, []string{"1K", "2K"}) {
-		t.Fatalf("image resolutions must publish exactly the passed values, got %v", image.Resolutions)
+	if len(image.Models) != 2 {
+		t.Fatalf("both image models published a tier and must both appear, got %v", image.Models)
+	}
+	pro := image.Models[0]
+	if pro.Model != ImageModelID || !reflect.DeepEqual(pro.Resolutions, []string{"1K", "2K"}) || pro.DefaultResolution != "2K" {
+		t.Fatalf("pro must publish exactly its passed tiers with the in-set default, got %+v", pro)
+	}
+	n := image.Models[1]
+	if n.Model != ImageModelNID || !reflect.DeepEqual(n.Resolutions, []string{"2K"}) || n.DefaultResolution != "2K" {
+		t.Fatalf("n must publish exactly its passed tiers with the in-set default, got %+v", n)
 	}
 	if !reflect.DeepEqual(image.Quantities, []int{1, 3}) {
 		t.Fatalf("image quantities must publish exactly the passed values, got %v", image.Quantities)
 	}
-	if image.Defaults.Ratio != "1:1" || image.Defaults.Resolution != "2K" || image.Defaults.Quantity != 1 {
+	if image.Defaults.Ratio != "1:1" || image.Defaults.Quantity != 1 {
 		t.Fatalf("image defaults must fall inside the published sets, got %+v", image.Defaults)
 	}
 	for _, mode := range image.Modes {
@@ -294,6 +332,32 @@ func TestDeriveManifestPublishedValuesArePassed(t *testing.T) {
 	assertUnavailableShape(t, "video", manifest.Video)
 	if manifest.Video.Reason != ManifestReasonReadinessPending {
 		t.Fatalf("video with no evidence must be readiness-pending, got %q", manifest.Video.Reason)
+	}
+}
+
+// TestDeriveManifestModelWithoutPassedTierIsDropped proves a model whose
+// tiers all lack evidence disappears from the manifest instead of publishing
+// an empty or unsubmittable entry.
+func TestDeriveManifestModelWithoutPassedTierIsDropped(t *testing.T) {
+	evidence := evidencePassing(
+		[4]string{"image", "mode", ModeTextToImage, ""},
+		[4]string{"image", "ratio", "1:1", ""},
+		[4]string{"image", "resolution", "3K", ImageModelNID},
+		[4]string{"image", "quantity", "1", ""},
+		[4]string{"image", "transfer", "temp-url", ""},
+		[4]string{"image", "probe", "png", ""},
+	)
+	connection := &ProviderConnection{
+		ID: NewUUID(), AdminState: AdminStateEnabled, CredentialState: CredentialStateValid,
+		ImageCapability: MediaCapabilityAvailable, VideoCapability: MediaCapabilityAvailable,
+	}
+	manifest := DeriveCapabilityManifest(evidence, connection)
+	assertAvailableShape(t, "image", manifest.Image)
+	if len(manifest.Image.Models) != 1 || manifest.Image.Models[0].Model != ImageModelNID {
+		t.Fatalf("only n has an accepted tier and must be the only published model, got %+v", manifest.Image.Models)
+	}
+	if containsString(manifest.Image.Models[0].Resolutions, "2K") {
+		t.Fatalf("n must publish only its passed tier, got %+v", manifest.Image.Models[0])
 	}
 }
 
@@ -310,15 +374,15 @@ func imageModeIDs(modes []CapabilityModeView) []string {
 // 720p unpassed but every other video dimension ready, the manifest is
 // available and its default resolution is the first passed value (480p).
 func TestDeriveManifestDefaultsFallBackWhenSpecDefaultUnpassed(t *testing.T) {
-	bindings := [][3]string{
-		{"video", "mode", ModeTextToVideo},
-		{"video", "resolution", "480p"},
-		{"video", "duration", "5"},
-		{"video", "reference_envelope", "omni-max-combo"},
-		{"video", "async_query", "poll"},
-		{"video", "transfer", "temp-url"},
-		{"video", "probe", "mp4"},
-		{"video", "probe", "audio-track"},
+	bindings := [][4]string{
+		{"video", "mode", ModeTextToVideo, ""},
+		{"video", "resolution", "480p", VideoModelID},
+		{"video", "duration", "5", ""},
+		{"video", "reference_envelope", "omni-max-combo", ""},
+		{"video", "async_query", "poll", ""},
+		{"video", "transfer", "temp-url", ""},
+		{"video", "probe", "mp4", ""},
+		{"video", "probe", "audio-track", ""},
 	}
 	connection := &ProviderConnection{
 		ID: NewUUID(), AdminState: AdminStateEnabled, CredentialState: CredentialStateValid,
@@ -326,11 +390,12 @@ func TestDeriveManifestDefaultsFallBackWhenSpecDefaultUnpassed(t *testing.T) {
 	}
 	manifest := DeriveCapabilityManifest(evidencePassing(bindings...), connection)
 	assertAvailableShape(t, "video", manifest.Video)
-	if containsString(manifest.Video.Resolutions, "720p") || !containsString(manifest.Video.Resolutions, "480p") {
-		t.Fatalf("video must publish only the passed resolutions, got %v", manifest.Video.Resolutions)
+	videoModel := manifest.Video.Models[0]
+	if containsString(videoModel.Resolutions, "720p") || !containsString(videoModel.Resolutions, "480p") {
+		t.Fatalf("video must publish only the passed resolutions, got %+v", videoModel)
 	}
-	if manifest.Video.Defaults.Resolution != "480p" {
-		t.Fatalf("video default resolution must fall back to the first passed value, got %q", manifest.Video.Defaults.Resolution)
+	if videoModel.DefaultResolution != "480p" {
+		t.Fatalf("video default resolution must fall back to the first passed value, got %q", videoModel.DefaultResolution)
 	}
 	assertUnavailableShape(t, "image", manifest.Image)
 }
@@ -357,14 +422,14 @@ func TestManifestDimensionsCoverEveryChecklistDimension(t *testing.T) {
 // leak across media: video evidence alone leaves image readiness-pending.
 func TestDeriveManifestImageVideoIndependence(t *testing.T) {
 	videoOnly := evidencePassing(
-		[3]string{"video", "mode", ModeTextToVideo},
-		[3]string{"video", "resolution", "720p"},
-		[3]string{"video", "duration", "5"},
-		[3]string{"video", "reference_envelope", "omni-max-combo"},
-		[3]string{"video", "async_query", "poll"},
-		[3]string{"video", "transfer", "temp-url"},
-		[3]string{"video", "probe", "mp4"},
-		[3]string{"video", "probe", "audio-track"},
+		[4]string{"video", "mode", ModeTextToVideo, ""},
+		[4]string{"video", "resolution", "720p", VideoModelID},
+		[4]string{"video", "duration", "5", ""},
+		[4]string{"video", "reference_envelope", "omni-max-combo", ""},
+		[4]string{"video", "async_query", "poll", ""},
+		[4]string{"video", "transfer", "temp-url", ""},
+		[4]string{"video", "probe", "mp4", ""},
+		[4]string{"video", "probe", "audio-track", ""},
 	)
 	manifest := DeriveCapabilityManifest(videoOnly, nil)
 	assertUnavailableShape(t, "image", manifest.Image)
@@ -490,29 +555,32 @@ func TestDeriveManifestRandomizedProperties(t *testing.T) {
 // assertValuesPassed checks every published value's slot is passed.
 func assertValuesPassed(t *testing.T, round int, media string, evidence ReadinessEvidence, view CapabilityMediaView) {
 	t.Helper()
-	check := func(dimension, value string) {
+	check := func(dimension, model, value string, passed map[string]bool) {
 		t.Helper()
-		if _, ok := readinessSlotForValue(media, dimension, value); !ok {
-			t.Fatalf("round %d: %s %s %q has no slot", round, media, dimension, value)
+		if _, ok := readinessSlotForValue(media, dimension, value, model); !ok {
+			t.Fatalf("round %d: %s %s %q (model %q) has no slot", round, media, dimension, value, model)
 		}
-		if !evidence.passedValues(media, dimension)[value] {
-			t.Fatalf("round %d: %s published unpassed value %s=%q", round, media, dimension, value)
+		if !passed[value] {
+			t.Fatalf("round %d: %s published unpassed value %s=%q (model %q)", round, media, dimension, value, model)
 		}
 	}
 	for _, mode := range view.Modes {
-		check("mode", mode.ID)
+		check("mode", "", mode.ID, evidence.passedValues(media, "mode"))
 	}
 	for _, r := range view.Ratios {
-		check("ratio", r)
+		check("ratio", "", r, evidence.passedValues(media, "ratio"))
 	}
-	for _, r := range view.Resolutions {
-		check("resolution", r)
+	for _, model := range view.Models {
+		tiers := evidence.passedValuesForModel(media, "resolution", model.Model)
+		for _, r := range model.Resolutions {
+			check("resolution", model.Model, r, tiers)
+		}
 	}
 	for _, q := range view.Quantities {
-		check("quantity", strconv.Itoa(q))
+		check("quantity", "", strconv.Itoa(q), evidence.passedValues(media, "quantity"))
 	}
 	for _, d := range view.Durations {
-		check("duration", strconv.Itoa(d))
+		check("duration", "", strconv.Itoa(d), evidence.passedValues(media, "duration"))
 	}
 }
 
@@ -522,9 +590,6 @@ func assertValuesPassed(t *testing.T, round int, media string, evidence Readines
 func assertDefaultsInsidePublished(t *testing.T, round int, media string, view CapabilityMediaView) {
 	t.Helper()
 	defaults := view.Defaults
-	if !containsString(view.Resolutions, defaults.Resolution) {
-		t.Fatalf("round %d: %s default resolution %q is outside published set", round, media, defaults.Resolution)
-	}
 	if media == "image" {
 		if !containsString(view.Ratios, defaults.Ratio) {
 			t.Fatalf("round %d: image default ratio %q is outside published set", round, defaults.Ratio)

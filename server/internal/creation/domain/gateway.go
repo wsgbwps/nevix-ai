@@ -7,10 +7,11 @@ import (
 )
 
 // The provider gateway port: the task kernel's single seam to external
-// generation. Adapters speak the domain's classified outcomes — request IDs,
-// raw error bodies, keys, and prompts never travel past this boundary — and
-// every classification below is deliberately recoverable by the kernel's
-// retry discipline (spec #150 Retry/超时/取消纪律).
+// generation. Adapters speak the domain's classified outcomes and may attach
+// the bounded standard provider error fields allowed by ADR-0016; arbitrary
+// raw bodies, keys, prompts, headers, and output URLs never travel past this
+// boundary. Every classification below remains deliberately recoverable by
+// the kernel's retry discipline (spec #150 Retry/超时/取消纪律).
 
 // Gateway classified errors.
 var (
@@ -64,6 +65,17 @@ func (e *RateLimitedError) Error() string { return "provider rate limited" }
 
 func (e *RateLimitedError) Is(target error) bool { return target == ErrProviderRateLimited }
 
+// ProviderUnavailableError preserves one allowlisted stable diagnosis while
+// retaining the bounded-retry semantics of ErrProviderUnavailable. Concrete
+// standard provider fields travel separately as a bounded FailureDiagnostic.
+type ProviderUnavailableError struct {
+	Reason FailureReason
+}
+
+func (e *ProviderUnavailableError) Error() string { return "provider temporarily unavailable" }
+
+func (e *ProviderUnavailableError) Is(target error) bool { return target == ErrProviderUnavailable }
+
 // IsSubmitIndeterminate reports an unidentified submit outcome.
 func IsSubmitIndeterminate(err error) bool { return errors.Is(err, ErrSubmitIndeterminate) }
 
@@ -95,6 +107,10 @@ func ClassifyFailureReason(err error) FailureReason {
 	if errors.As(err, &rejected) {
 		return rejected.Reason
 	}
+	var unavailable *ProviderUnavailableError
+	if errors.As(err, &unavailable) {
+		return unavailable.Reason
+	}
 	return ReasonTemporarilyUnavailable
 }
 
@@ -125,13 +141,15 @@ type CallCredentialSource interface {
 	ActiveCallCredential(ctx context.Context) (string, error)
 }
 
-// ExpectedOutputMime is the verified output contract per media (spec #150
-// 图片/视频合同): image outputs are PNG; video MP4 lands with slice 11.
-func ExpectedOutputMime(media MediaType) string {
+// OutputMimeAccepted reports whether a probed provider output can form an
+// asset for the requested media type. Image providers may return either JPEG
+// or PNG. Other media retain their existing unrestricted contract until their
+// format-specific verification slice lands.
+func OutputMimeAccepted(media MediaType, mime string) bool {
 	if media == MediaImage {
-		return "image/png"
+		return mime == "image/jpeg" || mime == "image/png"
 	}
-	return ""
+	return true
 }
 
 // GatewayReference is one ordered reference with its role and data URL.
@@ -161,9 +179,10 @@ const (
 
 // PollOutcome is one authoritative poll answer.
 type PollOutcome struct {
-	Status  PollStatus
-	Outputs []GatewayOutput
-	Reason  *FailureReason // classified, when Status == PollFailed
+	Status     PollStatus
+	Outputs    []GatewayOutput
+	Reason     *FailureReason     // classified, when Status == PollFailed
+	Diagnostic *FailureDiagnostic // concrete creator-private explanation, when available
 }
 
 // ProviderGateway is the external generation seam. The credential argument

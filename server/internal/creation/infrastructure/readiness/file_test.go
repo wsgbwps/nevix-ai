@@ -32,7 +32,7 @@ func TestLoadEvidenceFileMissingFileIsEmpty(t *testing.T) {
 
 func TestLoadEvidenceFileParsesValidDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "production-readiness.json")
-	raw := `{"schema_version": 1, "generated_at": "2026-08-28T00:00:00Z", "entries": [{"slot_id": "image.resolution.2k", "status": "passed", "checked_at": "2026-08-28T00:00:00Z", "evidence_ref": "runs/2k"}]}`
+	raw := `{"schema_version": 3, "manifest_version": 3, "generated_at": "2026-08-28T00:00:00Z", "entries": [{"slot_id": "image.resolution.pro-2k", "status": "passed", "checked_at": "2026-08-28T00:00:00Z", "evidence_ref": "runs/2k"}]}`
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatalf("write evidence: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestLoadEvidenceFileParsesValidDocument(t *testing.T) {
 
 func TestLoadEvidenceFileRejectsCorruptDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "production-readiness.json")
-	if err := os.WriteFile(path, []byte(`{"schema_version": 1, "entries": [{"slot_id": "nope", "status": "passed"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"schema_version": 3, "manifest_version": 3, "entries": [{"slot_id": "nope", "status": "passed"}]}`), 0o600); err != nil {
 		t.Fatalf("write evidence: %v", err)
 	}
 	_, err := LoadEvidenceFile(path)
