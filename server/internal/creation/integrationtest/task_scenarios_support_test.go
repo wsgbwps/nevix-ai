@@ -48,6 +48,7 @@ type taskDraft struct {
 	Quantity   int
 	Duration   int
 	Prompt     string
+	References []any
 }
 
 // saveImageDraft saves a minimal text-to-image draft on a fresh session.
@@ -65,12 +66,18 @@ func (h *harness) saveImageDraft(t *testing.T, token, prompt string, quantity in
 }
 
 // saveDraftOn stores the draft and captures the revision the submitter echoes.
+// The draft records the manifest version the composer saw, so the helper
+// fetches the live one — scenarios must survive manifest content bumps.
 func (h *harness) saveDraftOn(t *testing.T, token, sessionID string, draft taskDraft) taskDraft {
 	t.Helper()
+	_, _, manifest := h.getManifest(t, token)
+	if manifest.ManifestVersion < 1 {
+		t.Fatalf("manifest must publish a version before drafts can record it, got %+v", manifest)
+	}
 	payload := map[string]any{
 		"prompt":           draft.Prompt,
 		"media_type":       draft.MediaType,
-		"manifest_version": 3,
+		"manifest_version": manifest.ManifestVersion,
 		"model":            draft.Model,
 		"mode":             draft.Mode,
 		"ratio":            nil,
@@ -87,6 +94,9 @@ func (h *harness) saveDraftOn(t *testing.T, token, sessionID string, draft taskD
 	}
 	if draft.Duration > 0 {
 		payload["duration_seconds"] = draft.Duration
+	}
+	if draft.References != nil {
+		payload["references"] = draft.References
 	}
 	status, body := h.doRequest(t, "PUT", "/creation/sessions/"+sessionID+"/draft", token, payload)
 	if status != http.StatusOK {

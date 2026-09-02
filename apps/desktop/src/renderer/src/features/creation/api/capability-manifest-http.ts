@@ -82,11 +82,16 @@ export interface CapabilitySize {
   readonly height: number
 }
 
-/** One allowlisted model with its own resolution tiers. */
+/**
+ * One allowlisted model with its own resolution tiers. Image models also
+ * publish the vendor's per-model reference-image ceiling; the mode's total
+ * stays the widest cross-model bound and the ceiling is the binding one.
+ */
 export interface CapabilityModel {
   readonly model: string
   readonly resolutions: readonly string[]
   readonly defaultResolution: string
+  readonly maxReferenceImages?: number
   readonly sizes?: readonly CapabilitySize[]
 }
 
@@ -311,10 +316,17 @@ function parseModels(
     }
     const sizes = parseSizes(item, resolutions, ratios)
     if (sizes === MALFORMED_LIST) return null
+    let maxReferenceImages: number | undefined
+    if (hasField(item, 'max_reference_images')) {
+      const ceiling = readNumber(item, 'max_reference_images')
+      if (ceiling === null || !Number.isInteger(ceiling) || ceiling < 1) return null
+      maxReferenceImages = ceiling
+    }
     models.push({
       model,
       resolutions,
       defaultResolution,
+      ...(maxReferenceImages !== undefined ? { maxReferenceImages } : {}),
       ...(sizes !== undefined ? { sizes } : {})
     })
   }

@@ -51,6 +51,7 @@ interface SaveCall {
     prompt: string
     mediaType: string | null
     manifestVersion: number
+    mode: string | null
     references: Array<{ materialId: string; role: string }>
   }
 }
@@ -138,7 +139,7 @@ test('manifest defaults autosave with the version delivered in the same response
     .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.manifestVersion, {
       timeout: 5_000
     })
-    .toBe(4)
+    .toBe(5)
 })
 
 test('editing the prompt autosaves the full draft with its ordered references', async ({
@@ -337,6 +338,52 @@ test('the expanded deck overlays in place instead of squeezing the prompt', asyn
   const after = await prompt.boundingBox()
   expect(after?.x).toBe(before?.x)
   expect(after?.width).toBe(before?.width)
+})
+
+test('adding a reference flips the image draft to reference-image and back', async ({
+  mount,
+  page
+}) => {
+  // Image modes are deck-derived: the composer offers no image mode picker,
+  // so the deck's contents decide the shape (text-to-image ⇄ reference-image).
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{
+        [scriptedSessionId]: {
+          prompt: '',
+          mediaType: 'image',
+          manifestVersion: 5,
+          updatedAt: '2026-08-29T10:00:00Z',
+          model: 'doubao-seedream-5.0-pro',
+          mode: 'text-to-image',
+          ratio: '1:1',
+          resolution: '2K',
+          quantity: 1,
+          durationSeconds: null,
+          references: []
+        }
+      }}
+      materials={{ [scriptedSessionId]: [] }}
+    />
+  )
+  await selectFirstSession(page)
+
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByLabel('Add reference material').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({ name: 'ref.png', mimeType: 'image/png', buffer: Buffer.from('png') })
+  await expect
+    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.mode, { timeout: 5_000 })
+    .toBe('reference-image')
+
+  // Removing the only card flips the derived mode back: an empty
+  // reference-image draft could never satisfy its own minimum.
+  const deck = page.getByTestId('reference-deck')
+  await deck.getByRole('button', { name: 'ref.png', exact: true }).click()
+  await page.keyboard.press('Delete')
+  await expect
+    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.mode, { timeout: 5_000 })
+    .toBe('text-to-image')
 })
 
 test('submitting stays disabled while capability context is missing', async ({ mount, page }) => {

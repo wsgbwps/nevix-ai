@@ -35,10 +35,12 @@ export function roleAcceptsKind(role: DraftReferenceRole, kind: MaterialKind): b
 
 /**
  * The material kinds the add entry may bind under the current manifest,
- * media, and mode: the published mode's own per-media envelopes. While no
- * manifest or only a stale mode is present, every kind stays addable so
- * drafting never depends on provider state; with the media itself
- * unavailable nothing new can be bound (the stable reason explains why).
+ * media, and mode. Video takes the published mode's own per-media envelopes
+ * (video modes are explicitly chosen). Image modes derive from the deck —
+ * the composer offers no image mode picker — so any available image
+ * capability accepts images; adding the first one derives the mode. While no
+ * manifest is present every kind stays addable so drafting never depends on
+ * provider state; with the media itself unavailable nothing new can be bound.
  */
 export function allowedReferenceKinds(
   manifest: CapabilityManifest | null,
@@ -49,6 +51,7 @@ export function allowedReferenceKinds(
   if (manifest === null || media === null) return everyKind
   const capability = mediaCapability(manifest, media)
   if (capability === null || !capability.available) return []
+  if (media === 'image') return ['image']
   const published = (capability.modes ?? []).find((entry) => entry.id === mode)
   if (!published) return everyKind
   const kinds: MaterialKind[] = []
@@ -163,12 +166,27 @@ export function modeReferenceBounds(
   return match ? { ...match.referenceMaterial.total } : null
 }
 
-/** The deck cap: the selected mode's max when published, else the fallback. */
+/**
+ * The deck cap for one (model, mode) selection. Image modes derive from the
+ * deck, so the cap is the selected model's own reference ceiling — the mode
+ * total only backs it up when the model is absent or stale (and the zero of
+ * a not-yet-derived text-to-image never caps the deck). Video takes the
+ * published mode's max.
+ */
 export function referenceCap(
   manifest: CapabilityManifest | null,
   media: DraftMediaType,
+  model: string | null,
   mode: string | null
 ): number {
+  if (media === 'image') {
+    const ceiling =
+      model === null ? null : (publishedModel(manifest, media, model)?.maxReferenceImages ?? null)
+    if (ceiling !== null) return ceiling
+    const bounds = mode === null ? null : modeReferenceBounds(manifest, media, mode)
+    if (bounds !== null && bounds.max > 0) return bounds.max
+    return fallbackReferenceCap
+  }
   if (mode === null) return fallbackReferenceCap
   const bounds = modeReferenceBounds(manifest, media, mode)
   return bounds === null ? fallbackReferenceCap : bounds.max
@@ -260,8 +278,17 @@ export function staleDraftFields(
   const bounds = modeReferenceBounds(manifest, media, draft.mode)
   if (bounds === null) {
     stale.add('references')
-  } else if (draft.references.length < bounds.min || draft.references.length > bounds.max) {
-    stale.add('references')
+  } else {
+    // The mode total is the widest cross-model bound; a published model's
+    // reference ceiling is the binding one.
+    const ceiling =
+      draft.model === null
+        ? null
+        : (publishedModel(manifest, media, draft.model)?.maxReferenceImages ?? null)
+    const max = ceiling !== null && ceiling < bounds.max ? ceiling : bounds.max
+    if (draft.references.length < bounds.min || draft.references.length > max) {
+      stale.add('references')
+    }
   }
   return stale
 }

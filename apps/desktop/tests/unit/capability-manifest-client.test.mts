@@ -49,6 +49,7 @@ const availableImage = {
       model: 'doubao-seedream-5.0-pro',
       resolutions: ['1K', '1.5K', '2K'],
       default_resolution: '2K',
+      max_reference_images: 10,
       sizes: [
         { resolution: '1K', ratio: '1:1', width: 1024, height: 1024 },
         { resolution: '2K', ratio: '4:3', width: 2368, height: 1776 }
@@ -195,6 +196,10 @@ describe('capability manifest client', () => {
           { resolution: '2K', ratio: '4:3', width: 2368, height: 1776 }
         ])
         assert.equal(result.value.image.models?.[1].sizes, undefined)
+        // The per-model reference ceiling rides the model view; video (and
+        // models without one) simply carries none.
+        assert.equal(result.value.image.models?.[0].maxReferenceImages, 10)
+        assert.equal(result.value.image.models?.[1].maxReferenceImages, undefined)
         assert.deepEqual(
           result.value.image.modes?.map((mode) => mode.id),
           ['text-to-image', 'reference-image']
@@ -275,6 +280,18 @@ describe('capability manifest client', () => {
       }
     })
     assert.equal(badEnvelope, null)
+    // A malformed per-model reference ceiling fails the whole payload too.
+    const proWithBadCeiling = (ceiling: unknown): unknown => ({
+      schema_version: 1,
+      manifest_version: 1,
+      image: {
+        ...availableImage,
+        models: [{ ...availableImage.models[0], max_reference_images: ceiling }]
+      },
+      video: pendingVideo
+    })
+    assert.equal(parseCapabilityManifest(proWithBadCeiling('ten')), null)
+    assert.equal(parseCapabilityManifest(proWithBadCeiling(0)), null)
   })
 
   it('maps stable failures without inventing verdicts', async () => {

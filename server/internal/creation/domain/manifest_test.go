@@ -169,10 +169,11 @@ func expectedPublishedModels(media string) []CapabilityModelView {
 	expected := make([]CapabilityModelView, 0, len(source))
 	for _, model := range source {
 		published := CapabilityModelView{
-			Model:             model.Model,
-			Resolutions:       append([]string(nil), model.Resolutions...),
-			DefaultResolution: model.DefaultResolution,
-			Sizes:             modelSizes(media, model),
+			Model:              model.Model,
+			Resolutions:        append([]string(nil), model.Resolutions...),
+			DefaultResolution:  model.DefaultResolution,
+			MaxReferenceImages: model.MaxReferenceImages,
+			Sizes:              modelSizes(media, model),
 		}
 		expected = append(expected, published)
 	}

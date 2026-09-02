@@ -145,7 +145,7 @@ const nidSizes = imageModelSizes(['2K', '3K', '4K'], {
 /** The V1 manifest as the server publishes it with both media active. */
 const activeManifest: CapabilityManifest = {
   schemaVersion: 2,
-  manifestVersion: 4,
+  manifestVersion: 5,
   updatedAt: '2026-08-29T10:00:00Z',
   image: {
     available: true,
@@ -156,12 +156,14 @@ const activeManifest: CapabilityManifest = {
         model: 'doubao-seedream-5.0-pro',
         resolutions: ['1K', '1.5K', '2K'],
         defaultResolution: '2K',
+        maxReferenceImages: 10,
         sizes: proSizes
       },
       {
         model: 'doubao-seedream-5.0',
         resolutions: ['2K', '3K', '4K'],
         defaultResolution: '2K',
+        maxReferenceImages: 14,
         sizes: nidSizes
       }
     ],
@@ -169,7 +171,7 @@ const activeManifest: CapabilityManifest = {
       { id: 'text-to-image', referenceMaterial: noReferences },
       {
         id: 'reference-image',
-        referenceMaterial: { total: { min: 1, max: 4 }, image: imageEnvelope(1, 4) }
+        referenceMaterial: { total: { min: 1, max: 14 }, image: imageEnvelope(1, 14) }
       }
     ],
     ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
@@ -496,7 +498,7 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
           [sessionA.id]: {
             prompt: '夏季跑鞋主图，暖光背景',
             mediaType: 'image',
-            manifestVersion: 4,
+            manifestVersion: 5,
             updatedAt: '2026-08-29T10:00:00Z',
             model: 'doubao-seedream-5.0-pro',
             mode: 'reference-image',

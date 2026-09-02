@@ -91,7 +91,7 @@ func TestCapabilityManifestWithoutConnectionIsUnavailable(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("manifest must answer 200, got %d: %s", status, body)
 	}
-	if payload.SchemaVersion != 2 || payload.ManifestVersion != 4 {
+	if payload.SchemaVersion != 2 || payload.ManifestVersion != 5 {
 		t.Fatalf("manifest must publish its schema and content versions: %+v", payload)
 	}
 	for media, view := range map[string]manifestMedia{"image": payload.Image, "video": payload.Video} {

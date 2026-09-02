@@ -498,8 +498,14 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 	if modePolicy == nil {
 		return nil, domain.ErrDraftCapabilityStale
 	}
+	// The mode total is the widest cross-model bound; the selected image
+	// model's published ceiling is the binding one (pro 10, base 14).
+	maxReferences := modePolicy.Total.Max
+	if modelView.MaxReferenceImages != nil && *modelView.MaxReferenceImages < maxReferences {
+		maxReferences = *modelView.MaxReferenceImages
+	}
 	count := len(draft.References)
-	if count < modePolicy.Total.Min || count > modePolicy.Total.Max {
+	if count < modePolicy.Total.Min || count > maxReferences {
 		return nil, domain.ErrDraftCapabilityStale
 	}
 	for _, reference := range draft.References {

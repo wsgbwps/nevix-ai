@@ -1809,6 +1809,9 @@ components:
         default_resolution:
           type: string
           description: 该模型的推荐默认档；必属本条目 resolutions。
+        max_reference_images:
+          type: integer
+          description: 该模型允许的最大图片参考素材数量（供应商逐模型契约）；仅图片模型发布。模式 total 是跨模型最宽边界，提交时按所选模型收紧。
         sizes:
           type: array
           description: 该模型每个「分辨率档位×宽高比」组合对应的供应商像素尺寸；仅图片模型发布。条目的 resolution 必属本条目 resolutions，ratio 必属媒体 ratios。

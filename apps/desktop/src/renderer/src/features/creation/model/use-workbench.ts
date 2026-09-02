@@ -495,29 +495,39 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [manifest, patchDraft]
   )
 
+  // Re-derives binding roles for one published mode; a binding whose
+  // material kind cannot structurally fill the new role (the server twin is
+  // roleAcceptsKind) keeps its previous role, so the draft stays saveable
+  // and the stale reference note — never a silent rewrite — explains the
+  // mismatch.
+  const bindingsForMode = useCallback(
+    (media: DraftMediaType, mode: string, references: DraftReferenceView[]) => {
+      if (roleForPosition(media, mode, 0) === null) return references
+      const kindOf = new Map(materials.map((material) => [material.id, material.kind] as const))
+      return references.map((reference, position) => {
+        const nextRole = roleForPosition(media, mode, position)
+        const kind = kindOf.get(reference.materialId)
+        if (nextRole === null || kind === undefined || !roleAcceptsKind(nextRole, kind)) {
+          return reference
+        }
+        return { ...reference, role: nextRole }
+      })
+    },
+    [materials]
+  )
+
   const setMode = useCallback(
     (mode: string) => {
       const media = draftRef.current.mediaType
       // Re-derive binding roles only for published modes; a stale mode keeps
-      // every stored binding untouched. A binding whose material kind cannot
-      // structurally fill the new role (the server twin is roleAcceptsKind)
-      // keeps its previous role, so the draft stays saveable and the stale
-      // reference note — never a silent rewrite — explains the mismatch.
-      const kindOf = new Map(materials.map((material) => [material.id, material.kind] as const))
-      const known = media !== null && roleForPosition(media, mode, 0) !== null
-      const rederived = known
-        ? draftRef.current.references.map((reference, position) => {
-            const nextRole = roleForPosition(media, mode, position)
-            const kind = kindOf.get(reference.materialId)
-            if (nextRole === null || kind === undefined || !roleAcceptsKind(nextRole, kind)) {
-              return reference
-            }
-            return { ...reference, role: nextRole }
-          })
-        : draftRef.current.references
+      // every stored binding untouched.
+      const rederived =
+        media === null
+          ? draftRef.current.references
+          : bindingsForMode(media, mode, draftRef.current.references)
       patchDraft({ mode, references: rederived })
     },
-    [materials, patchDraft]
+    [bindingsForMode, patchDraft]
   )
 
   const createSession = useCallback(
@@ -576,7 +586,19 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       // image role, anything else binds as omni (which accepts all kinds).
       const role = derived ?? (material.kind === 'image' ? 'reference' : 'omni')
       const binding: DraftReferenceView = { materialId: material.id, role }
-      patchDraft({ references: [...draftRef.current.references, binding] })
+      const nextReferences = [...draftRef.current.references, binding]
+      if (media === 'image') {
+        // Image modes derive from the deck: any reference means the
+        // reference-image shape, and the bindings re-derive their roles with
+        // it — the composer offers no image mode picker (video modes are
+        // not deck-derivable).
+        patchDraft({
+          references: bindingsForMode(media, 'reference-image', nextReferences),
+          mode: 'reference-image'
+        })
+      } else {
+        patchDraft({ references: nextReferences })
+      }
       if (material.kind === 'image') {
         void ports
           .loadImageBlobUrl(material.id)
@@ -587,19 +609,27 @@ export function useCreationWorkbench(): CreationWorkbenchController {
           .catch(() => undefined)
       }
     },
-    [patchDraft, ports]
+    [bindingsForMode, patchDraft, ports]
   )
 
   const removeMaterial = useCallback(
     async (materialId: string) => {
       if (!ports) return
-      patchDraft({
-        references: draftRef.current.references.filter((entry) => entry.materialId !== materialId)
-      })
+      const remaining = draftRef.current.references.filter(
+        (entry) => entry.materialId !== materialId
+      )
+      if (draftRef.current.mediaType === 'image') {
+        // The deck's emptiness flips the derived image mode back: an empty
+        // reference-image draft could never satisfy its own minimum.
+        const mode = remaining.length > 0 ? 'reference-image' : 'text-to-image'
+        patchDraft({ references: bindingsForMode('image', mode, remaining), mode })
+      } else {
+        patchDraft({ references: remaining })
+      }
       setMaterials((current) => current.filter((material) => material.id !== materialId))
       await ports.deleteMaterial(materialId).catch(() => undefined)
     },
-    [patchDraft, ports]
+    [bindingsForMode, patchDraft, ports]
   )
 
   const retrySave = useCallback(() => {
@@ -744,7 +774,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     return null
   })()
 
-  const deckCap = referenceCap(manifest, draft.mediaType ?? 'image', draft.mode)
+  const deckCap = referenceCap(manifest, draft.mediaType ?? 'image', draft.model, draft.mode)
   const allowedKinds = allowedReferenceKinds(manifest, draft.mediaType, draft.mode)
 
   return {

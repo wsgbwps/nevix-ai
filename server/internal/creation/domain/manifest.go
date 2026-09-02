@@ -15,8 +15,10 @@ const ManifestSchemaVersion = 2
 // capability set changes, such as a model or vendor ratio/size contract
 // change. v4: the base image model id dropped the catalog alias's -n suffix
 // (doubao-seedream-5.0-n → doubao-seedream-5.0) — the vendor's versioned
-// backend id has no suffix, so -n reads like a distinct product.
-const ManifestVersion = 4
+// backend id has no suffix, so -n reads like a distinct product. v5: the
+// image reference envelope is per model (pro 10, base 14 reference images)
+// instead of a flat 1–4; each model view publishes its own ceiling.
+const ManifestVersion = 5
 
 // The V1 allowlisted models (spec #150). Declared here because the manifest
 // publishes them; the Kapon adapter reuses these constants so the catalog
@@ -53,10 +55,11 @@ var (
 	// imageModels declares the accepted image models and their resolution
 	// tiers (Kapon size contract, apifox 2026-09): pro covers 1K/1.5K/2K,
 	// the base model covers 2K/3K/4K; the tier labels overlap but the pixel
-	// sizes differ.
+	// sizes differ. MaxReferenceImages is the vendor's per-model reference
+	// ceiling (user-confirmed 2026-09-01): pro 10, base 14.
 	imageModels = []CapabilityModelView{
-		{Model: ImageModelID, Resolutions: []string{"1K", "1.5K", "2K"}, DefaultResolution: "2K"},
-		{Model: ImageModelBaseID, Resolutions: []string{"2K", "3K", "4K"}, DefaultResolution: "2K"},
+		{Model: ImageModelID, Resolutions: []string{"1K", "1.5K", "2K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(10)},
+		{Model: ImageModelBaseID, Resolutions: []string{"2K", "3K", "4K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(14)},
 	}
 	imageQuantities = []int{1, 2, 3, 4}
 
@@ -113,13 +116,15 @@ type (
 	}
 	// CapabilityModelView is one allowlisted model and the resolution tiers
 	// it publishes. Image media carries two models with disjoint tier sets
-	// plus the pixel size of every published (tier, ratio) combination;
-	// video carries one model and no pixel sizes.
+	// plus the pixel size of every published (tier, ratio) combination and
+	// the model's reference-image ceiling; video carries one model and no
+	// pixel sizes or ceiling.
 	CapabilityModelView struct {
-		Model             string               `json:"model"`
-		Resolutions       []string             `json:"resolutions"`
-		DefaultResolution string               `json:"default_resolution"`
-		Sizes             []CapabilitySizeView `json:"sizes,omitempty"`
+		Model              string               `json:"model"`
+		Resolutions        []string             `json:"resolutions"`
+		DefaultResolution  string               `json:"default_resolution"`
+		MaxReferenceImages *int                 `json:"max_reference_images,omitempty"`
+		Sizes              []CapabilitySizeView `json:"sizes,omitempty"`
 	}
 	// CapabilitySizeView is the vendor pixel resolution of one published
 	// (resolution tier, ratio) combination — display metadata resolved from
@@ -290,9 +295,11 @@ func modeReferencePolicy(media, mode string) ReferenceMaterialPolicy {
 	case media == string(MediaImage) && mode == ModeTextToImage:
 		return ReferenceMaterialPolicy{Total: CountRange{Min: 0, Max: 0}}
 	case media == string(MediaImage): // reference-image
+		// Total is the widest cross-model bound; the selected model's
+		// MaxReferenceImages is the binding ceiling at admission.
 		return ReferenceMaterialPolicy{
-			Total:    CountRange{Min: 1, Max: 4},
-			PerMedia: &PerMediaReferences{Image: ptr(imageReferencePolicy(1, 4, imageRefMaxBytes))},
+			Total:    CountRange{Min: 1, Max: 14},
+			PerMedia: &PerMediaReferences{Image: ptr(imageReferencePolicy(1, 14, imageRefMaxBytes))},
 		}
 	case mode == ModeTextToVideo:
 		return ReferenceMaterialPolicy{Total: CountRange{Min: 0, Max: 0}}
@@ -322,8 +329,8 @@ func modeReferencePolicy(media, mode string) ReferenceMaterialPolicy {
 func mediaReferenceEnvelope(media string) ReferenceMaterialPolicy {
 	if media == string(MediaImage) {
 		return ReferenceMaterialPolicy{
-			Total:    CountRange{Min: 0, Max: 4},
-			PerMedia: &PerMediaReferences{Image: ptr(imageReferencePolicy(0, 4, imageRefMaxBytes))},
+			Total:    CountRange{Min: 0, Max: 14},
+			PerMedia: &PerMediaReferences{Image: ptr(imageReferencePolicy(0, 14, imageRefMaxBytes))},
 		}
 	}
 	return ReferenceMaterialPolicy{
@@ -347,10 +354,11 @@ func deriveAvailableMedia(media string, models []CapabilityModelView, modes []st
 
 	for _, model := range models {
 		view.Models = append(view.Models, CapabilityModelView{
-			Model:             model.Model,
-			Resolutions:       append([]string(nil), model.Resolutions...),
-			DefaultResolution: model.DefaultResolution,
-			Sizes:             modelSizes(media, model),
+			Model:              model.Model,
+			Resolutions:        append([]string(nil), model.Resolutions...),
+			DefaultResolution:  model.DefaultResolution,
+			MaxReferenceImages: model.MaxReferenceImages,
+			Sizes:              modelSizes(media, model),
 		})
 	}
 

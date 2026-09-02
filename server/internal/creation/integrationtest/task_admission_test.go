@@ -48,6 +48,12 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 
 	draft := h.saveImageDraft(t, token, "一张干净的白色背景商拍图", 3)
 
+	// Attempts are governance rows scoped by user and persist across the
+	// shared database's scenarios, so the assertions below count only this
+	// creator's delta — one row per submission, none for a replay.
+	attemptsBaseline := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_generation_attempts WHERE user_id = $1::uuid`, h.userID(t, creator))
+
 	status, body := h.submitTask(t, token, draft.SessionID, "key-once", draft.Revision)
 	if status != http.StatusCreated {
 		t.Fatalf("first submission must create, got %d: %s", status, body)
@@ -78,7 +84,7 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_reservations WHERE task_id = $1::uuid AND released_at IS NULL`, taskID) != 1 {
 		t.Fatal("admission must persist the concurrency reservation")
 	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_attempts`) != 1 {
+	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_attempts WHERE user_id = $1::uuid`, h.userID(t, creator)) != attemptsBaseline+1 {
 		t.Fatal("admission must record exactly one structurally valid attempt")
 	}
 	// Idempotent replay: same key + same payload → the same task, nothing
@@ -91,7 +97,7 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	if replayed.Task.ID != taskID {
 		t.Fatalf("replay must return the original task, got %s", replayed.Task.ID)
 	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_attempts`) != 1 {
+	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_attempts WHERE user_id = $1::uuid`, h.userID(t, creator)) != attemptsBaseline+1 {
 		t.Fatal("a replayed submission must not count a second attempt")
 	}
 	// Task/reservation counts scope to this scenario: other integration
@@ -175,6 +181,84 @@ func TestTaskAdmissionRevalidatesDraft(t *testing.T) {
 	if detail.Draft == nil || detail.Draft.UpdatedAt != foreignRevision {
 		t.Fatalf("rejected submissions must not rewrite the draft, got %+v", detail.Draft)
 	}
+}
+
+// TestTaskAdmissionEnforcesPerModelReferenceCeiling: the reference-image
+// count envelope is per model (pro 10, base 14, user-confirmed 2026-09-01).
+// The same eleven-reference draft is stale on the pro model and admits on
+// the base model; the base model admits exactly fourteen, and the draft's
+// structural envelope refuses anything beyond the widest vendor bound.
+func TestTaskAdmissionEnforcesPerModelReferenceCeiling(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{})
+	token := h.loginToken(t, creator, harnessPassword)
+	status, body := h.doRequest(t, "POST", "/creation/sessions", token, map[string]any{"name": "ref-ceiling"})
+	if status != http.StatusCreated {
+		t.Fatalf("create session: status=%d body=%s", status, body)
+	}
+	sessionID := extractField(t, body, "id")
+
+	eleven := make([]any, 0, 11)
+	for i := 0; i < 11; i++ {
+		status, body := h.doUpload(t, "POST", "/creation/sessions/"+sessionID+"/materials", token,
+			fmt.Sprintf("ref-%02d.png", i), pngBytes(t))
+		if status != http.StatusCreated {
+			t.Fatalf("upload reference %d: status=%d body=%s", i, status, body)
+		}
+		eleven = append(eleven, map[string]any{"material_id": extractField(t, body, "id"), "role": "reference"})
+	}
+	saveWithRefs := func(model string, refs []any) taskDraft {
+		return h.saveDraftOn(t, token, sessionID, taskDraft{
+			MediaType: "image", Model: model, Mode: "reference-image",
+			Ratio: "1:1", Resolution: "2K", Quantity: 1, Prompt: "参考图生图",
+			References: refs,
+		})
+	}
+
+	status, body = h.submitTask(t, token, sessionID, "pro-over-ceiling", saveWithRefs("doubao-seedream-5.0-pro", eleven).Revision)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("11 references must be stale on pro (ceiling 10), got %d: %s", status, body)
+	}
+	assertErrorCode(t, body, "draft_capability_stale")
+
+	status, body = h.submitTask(t, token, sessionID, "base-within-ceiling", saveWithRefs("doubao-seedream-5.0", eleven).Revision)
+	if status != http.StatusCreated {
+		t.Fatalf("11 references must admit on the base model (ceiling 14), got %d: %s", status, body)
+	}
+
+	threeMore := make([]any, 0, 3)
+	for i := 0; i < 3; i++ {
+		status, body := h.doUpload(t, "POST", "/creation/sessions/"+sessionID+"/materials", token,
+			fmt.Sprintf("ref-%02d.png", 11+i), pngBytes(t))
+		if status != http.StatusCreated {
+			t.Fatalf("upload reference %d: status=%d body=%s", 11+i, status, body)
+		}
+		threeMore = append(threeMore, map[string]any{"material_id": extractField(t, body, "id"), "role": "reference"})
+	}
+	fourteenRefs := append(append([]any{}, eleven...), threeMore...)
+	status, body = h.submitTask(t, token, sessionID, "base-at-ceiling", saveWithRefs("doubao-seedream-5.0", fourteenRefs).Revision)
+	if status != http.StatusCreated {
+		t.Fatalf("14 references must admit on the base model (ceiling 14), got %d: %s", status, body)
+	}
+
+	// The draft's structural envelope is the widest vendor bound (14): a
+	// fifteenth reference can never even be saved, whatever the model.
+	status, body = h.doUpload(t, "POST", "/creation/sessions/"+sessionID+"/materials", token,
+		"ref-14.png", pngBytes(t))
+	if status != http.StatusCreated {
+		t.Fatalf("upload reference 15: status=%d body=%s", status, body)
+	}
+	fifteenRefs := append(append([]any{}, fourteenRefs...),
+		map[string]any{"material_id": extractField(t, body, "id"), "role": "reference"})
+	_, _, manifest := h.getManifest(t, token)
+	status, body = h.doRequest(t, "PUT", "/creation/sessions/"+sessionID+"/draft", token, map[string]any{
+		"prompt": "参考图生图", "media_type": "image", "manifest_version": manifest.ManifestVersion,
+		"model": "doubao-seedream-5.0", "mode": "reference-image",
+		"ratio": "1:1", "resolution": "2K", "quantity": 1, "references": fifteenRefs,
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("a 15-reference draft must violate the structural envelope, got %d: %s", status, body)
+	}
+	assertErrorCode(t, body, "invalid_request")
 }
 
 // TestTaskGovernanceMatrix walks the fixed rejection order with instance and
