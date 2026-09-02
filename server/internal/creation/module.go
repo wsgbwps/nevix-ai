@@ -20,7 +20,6 @@ import (
 	"github.com/nevix-ai/server/internal/creation/infrastructure/kapon"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/media"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/postgres"
-	"github.com/nevix-ai/server/internal/creation/infrastructure/readiness"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/secrets"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/storage"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/writetx"
@@ -49,7 +48,6 @@ type Config struct {
 	SecretsDir         string // secrets volume root holding the master key file
 	KaponBaseURL       string // reviewed fixed route; unset means the default
 	CORSAllowedOrigins []string
-	ReadinessFile      string // optional Production Readiness evidence document
 }
 
 // LoadConfig validates the Module's deployment variables strictly: unknown
@@ -113,12 +111,6 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, errors.New("creation: missing required deployment variable: NEVIX_CREATION_SECRETS_DIR (the secrets volume holding the Provider Credential master key)")
 	}
 	cfg.SecretsDir = secretsDir
-	// Optional: an unset variable (or a not-yet-existing file) is the valid
-	// factory state where nothing is Production Ready; a present-but-invalid
-	// document fails startup loudly instead.
-	if readinessFile, ok := lookup("NEVIX_CREATION_READINESS_FILE"); ok && strings.TrimSpace(readinessFile) != "" {
-		cfg.ReadinessFile = readinessFile
-	}
 	kaponBaseURL, ok := lookup("KAPON_BASE_URL")
 	if ok && strings.TrimSpace(kaponBaseURL) != "" {
 		if err := kapon.ValidateBaseURL(kaponBaseURL); err != nil {
@@ -205,23 +197,21 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	connectionRepos := postgres.NewConnectionRepository(pool)
 	taskRepos := postgres.NewGenerationTaskRepository(pool)
 	governanceRepos := postgres.NewGovernanceRepository(pool)
+	assetRepos := postgres.NewMediaAssetRepository(pool)
 	hub := creationhttp.NewInvalidationHub()
 	sessionService := application.NewSessionService(sessionRepos, materialRepos, tx)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
 	connectionService := application.NewConnectionService(connectionRepos, taskRepos, connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
-	// The readiness evidence is a startup-loaded deployment asset: an invalid
-	// document refuses to boot rather than silently deactivating capabilities.
-	evidence, err := readiness.LoadEvidenceFile(cfg.ReadinessFile)
-	if err != nil {
-		return nil, err
-	}
-	manifestService := application.NewManifestService(connectionRepos, evidence)
+	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, governanceRepos, manifestService, tx, hub)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
 	// The worker shares the module's storage adapter and speaks the fixed
-	// Kapon generation route; both stay behind the domain gateway seam.
+	// Kapon generation route; both stay behind the domain gateway seam. The
+	// connection service is the call-time credential source: the decrypted
+	// Provider Key exists only between its resolve and the adapter's
+	// Authorization header.
 	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL)
-	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, store, media.Prober{}, gateway, hub, tx, workerLeaseOwner())
+	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, store, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
 	return &Module{
 		sessions:    creationhttp.NewSessionHandler(sessionService),
 		materials:   creationhttp.NewMaterialHandler(materialService),

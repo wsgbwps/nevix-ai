@@ -50,12 +50,12 @@ func (h *harness) getSessionDetail(t *testing.T, token, sessionID string) (int, 
 
 func fullDraftInput(materialIDs ...string) map[string]any {
 	mediaType := "image"
-	model := "doubao-seedream-5.0-lite"
+	model := "doubao-seedream-5.0-pro"
 	mode := "reference-image"
-	ratio := "4:5"
+	ratio := "4:3"
 	resolution := "2K"
 	quantity := 2
-	manifestVersion := 1
+	manifestVersion := 3
 	refs := make([]map[string]any, 0, len(materialIDs))
 	for _, id := range materialIDs {
 		refs = append(refs, map[string]any{"material_id": id, "role": "reference"})
@@ -117,16 +117,16 @@ func TestDraftSaveAndRecoverRoundTrip(t *testing.T) {
 	if recovered.Draft.MediaType == nil || *recovered.Draft.MediaType != "image" {
 		t.Fatalf("media type lost: %+v", recovered.Draft)
 	}
-	if recovered.Draft.ManifestVersion != 1 {
+	if recovered.Draft.ManifestVersion != 3 {
 		t.Fatalf("manifest version lost: %+v", recovered.Draft)
 	}
-	if recovered.Draft.Model == nil || *recovered.Draft.Model != "doubao-seedream-5.0-lite" {
+	if recovered.Draft.Model == nil || *recovered.Draft.Model != "doubao-seedream-5.0-pro" {
 		t.Fatalf("model lost: %+v", recovered.Draft)
 	}
 	if recovered.Draft.Mode == nil || *recovered.Draft.Mode != "reference-image" {
 		t.Fatalf("mode lost: %+v", recovered.Draft)
 	}
-	if recovered.Draft.Ratio == nil || *recovered.Draft.Ratio != "4:5" {
+	if recovered.Draft.Ratio == nil || *recovered.Draft.Ratio != "4:3" {
 		t.Fatalf("ratio lost: %+v", recovered.Draft)
 	}
 	if recovered.Draft.Quantity == nil || *recovered.Draft.Quantity != 2 {

@@ -24,7 +24,7 @@ func TestCheckDecodesIndependentModelVisibility(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"object":"list","data":[{"id":"doubao-seedream-5.0-lite"},{"id":"unrelated-model"},{"id":"doubao-seedance-2-5"}]}`))
+		w.Write([]byte(`{"object":"list","data":[{"id":"doubao-seedream-5.0-pro"},{"id":"unrelated-model"},{"id":"doubao-seedance-2-5"}]}`))
 	})
 	result, err := client.Check(context.Background(), "valid-key")
 	if err != nil {

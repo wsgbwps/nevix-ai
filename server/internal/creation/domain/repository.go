@@ -177,13 +177,17 @@ type GenerationTaskRepository interface {
 	// TransitionJob performs one guarded job migration, optionally binding
 	// the external reference on first submission.
 	TransitionJob(ctx context.Context, tx TxExecutor, jobID UUID, from []JobStatus, to JobStatus, externalRef *string) (bool, error)
+	// BeginJobSubmitAttempt commits the pending/submitting marker, clears a
+	// prior transient outcome, and increments the provider-call count exactly
+	// once immediately before one external submit. attempts is valid when ok.
+	BeginJobSubmitAttempt(ctx context.Context, tx TxExecutor, jobID UUID, from []JobStatus) (attempts int, ok bool, err error)
 	// MarkJobSubmitRetryable records that the in-flight submit ended in a
 	// definitively identified transient rejection (explicit 429/503), which
 	// makes a bounded re-submit safe; the next submit attempt clears it.
 	MarkJobSubmitRetryable(ctx context.Context, tx TxExecutor, jobID UUID) error
 	// WriteSlotVerdict writes one slot's terminal verdict write-once; an
 	// already-settled slot keeps its first verdict and returns false.
-	WriteSlotVerdict(ctx context.Context, tx TxExecutor, taskID UUID, index int, status SlotStatus, reason *FailureReason, result *SlotResult) (bool, error)
+	WriteSlotVerdict(ctx context.Context, tx TxExecutor, taskID UUID, index int, status SlotStatus, reason *FailureReason, diagnostic *FailureDiagnostic, result *SlotResult) (bool, error)
 	// LoadSlotOutcomes reads every slot's current verdict (nil for pending).
 	LoadSlotOutcomes(ctx context.Context, tx TxExecutor, taskID UUID) ([]SlotOutcome, error)
 

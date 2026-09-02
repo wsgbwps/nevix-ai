@@ -44,9 +44,17 @@ async function readRotation() {
 
 const initial = await readRotation()
 const server = https.createServer({ ...initial }, (request, response) => {
+  // The terminator stands in for the official Nginx delivery (spec #150
+  // Nginx): inbound Forwarded headers are replaced with the trusted HTTPS
+  // marker the Go data plane requires on high-risk routes.
+  const headers = { ...request.headers }
+  delete headers['x-forwarded-proto']
   const upstream = http.request(
     new URL(request.url ?? '/', target),
-    { method: request.method, headers: { ...request.headers, host: new URL(target).host } },
+    {
+      method: request.method,
+      headers: { ...headers, host: new URL(target).host, 'x-forwarded-proto': 'https' }
+    },
     (upstreamResponse) => {
       response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers)
       upstreamResponse.pipe(response)

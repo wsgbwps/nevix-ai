@@ -10,7 +10,8 @@
 import type {
   CapabilityManifest,
   CapabilityMedia,
-  CapabilityMediaMode
+  CapabilityMediaMode,
+  CapabilityModel
 } from '../api/capability-manifest-http'
 import type { DraftReferenceRole, MaterialKind, SessionDraftView } from '../api/go-creation-http'
 
@@ -34,10 +35,12 @@ export function roleAcceptsKind(role: DraftReferenceRole, kind: MaterialKind): b
 
 /**
  * The material kinds the add entry may bind under the current manifest,
- * media, and mode: the published mode's own per-media envelopes. While no
- * manifest or only a stale mode is present, every kind stays addable so
- * drafting never depends on provider state; with the media itself
- * unavailable nothing new can be bound (the stable reason explains why).
+ * media, and mode. Video takes the published mode's own per-media envelopes
+ * (video modes are explicitly chosen). Image modes derive from the deck —
+ * the composer offers no image mode picker — so any available image
+ * capability accepts images; adding the first one derives the mode. While no
+ * manifest is present every kind stays addable so drafting never depends on
+ * provider state; with the media itself unavailable nothing new can be bound.
  */
 export function allowedReferenceKinds(
   manifest: CapabilityManifest | null,
@@ -48,6 +51,7 @@ export function allowedReferenceKinds(
   if (manifest === null || media === null) return everyKind
   const capability = mediaCapability(manifest, media)
   if (capability === null || !capability.available) return []
+  if (media === 'image') return ['image']
   const published = (capability.modes ?? []).find((entry) => entry.id === mode)
   if (!published) return everyKind
   const kinds: MaterialKind[] = []
@@ -84,14 +88,60 @@ export function mediaCapability(
   return media === 'image' ? manifest.image : manifest.video
 }
 
-/** Candidate models for one media; empty when the manifest is unavailable. */
+/** Candidate models for one media, in manifest order; empty when unavailable. */
 export function modelCandidates(
   manifest: CapabilityManifest | null,
   media: DraftMediaType
 ): readonly string[] {
   const capability = mediaCapability(manifest, media)
-  if (capability === null || !capability.available || capability.model === undefined) return []
-  return [capability.model]
+  if (capability === null || !capability.available) return []
+  return (capability.models ?? []).map((model) => model.model)
+}
+
+/** The published model entry for one model ID; null when not submittable. */
+export function publishedModel(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType,
+  model: string
+): CapabilityModel | null {
+  const capability = mediaCapability(manifest, media)
+  if (capability === null || !capability.available) return null
+  return (capability.models ?? []).find((entry) => entry.model === model) ?? null
+}
+
+/**
+ * Resolution tiers of the selected model; empty while no (published) model
+ * is selected — the tiers are model-scoped, so a stale model legitimately
+ * publishes none.
+ */
+export function resolutionCandidates(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType,
+  model: string | null
+): readonly string[] {
+  if (model === null) return []
+  return publishedModel(manifest, media, model)?.resolutions ?? []
+}
+
+/**
+ * The vendor pixel size the server submits for this exact (model, ratio,
+ * resolution) selection — the manifest publishes the same table the adapter
+ * resolves, so the composer can show the exact output size. `null` while any
+ * dimension is stale or the combination is unpublished (display only: it
+ * never gates submission).
+ */
+export function publishedSize(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType,
+  model: string | null,
+  ratio: string | null,
+  resolution: string | null
+): { width: number; height: number } | null {
+  if (model === null || ratio === null || resolution === null) return null
+  const size = publishedModel(manifest, media, model)?.sizes?.find(
+    (entry) => entry.ratio === ratio && entry.resolution === resolution
+  )
+  return size ? { width: size.width, height: size.height } : null
 }
 
 /** Candidate modes for one media in manifest order. */
@@ -116,12 +166,27 @@ export function modeReferenceBounds(
   return match ? { ...match.referenceMaterial.total } : null
 }
 
-/** The deck cap: the selected mode's max when published, else the fallback. */
+/**
+ * The deck cap for one (model, mode) selection. Image modes derive from the
+ * deck, so the cap is the selected model's own reference ceiling — the mode
+ * total only backs it up when the model is absent or stale (and the zero of
+ * a not-yet-derived text-to-image never caps the deck). Video takes the
+ * published mode's max.
+ */
 export function referenceCap(
   manifest: CapabilityManifest | null,
   media: DraftMediaType,
+  model: string | null,
   mode: string | null
 ): number {
+  if (media === 'image') {
+    const ceiling =
+      model === null ? null : (publishedModel(manifest, media, model)?.maxReferenceImages ?? null)
+    if (ceiling !== null) return ceiling
+    const bounds = mode === null ? null : modeReferenceBounds(manifest, media, mode)
+    if (bounds !== null && bounds.max > 0) return bounds.max
+    return fallbackReferenceCap
+  }
   if (mode === null) return fallbackReferenceCap
   const bounds = modeReferenceBounds(manifest, media, mode)
   return bounds === null ? fallbackReferenceCap : bounds.max
@@ -203,15 +268,27 @@ export function staleDraftFields(
   ) {
     stale.add('durationSeconds')
   }
-  if (draft.resolution === null || !(capability.resolutions ?? []).includes(draft.resolution)) {
+  if (
+    draft.resolution === null ||
+    !resolutionCandidates(manifest, media, draft.model).includes(draft.resolution)
+  ) {
     stale.add('resolution')
   }
 
   const bounds = modeReferenceBounds(manifest, media, draft.mode)
   if (bounds === null) {
     stale.add('references')
-  } else if (draft.references.length < bounds.min || draft.references.length > bounds.max) {
-    stale.add('references')
+  } else {
+    // The mode total is the widest cross-model bound; a published model's
+    // reference ceiling is the binding one.
+    const ceiling =
+      draft.model === null
+        ? null
+        : (publishedModel(manifest, media, draft.model)?.maxReferenceImages ?? null)
+    const max = ceiling !== null && ceiling < bounds.max ? ceiling : bounds.max
+    if (draft.references.length < bounds.min || draft.references.length > max) {
+      stale.add('references')
+    }
   }
   return stale
 }

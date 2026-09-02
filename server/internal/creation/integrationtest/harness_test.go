@@ -69,9 +69,6 @@ type harness struct {
 
 // harnessOptions selects per-scenario module configuration.
 type harnessOptions struct {
-	// readinessPath points at a scenario's Production Readiness evidence
-	// file; empty keeps the deployment default of nothing activated.
-	readinessPath string
 	// runWorkers starts the module's queue worker alongside the HTTP
 	// surface so task-lifecycle scenarios observe real convergence.
 	runWorkers bool
@@ -116,7 +113,6 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		SecretsDir:         secretsDir,
 		KaponBaseURL:       kapon.URL(),
 		CORSAllowedOrigins: []string{corsOrigin},
-		ReadinessFile:      opts.readinessPath,
 	}
 	// The identity Module is constructed before both registrations so its
 	// narrow SessionAuthenticator seam can be injected into Creation, exactly
@@ -138,11 +134,6 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 			return secretsDir, true
 		case "KAPON_BASE_URL":
 			return kapon.URL(), true
-		case "NEVIX_CREATION_READINESS_FILE":
-			if opts.readinessPath != "" {
-				return opts.readinessPath, true
-			}
-			return "", false
 		default:
 			return "", false
 		}

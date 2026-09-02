@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
@@ -99,7 +100,7 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 		if connection.ID != (domain.UUID{}) {
 			connectionView = &connection
 		}
-		manifest := domain.DeriveCapabilityManifest(s.manifest.evidence, connectionView)
+		manifest := domain.DeriveCapabilityManifest(connectionView)
 
 		spec, err := freezeSpecification(draft, manifest)
 		if err != nil {
@@ -195,7 +196,7 @@ func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteSco
 	if connection.ID != (domain.UUID{}) {
 		connectionView = &connection
 	}
-	manifest := domain.DeriveCapabilityManifest(s.manifest.evidence, connectionView)
+	manifest := domain.DeriveCapabilityManifest(connectionView)
 	if err := mediaAvailability(manifest, media); err != nil {
 		return nil, err
 	}
@@ -245,6 +246,7 @@ func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteSco
 		OwnerID:        owner,
 		IdempotencyKey: idempotencyKey,
 		PayloadHash:    spec.PayloadHash(),
+		Media:          spec.MediaType,
 		Spec:           *spec,
 		Status:         domain.TaskQueued,
 		SlotCount:      spec.Quantity,
@@ -385,7 +387,7 @@ func (s *TaskService) Cancel(ctx context.Context, owner, taskID domain.UUID) err
 		for _, slot := range slots {
 			if slot.Status == nil {
 				if _, err := s.tasks.WriteSlotVerdict(ctx, sc.Tx(), task.ID, slot.Index,
-					domain.SlotCancelled, nil, nil); err != nil {
+					domain.SlotCancelled, nil, nil, nil); err != nil {
 					return err
 				}
 			}
@@ -426,8 +428,11 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 	if draft == nil {
 		return nil, domain.ErrDraftNotReady
 	}
+	// The prompt envelope counts Unicode characters (spec 图片合同) — the
+	// same rune rule the draft gate applies — not bytes.
+	promptRunes := utf8.RuneCountInString(draft.Prompt)
 	if draft.MediaType == nil || draft.Model == nil || draft.Mode == nil ||
-		draft.Prompt == "" || len(draft.Prompt) > domain.PromptMaxChars {
+		draft.Prompt == "" || promptRunes > domain.PromptMaxChars {
 		return nil, domain.ErrDraftNotReady
 	}
 	media := *draft.MediaType
@@ -442,7 +447,10 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 		}
 		return nil, &domain.MediaUnavailableError{Reason: reason, Action: mediaView.Action}
 	}
-	if *draft.Model != mediaView.Model {
+	// Resolution tiers are model-scoped: the draft's model must be a
+	// published model and its resolution must be one of that model's tiers.
+	modelView := publishedModel(mediaView.Models, *draft.Model)
+	if modelView == nil || !valueInList(modelView.Resolutions, draft.Resolution) {
 		return nil, domain.ErrDraftCapabilityStale
 	}
 	modeKnown := false
@@ -456,9 +464,6 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 		}
 	}
 	if !modeKnown {
-		return nil, domain.ErrDraftCapabilityStale
-	}
-	if !valueInList(mediaView.Resolutions, draft.Resolution) {
 		return nil, domain.ErrDraftCapabilityStale
 	}
 	spec := &domain.GenerationSpecification{
@@ -481,9 +486,6 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 		spec.Resolution = draft.Resolution
 		spec.Quantity = *draft.Quantity
 	} else {
-		if !valueInList(mediaView.Resolutions, draft.Resolution) {
-			return nil, domain.ErrDraftCapabilityStale
-		}
 		if draft.DurationSeconds == nil || !intInList(mediaView.Durations, *draft.DurationSeconds) {
 			return nil, domain.ErrDraftCapabilityStale
 		}
@@ -496,8 +498,14 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 	if modePolicy == nil {
 		return nil, domain.ErrDraftCapabilityStale
 	}
+	// The mode total is the widest cross-model bound; the selected image
+	// model's published ceiling is the binding one (pro 10, base 14).
+	maxReferences := modePolicy.Total.Max
+	if modelView.MaxReferenceImages != nil && *modelView.MaxReferenceImages < maxReferences {
+		maxReferences = *modelView.MaxReferenceImages
+	}
 	count := len(draft.References)
-	if count < modePolicy.Total.Min || count > modePolicy.Total.Max {
+	if count < modePolicy.Total.Min || count > maxReferences {
 		return nil, domain.ErrDraftCapabilityStale
 	}
 	for _, reference := range draft.References {
@@ -578,6 +586,17 @@ func mediaAvailability(manifest domain.CapabilityManifestView, media domain.Medi
 		return nil
 	}
 	return &domain.MediaUnavailableError{Reason: view.Reason, Action: view.Action}
+}
+
+// publishedModel returns the media's published model entry for one model ID,
+// or nil when the model is not currently submittable.
+func publishedModel(models []domain.CapabilityModelView, model string) *domain.CapabilityModelView {
+	for index := range models {
+		if models[index].Model == model {
+			return &models[index]
+		}
+	}
+	return nil
 }
 
 func valueInList(values []string, value *string) bool {

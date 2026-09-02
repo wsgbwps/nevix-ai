@@ -8,23 +8,25 @@ import (
 	"time"
 )
 
-// Generation task kernel scenario support (issue #159): a ready deployment
-// (readiness evidence active for both media + configured provider
-// connection), a saved draft, and idempotent submission helpers.
+// Generation task kernel scenario support (issue #159): a configured provider
+// connection, a saved draft, and idempotent submission helpers.
 
 // readyTaskHarness builds a harness whose manifest is fully active and whose
 // provider connection is configured against the fake Kapon route.
 func readyTaskHarness(t *testing.T, opts harnessOptions) (*harness, string, string) {
 	t.Helper()
-	opts.readinessPath = writeEvidenceFile(t, append(append([]string{}, manifestImageSlots...), manifestVideoSlots...)...)
 	h := newHarnessWithOptions(t, opts)
 	h.ensureAccounts(t)
 	adminToken := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
 	h.resetProviderConnections(t)
-	// Governance rows persist across scenarios (one shared database), so a
-	// ready harness always starts from the unset baseline.
+	// Governance rows and attempt counters persist across scenarios (one
+	// shared database), so a ready harness always starts from the unset,
+	// uncounted baseline.
 	if _, err := h.ownerPool.Exec(h.ctx, `DELETE FROM creation_generation_policies`); err != nil {
 		t.Fatalf("clear governance policies: %v", err)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `DELETE FROM creation_generation_attempts`); err != nil {
+		t.Fatalf("clear generation attempts: %v", err)
 	}
 	h.kapon.acceptKey("task-kernel-key")
 	status, body := h.configureConnection(t, adminToken, "task-kernel-key")
@@ -46,6 +48,7 @@ type taskDraft struct {
 	Quantity   int
 	Duration   int
 	Prompt     string
+	References []any
 }
 
 // saveImageDraft saves a minimal text-to-image draft on a fresh session.
@@ -57,18 +60,24 @@ func (h *harness) saveImageDraft(t *testing.T, token, prompt string, quantity in
 	}
 	sessionID := extractField(t, body, "id")
 	return h.saveDraftOn(t, token, sessionID, taskDraft{
-		SessionID: sessionID, MediaType: "image", Model: "doubao-seedream-5.0-lite",
+		SessionID: sessionID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
 		Mode: "text-to-image", Ratio: "1:1", Resolution: "2K", Quantity: quantity, Prompt: prompt,
 	})
 }
 
 // saveDraftOn stores the draft and captures the revision the submitter echoes.
+// The draft records the manifest version the composer saw, so the helper
+// fetches the live one — scenarios must survive manifest content bumps.
 func (h *harness) saveDraftOn(t *testing.T, token, sessionID string, draft taskDraft) taskDraft {
 	t.Helper()
+	_, _, manifest := h.getManifest(t, token)
+	if manifest.ManifestVersion < 1 {
+		t.Fatalf("manifest must publish a version before drafts can record it, got %+v", manifest)
+	}
 	payload := map[string]any{
 		"prompt":           draft.Prompt,
 		"media_type":       draft.MediaType,
-		"manifest_version": 1,
+		"manifest_version": manifest.ManifestVersion,
 		"model":            draft.Model,
 		"mode":             draft.Mode,
 		"ratio":            nil,
@@ -85,6 +94,9 @@ func (h *harness) saveDraftOn(t *testing.T, token, sessionID string, draft taskD
 	}
 	if draft.Duration > 0 {
 		payload["duration_seconds"] = draft.Duration
+	}
+	if draft.References != nil {
+		payload["references"] = draft.References
 	}
 	status, body := h.doRequest(t, "PUT", "/creation/sessions/"+sessionID+"/draft", token, payload)
 	if status != http.StatusOK {
@@ -120,10 +132,18 @@ type taskView struct {
 		CreatedAt       string  `json:"created_at"`
 	} `json:"task"`
 	Slots []struct {
-		Index         int     `json:"index"`
-		Status        string  `json:"status"`
-		FailureReason *string `json:"failure_reason"`
-		Result        *struct {
+		Index             int     `json:"index"`
+		Status            string  `json:"status"`
+		FailureReason     *string `json:"failure_reason"`
+		FailureDiagnostic *struct {
+			Source       string  `json:"source"`
+			Code         string  `json:"code"`
+			Message      string  `json:"message"`
+			HTTPStatus   *int    `json:"http_status"`
+			ProviderType *string `json:"provider_type"`
+			RequestID    *string `json:"request_id"`
+		} `json:"failure_diagnostic"`
+		Result *struct {
 			MimeType   string `json:"mime_type"`
 			ByteSize   int64  `json:"byte_size"`
 			Checksum   string `json:"checksum_sha256"`

@@ -23,6 +23,8 @@ import {
   mediaCapability,
   modeCandidates,
   modelCandidates,
+  publishedSize,
+  resolutionCandidates,
   type DraftMediaType
 } from '../model/capability'
 import type { CreationWorkbenchController } from '../model/use-workbench'
@@ -32,7 +34,6 @@ import { ReferenceDeck } from './reference-deck'
 // shape the provider-connection surface uses for wire codes.
 
 const reasonKeys = {
-  production_readiness_pending: 'composer.unavailable.reasons.production_readiness_pending',
   not_configured: 'composer.unavailable.reasons.not_configured',
   checking: 'composer.unavailable.reasons.checking',
   credential_invalid: 'composer.unavailable.reasons.credential_invalid',
@@ -43,7 +44,6 @@ const reasonKeys = {
 
 const actionKeys = {
   wait: 'composer.unavailable.actions.wait',
-  await_release: 'composer.unavailable.actions.await_release',
   contact_admin: 'composer.unavailable.actions.contact_admin'
 } as const
 
@@ -327,7 +327,7 @@ function ModelMenu({
           <DropdownMenuItem
             key={model}
             className="min-h-14 cursor-pointer rounded-xl px-3 py-2"
-            onSelect={() => workbench.patchDraft({ model })}
+            onSelect={() => workbench.setModel(model)}
           >
             <span className="border-border bg-accent grid size-9 shrink-0 place-items-center rounded-lg border">
               <SparklesIcon className="size-4" aria-hidden />
@@ -408,8 +408,17 @@ function ParamsMenu({
   if (media === null || capability === null || !capability.available) return <></>
 
   const ratios = capability.ratios ?? []
-  const resolutions = capability.resolutions ?? []
+  // Resolution tiers are model-scoped: the selected model's own published
+  // tiers, empty while the draft's model is stale so only the stale note
+  // shows.
+  const resolutions = resolutionCandidates(manifest, media, draft.model)
   const quantities = capability.quantities ?? []
+  // The exact pixel size the server will submit for this selection; hidden
+  // while any dimension is stale or the combination is unpublished.
+  const size =
+    media === 'image'
+      ? publishedSize(manifest, media, draft.model, draft.ratio, draft.resolution)
+      : null
   const staleRatio = staleFields.has('ratio') ? draft.ratio : null
   const staleResolution = staleFields.has('resolution') ? draft.resolution : null
   const staleQuantity = staleFields.has('quantity') ? draft.quantity : null
@@ -494,6 +503,27 @@ function ParamsMenu({
                     {quantity}
                   </button>
                 ))}
+              </div>
+            </ParamGroup>
+          )}
+          {size !== null && (
+            <ParamGroup label={t('composer.params.size')}>
+              <div
+                data-testid="composer-params-size"
+                className="bg-accent/60 flex items-center gap-2 rounded-xl p-1 text-xs"
+              >
+                <span className="bg-background/60 flex h-9 flex-1 items-center justify-between rounded-lg px-3">
+                  <span className="text-muted-foreground">W</span>
+                  <span className="font-medium">{size.width}</span>
+                </span>
+                <span className="text-muted-foreground" aria-hidden>
+                  ×
+                </span>
+                <span className="bg-background/60 flex h-9 flex-1 items-center justify-between rounded-lg px-3">
+                  <span className="text-muted-foreground">H</span>
+                  <span className="font-medium">{size.height}</span>
+                </span>
+                <span className="text-muted-foreground pr-1">px</span>
               </div>
             </ParamGroup>
           )}

@@ -3,6 +3,8 @@ package integrationtest
 import (
 	"context"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,7 +19,7 @@ import (
 func TestImageTaskLifecycleReachesSucceeded(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{outputs: 2})
+	h.kapon.generation.setImage(imageScript{outputs: 1})
 
 	draft := h.saveImageDraft(t, token, "两张输出", 2)
 	status, body := h.submitTask(t, token, draft.SessionID, "img-life", draft.Revision)
@@ -68,7 +70,7 @@ func TestImageTaskLifecycleReachesSucceeded(t *testing.T) {
 func TestVideoTaskLifecycleRunsAsync(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 3})
+	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 5})
 
 	status, body := h.doRequest(t, "POST", "/creation/sessions", token, map[string]any{"name": "video"})
 	if status != http.StatusCreated {
@@ -95,6 +97,9 @@ func TestVideoTaskLifecycleRunsAsync(t *testing.T) {
 	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'completed'`, view.Task.ID); got != 1 {
 		t.Fatalf("one completed provider job expected, got %d", got)
 	}
+	if got := h.kapon.generation.videoRequests(); got < 6 {
+		t.Fatalf("accepted async work must retain its independent poll budget, got %d provider requests", got)
+	}
 }
 
 // TestPartialSuccessKeepsEverySucceededSlot: a provider shortfall fails only
@@ -103,7 +108,7 @@ func TestVideoTaskLifecycleRunsAsync(t *testing.T) {
 func TestPartialSuccessKeepsEverySucceededSlotAndRetryCreatesNewTask(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{outputs: 2})
+	h.kapon.generation.setImage(imageScript{outputs: 1, emptyOutputsOn: 2})
 
 	draft := h.saveImageDraft(t, token, "部分成功", 3)
 	status, body := h.submitTask(t, token, draft.SessionID, "partial", draft.Revision)
@@ -228,6 +233,47 @@ func TestCancelConvergesBestEffort(t *testing.T) {
 	converged := h.awaitTaskTerminal(t, token, running.Task.ID)
 	if converged.Task.Status != "succeeded" {
 		t.Fatalf("accepted work with retained outputs must converge succeeded, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
+	}
+}
+
+// TestCancelOfReflessSubmitConverges: a cancel requested while the job is
+// held submitting without an external identity (transient-rejection backoff)
+// converges cancelled — the cancelling path never touches a missing
+// external ref.
+func TestCancelOfReflessSubmitConverges(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	h.kapon.generation.setImage(imageScript{status: http.StatusTooManyRequests})
+
+	draft := h.saveImageDraft(t, token, "取消未受理提交", 1)
+	status, body := h.submitTask(t, token, draft.SessionID, "cancel-refless", draft.Revision)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	view := decodeTaskView(t, body)
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'submitting' AND external_ref IS NULL AND last_outcome = 'transient_rejected'`, view.Task.ID); got == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("job never entered the ref-less submitting hold")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if status, body = h.doRequest(t, "POST", "/creation/tasks/"+view.Task.ID+"/cancel", token, nil); status != http.StatusOK {
+		t.Fatalf("cancel: %d %s", status, body)
+	}
+	converged := h.awaitTaskTerminal(t, token, view.Task.ID)
+	if converged.Task.Status != "cancelled" {
+		t.Fatalf("a submit that never obtained an external identity must cancel, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
+	}
+	for _, slot := range converged.Slots {
+		if slot.Status != "cancelled" {
+			t.Fatalf("every slot must end cancelled: %s", slotVerdicts(converged))
+		}
 	}
 }
 
@@ -431,4 +477,194 @@ func TestLocalCrashNeverFabricatesTimeout(t *testing.T) {
 		t.Fatal("local waiting must never end as business timed_out")
 	}
 	_ = context.Background()
+}
+
+// TestCompletedJobSurvivesCredentialUnavailability: a job that already
+// settled provider-side (persist-phase crash recovery) holds as transient
+// while the call credential is unresolvable, and its outputs still form
+// assets once the credential returns — the completed job's outputs are never
+// discarded as a nil-reason terminal failure (issue #160 review).
+func TestCompletedJobSurvivesCredentialUnavailability(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 1 << 30})
+
+	status, body := h.doRequest(t, "POST", "/creation/sessions", token, map[string]any{"name": "sealed"})
+	if status != http.StatusCreated {
+		t.Fatalf("create session: %d", status)
+	}
+	sessionID := extractField(t, body, "id")
+	draft := h.saveDraftOn(t, token, sessionID, taskDraft{
+		MediaType: "video", Model: "doubao-seedance-2-5", Mode: "text-to-video",
+		Resolution: "720p", Duration: 5, Prompt: "凭据恢复后继续收敛",
+	})
+	status, body = h.submitTask(t, token, sessionID, "sealed-1", draft.Revision)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+
+	// Wait until the job is mid-flight (processing with an external ref).
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _, view := h.getTask(t, token, taskID)
+		if view.Task.Status == "processing" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'processing' AND external_ref IS NOT NULL`, taskID); got != 1 {
+		t.Fatalf("processing job with external ref expected, got %d", got)
+	}
+
+	// Simulate the persist-phase crash state: the job settled provider-side
+	// (completed) while the task's slots never landed.
+	if _, err := h.ownerPool.Exec(h.ctx,
+		`UPDATE creation_provider_jobs SET status = 'completed', terminal_at = now() WHERE task_id = $1::uuid`, taskID); err != nil {
+		t.Fatalf("mark job completed: %v", err)
+	}
+
+	// Seal the master key: the call credential cannot be resolved, so the
+	// completed job must hold transiently instead of converging to a
+	// nil-reason failure that would discard its transferable outputs.
+	if err := os.Chmod(h.secretsDir, 0o000); err != nil {
+		t.Fatalf("seal secrets dir: %v", err)
+	}
+	holdDeadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(holdDeadline) {
+		_, _, view := h.getTask(t, token, taskID)
+		if isTerminalStatus(view.Task.Status) {
+			t.Fatalf("sealed credential must hold the task open, got %s (%s)", view.Task.Status, slotVerdicts(view))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// The credential returns and the provider answers with its outputs: the
+	// same job converges succeeded with a formed asset — no new generation.
+	if err := os.Chmod(h.secretsDir, 0o700); err != nil {
+		t.Fatalf("unseal secrets dir: %v", err)
+	}
+	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 0})
+	view := h.awaitTaskTerminal(t, token, taskID)
+	if view.Task.Status != "succeeded" {
+		t.Fatalf("recovered job must succeed, got %s (%s)", view.Task.Status, slotVerdicts(view))
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid`, taskID); got != 1 {
+		t.Fatalf("recovery must not create a second external attempt, got %d jobs", got)
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, taskID); got != 1 {
+		t.Fatalf("the completed job's output must form its asset, got %d", got)
+	}
+}
+
+// TestTransientRejectionAttemptLimitConverges: the provider's four-step
+// transient-submit ladder is also the durable call budget. Once spent, the
+// task exposes a retryable terminal verdict instead of silently waiting on
+// the queue-wide 240-attempt allowance (issue #160 field report:
+// last_outcome=transient_rejected, no error).
+func TestTransientRejectionAttemptLimitConverges(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	one := 1
+	h.kapon.generation.setImage(imageScript{
+		status: http.StatusTooManyRequests, retryAfterSeconds: &one,
+	})
+
+	draft := h.saveImageDraft(t, token, "预算耗尽", 1)
+	status, body := h.submitTask(t, token, draft.SessionID, "exhaust-1", draft.Revision)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+
+	// Wait for exactly one provider call, then inflate the unrelated queue
+	// claim count. A correct implementation still permits three more submit
+	// calls because submit_attempts is the durable budget owner.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if got := countRows(t, h.ownerPool,
+			`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 1`, taskID); got == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the first transient rejection was never recorded")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx,
+		`UPDATE creation_generation_queue SET attempts = 200 WHERE task_id = $1::uuid`, taskID); err != nil {
+		t.Fatalf("inflate the independent queue-claim budget: %v", err)
+	}
+	// Keep the first three waits fast, then make the limiting answer match
+	// the real Kapon response observed for issue #160. The worker must retain
+	// retry semantics while preserving the allowlisted terminal diagnosis.
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		if got := countRows(t, h.ownerPool,
+			`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 3`, taskID); got == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the third transient rejection was never recorded")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	h.kapon.generation.setImage(imageScript{
+		status: http.StatusServiceUnavailable, code: "MODEL_GROUP_ALL_UNAVAILABLE",
+	})
+
+	converged := h.awaitTaskTerminal(t, token, taskID)
+	if converged.Task.Status != "failed" {
+		t.Fatalf("exhausted transient retries must converge failed, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
+	}
+	for _, slot := range converged.Slots {
+		if slot.Status != "failed" || slot.FailureReason == nil || *slot.FailureReason != "provider_route_unavailable" {
+			t.Fatalf("the limiting model-route 503 must retain its stable diagnosis: %s", slotVerdicts(converged))
+		}
+		diagnostic := slot.FailureDiagnostic
+		// The gateway appends the redacted request shape and host route to the
+		// provider message (ADR-0016); the creator-private detail is the prefix.
+		if diagnostic == nil || diagnostic.Source != "provider" ||
+			diagnostic.Code != "MODEL_GROUP_ALL_UNAVAILABLE" ||
+			!strings.HasPrefix(diagnostic.Message, "provider-private-detail") ||
+			diagnostic.RequestID == nil || *diagnostic.RequestID != "kapon-private-request-id" ||
+			diagnostic.HTTPStatus == nil || *diagnostic.HTTPStatus != http.StatusServiceUnavailable {
+			t.Fatalf("the creator-private Kapon diagnostic must survive: %+v", diagnostic)
+		}
+	}
+	terminalStatus, terminalBody, _ := h.getTask(t, token, taskID)
+	if terminalStatus != http.StatusOK {
+		t.Fatalf("get terminal task: %d %s", terminalStatus, terminalBody)
+	}
+	assertContractResponse(t, http.MethodGet, "/creation/tasks/"+taskID, terminalStatus, terminalBody)
+	for _, required := range []string{"MODEL_GROUP_ALL_UNAVAILABLE", "provider-private-detail", "kapon-private-request-id"} {
+		if !strings.Contains(string(terminalBody), required) {
+			t.Fatalf("task API dropped creator-private provider response field %q: %s", required, terminalBody)
+		}
+	}
+	if got := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_generation_reservations WHERE task_id = $1::uuid AND released_at IS NOT NULL`, taskID); got != 1 {
+		t.Fatal("exhaustion must release the reservation exactly once")
+	}
+	if got := h.kapon.generation.imageRequests(); got != 4 {
+		t.Fatalf("the four-step transient-submit budget must make 4 provider calls, got %d", got)
+	}
+	if got := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'failed' AND submit_attempts = 4 AND last_outcome IS NULL`, taskID); got != 1 {
+		t.Fatal("the limiting rejection and terminal provider-job verdict must commit together")
+	}
+	if got := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_generation_queue WHERE task_id = $1::uuid AND attempts >= max_attempts`, taskID); got != 1 {
+		t.Fatal("the exhausted queue item must stay retired (attempts saturated)")
+	}
+}
+
+// isTerminalStatus reports whether a wire task status is one of the five
+// terminal states.
+func isTerminalStatus(status string) bool {
+	switch status {
+	case "succeeded", "partially_succeeded", "failed", "cancelled", "timed_out":
+		return true
+	}
+	return false
 }

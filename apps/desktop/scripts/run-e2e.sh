@@ -5,11 +5,13 @@ set -euo pipefail
 # full  — Full E2E Suite: configuration-failure builds, then every spec (default).
 # smoke — Smoke Suite: one test-mode build, then only specs tagged @smoke.
 # settings — Settings Information Architecture: one test-mode build, then the Settings spec.
+# image — Slice-10 image generation: fake Kapon generation route + configured
+#   provider connection, then the shortest image spec.
 mode="${1:-full}"
 case "$mode" in
-  full | smoke | settings) ;;
+  full | smoke | settings | image) ;;
   *)
-    echo "usage: $0 [full|smoke|settings]" >&2
+    echo "usage: $0 [full|smoke|settings|image]" >&2
     exit 2
     ;;
 esac
@@ -44,6 +46,9 @@ admin_email="e2e.admin@nevix.test"
 admin_initial_password="initial-horse-battery-staple"
 tls_host=127.0.0.1
 tls_port=8443
+fake_kapon_pid=""
+fake_kapon_port=9399
+fake_kapon_log=""
 failure_injection="${NEVIX_TEST_INJECT_IDENTITY_SERVER_FAILURE:-}"
 
 case "$failure_injection" in
@@ -152,6 +157,21 @@ stop_tls_terminator() {
   fi
 }
 
+stop_fake_kapon() {
+  if [[ -n "$fake_kapon_pid" ]]; then
+    if kill -0 "$fake_kapon_pid" >/dev/null 2>&1; then
+      kill "$fake_kapon_pid" >/dev/null 2>&1 || true
+    fi
+    wait "$fake_kapon_pid" >/dev/null 2>&1 || true
+    fake_kapon_pid=""
+  fi
+  if [[ -n "$fake_kapon_log" ]]; then
+    cat "$fake_kapon_log" >>"$identity_server_log" 2>/dev/null || true
+    rm -f "$fake_kapon_log"
+    fake_kapon_log=""
+  fi
+}
+
 inject_identity_server_failure_after_renderer_launch() {
   for _ in $(seq 1 240); do
     if [[ -f "$identity_server_failure_marker_dir/request-ready" ]]; then
@@ -188,6 +208,7 @@ cleanup() {
   local exit_status="$1"
   local cleanup_status="$exit_status"
 
+  stop_fake_kapon
   stop_identity_server_failure_injector
   stop_tls_terminator
   stop_setup_server
@@ -454,6 +475,42 @@ claim_main_instance() {
     >/dev/null
 }
 
+# Slice-10 image harness (issue #160). The provider connection is configured
+# through the TLS terminator because the
+# reauthentication and connection commands demand the trusted HTTPS transport
+# marker (plain loopback http answers secure_transport_required).
+start_fake_kapon() {
+  fake_kapon_log="$(mktemp -t nevix-fake-kapon.XXXXXX.log)"
+  node "$repo_root/scripts/dev/fake-kapon.mjs" >"$fake_kapon_log" 2>&1 &
+  fake_kapon_pid=$!
+  for _ in $(seq 1 40); do
+    # An unauthorized catalog request still proves the listener is up.
+    if curl -s -o /dev/null "http://127.0.0.1:$fake_kapon_port/v1/models"; then
+      return
+    fi
+    sleep 0.25
+  done
+  echo "error: fake Kapon did not become ready" >&2
+  cat "$fake_kapon_log" >&2 || true
+  return 1
+}
+
+configure_provider_connection() {
+  local tls_url="https://$tls_host:$tls_port"
+  local token proof
+  token="$(curl -fsk -X POST "$tls_url/identity/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}" \
+    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).token)')"
+  proof="$(curl -fsk -X POST "$tls_url/identity/admin/reauth/proofs" \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -d "{\"action\":\"provider_connection.create\",\"password\":\"$admin_initial_password\"}" \
+    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).proof)')"
+  curl -fsk -X POST "$tls_url/creation/provider-connection" \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -d "{\"proof\":\"$proof\",\"provider_key\":\"test-key\"}" >/dev/null
+}
+
 # The TLS terminator fronts the identity server with a self-signed certificate
 # so the TOFU specs exercise a genuinely untrusted chain, and can rotate to a
 # second certificate mid-run for the fingerprint-change warning.
@@ -565,6 +622,13 @@ require_free_port 8080
 require_free_port "$tls_port"
 require_free_port "$setup_server_port"
 require_free_port "$open_server_port"
+if [[ "$mode" == "image" ]]; then
+  require_free_port "$fake_kapon_port"
+  # The fake generation route must exist before the server boots; an unset
+  # KAPON_BASE_URL there would bind the real reviewed route instead.
+  start_fake_kapon
+  export KAPON_E2E_BASE_URL="http://127.0.0.1:$fake_kapon_port"
+fi
 
 start_postgres
 start_identity_server
@@ -576,6 +640,10 @@ server_url="http://127.0.0.1:8080"
 if [[ "$mode" == "full" ]]; then
   start_setup_server
   start_open_server
+fi
+if [[ "$mode" == "image" ]]; then
+  configure_provider_connection
+  echo "==> Fake Kapon generation route ready on $KAPON_E2E_BASE_URL (provider connection configured)"
 fi
 
 pnpm exec electron-vite build --mode test
@@ -591,6 +659,10 @@ if [[ "$mode" == "smoke" ]]; then
 elif [[ "$mode" == "settings" ]]; then
   playwright_args+=(
     tests/settings/settings-page.spec.ts
+  )
+elif [[ "$mode" == "image" ]]; then
+  playwright_args+=(
+    tests/creation/creation-image.spec.ts
   )
 fi
 if [[ "$failure_injection" == "after-renderer-launch" ]]; then

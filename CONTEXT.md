@@ -68,12 +68,12 @@ AI Provider Connection 对图片或视频一种媒体及其固定模型的独立
 _Avoid_: Default Connection, Provider Health, Media Provider
 
 **AI Provider Capability Manifest**:
-经真实供应商调用验收后形成的版本化能力合同，限定模型支持的生成选项、组合及参考素材数量；Desktop 只展示其允许值，Server 执行权威校验。
+随 Nevix 代码发布的版本化能力合同，限定模型支持的生成选项、组合及参考素材数量；Desktop 只展示其允许值，Server 执行权威校验。
 _Avoid_: Provider Documentation, Runtime Capability Guess, Client Capability Config
 
-**AI Provider Production Readiness**:
-Nevix 在供应商上线或版本变更时统一验证的产品级生产门槛，覆盖图片与视频模式、分辨率、异步查询和结果转存的真实 smoke test；它不是 Deployment Instance 的连接状态。
-_Avoid_: AI Provider Connection Check, Per-Instance Smoke Test
+**AI Provider Release Smoke**:
+Nevix 首次正式发布、固定模型变化或供应商合同变化时，由开发者按发布 checklist 人工执行的真实生成检查；结果只记录在 release checklist 或 issue，不是运行时状态、部署资产或 Capability Manifest 激活门槛。
+_Avoid_: AI Provider Production Readiness, Runtime Readiness Evidence, AI Provider Connection Check
 
 **AI Provider Job**:
 Generation Task 内记录的一次外部 AI 供应商执行实体，以所用 AI Provider Connection 和供应商作业标识区分；它由 Generation Task 拥有，不是独立聚合或 Module。

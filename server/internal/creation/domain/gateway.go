@@ -7,10 +7,11 @@ import (
 )
 
 // The provider gateway port: the task kernel's single seam to external
-// generation. Adapters speak the domain's classified outcomes — request IDs,
-// raw error bodies, keys, and prompts never travel past this boundary — and
-// every classification below is deliberately recoverable by the kernel's
-// retry discipline (spec #150 Retry/超时/取消纪律).
+// generation. Adapters speak the domain's classified outcomes and may attach
+// the bounded standard provider error fields allowed by ADR-0016; arbitrary
+// raw bodies, keys, prompts, headers, and output URLs never travel past this
+// boundary. Every classification below remains deliberately recoverable by
+// the kernel's retry discipline (spec #150 Retry/超时/取消纪律).
 
 // Gateway classified errors.
 var (
@@ -64,6 +65,17 @@ func (e *RateLimitedError) Error() string { return "provider rate limited" }
 
 func (e *RateLimitedError) Is(target error) bool { return target == ErrProviderRateLimited }
 
+// ProviderUnavailableError preserves one allowlisted stable diagnosis while
+// retaining the bounded-retry semantics of ErrProviderUnavailable. Concrete
+// standard provider fields travel separately as a bounded FailureDiagnostic.
+type ProviderUnavailableError struct {
+	Reason FailureReason
+}
+
+func (e *ProviderUnavailableError) Error() string { return "provider temporarily unavailable" }
+
+func (e *ProviderUnavailableError) Is(target error) bool { return target == ErrProviderUnavailable }
+
 // IsSubmitIndeterminate reports an unidentified submit outcome.
 func IsSubmitIndeterminate(err error) bool { return errors.Is(err, ErrSubmitIndeterminate) }
 
@@ -95,6 +107,10 @@ func ClassifyFailureReason(err error) FailureReason {
 	if errors.As(err, &rejected) {
 		return rejected.Reason
 	}
+	var unavailable *ProviderUnavailableError
+	if errors.As(err, &unavailable) {
+		return unavailable.Reason
+	}
 	return ReasonTemporarilyUnavailable
 }
 
@@ -111,6 +127,29 @@ type SubmitRequest struct {
 	Resolution *string
 	DurationS  *int
 	References []GatewayReference
+}
+
+// CallCredentialSource resolves the active connection's decrypted Provider
+// Key for exactly one provider call. The plaintext exists only between the
+// resolve and the adapter's Authorization header (spec #150 敏感信息纪律) —
+// never in rows, logs, errors, or responses.
+type CallCredentialSource interface {
+	// ActiveCallCredential returns the active connection's plaintext key,
+	// or an error when no usable credential exists (not configured, not
+	// valid, or the envelope/master key is unavailable) — the caller must
+	// fail closed and hold without fabricating an external outcome.
+	ActiveCallCredential(ctx context.Context) (string, error)
+}
+
+// OutputMimeAccepted reports whether a probed provider output can form an
+// asset for the requested media type. Image providers may return either JPEG
+// or PNG. Other media retain their existing unrestricted contract until their
+// format-specific verification slice lands.
+func OutputMimeAccepted(media MediaType, mime string) bool {
+	if media == MediaImage {
+		return mime == "image/jpeg" || mime == "image/png"
+	}
+	return true
 }
 
 // GatewayReference is one ordered reference with its role and data URL.
@@ -140,21 +179,24 @@ const (
 
 // PollOutcome is one authoritative poll answer.
 type PollOutcome struct {
-	Status  PollStatus
-	Outputs []GatewayOutput
-	Reason  *FailureReason // classified, when Status == PollFailed
+	Status     PollStatus
+	Outputs    []GatewayOutput
+	Reason     *FailureReason     // classified, when Status == PollFailed
+	Diagnostic *FailureDiagnostic // concrete creator-private explanation, when available
 }
 
-// ProviderGateway is the external generation seam.
+// ProviderGateway is the external generation seam. The credential argument
+// authenticates one call; adapters set the Authorization header from it and
+// never persist, log, or wrap it into an error.
 type ProviderGateway interface {
 	// Submit starts one external generation. A lost outcome returns
 	// ErrSubmitIndeterminate; classified errors otherwise.
-	Submit(ctx context.Context, req SubmitRequest) (SubmitOutcome, error)
+	Submit(ctx context.Context, credential string, req SubmitRequest) (SubmitOutcome, error)
 	// Poll queries one external job. Polling is provably safe to retry.
-	Poll(ctx context.Context, ref string) (PollOutcome, error)
+	Poll(ctx context.Context, credential string, ref string) (PollOutcome, error)
 	// Cancel asks the provider to stop one accepted job; convergence stays
 	// authoritative via Poll (best-effort cancel contract).
-	Cancel(ctx context.Context, ref string) error
+	Cancel(ctx context.Context, credential string, ref string) error
 }
 
 // BackoffSchedule is the bounded 429 backoff ladder (spec: 5s, 15s, 30s,

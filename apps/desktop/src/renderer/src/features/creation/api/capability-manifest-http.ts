@@ -15,9 +15,8 @@ export type CapabilityMediaMode =
   | 'first-last-frame'
   | 'omni-reference'
 
-/** Stable unavailability causes; `production_readiness_pending` is global. */
+/** Stable instance-connection unavailability causes. */
 export type CapabilityReason =
-  | 'production_readiness_pending'
   | 'not_configured'
   | 'checking'
   | 'credential_invalid'
@@ -26,7 +25,7 @@ export type CapabilityReason =
   | 'model_unavailable'
 
 /** Stable action advice paired with each reason. */
-export type CapabilityAction = 'wait' | 'await_release' | 'contact_admin'
+export type CapabilityAction = 'wait' | 'contact_admin'
 
 /** Inclusive min..max count. */
 export interface CapabilityCountRange {
@@ -75,9 +74,29 @@ export interface CapabilityMode {
   }
 }
 
-/** The per-dimension recommended defaults; always inside published sets. */
-export interface CapabilityDefaults {
+/** The vendor pixel size of one (resolution tier, ratio) combination. */
+export interface CapabilitySize {
   readonly resolution: string
+  readonly ratio: string
+  readonly width: number
+  readonly height: number
+}
+
+/**
+ * One allowlisted model with its own resolution tiers. Image models also
+ * publish the vendor's per-model reference-image ceiling; the mode's total
+ * stays the widest cross-model bound and the ceiling is the binding one.
+ */
+export interface CapabilityModel {
+  readonly model: string
+  readonly resolutions: readonly string[]
+  readonly defaultResolution: string
+  readonly maxReferenceImages?: number
+  readonly sizes?: readonly CapabilitySize[]
+}
+
+/** The media-level recommended defaults; always inside published sets. */
+export interface CapabilityDefaults {
   readonly ratio?: string
   readonly quantity?: number
   readonly duration?: number
@@ -91,16 +110,16 @@ export interface PromptEnvelope {
 
 /**
  * One media's submittable capability set, or the structured unavailability
- * (reason/action) with every value field absent.
+ * (reason/action) with every value field absent. Resolution tiers are
+ * model-scoped: each published model carries its own tiers.
  */
 export interface CapabilityMedia {
   readonly available: boolean
   readonly reason: CapabilityReason | null
   readonly action: CapabilityAction | null
-  readonly model?: string
+  readonly models?: readonly CapabilityModel[]
   readonly modes?: readonly CapabilityMode[]
   readonly ratios?: readonly string[]
-  readonly resolutions?: readonly string[]
   readonly quantities?: readonly number[]
   readonly durations?: readonly number[]
   readonly defaults?: CapabilityDefaults
@@ -125,7 +144,6 @@ const CAPABILITY_MODES: readonly CapabilityMediaMode[] = [
 ]
 
 const CAPABILITY_REASONS: readonly CapabilityReason[] = [
-  'production_readiness_pending',
   'not_configured',
   'checking',
   'credential_invalid',
@@ -134,7 +152,7 @@ const CAPABILITY_REASONS: readonly CapabilityReason[] = [
   'model_unavailable'
 ]
 
-const CAPABILITY_ACTIONS: readonly CapabilityAction[] = ['wait', 'await_release', 'contact_admin']
+const CAPABILITY_ACTIONS: readonly CapabilityAction[] = ['wait', 'contact_admin']
 
 /** Every trust-command failure shape, for callers that need the union. */
 export type ManifestFailure = CreationApiFailure
@@ -206,8 +224,13 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
     return { available: false, reason, action }
   }
 
-  const model = readString(entry, 'model')
-  if (model === null) return null
+  // Optional list fields distinguish absent (skip) from malformed (reject):
+  // a corrupted ratios array can never shrink into a smaller capability set.
+  const ratios = readStringList(entry, 'ratios')
+  if (ratios === MALFORMED_LIST) return null
+
+  const models = parseModels(entry, ratios)
+  if (models === null) return null
 
   const modes: CapabilityMode[] = []
   if (!Array.isArray(readObjectField(entry, 'modes'))) return null
@@ -242,20 +265,12 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
   }
   if (modes.length === 0) return null
 
-  const resolutions = readStringList(entry, 'resolutions')
-  if (resolutions === undefined || resolutions === MALFORMED_LIST || resolutions.length === 0)
-    return null
-
   const defaults = parseDefaults(entry)
   if (defaults === null) return null
 
   const prompt = parsePrompt(entry)
   if (prompt === null) return null
 
-  // Optional list fields distinguish absent (skip) from malformed (reject):
-  // a corrupted ratios array can never shrink into a smaller capability set.
-  const ratios = readStringList(entry, 'ratios')
-  if (ratios === MALFORMED_LIST) return null
   const quantities = readNumberList(entry, 'quantities')
   if (quantities === MALFORMED_LIST) return null
   const durations = readNumberList(entry, 'durations')
@@ -265,15 +280,95 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
     available: true,
     reason: null,
     action: null,
-    model,
+    models,
     modes,
-    resolutions,
     defaults,
     prompt,
     ...(ratios !== undefined ? { ratios } : {}),
     ...(quantities !== undefined ? { quantities } : {}),
     ...(durations !== undefined ? { durations } : {})
   }
+}
+
+// parseModels reads the model list with its per-model resolution tiers. A
+// default outside the entry's own tiers fails closed: the composer may only
+// ever seed resolutions the model itself publishes.
+function parseModels(
+  entry: unknown,
+  ratios: readonly string[] | undefined
+): CapabilityModel[] | null {
+  const raw = readObjectField(entry, 'models')
+  if (!Array.isArray(raw)) return null
+  const models: CapabilityModel[] = []
+  for (const item of raw) {
+    const model = readString(item, 'model')
+    const resolutions = readStringList(item, 'resolutions')
+    const defaultResolution = readString(item, 'default_resolution')
+    if (
+      model === null ||
+      resolutions === undefined ||
+      resolutions === MALFORMED_LIST ||
+      resolutions.length === 0 ||
+      defaultResolution === null ||
+      !resolutions.includes(defaultResolution)
+    ) {
+      return null
+    }
+    const sizes = parseSizes(item, resolutions, ratios)
+    if (sizes === MALFORMED_LIST) return null
+    let maxReferenceImages: number | undefined
+    if (hasField(item, 'max_reference_images')) {
+      const ceiling = readNumber(item, 'max_reference_images')
+      if (ceiling === null || !Number.isInteger(ceiling) || ceiling < 1) return null
+      maxReferenceImages = ceiling
+    }
+    models.push({
+      model,
+      resolutions,
+      defaultResolution,
+      ...(maxReferenceImages !== undefined ? { maxReferenceImages } : {}),
+      ...(sizes !== undefined ? { sizes } : {})
+    })
+  }
+  if (models.length === 0) return null
+  return models
+}
+
+// parseSizes reads one model's published pixel sizes — display metadata for
+// the exact size the server submits. Every entry must sit inside the model's
+// own tiers and the media's published ratios, so a malformed or out-of-set
+// size can never impersonate a capability.
+function parseSizes(
+  item: unknown,
+  resolutions: readonly string[],
+  ratios: readonly string[] | undefined
+): CapabilitySize[] | MalformedList | undefined {
+  if (!hasField(item, 'sizes')) return undefined
+  const value = (item as Record<string, unknown>)['sizes']
+  if (!Array.isArray(value)) return MALFORMED_LIST
+  const sizes: CapabilitySize[] = []
+  for (const raw of value) {
+    const resolution = readString(raw, 'resolution')
+    const ratio = readString(raw, 'ratio')
+    const width = readNumber(raw, 'width')
+    const height = readNumber(raw, 'height')
+    if (
+      resolution === null ||
+      !resolutions.includes(resolution) ||
+      ratio === null ||
+      (ratios !== undefined && !ratios.includes(ratio)) ||
+      width === null ||
+      !Number.isInteger(width) ||
+      width < 1 ||
+      height === null ||
+      !Number.isInteger(height) ||
+      height < 1
+    ) {
+      return MALFORMED_LIST
+    }
+    sizes.push({ resolution, ratio, width, height })
+  }
+  return sizes
 }
 
 // Sentinel for "the field is present but is not the documented list shape" —
@@ -404,12 +499,10 @@ function parsePrompt(entry: unknown): PromptEnvelope | null {
 function parseDefaults(entry: unknown): CapabilityDefaults | null {
   const raw = (entry as Record<string, unknown>).defaults
   if (typeof raw !== 'object' || raw === null) return null
-  const resolution = readString(raw, 'resolution')
-  if (resolution === null) return null
   const ratio = readString(raw, 'ratio') ?? undefined
   const quantity = readNumber(raw, 'quantity') ?? undefined
   const duration = readNumber(raw, 'duration') ?? undefined
-  return { resolution, ratio, quantity, duration }
+  return { ratio, quantity, duration }
 }
 
 /**

@@ -2,8 +2,10 @@
 // only the fixed domestic route and its OpenAI-style model catalog. The
 // instance-level Connection Check is exactly one GET /v1/models with the
 // candidate key — token validity plus visibility of the two allowlisted
-// models — and never generates real media. Request IDs, raw error bodies,
-// and the key itself never leave this package's error paths.
+// models — and never generates real media. Connection Check returns no
+// provider diagnostics: request IDs, raw error bodies, and the key never leave
+// its paths. Generation-task failures have their separate bounded,
+// creator-private diagnostic contract in generations.go and ADR-0016.
 package kapon
 
 import (

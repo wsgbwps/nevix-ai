@@ -51,6 +51,7 @@ interface SaveCall {
     prompt: string
     mediaType: string | null
     manifestVersion: number
+    mode: string | null
     references: Array<{ materialId: string; role: string }>
   }
 }
@@ -114,10 +115,31 @@ test('selecting a session recovers its stored draft verbatim', async ({ mount, p
 
   await expect(page.getByTestId('composer-prompt')).toHaveValue('夏季跑鞋主图，暖光背景')
   await expect(page.getByTestId('composer-media')).toContainText('Image generation')
-  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-lite')
-  await expect(page.getByTestId('composer-params')).toContainText('4:5')
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-pro')
+  await expect(page.getByTestId('composer-params')).toContainText('4:3')
   await expect(page.getByTestId('composer-params')).toContainText('2K')
   await expect(page.getByTestId('composer-params').getByText('2', { exact: true })).toBeVisible()
+})
+
+test('manifest defaults autosave with the version delivered in the same response', async ({
+  mount,
+  page
+}) => {
+  await mount(
+    <CreationWorkbenchStory
+      manifestDeferred
+      drafts={{ 'aaaaaaaa-0000-4000-8000-000000000001': null }}
+    />
+  )
+  await selectFirstSession(page)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseManifest())
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-pro')
+  await expect
+    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.manifestVersion, {
+      timeout: 5_000
+    })
+    .toBe(5)
 })
 
 test('editing the prompt autosaves the full draft with its ordered references', async ({
@@ -154,6 +176,10 @@ test('a stale draft value is preserved verbatim and marked as capability-changed
   // The params trigger keeps the removed ratio while the legal 2K stands.
   await expect(page.getByTestId('composer-params')).toContainText('7:3')
   await expect(page.getByTestId('composer-params')).toContainText('2K')
+  // The size row needs a published (model, ratio, resolution); a stale draft
+  // has none, so it hides instead of showing a wrong pixel size.
+  await page.getByTestId('composer-params').click()
+  await expect(page.getByRole('menu').getByTestId('composer-params-size')).toHaveCount(0)
 })
 
 test('the model menu lists only manifest candidates plus the stale note', async ({
@@ -169,7 +195,7 @@ test('the model menu lists only manifest candidates plus the stale note', async 
   // Legal candidates come from the manifest only; the removed model is not a
   // selectable candidate.
   const menu = page.getByRole('menu')
-  await expect(menu).toContainText('doubao-seedream-5.0-lite')
+  await expect(menu).toContainText('doubao-seedream-5.0-pro')
   await expect(menu.getByRole('menuitem').filter({ hasText: 'removed-legacy-model' })).toHaveCount(
     0
   )
@@ -177,6 +203,63 @@ test('the model menu lists only manifest candidates plus the stale note', async 
   await expect(menu.getByRole('note')).toContainText('removed-legacy-model')
   await expect(menu.getByRole('note')).toContainText('Capability changed')
   await page.keyboard.press('Escape')
+})
+
+test('the resolution tiers follow the selected image model', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  // The stored draft's model (pro) publishes only 1K/1.5K/2K; the base
+  // model's 3K/4K do not exist for it.
+  await page.getByTestId('composer-params').click()
+  const params = page.getByRole('menu')
+  await expect(params.getByRole('button', { name: '1.5K' })).toBeVisible()
+  await expect(params.getByRole('button', { name: '4K' })).toHaveCount(0)
+  // The size row reads the vendor pixels of the current selection (pro 4:3
+  // 2K) — exactly what the server submits.
+  await expect(params.getByTestId('composer-params-size')).toContainText('2368')
+  await expect(params.getByTestId('composer-params-size')).toContainText('1776')
+  await page.keyboard.press('Escape')
+
+  // The model menu lists both allowlisted image models; switching adopts the
+  // other model's tier set. The stored 2K stands because the base model also
+  // publishes it.
+  await page.getByTestId('composer-model').click()
+  const menu = page.getByRole('menu')
+  await expect(
+    menu.getByRole('menuitem', { name: 'doubao-seedream-5.0', exact: true })
+  ).toBeVisible()
+  await menu.getByRole('menuitem', { name: 'doubao-seedream-5.0', exact: true }).click()
+  // Exact text: the base id is a prefix of the pro id, so a substring
+  // assertion could not tell the switch from a no-op.
+  await expect(
+    page.getByTestId('composer-model').getByText('doubao-seedream-5.0', { exact: true })
+  ).toBeVisible()
+  await expect(page.getByTestId('composer-params')).toContainText('2K')
+
+  await page.getByTestId('composer-params').click()
+  await expect(params.getByRole('button', { name: '1.5K' })).toHaveCount(0)
+  await expect(params.getByRole('button', { name: '3K' })).toBeVisible()
+  await expect(params.getByRole('button', { name: '4K' })).toBeVisible()
+  // The same tier label resolves to the base model's own pixels.
+  await expect(params.getByTestId('composer-params-size')).toContainText('2304')
+  await expect(params.getByTestId('composer-params-size')).toContainText('1728')
+})
+
+test('the size row follows the selected ratio and resolution', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  await page.getByTestId('composer-params').click()
+  const params = page.getByRole('menu')
+  await params.getByRole('button', { name: '9:16' }).click()
+  await params.getByRole('button', { name: '1K' }).click()
+  await expect(params.getByTestId('composer-params-size')).toContainText('800')
+  await expect(params.getByTestId('composer-params-size')).toContainText('1424')
+
+  await params.getByRole('button', { name: '1.5K' }).click()
+  await expect(params.getByTestId('composer-params-size')).toContainText('1152')
+  await expect(params.getByTestId('composer-params-size')).toContainText('2048')
 })
 
 test('an unreachable manifest still allows drafting and autosave', async ({ mount, page }) => {
@@ -257,6 +340,52 @@ test('the expanded deck overlays in place instead of squeezing the prompt', asyn
   expect(after?.width).toBe(before?.width)
 })
 
+test('adding a reference flips the image draft to reference-image and back', async ({
+  mount,
+  page
+}) => {
+  // Image modes are deck-derived: the composer offers no image mode picker,
+  // so the deck's contents decide the shape (text-to-image ⇄ reference-image).
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{
+        [scriptedSessionId]: {
+          prompt: '',
+          mediaType: 'image',
+          manifestVersion: 5,
+          updatedAt: '2026-08-29T10:00:00Z',
+          model: 'doubao-seedream-5.0-pro',
+          mode: 'text-to-image',
+          ratio: '1:1',
+          resolution: '2K',
+          quantity: 1,
+          durationSeconds: null,
+          references: []
+        }
+      }}
+      materials={{ [scriptedSessionId]: [] }}
+    />
+  )
+  await selectFirstSession(page)
+
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByLabel('Add reference material').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({ name: 'ref.png', mimeType: 'image/png', buffer: Buffer.from('png') })
+  await expect
+    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.mode, { timeout: 5_000 })
+    .toBe('reference-image')
+
+  // Removing the only card flips the derived mode back: an empty
+  // reference-image draft could never satisfy its own minimum.
+  const deck = page.getByTestId('reference-deck')
+  await deck.getByRole('button', { name: 'ref.png', exact: true }).click()
+  await page.keyboard.press('Delete')
+  await expect
+    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.mode, { timeout: 5_000 })
+    .toBe('text-to-image')
+})
+
 test('submitting stays disabled while capability context is missing', async ({ mount, page }) => {
   // The submit command freezes a manifest-conformant intent: without a live
   // manifest (or without a complete draft) the affordance stays inert rather
@@ -308,7 +437,7 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
       {
         index: 1,
         status: 'failed',
-        failureReason: 'temporarily_unavailable',
+        failureReason: 'provider_route_unavailable',
         result: null
       }
     ]
@@ -325,8 +454,10 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
     'data-slot-status',
     'failed'
   )
-  await expect(page.getByTestId(`slot-${failedTask.id}-1`)).toContainText(
-    'Provider temporarily unavailable'
+  const failedSlot = page.getByTestId(`slot-${failedTask.id}-1`)
+  await expect(failedSlot).toContainText('MODEL_GROUP_ALL_UNAVAILABLE')
+  await expect(failedSlot).toContainText(
+    'channel binding, permissions, balance, quota, or capacity'
   )
 
   // Partial success keeps retrying exactly the uncompleted slots.
@@ -334,6 +465,47 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
   const retries = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
   expect(retries).toHaveLength(1)
   expect(retries[0].taskId).toBe(failedTask.id)
+})
+
+test('a failed slot renders the concrete persisted diagnostic instead of only a generic reason', async ({
+  mount,
+  page
+}) => {
+  const failedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000diag',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-01T02:59:32Z',
+    updatedAt: '2026-09-01T03:00:00Z',
+    terminalAt: '2026-09-01T03:00:00Z',
+    slots: [
+      {
+        index: 0,
+        status: 'failed',
+        failureReason: 'temporarily_unavailable',
+        failureDiagnostic: {
+          source: 'output_transfer',
+          code: 'provider_output_http_status',
+          message: 'Provider output download returned HTTP 403',
+          httpStatus: 403,
+          providerType: null,
+          requestId: null
+        },
+        result: null
+      }
+    ]
+  } as unknown as ScriptedTask
+
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [failedTask] }} />)
+  await selectFirstSession(page)
+
+  const failedSlot = page.getByTestId(`slot-${failedTask.id}-0`)
+  await expect(failedSlot).toContainText('provider_output_http_status')
+  await expect(failedSlot).toContainText('Provider output download returned HTTP 403')
 })
 
 test('cancel requests best-effort convergence on a running task', async ({ mount, page }) => {
@@ -426,6 +598,33 @@ test('an SSE invalidation refetches the task list', async ({ mount, page }) => {
   )
 })
 
+test('clearing the prompt keeps the submitted tasks on screen', async ({ mount, page }) => {
+  const runningTask: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000kee1',
+    sessionId: scriptedSessionId,
+    status: 'processing',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:00:01Z',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [runningTask] }} />)
+  await selectFirstSession(page)
+
+  await expect(page.getByTestId('result-gallery')).toBeVisible()
+
+  // Emptying the draft only clears the prompt — the session's task view
+  // stays mounted (issue #160 field report: clearing the prompt reset the
+  // workspace to the empty hero and hid every submitted task).
+  await page.getByTestId('composer-prompt').fill('')
+  await expect(page.getByTestId('result-gallery')).toBeVisible()
+  await expect(page.getByTestId('workspace-hero')).toHaveCount(0)
+})
+
 test('the workbench fills the shell content area it is mounted in', async ({ mount, page }) => {
   // Regression for the desktop fill bug: the page used to sit behind a plain
   // block wrapper in app/pages/creation-page.tsx, which made the section's
@@ -442,4 +641,94 @@ test('the workbench fills the shell content area it is mounted in', async ({ mou
   const shell = await page.getByTestId('shell-content').boundingBox()
   expect(section!.y).toBeCloseTo(shell!.y, 0)
   expect(section!.height).toBeGreaterThanOrEqual(shell!.height - 1)
+})
+
+test('a succeeded image slot offers a keyboard-reachable download', async ({ mount, page }) => {
+  const doneTask: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000dl00',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [
+      {
+        index: 0,
+        status: 'succeeded',
+        failureReason: null,
+        // The vendor's real output shape: Seedream returns JPEG, and the
+        // download name must keep that format instead of forcing png.
+        result: {
+          mimeType: 'image/jpeg',
+          byteSize: 2048,
+          checksumSha256: 'ab'.repeat(32),
+          widthPx: 1568,
+          heightPx: 672,
+          durationMs: null
+        }
+      }
+    ]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [doneTask] }} />)
+  await selectFirstSession(page)
+
+  // Record programmatic anchor activations instead of navigating the CT page.
+  await page.evaluate(() => {
+    const calls: Array<{ href: string; download: string }> = []
+    ;(window as unknown as { __downloadCalls: typeof calls }).__downloadCalls = calls
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      calls.push({ href: this.href, download: this.download })
+    }
+  })
+
+  const button = page.getByTestId(`slot-download-${doneTask.id}-0`)
+  await expect(button).toBeVisible()
+  await button.focus()
+  await button.click()
+
+  const calls = await page.evaluate(
+    () =>
+      (window as unknown as { __downloadCalls?: Array<{ href: string; download: string }> })
+        .__downloadCalls ?? []
+  )
+  expect(calls).toHaveLength(1)
+  // The download keeps the provider's original format (JPEG here), named by
+  // the verified result's mime instead of a fixed png extension.
+  expect(calls[0].download).toBe(`nevix-${doneTask.id.slice(0, 8)}-1.jpg`)
+  expect(calls[0].href).toContain('data:image')
+})
+
+test('a policy-rejected task keeps editing paths but no identical quick retry', async ({
+  mount,
+  page
+}) => {
+  const rejectedTask: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000p0li',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 2,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [
+      { index: 0, status: 'failed', failureReason: 'input_policy_rejected', result: null },
+      { index: 1, status: 'failed', failureReason: 'input_policy_rejected', result: null }
+    ]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [rejectedTask] }} />)
+  await selectFirstSession(page)
+
+  // The identical-content retry is forbidden; editing and regenerating stays.
+  await expect(page.getByTestId(`task-retry-${rejectedTask.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`task-regenerate-${rejectedTask.id}`)).toBeVisible()
+  await expect(page.getByTestId(`slot-${rejectedTask.id}-0`)).toContainText(
+    'Input rejected by safety review'
+  )
 })

@@ -87,10 +87,10 @@ func TestUploadRecordsAtomicRightsFacts(t *testing.T) {
 	if view.Kind != "image" || view.MimeType != "image/png" || view.FileName != "poster.png" {
 		t.Fatalf("identity facts wrong: %+v", view)
 	}
-	if view.WidthPx == nil || *view.WidthPx != 24 || view.HeightPx == nil || *view.HeightPx != 16 {
+	if view.WidthPx == nil || *view.WidthPx != 256 || view.HeightPx == nil || *view.HeightPx != 256 {
 		t.Fatalf("dimensions not authoritative: %+v", view)
 	}
-	if view.PixelCount == nil || *view.PixelCount != 384 {
+	if view.PixelCount == nil || *view.PixelCount != 65536 {
 		t.Fatalf("pixel count missing: %+v", view)
 	}
 	if view.DurationMS != nil {
@@ -140,6 +140,12 @@ func TestUploadValidationPipelineStableReasons(t *testing.T) {
 		{"extension-disagrees-with-content", "photo.mp3", pngBytes(t), http.StatusUnsupportedMediaType, true},
 		{"foreign-content-sniffed-unknown", "notes.txt", textBlob, http.StatusUnsupportedMediaType, true},
 		{"corrupt-image-fails-authoritative-decode", "broken.png", pngBytes(t)[:40], http.StatusUnprocessableEntity, true},
+		// The manifest's published reference dimension envelope is enforced
+		// at ingest (issue #160, Server 权威校验方): 256–6000px per side,
+		// aspect within 1:3..3:1.
+		{"undersized-image-below-256px", "tiny.png", pngBytesSized(t, 24, 16), http.StatusUnprocessableEntity, true},
+		{"aspect-narrower-than-1-3", "strip.png", pngBytesSized(t, 100, 400), http.StatusUnprocessableEntity, true},
+		{"side-above-6000px", "huge.png", pngBytesSized(t, 6001, 256), http.StatusUnprocessableEntity, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

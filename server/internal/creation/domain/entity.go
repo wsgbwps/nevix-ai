@@ -57,11 +57,14 @@ func (r DraftRole) AcceptsKind(k Kind) bool {
 // is preserved, never silently rewritten; manifest conformance belongs to
 // submission time.
 const (
-	DraftPromptMaxChars     = 2000
-	DraftModelMaxChars      = 128
-	DraftModeMaxChars       = 64
-	DraftValueMaxChars      = 16
-	DraftMaxReferenceFrames = 4
+	DraftPromptMaxChars = 2000
+	DraftModelMaxChars  = 128
+	DraftModeMaxChars   = 64
+	DraftValueMaxChars  = 16
+	// The widest reference ceiling any manifest version may publish: the
+	// base image model's 14 (manifest v5). Per-model conformance belongs to
+	// submission time.
+	DraftMaxReferenceFrames = 14
 )
 
 // DraftReference is one ordered material binding of the draft; slice order in

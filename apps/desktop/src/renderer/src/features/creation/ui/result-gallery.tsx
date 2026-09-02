@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { BanIcon, RefreshCwIcon, RepeatIcon, TriangleAlertIcon } from 'lucide-react'
+import { BanIcon, DownloadIcon, RefreshCwIcon, RepeatIcon, TriangleAlertIcon } from 'lucide-react'
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import type {
   GenerationSlotView,
+  GenerationTaskDetail,
   GenerationTaskView,
-  SlotFailureReason
+  SlotFailureDiagnosticSource,
+  SlotFailureReason,
+  SlotResultView
 } from '../api/generation-task-http'
 import type { CreationWorkbenchController } from '../model/use-workbench'
 
@@ -31,6 +34,7 @@ const reasonKeys = {
   output_policy_rejected: 'gallery.reasons.output_policy_rejected',
   action_required: 'gallery.reasons.action_required',
   temporarily_unavailable: 'gallery.reasons.temporarily_unavailable',
+  provider_route_unavailable: 'gallery.reasons.provider_route_unavailable',
   processing_indeterminate: 'gallery.reasons.processing_indeterminate',
   internal_error: 'gallery.reasons.internal_error'
 } as const
@@ -41,6 +45,19 @@ function statusKey(status: string): (typeof statusKeys)[keyof typeof statusKeys]
 
 function reasonKey(reason: SlotFailureReason): (typeof reasonKeys)[keyof typeof reasonKeys] {
   return reason in reasonKeys ? reasonKeys[reason] : reasonKeys.internal_error
+}
+
+const diagnosticSourceKeys = {
+  provider: 'gallery.diagnostic.sources.provider',
+  output_transfer: 'gallery.diagnostic.sources.output_transfer',
+  storage: 'gallery.diagnostic.sources.storage',
+  media_probe: 'gallery.diagnostic.sources.media_probe'
+} as const
+
+function diagnosticSourceKey(
+  source: SlotFailureDiagnosticSource
+): (typeof diagnosticSourceKeys)[keyof typeof diagnosticSourceKeys] {
+  return diagnosticSourceKeys[source]
 }
 
 const mediaKeys = {
@@ -143,7 +160,8 @@ function TaskCard({
         {terminal &&
           !indeterminate &&
           task.status !== 'succeeded' &&
-          task.status !== 'cancelled' && (
+          task.status !== 'cancelled' &&
+          !hasPolicyRejectedSlot(detail) && (
             <button
               type="button"
               data-testid={`task-retry-${task.id}`}
@@ -209,6 +227,20 @@ function placeholderSlots(count: number): GenerationSlotView[] {
   }))
 }
 
+// A policy-rejected slot forbids the quick "retry uncompleted" affordance:
+// the retry re-runs the frozen specification verbatim, so identical input or
+// output content would be rejected again (spec #150 安全拒绝). Editing the
+// draft and regenerating stays available.
+function hasPolicyRejectedSlot(detail: GenerationTaskDetail | undefined): boolean {
+  return (
+    detail?.slots.some(
+      (slot) =>
+        slot.failureReason === 'input_policy_rejected' ||
+        slot.failureReason === 'output_policy_rejected'
+    ) ?? false
+  )
+}
+
 function SlotCard({
   workbench,
   taskId,
@@ -240,6 +272,23 @@ function SlotCard({
     }
   }, [mediaType, succeeded, slot.index, taskId, workbench])
 
+  // The download reuses the already-verified bytes (or loads them on demand)
+  // and names the file after its task slot.
+  const download = (): void => {
+    void workbench
+      .loadResultBlobUrl(taskId, slot.index)
+      .then((blobUrl) => {
+        if (blobUrl === null) return
+        const anchor = document.createElement('a')
+        anchor.href = blobUrl
+        anchor.download = downloadFilename(taskId, slot.index, mediaType, slot.result)
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+      })
+      .catch(() => undefined)
+  }
+
   return (
     <div
       data-testid={`slot-${taskId}-${slot.index}`}
@@ -255,17 +304,76 @@ function SlotCard({
           <video src={url} controls className="size-full object-cover" />
         )
       ) : (
-        <span className="absolute inset-0 grid place-items-center">
-          <span className="text-muted-foreground px-2 text-center text-[10px] leading-4">
+        <span className="absolute inset-0 flex overflow-y-auto p-2">
+          <span className="text-muted-foreground my-auto w-full text-center text-[10px] leading-4">
             {t(statusKey(slot.status))}
             {slot.failureReason !== null && (
               <span className="block">{t(reasonKey(slot.failureReason))}</span>
             )}
+            {slot.failureDiagnostic != null && (
+              <span
+                className="border-border/70 mt-1 block border-t pt-1 text-left break-words"
+                data-testid={`slot-diagnostic-${taskId}-${slot.index}`}
+              >
+                <span className="block font-medium">
+                  {t(diagnosticSourceKey(slot.failureDiagnostic.source))}
+                </span>
+                <span className="block font-mono">
+                  {slot.failureDiagnostic.code}
+                  {slot.failureDiagnostic.providerType !== null
+                    ? ` · ${slot.failureDiagnostic.providerType}`
+                    : ''}
+                  {slot.failureDiagnostic.httpStatus !== null
+                    ? ` · HTTP ${slot.failureDiagnostic.httpStatus}`
+                    : ''}
+                </span>
+                <span className="block">{slot.failureDiagnostic.message}</span>
+                {slot.failureDiagnostic.requestId !== null && (
+                  <span className="block font-mono">
+                    {t('gallery.diagnostic.requestId')}: {slot.failureDiagnostic.requestId}
+                  </span>
+                )}
+              </span>
+            )}
           </span>
         </span>
       )}
+      {succeeded && (
+        <button
+          type="button"
+          data-testid={`slot-download-${taskId}-${slot.index}`}
+          aria-label={String(t('gallery.actions.download'))}
+          title={downloadFilename(taskId, slot.index, mediaType, slot.result)}
+          onClick={download}
+          className="absolute right-1 bottom-1 z-10 grid size-6 place-items-center rounded-md border border-white/25 bg-black/50 text-white outline-none hover:bg-black/65 focus-visible:ring-2 focus-visible:ring-sky-400/70"
+        >
+          <DownloadIcon className="size-3" aria-hidden />
+        </button>
+      )}
     </div>
   )
+}
+
+// Downloads keep the provider's original format: the extension follows the
+// verified result's mime type (the vendor commonly returns JPEG), never a
+// fixed png — the bytes themselves already pass through unmodified.
+const resultExtensions: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4'
+}
+
+function downloadFilename(
+  taskId: string,
+  index: number,
+  mediaType: 'image' | 'video',
+  result: SlotResultView | null
+): string {
+  const extension =
+    (result !== null ? resultExtensions[result.mimeType] : undefined) ??
+    (mediaType === 'video' ? 'mp4' : 'png')
+  return `nevix-${taskId.slice(0, 8)}-${index + 1}.${extension}`
 }
 
 export type { SlotFailureReason }

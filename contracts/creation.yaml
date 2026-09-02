@@ -621,9 +621,8 @@ paths:
         参考素材上限（schema_version 标识载荷形状，manifest_version 标识能力内容版本）。
         每媒体 available=false 时只携带稳定 reason 与行动建议，值集合省略 ——
         下游 Workbench 据此保留失效草稿原值并阻止提交，无需猜测 Provider 状态。
-        Nevix 全局 Production Readiness（发布级真实 smoke 门槛）与实例 Connection 检查
-        在此正交合并：Readiness 未通过的媒体一律 production_readiness_pending，
-        且绝不改写实例 Connection/Credential/Capability 检查事实。
+        模型与参数集合是随代码发布的版本化合同；运行时可用性只由实例 Connection
+        Check 的 Credential/Capability 与管理状态决定，不依赖部署侧附加文件。
         固定国内 Endpoint 与模型 allowlist 不由 Desktop 配置；无第二连接或 fallback。
       security:
         - bearerAuth: []
@@ -1683,11 +1682,11 @@ components:
         schema_version:
           type: integer
           enum:
-            - 1
-          description: 载荷形状版本；字段结构变化时递增。
+            - 2
+          description: 载荷形状版本；字段结构变化时递增。v2：媒体模型改为 models 列表（各带分辨率档位与默认档）。
         manifest_version:
           type: integer
-          description: 能力内容版本；已验收能力集合变化（扩张或经决策移除）时递增。
+          description: 能力内容版本；源代码中的能力集合变化（扩张或移除）时递增。
           minimum: 1
         image:
           $ref: "#/components/schemas/CapabilityMedia"
@@ -1708,26 +1707,26 @@ components:
           type: string
           nullable: true
           enum:
-            - production_readiness_pending
             - not_configured
             - checking
             - credential_invalid
             - credential_unavailable
             - connection_paused
             - model_unavailable
-          description: 不可用/检查中的稳定机器原因；可用时省略。production_readiness_pending 表示 Nevix 全局发布门槛未通过，实例侧无法修复。
+          description: 实例连接不可用/检查中的稳定机器原因；可用时省略。
         action:
           type: string
           nullable: true
           enum:
             - wait
-            - await_release
             - contact_admin
-          description: 稳定行动建议；可用时省略。await_release 表示等待 Nevix 发布级验收，实例 Admin 无法就地修复。
-        model:
-          type: string
+          description: 稳定行动建议；可用时省略。
+        models:
+          type: array
           nullable: true
-          description: 该媒体已验收的唯一 allowlist 模型；可用时非空。
+          description: 该媒体的版本化 allowlist 模型（固定顺序）；各模型携带自己的分辨率档位与默认档。可用时非空。
+          items:
+            $ref: "#/components/schemas/CapabilityModel"
         modes:
           type: array
           nullable: true
@@ -1737,21 +1736,18 @@ components:
         ratios:
           type: array
           nullable: true
-          description: 图片可提交比例（固定顺序，来自已验收 supported ratios）；仅 image 且可用时非空。
+          description: 图片可提交比例（固定顺序，来自版本化 supported ratios）；仅 image 且可用时非空。
           items:
             type: string
             enum:
               - "1:1"
               - "4:3"
-              - "4:5"
+              - "3:4"
               - "16:9"
               - "9:16"
-        resolutions:
-          type: array
-          nullable: true
-          description: 可提交分辨率（固定顺序）；可用时非空。图片为 1K/2K/4K，视频为 480p/720p/1080p。
-          items:
-            type: string
+              - "3:2"
+              - "2:3"
+              - "21:9"
         quantities:
           type: array
           nullable: true
@@ -1770,13 +1766,9 @@ components:
         defaults:
           type: object
           nullable: true
-          description: 每维度的推荐默认值；均属当前已发布集合。可用时非空。
-          required:
-            - resolution
+          description: 媒体级维度的推荐默认值（ratio/quantity/duration）；分辨率默认档在各 models 条目上。可用时非空。
           properties:
             ratio:
-              type: string
-            resolution:
               type: string
             quantity:
               type: integer
@@ -1798,6 +1790,56 @@ components:
           nullable: true
           description: 参考素材总包络（跨模式最宽边界）；逐模式边界见 CapabilityMode。可用时非空。
           $ref: "#/components/schemas/ReferenceMaterialPolicy"
+    CapabilityModel:
+      type: object
+      required:
+        - model
+        - resolutions
+        - default_resolution
+      description: 一个版本化 allowlist 模型及其分辨率档位；图片为双模型（档位互不相同），视频为单条目。图片模型额外发布各「档位×宽高比」的像素尺寸（展示用；提交时服务端按同一映射解析 size）。
+      properties:
+        model:
+          type: string
+          description: 模型 ID（提交 Task 时的 model 值）。
+        resolutions:
+          type: array
+          description: 该模型可提交的分辨率档位（固定顺序）。
+          items:
+            type: string
+        default_resolution:
+          type: string
+          description: 该模型的推荐默认档；必属本条目 resolutions。
+        max_reference_images:
+          type: integer
+          description: 该模型允许的最大图片参考素材数量（供应商逐模型契约）；仅图片模型发布。模式 total 是跨模型最宽边界，提交时按所选模型收紧。
+        sizes:
+          type: array
+          description: 该模型每个「分辨率档位×宽高比」组合对应的供应商像素尺寸；仅图片模型发布。条目的 resolution 必属本条目 resolutions，ratio 必属媒体 ratios。
+          items:
+            $ref: "#/components/schemas/CapabilitySize"
+    CapabilitySize:
+      type: object
+      required:
+        - resolution
+        - ratio
+        - width
+        - height
+      description: 一个「分辨率档位×宽高比」组合的像素尺寸（与供应商 size 契约一一对应）。
+      properties:
+        resolution:
+          type: string
+          description: 分辨率档位（如 1K / 2K）。
+        ratio:
+          type: string
+          description: 宽高比（如 9:16）。
+        width:
+          type: integer
+          description: 输出宽度（像素）。
+          minimum: 1
+        height:
+          type: integer
+          description: 输出高度（像素）。
+          minimum: 1
     CapabilityMode:
       type: object
       required:
@@ -2026,6 +2068,48 @@ components:
           type: string
           format: date-time
           nullable: true
+    GenerationFailureDiagnostic:
+      type: object
+      description: >-
+        创建者私有的具体失败诊断。provider 来源保留 Kapon 标准错误 envelope
+        中经过本次调用凭据/敏感输入与 URL 脱敏、控制字符清理及长度限制的字段；
+        其他来源由 Server 在下载、存储或媒体探测的权威失败点生成。不会包含 Provider Key、Authorization header、
+        prompt、参考素材、输出 URL 或任意原始响应体；该对象只解释 failure_reason，
+        不参与重试、治理或状态机判断。
+      required:
+        - source
+        - code
+        - message
+        - http_status
+        - provider_type
+        - request_id
+      properties:
+        source:
+          type: string
+          enum: [provider, output_transfer, storage, media_probe]
+        code:
+          type: string
+          minLength: 1
+          maxLength: 128
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        http_status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          nullable: true
+        provider_type:
+          type: string
+          minLength: 1
+          maxLength: 128
+          nullable: true
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          nullable: true
     GenerationSlot:
       type: object
       required:
@@ -2059,9 +2143,14 @@ components:
             - output_policy_rejected
             - action_required
             - temporarily_unavailable
+            - provider_route_unavailable
             - processing_indeterminate
             - internal_error
-          description: 稳定失败 taxonomy；部分成功逐槽位显示 reason。
+          description: 稳定失败 taxonomy；provider_route_unavailable 是 Server 对白名单模型渠道错误的归一化诊断；部分成功逐槽位显示 reason。具体诊断（若可获得）由 failure_diagnostic 携带。
+        failure_diagnostic:
+          allOf:
+            - $ref: "#/components/schemas/GenerationFailureDiagnostic"
+          nullable: true
         result:
           type: object
           nullable: true

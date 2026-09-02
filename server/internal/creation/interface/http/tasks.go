@@ -246,7 +246,7 @@ func toTaskResource(task domain.GenerationTask) generationTaskResource {
 		ID:              task.ID.String(),
 		SessionID:       task.SessionID.String(),
 		Status:          string(task.Status),
-		MediaType:       string(task.Spec.MediaType),
+		MediaType:       string(task.Media),
 		SlotCount:       task.SlotCount,
 		CancelRequested: task.CancelRequested,
 		CreatedAt:       task.CreatedAt.UTC().Format(timeRFC3339),
@@ -264,10 +264,20 @@ func toTaskResource(task domain.GenerationTask) generationTaskResource {
 }
 
 type generationSlotResource struct {
-	Index         int                 `json:"index"`
-	Status        string              `json:"status"`
-	FailureReason *string             `json:"failure_reason"`
-	Result        *slotResultResource `json:"result"`
+	Index             int                    `json:"index"`
+	Status            string                 `json:"status"`
+	FailureReason     *string                `json:"failure_reason"`
+	FailureDiagnostic *slotFailureDiagnostic `json:"failure_diagnostic"`
+	Result            *slotResultResource    `json:"result"`
+}
+
+type slotFailureDiagnostic struct {
+	Source       string  `json:"source"`
+	Code         string  `json:"code"`
+	Message      string  `json:"message"`
+	HTTPStatus   *int    `json:"http_status"`
+	ProviderType *string `json:"provider_type"`
+	RequestID    *string `json:"request_id"`
 }
 
 type slotResultResource struct {
@@ -285,6 +295,16 @@ func toSlotResource(task domain.GenerationTask, slot domain.GenerationSlot) gene
 	if slot.Reason != nil {
 		reason := string(*slot.Reason)
 		resource.FailureReason = &reason
+	}
+	if slot.Diagnostic != nil {
+		resource.FailureDiagnostic = &slotFailureDiagnostic{
+			Source:       string(slot.Diagnostic.Source),
+			Code:         slot.Diagnostic.Code,
+			Message:      slot.Diagnostic.Message,
+			HTTPStatus:   slot.Diagnostic.HTTPStatus,
+			ProviderType: slot.Diagnostic.ProviderType,
+			RequestID:    slot.Diagnostic.RequestID,
+		}
 	}
 	if slot.Status != nil && *slot.Status == domain.SlotSucceeded && slot.ResultBlobKey != nil {
 		checksum := ""
@@ -357,7 +377,7 @@ func toTaskDetail(task domain.GenerationTask, slots []domain.GenerationSlot) gen
 	}
 	detail.Specification = &generationSpecResource{
 		SchemaVersion:   task.Spec.SchemaVersion,
-		MediaType:       string(task.Spec.MediaType),
+		MediaType:       string(task.Media),
 		Prompt:          task.Spec.Prompt,
 		Model:           task.Spec.Model,
 		Mode:            task.Spec.Mode,

@@ -53,6 +53,32 @@ func (s *ConnectionService) GetActive(ctx context.Context) (domain.ProviderConne
 	return s.connections.GetActive(ctx)
 }
 
+// ActiveCallCredential implements the task worker's domain.CallCredentialSource:
+// it opens the active connection's sealed envelope for exactly one provider
+// call. It deliberately does not gate on admin state or credential verdict —
+// paused connections and rejected verdicts must not stop accepted jobs from
+// converging (poll/transfer); any failure here makes the caller fail closed
+// and hold. The plaintext lives only until the call returns.
+func (s *ConnectionService) ActiveCallCredential(ctx context.Context) (string, error) {
+	connection, err := s.connections.GetActive(ctx)
+	if err != nil {
+		return "", err
+	}
+	if connection.Envelope == nil {
+		// Unreachable while the database CHECK holds; treated as sealed.
+		return "", domain.ErrCredentialSealed
+	}
+	key, err := s.vault.LoadKey()
+	if err != nil {
+		return "", fmt.Errorf("creation: call credential unavailable: %w", err)
+	}
+	plaintext, err := s.vault.Open(key, connection.ID, *connection.Envelope)
+	if err != nil {
+		return "", fmt.Errorf("creation: call credential unavailable: %w", err)
+	}
+	return string(plaintext), nil
+}
+
 // MemberCapabilities returns the per-media member projection.
 func (s *ConnectionService) MemberCapabilities(ctx context.Context) (domain.MediaCapabilitiesView, error) {
 	connection, err := s.connections.GetActive(ctx)

@@ -41,14 +41,28 @@ export type SlotFailureReason =
   | 'output_policy_rejected'
   | 'action_required'
   | 'temporarily_unavailable'
+  | 'provider_route_unavailable'
   | 'processing_indeterminate'
   | 'internal_error'
+
+export type SlotFailureDiagnosticSource = 'provider' | 'output_transfer' | 'storage' | 'media_probe'
+
+/** Concrete creator-private explanation for one stable slot verdict. */
+export interface SlotFailureDiagnostic {
+  readonly source: SlotFailureDiagnosticSource
+  readonly code: string
+  readonly message: string
+  readonly httpStatus: number | null
+  readonly providerType: string | null
+  readonly requestId: string | null
+}
 
 /** One result slot: a derived projection until a terminal verdict lands. */
 export interface GenerationSlotView {
   readonly index: number
   readonly status: string
   readonly failureReason: SlotFailureReason | null
+  readonly failureDiagnostic?: SlotFailureDiagnostic | null
   readonly result: SlotResultView | null
 }
 
@@ -166,9 +180,63 @@ const SLOT_FAILURE_REASONS: ReadonlySet<string> = new Set([
   'output_policy_rejected',
   'action_required',
   'temporarily_unavailable',
+  'provider_route_unavailable',
   'processing_indeterminate',
   'internal_error'
 ])
+
+const SLOT_FAILURE_DIAGNOSTIC_SOURCES: ReadonlySet<string> = new Set([
+  'provider',
+  'output_transfer',
+  'storage',
+  'media_probe'
+])
+
+function codePointLength(value: string): number {
+  return [...value].length
+}
+
+function parseFailureDiagnostic(payload: unknown): SlotFailureDiagnostic | null {
+  if (!isRecord(payload)) return null
+  const source = str(payload, 'source')
+  const code = str(payload, 'code')
+  const message = str(payload, 'message')
+  if (
+    source === null ||
+    !SLOT_FAILURE_DIAGNOSTIC_SOURCES.has(source) ||
+    code === null ||
+    codePointLength(code) < 1 ||
+    codePointLength(code) > 128 ||
+    message === null ||
+    codePointLength(message) < 1 ||
+    codePointLength(message) > 2000
+  ) {
+    return null
+  }
+  const httpStatus = nullableNum(payload, 'http_status')
+  const providerType = nullableStr(payload, 'provider_type')
+  const requestId = nullableStr(payload, 'request_id')
+  if (
+    httpStatus === undefined ||
+    (httpStatus !== null &&
+      (!Number.isInteger(httpStatus) || httpStatus < 100 || httpStatus > 599)) ||
+    providerType === undefined ||
+    (providerType !== null &&
+      (codePointLength(providerType) < 1 || codePointLength(providerType) > 128)) ||
+    requestId === undefined ||
+    (requestId !== null && (codePointLength(requestId) < 1 || codePointLength(requestId) > 256))
+  ) {
+    return null
+  }
+  return {
+    source: source as SlotFailureDiagnosticSource,
+    code,
+    message,
+    httpStatus,
+    providerType,
+    requestId
+  }
+}
 
 function parseSlot(payload: unknown): GenerationSlotView | null {
   const indexRaw = nullableNum(payload, 'index')
@@ -178,6 +246,14 @@ function parseSlot(payload: unknown): GenerationSlotView | null {
   if (reasonRaw === undefined) return null
   if (reasonRaw !== null && !SLOT_FAILURE_REASONS.has(reasonRaw)) return null
   const reason = reasonRaw as SlotFailureReason | null
+  let failureDiagnostic: SlotFailureDiagnostic | null = null
+  if (isRecord(payload) && 'failure_diagnostic' in payload) {
+    const rawDiagnostic = payload['failure_diagnostic']
+    if (rawDiagnostic !== null) {
+      failureDiagnostic = parseFailureDiagnostic(rawDiagnostic)
+      if (failureDiagnostic === null) return null
+    }
+  }
   let result: SlotResultView | null = null
   const rawResult = isRecord(payload) && 'result' in payload ? payload['result'] : undefined
   if (rawResult !== undefined && rawResult !== null) {
@@ -194,7 +270,7 @@ function parseSlot(payload: unknown): GenerationSlotView | null {
       durationMs: nullableNum(rawResult, 'duration_ms') ?? null
     }
   }
-  return { index: indexRaw, status, failureReason: reason, result }
+  return { index: indexRaw, status, failureReason: reason, failureDiagnostic, result }
 }
 
 function parseTaskDetail(payload: unknown): GenerationTaskDetail | null {

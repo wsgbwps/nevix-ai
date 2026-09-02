@@ -110,6 +110,15 @@ func (s *MaterialService) Upload(ctx context.Context, owner, sessionID domain.UU
 		cleanup()
 		return domain.ReferenceMaterial{}, domain.ErrTooLarge
 	}
+	// The reference dimension envelope is authoritative at ingest: an image
+	// outside the manifest's published bounds never becomes a material, so
+	// no later gate can be bypassed by a stale or client-side check.
+	if identified.Kind == domain.KindImage {
+		if err := domain.CheckImageReferenceEnvelope(identified.Facts); err != nil {
+			cleanup()
+			return domain.ReferenceMaterial{}, err
+		}
+	}
 	ext := strings.ToLower(filepath.Ext(base))
 	if !identified.Kind.AcceptsExtension(ext) {
 		cleanup()

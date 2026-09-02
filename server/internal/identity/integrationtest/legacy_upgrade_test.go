@@ -7,6 +7,8 @@ package integrationtest
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,27 @@ import (
 // URL (both harness DSNs address the default `postgres` database).
 func scratchDatabaseURL(ownerURL string) string {
 	return strings.Replace(ownerURL, "/postgres?", "/nevix_legacy_upgrade_test?", 1)
+}
+
+// embeddedMigrationCount derives the expectation from the embedded files
+// themselves, so appending an up-only migration never stales this sentinel.
+func embeddedMigrationCount(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("../../migration/migrations")
+	if err != nil {
+		t.Fatalf("read embedded migrations: %v", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		stem, _, ok := strings.Cut(entry.Name(), "_")
+		if !ok {
+			continue
+		}
+		if _, err := strconv.ParseInt(stem, 10, 64); err == nil {
+			count++
+		}
+	}
+	return count
 }
 
 func TestBaselineDropsTheLegacyWorldAndRebuilds(t *testing.T) {
@@ -77,8 +100,8 @@ func TestBaselineDropsTheLegacyWorldAndRebuilds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply baseline over legacy schema: %v", err)
 	}
-	if len(applied) != 8 {
-		t.Fatalf("applied %d migrations on the legacy scratch database, want the 8 embedded ones", len(applied))
+	if want := embeddedMigrationCount(t); len(applied) != want {
+		t.Fatalf("applied %d migrations on the legacy scratch database, want the %d embedded ones", len(applied), want)
 	}
 
 	conn, err = pgx.Connect(ctx, scratchURL)

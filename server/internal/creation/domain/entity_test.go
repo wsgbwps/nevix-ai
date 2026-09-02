@@ -8,7 +8,7 @@ import (
 
 func validDraft() *SessionDraft {
 	media := DraftMediaImage
-	model := "doubao-seedream-5.0-lite"
+	model := "doubao-seedream-5.0-pro"
 	mode := "reference-image"
 	ratio := "4:5"
 	resolution := "2K"

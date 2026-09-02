@@ -15,6 +15,7 @@ import type {
 } from '../../../src/renderer/src/features/creation/api/go-creation-http'
 import type {
   CapabilityManifest,
+  CapabilityModel,
   ImageReferenceEnvelope
 } from '../../../src/renderer/src/features/creation/api/capability-manifest-http'
 import type {
@@ -111,34 +112,84 @@ function imageEnvelope(min: number, max: number): ImageReferenceEnvelope {
 
 const noReferences = { total: { min: 0, max: 0 } }
 
+/**
+ * Real vendor pixel sizes (豆包生图 OpenAPI x-size-map) for the ratios the
+ * tests exercise, so the composer's size row reads exactly what the server
+ * publishes for the same selection.
+ */
+function imageModelSizes(
+  tiers: readonly string[],
+  sizes: Record<string, Record<string, [number, number]>>
+): CapabilityModel['sizes'] {
+  return tiers.flatMap((resolution) =>
+    Object.entries(sizes[resolution] ?? {}).map(([ratio, [width, height]]) => ({
+      resolution,
+      ratio,
+      width,
+      height
+    }))
+  )
+}
+
+const proSizes = imageModelSizes(['1K', '1.5K', '2K'], {
+  '1K': { '4:3': [1152, 864], '9:16': [800, 1424] },
+  '1.5K': { '4:3': [1792, 1344], '9:16': [1152, 2048] },
+  '2K': { '4:3': [2368, 1776], '9:16': [1584, 2816] }
+})
+const nidSizes = imageModelSizes(['2K', '3K', '4K'], {
+  '2K': { '4:3': [2304, 1728], '9:16': [1600, 2848] },
+  '3K': { '4:3': [3456, 2592], '9:16': [2304, 4096] },
+  '4K': { '4:3': [4704, 3520], '9:16': [3040, 5504] }
+})
+
 /** The V1 manifest as the server publishes it with both media active. */
 const activeManifest: CapabilityManifest = {
-  schemaVersion: 1,
-  manifestVersion: 1,
+  schemaVersion: 2,
+  manifestVersion: 5,
   updatedAt: '2026-08-29T10:00:00Z',
   image: {
     available: true,
     reason: null,
     action: null,
-    model: 'doubao-seedream-5.0-lite',
+    models: [
+      {
+        model: 'doubao-seedream-5.0-pro',
+        resolutions: ['1K', '1.5K', '2K'],
+        defaultResolution: '2K',
+        maxReferenceImages: 10,
+        sizes: proSizes
+      },
+      {
+        model: 'doubao-seedream-5.0',
+        resolutions: ['2K', '3K', '4K'],
+        defaultResolution: '2K',
+        maxReferenceImages: 14,
+        sizes: nidSizes
+      }
+    ],
     modes: [
       { id: 'text-to-image', referenceMaterial: noReferences },
       {
         id: 'reference-image',
-        referenceMaterial: { total: { min: 1, max: 4 }, image: imageEnvelope(1, 4) }
+        referenceMaterial: { total: { min: 1, max: 14 }, image: imageEnvelope(1, 14) }
       }
     ],
-    ratios: ['1:1', '4:3', '4:5', '16:9', '9:16'],
-    resolutions: ['1K', '2K', '4K'],
+    ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
     quantities: [1, 2, 3, 4],
-    defaults: { resolution: '2K', ratio: '1:1', quantity: 1 },
+    defaults: { ratio: '1:1', quantity: 1 },
     prompt: { minChars: 1, maxChars: 2000 }
   },
   video: {
     available: true,
     reason: null,
     action: null,
-    model: 'doubao-seedance-2-5',
+    models: [
+      {
+        model: 'doubao-seedance-2-5',
+        resolutions: ['480p', '720p', '1080p'],
+        defaultResolution: '720p'
+      }
+    ],
     modes: [
       { id: 'text-to-video', referenceMaterial: noReferences },
       {
@@ -171,9 +222,8 @@ const activeManifest: CapabilityManifest = {
         }
       }
     ],
-    resolutions: ['480p', '720p', '1080p'],
     durations: [5, 10],
-    defaults: { resolution: '720p', duration: 5 },
+    defaults: { duration: 5 },
     prompt: { minChars: 1, maxChars: 2000 }
   }
 }
@@ -185,6 +235,7 @@ export interface DeckTestControls {
   taskCalls(): ReadonlyArray<{ sessionId: string; idempotencyKey: string }>
   retryCalls(): ReadonlyArray<{ taskId: string; idempotencyKey: string }>
   cancelledIds(): string[]
+  releaseManifest(): void
   fireInvalidation(): void
   pushTask(task: ScriptedTask): void
 }
@@ -214,6 +265,8 @@ interface RuntimeOptions {
   readonly manifest: CapabilityManifest | null
   /** When true the manifest call fails like an unreachable server. */
   readonly manifestFails?: boolean
+  /** When true the test releases the manifest response explicitly. */
+  readonly manifestDeferred?: boolean
   readonly sessions: readonly CreationSessionView[]
   readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
@@ -229,6 +282,12 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
   const saveCalls: Array<{ sessionId: string; draft: SessionDraftInput }> = []
   const deletedIds: string[] = []
   const uploadCalls: Array<{ sessionId: string; name: string }> = []
+  let releaseManifestResponse: (() => void) | null = null
+  const manifestReady = options.manifestDeferred
+    ? new Promise<void>((resolve) => {
+        releaseManifestResponse = resolve
+      })
+    : Promise.resolve()
   const taskState: {
     tasks: ScriptedTask[]
     submitCalls: Array<{ sessionId: string; idempotencyKey: string }>
@@ -253,6 +312,10 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     taskCalls: () => taskState.submitCalls,
     retryCalls: () => taskState.retryCalls,
     cancelledIds: () => taskState.cancelledIds,
+    releaseManifest: () => {
+      releaseManifestResponse?.()
+      releaseManifestResponse = null
+    },
     fireInvalidation: () => taskState.eventHandlers?.onInvalidation(),
     pushTask: (task) => {
       taskState.tasks = [task, ...taskState.tasks]
@@ -310,10 +373,12 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
       return succeeded(undefined)
     },
     loadImageBlobUrl: async () => thumbnailUrl,
-    loadCapabilityManifest: async () =>
-      options.manifestFails || options.manifest === null
+    loadCapabilityManifest: async () => {
+      await manifestReady
+      return options.manifestFails || options.manifest === null
         ? { outcome: 'network-failure' }
-        : succeeded(options.manifest),
+        : succeeded(options.manifest)
+    },
     // Generation task kernel (issue #159): in-memory task store behind the
     // same operations, plus an invalidation handle for SSE scenarios.
     submitTask: async (sessionId, input) => {
@@ -412,6 +477,7 @@ function Frame({ children }: { readonly children: React.ReactNode }): React.JSX.
 interface StoryOptions {
   readonly manifest?: CapabilityManifest | null
   readonly manifestFails?: boolean
+  readonly manifestDeferred?: boolean
   readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
   readonly sessions?: readonly CreationSessionView[]
@@ -425,17 +491,18 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
       value={installWorkbenchRuntime({
         manifest: options.manifest === undefined ? activeManifest : options.manifest,
         manifestFails: options.manifestFails,
+        manifestDeferred: options.manifestDeferred,
         sessions,
         taskScript: options.taskScript,
         drafts: options.drafts ?? {
           [sessionA.id]: {
             prompt: '夏季跑鞋主图，暖光背景',
             mediaType: 'image',
-            manifestVersion: 1,
+            manifestVersion: 5,
             updatedAt: '2026-08-29T10:00:00Z',
-            model: 'doubao-seedream-5.0-lite',
+            model: 'doubao-seedream-5.0-pro',
             mode: 'reference-image',
-            ratio: '4:5',
+            ratio: '4:3',
             resolution: '2K',
             quantity: 2,
             durationSeconds: null,

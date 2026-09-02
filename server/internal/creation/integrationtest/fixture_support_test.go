@@ -21,12 +21,20 @@ func fixtureImage(w, h int) *image.RGBA {
 	return img
 }
 
-// pngBytes encodes a 24x16 PNG used to exercise the authoritative image path.
+// pngBytes encodes a 256x256 PNG used to exercise the authoritative image
+// path: the same size envelope the manifest publishes and the upload gate
+// enforces (spec 图片合同).
 func pngBytes(t *testing.T) []byte {
 	t.Helper()
+	return pngBytesSized(t, 256, 256)
+}
+
+// pngBytesSized encodes a deterministic w×h PNG for envelope-boundary cases.
+func pngBytesSized(t *testing.T, w, h int) []byte {
+	t.Helper()
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, fixtureImage(24, 16)); err != nil {
-		t.Fatalf("encode png fixture: %v", err)
+	if err := png.Encode(&buf, fixtureImage(w, h)); err != nil {
+		t.Fatalf("encode %dx%d png fixture: %v", w, h, err)
 	}
 	return buf.Bytes()
 }

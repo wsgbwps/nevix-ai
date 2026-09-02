@@ -44,22 +44,43 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const availableImage = {
   available: true,
-  model: 'doubao-seedream-5.0-lite',
+  models: [
+    {
+      model: 'doubao-seedream-5.0-pro',
+      resolutions: ['1K', '1.5K', '2K'],
+      default_resolution: '2K',
+      max_reference_images: 10,
+      sizes: [
+        { resolution: '1K', ratio: '1:1', width: 1024, height: 1024 },
+        { resolution: '2K', ratio: '4:3', width: 2368, height: 1776 }
+      ]
+    },
+    {
+      model: 'doubao-seedream-5.0',
+      resolutions: ['2K', '3K', '4K'],
+      default_resolution: '2K'
+    }
+  ],
   modes: [
     { id: 'text-to-image', reference_material: { total: { min: 0, max: 0 } } },
     { id: 'reference-image', reference_material: { total: { min: 1, max: 4 } } }
   ],
   ratios: ['1:1', '4:3'],
-  resolutions: ['1K', '2K'],
   quantities: [1, 2],
-  defaults: { ratio: '1:1', resolution: '2K', quantity: 1 },
+  defaults: { ratio: '1:1', quantity: 1 },
   prompt: { min_chars: 1, max_chars: 2000 },
   reference_material: { total: { min: 0, max: 4 } }
 }
 
 const availableVideo = {
   available: true,
-  model: 'doubao-seedance-2-5',
+  models: [
+    {
+      model: 'doubao-seedance-2-5',
+      resolutions: ['480p', '720p', '1080p'],
+      default_resolution: '720p'
+    }
+  ],
   modes: [
     {
       id: 'first-last-frame',
@@ -102,17 +123,16 @@ const availableVideo = {
       }
     }
   ],
-  resolutions: ['720p'],
   durations: [5],
-  defaults: { resolution: '720p', duration: 5 },
+  defaults: { duration: 5 },
   prompt: { min_chars: 1, max_chars: 2000 },
   reference_material: { total: { min: 0, max: 4 } }
 }
 
 const pendingVideo = {
   available: false,
-  reason: 'production_readiness_pending',
-  action: 'await_release'
+  reason: 'not_configured',
+  action: 'contact_admin'
 }
 
 describe('capability manifest client', () => {
@@ -144,7 +164,7 @@ describe('capability manifest client', () => {
     assert.equal(requests[0].headers.get('Authorization'), 'Bearer token-a')
   })
 
-  it('parses available and readiness-pending media into structured views', async () => {
+  it('parses available and connection-unavailable media into structured views', async () => {
     await withFetch(
       () =>
         Promise.resolve(
@@ -163,21 +183,36 @@ describe('capability manifest client', () => {
         assert.equal(result.value.schemaVersion, 1)
         assert.equal(result.value.manifestVersion, 3)
         assert.equal(result.value.image.available, true)
-        assert.equal(result.value.image.model, 'doubao-seedream-5.0-lite')
+        assert.deepEqual(
+          result.value.image.models?.map((model) => model.model),
+          ['doubao-seedream-5.0-pro', 'doubao-seedream-5.0']
+        )
+        assert.deepEqual(result.value.image.models?.[0].resolutions, ['1K', '1.5K', '2K'])
+        assert.equal(result.value.image.models?.[0].defaultResolution, '2K')
+        // The published pixel sizes arrive verbatim; a model without them
+        // (video) simply carries no sizes.
+        assert.deepEqual(result.value.image.models?.[0].sizes, [
+          { resolution: '1K', ratio: '1:1', width: 1024, height: 1024 },
+          { resolution: '2K', ratio: '4:3', width: 2368, height: 1776 }
+        ])
+        assert.equal(result.value.image.models?.[1].sizes, undefined)
+        // The per-model reference ceiling rides the model view; video (and
+        // models without one) simply carries none.
+        assert.equal(result.value.image.models?.[0].maxReferenceImages, 10)
+        assert.equal(result.value.image.models?.[1].maxReferenceImages, undefined)
         assert.deepEqual(
           result.value.image.modes?.map((mode) => mode.id),
           ['text-to-image', 'reference-image']
         )
         assert.deepEqual(result.value.image.defaults, {
           ratio: '1:1',
-          resolution: '2K',
           quantity: 1,
           duration: undefined
         })
         assert.equal(result.value.video.available, false)
-        assert.equal(result.value.video.reason, 'production_readiness_pending')
-        assert.equal(result.value.video.action, 'await_release')
-        assert.equal(result.value.video.model, undefined)
+        assert.equal(result.value.video.reason, 'not_configured')
+        assert.equal(result.value.video.action, 'contact_admin')
+        assert.equal(result.value.video.models, undefined)
       }
     )
   })
@@ -245,6 +280,18 @@ describe('capability manifest client', () => {
       }
     })
     assert.equal(badEnvelope, null)
+    // A malformed per-model reference ceiling fails the whole payload too.
+    const proWithBadCeiling = (ceiling: unknown): unknown => ({
+      schema_version: 1,
+      manifest_version: 1,
+      image: {
+        ...availableImage,
+        models: [{ ...availableImage.models[0], max_reference_images: ceiling }]
+      },
+      video: pendingVideo
+    })
+    assert.equal(parseCapabilityManifest(proWithBadCeiling('ten')), null)
+    assert.equal(parseCapabilityManifest(proWithBadCeiling(0)), null)
   })
 
   it('maps stable failures without inventing verdicts', async () => {
@@ -276,7 +323,7 @@ describe('capability manifest client', () => {
       parseCapabilityManifest({
         schema_version: 1,
         manifest_version: 1,
-        image: { available: false, reason: 'kapon_says_meh', action: 'await_release' },
+        image: { available: false, reason: 'kapon_says_meh', action: 'contact_admin' },
         video: pendingVideo
       }),
       null
@@ -301,6 +348,57 @@ describe('capability manifest client', () => {
       }),
       null
     )
+    // A model whose default resolution is outside its own tier set fails
+    // closed — the composer may never seed an unsubmittable resolution.
+    assert.equal(
+      parseCapabilityManifest({
+        schema_version: 1,
+        manifest_version: 1,
+        image: {
+          ...availableImage,
+          models: [
+            {
+              model: 'doubao-seedream-5.0-pro',
+              resolutions: ['1K', '1.5K', '2K'],
+              default_resolution: '4K'
+            }
+          ]
+        },
+        video: pendingVideo
+      }),
+      null
+    )
+    // A pixel size outside the model's own tiers, outside the published
+    // ratios, or with a non-positive dimension fails closed: display data
+    // must never impersonate a capability.
+    const sizeCases: Array<Record<string, unknown>> = [
+      { resolution: '4K', ratio: '1:1', width: 4096, height: 4096 },
+      { resolution: '1K', ratio: '9:16', width: 800, height: 1424 },
+      { resolution: '1K', ratio: '1:1', width: 0, height: 1024 },
+      { resolution: '1K', ratio: '1:1', width: 'wide', height: 1024 }
+    ]
+    for (const sizes of sizeCases) {
+      assert.equal(
+        parseCapabilityManifest({
+          schema_version: 1,
+          manifest_version: 1,
+          image: {
+            ...availableImage,
+            models: [
+              {
+                model: 'doubao-seedream-5.0-pro',
+                resolutions: ['1K', '1.5K', '2K'],
+                default_resolution: '2K',
+                sizes: [sizes]
+              }
+            ]
+          },
+          video: pendingVideo
+        }),
+        null,
+        `sizes entry must fail closed: ${JSON.stringify(sizes)}`
+      )
+    }
     // A truncated payload (missing video) fails closed.
     assert.equal(
       parseCapabilityManifest({ schema_version: 1, manifest_version: 1, image: availableImage }),
@@ -331,5 +429,5 @@ function pendingImage(): {
   reason: string
   action: string
 } {
-  return { available: false, reason: 'production_readiness_pending', action: 'await_release' }
+  return { available: false, reason: 'not_configured', action: 'contact_admin' }
 }
