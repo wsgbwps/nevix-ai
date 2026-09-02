@@ -282,13 +282,13 @@ function SessionRow({
     // menu keeps the row lit while its portal is open.
     <li
       className={
-        'group relative flex items-center gap-1 rounded-lg ' +
+        'group relative flex items-center gap-1 rounded-md ' +
         (renaming ? '' : selected || menuOpen ? 'bg-accent' : 'hover:bg-foreground/[0.04]')
       }
     >
       {renaming ? (
         <form
-          className="bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5"
+          className="bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5"
           onSubmit={(event) => {
             event.preventDefault()
             endRename()
@@ -328,9 +328,9 @@ function SessionRow({
             <DropdownMenuTrigger
               aria-label={t('sessions.menu.open')}
               data-testid={`session-menu-${session.id}`}
-              className="text-muted-foreground hover:text-foreground rounded p-1 opacity-0 outline-none group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sky-400/50 data-[state=open]:opacity-100"
+              className="text-muted-foreground hover:text-foreground mr-1.5 rounded p-1 opacity-0 outline-none group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sky-400/50 data-[state=open]:opacity-100"
             >
-              <MoreHorizontalIcon className="size-4" aria-hidden />
+              <MoreHorizontalIcon className="size-5" aria-hidden />
             </DropdownMenuTrigger>
             <ComposerMenuContent side="bottom" align="start" sideOffset={4}>
               <DropdownMenuItem
@@ -360,7 +360,7 @@ function SessionRow({
 function SessionTile({ index }: { readonly index: number }): React.JSX.Element {
   return (
     <span
-      className={`grid size-7 shrink-0 place-items-center rounded-md bg-gradient-to-br ${rowGradients[index % rowGradients.length]}`}
+      className={`grid size-7 shrink-0 place-items-center rounded bg-gradient-to-br ${rowGradients[index % rowGradients.length]}`}
     >
       <FileImageIcon className="size-3.5 text-white/75" aria-hidden />
     </span>
