@@ -259,6 +259,7 @@ function SessionRow({
   const name = session.name.length > 0 ? session.name : t('sessions.unnamed')
   const [renaming, setRenaming] = useState(false)
   const [draftName, setDraftName] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
   // Escape must not double-fire the blur-driven commit when the input unmounts.
   const renameCancelledRef = useRef(false)
 
@@ -275,7 +276,16 @@ function SessionRow({
   }
 
   return (
-    <li className="group relative flex items-center gap-1">
+    // The row container owns the background so the primary button and the
+    // actions trigger sit on one continuous surface (the trigger cannot nest
+    // inside the button — interactive elements do not nest); the controlled
+    // menu keeps the row lit while its portal is open.
+    <li
+      className={
+        'group relative flex items-center gap-1 rounded-lg ' +
+        (renaming ? '' : selected || menuOpen ? 'bg-accent' : 'hover:bg-foreground/[0.04]')
+      }
+    >
       {renaming ? (
         <form
           className="bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5"
@@ -309,15 +319,12 @@ function SessionRow({
             onClick={onSelect}
             aria-current={selected ? 'true' : undefined}
             aria-label={name}
-            className={
-              'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ' +
-              (selected ? 'bg-accent' : 'hover:bg-foreground/[0.04]')
-            }
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
           >
             <SessionTile index={index} />
             <span className="text-foreground block truncate text-xs font-medium">{name}</span>
           </button>
-          <DropdownMenu>
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger
               aria-label={t('sessions.menu.open')}
               data-testid={`session-menu-${session.id}`}
