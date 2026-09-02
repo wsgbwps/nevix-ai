@@ -30,7 +30,7 @@ import {
 import type { CreationWorkbenchController } from '../model/use-workbench'
 import { modeKeys } from '../i18n/mode-keys'
 import { ComposerMenuContent } from './composer-menu-content'
-import { ratioGlyphSize } from './ratio-glyph'
+import { ratioGlyphDiagonalSize, ratioGlyphSize } from './ratio-glyph'
 import { ReferenceDeck } from './reference-deck'
 
 // Dynamic verdict vocabularies resolve through explicit key maps — the same
@@ -450,11 +450,15 @@ function ParamsMenu({
               <OptionStrip
                 items={ratios}
                 isSelected={(ratio) => ratio === draft.ratio}
-                layout="h-[52px] flex-col gap-1"
+                layout="h-[52px] flex-col gap-2.5"
                 onSelect={(ratio) => workbench.patchDraft({ ratio })}
                 render={(ratio) => (
                   <>
-                    <RatioGlyph ratio={ratio} />
+                    {/* Fixed-height slot: every glyph shares one band so the
+                        labels below sit on one line across the strip. */}
+                    <span className="flex h-4 shrink-0 items-center justify-center">
+                      <RatioGlyph ratio={ratio} diagonal={16} />
+                    </span>
                     <span className="text-[11px] leading-none">{ratio}</span>
                   </>
                 )}
@@ -573,7 +577,7 @@ function Separator(): React.JSX.Element {
 }
 
 // Option cells carry their own height and font size — the strip layouts give
-// them, e.g. 'h-9 text-[13px]' or the vertical 'h-[52px] flex-col gap-1'.
+// them, e.g. 'h-9 text-[13px]' or the vertical 'h-[52px] flex-col gap-2.5'.
 function paramOptionClass(selected: boolean, layout: string): string {
   return (
     `${layout} flex items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ` +
@@ -622,19 +626,29 @@ function OptionStrip<T extends string | number>({
 }
 
 // The ratio cell icon: a border box at the published ratio's real proportions
-// (21:9 reads as a wide strip, 9:16 as a tall one). A missing or malformed
-// ratio falls back to a neutral square so video and stale drafts keep an icon.
+// (21:9 reads as a wide strip, 9:16 as a tall one). The params strip passes
+// `diagonal` so every ratio previews at the same perceived size; without it
+// the longest edge scales to `max` (the inline trigger). A missing or
+// malformed ratio falls back to a neutral square so video and stale drafts
+// keep an icon.
 function RatioGlyph({
   ratio,
-  max = 20
+  max = 20,
+  diagonal
 }: {
   readonly ratio: string | null
   readonly max?: number
+  readonly diagonal?: number
 }): React.JSX.Element {
-  const size = (ratio === null ? null : ratioGlyphSize(ratio, max)) ?? {
-    width: max * 0.7,
-    height: max * 0.7
-  }
+  const size =
+    (ratio === null
+      ? null
+      : diagonal === undefined
+        ? ratioGlyphSize(ratio, max)
+        : ratioGlyphDiagonalSize(ratio, diagonal)) ??
+    (diagonal === undefined
+      ? { width: max * 0.7, height: max * 0.7 }
+      : { width: diagonal / Math.SQRT2, height: diagonal / Math.SQRT2 })
   return (
     <span
       className="block shrink-0 rounded-[4px] border-[1.5px] border-current"
