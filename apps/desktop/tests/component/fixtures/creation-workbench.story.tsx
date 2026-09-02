@@ -244,6 +244,12 @@ function succeeded<T>(value: T): CreationApiResult<T> {
 /** Scripted task behavior: what submitTask does and which tasks pre-exist. */
 export interface ScriptedTask extends GenerationTaskView {
   readonly slots: GenerationTaskDetail['slots']
+  /** The task's frozen specification; absent details render task-view facts only. */
+  readonly specification?: GenerationTaskDetail['specification']
+}
+
+function detailOf(task: ScriptedTask): GenerationTaskDetail {
+  return { task, slots: task.slots, specification: task.specification ?? null }
 }
 
 export interface TaskScript {
@@ -408,7 +414,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
         ]
       }
       taskState.tasks = [task, ...taskState.tasks]
-      return succeeded({ task, slots: task.slots })
+      return succeeded(detailOf(task))
     },
     listTasks: async (sessionId) =>
       succeeded({
@@ -433,13 +439,13 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     getTask: async (taskId) => {
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
-      return succeeded({ task, slots: task.slots })
+      return succeeded(detailOf(task))
     },
     cancelTask: async (taskId) => {
       taskState.cancelledIds.push(taskId)
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
-      return succeeded({ task, slots: task.slots })
+      return succeeded(detailOf(task))
     },
     retryTask: async (taskId, idempotencyKey) => {
       taskState.retryCalls.push({ taskId, idempotencyKey })
@@ -459,7 +465,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
         }))
       }
       taskState.tasks = [retried, ...taskState.tasks]
-      return succeeded({ task: retried, slots: retried.slots })
+      return succeeded(detailOf(retried))
     },
     loadResultBlobUrl: async () => thumbnailUrl,
     subscribeEvents: (handlers) => {

@@ -19,6 +19,7 @@ import {
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import type {
   GenerationSlotView,
+  GenerationSpecificationView,
   GenerationTaskDetail,
   GenerationTaskView,
   SlotFailureDiagnosticSource,
@@ -89,10 +90,11 @@ const mediaKeys = {
  * states live inside the slots; there is no separate banner to correlate
  * with.
  *
- * The prompt and parameters mirror the session's current draft: Generation
- * Tasks do not yet freeze a per-task specification snapshot on the wire
- * (contract extension tracked in #186), so every card shows the draft the
- * session holds right now.
+ * Each card reads the prompt and parameters from the task's own frozen
+ * Generation Specification in its detail — never the session draft, which
+ * may have moved on. Before the detail arrives the header shows task-view
+ * facts only (status, media type), and unsettled slots borrow the draft's
+ * ratio purely for placeholder geometry.
  */
 
 const galleryGridClass = 'grid grid-cols-2 gap-2 md:grid-cols-4'
@@ -133,6 +135,7 @@ function TaskCard({
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const detail = workbench.taskDetails[task.id]
+  const spec = detail?.specification ?? null
   const terminal = isTerminalTaskStatus(task.status)
   const indeterminate = task.terminalCause !== null
   const { draft } = workbench
@@ -154,28 +157,28 @@ function TaskCard({
       className="animate-in fade-in slide-in-from-bottom-2 flex flex-col gap-2.5 duration-300"
     >
       <div className="flex flex-col gap-1">
-        {draft.prompt.length > 0 && (
-          <p className="text-foreground/80 line-clamp-3 text-xs leading-5">{draft.prompt}</p>
+        {spec !== null && spec.prompt.length > 0 && (
+          <p className="text-foreground/80 line-clamp-3 text-xs leading-5">{spec.prompt}</p>
         )}
         <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
           <span className="text-foreground/70 font-medium">{t(statusKey(task.status))}</span>
           <span>
             {t(mediaKeys[task.mediaType])}
-            {draft.model !== null && ` · ${draft.model}`}
+            {spec !== null && ` · ${spec.model}`}
           </span>
-          {draft.ratio !== null && (
+          {spec?.ratio != null && (
             <>
               <MetaSeparator />
-              <span>{draft.ratio}</span>
+              <span>{spec.ratio}</span>
             </>
           )}
-          {draft.resolution !== null && (
+          {spec?.resolution != null && (
             <>
               <MetaSeparator />
-              <span>{draft.resolution}</span>
+              <span>{spec.resolution}</span>
             </>
           )}
-          <TaskDetailsMenu workbench={workbench} task={task} />
+          <TaskDetailsMenu task={task} spec={spec} />
         </div>
       </div>
       <div className={galleryGridClass}>
@@ -186,7 +189,7 @@ function TaskCard({
             taskId={task.id}
             slot={slot}
             mediaType={task.mediaType}
-            fallbackRatio={draft.ratio}
+            fallbackRatio={spec?.ratio ?? draft.ratio}
           />
         ))}
       </div>
@@ -299,19 +302,16 @@ function MetaSeparator(): React.JSX.Element {
   )
 }
 
-/**
- * The draft facts behind a task; replaced by the task's own frozen snapshot
- * once the contract extension in #186 lands.
- */
+/** The frozen-specification facts behind a task; while no detail (or no
+ * specification in it) has arrived, only the task's own identity rows show. */
 function TaskDetailsMenu({
-  workbench,
-  task
+  task,
+  spec
 }: {
-  readonly workbench: CreationWorkbenchController
   readonly task: GenerationTaskView
+  readonly spec: GenerationSpecificationView | null
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { draft } = workbench
   const created = new Date(task.createdAt)
   return (
     <DropdownMenu>
@@ -323,35 +323,35 @@ function TaskDetailsMenu({
         <InfoIcon className="size-3" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72 rounded-xl p-2">
-        {draft.prompt.length > 0 && (
-          <DetailRow label={t('gallery.details.prompt')}>
-            <span className="line-clamp-6 whitespace-pre-wrap">{draft.prompt}</span>
-          </DetailRow>
-        )}
-        {draft.mode !== null && (
-          <DetailRow
-            label={t('gallery.details.mode')}
-            value={
-              draft.mode in modeKeys
-                ? String(t(modeKeys[draft.mode as keyof typeof modeKeys]))
-                : draft.mode
-            }
-          />
-        )}
-        {draft.quantity !== null && (
-          <DetailRow label={t('gallery.details.quantity')} value={String(draft.quantity)} />
-        )}
-        {draft.durationSeconds !== null && (
-          <DetailRow
-            label={t('gallery.details.duration')}
-            value={String(t('composer.params.seconds', { n: draft.durationSeconds }))}
-          />
-        )}
-        {draft.references.length > 0 && (
-          <DetailRow
-            label={t('gallery.details.references')}
-            value={String(draft.references.length)}
-          />
+        {spec !== null && (
+          <>
+            {spec.prompt.length > 0 && (
+              <DetailRow label={t('gallery.details.prompt')}>
+                <span className="line-clamp-6 whitespace-pre-wrap">{spec.prompt}</span>
+              </DetailRow>
+            )}
+            <DetailRow
+              label={t('gallery.details.mode')}
+              value={
+                spec.mode in modeKeys
+                  ? String(t(modeKeys[spec.mode as keyof typeof modeKeys]))
+                  : spec.mode
+              }
+            />
+            <DetailRow label={t('gallery.details.quantity')} value={String(spec.quantity)} />
+            {spec.durationSeconds !== null && (
+              <DetailRow
+                label={t('gallery.details.duration')}
+                value={String(t('composer.params.seconds', { n: spec.durationSeconds }))}
+              />
+            )}
+            {spec.referenceCount > 0 && (
+              <DetailRow
+                label={t('gallery.details.references')}
+                value={String(spec.referenceCount)}
+              />
+            )}
+          </>
         )}
         <DetailRow label={t('gallery.details.task')}>
           <span className="font-mono">{task.id}</span>

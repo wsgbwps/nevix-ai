@@ -669,6 +669,84 @@ test('clearing the prompt keeps the submitted tasks on screen', async ({ mount, 
   await expect(page.getByTestId('workspace-hero')).toHaveCount(0)
 })
 
+test('a task card shows its frozen specification, never the live draft', async ({
+  mount,
+  page
+}) => {
+  const frozen: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000frz1',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }],
+    specification: {
+      prompt: 'frozen-at-submit prompt',
+      model: 'frozen-model',
+      mode: 'reference-image',
+      ratio: '1:1',
+      resolution: null,
+      quantity: 1,
+      durationSeconds: null,
+      referenceCount: 0
+    }
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [frozen] }} />)
+  await selectFirstSession(page)
+
+  // The card reads the task's own frozen intent; the session draft holds a
+  // different prompt and must never leak onto it (issue #186).
+  const card = page.getByTestId(`task-${frozen.id}`)
+  await expect(card).toContainText('frozen-at-submit prompt')
+  await expect(card).toContainText('frozen-model')
+  await expect(card).toContainText('1:1')
+  await expect(card).not.toContainText('夏季跑鞋主图，暖光背景')
+
+  await page.getByTestId('composer-prompt').fill('a totally different live draft')
+  await expect(card).toContainText('frozen-at-submit prompt')
+  await expect(card).not.toContainText('a totally different live draft')
+
+  // The details menu reports the same frozen facts.
+  await page.getByTestId(`task-details-${frozen.id}`).click()
+  const menu = page.getByRole('menu')
+  await expect(menu).toBeVisible()
+  await expect(menu).toContainText('frozen-at-submit prompt')
+})
+
+test('a task whose detail carries no specification shows task-view facts only', async ({
+  mount,
+  page
+}) => {
+  const bare: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000bar1',
+    sessionId: scriptedSessionId,
+    status: 'processing',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:00:01Z',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [bare] }} />)
+  await selectFirstSession(page)
+
+  // Without a freeze the header keeps the task's own status and media line;
+  // no prompt paragraph and no draft mirror.
+  const card = page.getByTestId(`task-${bare.id}`)
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('Generating')
+  await expect(card).not.toContainText('夏季跑鞋主图，暖光背景')
+  await expect(page.getByTestId(`slot-${bare.id}-0`)).toBeVisible()
+})
+
 test('the workbench fills the shell content area it is mounted in', async ({ mount, page }) => {
   // Regression for the desktop fill bug: the page used to sit behind a plain
   // block wrapper in app/pages/creation-page.tsx, which made the section's

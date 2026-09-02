@@ -88,9 +88,23 @@ export interface GenerationTaskView {
   readonly terminalAt: string | null
 }
 
+/** The task's frozen generation intent (contracts specification), reduced to
+ * the facts the gallery displays; references are validated but only counted. */
+export interface GenerationSpecificationView {
+  readonly prompt: string
+  readonly model: string
+  readonly mode: string
+  readonly ratio: string | null
+  readonly resolution: string | null
+  readonly quantity: number
+  readonly durationSeconds: number | null
+  readonly referenceCount: number
+}
+
 export interface GenerationTaskDetail {
   readonly task: GenerationTaskView
   readonly slots: readonly GenerationSlotView[]
+  readonly specification: GenerationSpecificationView | null
 }
 
 export interface TaskPage {
@@ -273,10 +287,58 @@ function parseSlot(payload: unknown): GenerationSlotView | null {
   return { index: indexRaw, status, failureReason: reason, failureDiagnostic, result }
 }
 
+const SPEC_REFERENCE_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'audio'])
+
+// Parses one present specification; null on any malformation so the caller
+// fails the whole detail closed — a guessed prompt must never render as the
+// task's frozen intent (the same strictness as a malformed failure
+// diagnostic).
+function parseSpecification(raw: unknown): GenerationSpecificationView | null {
+  if (!isRecord(raw)) return null
+  const prompt = str(raw, 'prompt')
+  const model = str(raw, 'model')
+  const mode = str(raw, 'mode')
+  const mediaType = str(raw, 'media_type')
+  if (prompt === null || model === null || mode === null) return null
+  if (mediaType !== 'image' && mediaType !== 'video') return null
+  if (nullableNum(raw, 'schema_version') == null) return null
+  if (nullableNum(raw, 'manifest_version') == null) return null
+  const quantity = nullableNum(raw, 'quantity')
+  if (quantity === null || quantity === undefined || quantity < 1) return null
+  const references = raw['references']
+  if (!Array.isArray(references)) return null
+  let referenceCount = 0
+  for (const reference of references) {
+    if (!isRecord(reference)) return null
+    const materialId = str(reference, 'material_id')
+    const role = str(reference, 'role')
+    const kind = str(reference, 'kind')
+    if (materialId === null || role === null || kind === null) return null
+    if (!SPEC_REFERENCE_KINDS.has(kind)) return null
+    if (nullableNum(reference, 'claims_version') == null) return null
+    referenceCount++
+  }
+  return {
+    prompt,
+    model,
+    mode,
+    ratio: nullableStr(raw, 'ratio') ?? null,
+    resolution: nullableStr(raw, 'resolution') ?? null,
+    durationSeconds: nullableNum(raw, 'duration_seconds') ?? null,
+    quantity,
+    referenceCount
+  }
+}
+
 function parseTaskDetail(payload: unknown): GenerationTaskDetail | null {
   if (!isRecord(payload) || !('task' in payload) || !('slots' in payload)) return null
   const task = parseTask(payload['task'])
   if (task === null) return null
+  // The specification is contract-optional: absence renders task-view facts
+  // only; any present value goes through the strict parse above.
+  const rawSpecification = payload['specification']
+  const specification = rawSpecification == null ? null : parseSpecification(rawSpecification)
+  if (rawSpecification != null && specification === null) return null
   const rawSlots = payload['slots']
   if (!Array.isArray(rawSlots)) return null
   const slots: GenerationSlotView[] = []
@@ -285,7 +347,7 @@ function parseTaskDetail(payload: unknown): GenerationTaskDetail | null {
     if (slot === null) return null
     slots.push(slot)
   }
-  return { task, slots }
+  return { task, slots, specification }
 }
 
 function parseTaskPage(payload: unknown): TaskPage | null {
