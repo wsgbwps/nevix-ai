@@ -47,7 +47,8 @@ const server = https.createServer({ ...initial }, (request, response) => {
   // The terminator stands in for the official Nginx delivery (spec #150
   // Nginx): inbound Forwarded headers are replaced with the trusted HTTPS
   // marker the Go data plane requires on high-risk routes.
-  const { 'x-forwarded-proto': _dropped, ...headers } = request.headers
+  const headers = { ...request.headers }
+  delete headers['x-forwarded-proto']
   const upstream = http.request(
     new URL(request.url ?? '/', target),
     {
