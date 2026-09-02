@@ -223,6 +223,9 @@ export interface DeckTestControls {
   taskCalls(): ReadonlyArray<{ sessionId: string; idempotencyKey: string }>
   retryCalls(): ReadonlyArray<{ taskId: string; idempotencyKey: string }>
   cancelledIds(): string[]
+  createSessionCalls(): ReadonlyArray<{ name: string }>
+  renameCalls(): ReadonlyArray<{ sessionId: string; name: string }>
+  deletedSessionIds(): string[]
   releaseManifest(): void
   fireInvalidation(): void
   pushTask(task: ScriptedTask): void
@@ -270,6 +273,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
   const saveCalls: Array<{ sessionId: string; draft: SessionDraftInput }> = []
   const deletedIds: string[] = []
   const uploadCalls: Array<{ sessionId: string; name: string }> = []
+  const createdSessions: Array<{ name: string }> = []
+  const renameCalls: Array<{ sessionId: string; name: string }> = []
+  const deletedSessionIds: string[] = []
   let releaseManifestResponse: (() => void) | null = null
   const manifestReady = options.manifestDeferred
     ? new Promise<void>((resolve) => {
@@ -300,6 +306,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     taskCalls: () => taskState.submitCalls,
     retryCalls: () => taskState.retryCalls,
     cancelledIds: () => taskState.cancelledIds,
+    createSessionCalls: () => createdSessions,
+    renameCalls: () => renameCalls,
+    deletedSessionIds: () => deletedSessionIds,
     releaseManifest: () => {
       releaseManifestResponse?.()
       releaseManifestResponse = null
@@ -313,14 +322,22 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
 
   return {
     listSessions: async () => succeeded({ sessions: options.sessions, nextCursor: null }),
-    createSession: async (name) =>
-      succeeded({
+    createSession: async (name) => {
+      createdSessions.push({ name: name ?? '' })
+      return succeeded({
         ...sessionB,
         id: 'eeeeeeee-0000-4000-8000-000000000007',
         name: name ?? ''
-      }),
-    renameSession: async () => succeeded(sessionA),
-    deleteSession: async () => succeeded(undefined),
+      })
+    },
+    renameSession: async (sessionId, name) => {
+      renameCalls.push({ sessionId, name })
+      return succeeded({ ...sessionA, name })
+    },
+    deleteSession: async (sessionId) => {
+      deletedSessionIds.push(sessionId)
+      return succeeded(undefined)
+    },
     getSessionDetail: async (sessionId) => {
       const session = options.sessions.find((entry) => entry.id === sessionId)
       if (!session) return { outcome: 'request-rejected', code: 'not_found' }

@@ -3,6 +3,7 @@ import type { CapabilityManifest } from '../api/capability-manifest-http'
 import type {
   CreationSessionView,
   DraftReferenceView,
+  MaterialKind,
   ReferenceMaterialView,
   SessionDraftInput
 } from '../api/go-creation-http'
@@ -74,9 +75,12 @@ export interface CreationWorkbenchController {
   sessions: readonly CreationSessionView[]
   selected: CreationSessionView | null
   selectedId: string | null
+  /** True while the creator drafts against a session that does not exist yet. */
+  composingNew: boolean
   selectSession: (session: CreationSessionView) => void
-  createSession: (name: string) => void
+  startNewDraft: () => void
   deleteSession: (sessionId: string) => void
+  renameSession: (sessionId: string, name: string) => void
   materials: readonly ReferenceMaterialView[]
   thumbnails: Readonly<Record<string, string>>
   draft: ComposerDraft
@@ -119,6 +123,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const [reloadAttempt, setReloadAttempt] = useState(0)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [composingNew, setComposingNew] = useState(false)
   const [materials, setMaterials] = useState<readonly ReferenceMaterialView[]>([])
   const [thumbnails, setThumbnails] = useState<Readonly<Record<string, string>>>({})
   const [draft, setDraft] = useState<ComposerDraft>(emptyComposerDraft)
@@ -149,10 +154,56 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const baselineRef = useRef<string>(JSON.stringify(emptyComposerDraft()))
   const draftRef = useRef<ComposerDraft>(draft)
   const selectedIdRef = useRef<string | null>(selectedId)
+  const composingNewRef = useRef(false)
   const draftRevisionRef = useRef<string | null>(null)
   const submittingRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(false)
+
+  /**
+   * Files added while composing a session that does not exist yet, keyed by
+   * their synthetic material id. They upload when the session materializes at
+   * submit time; until then nothing about them ever reaches the server.
+   */
+  const pendingMaterialFilesRef = useRef(
+    new Map<string, { file: File; previewUrl: string | null }>()
+  )
+
+  /** A locally-held file masquerades as a material so the deck and role
+   * binding treat it identically; the fields the upload would establish stay
+   * empty until the real record replaces it. */
+  const pendingMaterialView = (id: string, file: File): ReferenceMaterialView => ({
+    id,
+    kind: file.type.startsWith('video/')
+      ? 'video'
+      : file.type.startsWith('audio/')
+        ? 'audio'
+        : 'image',
+    fileName: file.name,
+    mimeType: file.type,
+    byteSize: file.size,
+    widthPx: null,
+    heightPx: null,
+    pixelCount: null,
+    durationMs: null,
+    checksumSha256: '',
+    claimsVersion: 0,
+    createdAt: new Date(0).toISOString()
+  })
+
+  /** Drops one pending file's local records, revoking its preview URL. */
+  const dropPendingMaterial = (materialId: string): void => {
+    const pending = pendingMaterialFilesRef.current.get(materialId)
+    if (pending === undefined) return
+    pendingMaterialFilesRef.current.delete(materialId)
+    if (pending.previewUrl !== null) URL.revokeObjectURL(pending.previewUrl)
+    setThumbnails((current) => {
+      if (!(materialId in current)) return current
+      const next = { ...current }
+      delete next[materialId]
+      return next
+    })
+  }
 
   // Render cannot write refs; mirror the committed values after commit so the
   // autosave pipeline (timer, flush, unmount cleanup) always reads the latest
@@ -163,6 +214,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   useLayoutEffect(() => {
     draftRef.current = draft
     selectedIdRef.current = selectedId
+    composingNewRef.current = composingNew
   })
 
   useEffect(() => {
@@ -327,6 +379,11 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       if (sessionId !== null && JSON.stringify(draftRef.current) !== baselineRef.current) {
         void ports?.saveSessionDraft(sessionId, toInput(draftRef.current))
       }
+      // Locally-held composing previews never became server materials; their
+      // object URLs die with the surface.
+      for (const [, entry] of pendingMaterialFilesRef.current) {
+        if (entry.previewUrl !== null) URL.revokeObjectURL(entry.previewUrl)
+      }
     },
     [ports, toInput]
   )
@@ -396,6 +453,10 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     async (session: CreationSessionView) => {
       if (!ports) return
       await flushSave()
+      setComposingNew(false)
+      composingNewRef.current = false
+      for (const materialId of pendingMaterialFilesRef.current.keys())
+        dropPendingMaterial(materialId)
       setSelectedId(session.id)
       selectedIdRef.current = session.id
       setMaterials([])
@@ -530,21 +591,34 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [bindingsForMode, patchDraft]
   )
 
-  const createSession = useCallback(
-    async (name: string) => {
-      if (!ports) return
-      const result = await ports.createSession(name.trim()).catch(() => null)
-      if (!mountedRef.current) return
-      if (result === null || result.outcome !== 'succeeded') {
-        setStatus('error')
-        return
-      }
-      setSessions((current) => [result.value, ...current])
-      setStatus('ready')
-      await selectSession(result.value)
-    },
-    [ports, selectSession]
-  )
+  /**
+   * Enters the composer without a server session: the draft lives locally and
+   * the session materializes only when a task is actually submitted. A fresh
+   * round seeds from the manifest defaults exactly like a never-saved session.
+   */
+  const startNewDraft = useCallback(() => {
+    if (!ports) return
+    if (composingNewRef.current) return
+    // flushSave reads the still-selected session synchronously, so this must
+    // precede the state/ref clears below.
+    void flushSave()
+    setComposingNew(true)
+    composingNewRef.current = true
+    setSelectedId(null)
+    selectedIdRef.current = null
+    // A composing round has no authoritative draft; a stale revision from the
+    // previously selected session must never ride a submission.
+    draftRevisionRef.current = null
+    setDraftRevision(null)
+    for (const materialId of pendingMaterialFilesRef.current.keys()) {
+      dropPendingMaterial(materialId)
+    }
+    setMaterials([])
+    setThumbnails({})
+    setTasks([])
+    setTaskDetails({})
+    applyLoadedDraft(manifest === null ? null : manifestDefaultDraft(manifest))
+  }, [applyLoadedDraft, flushSave, manifest, manifestDefaultDraft, ports])
 
   const deleteSession = useCallback(
     async (sessionId: string) => {
@@ -565,10 +639,72 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [applyLoadedDraft, ports]
   )
 
+  const renameSession = useCallback(
+    (sessionId: string, name: string) => {
+      // `selected` derives from this list, so the workspace title follows.
+      // Optimistic like deleteSession: a failed PATCH surfaces on the next
+      // reload instead of rolling the visible name back.
+      setSessions((current) =>
+        current.map((session) => (session.id === sessionId ? { ...session, name } : session))
+      )
+      void ports?.renameSession(sessionId, name).catch(() => undefined)
+    },
+    [ports]
+  )
+
+  const loadImageThumbnail = useCallback(
+    (materialId: string): void => {
+      void ports
+        ?.loadImageBlobUrl(materialId)
+        .then((url) => {
+          if (!url || !mountedRef.current) return
+          setThumbnails((current) => ({ ...current, [materialId]: url }))
+        })
+        .catch(() => undefined)
+    },
+    [ports]
+  )
+
   const addMaterial = useCallback(
     async (file: File) => {
+      if (!ports) return
+      // The structural fallback keeps every kind saveable: images take the
+      // image role, anything else binds as omni (which accepts all kinds).
+      const bindToDraft = (kind: MaterialKind, materialId: string): void => {
+        const media = draftRef.current.mediaType
+        const derived =
+          media === null
+            ? null
+            : roleForPosition(media, draftRef.current.mode, draftRef.current.references.length)
+        const role = derived ?? (kind === 'image' ? 'reference' : 'omni')
+        const binding: DraftReferenceView = { materialId, role }
+        const nextReferences = [...draftRef.current.references, binding]
+        if (media === 'image') {
+          // Image modes derive from the deck: any reference means the
+          // reference-image shape, and the bindings re-derive their roles with
+          // it — the composer offers no image mode picker (video modes are
+          // not deck-derivable).
+          patchDraft({
+            references: bindingsForMode(media, 'reference-image', nextReferences),
+            mode: 'reference-image'
+          })
+        } else {
+          patchDraft({ references: nextReferences })
+        }
+      }
       const sessionId = selectedIdRef.current
-      if (!ports || sessionId === null) return
+      if (sessionId === null) {
+        // Composing a session that does not exist yet: the file stays local
+        // and uploads when the session materializes at submit time.
+        const id = crypto.randomUUID()
+        const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+        pendingMaterialFilesRef.current.set(id, { file, previewUrl })
+        const material = pendingMaterialView(id, file)
+        setMaterials((current) => [...current, material])
+        if (previewUrl !== null) setThumbnails((current) => ({ ...current, [id]: previewUrl }))
+        bindToDraft(material.kind, id)
+        return
+      }
       const result = await ports.uploadMaterial(sessionId, file).catch(() => null)
       if (!mountedRef.current) return
       if (result === null || result.outcome !== 'succeeded') {
@@ -577,39 +713,10 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       }
       const material = result.value
       setMaterials((current) => [...current, material])
-      const media = draftRef.current.mediaType
-      const derived =
-        media === null
-          ? null
-          : roleForPosition(media, draftRef.current.mode, draftRef.current.references.length)
-      // The structural fallback keeps every kind saveable: images take the
-      // image role, anything else binds as omni (which accepts all kinds).
-      const role = derived ?? (material.kind === 'image' ? 'reference' : 'omni')
-      const binding: DraftReferenceView = { materialId: material.id, role }
-      const nextReferences = [...draftRef.current.references, binding]
-      if (media === 'image') {
-        // Image modes derive from the deck: any reference means the
-        // reference-image shape, and the bindings re-derive their roles with
-        // it — the composer offers no image mode picker (video modes are
-        // not deck-derivable).
-        patchDraft({
-          references: bindingsForMode(media, 'reference-image', nextReferences),
-          mode: 'reference-image'
-        })
-      } else {
-        patchDraft({ references: nextReferences })
-      }
-      if (material.kind === 'image') {
-        void ports
-          .loadImageBlobUrl(material.id)
-          .then((url) => {
-            if (!url || !mountedRef.current) return
-            setThumbnails((current) => ({ ...current, [material.id]: url }))
-          })
-          .catch(() => undefined)
-      }
+      bindToDraft(material.kind, material.id)
+      if (material.kind === 'image') loadImageThumbnail(material.id)
     },
-    [bindingsForMode, patchDraft, ports]
+    [bindingsForMode, loadImageThumbnail, patchDraft, ports]
   )
 
   const removeMaterial = useCallback(
@@ -627,6 +734,12 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         patchDraft({ references: remaining })
       }
       setMaterials((current) => current.filter((material) => material.id !== materialId))
+      // A locally-held composing file never reached the server; only its
+      // local records die with the removal.
+      if (pendingMaterialFilesRef.current.has(materialId)) {
+        dropPendingMaterial(materialId)
+        return
+      }
       await ports.deleteMaterial(materialId).catch(() => undefined)
     },
     [bindingsForMode, patchDraft, ports]
@@ -665,40 +778,134 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     return () => clearInterval(interval)
   }, [eventStreamLive, hasActiveTasks, refreshTasks])
 
+  /**
+   * Creates the server session a composing round has been drafting against
+   * and adopts it as selected WITHOUT reloading the stored state — the local
+   * draft is the intent the subsequent flush must persist.
+   */
+  const materializeSession = useCallback(async (): Promise<string | null> => {
+    if (!ports) return null
+    const result = await ports.createSession('').catch(() => null)
+    if (!mountedRef.current) return null
+    if (result === null || result.outcome !== 'succeeded') {
+      setSubmitError('network-failure')
+      return null
+    }
+    const session = result.value
+    setSessions((current) => [session, ...current])
+    setComposingNew(false)
+    composingNewRef.current = false
+    setSelectedId(session.id)
+    selectedIdRef.current = session.id
+    return session.id
+  }, [ports])
+
+  /**
+   * Uploads every locally-held composing file to the materialized session
+   * and rewrites the draft bindings to the real material ids, preserving
+   * order and roles. Already-uploaded files never send twice, so a retry
+   * after a mid-way failure resumes with the rest.
+   */
+  const uploadPendingMaterials = useCallback(
+    async (sessionId: string): Promise<boolean> => {
+      if (!ports) return false
+      const idMap = new Map<string, string>()
+      let failed = false
+      for (const [pendingId, entry] of pendingMaterialFilesRef.current) {
+        const result = await ports.uploadMaterial(sessionId, entry.file).catch(() => null)
+        if (!mountedRef.current) return false
+        if (result === null || result.outcome !== 'succeeded') {
+          setSubmitError('network-failure')
+          failed = true
+          break
+        }
+        idMap.set(pendingId, result.value.id)
+        const uploaded = result.value
+        setMaterials((current) =>
+          current.map((material) => (material.id === pendingId ? uploaded : material))
+        )
+        if (uploaded.kind === 'image') loadImageThumbnail(uploaded.id)
+      }
+      if (idMap.size > 0) {
+        // Rewrite synchronously in state AND ref: the flush that follows must
+        // persist real material ids regardless of React commit timing.
+        const references = draftRef.current.references.map((reference) => {
+          const realId = idMap.get(reference.materialId)
+          return realId === undefined ? reference : { ...reference, materialId: realId }
+        })
+        draftRef.current = { ...draftRef.current, references }
+        setDraft(draftRef.current)
+        setSaveStatus('idle')
+        for (const pendingId of idMap.keys()) dropPendingMaterial(pendingId)
+      }
+      return !failed
+    },
+    [loadImageThumbnail, ports]
+  )
+
   const submit = useCallback(() => {
-    const sessionId = selectedIdRef.current
-    const revision = draftRevisionRef.current
-    if (!ports || sessionId === null || revision === null) return
+    if (!ports) return
+    const composing = composingNewRef.current
+    const currentSessionId = selectedIdRef.current
+    // An existing session may only submit once its stored draft revision is
+    // authoritative; a composing round mints that revision as part of
+    // materializing the session below.
+    if (!composing && (currentSessionId === null || draftRevisionRef.current === null)) return
     if (submittingRef.current) return
     submittingRef.current = true
     setSubmitting(true)
     setSubmitError(null)
-    const run = async (): Promise<void> => {
-      // The submission freezes the SERVER-stored draft: flush any unsaved
-      // edit first so the frozen intent is exactly what the composer shows.
-      await flushSave()
-      const result = await ports
-        .submitTask(sessionId, {
-          idempotencyKey: crypto.randomUUID(),
-          draftRevision: draftRevisionRef.current ?? revision
-        })
-        .catch(() => null)
+    const finish = (): void => {
       submittingRef.current = false
       setSubmitting(false)
-      if (!mountedRef.current) return
-      if (selectedIdRef.current !== sessionId) return
-      if (result !== null && result.outcome === 'succeeded') {
-        setSubmitError(null)
-        setIndeterminateTaskId(null)
-        await loadTasks(sessionId)
-      } else if (result !== null && result.outcome === 'request-rejected') {
-        setSubmitError(result.code)
-      } else {
-        setSubmitError('network-failure')
+    }
+    const run = async (): Promise<void> => {
+      try {
+        let sessionId = currentSessionId
+        if (sessionId === null) {
+          const created = await materializeSession()
+          if (created === null) return
+          sessionId = created
+          // A freshly materialized session has no stored draft: persist the
+          // local intent unconditionally so an authoritative revision exists
+          // no matter what fails later (a mid-way upload failure must leave a
+          // retryable state, not a permanently disabled submit).
+          await persistDraft(sessionId, draftRef.current)
+          if (!mountedRef.current || selectedIdRef.current !== sessionId) return
+        }
+        if (!(await uploadPendingMaterials(sessionId))) return
+        // The submission freezes the SERVER-stored draft: flush any unsaved
+        // edit first so the frozen intent is exactly what the composer shows.
+        await flushSave()
+        const revision = draftRevisionRef.current
+        if (revision === null) {
+          setSubmitError('network-failure')
+          return
+        }
+        const result = await ports
+          .submitTask(sessionId, {
+            idempotencyKey: crypto.randomUUID(),
+            draftRevision: revision
+          })
+          .catch(() => null)
+        finish()
+        if (!mountedRef.current) return
+        if (selectedIdRef.current !== sessionId) return
+        if (result !== null && result.outcome === 'succeeded') {
+          setSubmitError(null)
+          setIndeterminateTaskId(null)
+          await loadTasks(sessionId)
+        } else if (result !== null && result.outcome === 'request-rejected') {
+          setSubmitError(result.code)
+        } else {
+          setSubmitError('network-failure')
+        }
+      } finally {
+        finish()
       }
     }
     void run()
-  }, [flushSave, loadTasks, ports])
+  }, [flushSave, loadTasks, materializeSession, persistDraft, ports, uploadPendingMaterials])
 
   // The composer's submit affordance: a void adapter so the JSX handler can
   // stay a plain reference.
@@ -784,15 +991,15 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     sessions,
     selected,
     selectedId,
+    composingNew,
     selectSession: (session: CreationSessionView) => {
       void selectSession(session)
     },
-    createSession: (name: string) => {
-      void createSession(name)
-    },
+    startNewDraft,
     deleteSession: (sessionId: string) => {
       void deleteSession(sessionId)
     },
+    renameSession,
     materials,
     thumbnails,
     draft,
@@ -815,7 +1022,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     allowedKinds,
     tasks,
     taskDetails,
-    submitDisabled: submitBlocked !== null || draftRevision === null || submitting,
+    submitDisabled:
+      submitBlocked !== null || (!composingNew && draftRevision === null) || submitting,
     submitBlockedReason: submitBlocked,
     submit: submitCallback,
     cancelTask: cancelTaskById,

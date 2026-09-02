@@ -776,3 +776,159 @@ test('a policy-rejected task keeps editing paths but no identical quick retry', 
     'Input rejected by safety review'
   )
 })
+
+test('the new-conversation row enters the composer without creating a session', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory />)
+  await page.getByTestId('session-new').click()
+
+  await expect(page.getByTestId('composer')).toBeVisible()
+  await expect(page.getByTestId('workspace-hero')).toBeVisible()
+  // Lazy creation: nothing reached the server and no row appeared for it.
+  expect(await page.evaluate(() => window.__creationDeckTest?.createSessionCalls() ?? [])).toEqual(
+    []
+  )
+  await expect(page.getByTestId('session-list').getByRole('listitem')).toHaveCount(2)
+})
+
+test('a composing draft submits by materializing the session first', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await page.getByTestId('session-new').click()
+  await expect(page.getByTestId('composer')).toBeVisible()
+  await page.getByTestId('composer-prompt').fill('秋季上新主图')
+  const submit = page.getByTestId('composer-submit')
+  await expect(submit).toBeEnabled()
+  await submit.click()
+
+  // The session materialized exactly once (unnamed) and joined the list.
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.createSessionCalls() ?? []))
+    .toHaveLength(1)
+  expect(
+    (await page.evaluate(() => window.__creationDeckTest?.createSessionCalls() ?? []))[0]?.name
+  ).toBe('')
+  await expect(page.getByTestId('session-list').getByRole('listitem')).toHaveCount(3)
+  // The submission rode the freshly persisted draft revision.
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
+    .toHaveLength(1)
+  expect(
+    (await page.evaluate(() => window.__creationDeckTest?.saveDraftCalls() ?? [])).at(-1)?.draft
+  ).toMatchObject({ prompt: '秋季上新主图' })
+})
+
+test('an untouched composing draft still materializes with a fresh revision', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory />)
+  // Select a session first so a stale revision exists, then start composing
+  // and submit without touching the seeded draft.
+  await selectFirstSession(page)
+  await page.getByTestId('session-new').click()
+  await expect(page.getByTestId('composer')).toBeVisible()
+  await page.getByTestId('composer-submit').click()
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
+    .toHaveLength(1)
+  // The submission rode a revision minted for the NEW session, not the stale
+  // one carried over from before composing started.
+  const saves = await page.evaluate(() => window.__creationDeckTest?.saveDraftCalls() ?? [])
+  expect(saves.at(-1)?.sessionId).toBe('eeeeeeee-0000-4000-8000-000000000007')
+  await expect(page.getByTestId('gallery-submit-error')).toHaveCount(0)
+})
+
+test('references added while composing upload only when the session materializes', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory />)
+  await page.getByTestId('session-new').click()
+  await expect(page.getByTestId('composer')).toBeVisible()
+
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByLabel('Add reference material').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({
+    name: 'composing.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('png')
+  })
+
+  // The deck card renders from its local preview; nothing has uploaded.
+  await expect(
+    page.getByTestId('reference-deck').getByRole('button', { name: 'composing.png', exact: true })
+  ).toBeVisible()
+  expect(await page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? [])).toEqual([])
+
+  await page.getByTestId('composer-prompt').fill('poster')
+  await page.getByTestId('composer-submit').click()
+
+  // Submission uploads the held file and saves the binding with the REAL id.
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? []))
+    .toHaveLength(1)
+  await expect
+    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft)
+    .toMatchObject({
+      references: [{ materialId: 'ffffffff-0000-4000-8000-000000000006', role: 'reference' }]
+    })
+})
+
+test('the row actions menu renames a session inline', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  const row = page
+    .getByTestId('session-list')
+    .getByRole('listitem')
+    .filter({ hasText: 'Spring campaign' })
+  await row.hover()
+  await row.getByTestId(`session-menu-${scriptedSessionId}`).click()
+  await page.getByRole('menuitem', { name: 'Rename' }).click()
+
+  const input = page.getByTestId('session-rename-input')
+  await expect(input).toBeVisible()
+  await expect(input).toHaveValue('Spring campaign')
+  await input.fill('Summer campaign')
+  await input.press('Enter')
+
+  await expect(page.getByTestId('session-list')).toContainText('Summer campaign')
+  expect(await page.evaluate(() => window.__creationDeckTest?.renameCalls() ?? [])).toEqual([
+    { sessionId: scriptedSessionId, name: 'Summer campaign' }
+  ])
+})
+
+test('escape cancels the inline rename without touching the server', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  const row = page
+    .getByTestId('session-list')
+    .getByRole('listitem')
+    .filter({ hasText: 'Spring campaign' })
+  await row.hover()
+  await row.getByTestId(`session-menu-${scriptedSessionId}`).click()
+  await page.getByRole('menuitem', { name: 'Rename' }).click()
+
+  await page.getByTestId('session-rename-input').fill('Discarded name')
+  await page.getByTestId('session-rename-input').press('Escape')
+
+  await expect(page.getByTestId('session-list')).toContainText('Spring campaign')
+  expect(await page.evaluate(() => window.__creationDeckTest?.renameCalls() ?? [])).toEqual([])
+})
+
+test('the row actions menu deletes a session', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  const row = page
+    .getByTestId('session-list')
+    .getByRole('listitem')
+    .filter({ hasText: 'Spring campaign' })
+  await row.hover()
+  await row.getByTestId(`session-menu-${scriptedSessionId}`).click()
+  await page.getByRole('menuitem', { name: 'Delete' }).click()
+
+  await expect(page.getByTestId('session-list')).not.toContainText('Spring campaign')
+  expect(await page.evaluate(() => window.__creationDeckTest?.deletedSessionIds() ?? [])).toEqual([
+    scriptedSessionId
+  ])
+})

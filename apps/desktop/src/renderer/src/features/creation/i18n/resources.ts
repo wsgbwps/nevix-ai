@@ -10,17 +10,11 @@ export const creationTranslations = defineResourceTranslations({
         label: '开启创作',
         empty: '还没有创作会话，从一个空白草稿开始',
         unnamed: '未命名创作',
-        remove: '删除会话 {{name}}',
-        newLabel: '新会话名称（可选）',
-        newPlaceholder: '新对话',
-        newSubmit: '创建',
-        private: 'Creation Session 由创建者私有',
-        meta: {
-          justNow: '刚刚',
-          minutesAgo: '{{n}} 分钟前',
-          hoursAgo: '{{n}} 小时前',
-          daysAgo: '{{n}} 天前'
-        }
+        recent: '最近',
+        newAction: '新对话',
+        rename: { label: '重命名会话' },
+        menu: { open: '会话操作', rename: '重命名', delete: '删除' },
+        private: 'Creation Session 由创建者私有'
       },
       workspace: {
         label: '工作区',
@@ -260,17 +254,11 @@ export const creationTranslations = defineResourceTranslations({
         label: 'Start creating',
         empty: 'No creation sessions yet; start from a blank draft',
         unnamed: 'Untitled creation',
-        remove: 'Delete session {{name}}',
-        newLabel: 'New session name (optional)',
-        newPlaceholder: 'New conversation',
-        newSubmit: 'Create',
-        private: 'Creation Sessions are private to their creator',
-        meta: {
-          justNow: 'just now',
-          minutesAgo: '{{n}} min ago',
-          hoursAgo: '{{n}} h ago',
-          daysAgo: '{{n}} d ago'
-        }
+        recent: 'Recent',
+        newAction: 'New conversation',
+        rename: { label: 'Rename session' },
+        menu: { open: 'Session actions', rename: 'Rename', delete: 'Delete' },
+        private: 'Creation Sessions are private to their creator'
       },
       workspace: {
         label: 'Workspace',
