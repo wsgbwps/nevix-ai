@@ -28,6 +28,7 @@ import {
   type DraftMediaType
 } from '../model/capability'
 import type { CreationWorkbenchController } from '../model/use-workbench'
+import { modeKeys } from '../i18n/mode-keys'
 import { ReferenceDeck } from './reference-deck'
 
 // Dynamic verdict vocabularies resolve through explicit key maps — the same
@@ -45,15 +46,6 @@ const reasonKeys = {
 const actionKeys = {
   wait: 'composer.unavailable.actions.wait',
   contact_admin: 'composer.unavailable.actions.contact_admin'
-} as const
-
-const modeKeys = {
-  'text-to-image': 'composer.mode.text-to-image',
-  'reference-image': 'composer.mode.reference-image',
-  'text-to-video': 'composer.mode.text-to-video',
-  'first-frame': 'composer.mode.first-frame',
-  'first-last-frame': 'composer.mode.first-last-frame',
-  'omni-reference': 'composer.mode.omni-reference'
 } as const
 
 // Control-row and menu surfaces from the accepted prototype (6e465e8),

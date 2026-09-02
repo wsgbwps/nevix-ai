@@ -50,7 +50,6 @@ export const creationTranslations = defineResourceTranslations({
       },
       gallery: {
         resultAlt: '已验证的生成结果',
-        slotCount: '{{n}} 个结果位',
         taskLabel: '生成任务',
         submitFailed: '提交被拒绝：{{code}}',
         status: {
@@ -90,8 +89,21 @@ export const creationTranslations = defineResourceTranslations({
           cancel: '取消',
           regenerate: '再次生成',
           retryUncompleted: '只重试未完成项',
-          download: '下载'
+          download: '下载',
+          reedit: '重新编辑',
+          more: '更多操作'
         },
+        details: {
+          label: '详细信息',
+          prompt: '提示词',
+          mode: '模式',
+          quantity: '数量',
+          duration: '时长',
+          references: '参考素材',
+          task: '任务 ID',
+          createdAt: '创建时间'
+        },
+        backToBottom: '回到底部',
         indeterminate: {
           title: '重做结果未知的任务',
           body: '该任务的供应商结局未知。重做会创建新任务，可能产生重复生成与重复计费。',
@@ -291,7 +303,6 @@ export const creationTranslations = defineResourceTranslations({
       },
       gallery: {
         resultAlt: 'Verified generation result',
-        slotCount: '{{n}} result slots',
         taskLabel: 'Generation task',
         submitFailed: 'Submission rejected: {{code}}',
         status: {
@@ -331,8 +342,21 @@ export const creationTranslations = defineResourceTranslations({
           cancel: 'Cancel',
           regenerate: 'Regenerate',
           retryUncompleted: 'Retry uncompleted',
-          download: 'Download'
+          download: 'Download',
+          reedit: 'Re-edit',
+          more: 'More actions'
         },
+        details: {
+          label: 'Details',
+          prompt: 'Prompt',
+          mode: 'Mode',
+          quantity: 'Quantity',
+          duration: 'Duration',
+          references: 'References',
+          task: 'Task ID',
+          createdAt: 'Created'
+        },
+        backToBottom: 'Back to bottom',
         indeterminate: {
           title: 'Redo a task with unknown outcome',
           body: 'The provider outcome is unknown. A redo creates a new task and may repeat generation and billing.',

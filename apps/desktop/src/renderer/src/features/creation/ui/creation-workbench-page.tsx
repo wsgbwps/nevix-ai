@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  ChevronsDownIcon,
   FileImageIcon,
   ImageIcon,
   PencilLineIcon,
@@ -31,6 +32,31 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   // The relative "updated" labels anchor to when the list mounted; re-renders
   // never resample the clock, so a row's label cannot change between renders.
   const [listClock] = useState(() => Date.now())
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [showBackToBottom, setShowBackToBottom] = useState(false)
+  // The gallery displays tasks old→new, so the head of the server's
+  // newest-first page is the newest card at the bottom; a changed head means
+  // new content to reveal there. That jump is instant so the back-to-bottom
+  // pill never flashes mid-glide — only the creator-invited return animates.
+  const newestTaskId = workbench.tasks[0]?.id ?? null
+  const returningRef = useRef(false)
+  const lastScrollTopRef = useRef(0)
+  useEffect(() => {
+    if (newestTaskId === null) return
+    const scroller = scrollRef.current
+    if (scroller === null) return
+    const frame = requestAnimationFrame(() => {
+      scroller.scrollTo({ top: scroller.scrollHeight })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [newestTaskId])
+  const scrollToBottom = (): void => {
+    const scroller = scrollRef.current
+    if (scroller === null) return
+    returningRef.current = true
+    setShowBackToBottom(false)
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' })
+  }
   if (!workbench.ports) return null
 
   return (
@@ -91,7 +117,25 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
       <main aria-label={t('workspace.label')} className="relative min-w-0 flex-1 overflow-hidden">
         {workbench.selected ? (
           <>
-            <div className="h-full overflow-y-auto px-6 pb-[190px]">
+            <div
+              ref={scrollRef}
+              onScroll={() => {
+                const scroller = scrollRef.current
+                if (scroller === null) return
+                const { scrollTop, clientHeight, scrollHeight } = scroller
+                const away = scrollTop + clientHeight < scrollHeight - 120
+                // An upward move means the creator took over mid-glide; stop
+                // suppressing the pill so it reflects where they actually are.
+                const tookOver = scrollTop < lastScrollTopRef.current
+                lastScrollTopRef.current = scrollTop
+                if (returningRef.current) {
+                  if (!away || tookOver) returningRef.current = false
+                  else return
+                }
+                setShowBackToBottom(away)
+              }}
+              className="h-full overflow-y-auto px-6 pb-[190px]"
+            >
               {/* The greeting hero is the empty-session state: clearing the
                   prompt must never hide a session that already holds tasks. */}
               {workbench.draft.prompt.length === 0 && workbench.tasks.length === 0 ? (
@@ -114,9 +158,6 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                       </p>
                     </div>
                   </div>
-                  <p className="text-foreground/70 mb-3 text-xs leading-5">
-                    {workbench.draft.prompt}
-                  </p>
                   {workbench.submitError !== null && (
                     <p
                       role="alert"
@@ -137,6 +178,17 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                 </div>
               )}
             </div>
+            {showBackToBottom && (
+              <button
+                type="button"
+                data-testid="back-to-bottom"
+                onClick={scrollToBottom}
+                className="bg-card border-border/60 text-muted-foreground hover:text-foreground animate-in fade-in slide-in-from-bottom-1 absolute right-6 bottom-[200px] z-20 flex h-8 items-center gap-1 rounded-full border px-3 text-[10px] shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+              >
+                {t('gallery.backToBottom')}
+                <ChevronsDownIcon className="size-3" aria-hidden />
+              </button>
+            )}
             <CreationComposer workbench={workbench} />
           </>
         ) : (

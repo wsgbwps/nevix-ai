@@ -460,7 +460,9 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
     'channel binding, permissions, balance, quota, or capacity'
   )
 
-  // Partial success keeps retrying exactly the uncompleted slots.
+  // Partial success keeps retrying exactly the uncompleted slots; the redo
+  // affordance lives in the task's overflow menu.
+  await page.getByTestId(`task-more-${failedTask.id}`).click()
   await page.getByTestId(`task-retry-${failedTask.id}`).click()
   const retries = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
   expect(retries).toHaveLength(1)
@@ -559,6 +561,7 @@ test('indeterminate outcomes require an explicit risk confirmation before redo',
 
   // The redo affordance opens the risk dialog; the retry fires only after the
   // creator confirms the repeat-generation/billing risk.
+  await page.getByTestId(`task-more-${unknownTask.id}`).click()
   await page.getByTestId(`task-retry-indeterminate-${unknownTask.id}`).click()
   const before = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
   expect(before).toHaveLength(0)
@@ -596,6 +599,47 @@ test('an SSE invalidation refetches the task list', async ({ mount, page }) => {
     'data-slot-status',
     'generating'
   )
+})
+
+test('the gallery lists tasks old→new with the newest nearest the composer', async ({
+  mount,
+  page
+}) => {
+  // The scripted server pages tasks newest-first, exactly like the real wire
+  // order; the gallery displays the reversal so the latest task sits at the
+  // bottom of the old→new stack.
+  const older: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000old1',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-28T09:00:00Z',
+    updatedAt: '2026-08-28T09:01:00Z',
+    terminalAt: '2026-08-28T09:01:00Z',
+    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }]
+  }
+  const newer: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000new1',
+    sessionId: scriptedSessionId,
+    status: 'processing',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:00:01Z',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [newer, older] }} />)
+  await selectFirstSession(page)
+
+  const olderBox = await page.getByTestId(`task-${older.id}`).boundingBox()
+  const newerBox = await page.getByTestId(`task-${newer.id}`).boundingBox()
+  expect(olderBox!.y).toBeLessThan(newerBox!.y)
 })
 
 test('clearing the prompt keeps the submitted tasks on screen', async ({ mount, page }) => {
