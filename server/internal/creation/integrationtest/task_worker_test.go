@@ -622,9 +622,11 @@ func TestTransientRejectionAttemptLimitConverges(t *testing.T) {
 			t.Fatalf("the limiting model-route 503 must retain its stable diagnosis: %s", slotVerdicts(converged))
 		}
 		diagnostic := slot.FailureDiagnostic
+		// The gateway appends the redacted request shape and host route to the
+		// provider message (ADR-0016); the creator-private detail is the prefix.
 		if diagnostic == nil || diagnostic.Source != "provider" ||
 			diagnostic.Code != "MODEL_GROUP_ALL_UNAVAILABLE" ||
-			diagnostic.Message != "provider-private-detail" ||
+			!strings.HasPrefix(diagnostic.Message, "provider-private-detail") ||
 			diagnostic.RequestID == nil || *diagnostic.RequestID != "kapon-private-request-id" ||
 			diagnostic.HTTPStatus == nil || *diagnostic.HTTPStatus != http.StatusServiceUnavailable {
 			t.Fatalf("the creator-private Kapon diagnostic must survive: %+v", diagnostic)
