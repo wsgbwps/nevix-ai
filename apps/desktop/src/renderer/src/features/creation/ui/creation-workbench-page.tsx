@@ -100,24 +100,19 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
               {t('sessions.empty')}
             </p>
           ) : (
-            <>
-              <p className="text-muted-foreground px-2 pt-2 pb-1 text-[10px]">
-                {t('sessions.recent')}
-              </p>
-              <ul className="grid gap-0.5" data-testid="session-list">
-                {workbench.sessions.map((session, index) => (
-                  <SessionRow
-                    key={session.id}
-                    session={session}
-                    index={index}
-                    selected={workbench.selectedId === session.id}
-                    onSelect={() => workbench.selectSession(session)}
-                    onDelete={() => workbench.deleteSession(session.id)}
-                    onRename={(name) => workbench.renameSession(session.id, name)}
-                  />
-                ))}
-              </ul>
-            </>
+            <ul className="grid gap-0.5" data-testid="session-list">
+              {workbench.sessions.map((session, index) => (
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  index={index}
+                  selected={workbench.selectedId === session.id}
+                  onSelect={() => workbench.selectSession(session)}
+                  onDelete={() => workbench.deleteSession(session.id)}
+                  onRename={(name) => workbench.renameSession(session.id, name)}
+                />
+              ))}
+            </ul>
           )}
           {workbench.status === 'loading' && (
             <p role="status" className="text-muted-foreground px-1 py-2 text-xs">
