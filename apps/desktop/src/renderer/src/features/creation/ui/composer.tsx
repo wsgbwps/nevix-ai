@@ -59,7 +59,6 @@ const staleTriggerClass = 'border-warning/70 bg-accent text-warning'
 const menuClass = 'w-52 rounded-2xl p-2 shadow-2xl'
 const menuLabelClass = 'text-muted-foreground px-2 pb-2 text-[10px]'
 const menuItemClass = 'h-11 cursor-pointer rounded-xl px-3 text-xs'
-const accentIconClass = 'size-3 text-cyan-600 dark:text-cyan-300'
 
 /**
  * The fixed bottom Composer (issue #177, prototype 6e465e8): prompt text
@@ -302,7 +301,6 @@ function ModelMenu({
         <BoxIcon className="size-3.5 shrink-0" aria-hidden />
         <span className="max-w-40 truncate">{draft.model ?? t('composer.model.label')}</span>
         {staleModel !== null && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
-        <SparklesIcon className={accentIconClass} aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         side="top"
@@ -427,7 +425,6 @@ function ParamsMenu({
         {media === 'image' && draft.ratio !== null && <span>{draft.ratio}</span>}
         {media === 'image' && draft.ratio !== null && draft.resolution !== null && <Separator />}
         {draft.resolution !== null && <span>{draft.resolution}</span>}
-        <SparklesIcon className={accentIconClass} aria-hidden />
         {media === 'image' && draft.quantity !== null && (
           <>
             <Separator />
