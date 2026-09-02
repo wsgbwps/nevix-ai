@@ -20,12 +20,15 @@ const REAL_PNG = Buffer.from(
   'base64'
 )
 
-// The shortest Creation tracer (issues #156 / #177): sign in, open AI
-// Creation from the App Shell, draft in a composing session that does not
+// The shortest Creation tracer (issues #156 / #177, ADR-0017): sign in, open
+// AI Creation from the App Shell, draft in a composing session that does not
 // exist yet (the 「新对话」 row creates nothing server-side), hold one
 // reference image locally, then submit — the first submission materializes
-// the private session and persists draft plus upload through the Go trusted
-// data plane. A restart recovers both from the server, not local cache.
+// the private session, uploads the reference through the Go trusted data
+// plane, and carries the full generation intent in the submit request. The
+// editable draft itself is device-local state: a restart recovers the prompt
+// from this device's store (never the server) and the reference from the
+// server-side material it became at submission.
 test(
   'a creator drafts in the Workbench and the draft survives an app restart',
   { tag: '@smoke' },
@@ -79,16 +82,15 @@ test(
             .getByRole('button', { name: 'shot.png', exact: true })
         ).toBeVisible({ timeout: 15_000 })
 
-        // 首次提交：会话此刻才创建，草稿与素材随之一并落库。
+        // 首次提交：会话此刻才创建，素材随之上传，提交请求携带完整生成意图。
         await expect(workbench.getByTestId('composer-submit')).toBeEnabled({ timeout: 15_000 })
         await workbench.getByTestId('composer-submit').click()
-        await expect(workbench.getByTestId('composer-save')).toContainText('草稿已保存', {
-          timeout: 15_000
-        })
+        await expect(workbench.getByTestId('result-gallery')).toBeVisible({ timeout: 15_000 })
 
         await launched.electronApp.close()
 
-        // 重启：草稿经 Go API 从服务端恢复，而不是本地缓存。
+        // 重启：提示词从本设备的草稿存储恢复（ADR-0017），参考图从提交时
+        // 落库的服务端素材恢复。
         const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
         try {
           const login = relaunched.page.getByRole('heading', { name: '登录 Nevix AI' })

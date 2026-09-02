@@ -153,12 +153,8 @@ export const creationTranslations = defineResourceTranslations({
             contact_admin: '请联系管理员处理。'
           }
         },
-        save: {
-          saving: '草稿保存中…',
-          saved: '草稿已保存',
-          failed: '草稿保存失败，点击重试'
-        },
         deck: {
+          uploadFailed: '参考素材上传失败，请重试',
           label: '参考素材牌堆',
           add: '添加参考素材',
           tile: '参考内容',
@@ -401,12 +397,8 @@ export const creationTranslations = defineResourceTranslations({
             contact_admin: 'Please contact your administrator.'
           }
         },
-        save: {
-          saving: 'Saving draft…',
-          saved: 'Draft saved',
-          failed: 'Draft save failed; click to retry'
-        },
         deck: {
+          uploadFailed: 'Reference upload failed; try again',
           label: 'Reference material deck',
           add: 'Add reference material',
           tile: 'Reference',

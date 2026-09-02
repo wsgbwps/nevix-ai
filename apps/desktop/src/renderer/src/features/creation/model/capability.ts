@@ -13,7 +13,7 @@ import type {
   CapabilityMediaMode,
   CapabilityModel
 } from '../api/capability-manifest-http'
-import type { DraftReferenceRole, MaterialKind, SessionDraftView } from '../api/go-creation-http'
+import type { DraftReferenceRole, LocalDraftRecord, MaterialKind } from '../api/go-creation-http'
 
 export type DraftMediaType = 'image' | 'video'
 
@@ -221,7 +221,7 @@ export function roleForPosition(
 }
 
 /**
- * Validates one stored draft against the current manifest and reports the
+ * Validates one draft against the current manifest and reports the
  * stale fields. Values stay untouched; the caller surfaces each stale field
  * with its stable reason and keeps submission blocked. A missing manifest
  * reports nothing stale — without a verdict there is no claim to preserve or
@@ -229,7 +229,7 @@ export function roleForPosition(
  */
 export function staleDraftFields(
   manifest: CapabilityManifest | null,
-  draft: SessionDraftView
+  draft: LocalDraftRecord
 ): ReadonlySet<DraftStaleField> {
   const stale = new Set<DraftStaleField>()
   if (manifest === null) return stale

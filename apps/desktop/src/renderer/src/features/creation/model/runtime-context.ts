@@ -7,8 +7,12 @@ import type { CreationWorkspacePorts } from './ports'
  * Workbench page (`CreationRuntimeContext.Provider`). `null` means no
  * connected session — the page renders nothing while the root route
  * navigates.
+ *
+ * `userId` scopes the device-local Draft store to the connected account
+ * (ADR-0017): drafts are per-device AND per-account, never shared across
+ * sign-ins on one machine.
  */
-export type CreationRuntime = CreationWorkspacePorts | null
+export type CreationRuntime = (CreationWorkspacePorts & { readonly userId: string }) | null
 
 export const CreationRuntimeContext = createContext<CreationRuntime>(null)
 

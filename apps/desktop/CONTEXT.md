@@ -7,6 +7,7 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 > 2026-08-22：用户系统迁移（#99）已落地到桌面端：组织时代词群随 Organization Feature 一并移除，本词典只剩单租户词汇；账号治理词汇（User Management Domain / Audit Log）已随桌面端 Admin 界面（#105）入册，其余账号治理词群（Admin/Member 等）见 [Server 词典](../../server/CONTEXT.md)。
 > 2026-08-23：连接基座（#104）落地，新增 Server URL / Connection Screen / Connection Probe / Certificate Fingerprint Pin 词群，取代已消亡的「构建期服务器配置」概念。
 > 2026-09-02：任务卡片改由任务自己的冻结 Generation Specification 展示提示词与参数（#186），新增 Draft / Generation Specification 词群以区分「正在编辑」与「提交时冻结」两种生成意图。
+> 2026-09-02：Draft 确定为设备本地状态：仅留存于当前设备、多设备互不相通，提交请求携带完整生成意图，服务端不再保存可编辑草稿。
 
 **User**:
 使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
@@ -69,8 +70,8 @@ _Avoid_: Inspiration Domain, Discovery Domain
 _Avoid_: Official Featured Work, Channel Template, Static Example
 
 **Draft**:
-创作台中 User 正在编辑、随写随存的生成意图；它只属于会话的当下时刻，可以任意修改，尚未对任何生成结果负责。
-_Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照
+创作台中 User 正在编辑、仅留存于当前设备的生成意图；它随写随存于本设备，多设备互不相通，可以任意修改，尚未对任何生成结果负责，提交时才冻结为 Generation Specification。
+_Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 服务端草稿
 
 **Generation Specification**:
 生成提交时冻结的完整生成意图；它承载提交时刻的真实意图，冻结后永不变更，与会话当前仍可编辑的 Draft 相对。

@@ -199,7 +199,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	governanceRepos := postgres.NewGovernanceRepository(pool)
 	assetRepos := postgres.NewMediaAssetRepository(pool)
 	hub := creationhttp.NewInvalidationHub()
-	sessionService := application.NewSessionService(sessionRepos, materialRepos, tx)
+	sessionService := application.NewSessionService(sessionRepos, tx)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
 	connectionService := application.NewConnectionService(connectionRepos, taskRepos, connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
 	manifestService := application.NewManifestService(connectionRepos)

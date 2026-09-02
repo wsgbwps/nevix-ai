@@ -9,7 +9,7 @@ import (
 )
 
 // Generation task kernel scenario support (issue #159): a configured provider
-// connection, a saved draft, and idempotent submission helpers.
+// connection and idempotent full-intent submission helpers (ADR-0017).
 
 // readyTaskHarness builds a harness whose manifest is fully active and whose
 // provider connection is configured against the fake Kapon route.
@@ -36,87 +36,80 @@ func readyTaskHarness(t *testing.T, opts harnessOptions) (*harness, string, stri
 	return h, adminToken, creatorEmail
 }
 
-// taskDraft mirrors the saved composer draft (contracts SessionDraft).
-type taskDraft struct {
-	SessionID  string
-	Revision   string
-	MediaType  string
-	Model      string
-	Mode       string
-	Ratio      string
-	Resolution string
-	Quantity   int
-	Duration   int
-	Prompt     string
-	References []any
+// taskIntent mirrors the submit request's generation intent (contracts
+// TaskSubmitInput): the device-local draft's values at submit time.
+type taskIntent struct {
+	SessionID       string
+	ManifestVersion int
+	MediaType       string
+	Model           string
+	Mode            string
+	Ratio           string
+	Resolution      string
+	Quantity        int
+	Duration        int
+	Prompt          string
+	References      []any
 }
 
-// saveImageDraft saves a minimal text-to-image draft on a fresh session.
-func (h *harness) saveImageDraft(t *testing.T, token, prompt string, quantity int) taskDraft {
+// imageTaskIntent creates a fresh session and builds a minimal text-to-image
+// intent over the live manifest version.
+func (h *harness) imageTaskIntent(t *testing.T, token, prompt string, quantity int) taskIntent {
 	t.Helper()
 	status, body := h.doRequest(t, "POST", "/creation/sessions", token, map[string]any{"name": "kernel"})
 	if status != http.StatusCreated {
 		t.Fatalf("create session: status=%d body=%s", status, body)
 	}
 	sessionID := extractField(t, body, "id")
-	return h.saveDraftOn(t, token, sessionID, taskDraft{
+	return h.buildTaskIntent(t, token, sessionID, taskIntent{
 		SessionID: sessionID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
 		Mode: "text-to-image", Ratio: "1:1", Resolution: "2K", Quantity: quantity, Prompt: prompt,
 	})
 }
 
-// saveDraftOn stores the draft and captures the revision the submitter echoes.
-// The draft records the manifest version the composer saw, so the helper
-// fetches the live one — scenarios must survive manifest content bumps.
-func (h *harness) saveDraftOn(t *testing.T, token, sessionID string, draft taskDraft) taskDraft {
+// buildTaskIntent resolves the live manifest version into the intent for one
+// session — the submitter records the manifest it drafted against; scenarios
+// may override ManifestVersion afterwards to probe version revalidation.
+func (h *harness) buildTaskIntent(t *testing.T, token, sessionID string, intent taskIntent) taskIntent {
 	t.Helper()
 	_, _, manifest := h.getManifest(t, token)
 	if manifest.ManifestVersion < 1 {
-		t.Fatalf("manifest must publish a version before drafts can record it, got %+v", manifest)
+		t.Fatalf("manifest must publish a version before intents can record it, got %+v", manifest)
 	}
+	intent.SessionID = sessionID
+	intent.ManifestVersion = manifest.ManifestVersion
+	return intent
+}
+
+// submitTask POSTs one idempotent submission carrying the full intent.
+func (h *harness) submitTask(t *testing.T, token, key string, intent taskIntent) (int, []byte) {
+	t.Helper()
 	payload := map[string]any{
-		"prompt":           draft.Prompt,
-		"media_type":       draft.MediaType,
-		"manifest_version": manifest.ManifestVersion,
-		"model":            draft.Model,
-		"mode":             draft.Mode,
+		"idempotency_key":  key,
+		"prompt":           intent.Prompt,
+		"media_type":       intent.MediaType,
+		"manifest_version": intent.ManifestVersion,
+		"model":            intent.Model,
+		"mode":             intent.Mode,
 		"ratio":            nil,
-		"resolution":       draft.Resolution,
+		"resolution":       intent.Resolution,
 		"quantity":         nil,
 		"duration_seconds": nil,
 		"references":       []any{},
 	}
-	if draft.Ratio != "" {
-		payload["ratio"] = draft.Ratio
+	if intent.Ratio != "" {
+		payload["ratio"] = intent.Ratio
 	}
-	if draft.Quantity > 0 {
-		payload["quantity"] = draft.Quantity
+	if intent.Quantity > 0 {
+		payload["quantity"] = intent.Quantity
 	}
-	if draft.Duration > 0 {
-		payload["duration_seconds"] = draft.Duration
+	if intent.Duration > 0 {
+		payload["duration_seconds"] = intent.Duration
 	}
-	if draft.References != nil {
-		payload["references"] = draft.References
+	if intent.References != nil {
+		payload["references"] = intent.References
 	}
-	status, body := h.doRequest(t, "PUT", "/creation/sessions/"+sessionID+"/draft", token, payload)
-	if status != http.StatusOK {
-		t.Fatalf("save draft: status=%d body=%s", status, body)
-	}
-	draft.SessionID = sessionID
-	draft.Revision = extractField(t, body, "updated_at")
-	if draft.Revision == "" {
-		t.Fatal("draft save must return the revision timestamp")
-	}
-	return draft
-}
-
-// submitTask POSTs one idempotent submission.
-func (h *harness) submitTask(t *testing.T, token, sessionID, key, revision string) (int, []byte) {
-	t.Helper()
-	return h.doRequest(t, "POST", "/creation/sessions/"+sessionID+"/tasks", token, map[string]any{
-		"idempotency_key": key,
-		"draft_revision":  revision,
-	})
+	return h.doRequest(t, "POST", "/creation/sessions/"+intent.SessionID+"/tasks", token, payload)
 }
 
 // taskView decodes the task detail payload.
@@ -131,6 +124,18 @@ type taskView struct {
 		TerminalCause   *string `json:"terminal_cause"`
 		CreatedAt       string  `json:"created_at"`
 	} `json:"task"`
+	Specification *struct {
+		Prompt     string  `json:"prompt"`
+		Model      string  `json:"model"`
+		Mode       string  `json:"mode"`
+		Ratio      *string `json:"ratio"`
+		Resolution *string `json:"resolution"`
+		Quantity   int     `json:"quantity"`
+		References []struct {
+			MaterialID string `json:"material_id"`
+			Role       string `json:"role"`
+		} `json:"references"`
+	} `json:"specification"`
 	Slots []struct {
 		Index             int     `json:"index"`
 		Status            string  `json:"status"`

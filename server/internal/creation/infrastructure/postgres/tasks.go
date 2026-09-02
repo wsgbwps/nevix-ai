@@ -32,11 +32,22 @@ var nonTerminalTaskStatuses = []string{
 	string(domain.TaskPersisting), string(domain.TaskCancelling),
 }
 
-// LoadSessionDraftForAdmission reads session + draft on the admission
-// transaction so the frozen specification and the revision check share the
-// caller's snapshot.
-func (r *GenerationTaskRepository) LoadSessionDraftForAdmission(ctx context.Context, tx domain.TxExecutor, owner, sessionID domain.UUID) (domain.Session, *domain.SessionDraft, error) {
-	return readSessionWithDraft(ctx, tx, owner, sessionID)
+// LoadSessionForAdmission reads the active owned session on the admission
+// transaction so liveness and ownership share the caller's snapshot.
+func (r *GenerationTaskRepository) LoadSessionForAdmission(ctx context.Context, tx domain.TxExecutor, owner, sessionID domain.UUID) (domain.Session, error) {
+	row := tx.QueryRow(ctx,
+		`SELECT id, name, created_at, updated_at FROM creation_sessions
+		 WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL`,
+		sessionID, owner)
+	var s domain.Session
+	if err := row.Scan(&s.ID, &s.Name, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Session{}, domain.ErrSessionNotFound
+		}
+		return domain.Session{}, fmt.Errorf("creation: load session for admission: %w", err)
+	}
+	s.OwnerID = owner
+	return s, nil
 }
 
 // FindByIdempotencyKey resolves a prior task for the creator-scoped key on
@@ -44,7 +55,7 @@ func (r *GenerationTaskRepository) LoadSessionDraftForAdmission(ctx context.Cont
 func (r *GenerationTaskRepository) FindByIdempotencyKey(ctx context.Context, tx domain.TxExecutor, owner domain.UUID, key string) (domain.GenerationTask, bool, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id, session_id, owner_user_id, idempotency_key, payload_hash, media_type,
-		       specification, manifest_version, draft_revision, status, slot_count,
+		       specification, manifest_version, status, slot_count,
 		       terminal_cause, cancel_requested_at IS NOT NULL, created_at, updated_at, terminal_at
 		FROM creation_generation_tasks WHERE owner_user_id = $1 AND idempotency_key = $2`,
 		owner, key)
@@ -130,10 +141,10 @@ func (r *GenerationTaskRepository) InsertAdmittedTask(ctx context.Context, tx do
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO creation_generation_tasks (
 			id, session_id, owner_user_id, idempotency_key, payload_hash, media_type,
-			specification, manifest_version, draft_revision, status, slot_count
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			specification, manifest_version, status, slot_count
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		task.ID, task.SessionID, task.OwnerID, task.IdempotencyKey, task.PayloadHash,
-		string(task.Spec.MediaType), specJSON, task.Spec.ManifestVersion, task.DraftRevision,
+		string(task.Spec.MediaType), specJSON, task.Spec.ManifestVersion,
 		string(task.Status), task.SlotCount); err != nil {
 		return fmt.Errorf("creation: insert generation task: %w", err)
 	}
@@ -191,7 +202,7 @@ func scanTaskFull(row pgx.Row) (domain.GenerationTask, error) {
 	var specJSON []byte
 	var manifestVersion int
 	err := row.Scan(&t.ID, &t.SessionID, &t.OwnerID, &t.IdempotencyKey, &t.PayloadHash,
-		&media, &specJSON, &manifestVersion, &t.DraftRevision, &status, &t.SlotCount,
+		&media, &specJSON, &manifestVersion, &status, &t.SlotCount,
 		&cause, &t.CancelRequested, &t.CreatedAt, &t.UpdatedAt, &t.TerminalAt)
 	if err != nil {
 		return domain.GenerationTask{}, err
@@ -261,10 +272,16 @@ func (r *GenerationTaskRepository) GetForWorker(ctx context.Context, taskID doma
 	return readTaskWithSlotsAndJob(ctx, tx, domain.UUID{}, taskID)
 }
 
+// taskReadExec is the statement surface a task detail read needs; both the
+// pool and a caller's transaction satisfy it.
+type taskReadExec interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // readTaskWithSlotsAndJob shares the task detail read; a zero owner skips
-// the ownership predicate (worker path). It reuses the draftReadExec
-// statement surface from postgres.go.
-func readTaskWithSlotsAndJob(ctx context.Context, exec draftReadExec, owner, taskID domain.UUID) (domain.GenerationTask, []domain.GenerationSlot, domain.ProviderJob, error) {
+// the ownership predicate (worker path).
+func readTaskWithSlotsAndJob(ctx context.Context, exec taskReadExec, owner, taskID domain.UUID) (domain.GenerationTask, []domain.GenerationSlot, domain.ProviderJob, error) {
 	ownerPredicate := "AND owner_user_id = $2"
 	args := []any{taskID, owner}
 	if owner == (domain.UUID{}) {
@@ -273,7 +290,7 @@ func readTaskWithSlotsAndJob(ctx context.Context, exec draftReadExec, owner, tas
 	}
 	task, err := scanTaskFull(exec.QueryRow(ctx, `
 		SELECT id, session_id, owner_user_id, idempotency_key, payload_hash, media_type,
-		       specification, manifest_version, draft_revision, status, slot_count,
+		       specification, manifest_version, status, slot_count,
 		       terminal_cause, cancel_requested_at IS NOT NULL, created_at, updated_at, terminal_at
 		FROM creation_generation_tasks WHERE id = $1 `+ownerPredicate, args...))
 	if errors.Is(err, pgx.ErrNoRows) {

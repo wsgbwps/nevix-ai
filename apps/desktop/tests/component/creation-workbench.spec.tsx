@@ -4,7 +4,7 @@ import {
   CreationWorkbenchStory,
   type ScriptedTask
 } from './fixtures/creation-workbench.story'
-import type { SessionDraftInput } from '../src/renderer/src/features/creation/api/go-creation-http'
+import type { LocalDraftRecord } from '../src/renderer/src/features/creation/api/go-creation-http'
 import type { CapabilityManifest } from '../src/renderer/src/features/creation/api/capability-manifest-http'
 
 /**
@@ -26,12 +26,11 @@ const noCapabilityManifest: CapabilityManifest = {
   video: { available: false, reason: 'not_configured', action: 'contact_admin' }
 }
 
-/** A stored draft carrying values the current manifest has removed. */
-const staleDraft: SessionDraftInput = {
+/** A local draft carrying values the current manifest has removed. */
+const staleDraft: LocalDraftRecord = {
   prompt: 'legacy campaign draft',
   mediaType: 'image',
   manifestVersion: 1,
-  updatedAt: '2026-08-29T10:00:00Z',
   model: 'removed-legacy-model',
   mode: 'reference-image',
   ratio: '7:3',
@@ -45,19 +44,12 @@ const staleDraft: SessionDraftInput = {
 // fixture file carries top-level await and must not leak runtime values here).
 const scriptedSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'
 
-interface SaveCall {
-  sessionId: string
-  draft: {
-    prompt: string
-    mediaType: string | null
-    manifestVersion: number
-    mode: string | null
-    references: Array<{ materialId: string; role: string }>
-  }
-}
-
-function saveDraftCalls(page: Page): Promise<SaveCall[]> {
-  return page.evaluate(() => window.__creationDeckTest?.saveDraftCalls() ?? [])
+/** Reads this device's local draft record through the story's test handle. */
+function draftRecord(page: Page, key: string): Promise<LocalDraftRecord | null> {
+  return page.evaluate(
+    (sessionKey) => window.__creationDeckTest?.draftRecord(sessionKey) ?? null,
+    key
+  )
 }
 
 function deleteMaterialCalls(page: Page): Promise<string[]> {
@@ -97,7 +89,7 @@ test('an empty draft greets with the hero and a template card fills the prompt',
   await expect(hero).toBeVisible()
   await expect(page.getByTestId('composer-prompt')).toHaveValue('')
 
-  // A starter template writes the draft prompt; the save keeps autosaving.
+  // A starter template writes the draft prompt; the local store keeps it.
   await hero.getByTestId('template-card-scene').click()
   const scenePrompt =
     'Place the product into a clean, bright lifestyle scene that highlights its real materials and key selling points.'
@@ -105,7 +97,9 @@ test('an empty draft greets with the hero and a template card fills the prompt',
   // The hero yields once the draft holds a prompt.
   await expect(page.getByTestId('workspace-hero')).toHaveCount(0)
   await expect
-    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.prompt, { timeout: 5_000 })
+    .poll(async () => (await draftRecord(page, 'bbbbbbbb-0000-4000-8000-000000000002'))?.prompt, {
+      timeout: 5_000
+    })
     .toBe(scenePrompt)
 })
 
@@ -121,7 +115,7 @@ test('selecting a session recovers its stored draft verbatim', async ({ mount, p
   await expect(page.getByTestId('composer-params').getByText('2', { exact: true })).toBeVisible()
 })
 
-test('manifest defaults autosave with the version delivered in the same response', async ({
+test('manifest defaults persist locally with the version delivered in the same response', async ({
   mount,
   page
 }) => {
@@ -136,13 +130,15 @@ test('manifest defaults autosave with the version delivered in the same response
   await page.evaluate(() => window.__creationDeckTest?.releaseManifest())
   await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-pro')
   await expect
-    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.manifestVersion, {
-      timeout: 5_000
-    })
+    .poll(
+      async () =>
+        (await draftRecord(page, 'aaaaaaaa-0000-4000-8000-000000000001'))?.manifestVersion,
+      { timeout: 5_000 }
+    )
     .toBe(5)
 })
 
-test('editing the prompt autosaves the full draft with its ordered references', async ({
+test('editing the prompt persists the full draft with its ordered references locally', async ({
   mount,
   page
 }) => {
@@ -151,15 +147,13 @@ test('editing the prompt autosaves the full draft with its ordered references', 
 
   await page.getByTestId('composer-prompt').fill('暖光背景下的白色运动鞋')
   await expect
-    .poll(async () => (await saveDraftCalls(page)).length, { timeout: 5_000 })
-    .toBeGreaterThan(0)
-
-  const call = (await saveDraftCalls(page)).at(-1)!
-  expect(call.sessionId).toBe('aaaaaaaa-0000-4000-8000-000000000001')
-  expect(call.draft.prompt).toBe('暖光背景下的白色运动鞋')
-  // The ordered reference identity/role list rides the same atomic save.
-  expect(call.draft.references.map((entry) => entry.role)).toEqual(['reference', 'reference'])
-  await expect(page.getByTestId('composer-save')).toContainText('Draft saved')
+    .poll(async () => (await draftRecord(page, 'aaaaaaaa-0000-4000-8000-000000000001'))?.prompt, {
+      timeout: 5_000
+    })
+    .toBe('暖光背景下的白色运动鞋')
+  const record = await draftRecord(page, 'aaaaaaaa-0000-4000-8000-000000000001')
+  // The ordered reference identity/role list rides the same local record.
+  expect(record?.references.map((entry) => entry.role)).toEqual(['reference', 'reference'])
 })
 
 test('a stale draft value is preserved verbatim and marked as capability-changed', async ({
@@ -271,9 +265,8 @@ test('an unreachable manifest still allows drafting and autosave', async ({ moun
   )
   await page.getByTestId('composer-prompt').fill('offline draft still saves')
   await expect
-    .poll(async () => (await saveDraftCalls(page)).length, { timeout: 5_000 })
-    .toBeGreaterThan(0)
-  expect((await saveDraftCalls(page)).at(-1)!.draft.prompt).toBe('offline draft still saves')
+    .poll(async () => (await draftRecord(page, scriptedSessionId))?.prompt, { timeout: 5_000 })
+    .toBe('offline draft still saves')
 })
 
 test('no available media capability keeps the composer editable with stable advice', async ({
@@ -291,8 +284,8 @@ test('no available media capability keeps the composer editable with stable advi
   )
   await page.getByTestId('composer-prompt').fill('prompt before any provider exists')
   await expect
-    .poll(async () => (await saveDraftCalls(page)).length, { timeout: 5_000 })
-    .toBeGreaterThan(0)
+    .poll(async () => (await draftRecord(page, scriptedSessionId))?.prompt, { timeout: 5_000 })
+    .toBe('prompt before any provider exists')
 })
 
 test('the reference deck expands on focus with full keyboard equivalence', async ({
@@ -353,7 +346,6 @@ test('adding a reference flips the image draft to reference-image and back', asy
           prompt: '',
           mediaType: 'image',
           manifestVersion: 5,
-          updatedAt: '2026-08-29T10:00:00Z',
           model: 'doubao-seedream-5.0-pro',
           mode: 'text-to-image',
           ratio: '1:1',
@@ -373,7 +365,7 @@ test('adding a reference flips the image draft to reference-image and back', asy
   const chooser = await chooserPromise
   await chooser.setFiles({ name: 'ref.png', mimeType: 'image/png', buffer: Buffer.from('png') })
   await expect
-    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.mode, { timeout: 5_000 })
+    .poll(async () => (await draftRecord(page, scriptedSessionId))?.mode, { timeout: 5_000 })
     .toBe('reference-image')
 
   // Removing the only card flips the derived mode back: an empty
@@ -382,7 +374,7 @@ test('adding a reference flips the image draft to reference-image and back', asy
   await deck.getByRole('button', { name: 'ref.png', exact: true }).click()
   await page.keyboard.press('Delete')
   await expect
-    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft.mode, { timeout: 5_000 })
+    .poll(async () => (await draftRecord(page, scriptedSessionId))?.mode, { timeout: 5_000 })
     .toBe('text-to-image')
 })
 
@@ -888,22 +880,21 @@ test('a composing draft submits by materializing the session first', async ({ mo
     (await page.evaluate(() => window.__creationDeckTest?.createSessionCalls() ?? []))[0]?.name
   ).toBe('')
   await expect(page.getByTestId('session-list').getByRole('listitem')).toHaveCount(3)
-  // The submission rode the freshly persisted draft revision.
+  // The submission carried the local intent verbatim.
   await expect
     .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
     .toHaveLength(1)
-  expect(
-    (await page.evaluate(() => window.__creationDeckTest?.saveDraftCalls() ?? [])).at(-1)?.draft
-  ).toMatchObject({ prompt: '秋季上新主图' })
+  const submits = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(submits[0]?.intent).toMatchObject({ prompt: '秋季上新主图' })
 })
 
-test('an untouched composing draft still materializes with a fresh revision', async ({
+test('an untouched composing draft still submits without touching the seeded draft', async ({
   mount,
   page
 }) => {
   await mount(<CreationWorkbenchStory />)
-  // Select a session first so a stale revision exists, then start composing
-  // and submit without touching the seeded draft.
+  // Select a session first, then start composing and submit without touching
+  // the seeded draft: the composing round's own defaults ride the submission.
   await selectFirstSession(page)
   await page.getByTestId('session-new').click()
   await expect(page.getByTestId('composer')).toBeVisible()
@@ -912,10 +903,13 @@ test('an untouched composing draft still materializes with a fresh revision', as
   await expect
     .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
     .toHaveLength(1)
-  // The submission rode a revision minted for the NEW session, not the stale
-  // one carried over from before composing started.
-  const saves = await page.evaluate(() => window.__creationDeckTest?.saveDraftCalls() ?? [])
-  expect(saves.at(-1)?.sessionId).toBe('eeeeeeee-0000-4000-8000-000000000007')
+  // The composing round's draft moved under the materialized session's key.
+  await expect
+    .poll(
+      async () => (await draftRecord(page, 'eeeeeeee-0000-4000-8000-000000000007'))?.mediaType,
+      { timeout: 5_000 }
+    )
+    .toBe('image')
   await expect(page.getByTestId('gallery-submit-error')).toHaveCount(0)
 })
 
@@ -945,12 +939,15 @@ test('references added while composing upload only when the session materializes
   await page.getByTestId('composer-prompt').fill('poster')
   await page.getByTestId('composer-submit').click()
 
-  // Submission uploads the held file and saves the binding with the REAL id.
+  // Submission uploads the held file and re-binds the local draft with the
+  // REAL id under the materialized session's key.
   await expect
     .poll(async () => page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? []))
     .toHaveLength(1)
   await expect
-    .poll(async () => (await saveDraftCalls(page)).at(-1)?.draft)
+    .poll(async () => draftRecord(page, 'eeeeeeee-0000-4000-8000-000000000007'), {
+      timeout: 5_000
+    })
     .toMatchObject({
       references: [{ materialId: 'ffffffff-0000-4000-8000-000000000006', role: 'reference' }]
     })

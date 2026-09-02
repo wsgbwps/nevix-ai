@@ -5,7 +5,7 @@
  * SSE stream is a fetch-stream with the bearer in the header (never the URL)
  * and no Last-Event-ID semantics — a lost stream is answered by a refetch.
  */
-import type { CreationApiResult } from './go-creation-http'
+import type { CreationApiResult, LocalDraftRecord } from './go-creation-http'
 import { request } from './go-creation-http'
 
 /** One generation task's one-way status (contracts GenerationTask.status). */
@@ -112,10 +112,12 @@ export interface TaskPage {
   readonly nextCursor: string | null
 }
 
-/** TaskSubmitInput on the wire: key + the draft revision the submitter saw. */
+/** TaskSubmitInput on the wire: the idempotency key plus the complete
+ * generation intent carried by the submission (ADR-0017 — the server stores
+ * no editable draft to point at). */
 export interface TaskSubmitInput {
   readonly idempotencyKey: string
-  readonly draftRevision: string
+  readonly intent: LocalDraftRecord
 }
 
 // --- parsing (fail closed, mirroring the sibling clients) --------------------
@@ -395,7 +397,22 @@ export function createGenerationTaskClient(serverUrl: string): {
       request(serverUrl, {
         method: 'POST',
         path: `/creation/sessions/${sessionId}/tasks`,
-        body: { idempotency_key: input.idempotencyKey, draft_revision: input.draftRevision },
+        body: {
+          idempotency_key: input.idempotencyKey,
+          prompt: input.intent.prompt,
+          media_type: input.intent.mediaType,
+          manifest_version: input.intent.manifestVersion,
+          model: input.intent.model,
+          mode: input.intent.mode,
+          ratio: input.intent.ratio,
+          resolution: input.intent.resolution,
+          quantity: input.intent.quantity,
+          duration_seconds: input.intent.durationSeconds,
+          references: input.intent.references.map((reference) => ({
+            material_id: reference.materialId,
+            role: reference.role
+          }))
+        },
         token
       }).then(detailOf),
     listTasks: async (token, sessionId) => {

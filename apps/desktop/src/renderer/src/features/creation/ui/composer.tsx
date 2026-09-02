@@ -140,6 +140,15 @@ export function CreationComposer({
                 {t('composer.stale.references')}
               </p>
             )}
+            {workbench.materialUploadFailed && (
+              <p
+                role="alert"
+                data-testid="composer-upload-failed"
+                className="text-destructive mt-1 max-w-56 text-[10px] leading-4"
+              >
+                {t('composer.deck.uploadFailed')}
+              </p>
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <label htmlFor="composer-prompt" className="sr-only">
@@ -170,7 +179,6 @@ export function CreationComposer({
           {media !== null && controls && <ParamsMenu workbench={workbench} />}
           {media === 'video' && controls && <DurationMenu workbench={workbench} />}
           <div className="ml-auto flex items-center gap-2">
-            <SaveStatus workbench={workbench} />
             <button
               type="button"
               disabled={workbench.submitDisabled}
@@ -684,36 +692,5 @@ function StaleRow({ value }: { readonly value: string }): React.JSX.Element {
       <span className="truncate">{value}</span>
       <span className="text-muted-foreground shrink-0">{t('composer.stale.badge')}</span>
     </div>
-  )
-}
-
-function SaveStatus({
-  workbench
-}: {
-  readonly workbench: CreationWorkbenchController
-}): React.JSX.Element | null {
-  const { t } = useTranslation('creation')
-  if (workbench.saveStatus === 'idle') return null
-  if (workbench.saveStatus === 'failed') {
-    return (
-      <button
-        type="button"
-        data-testid="composer-save"
-        onClick={workbench.retrySave}
-        className="text-destructive flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
-      >
-        <TriangleAlertIcon className="size-3" aria-hidden />
-        {t('composer.save.failed')}
-      </button>
-    )
-  }
-  return (
-    <span
-      role="status"
-      data-testid="composer-save"
-      className="text-muted-foreground px-1.5 text-[10px]"
-    >
-      {workbench.saveStatus === 'saving' ? t('composer.save.saving') : t('composer.save.saved')}
-    </span>
   )
 }

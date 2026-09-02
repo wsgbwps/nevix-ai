@@ -9,8 +9,6 @@ import {
   type MaterialPage,
   type ReferenceMaterialView,
   type SessionDetailView,
-  type SessionDraftInput,
-  type SessionDraftView,
   type SessionPage
 } from '../api/go-creation-http'
 import {
@@ -71,10 +69,6 @@ export interface CreationWorkspacePorts {
   ) => Promise<CreationApiResult<CreationSessionView>>
   readonly deleteSession: (sessionId: string) => Promise<CreationApiResult<void>>
   readonly getSessionDetail: (sessionId: string) => Promise<CreationApiResult<SessionDetailView>>
-  readonly saveSessionDraft: (
-    sessionId: string,
-    draft: SessionDraftInput
-  ) => Promise<CreationApiResult<SessionDraftView>>
   readonly listMaterials: (
     sessionId: string,
     cursor?: string | null
@@ -86,7 +80,7 @@ export interface CreationWorkspacePorts {
   readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
   readonly loadImageBlobUrl: (materialId: string) => Promise<string | null>
   readonly loadCapabilityManifest: () => Promise<CreationApiResult<CapabilityManifest>>
-  /** Submits one idempotent generation task from the stored draft. */
+  /** Submits one idempotent generation task carrying the full local intent. */
   readonly submitTask: (
     sessionId: string,
     input: TaskSubmitInput
@@ -153,8 +147,6 @@ export function createCreationWorkspacePorts(
       withToken((client, token) => client.deleteSession(token, sessionId)),
     getSessionDetail: (sessionId) =>
       withToken((client, token) => client.getSessionDetail(token, sessionId)),
-    saveSessionDraft: (sessionId, draft) =>
-      withToken((client, token) => client.saveSessionDraft(token, sessionId, draft)),
     listMaterials: (sessionId, cursor) =>
       withToken(async (client, token) => {
         if (cursor) return client.listMaterials(token, sessionId, cursor)

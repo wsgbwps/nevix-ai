@@ -6,6 +6,8 @@
 
 2026-09-01 修订：Capability Manifest 改为随代码发布的版本化合同；真实 Provider smoke 仅是人工发布检查，不再生成或部署运行时 evidence，也不参与 Server 启动或实例能力激活。本修订取代 #150、#158 与 #166 中关于 Production Readiness evidence 运行时门控的设计。
 
+2026-09-02 修订：会话草稿的存储与提交锚点改由 [ADR-0017](0017-device-local-session-draft.md) 决定——Draft 为设备本地状态，submitTask 携带完整生成意图；#150 中「草稿随写随存于服务端、draft_revision 指针提交」的设计随之作废。
+
 ## 背景
 
 AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 decision tickets 与多份 ADR 中；旧票建立于 Organization、Supabase/RLS、Desktop 直连数据面等前提之上。#93 清空全部决策前沿并取代早期假设，#150 把最终边界收敛为单一规格。若不在架构文档中固化，实施 agent 容易复活已被取代的设计。本 ADR 与 [ADR-0012](0012-unified-ai-creation-owner.md)（owner 统一）、[ADR-0014](0014-go-sole-trusted-data-plane.md)（数据面）、[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)（用户系统与授权）互补，各自保持单一权威说明。

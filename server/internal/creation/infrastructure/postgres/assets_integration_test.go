@@ -137,8 +137,8 @@ func fixtureGenerationTask(t *testing.T, ownerURL string, pool *pgxpool.Pool, ow
 	if _, err := pool.Exec(context.Background(), `
 		INSERT INTO creation_generation_tasks
 			(id, session_id, owner_user_id, idempotency_key, payload_hash, media_type,
-			 specification, manifest_version, draft_revision, slot_count)
-		VALUES ($1, $2, $3, $4, $5, 'image', '{}', 1, now(), 1)`,
+			 specification, manifest_version, slot_count)
+		VALUES ($1, $2, $3, $4, $5, 'image', '{}', 1, 1)`,
 		id, sessionID, owner, "fixture-"+id.String(), "fixture-hash"); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}

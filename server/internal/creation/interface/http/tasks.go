@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -28,9 +27,28 @@ func NewGenerationTaskHandler(tasks *application.TaskService, store domain.BlobS
 // frequency window is 60s so the header stays honest for rate rejections.
 const rateAdviceSeconds = 60
 
+// taskSubmitRequest is the submit wire shape (contracts TaskSubmitInput):
+// the idempotency key plus the complete generation intent. The intent fields
+// decode straight into domain.GenerationIntent semantics — references and
+// idempotency_key are required per contract; a missing field is rejected
+// exactly like any other envelope violation.
 type taskSubmitRequest struct {
-	IdempotencyKey *string `json:"idempotency_key"`
-	DraftRevision  *string `json:"draft_revision"`
+	IdempotencyKey  *string                   `json:"idempotency_key"`
+	Prompt          *string                   `json:"prompt"`
+	MediaType       *string                   `json:"media_type"`
+	ManifestVersion int                       `json:"manifest_version"`
+	Model           *string                   `json:"model"`
+	Mode            *string                   `json:"mode"`
+	Ratio           *string                   `json:"ratio"`
+	Resolution      *string                   `json:"resolution"`
+	Quantity        *int                      `json:"quantity"`
+	DurationSeconds *int                      `json:"duration_seconds"`
+	References      []submitReferenceResource `json:"references"`
+}
+
+type submitReferenceResource struct {
+	MaterialID string `json:"material_id"`
+	Role       string `json:"role"`
 }
 
 // SubmitTask answers POST /creation/sessions/{sessionID}/tasks.
@@ -43,20 +61,43 @@ func (h *GenerationTaskHandler) SubmitTask(w http.ResponseWriter, r *http.Reques
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.IdempotencyKey == nil || req.DraftRevision == nil {
-		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The idempotency_key and draft_revision fields are required."})
+	if req.IdempotencyKey == nil || req.References == nil {
+		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The idempotency_key and references fields are required."})
 		return
 	}
-	revision, err := time.Parse(time.RFC3339Nano, *req.DraftRevision)
-	if err != nil {
-		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The draft_revision field must be an RFC 3339 timestamp."})
-		return
+	intent := &domain.GenerationIntent{
+		ManifestVersion: req.ManifestVersion,
+		Model:           req.Model,
+		Mode:            req.Mode,
+		Ratio:           req.Ratio,
+		Resolution:      req.Resolution,
+		Quantity:        req.Quantity,
+		DurationSeconds: req.DurationSeconds,
+		References:      make([]domain.DraftReference, 0, len(req.References)),
+	}
+	if req.Prompt != nil {
+		intent.Prompt = *req.Prompt
+	}
+	if req.MediaType != nil {
+		media := domain.DraftMediaType(*req.MediaType)
+		intent.MediaType = &media
+	}
+	for _, reference := range req.References {
+		materialID, err := domain.ParseUUID(reference.MaterialID)
+		if err != nil {
+			WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "Every reference must carry a material_id uuid."})
+			return
+		}
+		intent.References = append(intent.References, domain.DraftReference{
+			MaterialID: materialID,
+			Role:       domain.DraftRole(reference.Role),
+		})
 	}
 	result, err := h.tasks.Submit(r.Context(), application.SubmitCommand{
 		Owner:          creatorID(w, r),
 		SessionID:      sessionID,
 		IdempotencyKey: *req.IdempotencyKey,
-		DraftRevision:  revision,
+		Intent:         intent,
 	})
 	if err != nil {
 		failTask(w, r, err)
@@ -393,7 +434,7 @@ func toTaskDetail(task domain.GenerationTask, slots []domain.GenerationSlot) gen
 
 // failTask maps task-command errors onto the contract's stable statuses:
 // 403 for the persistent governance blocks, 429 (+Retry-After) for the
-// retryable ones, 409 for idempotency/revision conflicts, 422 for draft and
+// retryable ones, 409 for idempotency conflicts, 422 for intent and
 // capability rejections.
 func failTask(w http.ResponseWriter, r *http.Request, err error) {
 	var governanceBlocked *domain.GovernanceBlockedError
@@ -401,12 +442,10 @@ func failTask(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errorsIs(err, domain.ErrIdempotencyPayloadConflict):
 		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeIdempotencyConflict, Message: "This idempotency key was already used with a different payload."})
-	case errorsIs(err, domain.ErrDraftRevisionConflict):
-		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeDraftRevisionConflict, Message: "The draft changed since the submitted revision; reload and resubmit."})
-	case errorsIs(err, domain.ErrDraftNotReady):
-		WriteError(w, &Error{Status: http.StatusUnprocessableEntity, Code: CodeDraftNotReady, Message: "The stored draft does not carry a complete generation intent."})
-	case errorsIs(err, domain.ErrDraftCapabilityStale):
-		WriteError(w, &Error{Status: http.StatusUnprocessableEntity, Code: CodeDraftCapabilityStale, Message: "Draft values are outside the current capability manifest; the draft was preserved."})
+	case errorsIs(err, domain.ErrIntentNotReady):
+		WriteError(w, &Error{Status: http.StatusUnprocessableEntity, Code: CodeIntentNotReady, Message: "The submitted intent does not carry a complete generation intent."})
+	case errorsIs(err, domain.ErrCapabilityStale):
+		WriteError(w, &Error{Status: http.StatusUnprocessableEntity, Code: CodeCapabilityStale, Message: "Intent values are outside the current capability manifest."})
 	case errorsAs(err, &mediaUnavailable):
 		WriteError(w, &Error{Status: http.StatusUnprocessableEntity, Code: CodeMediaUnavailable, Message: "The target media is not available for generation right now."})
 	case errorsAs(err, &governanceBlocked):

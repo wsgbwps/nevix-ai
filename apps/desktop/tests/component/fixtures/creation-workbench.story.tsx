@@ -3,13 +3,13 @@ import { testI18n } from './creation-workbench-i18n'
 import {
   CreationRuntimeContext,
   CreationWorkbenchPage,
-  type CreationWorkspacePorts
+  type CreationRuntime
 } from '../../../src/renderer/src/features/creation'
 import type {
   CreationApiResult,
   CreationSessionView,
-  ReferenceMaterialView,
-  SessionDraftInput
+  LocalDraftRecord,
+  ReferenceMaterialView
 } from '../../../src/renderer/src/features/creation/api/go-creation-http'
 import type {
   CapabilityManifest,
@@ -20,6 +20,11 @@ import type {
   GenerationTaskDetail,
   GenerationTaskView
 } from '../../../src/renderer/src/features/creation/api/generation-task-http'
+import {
+  readLocalDraft,
+  removeLocalDraft,
+  writeLocalDraft
+} from '../../../src/renderer/src/features/creation/model/draft-store'
 
 /**
  * Black-box composition for the Creation Workbench public surface (issues
@@ -217,7 +222,8 @@ const activeManifest: CapabilityManifest = {
 }
 
 export interface DeckTestControls {
-  saveDraftCalls(): ReadonlyArray<{ sessionId: string; draft: unknown }>
+  /** Reads this device's local draft record for one session key ('new' for composing). */
+  draftRecord(key: string): LocalDraftRecord | null
   deleteMaterialCalls(): string[]
   uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
   taskCalls(): ReadonlyArray<{ sessionId: string; idempotencyKey: string }>
@@ -258,6 +264,9 @@ export interface TaskScript {
   readonly submitRejection?: string
 }
 
+/** The account id scoping the device-local draft store in this story. */
+const storyUserId = 'story-user'
+
 interface RuntimeOptions {
   readonly manifest: CapabilityManifest | null
   /** When true the manifest call fails like an unreachable server. */
@@ -265,18 +274,21 @@ interface RuntimeOptions {
   /** When true the test releases the manifest response explicitly. */
   readonly manifestDeferred?: boolean
   readonly sessions: readonly CreationSessionView[]
-  readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
+  /** Seeds the device-local draft store (ADR-0017); null entries clear a key. */
+  readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
   readonly taskScript?: TaskScript
 }
 
-// Builds the story's ports: an in-memory draft store behind the same
-// operations the production wire uses, plus the assertion handle.
-function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePorts {
-  const drafts = new Map(Object.entries(options.drafts ?? {}))
+// Builds the story's runtime: scripted server ports plus the real
+// device-local draft store seeded into localStorage, so draft behavior runs
+// through its production surface (ADR-0017).
+function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const materials = new Map(Object.entries(options.materials ?? {}))
-  const savedDrafts = new Map<string, SessionDraftInput>()
-  const saveCalls: Array<{ sessionId: string; draft: SessionDraftInput }> = []
+  for (const [key, record] of Object.entries(options.drafts ?? {})) {
+    if (record === null) removeLocalDraft(localStorage, storyUserId, key)
+    else writeLocalDraft(localStorage, storyUserId, key, record)
+  }
   const deletedIds: string[] = []
   const uploadCalls: Array<{ sessionId: string; name: string }> = []
   const createdSessions: Array<{ name: string }> = []
@@ -306,7 +318,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
   }
 
   window.__creationDeckTest = {
-    saveDraftCalls: () => saveCalls,
+    draftRecord: (key) => readLocalDraft(localStorage, storyUserId, key),
     deleteMaterialCalls: () => deletedIds,
     uploadCalls: () => uploadCalls,
     taskCalls: () => taskState.submitCalls,
@@ -326,7 +338,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     }
   }
 
-  return {
+  const ports = {
+    userId: storyUserId,
     listSessions: async () => succeeded({ sessions: options.sessions, nextCursor: null }),
     createSession: async (name) => {
       createdSessions.push({ name: name ?? '' })
@@ -347,19 +360,12 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     getSessionDetail: async (sessionId) => {
       const session = options.sessions.find((entry) => entry.id === sessionId)
       if (!session) return { outcome: 'request-rejected', code: 'not_found' }
-      const stored = savedDrafts.get(sessionId) ?? drafts.get(sessionId) ?? null
       return succeeded({
         id: session.id,
         name: session.name,
         createdAt: session.createdAt,
-        updatedAt: session.updatedAt,
-        draft: stored === null ? null : { ...stored, references: [...stored.references] }
+        updatedAt: session.updatedAt
       })
-    },
-    saveSessionDraft: async (sessionId, draft) => {
-      saveCalls.push({ sessionId, draft: { ...draft, references: [...draft.references] } })
-      savedDrafts.set(sessionId, draft)
-      return succeeded({ ...draft, references: [...draft.references] })
     },
     listMaterials: async (sessionId) =>
       succeeded({ materials: materials.get(sessionId) ?? [], nextCursor: null }),
@@ -393,7 +399,11 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     // Generation task kernel (issue #159): in-memory task store behind the
     // same operations, plus an invalidation handle for SSE scenarios.
     submitTask: async (sessionId, input) => {
-      taskState.submitCalls.push({ sessionId, idempotencyKey: input.idempotencyKey })
+      taskState.submitCalls.push({
+        sessionId,
+        idempotencyKey: input.idempotencyKey,
+        intent: input.intent
+      })
       if (options.taskScript?.submitRejection !== undefined) {
         return { outcome: 'request-rejected', code: options.taskScript.submitRejection }
       }
@@ -475,6 +485,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
       }
     }
   }
+  return ports
 }
 
 function Frame({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
@@ -489,7 +500,7 @@ interface StoryOptions {
   readonly manifest?: CapabilityManifest | null
   readonly manifestFails?: boolean
   readonly manifestDeferred?: boolean
-  readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
+  readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
   readonly sessions?: readonly CreationSessionView[]
   readonly taskScript?: TaskScript
@@ -510,7 +521,6 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
             prompt: '夏季跑鞋主图，暖光背景',
             mediaType: 'image',
             manifestVersion: 5,
-            updatedAt: '2026-08-29T10:00:00Z',
             model: 'doubao-seedream-5.0-pro',
             mode: 'reference-image',
             ratio: '4:3',

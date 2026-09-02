@@ -20,8 +20,8 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1})
 
-	draft := h.saveImageDraft(t, token, "默认参数", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-wire-default", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "默认参数", 1)
+	status, body := h.submitTask(t, token, "img-wire-default", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -49,11 +49,11 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 
 	// The provider receives the model-specific pixel size derived from the
 	// selected ratio and resolution tier.
-	draft16x9 := h.saveDraftOn(t, token, draft.SessionID, taskDraft{
+	draft16x9 := h.buildTaskIntent(t, token, draft.SessionID, taskIntent{
 		SessionID: draft.SessionID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
 		Mode: "text-to-image", Ratio: "16:9", Resolution: "1K", Quantity: 1, Prompt: "横幅",
 	})
-	status, body = h.submitTask(t, token, draft16x9.SessionID, "img-wire-16x9", draft16x9.Revision)
+	status, body = h.submitTask(t, token, "img-wire-16x9", draft16x9)
 	if status != http.StatusCreated {
 		t.Fatalf("submit 16:9: %d %s", status, body)
 	}
@@ -70,8 +70,8 @@ func TestImageOutputsFormUniqueMediaAssets(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1})
 
-	draft := h.saveImageDraft(t, token, "两张资产", 2)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-assets", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "两张资产", 2)
+	status, body := h.submitTask(t, token, "img-assets", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -141,8 +141,8 @@ func TestPartialSuccessFormsAssetsOnlyForSucceededSlots(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1, emptyOutputsOn: 2})
 
-	draft := h.saveImageDraft(t, token, "部分资产", 3)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-partial-assets", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "部分资产", 3)
+	status, body := h.submitTask(t, token, "img-partial-assets", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -163,8 +163,8 @@ func TestProviderOverSupplyNeverFormsExtraAsset(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 4})
 
-	draft := h.saveImageDraft(t, token, "超额输出", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-oversupply", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "超额输出", 1)
+	status, body := h.submitTask(t, token, "img-oversupply", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -185,8 +185,8 @@ func TestImagePolicyRejectionFormsNoAsset(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{status: http.StatusBadRequest, code: "input_content_policy"})
 
-	draft := h.saveImageDraft(t, token, "被拒绝输入", 2)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-policy", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "被拒绝输入", 2)
+	status, body := h.submitTask(t, token, "img-policy", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -212,8 +212,8 @@ func TestImageIndeterminateFormsNoAsset(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{abort: true})
 
-	draft := h.saveImageDraft(t, token, "结局未知", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-indeterminate", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "结局未知", 1)
+	status, body := h.submitTask(t, token, "img-indeterminate", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -239,8 +239,8 @@ func TestJPEGImageOutputFormsVerifiedAsset(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1, jpeg: true})
 
-	draft := h.saveImageDraft(t, token, "JPEG 输出", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-jpeg-output", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "JPEG 输出", 1)
+	status, body := h.submitTask(t, token, "img-jpeg-output", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -270,8 +270,8 @@ func TestImageOutputHTTPFailureKeepsConcreteDiagnostic(t *testing.T) {
 		outputs: 1, outputStatus: http.StatusForbidden,
 	})
 
-	draft := h.saveImageDraft(t, token, "下载诊断", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-output-403", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "下载诊断", 1)
+	status, body := h.submitTask(t, token, "img-output-403", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -301,8 +301,8 @@ func TestImageSubmitAcceptsFullLengthUnicodePrompt(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1})
 
-	draft := h.saveImageDraft(t, token, strings.Repeat("鞋", 2000), 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-cjk-2000", draft.Revision)
+	draft := h.imageTaskIntent(t, token, strings.Repeat("鞋", 2000), 1)
+	status, body := h.submitTask(t, token, "img-cjk-2000", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("2000-rune prompt must submit, got %d %s", status, body)
 	}

@@ -15,7 +15,6 @@ func (m *Module) routes() []creationhttp.Route {
 		{Method: "GET", Path: "/creation/sessions/{sessionID}", Handler: m.sessions.GetSession},
 		{Method: "PATCH", Path: "/creation/sessions/{sessionID}", Handler: m.sessions.RenameSession},
 		{Method: "DELETE", Path: "/creation/sessions/{sessionID}", Handler: m.sessions.DeleteSession},
-		{Method: "PUT", Path: "/creation/sessions/{sessionID}/draft", Handler: m.sessions.SaveDraft},
 		{Method: "GET", Path: "/creation/sessions/{sessionID}/materials", Handler: m.materials.ListMaterials},
 		{Method: "POST", Path: "/creation/sessions/{sessionID}/materials", Handler: m.materials.UploadMaterial},
 		{Method: "GET", Path: "/creation/materials/{materialID}", Handler: m.materials.DownloadMaterial},

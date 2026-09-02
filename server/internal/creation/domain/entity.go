@@ -51,11 +51,11 @@ func (r DraftRole) AcceptsKind(k Kind) bool {
 	}
 }
 
-// Structural draft envelope (contracts/creation.yaml SessionDraftInput). The
-// bounds here are deliberately wider than any single manifest version: values
-// the current manifest has removed must round-trip untouched so a stale draft
-// is preserved, never silently rewritten; manifest conformance belongs to
-// submission time.
+// Structural intent envelope (contracts/creation.yaml TaskSubmitInput). The
+// bounds here are deliberately wider than any single manifest version: a
+// device-local draft may carry stale values between sessions, so structural
+// acceptance stays permissive while manifest conformance belongs to the
+// admission freeze.
 const (
 	DraftPromptMaxChars = 2000
 	DraftModelMaxChars  = 128
@@ -63,26 +63,26 @@ const (
 	DraftValueMaxChars  = 16
 	// The widest reference ceiling any manifest version may publish: the
 	// base image model's 14 (manifest v5). Per-model conformance belongs to
-	// submission time.
+	// the admission freeze.
 	DraftMaxReferenceFrames = 14
 )
 
-// DraftReference is one ordered material binding of the draft; slice order in
-// SessionDraft.References is the pile order persisted as position.
+// DraftReference is one ordered material binding of the submitted intent;
+// slice order in GenerationIntent.References is the pile order.
 type DraftReference struct {
 	MaterialID UUID
 	Role       DraftRole
 }
 
-// SessionDraft is the recoverable generation intent of a session: prompt,
-// target media, the manifest version the composer rendered when saving, the
-// model/mode/parameters as chosen, and the ordered reference bindings.
-// Nil pointers mean the field is unset, not empty — an unset value and a
-// stored zero are different draft facts. Revision is the draft's last save
-// timestamp (zero on a never-saved draft); admission compares it against the
-// submitter's draft_revision to reject stale submissions.
-type SessionDraft struct {
-	Revision        time.Time
+// GenerationIntent is the complete generation intent a submission carries
+// (ADR-0017): the device-local draft's values at submit time — prompt, target
+// media, the manifest version the composer rendered, the model/mode/parameters
+// as chosen, and the ordered reference bindings. The server never stores it
+// editable: admission validates the envelope, freezes the intent against the
+// live manifest into a GenerationSpecification, and the intent dies with the
+// request. Nil pointers mean the field is unset, not empty — an unset value
+// and a submitted zero are different intent facts.
+type GenerationIntent struct {
 	Prompt          string
 	MediaType       *DraftMediaType
 	ManifestVersion int
@@ -95,39 +95,40 @@ type SessionDraft struct {
 	References      []DraftReference
 }
 
-// Validate enforces the structural draft envelope. It never consults the
-// capability manifest: stale-but-wellformed values stay preserved.
-func (d *SessionDraft) Validate() error {
-	if utf8.RuneCountInString(d.Prompt) > DraftPromptMaxChars {
-		return ErrInvalidDraft
+// Validate enforces the structural intent envelope. It never consults the
+// capability manifest: stale-but-wellformed values reach the freeze, which
+// rejects them there.
+func (i *GenerationIntent) Validate() error {
+	if utf8.RuneCountInString(i.Prompt) > DraftPromptMaxChars {
+		return ErrInvalidIntent
 	}
-	if d.MediaType != nil && *d.MediaType != DraftMediaImage && *d.MediaType != DraftMediaVideo {
-		return ErrInvalidDraft
+	if i.MediaType != nil && *i.MediaType != DraftMediaImage && *i.MediaType != DraftMediaVideo {
+		return ErrInvalidIntent
 	}
-	if d.ManifestVersion < 1 {
-		return ErrInvalidDraft
+	if i.ManifestVersion < 1 {
+		return ErrInvalidIntent
 	}
 	// Each field checks against its own named bound — never via pointer
 	// identity — so aliased pointers cannot swap one field's limit for
 	// another's and turn a 400 into a database-check 500.
-	if overLimit(d.Model, DraftModelMaxChars) || overLimit(d.Mode, DraftModeMaxChars) ||
-		overLimit(d.Ratio, DraftValueMaxChars) || overLimit(d.Resolution, DraftValueMaxChars) {
-		return ErrInvalidDraft
+	if overLimit(i.Model, DraftModelMaxChars) || overLimit(i.Mode, DraftModeMaxChars) ||
+		overLimit(i.Ratio, DraftValueMaxChars) || overLimit(i.Resolution, DraftValueMaxChars) {
+		return ErrInvalidIntent
 	}
-	if d.Quantity != nil && (*d.Quantity < 1 || *d.Quantity > 4) {
-		return ErrInvalidDraft
+	if i.Quantity != nil && (*i.Quantity < 1 || *i.Quantity > 4) {
+		return ErrInvalidIntent
 	}
-	if d.DurationSeconds != nil && *d.DurationSeconds < 1 {
-		return ErrInvalidDraft
+	if i.DurationSeconds != nil && *i.DurationSeconds < 1 {
+		return ErrInvalidIntent
 	}
-	if len(d.References) > DraftMaxReferenceFrames {
-		return ErrInvalidDraft
+	if len(i.References) > DraftMaxReferenceFrames {
+		return ErrInvalidIntent
 	}
-	for _, reference := range d.References {
+	for _, reference := range i.References {
 		switch reference.Role {
 		case RoleReference, RoleFirstFrame, RoleLastFrame, RoleOmni:
 		default:
-			return ErrInvalidDraft
+			return ErrInvalidIntent
 		}
 	}
 	return nil

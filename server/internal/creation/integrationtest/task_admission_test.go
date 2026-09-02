@@ -2,10 +2,10 @@ package integrationtest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,7 +46,7 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	_ = adminToken
 	token := h.loginToken(t, creator, harnessPassword)
 
-	draft := h.saveImageDraft(t, token, "一张干净的白色背景商拍图", 3)
+	draft := h.imageTaskIntent(t, token, "一张干净的白色背景商拍图", 3)
 
 	// Attempts are governance rows scoped by user and persist across the
 	// shared database's scenarios, so the assertions below count only this
@@ -54,7 +54,7 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	attemptsBaseline := countRows(t, h.ownerPool,
 		`SELECT count(*) FROM creation_generation_attempts WHERE user_id = $1::uuid`, h.userID(t, creator))
 
-	status, body := h.submitTask(t, token, draft.SessionID, "key-once", draft.Revision)
+	status, body := h.submitTask(t, token, "key-once", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("first submission must create, got %d: %s", status, body)
 	}
@@ -89,7 +89,7 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	}
 	// Idempotent replay: same key + same payload → the same task, nothing
 	// counted twice.
-	status, body = h.submitTask(t, token, draft.SessionID, "key-once", draft.Revision)
+	status, body = h.submitTask(t, token, "key-once", draft)
 	if status != http.StatusOK {
 		t.Fatalf("replay must answer 200, got %d: %s", status, body)
 	}
@@ -107,18 +107,18 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	}
 
 	// Same key, different payload (prompt changed → different frozen spec).
-	changed := h.saveDraftOn(t, token, draft.SessionID, taskDraft{
+	changed := h.buildTaskIntent(t, token, draft.SessionID, taskIntent{
 		MediaType: "image", Model: "doubao-seedream-5.0-pro", Mode: "text-to-image",
 		Ratio: "1:1", Resolution: "2K", Quantity: 3, Prompt: "另一个意图",
 	})
-	status, body = h.submitTask(t, token, draft.SessionID, "key-once", changed.Revision)
+	status, body = h.submitTask(t, token, "key-once", changed)
 	if status != http.StatusConflict {
 		t.Fatalf("same key different payload must conflict, got %d: %s", status, body)
 	}
 	assertErrorCode(t, body, "idempotency_payload_conflict")
 
 	// Network retry on a fresh key creates exactly one additional task.
-	status, body = h.submitTask(t, token, draft.SessionID, "key-two", changed.Revision)
+	status, body = h.submitTask(t, token, "key-two", changed)
 	if status != http.StatusCreated {
 		t.Fatalf("second key must admit, got %d: %s", status, body)
 	}
@@ -130,56 +130,100 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	}
 }
 
-// TestTaskAdmissionRevalidatesDraft covers the stale-revision and capability
-// revalidation rejections: nothing is created, nothing is rewritten.
-func TestTaskAdmissionRevalidatesDraft(t *testing.T) {
+// TestTaskAdmissionRejectsIntentPayloads covers the intent-payload
+// rejections: incomplete intent, foreign manifest version, values outside the
+// current manifest, and references that violate the structural envelope or the
+// session's material facts. Nothing is created on any rejection.
+func TestTaskAdmissionRejectsIntentPayloads(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{})
 	token := h.loginToken(t, creator, harnessPassword)
-	draft := h.saveImageDraft(t, token, "校验用草稿", 1)
+	intent := h.imageTaskIntent(t, token, "校验用意图", 1)
 	before := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks`)
 
-	// Stale revision: the draft changed since the submitter looked at it.
-	status, body := h.submitTask(t, token, draft.SessionID, "rev-key", "1970-01-01T00:00:00Z")
-	if status != http.StatusConflict {
-		t.Fatalf("stale revision must conflict, got %d: %s", status, body)
+	// An intent without a prompt cannot form a generation intent.
+	emptyPrompt := intent
+	emptyPrompt.Prompt = ""
+	if status, body := h.submitTask(t, token, "noprompt-key", emptyPrompt); status != http.StatusUnprocessableEntity {
+		t.Fatalf("promptless intent must be intent_not_ready, got %d: %s", status, body)
+	} else {
+		assertErrorCode(t, body, "intent_not_ready")
 	}
-	assertErrorCode(t, body, "draft_revision_conflict")
 
-	// A draft saved against a foreign manifest version blocks submission:
-	// the revision matches, the manifest version does not.
-	_ = h.saveDraftOn(t, token, draft.SessionID, taskDraft{
-		MediaType: "image", Model: "doubao-seedream-5.0-pro", Mode: "text-to-image",
-		Ratio: "1:1", Resolution: "2K", Quantity: 1, Prompt: "版本校验",
-	})
-	_, foreignBody := h.doRequest(t, "PUT", "/creation/sessions/"+draft.SessionID+"/draft", token, map[string]any{
-		"prompt": "版本校验", "media_type": "image", "manifest_version": 99,
-		"model": "doubao-seedream-5.0-pro", "mode": "text-to-image",
-		"ratio": "1:1", "resolution": "2K", "quantity": 1, "references": []any{},
-	})
-	foreignRevision := extractField(t, foreignBody, "updated_at")
-	status, body = h.submitTask(t, token, draft.SessionID, "stale-key", foreignRevision)
-	if status != http.StatusUnprocessableEntity {
+	// An intent recorded against a foreign manifest version never freezes.
+	foreignVersion := intent
+	foreignVersion.ManifestVersion = 99
+	if status, body := h.submitTask(t, token, "stale-key", foreignVersion); status != http.StatusUnprocessableEntity {
 		t.Fatalf("foreign manifest version must be rejected, got %d: %s", status, body)
+	} else {
+		assertErrorCode(t, body, "media_unavailable")
 	}
-	assertErrorCode(t, body, "media_unavailable")
 
-	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks`); got != before {
-		t.Fatalf("rejected admissions must not create tasks, before=%d after=%d", before, got)
+	// Values the current manifest no longer publishes are stale at admission.
+	removedModel := intent
+	removedModel.Model = "removed-legacy-model"
+	if status, body := h.submitTask(t, token, "stale-model-key", removedModel); status != http.StatusUnprocessableEntity {
+		t.Fatalf("removed model must be capability_stale, got %d: %s", status, body)
+	} else {
+		assertErrorCode(t, body, "capability_stale")
 	}
-	// The draft survives rejected submissions untouched: its revision stays
-	// exactly the one the last save returned.
-	_, body = h.doRequest(t, "GET", "/creation/sessions/"+draft.SessionID, token, nil)
-	var detail struct {
-		Draft *struct {
-			Prompt    string `json:"prompt"`
-			UpdatedAt string `json:"updated_at"`
-		} `json:"draft"`
+
+	// Structural envelope violations are request rejections: unknown media,
+	// out-of-range quantity, and an over-long prompt.
+	badMedia := intent
+	badMedia.MediaType = "audio"
+	if status, body := h.submitTask(t, token, "badmedia-key", badMedia); status != http.StatusBadRequest {
+		t.Fatalf("unknown media type must be invalid_request, got %d: %s", status, body)
+	} else {
+		assertErrorCode(t, body, "invalid_request")
 	}
-	if err := json.Unmarshal(body, &detail); err != nil {
-		t.Fatalf("decode session detail: %v", err)
+	badQuantity := intent
+	badQuantity.Quantity = 5
+	if status, body := h.submitTask(t, token, "badqty-key", badQuantity); status != http.StatusBadRequest {
+		t.Fatalf("out-of-range quantity must be invalid_request, got %d: %s", status, body)
+	} else {
+		assertErrorCode(t, body, "invalid_request")
 	}
-	if detail.Draft == nil || detail.Draft.UpdatedAt != foreignRevision {
-		t.Fatalf("rejected submissions must not rewrite the draft, got %+v", detail.Draft)
+	longPrompt := intent
+	longPrompt.Prompt = strings.Repeat("啊", 2001)
+	if status, body := h.submitTask(t, token, "longprompt-key", longPrompt); status != http.StatusBadRequest {
+		t.Fatalf("over-long prompt must be invalid_request, got %d: %s", status, body)
+	} else {
+		assertErrorCode(t, body, "invalid_request")
+	}
+	// The 2000-rune boundary stays legal.
+	boundary := intent
+	boundary.Prompt = strings.Repeat("啊", 2000)
+	if status, body := h.submitTask(t, token, "boundary-key", boundary); status != http.StatusCreated {
+		t.Fatalf("2000-rune prompt must admit, got %d: %s", status, body)
+	}
+
+	// A reference to another session's material violates the envelope. The
+	// mode must accept references so the check reaches the material facts
+	// instead of failing earlier on the count envelope.
+	other := h.imageTaskIntent(t, token, "他人素材会话", 1)
+	foreignMaterial := h.uploadImage(t, token, other.SessionID, "foreign.png")
+	foreignRefs := intent
+	foreignRefs.Mode = "reference-image"
+	foreignRefs.References = []any{map[string]any{"material_id": foreignMaterial, "role": "reference"}}
+	if status, body := h.submitTask(t, token, "foreignref-key", foreignRefs); status != http.StatusBadRequest {
+		t.Fatalf("foreign material reference must be invalid_request, got %d: %s", status, body)
+	} else {
+		assertErrorCode(t, body, "invalid_request")
+	}
+
+	// A role that cannot structurally accept the material's kind never freezes.
+	ownAudio := h.uploadAudio(t, token, intent.SessionID)
+	mismatched := intent
+	mismatched.Mode = "reference-image"
+	mismatched.References = []any{map[string]any{"material_id": ownAudio, "role": "reference"}}
+	if status, body := h.submitTask(t, token, "rolekind-key", mismatched); status != http.StatusBadRequest {
+		t.Fatalf("role-kind mismatch must be invalid_request, got %d: %s", status, body)
+	} else {
+		assertErrorCode(t, body, "invalid_request")
+	}
+
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks`); got != before+1 {
+		t.Fatalf("only the boundary submission may create a task, before=%d after=%d", before, got)
 	}
 }
 
@@ -206,21 +250,21 @@ func TestTaskAdmissionEnforcesPerModelReferenceCeiling(t *testing.T) {
 		}
 		eleven = append(eleven, map[string]any{"material_id": extractField(t, body, "id"), "role": "reference"})
 	}
-	saveWithRefs := func(model string, refs []any) taskDraft {
-		return h.saveDraftOn(t, token, sessionID, taskDraft{
+	saveWithRefs := func(model string, refs []any) taskIntent {
+		return h.buildTaskIntent(t, token, sessionID, taskIntent{
 			MediaType: "image", Model: model, Mode: "reference-image",
 			Ratio: "1:1", Resolution: "2K", Quantity: 1, Prompt: "参考图生图",
 			References: refs,
 		})
 	}
 
-	status, body = h.submitTask(t, token, sessionID, "pro-over-ceiling", saveWithRefs("doubao-seedream-5.0-pro", eleven).Revision)
+	status, body = h.submitTask(t, token, "pro-over-ceiling", saveWithRefs("doubao-seedream-5.0-pro", eleven))
 	if status != http.StatusUnprocessableEntity {
 		t.Fatalf("11 references must be stale on pro (ceiling 10), got %d: %s", status, body)
 	}
-	assertErrorCode(t, body, "draft_capability_stale")
+	assertErrorCode(t, body, "capability_stale")
 
-	status, body = h.submitTask(t, token, sessionID, "base-within-ceiling", saveWithRefs("doubao-seedream-5.0", eleven).Revision)
+	status, body = h.submitTask(t, token, "base-within-ceiling", saveWithRefs("doubao-seedream-5.0", eleven))
 	if status != http.StatusCreated {
 		t.Fatalf("11 references must admit on the base model (ceiling 14), got %d: %s", status, body)
 	}
@@ -235,13 +279,13 @@ func TestTaskAdmissionEnforcesPerModelReferenceCeiling(t *testing.T) {
 		threeMore = append(threeMore, map[string]any{"material_id": extractField(t, body, "id"), "role": "reference"})
 	}
 	fourteenRefs := append(append([]any{}, eleven...), threeMore...)
-	status, body = h.submitTask(t, token, sessionID, "base-at-ceiling", saveWithRefs("doubao-seedream-5.0", fourteenRefs).Revision)
+	status, body = h.submitTask(t, token, "base-at-ceiling", saveWithRefs("doubao-seedream-5.0", fourteenRefs))
 	if status != http.StatusCreated {
 		t.Fatalf("14 references must admit on the base model (ceiling 14), got %d: %s", status, body)
 	}
 
-	// The draft's structural envelope is the widest vendor bound (14): a
-	// fifteenth reference can never even be saved, whatever the model.
+	// The intent's structural envelope is the widest vendor bound (14): a
+	// fifteenth reference can never be submitted, whatever the model.
 	status, body = h.doUpload(t, "POST", "/creation/sessions/"+sessionID+"/materials", token,
 		"ref-14.png", pngBytes(t))
 	if status != http.StatusCreated {
@@ -249,14 +293,9 @@ func TestTaskAdmissionEnforcesPerModelReferenceCeiling(t *testing.T) {
 	}
 	fifteenRefs := append(append([]any{}, fourteenRefs...),
 		map[string]any{"material_id": extractField(t, body, "id"), "role": "reference"})
-	_, _, manifest := h.getManifest(t, token)
-	status, body = h.doRequest(t, "PUT", "/creation/sessions/"+sessionID+"/draft", token, map[string]any{
-		"prompt": "参考图生图", "media_type": "image", "manifest_version": manifest.ManifestVersion,
-		"model": "doubao-seedream-5.0", "mode": "reference-image",
-		"ratio": "1:1", "resolution": "2K", "quantity": 1, "references": fifteenRefs,
-	})
+	status, body = h.submitTask(t, token, "fifteen-ref-key", saveWithRefs("doubao-seedream-5.0", fifteenRefs))
 	if status != http.StatusBadRequest {
-		t.Fatalf("a 15-reference draft must violate the structural envelope, got %d: %s", status, body)
+		t.Fatalf("a 15-reference intent must violate the structural envelope, got %d: %s", status, body)
 	}
 	assertErrorCode(t, body, "invalid_request")
 }
@@ -266,7 +305,7 @@ func TestTaskAdmissionEnforcesPerModelReferenceCeiling(t *testing.T) {
 func TestTaskGovernanceMatrix(t *testing.T) {
 	h, adminToken, creator := readyTaskHarness(t, harnessOptions{})
 	creatorToken := h.loginToken(t, creator, harnessPassword)
-	draft := h.saveImageDraft(t, creatorToken, "治理矩阵", 1)
+	draft := h.imageTaskIntent(t, creatorToken, "治理矩阵", 1)
 	baselineQueue := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_queue`)
 	baselineOwnerTasks := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks WHERE owner_user_id = $1::uuid`, h.userID(t, creator))
 
@@ -282,7 +321,7 @@ func TestTaskGovernanceMatrix(t *testing.T) {
 	if _, err := h.ownerPool.Exec(context.Background(), `UPDATE provider_connections SET credit_blocked_at = now()`); err != nil {
 		t.Fatalf("simulate credit block: %v", err)
 	}
-	status, body := h.submitTask(t, creatorToken, draft.SessionID, "gov-credit", draft.Revision)
+	status, body := h.submitTask(t, creatorToken, "gov-credit", draft)
 	if status != http.StatusForbidden {
 		t.Fatalf("credit block must 403, got %d: %s", status, body)
 	}
@@ -294,7 +333,7 @@ func TestTaskGovernanceMatrix(t *testing.T) {
 	// instance monthly → member monthly → instance rate → member rate →
 	// member concurrency, each behind the previous one being lifted.
 	putInstance(t, map[string]any{"monthly_task_limit": 0})
-	status, body = h.submitTask(t, creatorToken, draft.SessionID, "gov-im", draft.Revision)
+	status, body = h.submitTask(t, creatorToken, "gov-im", draft)
 	assertErrorCode(t, body, "instance_monthly_generation_limit_reached")
 	if status != http.StatusForbidden {
 		t.Fatalf("monthly ceiling must 403, got %d", status)
@@ -302,12 +341,12 @@ func TestTaskGovernanceMatrix(t *testing.T) {
 
 	putInstance(t, map[string]any{})
 	_, _ = h.doRequest(t, "PUT", "/creation/generation-governance/users/"+h.userID(t, creator), adminToken, map[string]any{"monthly_task_limit": 0})
-	_, body = h.submitTask(t, creatorToken, draft.SessionID, "gov-mm", draft.Revision)
+	_, body = h.submitTask(t, creatorToken, "gov-mm", draft)
 	assertErrorCode(t, body, "member_monthly_generation_limit_reached")
 
 	_, _ = h.doRequest(t, "PUT", "/creation/generation-governance/users/"+h.userID(t, creator), adminToken, map[string]any{})
 	putInstance(t, map[string]any{"rate_limit": 0})
-	status, body = h.submitTask(t, creatorToken, draft.SessionID, "gov-ir", draft.Revision)
+	status, body = h.submitTask(t, creatorToken, "gov-ir", draft)
 	assertErrorCode(t, body, "instance_generation_rate_limited")
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("rate limit must 429, got %d", status)
@@ -318,12 +357,12 @@ func TestTaskGovernanceMatrix(t *testing.T) {
 
 	putInstance(t, map[string]any{})
 	_, _ = h.doRequest(t, "PUT", "/creation/generation-governance/users/"+h.userID(t, creator), adminToken, map[string]any{"rate_limit": 0})
-	_, body = h.submitTask(t, creatorToken, draft.SessionID, "gov-mr", draft.Revision)
+	_, body = h.submitTask(t, creatorToken, "gov-mr", draft)
 	assertErrorCode(t, body, "member_generation_rate_limited")
 
 	// Explicit 0 concurrency on the image pool blocks image but not video.
 	_, _ = h.doRequest(t, "PUT", "/creation/generation-governance/users/"+h.userID(t, creator), adminToken, map[string]any{"image_concurrency": 0})
-	_, body = h.submitTask(t, creatorToken, draft.SessionID, "gov-mc", draft.Revision)
+	_, body = h.submitTask(t, creatorToken, "gov-mc", draft)
 	assertErrorCode(t, body, "member_generation_concurrency_limited")
 
 	// Governance rejections record the structurally valid attempt but no
@@ -345,13 +384,13 @@ func TestTaskGovernanceMatrix(t *testing.T) {
 func TestTaskSubmissionLatencyP95(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{})
 	token := h.loginToken(t, creator, harnessPassword)
-	draft := h.saveImageDraft(t, token, "延迟预算", 1)
+	draft := h.imageTaskIntent(t, token, "延迟预算", 1)
 
 	durations := make([]float64, 0, 20)
 	for i := 0; i < 20; i++ {
 		key := fmt.Sprintf("p95-%d", i)
 		start := time.Now()
-		status, body := h.submitTask(t, token, draft.SessionID, key, draft.Revision)
+		status, body := h.submitTask(t, token, key, draft)
 		durations = append(durations, time.Since(start).Seconds())
 		if status != http.StatusCreated {
 			t.Fatalf("submission %d must admit, got %d: %s", i, status, body)
@@ -368,8 +407,8 @@ func TestTaskSubmissionLatencyP95(t *testing.T) {
 func TestConnectionDeleteGuardRejectsActiveTasks(t *testing.T) {
 	h, adminToken, creator := readyTaskHarness(t, harnessOptions{})
 	creatorToken := h.loginToken(t, creator, harnessPassword)
-	draft := h.saveImageDraft(t, creatorToken, "删除守卫", 1)
-	status, body := h.submitTask(t, creatorToken, draft.SessionID, "guard-key", draft.Revision)
+	draft := h.imageTaskIntent(t, creatorToken, "删除守卫", 1)
+	status, body := h.submitTask(t, creatorToken, "guard-key", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submission must admit: %d %s", status, body)
 	}
@@ -387,9 +426,9 @@ func TestConnectionDeleteGuardRejectsActiveTasks(t *testing.T) {
 func TestUnsetGovernanceAdmits(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{})
 	token := h.loginToken(t, creator, harnessPassword)
-	draft := h.saveImageDraft(t, token, "未设置即不限", 4)
+	draft := h.imageTaskIntent(t, token, "未设置即不限", 4)
 	for i := 0; i < 4; i++ {
-		status, body := h.submitTask(t, token, draft.SessionID, fmt.Sprintf("unset-%d", i), draft.Revision)
+		status, body := h.submitTask(t, token, fmt.Sprintf("unset-%d", i), draft)
 		if status != http.StatusCreated {
 			t.Fatalf("unlimited submission %d must admit, got %d: %s", i, status, body)
 		}

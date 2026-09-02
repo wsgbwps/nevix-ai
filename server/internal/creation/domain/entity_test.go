@@ -6,14 +6,14 @@ import (
 	"unicode/utf8"
 )
 
-func validDraft() *SessionDraft {
+func validIntent() *GenerationIntent {
 	media := DraftMediaImage
 	model := "doubao-seedream-5.0-pro"
 	mode := "reference-image"
 	ratio := "4:5"
 	resolution := "2K"
 	quantity := 2
-	return &SessionDraft{
+	return &GenerationIntent{
 		Prompt:          "夏季跑鞋主图",
 		MediaType:       &media,
 		ManifestVersion: 1,
@@ -26,79 +26,80 @@ func validDraft() *SessionDraft {
 	}
 }
 
-func TestSessionDraftValidateAcceptsTheStructuralEnvelope(t *testing.T) {
-	// The widest legal draft saves without a manifest being consulted: stale
-	// values must round-trip, so nothing here names a real capability.
-	draft := validDraft()
+func TestGenerationIntentValidateAcceptsTheStructuralEnvelope(t *testing.T) {
+	// The widest legal intent validates without a manifest being consulted:
+	// stale values must reach the admission freeze, so nothing here names a
+	// real capability.
+	intent := validIntent()
 	stale := "removed-legacy-model"
-	draft.Model = &stale
-	if err := draft.Validate(); err != nil {
-		t.Fatalf("legal draft rejected: %v", err)
+	intent.Model = &stale
+	if err := intent.Validate(); err != nil {
+		t.Fatalf("legal intent rejected: %v", err)
 	}
 
-	empty := &SessionDraft{ManifestVersion: 1}
+	empty := &GenerationIntent{ManifestVersion: 1}
 	if err := empty.Validate(); err != nil {
-		t.Fatalf("empty draft must stay legal: %v", err)
+		t.Fatalf("empty intent must stay legal: %v", err)
 	}
 }
 
-func TestSessionDraftValidateRejectsEnvelopeViolations(t *testing.T) {
+func TestGenerationIntentValidateRejectsEnvelopeViolations(t *testing.T) {
 	t.Run("prompt over 2000 runes", func(t *testing.T) {
-		draft := validDraft()
-		draft.Prompt = strings.Repeat("啊", DraftPromptMaxChars+1)
-		if err := draft.Validate(); err != ErrInvalidDraft {
-			t.Fatalf("want ErrInvalidDraft, got %v", err)
+		intent := validIntent()
+		intent.Prompt = strings.Repeat("啊", DraftPromptMaxChars+1)
+		if err := intent.Validate(); err != ErrInvalidIntent {
+			t.Fatalf("want ErrInvalidIntent, got %v", err)
 		}
 		if got := utf8.RuneCountInString(strings.Repeat("啊", DraftPromptMaxChars)); got != 2000 {
 			t.Fatalf("boundary fixture broken: %d", got)
 		}
 	})
 	t.Run("unknown media type", func(t *testing.T) {
-		draft := validDraft()
+		intent := validIntent()
 		audio := DraftMediaType("audio")
-		draft.MediaType = &audio
-		if err := draft.Validate(); err != ErrInvalidDraft {
-			t.Fatalf("want ErrInvalidDraft, got %v", err)
+		intent.MediaType = &audio
+		if err := intent.Validate(); err != ErrInvalidIntent {
+			t.Fatalf("want ErrInvalidIntent, got %v", err)
 		}
 	})
 	t.Run("manifest version below one", func(t *testing.T) {
-		draft := validDraft()
-		draft.ManifestVersion = 0
-		if err := draft.Validate(); err != ErrInvalidDraft {
-			t.Fatalf("want ErrInvalidDraft, got %v", err)
+		intent := validIntent()
+		intent.ManifestVersion = 0
+		if err := intent.Validate(); err != ErrInvalidIntent {
+			t.Fatalf("want ErrInvalidIntent, got %v", err)
 		}
 	})
 	t.Run("quantity out of range", func(t *testing.T) {
-		draft := validDraft()
+		intent := validIntent()
 		quantity := 5
-		draft.Quantity = &quantity
-		if err := draft.Validate(); err != ErrInvalidDraft {
-			t.Fatalf("want ErrInvalidDraft, got %v", err)
+		intent.Quantity = &quantity
+		if err := intent.Validate(); err != ErrInvalidIntent {
+			t.Fatalf("want ErrInvalidIntent, got %v", err)
 		}
 	})
 	t.Run("non-positive duration", func(t *testing.T) {
-		draft := validDraft()
+		intent := validIntent()
 		duration := 0
-		draft.DurationSeconds = &duration
-		if err := draft.Validate(); err != ErrInvalidDraft {
-			t.Fatalf("want ErrInvalidDraft, got %v", err)
+		intent.DurationSeconds = &duration
+		if err := intent.Validate(); err != ErrInvalidIntent {
+			t.Fatalf("want ErrInvalidIntent, got %v", err)
 		}
 	})
 	t.Run("over four references", func(t *testing.T) {
-		draft := validDraft()
-		draft.References = make([]DraftReference, DraftMaxReferenceFrames+1)
-		for i := range draft.References {
-			draft.References[i] = DraftReference{MaterialID: NewUUID(), Role: RoleOmni}
+		intent := validIntent()
+		intent.References = make([]DraftReference, DraftMaxReferenceFrames+1)
+		for i := range intent.References {
+			intent.References[i] = DraftReference{MaterialID: NewUUID(), Role: RoleOmni}
 		}
-		if err := draft.Validate(); err != ErrInvalidDraft {
-			t.Fatalf("want ErrInvalidDraft, got %v", err)
+		if err := intent.Validate(); err != ErrInvalidIntent {
+			t.Fatalf("want ErrInvalidIntent, got %v", err)
 		}
 	})
 	t.Run("unknown role", func(t *testing.T) {
-		draft := validDraft()
-		draft.References = []DraftReference{{MaterialID: NewUUID(), Role: DraftRole("hero")}}
-		if err := draft.Validate(); err != ErrInvalidDraft {
-			t.Fatalf("want ErrInvalidDraft, got %v", err)
+		intent := validIntent()
+		intent.References = []DraftReference{{MaterialID: NewUUID(), Role: DraftRole("hero")}}
+		if err := intent.Validate(); err != ErrInvalidIntent {
+			t.Fatalf("want ErrInvalidIntent, got %v", err)
 		}
 	})
 }
