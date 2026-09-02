@@ -1,8 +1,6 @@
-import i18next from 'i18next'
 import { I18nextProvider } from 'react-i18next'
-import { createI18nOptions } from '../../../src/shared/i18n/i18next-options'
+import { testI18n } from './creation-workbench-i18n'
 import {
-  creationResources,
   CreationRuntimeContext,
   CreationWorkbenchPage,
   type CreationWorkspacePorts
@@ -30,16 +28,6 @@ import type {
  * visible UI and observe caller-visible port calls; no internal store or hook
  * is exposed beyond a narrow assertion handle.
  */
-
-const testI18n = i18next.createInstance()
-await testI18n.init(
-  createI18nOptions({
-    language: 'en',
-    resources: creationResources,
-    defaultNS: 'creation',
-    environment: 'test'
-  })
-)
 
 const sessionA: CreationSessionView = {
   id: 'aaaaaaaa-0000-4000-8000-000000000001',
@@ -549,3 +537,7 @@ export function CreationWorkbenchShellStory(options: StoryOptions = {}): React.J
     </I18nextProvider>
   )
 }
+
+export { RuntimeWorkbenchPage }
+
+export type { StoryOptions }
