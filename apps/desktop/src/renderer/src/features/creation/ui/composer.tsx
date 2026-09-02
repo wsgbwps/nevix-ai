@@ -5,6 +5,7 @@ import {
   ChevronDownIcon,
   Clock3Icon,
   ImageIcon,
+  Link2Icon,
   SendIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
@@ -13,7 +14,6 @@ import {
 } from 'lucide-react'
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger
@@ -29,6 +29,8 @@ import {
 } from '../model/capability'
 import type { CreationWorkbenchController } from '../model/use-workbench'
 import { modeKeys } from '../i18n/mode-keys'
+import { ComposerMenuContent } from './composer-menu-content'
+import { ratioGlyphSize } from './ratio-glyph'
 import { ReferenceDeck } from './reference-deck'
 
 // Dynamic verdict vocabularies resolve through explicit key maps — the same
@@ -50,15 +52,17 @@ const actionKeys = {
 
 // Control-row and menu surfaces from the accepted prototype (6e465e8),
 // expressed through theme tokens: an h-8 pill per capability, menus opening
-// upward as large rounded-2xl touch surfaces.
+// upward as compact rounded-xl surfaces in the reference design's proportions.
 const controlClass =
   'group flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-accent px-2.5 text-[10px] text-foreground/80 outline-none transition-colors hover:bg-input data-[state=open]:bg-input'
 
 const staleTriggerClass = 'border-warning/70 bg-accent text-warning'
 
-const menuClass = 'w-52 rounded-2xl p-2 shadow-2xl'
-const menuLabelClass = 'text-muted-foreground px-2 pb-2 text-[10px]'
-const menuItemClass = 'h-11 cursor-pointer rounded-xl px-3 text-xs'
+// Menus only override the base surface's width, padding, and shadow —
+// radius and surface tokens come from ComposerMenuContent's baseClass.
+const menuClass = 'w-52 shadow-2xl'
+const menuLabelClass = 'text-muted-foreground px-2.5 pb-1.5 pt-1 text-[11px]'
+const menuItemClass = 'h-9 cursor-pointer rounded-lg px-2.5 text-[13px]'
 
 /**
  * The fixed bottom Composer (issue #177, prototype 6e465e8): prompt text
@@ -233,7 +237,7 @@ function MediaMenu({
           aria-hidden
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" sideOffset={10} align="start" className={menuClass}>
+      <ComposerMenuContent side="top" sideOffset={10} align="start" className={menuClass}>
         <DropdownMenuLabel className={menuLabelClass}>
           {t('composer.media.label')}
         </DropdownMenuLabel>
@@ -269,7 +273,7 @@ function MediaMenu({
             {t('composer.manifestUnavailable')}
           </DropdownMenuLabel>
         )}
-      </DropdownMenuContent>
+      </ComposerMenuContent>
     </DropdownMenu>
   )
 }
@@ -302,11 +306,11 @@ function ModelMenu({
         <span className="max-w-40 truncate">{draft.model ?? t('composer.model.label')}</span>
         {staleModel !== null && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
       </DropdownMenuTrigger>
-      <DropdownMenuContent
+      <ComposerMenuContent
         side="top"
         sideOffset={10}
         align="start"
-        className="w-[360px] rounded-2xl p-2 shadow-2xl"
+        className="w-[360px] shadow-2xl"
       >
         <DropdownMenuLabel className={menuLabelClass}>
           {t('composer.model.label')}
@@ -333,7 +337,7 @@ function ModelMenu({
             {t('composer.manifestUnavailable')}
           </DropdownMenuLabel>
         )}
-      </DropdownMenuContent>
+      </ComposerMenuContent>
     </DropdownMenu>
   )
 }
@@ -367,7 +371,7 @@ function ModeMenu({
           aria-hidden
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" sideOffset={10} align="start" className={menuClass}>
+      <ComposerMenuContent side="top" sideOffset={10} align="start" className={menuClass}>
         <DropdownMenuLabel className={menuLabelClass}>{t('composer.mode.label')}</DropdownMenuLabel>
         {staleMode !== null && <StaleRow value={staleMode} />}
         {candidates.map((mode) => (
@@ -381,7 +385,7 @@ function ModeMenu({
             {draft.mode === mode ? <CheckIcon className="ml-auto size-4" aria-hidden /> : null}
           </DropdownMenuItem>
         ))}
-      </DropdownMenuContent>
+      </ComposerMenuContent>
     </DropdownMenu>
   )
 }
@@ -421,7 +425,7 @@ function ParamsMenu({
         aria-label={t('composer.params.label')}
         className={`${controlClass} ${staleParams ? staleTriggerClass : ''}`}
       >
-        <span className="block size-3 shrink-0 rounded-[3px] border border-current" aria-hidden />
+        <RatioGlyph ratio={draft.ratio} max={14} />
         {media === 'image' && draft.ratio !== null && <span>{draft.ratio}</span>}
         {media === 'image' && draft.ratio !== null && draft.resolution !== null && <Separator />}
         {draft.resolution !== null && <span>{draft.resolution}</span>}
@@ -433,66 +437,52 @@ function ParamsMenu({
         )}
         {staleParams && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
       </DropdownMenuTrigger>
-      <DropdownMenuContent
+      <ComposerMenuContent
         side="top"
         sideOffset={10}
         align="end"
-        className="w-[420px] rounded-2xl p-4 shadow-2xl"
+        className="w-[420px] p-4 shadow-2xl"
       >
         <div className="grid gap-4">
           {media === 'image' && ratios.length > 0 && (
             <ParamGroup label={t('composer.params.ratio')}>
               {staleRatio !== null && <StaleRow value={staleRatio} />}
-              <div className="bg-accent/60 grid [grid-template-columns:repeat(auto-fit,minmax(64px,1fr))] gap-1 rounded-xl p-1">
-                {ratios.map((ratio) => (
-                  <button
-                    key={ratio}
-                    type="button"
-                    aria-pressed={draft.ratio === ratio}
-                    onClick={() => workbench.patchDraft({ ratio })}
-                    className={paramOptionClass(ratio === draft.ratio, 'h-11')}
-                  >
-                    <span className="mx-auto mb-1 block h-2.5 w-4 rounded-[3px] border border-current" />
-                    {ratio}
-                  </button>
-                ))}
-              </div>
+              <OptionStrip
+                items={ratios}
+                isSelected={(ratio) => ratio === draft.ratio}
+                layout="h-[52px] flex-col gap-1"
+                onSelect={(ratio) => workbench.patchDraft({ ratio })}
+                render={(ratio) => (
+                  <>
+                    <RatioGlyph ratio={ratio} />
+                    <span className="text-[11px] leading-none">{ratio}</span>
+                  </>
+                )}
+              />
             </ParamGroup>
           )}
           {resolutions.length > 0 && (
             <ParamGroup label={t('composer.params.resolution')}>
               {staleResolution !== null && <StaleRow value={staleResolution} />}
-              <div className="bg-accent/60 grid grid-cols-3 gap-1 rounded-xl p-1">
-                {resolutions.map((resolution) => (
-                  <button
-                    key={resolution}
-                    type="button"
-                    aria-pressed={draft.resolution === resolution}
-                    onClick={() => workbench.patchDraft({ resolution })}
-                    className={paramOptionClass(resolution === draft.resolution, 'h-9')}
-                  >
-                    {resolution}
-                  </button>
-                ))}
-              </div>
+              <OptionStrip
+                items={resolutions}
+                isSelected={(resolution) => resolution === draft.resolution}
+                layout="h-10 text-[13px]"
+                onSelect={(resolution) => workbench.patchDraft({ resolution })}
+                render={(resolution) => resolution}
+              />
             </ParamGroup>
           )}
           {media === 'image' && quantities.length > 0 && (
             <ParamGroup label={t('composer.params.quantity')}>
               {staleQuantity !== null && <StaleRow value={String(staleQuantity)} />}
-              <div className="bg-accent/60 grid grid-cols-4 gap-1 rounded-xl p-1">
-                {quantities.map((quantity) => (
-                  <button
-                    key={quantity}
-                    type="button"
-                    aria-pressed={draft.quantity === quantity}
-                    onClick={() => workbench.patchDraft({ quantity })}
-                    className={paramOptionClass(draft.quantity === quantity, 'h-9')}
-                  >
-                    {quantity}
-                  </button>
-                ))}
-              </div>
+              <OptionStrip
+                items={quantities}
+                isSelected={(quantity) => quantity === draft.quantity}
+                layout="h-9 text-[13px]"
+                onSelect={(quantity) => workbench.patchDraft({ quantity })}
+                render={(quantity) => quantity}
+              />
             </ParamGroup>
           )}
           {size !== null && (
@@ -503,21 +493,19 @@ function ParamsMenu({
               >
                 <span className="bg-background/60 flex h-9 flex-1 items-center justify-between rounded-lg px-3">
                   <span className="text-muted-foreground">W</span>
-                  <span className="font-medium">{size.width}</span>
+                  <span className="text-[13px] font-medium">{size.width}</span>
                 </span>
-                <span className="text-muted-foreground" aria-hidden>
-                  ×
-                </span>
+                <Link2Icon className="text-muted-foreground size-4 shrink-0" aria-hidden />
                 <span className="bg-background/60 flex h-9 flex-1 items-center justify-between rounded-lg px-3">
                   <span className="text-muted-foreground">H</span>
-                  <span className="font-medium">{size.height}</span>
+                  <span className="text-[13px] font-medium">{size.height}</span>
                 </span>
-                <span className="text-muted-foreground pr-1">px</span>
+                <span className="text-muted-foreground pr-1 text-[11px]">PX</span>
               </div>
             </ParamGroup>
           )}
         </div>
-      </DropdownMenuContent>
+      </ComposerMenuContent>
     </DropdownMenu>
   )
 }
@@ -550,11 +538,11 @@ function DurationMenu({
         </span>
         {staleDuration !== null && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
       </DropdownMenuTrigger>
-      <DropdownMenuContent
+      <ComposerMenuContent
         side="top"
         sideOffset={10}
         align="end"
-        className="w-[400px] rounded-2xl p-4 shadow-2xl"
+        className="w-[400px] p-4 shadow-2xl"
       >
         <p className="text-muted-foreground mb-4 text-xs font-medium">
           {t('composer.params.duration')}
@@ -564,20 +552,14 @@ function DurationMenu({
             <StaleRow value={t('composer.params.durationShort', { n: staleDuration })} />
           </div>
         )}
-        <div className="bg-accent/60 grid [grid-template-columns:repeat(auto-fit,minmax(64px,1fr))] gap-1 rounded-xl p-1">
-          {durations.map((duration) => (
-            <button
-              key={duration}
-              type="button"
-              aria-pressed={draft.durationSeconds === duration}
-              onClick={() => workbench.patchDraft({ durationSeconds: duration })}
-              className={paramOptionClass(draft.durationSeconds === duration, 'h-9')}
-            >
-              {t('composer.params.seconds', { n: duration })}
-            </button>
-          ))}
-        </div>
-      </DropdownMenuContent>
+        <OptionStrip
+          items={durations}
+          isSelected={(duration) => duration === draft.durationSeconds}
+          layout="h-9 text-[11px]"
+          onSelect={(duration) => workbench.patchDraft({ durationSeconds: duration })}
+          render={(duration) => t('composer.params.seconds', { n: duration })}
+        />
+      </ComposerMenuContent>
     </DropdownMenu>
   )
 }
@@ -590,12 +572,75 @@ function Separator(): React.JSX.Element {
   )
 }
 
-function paramOptionClass(selected: boolean, height: string): string {
+// Option cells carry their own height and font size — the strip layouts give
+// them, e.g. 'h-9 text-[13px]' or the vertical 'h-[52px] flex-col gap-1'.
+function paramOptionClass(selected: boolean, layout: string): string {
   return (
-    `${height} rounded-lg text-[11px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ` +
+    `${layout} flex items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ` +
     (selected
       ? 'bg-accent text-foreground font-medium'
       : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground')
+  )
+}
+
+// One row of equal-width option cells driven by a manifest candidate list;
+// `layout` carries the cell's height and font size, `render` its content.
+function OptionStrip<T extends string | number>({
+  items,
+  isSelected,
+  layout,
+  onSelect,
+  render
+}: {
+  readonly items: readonly T[]
+  readonly isSelected: (item: T) => boolean
+  readonly layout: string
+  readonly onSelect: (item: T) => void
+  readonly render: (item: T) => React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div
+      className="bg-accent/60 grid gap-1 rounded-xl p-1"
+      style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+    >
+      {items.map((item) => {
+        const selected = isSelected(item)
+        return (
+          <button
+            key={String(item)}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onSelect(item)}
+            className={paramOptionClass(selected, layout)}
+          >
+            {render(item)}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// The ratio cell icon: a border box at the published ratio's real proportions
+// (21:9 reads as a wide strip, 9:16 as a tall one). A missing or malformed
+// ratio falls back to a neutral square so video and stale drafts keep an icon.
+function RatioGlyph({
+  ratio,
+  max = 20
+}: {
+  readonly ratio: string | null
+  readonly max?: number
+}): React.JSX.Element {
+  const size = (ratio === null ? null : ratioGlyphSize(ratio, max)) ?? {
+    width: max * 0.7,
+    height: max * 0.7
+  }
+  return (
+    <span
+      className="block shrink-0 rounded-[4px] border-[1.5px] border-current"
+      style={{ width: size.width, height: size.height }}
+      aria-hidden
+    />
   )
 }
 
@@ -608,7 +653,7 @@ function ParamGroup({
 }): React.JSX.Element {
   return (
     <div className="grid gap-1.5">
-      <p className="text-muted-foreground text-[10px]">{label}</p>
+      <p className="text-muted-foreground text-[11px]">{label}</p>
       {children}
     </div>
   )
