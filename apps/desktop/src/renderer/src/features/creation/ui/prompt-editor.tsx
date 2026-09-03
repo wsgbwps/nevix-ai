@@ -124,7 +124,7 @@ export function PromptEditor({
                 aria-autocomplete="list"
                 aria-haspopup="listbox"
                 aria-multiline="true"
-                className="text-foreground size-full overflow-y-auto bg-transparent px-1 py-1 text-xs leading-5 outline-none"
+                className="text-foreground size-full [scrollbar-width:none] overflow-y-auto bg-transparent px-1 py-1 text-xs leading-5 outline-none"
               />
             }
             placeholder={
