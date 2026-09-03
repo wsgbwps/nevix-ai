@@ -4,8 +4,9 @@ import {
   CreationWorkbenchStory,
   type ScriptedTask
 } from './fixtures/creation-workbench.story'
-import type { LocalDraftRecord } from '../src/renderer/src/features/creation/api/go-creation-http'
+import type { LocalDraftRecord } from '../src/renderer/src/features/creation/model/draft-store'
 import type { CapabilityManifest } from '../src/renderer/src/features/creation/api/capability-manifest-http'
+import type { ReferenceMaterialView } from '../src/renderer/src/features/creation/api/go-creation-http'
 
 /**
  * Public-surface component tests for the production Creation Workbench
@@ -29,6 +30,10 @@ const noCapabilityManifest: CapabilityManifest = {
 /** A local draft carrying values the current manifest has removed. */
 const staleDraft: LocalDraftRecord = {
   prompt: 'legacy campaign draft',
+  promptDocument: {
+    version: 1,
+    nodes: [{ type: 'text', text: 'legacy campaign draft' }]
+  },
   mediaType: 'image',
   manifestVersion: 1,
   model: 'removed-legacy-model',
@@ -43,6 +48,44 @@ const staleDraft: LocalDraftRecord = {
 // The scripted session id the fixture mounts by default (kept local: the
 // fixture file carries top-level await and must not leak runtime values here).
 const scriptedSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'
+const firstMaterialId = 'cccccccc-0000-4000-8000-000000000003'
+
+function scriptedMaterial(
+  id: string,
+  kind: ReferenceMaterialView['kind'],
+  fileName: string
+): ReferenceMaterialView {
+  return {
+    id,
+    kind,
+    fileName,
+    mimeType: kind === 'video' ? 'video/mp4' : kind === 'audio' ? 'audio/mpeg' : 'image/png',
+    byteSize: 1024,
+    widthPx: kind === 'audio' ? null : 24,
+    heightPx: kind === 'audio' ? null : 16,
+    pixelCount: kind === 'image' ? 384 : null,
+    durationMs: kind === 'image' ? null : 3000,
+    checksumSha256: 'aa'.repeat(32),
+    claimsVersion: 1,
+    createdAt: '2026-08-23T08:00:00Z'
+  }
+}
+
+function videoMentionDraft(materialId: string): LocalDraftRecord {
+  return {
+    prompt: 'Video 1',
+    promptDocument: { version: 1, nodes: [{ type: 'mention', materialId }] },
+    mediaType: 'video',
+    manifestVersion: 5,
+    model: 'doubao-seedance-2-5',
+    mode: 'omni-reference',
+    ratio: null,
+    resolution: '720p',
+    quantity: 1,
+    durationSeconds: 5,
+    references: [{ materialId, role: 'omni' }]
+  }
+}
 
 /** Reads this device's local draft record through the story's test handle. */
 function draftRecord(page: Page, key: string): Promise<LocalDraftRecord | null> {
@@ -87,13 +130,13 @@ test('an empty draft greets with the hero and a template card fills the prompt',
 
   const hero = page.getByTestId('workspace-hero')
   await expect(hero).toBeVisible()
-  await expect(page.getByTestId('composer-prompt')).toHaveValue('')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('')
 
   // A starter template writes the draft prompt; the local store keeps it.
   await hero.getByTestId('template-card-scene').click()
   const scenePrompt =
     'Place the product into a clean, bright lifestyle scene that highlights its real materials and key selling points.'
-  await expect(page.getByTestId('composer-prompt')).toHaveValue(scenePrompt)
+  await expect(page.getByTestId('composer-prompt')).toHaveText(scenePrompt)
   // The hero yields once the draft holds a prompt.
   await expect(page.getByTestId('workspace-hero')).toHaveCount(0)
   await expect
@@ -107,7 +150,7 @@ test('selecting a session recovers its stored draft verbatim', async ({ mount, p
   await mount(<CreationWorkbenchStory />)
   await selectFirstSession(page)
 
-  await expect(page.getByTestId('composer-prompt')).toHaveValue('夏季跑鞋主图，暖光背景')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('夏季跑鞋主图，暖光背景')
   await expect(page.getByTestId('composer-media')).toContainText('Image generation')
   await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-pro')
   await expect(page.getByTestId('composer-params')).toContainText('4:3')
@@ -154,6 +197,269 @@ test('editing the prompt persists the full draft with its ordered references loc
   const record = await draftRecord(page, 'aaaaaaaa-0000-4000-8000-000000000001')
   // The ordered reference identity/role list rides the same local record.
   expect(record?.references.map((entry) => entry.role)).toEqual(['reference', 'reference'])
+})
+
+test('mention-only prompts submit localized plain text without leaking document identity', async ({
+  mount,
+  page
+}) => {
+  const draft: LocalDraftRecord = {
+    prompt: 'Image 1Image 1',
+    promptDocument: {
+      version: 1,
+      nodes: [
+        { type: 'mention', materialId: firstMaterialId },
+        { type: 'mention', materialId: firstMaterialId }
+      ]
+    },
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '4:3',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: [{ materialId: firstMaterialId, role: 'reference' }]
+  }
+  await mount(<CreationWorkbenchStory drafts={{ [scriptedSessionId]: draft }} />)
+  await selectFirstSession(page)
+
+  await expect(page.getByRole('button', { name: 'Image 1' })).toHaveCount(2)
+  await expect(page.getByTestId('composer-submit')).toBeEnabled()
+  await page.getByTestId('composer-submit').click()
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
+    .toHaveLength(1)
+  const [call] = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(call?.intent.prompt).toBe('Image 1Image 1')
+  expect(call?.intent.references).toEqual([{ materialId: firstMaterialId, role: 'reference' }])
+  expect(Object.hasOwn(call?.intent ?? {}, 'promptDocument')).toBe(false)
+})
+
+test('restoring a draft prunes dangling mentions and writes through the recovered text', async ({
+  mount,
+  page
+}) => {
+  const draft: LocalDraftRecord = {
+    prompt: 'beforemissingafter',
+    promptDocument: {
+      version: 1,
+      nodes: [
+        { type: 'text', text: 'before' },
+        { type: 'mention', materialId: 'missing-material' },
+        { type: 'text', text: 'after' }
+      ]
+    },
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '4:3',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: [{ materialId: firstMaterialId, role: 'reference' }]
+  }
+  await mount(<CreationWorkbenchStory drafts={{ [scriptedSessionId]: draft }} />)
+  await selectFirstSession(page)
+
+  await expect(
+    page.getByText('Unavailable references were removed and their mentions kept as text.')
+  ).toBeVisible()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('beforemissingafter')
+  await expect
+    .poll(async () => (await draftRecord(page, scriptedSessionId))?.promptDocument)
+    .toEqual({ version: 1, nodes: [{ type: 'text', text: 'beforemissingafter' }] })
+
+  await page.getByRole('button', { name: 'Untitled creation', exact: true }).click()
+  await expect(
+    page.getByText('Unavailable references were removed and their mentions kept as text.')
+  ).toHaveCount(0)
+})
+
+test('reloading a composing draft keeps pending-file mentions as fallback text', async ({
+  mount,
+  page
+}) => {
+  const pendingId = 'pending-before-reload'
+  const draft: LocalDraftRecord = {
+    prompt: 'Image 1',
+    promptDocument: { version: 1, nodes: [{ type: 'mention', materialId: pendingId }] },
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '4:3',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: [{ materialId: pendingId, role: 'reference' }]
+  }
+  await mount(<CreationWorkbenchStory drafts={{ new: draft }} />)
+  await page.getByTestId('session-new').click()
+
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Image 1')
+  await expect
+    .poll(async () => draftRecord(page, 'new'))
+    .toMatchObject({
+      prompt: 'Image 1',
+      promptDocument: { version: 1, nodes: [{ type: 'text', text: 'Image 1' }] },
+      mode: 'text-to-image',
+      references: []
+    })
+})
+
+test('removing a mentioned material confirms the count and cannot be undone in the editor', async ({
+  mount,
+  page
+}) => {
+  const draft: LocalDraftRecord = {
+    prompt: 'AImage 1BImage 1C',
+    promptDocument: {
+      version: 1,
+      nodes: [
+        { type: 'text', text: 'A' },
+        { type: 'mention', materialId: firstMaterialId },
+        { type: 'text', text: 'B' },
+        { type: 'mention', materialId: firstMaterialId },
+        { type: 'text', text: 'C' }
+      ]
+    },
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '4:3',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: [{ materialId: firstMaterialId, role: 'reference' }]
+  }
+  await mount(<CreationWorkbenchStory drafts={{ [scriptedSessionId]: draft }} />)
+  await selectFirstSession(page)
+
+  const deckCard = page.getByTestId('reference-deck').getByRole('button', {
+    name: 'poster.png',
+    exact: true
+  })
+  await deckCard.focus()
+  await page.keyboard.press('Delete')
+  const dialog = page.getByRole('dialog', { name: 'Remove reference material?' })
+  await expect(dialog).toContainText('2 mention(s)')
+  expect(await deleteMaterialCalls(page)).toEqual([])
+
+  await dialog.getByRole('button', { name: 'Remove', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Image 1' })).toHaveCount(0)
+  await expect.poll(() => deleteMaterialCalls(page)).toEqual([firstMaterialId])
+  await expect
+    .poll(async () => (await draftRecord(page, scriptedSessionId))?.promptDocument)
+    .toEqual({ version: 1, nodes: [{ type: 'text', text: 'ABC' }] })
+
+  await page.getByTestId('composer-prompt').focus()
+  await page.keyboard.press('Meta+z')
+  await expect(page.getByRole('button', { name: 'Image 1' })).toHaveCount(0)
+})
+
+test('video mention hover stays metadata-only and full preview retries then reuses its URL', async ({
+  mount,
+  page
+}) => {
+  const videoId = '12121212-0000-4000-8000-000000000012'
+  const video = scriptedMaterial(videoId, 'video', 'walkthrough.mp4')
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{ [scriptedSessionId]: videoMentionDraft(videoId) }}
+      materials={{ [scriptedSessionId]: [video] }}
+      materialBlobFailures={1}
+    />
+  )
+  await selectFirstSession(page)
+
+  const chip = page.getByRole('button', { name: 'Video 1' })
+  await chip.focus()
+  await expect(page.getByTestId('reference-hover-preview')).toContainText('3s')
+
+  await chip.hover()
+  await expect(page.getByTestId('reference-hover-preview')).toContainText('3s')
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])).toEqual(
+    []
+  )
+
+  await chip.click()
+  const preview = page.getByTestId('reference-full-preview')
+  await expect(preview.getByRole('alert')).toContainText('Material could not be loaded')
+  await preview.getByRole('button', { name: 'Retry' }).click()
+  await expect(preview.locator('video')).toBeVisible()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? []))
+    .toHaveLength(2)
+
+  await page.keyboard.press('Escape')
+  await expect(chip).toBeFocused()
+  await chip.click()
+  await expect(preview.locator('video')).toBeVisible()
+  await page.waitForTimeout(50)
+  expect(
+    await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])
+  ).toHaveLength(2)
+})
+
+test('closing a loading full preview aborts the material request', async ({ mount, page }) => {
+  const videoId = '13131313-0000-4000-8000-000000000013'
+  const video = scriptedMaterial(videoId, 'video', 'deferred.mp4')
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{ [scriptedSessionId]: videoMentionDraft(videoId) }}
+      materials={{ [scriptedSessionId]: [video] }}
+      materialBlobDeferred
+    />
+  )
+  await selectFirstSession(page)
+
+  const chip = page.getByRole('button', { name: 'Video 1' })
+  await chip.click()
+  await expect(page.getByTestId('reference-full-preview')).toContainText('Loading material')
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? []))
+    .toHaveLength(1)
+
+  await page.keyboard.press('Escape')
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls()[0]?.aborted)
+    )
+    .toBe(true)
+  await expect(chip).toBeFocused()
+})
+
+test('a pending image mention hover preserves the local file ratio', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await page.getByTestId('session-new').click()
+
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByLabel('Add reference material').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({
+    name: 'portrait.svg',
+    mimeType: 'image/svg+xml',
+    buffer: Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="240"><rect width="120" height="240" fill="blue"/></svg>'
+    )
+  })
+
+  const editor = page.getByTestId('composer-prompt')
+  await editor.fill('@')
+  await page.keyboard.press('Enter')
+  const chip = page.getByRole('button', { name: 'Image 1' })
+  await chip.hover()
+  const preview = page.getByTestId('reference-hover-preview')
+  await expect(preview).toBeVisible()
+  const box = await preview.boundingBox()
+  expect(box).not.toBeNull()
+  expect(box?.width).toBeCloseTo(180, 0)
+  expect((box?.height ?? 0) / (box?.width ?? 1)).toBeCloseTo(2, 1)
 })
 
 test('a stale draft value is preserved verbatim and marked as capability-changed', async ({
@@ -333,6 +639,36 @@ test('the expanded deck overlays in place instead of squeezing the prompt', asyn
   expect(after?.width).toBe(before?.width)
 })
 
+test('the reference deck collapses when the pointer leaves a pointer-focused card', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  const deck = page.getByTestId('reference-deck')
+  const backCard = deck.getByRole('button', { name: 'poster.png', exact: true })
+  const topCard = deck.getByRole('button', { name: 'banner.png', exact: true })
+  await deck.hover()
+  await backCard.click()
+  await expect
+    .poll(async () => {
+      const back = await backCard.boundingBox()
+      const top = await topCard.boundingBox()
+      return Math.abs((back?.x ?? 0) - (top?.x ?? 0))
+    })
+    .toBeGreaterThan(25)
+
+  await page.mouse.move(0, 0)
+  await expect
+    .poll(async () => {
+      const back = await backCard.boundingBox()
+      const top = await topCard.boundingBox()
+      return Math.abs((back?.x ?? 0) - (top?.x ?? 0))
+    })
+    .toBeLessThan(15)
+})
+
 test('adding a reference flips the image draft to reference-image and back', async ({
   mount,
   page
@@ -344,6 +680,7 @@ test('adding a reference flips the image draft to reference-image and back', asy
       drafts={{
         [scriptedSessionId]: {
           prompt: '',
+          promptDocument: { version: 1, nodes: [{ type: 'text', text: '' }] },
           mediaType: 'image',
           manifestVersion: 5,
           model: 'doubao-seedream-5.0-pro',
@@ -888,16 +1225,14 @@ test('a composing draft submits by materializing the session first', async ({ mo
   expect(submits[0]?.intent).toMatchObject({ prompt: '秋季上新主图' })
 })
 
-test('an untouched composing draft still submits without touching the seeded draft', async ({
-  mount,
-  page
-}) => {
+test('a composing draft submits after satisfying the prompt minimum', async ({ mount, page }) => {
   await mount(<CreationWorkbenchStory />)
-  // Select a session first, then start composing and submit without touching
-  // the seeded draft: the composing round's own defaults ride the submission.
+  // Select a session first, then start composing: the composing round's own
+  // defaults ride the submission once its prompt satisfies the manifest.
   await selectFirstSession(page)
   await page.getByTestId('session-new').click()
   await expect(page.getByTestId('composer')).toBeVisible()
+  await page.getByTestId('composer-prompt').fill('新草稿')
   await page.getByTestId('composer-submit').click()
 
   await expect
@@ -913,7 +1248,7 @@ test('an untouched composing draft still submits without touching the seeded dra
   await expect(page.getByTestId('gallery-submit-error')).toHaveCount(0)
 })
 
-test('references added while composing upload only when the session materializes', async ({
+test('materialization remaps every pending mention while preserving the submission contract', async ({
   mount,
   page
 }) => {
@@ -936,7 +1271,12 @@ test('references added while composing upload only when the session materializes
   ).toBeVisible()
   expect(await page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? [])).toEqual([])
 
-  await page.getByTestId('composer-prompt').fill('poster')
+  const editor = page.getByTestId('composer-prompt')
+  await editor.fill('@')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type(' and @')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('button', { name: 'Image 1' })).toHaveCount(2)
   await page.getByTestId('composer-submit').click()
 
   // Submission uploads the held file and re-binds the local draft with the
@@ -949,8 +1289,21 @@ test('references added while composing upload only when the session materializes
       timeout: 5_000
     })
     .toMatchObject({
-      references: [{ materialId: 'ffffffff-0000-4000-8000-000000000006', role: 'reference' }]
+      references: [{ materialId: 'ffffffff-0000-4000-8000-000000000006', role: 'reference' }],
+      promptDocument: {
+        version: 1,
+        nodes: [
+          { type: 'mention', materialId: 'ffffffff-0000-4000-8000-000000000006' },
+          { type: 'text', text: ' and ' },
+          { type: 'mention', materialId: 'ffffffff-0000-4000-8000-000000000006' }
+        ]
+      }
     })
+  const [call] = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(call?.intent.prompt).toBe('Image 1 and Image 1')
+  expect(call?.intent.references).toEqual([
+    { materialId: 'ffffffff-0000-4000-8000-000000000006', role: 'reference' }
+  ])
 })
 
 test('the row actions menu renames a session inline', async ({ mount, page }) => {

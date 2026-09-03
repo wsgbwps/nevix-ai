@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import gsap from 'gsap'
 import {
@@ -15,6 +15,14 @@ import {
   TriangleAlertIcon,
   VideoIcon
 } from 'lucide-react'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle
+} from '../../../components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -33,6 +41,8 @@ import {
 import type { CreationWorkbenchController } from '../model/use-workbench'
 import { modeKeys } from '../i18n/mode-keys'
 import { ComposerMenuContent } from './composer-menu-content'
+import { PromptEditor } from './prompt-editor'
+import { ReferenceMaterialPreview } from './reference-material-preview'
 import { ratioGlyphDiagonalSize, ratioGlyphSize } from './ratio-glyph'
 import { ReferenceDeck } from './reference-deck'
 import { useComposerPresence } from './use-composer-presence'
@@ -113,11 +123,17 @@ export function CreationComposer({
   const { draft, manifest, manifestStatus, staleFields } = workbench
   const rowRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
-  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const promptRef = useRef<HTMLDivElement>(null)
   const controlClipRef = useRef<HTMLDivElement>(null)
   const submitRef = useRef<HTMLButtonElement>(null)
   const expanded = useComposerPresence({ scrollerRef, rootRef: cardRef })
   const mountedRef = useRef(false)
+  const [mentionHover, setMentionHover] = useState<{
+    readonly materialId: string
+    readonly anchor: HTMLElement
+  } | null>(null)
+  const [previewMaterialId, setPreviewMaterialId] = useState<string | null>(null)
+  const [previewReturnFocus, setPreviewReturnFocus] = useState<HTMLElement | null>(null)
 
   useEffect(() => {
     const wrap = wrapperRef.current
@@ -218,8 +234,14 @@ export function CreationComposer({
         ref={cardRef}
         // Blank-surface clicks expand and hand the caret to the prompt.
         onClick={(event) => {
-          if ((event.target as HTMLElement).closest('button, textarea, input, a') !== null) return
-          promptRef.current?.focus()
+          if (
+            (event.target as HTMLElement).closest(
+              'button, textarea, input, a, [contenteditable="true"]'
+            ) !== null
+          ) {
+            return
+          }
+          document.getElementById('composer-prompt')?.focus()
         }}
         className="bg-card relative rounded-[22px] border p-3 shadow-2xl"
       >
@@ -264,23 +286,45 @@ export function CreationComposer({
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <label htmlFor="composer-prompt" className="sr-only">
-              {t('composer.promptLabel')}
-            </label>
-            <textarea
-              id="composer-prompt"
-              ref={promptRef}
-              data-testid="composer-prompt"
-              value={draft.prompt}
-              maxLength={promptCap}
-              placeholder={
-                draft.references.length > 0
-                  ? String(t('composer.promptPlaceholderWithRefs'))
-                  : String(t('composer.promptPlaceholder'))
-              }
-              onChange={(event) => workbench.patchDraft({ prompt: event.target.value })}
-              className="placeholder:text-muted-foreground/70 text-foreground h-24 w-full resize-none bg-transparent px-1 py-1 text-xs leading-5 outline-none"
-            />
+            <div ref={promptRef} className="h-24 w-full">
+              <PromptEditor
+                document={draft.promptDocument}
+                documentKey={`${workbench.ports?.userId ?? ''}:${workbench.composingNew ? 'new' : (workbench.selectedId ?? 'inactive')}`}
+                candidates={workbench.mentionCandidates}
+                thumbnails={workbench.thumbnails}
+                maxChars={promptCap}
+                placeholder={
+                  draft.references.length > 0
+                    ? String(t('composer.promptPlaceholderWithRefs'))
+                    : String(t('composer.promptPlaceholder'))
+                }
+                label={String(t('composer.promptLabel'))}
+                emptyLabel={String(t('composer.mention.empty'))}
+                noResultsLabel={String(t('composer.mention.noResults'))}
+                onChange={(promptDocument) => workbench.patchDraft({ promptDocument })}
+                onPreview={(materialId, focusTarget) => {
+                  setPreviewReturnFocus(focusTarget)
+                  setPreviewMaterialId(materialId)
+                }}
+                onMentionHover={(materialId, anchor) =>
+                  setMentionHover(
+                    materialId !== null && anchor !== null ? { materialId, anchor } : null
+                  )
+                }
+              />
+            </div>
+            {(workbench.promptLength >= Math.max(0, workbench.promptMaxChars - 100) ||
+              workbench.promptLength > workbench.promptMaxChars) && (
+              <p
+                className={`mt-1 text-right text-[10px] ${workbench.promptInvalid ? 'text-destructive' : 'text-muted-foreground'}`}
+                role={workbench.promptInvalid ? 'alert' : undefined}
+              >
+                {t('composer.mention.length', {
+                  current: workbench.promptLength,
+                  max: workbench.promptMaxChars
+                })}
+              </p>
+            )}
           </div>
         </div>
         {/* The control row is the only piece the compact form hides; GSAP
@@ -309,9 +353,12 @@ export function CreationComposer({
           title={
             workbench.submitBlockedReason === 'stale'
               ? String(t('composer.stale.badge'))
-              : workbench.submitBlockedReason === 'unavailable'
-                ? String(t('composer.unavailable.template', { reason: '', action: '' }))
-                : String(t('composer.submit'))
+              : workbench.submitBlockedReason === 'length' &&
+                  workbench.promptLength > workbench.promptMaxChars
+                ? String(t('composer.mention.overLimit', { max: workbench.promptMaxChars }))
+                : workbench.submitBlockedReason === 'unavailable'
+                  ? String(t('composer.unavailable.template', { reason: '', action: '' }))
+                  : String(t('composer.submit'))
           }
           aria-label={String(t('composer.submit'))}
           aria-disabled={workbench.submitDisabled}
@@ -326,6 +373,57 @@ export function CreationComposer({
           <ArrowUpIcon className="size-4" aria-hidden />
         </button>
       </div>
+      {workbench.referenceRecoveryShown && (
+        <div
+          role="status"
+          className="bg-card text-warning absolute right-0 bottom-full mb-2 rounded-lg border px-3 py-2 text-[11px] shadow-lg"
+        >
+          <button type="button" onClick={workbench.dismissReferenceRecovery}>
+            {t('composer.mention.recovered')}
+          </button>
+        </div>
+      )}
+      <ReferenceMaterialPreview
+        materials={workbench.materials}
+        candidates={workbench.mentionCandidates}
+        thumbnails={workbench.thumbnails}
+        hover={mentionHover}
+        openMaterialId={previewMaterialId}
+        returnFocus={previewReturnFocus}
+        onOpenChange={(open) => {
+          if (!open) setPreviewMaterialId(null)
+        }}
+        loadPreviewBlob={workbench.loadMaterialPreviewBlob}
+      />
+      <Dialog
+        open={workbench.pendingMaterialRemoval !== null}
+        onOpenChange={(open) => {
+          if (!open) workbench.dismissMaterialRemoval()
+        }}
+      >
+        <DialogContent>
+          <DialogTitle>{t('composer.mention.removeTitle')}</DialogTitle>
+          <DialogDescription>
+            {t('composer.mention.removeBody', {
+              count: workbench.pendingMaterialRemoval?.mentionCount ?? 0
+            })}
+          </DialogDescription>
+          <DialogFooter>
+            <DialogClose asChild>
+              <button type="button" className="rounded-lg border px-3 py-1.5">
+                {t('composer.mention.removeCancel')}
+              </button>
+            </DialogClose>
+            <button
+              type="button"
+              className="bg-destructive text-destructive-foreground rounded-lg px-3 py-1.5"
+              onClick={workbench.confirmMaterialRemoval}
+            >
+              {t('composer.mention.removeConfirm')}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

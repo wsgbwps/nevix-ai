@@ -33,6 +33,13 @@ function fakeStorage(): Storage {
 
 const record = {
   prompt: '夏季跑鞋主图，暖光背景',
+  promptDocument: {
+    version: 1 as const,
+    nodes: [
+      { type: 'text' as const, text: '参考 ' },
+      { type: 'mention' as const, materialId: 'cccccccc-0000-4000-8000-000000000003' }
+    ]
+  },
   mediaType: 'image' as const,
   model: 'doubao-seedream-5.0-pro',
   mode: 'reference-image',
@@ -104,4 +111,51 @@ test('corrupted or foreign payloads fail closed to null', () => {
     JSON.stringify({ ...record, references: [{ materialId: 'x', role: 'hero' }] })
   )
   assert.equal(readLocalDraft(storage, 'user-1', 'aaaaaaaa-0000-4000-8000-000000000001'), null)
+})
+
+test('a pre-mention draft migrates its fallback prompt without inferring identity', () => {
+  const storage = fakeStorage()
+  const key = 'nevix:creation:draft:user-1:aaaaaaaa-0000-4000-8000-000000000001'
+  storage.setItem(
+    key,
+    JSON.stringify({
+      prompt: record.prompt,
+      media_type: record.mediaType,
+      manifest_version: record.manifestVersion,
+      model: record.model,
+      mode: record.mode,
+      ratio: record.ratio,
+      resolution: record.resolution,
+      quantity: record.quantity,
+      duration_seconds: record.durationSeconds,
+      references: record.references.map((reference) => ({
+        material_id: reference.materialId,
+        role: reference.role
+      }))
+    })
+  )
+
+  assert.deepEqual(
+    readLocalDraft(storage, 'user-1', 'aaaaaaaa-0000-4000-8000-000000000001')?.promptDocument,
+    { version: 1, nodes: [{ type: 'text', text: '夏季跑鞋主图，暖光背景' }] }
+  )
+})
+
+test('an invalid prompt document preserves the valid fallback and the rest of the draft', () => {
+  const storage = fakeStorage()
+  writeLocalDraft(storage, 'user-1', 'new', record)
+  const key = 'nevix:creation:draft:user-1:new'
+  const stored = JSON.parse(storage.getItem(key) ?? '{}')
+  stored.prompt_document = {
+    version: 1,
+    nodes: [{ type: 'mention', label: '图片 1' }]
+  }
+  storage.setItem(key, JSON.stringify(stored))
+
+  const restored = readLocalDraft(storage, 'user-1', 'new')
+  assert.equal(restored?.model, record.model)
+  assert.deepEqual(restored?.promptDocument, {
+    version: 1,
+    nodes: [{ type: 'text', text: record.prompt }]
+  })
 })

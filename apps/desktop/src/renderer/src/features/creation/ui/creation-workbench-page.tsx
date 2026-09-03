@@ -16,6 +16,7 @@ import {
 } from '../../../components/ui/dropdown-menu'
 import type { CreationSessionView } from '../api/go-creation-http'
 import { useCreationWorkbench } from '../model/use-workbench'
+import { textPromptDocument } from '../model/prompt-document'
 import { ComposerMenuContent } from './composer-menu-content'
 import { CreationComposer } from './composer'
 import { ResultGallery } from './result-gallery'
@@ -192,9 +193,13 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
             >
               {/* The greeting hero is the empty-session state: clearing the
                   prompt must never hide a session that already holds tasks. */}
-              {workbench.draft.prompt.length === 0 && workbench.tasks.length === 0 ? (
+              {workbench.expandedPrompt.length === 0 && workbench.tasks.length === 0 ? (
                 <div className="mx-auto flex min-h-full max-w-[720px] flex-col items-center justify-center pb-10">
-                  <EmptyDraftHero onUseTemplate={(prompt) => workbench.patchDraft({ prompt })} />
+                  <EmptyDraftHero
+                    onUseTemplate={(prompt) =>
+                      workbench.patchDraft({ promptDocument: textPromptDocument(prompt) })
+                    }
+                  />
                 </div>
               ) : (
                 <div className="mx-auto max-w-[820px] pt-16">

@@ -13,7 +13,7 @@ import type {
   CapabilityMediaMode,
   CapabilityModel
 } from '../api/capability-manifest-http'
-import type { DraftReferenceRole, LocalDraftRecord, MaterialKind } from '../api/go-creation-http'
+import type { DraftReferenceRole, MaterialKind } from '../api/go-creation-http'
 
 export type DraftMediaType = 'image' | 'video'
 
@@ -74,6 +74,17 @@ export type DraftStaleField =
   | 'quantity'
   | 'durationSeconds'
   | 'references'
+
+interface DraftCapabilityState {
+  readonly mediaType: DraftMediaType | null
+  readonly model: string | null
+  readonly mode: string | null
+  readonly ratio: string | null
+  readonly resolution: string | null
+  readonly quantity: number | null
+  readonly durationSeconds: number | null
+  readonly references: readonly { readonly materialId: string; readonly role: DraftReferenceRole }[]
+}
 
 /**
  * The composer's view of one media capability: `null` when the manifest is
@@ -229,7 +240,7 @@ export function roleForPosition(
  */
 export function staleDraftFields(
   manifest: CapabilityManifest | null,
-  draft: LocalDraftRecord
+  draft: DraftCapabilityState
 ): ReadonlySet<DraftStaleField> {
   const stale = new Set<DraftStaleField>()
   if (manifest === null) return stale

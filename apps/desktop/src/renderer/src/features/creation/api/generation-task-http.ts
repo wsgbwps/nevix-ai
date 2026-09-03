@@ -5,7 +5,7 @@
  * SSE stream is a fetch-stream with the bearer in the header (never the URL)
  * and no Last-Event-ID semantics — a lost stream is answered by a refetch.
  */
-import type { CreationApiResult, LocalDraftRecord } from './go-creation-http'
+import type { CreationApiResult, DraftReferenceView } from './go-creation-http'
 import { request } from './go-creation-http'
 
 /** One generation task's one-way status (contracts GenerationTask.status). */
@@ -117,7 +117,22 @@ export interface TaskPage {
  * no editable draft to point at). */
 export interface TaskSubmitInput {
   readonly idempotencyKey: string
-  readonly intent: LocalDraftRecord
+  readonly intent: GenerationIntent
+}
+
+/** Plain transport intent frozen by the server. Desktop-only mention identity
+ * is expanded before crossing this trusted seam. */
+export interface GenerationIntent {
+  readonly prompt: string
+  readonly mediaType: 'image' | 'video' | null
+  readonly manifestVersion: number
+  readonly model: string | null
+  readonly mode: string | null
+  readonly ratio: string | null
+  readonly resolution: string | null
+  readonly quantity: number | null
+  readonly durationSeconds: number | null
+  readonly references: readonly DraftReferenceView[]
 }
 
 // --- parsing (fail closed, mirroring the sibling clients) --------------------

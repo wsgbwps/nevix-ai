@@ -8,15 +8,16 @@ import {
 import type {
   CreationApiResult,
   CreationSessionView,
-  LocalDraftRecord,
   ReferenceMaterialView
 } from '../../../src/renderer/src/features/creation/api/go-creation-http'
+import type { LocalDraftRecord } from '../../../src/renderer/src/features/creation/model/draft-store'
 import type {
   CapabilityManifest,
   CapabilityModel,
   ImageReferenceEnvelope
 } from '../../../src/renderer/src/features/creation/api/capability-manifest-http'
 import type {
+  GenerationIntent,
   GenerationTaskDetail,
   GenerationTaskView
 } from '../../../src/renderer/src/features/creation/api/generation-task-http'
@@ -225,8 +226,14 @@ export interface DeckTestControls {
   /** Reads this device's local draft record for one session key ('new' for composing). */
   draftRecord(key: string): LocalDraftRecord | null
   deleteMaterialCalls(): string[]
+  materialBlobCalls(): ReadonlyArray<{ materialId: string; aborted: boolean }>
+  releaseMaterialBlobs(): void
   uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
-  taskCalls(): ReadonlyArray<{ sessionId: string; idempotencyKey: string }>
+  taskCalls(): ReadonlyArray<{
+    sessionId: string
+    idempotencyKey: string
+    intent: GenerationIntent
+  }>
   retryCalls(): ReadonlyArray<{ taskId: string; idempotencyKey: string }>
   cancelledIds(): string[]
   createSessionCalls(): ReadonlyArray<{ name: string }>
@@ -277,6 +284,10 @@ interface RuntimeOptions {
   /** Seeds the device-local draft store (ADR-0017); null entries clear a key. */
   readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
+  /** Number of initial full-preview loads that should fail with no Blob. */
+  readonly materialBlobFailures?: number
+  /** Keeps full-preview loads pending until the test releases or aborts them. */
+  readonly materialBlobDeferred?: boolean
   readonly taskScript?: TaskScript
 }
 
@@ -290,6 +301,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     else writeLocalDraft(localStorage, storyUserId, key, record)
   }
   const deletedIds: string[] = []
+  const materialBlobCalls: Array<{ materialId: string; aborted: boolean }> = []
+  const materialBlobReleases = new Set<() => void>()
+  let remainingMaterialBlobFailures = options.materialBlobFailures ?? 0
   const uploadCalls: Array<{ sessionId: string; name: string }> = []
   const createdSessions: Array<{ name: string }> = []
   const renameCalls: Array<{ sessionId: string; name: string }> = []
@@ -302,7 +316,11 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     : Promise.resolve()
   const taskState: {
     tasks: ScriptedTask[]
-    submitCalls: Array<{ sessionId: string; idempotencyKey: string }>
+    submitCalls: Array<{
+      sessionId: string
+      idempotencyKey: string
+      intent: GenerationIntent
+    }>
     retryCalls: Array<{ taskId: string; idempotencyKey: string }>
     cancelledIds: string[]
     eventHandlers: { onInvalidation: () => void; onStateChange: (live: boolean) => void } | null
@@ -320,6 +338,11 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   window.__creationDeckTest = {
     draftRecord: (key) => readLocalDraft(localStorage, storyUserId, key),
     deleteMaterialCalls: () => deletedIds,
+    materialBlobCalls: () => materialBlobCalls,
+    releaseMaterialBlobs: () => {
+      for (const release of materialBlobReleases) release()
+      materialBlobReleases.clear()
+    },
     uploadCalls: () => uploadCalls,
     taskCalls: () => taskState.submitCalls,
     retryCalls: () => taskState.retryCalls,
@@ -389,7 +412,34 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       }
       return succeeded(undefined)
     },
-    loadImageBlobUrl: async () => thumbnailUrl,
+    loadMaterialBlob: async (materialId, signal) => {
+      const call = { materialId, aborted: false }
+      materialBlobCalls.push(call)
+      signal?.addEventListener('abort', () => {
+        call.aborted = true
+      })
+      if (options.materialBlobDeferred) {
+        await new Promise<void>((resolve) => {
+          const release = (): void => {
+            materialBlobReleases.delete(release)
+            resolve()
+          }
+          materialBlobReleases.add(release)
+          signal?.addEventListener('abort', release, { once: true })
+        })
+      }
+      if (signal?.aborted) return null
+      if (remainingMaterialBlobFailures > 0) {
+        remainingMaterialBlobFailures -= 1
+        return null
+      }
+      return new Blob(
+        [
+          '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+        ],
+        { type: 'image/svg+xml' }
+      )
+    },
     loadCapabilityManifest: async () => {
       await manifestReady
       return options.manifestFails || options.manifest === null
@@ -502,6 +552,8 @@ interface StoryOptions {
   readonly manifestDeferred?: boolean
   readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
+  readonly materialBlobFailures?: number
+  readonly materialBlobDeferred?: boolean
   readonly sessions?: readonly CreationSessionView[]
   readonly taskScript?: TaskScript
 }
@@ -516,9 +568,15 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
         manifestDeferred: options.manifestDeferred,
         sessions,
         taskScript: options.taskScript,
+        materialBlobFailures: options.materialBlobFailures,
+        materialBlobDeferred: options.materialBlobDeferred,
         drafts: options.drafts ?? {
           [sessionA.id]: {
             prompt: '夏季跑鞋主图，暖光背景',
+            promptDocument: {
+              version: 1,
+              nodes: [{ type: 'text', text: '夏季跑鞋主图，暖光背景' }]
+            },
             mediaType: 'image',
             manifestVersion: 5,
             model: 'doubao-seedream-5.0-pro',

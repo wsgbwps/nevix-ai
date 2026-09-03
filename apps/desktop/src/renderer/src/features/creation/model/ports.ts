@@ -78,7 +78,7 @@ export interface CreationWorkspacePorts {
     file: File
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
-  readonly loadImageBlobUrl: (materialId: string) => Promise<string | null>
+  readonly loadMaterialBlob: (materialId: string, signal?: AbortSignal) => Promise<Blob | null>
   readonly loadCapabilityManifest: () => Promise<CreationApiResult<CapabilityManifest>>
   /** Submits one idempotent generation task carrying the full local intent. */
   readonly submitTask: (
@@ -159,8 +159,8 @@ export function createCreationWorkspacePorts(
       withToken((client, token) => client.uploadMaterial(token, sessionId, file)),
     deleteMaterial: (materialId) =>
       withToken((client, token) => client.deleteMaterial(token, materialId)),
-    loadImageBlobUrl: (materialId) =>
-      withToken((client, token) => client.loadImageBlobUrl(token, materialId)),
+    loadMaterialBlob: (materialId, signal) =>
+      withToken((client, token) => client.loadMaterialBlob(token, materialId, signal)),
     // The manifest client shares the request helper's failure mapping; only
     // the parser differs, so it rides the same per-call token acquisition.
     loadCapabilityManifest: () =>

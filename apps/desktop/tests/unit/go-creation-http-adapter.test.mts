@@ -165,3 +165,26 @@ test('malformed session detail payloads fail closed', async () => {
   )
   assert.equal(missingTimestamp.outcome, 'network-failure')
 })
+
+test('material download returns the trusted blob and forwards cancellation', async () => {
+  const client = createCreationClient(serverUrl)
+  const controller = new AbortController()
+  let request: Request | null = null
+
+  const blob = await withFetch(
+    async (input, init) => {
+      request = new Request(input as RequestInfo | URL, init)
+      return new Response(new Uint8Array([1, 2, 3]), {
+        headers: { 'Content-Type': 'video/mp4' }
+      })
+    },
+    () => client.loadMaterialBlob('tok', 'material-1', controller.signal)
+  )
+
+  assert.ok(request !== null)
+  assert.equal(request.url, 'https://server.example/creation/materials/material-1')
+  assert.equal(request.headers.get('Authorization'), 'Bearer tok')
+  assert.equal(request.signal.aborted, false)
+  assert.equal(blob?.type, 'video/mp4')
+  assert.deepEqual([...new Uint8Array(await blob!.arrayBuffer())], [1, 2, 3])
+})

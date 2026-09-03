@@ -161,6 +161,25 @@ export const creationTranslations = defineResourceTranslations({
           count: '{{n}} 张参考图片',
           remove: '移除 {{name}}',
           kind: { image: '图', video: '视频', audio: '音' }
+        },
+        mention: {
+          kind: { image: '图片', video: '视频', audio: '音频' },
+          empty: '请先添加参考素材',
+          noResults: '没有匹配的参考素材',
+          length: '{{current}}/{{max}}',
+          overLimit: '提示词不能超过 {{max}} 个字符',
+          removeTitle: '删除参考素材？',
+          removeBody: '删除该素材也会移除提示词中的 {{count}} 处引用。',
+          removeConfirm: '删除',
+          removeCancel: '取消',
+          recovered: '已移除不可用的参考素材，并将相关引用保留为文本。',
+          preview: {
+            title: '预览 {{label}}',
+            loading: '正在加载素材…',
+            failed: '素材加载失败',
+            retry: '重试',
+            duration: '{{seconds}} 秒'
+          }
         }
       },
       state: {
@@ -405,6 +424,25 @@ export const creationTranslations = defineResourceTranslations({
           count: '{{n}} reference images',
           remove: 'Remove {{name}}',
           kind: { image: 'IMG', video: 'VID', audio: 'AUD' }
+        },
+        mention: {
+          kind: { image: 'Image', video: 'Video', audio: 'Audio' },
+          empty: 'Add reference material first',
+          noResults: 'No matching reference material',
+          length: '{{current}}/{{max}}',
+          overLimit: 'The prompt cannot exceed {{max}} characters',
+          removeTitle: 'Remove reference material?',
+          removeBody: 'Removing it also deletes {{count}} mention(s) from the prompt.',
+          removeConfirm: 'Remove',
+          removeCancel: 'Cancel',
+          recovered: 'Unavailable references were removed and their mentions kept as text.',
+          preview: {
+            title: 'Preview {{label}}',
+            loading: 'Loading material…',
+            failed: 'Material could not be loaded',
+            retry: 'Retry',
+            duration: '{{seconds}}s'
+          }
         }
       },
       state: {

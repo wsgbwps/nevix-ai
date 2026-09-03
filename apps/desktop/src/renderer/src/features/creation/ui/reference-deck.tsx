@@ -147,9 +147,12 @@ export function ReferenceDeck({
             compact ? 'h-10 w-[30px]' : 'h-16 w-12'
           )}
           onMouseEnter={() => setPileHovered(true)}
-          onMouseLeave={() => {
+          onMouseLeave={(event) => {
             setPileHovered(false)
             setHoveredId(null)
+            if (event.currentTarget.querySelector(':focus-visible') === null) {
+              setFocusedId(null)
+            }
           }}
           onFocus={() => setPileHovered(true)}
           onBlur={(event) => {

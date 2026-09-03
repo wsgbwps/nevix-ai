@@ -149,97 +149,6 @@ function readNumberOrNullField(source: unknown, field: string): number | null {
   return null
 }
 
-const DRAFT_ROLES: readonly DraftReferenceRole[] = [
-  'reference',
-  'first_frame',
-  'last_frame',
-  'omni'
-]
-
-// Nullable wire scalars distinguish null (stored unset) from undefined
-// (field absent — never legal on the intent, fails closed).
-function readNullableString(source: unknown, field: string): string | null | undefined {
-  if (typeof source !== 'object' || source === null || !(field in source)) return undefined
-  const value = (source as Record<string, unknown>)[field]
-  if (value === null) return null
-  return typeof value === 'string' ? value : undefined
-}
-
-function readNullableNumber(source: unknown, field: string): number | null | undefined {
-  if (typeof source !== 'object' || source === null || !(field in source)) return undefined
-  const value = (source as Record<string, unknown>)[field]
-  if (value === null) return null
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-/** The device-local draft record (ADR-0017): the ComposerDraft fields plus the
- * manifest version the draft was last edited under. The same snake_case shape
- * serves the submit wire and the localStorage record. */
-export interface LocalDraftRecord {
-  readonly prompt: string
-  readonly mediaType: 'image' | 'video' | null
-  readonly manifestVersion: number
-  readonly model: string | null
-  readonly mode: string | null
-  readonly ratio: string | null
-  readonly resolution: string | null
-  readonly quantity: number | null
-  readonly durationSeconds: number | null
-  readonly references: DraftReferenceView[]
-}
-
-/** Parses the nullable intent scalars shared by submit and the draft store;
- * any foreign or partial shape fails closed to null. */
-export function parseDraftRecordShape(payload: unknown): LocalDraftRecord | null {
-  if (typeof payload !== 'object' || payload === null) return null
-  const prompt = readStringField(payload, 'prompt')
-  const manifestVersion = readNumberOrNullField(payload, 'manifest_version')
-  if (prompt === null || manifestVersion === null || manifestVersion < 1) return null
-  const mediaType = readNullableString(payload, 'media_type')
-  if (mediaType === undefined) return null
-  if (mediaType !== null && mediaType !== 'image' && mediaType !== 'video') return null
-  const referencesRaw =
-    'references' in payload ? (payload as Record<string, unknown>).references : undefined
-  if (!Array.isArray(referencesRaw)) return null
-  const references: DraftReferenceView[] = []
-  for (const entry of referencesRaw) {
-    const materialId = readStringField(entry, 'material_id')
-    const role = readStringField(entry, 'role')
-    if (!materialId || role === null || !DRAFT_ROLES.includes(role as DraftReferenceRole)) {
-      return null
-    }
-    references.push({ materialId, role: role as DraftReferenceRole })
-  }
-  const model = readNullableString(payload, 'model')
-  const mode = readNullableString(payload, 'mode')
-  const ratio = readNullableString(payload, 'ratio')
-  const resolution = readNullableString(payload, 'resolution')
-  const quantity = readNullableNumber(payload, 'quantity')
-  const durationSeconds = readNullableNumber(payload, 'duration_seconds')
-  if (
-    model === undefined ||
-    mode === undefined ||
-    ratio === undefined ||
-    resolution === undefined ||
-    quantity === undefined ||
-    durationSeconds === undefined
-  ) {
-    return null
-  }
-  return {
-    prompt,
-    mediaType,
-    manifestVersion,
-    model,
-    mode,
-    ratio,
-    resolution,
-    quantity,
-    durationSeconds,
-    references
-  }
-}
-
 function parseSessionDetail(payload: unknown): SessionDetailView | null {
   if (typeof payload !== 'object' || payload === null) return null
   const id = readStringField(payload, 'id')
@@ -276,11 +185,8 @@ export function createCreationClient(serverUrl: string): {
     file: File
   ): Promise<CreationApiResult<ReferenceMaterialView>>
   deleteMaterial(token: string, materialId: string): Promise<CreationApiResult<void>>
-  /**
-   * Streams one owned material back through Go for thumbnail display; resolves
-   * to an object URL or null when nothing renderable came back.
-   */
-  loadImageBlobUrl(token: string, materialId: string): Promise<string | null>
+  /** Streams one owned material through Go; callers own any derived object URL. */
+  loadMaterialBlob(token: string, materialId: string, signal?: AbortSignal): Promise<Blob | null>
 } {
   async function listPage<T>(
     parse: (payload: unknown) => T | null,
@@ -490,20 +396,20 @@ export function createCreationClient(serverUrl: string): {
       if (response.status === 403) return { outcome: 'forbidden' }
       return { outcome: 'request-rejected', code: 'not_found' }
     },
-    loadImageBlobUrl: async (token, materialId) => {
+    loadMaterialBlob: async (token, materialId, signal) => {
       const url = new URL(`/creation/materials/${materialId}`, serverUrl)
       let response: Response
       try {
         response = await fetch(url, {
           redirect: 'error',
+          signal,
           headers: { Authorization: `Bearer ${token}` }
         })
       } catch {
         return null
       }
       if (!response.ok) return null
-      const blob = await response.blob().catch(() => null)
-      return blob ? URL.createObjectURL(blob) : null
+      return response.blob().catch(() => null)
     }
   }
 }
