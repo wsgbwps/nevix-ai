@@ -158,7 +158,18 @@ function TaskCard({
     >
       <div className="flex flex-col gap-1">
         {spec !== null && spec.prompt.length > 0 && (
-          <p className="text-foreground/80 line-clamp-3 text-xs leading-5">{spec.prompt}</p>
+          <div className="group/prompt relative">
+            <p className="text-foreground/80 line-clamp-2 text-xs leading-5">{spec.prompt}</p>
+            {/* Hover expansion overlays the card without reflowing it; the
+                clone stays a wrapper descendant, so wrapper:hover — not the
+                clone's own hover — holds it open and it cannot flicker. */}
+            <p
+              aria-hidden
+              className="text-foreground/80 bg-background invisible absolute inset-x-0 top-0 z-10 pb-1 text-xs leading-5 group-hover/prompt:visible"
+            >
+              {spec.prompt}
+            </p>
+          </div>
         )}
         <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
           <span className="text-foreground/70 font-medium">{t(statusKey(task.status))}</span>
