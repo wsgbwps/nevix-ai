@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  ChevronsDownIcon,
   FileImageIcon,
   ImageIcon,
   MoreHorizontalIcon,
@@ -20,6 +19,7 @@ import { useCreationWorkbench } from '../model/use-workbench'
 import { ComposerMenuContent } from './composer-menu-content'
 import { CreationComposer } from './composer'
 import { ResultGallery } from './result-gallery'
+import { isScrolledToBottom } from './use-composer-presence'
 
 /**
  * The production Creation Workbench (issue #177): the accepted prototype
@@ -64,11 +64,43 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
     setShowBackToBottom(false)
     scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' })
   }
-  if (!workbench.ports) return null
 
   // A composing round owns the workspace exactly like a selected session —
   // its session does not exist on the server yet.
   const workspaceActive = workbench.selected !== null || workbench.composingNew
+
+  // The bottom reserve keeps gallery content clear of the floating
+  // composer: the wrapper's measured height plus its bottom inset and a
+  // clearance gap. Grow-only (high-water): shrinking with the compact form
+  // would pull a scrolled-away view back inside the at-bottom slack and
+  // oscillate. While bottom-pinned, growth bumps scrollTop by the same
+  // delta so it never reads as scrolled-away.
+  const composerWrapRef = useRef<HTMLDivElement | null>(null)
+  const reserveRef = useRef(0)
+  useLayoutEffect(() => {
+    if (!workspaceActive) return
+    const scroller = scrollRef.current
+    const wrap = composerWrapRef.current
+    if (scroller === null || wrap === null) return
+    const apply = (): void => {
+      const needed =
+        Math.ceil(wrap.getBoundingClientRect().height) +
+        parseFloat(getComputedStyle(wrap).bottom) +
+        16
+      const current = reserveRef.current
+      if (needed <= current) return
+      const pinned = isScrolledToBottom(scroller)
+      scroller.style.paddingBottom = `${needed}px`
+      reserveRef.current = needed
+      if (pinned) scroller.scrollTop += needed - current
+    }
+    apply()
+    const observer = new ResizeObserver(apply)
+    observer.observe(wrap)
+    return () => observer.disconnect()
+  }, [workspaceActive])
+
+  if (!workbench.ports) return null
 
   return (
     <section className="flex min-h-0 flex-1 overflow-hidden" data-testid="creation-workbench">
@@ -144,8 +176,8 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
               onScroll={() => {
                 const scroller = scrollRef.current
                 if (scroller === null) return
-                const { scrollTop, clientHeight, scrollHeight } = scroller
-                const away = scrollTop + clientHeight < scrollHeight - 120
+                const { scrollTop } = scroller
+                const away = !isScrolledToBottom(scroller)
                 // An upward move means the creator took over mid-glide; stop
                 // suppressing the pill so it reflects where they actually are.
                 const tookOver = scrollTop < lastScrollTopRef.current
@@ -156,7 +188,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                 }
                 setShowBackToBottom(away)
               }}
-              className="h-full overflow-y-auto px-6 pb-[190px]"
+              className="h-full overflow-y-auto px-6"
             >
               {/* The greeting hero is the empty-session state: clearing the
                   prompt must never hide a session that already holds tasks. */}
@@ -200,18 +232,13 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                 </div>
               )}
             </div>
-            {showBackToBottom && (
-              <button
-                type="button"
-                data-testid="back-to-bottom"
-                onClick={scrollToBottom}
-                className="bg-card border-border/60 text-muted-foreground hover:text-foreground animate-in fade-in slide-in-from-bottom-1 absolute right-6 bottom-[200px] z-20 flex h-8 items-center gap-1 rounded-full border px-3 text-[10px] shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
-              >
-                {t('gallery.backToBottom')}
-                <ChevronsDownIcon className="size-3" aria-hidden />
-              </button>
-            )}
-            <CreationComposer workbench={workbench} />
+            <CreationComposer
+              workbench={workbench}
+              scrollerRef={scrollRef}
+              wrapperRef={composerWrapRef}
+              backToBottomVisible={showBackToBottom}
+              onBackToBottom={scrollToBottom}
+            />
           </>
         ) : (
           <EmptyWorkspace />

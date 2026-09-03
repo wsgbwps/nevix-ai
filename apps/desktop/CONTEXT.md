@@ -81,6 +81,14 @@ _Avoid_: Draft, 任务参数（指 Specification 中的个别字段）
 AI Creation Domain 拥有的会话式创作页面，承载创作上下文、生成操作、任务状态和结果；它是界面而非 Domain 或新的租户边界。
 _Avoid_: Generation Workspace, Creation Workspace
 
+**Composer 完整态**:
+Creation Workbench 底部 Composer 的完整形态：参考素材堆、多行提示词输入、能力控制行与提交按钮齐全；工作区位于滚动底部、或 User 正与 Composer 交互时呈现。
+_Avoid_: 编辑态, 默认态
+
+**Composer 紧凑态**:
+工作区滚离底部时 Composer 整体收窄收矮成的居中单行形态：素材堆（或收小的添加入口）、单行提示词与提交按钮保留，能力控制行隐藏；点击其内部恢复完整态，直到下一次滚动才收回。
+_Avoid_: 折叠态（与素材堆自身的收拢牌堆撞词）, 最小化
+
 **Asset Library**:
 AI Creation Domain 拥有的媒体资产浏览与复用页面；媒体资产的独立生命周期不使该页面成为独立 Domain，不与 renderer 静态 assets 混同。
 _Avoid_: Media Asset Domain, Asset Workspace

@@ -1,12 +1,15 @@
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import gsap from 'gsap'
 import {
+  ArrowUpIcon,
   BoxIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronsDownIcon,
   Clock3Icon,
   ImageIcon,
   Link2Icon,
-  SendIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
   TriangleAlertIcon,
@@ -32,6 +35,7 @@ import { modeKeys } from '../i18n/mode-keys'
 import { ComposerMenuContent } from './composer-menu-content'
 import { ratioGlyphDiagonalSize, ratioGlyphSize } from './ratio-glyph'
 import { ReferenceDeck } from './reference-deck'
+import { useComposerPresence } from './use-composer-presence'
 
 // Dynamic verdict vocabularies resolve through explicit key maps — the same
 // shape the provider-connection surface uses for wire codes.
@@ -64,6 +68,21 @@ const menuClass = 'w-52 shadow-2xl'
 const menuLabelClass = 'text-muted-foreground px-2.5 pb-1.5 pt-1 text-[11px]'
 const menuItemClass = 'h-9 cursor-pointer rounded-lg px-2.5 text-[13px]'
 
+// Dual-state geometry (px). These constants mirror the Tailwind classes on
+// the same elements (h-24, min-h-16, py-1 + leading-5, bottom-3) and drift
+// silently if changed apart. The deck keeps the compact row a constant 40px
+// with or without references; the submit circle centers on the h-8 control
+// row when expanded (the padding edge itself) and on the main row when
+// compact.
+const EXPANDED_MAX_WIDTH = 820
+const COMPACT_MAX_WIDTH = 480
+const ROW_HEIGHT = 64
+const ROW_COMPACT_HEIGHT = 40
+const PROMPT_HEIGHT = 96
+const PROMPT_COMPACT_HEIGHT = 28
+const SUBMIT_BOTTOM = 12
+const SUBMIT_SIZE = 32
+
 /**
  * The fixed bottom Composer (issue #177, prototype 6e465e8): prompt text
  * area, the inline reference deck, and the capability controls expanding
@@ -71,14 +90,87 @@ const menuItemClass = 'h-9 cursor-pointer rounded-lg px-2.5 text-[13px]'
  * Manifest; draft values the manifest removed stay displayed with a stable
  * stale marker and are never rewritten. This slice creates no Generation
  * Task — the submit affordance stays disabled rather than faking success.
+ *
+ * The surface is dual-state (完整态/紧凑态, see apps/desktop/CONTEXT.md):
+ * `useComposerPresence` owns presence; this component tweens the geometry
+ * and hosts the back-to-bottom pill at the container's top-right corner.
  */
 export function CreationComposer({
-  workbench
+  workbench,
+  scrollerRef,
+  wrapperRef,
+  backToBottomVisible,
+  onBackToBottom
 }: {
   readonly workbench: CreationWorkbenchController
+  readonly scrollerRef: React.RefObject<HTMLDivElement | null>
+  /** The page measures this wrapper for the scroller's bottom reserve. */
+  readonly wrapperRef: React.RefObject<HTMLDivElement | null>
+  readonly backToBottomVisible: boolean
+  readonly onBackToBottom: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const { draft, manifest, manifestStatus, staleFields } = workbench
+  const rowRef = useRef<HTMLDivElement>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const controlClipRef = useRef<HTMLDivElement>(null)
+  const submitRef = useRef<HTMLButtonElement>(null)
+  const expanded = useComposerPresence({ scrollerRef, rootRef: cardRef })
+  const mountedRef = useRef(false)
+
+  useEffect(() => {
+    const wrap = wrapperRef.current
+    const row = rowRef.current
+    const prompt = promptRef.current
+    const clip = controlClipRef.current
+    const submit = submitRef.current
+    if (wrap === null || row === null || prompt === null || clip === null || submit === null) {
+      return
+    }
+
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    // The first pass settles without animation; only transitions glide.
+    const animate = mountedRef.current && !reduce
+    mountedRef.current = true
+    const spring = { duration: animate ? 0.36 : 0, ease: 'back.out(1.5)' } as const
+    const rowTarget = expanded ? ROW_HEIGHT : ROW_COMPACT_HEIGHT
+    // On expand, hand animated properties back to the document so later
+    // content changes never freeze a stale px.
+    const settle = (el: HTMLElement, prop: string): (() => void) | undefined =>
+      expanded ? () => gsap.set(el, { clearProps: prop }) : undefined
+
+    const tweens: gsap.core.Tween[] = [
+      gsap.to(wrap, {
+        maxWidth: expanded ? EXPANDED_MAX_WIDTH : COMPACT_MAX_WIDTH,
+        ...spring,
+        onComplete: settle(wrap, 'maxWidth')
+      }),
+      gsap.to(row, {
+        minHeight: rowTarget,
+        ...spring,
+        onComplete: settle(row, 'minHeight')
+      }),
+      gsap.to(prompt, {
+        height: expanded ? PROMPT_HEIGHT : PROMPT_COMPACT_HEIGHT,
+        y: expanded ? 0 : (rowTarget - PROMPT_COMPACT_HEIGHT) / 2,
+        ...spring
+      }),
+      gsap.to(clip, {
+        height: expanded ? 'auto' : 0,
+        autoAlpha: expanded ? 1 : 0,
+        ...spring,
+        onComplete: settle(clip, 'height')
+      }),
+      gsap.to(submit, {
+        bottom: expanded ? SUBMIT_BOTTOM : SUBMIT_BOTTOM + (rowTarget - SUBMIT_SIZE) / 2,
+        ...spring
+      })
+    ]
+    return () => {
+      for (const tween of tweens) tween.kill()
+    }
+  }, [expanded, wrapperRef])
 
   const media = draft.mediaType
   const capability = media === null ? null : mediaCapability(manifest, media)
@@ -107,10 +199,30 @@ export function CreationComposer({
 
   return (
     <div
-      className="absolute right-6 bottom-5 left-6 z-20 mx-auto max-w-[760px]"
+      ref={wrapperRef}
+      className="absolute right-6 bottom-5 left-6 z-20 mx-auto max-w-[820px]"
       data-testid="composer"
     >
-      <div className="bg-card rounded-[22px] border p-3 shadow-2xl">
+      {backToBottomVisible && (
+        <button
+          type="button"
+          data-testid="back-to-bottom"
+          onClick={onBackToBottom}
+          className="bg-card border-border/60 text-muted-foreground hover:text-foreground animate-in fade-in slide-in-from-bottom-1 absolute right-0 bottom-full z-20 mb-2 flex h-8 items-center gap-1 rounded-full border px-3 text-[10px] shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+        >
+          {t('gallery.backToBottom')}
+          <ChevronsDownIcon className="size-3" aria-hidden />
+        </button>
+      )}
+      <div
+        ref={cardRef}
+        // Blank-surface clicks expand and hand the caret to the prompt.
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest('button, textarea, input, a') !== null) return
+          promptRef.current?.focus()
+        }}
+        className="bg-card relative rounded-[22px] border p-3 shadow-2xl"
+      >
         {unavailableLine !== null && (
           <p
             role="status"
@@ -120,9 +232,10 @@ export function CreationComposer({
             {unavailableLine}
           </p>
         )}
-        <div className="flex min-h-16 items-start gap-3">
+        <div ref={rowRef} className="flex min-h-16 items-start gap-3">
           <div className="min-w-0 shrink">
             <ReferenceDeck
+              compact={!expanded}
               bindings={draft.references}
               materials={workbench.materials}
               thumbnails={workbench.thumbnails}
@@ -156,6 +269,7 @@ export function CreationComposer({
             </label>
             <textarea
               id="composer-prompt"
+              ref={promptRef}
               data-testid="composer-prompt"
               value={draft.prompt}
               maxLength={promptCap}
@@ -165,45 +279,52 @@ export function CreationComposer({
                   : String(t('composer.promptPlaceholder'))
               }
               onChange={(event) => workbench.patchDraft({ prompt: event.target.value })}
-              className="placeholder:text-muted-foreground/70 text-foreground min-h-16 w-full resize-none bg-transparent px-1 py-1 text-xs leading-5 outline-none"
+              className="placeholder:text-muted-foreground/70 text-foreground h-24 w-full resize-none bg-transparent px-1 py-1 text-xs leading-5 outline-none"
             />
           </div>
         </div>
-        <div className="mt-2 flex min-w-0 items-center gap-1.5 border-t pt-2">
-          <MediaMenu
-            workbench={workbench}
-            triggerClass={`${controlClass} ${draft.mediaType !== null && !staleFields.has('mediaType') ? 'text-cyan-600 dark:text-cyan-300' : ''} ${staleFields.has('mediaType') ? staleTriggerClass : ''}`}
-          />
-          {media !== null && <ModelMenu workbench={workbench} triggerClass={controlClass} />}
-          {media === 'video' && controls && <ModeMenu workbench={workbench} />}
-          {media !== null && controls && <ParamsMenu workbench={workbench} />}
-          {media === 'video' && controls && <DurationMenu workbench={workbench} />}
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              disabled={workbench.submitDisabled}
-              title={
-                workbench.submitBlockedReason === 'stale'
-                  ? String(t('composer.stale.badge'))
-                  : workbench.submitBlockedReason === 'unavailable'
-                    ? String(t('composer.unavailable.template', { reason: '', action: '' }))
-                    : String(t('composer.submit'))
-              }
-              aria-label={String(t('composer.submit'))}
-              aria-disabled={workbench.submitDisabled}
-              data-testid="composer-submit"
-              onClick={workbench.submit}
-              className={
-                'flex size-8 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ' +
-                (workbench.submitDisabled
-                  ? 'bg-accent text-muted-foreground'
-                  : 'bg-cyan-600 text-white hover:bg-cyan-500 dark:bg-cyan-500 dark:hover:bg-cyan-400')
-              }
-            >
-              <SendIcon className="size-4" aria-hidden />
-            </button>
+        {/* The control row is the only piece the compact form hides; GSAP
+            clips this wrapper to zero while the submit circle (anchored to
+            the card, outside the clip) glides up to the prompt row. */}
+        <div ref={controlClipRef} className="overflow-hidden">
+          <div className="mt-2 flex min-w-0 items-center gap-1.5 border-t pt-2">
+            <MediaMenu
+              workbench={workbench}
+              triggerClass={`${controlClass} ${draft.mediaType !== null && !staleFields.has('mediaType') ? 'text-cyan-600 dark:text-cyan-300' : ''} ${staleFields.has('mediaType') ? staleTriggerClass : ''}`}
+            />
+            {media !== null && <ModelMenu workbench={workbench} triggerClass={controlClass} />}
+            {media === 'video' && controls && <ModeMenu workbench={workbench} />}
+            {media !== null && controls && <ParamsMenu workbench={workbench} />}
+            {media === 'video' && controls && <DurationMenu workbench={workbench} />}
+            {/* Reserves the absolute submit circle's slot so the longest
+                capability pill never underlaps it. */}
+            <div className="ml-auto size-8 shrink-0" aria-hidden />
           </div>
         </div>
+        <button
+          type="button"
+          ref={submitRef}
+          disabled={workbench.submitDisabled}
+          onClick={workbench.submit}
+          title={
+            workbench.submitBlockedReason === 'stale'
+              ? String(t('composer.stale.badge'))
+              : workbench.submitBlockedReason === 'unavailable'
+                ? String(t('composer.unavailable.template', { reason: '', action: '' }))
+                : String(t('composer.submit'))
+          }
+          aria-label={String(t('composer.submit'))}
+          aria-disabled={workbench.submitDisabled}
+          data-testid="composer-submit"
+          className={
+            'absolute right-3 bottom-3 flex size-8 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ' +
+            (workbench.submitDisabled
+              ? 'bg-accent text-muted-foreground'
+              : 'bg-cyan-600 text-white hover:bg-cyan-500 dark:bg-cyan-500 dark:hover:bg-cyan-400')
+          }
+        >
+          <ArrowUpIcon className="size-4" aria-hidden />
+        </button>
       </div>
     </div>
   )

@@ -16,7 +16,9 @@ import type {
  * the expansion never reflows the prompt beside it — the prototype overlays
  * the workspace exactly like this. ArrowLeft/ArrowRight move focus, Delete
  * removes the focused card, and the round add entry sits at the pile corner
- * (collapsed) or the fan's end tile (expanded). Actual bytes still flow only
+ * (collapsed) or the fan's end tile (expanded). While the composer is
+ * compact, every face scales to 0.625 of the expanded geometry (25px fan
+ * pitch). Actual bytes still flow only
  * through the Go trusted data plane — this component renders object URLs the
  * ports layer streamed.
  */
@@ -26,6 +28,7 @@ const fanRotations = [-4, 4, -6, 3]
 const pileRotations = [2, -4, 5, -5]
 
 export function ReferenceDeck({
+  compact = false,
   bindings,
   materials,
   thumbnails,
@@ -34,6 +37,8 @@ export function ReferenceDeck({
   onAdd,
   onRemove
 }: {
+  /** True while the composer sits in its compact form (紧凑态). */
+  readonly compact?: boolean
   /** Ordered draft bindings; the deck order is exactly this order. */
   readonly bindings: readonly DraftReferenceView[]
   /** All session materials, for identity/kind lookups. */
@@ -55,6 +60,7 @@ export function ReferenceDeck({
   const [pileHovered, setPileHovered] = useState(false)
 
   const expanded = pileHovered || focusedId !== null
+  const fanPitch = compact ? 25 : 40
 
   const kindLabel: Record<ReferenceMaterialView['kind'], string> = {
     image: String(t('composer.deck.kind.image')),
@@ -92,8 +98,18 @@ export function ReferenceDeck({
     cardRefs.current.get(next.materialId)?.focus()
   }
 
-  const cardFace =
-    'size-full overflow-hidden rounded-lg border border-foreground/20 bg-muted shadow-sm'
+  // Opening on pointerdown (click then covers only keyboard activation,
+  // detail 0): a press pins the composer's expanded form, whose re-render
+  // and spring move these entries mid-press — a release-time click can miss.
+  function openPickerOnPointerDown(event: React.PointerEvent<HTMLButtonElement>): void {
+    if (event.button === 0) fileInputRef.current?.click()
+  }
+
+  function openPickerOnKeyboardClick(event: React.MouseEvent<HTMLButtonElement>): void {
+    if (event.detail === 0) fileInputRef.current?.click()
+  }
+
+  const cardFace = 'size-full overflow-hidden border border-foreground/20 bg-muted shadow-sm'
 
   return (
     <section
@@ -105,18 +121,31 @@ export function ReferenceDeck({
         <button
           type="button"
           aria-label={t('composer.deck.add')}
-          onClick={() => fileInputRef.current?.click()}
-          className="text-muted-foreground bg-accent hover:border-foreground/10 hover:bg-input hover:text-foreground flex h-16 w-12 flex-col items-center justify-center gap-1 rounded-lg border border-transparent transition-colors duration-[180ms] ease-out outline-none focus-visible:ring-2 focus-visible:ring-sky-400/45"
+          onPointerDown={openPickerOnPointerDown}
+          onClick={openPickerOnKeyboardClick}
+          className={
+            'text-muted-foreground bg-accent hover:border-foreground/10 hover:bg-input hover:text-foreground flex items-center justify-center rounded-lg border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-sky-400/45 ' +
+            (compact
+              ? 'h-10 w-[30px] transition-[width,height,color,background-color,border-color] duration-[360ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]'
+              : 'h-16 w-12 flex-col gap-1 transition-colors duration-[180ms] ease-out')
+          }
         >
-          <PlusIcon className="size-4 stroke-[1.5]" aria-hidden />
-          <span className="text-[8px] leading-3">{t('composer.deck.tile')}</span>
+          <PlusIcon
+            className={cn('shrink-0 stroke-[1.5]', compact ? 'size-2.5' : 'size-4')}
+            aria-hidden
+          />
+          {!compact && <span className="text-[8px] leading-3">{t('composer.deck.tile')}</span>}
         </button>
       ) : (
         <div
           role="group"
           aria-label={t('composer.deck.count', { n: visible.length })}
           data-testid="deck-strip"
-          className="relative h-16 w-12"
+          className={cn(
+            // Rides the composer's 0.36s spring so the deck and bar move as one.
+            'relative transition-[width,height] duration-[360ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]',
+            compact ? 'h-10 w-[30px]' : 'h-16 w-12'
+          )}
           onMouseEnter={() => setPileHovered(true)}
           onMouseLeave={() => {
             setPileHovered(false)
@@ -148,7 +177,7 @@ export function ReferenceDeck({
                   zIndex: hoveredId === material.id ? 40 : 20 - depth,
                   opacity: expanded ? 1 : 1 - depth * 0.16,
                   transform: expanded
-                    ? `translate(${depth * 40}px, 0) rotate(${fanRotations[depth]}deg)`
+                    ? `translate(${depth * fanPitch}px, 0) rotate(${fanRotations[depth]}deg)`
                     : `translate(${depth * 3}px, ${depth * -2}px) rotate(${pileRotations[depth]}deg) scale(${1 - depth * 0.025})`
                 }}
                 onMouseEnter={() => setHoveredId(material.id)}
@@ -184,6 +213,7 @@ export function ReferenceDeck({
                   }}
                   className={cn(
                     cardFace,
+                    compact ? 'rounded-[5px]' : 'rounded-lg',
                     'relative outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50',
                     isTop && 'animate-in fade-in-0 zoom-in-95'
                   )}
@@ -204,13 +234,14 @@ export function ReferenceDeck({
                   onFocus={() => setFocusedId(material.id)}
                   onClick={() => onRemove(material.id)}
                   className={cn(
-                    'border-foreground/10 bg-input text-foreground absolute -top-2 -right-2 grid size-7 place-items-center rounded-full border shadow-md transition-[opacity,transform] duration-[180ms] ease-out outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50',
+                    'border-foreground/10 bg-input text-foreground absolute grid place-items-center rounded-full border shadow-md transition-[opacity,transform] duration-[180ms] ease-out outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50',
+                    compact ? '-top-[5px] -right-[5px] size-[17.5px]' : '-top-2 -right-2 size-7',
                     showRemove
                       ? 'translate-y-0 scale-100 opacity-100'
                       : 'pointer-events-none translate-y-[3px] scale-[0.98] opacity-0'
                   )}
                 >
-                  <XIcon className="size-3.5" aria-hidden />
+                  <XIcon className={compact ? 'size-2.5' : 'size-3.5'} aria-hidden />
                 </button>
               </div>
             )
@@ -219,21 +250,32 @@ export function ReferenceDeck({
             <button
               type="button"
               aria-label={t('composer.deck.add')}
-              onClick={() => fileInputRef.current?.click()}
+              onPointerDown={openPickerOnPointerDown}
+              onClick={openPickerOnKeyboardClick}
               className={cn(
                 'border-foreground/10 bg-input text-foreground absolute inset-0 z-30 flex items-center justify-center border shadow-md transition-[transform,background-color] duration-200 ease-out outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50',
                 expanded
-                  ? 'text-muted-foreground hover:bg-accent hover:text-foreground h-16 w-12 flex-col gap-1 rounded-lg'
-                  : 'hover:bg-accent size-7 rounded-full'
+                  ? compact
+                    ? 'text-muted-foreground hover:bg-accent hover:text-foreground h-10 w-[30px] rounded-lg'
+                    : 'text-muted-foreground hover:bg-accent hover:text-foreground h-16 w-12 flex-col gap-1 rounded-lg'
+                  : compact
+                    ? 'hover:bg-accent size-[17.5px] rounded-full'
+                    : 'hover:bg-accent size-7 rounded-full'
               )}
               style={{
+                // The collapsed circle rides the pile's bottom-right corner.
                 transform: expanded
-                  ? `translate(${visible.length * 40}px, 0) rotate(-4deg)`
-                  : 'translate(28px, 36px)'
+                  ? `translate(${visible.length * fanPitch}px, 0) rotate(-4deg)`
+                  : compact
+                    ? 'translate(17.5px, 22.5px)'
+                    : 'translate(28px, 36px)'
               }}
             >
-              <PlusIcon className="size-4 shrink-0 stroke-[1.5]" aria-hidden />
-              {expanded ? (
+              <PlusIcon
+                className={cn('shrink-0 stroke-[1.5]', compact ? 'size-2.5' : 'size-4')}
+                aria-hidden
+              />
+              {expanded && !compact ? (
                 <span className="text-[8px] leading-3">{t('composer.deck.tile')}</span>
               ) : null}
             </button>
