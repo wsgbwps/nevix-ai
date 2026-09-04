@@ -79,18 +79,19 @@ const menuLabelClass = 'text-muted-foreground px-2.5 pb-1.5 pt-1 text-[11px]'
 const menuItemClass = 'h-9 cursor-pointer rounded-lg px-2.5 text-[13px]'
 
 // Dual-state geometry (px). These constants mirror the Tailwind classes on
-// the same elements (h-24, min-h-16, py-1 + leading-5, bottom-3) and drift
+// the same elements (h-28, min-h-20, py-1 + leading-5, bottom-4) and drift
 // silently if changed apart. The deck keeps the compact row a constant 40px
 // with or without references; the submit circle centers on the h-8 control
 // row when expanded (the padding edge itself) and on the main row when
 // compact.
-const EXPANDED_MAX_WIDTH = 820
-const COMPACT_MAX_WIDTH = 480
-const ROW_HEIGHT = 64
+/** Expanded column width (px); the workbench page's gallery container aligns to it. */
+export const EXPANDED_MAX_WIDTH = 992
+const COMPACT_MAX_WIDTH = 622
+const ROW_HEIGHT = 80
 const ROW_COMPACT_HEIGHT = 40
-const PROMPT_HEIGHT = 96
+const PROMPT_HEIGHT = 112
 const PROMPT_COMPACT_HEIGHT = 28
-const SUBMIT_BOTTOM = 12
+const SUBMIT_BOTTOM = 16
 const SUBMIT_SIZE = 32
 
 /**
@@ -216,7 +217,7 @@ export function CreationComposer({
   return (
     <div
       ref={wrapperRef}
-      className="absolute right-6 bottom-5 left-6 z-20 mx-auto max-w-[820px]"
+      className="absolute right-6 bottom-5 left-6 z-20 mx-auto max-w-[992px]"
       data-testid="composer"
     >
       {backToBottomVisible && (
@@ -243,7 +244,7 @@ export function CreationComposer({
           }
           document.getElementById('composer-prompt')?.focus()
         }}
-        className="bg-card relative rounded-[22px] border p-3 shadow-2xl"
+        className="bg-card relative rounded-[22px] border p-4 shadow-2xl"
       >
         {unavailableLine !== null && (
           <p
@@ -254,7 +255,7 @@ export function CreationComposer({
             {unavailableLine}
           </p>
         )}
-        <div ref={rowRef} className="flex min-h-16 items-start gap-3">
+        <div ref={rowRef} className="flex min-h-20 items-start gap-3">
           <div className="min-w-0 shrink">
             <ReferenceDeck
               compact={!expanded}
@@ -302,7 +303,7 @@ export function CreationComposer({
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <div ref={promptRef} className="h-24 w-full">
+            <div ref={promptRef} className="h-28 w-full">
               <PromptEditor
                 document={draft.promptDocument}
                 documentKey={`${workbench.ports?.userId ?? ''}:${workbench.composingNew ? 'new' : (workbench.selectedId ?? 'inactive')}`}
@@ -380,7 +381,7 @@ export function CreationComposer({
           aria-disabled={workbench.submitDisabled}
           data-testid="composer-submit"
           className={
-            'absolute right-3 bottom-3 flex size-8 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ' +
+            'absolute right-4 bottom-4 flex size-8 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ' +
             (workbench.submitDisabled
               ? 'bg-accent text-muted-foreground'
               : 'bg-cyan-600 text-white hover:bg-cyan-500 dark:bg-cyan-500 dark:hover:bg-cyan-400')

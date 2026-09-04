@@ -105,9 +105,10 @@ const mediaKeys = {
 
 const galleryGridClass = 'grid grid-cols-2 gap-2 md:grid-cols-4'
 
-// Quiet borderless affordances for the task's action row.
+// Task action chips carry a persistent subtle fill so consecutive task cards
+// read as separate groups; hover deepens it via accent.
 const quietButtonClass =
-  'text-muted-foreground hover:bg-accent hover:text-foreground flex h-7 items-center gap-1 rounded-lg px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50'
+  'text-muted-foreground bg-foreground/[0.06] hover:bg-accent hover:text-foreground flex h-8 items-center gap-1 rounded-md px-2.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50'
 
 export function ResultGallery({
   workbench
@@ -124,7 +125,7 @@ export function ResultGallery({
     )
   }
   return (
-    <div className="flex flex-col gap-8" data-testid="result-gallery">
+    <div className="flex flex-col gap-10" data-testid="result-gallery">
       {[...tasks].reverse().map((task) => (
         <TaskCard key={task.id} workbench={workbench} task={task} />
       ))}
@@ -216,7 +217,7 @@ function TaskCard({
           onClick={focusComposerPrompt}
           className={quietButtonClass}
         >
-          <PencilLineIcon className="size-3" aria-hidden />
+          <PencilLineIcon className="size-3.5" aria-hidden />
           {t('gallery.actions.reedit')}
         </button>
         {!terminal && (
@@ -226,7 +227,7 @@ function TaskCard({
             onClick={() => workbench.cancelTask(task.id)}
             className={quietButtonClass}
           >
-            <BanIcon className="size-3" aria-hidden />
+            <BanIcon className="size-3.5" aria-hidden />
             {t('gallery.actions.cancel')}
           </button>
         )}
@@ -238,7 +239,7 @@ function TaskCard({
             disabled={workbench.submitDisabled}
             className={`${quietButtonClass} disabled:opacity-50`}
           >
-            <RefreshCwIcon className="size-3" aria-hidden />
+            <RefreshCwIcon className="size-3.5" aria-hidden />
             {t('gallery.actions.regenerate')}
           </button>
         )}
@@ -249,7 +250,7 @@ function TaskCard({
               aria-label={String(t('gallery.actions.more'))}
               className={quietButtonClass}
             >
-              <MoreHorizontalIcon className="size-3.5" aria-hidden />
+              <MoreHorizontalIcon className="size-4" aria-hidden />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-44 rounded-xl">
               {retryUncompleted && (

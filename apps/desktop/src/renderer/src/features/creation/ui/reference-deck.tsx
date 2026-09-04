@@ -310,10 +310,10 @@ export function ReferenceDeck({
           onPointerDown={openPickerOnPointerDown}
           onClick={openPickerOnKeyboardClick}
           className={
-            'text-muted-foreground bg-accent hover:border-foreground/10 hover:bg-input hover:text-foreground flex items-center justify-center rounded-lg border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-sky-400/45 ' +
+            'text-muted-foreground bg-accent hover:border-foreground/10 hover:bg-input hover:text-foreground flex items-center justify-center border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-sky-400/45 ' +
             (compact
-              ? 'h-10 w-[30px] transition-[width,height,transform,color,background-color,border-color] duration-[360ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]'
-              : 'h-16 w-12 flex-col gap-1 transition-[transform,color,background-color] duration-200 ease-out')
+              ? 'h-10 w-[30px] rounded-md transition-[width,height,transform,color,background-color,border-color] duration-[360ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]'
+              : 'h-16 w-12 flex-col gap-1 rounded-lg transition-[transform,color,background-color] duration-200 ease-out')
           }
           style={isAppendAim ? { transform: 'scale(1.08)' } : undefined}
         >

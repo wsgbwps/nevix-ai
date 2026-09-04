@@ -18,7 +18,7 @@ import type { CreationSessionView } from '../api/go-creation-http'
 import { useCreationWorkbench } from '../model/use-workbench'
 import { textPromptDocument } from '../model/prompt-document'
 import { ComposerMenuContent } from './composer-menu-content'
-import { CreationComposer } from './composer'
+import { CreationComposer, EXPANDED_MAX_WIDTH } from './composer'
 import { ResultGallery } from './result-gallery'
 import { isScrolledToBottom } from './use-composer-presence'
 
@@ -202,7 +202,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                   />
                 </div>
               ) : (
-                <div className="mx-auto max-w-[820px] pt-16">
+                <div className="mx-auto pt-16" style={{ maxWidth: EXPANDED_MAX_WIDTH }}>
                   <div className="mb-3 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <h1 className="text-foreground truncate text-base font-semibold">
