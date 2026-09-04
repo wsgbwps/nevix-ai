@@ -866,10 +866,18 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [loadImageThumbnail, ports]
   )
 
-  /** Drops one material from every local record; the caller settles its
-   * bytes (pending file vs server delete) around this. */
+  /** Drops one material from every local record, thumbnail entry included —
+   * a stale entry would leave consumers (task-card piles) holding a revoked
+   * object URL; the caller settles its bytes (pending file vs server
+   * delete) around this. */
   const forgetMaterialRecords = useCallback((materialId: string): void => {
     setMaterials((current) => current.filter((material) => material.id !== materialId))
+    setThumbnails((current) => {
+      if (!(materialId in current)) return current
+      const next = { ...current }
+      delete next[materialId]
+      return next
+    })
     materialsRef.current = materialsRef.current.filter((material) => material.id !== materialId)
     materialIdsRef.current = new Set(
       [...materialIdsRef.current].filter((candidate) => candidate !== materialId)
@@ -1314,12 +1322,6 @@ export function useCreationWorkbench(): CreationWorkbenchController {
           await ports.deleteMaterial(materialId).catch(() => undefined)
         }
         forgetMaterialRecords(materialId)
-        setThumbnails((current) => {
-          if (!(materialId in current)) return current
-          const next = { ...current }
-          delete next[materialId]
-          return next
-        })
         // Splice the new binding into the replaced position; its role derives
         // from the mode exactly as a fresh add at that position would.
         const kept = draftRef.current.references.filter(

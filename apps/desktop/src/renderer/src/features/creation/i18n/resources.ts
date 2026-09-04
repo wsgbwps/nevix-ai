@@ -96,6 +96,15 @@ export const creationTranslations = defineResourceTranslations({
           task: '任务 ID',
           createdAt: '创建时间'
         },
+        references: {
+          pile: '参考素材 {{n}} 个'
+        },
+        role: {
+          reference: '参考',
+          firstFrame: '首帧',
+          lastFrame: '尾帧',
+          omni: '全能参考'
+        },
         backToBottom: '回到底部',
         indeterminate: {
           title: '重做结果未知的任务',
@@ -359,6 +368,15 @@ export const creationTranslations = defineResourceTranslations({
           references: 'References',
           task: 'Task ID',
           createdAt: 'Created'
+        },
+        references: {
+          pile: '{{n}} reference materials'
+        },
+        role: {
+          reference: 'Reference',
+          firstFrame: 'First frame',
+          lastFrame: 'Last frame',
+          omni: 'Omni'
         },
         backToBottom: 'Back to bottom',
         indeterminate: {

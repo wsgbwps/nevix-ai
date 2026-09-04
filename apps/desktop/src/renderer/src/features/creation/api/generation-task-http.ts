@@ -5,7 +5,7 @@
  * SSE stream is a fetch-stream with the bearer in the header (never the URL)
  * and no Last-Event-ID semantics — a lost stream is answered by a refetch.
  */
-import type { CreationApiResult, DraftReferenceView } from './go-creation-http'
+import type { CreationApiResult, DraftReferenceView, MaterialKind } from './go-creation-http'
 import { request } from './go-creation-http'
 
 /** One generation task's one-way status (contracts GenerationTask.status). */
@@ -88,8 +88,16 @@ export interface GenerationTaskView {
   readonly terminalAt: string | null
 }
 
+/** One reference inside the task's frozen specification: the material's
+ * identity and the role it played, never its session-scoped bytes. */
+export interface GenerationSpecificationReferenceView {
+  readonly materialId: string
+  readonly role: string
+  readonly kind: MaterialKind
+}
+
 /** The task's frozen generation intent (contracts specification), reduced to
- * the facts the gallery displays; references are validated but only counted. */
+ * the facts the gallery displays. */
 export interface GenerationSpecificationView {
   readonly prompt: string
   readonly model: string
@@ -98,7 +106,7 @@ export interface GenerationSpecificationView {
   readonly resolution: string | null
   readonly quantity: number
   readonly durationSeconds: number | null
-  readonly referenceCount: number
+  readonly references: readonly GenerationSpecificationReferenceView[]
 }
 
 export interface GenerationTaskDetail {
@@ -324,7 +332,7 @@ function parseSpecification(raw: unknown): GenerationSpecificationView | null {
   if (quantity === null || quantity === undefined || quantity < 1) return null
   const references = raw['references']
   if (!Array.isArray(references)) return null
-  let referenceCount = 0
+  const parsedReferences: GenerationSpecificationReferenceView[] = []
   for (const reference of references) {
     if (!isRecord(reference)) return null
     const materialId = str(reference, 'material_id')
@@ -333,7 +341,11 @@ function parseSpecification(raw: unknown): GenerationSpecificationView | null {
     if (materialId === null || role === null || kind === null) return null
     if (!SPEC_REFERENCE_KINDS.has(kind)) return null
     if (nullableNum(reference, 'claims_version') == null) return null
-    referenceCount++
+    parsedReferences.push({
+      materialId,
+      role,
+      kind: kind as GenerationSpecificationReferenceView['kind']
+    })
   }
   return {
     prompt,
@@ -343,7 +355,7 @@ function parseSpecification(raw: unknown): GenerationSpecificationView | null {
     resolution: nullableStr(raw, 'resolution') ?? null,
     durationSeconds: nullableNum(raw, 'duration_seconds') ?? null,
     quantity,
-    referenceCount
+    references: parsedReferences
   }
 }
 

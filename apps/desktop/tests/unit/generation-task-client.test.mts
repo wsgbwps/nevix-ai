@@ -179,7 +179,9 @@ test('the frozen specification rides the detail into the gallery view', async ()
     resolution: '2K',
     quantity: 2,
     durationSeconds: null,
-    referenceCount: 1
+    references: [
+      { materialId: 'cccccccc-0000-4000-8000-000000000003', role: 'reference', kind: 'image' }
+    ]
   })
 })
 

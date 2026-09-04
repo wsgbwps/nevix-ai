@@ -6,6 +6,7 @@ import {
   InfoIcon,
   MoreHorizontalIcon,
   PencilLineIcon,
+  QuoteIcon,
   RefreshCwIcon,
   RepeatIcon,
   TriangleAlertIcon
@@ -19,12 +20,14 @@ import {
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import type {
   GenerationSlotView,
+  GenerationSpecificationReferenceView,
   GenerationSpecificationView,
   GenerationTaskDetail,
   GenerationTaskView,
   SlotFailureDiagnosticSource,
   SlotFailureReason
 } from '../api/generation-task-http'
+import type { ReferenceMaterialView } from '../api/go-creation-http'
 import type { CreationWorkbenchController } from '../model/use-workbench'
 import { slotResultFilename } from '../lib/result-filename'
 import {
@@ -88,13 +91,28 @@ const mediaKeys = {
   video: 'composer.media.video'
 } as const
 
+// Reference kinds resolve through the deck's kind vocabulary so a card's
+// glyph speaks the same words as the composer's pile.
+const referenceKindKeys = {
+  image: 'composer.deck.kind.image',
+  video: 'composer.deck.kind.video',
+  audio: 'composer.deck.kind.audio'
+} as const
+
+const roleKeys = {
+  reference: 'gallery.role.reference',
+  first_frame: 'gallery.role.firstFrame',
+  last_frame: 'gallery.role.lastFrame',
+  omni: 'gallery.role.omni'
+} as const
+
 /**
  * The borderless result gallery: tasks read old→new so the newest card sits
  * nearest the composer at the bottom — the server pages tasks newest-first,
  * and the reversal is display-only. Every task renders three stacked blocks
- * (the prompt with its parameter row, the slot strip, the task actions), and
- * states live inside the slots; there is no separate banner to correlate
- * with.
+ * (the header — the frozen reference pile, prompt, and parameter row — the
+ * slot strip, the task actions), and states live inside the slots; there is
+ * no separate banner to correlate with.
  *
  * Each card reads the prompt and parameters from the task's own frozen
  * Generation Specification in its detail — never the session draft, which
@@ -162,40 +180,50 @@ function TaskCard({
       data-testid={`task-${task.id}`}
       className="animate-in fade-in slide-in-from-bottom-2 flex flex-col gap-2.5 duration-300"
     >
-      <div className="flex flex-col gap-1">
-        {spec !== null && spec.prompt.length > 0 && (
-          <div className="group/prompt relative">
-            <p className="text-foreground/80 line-clamp-2 text-xs leading-5">{spec.prompt}</p>
-            {/* Hover expansion overlays the card without reflowing it; the
-                clone stays a wrapper descendant, so wrapper:hover — not the
-                clone's own hover — holds it open and it cannot flicker. */}
-            <p
-              aria-hidden
-              className="text-foreground/80 bg-background invisible absolute inset-x-0 top-0 z-10 pb-1 text-xs leading-5 group-hover/prompt:visible"
-            >
-              {spec.prompt}
-            </p>
-          </div>
+      <div className="flex items-start gap-2.5">
+        {spec !== null && spec.references.length > 0 && (
+          <TaskReferencePile
+            taskId={task.id}
+            references={spec.references}
+            materials={workbench.materials}
+            thumbnails={workbench.thumbnails}
+          />
         )}
-        <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
-          <span className="text-foreground/70 font-medium">{t(statusKey(task.status))}</span>
-          <span>
-            {t(mediaKeys[task.mediaType])}
-            {spec !== null && ` · ${spec.model}`}
-          </span>
-          {spec?.ratio != null && (
-            <>
-              <MetaSeparator />
-              <span>{spec.ratio}</span>
-            </>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          {spec !== null && spec.prompt.length > 0 && (
+            <div className="group/prompt relative">
+              <p className="text-foreground/80 line-clamp-2 text-xs leading-5">{spec.prompt}</p>
+              {/* Hover expansion overlays the card without reflowing it; the
+                  clone stays a wrapper descendant, so wrapper:hover — not the
+                  clone's own hover — holds it open and it cannot flicker. */}
+              <p
+                aria-hidden
+                className="text-foreground/80 bg-background invisible absolute inset-x-0 top-0 z-10 pb-1 text-xs leading-5 group-hover/prompt:visible"
+              >
+                {spec.prompt}
+              </p>
+            </div>
           )}
-          {spec?.resolution != null && (
-            <>
-              <MetaSeparator />
-              <span>{spec.resolution}</span>
-            </>
-          )}
-          <TaskDetailsMenu task={task} spec={spec} />
+          <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
+            <span className="text-foreground/70 font-medium">{t(statusKey(task.status))}</span>
+            <span>
+              {t(mediaKeys[task.mediaType])}
+              {spec !== null && ` · ${spec.model}`}
+            </span>
+            {spec?.ratio != null && (
+              <>
+                <MetaSeparator />
+                <span>{spec.ratio}</span>
+              </>
+            )}
+            {spec?.resolution != null && (
+              <>
+                <MetaSeparator />
+                <span>{spec.resolution}</span>
+              </>
+            )}
+            <TaskDetailsMenu task={task} spec={spec} />
+          </div>
         </div>
       </div>
       <div className={galleryGridClass}>
@@ -319,6 +347,90 @@ function MetaSeparator(): React.JSX.Element {
   )
 }
 
+// The card's reference pile replicates the deck's fan in a static, read-only
+// form: deck-faced cards overlap left→right with alternating tilts, the
+// later position on top (Reference Material, CONTEXT.md, covers the
+// frozen-identity boundary). The pitch compresses so any frozen reference
+// count stays inside the header row.
+const fanRotations = [-5, 3, -3, 4, -4, 2.5]
+const pileShifts = [0, -1.5, 1.5]
+const pileCardWidth = 34
+const pileCardHeight = 44
+const pileMaxWidth = 104
+
+function TaskReferencePile({
+  taskId,
+  references,
+  materials,
+  thumbnails
+}: {
+  readonly taskId: string
+  readonly references: readonly GenerationSpecificationReferenceView[]
+  readonly materials: readonly ReferenceMaterialView[]
+  readonly thumbnails: Readonly<Record<string, string>>
+}): React.JSX.Element {
+  const { t } = useTranslation('creation')
+  const byId = new Map(materials.map((material) => [material.id, material] as const))
+  const pitch =
+    references.length > 1
+      ? Math.min(16, (pileMaxWidth - pileCardWidth) / (references.length - 1))
+      : 0
+  return (
+    <div
+      role="group"
+      aria-label={String(t('gallery.references.pile', { n: references.length }))}
+      data-testid={`task-references-${taskId}`}
+      className="relative shrink-0 self-start"
+      style={{
+        width: pileCardWidth + pitch * (references.length - 1),
+        height: pileCardHeight
+      }}
+    >
+      {references.map((reference, position) => {
+        const material = byId.get(reference.materialId)
+        // Unknown frozen roles fall back to their raw wire value, like the
+        // details menu's modes do.
+        const role =
+          reference.role in roleKeys
+            ? String(t(roleKeys[reference.role as keyof typeof roleKeys]))
+            : reference.role
+        const title = material === undefined ? role : `${material.fileName} · ${role}`
+        return (
+          <div
+            key={position}
+            title={title}
+            className="border-foreground/20 bg-muted absolute top-0 overflow-hidden rounded-[5px] border shadow-sm"
+            style={{
+              left: position * pitch,
+              width: pileCardWidth,
+              height: pileCardHeight,
+              zIndex: position,
+              transform: `translateY(${pileShifts[position % pileShifts.length]}px) rotate(${fanRotations[position % fanRotations.length]}deg)`
+            }}
+          >
+            {thumbnails[reference.materialId] !== undefined ? (
+              <img
+                src={thumbnails[reference.materialId]}
+                alt=""
+                className="size-full object-cover"
+              />
+            ) : (
+              <span className="text-muted-foreground grid size-full place-items-center text-[10px] uppercase">
+                {String(t(referenceKindKeys[reference.kind]))}
+              </span>
+            )}
+          </div>
+        )
+      })}
+      {/* The quote badge marks the pile as task references; the icon mirrors
+          vertically so the marks point up like opening quotes. */}
+      <div className="absolute -bottom-1 -left-1 z-10 grid size-5 place-items-center rounded-full border border-white/15 bg-black text-white shadow-md">
+        <QuoteIcon className="size-2.5 -scale-y-100" aria-hidden />
+      </div>
+    </div>
+  )
+}
+
 /** The frozen-specification facts behind a task; while no detail (or no
  * specification in it) has arrived, only the task's own identity rows show. */
 function TaskDetailsMenu({
@@ -362,10 +474,10 @@ function TaskDetailsMenu({
                 value={String(t('composer.params.seconds', { n: spec.durationSeconds }))}
               />
             )}
-            {spec.referenceCount > 0 && (
+            {spec.references.length > 0 && (
               <DetailRow
                 label={t('gallery.details.references')}
-                value={String(spec.referenceCount)}
+                value={String(spec.references.length)}
               />
             )}
           </>

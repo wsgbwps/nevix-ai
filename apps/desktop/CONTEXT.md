@@ -73,6 +73,10 @@ _Avoid_: Official Featured Work, Channel Template, Static Example
 创作台中 User 正在编辑、仅留存于当前设备的生成意图；它随写随存于本设备，多设备互不相通，可以任意修改，尚未对任何生成结果负责，提交时才冻结为 Generation Specification。
 _Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 服务端草稿
 
+**Reference Material**:
+User 在创作台向当前会话上传、供生成引用的原始媒体（图片/视频/音频）；它属于会话、可独立删除，身份是素材 id。提交时冻结进 Generation Specification 的是对它的引用（素材 id、role、kind、claims 版本）而非素材本体；素材删除后任务里的冻结引用悬空，界面按素材缺失回退展示，不影响已生成结果。它与 Asset Library 的媒体资产分属两个生命阶段，V1 互不连通。
+_Avoid_: 素材库, Attachment, 上传文件
+
 **Reference Mention**:
 Draft 提示词内、随本地 Draft 持久化的结构化指代，稳定绑定当前已添加 Reference Material 的身份；界面将其呈现为不可拆分的行内 chip，并按当前参考素材顺序在各媒体类型内动态编号和本地化类型名称，不按素材 role 命名。它不决定素材是否参与生成，提交时按当前 Interface Language 展开为同一类型名称与编号的普通文本且不把身份冻结进 Generation Specification；V1 也不从主体库或 Asset Library 引入候选。
 _Avoid_: @文本, 素材名称, Reference Binding
