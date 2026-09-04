@@ -10,6 +10,7 @@ import type { GenerationTaskDetail, GenerationTaskView } from '../api/generation
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import { loadImageDimensions } from '../lib/image-dimensions'
 import { MaterialUrlOwner } from '../lib/material-url-owner'
+import { ResultBlobCache } from '../lib/result-blob-cache'
 import { resultFilename } from '../lib/result-filename'
 import { planFileDrop, type ResultDragPayload } from './reference-drop'
 import {
@@ -218,6 +219,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const thumbnailLoadRef = useRef(0)
   const materialUrlsRef = useRef<MaterialUrlOwner | null>(null)
   if (materialUrlsRef.current === null) materialUrlsRef.current = new MaterialUrlOwner()
+  const portsRef = useRef<CreationRuntime>(ports)
+  const resultBlobCacheRef = useRef<ResultBlobCache | null>(null)
 
   /** The version a persisted record/submission carries: what the composer
    * last saw, else the restored record's own, else the contract floor. */
@@ -277,6 +280,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     materialsRef.current = materials
     materialIdsRef.current = new Set(materials.map((material) => material.id))
     mentionKindLabelsRef.current = mentionKindLabels
+    portsRef.current = ports
   })
 
   useEffect(() => {
@@ -412,12 +416,13 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     }
   }, [adoptManifestDefaults, ports])
 
-  // The Feature-local owner revokes thumbnails and pending-file previews when
-  // this surface ends.
+  // The Feature-local owners revoke thumbnails, pending-file previews, and
+  // cached result URLs when this surface ends.
   useEffect(
     () => () => {
       thumbnailLoadRef.current += 1
       materialUrlsRef.current?.dispose()
+      resultBlobCacheRef.current?.dispose()
     },
     []
   )
@@ -502,6 +507,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         dropPendingMaterial(materialId)
       thumbnailLoadRef.current += 1
       materialUrlsRef.current?.dispose()
+      resultBlobCacheRef.current?.dispose()
       setSelectedId(session.id)
       selectedIdRef.current = session.id
       materialsRef.current = []
@@ -689,6 +695,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     }
     thumbnailLoadRef.current += 1
     materialUrlsRef.current?.dispose()
+    resultBlobCacheRef.current?.dispose()
     materialsRef.current = []
     setMaterials([])
     setThumbnails({})
@@ -747,6 +754,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         setSelectedId(null)
         thumbnailLoadRef.current += 1
         materialUrlsRef.current?.dispose()
+        resultBlobCacheRef.current?.dispose()
         materialsRef.current = []
         materialIdsRef.current = new Set()
         setMaterials([])
@@ -1160,10 +1168,23 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [retryTaskById]
   )
 
+  // The result cache's wire reads the live ports, so a reconnect re-crosses
+  // through the new client instead of a closure-held dead one; creation is
+  // deferred to call time because render-scope closures over refs are
+  // forbidden (react-hooks/refs).
+  const ensureResultBlobCache = useCallback((): ResultBlobCache => {
+    if (resultBlobCacheRef.current === null) {
+      resultBlobCacheRef.current = new ResultBlobCache(
+        (taskId, slotIndex) =>
+          portsRef.current?.loadResultBlob(taskId, slotIndex) ?? Promise.resolve(null)
+      )
+    }
+    return resultBlobCacheRef.current
+  }, [])
+
   const loadResultBlobUrlFor = useCallback(
-    (taskId: string, slotIndex: number) =>
-      ports?.loadResultBlobUrl(taskId, slotIndex) ?? Promise.resolve(null),
-    [ports]
+    (taskId: string, slotIndex: number) => ensureResultBlobCache().objectUrl(taskId, slotIndex),
+    [ensureResultBlobCache]
   )
 
   const loadMaterialPreviewBlob = useCallback(
@@ -1332,7 +1353,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     (payload: ResultDragPayload, targetMaterialId: string | null): void => {
       if (!ports) return
       void (async () => {
-        const blob = await ports.loadResultBlob(payload.taskId, payload.slotIndex).catch(() => null)
+        const blob = (await ensureResultBlobCache().blob(payload.taskId, payload.slotIndex)) ?? null
         if (!mountedRef.current) return
         if (blob === null) {
           setMaterialUploadFailed(true)
@@ -1348,7 +1369,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         else addMaterials([file])
       })()
     },
-    [addMaterials, ports, replaceMaterial]
+    [addMaterials, ports, replaceMaterial, ensureResultBlobCache]
   )
 
   return {

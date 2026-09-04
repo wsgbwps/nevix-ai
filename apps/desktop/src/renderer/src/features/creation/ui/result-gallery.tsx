@@ -457,14 +457,14 @@ function SlotCard({
   const { t } = useTranslation('creation')
   const [url, setUrl] = useState<string | null>(null)
   const succeeded = slot.status === 'succeeded'
+  const loadResultBlobUrl = workbench.loadResultBlobUrl
 
   // The verified output renders inside its slot; the blob rides the trusted
   // data plane like every other byte and is fetched exactly once.
   useEffect(() => {
     if (!succeeded) return
     let active = true
-    void workbench
-      .loadResultBlobUrl(taskId, slot.index)
+    void loadResultBlobUrl(taskId, slot.index)
       .then((blobUrl) => {
         if (active && blobUrl !== null) setUrl(blobUrl)
       })
@@ -472,7 +472,7 @@ function SlotCard({
     return () => {
       active = false
     }
-  }, [mediaType, succeeded, slot.index, taskId, workbench])
+  }, [mediaType, succeeded, slot.index, taskId, loadResultBlobUrl])
 
   // The download reuses the already-verified bytes (or loads them on demand)
   // and names the file after its task slot.

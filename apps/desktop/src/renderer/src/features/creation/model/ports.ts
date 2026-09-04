@@ -92,10 +92,9 @@ export interface CreationWorkspacePorts {
     taskId: string,
     idempotencyKey: string
   ) => Promise<CreationApiResult<GenerationTaskDetail>>
-  /** Streams one succeeded slot's verified output as bytes (ADR-0018 re-upload). */
+  /** Streams one succeeded slot's verified output as bytes; display URLs are
+   * derived Feature-locally by the result cache, never over this seam. */
   readonly loadResultBlob: (taskId: string, slotIndex: number) => Promise<Blob | null>
-  /** Streams one succeeded slot's verified output for display. */
-  readonly loadResultBlobUrl: (taskId: string, slotIndex: number) => Promise<string | null>
   /**
    * Opens the creator-scoped SSE invalidation stream; returns unsubscribe.
    * onStateChange mirrors liveness so the caller can poll while it is down.
@@ -176,8 +175,6 @@ export function createCreationWorkspacePorts(
       withTaskToken((client, token) => client.retryTask(token, taskId, idempotencyKey)),
     loadResultBlob: (taskId, slotIndex) =>
       withTaskToken((client, token) => client.loadResultBlob(token, taskId, slotIndex)),
-    loadResultBlobUrl: (taskId, slotIndex) =>
-      withTaskToken((client, token) => client.loadResultBlobUrl(token, taskId, slotIndex)),
     subscribeEvents: (handlers) =>
       openCreationEventStream(
         serverUrl,

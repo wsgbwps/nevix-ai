@@ -50,6 +50,19 @@ function uploadCalls(page: Page): Promise<ReadonlyArray<{ sessionId: string; nam
   return page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? [])
 }
 
+function resultBlobTransfers(
+  page: Page
+): Promise<ReadonlyArray<{ taskId: string; slotIndex: number }>> {
+  return page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers() ?? [])
+}
+
+/** Lets queued render effects flush, so a negative transfer assertion cannot
+ * race a pending re-fetch. */
+async function settleFrames(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))))
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))))
+}
+
 function deleteMaterialCalls(page: Page): Promise<string[]> {
   return page.evaluate(() => window.__creationDeckTest?.deleteMaterialCalls() ?? [])
 }
@@ -331,4 +344,60 @@ test('a dragged slot result re-uploads without fetching its object URL (renderer
 
   await expect.poll(() => uploadCalls(page)).toHaveLength(1)
   await expect(page.getByTestId('composer-upload-failed')).toHaveCount(0)
+})
+
+test('editing the deck does not re-transfer an already-rendered slot result', async ({
+  mount,
+  page
+}) => {
+  const taskId = 'eeeeeeee-0000-4000-8000-00000000000f'
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{
+        tasks: [
+          {
+            id: taskId,
+            sessionId: scriptedSessionId,
+            status: 'succeeded',
+            mediaType: 'image',
+            slotCount: 1,
+            cancelRequested: false,
+            terminalCause: null,
+            terminalAt: null,
+            createdAt: '2026-08-23T08:00:00Z',
+            updatedAt: '2026-08-23T08:00:05Z',
+            slots: [
+              {
+                index: 0,
+                status: 'succeeded',
+                failureReason: null,
+                result: {
+                  mimeType: 'image/png',
+                  byteSize: 64,
+                  checksumSha256: 'bb'.repeat(32),
+                  widthPx: 48,
+                  heightPx: 64,
+                  durationMs: null
+                }
+              }
+            ]
+          }
+        ]
+      }}
+    />
+  )
+  await selectFirstSession(page)
+
+  // The verified bytes cross the data plane exactly once, when the slot
+  // first renders.
+  await expect(page.getByTestId(`slot-${taskId}-0`).locator('img')).toBeVisible()
+  expect(await resultBlobTransfers(page)).toHaveLength(1)
+
+  // A deck edit re-renders the whole workbench; the gallery must keep riding
+  // that first transfer instead of downloading the result again.
+  await dropOn(page, '[data-testid="reference-deck"]', [{ name: 'photo.png', type: 'image/png' }])
+  await expect(page.locator('[data-testid="deck-strip"] [data-material-id]')).toHaveCount(3)
+  await settleFrames(page)
+
+  expect(await resultBlobTransfers(page)).toHaveLength(1)
 })

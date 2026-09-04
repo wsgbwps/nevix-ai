@@ -230,6 +230,7 @@ export interface DeckTestControls {
   draftRecord(key: string): LocalDraftRecord | null
   deleteMaterialCalls(): string[]
   materialBlobCalls(): ReadonlyArray<{ materialId: string; aborted: boolean }>
+  resultBlobTransfers(): ReadonlyArray<{ taskId: string; slotIndex: number }>
   releaseMaterialBlobs(): void
   uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
   taskCalls(): ReadonlyArray<{
@@ -311,6 +312,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const createdSessions: Array<{ name: string }> = []
   const renameCalls: Array<{ sessionId: string; name: string }> = []
   const deletedSessionIds: string[] = []
+  const resultBlobTransfers: Array<{ taskId: string; slotIndex: number }> = []
   let releaseManifestResponse: (() => void) | null = null
   const manifestReady = options.manifestDeferred
     ? new Promise<void>((resolve) => {
@@ -342,6 +344,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     draftRecord: (key) => readLocalDraft(localStorage, storyUserId, key),
     deleteMaterialCalls: () => deletedIds,
     materialBlobCalls: () => materialBlobCalls,
+    resultBlobTransfers: () => resultBlobTransfers,
     releaseMaterialBlobs: () => {
       for (const release of materialBlobReleases) release()
       materialBlobReleases.clear()
@@ -532,8 +535,12 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     },
     // A real blob: URL, never a data: stand-in — a fake would hide any
     // path that fetches the object URL (which the renderer CSP forbids).
-    loadResultBlob: async () => resultBlob(),
-    loadResultBlobUrl: async () => URL.createObjectURL(resultBlob()),
+    // Transfers are counted so tests can assert how often the data plane
+    // actually moved a slot's bytes.
+    loadResultBlob: async (taskId, slotIndex) => {
+      resultBlobTransfers.push({ taskId, slotIndex })
+      return resultBlob()
+    },
     subscribeEvents: (handlers) => {
       taskState.eventHandlers = handlers
       return () => {

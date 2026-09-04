@@ -398,7 +398,6 @@ export function createGenerationTaskClient(serverUrl: string): {
     idempotencyKey: string
   ): Promise<CreationApiResult<GenerationTaskDetail>>
   loadResultBlob(token: string, taskId: string, slotIndex: number): Promise<Blob | null>
-  loadResultBlobUrl(token: string, taskId: string, slotIndex: number): Promise<string | null>
 } {
   async function detailOf(
     result: Awaited<ReturnType<typeof request>>
@@ -484,11 +483,7 @@ export function createGenerationTaskClient(serverUrl: string): {
           token
         })
       ),
-    loadResultBlob,
-    loadResultBlobUrl: async (token, taskId, slotIndex) => {
-      const blob = await loadResultBlob(token, taskId, slotIndex)
-      return blob === null ? null : URL.createObjectURL(blob)
-    }
+    loadResultBlob
   }
 }
 
