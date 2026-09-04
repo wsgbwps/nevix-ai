@@ -4,7 +4,13 @@ import { appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const CLASSIFICATIONS = ["desktop", "server", "e2e", "harness"];
+const CLASSIFICATIONS = [
+  "desktop",
+  "server",
+  "windows_native",
+  "macos_native",
+  "harness",
+];
 
 function startsWith(path, prefix) {
   return path === prefix || path.startsWith(`${prefix}/`);
@@ -14,10 +20,9 @@ function isOneOf(path, values) {
   return values.includes(path);
 }
 
-// apps/desktop 下不改变应用运行时行为的路径:文档与根级 markdown、
-// 本地测试产物,以及只由 Desktop CI 自己执行的 unit/component 测试。
-// 它们不值得为一次 PR 启动整套 E2E 栈(Go server + PostgreSQL + Electron)
-// 的 Smoke E2E。
+// apps/desktop 下不改变应用运行时行为的路径：文档与根级 markdown、
+// 本地测试产物，以及已由 Linux Desktop CI 执行的 unit/component 测试。
+// 这些路径不启动平台 Native Smoke。
 function isDesktopNonRuntimePath(path) {
   if (
     startsWith(path, "apps/desktop/docs") ||
@@ -29,6 +34,26 @@ function isDesktopNonRuntimePath(path) {
   }
   const relative = path.slice("apps/desktop/".length);
   return !relative.includes("/") && relative.endsWith(".md");
+}
+
+function isMacOSNativePath(path) {
+  return (
+    startsWith(path, "apps/desktop/src/main") ||
+    startsWith(path, "apps/desktop/src/preload") ||
+    startsWith(path, "apps/desktop/src/shared") ||
+    startsWith(path, "apps/desktop/build") ||
+    startsWith(path, "apps/desktop/tests/window") ||
+    isOneOf(path, [
+      "apps/desktop/electron-builder.yml",
+      "apps/desktop/electron.vite.config.ts",
+      "apps/desktop/package.json",
+      "apps/desktop/playwright.config.ts",
+      "apps/desktop/scripts/run-native-smoke.mjs",
+      "apps/desktop/tests/auth/native-secure-persistence.spec.ts",
+      "apps/desktop/tests/helpers/electron-app.ts",
+      "apps/desktop/tests/startup/renderer-readiness.spec.ts",
+    ])
+  );
 }
 
 export function classifyPaths(paths) {
@@ -43,33 +68,20 @@ export function classifyPaths(paths) {
     if (startsWith(path, "apps/desktop")) {
       checks.add("desktop");
       if (!isDesktopNonRuntimePath(path)) {
-        checks.add("e2e");
+        checks.add("windows_native");
+        if (isMacOSNativePath(path)) checks.add("macos_native");
       }
     }
 
     if (startsWith(path, "server")) checks.add("server");
-    // identity 与 creation 的服务端与契约变化跑 Server CI（集成套件在
-    // server-ci 内联）并触发 E2E（Desktop harness 会拉起真 server）。
-    if (
-      startsWith(path, "server/internal/identity") ||
-      startsWith(path, "server/internal/creation") ||
-      isOneOf(path, ["server/go.mod", "server/go.sum"])
-    ) {
-      checks.add("e2e");
-    }
-    if (startsWith(path, "server/cmd/server")) checks.add("e2e");
 
     // deploy 交付资产（公网 Compose/Nginx/证书生命周期）由 harness 内联的
     // deploy-stack 结构测试验证：端口暴露、摘要钉扎、TLS 与流式合同。
     // 不改产品运行时代码，无需产品套件。
     if (startsWith(path, "deploy")) checks.add("harness");
 
-    // contracts 是 Desktop ↔ Server 的 seam:server 契约一致性测试与 Desktop
-    // 消费端都依赖它。
-    if (startsWith(path, "contracts")) {
-      checks.add("server");
-      checks.add("e2e");
-    }
+    // contracts 的自动门禁由 Server CI 拥有；跨层验收留给本地 Full E2E。
+    if (startsWith(path, "contracts")) checks.add("server");
 
     // 专用集成 harness 入口随其服务端面一起触发 Server CI。
     if (
@@ -90,18 +102,15 @@ export function classifyPaths(paths) {
       isOneOf(path, ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"])
     ) {
       checks.add("desktop");
-      checks.add("e2e");
+      checks.add("windows_native");
+      checks.add("macos_native");
       checks.add("harness");
     }
     if (path === "turbo.json") checks.add("desktop");
-    if (isOneOf(path, ["go.work", "go.work.sum"])) {
-      checks.add("server");
-      checks.add("e2e");
-    }
+    if (isOneOf(path, ["go.work", "go.work.sum"])) checks.add("server");
 
     if (path === ".github/workflows/desktop-ci.yml") checks.add("desktop");
     if (path === ".github/workflows/server-ci.yml") checks.add("server");
-    if (path === ".github/workflows/desktop-e2e-ci.yml") checks.add("e2e");
     if (
       startsWith(path, ".codegraph") ||
       startsWith(path, ".agents") ||

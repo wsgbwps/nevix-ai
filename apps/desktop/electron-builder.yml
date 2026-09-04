@@ -39,15 +39,6 @@ mac:
   notarize: false
 dmg:
   artifactName: Nevix-AI-${version}.${ext}
-linux:
-  target:
-    - AppImage
-    - snap
-    - deb
-  maintainer: electronjs.org
-  category: Utility
-appImage:
-  artifactName: Nevix-AI-${version}.${ext}
 npmRebuild: false
 publish:
   provider: generic

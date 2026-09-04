@@ -1,21 +1,50 @@
-# E2E 测试分层：开发循环跑 Smoke，候选 SHA 跑 Full E2E
+# Desktop 测试分层：CI 跑 Native Smoke，本地 Mac 跑 Full E2E
 
-Desktop 的 Electron E2E 此前只有一条本地命令：四次构建加全部 spec 串行执行，CI 完全不跑——认证主链路没有任何自动门禁，本地每次全量又成为瓶颈。我们把 E2E 分为两层：**Smoke Suite**（spec 以 `@smoke` tag 标注，只做一次 test 模式构建，墙钟预算 10 分钟）用于开发循环和需要提前反馈的 pull request；**Full E2E Suite**（配置失败构建加全部 spec）在触及 Desktop 或 Auth Harness 输入的 `ready/<sha>` candidate push 与手动 `workflow_dispatch` 时执行，作为进入 `main` 前的信号。始终运行的 `CI gate` 按路径调用相应层级，文档和本地开发配置改动不启动 E2E。CI 中 Auth Harness 环境缺失必须 fail 而不是静默 skip（Linux runner 只有 basic_text 后端，需 `NEVIX_TEST_FORCE_BASIC_TEXT_STORAGE=1` 才会真正执行 Session 持久化路径）。当前 GitHub Free 私有仓库不开 required status check；本地 landing 与 hooks 防止误操作，但不构成服务器端不可绕过控制。若服务器端门禁可用，只应将 `CI gate` 设为必需检查。
+2026-09-04 起，Desktop 交付使用四层验证：Linux 基础检查、PR 的 source Native
+Smoke、本地 Mac Full E2E，以及发布候选的 packaged Native Smoke。本决策取代此前
+在 Ubuntu/Xvfb 中运行 Desktop Smoke/Full E2E 的 CI 分层。
+
+## Decision
+
+- Linux CI 只运行 Desktop lint、架构检查、typecheck、unit、component 与 build；Server
+  测试仍由 Server CI 拥有。Linux 不再运行 Electron E2E，也不是 Desktop 打包目标。
+- 所有改变 Desktop 运行时的 PR 在 `windows-latest` 运行 source Native Smoke。触及
+  `src/main/`、`src/preload/`、`src/shared/`、`build/`、Electron/打包配置、依赖清单或
+  Native Smoke 自身时，同时在 `macos-latest` 运行。Desktop 文档、`test-results/`、
+  unit 与 component 测试不启动 Native Smoke。
+- `@native-smoke` 套件不启动 Go、PostgreSQL、Docker、TLS 或外部网络。它验证 Renderer
+  首次提交、原生编辑菜单与剪贴板快捷键、窗口状态跨重启恢复，并通过真实
+  Keychain/DPAPI 写入 Session 与 Remembered Email：文件不得含明文，重启后必须可读，
+  clear 后必须消失。目标平台的安全后端不可用时直接失败，不允许 skip 或明文降级。
+- `make test-e2e` / `pnpm test:e2e` 保留为本地 Mac Full E2E，继续使用现有 Docker
+  harness。认证、Session、连接/TLS、安全边界改动与发布前检查必须运行并在 PR
+  或发布记录中注明结果。Server 与 `contracts/` 变更的自动门禁只触发 Server CI，跨层
+  验收由这一本地 Full E2E 承担。
+- `v*` tag 与 Desktop workflow 手动触发都在 macOS/Windows 并行打包，然后直接启动
+  `.app` 或 `win-unpacked/Nevix AI.exe` 运行 packaged Native Smoke。不测试 DMG/NSIS
+  安装与卸载，也不在此流程发布 artifact。
+- Native source job 预算 10 分钟，发布打包 job 预算 30 分钟；沿用 Playwright 在 CI
+  中的一次 retry。失败截图与 Electron 日志保留 7 天。
+
+`CI gate` 仍是唯一聚合门禁：路径分类器输出 `windows_native` / `macos_native`
+布尔值给现有 Desktop reusable workflow，任一 Native job 失败都会使 Desktop 调用和最终
+gate 失败。并发取消、PR 树复用与合并后 tree-SHA 去重保持不变。不再使用
+`skip-e2e` / `full-e2e` 标签或独立 Desktop E2E workflow。
 
 ## Considered Options
 
-- **所有改动跑全量**：未触及 Desktop 或认证链路的改动会付全额墙钟，正是路径分类要消除的成本。
-- **nightly 全量**：外部依赖（GoTrue 邮件链）已由 mail-smoke-ci 在 `supabase/**` 变更时覆盖；单人项目夜里跑红无人响应。
-- **快照 userDataDir 复用登录态**：应用恢复 Session 前必走 refresh，refresh token 一次性轮换，多个并行 worker 从同一份快照启动必然竞态——否决。若实测 UI 登录成为瓶颈，改用 `NEVIX_TEST_*` 环境变量注入、每测试独立身份的方案。
-- **五个具体 required status checks**：路径过滤会使未触发工作流保持 Pending，不能作为 path-aware candidate 的稳定门禁。若服务器端门禁可用，只设最终 `CI gate` 为必需检查；当前仓库仍不开 required status check。
+- **继续在 Linux 跑 Electron E2E**：Xvfb 不能代表真实 Keychain/DPAPI，`basic_text` 也不是
+  可接受的加密后端；它还把 Go/PostgreSQL/Docker harness 成本加到日常 PR。
+- **所有 Desktop 改动同时跑 macOS 和 Windows**：Renderer-only 改动无需为 macOS 原生差异
+  支付额外成本；Windows 作为日常补盲，macOS 保留给原生敏感路径。
+- **nightly Full E2E**：单人仓库无人值守夜间失败；高风险改动与发布前的明确本地
+  Mac 记录是更直接的验收点。
 
 ## Consequences
 
-- 并行化（文件级、`workers=2`）作为独立切片随后落地；`configuration.spec.ts` 因绑定专用构建保持串行；登录态复用挂起待实测。
-- `ready/<sha>` 事件只进入 `CI gate` 并按路径调用可复用的 Full E2E Suite；可选 PR 调用 Smoke Suite；普通 `main` push 不重复执行专用 workflow，Full E2E 不增加定时任务。
-
-> **2026-04-30 更新**：`ready/<sha>` 路线已由 [ADR-0011](0011-pr-based-delivery.md) 的 PR 路线取代。现行分层：PR 触及 E2E 相关路径跑 Smoke；需要全量时给 PR 打 `full-e2e` 标签升级为 Full（`workflow_dispatch` 亦可手动触发）；合并后的 `main` push 不再跑任何 E2E（PR 已验证同一棵代码树）。
-- 词汇以本 ADR 为准：**Smoke Suite**（开发或 PR 反馈子集）、**Full E2E Suite**（相关候选的全量门禁）、**Auth Harness**（`tests/auth/harness` 下的一次性 Supabase 栈）；它们是测试基础设施词汇，不进产品语言 CONTEXT.md。
-- 名不副实的 `test:auth`（实际跑全量）正名为 `test:e2e` / `test:e2e:smoke`。
-
-> **2026-08-19 更新**：E2E 触发路径细化——`apps/desktop` 下的文档与根级 markdown、`test-results/` 本地产物，以及只由 Desktop CI 执行的 `tests/unit`、`tests/component` 不再触发 E2E（仍归 Desktop CI 门禁）。另增 `skip-e2e` PR 标签：路径分类命中 E2E 但确无运行必要时可跳过 Smoke；与 `full-e2e` 同时存在时 `full-e2e` 优先，显式升级请求不被静默吞掉。
+- CI 快速反馈集中在真实桌面平台和无后端原生能力；网络认证与跨层契约不再由
+  GitHub-hosted Electron E2E 自动覆盖。
+- macOS 是本地 Full E2E 与发布前验收平台；Windows 是日常 CI 的必跑原生补盲平台。
+- 不新增 nightly、Linux Desktop 发布、签名/notarization、安装器流程或 artifact 发布。
+- Linux `basic_text` 的拒绝逻辑与回归测试保留；删除 Linux Desktop 发布入口不降低
+  安全防御。

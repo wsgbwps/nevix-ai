@@ -1,7 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const desktopRoot = new URL('..', import.meta.url).pathname
+const desktopRoot = fileURLToPath(new URL('..', import.meta.url))
 const roots = ['out', 'test-results']
 const exactForbiddenValues = [process.env.NEVIX_TEST_ADMIN_INITIAL_PASSWORD].filter(
   (value) => typeof value === 'string' && value.length > 0

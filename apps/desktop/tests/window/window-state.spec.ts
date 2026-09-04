@@ -32,13 +32,25 @@ test('first launch uses the default bounds of 1280x800', async () => {
   }
 })
 
-test('restores persisted bounds across restarts', async () => {
+test('@native-smoke restores persisted bounds across restarts', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-window-restore-'))
   try {
     const first = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+    let expectedBounds: { x: number; y: number; width: number; height: number }
     try {
-      await first.electronApp.evaluate(({ BrowserWindow }) => {
-        BrowserWindow.getAllWindows()[0]?.setBounds({ x: 80, y: 80, width: 1100, height: 700 })
+      expectedBounds = await first.electronApp.evaluate(({ BrowserWindow, screen }) => {
+        const window = BrowserWindow.getAllWindows()[0]
+        if (!window) throw new Error('Main window was not created')
+        const { workArea } = screen.getPrimaryDisplay()
+        const width = Math.min(1100, workArea.width)
+        const height = Math.min(700, workArea.height)
+        window.setBounds({
+          x: workArea.x + Math.floor((workArea.width - width) / 2),
+          y: workArea.y + Math.floor((workArea.height - height) / 2),
+          width,
+          height
+        })
+        return window.getBounds()
       })
     } finally {
       await first.electronApp.close()
@@ -47,7 +59,7 @@ test('restores persisted bounds across restarts', async () => {
     const second = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
     try {
       const bounds = await readWindowBounds(second.electronApp)
-      expect(bounds).toEqual({ x: 80, y: 80, width: 1100, height: 700 })
+      expect(bounds).toEqual(expectedBounds)
     } finally {
       await second.electronApp.close()
     }

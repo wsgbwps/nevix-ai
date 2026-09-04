@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp } from '../helpers/electron-app'
 
-test('@smoke launchTestApp waits for the renderer to commit content', async () => {
+test('@smoke @native-smoke launchTestApp waits for the renderer to commit content', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-renderer-readiness-'))
   const { electronApp, page } = await launchTestApp({
     userDataDir,

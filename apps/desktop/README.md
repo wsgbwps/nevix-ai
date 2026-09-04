@@ -28,21 +28,37 @@ $ pnpm build:win
 
 # For macOS
 $ pnpm build:mac
-
-# For Linux
-$ pnpm build:linux
 ```
 
-### E2E tests
+### Native Smoke
+
+The `@native-smoke` suite launches the real Electron app without Go, PostgreSQL, Docker, TLS, or
+external network access. It checks the first Renderer commit, native editing menu and clipboard
+shortcuts, window-state restoration, and real Keychain/DPAPI persistence for Session and Remembered
+Email. A missing native secure-storage backend fails the suite; it is never skipped or downgraded.
+
+```bash
+$ pnpm test:native:smoke     # Build in test mode, then launch the source app
+$ pnpm test:native:packaged  # Launch the unique packaged .app or win-unpacked .exe in dist/
+```
+
+CI runs the source suite on Windows for Desktop runtime changes and adds macOS for Main, Preload,
+Shared, native window/storage, packaging, dependency, and Native Smoke changes. A `v*` tag or manual
+Desktop workflow packages both platforms and runs the packaged suite; it does not exercise DMG or
+NSIS installation.
+
+### Full E2E tests
 
 The E2E Suite starts a disposable loopback stack — a pinned throwaway PostgreSQL container, a
 temporary Go identity server binary built from `server/` and bootstrapped with the first Admin,
 and a self-signed TLS terminator for the TOFU specs — builds the Desktop app in test mode, and
-runs the Electron Playwright suite. Docker must be running.
+runs the Electron Playwright suite. Run it on a local Mac with Docker available for authentication,
+Session, connection/TLS, security-boundary changes, and before release; record the result in the PR
+or release notes.
 
 ```bash
-$ pnpm test:e2e        # Full E2E Suite: typecheck plus every spec
-$ pnpm test:e2e:smoke  # Smoke Suite: one test-mode build, only specs tagged @smoke
+$ pnpm test:e2e        # Required local Full E2E: typecheck plus every spec
+$ pnpm test:e2e:smoke  # Optional focused backend E2E: specs tagged @smoke
 $ pnpm test:e2e:settings # Settings Information Architecture: focused Settings spec
 ```
 

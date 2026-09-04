@@ -119,8 +119,11 @@ export async function launchTestApp({
 
   if (serverUrl) await seedServerConnection(userDataDir, serverUrl)
 
+  const executablePath = process.env.NEVIX_TEST_ELECTRON_EXECUTABLE_PATH
   const electronApp = await electron.launch({
-    args: [appEntry, `--user-data-dir=${userDataDir}`],
+    ...(executablePath
+      ? { executablePath, args: [`--user-data-dir=${userDataDir}`] }
+      : { args: [appEntry, `--user-data-dir=${userDataDir}`] }),
     cwd: desktopRoot,
     env: {
       ...desktopProcessEnvironment(),

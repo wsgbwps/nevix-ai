@@ -17,14 +17,28 @@ function selected(paths) {
   );
 }
 
-test("Desktop pages require Desktop CI and Full E2E", () => {
+test("Renderer-only runtime changes add Windows Native Smoke", () => {
   assert.deepEqual(
     selected(["apps/desktop/src/renderer/src/app/pages/settings.tsx"]),
-    { desktop: true, e2e: true },
+    { desktop: true, windows_native: true },
   );
 });
 
-test("Desktop documentation and local artifacts stay out of E2E", () => {
+test("native-sensitive Desktop paths add macOS Native Smoke", () => {
+  assert.deepEqual(
+    selected([
+      "apps/desktop/src/main/window/main-window.ts",
+      "apps/desktop/src/preload/index.ts",
+      "apps/desktop/src/shared/ipc/channels.ts",
+      "apps/desktop/build/entitlements.mac.plist",
+      "apps/desktop/electron-builder.yml",
+      "apps/desktop/package.json",
+    ]),
+    { desktop: true, windows_native: true, macos_native: true },
+  );
+});
+
+test("Desktop documentation and local artifacts stay out of Native Smoke", () => {
   assert.deepEqual(
     selected([
       "apps/desktop/README.md",
@@ -47,13 +61,22 @@ test("Desktop unit and component tests run only inside Desktop CI", () => {
   );
 });
 
-test("E2E specs and their helpers still require E2E", () => {
+test("ordinary E2E specs add only Windows Native Smoke", () => {
+  assert.deepEqual(
+    selected(["apps/desktop/tests/auth/session-persistence.spec.ts"]),
+    { desktop: true, windows_native: true },
+  );
+});
+
+test("Native Smoke infrastructure adds both platform lanes", () => {
   assert.deepEqual(
     selected([
-      "apps/desktop/tests/auth/session-persistence.spec.ts",
+      "apps/desktop/scripts/run-native-smoke.mjs",
+      "apps/desktop/tests/auth/native-secure-persistence.spec.ts",
       "apps/desktop/tests/helpers/electron-app.ts",
+      "apps/desktop/tests/window/native-editing.spec.ts",
     ]),
-    { desktop: true, e2e: true },
+    { desktop: true, windows_native: true, macos_native: true },
   );
 });
 
@@ -63,36 +86,30 @@ test("ordinary Go packages require only Server CI", () => {
   });
 });
 
-test("Identity server changes require Server CI and Desktop E2E", () => {
-  assert.deepEqual(
-    selected(["server/internal/identity/auth/sessions.go"]),
-    { server: true, e2e: true },
-  );
-});
-
-test("Creation module changes require Server CI and Desktop E2E", () => {
-  assert.deepEqual(
-    selected(["server/internal/creation/module.go"]),
-    { server: true, e2e: true },
-  );
-  assert.deepEqual(
-    selected(["server/internal/creation/integrationtest/harness_test.go"]),
-    { server: true, e2e: true },
-  );
-});
-
-test("the Creation storage contract triggers Server CI and Desktop E2E", () => {
-  assert.deepEqual(selected(["contracts/creation.yaml"]), {
+test("Identity server changes require only Server CI", () => {
+  assert.deepEqual(selected(["server/internal/identity/auth/sessions.go"]), {
     server: true,
-    e2e: true,
   });
 });
 
-test("API contracts require Server CI and Desktop E2E", () => {
+test("Creation module changes require only Server CI", () => {
+  assert.deepEqual(selected(["server/internal/creation/module.go"]), {
+    server: true,
+  });
   assert.deepEqual(
-    selected(["contracts/identity.yaml"]),
-    { server: true, e2e: true },
+    selected(["server/internal/creation/integrationtest/harness_test.go"]),
+    { server: true },
   );
+});
+
+test("the Creation storage contract triggers only Server CI", () => {
+  assert.deepEqual(selected(["contracts/creation.yaml"]), {
+    server: true,
+  });
+});
+
+test("API contracts require only Server CI", () => {
+  assert.deepEqual(selected(["contracts/identity.yaml"]), { server: true });
 });
 
 test("the server integration harness entry runs Server CI", () => {
@@ -107,7 +124,8 @@ test("the server integration harness entry runs Server CI", () => {
 test("root JavaScript manifests cover product and harness consumers", () => {
   assert.deepEqual(selected(["package.json"]), {
     desktop: true,
-    e2e: true,
+    windows_native: true,
+    macos_native: true,
     harness: true,
   });
 });
@@ -265,18 +283,45 @@ test("the pre-push hook allows only documentation and repository tooling", () =>
   }
 });
 
-test("the e2e job and gate honor the skip-e2e label with full-e2e precedence", () => {
-  const workflow = readFileSync(
+test("the gate passes Native Smoke classifications through one Desktop workflow", () => {
+  const gateWorkflow = readFileSync(
     join(REPOSITORY, ".github/workflows/ci-gate.yml"),
     "utf8",
   );
-
-  // full-e2e 的升级请求优先:skip-e2e 只在没有 full-e2e 时生效。
-  assert.match(
-    workflow,
-    /E2E_ENFORCED: \$\{\{ github\.event_name == 'pull_request' && \(contains\(github\.event\.pull_request\.labels\.\*\.name, 'full-e2e'\) \|\| !contains\(github\.event\.pull_request\.labels\.\*\.name, 'skip-e2e'\)\) \}\}/,
+  const desktopWorkflow = readFileSync(
+    join(REPOSITORY, ".github/workflows/desktop-ci.yml"),
+    "utf8",
   );
-  assert.match(workflow, /suite: .*'full' \|\| 'smoke'/);
+
+  assert.match(
+    gateWorkflow,
+    /windows_native: \$\{\{ steps\.classify\.outputs\.windows_native \}\}/,
+  );
+  assert.match(
+    gateWorkflow,
+    /macos_native: \$\{\{ steps\.classify\.outputs\.macos_native \}\}/,
+  );
+  assert.match(
+    gateWorkflow,
+    /windows_native: \$\{\{ needs\.changes\.outputs\.windows_native == 'true' \}\}/,
+  );
+  assert.match(
+    gateWorkflow,
+    /macos_native: \$\{\{ needs\.changes\.outputs\.macos_native == 'true' \}\}/,
+  );
+  assert.doesNotMatch(gateWorkflow, /desktop-e2e-ci|skip-e2e|full-e2e|E2E_/);
+
+  assert.match(desktopWorkflow, /workflow_dispatch:/);
+  assert.match(desktopWorkflow, /windows_native:[\s\S]*type: boolean/);
+  assert.match(desktopWorkflow, /macos_native:[\s\S]*type: boolean/);
+  assert.match(
+    desktopWorkflow,
+    /pnpm --filter @nevix\/desktop test:native:smoke/,
+  );
+  assert.match(
+    desktopWorkflow,
+    /pnpm --filter @nevix\/desktop test:native:packaged/,
+  );
 });
 
 test("every existing repository path has an explicit check owner", () => {
