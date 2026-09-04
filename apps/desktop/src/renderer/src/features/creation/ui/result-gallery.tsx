@@ -144,7 +144,6 @@ function TaskCard({
   const spec = detail?.specification ?? null
   const terminal = isTerminalTaskStatus(task.status)
   const indeterminate = task.terminalCause !== null
-  const { draft } = workbench
   const retryUncompleted =
     terminal &&
     !indeterminate &&
@@ -206,7 +205,7 @@ function TaskCard({
             taskId={task.id}
             slot={slot}
             mediaType={task.mediaType}
-            fallbackRatio={spec?.ratio ?? draft.ratio}
+            fallbackRatio={spec?.ratio ?? null}
           />
         ))}
       </div>
@@ -423,8 +422,9 @@ function hasPolicyRejectedSlot(detail: GenerationTaskDetail | undefined): boolea
 
 // Slot cells keep the verified result's intrinsic shape — the height scales
 // with the image ratio instead of a fixed square, so one task's images align
-// as an even strip. Unsettled slots borrow the draft's target ratio; with no
-// ratio anywhere the cell falls back to square.
+// as an even strip. Settled-shape cells come from the task's own frozen
+// ratio only; the live draft never leaks onto a card (video specs freeze no
+// ratio, so those cells fall back to square).
 function slotAspectRatio(slot: GenerationSlotView, fallbackRatio: string | null): number {
   const { widthPx, heightPx } = slot.result ?? {}
   if (

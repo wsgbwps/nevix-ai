@@ -1047,6 +1047,46 @@ test('a task card shows its frozen specification, never the live draft', async (
   await expect(menu).toContainText('frozen-at-submit prompt')
 })
 
+test("a terminal card's slot shape never tracks the live draft ratio", async ({ mount, page }) => {
+  // Video specs freeze no ratio (the server's video branch never sets one),
+  // so a cancelled video card is the widest borrowing path: its cells must
+  // stay square instead of following whatever ratio the composer drafts.
+  const cancelled: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000cxv1',
+    sessionId: scriptedSessionId,
+    status: 'cancelled',
+    mediaType: 'video',
+    slotCount: 1,
+    cancelRequested: true,
+    terminalCause: null,
+    createdAt: '2026-09-01T09:00:00Z',
+    updatedAt: '2026-09-01T09:00:30Z',
+    terminalAt: '2026-09-01T09:00:30Z',
+    slots: [{ index: 0, status: 'cancelled', failureReason: null, result: null }],
+    specification: {
+      prompt: 'cancelled video prompt',
+      model: 'doubao-seedance-2-5',
+      mode: 'omni-reference',
+      ratio: null,
+      resolution: '720p',
+      quantity: 1,
+      durationSeconds: 5,
+      referenceCount: 0
+    }
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [cancelled] }} />)
+  await selectFirstSession(page)
+
+  const slot = page.getByTestId(`slot-${cancelled.id}-0`)
+  await expect(slot).toHaveAttribute('data-slot-status', 'cancelled')
+  await expect(slot).toHaveCSS('aspect-ratio', '1 / 1')
+
+  await page.getByTestId('composer-params').click()
+  await page.getByRole('menu').getByRole('button', { name: '9:16' }).click()
+  await expect(page.getByTestId('composer-params')).toContainText('9:16')
+  await expect(slot).toHaveCSS('aspect-ratio', '1 / 1')
+})
+
 test('a task whose detail carries no specification shows task-view facts only', async ({
   mount,
   page
