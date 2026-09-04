@@ -37,24 +37,24 @@ must use the PR flow below.
    push the branch and open a PR against `main` (`gh pr create --fill --base
    main`). Describe shared-area changes with their impact and tests in the PR
    body.
-3. Wait for the path-aware `CI gate`: `gh pr checks --watch --fail-fast`. PRs
-   run smoke E2E when e2e-relevant paths change (desktop docs/markdown,
-   `test-results/`, and unit/component tests do not trigger E2E). Label the
-   PR `skip-e2e` to skip a classified smoke run that is genuinely
-   unnecessary; `full-e2e` takes precedence over `skip-e2e`.
+3. Wait for the path-aware `CI gate`: `gh pr checks --watch --fail-fast`.
+   Desktop runtime changes run source Native Smoke on Windows; Main, Preload,
+   Shared, native window/storage, packaging, dependency, and Native Smoke
+   changes also run it on macOS. Desktop documentation, `test-results/`, and
+   unit/component tests do not start a Native Smoke job. Authentication,
+   Session, connection/TLS, security-boundary changes, and release candidates
+   also require `make test-e2e` on a local Mac, with the result recorded in the
+   PR or release notes.
 4. Squash-merge and delete the branch: `gh pr merge --squash --delete-branch`.
    Each task lands as exactly one commit on `main`; the PR page is its
    acceptance record.
-5. The merge push runs the gate once on `main` (never E2E — the PR already
-   validated the same tree). When the squash commit reproduces the merged
-   PR's head tree exactly and that head has a green gate run, tree-SHA
-   dedup (`scripts/post-merge-dedup.mjs`) skips desktop/server/identity as
-   already verified; otherwise they run as classified. Dedup fails open:
-   a moved base, a missing green run, or an API error runs the full
-   post-merge gate. A failed post-merge run is repaired by a follow-up PR
-   or a revert PR. When a change needs the Full E2E Suite
-   (auth/session/security-sensitive UI), label the PR `full-e2e` before
-   merging, or run the suite manually via `workflow_dispatch`.
+5. The merge push runs the gate once on `main`. When the squash commit
+   reproduces the merged PR's head tree exactly and that head has a green gate
+   run, tree-SHA dedup (`scripts/post-merge-dedup.mjs`) skips desktop/server as
+   already verified; otherwise they run as classified. Dedup fails open: a
+   moved base, a missing green run, or an API error runs the classified
+   post-merge gate. A failed post-merge run is repaired by a follow-up PR or a
+   revert PR.
 
 ## Notes
 

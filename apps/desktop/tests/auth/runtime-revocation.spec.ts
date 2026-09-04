@@ -35,8 +35,8 @@ test('a session revoked at runtime is cleared on the next launch and cannot rest
       serverUrl: identityServer!.serverUrl
     })
     try {
-      // The revocation evidence rides the stored envelope across a relaunch, so a backend
-      // that persists nothing by design (CI-forced basic_text) cannot exercise it.
+      // The revocation evidence rides the stored envelope across a relaunch, so an unavailable
+      // secure backend that persists nothing by design cannot exercise it.
       test.skip(
         !(await hasSecurePersistenceBackend(launched.electronApp)),
         'requires a native Keychain, DPAPI, or Secret Service backend'

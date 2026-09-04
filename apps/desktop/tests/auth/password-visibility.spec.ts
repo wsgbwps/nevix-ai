@@ -142,9 +142,9 @@ test(
 
             window.minimize()
 
-            // GitHub's Linux smoke job runs Electron in Xvfb without a window manager, so the
-            // native minimize request cannot change window state. Emitting the same Electron
-            // event keeps that environment focused on the main-process deactivation bridge.
+            // A headless Linux session may have no window manager, so the native minimize
+            // request cannot change window state. Emitting the same Electron event keeps that
+            // environment focused on the main-process deactivation bridge.
             const requiresFallback =
               process.platform === 'linux' && Boolean(process.env.CI) && !window.isMinimized()
             if (requiresFallback) {

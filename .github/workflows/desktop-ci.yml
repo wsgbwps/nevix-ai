@@ -4,7 +4,19 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
   workflow_call:
+    inputs:
+      windows_native:
+        description: Run the source Native Smoke suite on Windows.
+        required: false
+        default: false
+        type: boolean
+      macos_native:
+        description: Run the source Native Smoke suite on macOS.
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: desktop-ci-${{ github.ref }}
@@ -57,10 +69,70 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @nevix/desktop build
 
+  windows-native:
+    name: Native Smoke (Windows)
+    needs: [quality, build]
+    if: inputs.windows_native
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nevix/desktop test:native:smoke
+      - name: Verify Native Smoke failure artifacts contain no credentials
+        id: verify-windows-native-failure-artifacts
+        if: failure()
+        run: pnpm --filter @nevix/desktop verify:auth-artifacts
+      - name: Upload Native Smoke failure artifacts
+        if: failure() && steps.verify-windows-native-failure-artifacts.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-source-windows-test-results
+          path: apps/desktop/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  macos-native:
+    name: Native Smoke (macOS)
+    needs: [quality, build]
+    if: inputs.macos_native
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nevix/desktop test:native:smoke
+      - name: Verify Native Smoke failure artifacts contain no credentials
+        id: verify-macos-native-failure-artifacts
+        if: failure()
+        run: pnpm --filter @nevix/desktop verify:auth-artifacts
+      - name: Upload Native Smoke failure artifacts
+        if: failure() && steps.verify-macos-native-failure-artifacts.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-source-macos-test-results
+          path: apps/desktop/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   package:
     name: Package (${{ matrix.os }})
     needs: [quality, build]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +142,7 @@ jobs:
           - os: windows-latest
             script: build:win
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
@@ -81,3 +154,16 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @nevix/desktop ${{ matrix.script }}
+      - run: pnpm --filter @nevix/desktop test:native:packaged
+      - name: Verify packaged Native Smoke failure artifacts contain no credentials
+        id: verify-packaged-native-failure-artifacts
+        if: failure()
+        run: pnpm --filter @nevix/desktop verify:auth-artifacts
+      - name: Upload packaged Native Smoke failure artifacts
+        if: failure() && steps.verify-packaged-native-failure-artifacts.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-packaged-${{ runner.os }}-test-results
+          path: apps/desktop/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

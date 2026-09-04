@@ -63,3 +63,12 @@ CI 分类器本就将其归为 harness,pre-push 与 agent 工具 hook 却未放�
 属于规则遗漏。此次把根 `.gitignore` 并入 repository-tooling 快道:
 待提交/待推送范围含根 `.gitignore` 且其余路径均在快道内时,可直接提交
 并推送 `main`。嵌套目录下的 `.gitignore` 不随之放行,仍走 PR。
+
+## 更新 — 2026-09-04：Desktop CI 收敛到 Native Smoke
+
+本 ADR 中早期的 PR Smoke E2E、`full-e2e` 标签与手动 Full E2E workflow
+已由 [ADR-0007](0007-e2e-test-tiering.md) 的新分层取代。现在，Desktop 运行时 PR
+按路径跑 Windows source Native Smoke，原生敏感路径再加 macOS；认证、
+Session、连接/TLS、安全边界与发布前的 Full E2E 在本地 Mac 运行并留下
+PR 或发布记录。`v*` tag 与手动 Desktop 发布候选会打包 macOS/Windows
+并启动打包后可执行文件。单一 `CI gate`、PR 树复用和合并后 tree-SHA 去重不变。

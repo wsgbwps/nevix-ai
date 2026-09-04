@@ -52,9 +52,8 @@ test('changing the configured server while signed in clears the session and relo
       await expect(
         launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
       ).toBeVisible()
-      // The stored-envelope assertions need a backend that actually persists
-      // sessions; CI-forced basic_text stores nothing by design, where the
-      // reload-to-claim-boundary assertions below still prove the flow.
+      // The stored-envelope assertions need a backend that actually persists sessions; when
+      // secure storage is unavailable, the reload-to-claim-boundary assertions still prove the flow.
       const hasSecureBackend = await hasSecurePersistenceBackend(launched.electronApp)
       if (hasSecureBackend) {
         await expect.poll(() => fileExists(sessionPath)).toBe(true)

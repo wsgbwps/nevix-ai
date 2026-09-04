@@ -264,6 +264,7 @@ make postgres-down # 停止并移除本地开发 PostgreSQL 容器（数据卷�
 
 make test-e2e-smoke  # 桌面端 Smoke E2E（自动拉起一次性 PostgreSQL + 临时 Go server + Electron）
 make test-e2e        # 桌面端全量 E2E（typecheck + 全部 spec）
+pnpm --filter @nevix/desktop test:native:smoke  # 本机 source Native Smoke（无后端）
 make test-identity-integration  # 起一次性 PostgreSQL 跑 Server 集成测试
 ```
 
@@ -297,6 +298,7 @@ Server 集成测试：`./scripts/test-identity-integration.sh` 拉起一次性 p
 
 - 非快道改动在短命任务分支完成；保持线性、可独立回滚的历史
 - 任务分支上的提交是本轮实现的停靠点：先交由用户检验，检验通过且明确要求后才推送并开 PR
-- 推送该任务分支并开 PR（`gh pr create --fill --base main`），用 `gh pr checks --watch --fail-fast` 等待路径感知的 `CI gate`（E2E 相关改动跑 Smoke，文档/markdown 与 unit/component 测试不触发；需要全量 E2E 时给 PR 打 `full-e2e` 标签，确无必要时可打 `skip-e2e` 跳过，`full-e2e` 优先）
+- 推送该任务分支并开 PR（`gh pr create --fill --base main`），用 `gh pr checks --watch --fail-fast` 等待路径感知的 `CI gate`：Desktop 运行时改动跑 Windows source Native Smoke，Main/Preload/Shared、原生窗口/存储、打包与依赖改动再加 macOS；文档、`test-results/`、unit/component 不启动 Native Smoke
+- 认证、Session、连接/TLS、安全边界改动和发布前必须在本地 Mac 运行 `make test-e2e`，并在 PR 或发布记录中注明结果
 - 检查通过后 squash merge 并删除分支（`gh pr merge --squash --delete-branch`）；每个任务在 `main` 上一个 commit，PR 页面即验收记录
 - 本地 hooks 拦截对 `main` 的非快道提交与推送；文档与非产品仓库工具的纯快道改动可直提并跳过 CI（推送同样待用户明确要求）；完整路径边界见 [`docs/agents/delivery.md`](docs/agents/delivery.md)

@@ -1,71 +1,53 @@
-# Authentication Session and Remembered Email native credential-backend smoke
+# Authentication native credential-storage smoke
 
-Run this checklist on a packaged Desktop build against a disposable identity server
-(Go server + PostgreSQL, provisioned by the delivery documentation). Use a
-test User and a fresh operating-system account or disposable virtual machine. Never record the
-password, session token, response body, or decrypted Session in the
-evidence.
+The automated `@native-smoke` suite proves that the Desktop uses the target operating system's real
+credential backend: Keychain on macOS and DPAPI on Windows. It runs with a fresh temporary
+`userData` directory and does not start Go, PostgreSQL, Docker, TLS, or any external network request.
 
-Passing the Ubuntu/Xvfb Playwright lane does not prove Linux Secret Service support. Record a
-platform as supported only after its row below has evidence from the named native backend.
+Run the source or packaged mode from `apps/desktop/`:
 
-## Backends and prerequisites
+```bash
+pnpm test:native:smoke
+pnpm test:native:packaged
+```
 
-| Platform | Required backend               | Prerequisite                                                                                                     |
-| -------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| macOS    | Keychain                       | The login Keychain is unlocked and available to the packaged app.                                                |
-| Windows  | DPAPI                          | The smoke runs under the same Windows User for sign-in and relaunch.                                             |
-| Linux    | `gnome_libsecret` or `kwallet` | A controlled desktop session has a working Secret Service; `basic_text` is a failure, not encrypted persistence. |
+Source mode builds Electron in test mode first. Packaged mode searches `dist/` for exactly one
+platform executable:
 
-Use the platform's application-data directory and locate only `authentication-session.enc` and
-`authentication-remembered-email.enc` beneath the packaged app's `userData` directory. Typical parent directories are
-`~/Library/Application Support/Nevix AI` on macOS, `%APPDATA%\Nevix AI` on Windows, and
-`~/.config/Nevix AI` on Linux. Confirm the actual location for the artifact under test before
-collecting evidence.
+- macOS: `**/*.app/Contents/MacOS/Nevix AI`
+- Windows: `**/win-unpacked/Nevix AI.exe`
 
-## Smoke procedure
+Zero or multiple matches fail before launch. Both modes run the same specs serially and pass an
+isolated `--user-data-dir`; packaged mode otherwise follows production behavior.
 
-1. Start with a fresh `userData` directory and confirm that neither Authentication encrypted file
-   exists. Launch the packaged app and confirm the login form has an empty focused email field and
-   a selected **Remember email** checkbox.
-2. Sign in with the disposable verified User and confirm the app shell is visible.
-3. Confirm both encrypted files exist. Parse each as JSON and verify that it contains only
-   `version: 1` and a non-empty base64 `ciphertext`. Search the file as bytes and text and confirm it
-   contains no email address or password; additionally confirm the Session file contains no
-   session `token` value or complete Session JSON.
-4. Save a checksum of each ciphertext envelope without copying its contents into the evidence.
-5. Quit the app normally, relaunch it with the same operating-system User and `userData`, and
-   confirm the restoring boundary appears before the app shell.
-6. Confirm the app shell appears only while the server is reachable. The opaque session token
-   does not rotate on restore, so the envelope checksum is unchanged by a successful restoration.
-7. Quit again, make the Auth origin unreachable, and relaunch. Confirm the retryable restore screen
-   appears, the app shell remains hidden, and the envelope checksum is unchanged.
-8. Restore connectivity, select **Retry**, confirm the app shell appears, and confirm the envelope
-   checksum is unchanged.
-9. Select **Sign out of this device**. Confirm the login screen appears, the authoritative email is
-   prefilled with password focus, `authentication-session.enc` is deleted, and
-   `authentication-remembered-email.enc` remains unchanged.
-10. Relaunch with the same `userData` and confirm the app remains signed out with the same prefill.
-    Clear **Remember email**, confirm its encrypted file is deleted immediately, reselect the
-    checkbox, edit the email without signing in, then relaunch; confirm the field is empty, the
-    checkbox defaults selected, and focus returns to email.
-11. Sign in again, then repeat step 9 while the server is unreachable. Confirm the app immediately returns to
-    login, shows the remote-revocation-delay wording, deletes the file, and remains signed out after
-    relaunch.
+## Credential assertions
 
-For Linux, additionally record `safeStorage.getSelectedStorageBackend()` from the smoke harness. A
-result of `basic_text` must produce the secure-storage-unavailable explanation, create neither
-Authentication encrypted file, retain a newly remembered email only until the app exits, and leave
-the platform support row unclaimed.
+The suite uses the trusted Renderer IPC bridge to write a synthetic Session and Remembered Email,
+then verifies all of the following:
 
-## Evidence record
+1. The platform reports an available secure-storage backend. Unavailability is a failure, never a
+   skip or plaintext fallback.
+2. `authentication-session.enc` and `authentication-remembered-email.enc` each contain only
+   `version: 1` and a non-empty base64 `ciphertext`; neither envelope contains the synthetic token,
+   user id, or email in plaintext.
+3. After quitting and relaunching under the same operating-system user and `userData`, both values
+   can be read through their production IPC Channels.
+4. Clearing both values removes their files.
 
-Attach the artifact version/commit, OS version, backend, date, operator, the pass/fail result for
-each numbered step, and redacted screenshots or command output. Do not attach the Session envelope
-or network trace.
+The suite also covers the first Renderer commit, native editing menu, copy/cut/paste shortcuts, and
+window-state restoration across restart. Electron and Renderer diagnostics are written beneath
+`test-results/`; CI uploads failure diagnostics for seven days after first checking them for
+credential material.
 
-| Platform/backend     | Evidence     | Support claim |
-| -------------------- | ------------ | ------------- |
-| macOS Keychain       | Not recorded | Not claimed   |
-| Windows DPAPI        | Not recorded | Not claimed   |
-| Linux Secret Service | Not recorded | Not claimed   |
+Windows source Native Smoke runs for every Desktop runtime PR. macOS is added for Main, Preload,
+Shared, native window/storage, packaging, dependency, and Native Smoke changes. `v*` tags and manual
+Desktop release-candidate workflows package both platforms and run packaged Native Smoke.
+
+Linux is not a Desktop release target. The product still rejects Electron's Linux `basic_text`
+backend and retains its explicit regression tests; removing Linux packaging does not permit
+plaintext Session or Remembered Email persistence.
+
+Native Smoke deliberately does not validate login, server-side Session acceptance, TLS/TOFU,
+outages, revocation, or cross-layer contracts. Authentication, Session, connection/TLS,
+security-boundary changes, and release candidates must additionally run `make test-e2e` on a local
+Mac and record the result in the PR or release notes.

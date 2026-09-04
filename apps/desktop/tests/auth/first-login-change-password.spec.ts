@@ -155,7 +155,7 @@ test('a stored session that still owes the change returns to the forced change b
     })
     try {
       // Relaunching a stored gated session requires a backend that actually persists the
-      // envelope; CI-forced basic_text stores nothing by design.
+      // envelope; an unavailable secure backend stores nothing by design.
       test.skip(
         !(await hasSecurePersistenceBackend(launched.electronApp)),
         'requires a native Keychain, DPAPI, or Secret Service backend'

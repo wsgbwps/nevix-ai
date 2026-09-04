@@ -32,7 +32,7 @@ test('first launch uses the default bounds of 1280x800', async () => {
   }
 })
 
-test('restores persisted bounds across restarts', async () => {
+test('@native-smoke restores persisted bounds across restarts', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-window-restore-'))
   try {
     const first = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })

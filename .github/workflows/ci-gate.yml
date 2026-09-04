@@ -45,7 +45,8 @@ jobs:
     outputs:
       desktop: ${{ steps.classify.outputs.desktop }}
       server: ${{ steps.classify.outputs.server }}
-      e2e: ${{ steps.classify.outputs.e2e }}
+      windows_native: ${{ steps.classify.outputs.windows_native }}
+      macos_native: ${{ steps.classify.outputs.macos_native }}
       skip_verified: ${{ steps.dedup.outputs.skip_verified }}
     steps:
       - uses: actions/checkout@v6
@@ -110,6 +111,9 @@ jobs:
     # dedup 证明本次 push 的树已由 green PR run 验证过时,跳过重复检查。
     if: needs.changes.outputs.desktop == 'true' && needs.changes.outputs.skip_verified != 'true'
     uses: ./.github/workflows/desktop-ci.yml
+    with:
+      windows_native: ${{ needs.changes.outputs.windows_native == 'true' }}
+      macos_native: ${{ needs.changes.outputs.macos_native == 'true' }}
 
   server:
     name: Server CI
@@ -117,28 +121,10 @@ jobs:
     if: needs.changes.outputs.server == 'true' && needs.changes.outputs.skip_verified != 'true'
     uses: ./.github/workflows/server-ci.yml
 
-  e2e:
-    name: Desktop E2E
-    needs: changes
-    # PR 只跑 smoke;需要全量时给 PR 打 full-e2e 标签主动升级
-    # (workflow_dispatch 也可手动跑全量)。合并后的 main push 不再跑 E2E:
-    # PR 已对同一棵代码树验证过,合并后重跑只产生重复成本。
-    # skip-e2e 可跳过已分类的 smoke 运行;full-e2e 的升级请求优先,
-    # 不被陈旧的 skip-e2e 标签静默吞掉。
-    if: >-
-      needs.changes.outputs.e2e == 'true' &&
-      github.event_name == 'pull_request' &&
-      (
-        contains(github.event.pull_request.labels.*.name, 'full-e2e') ||
-        !contains(github.event.pull_request.labels.*.name, 'skip-e2e')
-      )
-    uses: ./.github/workflows/desktop-e2e-ci.yml
-    with:
-      suite: ${{ contains(github.event.pull_request.labels.*.name, 'full-e2e') && 'full' || 'smoke' }}
   gate:
     name: CI gate
     if: always()
-    needs: [changes, desktop, server, e2e]
+    needs: [changes, desktop, server]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -147,12 +133,6 @@ jobs:
       DESKTOP_RESULT: ${{ needs.desktop.result }}
       SERVER_REQUIRED: ${{ needs.changes.outputs.server }}
       SERVER_RESULT: ${{ needs.server.result }}
-      E2E_REQUIRED: ${{ needs.changes.outputs.e2e }}
-      # 合并后的 main push 按设计跳过 E2E（PR 已验证同一棵树），gate 只在
-      # pull_request 事件上强制 E2E，否则 skipped 会被误判为失败。PR 打了
-      # skip-e2e 时同样不强制;full-e2e 优先于 skip-e2e,升级请求仍被强制。
-      E2E_ENFORCED: ${{ github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'full-e2e') || !contains(github.event.pull_request.labels.*.name, 'skip-e2e')) }}
-      E2E_RESULT: ${{ needs.e2e.result }}
       # tree-SHA 去重命中时,产品检查被有意跳过（green PR run 已验证同一
       # 棵树），gate 把这种 skipped 视为已满足。
       DEDUP_SKIP: ${{ needs.changes.outputs.skip_verified == 'true' }}
@@ -168,17 +148,11 @@ jobs:
           fi
 
           failed=false
-          for check in DESKTOP SERVER E2E; do
+          for check in DESKTOP SERVER; do
             required_var="${check}_REQUIRED"
             result_var="${check}_RESULT"
             required="${!required_var}"
             result="${!result_var}"
-
-            # Post-merge main pushes intentionally skip E2E (see the e2e job
-            # condition); the gate enforces it only where it runs.
-            if [ "$check" = "E2E" ] && [ "$E2E_ENFORCED" != "true" ]; then
-              continue
-            fi
 
             if [ "$required" = "true" ] && [ "$result" != "success" ]; then
               # Post-merge dedup intentionally skips checks whose tree a

@@ -64,15 +64,11 @@ async function pasteInto(
   await page.keyboard.press(`${editModifier}+V`)
 }
 
-test('the app exposes only managed hidden native edit accelerators', async () => {
+test('@native-smoke the app exposes only managed hidden native edit accelerators', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-native-editing-menu-'))
 
   try {
-    const launched = await launchTestApp({
-      userDataDir,
-      systemLanguages: ['en-US'],
-      serverUrl: process.env.NEVIX_TEST_SERVER_URL
-    })
+    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
 
     try {
       const applicationMenuItems = await launched.electronApp.evaluate(({ Menu }) => {
@@ -117,6 +113,35 @@ test('the app exposes only managed hidden native edit accelerators', async () =>
           { role: 'selectall', visible: false, submenu: null }
         ])
       }
+    } finally {
+      await launched.electronApp.close()
+    }
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('@native-smoke native clipboard shortcuts work without a server', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-native-editing-offline-'))
+
+  try {
+    const launched = await launchTestApp({ userDataDir, systemLanguages: ['en-US'] })
+
+    try {
+      const serverAddress = launched.page.locator('#server-connection-url')
+      const value = 'https://native-smoke.invalid'
+      await pasteInto(launched.electronApp, launched.page, serverAddress, value)
+      await expect(serverAddress).toHaveValue(value)
+
+      await serverAddress.selectText()
+      await writeClipboard(launched.electronApp, 'copy-not-dispatched')
+      await launched.page.keyboard.press(`${editModifier}+C`)
+      expect(await readClipboard(launched.electronApp)).toBe(value)
+
+      await launched.page.keyboard.press(`${editModifier}+X`)
+      await expect(serverAddress).toHaveValue('')
+      await launched.page.keyboard.press(`${editModifier}+V`)
+      await expect(serverAddress).toHaveValue(value)
     } finally {
       await launched.electronApp.close()
     }
