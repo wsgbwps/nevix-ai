@@ -357,7 +357,6 @@ type GenerationTask struct {
 	SlotCount       int
 	TerminalCause   *TerminalCause
 	CancelRequested bool
-	DraftRevision   time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	TerminalAt      *time.Time

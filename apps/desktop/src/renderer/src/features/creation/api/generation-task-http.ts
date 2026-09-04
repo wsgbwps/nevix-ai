@@ -5,7 +5,7 @@
  * SSE stream is a fetch-stream with the bearer in the header (never the URL)
  * and no Last-Event-ID semantics — a lost stream is answered by a refetch.
  */
-import type { CreationApiResult } from './go-creation-http'
+import type { CreationApiResult, DraftReferenceView, MaterialKind } from './go-creation-http'
 import { request } from './go-creation-http'
 
 /** One generation task's one-way status (contracts GenerationTask.status). */
@@ -88,9 +88,31 @@ export interface GenerationTaskView {
   readonly terminalAt: string | null
 }
 
+/** One reference inside the task's frozen specification: the material's
+ * identity and the role it played, never its session-scoped bytes. */
+export interface GenerationSpecificationReferenceView {
+  readonly materialId: string
+  readonly role: string
+  readonly kind: MaterialKind
+}
+
+/** The task's frozen generation intent (contracts specification), reduced to
+ * the facts the gallery displays. */
+export interface GenerationSpecificationView {
+  readonly prompt: string
+  readonly model: string
+  readonly mode: string
+  readonly ratio: string | null
+  readonly resolution: string | null
+  readonly quantity: number
+  readonly durationSeconds: number | null
+  readonly references: readonly GenerationSpecificationReferenceView[]
+}
+
 export interface GenerationTaskDetail {
   readonly task: GenerationTaskView
   readonly slots: readonly GenerationSlotView[]
+  readonly specification: GenerationSpecificationView | null
 }
 
 export interface TaskPage {
@@ -98,10 +120,27 @@ export interface TaskPage {
   readonly nextCursor: string | null
 }
 
-/** TaskSubmitInput on the wire: key + the draft revision the submitter saw. */
+/** TaskSubmitInput on the wire: the idempotency key plus the complete
+ * generation intent carried by the submission (ADR-0017 — the server stores
+ * no editable draft to point at). */
 export interface TaskSubmitInput {
   readonly idempotencyKey: string
-  readonly draftRevision: string
+  readonly intent: GenerationIntent
+}
+
+/** Plain transport intent frozen by the server. Desktop-only mention identity
+ * is expanded before crossing this trusted seam. */
+export interface GenerationIntent {
+  readonly prompt: string
+  readonly mediaType: 'image' | 'video' | null
+  readonly manifestVersion: number
+  readonly model: string | null
+  readonly mode: string | null
+  readonly ratio: string | null
+  readonly resolution: string | null
+  readonly quantity: number | null
+  readonly durationSeconds: number | null
+  readonly references: readonly DraftReferenceView[]
 }
 
 // --- parsing (fail closed, mirroring the sibling clients) --------------------
@@ -273,10 +312,62 @@ function parseSlot(payload: unknown): GenerationSlotView | null {
   return { index: indexRaw, status, failureReason: reason, failureDiagnostic, result }
 }
 
+const SPEC_REFERENCE_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'audio'])
+
+// Parses one present specification; null on any malformation so the caller
+// fails the whole detail closed — a guessed prompt must never render as the
+// task's frozen intent (the same strictness as a malformed failure
+// diagnostic).
+function parseSpecification(raw: unknown): GenerationSpecificationView | null {
+  if (!isRecord(raw)) return null
+  const prompt = str(raw, 'prompt')
+  const model = str(raw, 'model')
+  const mode = str(raw, 'mode')
+  const mediaType = str(raw, 'media_type')
+  if (prompt === null || model === null || mode === null) return null
+  if (mediaType !== 'image' && mediaType !== 'video') return null
+  if (nullableNum(raw, 'schema_version') == null) return null
+  if (nullableNum(raw, 'manifest_version') == null) return null
+  const quantity = nullableNum(raw, 'quantity')
+  if (quantity === null || quantity === undefined || quantity < 1) return null
+  const references = raw['references']
+  if (!Array.isArray(references)) return null
+  const parsedReferences: GenerationSpecificationReferenceView[] = []
+  for (const reference of references) {
+    if (!isRecord(reference)) return null
+    const materialId = str(reference, 'material_id')
+    const role = str(reference, 'role')
+    const kind = str(reference, 'kind')
+    if (materialId === null || role === null || kind === null) return null
+    if (!SPEC_REFERENCE_KINDS.has(kind)) return null
+    if (nullableNum(reference, 'claims_version') == null) return null
+    parsedReferences.push({
+      materialId,
+      role,
+      kind: kind as GenerationSpecificationReferenceView['kind']
+    })
+  }
+  return {
+    prompt,
+    model,
+    mode,
+    ratio: nullableStr(raw, 'ratio') ?? null,
+    resolution: nullableStr(raw, 'resolution') ?? null,
+    durationSeconds: nullableNum(raw, 'duration_seconds') ?? null,
+    quantity,
+    references: parsedReferences
+  }
+}
+
 function parseTaskDetail(payload: unknown): GenerationTaskDetail | null {
   if (!isRecord(payload) || !('task' in payload) || !('slots' in payload)) return null
   const task = parseTask(payload['task'])
   if (task === null) return null
+  // The specification is contract-optional: absence renders task-view facts
+  // only; any present value goes through the strict parse above.
+  const rawSpecification = payload['specification']
+  const specification = rawSpecification == null ? null : parseSpecification(rawSpecification)
+  if (rawSpecification != null && specification === null) return null
   const rawSlots = payload['slots']
   if (!Array.isArray(rawSlots)) return null
   const slots: GenerationSlotView[] = []
@@ -285,7 +376,7 @@ function parseTaskDetail(payload: unknown): GenerationTaskDetail | null {
     if (slot === null) return null
     slots.push(slot)
   }
-  return { task, slots }
+  return { task, slots, specification }
 }
 
 function parseTaskPage(payload: unknown): TaskPage | null {
@@ -318,7 +409,7 @@ export function createGenerationTaskClient(serverUrl: string): {
     taskId: string,
     idempotencyKey: string
   ): Promise<CreationApiResult<GenerationTaskDetail>>
-  loadResultBlobUrl(token: string, taskId: string, slotIndex: number): Promise<string | null>
+  loadResultBlob(token: string, taskId: string, slotIndex: number): Promise<Blob | null>
 } {
   async function detailOf(
     result: Awaited<ReturnType<typeof request>>
@@ -328,12 +419,48 @@ export function createGenerationTaskClient(serverUrl: string): {
     return detail ? { outcome: 'succeeded', value: detail } : { outcome: 'network-failure' }
   }
 
+  // Bytes, never an object URL: the renderer's CSP treats blob: as
+  // display-only (renderer/index.html), so callers must not fetch it back.
+  async function loadResultBlob(
+    token: string,
+    taskId: string,
+    slotIndex: number
+  ): Promise<Blob | null> {
+    const url = new URL(`/creation/tasks/${taskId}/slots/${slotIndex}/result`, serverUrl)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        redirect: 'error',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+    } catch {
+      return null
+    }
+    if (!response.ok) return null
+    return response.blob().catch(() => null)
+  }
+
   return {
     submitTask: (token, sessionId, input) =>
       request(serverUrl, {
         method: 'POST',
         path: `/creation/sessions/${sessionId}/tasks`,
-        body: { idempotency_key: input.idempotencyKey, draft_revision: input.draftRevision },
+        body: {
+          idempotency_key: input.idempotencyKey,
+          prompt: input.intent.prompt,
+          media_type: input.intent.mediaType,
+          manifest_version: input.intent.manifestVersion,
+          model: input.intent.model,
+          mode: input.intent.mode,
+          ratio: input.intent.ratio,
+          resolution: input.intent.resolution,
+          quantity: input.intent.quantity,
+          duration_seconds: input.intent.durationSeconds,
+          references: input.intent.references.map((reference) => ({
+            material_id: reference.materialId,
+            role: reference.role
+          }))
+        },
         token
       }).then(detailOf),
     listTasks: async (token, sessionId) => {
@@ -368,21 +495,7 @@ export function createGenerationTaskClient(serverUrl: string): {
           token
         })
       ),
-    loadResultBlobUrl: async (token, taskId, slotIndex) => {
-      const url = new URL(`/creation/tasks/${taskId}/slots/${slotIndex}/result`, serverUrl)
-      let response: Response
-      try {
-        response = await fetch(url, {
-          redirect: 'error',
-          headers: { Authorization: `Bearer ${token}` }
-        })
-      } catch {
-        return null
-      }
-      if (!response.ok) return null
-      const blob = await response.blob().catch(() => null)
-      return blob ? URL.createObjectURL(blob) : null
-    }
+    loadResultBlob
   }
 }
 

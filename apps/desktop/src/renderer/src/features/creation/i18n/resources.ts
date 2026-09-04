@@ -10,17 +10,10 @@ export const creationTranslations = defineResourceTranslations({
         label: '开启创作',
         empty: '还没有创作会话，从一个空白草稿开始',
         unnamed: '未命名创作',
-        remove: '删除会话 {{name}}',
-        newLabel: '新会话名称（可选）',
-        newPlaceholder: '新对话',
-        newSubmit: '创建',
-        private: 'Creation Session 由创建者私有',
-        meta: {
-          justNow: '刚刚',
-          minutesAgo: '{{n}} 分钟前',
-          hoursAgo: '{{n}} 小时前',
-          daysAgo: '{{n}} 天前'
-        }
+        newAction: '新对话',
+        rename: { label: '重命名会话' },
+        menu: { open: '会话操作', rename: '重命名', delete: '删除' },
+        private: 'Creation Session 由创建者私有'
       },
       workspace: {
         label: '工作区',
@@ -50,7 +43,6 @@ export const creationTranslations = defineResourceTranslations({
       },
       gallery: {
         resultAlt: '已验证的生成结果',
-        slotCount: '{{n}} 个结果位',
         taskLabel: '生成任务',
         submitFailed: '提交被拒绝：{{code}}',
         status: {
@@ -90,8 +82,30 @@ export const creationTranslations = defineResourceTranslations({
           cancel: '取消',
           regenerate: '再次生成',
           retryUncompleted: '只重试未完成项',
-          download: '下载'
+          download: '下载',
+          reedit: '重新编辑',
+          more: '更多操作'
         },
+        details: {
+          label: '详细信息',
+          prompt: '提示词',
+          mode: '模式',
+          quantity: '数量',
+          duration: '时长',
+          references: '参考素材',
+          task: '任务 ID',
+          createdAt: '创建时间'
+        },
+        references: {
+          pile: '参考素材 {{n}} 个'
+        },
+        role: {
+          reference: '参考',
+          firstFrame: '首帧',
+          lastFrame: '尾帧',
+          omni: '全能参考'
+        },
+        backToBottom: '回到底部',
         indeterminate: {
           title: '重做结果未知的任务',
           body: '该任务的供应商结局未知。重做会创建新任务，可能产生重复生成与重复计费。',
@@ -148,18 +162,36 @@ export const creationTranslations = defineResourceTranslations({
             contact_admin: '请联系管理员处理。'
           }
         },
-        save: {
-          saving: '草稿保存中…',
-          saved: '草稿已保存',
-          failed: '草稿保存失败，点击重试'
-        },
         deck: {
+          uploadFailed: '参考素材上传失败，请重试',
           label: '参考素材牌堆',
           add: '添加参考素材',
           tile: '参考内容',
           count: '{{n}} 张参考图片',
           remove: '移除 {{name}}',
-          kind: { image: '图', video: '视频', audio: '音' }
+          kind: { image: '图', video: '视频', audio: '音' },
+          dropInvite: '松手添加参考素材',
+          dropReplace: '松手替换该素材',
+          dropRejected: '已添加 {{added}} 个素材，{{rejected}} 个被拒：类型或数量超出当前模式允许'
+        },
+        mention: {
+          kind: { image: '图片', video: '视频', audio: '音频' },
+          empty: '请先添加参考素材',
+          noResults: '没有匹配的参考素材',
+          length: '{{current}}/{{max}}',
+          overLimit: '提示词不能超过 {{max}} 个字符',
+          removeTitle: '删除参考素材？',
+          removeBody: '删除该素材也会移除提示词中的 {{count}} 处引用。',
+          removeConfirm: '删除',
+          removeCancel: '取消',
+          recovered: '已移除不可用的参考素材，并将相关引用保留为文本。',
+          preview: {
+            title: '预览 {{label}}',
+            loading: '正在加载素材…',
+            failed: '素材加载失败',
+            retry: '重试',
+            duration: '{{seconds}} 秒'
+          }
         }
       },
       state: {
@@ -248,17 +280,10 @@ export const creationTranslations = defineResourceTranslations({
         label: 'Start creating',
         empty: 'No creation sessions yet; start from a blank draft',
         unnamed: 'Untitled creation',
-        remove: 'Delete session {{name}}',
-        newLabel: 'New session name (optional)',
-        newPlaceholder: 'New conversation',
-        newSubmit: 'Create',
-        private: 'Creation Sessions are private to their creator',
-        meta: {
-          justNow: 'just now',
-          minutesAgo: '{{n}} min ago',
-          hoursAgo: '{{n}} h ago',
-          daysAgo: '{{n}} d ago'
-        }
+        newAction: 'New conversation',
+        rename: { label: 'Rename session' },
+        menu: { open: 'Session actions', rename: 'Rename', delete: 'Delete' },
+        private: 'Creation Sessions are private to their creator'
       },
       workspace: {
         label: 'Workspace',
@@ -291,7 +316,6 @@ export const creationTranslations = defineResourceTranslations({
       },
       gallery: {
         resultAlt: 'Verified generation result',
-        slotCount: '{{n}} result slots',
         taskLabel: 'Generation task',
         submitFailed: 'Submission rejected: {{code}}',
         status: {
@@ -331,8 +355,30 @@ export const creationTranslations = defineResourceTranslations({
           cancel: 'Cancel',
           regenerate: 'Regenerate',
           retryUncompleted: 'Retry uncompleted',
-          download: 'Download'
+          download: 'Download',
+          reedit: 'Re-edit',
+          more: 'More actions'
         },
+        details: {
+          label: 'Details',
+          prompt: 'Prompt',
+          mode: 'Mode',
+          quantity: 'Quantity',
+          duration: 'Duration',
+          references: 'References',
+          task: 'Task ID',
+          createdAt: 'Created'
+        },
+        references: {
+          pile: '{{n}} reference materials'
+        },
+        role: {
+          reference: 'Reference',
+          firstFrame: 'First frame',
+          lastFrame: 'Last frame',
+          omni: 'Omni'
+        },
+        backToBottom: 'Back to bottom',
         indeterminate: {
           title: 'Redo a task with unknown outcome',
           body: 'The provider outcome is unknown. A redo creates a new task and may repeat generation and billing.',
@@ -391,18 +437,37 @@ export const creationTranslations = defineResourceTranslations({
             contact_admin: 'Please contact your administrator.'
           }
         },
-        save: {
-          saving: 'Saving draft…',
-          saved: 'Draft saved',
-          failed: 'Draft save failed; click to retry'
-        },
         deck: {
+          uploadFailed: 'Reference upload failed; try again',
           label: 'Reference material deck',
           add: 'Add reference material',
           tile: 'Reference',
           count: '{{n}} reference images',
           remove: 'Remove {{name}}',
-          kind: { image: 'IMG', video: 'VID', audio: 'AUD' }
+          kind: { image: 'IMG', video: 'VID', audio: 'AUD' },
+          dropInvite: 'Drop to add as reference',
+          dropReplace: 'Drop to replace this material',
+          dropRejected:
+            'Added {{added}} material(s); rejected {{rejected}}: type or count beyond what the current mode allows'
+        },
+        mention: {
+          kind: { image: 'Image', video: 'Video', audio: 'Audio' },
+          empty: 'Add reference material first',
+          noResults: 'No matching reference material',
+          length: '{{current}}/{{max}}',
+          overLimit: 'The prompt cannot exceed {{max}} characters',
+          removeTitle: 'Remove reference material?',
+          removeBody: 'Removing it also deletes {{count}} mention(s) from the prompt.',
+          removeConfirm: 'Remove',
+          removeCancel: 'Cancel',
+          recovered: 'Unavailable references were removed and their mentions kept as text.',
+          preview: {
+            title: 'Preview {{label}}',
+            loading: 'Loading material…',
+            failed: 'Material could not be loaded',
+            retry: 'Retry',
+            duration: '{{seconds}}s'
+          }
         }
       },
       state: {

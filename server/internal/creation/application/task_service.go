@@ -47,12 +47,13 @@ func NewTaskService(
 }
 
 // SubmitCommand is one idempotent submission: the key is creator-scoped and
-// the revision pins the draft the submitter saw.
+// the intent is the device-local draft's complete values at submit time
+// (ADR-0017) — the server stores no editable draft to point at.
 type SubmitCommand struct {
 	Owner          domain.UUID
 	SessionID      domain.UUID
 	IdempotencyKey string
-	DraftRevision  time.Time
+	Intent         *domain.GenerationIntent
 }
 
 // SubmissionResult answers both fresh and replayed submissions.
@@ -63,33 +64,31 @@ type SubmissionResult struct {
 }
 
 // Submit admits one generation task. The frozen specification is always
-// derived from the server-stored draft — never from request values — inside
-// the admission transaction, and the whole admission (attempt fact,
-// governance evaluation, specification, task, slots, job, queue item,
-// reservation) commits or rolls back as one. Governance rejections commit
-// only the attempt fact. Replays (same key, same payload) return the prior
-// task without counting anything a second time.
+// derived from the request's generation intent — validated structurally,
+// checked against the live capability manifest, and completed with verified
+// material facts — inside the admission transaction, and the whole admission
+// (attempt fact, governance evaluation, specification, task, slots, job,
+// queue item, reservation) commits or rolls back as one. Governance
+// rejections commit only the attempt fact. Replays (same key, same payload)
+// return the prior task without counting anything a second time.
 func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (SubmissionResult, error) {
 	key := domain.NormalizeIdempotencyKey(cmd.IdempotencyKey)
 	if key == "" {
-		return SubmissionResult{}, domain.ErrDraftNotReady
+		return SubmissionResult{}, domain.ErrInvalidIntent
+	}
+	if cmd.Intent == nil {
+		return SubmissionResult{}, domain.ErrIntentNotReady
+	}
+	if err := cmd.Intent.Validate(); err != nil {
+		return SubmissionResult{}, err
 	}
 	var (
 		result  SubmissionResult
 		blocked error
 	)
 	err := s.runner.Run(ctx, func(sc domain.WriteScope) error {
-		_, draft, err := s.tasks.LoadSessionDraftForAdmission(ctx, sc.Tx(), cmd.Owner, cmd.SessionID)
-		if err != nil {
+		if _, err := s.tasks.LoadSessionForAdmission(ctx, sc.Tx(), cmd.Owner, cmd.SessionID); err != nil {
 			return err
-		}
-		// Revision revalidation comes first: a submission based on a stale
-		// draft is rejected without rewriting or freezing anything.
-		if draft == nil || draft.Revision.IsZero() {
-			return domain.ErrDraftNotReady
-		}
-		if !draft.Revision.Equal(cmd.DraftRevision) {
-			return domain.ErrDraftRevisionConflict
 		}
 
 		connection, err := s.connections.GetActiveInTx(ctx, sc.Tx())
@@ -102,7 +101,7 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 		}
 		manifest := domain.DeriveCapabilityManifest(connectionView)
 
-		spec, err := freezeSpecification(draft, manifest)
+		spec, err := freezeSpecification(cmd.Intent, manifest)
 		if err != nil {
 			return err
 		}
@@ -122,7 +121,7 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 			return nil
 		}
 
-		task, err := s.admitSpecification(ctx, sc, cmd.Owner, cmd.SessionID, spec, key, draft.Revision)
+		task, err := s.admitSpecification(ctx, sc, cmd.Owner, cmd.SessionID, spec, key)
 		if err != nil {
 			// Governance rejections commit the attempt fact they recorded.
 			var governanceBlocked *domain.GovernanceBlockedError
@@ -161,7 +160,7 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 // and retries: manifest-vs-connection availability, the fixed-order
 // governance evaluation, the attempt fact, and the atomic creation of
 // specification, task, slots, job, queue item, and reservation.
-func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteScope, owner, sessionID domain.UUID, spec *domain.GenerationSpecification, idempotencyKey string, draftRevision time.Time) (*domain.GenerationTask, error) {
+func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteScope, owner, sessionID domain.UUID, spec *domain.GenerationSpecification, idempotencyKey string) (*domain.GenerationTask, error) {
 	// Reference identity/role/kind facts are re-verified inside the
 	// transaction: a material deleted between draft save and admission
 	// fails the whole admission instead of freezing a dangling reference.
@@ -250,7 +249,6 @@ func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteSco
 		Spec:           *spec,
 		Status:         domain.TaskQueued,
 		SlotCount:      spec.Quantity,
-		DraftRevision:  draftRevision,
 	}
 	admitted := &domain.AdmittedTask{
 		Task:             task,
@@ -315,7 +313,7 @@ func (s *TaskService) RetryUncompleted(ctx context.Context, owner, taskID domain
 			result.Task = existing
 			return nil
 		}
-		task, err := s.admitSpecification(ctx, sc, owner, original.SessionID, &spec, key, original.DraftRevision)
+		task, err := s.admitSpecification(ctx, sc, owner, original.SessionID, &spec, key)
 		if err != nil {
 			var governanceBlocked *domain.GovernanceBlockedError
 			if errors.As(err, &governanceBlocked) {
@@ -421,42 +419,42 @@ func (s *TaskService) Get(ctx context.Context, owner, taskID domain.UUID) (domai
 }
 
 // freezeSpecification derives the immutable generation intent from the
-// server-stored draft against the current manifest. Every mismatch blocks
-// admission without rewriting the draft: missing intent is not ready, values
-// outside the manifest are stale, and the manifest version must be current.
-func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityManifestView) (*domain.GenerationSpecification, error) {
-	if draft == nil {
-		return nil, domain.ErrDraftNotReady
+// submitted intent against the current manifest. Every mismatch blocks
+// admission: missing intent is not ready, values outside the manifest are
+// stale, and the manifest version must be current.
+func freezeSpecification(intent *domain.GenerationIntent, manifest domain.CapabilityManifestView) (*domain.GenerationSpecification, error) {
+	if intent == nil {
+		return nil, domain.ErrIntentNotReady
 	}
 	// The prompt envelope counts Unicode characters (spec 图片合同) — the
-	// same rune rule the draft gate applies — not bytes.
-	promptRunes := utf8.RuneCountInString(draft.Prompt)
-	if draft.MediaType == nil || draft.Model == nil || draft.Mode == nil ||
-		draft.Prompt == "" || promptRunes > domain.PromptMaxChars {
-		return nil, domain.ErrDraftNotReady
+	// same rune rule the intent gate applies — not bytes.
+	promptRunes := utf8.RuneCountInString(intent.Prompt)
+	if intent.MediaType == nil || intent.Model == nil || intent.Mode == nil ||
+		intent.Prompt == "" || promptRunes > domain.PromptMaxChars {
+		return nil, domain.ErrIntentNotReady
 	}
-	media := *draft.MediaType
+	media := *intent.MediaType
 	mediaView := manifest.Image
 	if media == domain.DraftMediaVideo {
 		mediaView = manifest.Video
 	}
-	if draft.ManifestVersion != manifest.ManifestVersion || !mediaView.Available {
+	if intent.ManifestVersion != manifest.ManifestVersion || !mediaView.Available {
 		reason := mediaView.Reason
 		if reason == "" {
 			reason = "manifest_version_changed"
 		}
 		return nil, &domain.MediaUnavailableError{Reason: reason, Action: mediaView.Action}
 	}
-	// Resolution tiers are model-scoped: the draft's model must be a
+	// Resolution tiers are model-scoped: the intent's model must be a
 	// published model and its resolution must be one of that model's tiers.
-	modelView := publishedModel(mediaView.Models, *draft.Model)
-	if modelView == nil || !valueInList(modelView.Resolutions, draft.Resolution) {
-		return nil, domain.ErrDraftCapabilityStale
+	modelView := publishedModel(mediaView.Models, *intent.Model)
+	if modelView == nil || !valueInList(modelView.Resolutions, intent.Resolution) {
+		return nil, domain.ErrCapabilityStale
 	}
 	modeKnown := false
 	var modePolicy *domain.ReferenceMaterialPolicy
 	for _, mode := range mediaView.Modes {
-		if mode.ID == *draft.Mode {
+		if mode.ID == *intent.Mode {
 			modeKnown = true
 			policy := mode.ReferenceMaterial
 			modePolicy = &policy
@@ -464,39 +462,39 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 		}
 	}
 	if !modeKnown {
-		return nil, domain.ErrDraftCapabilityStale
+		return nil, domain.ErrCapabilityStale
 	}
 	spec := &domain.GenerationSpecification{
 		SchemaVersion:   domain.SpecificationSchemaVersion,
 		MediaType:       domain.MediaType(media),
-		Prompt:          draft.Prompt,
-		Model:           *draft.Model,
-		Mode:            *draft.Mode,
+		Prompt:          intent.Prompt,
+		Model:           *intent.Model,
+		Mode:            *intent.Mode,
 		ManifestVersion: manifest.ManifestVersion,
-		References:      make([]domain.SpecificationReference, 0, len(draft.References)),
+		References:      make([]domain.SpecificationReference, 0, len(intent.References)),
 	}
 	if media == domain.DraftMediaImage {
-		if !valueInList(mediaView.Ratios, draft.Ratio) {
-			return nil, domain.ErrDraftCapabilityStale
+		if !valueInList(mediaView.Ratios, intent.Ratio) {
+			return nil, domain.ErrCapabilityStale
 		}
-		if draft.Quantity == nil || !intInList(mediaView.Quantities, *draft.Quantity) {
-			return nil, domain.ErrDraftCapabilityStale
+		if intent.Quantity == nil || !intInList(mediaView.Quantities, *intent.Quantity) {
+			return nil, domain.ErrCapabilityStale
 		}
-		spec.Ratio = draft.Ratio
-		spec.Resolution = draft.Resolution
-		spec.Quantity = *draft.Quantity
+		spec.Ratio = intent.Ratio
+		spec.Resolution = intent.Resolution
+		spec.Quantity = *intent.Quantity
 	} else {
-		if draft.DurationSeconds == nil || !intInList(mediaView.Durations, *draft.DurationSeconds) {
-			return nil, domain.ErrDraftCapabilityStale
+		if intent.DurationSeconds == nil || !intInList(mediaView.Durations, *intent.DurationSeconds) {
+			return nil, domain.ErrCapabilityStale
 		}
-		spec.Resolution = draft.Resolution
-		spec.DurationSeconds = draft.DurationSeconds
+		spec.Resolution = intent.Resolution
+		spec.DurationSeconds = intent.DurationSeconds
 		spec.Quantity = 1
 	}
 	// Mode policy shapes the reference envelope: count first, then the
 	// per-kind facts (validated against material rows by the caller).
 	if modePolicy == nil {
-		return nil, domain.ErrDraftCapabilityStale
+		return nil, domain.ErrCapabilityStale
 	}
 	// The mode total is the widest cross-model bound; the selected image
 	// model's published ceiling is the binding one (pro 10, base 14).
@@ -504,11 +502,11 @@ func freezeSpecification(draft *domain.SessionDraft, manifest domain.CapabilityM
 	if modelView.MaxReferenceImages != nil && *modelView.MaxReferenceImages < maxReferences {
 		maxReferences = *modelView.MaxReferenceImages
 	}
-	count := len(draft.References)
+	count := len(intent.References)
 	if count < modePolicy.Total.Min || count > maxReferences {
-		return nil, domain.ErrDraftCapabilityStale
+		return nil, domain.ErrCapabilityStale
 	}
-	for _, reference := range draft.References {
+	for _, reference := range intent.References {
 		spec.References = append(spec.References, domain.SpecificationReference{
 			MaterialID: reference.MaterialID,
 			Role:       reference.Role,
@@ -526,10 +524,10 @@ func validateSpecificationReferences(spec *domain.GenerationSpecification, byID 
 		material, ok := byID[reference.MaterialID]
 		if !ok {
 			// A reference to a material outside this session never freezes.
-			return domain.ErrInvalidDraft
+			return domain.ErrInvalidIntent
 		}
 		if !reference.Role.AcceptsKind(material.Kind) {
-			return domain.ErrInvalidDraft
+			return domain.ErrInvalidIntent
 		}
 		reference.Kind = material.Kind
 		reference.ClaimsVersion = material.ClaimsVersion
@@ -547,30 +545,30 @@ func validateSpecificationReferences(spec *domain.GenerationSpecification, byID 
 func referenceWithinEnvelope(spec *domain.GenerationSpecification, reference *domain.SpecificationReference, material domain.ReferenceMaterial) error {
 	envelope := domain.MediaReferenceEnvelope(spec.MediaType)
 	if envelope.PerMedia == nil {
-		return domain.ErrDraftCapabilityStale
+		return domain.ErrCapabilityStale
 	}
 	var maxBytes int64
 	switch reference.Kind {
 	case domain.KindImage:
 		if envelope.PerMedia.Image == nil {
-			return domain.ErrDraftCapabilityStale
+			return domain.ErrCapabilityStale
 		}
 		maxBytes = int64(envelope.PerMedia.Image.MaxBytes)
 	case domain.KindVideo:
 		if envelope.PerMedia.Video == nil {
-			return domain.ErrDraftCapabilityStale
+			return domain.ErrCapabilityStale
 		}
 		maxBytes = int64(envelope.PerMedia.Video.MaxBytes)
 	case domain.KindAudio:
 		if envelope.PerMedia.Audio == nil {
-			return domain.ErrDraftCapabilityStale
+			return domain.ErrCapabilityStale
 		}
 		maxBytes = int64(envelope.PerMedia.Audio.MaxBytes)
 	default:
-		return domain.ErrInvalidDraft
+		return domain.ErrInvalidIntent
 	}
 	if material.ByteSize > maxBytes {
-		return domain.ErrDraftCapabilityStale
+		return domain.ErrCapabilityStale
 	}
 	return nil
 }

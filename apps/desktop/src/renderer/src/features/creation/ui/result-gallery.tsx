@@ -1,16 +1,41 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { BanIcon, DownloadIcon, RefreshCwIcon, RepeatIcon, TriangleAlertIcon } from 'lucide-react'
+import {
+  BanIcon,
+  DownloadIcon,
+  InfoIcon,
+  MoreHorizontalIcon,
+  PencilLineIcon,
+  RefreshCwIcon,
+  RepeatIcon,
+  TriangleAlertIcon
+} from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '../../../components/ui/dropdown-menu'
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import type {
   GenerationSlotView,
+  GenerationSpecificationReferenceView,
+  GenerationSpecificationView,
   GenerationTaskDetail,
   GenerationTaskView,
   SlotFailureDiagnosticSource,
-  SlotFailureReason,
-  SlotResultView
+  SlotFailureReason
 } from '../api/generation-task-http'
+import type { ReferenceMaterialView } from '../api/go-creation-http'
 import type { CreationWorkbenchController } from '../model/use-workbench'
+import { slotResultFilename } from '../lib/result-filename'
+import {
+  RESULT_DRAG_MIME,
+  beginResultDrag,
+  encodeResultDrag,
+  endResultDrag
+} from '../model/reference-drop'
+import { modeKeys } from '../i18n/mode-keys'
 
 // Dynamic verdict vocabularies resolve through explicit key maps — the same
 // shape the composer uses for wire codes.
@@ -65,15 +90,42 @@ const mediaKeys = {
   video: 'composer.media.video'
 } as const
 
+// Reference kinds resolve through the deck's kind vocabulary so a card's
+// glyph speaks the same words as the composer's pile.
+const referenceKindKeys = {
+  image: 'composer.deck.kind.image',
+  video: 'composer.deck.kind.video',
+  audio: 'composer.deck.kind.audio'
+} as const
+
+const roleKeys = {
+  reference: 'gallery.role.reference',
+  first_frame: 'gallery.role.firstFrame',
+  last_frame: 'gallery.role.lastFrame',
+  omni: 'gallery.role.omni'
+} as const
+
 /**
- * The four-column square-edged result gallery (issue #159, prototype
- * 6e465e8): every task renders its stable ordered slots inline with their
- * state, and the task-level actions — cancel, regenerate, retry only the
- * uncompleted slots — sit beneath the grid. States live inside the slots;
- * there is no separate banner to correlate with.
+ * The borderless result gallery: tasks read old→new so the newest card sits
+ * nearest the composer at the bottom — the server pages tasks newest-first,
+ * and the reversal is display-only. Every task renders three stacked blocks
+ * (the header — the frozen reference pile, prompt, and parameter row — the
+ * slot strip, the task actions), and states live inside the slots; there is
+ * no separate banner to correlate with.
+ *
+ * Each card reads the prompt and parameters from the task's own frozen
+ * Generation Specification in its detail — never the session draft, which
+ * may have moved on. Before the detail arrives the header shows task-view
+ * facts only (status, media type), and unsettled slots borrow the draft's
+ * ratio purely for placeholder geometry.
  */
 
 const galleryGridClass = 'grid grid-cols-2 gap-2 md:grid-cols-4'
+
+// Task action chips carry a persistent subtle fill so consecutive task cards
+// read as separate groups; hover deepens it via accent.
+const quietButtonClass =
+  'text-muted-foreground bg-foreground/[0.06] hover:bg-accent hover:text-foreground flex h-8 items-center gap-1 rounded-md px-2.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50'
 
 export function ResultGallery({
   workbench
@@ -90,8 +142,8 @@ export function ResultGallery({
     )
   }
   return (
-    <div className="flex flex-col gap-6" data-testid="result-gallery">
-      {tasks.map((task) => (
+    <div className="flex flex-col gap-10" data-testid="result-gallery">
+      {[...tasks].reverse().map((task) => (
         <TaskCard key={task.id} workbench={workbench} task={task} />
       ))}
     </div>
@@ -107,20 +159,71 @@ function TaskCard({
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const detail = workbench.taskDetails[task.id]
+  const spec = detail?.specification ?? null
   const terminal = isTerminalTaskStatus(task.status)
   const indeterminate = task.terminalCause !== null
+  const retryUncompleted =
+    terminal &&
+    !indeterminate &&
+    task.status !== 'succeeded' &&
+    task.status !== 'cancelled' &&
+    !hasPolicyRejectedSlot(detail)
+  // The composer is a fixed surface that owns the live draft; re-editing a
+  // task means editing that draft and regenerating.
+  const focusComposerPrompt = (): void => {
+    document.getElementById('composer-prompt')?.focus()
+  }
   return (
     <section
       aria-label={String(t(statusKey(task.status)))}
       data-testid={`task-${task.id}`}
-      className="border-border/70 rounded-none border p-3"
+      className="animate-in fade-in slide-in-from-bottom-2 flex flex-col gap-2.5 duration-300"
     >
-      <div className="text-muted-foreground mb-2 flex items-center gap-2 text-[10px]">
-        <span className="text-foreground/80 font-medium">{t(statusKey(task.status))}</span>
-        <span>
-          {mediaKeys[task.mediaType] && t(mediaKeys[task.mediaType])} ·{' '}
-          {t('gallery.slotCount', { n: task.slotCount })}
-        </span>
+      <div className="flex items-start gap-2.5">
+        {spec !== null && spec.references.length > 0 && (
+          <TaskReferencePile
+            taskId={task.id}
+            references={spec.references}
+            materials={workbench.materials}
+            thumbnails={workbench.thumbnails}
+          />
+        )}
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          {spec !== null && spec.prompt.length > 0 && (
+            <div className="group/prompt relative">
+              <p className="text-foreground/80 line-clamp-2 text-xs leading-5">{spec.prompt}</p>
+              {/* Hover expansion overlays the card without reflowing it; the
+                  clone stays a wrapper descendant, so wrapper:hover — not the
+                  clone's own hover — holds it open and it cannot flicker. */}
+              <p
+                aria-hidden
+                className="text-foreground/80 bg-background invisible absolute inset-x-0 top-0 z-10 pb-1 text-xs leading-5 group-hover/prompt:visible"
+              >
+                {spec.prompt}
+              </p>
+            </div>
+          )}
+          <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
+            <span className="text-foreground/70 font-medium">{t(statusKey(task.status))}</span>
+            <span>
+              {t(mediaKeys[task.mediaType])}
+              {spec !== null && ` · ${spec.model}`}
+            </span>
+            {spec?.ratio != null && (
+              <>
+                <MetaSeparator />
+                <span>{spec.ratio}</span>
+              </>
+            )}
+            {spec?.resolution != null && (
+              <>
+                <MetaSeparator />
+                <span>{spec.resolution}</span>
+              </>
+            )}
+            <TaskDetailsMenu task={task} spec={spec} />
+          </div>
+        </div>
       </div>
       <div className={galleryGridClass}>
         {(detail?.slots ?? placeholderSlots(task.slotCount)).map((slot) => (
@@ -130,18 +233,28 @@ function TaskCard({
             taskId={task.id}
             slot={slot}
             mediaType={task.mediaType}
+            fallbackRatio={spec?.ratio ?? null}
           />
         ))}
       </div>
-      <div className="mt-2 flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          data-testid={`task-edit-${task.id}`}
+          onClick={focusComposerPrompt}
+          className={quietButtonClass}
+        >
+          <PencilLineIcon className="size-3.5" aria-hidden />
+          {t('gallery.actions.reedit')}
+        </button>
         {!terminal && (
           <button
             type="button"
             data-testid={`task-cancel-${task.id}`}
             onClick={() => workbench.cancelTask(task.id)}
-            className="text-muted-foreground border-border hover:bg-accent flex h-7 items-center gap-1 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+            className={quietButtonClass}
           >
-            <BanIcon className="size-3" aria-hidden />
+            <BanIcon className="size-3.5" aria-hidden />
             {t('gallery.actions.cancel')}
           </button>
         )}
@@ -151,37 +264,44 @@ function TaskCard({
             data-testid={`task-regenerate-${task.id}`}
             onClick={workbench.submit}
             disabled={workbench.submitDisabled}
-            className="text-muted-foreground border-border hover:bg-accent flex h-7 items-center gap-1 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 disabled:opacity-50"
+            className={`${quietButtonClass} disabled:opacity-50`}
           >
-            <RefreshCwIcon className="size-3" aria-hidden />
+            <RefreshCwIcon className="size-3.5" aria-hidden />
             {t('gallery.actions.regenerate')}
           </button>
         )}
-        {terminal &&
-          !indeterminate &&
-          task.status !== 'succeeded' &&
-          task.status !== 'cancelled' &&
-          !hasPolicyRejectedSlot(detail) && (
-            <button
-              type="button"
-              data-testid={`task-retry-${task.id}`}
-              onClick={() => workbench.retryTask(task.id)}
-              className="text-muted-foreground border-border hover:bg-accent flex h-7 items-center gap-1 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+        {(retryUncompleted || indeterminate) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              data-testid={`task-more-${task.id}`}
+              aria-label={String(t('gallery.actions.more'))}
+              className={quietButtonClass}
             >
-              <RepeatIcon className="size-3" aria-hidden />
-              {t('gallery.actions.retryUncompleted')}
-            </button>
-          )}
-        {terminal && indeterminate && (
-          <button
-            type="button"
-            data-testid={`task-retry-indeterminate-${task.id}`}
-            onClick={() => workbench.requestIndeterminateRedo(task.id)}
-            className="text-muted-foreground border-border hover:bg-accent flex h-7 items-center gap-1 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
-          >
-            <RepeatIcon className="size-3" aria-hidden />
-            {t('gallery.actions.retryUncompleted')}
-          </button>
+              <MoreHorizontalIcon className="size-4" aria-hidden />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44 rounded-xl">
+              {retryUncompleted && (
+                <DropdownMenuItem
+                  data-testid={`task-retry-${task.id}`}
+                  className="cursor-pointer text-xs"
+                  onSelect={() => workbench.retryTask(task.id)}
+                >
+                  <RepeatIcon className="size-3.5" aria-hidden />
+                  {t('gallery.actions.retryUncompleted')}
+                </DropdownMenuItem>
+              )}
+              {indeterminate && (
+                <DropdownMenuItem
+                  data-testid={`task-retry-indeterminate-${task.id}`}
+                  className="cursor-pointer text-xs"
+                  onSelect={() => workbench.requestIndeterminateRedo(task.id)}
+                >
+                  <RepeatIcon className="size-3.5" aria-hidden />
+                  {t('gallery.actions.retryUncompleted')}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
       {workbench.indeterminateTaskId === task.id && (
@@ -189,7 +309,7 @@ function TaskCard({
           role="alertdialog"
           aria-label={t('gallery.indeterminate.title')}
           data-testid={`indeterminate-confirm-${task.id}`}
-          className="bg-warning/10 mt-2 rounded-lg p-2"
+          className="bg-warning/10 rounded-lg p-2"
         >
           <p className="text-warning flex items-start gap-1.5 text-[11px] leading-4">
             <TriangleAlertIcon className="mt-0.5 size-3 shrink-0" aria-hidden />
@@ -218,6 +338,184 @@ function TaskCard({
   )
 }
 
+function MetaSeparator(): React.JSX.Element {
+  return (
+    <span className="text-muted-foreground/50" aria-hidden>
+      |
+    </span>
+  )
+}
+
+// The card's reference pile replicates the deck's fan in a static, read-only
+// form: deck-faced cards overlap left→right with alternating tilts, the
+// later position on top (Reference Material, CONTEXT.md, covers the
+// frozen-identity boundary). The pitch compresses so any frozen reference
+// count stays inside the header row.
+const fanRotations = [-5, 3, -3, 4, -4, 2.5]
+const pileShifts = [0, -1.5, 1.5]
+const pileCardWidth = 34
+const pileCardHeight = 44
+const pileMaxWidth = 104
+
+function TaskReferencePile({
+  taskId,
+  references,
+  materials,
+  thumbnails
+}: {
+  readonly taskId: string
+  readonly references: readonly GenerationSpecificationReferenceView[]
+  readonly materials: readonly ReferenceMaterialView[]
+  readonly thumbnails: Readonly<Record<string, string>>
+}): React.JSX.Element {
+  const { t } = useTranslation('creation')
+  const byId = new Map(materials.map((material) => [material.id, material] as const))
+  const pitch =
+    references.length > 1
+      ? Math.min(16, (pileMaxWidth - pileCardWidth) / (references.length - 1))
+      : 0
+  return (
+    <div
+      role="group"
+      aria-label={String(t('gallery.references.pile', { n: references.length }))}
+      data-testid={`task-references-${taskId}`}
+      className="relative shrink-0 self-start"
+      style={{
+        width: pileCardWidth + pitch * (references.length - 1),
+        height: pileCardHeight
+      }}
+    >
+      {references.map((reference, position) => {
+        const material = byId.get(reference.materialId)
+        // Unknown frozen roles fall back to their raw wire value, like the
+        // details menu's modes do.
+        const role =
+          reference.role in roleKeys
+            ? String(t(roleKeys[reference.role as keyof typeof roleKeys]))
+            : reference.role
+        const title = material === undefined ? role : `${material.fileName} · ${role}`
+        return (
+          <div
+            key={position}
+            title={title}
+            className="border-foreground/20 bg-muted absolute top-0 overflow-hidden rounded-[5px] border shadow-sm"
+            style={{
+              left: position * pitch,
+              width: pileCardWidth,
+              height: pileCardHeight,
+              zIndex: position,
+              transform: `translateY(${pileShifts[position % pileShifts.length]}px) rotate(${fanRotations[position % fanRotations.length]}deg)`
+            }}
+          >
+            {thumbnails[reference.materialId] !== undefined ? (
+              <img
+                src={thumbnails[reference.materialId]}
+                alt=""
+                className="size-full object-cover"
+              />
+            ) : (
+              <span className="text-muted-foreground grid size-full place-items-center text-[10px] uppercase">
+                {String(t(referenceKindKeys[reference.kind]))}
+              </span>
+            )}
+          </div>
+        )
+      })}
+      {/* The quote badge marks the pile as task references; the glyph is an
+          inline solid quote because lucide's stroked quote has a different
+          silhouette than the design's serif opening quotes. */}
+      <div className="absolute -bottom-1 -left-1 z-10 grid size-5 place-items-center rounded-full border border-[#30333c] bg-[#22252b] text-[#41484f]">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="size-2.5" aria-hidden>
+          <path d="M8 4.2C7.3 6.9 6.9 8.6 7.2 10.2A4.9 4.9 0 1 1 2.6 11.9C4.1 9.2 6.3 6.3 8 4.2Z" />
+          <path
+            d="M8 4.2C7.3 6.9 6.9 8.6 7.2 10.2A4.9 4.9 0 1 1 2.6 11.9C4.1 9.2 6.3 6.3 8 4.2Z"
+            transform="translate(11.3 0)"
+          />
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+/** The frozen-specification facts behind a task; while no detail (or no
+ * specification in it) has arrived, only the task's own identity rows show. */
+function TaskDetailsMenu({
+  task,
+  spec
+}: {
+  readonly task: GenerationTaskView
+  readonly spec: GenerationSpecificationView | null
+}): React.JSX.Element {
+  const { t } = useTranslation('creation')
+  const created = new Date(task.createdAt)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        data-testid={`task-details-${task.id}`}
+        className="text-muted-foreground hover:bg-accent hover:text-foreground flex h-6 items-center gap-1 rounded-lg px-1.5 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+      >
+        {t('gallery.details.label')}
+        <InfoIcon className="size-3" aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72 rounded-xl p-2">
+        {spec !== null && (
+          <>
+            {spec.prompt.length > 0 && (
+              <DetailRow label={t('gallery.details.prompt')}>
+                <span className="line-clamp-6 whitespace-pre-wrap">{spec.prompt}</span>
+              </DetailRow>
+            )}
+            <DetailRow
+              label={t('gallery.details.mode')}
+              value={
+                spec.mode in modeKeys
+                  ? String(t(modeKeys[spec.mode as keyof typeof modeKeys]))
+                  : spec.mode
+              }
+            />
+            <DetailRow label={t('gallery.details.quantity')} value={String(spec.quantity)} />
+            {spec.durationSeconds !== null && (
+              <DetailRow
+                label={t('gallery.details.duration')}
+                value={String(t('composer.params.seconds', { n: spec.durationSeconds }))}
+              />
+            )}
+            {spec.references.length > 0 && (
+              <DetailRow
+                label={t('gallery.details.references')}
+                value={String(spec.references.length)}
+              />
+            )}
+          </>
+        )}
+        <DetailRow label={t('gallery.details.task')}>
+          <span className="font-mono">{task.id}</span>
+        </DetailRow>
+        {!Number.isNaN(created.getTime()) && (
+          <DetailRow label={t('gallery.details.createdAt')} value={created.toLocaleString()} />
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function DetailRow({
+  label,
+  value,
+  children
+}: {
+  readonly label: string
+  readonly value?: string
+  readonly children?: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="flex items-start justify-between gap-3 px-1 py-0.5 text-[11px]">
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className="text-foreground/80 min-w-0 text-right break-words">{children ?? value}</span>
+    </div>
+  )
+}
+
 function placeholderSlots(count: number): GenerationSlotView[] {
   return Array.from({ length: count }, (_, index) => ({
     index,
@@ -241,28 +539,51 @@ function hasPolicyRejectedSlot(detail: GenerationTaskDetail | undefined): boolea
   )
 }
 
+// Slot cells keep the verified result's intrinsic shape — the height scales
+// with the image ratio instead of a fixed square, so one task's images align
+// as an even strip. Settled-shape cells come from the task's own frozen
+// ratio only; the live draft never leaks onto a card (video specs freeze no
+// ratio, so those cells fall back to square).
+function slotAspectRatio(slot: GenerationSlotView, fallbackRatio: string | null): number {
+  const { widthPx, heightPx } = slot.result ?? {}
+  if (
+    widthPx !== null &&
+    widthPx !== undefined &&
+    heightPx !== null &&
+    heightPx !== undefined &&
+    widthPx > 0 &&
+    heightPx > 0
+  ) {
+    return widthPx / heightPx
+  }
+  const [width, height] = (fallbackRatio ?? '').split(':').map(Number)
+  return width > 0 && height > 0 ? width / height : 1
+}
+
 function SlotCard({
   workbench,
   taskId,
   slot,
-  mediaType
+  mediaType,
+  fallbackRatio
 }: {
   readonly workbench: CreationWorkbenchController
   readonly taskId: string
   readonly slot: GenerationSlotView
   readonly mediaType: 'image' | 'video'
+  readonly fallbackRatio: string | null
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const [url, setUrl] = useState<string | null>(null)
   const succeeded = slot.status === 'succeeded'
+  const loadResultBlobUrl = workbench.loadResultBlobUrl
 
   // The verified output renders inside its slot; the blob rides the trusted
   // data plane like every other byte and is fetched exactly once.
   useEffect(() => {
     if (!succeeded) return
     let active = true
-    void workbench
-      .loadResultBlobUrl(taskId, slot.index)
+    void loadResultBlobUrl(taskId, slot.index)
       .then((blobUrl) => {
         if (active && blobUrl !== null) setUrl(blobUrl)
       })
@@ -270,7 +591,7 @@ function SlotCard({
     return () => {
       active = false
     }
-  }, [mediaType, succeeded, slot.index, taskId, workbench])
+  }, [mediaType, succeeded, slot.index, taskId, loadResultBlobUrl])
 
   // The download reuses the already-verified bytes (or loads them on demand)
   // and names the file after its task slot.
@@ -281,12 +602,51 @@ function SlotCard({
         if (blobUrl === null) return
         const anchor = document.createElement('a')
         anchor.href = blobUrl
-        anchor.download = downloadFilename(taskId, slot.index, mediaType, slot.result)
+        anchor.download = slotResultFilename(taskId, slot.index, mediaType, slot.result)
         document.body.appendChild(anchor)
         anchor.click()
         anchor.remove()
       })
       .catch(() => undefined)
+  }
+
+  // A succeeded slot is the drag source for reference reuse (ADR-0018): the
+  // custom type identifies the slot at drop time, while the module record
+  // carries the payload through dragover's protected mode. The native ghost
+  // would be the whole gallery cell, far larger than the deck cards it
+  // hovers — a 48x64 offscreen twin (the deck card's size) keeps the drop
+  // target visible while dragging.
+  const ghostRef = useRef<HTMLDivElement | null>(null)
+  const dragStart = (event: React.DragEvent<HTMLDivElement>): void => {
+    const payload = { taskId, slotIndex: slot.index, mediaType }
+    beginResultDrag(payload)
+    event.dataTransfer.setData(RESULT_DRAG_MIME, encodeResultDrag(payload))
+    event.dataTransfer.effectAllowed = 'copy'
+    const ghost = document.createElement('div')
+    ghost.style.cssText =
+      'position:fixed;top:-200px;left:-200px;z-index:-1;width:48px;height:64px;overflow:hidden;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.4);background:var(--muted)'
+    const source = event.currentTarget.querySelector('img')
+    if (source !== null) {
+      const face = document.createElement('img')
+      face.src = source.src
+      face.style.cssText = 'width:100%;height:100%;object-fit:cover'
+      ghost.appendChild(face)
+    } else {
+      const face = document.createElement('span')
+      face.style.cssText =
+        'display:grid;place-items:center;width:100%;height:100%;color:var(--muted-foreground);font-size:18px'
+      face.textContent = mediaType === 'video' ? '▶' : 'IMG'
+      ghost.appendChild(face)
+    }
+    document.body.appendChild(ghost)
+    ghostRef.current = ghost
+    event.dataTransfer.setDragImage(ghost, 24, 32)
+  }
+
+  const dragEnd = (): void => {
+    endResultDrag()
+    ghostRef.current?.remove()
+    ghostRef.current = null
   }
 
   return (
@@ -295,7 +655,14 @@ function SlotCard({
       data-slot-status={slot.status}
       role={succeeded ? undefined : 'status'}
       aria-label={String(t(statusKey(slot.status)))}
-      className="bg-accent/40 border-border/60 relative aspect-square overflow-hidden rounded-none border"
+      draggable={succeeded}
+      onDragStart={(event) => {
+        if (succeeded) dragStart(event)
+        else event.preventDefault()
+      }}
+      onDragEnd={dragEnd}
+      style={{ aspectRatio: String(slotAspectRatio(slot, fallbackRatio)) }}
+      className="bg-foreground/[0.04] relative overflow-hidden rounded-lg"
     >
       {succeeded && url !== null ? (
         mediaType === 'image' ? (
@@ -343,7 +710,7 @@ function SlotCard({
           type="button"
           data-testid={`slot-download-${taskId}-${slot.index}`}
           aria-label={String(t('gallery.actions.download'))}
-          title={downloadFilename(taskId, slot.index, mediaType, slot.result)}
+          title={slotResultFilename(taskId, slot.index, mediaType, slot.result)}
           onClick={download}
           className="absolute right-1 bottom-1 z-10 grid size-6 place-items-center rounded-md border border-white/25 bg-black/50 text-white outline-none hover:bg-black/65 focus-visible:ring-2 focus-visible:ring-sky-400/70"
         >
@@ -352,28 +719,6 @@ function SlotCard({
       )}
     </div>
   )
-}
-
-// Downloads keep the provider's original format: the extension follows the
-// verified result's mime type (the vendor commonly returns JPEG), never a
-// fixed png — the bytes themselves already pass through unmodified.
-const resultExtensions: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'video/mp4': 'mp4'
-}
-
-function downloadFilename(
-  taskId: string,
-  index: number,
-  mediaType: 'image' | 'video',
-  result: SlotResultView | null
-): string {
-  const extension =
-    (result !== null ? resultExtensions[result.mimeType] : undefined) ??
-    (mediaType === 'video' ? 'mp4' : 'png')
-  return `nevix-${taskId.slice(0, 8)}-${index + 1}.${extension}`
 }
 
 export type { SlotFailureReason }

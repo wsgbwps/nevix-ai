@@ -109,8 +109,8 @@ func TestSSEInvalidationIsCommitScopedAndCreatorScoped(t *testing.T) {
 	go readStreamLines(ownerReader, ownerLines)
 	go readStreamLines(otherReader, otherLines)
 
-	draft := h.saveImageDraft(t, creatorToken, "SSE 通知", 1)
-	status, body := h.submitTask(t, creatorToken, draft.SessionID, "sse-1", draft.Revision)
+	draft := h.imageTaskIntent(t, creatorToken, "SSE 通知", 1)
+	status, body := h.submitTask(t, creatorToken, "sse-1", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -127,8 +127,8 @@ func TestSSEInvalidationIsCommitScopedAndCreatorScoped(t *testing.T) {
 
 	// And it still works for its own submissions — proving the stream was
 	// live the whole time rather than silently dead.
-	otherDraft := h.saveImageDraft(t, otherToken, "他人流", 1)
-	status, body = h.submitTask(t, otherToken, otherDraft.SessionID, "sse-2", otherDraft.Revision)
+	otherDraft := h.imageTaskIntent(t, otherToken, "他人流", 1)
+	status, body = h.submitTask(t, otherToken, "sse-2", otherDraft)
 	if status != http.StatusCreated {
 		t.Fatalf("other submit: %d %s", status, body)
 	}

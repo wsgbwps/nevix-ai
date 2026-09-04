@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { CapabilityManifest } from '../api/capability-manifest-http'
 import type {
   CreationSessionView,
   DraftReferenceView,
-  ReferenceMaterialView,
-  SessionDraftInput
+  ReferenceMaterialView
 } from '../api/go-creation-http'
 import type { GenerationTaskDetail, GenerationTaskView } from '../api/generation-task-http'
 import { isTerminalTaskStatus } from '../api/generation-task-http'
+import { loadImageDimensions } from '../lib/image-dimensions'
+import { MaterialUrlOwner } from '../lib/material-url-owner'
+import { ResultBlobCache } from '../lib/result-blob-cache'
+import { resultFilename } from '../lib/result-filename'
+import { planFileDrop, type ResultDragPayload } from './reference-drop'
 import {
   allowedReferenceKinds,
   mediaCapability,
@@ -19,22 +24,38 @@ import {
   type DraftMediaType,
   type DraftStaleField
 } from './capability'
+import {
+  readLocalDraft,
+  removeLocalDraft,
+  writeLocalDraft,
+  type LocalDraftRecord
+} from './draft-store'
+import {
+  countPromptMentions,
+  expandPromptDocument,
+  promptDocumentLength,
+  promptMentionCandidates,
+  prunePromptMentions,
+  remapPromptMentions,
+  removePromptMentions,
+  textPromptDocument,
+  type PromptDocument,
+  type PromptMentionCandidate,
+  type PromptMentionKindLabels
+} from './prompt-document'
 import { useCreationRuntime, type CreationRuntime } from './runtime-context'
 
 export type WorkbenchStatus = 'loading' | 'ready' | 'error'
-
-/** idle = nothing unsent; the other states describe the autosave pipeline. */
-export type DraftSaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
 
 export type ManifestStatus = 'loading' | 'ready' | 'unavailable'
 
 /**
  * The composer's editable mirror of the session draft. Field values are
- * exactly what the creator sees and what gets saved — the manifest only adds
- * candidate menus and stale verdicts, it never rewrites these values.
+ * exactly what the creator sees; the manifest only adds candidate menus and
+ * stale verdicts, it never rewrites these values.
  */
 export interface ComposerDraft {
-  prompt: string
+  promptDocument: PromptDocument
   mediaType: DraftMediaType | null
   model: string | null
   mode: string | null
@@ -46,7 +67,7 @@ export interface ComposerDraft {
 }
 
 export const emptyComposerDraft = (): ComposerDraft => ({
-  prompt: '',
+  promptDocument: textPromptDocument(''),
   mediaType: null,
   model: null,
   mode: null,
@@ -57,14 +78,11 @@ export const emptyComposerDraft = (): ComposerDraft => ({
   references: []
 })
 
-/** Debounce for draft autosave; short enough that a reload loses nothing. */
-const autosaveDebounceMs = 800
-
 /**
  * The Workbench orchestration (issue #177): private session list state, the
- * selected session's materials, the Capability Manifest, and the recoverable
- * draft with its autosave pipeline. Provider availability never gates editing
- * or saving — only the candidate menus and stale verdicts come from the
+ * selected session's materials, the Capability Manifest, and the device-local
+ * draft with its write-through store (ADR-0017). Provider availability never
+ * gates editing — only the candidate menus and stale verdicts come from the
  * manifest.
  */
 export interface CreationWorkbenchController {
@@ -74,20 +92,43 @@ export interface CreationWorkbenchController {
   sessions: readonly CreationSessionView[]
   selected: CreationSessionView | null
   selectedId: string | null
+  /** True while the creator drafts against a session that does not exist yet. */
+  composingNew: boolean
   selectSession: (session: CreationSessionView) => void
-  createSession: (name: string) => void
+  startNewDraft: () => void
   deleteSession: (sessionId: string) => void
+  renameSession: (sessionId: string, name: string) => void
   materials: readonly ReferenceMaterialView[]
   thumbnails: Readonly<Record<string, string>>
   draft: ComposerDraft
+  mentionCandidates: readonly PromptMentionCandidate[]
+  expandedPrompt: string
+  promptLength: number
+  promptMaxChars: number
+  promptInvalid: boolean
   patchDraft: (patch: Partial<ComposerDraft>) => void
   setMediaType: (media: DraftMediaType) => void
   setModel: (model: string) => void
   setMode: (mode: string) => void
   addMaterial: (file: File) => void
+  /** Admits a dropped file batch against the mode's policy and adds what it accepts. */
+  addMaterials: (files: readonly File[]) => void
+  /** Swaps one bound card for a new file, keeping the deck position. */
+  replaceMaterial: (materialId: string, file: File) => void
+  /** Re-uploads a succeeded task result as a new Reference Material (ADR-0018). */
+  addResultAsMaterial: (payload: ResultDragPayload, targetMaterialId: string | null) => void
+  /** Materials the prompt's Reference Mentions still name; replacing one would orphan them. */
+  mentionedMaterialIds: ReadonlySet<string>
+  /** Last drop's admission summary; null while nothing was rejected. */
+  materialDropRejection: { readonly added: number; readonly rejected: number } | null
   removeMaterial: (materialId: string) => void
-  saveStatus: DraftSaveStatus
-  retrySave: () => void
+  pendingMaterialRemoval: { readonly materialId: string; readonly mentionCount: number } | null
+  confirmMaterialRemoval: () => void
+  dismissMaterialRemoval: () => void
+  referenceRecoveryShown: boolean
+  dismissReferenceRecovery: () => void
+  /** True while the latest material upload failed; cleared by the next attempt. */
+  materialUploadFailed: boolean
   manifest: CapabilityManifest | null
   manifestStatus: ManifestStatus
   staleFields: ReadonlySet<DraftStaleField>
@@ -96,7 +137,7 @@ export interface CreationWorkbenchController {
   tasks: readonly GenerationTaskView[]
   taskDetails: Readonly<Record<string, GenerationTaskDetail>>
   submitDisabled: boolean
-  submitBlockedReason: 'unavailable' | 'stale' | 'saving' | null
+  submitBlockedReason: 'unavailable' | 'stale' | 'length' | null
   submit: () => void
   cancelTask: (taskId: string) => void
   retryTask: (taskId: string) => void
@@ -104,6 +145,8 @@ export interface CreationWorkbenchController {
   dismissSubmitError: () => void
   /** Streams one succeeded slot's verified output for display. */
   loadResultBlobUrl: (taskId: string, slotIndex: number) => Promise<string | null>
+  /** Reads one server-backed or pending local Reference Material for UI presentation. */
+  loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal) => Promise<Blob | null>
   /** Retry of indeterminate work requires the creator's explicit risk confirm. */
   requestIndeterminateRedo: (taskId: string) => void
   confirmIndeterminateRedo: (taskId: string) => void
@@ -113,16 +156,30 @@ export interface CreationWorkbenchController {
 
 export function useCreationWorkbench(): CreationWorkbenchController {
   const ports = useCreationRuntime()
+  const { t } = useTranslation('creation')
+  const mentionKindLabels = useMemo<PromptMentionKindLabels>(
+    () => ({
+      image: String(t('composer.mention.kind.image')),
+      video: String(t('composer.mention.kind.video')),
+      audio: String(t('composer.mention.kind.audio'))
+    }),
+    [t]
+  )
 
   const [status, setStatus] = useState<WorkbenchStatus>('loading')
   const [sessions, setSessions] = useState<readonly CreationSessionView[]>([])
   const [reloadAttempt, setReloadAttempt] = useState(0)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [composingNew, setComposingNew] = useState(false)
   const [materials, setMaterials] = useState<readonly ReferenceMaterialView[]>([])
   const [thumbnails, setThumbnails] = useState<Readonly<Record<string, string>>>({})
   const [draft, setDraft] = useState<ComposerDraft>(emptyComposerDraft)
-  const [saveStatus, setSaveStatus] = useState<DraftSaveStatus>('idle')
+  const [materialUploadFailed, setMaterialUploadFailed] = useState(false)
+  const [materialDropRejection, setMaterialDropRejection] = useState<{
+    readonly added: number
+    readonly rejected: number
+  } | null>(null)
   const [manifest, setManifest] = useState<CapabilityManifest | null>(null)
   const [manifestStatus, setManifestStatus] = useState<ManifestStatus>('loading')
   const [tasks, setTasks] = useState<readonly GenerationTaskView[]>([])
@@ -131,38 +188,99 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const [indeterminateTaskId, setIndeterminateTaskId] = useState<string | null>(null)
   const [eventStreamLive, setEventStreamLive] = useState(false)
   const [invalidationTick, setInvalidationTick] = useState(0)
-  // Render-visible submission facts: the revision a submit would echo (null
-  // until a stored or freshly saved draft is authoritative) and whether a
-  // submission round trip is in flight.
-  const [draftRevision, setDraftRevision] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [pendingMaterialRemoval, setPendingMaterialRemoval] = useState<{
+    readonly materialId: string
+    readonly mentionCount: number
+  } | null>(null)
+  const [referenceRecoveryShown, setReferenceRecoveryShown] = useState(false)
 
-  // The manifest version the composer last saw — the save payload records it
-  // verbatim; with no manifest ever seen, the stored draft's version stands.
-  // State drives stale verdicts in render; the ref below serves callbacks
-  // that can run before React commits the corresponding state update.
-  const [seenManifestVersion, setSeenManifestVersion] = useState<number | null>(null)
-  // Manifest adoption can schedule an autosave in the same turn as the state
-  // update. The synchronous twin prevents that timer from persisting the
-  // previous render's fallback version.
+  // Manifest adoption can write through in the same turn it updates React;
+  // keep the last seen version synchronous so that write cannot persist the
+  // previous fallback version.
   const seenManifestVersionRef = useRef<number | null>(null)
-  const baselineRef = useRef<string>(JSON.stringify(emptyComposerDraft()))
+  // The manifest version of the last restored local record, kept so edits
+  // before the manifest arrives still record the version the draft was last
+  // edited under.
+  const recordManifestVersionRef = useRef<number | null>(null)
+  // True from a surface switch's optimistic reset until its local record (or
+  // the fallback) lands: the reset looks like an "untouched empty draft", and
+  // manifest adoption running inside that window would write seeded defaults
+  // straight through to the store, clobbering the record about to restore.
+  const restoreInFlightRef = useRef(false)
   const draftRef = useRef<ComposerDraft>(draft)
   const selectedIdRef = useRef<string | null>(selectedId)
-  const draftRevisionRef = useRef<string | null>(null)
+  const composingNewRef = useRef(false)
   const submittingRef = useRef(false)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(false)
+  const materialIdsRef = useRef<ReadonlySet<string>>(new Set())
+  const materialsRef = useRef<readonly ReferenceMaterialView[]>([])
+  const mentionKindLabelsRef = useRef<PromptMentionKindLabels>(mentionKindLabels)
+  const thumbnailLoadRef = useRef(0)
+  const materialUrlsRef = useRef<MaterialUrlOwner | null>(null)
+  if (materialUrlsRef.current === null) materialUrlsRef.current = new MaterialUrlOwner()
+  const portsRef = useRef<CreationRuntime>(ports)
+  const resultBlobCacheRef = useRef<ResultBlobCache | null>(null)
 
-  // Render cannot write refs; mirror the committed values after commit so the
-  // autosave pipeline (timer, flush, unmount cleanup) always reads the latest
-  // state without stale closures. Layout timing is load-bearing: the flush
-  // effect below tears down in the same commit's passive-cleanup phase, which
-  // runs BEFORE passive setups — a passive mirror there would let the flush
-  // compare a one-render-stale draft against the new baseline and save it.
+  /** The version a persisted record/submission carries: what the composer
+   * last saw, else the restored record's own, else the contract floor. */
+  const intentManifestVersion = (): number =>
+    seenManifestVersionRef.current ?? recordManifestVersionRef.current ?? 1
+
+  /**
+   * Files added while composing a session that does not exist yet, keyed by
+   * their synthetic material id. They upload when the session materializes at
+   * submit time; until then nothing about them ever reaches the server.
+   */
+  const pendingMaterialFilesRef = useRef(new Map<string, { file: File }>())
+
+  /** A locally-held file masquerades as a material so the deck and role
+   * binding treat it identically; the fields the upload would establish stay
+   * empty until the real record replaces it. */
+  const pendingMaterialView = (id: string, file: File): ReferenceMaterialView => ({
+    id,
+    kind: file.type.startsWith('video/')
+      ? 'video'
+      : file.type.startsWith('audio/')
+        ? 'audio'
+        : 'image',
+    fileName: file.name,
+    mimeType: file.type,
+    byteSize: file.size,
+    widthPx: null,
+    heightPx: null,
+    pixelCount: null,
+    durationMs: null,
+    checksumSha256: '',
+    claimsVersion: 0,
+    createdAt: new Date(0).toISOString()
+  })
+
+  /** Drops one pending file's local records, revoking its preview URL. */
+  const dropPendingMaterial = (materialId: string): void => {
+    const pending = pendingMaterialFilesRef.current.get(materialId)
+    if (pending === undefined) return
+    pendingMaterialFilesRef.current.delete(materialId)
+    materialUrlsRef.current?.releaseMaterial(materialId)
+    setThumbnails((current) => {
+      if (!(materialId in current)) return current
+      const next = { ...current }
+      delete next[materialId]
+      return next
+    })
+  }
+
+  // Render cannot write refs; mirror the committed values after commit so
+  // callbacks (write-through, submit, unmount cleanup) always read the latest
+  // state without stale closures.
   useLayoutEffect(() => {
     draftRef.current = draft
     selectedIdRef.current = selectedId
+    composingNewRef.current = composingNew
+    materialsRef.current = materials
+    materialIdsRef.current = new Set(materials.map((material) => material.id))
+    mentionKindLabelsRef.current = mentionKindLabels
+    portsRef.current = ports
   })
 
   useEffect(() => {
@@ -174,65 +292,45 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     }
   }, [])
 
-  const isDirty = useCallback(() => JSON.stringify(draftRef.current) !== baselineRef.current, [])
-
-  const toInput = useCallback(
-    (value: ComposerDraft): SessionDraftInput => ({
-      ...value,
-      manifestVersion: seenManifestVersionRef.current ?? 1,
-      updatedAt: draftRevisionRef.current ?? ''
-    }),
-    []
-  )
-
-  const persistDraft = useCallback(
-    async (sessionId: string, value: ComposerDraft) => {
-      if (!ports) return
-      setSaveStatus('saving')
-      const result = await ports.saveSessionDraft(sessionId, toInput(value)).catch(() => null)
-      if (!mountedRef.current) return
-      // Only the still-selected session consumes the verdict; a save that
-      // raced a session switch is already superseded by the switch's own load.
-      if (selectedIdRef.current !== sessionId) return
-      if (result !== null && result.outcome === 'succeeded') {
-        baselineRef.current = JSON.stringify(value)
-        draftRevisionRef.current = result.value.updatedAt
-        setDraftRevision(result.value.updatedAt)
-        setSaveStatus('saved')
-      } else {
-        setSaveStatus('failed')
+  /** The device-local draft store: synchronous write-through, keyed by the
+   * connected account and the composing surface (ADR-0017). */
+  const writeDraftThrough = useCallback(
+    (value: ComposerDraft): void => {
+      if (ports === null) return
+      const storage = globalThis.localStorage
+      if (storage === undefined) return
+      const key = composingNewRef.current ? 'new' : selectedIdRef.current
+      if (key === null) return
+      const candidates = promptMentionCandidates(
+        value.references,
+        materialsRef.current,
+        mentionKindLabelsRef.current
+      )
+      const record: LocalDraftRecord = {
+        ...value,
+        prompt: expandPromptDocument(value.promptDocument, candidates),
+        manifestVersion: intentManifestVersion()
       }
+      writeLocalDraft(storage, ports.userId, key, record)
     },
-    [ports, toInput]
+    [ports]
   )
-
-  const scheduleSave = useCallback(() => {
-    if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      saveTimerRef.current = null
-      const sessionId = selectedIdRef.current
-      if (sessionId !== null && isDirty()) void persistDraft(sessionId, draftRef.current)
-    }, autosaveDebounceMs)
-  }, [isDirty, persistDraft])
-
-  /** Sends any pending draft now — session switch, material ops, unmount. */
-  const flushSave = useCallback(async () => {
-    if (saveTimerRef.current !== null) {
-      clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
-    const sessionId = selectedIdRef.current
-    if (sessionId !== null && isDirty()) await persistDraft(sessionId, draftRef.current)
-  }, [isDirty, persistDraft])
 
   const patchDraft = useCallback(
     (patch: Partial<ComposerDraft>) => {
-      setDraft((current) => ({ ...current, ...patch }))
-      setSaveStatus('idle')
-      scheduleSave()
+      const next = { ...draftRef.current, ...patch }
+      draftRef.current = next
+      setDraft(next)
+      writeDraftThrough(next)
     },
-    [scheduleSave]
+    [writeDraftThrough]
   )
+
+  // The fallback mirrors the currently localized expansion even though the
+  // identity-bearing PromptDocument remains unchanged.
+  useEffect(() => {
+    writeDraftThrough(draftRef.current)
+  }, [mentionKindLabels, writeDraftThrough])
 
   /** The manifest-seeded draft a brand-new empty session starts from. */
   const manifestDefaultDraft = useCallback((value: CapabilityManifest): ComposerDraft | null => {
@@ -247,7 +345,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     const first = (capability.modes ?? [])[0]
     const model = (capability.models ?? [])[0]
     return {
-      prompt: '',
+      promptDocument: textPromptDocument(''),
       mediaType: media,
       model: model?.model ?? null,
       mode: first ? first.id : null,
@@ -263,9 +361,11 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const adoptManifestDefaults = useCallback(
     (value: CapabilityManifest) => {
       // Only an untouched empty draft is auto-configured; anything the
-      // creator (or a stored draft) holds is never rewritten.
+      // creator (or a stored draft) holds is never rewritten — including the
+      // optimistic empty a surface switch shows while its record restores.
+      if (restoreInFlightRef.current) return
       if (JSON.stringify(draftRef.current) !== JSON.stringify(emptyComposerDraft())) return
-      if (selectedIdRef.current === null) return
+      if (selectedIdRef.current === null && !composingNewRef.current) return
       const seeded = manifestDefaultDraft(value)
       if (seeded === null) return
       patchDraft(seeded)
@@ -304,7 +404,6 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       if (!active) return
       if (result !== null && result.outcome === 'succeeded') {
         seenManifestVersionRef.current = result.value.manifestVersion
-        setSeenManifestVersion(result.value.manifestVersion)
         setManifest(result.value)
         setManifestStatus('ready')
         adoptManifestDefaults(result.value)
@@ -317,46 +416,51 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     }
   }, [adoptManifestDefaults, ports])
 
-  // Flush an unsaved draft before the surface goes away. Reuses the same
-  // dirty check and input mapping as the debounced pipeline; the save itself
-  // is best-effort because the renderer is already tearing down.
+  // The Feature-local owners revoke thumbnails, pending-file previews, and
+  // cached result URLs when this surface ends.
   useEffect(
     () => () => {
-      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
-      const sessionId = selectedIdRef.current
-      if (sessionId !== null && JSON.stringify(draftRef.current) !== baselineRef.current) {
-        void ports?.saveSessionDraft(sessionId, toInput(draftRef.current))
-      }
+      thumbnailLoadRef.current += 1
+      materialUrlsRef.current?.dispose()
+      resultBlobCacheRef.current?.dispose()
     },
-    [ports, toInput]
+    []
   )
 
   const loadThumbnails = useCallback(
     async (list: readonly ReferenceMaterialView[]) => {
       if (!ports) return
+      const load = ++thumbnailLoadRef.current
       const entries = await Promise.all(
         list.map(async (material) =>
           material.kind === 'image'
-            ? ([material.id, await ports.loadImageBlobUrl(material.id)] as const)
+            ? ([material.id, await ports.loadMaterialBlob(material.id)] as const)
             : ([material.id, null] as const)
         )
       )
-      if (!mountedRef.current) return
+      if (!mountedRef.current || load !== thumbnailLoadRef.current) return
+      materialUrlsRef.current?.releaseThumbnails()
       const next: Record<string, string> = {}
-      for (const [id, url] of entries) {
-        if (url) next[id] = url
+      for (const [id, blob] of entries) {
+        if (blob) next[id] = materialUrlsRef.current!.replaceThumbnail(id, blob)
       }
       setThumbnails(next)
     },
     [ports]
   )
 
-  const applyLoadedDraft = useCallback((stored: ComposerDraft | null) => {
-    const value = stored ?? emptyComposerDraft()
-    baselineRef.current = JSON.stringify(value)
-    setDraft(value)
-    setSaveStatus('idle')
-  }, [])
+  const applyLoadedDraft = useCallback(
+    (stored: ComposerDraft | null, manifestVersion: number | null) => {
+      const value = stored ?? emptyComposerDraft()
+      recordManifestVersionRef.current = manifestVersion
+      draftRef.current = value
+      setDraft(value)
+      setMaterialUploadFailed(false)
+      // A surface switch must not carry the previous surface's drop summary.
+      setMaterialDropRejection(null)
+    },
+    []
+  )
 
   // --- Generation Task kernel (issue #159) ---------------------------------
 
@@ -395,14 +499,25 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const selectSession = useCallback(
     async (session: CreationSessionView) => {
       if (!ports) return
-      await flushSave()
+      setReferenceRecoveryShown(false)
+      setPendingMaterialRemoval(null)
+      setComposingNew(false)
+      composingNewRef.current = false
+      for (const materialId of pendingMaterialFilesRef.current.keys())
+        dropPendingMaterial(materialId)
+      thumbnailLoadRef.current += 1
+      materialUrlsRef.current?.dispose()
+      resultBlobCacheRef.current?.dispose()
       setSelectedId(session.id)
       selectedIdRef.current = session.id
+      materialsRef.current = []
       setMaterials([])
       setThumbnails({})
-      // Optimistic empty draft and task view until the authoritative
-      // copies arrive; stale entries must not leak across the switch.
-      applyLoadedDraft(emptyComposerDraft())
+      // Optimistic empty draft and task view until the authoritative copies
+      // arrive; stale entries must not leak across the switch. The restore
+      // flag keeps manifest adoption from seeding this transient empty.
+      restoreInFlightRef.current = true
+      applyLoadedDraft(null, null)
       setTasks([])
       setTaskDetails({})
       const [detail, materialPage] = await Promise.all([
@@ -416,42 +531,72 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         materialPage === null ||
         materialPage.outcome !== 'succeeded'
       ) {
+        restoreInFlightRef.current = false
         setStatus('error')
         setSelectedId(null)
         selectedIdRef.current = null
         return
       }
       setMaterials(materialPage.value.materials)
-      const stored = detail.value.draft
-      draftRevisionRef.current = stored?.updatedAt ?? null
-      setDraftRevision(stored?.updatedAt ?? null)
+      materialsRef.current = materialPage.value.materials
+      materialIdsRef.current = new Set(materialPage.value.materials.map((material) => material.id))
       void loadTasks(session.id)
-      applyLoadedDraft(
-        stored === null
-          ? // A never-saved session starts from the manifest defaults when the
-            // manifest is available; nothing stored is ever rewritten.
-            manifest === null
-            ? null
-            : manifestDefaultDraft(manifest)
-          : {
-              prompt: stored.prompt,
-              mediaType: stored.mediaType,
-              model: stored.model,
-              mode: stored.mode,
-              ratio: stored.ratio,
-              resolution: stored.resolution,
-              quantity: stored.quantity,
-              durationSeconds: stored.durationSeconds,
-              references: [...stored.references]
-            }
-      )
-      if (stored !== null && seenManifestVersionRef.current === null) {
-        seenManifestVersionRef.current = stored.manifestVersion
-        setSeenManifestVersion(stored.manifestVersion)
+      // The editable draft is device-local state: restore this device's copy
+      // and prune reference bindings whose materials no longer exist in the
+      // session (deleted from another surface — nothing rewrote them here).
+      const stored = readLocalDraft(globalThis.localStorage, ports.userId, session.id)
+      if (stored === null) {
+        applyLoadedDraft(manifest === null ? null : manifestDefaultDraft(manifest), null)
+      } else {
+        const known = new Set(materialPage.value.materials.map((material) => material.id))
+        const references = stored.references.filter((reference) => known.has(reference.materialId))
+        const prunedPromptDocument = prunePromptMentions(stored.promptDocument, references)
+        const recovered =
+          references.length !== stored.references.length ||
+          JSON.stringify(prunedPromptDocument) !== JSON.stringify(stored.promptDocument)
+        // Identity cannot be reconstructed after a material disappears. Keep
+        // the last visible expansion as ordinary text instead of losing prompt
+        // content or guessing which surviving label carried which identity.
+        const promptDocument = recovered ? textPromptDocument(stored.prompt) : prunedPromptDocument
+        if (recovered) setReferenceRecoveryShown(true)
+        let value: ComposerDraft = {
+          promptDocument,
+          mediaType: stored.mediaType,
+          model: stored.model,
+          mode: stored.mode,
+          ratio: stored.ratio,
+          resolution: stored.resolution,
+          quantity: stored.quantity,
+          durationSeconds: stored.durationSeconds,
+          references
+        }
+        if (
+          stored.mediaType === 'image' &&
+          references.length === 0 &&
+          stored.mode === 'reference-image'
+        ) {
+          // The deck's emptiness flips the derived image mode back: an empty
+          // reference-image draft could never satisfy its own minimum.
+          value = { ...value, mode: 'text-to-image' }
+        }
+        applyLoadedDraft(value, stored.manifestVersion)
+        writeDraftThrough(value)
+        if (seenManifestVersionRef.current === null) {
+          seenManifestVersionRef.current = stored.manifestVersion
+        }
       }
+      restoreInFlightRef.current = false
       await loadThumbnails(materialPage.value.materials)
     },
-    [applyLoadedDraft, flushSave, loadTasks, loadThumbnails, manifest, manifestDefaultDraft, ports]
+    [
+      applyLoadedDraft,
+      loadTasks,
+      loadThumbnails,
+      manifest,
+      manifestDefaultDraft,
+      ports,
+      writeDraftThrough
+    ]
   )
 
   const setMediaType = useCallback(
@@ -497,7 +642,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
 
   // Re-derives binding roles for one published mode; a binding whose
   // material kind cannot structurally fill the new role (the server twin is
-  // roleAcceptsKind) keeps its previous role, so the draft stays saveable
+  // roleAcceptsKind) keeps its previous role, so the draft stays submittable
   // and the stale reference note — never a silent rewrite — explains the
   // mismatch.
   const bindingsForMode = useCallback(
@@ -530,62 +675,231 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [bindingsForMode, patchDraft]
   )
 
-  const createSession = useCallback(
-    async (name: string) => {
-      if (!ports) return
-      const result = await ports.createSession(name.trim()).catch(() => null)
-      if (!mountedRef.current) return
-      if (result === null || result.outcome !== 'succeeded') {
-        setStatus('error')
-        return
+  /**
+   * Enters the composer without a server session: the draft lives locally and
+   * the session materializes only when a task is actually submitted. A fresh
+   * round seeds from the manifest defaults exactly like a never-edited
+   * session; a surviving local composing draft restores instead.
+   */
+  const startNewDraft = useCallback(() => {
+    if (!ports) return
+    if (composingNewRef.current) return
+    setReferenceRecoveryShown(false)
+    setPendingMaterialRemoval(null)
+    setComposingNew(true)
+    composingNewRef.current = true
+    setSelectedId(null)
+    selectedIdRef.current = null
+    for (const materialId of pendingMaterialFilesRef.current.keys()) {
+      dropPendingMaterial(materialId)
+    }
+    thumbnailLoadRef.current += 1
+    materialUrlsRef.current?.dispose()
+    resultBlobCacheRef.current?.dispose()
+    materialsRef.current = []
+    setMaterials([])
+    setThumbnails({})
+    setTasks([])
+    setTaskDetails({})
+    // startNewDraft resolves synchronously, but the same adoption guard as
+    // selectSession keeps a manifest response landing mid-reset from seeding.
+    restoreInFlightRef.current = true
+    const storage = globalThis.localStorage
+    const stored = storage === undefined ? null : readLocalDraft(storage, ports.userId, 'new')
+    if (stored === null) {
+      applyLoadedDraft(manifest === null ? null : manifestDefaultDraft(manifest), null)
+    } else {
+      // Pending files cannot survive a restart; their bindings die with them,
+      // and an emptied reference-image deck flips its derived mode back so the
+      // draft can still satisfy its own minimum.
+      const mode =
+        stored.mediaType === 'image' && stored.mode === 'reference-image'
+          ? 'text-to-image'
+          : stored.mode
+      const prunedPromptDocument = prunePromptMentions(stored.promptDocument, [])
+      const recovered =
+        stored.references.length > 0 ||
+        JSON.stringify(prunedPromptDocument) !== JSON.stringify(stored.promptDocument)
+      // Pending files cannot survive a reload, but their last expanded prompt
+      // can. Preserve that text rather than erasing mention-only drafts.
+      const promptDocument = recovered ? textPromptDocument(stored.prompt) : prunedPromptDocument
+      if (recovered) setReferenceRecoveryShown(true)
+      const value = {
+        promptDocument,
+        mediaType: stored.mediaType,
+        model: stored.model,
+        mode,
+        ratio: stored.ratio,
+        resolution: stored.resolution,
+        quantity: stored.quantity,
+        durationSeconds: stored.durationSeconds,
+        references: []
       }
-      setSessions((current) => [result.value, ...current])
-      setStatus('ready')
-      await selectSession(result.value)
-    },
-    [ports, selectSession]
-  )
+      applyLoadedDraft(value, stored.manifestVersion)
+      writeDraftThrough(value)
+      if (seenManifestVersionRef.current === null) {
+        seenManifestVersionRef.current = stored.manifestVersion
+      }
+    }
+    restoreInFlightRef.current = false
+  }, [applyLoadedDraft, manifest, manifestDefaultDraft, ports, writeDraftThrough])
 
   const deleteSession = useCallback(
     async (sessionId: string) => {
       if (!ports) return
       if (selectedIdRef.current === sessionId) {
-        // The draft of a deleted session must not be resurrected by a flush.
-        if (saveTimerRef.current !== null) {
-          clearTimeout(saveTimerRef.current)
-          saveTimerRef.current = null
-        }
+        setReferenceRecoveryShown(false)
+        setPendingMaterialRemoval(null)
         selectedIdRef.current = null
         setSelectedId(null)
-        applyLoadedDraft(emptyComposerDraft())
+        thumbnailLoadRef.current += 1
+        materialUrlsRef.current?.dispose()
+        resultBlobCacheRef.current?.dispose()
+        materialsRef.current = []
+        materialIdsRef.current = new Set()
+        setMaterials([])
+        setThumbnails({})
+        applyLoadedDraft(null, null)
       }
       setSessions((current) => current.filter((session) => session.id !== sessionId))
+      // The deleted session's device-local draft goes with it.
+      const storage = globalThis.localStorage
+      if (storage !== undefined) removeLocalDraft(storage, ports.userId, sessionId)
       await ports.deleteSession(sessionId).catch(() => undefined)
     },
     [applyLoadedDraft, ports]
   )
 
-  const addMaterial = useCallback(
-    async (file: File) => {
+  const renameSession = useCallback(
+    (sessionId: string, name: string) => {
+      // `selected` derives from this list, so the workspace title follows.
+      // Optimistic like deleteSession: a failed PATCH surfaces on the next
+      // reload instead of rolling the visible name back.
+      setSessions((current) =>
+        current.map((session) => (session.id === sessionId ? { ...session, name } : session))
+      )
+      void ports?.renameSession(sessionId, name).catch(() => undefined)
+    },
+    [ports]
+  )
+
+  const loadImageThumbnail = useCallback(
+    (materialId: string): void => {
+      const load = thumbnailLoadRef.current
+      void ports
+        ?.loadMaterialBlob(materialId)
+        .then((blob) => {
+          if (
+            !blob ||
+            !mountedRef.current ||
+            load !== thumbnailLoadRef.current ||
+            !materialIdsRef.current.has(materialId)
+          ) {
+            return
+          }
+          const url = materialUrlsRef.current!.replaceThumbnail(materialId, blob)
+          setThumbnails((current) => ({ ...current, [materialId]: url }))
+        })
+        .catch(() => undefined)
+    },
+    [ports]
+  )
+
+  /**
+   * Registers one file as a deck material and returns its identity: while
+   * composing a session that does not exist yet the file stays local
+   * (ADR-0017) and uploads at submit time; otherwise it uploads now. Returns
+   * null when the upload fails (already surfaced as materialUploadFailed).
+   */
+  const stageMaterialFile = useCallback(
+    async (file: File): Promise<{ id: string; kind: ReferenceMaterialView['kind'] } | null> => {
+      if (!ports) return null
       const sessionId = selectedIdRef.current
-      if (!ports || sessionId === null) return
+      if (sessionId === null) {
+        const id = crypto.randomUUID()
+        const previewUrl = file.type.startsWith('image/')
+          ? materialUrlsRef.current!.replaceThumbnail(id, file)
+          : null
+        pendingMaterialFilesRef.current.set(id, { file })
+        const material = pendingMaterialView(id, file)
+        materialsRef.current = [...materialsRef.current, material]
+        materialIdsRef.current = new Set([...materialIdsRef.current, id])
+        setMaterials((current) => [...current, material])
+        if (previewUrl !== null) {
+          setThumbnails((current) => ({ ...current, [id]: previewUrl }))
+          void loadImageDimensions(previewUrl).then((dimensions) => {
+            if (
+              dimensions === null ||
+              !mountedRef.current ||
+              !pendingMaterialFilesRef.current.has(id)
+            ) {
+              return
+            }
+            const withDimensions = (entry: ReferenceMaterialView): ReferenceMaterialView =>
+              entry.id === id
+                ? {
+                    ...entry,
+                    widthPx: dimensions.width,
+                    heightPx: dimensions.height,
+                    pixelCount: dimensions.width * dimensions.height
+                  }
+                : entry
+            materialsRef.current = materialsRef.current.map(withDimensions)
+            setMaterials((current) => current.map(withDimensions))
+          })
+        }
+        return { id, kind: material.kind }
+      }
       const result = await ports.uploadMaterial(sessionId, file).catch(() => null)
-      if (!mountedRef.current) return
+      if (!mountedRef.current) return null
       if (result === null || result.outcome !== 'succeeded') {
-        setSaveStatus('failed')
-        return
+        setMaterialUploadFailed(true)
+        return null
       }
       const material = result.value
+      materialsRef.current = [...materialsRef.current, material]
+      materialIdsRef.current = new Set([...materialIdsRef.current, material.id])
       setMaterials((current) => [...current, material])
+      if (material.kind === 'image') loadImageThumbnail(material.id)
+      return { id: material.id, kind: material.kind }
+    },
+    [loadImageThumbnail, ports]
+  )
+
+  /** Drops one material from every local record, thumbnail entry included —
+   * a stale entry would leave consumers (task-card piles) holding a revoked
+   * object URL; the caller settles its bytes (pending file vs server
+   * delete) around this. */
+  const forgetMaterialRecords = useCallback((materialId: string): void => {
+    setMaterials((current) => current.filter((material) => material.id !== materialId))
+    setThumbnails((current) => {
+      if (!(materialId in current)) return current
+      const next = { ...current }
+      delete next[materialId]
+      return next
+    })
+    materialsRef.current = materialsRef.current.filter((material) => material.id !== materialId)
+    materialIdsRef.current = new Set(
+      [...materialIdsRef.current].filter((candidate) => candidate !== materialId)
+    )
+  }, [])
+
+  const addMaterial = useCallback(
+    async (file: File) => {
+      if (!ports) return
+      setMaterialUploadFailed(false)
+      setMaterialDropRejection(null)
+      const staged = await stageMaterialFile(file)
+      if (staged === null) return
+      // The structural fallback keeps every kind submittable: images take the
+      // image role, anything else binds as omni (which accepts all kinds).
       const media = draftRef.current.mediaType
       const derived =
         media === null
           ? null
           : roleForPosition(media, draftRef.current.mode, draftRef.current.references.length)
-      // The structural fallback keeps every kind saveable: images take the
-      // image role, anything else binds as omni (which accepts all kinds).
-      const role = derived ?? (material.kind === 'image' ? 'reference' : 'omni')
-      const binding: DraftReferenceView = { materialId: material.id, role }
+      const role = derived ?? (staged.kind === 'image' ? 'reference' : 'omni')
+      const binding: DraftReferenceView = { materialId: staged.id, role }
       const nextReferences = [...draftRef.current.references, binding]
       if (media === 'image') {
         // Image modes derive from the deck: any reference means the
@@ -599,43 +913,60 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       } else {
         patchDraft({ references: nextReferences })
       }
-      if (material.kind === 'image') {
-        void ports
-          .loadImageBlobUrl(material.id)
-          .then((url) => {
-            if (!url || !mountedRef.current) return
-            setThumbnails((current) => ({ ...current, [material.id]: url }))
-          })
-          .catch(() => undefined)
-      }
     },
-    [bindingsForMode, patchDraft, ports]
+    [bindingsForMode, patchDraft, ports, stageMaterialFile]
   )
 
-  const removeMaterial = useCallback(
+  const removeMaterialNow = useCallback(
     async (materialId: string) => {
       if (!ports) return
+      setPendingMaterialRemoval(null)
       const remaining = draftRef.current.references.filter(
         (entry) => entry.materialId !== materialId
       )
+      const promptDocument = removePromptMentions(draftRef.current.promptDocument, materialId)
       if (draftRef.current.mediaType === 'image') {
         // The deck's emptiness flips the derived image mode back: an empty
         // reference-image draft could never satisfy its own minimum.
         const mode = remaining.length > 0 ? 'reference-image' : 'text-to-image'
-        patchDraft({ references: bindingsForMode('image', mode, remaining), mode })
+        patchDraft({
+          promptDocument,
+          references: bindingsForMode('image', mode, remaining),
+          mode
+        })
       } else {
-        patchDraft({ references: remaining })
+        patchDraft({ promptDocument, references: remaining })
       }
-      setMaterials((current) => current.filter((material) => material.id !== materialId))
+      forgetMaterialRecords(materialId)
+      materialUrlsRef.current?.releaseMaterial(materialId)
+      // A locally-held composing file never reached the server; only its
+      // local records die with the removal.
+      if (pendingMaterialFilesRef.current.has(materialId)) {
+        dropPendingMaterial(materialId)
+        return
+      }
       await ports.deleteMaterial(materialId).catch(() => undefined)
     },
-    [bindingsForMode, patchDraft, ports]
+    [bindingsForMode, forgetMaterialRecords, patchDraft, ports]
   )
 
-  const retrySave = useCallback(() => {
-    const sessionId = selectedIdRef.current
-    if (sessionId !== null) void persistDraft(sessionId, draftRef.current)
-  }, [persistDraft])
+  const requestMaterialRemoval = useCallback(
+    (materialId: string) => {
+      const mentionCount = countPromptMentions(draftRef.current.promptDocument, materialId)
+      if (mentionCount === 0) {
+        void removeMaterialNow(materialId)
+        return
+      }
+      setPendingMaterialRemoval({ materialId, mentionCount })
+    },
+    [removeMaterialNow]
+  )
+
+  const confirmMaterialRemoval = useCallback(() => {
+    if (pendingMaterialRemoval !== null) {
+      void removeMaterialNow(pendingMaterialRemoval.materialId)
+    }
+  }, [pendingMaterialRemoval, removeMaterialNow])
 
   // SSE invalidation after every persisted task change; while the stream is
   // down, polling converges the view within the ten-second contract window.
@@ -665,40 +996,147 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     return () => clearInterval(interval)
   }, [eventStreamLive, hasActiveTasks, refreshTasks])
 
+  /**
+   * Creates the server session a composing round has been drafting against
+   * and adopts it as selected WITHOUT reloading the stored state — the local
+   * draft is the intent the submission carries. The draft is written under
+   * the session's key BEFORE the composing key dies, so a mid-submit failure
+   * or crash leaves the intent durable exactly once.
+   */
+  const materializeSession = useCallback(async (): Promise<string | null> => {
+    if (!ports) return null
+    const result = await ports.createSession('').catch(() => null)
+    if (!mountedRef.current) return null
+    if (result === null || result.outcome !== 'succeeded') {
+      setSubmitError('network-failure')
+      return null
+    }
+    const session = result.value
+    setSessions((current) => [session, ...current])
+    setComposingNew(false)
+    composingNewRef.current = false
+    setSelectedId(session.id)
+    selectedIdRef.current = session.id
+    writeDraftThrough(draftRef.current)
+    const storage = globalThis.localStorage
+    if (storage !== undefined) removeLocalDraft(storage, ports.userId, 'new')
+    return session.id
+  }, [ports, writeDraftThrough])
+
+  /**
+   * Uploads every locally-held composing file to the materialized session
+   * and rewrites the draft bindings to the real material ids, preserving
+   * order and roles. Already-uploaded files never send twice, so a retry
+   * after a mid-way failure resumes with the rest.
+   */
+  const uploadPendingMaterials = useCallback(
+    async (sessionId: string): Promise<boolean> => {
+      if (!ports) return false
+      const idMap = new Map<string, string>()
+      let failed = false
+      for (const [pendingId, entry] of pendingMaterialFilesRef.current) {
+        const result = await ports.uploadMaterial(sessionId, entry.file).catch(() => null)
+        if (!mountedRef.current) return false
+        if (result === null || result.outcome !== 'succeeded') {
+          setSubmitError('network-failure')
+          failed = true
+          break
+        }
+        idMap.set(pendingId, result.value.id)
+        const uploaded = result.value
+        materialsRef.current = materialsRef.current.map((material) =>
+          material.id === pendingId ? uploaded : material
+        )
+        materialIdsRef.current = new Set(
+          [...materialIdsRef.current].map((materialId) =>
+            materialId === pendingId ? uploaded.id : materialId
+          )
+        )
+        setMaterials((current) =>
+          current.map((material) => (material.id === pendingId ? uploaded : material))
+        )
+        if (uploaded.kind === 'image') loadImageThumbnail(uploaded.id)
+      }
+      if (idMap.size > 0) {
+        // Rewrite synchronously in state AND ref: the write-through that
+        // follows must persist real material ids regardless of React commit
+        // timing.
+        const references = draftRef.current.references.map((reference) => {
+          const realId = idMap.get(reference.materialId)
+          return realId === undefined ? reference : { ...reference, materialId: realId }
+        })
+        draftRef.current = {
+          ...draftRef.current,
+          promptDocument: remapPromptMentions(draftRef.current.promptDocument, idMap),
+          references
+        }
+        setDraft(draftRef.current)
+        writeDraftThrough(draftRef.current)
+        for (const pendingId of idMap.keys()) dropPendingMaterial(pendingId)
+      }
+      return !failed
+    },
+    [loadImageThumbnail, ports, writeDraftThrough]
+  )
+
   const submit = useCallback(() => {
-    const sessionId = selectedIdRef.current
-    const revision = draftRevisionRef.current
-    if (!ports || sessionId === null || revision === null) return
+    if (!ports) return
+    const currentSessionId = selectedIdRef.current
     if (submittingRef.current) return
     submittingRef.current = true
     setSubmitting(true)
     setSubmitError(null)
-    const run = async (): Promise<void> => {
-      // The submission freezes the SERVER-stored draft: flush any unsaved
-      // edit first so the frozen intent is exactly what the composer shows.
-      await flushSave()
-      const result = await ports
-        .submitTask(sessionId, {
-          idempotencyKey: crypto.randomUUID(),
-          draftRevision: draftRevisionRef.current ?? revision
-        })
-        .catch(() => null)
+    const finish = (): void => {
       submittingRef.current = false
       setSubmitting(false)
-      if (!mountedRef.current) return
-      if (selectedIdRef.current !== sessionId) return
-      if (result !== null && result.outcome === 'succeeded') {
-        setSubmitError(null)
-        setIndeterminateTaskId(null)
-        await loadTasks(sessionId)
-      } else if (result !== null && result.outcome === 'request-rejected') {
-        setSubmitError(result.code)
-      } else {
-        setSubmitError('network-failure')
+    }
+    const run = async (): Promise<void> => {
+      try {
+        let sessionId = currentSessionId
+        if (sessionId === null) {
+          const created = await materializeSession()
+          if (created === null) return
+          sessionId = created
+        }
+        if (!(await uploadPendingMaterials(sessionId))) return
+        // The submission carries the complete local intent (ADR-0017); the
+        // write-through keeps this session's device-local copy identical to
+        // what was frozen.
+        writeDraftThrough(draftRef.current)
+        const { promptDocument, ...plainIntent } = draftRef.current
+        const candidates = promptMentionCandidates(
+          draftRef.current.references,
+          materialsRef.current,
+          mentionKindLabelsRef.current
+        )
+        const result = await ports
+          .submitTask(sessionId, {
+            idempotencyKey: crypto.randomUUID(),
+            intent: {
+              ...plainIntent,
+              prompt: expandPromptDocument(promptDocument, candidates),
+              manifestVersion: intentManifestVersion()
+            }
+          })
+          .catch(() => null)
+        finish()
+        if (!mountedRef.current) return
+        if (selectedIdRef.current !== sessionId) return
+        if (result !== null && result.outcome === 'succeeded') {
+          setSubmitError(null)
+          setIndeterminateTaskId(null)
+          await loadTasks(sessionId)
+        } else if (result !== null && result.outcome === 'request-rejected') {
+          setSubmitError(result.code)
+        } else {
+          setSubmitError('network-failure')
+        }
+      } finally {
+        finish()
       }
     }
     void run()
-  }, [flushSave, loadTasks, ports])
+  }, [loadTasks, materializeSession, ports, uploadPendingMaterials, writeDraftThrough])
 
   // The composer's submit affordance: a void adapter so the JSX handler can
   // stay a plain reference.
@@ -738,28 +1176,73 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [retryTaskById]
   )
 
+  // The result cache's wire reads the live ports, so a reconnect re-crosses
+  // through the new client instead of a closure-held dead one; creation is
+  // deferred to call time because render-scope closures over refs are
+  // forbidden (react-hooks/refs).
+  const ensureResultBlobCache = useCallback((): ResultBlobCache => {
+    if (resultBlobCacheRef.current === null) {
+      resultBlobCacheRef.current = new ResultBlobCache(
+        (taskId, slotIndex) =>
+          portsRef.current?.loadResultBlob(taskId, slotIndex) ?? Promise.resolve(null)
+      )
+    }
+    return resultBlobCacheRef.current
+  }, [])
+
   const loadResultBlobUrlFor = useCallback(
-    (taskId: string, slotIndex: number) =>
-      ports?.loadResultBlobUrl(taskId, slotIndex) ?? Promise.resolve(null),
+    (taskId: string, slotIndex: number) => ensureResultBlobCache().objectUrl(taskId, slotIndex),
+    [ensureResultBlobCache]
+  )
+
+  const loadMaterialPreviewBlob = useCallback(
+    async (materialId: string, signal?: AbortSignal): Promise<Blob | null> => {
+      const pending = pendingMaterialFilesRef.current.get(materialId)?.file
+      return pending ?? (await ports?.loadMaterialBlob(materialId, signal)) ?? null
+    },
     [ports]
   )
 
   const staleFields: ReadonlySet<DraftStaleField> = useMemo(
     () =>
       staleDraftFields(manifest, {
-        ...draft,
-        manifestVersion: seenManifestVersion ?? 1,
-        updatedAt: ''
+        ...draft
       }),
-    [draft, manifest, seenManifestVersion]
+    [draft, manifest]
   )
+
+  const mentionCandidates = useMemo(
+    () => promptMentionCandidates(draft.references, materials, mentionKindLabels),
+    [draft.references, materials, mentionKindLabels]
+  )
+  // The deck's replace aim must refuse cards the prompt still names through
+  // Reference Mentions — replacing one is a removal under the hood.
+  const mentionedMaterialIds = useMemo(() => {
+    const mentioned = new Set<string>()
+    for (const material of materials) {
+      if (countPromptMentions(draft.promptDocument, material.id) > 0) mentioned.add(material.id)
+    }
+    return mentioned
+  }, [draft.promptDocument, materials])
+  const expandedPrompt = useMemo(
+    () => expandPromptDocument(draft.promptDocument, mentionCandidates),
+    [draft.promptDocument, mentionCandidates]
+  )
+  const promptLength = promptDocumentLength(draft.promptDocument, mentionCandidates)
+  const currentCapability =
+    draft.mediaType === null ? null : mediaCapability(manifest, draft.mediaType)
+  const promptMinChars =
+    currentCapability?.available === true ? (currentCapability.prompt?.minChars ?? 1) : 1
+  const promptMaxChars =
+    currentCapability?.available === true ? (currentCapability.prompt?.maxChars ?? 2000) : 2000
+  const promptInvalid = promptLength < promptMinChars || promptLength > promptMaxChars
 
   const selected = useMemo(
     () => sessions.find((session) => session.id === selectedId) ?? null,
     [selectedId, sessions]
   )
 
-  const submitBlocked: 'unavailable' | 'stale' | 'saving' | null = (() => {
+  const submitBlocked: 'unavailable' | 'stale' | 'length' | null = (() => {
     if (draft.mediaType === null || draft.model === null || draft.mode === null)
       return 'unavailable'
     // Submission freezes a manifest-conformant intent: without the current
@@ -769,13 +1252,127 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     if (manifestStatus !== 'ready' || capability === null || !capability.available) {
       return 'unavailable'
     }
+    if (promptInvalid) return 'length'
     if (staleFields.size > 0) return 'stale'
-    if (saveStatus === 'saving' || saveStatus === 'failed') return 'saving'
     return null
   })()
 
   const deckCap = referenceCap(manifest, draft.mediaType ?? 'image', draft.model, draft.mode)
   const allowedKinds = allowedReferenceKinds(manifest, draft.mediaType, draft.mode)
+
+  /**
+   * Adds a dropped batch: admission is judged once against the deck's current
+   * capacity and the mode's kinds, then admitted files flow through the same
+   * upload path as the picker (drop order preserved); the summary line
+   * reports the rejected remainder. The server stays the final authority.
+   */
+  const addMaterials = useCallback(
+    (files: readonly File[]): void => {
+      if (!ports || files.length === 0) return
+      void (async () => {
+        const remaining = Math.max(0, deckCap - draftRef.current.references.length)
+        const plan = planFileDrop(files, allowedKinds, remaining)
+        for (const file of plan.accepted) {
+          await addMaterial(file)
+          if (!mountedRef.current) return
+        }
+        const rejected = plan.rejectedKind + plan.rejectedCap
+        if (rejected > 0) {
+          setMaterialDropRejection({ added: plan.accepted.length, rejected })
+        }
+      })()
+    },
+    [addMaterial, allowedKinds, deckCap, ports]
+  )
+
+  /**
+   * Swaps one bound card for a new file at the same deck position. The new
+   * upload happens before the old material retires, so a failed upload
+   * leaves the deck untouched. A material the prompt still mentions is never
+   * replaced (that removal path needs the mention-confirm dialog) — such a
+   * drop falls back to a plain append.
+   */
+  const replaceMaterial = useCallback(
+    (materialId: string, file: File): void => {
+      if (!ports) return
+      void (async () => {
+        const draftNow = draftRef.current
+        const position = draftNow.references.findIndex(
+          (binding) => binding.materialId === materialId
+        )
+        const replaceable =
+          materialIdsRef.current.has(materialId) &&
+          position >= 0 &&
+          countPromptMentions(draftNow.promptDocument, materialId) === 0
+        if (!replaceable) {
+          addMaterials([file])
+          return
+        }
+        setMaterialUploadFailed(false)
+        setMaterialDropRejection(null)
+        const media = draftNow.mediaType
+        const staged = await stageMaterialFile(file)
+        // A failed staging leaves the deck untouched; the old card only
+        // retires once its replacement exists.
+        if (staged === null) return
+        if (pendingMaterialFilesRef.current.has(materialId)) {
+          dropPendingMaterial(materialId)
+        } else {
+          materialUrlsRef.current?.releaseMaterial(materialId)
+          await ports.deleteMaterial(materialId).catch(() => undefined)
+        }
+        forgetMaterialRecords(materialId)
+        // Splice the new binding into the replaced position; its role derives
+        // from the mode exactly as a fresh add at that position would.
+        const kept = draftRef.current.references.filter(
+          (binding) => binding.materialId !== materialId
+        )
+        const insertAt = Math.min(position, kept.length)
+        const fallbackRole = staged.kind === 'image' ? 'reference' : 'omni'
+        const role =
+          (media !== null ? roleForPosition(media, draftRef.current.mode, insertAt) : null) ??
+          fallbackRole
+        kept.splice(insertAt, 0, { materialId: staged.id, role })
+        if (media === 'image') {
+          patchDraft({
+            references: bindingsForMode('image', 'reference-image', kept),
+            mode: 'reference-image'
+          })
+        } else {
+          patchDraft({ references: kept })
+        }
+      })()
+    },
+    [addMaterials, bindingsForMode, forgetMaterialRecords, patchDraft, ports, stageMaterialFile]
+  )
+
+  /**
+   * A dragged result re-enters through the plain upload path (ADR-0018):
+   * verified bytes stream back through the trusted data plane and upload
+   * as a brand-new material named like its download twin.
+   */
+  const addResultAsMaterial = useCallback(
+    (payload: ResultDragPayload, targetMaterialId: string | null): void => {
+      if (!ports) return
+      void (async () => {
+        const blob = (await ensureResultBlobCache().blob(payload.taskId, payload.slotIndex)) ?? null
+        if (!mountedRef.current) return
+        if (blob === null) {
+          setMaterialUploadFailed(true)
+          return
+        }
+        const mimeType = blob.type !== '' ? blob.type : null
+        const file = new File(
+          [blob],
+          resultFilename(payload.taskId, payload.slotIndex, payload.mediaType, mimeType),
+          { type: blob.type }
+        )
+        if (targetMaterialId !== null) replaceMaterial(targetMaterialId, file)
+        else addMaterials([file])
+      })()
+    },
+    [addMaterials, ports, replaceMaterial, ensureResultBlobCache]
+  )
 
   return {
     ports,
@@ -784,18 +1381,23 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     sessions,
     selected,
     selectedId,
+    composingNew,
     selectSession: (session: CreationSessionView) => {
       void selectSession(session)
     },
-    createSession: (name: string) => {
-      void createSession(name)
-    },
+    startNewDraft,
     deleteSession: (sessionId: string) => {
       void deleteSession(sessionId)
     },
+    renameSession,
     materials,
     thumbnails,
     draft,
+    mentionCandidates,
+    expandedPrompt,
+    promptLength,
+    promptMaxChars,
+    promptInvalid,
     patchDraft,
     setMediaType,
     setModel,
@@ -803,11 +1405,18 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     addMaterial: (file: File) => {
       void addMaterial(file)
     },
-    removeMaterial: (materialId: string) => {
-      void removeMaterial(materialId)
-    },
-    saveStatus,
-    retrySave,
+    addMaterials,
+    replaceMaterial,
+    addResultAsMaterial,
+    mentionedMaterialIds,
+    materialDropRejection,
+    removeMaterial: requestMaterialRemoval,
+    pendingMaterialRemoval,
+    confirmMaterialRemoval,
+    dismissMaterialRemoval: () => setPendingMaterialRemoval(null),
+    referenceRecoveryShown,
+    dismissReferenceRecovery: () => setReferenceRecoveryShown(false),
+    materialUploadFailed,
     manifest,
     manifestStatus,
     staleFields,
@@ -815,7 +1424,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     allowedKinds,
     tasks,
     taskDetails,
-    submitDisabled: submitBlocked !== null || draftRevision === null || submitting,
+    submitDisabled: submitBlocked !== null || submitting,
     submitBlockedReason: submitBlocked,
     submit: submitCallback,
     cancelTask: cancelTaskById,
@@ -823,6 +1432,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     submitError,
     dismissSubmitError: () => setSubmitError(null),
     loadResultBlobUrl: loadResultBlobUrlFor,
+    loadMaterialPreviewBlob,
     requestIndeterminateRedo: (taskId: string) => setIndeterminateTaskId(taskId),
     confirmIndeterminateRedo,
     indeterminateTaskId,

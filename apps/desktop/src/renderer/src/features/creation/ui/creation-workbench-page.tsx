@@ -1,17 +1,26 @@
-import { useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   FileImageIcon,
   ImageIcon,
+  MoreHorizontalIcon,
   PencilLineIcon,
-  PlusIcon,
   SparklesIcon,
+  Trash2Icon,
   VideoIcon
 } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '../../../components/ui/dropdown-menu'
 import type { CreationSessionView } from '../api/go-creation-http'
 import { useCreationWorkbench } from '../model/use-workbench'
-import { CreationComposer } from './composer'
+import { textPromptDocument } from '../model/prompt-document'
+import { ComposerMenuContent } from './composer-menu-content'
+import { CreationComposer, EXPANDED_MAX_WIDTH } from './composer'
 import { ResultGallery } from './result-gallery'
+import { isScrolledToBottom } from './use-composer-presence'
 
 /**
  * The production Creation Workbench (issue #177): the accepted prototype
@@ -23,14 +32,75 @@ import { ResultGallery } from './result-gallery'
  * Intentional deviations from the prototype snapshot (6e465e8): no asset
  * library entry (this slice has no production asset-library destination), no
  * list-collapse control (dead controls are not shipped), and session rows
- * carry the delete affordance required by the draft lifecycle.
+ * carry a hover actions menu (rename, delete) instead of inline controls.
+ * The "new conversation" row enters a composing round without a server
+ * session; the session materializes only at first submit (see
+ * useCreationWorkbench).
  */
 export function CreationWorkbenchPage(): React.JSX.Element | null {
   const workbench = useCreationWorkbench()
-  const { t, i18n } = useTranslation('creation')
-  // The relative "updated" labels anchor to when the list mounted; re-renders
-  // never resample the clock, so a row's label cannot change between renders.
-  const [listClock] = useState(() => Date.now())
+  const { t } = useTranslation('creation')
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [showBackToBottom, setShowBackToBottom] = useState(false)
+  // The gallery displays tasks old→new, so the head of the server's
+  // newest-first page is the newest card at the bottom; a changed head means
+  // new content to reveal there. That jump is instant so the back-to-bottom
+  // pill never flashes mid-glide — only the creator-invited return animates.
+  const newestTaskId = workbench.tasks[0]?.id ?? null
+  const returningRef = useRef(false)
+  const lastScrollTopRef = useRef(0)
+  useEffect(() => {
+    if (newestTaskId === null) return
+    const scroller = scrollRef.current
+    if (scroller === null) return
+    const frame = requestAnimationFrame(() => {
+      scroller.scrollTo({ top: scroller.scrollHeight })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [newestTaskId])
+  const scrollToBottom = (): void => {
+    const scroller = scrollRef.current
+    if (scroller === null) return
+    returningRef.current = true
+    setShowBackToBottom(false)
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' })
+  }
+
+  // A composing round owns the workspace exactly like a selected session —
+  // its session does not exist on the server yet.
+  const workspaceActive = workbench.selected !== null || workbench.composingNew
+
+  // The bottom reserve keeps gallery content clear of the floating
+  // composer: the wrapper's measured height plus its bottom inset and a
+  // clearance gap. Grow-only (high-water): shrinking with the compact form
+  // would pull a scrolled-away view back inside the at-bottom slack and
+  // oscillate. While bottom-pinned, growth bumps scrollTop by the same
+  // delta so it never reads as scrolled-away.
+  const composerWrapRef = useRef<HTMLDivElement | null>(null)
+  const reserveRef = useRef(0)
+  useLayoutEffect(() => {
+    if (!workspaceActive) return
+    const scroller = scrollRef.current
+    const wrap = composerWrapRef.current
+    if (scroller === null || wrap === null) return
+    const apply = (): void => {
+      const needed =
+        Math.ceil(wrap.getBoundingClientRect().height) +
+        parseFloat(getComputedStyle(wrap).bottom) +
+        16
+      const current = reserveRef.current
+      if (needed <= current) return
+      const pinned = isScrolledToBottom(scroller)
+      scroller.style.paddingBottom = `${needed}px`
+      reserveRef.current = needed
+      if (pinned) scroller.scrollTop += needed - current
+    }
+    apply()
+    const observer = new ResizeObserver(apply)
+    observer.observe(wrap)
+    return () => observer.disconnect()
+  }, [workspaceActive])
+
   if (!workbench.ports) return null
 
   return (
@@ -39,29 +109,40 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
         aria-label={t('sessions.label')}
         className="bg-sidebar flex w-[210px] shrink-0 flex-col border-r"
       >
-        <div className="flex h-14 shrink-0 items-center px-4">
+        <div className="flex h-12 shrink-0 items-center px-4">
           <h2 className="text-foreground text-sm font-semibold">{t('sessions.label')}</h2>
         </div>
         <div className="px-2 pb-1">
-          <NewSessionForm onCreate={workbench.createSession} />
+          <button
+            type="button"
+            data-testid="session-new"
+            onClick={workbench.startNewDraft}
+            className="hover:bg-foreground/[0.04] flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+          >
+            <span className="bg-foreground/[0.06] text-foreground grid size-7 shrink-0 place-items-center rounded-md border">
+              <PencilLineIcon className="size-3.5" aria-hidden />
+            </span>
+            <span className="text-foreground truncate text-xs font-medium">
+              {t('sessions.newAction')}
+            </span>
+          </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-3">
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1">
           {workbench.sessions.length === 0 && workbench.status === 'ready' ? (
             <p className="text-muted-foreground px-1 py-2 text-xs" role="status">
               {t('sessions.empty')}
             </p>
           ) : (
-            <ul className="grid gap-1" data-testid="session-list">
+            <ul className="grid gap-0.5" data-testid="session-list">
               {workbench.sessions.map((session, index) => (
                 <SessionRow
                   key={session.id}
                   session={session}
                   index={index}
-                  now={listClock}
-                  language={i18n.language}
                   selected={workbench.selectedId === session.id}
                   onSelect={() => workbench.selectSession(session)}
                   onDelete={() => workbench.deleteSession(session.id)}
+                  onRename={(name) => workbench.renameSession(session.id, name)}
                 />
               ))}
             </ul>
@@ -89,21 +170,43 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
         </p>
       </aside>
       <main aria-label={t('workspace.label')} className="relative min-w-0 flex-1 overflow-hidden">
-        {workbench.selected ? (
+        {workspaceActive ? (
           <>
-            <div className="h-full overflow-y-auto px-6 pb-[190px]">
+            <div
+              ref={scrollRef}
+              onScroll={() => {
+                const scroller = scrollRef.current
+                if (scroller === null) return
+                const { scrollTop } = scroller
+                const away = !isScrolledToBottom(scroller)
+                // An upward move means the creator took over mid-glide; stop
+                // suppressing the pill so it reflects where they actually are.
+                const tookOver = scrollTop < lastScrollTopRef.current
+                lastScrollTopRef.current = scrollTop
+                if (returningRef.current) {
+                  if (!away || tookOver) returningRef.current = false
+                  else return
+                }
+                setShowBackToBottom(away)
+              }}
+              className="h-full overflow-y-auto px-6"
+            >
               {/* The greeting hero is the empty-session state: clearing the
                   prompt must never hide a session that already holds tasks. */}
-              {workbench.draft.prompt.length === 0 && workbench.tasks.length === 0 ? (
+              {workbench.expandedPrompt.length === 0 && workbench.tasks.length === 0 ? (
                 <div className="mx-auto flex min-h-full max-w-[720px] flex-col items-center justify-center pb-10">
-                  <EmptyDraftHero onUseTemplate={(prompt) => workbench.patchDraft({ prompt })} />
+                  <EmptyDraftHero
+                    onUseTemplate={(prompt) =>
+                      workbench.patchDraft({ promptDocument: textPromptDocument(prompt) })
+                    }
+                  />
                 </div>
               ) : (
-                <div className="mx-auto max-w-[820px] pt-16">
+                <div className="mx-auto pt-16" style={{ maxWidth: EXPANDED_MAX_WIDTH }}>
                   <div className="mb-3 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <h1 className="text-foreground truncate text-base font-semibold">
-                        {workbench.selected.name.length > 0
+                        {workbench.selected !== null && workbench.selected.name.length > 0
                           ? workbench.selected.name
                           : t('sessions.unnamed')}
                       </h1>
@@ -114,9 +217,6 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                       </p>
                     </div>
                   </div>
-                  <p className="text-foreground/70 mb-3 text-xs leading-5">
-                    {workbench.draft.prompt}
-                  </p>
                   {workbench.submitError !== null && (
                     <p
                       role="alert"
@@ -137,7 +237,13 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                 </div>
               )}
             </div>
-            <CreationComposer workbench={workbench} />
+            <CreationComposer
+              workbench={workbench}
+              scrollerRef={scrollRef}
+              wrapperRef={composerWrapRef}
+              backToBottomVisible={showBackToBottom}
+              onBackToBottom={scrollToBottom}
+            />
           </>
         ) : (
           <EmptyWorkspace />
@@ -148,10 +254,11 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
 }
 
 /**
- * The list rows mirror the prototype's density (prototype 6e465e8): a
- * gradient thumbnail tile plus the relative update time. The tile is purely
- * decorative — the list endpoint carries no media type, and no Generation
- * Task state exists in this slice to color a status dot.
+ * The list rows mirror the prototype's compact density (prototype 6e465e8):
+ * one line with a gradient thumbnail tile and the name. Hovering reveals the
+ * actions trigger; its menu carries rename (edited inline in the row) and
+ * delete. The tile is purely decorative — the list endpoint carries no cover
+ * or media state.
  */
 const rowGradients = [
   'from-cyan-950 to-slate-800',
@@ -163,65 +270,127 @@ const rowGradients = [
 function SessionRow({
   session,
   index,
-  now,
-  language,
   selected,
   onSelect,
-  onDelete
+  onDelete,
+  onRename
 }: {
   readonly session: CreationSessionView
   readonly index: number
-  readonly now: number
-  readonly language: string
   readonly selected: boolean
   readonly onSelect: () => void
   readonly onDelete: () => void
+  readonly onRename: (name: string) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const name = session.name.length > 0 ? session.name : t('sessions.unnamed')
-  const updated = new Date(session.updatedAt)
-  const minutes = Math.floor((now - updated.getTime()) / 60_000)
-  const meta =
-    minutes < 1
-      ? String(t('sessions.meta.justNow'))
-      : minutes < 60
-        ? String(t('sessions.meta.minutesAgo', { n: minutes }))
-        : minutes < 24 * 60
-          ? String(t('sessions.meta.hoursAgo', { n: Math.floor(minutes / 60) }))
-          : minutes < 7 * 24 * 60
-            ? String(t('sessions.meta.daysAgo', { n: Math.floor(minutes / (24 * 60)) }))
-            : updated.toLocaleDateString(language)
+  const [renaming, setRenaming] = useState(false)
+  const [draftName, setDraftName] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  // Escape must not double-fire the blur-driven commit when the input unmounts.
+  const renameCancelledRef = useRef(false)
+
+  const beginRename = (): void => {
+    renameCancelledRef.current = false
+    setDraftName(session.name)
+    setRenaming(true)
+  }
+  const endRename = (): void => {
+    setRenaming(false)
+    if (renameCancelledRef.current) return
+    const next = draftName.trim()
+    if (next !== session.name) onRename(next)
+  }
+
   return (
-    <li className="group flex items-center gap-1">
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-current={selected ? 'true' : undefined}
-        aria-label={name}
-        className={
-          'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ' +
-          (selected ? 'bg-accent' : 'hover:bg-foreground/[0.04]')
-        }
-      >
-        <span
-          className={`grid size-8 shrink-0 place-items-center rounded-md bg-gradient-to-br ${rowGradients[index % rowGradients.length]}`}
+    // The row container owns the background so the primary button and the
+    // actions trigger sit on one continuous surface (the trigger cannot nest
+    // inside the button — interactive elements do not nest); the controlled
+    // menu keeps the row lit while its portal is open.
+    <li
+      className={
+        'group relative flex items-center gap-1 rounded-md ' +
+        (renaming ? '' : selected || menuOpen ? 'bg-accent' : 'hover:bg-foreground/[0.04]')
+      }
+    >
+      {renaming ? (
+        <form
+          className="bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5"
+          onSubmit={(event) => {
+            event.preventDefault()
+            endRename()
+          }}
         >
-          <FileImageIcon className="size-3.5 text-white/75" aria-hidden />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="text-foreground block truncate text-xs font-medium">{name}</span>
-          <span className="text-muted-foreground block truncate text-[9px]">{meta}</span>
-        </span>
-      </button>
-      <button
-        type="button"
-        aria-label={t('sessions.remove', { name })}
-        onClick={onDelete}
-        className="text-muted-foreground hover:text-foreground rounded p-1 text-[10px] opacity-0 outline-none group-hover:opacity-100 focus-visible:opacity-100"
-      >
-        ✕
-      </button>
+          <SessionTile index={index} />
+          <input
+            autoFocus
+            value={draftName}
+            onChange={(event) => setDraftName(event.target.value)}
+            onBlur={endRename}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                renameCancelledRef.current = true
+                setRenaming(false)
+              }
+            }}
+            aria-label={t('sessions.rename.label')}
+            maxLength={128}
+            data-testid="session-rename-input"
+            className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-xs font-medium outline-none"
+          />
+        </form>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={onSelect}
+            aria-current={selected ? 'true' : undefined}
+            aria-label={name}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+          >
+            <SessionTile index={index} />
+            <span className="text-foreground block truncate text-xs font-medium">{name}</span>
+          </button>
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger
+              aria-label={t('sessions.menu.open')}
+              data-testid={`session-menu-${session.id}`}
+              className="text-muted-foreground hover:text-foreground mr-1.5 rounded p-1 opacity-0 outline-none group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sky-400/50 data-[state=open]:opacity-100"
+            >
+              <MoreHorizontalIcon className="size-5" aria-hidden />
+            </DropdownMenuTrigger>
+            <ComposerMenuContent side="bottom" align="start" sideOffset={4}>
+              <DropdownMenuItem
+                onSelect={beginRename}
+                data-testid={`session-rename-${session.id}`}
+                className="text-xs"
+              >
+                <PencilLineIcon className="size-3.5" aria-hidden />
+                {t('sessions.menu.rename')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={onDelete}
+                data-testid={`session-delete-${session.id}`}
+                className="text-xs"
+              >
+                <Trash2Icon className="size-3.5" aria-hidden />
+                {t('sessions.menu.delete')}
+              </DropdownMenuItem>
+            </ComposerMenuContent>
+          </DropdownMenu>
+        </>
+      )}
     </li>
+  )
+}
+
+function SessionTile({ index }: { readonly index: number }): React.JSX.Element {
+  return (
+    <span
+      className={`grid size-7 shrink-0 place-items-center rounded bg-gradient-to-br ${rowGradients[index % rowGradients.length]}`}
+    >
+      <FileImageIcon className="size-3.5 text-white/75" aria-hidden />
+    </span>
   )
 }
 
@@ -299,47 +468,5 @@ function EmptyWorkspace(): React.JSX.Element {
         <p>{t('workspace.empty')}</p>
       </div>
     </div>
-  )
-}
-
-/**
- * The create row mirrors the prototype's "新对话" pill (a full-width h-9
- * quiet surface with a pencil glyph); the inline input keeps the optional
- * naming capability, and the plus submits.
- */
-function NewSessionForm({
-  onCreate
-}: {
-  readonly onCreate: (name: string) => void
-}): React.JSX.Element {
-  const { t } = useTranslation('creation')
-  const [name, setName] = useState('')
-  return (
-    <form
-      className="bg-foreground/[0.065] hover:bg-foreground/[0.09] focus-within:bg-foreground/[0.09] flex h-9 w-full items-center gap-2 rounded-lg px-3 transition-colors"
-      onSubmit={(event) => {
-        event.preventDefault()
-        onCreate(name)
-        setName('')
-      }}
-    >
-      <PencilLineIcon className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
-      <input
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        placeholder={t('sessions.newPlaceholder')}
-        aria-label={t('sessions.newLabel')}
-        maxLength={128}
-        data-testid="session-new-input"
-        className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-xs font-medium outline-none"
-      />
-      <button
-        type="submit"
-        aria-label={t('sessions.newSubmit')}
-        className="text-muted-foreground hover:text-foreground flex size-5 shrink-0 items-center justify-center rounded outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
-      >
-        <PlusIcon className="size-3.5" aria-hidden />
-      </button>
-    </form>
   )
 }

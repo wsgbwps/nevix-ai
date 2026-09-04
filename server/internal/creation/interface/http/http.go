@@ -51,11 +51,10 @@ const (
 	CodeRangeNotSatisfiable = "range_not_satisfiable"
 	CodeInternalError       = "internal_error"
 
-	CodeIdempotencyConflict   = "idempotency_payload_conflict"
-	CodeDraftRevisionConflict = "draft_revision_conflict"
-	CodeDraftNotReady         = "draft_not_ready"
-	CodeDraftCapabilityStale  = "draft_capability_stale"
-	CodeMediaUnavailable      = "media_unavailable"
+	CodeIdempotencyConflict = "idempotency_payload_conflict"
+	CodeIntentNotReady      = "intent_not_ready"
+	CodeCapabilityStale     = "capability_stale"
+	CodeMediaUnavailable    = "media_unavailable"
 
 	CodeNotConfigured               = "provider_connection_not_configured"
 	CodeConnectionExists            = "provider_connection_exists"
@@ -92,8 +91,8 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusUnprocessableEntity, Code: CodeUnreadableMedia, Message: "The media's dimensions fall outside the accepted reference envelope."}
 	case isError(err, domain.ErrRangeNotSatisfiable):
 		return &Error{Status: http.StatusRequestedRangeNotSatisfiable, Code: CodeRangeNotSatisfiable, Message: "The requested range cannot be satisfied."}
-	case isError(err, domain.ErrInvalidDraft):
-		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The draft violates the structural envelope or references materials outside the session."}
+	case isError(err, domain.ErrInvalidIntent):
+		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The submitted intent violates the structural envelope or references materials outside the session."}
 	case isError(err, domain.ErrConnectionNotConfigured):
 		return &Error{Status: http.StatusNotFound, Code: CodeNotConfigured, Message: "No AI provider connection is configured."}
 	case isError(err, domain.ErrConnectionExists):

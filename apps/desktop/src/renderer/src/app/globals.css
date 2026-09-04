@@ -3,6 +3,12 @@
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/inter';
 
+/* Explicit source root: component tests compile this stylesheet through a
+   vite server whose root is not this package, so Tailwind's automatic
+   content detection finds no sources there. Redundant (and output-identical)
+   for the production build, whose detection already covers this tree. */
+@source '../';
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

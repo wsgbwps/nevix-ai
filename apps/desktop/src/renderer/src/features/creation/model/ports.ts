@@ -9,8 +9,6 @@ import {
   type MaterialPage,
   type ReferenceMaterialView,
   type SessionDetailView,
-  type SessionDraftInput,
-  type SessionDraftView,
   type SessionPage
 } from '../api/go-creation-http'
 import {
@@ -71,10 +69,6 @@ export interface CreationWorkspacePorts {
   ) => Promise<CreationApiResult<CreationSessionView>>
   readonly deleteSession: (sessionId: string) => Promise<CreationApiResult<void>>
   readonly getSessionDetail: (sessionId: string) => Promise<CreationApiResult<SessionDetailView>>
-  readonly saveSessionDraft: (
-    sessionId: string,
-    draft: SessionDraftInput
-  ) => Promise<CreationApiResult<SessionDraftView>>
   readonly listMaterials: (
     sessionId: string,
     cursor?: string | null
@@ -84,9 +78,9 @@ export interface CreationWorkspacePorts {
     file: File
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
-  readonly loadImageBlobUrl: (materialId: string) => Promise<string | null>
+  readonly loadMaterialBlob: (materialId: string, signal?: AbortSignal) => Promise<Blob | null>
   readonly loadCapabilityManifest: () => Promise<CreationApiResult<CapabilityManifest>>
-  /** Submits one idempotent generation task from the stored draft. */
+  /** Submits one idempotent generation task carrying the full local intent. */
   readonly submitTask: (
     sessionId: string,
     input: TaskSubmitInput
@@ -98,8 +92,9 @@ export interface CreationWorkspacePorts {
     taskId: string,
     idempotencyKey: string
   ) => Promise<CreationApiResult<GenerationTaskDetail>>
-  /** Streams one succeeded slot's verified output for display. */
-  readonly loadResultBlobUrl: (taskId: string, slotIndex: number) => Promise<string | null>
+  /** Streams one succeeded slot's verified output as bytes; display URLs are
+   * derived Feature-locally by the result cache, never over this seam. */
+  readonly loadResultBlob: (taskId: string, slotIndex: number) => Promise<Blob | null>
   /**
    * Opens the creator-scoped SSE invalidation stream; returns unsubscribe.
    * onStateChange mirrors liveness so the caller can poll while it is down.
@@ -153,8 +148,6 @@ export function createCreationWorkspacePorts(
       withToken((client, token) => client.deleteSession(token, sessionId)),
     getSessionDetail: (sessionId) =>
       withToken((client, token) => client.getSessionDetail(token, sessionId)),
-    saveSessionDraft: (sessionId, draft) =>
-      withToken((client, token) => client.saveSessionDraft(token, sessionId, draft)),
     listMaterials: (sessionId, cursor) =>
       withToken(async (client, token) => {
         if (cursor) return client.listMaterials(token, sessionId, cursor)
@@ -167,8 +160,8 @@ export function createCreationWorkspacePorts(
       withToken((client, token) => client.uploadMaterial(token, sessionId, file)),
     deleteMaterial: (materialId) =>
       withToken((client, token) => client.deleteMaterial(token, materialId)),
-    loadImageBlobUrl: (materialId) =>
-      withToken((client, token) => client.loadImageBlobUrl(token, materialId)),
+    loadMaterialBlob: (materialId, signal) =>
+      withToken((client, token) => client.loadMaterialBlob(token, materialId, signal)),
     // The manifest client shares the request helper's failure mapping; only
     // the parser differs, so it rides the same per-call token acquisition.
     loadCapabilityManifest: () =>
@@ -180,8 +173,8 @@ export function createCreationWorkspacePorts(
     cancelTask: (taskId) => withTaskToken((client, token) => client.cancelTask(token, taskId)),
     retryTask: (taskId, idempotencyKey) =>
       withTaskToken((client, token) => client.retryTask(token, taskId, idempotencyKey)),
-    loadResultBlobUrl: (taskId, slotIndex) =>
-      withTaskToken((client, token) => client.loadResultBlobUrl(token, taskId, slotIndex)),
+    loadResultBlob: (taskId, slotIndex) =>
+      withTaskToken((client, token) => client.loadResultBlob(token, taskId, slotIndex)),
     subscribeEvents: (handlers) =>
       openCreationEventStream(
         serverUrl,

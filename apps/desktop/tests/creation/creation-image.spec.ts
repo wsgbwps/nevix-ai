@@ -50,13 +50,10 @@ test(
         await launched.page.getByRole('link', { name: 'AI 创作' }).click()
         await expect(workbench).toBeVisible()
 
-        await workbench.getByLabel('新会话名称（可选）').fill('图片生成')
-        await workbench.getByLabel('创建').click()
+        // 「新对话」只进入未落库的 composing 态；会话随首次提交物化。
+        await workbench.getByTestId('session-new').click()
         await expect(workbench.getByTestId('composer')).toBeVisible()
         await workbench.getByTestId('composer-prompt').fill('秋季上新主图，冷调布光')
-        await expect(workbench.getByTestId('composer-save')).toContainText('草稿已保存', {
-          timeout: 15_000
-        })
 
         // The verified output's download lands in the test directory: the
         // main-process handler stands in for the OS save dialog.
@@ -67,6 +64,7 @@ test(
           })
         }, downloadDir)
 
+        await expect(workbench.getByTestId('composer-submit')).toBeEnabled({ timeout: 15_000 })
         await workbench.getByTestId('composer-submit').click()
 
         // The worker converges the real queue: the slot's succeeded verdict

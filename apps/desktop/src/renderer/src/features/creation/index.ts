@@ -5,5 +5,6 @@ export {
   type ProviderConnectionProofAction
 } from './ui/provider-connection-settings'
 export { CreationRuntimeContext, useCreationRuntime } from './model/runtime-context'
+export type { CreationRuntime } from './model/runtime-context'
 export { createCreationWorkspacePorts, type CreationWorkspacePorts } from './model/ports'
 export type { ReferenceMaterialView } from './api/go-creation-http'

@@ -38,12 +38,13 @@ var (
 	// ErrRangeNotSatisfiable reports a Range header that is syntactically
 	// invalid, spans multiple ranges, or starts past the end of the blob.
 	ErrRangeNotSatisfiable = errors.New("range not satisfiable")
-	// ErrInvalidDraft reports a draft that violates the structural envelope:
-	// a bound overflow, an unknown media type or role, or a reference binding
-	// to a material outside the session (or of an incompatible kind). The
-	// capability manifest is deliberately not consulted — stale values must
-	// round-trip — so this is always a request-shape fault, not staleness.
-	ErrInvalidDraft = errors.New("invalid session draft")
+	// ErrInvalidIntent reports a submission payload that violates the
+	// structural envelope: a bound overflow, an unknown media type or role, or
+	// a reference binding to a material outside the session (or of an
+	// incompatible kind). The capability manifest is deliberately not
+	// consulted — stale values reach the freeze — so this is always a
+	// request-shape fault, not staleness.
+	ErrInvalidIntent = errors.New("invalid generation intent")
 )
 
 // Task-command errors. The interface layer maps these onto the stable codes
@@ -56,15 +57,12 @@ var (
 	// ErrIdempotencyPayloadConflict reports a reused idempotency key whose
 	// frozen payload differs from the stored task's payload hash.
 	ErrIdempotencyPayloadConflict = errors.New("idempotency key reused with a different payload")
-	// ErrDraftRevisionConflict reports a submission based on a stale draft
-	// revision; the stored draft is never silently rewritten.
-	ErrDraftRevisionConflict = errors.New("draft changed since the submitted revision")
-	// ErrDraftNotReady reports a draft that cannot form a generation intent
-	// at all: never saved, missing target media, or structurally invalid.
-	ErrDraftNotReady = errors.New("draft is not ready for submission")
-	// ErrDraftCapabilityStale reports draft values outside the current
-	// capability manifest; the draft keeps its values and blocks submission.
-	ErrDraftCapabilityStale = errors.New("draft values are outside the current capability manifest")
+	// ErrIntentNotReady reports a submitted intent that cannot form a
+	// generation intent at all: missing prompt, target media, or model/mode.
+	ErrIntentNotReady = errors.New("generation intent is not ready for submission")
+	// ErrCapabilityStale reports intent values outside the current capability
+	// manifest; nothing freezes.
+	ErrCapabilityStale = errors.New("intent values are outside the current capability manifest")
 	// ErrTaskNotTerminal reports a retry against a task that still owes work.
 	ErrTaskNotTerminal = errors.New("generation task is not terminal")
 	// ErrNoIncompleteSlots reports a retry against a task with nothing left

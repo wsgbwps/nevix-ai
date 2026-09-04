@@ -17,19 +17,8 @@ type SessionRepository interface {
 	// Get resolves one active (non-deleted) session owned by the acting user.
 	// Ingestion reuses it to fail before streaming bytes.
 	Get(ctx context.Context, owner, id UUID) (Session, error)
-	// GetWithDraft resolves the session together with its recoverable draft
-	// (nil when never saved); both shapes collapse misses into
-	// ErrSessionNotFound.
-	GetWithDraft(ctx context.Context, owner, id UUID) (Session, *SessionDraft, error)
 	List(ctx context.Context, owner UUID, cursor *CompoundCursor, limit int) ([]Session, *CompoundCursor, error)
 	Rename(ctx context.Context, tx TxExecutor, owner, id UUID, name string) (Session, error)
-	// SaveDraft atomically replaces the draft scalars and the ordered
-	// reference bindings inside the caller's write transaction and returns
-	// the database's authoritative new revision (draft_updated_at), the
-	// value submitters echo back as draft_revision. Missing session
-	// collapses into ErrSessionNotFound; a reference to a material outside
-	// the session collapses into ErrInvalidDraft.
-	SaveDraft(ctx context.Context, tx TxExecutor, owner, id UUID, draft *SessionDraft) (time.Time, error)
 	Delete(ctx context.Context, tx TxExecutor, owner, id UUID) error
 }
 
@@ -51,11 +40,6 @@ type MaterialRepository interface {
 	// inside the caller's transaction; materials outside the session are
 	// absent, and admission treats absence as a rejection fact.
 	LoadMaterialsInSession(ctx context.Context, tx TxExecutor, owner, sessionID UUID, ids []UUID) ([]ReferenceMaterial, error)
-	// ResolveKindsInSession returns the kinds of the requested materials that
-	// live under one active owned session; materials outside it are simply
-	// absent from the result. Runs inside the caller's transaction so a
-	// concurrent delete cannot slip between validation and draft write.
-	ResolveKindsInSession(ctx context.Context, tx TxExecutor, owner, sessionID UUID, ids []UUID) (map[UUID]Kind, error)
 }
 
 // CompoundCursor is one opaque compound keyset token over (created_at, id).
@@ -121,10 +105,10 @@ type (
 // the SQL predicates themselves; guarded transitions return false when the
 // one-way migration loses a race so callers can never fabricate state.
 type GenerationTaskRepository interface {
-	// LoadSessionDraftForAdmission resolves the active owned session and its
-	// draft inside the admission transaction, so the frozen specification
-	// and the revision check share one snapshot.
-	LoadSessionDraftForAdmission(ctx context.Context, tx TxExecutor, owner, sessionID UUID) (Session, *SessionDraft, error)
+	// LoadSessionForAdmission resolves the active owned session inside the
+	// admission transaction, so liveness and ownership share the freeze's
+	// snapshot.
+	LoadSessionForAdmission(ctx context.Context, tx TxExecutor, owner, sessionID UUID) (Session, error)
 	// FindByIdempotencyKey resolves a prior admitted task for the same
 	// creator-scoped key inside the admission transaction; ok is false when
 	// the key is fresh.

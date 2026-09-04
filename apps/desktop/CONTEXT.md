@@ -6,6 +6,8 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 
 > 2026-08-22：用户系统迁移（#99）已落地到桌面端：组织时代词群随 Organization Feature 一并移除，本词典只剩单租户词汇；账号治理词汇（User Management Domain / Audit Log）已随桌面端 Admin 界面（#105）入册，其余账号治理词群（Admin/Member 等）见 [Server 词典](../../server/CONTEXT.md)。
 > 2026-08-23：连接基座（#104）落地，新增 Server URL / Connection Screen / Connection Probe / Certificate Fingerprint Pin 词群，取代已消亡的「构建期服务器配置」概念。
+> 2026-09-02：任务卡片改由任务自己的冻结 Generation Specification 展示提示词与参数（#186），新增 Draft / Generation Specification 词群以区分「正在编辑」与「提交时冻结」两种生成意图。
+> 2026-09-02：Draft 确定为设备本地状态：仅留存于当前设备、多设备互不相通，提交请求携带完整生成意图，服务端不再保存可编辑草稿。
 
 **User**:
 使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
@@ -67,9 +69,33 @@ _Avoid_: Inspiration Domain, Discovery Domain
 由 Nevix 策划、在 Inspiration Page 以真实生成的示例封面呈现的可复用创作起点；V1 包含简体中文名称、说明与提示词骨架，以及具备复用授权的参考素材、媒体类型、推荐模型和生成参数。"做同款"会把参考素材、提示词、推荐模型与参数填入统一的 Creation Workbench，User 可以保留、删除、替换或修改这些内容；供应商连接由部署实例固定，模型只能在该连接内经 Nevix 适配并验证、且支持当前媒体类型的列表中切换。Official Selection 只是这类模板的展示集合，不构成独立作品类型。
 _Avoid_: Official Featured Work, Channel Template, Static Example
 
+**Draft**:
+创作台中 User 正在编辑、仅留存于当前设备的生成意图；它随写随存于本设备，多设备互不相通，可以任意修改，尚未对任何生成结果负责，提交时才冻结为 Generation Specification。
+_Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 服务端草稿
+
+**Reference Material**:
+User 在创作台向当前会话上传、供生成引用的原始媒体（图片/视频/音频）；它属于会话、可独立删除，身份是素材 id。提交时冻结进 Generation Specification 的是对它的引用（素材 id、role、kind、claims 版本）而非素材本体；素材删除后任务里的冻结引用悬空，界面按素材缺失回退展示，不影响已生成结果。它与 Asset Library 的媒体资产分属两个生命阶段，V1 互不连通。
+_Avoid_: 素材库, Attachment, 上传文件
+
+**Reference Mention**:
+Draft 提示词内、随本地 Draft 持久化的结构化指代，稳定绑定当前已添加 Reference Material 的身份；界面将其呈现为不可拆分的行内 chip，并按当前参考素材顺序在各媒体类型内动态编号和本地化类型名称，不按素材 role 命名。它不决定素材是否参与生成，提交时按当前 Interface Language 展开为同一类型名称与编号的普通文本且不把身份冻结进 Generation Specification；V1 也不从主体库或 Asset Library 引入候选。
+_Avoid_: @文本, 素材名称, Reference Binding
+
+**Generation Specification**:
+生成提交时冻结的完整生成意图；它承载提交时刻的真实意图，冻结后永不变更，与会话当前仍可编辑的 Draft 相对。
+_Avoid_: Draft, 任务参数（指 Specification 中的个别字段）
+
 **Creation Workbench**:
 AI Creation Domain 拥有的会话式创作页面，承载创作上下文、生成操作、任务状态和结果；它是界面而非 Domain 或新的租户边界。
 _Avoid_: Generation Workspace, Creation Workspace
+
+**Composer 完整态**:
+Creation Workbench 底部 Composer 的完整形态：参考素材堆、多行提示词输入、能力控制行与提交按钮齐全；工作区位于滚动底部、或 User 正与 Composer 交互时呈现。
+_Avoid_: 编辑态, 默认态
+
+**Composer 紧凑态**:
+工作区滚离底部时 Composer 整体收窄收矮成的居中单行形态：素材堆（或收小的添加入口）、单行提示词与提交按钮保留，能力控制行隐藏；点击其内部恢复完整态，直到下一次滚动才收回。
+_Avoid_: 折叠态（与素材堆自身的收拢牌堆撞词）, 最小化
 
 **Asset Library**:
 AI Creation Domain 拥有的媒体资产浏览与复用页面；媒体资产的独立生命周期不使该页面成为独立 Domain，不与 renderer 静态 assets 混同。

@@ -21,8 +21,8 @@ func TestImageTaskLifecycleReachesSucceeded(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1})
 
-	draft := h.saveImageDraft(t, token, "两张输出", 2)
-	status, body := h.submitTask(t, token, draft.SessionID, "img-life", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "两张输出", 2)
+	status, body := h.submitTask(t, token, "img-life", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -77,11 +77,11 @@ func TestVideoTaskLifecycleRunsAsync(t *testing.T) {
 		t.Fatalf("create session: %d", status)
 	}
 	sessionID := extractField(t, body, "id")
-	draft := h.saveDraftOn(t, token, sessionID, taskDraft{
+	draft := h.buildTaskIntent(t, token, sessionID, taskIntent{
 		MediaType: "video", Model: "doubao-seedance-2-5", Mode: "text-to-video",
 		Resolution: "720p", Duration: 5, Prompt: "一段商品运镜视频",
 	})
-	status, body = h.submitTask(t, token, sessionID, "vid-life", draft.Revision)
+	status, body = h.submitTask(t, token, "vid-life", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -110,8 +110,8 @@ func TestPartialSuccessKeepsEverySucceededSlotAndRetryCreatesNewTask(t *testing.
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1, emptyOutputsOn: 2})
 
-	draft := h.saveImageDraft(t, token, "部分成功", 3)
-	status, body := h.submitTask(t, token, draft.SessionID, "partial", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "部分成功", 3)
+	status, body := h.submitTask(t, token, "partial", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -171,8 +171,8 @@ func TestCancelConvergesBestEffort(t *testing.T) {
 
 	// 1) Unsubmitted: cancel converges immediately without external work.
 	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 1000})
-	draft := h.saveImageDraft(t, token, "立即取消", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "cancel-queued", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "立即取消", 1)
+	status, body := h.submitTask(t, token, "cancel-queued", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -206,11 +206,11 @@ func TestCancelConvergesBestEffort(t *testing.T) {
 		t.Fatal("session")
 	}
 	sessionID := extractField(t, body, "id")
-	videoDraft := h.saveDraftOn(t, token, sessionID, taskDraft{
+	videoDraft := h.buildTaskIntent(t, token, sessionID, taskIntent{
 		MediaType: "video", Model: "doubao-seedance-2-5", Mode: "text-to-video",
 		Resolution: "720p", Duration: 5, Prompt: "取消收敛",
 	})
-	status, body = h.submitTask(t, token, sessionID, "cancel-running", videoDraft.Revision)
+	status, body = h.submitTask(t, token, "cancel-running", videoDraft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -245,8 +245,8 @@ func TestCancelOfReflessSubmitConverges(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{status: http.StatusTooManyRequests})
 
-	draft := h.saveImageDraft(t, token, "取消未受理提交", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "cancel-refless", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "取消未受理提交", 1)
+	status, body := h.submitTask(t, token, "cancel-refless", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -285,8 +285,8 @@ func TestIndeterminateSubmitNeverAutoRetries(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{abort: true})
 
-	draft := h.saveImageDraft(t, token, "未知结局", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "indeterminate", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "未知结局", 1)
+	status, body := h.submitTask(t, token, "indeterminate", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -314,8 +314,8 @@ func TestProvider402PersistsCreditBlock(t *testing.T) {
 	creatorToken := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{status: http.StatusPaymentRequired})
 
-	draft := h.saveImageDraft(t, creatorToken, "额度耗尽", 1)
-	status, body := h.submitTask(t, creatorToken, draft.SessionID, "credit-1", draft.Revision)
+	draft := h.imageTaskIntent(t, creatorToken, "额度耗尽", 1)
+	status, body := h.submitTask(t, creatorToken, "credit-1", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -334,7 +334,7 @@ func TestProvider402PersistsCreditBlock(t *testing.T) {
 	}
 
 	// Admission now rejects with the stable reason at 403.
-	status, body = h.submitTask(t, creatorToken, draft.SessionID, "credit-2", draft.Revision)
+	status, body = h.submitTask(t, creatorToken, "credit-2", draft)
 	if status != http.StatusForbidden {
 		t.Fatalf("blocked submission must 403, got %d", status)
 	}
@@ -345,7 +345,7 @@ func TestProvider402PersistsCreditBlock(t *testing.T) {
 	if status, raw := h.doRequest(t, "DELETE", "/creation/provider-connection/credit-block", adminToken, nil); status != http.StatusNoContent {
 		t.Fatalf("clear credit block: %d %s", status, raw)
 	}
-	status, body = h.submitTask(t, creatorToken, draft.SessionID, "credit-3", draft.Revision)
+	status, body = h.submitTask(t, creatorToken, "credit-3", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("cleared submission must admit, got %d: %s", status, body)
 	}
@@ -359,8 +359,8 @@ func TestProviderRateLimitedBacksOffBounded(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{status: http.StatusTooManyRequests})
 
-	draft := h.saveImageDraft(t, token, "限速退避", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "rate-1", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "限速退避", 1)
+	status, body := h.submitTask(t, token, "rate-1", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -389,7 +389,7 @@ func TestPausedConnectionHoldsUnstartedCalls(t *testing.T) {
 
 	// Accept a video job first, then pause before its first poll.
 	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 1000})
-	draft := h.saveImageDraft(t, creatorToken, "暂停前任务", 1)
+	draft := h.imageTaskIntent(t, creatorToken, "暂停前任务", 1)
 	_ = draft
 
 	status, body := h.doRequest(t, "POST", "/creation/sessions", creatorToken, map[string]any{"name": "pause"})
@@ -397,11 +397,11 @@ func TestPausedConnectionHoldsUnstartedCalls(t *testing.T) {
 		t.Fatal("session")
 	}
 	sessionID := extractField(t, body, "id")
-	videoDraft := h.saveDraftOn(t, creatorToken, sessionID, taskDraft{
+	videoDraft := h.buildTaskIntent(t, creatorToken, sessionID, taskIntent{
 		MediaType: "video", Model: "doubao-seedance-2-5", Mode: "text-to-video",
 		Resolution: "720p", Duration: 5, Prompt: "暂停收敛",
 	})
-	status, body = h.submitTask(t, creatorToken, sessionID, "pause-accepted", videoDraft.Revision)
+	status, body = h.submitTask(t, creatorToken, "pause-accepted", videoDraft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -422,7 +422,7 @@ func TestPausedConnectionHoldsUnstartedCalls(t *testing.T) {
 
 	// Pause blocks new tasks at admission with the stable capability reason.
 	h.kapon.generation.setImage(imageScript{outputs: 1})
-	status, body = h.submitTask(t, creatorToken, draft.SessionID, "pause-queued", draft.Revision)
+	status, body = h.submitTask(t, creatorToken, "pause-queued", draft)
 	if status != http.StatusUnprocessableEntity {
 		t.Fatalf("paused admission must reject new tasks, got %d: %s", status, body)
 	}
@@ -449,18 +449,18 @@ func TestLocalCrashNeverFabricatesTimeout(t *testing.T) {
 	// deadline may end the task.
 	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 1 << 30})
 
-	draft := h.saveImageDraft(t, token, "静默供应商", 1)
+	draft := h.imageTaskIntent(t, token, "静默供应商", 1)
 	_ = draft
 	status, body := h.doRequest(t, "POST", "/creation/sessions", token, map[string]any{"name": "silent"})
 	if status != http.StatusCreated {
 		t.Fatal("session")
 	}
 	sessionID := extractField(t, body, "id")
-	videoDraft := h.saveDraftOn(t, token, sessionID, taskDraft{
+	videoDraft := h.buildTaskIntent(t, token, sessionID, taskIntent{
 		MediaType: "video", Model: "doubao-seedance-2-5", Mode: "text-to-video",
 		Resolution: "720p", Duration: 5, Prompt: "永不本地超时",
 	})
-	status, body = h.submitTask(t, token, sessionID, "silent-1", videoDraft.Revision)
+	status, body = h.submitTask(t, token, "silent-1", videoDraft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -494,11 +494,11 @@ func TestCompletedJobSurvivesCredentialUnavailability(t *testing.T) {
 		t.Fatalf("create session: %d", status)
 	}
 	sessionID := extractField(t, body, "id")
-	draft := h.saveDraftOn(t, token, sessionID, taskDraft{
+	draft := h.buildTaskIntent(t, token, sessionID, taskIntent{
 		MediaType: "video", Model: "doubao-seedance-2-5", Mode: "text-to-video",
 		Resolution: "720p", Duration: 5, Prompt: "凭据恢复后继续收敛",
 	})
-	status, body = h.submitTask(t, token, sessionID, "sealed-1", draft.Revision)
+	status, body = h.submitTask(t, token, "sealed-1", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
@@ -570,8 +570,8 @@ func TestTransientRejectionAttemptLimitConverges(t *testing.T) {
 		status: http.StatusTooManyRequests, retryAfterSeconds: &one,
 	})
 
-	draft := h.saveImageDraft(t, token, "预算耗尽", 1)
-	status, body := h.submitTask(t, token, draft.SessionID, "exhaust-1", draft.Revision)
+	draft := h.imageTaskIntent(t, token, "预算耗尽", 1)
+	status, body := h.submitTask(t, token, "exhaust-1", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}

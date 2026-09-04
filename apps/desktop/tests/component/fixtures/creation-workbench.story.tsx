@@ -1,27 +1,31 @@
-import i18next from 'i18next'
 import { I18nextProvider } from 'react-i18next'
-import { createI18nOptions } from '../../../src/shared/i18n/i18next-options'
+import { testI18n } from './creation-workbench-i18n'
 import {
-  creationResources,
   CreationRuntimeContext,
   CreationWorkbenchPage,
-  type CreationWorkspacePorts
+  type CreationRuntime
 } from '../../../src/renderer/src/features/creation'
 import type {
   CreationApiResult,
   CreationSessionView,
-  ReferenceMaterialView,
-  SessionDraftInput
+  ReferenceMaterialView
 } from '../../../src/renderer/src/features/creation/api/go-creation-http'
+import type { LocalDraftRecord } from '../../../src/renderer/src/features/creation/model/draft-store'
 import type {
   CapabilityManifest,
   CapabilityModel,
   ImageReferenceEnvelope
 } from '../../../src/renderer/src/features/creation/api/capability-manifest-http'
 import type {
+  GenerationIntent,
   GenerationTaskDetail,
   GenerationTaskView
 } from '../../../src/renderer/src/features/creation/api/generation-task-http'
+import {
+  readLocalDraft,
+  removeLocalDraft,
+  writeLocalDraft
+} from '../../../src/renderer/src/features/creation/model/draft-store'
 
 /**
  * Black-box composition for the Creation Workbench public surface (issues
@@ -30,16 +34,6 @@ import type {
  * visible UI and observe caller-visible port calls; no internal store or hook
  * is exposed beyond a narrow assertion handle.
  */
-
-const testI18n = i18next.createInstance()
-await testI18n.init(
-  createI18nOptions({
-    language: 'en',
-    resources: creationResources,
-    defaultNS: 'creation',
-    environment: 'test'
-  })
-)
 
 const sessionA: CreationSessionView = {
   id: 'aaaaaaaa-0000-4000-8000-000000000001',
@@ -91,10 +85,13 @@ const materialTwo = material({
   fileName: 'banner.png'
 })
 
-const thumbnailUrl =
-  'data:image/svg+xml;utf8,' +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+/** One task-slot result's bytes, fresh per call like the data plane serves them. */
+const resultBlob = (): Blob =>
+  new Blob(
+    [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    ],
+    { type: 'image/svg+xml' }
   )
 
 function imageEnvelope(min: number, max: number): ImageReferenceEnvelope {
@@ -229,12 +226,23 @@ const activeManifest: CapabilityManifest = {
 }
 
 export interface DeckTestControls {
-  saveDraftCalls(): ReadonlyArray<{ sessionId: string; draft: unknown }>
+  /** Reads this device's local draft record for one session key ('new' for composing). */
+  draftRecord(key: string): LocalDraftRecord | null
   deleteMaterialCalls(): string[]
+  materialBlobCalls(): ReadonlyArray<{ materialId: string; aborted: boolean }>
+  resultBlobTransfers(): ReadonlyArray<{ taskId: string; slotIndex: number }>
+  releaseMaterialBlobs(): void
   uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
-  taskCalls(): ReadonlyArray<{ sessionId: string; idempotencyKey: string }>
+  taskCalls(): ReadonlyArray<{
+    sessionId: string
+    idempotencyKey: string
+    intent: GenerationIntent
+  }>
   retryCalls(): ReadonlyArray<{ taskId: string; idempotencyKey: string }>
   cancelledIds(): string[]
+  createSessionCalls(): ReadonlyArray<{ name: string }>
+  renameCalls(): ReadonlyArray<{ sessionId: string; name: string }>
+  deletedSessionIds(): string[]
   releaseManifest(): void
   fireInvalidation(): void
   pushTask(task: ScriptedTask): void
@@ -253,6 +261,12 @@ function succeeded<T>(value: T): CreationApiResult<T> {
 /** Scripted task behavior: what submitTask does and which tasks pre-exist. */
 export interface ScriptedTask extends GenerationTaskView {
   readonly slots: GenerationTaskDetail['slots']
+  /** The task's frozen specification; absent details render task-view facts only. */
+  readonly specification?: GenerationTaskDetail['specification']
+}
+
+function detailOf(task: ScriptedTask): GenerationTaskDetail {
+  return { task, slots: task.slots, specification: task.specification ?? null }
 }
 
 export interface TaskScript {
@@ -261,6 +275,9 @@ export interface TaskScript {
   readonly submitRejection?: string
 }
 
+/** The account id scoping the device-local draft store in this story. */
+const storyUserId = 'story-user'
+
 interface RuntimeOptions {
   readonly manifest: CapabilityManifest | null
   /** When true the manifest call fails like an unreachable server. */
@@ -268,20 +285,34 @@ interface RuntimeOptions {
   /** When true the test releases the manifest response explicitly. */
   readonly manifestDeferred?: boolean
   readonly sessions: readonly CreationSessionView[]
-  readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
+  /** Seeds the device-local draft store (ADR-0017); null entries clear a key. */
+  readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
+  /** Number of initial full-preview loads that should fail with no Blob. */
+  readonly materialBlobFailures?: number
+  /** Keeps full-preview loads pending until the test releases or aborts them. */
+  readonly materialBlobDeferred?: boolean
   readonly taskScript?: TaskScript
 }
 
-// Builds the story's ports: an in-memory draft store behind the same
-// operations the production wire uses, plus the assertion handle.
-function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePorts {
-  const drafts = new Map(Object.entries(options.drafts ?? {}))
+// Builds the story's runtime: scripted server ports plus the real
+// device-local draft store seeded into localStorage, so draft behavior runs
+// through its production surface (ADR-0017).
+function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const materials = new Map(Object.entries(options.materials ?? {}))
-  const savedDrafts = new Map<string, SessionDraftInput>()
-  const saveCalls: Array<{ sessionId: string; draft: SessionDraftInput }> = []
+  for (const [key, record] of Object.entries(options.drafts ?? {})) {
+    if (record === null) removeLocalDraft(localStorage, storyUserId, key)
+    else writeLocalDraft(localStorage, storyUserId, key, record)
+  }
   const deletedIds: string[] = []
+  const materialBlobCalls: Array<{ materialId: string; aborted: boolean }> = []
+  const materialBlobReleases = new Set<() => void>()
+  let remainingMaterialBlobFailures = options.materialBlobFailures ?? 0
   const uploadCalls: Array<{ sessionId: string; name: string }> = []
+  const createdSessions: Array<{ name: string }> = []
+  const renameCalls: Array<{ sessionId: string; name: string }> = []
+  const deletedSessionIds: string[] = []
+  const resultBlobTransfers: Array<{ taskId: string; slotIndex: number }> = []
   let releaseManifestResponse: (() => void) | null = null
   const manifestReady = options.manifestDeferred
     ? new Promise<void>((resolve) => {
@@ -290,7 +321,11 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     : Promise.resolve()
   const taskState: {
     tasks: ScriptedTask[]
-    submitCalls: Array<{ sessionId: string; idempotencyKey: string }>
+    submitCalls: Array<{
+      sessionId: string
+      idempotencyKey: string
+      intent: GenerationIntent
+    }>
     retryCalls: Array<{ taskId: string; idempotencyKey: string }>
     cancelledIds: string[]
     eventHandlers: { onInvalidation: () => void; onStateChange: (live: boolean) => void } | null
@@ -306,12 +341,21 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
   }
 
   window.__creationDeckTest = {
-    saveDraftCalls: () => saveCalls,
+    draftRecord: (key) => readLocalDraft(localStorage, storyUserId, key),
     deleteMaterialCalls: () => deletedIds,
+    materialBlobCalls: () => materialBlobCalls,
+    resultBlobTransfers: () => resultBlobTransfers,
+    releaseMaterialBlobs: () => {
+      for (const release of materialBlobReleases) release()
+      materialBlobReleases.clear()
+    },
     uploadCalls: () => uploadCalls,
     taskCalls: () => taskState.submitCalls,
     retryCalls: () => taskState.retryCalls,
     cancelledIds: () => taskState.cancelledIds,
+    createSessionCalls: () => createdSessions,
+    renameCalls: () => renameCalls,
+    deletedSessionIds: () => deletedSessionIds,
     releaseManifest: () => {
       releaseManifestResponse?.()
       releaseManifestResponse = null
@@ -323,32 +367,34 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     }
   }
 
-  return {
+  const ports = {
+    userId: storyUserId,
     listSessions: async () => succeeded({ sessions: options.sessions, nextCursor: null }),
-    createSession: async (name) =>
-      succeeded({
+    createSession: async (name) => {
+      createdSessions.push({ name: name ?? '' })
+      return succeeded({
         ...sessionB,
         id: 'eeeeeeee-0000-4000-8000-000000000007',
         name: name ?? ''
-      }),
-    renameSession: async () => succeeded(sessionA),
-    deleteSession: async () => succeeded(undefined),
+      })
+    },
+    renameSession: async (sessionId, name) => {
+      renameCalls.push({ sessionId, name })
+      return succeeded({ ...sessionA, name })
+    },
+    deleteSession: async (sessionId) => {
+      deletedSessionIds.push(sessionId)
+      return succeeded(undefined)
+    },
     getSessionDetail: async (sessionId) => {
       const session = options.sessions.find((entry) => entry.id === sessionId)
       if (!session) return { outcome: 'request-rejected', code: 'not_found' }
-      const stored = savedDrafts.get(sessionId) ?? drafts.get(sessionId) ?? null
       return succeeded({
         id: session.id,
         name: session.name,
         createdAt: session.createdAt,
-        updatedAt: session.updatedAt,
-        draft: stored === null ? null : { ...stored, references: [...stored.references] }
+        updatedAt: session.updatedAt
       })
-    },
-    saveSessionDraft: async (sessionId, draft) => {
-      saveCalls.push({ sessionId, draft: { ...draft, references: [...draft.references] } })
-      savedDrafts.set(sessionId, draft)
-      return succeeded({ ...draft, references: [...draft.references] })
     },
     listMaterials: async (sessionId) =>
       succeeded({ materials: materials.get(sessionId) ?? [], nextCursor: null }),
@@ -372,7 +418,34 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
       }
       return succeeded(undefined)
     },
-    loadImageBlobUrl: async () => thumbnailUrl,
+    loadMaterialBlob: async (materialId, signal) => {
+      const call = { materialId, aborted: false }
+      materialBlobCalls.push(call)
+      signal?.addEventListener('abort', () => {
+        call.aborted = true
+      })
+      if (options.materialBlobDeferred) {
+        await new Promise<void>((resolve) => {
+          const release = (): void => {
+            materialBlobReleases.delete(release)
+            resolve()
+          }
+          materialBlobReleases.add(release)
+          signal?.addEventListener('abort', release, { once: true })
+        })
+      }
+      if (signal?.aborted) return null
+      if (remainingMaterialBlobFailures > 0) {
+        remainingMaterialBlobFailures -= 1
+        return null
+      }
+      return new Blob(
+        [
+          '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+        ],
+        { type: 'image/svg+xml' }
+      )
+    },
     loadCapabilityManifest: async () => {
       await manifestReady
       return options.manifestFails || options.manifest === null
@@ -382,7 +455,11 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     // Generation task kernel (issue #159): in-memory task store behind the
     // same operations, plus an invalidation handle for SSE scenarios.
     submitTask: async (sessionId, input) => {
-      taskState.submitCalls.push({ sessionId, idempotencyKey: input.idempotencyKey })
+      taskState.submitCalls.push({
+        sessionId,
+        idempotencyKey: input.idempotencyKey,
+        intent: input.intent
+      })
       if (options.taskScript?.submitRejection !== undefined) {
         return { outcome: 'request-rejected', code: options.taskScript.submitRejection }
       }
@@ -403,7 +480,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
         ]
       }
       taskState.tasks = [task, ...taskState.tasks]
-      return succeeded({ task, slots: task.slots })
+      return succeeded(detailOf(task))
     },
     listTasks: async (sessionId) =>
       succeeded({
@@ -428,13 +505,13 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
     getTask: async (taskId) => {
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
-      return succeeded({ task, slots: task.slots })
+      return succeeded(detailOf(task))
     },
     cancelTask: async (taskId) => {
       taskState.cancelledIds.push(taskId)
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
-      return succeeded({ task, slots: task.slots })
+      return succeeded(detailOf(task))
     },
     retryTask: async (taskId, idempotencyKey) => {
       taskState.retryCalls.push({ taskId, idempotencyKey })
@@ -454,9 +531,16 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
         }))
       }
       taskState.tasks = [retried, ...taskState.tasks]
-      return succeeded({ task: retried, slots: retried.slots })
+      return succeeded(detailOf(retried))
     },
-    loadResultBlobUrl: async () => thumbnailUrl,
+    // A real blob: URL, never a data: stand-in — a fake would hide any
+    // path that fetches the object URL (which the renderer CSP forbids).
+    // Transfers are counted so tests can assert how often the data plane
+    // actually moved a slot's bytes.
+    loadResultBlob: async (taskId, slotIndex) => {
+      resultBlobTransfers.push({ taskId, slotIndex })
+      return resultBlob()
+    },
     subscribeEvents: (handlers) => {
       taskState.eventHandlers = handlers
       return () => {
@@ -464,6 +548,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationWorkspacePort
       }
     }
   }
+  return ports
 }
 
 function Frame({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
@@ -478,8 +563,10 @@ interface StoryOptions {
   readonly manifest?: CapabilityManifest | null
   readonly manifestFails?: boolean
   readonly manifestDeferred?: boolean
-  readonly drafts?: Readonly<Record<string, SessionDraftInput | null>>
+  readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
+  readonly materialBlobFailures?: number
+  readonly materialBlobDeferred?: boolean
   readonly sessions?: readonly CreationSessionView[]
   readonly taskScript?: TaskScript
 }
@@ -494,12 +581,17 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
         manifestDeferred: options.manifestDeferred,
         sessions,
         taskScript: options.taskScript,
+        materialBlobFailures: options.materialBlobFailures,
+        materialBlobDeferred: options.materialBlobDeferred,
         drafts: options.drafts ?? {
           [sessionA.id]: {
             prompt: '夏季跑鞋主图，暖光背景',
+            promptDocument: {
+              version: 1,
+              nodes: [{ type: 'text', text: '夏季跑鞋主图，暖光背景' }]
+            },
             mediaType: 'image',
             manifestVersion: 5,
-            updatedAt: '2026-08-29T10:00:00Z',
             model: 'doubao-seedream-5.0-pro',
             mode: 'reference-image',
             ratio: '4:3',
@@ -549,3 +641,7 @@ export function CreationWorkbenchShellStory(options: StoryOptions = {}): React.J
     </I18nextProvider>
   )
 }
+
+export { RuntimeWorkbenchPage }
+
+export type { StoryOptions }

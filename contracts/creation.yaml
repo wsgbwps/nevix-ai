@@ -83,19 +83,19 @@ paths:
       summary: 读取当前创建者的单个 Session
       description: |-
         选择（继续创作）入口：只对创建者可见；不存在、他人所有或已逻辑删除一律 404 not_found。
-        已删除会话不因重新 GET 而复活。响应内嵌当前可恢复草稿（从未保存过草稿时为 null），
-        重新加载后以此恢复生成意图。
+        已删除会话不因重新 GET 而复活。可编辑草稿是设备本地状态（ADR-0017），不经此接口往返；
+        响应只携带会话资源本身。
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/sessionID"
       responses:
         "200":
-          description: 会话资源与当前草稿。
+          description: 会话资源。
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreationSessionDetail"
+                $ref: "#/components/schemas/CreationSession"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -154,42 +154,6 @@ paths:
       responses:
         "204":
           description: 会话已逻辑删除且不再出现。
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
-  /creation/sessions/{sessionID}/draft:
-    put:
-      operationId: saveSessionDraft
-      summary: 原子保存当前创建者的可恢复草稿
-      description: |-
-        以整体替换语义原子保存 Session 的生成意图：prompt、目标媒体、manifest version、
-        模型/模式/参数与有序 Reference Material identity/role 在同一写事务内落库；
-        任何失败回滚，不留部分更新。只允许创建者操作；目标不存在、他人所有或已删除
-        一律 404 not_found。值域校验刻意宽松于当前 Capability Manifest——manifest 已移除的
-        历史值必须能原样保留（不静默替换或降级），提交时（后续切片）才按 manifest 权威校验。
-        references 数组顺序即牌堆顺序；引用的素材必须属于本会话。该动作不创建 Generation Task。
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/sessionID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SessionDraftInput"
-      responses:
-        "200":
-          description: 草稿已原子保存，返回存储后的完整草稿。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionDraft"
-        "400":
-          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -640,18 +604,19 @@ paths:
   /creation/sessions/{sessionID}/tasks:
     post:
       operationId: submitGenerationTask
-      summary: 从当前草稿幂等提交不可变 Generation Task
+      summary: 以完整生成意图幂等提交不可变 Generation Task
       description: |-
-        唯一的 Task 准入入口。Server 从**当前存储的可编辑草稿**生成意图构造并冻结不可变
-        Generation Specification；请求只携带 creator-scoped idempotency_key 与 draft_revision
-        （提交者所依据的 draft 更新时刻）。准入在同一短事务内原子复验草稿 revision、
-        manifest 版本、Reference identity/role/kind 与参数，并按固定顺序执行治理检查
+        唯一的 Task 准入入口。可编辑草稿是设备本地状态（ADR-0017），Server 不存储草稿；
+        请求携带提交时刻的完整生成意图（prompt、目标媒体、manifest version、模型/模式/参数
+        与有序 Reference Material identity/role）及 creator-scoped idempotency_key。准入在
+        同一短事务内原子校验意图的结构信封、manifest 版本、Reference identity/role/kind
+        与参数，冻结为不可变 Generation Specification，并按固定顺序执行治理检查
         （provider credit → instance 月度 → member 月度 → instance 频率 → member 频率 →
         member 分媒体并发）；一次成功提交原子创建 Specification、Task、N 个稳定有序 slot、
         首个 pending Provider Job、queue item 与并发 reservation。
         同 key 同 payload 幂等返回既有 Task（200，不重复计数）；同 key 不同 payload 返回 409
         idempotency_payload_conflict。治理拒绝只持久化本次结构有效尝试事实，不创建
-        Task/Job/queue/reservation，也不改写草稿。
+        Task/Job/queue/reservation。
       security:
         - bearerAuth: []
       parameters:
@@ -684,7 +649,7 @@ paths:
         "409":
           $ref: "#/components/responses/TaskConflict"
         "422":
-          $ref: "#/components/responses/TaskDraftRejected"
+          $ref: "#/components/responses/TaskIntentRejected"
         "429":
           $ref: "#/components/responses/TaskGovernanceRateLimited"
         "500":
@@ -797,7 +762,7 @@ paths:
         "409":
           $ref: "#/components/responses/TaskRetryConflict"
         "422":
-          $ref: "#/components/responses/TaskDraftRejected"
+          $ref: "#/components/responses/TaskIntentRejected"
         "429":
           $ref: "#/components/responses/TaskGovernanceRateLimited"
         "500":
@@ -1261,7 +1226,7 @@ components:
                       - member_generation_rate_limited
                       - member_generation_concurrency_limited
     TaskConflict:
-      description: 幂等/草稿冲突 —— 同 key 不同 payload，或 draft_revision 落后于当前草稿；既有草稿值永不被静默改写。
+      description: 幂等冲突 —— 同 key 不同 payload；请求内没有可改写的服务端草稿状态（ADR-0017）。
       content:
         application/json:
           schema:
@@ -1272,7 +1237,6 @@ components:
                   error:
                     enum:
                       - idempotency_payload_conflict
-                      - draft_revision_conflict
     TaskRetryConflict:
       description: 重试条件不满足 —— 任务未终态，或没有未完成槽位可重试。
       content:
@@ -1286,8 +1250,8 @@ components:
                     enum:
                       - task_not_terminal
                       - no_incomplete_slots
-    TaskDraftRejected:
-      description: 准入复验拒绝 —— 结构不完整/非法的草稿、草稿值超出当前 manifest，或目标媒体当前不可用；过期或非法草稿不创建 Task，原值保留。
+    TaskIntentRejected:
+      description: 意图载荷拒绝 —— 结构不完整/非法的意图、意图值超出当前 manifest，或目标媒体当前不可用；不创建 Task。
       content:
         application/json:
           schema:
@@ -1297,8 +1261,8 @@ components:
                 properties:
                   error:
                     enum:
-                      - draft_not_ready
-                      - draft_capability_stale
+                      - intent_not_ready
+                      - capability_stale
                       - media_unavailable
                       - invalid_request
     InternalError:
@@ -1336,29 +1300,22 @@ components:
         updated_at:
           type: string
           format: date-time
-    CreationSessionDetail:
-      type: object
-      allOf:
-        - $ref: "#/components/schemas/CreationSession"
-        - type: object
-          required:
-            - draft
-          properties:
-            draft:
-              description: 当前可恢复草稿；从未保存过草稿时为 null。
-              allOf:
-                - $ref: "#/components/schemas/SessionDraft"
-              nullable: true
-    SessionDraftInput:
+    TaskSubmitInput:
       type: object
       required:
+        - idempotency_key
         - manifest_version
         - references
       properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: creator-scoped 幂等键；"再次生成"与"只重试未完成项"必须使用新键。
         prompt:
           type: string
           maxLength: 2000
-          description: 生成意图提示词；省略时存为空串。
+          description: 生成意图提示词；提交时不得为空（intent_not_ready）。
         media_type:
           type: string
           nullable: true
@@ -1368,7 +1325,7 @@ components:
         manifest_version:
           type: integer
           minimum: 1
-          description: 保存时工作台所见 Capability Manifest 的 manifest_version，按原值记录。
+          description: 提交者所依据 Capability Manifest 的 manifest_version；Server 在准入边界比对。
         model:
           type: string
           nullable: true
@@ -1396,70 +1353,10 @@ components:
           minimum: 1
         references:
           type: array
-          maxItems: 4
+          maxItems: 14
+          description: 有序 Reference Material identity/role；顺序即牌堆顺序，素材必须属于本会话。结构信封为最宽供应商上限（14），分模型上限由准入按 manifest 冻结时校验。
           items:
             $ref: "#/components/schemas/DraftReferenceInput"
-    SessionDraft:
-      type: object
-      required:
-        - prompt
-        - media_type
-        - manifest_version
-        - model
-        - mode
-        - ratio
-        - resolution
-        - quantity
-        - duration_seconds
-        - references
-        - updated_at
-      properties:
-        updated_at:
-          type: string
-          format: date-time
-          description: 草稿最近保存时刻（revision）；提交 Task 时作为 draft_revision 原样回传。
-        prompt:
-          type: string
-          maxLength: 2000
-        media_type:
-          type: string
-          nullable: true
-          enum:
-            - image
-            - video
-        manifest_version:
-          type: integer
-          minimum: 1
-        model:
-          type: string
-          nullable: true
-          maxLength: 128
-        mode:
-          type: string
-          nullable: true
-          maxLength: 64
-        ratio:
-          type: string
-          nullable: true
-          maxLength: 16
-        resolution:
-          type: string
-          nullable: true
-          maxLength: 16
-        quantity:
-          type: integer
-          nullable: true
-          minimum: 1
-          maximum: 4
-        duration_seconds:
-          type: integer
-          nullable: true
-          minimum: 1
-        references:
-          type: array
-          maxItems: 4
-          items:
-            $ref: "#/components/schemas/DraftReference"
     DraftReferenceInput:
       type: object
       required:
@@ -1470,22 +1367,6 @@ components:
           type: string
           format: uuid
           description: 引用的 Reference Material identity；必须属于本会话。
-        role:
-          type: string
-          enum:
-            - reference
-            - first_frame
-            - last_frame
-            - omni
-    DraftReference:
-      type: object
-      required:
-        - material_id
-        - role
-      properties:
-        material_id:
-          type: string
-          format: uuid
         role:
           type: string
           enum:
@@ -1987,21 +1868,6 @@ components:
           type: integer
         max_seconds:
           type: integer
-    TaskSubmitInput:
-      type: object
-      required:
-        - idempotency_key
-        - draft_revision
-      properties:
-        idempotency_key:
-          type: string
-          minLength: 1
-          maxLength: 128
-          description: creator-scoped 幂等键；"再次生成"与"只重试未完成项"必须使用新键。
-        draft_revision:
-          type: string
-          format: date-time
-          description: 提交者所依据的草稿更新时刻（draft 更新时间戳）；Server 在准入边界复验。
     TaskRetryInput:
       type: object
       required:

@@ -82,10 +82,10 @@ paths:
     $ref: "./creation.yaml#/paths/~1creation~1sessions"
   /creation/sessions/{sessionID}:
     $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}"
-  /creation/sessions/{sessionID}/draft:
-    $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}~1draft"
   /creation/sessions/{sessionID}/materials:
     $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}~1materials"
+  /creation/sessions/{sessionID}/tasks:
+    $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}~1tasks"
   /creation/materials/{materialID}:
     $ref: "./creation.yaml#/paths/~1creation~1materials~1{materialID}"
   /creation/provider-connection:

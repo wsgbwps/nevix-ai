@@ -163,8 +163,8 @@ func TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase(t *testing.T) {
 	if err := db.QueryRowContext(ctx,
 		`INSERT INTO public.creation_generation_tasks
 		 (session_id, owner_user_id, idempotency_key, payload_hash, media_type,
-		  specification, manifest_version, draft_revision, status, slot_count, terminal_at)
-		 VALUES ($1, $2, 'diagnostic-constraint', 'seed-payload', 'image', '{}'::jsonb, 1, now(), 'failed', 3, now())
+		  specification, manifest_version, status, slot_count, terminal_at)
+		 VALUES ($1, $2, 'diagnostic-constraint', 'seed-payload', 'image', '{}'::jsonb, 1, 'failed', 3, now())
 		 RETURNING id`, diagnosticSessionID, diagnosticUserID,
 	).Scan(&diagnosticTaskID); err != nil {
 		t.Fatalf("seed diagnostic task: %v", err)

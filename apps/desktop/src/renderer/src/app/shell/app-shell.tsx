@@ -95,7 +95,12 @@ export function AppShell({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <SidebarProvider>
+      {/* h-svh makes the shell's height definite: the wrapper's own min-h-svh
+          only sets a floor, so without it every descendant height resolves to
+          content height, the inset's overflow-auto content area never bounds,
+          and wheel events over page-managed scrollers chain to the document —
+          scrolling the whole shell (header, nav, and page) as one block. */}
+      <SidebarProvider className="h-svh">
         <Sidebar collapsible="icon">
           <SidebarHeader>
             <SidebarMenu>
