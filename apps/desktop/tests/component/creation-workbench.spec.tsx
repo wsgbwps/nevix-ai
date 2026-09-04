@@ -358,7 +358,7 @@ test('removing a mentioned material confirms the count and cannot be undone in t
     .toEqual({ version: 1, nodes: [{ type: 'text', text: 'ABC' }] })
 
   await page.getByTestId('composer-prompt').focus()
-  await page.keyboard.press('Meta+z')
+  await page.keyboard.press('ControlOrMeta+z')
   await expect(page.getByRole('button', { name: 'Image 1' })).toHaveCount(0)
 })
 

@@ -93,7 +93,7 @@ test('a mention deletes atomically and undo restores it', async ({ mount, page }
     .poll(() => page.evaluate(() => window.__referenceMentionEditorTest?.document()))
     .toEqual({ version: 1, nodes: [{ type: 'text', text: 'look' }] })
 
-  await page.keyboard.press('Meta+z')
+  await page.keyboard.press('ControlOrMeta+z')
   await expect(page.getByRole('button', { name: 'Image 1' })).toBeVisible()
 })
 
@@ -116,7 +116,7 @@ test('a mention-only document renders and an over-limit mention insertion is rej
   await expect(editor).toHaveText('1234@sho')
 
   await editor.fill('1234567')
-  await page.keyboard.press('Meta+a')
+  await page.keyboard.press('ControlOrMeta+a')
   await editor.evaluate((element) => {
     const clipboard = new DataTransfer()
     clipboard.setData('text/plain', 'ok')
@@ -424,7 +424,7 @@ test('external prune and document-key replacement reset editor history', async (
   )
   const editor = page.getByRole('combobox', { name: 'Prompt' })
   await expect(editor).toHaveText('replacement')
-  await page.keyboard.press('Meta+z')
+  await page.keyboard.press('ControlOrMeta+z')
   await expect(editor).toHaveText('replacement')
   await expect(chip).toHaveCount(0)
 })
@@ -433,7 +433,7 @@ test('clipboard preserves a user-authored zero-width space', async ({ mount, pag
   await mount(<ReferenceMentionEditorStory />)
   const editor = page.getByRole('combobox', { name: 'Prompt' })
   await editor.fill('a\u200bb')
-  await page.keyboard.press('Meta+a')
+  await page.keyboard.press('ControlOrMeta+a')
 
   const copied = await editor.evaluate((element) => {
     const clipboard = new DataTransfer()
@@ -462,7 +462,7 @@ test('clipboard preserves valid same-draft mentions and degrades cross-draft dat
   await editor.fill('@sho')
   await page.keyboard.press('Enter')
   await page.keyboard.type('B')
-  await page.keyboard.press('Meta+a')
+  await page.keyboard.press('ControlOrMeta+a')
 
   const copied = await editor.evaluate((element) => {
     const clipboard = new DataTransfer()
