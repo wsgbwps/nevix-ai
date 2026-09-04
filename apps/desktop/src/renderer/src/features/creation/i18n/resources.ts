@@ -160,7 +160,10 @@ export const creationTranslations = defineResourceTranslations({
           tile: '参考内容',
           count: '{{n}} 张参考图片',
           remove: '移除 {{name}}',
-          kind: { image: '图', video: '视频', audio: '音' }
+          kind: { image: '图', video: '视频', audio: '音' },
+          dropInvite: '松手添加参考素材',
+          dropReplace: '松手替换该素材',
+          dropRejected: '已添加 {{added}} 个素材，{{rejected}} 个被拒：类型或数量超出当前模式允许'
         },
         mention: {
           kind: { image: '图片', video: '视频', audio: '音频' },
@@ -423,7 +426,11 @@ export const creationTranslations = defineResourceTranslations({
           tile: 'Reference',
           count: '{{n}} reference images',
           remove: 'Remove {{name}}',
-          kind: { image: 'IMG', video: 'VID', audio: 'AUD' }
+          kind: { image: 'IMG', video: 'VID', audio: 'AUD' },
+          dropInvite: 'Drop to add as reference',
+          dropReplace: 'Drop to replace this material',
+          dropRejected:
+            'Added {{added}} material(s); rejected {{rejected}}: type or count beyond what the current mode allows'
         },
         mention: {
           kind: { image: 'Image', video: 'Video', audio: 'Audio' },

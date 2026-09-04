@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 // One notion of "at the bottom", shared by the back-to-bottom pill and the
 // composer's presence.
@@ -20,9 +20,17 @@ export function useComposerPresence({
 }: {
   readonly scrollerRef: React.RefObject<HTMLDivElement | null>
   readonly rootRef: React.RefObject<HTMLDivElement | null>
-}): boolean {
+}): { readonly expanded: boolean; readonly pin: () => void } {
   const [expanded, setExpanded] = useState(true)
   const pinnedRef = useRef(false)
+
+  // Pointer or focus intent inside the composer pins the expanded form.
+  // DnD suppresses both events, so surfaces hosting drops (the deck) call
+  // pin() from their own dragenter instead.
+  const pin = useCallback((): void => {
+    pinnedRef.current = true
+    setExpanded(true)
+  }, [])
 
   useEffect(() => {
     const scroller = scrollerRef.current
@@ -46,17 +54,13 @@ export function useComposerPresence({
     // pointerdown covers blank-surface clicks that land on nothing
     // focusable; focusin covers Tab and programmatic focus (the gallery's
     // re-edit jumps to the prompt field).
-    const pin = (): void => {
-      pinnedRef.current = true
-      setExpanded(true)
-    }
     root.addEventListener('pointerdown', pin)
     root.addEventListener('focusin', pin)
     return () => {
       root.removeEventListener('pointerdown', pin)
       root.removeEventListener('focusin', pin)
     }
-  }, [rootRef])
+  }, [pin, rootRef])
 
-  return expanded
+  return { expanded, pin }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   BanIcon,
@@ -23,10 +23,16 @@ import type {
   GenerationTaskDetail,
   GenerationTaskView,
   SlotFailureDiagnosticSource,
-  SlotFailureReason,
-  SlotResultView
+  SlotFailureReason
 } from '../api/generation-task-http'
 import type { CreationWorkbenchController } from '../model/use-workbench'
+import { slotResultFilename } from '../lib/result-filename'
+import {
+  RESULT_DRAG_MIME,
+  beginResultDrag,
+  encodeResultDrag,
+  endResultDrag
+} from '../model/reference-drop'
 import { modeKeys } from '../i18n/mode-keys'
 
 // Dynamic verdict vocabularies resolve through explicit key maps — the same
@@ -477,12 +483,51 @@ function SlotCard({
         if (blobUrl === null) return
         const anchor = document.createElement('a')
         anchor.href = blobUrl
-        anchor.download = downloadFilename(taskId, slot.index, mediaType, slot.result)
+        anchor.download = slotResultFilename(taskId, slot.index, mediaType, slot.result)
         document.body.appendChild(anchor)
         anchor.click()
         anchor.remove()
       })
       .catch(() => undefined)
+  }
+
+  // A succeeded slot is the drag source for reference reuse (ADR-0018): the
+  // custom type identifies the slot at drop time, while the module record
+  // carries the payload through dragover's protected mode. The native ghost
+  // would be the whole gallery cell, far larger than the deck cards it
+  // hovers — a 48x64 offscreen twin (the deck card's size) keeps the drop
+  // target visible while dragging.
+  const ghostRef = useRef<HTMLDivElement | null>(null)
+  const dragStart = (event: React.DragEvent<HTMLDivElement>): void => {
+    const payload = { taskId, slotIndex: slot.index, mediaType }
+    beginResultDrag(payload)
+    event.dataTransfer.setData(RESULT_DRAG_MIME, encodeResultDrag(payload))
+    event.dataTransfer.effectAllowed = 'copy'
+    const ghost = document.createElement('div')
+    ghost.style.cssText =
+      'position:fixed;top:-200px;left:-200px;z-index:-1;width:48px;height:64px;overflow:hidden;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.4);background:var(--muted)'
+    const source = event.currentTarget.querySelector('img')
+    if (source !== null) {
+      const face = document.createElement('img')
+      face.src = source.src
+      face.style.cssText = 'width:100%;height:100%;object-fit:cover'
+      ghost.appendChild(face)
+    } else {
+      const face = document.createElement('span')
+      face.style.cssText =
+        'display:grid;place-items:center;width:100%;height:100%;color:var(--muted-foreground);font-size:18px'
+      face.textContent = mediaType === 'video' ? '▶' : 'IMG'
+      ghost.appendChild(face)
+    }
+    document.body.appendChild(ghost)
+    ghostRef.current = ghost
+    event.dataTransfer.setDragImage(ghost, 24, 32)
+  }
+
+  const dragEnd = (): void => {
+    endResultDrag()
+    ghostRef.current?.remove()
+    ghostRef.current = null
   }
 
   return (
@@ -491,6 +536,12 @@ function SlotCard({
       data-slot-status={slot.status}
       role={succeeded ? undefined : 'status'}
       aria-label={String(t(statusKey(slot.status)))}
+      draggable={succeeded}
+      onDragStart={(event) => {
+        if (succeeded) dragStart(event)
+        else event.preventDefault()
+      }}
+      onDragEnd={dragEnd}
       style={{ aspectRatio: String(slotAspectRatio(slot, fallbackRatio)) }}
       className="bg-foreground/[0.04] relative overflow-hidden rounded-lg"
     >
@@ -540,7 +591,7 @@ function SlotCard({
           type="button"
           data-testid={`slot-download-${taskId}-${slot.index}`}
           aria-label={String(t('gallery.actions.download'))}
-          title={downloadFilename(taskId, slot.index, mediaType, slot.result)}
+          title={slotResultFilename(taskId, slot.index, mediaType, slot.result)}
           onClick={download}
           className="absolute right-1 bottom-1 z-10 grid size-6 place-items-center rounded-md border border-white/25 bg-black/50 text-white outline-none hover:bg-black/65 focus-visible:ring-2 focus-visible:ring-sky-400/70"
         >
@@ -549,28 +600,6 @@ function SlotCard({
       )}
     </div>
   )
-}
-
-// Downloads keep the provider's original format: the extension follows the
-// verified result's mime type (the vendor commonly returns JPEG), never a
-// fixed png — the bytes themselves already pass through unmodified.
-const resultExtensions: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'video/mp4': 'mp4'
-}
-
-function downloadFilename(
-  taskId: string,
-  index: number,
-  mediaType: 'image' | 'video',
-  result: SlotResultView | null
-): string {
-  const extension =
-    (result !== null ? resultExtensions[result.mimeType] : undefined) ??
-    (mediaType === 'video' ? 'mp4' : 'png')
-  return `nevix-${taskId.slice(0, 8)}-${index + 1}.${extension}`
 }
 
 export type { SlotFailureReason }

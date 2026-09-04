@@ -126,7 +126,7 @@ export function CreationComposer({
   const promptRef = useRef<HTMLDivElement>(null)
   const controlClipRef = useRef<HTMLDivElement>(null)
   const submitRef = useRef<HTMLButtonElement>(null)
-  const expanded = useComposerPresence({ scrollerRef, rootRef: cardRef })
+  const { expanded, pin } = useComposerPresence({ scrollerRef, rootRef: cardRef })
   const mountedRef = useRef(false)
   const [mentionHover, setMentionHover] = useState<{
     readonly materialId: string
@@ -263,7 +263,11 @@ export function CreationComposer({
               thumbnails={workbench.thumbnails}
               cap={workbench.deckCap}
               allowedKinds={workbench.allowedKinds}
-              onAdd={workbench.addMaterial}
+              onAddFiles={workbench.addMaterials}
+              onReplace={workbench.replaceMaterial}
+              onDropResult={workbench.addResultAsMaterial}
+              mentionedMaterialIds={workbench.mentionedMaterialIds}
+              onDragHover={pin}
               onRemove={workbench.removeMaterial}
             />
             {staleFields.has('references') && draft.references.length > 0 && (
@@ -282,6 +286,18 @@ export function CreationComposer({
                 className="text-destructive mt-1 max-w-56 text-[10px] leading-4"
               >
                 {t('composer.deck.uploadFailed')}
+              </p>
+            )}
+            {workbench.materialDropRejection && (
+              <p
+                role="status"
+                data-testid="composer-drop-rejected"
+                className="text-warning mt-1 max-w-56 text-[10px] leading-4"
+              >
+                {t('composer.deck.dropRejected', {
+                  added: workbench.materialDropRejection.added,
+                  rejected: workbench.materialDropRejection.rejected
+                })}
               </p>
             )}
           </div>

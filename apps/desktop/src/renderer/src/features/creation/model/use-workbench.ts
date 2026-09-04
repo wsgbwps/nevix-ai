@@ -4,13 +4,14 @@ import type { CapabilityManifest } from '../api/capability-manifest-http'
 import type {
   CreationSessionView,
   DraftReferenceView,
-  MaterialKind,
   ReferenceMaterialView
 } from '../api/go-creation-http'
 import type { GenerationTaskDetail, GenerationTaskView } from '../api/generation-task-http'
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import { loadImageDimensions } from '../lib/image-dimensions'
 import { MaterialUrlOwner } from '../lib/material-url-owner'
+import { resultFilename } from '../lib/result-filename'
+import { planFileDrop, type ResultDragPayload } from './reference-drop'
 import {
   allowedReferenceKinds,
   mediaCapability,
@@ -109,6 +110,16 @@ export interface CreationWorkbenchController {
   setModel: (model: string) => void
   setMode: (mode: string) => void
   addMaterial: (file: File) => void
+  /** Admits a dropped file batch against the mode's policy and adds what it accepts. */
+  addMaterials: (files: readonly File[]) => void
+  /** Swaps one bound card for a new file, keeping the deck position. */
+  replaceMaterial: (materialId: string, file: File) => void
+  /** Re-uploads a succeeded task result as a new Reference Material (ADR-0018). */
+  addResultAsMaterial: (payload: ResultDragPayload, targetMaterialId: string | null) => void
+  /** Materials the prompt's Reference Mentions still name; replacing one would orphan them. */
+  mentionedMaterialIds: ReadonlySet<string>
+  /** Last drop's admission summary; null while nothing was rejected. */
+  materialDropRejection: { readonly added: number; readonly rejected: number } | null
   removeMaterial: (materialId: string) => void
   pendingMaterialRemoval: { readonly materialId: string; readonly mentionCount: number } | null
   confirmMaterialRemoval: () => void
@@ -164,6 +175,10 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const [thumbnails, setThumbnails] = useState<Readonly<Record<string, string>>>({})
   const [draft, setDraft] = useState<ComposerDraft>(emptyComposerDraft)
   const [materialUploadFailed, setMaterialUploadFailed] = useState(false)
+  const [materialDropRejection, setMaterialDropRejection] = useState<{
+    readonly added: number
+    readonly rejected: number
+  } | null>(null)
   const [manifest, setManifest] = useState<CapabilityManifest | null>(null)
   const [manifestStatus, setManifestStatus] = useState<ManifestStatus>('loading')
   const [tasks, setTasks] = useState<readonly GenerationTaskView[]>([])
@@ -436,6 +451,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       draftRef.current = value
       setDraft(value)
       setMaterialUploadFailed(false)
+      // A surface switch must not carry the previous surface's drop summary.
+      setMaterialDropRejection(null)
     },
     []
   )
@@ -780,38 +797,17 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [ports]
   )
 
-  const addMaterial = useCallback(
-    async (file: File) => {
-      if (!ports) return
-      setMaterialUploadFailed(false)
-      // The structural fallback keeps every kind submittable: images take the
-      // image role, anything else binds as omni (which accepts all kinds).
-      const bindToDraft = (kind: MaterialKind, materialId: string): void => {
-        const media = draftRef.current.mediaType
-        const derived =
-          media === null
-            ? null
-            : roleForPosition(media, draftRef.current.mode, draftRef.current.references.length)
-        const role = derived ?? (kind === 'image' ? 'reference' : 'omni')
-        const binding: DraftReferenceView = { materialId, role }
-        const nextReferences = [...draftRef.current.references, binding]
-        if (media === 'image') {
-          // Image modes derive from the deck: any reference means the
-          // reference-image shape, and the bindings re-derive their roles with
-          // it — the composer offers no image mode picker (video modes are
-          // not deck-derivable).
-          patchDraft({
-            references: bindingsForMode(media, 'reference-image', nextReferences),
-            mode: 'reference-image'
-          })
-        } else {
-          patchDraft({ references: nextReferences })
-        }
-      }
+  /**
+   * Registers one file as a deck material and returns its identity: while
+   * composing a session that does not exist yet the file stays local
+   * (ADR-0017) and uploads at submit time; otherwise it uploads now. Returns
+   * null when the upload fails (already surfaced as materialUploadFailed).
+   */
+  const stageMaterialFile = useCallback(
+    async (file: File): Promise<{ id: string; kind: ReferenceMaterialView['kind'] } | null> => {
+      if (!ports) return null
       const sessionId = selectedIdRef.current
       if (sessionId === null) {
-        // Composing a session that does not exist yet: the file stays local
-        // and uploads when the session materializes at submit time.
         const id = crypto.randomUUID()
         const previewUrl = file.type.startsWith('image/')
           ? materialUrlsRef.current!.replaceThumbnail(id, file)
@@ -821,9 +817,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         materialsRef.current = [...materialsRef.current, material]
         materialIdsRef.current = new Set([...materialIdsRef.current, id])
         setMaterials((current) => [...current, material])
-        if (previewUrl !== null) setThumbnails((current) => ({ ...current, [id]: previewUrl }))
-        bindToDraft(material.kind, id)
         if (previewUrl !== null) {
+          setThumbnails((current) => ({ ...current, [id]: previewUrl }))
           void loadImageDimensions(previewUrl).then((dimensions) => {
             if (
               dimensions === null ||
@@ -845,22 +840,65 @@ export function useCreationWorkbench(): CreationWorkbenchController {
             setMaterials((current) => current.map(withDimensions))
           })
         }
-        return
+        return { id, kind: material.kind }
       }
       const result = await ports.uploadMaterial(sessionId, file).catch(() => null)
-      if (!mountedRef.current) return
+      if (!mountedRef.current) return null
       if (result === null || result.outcome !== 'succeeded') {
         setMaterialUploadFailed(true)
-        return
+        return null
       }
       const material = result.value
       materialsRef.current = [...materialsRef.current, material]
       materialIdsRef.current = new Set([...materialIdsRef.current, material.id])
       setMaterials((current) => [...current, material])
-      bindToDraft(material.kind, material.id)
       if (material.kind === 'image') loadImageThumbnail(material.id)
+      return { id: material.id, kind: material.kind }
     },
-    [bindingsForMode, loadImageThumbnail, patchDraft, ports]
+    [loadImageThumbnail, ports]
+  )
+
+  /** Drops one material from every local record; the caller settles its
+   * bytes (pending file vs server delete) around this. */
+  const forgetMaterialRecords = useCallback((materialId: string): void => {
+    setMaterials((current) => current.filter((material) => material.id !== materialId))
+    materialsRef.current = materialsRef.current.filter((material) => material.id !== materialId)
+    materialIdsRef.current = new Set(
+      [...materialIdsRef.current].filter((candidate) => candidate !== materialId)
+    )
+  }, [])
+
+  const addMaterial = useCallback(
+    async (file: File) => {
+      if (!ports) return
+      setMaterialUploadFailed(false)
+      setMaterialDropRejection(null)
+      const staged = await stageMaterialFile(file)
+      if (staged === null) return
+      // The structural fallback keeps every kind submittable: images take the
+      // image role, anything else binds as omni (which accepts all kinds).
+      const media = draftRef.current.mediaType
+      const derived =
+        media === null
+          ? null
+          : roleForPosition(media, draftRef.current.mode, draftRef.current.references.length)
+      const role = derived ?? (staged.kind === 'image' ? 'reference' : 'omni')
+      const binding: DraftReferenceView = { materialId: staged.id, role }
+      const nextReferences = [...draftRef.current.references, binding]
+      if (media === 'image') {
+        // Image modes derive from the deck: any reference means the
+        // reference-image shape, and the bindings re-derive their roles with
+        // it — the composer offers no image mode picker (video modes are
+        // not deck-derivable).
+        patchDraft({
+          references: bindingsForMode(media, 'reference-image', nextReferences),
+          mode: 'reference-image'
+        })
+      } else {
+        patchDraft({ references: nextReferences })
+      }
+    },
+    [bindingsForMode, patchDraft, ports, stageMaterialFile]
   )
 
   const removeMaterialNow = useCallback(
@@ -883,11 +921,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       } else {
         patchDraft({ promptDocument, references: remaining })
       }
-      setMaterials((current) => current.filter((material) => material.id !== materialId))
-      materialsRef.current = materialsRef.current.filter((material) => material.id !== materialId)
-      materialIdsRef.current = new Set(
-        [...materialIdsRef.current].filter((candidate) => candidate !== materialId)
-      )
+      forgetMaterialRecords(materialId)
       materialUrlsRef.current?.releaseMaterial(materialId)
       // A locally-held composing file never reached the server; only its
       // local records die with the removal.
@@ -897,7 +931,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       }
       await ports.deleteMaterial(materialId).catch(() => undefined)
     },
-    [bindingsForMode, patchDraft, ports]
+    [bindingsForMode, forgetMaterialRecords, patchDraft, ports]
   )
 
   const requestMaterialRemoval = useCallback(
@@ -1152,6 +1186,15 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     () => promptMentionCandidates(draft.references, materials, mentionKindLabels),
     [draft.references, materials, mentionKindLabels]
   )
+  // The deck's replace aim must refuse cards the prompt still names through
+  // Reference Mentions — replacing one is a removal under the hood.
+  const mentionedMaterialIds = useMemo(() => {
+    const mentioned = new Set<string>()
+    for (const material of materials) {
+      if (countPromptMentions(draft.promptDocument, material.id) > 0) mentioned.add(material.id)
+    }
+    return mentioned
+  }, [draft.promptDocument, materials])
   const expandedPrompt = useMemo(
     () => expandPromptDocument(draft.promptDocument, mentionCandidates),
     [draft.promptDocument, mentionCandidates]
@@ -1188,6 +1231,140 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const deckCap = referenceCap(manifest, draft.mediaType ?? 'image', draft.model, draft.mode)
   const allowedKinds = allowedReferenceKinds(manifest, draft.mediaType, draft.mode)
 
+  /**
+   * Adds a dropped batch: admission is judged once against the deck's current
+   * capacity and the mode's kinds, then admitted files flow through the same
+   * upload path as the picker (drop order preserved); the summary line
+   * reports the rejected remainder. The server stays the final authority.
+   */
+  const addMaterials = useCallback(
+    (files: readonly File[]): void => {
+      if (!ports || files.length === 0) return
+      void (async () => {
+        const remaining = Math.max(0, deckCap - draftRef.current.references.length)
+        const plan = planFileDrop(files, allowedKinds, remaining)
+        for (const file of plan.accepted) {
+          await addMaterial(file)
+          if (!mountedRef.current) return
+        }
+        const rejected = plan.rejectedKind + plan.rejectedCap
+        if (rejected > 0) {
+          setMaterialDropRejection({ added: plan.accepted.length, rejected })
+        }
+      })()
+    },
+    [addMaterial, allowedKinds, deckCap, ports]
+  )
+
+  /**
+   * Swaps one bound card for a new file at the same deck position. The new
+   * upload happens before the old material retires, so a failed upload
+   * leaves the deck untouched. A material the prompt still mentions is never
+   * replaced (that removal path needs the mention-confirm dialog) — such a
+   * drop falls back to a plain append.
+   */
+  const replaceMaterial = useCallback(
+    (materialId: string, file: File): void => {
+      if (!ports) return
+      void (async () => {
+        const draftNow = draftRef.current
+        const position = draftNow.references.findIndex(
+          (binding) => binding.materialId === materialId
+        )
+        const replaceable =
+          materialIdsRef.current.has(materialId) &&
+          position >= 0 &&
+          countPromptMentions(draftNow.promptDocument, materialId) === 0
+        if (!replaceable) {
+          addMaterials([file])
+          return
+        }
+        setMaterialUploadFailed(false)
+        setMaterialDropRejection(null)
+        const media = draftNow.mediaType
+        const staged = await stageMaterialFile(file)
+        // A failed staging leaves the deck untouched; the old card only
+        // retires once its replacement exists.
+        if (staged === null) return
+        if (pendingMaterialFilesRef.current.has(materialId)) {
+          dropPendingMaterial(materialId)
+        } else {
+          materialUrlsRef.current?.releaseMaterial(materialId)
+          await ports.deleteMaterial(materialId).catch(() => undefined)
+        }
+        forgetMaterialRecords(materialId)
+        setThumbnails((current) => {
+          if (!(materialId in current)) return current
+          const next = { ...current }
+          delete next[materialId]
+          return next
+        })
+        // Splice the new binding into the replaced position; its role derives
+        // from the mode exactly as a fresh add at that position would.
+        const kept = draftRef.current.references.filter(
+          (binding) => binding.materialId !== materialId
+        )
+        const insertAt = Math.min(position, kept.length)
+        const fallbackRole = staged.kind === 'image' ? 'reference' : 'omni'
+        const role =
+          (media !== null ? roleForPosition(media, draftRef.current.mode, insertAt) : null) ??
+          fallbackRole
+        kept.splice(insertAt, 0, { materialId: staged.id, role })
+        if (media === 'image') {
+          patchDraft({
+            references: bindingsForMode('image', 'reference-image', kept),
+            mode: 'reference-image'
+          })
+        } else {
+          patchDraft({ references: kept })
+        }
+      })()
+    },
+    [addMaterials, bindingsForMode, forgetMaterialRecords, patchDraft, ports, stageMaterialFile]
+  )
+
+  /**
+   * A dragged result re-enters through the plain upload path (ADR-0018): the
+   * verified bytes stream back through the trusted data plane, become a File
+   * named like its download twin, and upload as a brand-new material.
+   */
+  const addResultAsMaterial = useCallback(
+    (payload: ResultDragPayload, targetMaterialId: string | null): void => {
+      if (!ports) return
+      void (async () => {
+        const blobUrl = await ports
+          .loadResultBlobUrl(payload.taskId, payload.slotIndex)
+          .catch(() => null)
+        if (!mountedRef.current) return
+        if (blobUrl === null) {
+          setMaterialUploadFailed(true)
+          return
+        }
+        try {
+          const blob = await fetch(blobUrl)
+            .then((response) => response.blob())
+            .catch(() => null)
+          if (!mountedRef.current) return
+          if (blob === null) {
+            setMaterialUploadFailed(true)
+            return
+          }
+          const mimeType = blob.type !== '' ? blob.type : null
+          const file = new File(
+            [blob],
+            resultFilename(payload.taskId, payload.slotIndex, payload.mediaType, mimeType),
+            { type: blob.type }
+          )
+          if (targetMaterialId !== null) replaceMaterial(targetMaterialId, file)
+          else addMaterials([file])
+        } finally {
+          URL.revokeObjectURL(blobUrl)
+        }
+      })()
+    },
+    [addMaterials, ports, replaceMaterial]
+  )
+
   return {
     ports,
     status,
@@ -1219,6 +1396,11 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     addMaterial: (file: File) => {
       void addMaterial(file)
     },
+    addMaterials,
+    replaceMaterial,
+    addResultAsMaterial,
+    mentionedMaterialIds,
+    materialDropRejection,
     removeMaterial: requestMaterialRemoval,
     pendingMaterialRemoval,
     confirmMaterialRemoval,
