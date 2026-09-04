@@ -104,7 +104,8 @@ test(
           // 首次提交物化的会话未命名，列表以「未命名创作」呈现。
           await restored.getByRole('button', { name: '未命名创作', exact: true }).click()
           await expect(restored.getByTestId('composer')).toBeVisible()
-          await expect(restored.getByTestId('composer-prompt')).toHaveValue(
+          // Lexical 编辑器是 contenteditable combobox，断言走文本内容而非 value。
+          await expect(restored.getByTestId('composer-prompt')).toHaveText(
             '秋季上新主图，冷调布光',
             { timeout: 15_000 }
           )

@@ -5,8 +5,12 @@ set -euo pipefail
 # full  — Full E2E Suite: configuration-failure builds, then every spec (default).
 # smoke — Smoke Suite: one test-mode build, then only specs tagged @smoke.
 # settings — Settings Information Architecture: one test-mode build, then the Settings spec.
-# image — Slice-10 image generation: fake Kapon generation route + configured
-#   provider connection, then the shortest image spec.
+# image — Slice-10 image generation: the shortest image spec.
+#
+# Every mode except settings boots the fake Kapon generation route and
+# configures the provider connection: the creation tracers submit real
+# generation tasks (ADR-0017 first-submission materialization), which the
+# capability gate refuses while no provider is available.
 mode="${1:-full}"
 case "$mode" in
   full | smoke | settings | image) ;;
@@ -475,10 +479,10 @@ claim_main_instance() {
     >/dev/null
 }
 
-# Slice-10 image harness (issue #160). The provider connection is configured
-# through the TLS terminator because the
-# reauthentication and connection commands demand the trusted HTTPS transport
-# marker (plain loopback http answers secure_transport_required).
+# The creation tracers submit real tasks, so the harness configures the
+# provider connection through the TLS terminator because the reauthentication
+# and connection commands demand the trusted HTTPS transport marker (plain
+# loopback http answers secure_transport_required).
 start_fake_kapon() {
   fake_kapon_log="$(mktemp -t nevix-fake-kapon.XXXXXX.log)"
   node "$repo_root/scripts/dev/fake-kapon.mjs" >"$fake_kapon_log" 2>&1 &
@@ -622,7 +626,7 @@ require_free_port 8080
 require_free_port "$tls_port"
 require_free_port "$setup_server_port"
 require_free_port "$open_server_port"
-if [[ "$mode" == "image" ]]; then
+if [[ "$mode" != "settings" ]]; then
   require_free_port "$fake_kapon_port"
   # The fake generation route must exist before the server boots; an unset
   # KAPON_BASE_URL there would bind the real reviewed route instead.
@@ -641,7 +645,7 @@ if [[ "$mode" == "full" ]]; then
   start_setup_server
   start_open_server
 fi
-if [[ "$mode" == "image" ]]; then
+if [[ "$mode" != "settings" ]]; then
   configure_provider_connection
   echo "==> Fake Kapon generation route ready on $KAPON_E2E_BASE_URL (provider connection configured)"
 fi
