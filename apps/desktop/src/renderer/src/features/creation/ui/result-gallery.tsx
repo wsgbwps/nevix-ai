@@ -6,7 +6,6 @@ import {
   InfoIcon,
   MoreHorizontalIcon,
   PencilLineIcon,
-  QuoteIcon,
   RefreshCwIcon,
   RepeatIcon,
   TriangleAlertIcon
@@ -422,10 +421,17 @@ function TaskReferencePile({
           </div>
         )
       })}
-      {/* The quote badge marks the pile as task references; the icon mirrors
-          vertically so the marks point up like opening quotes. */}
-      <div className="absolute -bottom-1 -left-1 z-10 grid size-5 place-items-center rounded-full border border-white/15 bg-black text-white shadow-md">
-        <QuoteIcon className="size-2.5 -scale-y-100" aria-hidden />
+      {/* The quote badge marks the pile as task references; the glyph is an
+          inline solid quote because lucide's stroked quote has a different
+          silhouette than the design's serif opening quotes. */}
+      <div className="absolute -bottom-1 -left-1 z-10 grid size-5 place-items-center rounded-full border border-[#30333c] bg-[#22252b] text-[#41484f]">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="size-2.5" aria-hidden>
+          <path d="M8 4.2C7.3 6.9 6.9 8.6 7.2 10.2A4.9 4.9 0 1 1 2.6 11.9C4.1 9.2 6.3 6.3 8 4.2Z" />
+          <path
+            d="M8 4.2C7.3 6.9 6.9 8.6 7.2 10.2A4.9 4.9 0 1 1 2.6 11.9C4.1 9.2 6.3 6.3 8 4.2Z"
+            transform="translate(11.3 0)"
+          />
+        </svg>
       </div>
     </div>
   )
