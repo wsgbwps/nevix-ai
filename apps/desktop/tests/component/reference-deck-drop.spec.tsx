@@ -158,6 +158,41 @@ test('a card the prompt still mentions never gets replaced; the drop appends', a
   await expect(cards).toHaveCount(2)
 })
 
+test('the fan lays cards out oldest-to-newest, so a later drop joins the right end', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  const deck = page.getByTestId('reference-deck')
+  await deck.hover()
+  await expect(page.getByTestId('deck-strip')).toBeVisible()
+
+  // The authored transform (not the computed one) reads immediately, so the
+  // 200ms pose transition cannot race the assertion.
+  const fanX = (name: string): Promise<number> =>
+    deck.getByRole('button', { name, exact: true }).evaluate((button) => {
+      const card = button.closest<HTMLElement>('[data-material-id]')
+      const translate = card?.style.transform.match(/translate\((-?[\d.]+)px/)
+      return translate === undefined || translate === null ? Number.NaN : Number(translate[1])
+    })
+
+  expect(await fanX('poster.png')).toBe(0)
+  expect(await fanX('banner.png')).toBeGreaterThan(0)
+
+  await dropOn(page, '[data-testid="reference-deck"]', [{ name: 'photo.png', type: 'image/png' }])
+  await expect(page.locator('[data-testid="deck-strip"] [data-material-id]')).toHaveCount(3)
+
+  const posterX = await fanX('poster.png')
+  const bannerX = await fanX('banner.png')
+  const photoX = await fanX('photo.png')
+  expect(photoX).toBeGreaterThan(bannerX)
+  expect(bannerX).toBeGreaterThan(posterX)
+  // Even pitch: the newcomer takes the next slot, existing cards stay put.
+  expect(bannerX - posterX).toBe(photoX - bannerX)
+})
+
 test('a dragged slot result re-uploads as a material under its download name', async ({
   mount,
   page

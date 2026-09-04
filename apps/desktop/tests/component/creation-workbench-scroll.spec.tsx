@@ -199,10 +199,11 @@ test('the composer collapses away from the bottom and re-expands at the bottom o
   expect(pillBox.x + pillBox.width).toBeCloseTo(composerBox.x + composerBox.width, 0)
 
   // While compact, the pile still fans out on hover — at the scaled-down
-  // pitch, without expanding the whole composer.
+  // pitch, without expanding the whole composer. The newest card extends;
+  // the oldest anchors the fan's left.
   const strip = page.getByTestId('deck-strip')
   const stripBox = (await strip.boundingBox())!
-  const underCard = strip.locator('[role="listitem"]').first()
+  const underCard = strip.locator('[role="listitem"]').last()
   await page.mouse.move(stripBox.x + 8, stripBox.y + 8)
   await expect
     .poll(async () => (await underCard.boundingBox())?.x ?? -1)

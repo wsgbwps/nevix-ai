@@ -27,7 +27,8 @@ import {
  * slot-result drops append, or swap a card in place (ADR-0018).
  */
 
-/** Per-depth pose of the fan (expanded) and the pile (collapsed). */
+/** Decorative pose tables: the fan indexes by deck position (leftmost card
+ * first), the pile by depth (top card first); both repeat past four cards. */
 const fanRotations = [-4, 4, -6, 3]
 const pileRotations = [2, -4, 5, -5]
 
@@ -371,9 +372,11 @@ export function ReferenceDeck({
                 style={{
                   zIndex: hoveredId === material.id ? 40 : 20 - depth,
                   opacity: expanded ? 1 : 1 - depth * 0.16,
+                  // Fan x follows deck position (oldest left, newest beside
+                  // the add entry); depth still keys the pile pose and z-order.
                   transform: expanded
-                    ? `translate(${depth * fanPitch}px, 0) rotate(${fanRotations[depth]}deg)${isDragTarget ? ' translateY(-3px) scale(1.05)' : ''}`
-                    : `translate(${depth * 3}px, ${depth * -2}px) rotate(${pileRotations[depth]}deg) scale(${1 - depth * 0.025})`
+                    ? `translate(${position * fanPitch}px, 0) rotate(${fanRotations[position % fanRotations.length]}deg)${isDragTarget ? ' translateY(-3px) scale(1.05)' : ''}`
+                    : `translate(${depth * 3}px, ${depth * -2}px) rotate(${pileRotations[depth % pileRotations.length]}deg) scale(${1 - depth * 0.025})`
                 }}
                 onMouseEnter={() => setHoveredId(material.id)}
                 onMouseLeave={() => setHoveredId(null)}
