@@ -42,7 +42,10 @@ function AuthenticatedAuthenticationNotices({
   const authenticated = runtime.status === 'authenticated'
 
   return (
-    <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end gap-2">
+    // Passive status notices must stay click-through: on basic-text-storage
+    // devices this corner toast is permanent and would otherwise block the
+    // surface beneath it (the Workbench composer submit sits in this corner).
+    <div className="pointer-events-none fixed right-6 bottom-6 z-50 flex flex-col items-end gap-2">
       {authenticated && runtime.isSessionPersistenceUnavailable ? (
         <p
           role="status"
