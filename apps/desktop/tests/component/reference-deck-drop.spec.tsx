@@ -234,3 +234,66 @@ test('a kind-denied slot result is refused before any bytes stream', async ({ mo
   await expect(cards).toHaveCount(2)
   await expect(page.getByTestId('composer-drop-rejected')).toHaveCount(0)
 })
+
+test('a dragged slot result re-uploads without fetching its object URL (renderer CSP forbids blob: fetches)', async ({
+  mount,
+  page
+}) => {
+  // Mirror the renderer CSP (blob: is display-only — renderer-csp.ts): make
+  // fetch(blob:) reject here as it does in production, so the re-upload path
+  // proves it takes bytes through its port, never an object-URL fetch.
+  await page.evaluate(() => {
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.startsWith('blob:')) return Promise.reject(new TypeError('Failed to fetch'))
+      return originalFetch(input, init)
+    }
+  })
+
+  const taskId = 'eeeeeeee-0000-4000-8000-00000000000e'
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{
+        tasks: [
+          {
+            id: taskId,
+            sessionId: scriptedSessionId,
+            status: 'succeeded',
+            mediaType: 'image',
+            slotCount: 1,
+            cancelRequested: false,
+            terminalCause: null,
+            terminalAt: null,
+            createdAt: '2026-08-23T08:00:00Z',
+            updatedAt: '2026-08-23T08:00:05Z',
+            slots: [
+              {
+                index: 0,
+                status: 'succeeded',
+                failureReason: null,
+                result: {
+                  mimeType: 'image/svg+xml',
+                  byteSize: 64,
+                  checksumSha256: 'bb'.repeat(32),
+                  widthPx: 48,
+                  heightPx: 64,
+                  durationMs: null
+                }
+              }
+            ]
+          }
+        ]
+      }}
+    />
+  )
+  await selectFirstSession(page)
+
+  await dropOn(page, '[data-testid="reference-deck"]', [], {
+    type: 'application/x-nevix-creation-result',
+    data: JSON.stringify({ taskId, slotIndex: 0, mediaType: 'image' })
+  })
+
+  await expect.poll(() => uploadCalls(page)).toHaveLength(1)
+  await expect(page.getByTestId('composer-upload-failed')).toHaveCount(0)
+})

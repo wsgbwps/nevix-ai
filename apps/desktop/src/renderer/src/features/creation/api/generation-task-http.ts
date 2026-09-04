@@ -397,6 +397,7 @@ export function createGenerationTaskClient(serverUrl: string): {
     taskId: string,
     idempotencyKey: string
   ): Promise<CreationApiResult<GenerationTaskDetail>>
+  loadResultBlob(token: string, taskId: string, slotIndex: number): Promise<Blob | null>
   loadResultBlobUrl(token: string, taskId: string, slotIndex: number): Promise<string | null>
 } {
   async function detailOf(
@@ -405,6 +406,27 @@ export function createGenerationTaskClient(serverUrl: string): {
     if (result.outcome !== 'succeeded') return result
     const detail = parseTaskDetail(result.payload)
     return detail ? { outcome: 'succeeded', value: detail } : { outcome: 'network-failure' }
+  }
+
+  // Bytes, never an object URL: the renderer's CSP treats blob: as
+  // display-only (renderer/index.html), so callers must not fetch it back.
+  async function loadResultBlob(
+    token: string,
+    taskId: string,
+    slotIndex: number
+  ): Promise<Blob | null> {
+    const url = new URL(`/creation/tasks/${taskId}/slots/${slotIndex}/result`, serverUrl)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        redirect: 'error',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+    } catch {
+      return null
+    }
+    if (!response.ok) return null
+    return response.blob().catch(() => null)
   }
 
   return {
@@ -462,20 +484,10 @@ export function createGenerationTaskClient(serverUrl: string): {
           token
         })
       ),
+    loadResultBlob,
     loadResultBlobUrl: async (token, taskId, slotIndex) => {
-      const url = new URL(`/creation/tasks/${taskId}/slots/${slotIndex}/result`, serverUrl)
-      let response: Response
-      try {
-        response = await fetch(url, {
-          redirect: 'error',
-          headers: { Authorization: `Bearer ${token}` }
-        })
-      } catch {
-        return null
-      }
-      if (!response.ok) return null
-      const blob = await response.blob().catch(() => null)
-      return blob ? URL.createObjectURL(blob) : null
+      const blob = await loadResultBlob(token, taskId, slotIndex)
+      return blob === null ? null : URL.createObjectURL(blob)
     }
   }
 }

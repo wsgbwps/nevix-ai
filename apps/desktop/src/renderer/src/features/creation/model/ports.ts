@@ -92,6 +92,8 @@ export interface CreationWorkspacePorts {
     taskId: string,
     idempotencyKey: string
   ) => Promise<CreationApiResult<GenerationTaskDetail>>
+  /** Streams one succeeded slot's verified output as bytes (ADR-0018 re-upload). */
+  readonly loadResultBlob: (taskId: string, slotIndex: number) => Promise<Blob | null>
   /** Streams one succeeded slot's verified output for display. */
   readonly loadResultBlobUrl: (taskId: string, slotIndex: number) => Promise<string | null>
   /**
@@ -172,6 +174,8 @@ export function createCreationWorkspacePorts(
     cancelTask: (taskId) => withTaskToken((client, token) => client.cancelTask(token, taskId)),
     retryTask: (taskId, idempotencyKey) =>
       withTaskToken((client, token) => client.retryTask(token, taskId, idempotencyKey)),
+    loadResultBlob: (taskId, slotIndex) =>
+      withTaskToken((client, token) => client.loadResultBlob(token, taskId, slotIndex)),
     loadResultBlobUrl: (taskId, slotIndex) =>
       withTaskToken((client, token) => client.loadResultBlobUrl(token, taskId, slotIndex)),
     subscribeEvents: (handlers) =>

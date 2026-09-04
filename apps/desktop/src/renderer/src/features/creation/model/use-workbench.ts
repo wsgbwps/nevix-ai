@@ -1324,42 +1324,28 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   )
 
   /**
-   * A dragged result re-enters through the plain upload path (ADR-0018): the
-   * verified bytes stream back through the trusted data plane, become a File
-   * named like its download twin, and upload as a brand-new material.
+   * A dragged result re-enters through the plain upload path (ADR-0018):
+   * verified bytes stream back through the trusted data plane and upload
+   * as a brand-new material named like its download twin.
    */
   const addResultAsMaterial = useCallback(
     (payload: ResultDragPayload, targetMaterialId: string | null): void => {
       if (!ports) return
       void (async () => {
-        const blobUrl = await ports
-          .loadResultBlobUrl(payload.taskId, payload.slotIndex)
-          .catch(() => null)
+        const blob = await ports.loadResultBlob(payload.taskId, payload.slotIndex).catch(() => null)
         if (!mountedRef.current) return
-        if (blobUrl === null) {
+        if (blob === null) {
           setMaterialUploadFailed(true)
           return
         }
-        try {
-          const blob = await fetch(blobUrl)
-            .then((response) => response.blob())
-            .catch(() => null)
-          if (!mountedRef.current) return
-          if (blob === null) {
-            setMaterialUploadFailed(true)
-            return
-          }
-          const mimeType = blob.type !== '' ? blob.type : null
-          const file = new File(
-            [blob],
-            resultFilename(payload.taskId, payload.slotIndex, payload.mediaType, mimeType),
-            { type: blob.type }
-          )
-          if (targetMaterialId !== null) replaceMaterial(targetMaterialId, file)
-          else addMaterials([file])
-        } finally {
-          URL.revokeObjectURL(blobUrl)
-        }
+        const mimeType = blob.type !== '' ? blob.type : null
+        const file = new File(
+          [blob],
+          resultFilename(payload.taskId, payload.slotIndex, payload.mediaType, mimeType),
+          { type: blob.type }
+        )
+        if (targetMaterialId !== null) replaceMaterial(targetMaterialId, file)
+        else addMaterials([file])
       })()
     },
     [addMaterials, ports, replaceMaterial]

@@ -1150,7 +1150,7 @@ test('a succeeded image slot offers a keyboard-reachable download', async ({ mou
   // The download keeps the provider's original format (JPEG here), named by
   // the verified result's mime instead of a fixed png extension.
   expect(calls[0].download).toBe(`nevix-${doneTask.id.slice(0, 8)}-1.jpg`)
-  expect(calls[0].href).toContain('data:image')
+  expect(calls[0].href).toContain('blob:')
 })
 
 test('a policy-rejected task keeps editing paths but no identical quick retry', async ({

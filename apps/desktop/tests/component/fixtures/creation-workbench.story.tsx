@@ -85,10 +85,13 @@ const materialTwo = material({
   fileName: 'banner.png'
 })
 
-const thumbnailUrl =
-  'data:image/svg+xml;utf8,' +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+/** One task-slot result's bytes, fresh per call like the data plane serves them. */
+const resultBlob = (): Blob =>
+  new Blob(
+    [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    ],
+    { type: 'image/svg+xml' }
   )
 
 function imageEnvelope(min: number, max: number): ImageReferenceEnvelope {
@@ -527,7 +530,10 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       taskState.tasks = [retried, ...taskState.tasks]
       return succeeded(detailOf(retried))
     },
-    loadResultBlobUrl: async () => thumbnailUrl,
+    // A real blob: URL, never a data: stand-in — a fake would hide any
+    // path that fetches the object URL (which the renderer CSP forbids).
+    loadResultBlob: async () => resultBlob(),
+    loadResultBlobUrl: async () => URL.createObjectURL(resultBlob()),
     subscribeEvents: (handlers) => {
       taskState.eventHandlers = handlers
       return () => {
