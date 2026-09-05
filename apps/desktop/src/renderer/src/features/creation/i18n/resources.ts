@@ -13,6 +13,11 @@ export const creationTranslations = defineResourceTranslations({
         newAction: '新对话',
         rename: { label: '重命名会话' },
         menu: { open: '会话操作', rename: '重命名', delete: '删除' },
+        pendingStatus: {
+          running: '提交进行中',
+          unconfirmed: '结果未确认',
+          failed: '提交失败'
+        },
         private: 'Creation Session 由创建者私有'
       },
       workspace: {
@@ -124,10 +129,14 @@ export const creationTranslations = defineResourceTranslations({
         actionLifecycle: {
           inProgress:
             '操作正在后台继续；你可以继续编辑草稿或离开此页面。停止跟踪不会取消可能已发送的请求。',
+          sessionUnconfirmed:
+            '无法确认会话创建结果，系统不会自动重试（可能已创建会话）。请先检查会话列表；未上传的文件不会跨重启保留，需要重新选择。',
           submissionUnconfirmed:
             '无法确认提交结果。恢复会使用同一提交标识和点击时冻结的内容；停止本地跟踪不会撤销可能已生效的提交。',
           materialUnconfirmed:
             '无法确认素材“{{fileName}}”是否上传成功。请先读取服务端事实，不要盲目重传；停止本地跟踪也不会删除可能已上传的素材。',
+          sessionRestarted:
+            '上次会话创建的结果未确认，请先检查会话列表；未上传的文件未跨重启保留，需要重新选择。',
           submissionRestarted:
             '上次提交的结果未确认。应用重启后不再保留同一提交标识；请先检查服务端任务，再决定是否新建提交。',
           materialRestarted:
@@ -313,6 +322,11 @@ export const creationTranslations = defineResourceTranslations({
         newAction: 'New conversation',
         rename: { label: 'Rename session' },
         menu: { open: 'Session actions', rename: 'Rename', delete: 'Delete' },
+        pendingStatus: {
+          running: 'Submission in progress',
+          unconfirmed: 'Outcome unconfirmed',
+          failed: 'Submission failed'
+        },
         private: 'Creation Sessions are private to their creator'
       },
       workspace: {
@@ -427,10 +441,14 @@ export const creationTranslations = defineResourceTranslations({
         actionLifecycle: {
           inProgress:
             'The action is continuing in the background; you can keep editing or leave this page. Stopping local tracking does not cancel a request that may already have been sent.',
+          sessionUnconfirmed:
+            'The session creation outcome could not be confirmed and will not retry automatically — a session may already exist. Check the session list first; files that had not uploaded are not retained across a restart and must be reselected.',
           submissionUnconfirmed:
             'The submission outcome could not be confirmed. Resume uses the same submission key and click-frozen content; stopping local tracking does not undo a submission that may have applied.',
           materialUnconfirmed:
             'The upload outcome for “{{fileName}}” could not be confirmed. Check server facts before selecting the file again; stopping local tracking does not delete a material that may have uploaded.',
+          sessionRestarted:
+            'The previous session creation outcome was unconfirmed; check the session list first. Files that had not uploaded were not retained across restart and must be reselected.',
           submissionRestarted:
             'The previous submission outcome was unconfirmed. Its submission key is not retained across an app restart; check server tasks before creating a new submission.',
           materialRestarted:

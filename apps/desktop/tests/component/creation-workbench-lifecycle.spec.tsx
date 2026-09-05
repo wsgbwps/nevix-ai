@@ -405,3 +405,163 @@ test('reload restores only an unconfirmed warning, never a resumable submission'
   await page.getByTestId('creation-stop-tracking').click()
   await expect(page.getByTestId('creation-action-notice')).toHaveCount(0)
 })
+
+// --- no-identity submission ownership (issue #193) -------------------------
+
+const materializedSessionId = 'eeeeeeee-0000-4000-8000-000000000007'
+
+test('a new-draft submission owns its pending entry and converts without stealing focus', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory createSessionDeferred />)
+  await page.getByTestId('session-new').click()
+  await page.getByTestId('composer-prompt').fill('Draft A prompt')
+  await page.getByTestId('composer-submit').click()
+
+  await expect(page.getByTestId('session-list')).toContainText('Draft A prompt')
+  await expect(page.getByTestId('composer-submit')).toBeDisabled()
+
+  await page.getByTestId('session-new').click()
+  await expect(page.getByTestId('workspace-hero')).toBeVisible()
+  await page.getByTestId('composer-prompt').fill('Draft B prompt')
+  await expect(page.getByTestId('composer-submit')).toBeEnabled()
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseSessionCreations())
+  await expect(page.getByTestId('session-list')).not.toContainText('Draft A prompt')
+  await expect(page.getByTestId('composer-prompt')).toContainText('Draft B prompt')
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
+    .toHaveLength(1)
+  const calls = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(calls[0]?.sessionId).toBe(materializedSessionId)
+  expect(calls[0]?.intent.prompt).toBe('Draft A prompt')
+  const moved = await page.evaluate(
+    (key: string) => window.__creationDeckTest?.draftRecord(key) ?? null,
+    materializedSessionId
+  )
+  expect(moved?.prompt).toBe('Draft A prompt')
+})
+
+test('watching a pending draft follows its conversion into the real session', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory createSessionDeferred />)
+  await page.getByTestId('session-new').click()
+  await page.getByTestId('composer-prompt').fill('Draft A prompt')
+  await page.getByTestId('composer-submit').click()
+  await expect(page.getByTestId('creation-action-notice')).toContainText(
+    'continuing in the background'
+  )
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseSessionCreations())
+  await expect(page.getByTestId('composer-prompt')).toContainText('Draft A prompt')
+  await expect(page.getByTestId(`task-${acceptedTaskId}`)).toBeVisible()
+  await expect(page.getByTestId('session-list')).not.toContainText('Draft A prompt')
+})
+
+test('an ambiguous session creation shows the unconfirmed notice and never resends', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory createSessionOutcome="network-failure" />)
+  await page.getByTestId('session-new').click()
+  await page.getByTestId('composer-prompt').fill('Draft A prompt')
+  await page.getByTestId('composer-submit').click()
+
+  await expect(page.getByTestId('creation-action-notice')).toContainText(
+    'session creation outcome could not be confirmed'
+  )
+  await expect(page.getByTestId('session-list')).toContainText('Draft A prompt')
+  await expect(page.getByTestId('composer-submit')).toBeDisabled()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.createSessionCalls() ?? []))
+    .toHaveLength(1)
+
+  await page.getByTestId('creation-stop-tracking').click()
+  await expect(page.getByTestId('creation-action-notice')).toHaveCount(0)
+  await expect(page.getByTestId('session-list')).toContainText('Draft A prompt')
+  await expect(page.getByTestId('composer-submit')).toBeEnabled()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.createSessionCalls() ?? []))
+    .toHaveLength(1)
+})
+
+test('a reloaded pending draft keeps its entry and notice but resumes nothing', async ({
+  mount,
+  page
+}) => {
+  const reloadPendingKey = 'pending:99999999-9999-4999-8999-999999999999'
+  const pendingDraft: LocalDraftRecord = {
+    prompt: 'Unconfirmed creation prompt',
+    promptDocument: {
+      version: 1,
+      nodes: [{ type: 'text', text: 'Unconfirmed creation prompt' }]
+    },
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'text-to-image',
+    ratio: '1:1',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: [],
+    operationNotice: {
+      sessionUnconfirmed: true,
+      submissionUnconfirmed: false,
+      materialFileNames: []
+    }
+  }
+  await mount(<CreationWorkbenchStory drafts={{ [reloadPendingKey]: pendingDraft }} />)
+
+  await expect(page.getByTestId('session-list')).toContainText('Unconfirmed creation prompt')
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.createSessionCalls() ?? []))
+    .toHaveLength(0)
+
+  await page.getByRole('button', { name: 'Unconfirmed creation prompt' }).click()
+  await expect(page.getByTestId('composer-prompt')).toContainText('Unconfirmed creation prompt')
+  await expect(page.getByTestId('creation-action-notice')).toContainText(
+    'previous session creation outcome was unconfirmed'
+  )
+  await page.getByTestId('composer-submit').click()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.createSessionCalls() ?? []))
+    .toHaveLength(1)
+  await expect(page.getByTestId(`task-${acceptedTaskId}`)).toBeVisible()
+})
+
+test('a held file survives display switches and re-mounts its card on return', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory createSessionDeferred />)
+  await page.getByTestId('session-new').click()
+  await page.getByTestId('composer-prompt').fill('Deck keeps its files')
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByLabel('Add reference material').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({
+    name: 'held.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('png')
+  })
+  await expect(
+    page.getByTestId('reference-deck').getByRole('button', { name: 'held.png', exact: true })
+  ).toBeVisible()
+
+  await page.getByTestId('composer-submit').click()
+  // The runtime owns the file now; switching away drops display resources only.
+  await page.getByTestId('session-new').click()
+  await expect(page.getByTestId('workspace-hero')).toBeVisible()
+  expect(await page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? [])).toEqual([])
+
+  const entry = page.getByRole('button', { name: 'Deck keeps its files' })
+  await entry.click()
+  await expect(
+    page.getByTestId('reference-deck').getByRole('button', { name: 'held.png', exact: true })
+  ).toBeVisible()
+  expect(await page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? [])).toEqual([])
+})

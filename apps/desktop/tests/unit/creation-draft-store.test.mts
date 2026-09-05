@@ -13,8 +13,14 @@ registerHooks({
   }
 })
 
-const { readLocalDraft, writeLocalDraft, removeLocalDraft, setLocalDraftOperationNotice } =
-  await import('../../src/renderer/src/features/creation/model/draft-store.ts')
+const {
+  readLocalDraft,
+  writeLocalDraft,
+  removeLocalDraft,
+  setLocalDraftOperationNotice,
+  listPendingLocalDraftKeys,
+  moveLocalDraft
+} = await import('../../src/renderer/src/features/creation/model/draft-store.ts')
 
 /** Minimal in-memory Storage stand-in; production passes window.localStorage. */
 function fakeStorage(): Storage {
@@ -166,10 +172,12 @@ test('only the minimum unresolved-operation notice persists beside the editable 
   writeLocalDraft(storage, 'user-1', key, record)
 
   setLocalDraftOperationNotice(storage, 'user-1', key, {
+    sessionUnconfirmed: false,
     submissionUnconfirmed: true,
     materialFileNames: ['shoe.png', 'detail.png']
   })
   assert.deepEqual(readLocalDraft(storage, 'user-1', key)?.operationNotice, {
+    sessionUnconfirmed: false,
     submissionUnconfirmed: true,
     materialFileNames: ['shoe.png', 'detail.png']
   })
@@ -179,4 +187,80 @@ test('only the minimum unresolved-operation notice persists beside the editable 
 
   setLocalDraftOperationNotice(storage, 'user-1', key, null)
   assert.equal(readLocalDraft(storage, 'user-1', key)?.operationNotice, undefined)
+})
+
+test('a pre-#193 notice without a session marker still parses as session-confirmed', () => {
+  const storage = fakeStorage()
+  const key = 'aaaaaaaa-0000-4000-8000-000000000001'
+  writeLocalDraft(storage, 'user-1', key, record)
+  // The literal wire shape a #192 build persisted.
+  storage.setItem(
+    `nevix:creation:draft:user-1:${key}`,
+    JSON.stringify({
+      prompt: record.prompt,
+      prompt_document: record.promptDocument,
+      media_type: 'image',
+      manifest_version: 5,
+      model: record.model,
+      mode: 'text-to-image',
+      ratio: '1:1',
+      resolution: '2K',
+      quantity: 1,
+      duration_seconds: null,
+      references: [],
+      operation_notice: {
+        kind: 'unconfirmed-writes',
+        submission_unconfirmed: true,
+        material_file_names: ['shoe.png']
+      }
+    })
+  )
+  assert.deepEqual(readLocalDraft(storage, 'user-1', key)?.operationNotice, {
+    sessionUnconfirmed: false,
+    submissionUnconfirmed: true,
+    materialFileNames: ['shoe.png']
+  })
+})
+
+test('a session-unconfirmed notice alone keeps the record flagged', () => {
+  const storage = fakeStorage()
+  const key = 'pending:11111111-1111-4111-8111-111111111111'
+  writeLocalDraft(storage, 'user-1', key, record)
+  setLocalDraftOperationNotice(storage, 'user-1', key, {
+    sessionUnconfirmed: true,
+    submissionUnconfirmed: false,
+    materialFileNames: []
+  })
+  assert.deepEqual(readLocalDraft(storage, 'user-1', key)?.operationNotice, {
+    sessionUnconfirmed: true,
+    submissionUnconfirmed: false,
+    materialFileNames: []
+  })
+})
+
+test('pending keys list from storage and move preserves the record exactly once', () => {
+  const storage = fakeStorage()
+  const pendingKey = 'pending:11111111-1111-4111-8111-111111111111'
+  const otherUserKey = 'pending:33333333-3333-4333-8333-333333333333'
+  const sessionId = 'eeeeeeee-0000-4000-8000-000000000007'
+  writeLocalDraft(storage, 'user-1', pendingKey, record)
+  writeLocalDraft(storage, 'other-user', otherUserKey, record)
+  writeLocalDraft(storage, 'user-1', sessionId, record)
+  // A corrupted pending payload must not surface as a recoverable entry.
+  storage.setItem('nevix:creation:draft:user-1:pending:44444444-4444-4444-8444-444444444444', '{')
+
+  assert.deepEqual(listPendingLocalDraftKeys(storage, 'user-1'), [pendingKey])
+
+  moveLocalDraft(storage, 'user-1', pendingKey, 'eeeeeeee-0000-4000-8000-000000000008')
+  assert.equal(readLocalDraft(storage, 'user-1', pendingKey), null)
+  assert.equal(
+    readLocalDraft(storage, 'user-1', 'eeeeeeee-0000-4000-8000-000000000008')?.prompt,
+    record.prompt
+  )
+  assert.deepEqual(listPendingLocalDraftKeys(storage, 'user-1'), [])
+  assert.deepEqual(listPendingLocalDraftKeys(storage, 'other-user'), [otherUserKey])
+
+  // Moving a missing record is a no-op, never a destructive write.
+  moveLocalDraft(storage, 'user-1', pendingKey, sessionId)
+  assert.equal(readLocalDraft(storage, 'user-1', sessionId)?.prompt, record.prompt)
 })

@@ -1,14 +1,19 @@
 /**
  * The device-local Draft store (ADR-0017): the editable draft lives only on
  * the current device, keyed per account and per session (`new` for a
- * composition that has not materialized a session yet). Writes are
+ * composition that has not materialized a session yet, `pending:<uuid>` for
+ * one whose submission started before a session identity existed). Writes are
  * synchronous and write-through — a renderer reload or app restart loses
  * nothing — and reads fail closed: a corrupted or foreign payload is dropped,
  * never guessed at. Multi-device drafts never sync; the server sees the
  * intent only at submission.
  */
+
 import type { DraftReferenceRole, DraftReferenceView } from '../api/go-creation-http'
 import { parsePromptDocument, remapPromptMentions, type PromptDocument } from './prompt-document'
+
+/** Key prefix for drafts whose submission began without a session identity. */
+export const PENDING_DRAFT_KEY_PREFIX = 'pending:'
 
 export interface LocalDraftRecord {
   readonly prompt: string
@@ -26,6 +31,8 @@ export interface LocalDraftRecord {
 }
 
 export interface LocalDraftOperationNotice {
+  /** A session-materialization request may have been sent but its outcome is unknown. */
+  readonly sessionUnconfirmed: boolean
   readonly submissionUnconfirmed: boolean
   readonly materialFileNames: readonly string[]
 }
@@ -86,6 +93,7 @@ export function writeLocalDraft(
           : {
               operation_notice: {
                 kind: 'unconfirmed-writes',
+                session_unconfirmed: record.operationNotice.sessionUnconfirmed,
                 submission_unconfirmed: record.operationNotice.submissionUnconfirmed,
                 material_file_names: record.operationNotice.materialFileNames
               }
@@ -159,10 +167,14 @@ function parseOperationNotice(value: unknown): LocalDraftOperationNotice | null 
   // Read the first #192 draft shape so an upgrade does not discard an
   // already-recorded ambiguous write.
   if (value.kind === 'submission-unconfirmed') {
-    return { submissionUnconfirmed: true, materialFileNames: [] }
+    return { sessionUnconfirmed: false, submissionUnconfirmed: true, materialFileNames: [] }
   }
   if (value.kind === 'material-upload-unconfirmed' && typeof value.file_name === 'string') {
-    return { submissionUnconfirmed: false, materialFileNames: [value.file_name] }
+    return {
+      sessionUnconfirmed: false,
+      submissionUnconfirmed: false,
+      materialFileNames: [value.file_name]
+    }
   }
   if (
     value.kind === 'unconfirmed-writes' &&
@@ -170,9 +182,14 @@ function parseOperationNotice(value: unknown): LocalDraftOperationNotice | null 
     Array.isArray(value.material_file_names) &&
     value.material_file_names.every((fileName) => typeof fileName === 'string')
   ) {
+    // Records written before #193 carry no session_unconfirmed marker.
+    const sessionUnconfirmed = value.session_unconfirmed === true
     const materialFileNames = [...new Set(value.material_file_names)]
-    if (!value.submission_unconfirmed && materialFileNames.length === 0) return null
+    if (!sessionUnconfirmed && !value.submission_unconfirmed && materialFileNames.length === 0) {
+      return null
+    }
     return {
+      sessionUnconfirmed,
       submissionUnconfirmed: value.submission_unconfirmed,
       materialFileNames
     }
@@ -211,6 +228,38 @@ export function removeLocalDraft(storage: Storage, userId: string, key: string):
   } catch {
     // Removal is hygiene; an unavailable store carries nothing anyway.
   }
+}
+
+/** Persisted pending keys, so a fresh runtime rebuilds the temporary
+ * entries after a reload. */
+export function listPendingLocalDraftKeys(storage: Storage, userId: string): string[] {
+  const prefix = `${KEY_PREFIX}${userId}:`
+  const keys: string[] = []
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const stored = storage.key(index)
+      if (stored === null || !stored.startsWith(prefix)) continue
+      const key = stored.slice(prefix.length)
+      if (
+        key.startsWith(PENDING_DRAFT_KEY_PREFIX) &&
+        readLocalDraft(storage, userId, key) !== null
+      ) {
+        keys.push(key)
+      }
+    }
+  } catch {
+    // An unavailable store carries no records to list.
+  }
+  return keys
+}
+
+/** Re-homes one draft record synchronously: no await between read, write,
+ * and remove. */
+export function moveLocalDraft(storage: Storage, userId: string, from: string, to: string): void {
+  const record = readLocalDraft(storage, userId, from)
+  if (record === null) return
+  writeLocalDraft(storage, userId, to, record)
+  removeLocalDraft(storage, userId, from)
 }
 
 export function setLocalDraftOperationNotice(

@@ -248,6 +248,8 @@ export interface DeckTestControls {
   retryCalls(): ReadonlyArray<{ taskId: string; idempotencyKey: string }>
   cancelledIds(): string[]
   createSessionCalls(): ReadonlyArray<{ name: string }>
+  /** Holds session creations until releaseSessionCreations runs. */
+  releaseSessionCreations(): void
   renameCalls(): ReadonlyArray<{ sessionId: string; name: string }>
   deletedSessionIds(): string[]
   releaseManifest(): void
@@ -354,6 +356,10 @@ interface RuntimeOptions {
     | 'accepted-response-lost'
     | 'request-rejected'
   readonly deferFirstMaterialListFor?: string
+  /** Holds each session creation until releaseSessionCreations runs. */
+  readonly createSessionDeferred?: boolean
+  /** Scripted outcome for every session creation besides succeeded. */
+  readonly createSessionOutcome?: 'network-failure' | 'request-rejected'
   readonly taskScript?: TaskScript
 }
 
@@ -374,6 +380,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const sessionDeleteReleases = new Set<() => void>()
   const uploadReleases = new Set<() => void>()
   const submissionReleases = new Set<() => void>()
+  const sessionCreateReleases = new Set<() => void>()
+  // First creation answers with the id the legacy specs pin; later ones increment.
+  let nextCreatedSessionSerial = 7
   let releaseFirstMaterialList: (() => void) | null = null
   let firstMaterialListDeferred = options.deferFirstMaterialListFor !== undefined
   let deferNextMaterialList = false
@@ -469,6 +478,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     retryCalls: () => taskState.retryCalls,
     cancelledIds: () => taskState.cancelledIds,
     createSessionCalls: () => createdSessions,
+    releaseSessionCreations: () => releaseAll(sessionCreateReleases),
     renameCalls: () => renameCalls,
     deletedSessionIds: () => deletedSessionIds,
     releaseManifest: () => {
@@ -534,11 +544,22 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     listSessions: async () => succeeded({ sessions: serverSessions, nextCursor: null }),
     createSession: async (name) => {
       createdSessions.push({ name: name ?? '' })
-      return succeeded({
+      if (options.createSessionDeferred) await waitForRelease(sessionCreateReleases)
+      if (options.createSessionOutcome === 'network-failure') {
+        return { outcome: 'network-failure' as const }
+      }
+      if (options.createSessionOutcome === 'request-rejected') {
+        return { outcome: 'request-rejected' as const, code: 'session_limit_reached' }
+      }
+      const serial = nextCreatedSessionSerial
+      nextCreatedSessionSerial += 1
+      const created: CreationSessionView = {
         ...sessionB,
-        id: 'eeeeeeee-0000-4000-8000-000000000007',
+        id: `eeeeeeee-0000-4000-8000-${String(serial).padStart(12, '0')}`,
         name: name ?? ''
-      })
+      }
+      serverSessions = [created, ...serverSessions]
+      return succeeded(created)
     },
     renameSession: async (sessionId, name) => {
       renameCalls.push({ sessionId, name })
@@ -551,7 +572,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       return succeeded(undefined)
     },
     getSessionDetail: async (sessionId) => {
-      const session = options.sessions.find((entry) => entry.id === sessionId)
+      // Created-at-runtime sessions answer like any other server fact.
+      const session = serverSessions.find((entry) => entry.id === sessionId)
       if (!session) return { outcome: 'request-rejected', code: 'not_found' }
       return succeeded({
         id: session.id,
@@ -807,6 +829,8 @@ interface StoryOptions {
     | 'accepted-response-lost'
     | 'request-rejected'
   readonly deferFirstMaterialListFor?: string
+  readonly createSessionDeferred?: boolean
+  readonly createSessionOutcome?: 'network-failure' | 'request-rejected'
   readonly sessions?: readonly CreationSessionView[]
   readonly taskScript?: TaskScript
 }
@@ -825,6 +849,8 @@ function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
     uploadDeferred: options.uploadDeferred,
     uploadOutcome: options.uploadOutcome,
     deferFirstMaterialListFor: options.deferFirstMaterialListFor,
+    createSessionDeferred: options.createSessionDeferred,
+    createSessionOutcome: options.createSessionOutcome,
     drafts: options.drafts ?? {
       [sessionA.id]: {
         prompt: '夏季跑鞋主图，暖光背景',

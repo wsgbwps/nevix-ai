@@ -15,7 +15,11 @@ import {
   DropdownMenuTrigger
 } from '../../../components/ui/dropdown-menu'
 import type { CreationSessionView } from '../api/go-creation-http'
-import { useCreationWorkbench, type CreationWorkbenchController } from '../model/use-workbench'
+import {
+  useCreationWorkbench,
+  type CreationWorkbenchController,
+  type PendingDraftEntry
+} from '../model/use-workbench'
 import { textPromptDocument } from '../model/prompt-document'
 import { ComposerMenuContent } from './composer-menu-content'
 import { CreationComposer, EXPANDED_MAX_WIDTH } from './composer'
@@ -44,7 +48,8 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   const [showBackToBottom, setShowBackToBottom] = useState(false)
   const [newTaskWaiting, setNewTaskWaiting] = useState(false)
   const newestTaskId = workbench.tasks[0]?.id ?? null
-  const workspaceKey = workbench.composingNew ? 'new' : (workbench.selectedId ?? 'inactive')
+  const workspaceKey =
+    workbench.pendingKey ?? (workbench.composingNew ? 'new' : (workbench.selectedId ?? 'inactive'))
   const returningRef = useRef(false)
   const followingBottomRef = useRef(false)
   const userScrollIntentRef = useRef(false)
@@ -114,9 +119,12 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
     scroller.scrollTo({ top: scroller.scrollHeight })
   }
 
-  // A composing round owns the workspace exactly like a selected session —
-  // its session does not exist on the server yet.
-  const workspaceActive = workbench.selected !== null || workbench.composingNew
+  // Composing and pending drafts own the workspace like a selected session —
+  // neither exists on the server yet.
+  const workspaceActive =
+    workbench.selected !== null || workbench.composingNew || workbench.pendingKey !== null
+  const pendingWorkspaceTitle =
+    workbench.pendingDrafts.find((entry) => entry.key === workbench.pendingKey)?.title ?? ''
 
   // Virtual rows and result media can establish their real height after the
   // task-id effect's first scroll. Continue following those measurements only
@@ -213,12 +221,22 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1">
-          {workbench.sessions.length === 0 && workbench.status === 'ready' ? (
+          {workbench.sessions.length === 0 &&
+          workbench.pendingDrafts.length === 0 &&
+          workbench.status === 'ready' ? (
             <p className="text-muted-foreground px-1 py-2 text-xs" role="status">
               {t('sessions.empty')}
             </p>
           ) : (
             <ul className="grid gap-0.5" data-testid="session-list">
+              {workbench.pendingDrafts.map((entry) => (
+                <PendingSessionRow
+                  key={entry.key}
+                  entry={entry}
+                  selected={workbench.pendingKey === entry.key}
+                  onSelect={() => workbench.openPendingDraft(entry.key)}
+                />
+              ))}
               {workbench.sessions.map((session, index) => (
                 <SessionRow
                   key={session.id}
@@ -390,9 +408,13 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                   <div className="mb-3 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <h1 className="text-foreground truncate text-base font-semibold">
-                        {workbench.selected !== null && workbench.selected.name.length > 0
-                          ? workbench.selected.name
-                          : t('sessions.unnamed')}
+                        {workbench.pendingKey !== null
+                          ? pendingWorkspaceTitle.length > 0
+                            ? pendingWorkspaceTitle
+                            : t('sessions.unnamed')
+                          : workbench.selected !== null && workbench.selected.name.length > 0
+                            ? workbench.selected.name
+                            : t('sessions.unnamed')}
                       </h1>
                       <p className="text-muted-foreground mt-1 text-[10px]">
                         {workbench.draft.mediaType !== null
@@ -462,6 +484,7 @@ function WorkbenchActionNotice({
   const persisted = workbench.operationNotice
   const activeSubmission = state === 'submission-unconfirmed'
   const activeMaterial = state === 'material-unconfirmed'
+  const activeSession = state === 'session-unconfirmed'
   const afterRestart = state === 'idle' && persisted !== null
   const persistedMaterialNames = persisted?.materialFileNames ?? []
   const materialFileName =
@@ -472,8 +495,11 @@ function WorkbenchActionNotice({
   let message: string | null = null
   if (state === 'preparing' || state === 'submitting') {
     message = t('gallery.actionLifecycle.inProgress')
-  } else if (activeSubmission || activeMaterial) {
+  } else if (activeSubmission || activeMaterial || activeSession) {
     const parts: string[] = []
+    if (activeSession || persisted?.sessionUnconfirmed) {
+      parts.push(t('gallery.actionLifecycle.sessionUnconfirmed'))
+    }
     if (activeSubmission || persisted?.submissionUnconfirmed) {
       parts.push(t('gallery.actionLifecycle.submissionUnconfirmed'))
     }
@@ -485,6 +511,9 @@ function WorkbenchActionNotice({
     message = t('gallery.actionLifecycle.retired')
   } else if (afterRestart) {
     const parts: string[] = []
+    if (persisted.sessionUnconfirmed) {
+      parts.push(t('gallery.actionLifecycle.sessionRestarted'))
+    }
     if (persisted.submissionUnconfirmed) {
       parts.push(t('gallery.actionLifecycle.submissionRestarted'))
     }
@@ -496,7 +525,8 @@ function WorkbenchActionNotice({
   if (message === null) return null
 
   const canStop = state !== 'retired'
-  const canCheck = activeMaterial || persistedMaterialNames.length > 0 || afterRestart
+  const canCheck =
+    activeSession || activeMaterial || persistedMaterialNames.length > 0 || afterRestart
 
   return (
     <div
@@ -670,6 +700,62 @@ function SessionRow({
           </DropdownMenu>
         </>
       )}
+    </li>
+  )
+}
+
+/**
+ * A temporary entry for a draft with no Creation Session identity: clicking
+ * returns to its context. No menu — nothing on the server owns it.
+ */
+function PendingSessionRow({
+  entry,
+  selected,
+  onSelect
+}: {
+  readonly entry: PendingDraftEntry
+  readonly selected: boolean
+  readonly onSelect: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation('creation')
+  const name = entry.title.length > 0 ? entry.title : t('sessions.unnamed')
+  const statusKey =
+    entry.status === 'preparing' || entry.status === 'submitting'
+      ? 'running'
+      : entry.status === 'session-unconfirmed' ||
+          entry.status === 'submission-unconfirmed' ||
+          entry.status === 'material-unconfirmed'
+        ? 'unconfirmed'
+        : entry.status === 'failed'
+          ? 'failed'
+          : null
+  return (
+    <li
+      className={
+        'relative flex items-center gap-1 rounded-md ' +
+        (selected ? 'bg-accent' : 'hover:bg-foreground/[0.04]')
+      }
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={selected ? 'true' : undefined}
+        aria-label={name}
+        data-testid={`session-pending-${entry.key}`}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+      >
+        <span className="bg-foreground/[0.06] text-foreground grid size-7 shrink-0 place-items-center rounded-md border">
+          <PencilLineIcon className="size-3.5" aria-hidden />
+        </span>
+        <span className="grid min-w-0">
+          <span className="text-foreground block truncate text-xs font-medium">{name}</span>
+          {statusKey !== null && (
+            <span className="text-muted-foreground block truncate text-[9px]">
+              {t(`sessions.pendingStatus.${statusKey}`)}
+            </span>
+          )}
+        </span>
+      </button>
     </li>
   )
 }
