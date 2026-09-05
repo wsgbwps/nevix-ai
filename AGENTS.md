@@ -1,7 +1,7 @@
 ## Instruction routing
 
 - Before planning or changing files under `apps/desktop/`, read `apps/desktop/AGENTS.md`; under `server/`, read `server/AGENTS.md`
-- Before planning or performing development work, read and follow the `/karpathy-guidelines` skill throughout the task
+- Before planning or performing development work, read and follow the `/karpathy-guidelines` and `/ponytail`skill throughout the task
 - Before changes involving the trusted data plane seam (Go server API, auth, storage, push), Go trusted operations, or AI providers, read [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md), [ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md), and [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md); changes to their responsibility seams follow the architecture-change rules under **Shared areas and delivery**
 
 ## Directory architecture gate
@@ -15,7 +15,8 @@
 ## Code comments
 
 - Use comments for non-obvious reasons, constraints, and contracts, especially security, authorization, transactions, concurrency, ordering, and compatibility
-- Express behavior and control flow through names, types, functions, and tests; remove comments that only narrate the next statement or restate a test name
+- Express behavior and control flow through names, types, functions, and tests; apply the deletion test to every comment (clean code) — if a reader of the code alone loses nothing when it is removed, delete it
+- A warranted comment earns each line: one line by default, and a multi-paragraph block is a smell to shrink or split before landing it
 - Keep each explanation at its narrowest authoritative location; reference a canonical ADR, `CONTEXT.md`, or issue instead of repeating architecture or history across package, type, function, and test comments
 - Put migration stories and future work in ADRs or tracked issues; write TODOs with an issue reference or a concrete removal condition
 - Keep Go documentation comments for exported identifiers focused on the public contract; let semantic need, including safety guarantees, determine length

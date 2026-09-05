@@ -11,7 +11,9 @@ export { createCreationWorkspacePorts, type CreationWorkspacePorts } from './mod
 export { createCreationRuntime } from './model/workbench-runtime'
 export type {
   CreationRuntimeEvent,
+  StagedMaterialFile,
   WorkbenchActionResult,
   WorkbenchActionState
 } from './model/workbench-runtime'
+export type { PendingDraftEntry } from './model/use-workbench'
 export type { ReferenceMaterialView } from './api/go-creation-http'
