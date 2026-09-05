@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/experimental-ct-react'
 import type { Locator, Page } from '@playwright/test'
 import { CreationWorkbenchRealShellStory } from './fixtures/creation-workbench-real-shell.story'
-import type { CreationSessionView } from '../src/renderer/src/features/creation/api/go-creation-http'
+import type {
+  CreationSessionView,
+  ReferenceMaterialView
+} from '../src/renderer/src/features/creation/api/go-creation-http'
 import type { ScriptedTask } from './fixtures/creation-workbench.story'
 
 // Scroll-contract tests for the Creation Workbench inside the App Shell.
@@ -45,6 +48,96 @@ function tallImageTasks(tag: string): ScriptedTask[] {
   }))
 }
 
+function materialId(tag: string, n: number): string {
+  return `material-${tag}-${String(n).padStart(4, '0')}`
+}
+
+function manyMixedTasks(count: number, tag: string, withReferences = false): ScriptedTask[] {
+  return Array.from({ length: count }, (_, index) => {
+    const n = index + 1
+    const video = n % 2 === 0
+    const failed = n % 5 === 0
+    const portrait = n % 3 === 0
+    return {
+      id: `task-${tag}-${String(n).padStart(4, '0')}`,
+      sessionId: scriptedSessionId,
+      status: failed ? 'failed' : 'succeeded',
+      mediaType: video ? 'video' : 'image',
+      slotCount: 1,
+      cancelRequested: false,
+      terminalCause: null,
+      createdAt: new Date(Date.UTC(2026, 7, 1, 0, n)).toISOString(),
+      updatedAt: new Date(Date.UTC(2026, 7, 1, 0, n, 1)).toISOString(),
+      terminalAt: new Date(Date.UTC(2026, 7, 1, 0, n, 1)).toISOString(),
+      slots: [
+        failed
+          ? {
+              index: 0,
+              status: 'failed',
+              failureReason: 'temporarily_unavailable',
+              failureDiagnostic: {
+                source: 'output_transfer',
+                code: 'provider_output_http_status',
+                message: `Mixed-media diagnostic ${n}: provider output download returned HTTP 403`,
+                httpStatus: 403,
+                providerType: video ? 'video-provider' : 'image-provider',
+                requestId: `request-${n}`
+              },
+              result: null
+            }
+          : {
+              index: 0,
+              status: 'succeeded',
+              failureReason: null,
+              result: {
+                mimeType: video ? 'video/mp4' : 'image/jpeg',
+                byteSize: 2048,
+                checksumSha256: 'ab'.repeat(32),
+                widthPx: portrait ? 800 : 1568,
+                heightPx: portrait ? 1424 : 672,
+                durationMs: video ? 5_000 : null
+              }
+            }
+      ],
+      specification: {
+        prompt: `Mixed ${video ? 'video' : 'image'} task ${n}${n % 3 === 0 ? ' with a longer responsive prompt that wraps onto another line' : ''}`,
+        model: video ? 'doubao-seedance-2-5' : 'doubao-seedream-5.0-pro',
+        mode: video ? 'text-to-video' : 'text-to-image',
+        ratio: portrait ? '9:16' : '21:9',
+        resolution: video ? '720p' : '2K',
+        quantity: 1,
+        durationSeconds: video ? 5 : null,
+        references: withReferences
+          ? [
+              {
+                materialId: materialId(tag, n),
+                role: 'reference',
+                kind: 'image'
+              }
+            ]
+          : []
+      }
+    }
+  })
+}
+
+function referencedMaterials(count: number, tag: string): ReferenceMaterialView[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: materialId(tag, index + 1),
+    kind: 'image',
+    fileName: `reference-${index + 1}.png`,
+    mimeType: 'image/png',
+    byteSize: 4 * 1024 * 1024,
+    widthPx: 1568,
+    heightPx: 672,
+    pixelCount: 1568 * 672,
+    durationMs: null,
+    checksumSha256: 'cd'.repeat(32),
+    claimsVersion: 1,
+    createdAt: '2026-08-01T00:00:00Z'
+  }))
+}
+
 // The scroller the presence specs drive, once the mount-time reveal settled.
 async function settledScroller(page: Page): Promise<Locator> {
   const scroller = page.getByTestId('creation-workbench').getByRole('main').locator('div').first()
@@ -57,6 +150,93 @@ async function settledScroller(page: Page): Promise<Locator> {
     .toBe(true)
   return scroller
 }
+
+async function visibleTaskAnchor(
+  page: Page
+): Promise<{ readonly testId: string; readonly top: number }> {
+  let anchor: { readonly testId: string; readonly top: number } | null = null
+  await expect
+    .poll(async () => {
+      anchor = await page.evaluate(() => {
+        const scroller = document
+          .querySelector('[data-testid="creation-workbench"] main')
+          ?.querySelector('div')
+        if (!(scroller instanceof HTMLElement)) return null
+        const viewport = scroller.getBoundingClientRect()
+        const card = [
+          ...document.querySelectorAll<HTMLElement>('section[data-testid^="task-"]')
+        ].find((candidate) => {
+          const rect = candidate.getBoundingClientRect()
+          return rect.bottom > viewport.top + 1 && rect.top < viewport.bottom - 1
+        })
+        if (card === undefined) return null
+        return {
+          testId: card.dataset.testid ?? '',
+          top: card.getBoundingClientRect().top - viewport.top
+        }
+      })
+      return anchor
+    })
+    .not.toBeNull()
+  return anchor!
+}
+
+async function taskOffsetFromScroller(card: Locator, scroller: Locator): Promise<number> {
+  const [cardBox, scrollBox] = await Promise.all([card.boundingBox(), scroller.boundingBox()])
+  return (cardBox?.y ?? 0) - (scrollBox?.y ?? 0)
+}
+
+async function userScrollTo(
+  scroller: Locator,
+  target: number | 'top' | 'bottom' | { readonly fraction: number }
+): Promise<void> {
+  await scroller.evaluate((element, requested) => {
+    const top =
+      requested === 'top'
+        ? 0
+        : requested === 'bottom'
+          ? element.scrollHeight
+          : typeof requested === 'number'
+            ? requested
+            : element.scrollHeight * requested.fraction
+    element.dispatchEvent(
+      new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        deltaY: top < element.scrollTop ? -1 : 1
+      })
+    )
+    element.scrollTo({ top })
+  }, target)
+}
+
+test('the initial bottom follow survives a delayed virtualizer correction', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks: tallImageTasks('settle') }} />)
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const scroller = await settledScroller(page)
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+      )
+    )
+    .toBe(true)
+
+  // A delayed size correction is programmatic, not reading intent. Initial
+  // bottom-follow remains responsible until an explicit user input takes over.
+  await scroller.evaluate((element) => element.scrollTo({ top: 0 }))
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+      )
+    )
+    .toBe(true)
+  await expect(page.getByTestId('back-to-bottom')).toHaveCount(0)
+})
 
 test('workspace and session-list scrolling stay independent in the shell', async ({
   mount,
@@ -93,25 +273,24 @@ test('workspace and session-list scrolling stay independent in the shell', async
   await expect(page.getByTestId('composer')).toBeVisible()
 
   const workbench = page.getByTestId('creation-workbench')
-  const workspace = workbench.getByRole('main')
   // Before the coupled-scroll fix the scroller trivially had no overflow; the
   // settle poll proves it really reaches the bottom once its height is bound.
   const scroller = await settledScroller(page)
   // Start from the top of the gallery so a downward wheel has room to scroll.
-  await scroller.evaluate((el) => el.scrollTo({ top: 0 }))
+  await userScrollTo(scroller, 'top')
 
   // Wheel inside the workspace: the gallery must move, the session list must
   // stay exactly where it is.
   const list = page.getByTestId('session-list')
+  const gallery = page.getByTestId('result-gallery')
   const listTopBefore = (await list.boundingBox())!
-  const galleryTopBefore = (await page.getByTestId('result-gallery').boundingBox())!
-  const workspaceBox = (await workspace.boundingBox())!
+  const galleryTopBefore = (await gallery.boundingBox())!
   // Wheel default actions land on a later compositor frame, so the resulting
   // movement is awaited by polling instead of being measured immediately.
-  await page.mouse.move(workspaceBox.x + workspaceBox.width * 0.6, workspaceBox.y + 120)
+  await gallery.hover({ position: { x: galleryTopBefore.width * 0.6, y: 20 } })
   await page.mouse.wheel(0, 400)
   await expect
-    .poll(async () => (await page.getByTestId('result-gallery').boundingBox())?.y ?? -1, {
+    .poll(async () => (await gallery.boundingBox())?.y ?? -1, {
       timeout: 2_000
     })
     .toBeLessThan(galleryTopBefore.y)
@@ -152,6 +331,192 @@ test('workspace and session-list scrolling stay independent in the shell', async
   expect(listScrollTop).toBeGreaterThan(0)
 })
 
+test('a large task history mounts and loads media only around the visible window', async ({
+  mount,
+  page
+}) => {
+  const tasks = manyMixedTasks(120, 'window', true)
+  await mount(
+    <CreationWorkbenchRealShellStory
+      taskScript={{ tasks }}
+      drafts={{ [scriptedSessionId]: null }}
+      materials={{ [scriptedSessionId]: referencedMaterials(tasks.length, 'window') }}
+    />
+  )
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+
+  const scroller = await settledScroller(page)
+  const gallery = page.getByTestId('result-gallery')
+  await expect(gallery).toHaveAttribute('data-total-count', String(tasks.length))
+
+  const mountedCards = gallery.locator('section[data-testid^="task-"]')
+  await expect.poll(() => mountedCards.count()).toBeGreaterThan(0)
+  expect(await mountedCards.count()).toBeLessThan(20)
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers().length ?? 0)
+    )
+    .toBeGreaterThan(0)
+  expect(
+    await page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers().length ?? 0)
+  ).toBeLessThan(20)
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+    )
+    .toBeGreaterThan(0)
+  const bottomThumbnailLoads = await page.evaluate(
+    () => window.__creationDeckTest?.materialBlobCalls().length ?? 0
+  )
+  expect(bottomThumbnailLoads).toBeLessThan(20)
+
+  await userScrollTo(scroller, 'top')
+  await expect
+    .poll(async () => (await mountedCards.first().getAttribute('data-testid')) ?? '')
+    .not.toBe('')
+  expect(await mountedCards.count()).toBeLessThan(20)
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+    )
+    .toBeGreaterThan(bottomThumbnailLoads)
+  const afterTopThumbnailLoads = await page.evaluate(
+    () => window.__creationDeckTest?.materialBlobCalls().length ?? 0
+  )
+
+  // Returning to the first window must reacquire its thumbnails: rows that
+  // retired at the top released their display URLs instead of accumulating.
+  await userScrollTo(scroller, 'bottom')
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+    )
+    .toBeGreaterThan(afterTopThumbnailLoads)
+})
+
+test('a new task follows at the bottom but preserves an older reading position', async ({
+  mount,
+  page
+}) => {
+  const tasks = manyMixedTasks(40, 'follow')
+  await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks }} />)
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const scroller = await settledScroller(page)
+
+  const followed = manyMixedTasks(1, 'bottom')[0]
+  await page.evaluate((task) => window.__creationDeckTest?.pushTask(task as never), followed)
+  await expect(page.getByTestId(`task-${followed.id}`)).toBeVisible()
+  await expect
+    .poll(async () =>
+      scroller.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+      )
+    )
+    .toBe(true)
+
+  await userScrollTo(scroller, { fraction: 1 / 3 })
+  await expect(page.getByTestId('back-to-bottom')).toBeVisible()
+  // The anchor contract begins after the creator's scroll has settled; an
+  // in-flight user scroll legitimately still owns the viewport position.
+  await page.waitForTimeout(200)
+  const anchor = await visibleTaskAnchor(page)
+  const pushed = manyMixedTasks(1, 'new')[0]
+  await page.evaluate((task) => window.__creationDeckTest?.pushTask(task as never), pushed)
+
+  await expect(page.getByTestId('result-gallery')).toHaveAttribute(
+    'data-total-count',
+    String(tasks.length + 2)
+  )
+  await expect(page.getByTestId('back-to-bottom')).toContainText('New task')
+  const anchorCard = page.getByTestId(anchor.testId)
+  await expect(anchorCard).toBeVisible()
+  // Chromium can round the transform and the scroll offset to opposite device
+  // pixels while a newly measured virtual row settles.
+  await expect
+    .poll(async () => Math.abs((await taskOffsetFromScroller(anchorCard, scroller)) - anchor.top))
+    .toBeLessThanOrEqual(1)
+
+  await page.getByTestId('back-to-bottom').click()
+  await expect(page.getByTestId(`task-${pushed.id}`)).toBeVisible()
+  await expect
+    .poll(async () =>
+      scroller.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+      )
+    )
+    .toBe(true)
+
+  // Native scrollbar drags have no wheel/key/touch event. Its pointer
+  // lifecycle still counts as an explicit return and restores following.
+  await userScrollTo(scroller, { fraction: 1 / 3 })
+  await expect(page.getByTestId('back-to-bottom')).toBeVisible()
+  await scroller.evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    element.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        buttons: 1,
+        clientX: bounds.right - 1,
+        clientY: bounds.top + bounds.height / 2,
+        pointerId: 1
+      })
+    )
+    element.scrollTo({ top: element.scrollHeight })
+  })
+  await expect(page.getByTestId('back-to-bottom')).toHaveCount(0)
+  await page.evaluate(() => {
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }))
+  })
+  const afterScrollbar = manyMixedTasks(1, 'scrollbar')[0]
+  await page.evaluate((task) => window.__creationDeckTest?.pushTask(task as never), afterScrollbar)
+  await expect(page.getByTestId(`task-${afterScrollbar.id}`)).toBeVisible()
+  await expect
+    .poll(async () =>
+      scroller.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+      )
+    )
+    .toBe(true)
+})
+
+test('detail and responsive height changes keep the visible task anchor stable', async ({
+  mount,
+  page
+}) => {
+  await page.setViewportSize({ width: 1200, height: 720 })
+  const tasks = manyMixedTasks(60, 'anchor')
+  await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks, taskDetailsDeferred: true }} />)
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const scroller = await settledScroller(page)
+  await userScrollTo(scroller, { fraction: 1 / 2 })
+  // Let the virtualizer finish the creator's upward scroll before treating
+  // the visible task as the stable reading anchor.
+  await page.waitForTimeout(200)
+  const anchor = await visibleTaskAnchor(page)
+  const anchorCard = page.getByTestId(anchor.testId)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseTaskDetails())
+  const taskId = anchor.testId.slice('task-'.length)
+  await expect(page.getByTestId(`slot-${taskId}-0`)).toHaveAttribute(
+    'data-slot-status',
+    /^(succeeded|failed)$/
+  )
+  await expect(page.locator('[data-testid^="slot-diagnostic-"]').first()).toBeVisible()
+  await expect.poll(() => taskOffsetFromScroller(anchorCard, scroller)).toBeCloseTo(anchor.top, 0)
+
+  const beforeResize = await taskOffsetFromScroller(anchorCard, scroller)
+  await page.setViewportSize({ width: 740, height: 720 })
+  await expect(anchorCard).toBeVisible()
+  await expect.poll(() => taskOffsetFromScroller(anchorCard, scroller)).toBeCloseTo(beforeResize, 0)
+
+  const beforeComposerExpansion = await taskOffsetFromScroller(anchorCard, scroller)
+  await page.getByTestId('composer-prompt').click()
+  await expect(page.getByTestId('composer-params')).toBeVisible()
+  await expect
+    .poll(() => taskOffsetFromScroller(anchorCard, scroller))
+    .toBeCloseTo(beforeComposerExpansion, 0)
+})
+
 test('the composer collapses away from the bottom and re-expands at the bottom or on focus', async ({
   mount,
   page
@@ -183,7 +548,7 @@ test('the composer collapses away from the bottom and re-expands at the bottom o
   // height — with capability controls hidden, the submit circle reachable,
   // and the pill above the composer's top-right corner. A bound pile scales
   // down proportionally instead of holding the row tall.
-  await scroller.evaluate((el) => el.scrollTo({ top: 0 }))
+  await userScrollTo(scroller, 'top')
   await expect(params).toBeHidden()
   const compactBox = (await composer.boundingBox())!
   expect(compactBox.height).toBeLessThan(expandedBox.height - 40)
@@ -227,7 +592,7 @@ test('the composer collapses away from the bottom and re-expands at the bottom o
     pinnedComposerBox.x + pinnedComposerBox.width,
     0
   )
-  await scroller.evaluate((el) => el.scrollTo({ top: 40 }))
+  await userScrollTo(scroller, 40)
   await expect(params).toBeHidden()
 
   // Blur alone never collapses: the expanded form survives losing focus
@@ -238,21 +603,18 @@ test('the composer collapses away from the bottom and re-expands at the bottom o
   await expect(params).toBeVisible()
 
   // Reaching the bottom restores the full form.
-  await scroller.evaluate((el) => el.scrollTo({ top: el.scrollHeight }))
+  await userScrollTo(scroller, 'bottom')
   await expect(params).toBeVisible()
 
   // From the compact form, the deck's add entry still opens the material
   // picker — and expands the composer with it. The press releases well after
   // the pin's spring moved the entry, so the picker must be anchored at
   // pointerdown, not at the release-time click.
-  await scroller.evaluate((el) => el.scrollTo({ top: 0 }))
+  await userScrollTo(scroller, 'top')
   await expect(params).toBeHidden()
   const addEntry = page.getByRole('button', { name: 'Add reference material', exact: true })
-  await addEntry.hover()
   const chooserPromise = page.waitForEvent('filechooser')
-  await page.mouse.down()
-  await page.waitForTimeout(150)
-  await page.mouse.up()
+  await addEntry.click({ delay: 150 })
   await chooserPromise
   await expect(params).toBeVisible()
 })
@@ -276,7 +638,7 @@ test('the compact form also shrinks the empty deck add tile', async ({ mount, pa
   const expandedBox = (await composer.boundingBox())!
   const expandedTileHeight = (await tile.boundingBox())!.height
 
-  await scroller.evaluate((el) => el.scrollTo({ top: 0 }))
+  await userScrollTo(scroller, 'top')
   await expect(page.getByTestId('composer-params')).toBeHidden()
 
   const compactBox = (await composer.boundingBox())!

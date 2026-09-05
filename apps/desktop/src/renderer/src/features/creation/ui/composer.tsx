@@ -111,6 +111,7 @@ export function CreationComposer({
   scrollerRef,
   wrapperRef,
   backToBottomVisible,
+  newTaskWaiting,
   onBackToBottom
 }: {
   readonly workbench: CreationWorkbenchController
@@ -118,6 +119,7 @@ export function CreationComposer({
   /** The page measures this wrapper for the scroller's bottom reserve. */
   readonly wrapperRef: React.RefObject<HTMLDivElement | null>
   readonly backToBottomVisible: boolean
+  readonly newTaskWaiting: boolean
   readonly onBackToBottom: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
@@ -227,7 +229,7 @@ export function CreationComposer({
           onClick={onBackToBottom}
           className="bg-card border-border/60 text-muted-foreground hover:text-foreground animate-in fade-in slide-in-from-bottom-1 absolute right-0 bottom-full z-20 mb-2 flex h-8 items-center gap-1 rounded-full border px-3 text-[10px] shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
         >
-          {t('gallery.backToBottom')}
+          {t(newTaskWaiting ? 'gallery.newTaskAvailable' : 'gallery.backToBottom')}
           <ChevronsDownIcon className="size-3" aria-hidden />
         </button>
       )}
@@ -262,6 +264,9 @@ export function CreationComposer({
               bindings={draft.references}
               materials={workbench.materials}
               thumbnails={workbench.thumbnails}
+              thumbnailStates={workbench.thumbnailStates}
+              onRetainThumbnail={workbench.retainMaterialThumbnail}
+              onRequestThumbnail={workbench.requestMaterialThumbnail}
               cap={workbench.deckCap}
               allowedKinds={workbench.allowedKinds}
               onAddFiles={workbench.addMaterials}

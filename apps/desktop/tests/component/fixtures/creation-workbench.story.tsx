@@ -232,6 +232,7 @@ export interface DeckTestControls {
   materialBlobCalls(): ReadonlyArray<{ materialId: string; aborted: boolean }>
   resultBlobTransfers(): ReadonlyArray<{ taskId: string; slotIndex: number }>
   releaseMaterialBlobs(): void
+  releaseResultBlobs(): void
   uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
   taskCalls(): ReadonlyArray<{
     sessionId: string
@@ -244,6 +245,7 @@ export interface DeckTestControls {
   renameCalls(): ReadonlyArray<{ sessionId: string; name: string }>
   deletedSessionIds(): string[]
   releaseManifest(): void
+  releaseTaskDetails(): void
   fireInvalidation(): void
   pushTask(task: ScriptedTask): void
 }
@@ -268,15 +270,27 @@ export interface ScriptedTask extends GenerationTaskView {
 }
 
 function detailOf(task: ScriptedTask): GenerationTaskDetail {
+  const specification = task.specification
   return {
     task: task.detailTask ?? task,
     slots: task.slots,
-    specification: task.specification ?? null
+    // The production parser constructs new wire-view objects per response.
+    // Mirror that identity churn so lease regressions cannot hide in the adapter.
+    specification:
+      specification === undefined
+        ? null
+        : {
+            ...specification,
+            references: specification.references.map((reference) => ({ ...reference }))
+          }
   }
 }
 
 export interface TaskScript {
   readonly tasks?: readonly ScriptedTask[]
+  readonly taskDetailsDeferred?: boolean
+  readonly resultBlobDeferred?: boolean
+  readonly resultBlobFailures?: number
   /** When set, submitTask rejects with this stable code. */
   readonly submitRejection?: string
 }
@@ -319,10 +333,18 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const renameCalls: Array<{ sessionId: string; name: string }> = []
   const deletedSessionIds: string[] = []
   const resultBlobTransfers: Array<{ taskId: string; slotIndex: number }> = []
+  const resultBlobReleases = new Set<() => void>()
+  let remainingResultBlobFailures = options.taskScript?.resultBlobFailures ?? 0
   let releaseManifestResponse: (() => void) | null = null
   const manifestReady = options.manifestDeferred
     ? new Promise<void>((resolve) => {
         releaseManifestResponse = resolve
+      })
+    : Promise.resolve()
+  let releaseTaskDetailsResponse: (() => void) | null = null
+  const taskDetailsReady = options.taskScript?.taskDetailsDeferred
+    ? new Promise<void>((resolve) => {
+        releaseTaskDetailsResponse = resolve
       })
     : Promise.resolve()
   const taskState: {
@@ -355,6 +377,10 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       for (const release of materialBlobReleases) release()
       materialBlobReleases.clear()
     },
+    releaseResultBlobs: () => {
+      for (const release of resultBlobReleases) release()
+      resultBlobReleases.clear()
+    },
     uploadCalls: () => uploadCalls,
     taskCalls: () => taskState.submitCalls,
     retryCalls: () => taskState.retryCalls,
@@ -365,6 +391,10 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     releaseManifest: () => {
       releaseManifestResponse?.()
       releaseManifestResponse = null
+    },
+    releaseTaskDetails: () => {
+      releaseTaskDetailsResponse?.()
+      releaseTaskDetailsResponse = null
     },
     fireInvalidation: () => taskState.eventHandlers?.onInvalidation(),
     pushTask: (task) => {
@@ -509,6 +539,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
         nextCursor: null
       }),
     getTask: async (taskId) => {
+      await taskDetailsReady
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
       return succeeded(detailOf(task))
@@ -545,6 +576,19 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     // actually moved a slot's bytes.
     loadResultBlob: async (taskId, slotIndex) => {
       resultBlobTransfers.push({ taskId, slotIndex })
+      if (options.taskScript?.resultBlobDeferred) {
+        await new Promise<void>((resolve) => {
+          const release = (): void => {
+            resultBlobReleases.delete(release)
+            resolve()
+          }
+          resultBlobReleases.add(release)
+        })
+      }
+      if (remainingResultBlobFailures > 0) {
+        remainingResultBlobFailures -= 1
+        return null
+      }
       return resultBlob()
     },
     subscribeEvents: (handlers) => {
