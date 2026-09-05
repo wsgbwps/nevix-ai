@@ -8,6 +8,8 @@
 
 2026-09-02 修订：会话草稿的存储与提交锚点改由 [ADR-0017](0017-device-local-session-draft.md) 决定——Draft 为设备本地状态，submitTask 携带完整生成意图；#150 中「草稿随写随存于服务端、draft_revision 指针提交」的设计随之作废。
 
+2026-09-05 修订：为任务增量刷新补充单任务详情一致读取与可靠变化判据的合同；条件复用 `updatedAt`，不预先要求增加 `revision`。本次新增保证已定稿，源码待实施。
+
 ## 背景
 
 AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 decision tickets 与多份 ADR 中；旧票建立于 Organization、Supabase/RLS、Desktop 直连数据面等前提之上。#93 清空全部决策前沿并取代早期假设，#150 把最终边界收敛为单一规格。若不在架构文档中固化，实施 agent 容易复活已被取代的设计。本 ADR 与 [ADR-0012](0012-unified-ai-creation-owner.md)（owner 统一）、[ADR-0014](0014-go-sole-trusted-data-plane.md)（数据面）、[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)（用户系统与授权）互补，各自保持单一权威说明。
@@ -51,6 +53,12 @@ Creation 拥有自己的 domain-local write transaction implementation，与 Ide
 ### Session 吊销后断流
 
 Identity 在 Session 吊销事务成功提交后，通过共享 Domain Event（`internal/event`）发布受影响的非敏感 Session identity；Creation 的 SSE hub 订阅并断开精确流。回滚不发布；已授权的在途 HTTP 请求不追溯取消；事件只表达事实，不携带 token、prompt 或私有内容。
+
+### Generation Task 详情读取合同
+
+先保证单个 Generation Task 的状态、结果位、诊断/结果与 Generation Specification 来自一致读取，不能把并发提交前后的数据混成一份详情。再验证能否复用 `updatedAt` 作为增量补读的变化判据：传输须保留足够精度，而且每次可见详情变化都必须改变它；保证覆盖相关写入路径、列表/详情语义与并发读取，不能只依赖调用习惯或时间格式调整。
+
+能可靠满足上述条件就复用 `updatedAt`；无法可靠满足时才增加 `revision`，并记录依据与验证证据，不预先要求新增版本列或迁移。详情返回的变化判据必须对应同一份一致读取结果。这项 Go 合同是 Desktop 任务增量刷新的独立前置，客户端调度、缓存与展示生命周期见 [Desktop ADR-0005](../../apps/desktop/docs/adr/0005-creation-operation-and-task-refresh-lifetimes.md)，不混入服务端可信责任。
 
 ### 本地 AEAD（Provider 凭据保护）
 

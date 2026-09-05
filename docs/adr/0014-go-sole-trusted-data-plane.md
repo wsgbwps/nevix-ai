@@ -27,7 +27,7 @@ ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supa
 - SSE 仅加速展示，真相永远在 Postgres；事件源为生成任务状态迁移（事件词汇与 wire contract 归 [#150](https://github.com/wsgbwps/nevix-ai/issues/150)：事件只表示当前 User 的 creation state 已失效，不携带私有 payload，不实现 Last-Event-ID）。
 - 认证经 fetch-stream 携带 Authorization header，token 不进 URL/query。
 - 连接生命周期绑定 Session：吊销、停用或登出即断流——Session 吊销后的跨 Module 断流 seam 见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
-- 心跳约 20s（防反向代理 idle 断连）；断线重连先全量后续流，由 polling 最终收敛。
+- 心跳约 20s（防反向代理 idle 断连）；重连成功主动读取服务端事实，不依赖错过的事件重放。读取可依据可靠变化判据补齐当前视图，无需重拉全部历史详情；Desktop 的事件合并、断流轮询条件与停止读取规则归 [Desktop ADR-0005](../../apps/desktop/docs/adr/0005-creation-operation-and-task-refresh-lifetimes.md)。
 
 ### TLS 与桌面端连接
 

@@ -47,7 +47,7 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 ### 推送通道
 
 - SSE，v1 即实现：Go 单实例内按 user_id 的 hub；事件源为生成任务状态迁移。
-- 真相在 Postgres，SSE 仅加速展示；断线重连先全量后续流。
+- 真相在 Postgres，SSE 仅加速展示；断线重连主动核对服务端事实，补读与恢复原则见 [ADR-0014](0014-go-sole-trusted-data-plane.md)。
 - WebSocket 仅当出现真实双向/高频需求时另立 ADR。
 
 ### 升级
