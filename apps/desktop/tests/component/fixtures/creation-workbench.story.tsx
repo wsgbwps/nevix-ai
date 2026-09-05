@@ -261,12 +261,18 @@ function succeeded<T>(value: T): CreationApiResult<T> {
 /** Scripted task behavior: what submitTask does and which tasks pre-exist. */
 export interface ScriptedTask extends GenerationTaskView {
   readonly slots: GenerationTaskDetail['slots']
+  /** Optional task facts returned by detail, independent of the list summary. */
+  readonly detailTask?: GenerationTaskView
   /** The task's frozen specification; absent details render task-view facts only. */
   readonly specification?: GenerationTaskDetail['specification']
 }
 
 function detailOf(task: ScriptedTask): GenerationTaskDetail {
-  return { task, slots: task.slots, specification: task.specification ?? null }
+  return {
+    task: task.detailTask ?? task,
+    slots: task.slots,
+    specification: task.specification ?? null
+  }
 }
 
 export interface TaskScript {

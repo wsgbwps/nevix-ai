@@ -8,7 +8,7 @@
 
 2026-09-02 修订：会话草稿的存储与提交锚点改由 [ADR-0017](0017-device-local-session-draft.md) 决定——Draft 为设备本地状态，submitTask 携带完整生成意图；#150 中「草稿随写随存于服务端、draft_revision 指针提交」的设计随之作废。
 
-2026-09-05 修订：为任务增量刷新补充单任务详情一致读取与可靠变化判据的合同；条件复用 `updatedAt`，不预先要求增加 `revision`。本次新增保证已定稿，源码待实施。
+2026-09-05 修订：为任务增量刷新补充单任务详情一致读取与可靠变化判据的合同；#190 已验证并复用 `updatedAt`，不增加 `revision` 或 migration。实现与测试证据见下文。
 
 ## 背景
 
@@ -58,7 +58,17 @@ Identity 在 Session 吊销事务成功提交后，通过共享 Domain Event（`
 
 先保证单个 Generation Task 的状态、结果位、诊断/结果与 Generation Specification 来自一致读取，不能把并发提交前后的数据混成一份详情。再验证能否复用 `updatedAt` 作为增量补读的变化判据：传输须保留足够精度，而且每次可见详情变化都必须改变它；保证覆盖相关写入路径、列表/详情语义与并发读取，不能只依赖调用习惯或时间格式调整。
 
-能可靠满足上述条件就复用 `updatedAt`；无法可靠满足时才增加 `revision`，并记录依据与验证证据，不预先要求新增版本列或迁移。详情返回的变化判据必须对应同一份一致读取结果。这项 Go 合同是 Desktop 任务增量刷新的独立前置，客户端调度、缓存与展示生命周期见 [Desktop ADR-0005](../../apps/desktop/docs/adr/0005-creation-operation-and-task-refresh-lifetimes.md)，不混入服务端可信责任。
+经 #190 的生产写入口审计，外部可见的可变详情只来自 task transition、cancel request 与 write-once slot verdict；Generation Specification 在准入后不可变，provider job、queue、reservation 与 asset 的内部变化不直接进入详情。因此采用以下已实现保证：
+
+- creator detail 在只读 `REPEATABLE READ` 事务中读取 task、slots 与 job，使返回的 `updatedAt` 和全部详情事实属于同一数据库快照；列表摘要由单条查询读取同一 task 行判据。
+- task transition 与首次 cancel request 在同一写语句中以 `GREATEST(updated_at + interval '1 microsecond', clock_timestamp())` 严格推进父 task 判据；重复 cancel 不制造无事实变化的新判据。
+- `WriteSlotVerdict` 先锁 parent task，再写 slot，并且只在首次 verdict 成功时于同一 verified write transaction 推进父 task 判据。这个局部 `task → slot` 顺序不新增 slot/task 反向锁序；它不宣称修复 Creation worker 中既有的其他锁序风险。
+- HTTP 以 RFC 3339 fractional-second 形式保留 PostgreSQL 的微秒值；列表与详情的 `updated_at` 具有相同语义，Desktop 将完整字符串视为 opaque criterion，不经毫秒级 `Date` 转换后比较。
+- fresh submit/retry 返回数据库生成的时间；idempotent replay 的响应同时采用 post-commit 重读的 task 与 slots，避免响应层重新拼接不同快照。
+
+受控测试覆盖 task/slot 并发提交时的单快照、同秒连续及并发 slot 写入、status/cancel/diagnostic/result 的判据推进、列表/详情 wire 精度和 Desktop 详情整卡配对。PostgreSQL `timestamptz` 的微秒精度与上述严格推进机制足以区分每次可见提交，所以 `revision` 不提供额外保证，只会扩大 schema 与消费者变更；本修订不新增列或数据迁移。
+
+该判据仅适用于 Generation Task 的一致详情，不是跨 aggregate 的全局事件序号。详情返回的判据必须对应同一份一致读取结果。这项 Go 合同是 Desktop 任务增量刷新的独立前置，客户端调度、缓存与展示生命周期见 [Desktop ADR-0005](../../apps/desktop/docs/adr/0005-creation-operation-and-task-refresh-lifetimes.md)，不混入服务端可信责任。
 
 ### 本地 AEAD（Provider 凭据保护）
 

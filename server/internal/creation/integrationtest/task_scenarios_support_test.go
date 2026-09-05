@@ -123,6 +123,7 @@ type taskView struct {
 		CancelRequested bool    `json:"cancel_requested"`
 		TerminalCause   *string `json:"terminal_cause"`
 		CreatedAt       string  `json:"created_at"`
+		UpdatedAt       string  `json:"updated_at"`
 	} `json:"task"`
 	Specification *struct {
 		Prompt     string  `json:"prompt"`

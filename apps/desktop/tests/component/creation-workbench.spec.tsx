@@ -798,6 +798,45 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
   expect(retries[0].taskId).toBe(failedTask.id)
 })
 
+test('a task card keeps detail facts paired with the detail change criterion', async ({
+  mount,
+  page
+}) => {
+  const summary: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000pair',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-05T01:00:00Z',
+    updatedAt: '2026-09-05T01:00:00.123457Z',
+    terminalAt: '2026-09-05T01:00:00.123457Z',
+    detailTask: {
+      id: 'dddddddd-0000-4000-8000-00000000pair',
+      sessionId: scriptedSessionId,
+      status: 'queued',
+      mediaType: 'image',
+      slotCount: 1,
+      cancelRequested: false,
+      terminalCause: null,
+      createdAt: '2026-09-05T01:00:00Z',
+      updatedAt: '2026-09-05T01:00:00.123456Z',
+      terminalAt: null
+    },
+    slots: [{ index: 0, status: 'queued', failureReason: null, result: null }]
+  }
+
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [summary] }} />)
+  await selectFirstSession(page)
+
+  const card = page.getByTestId(`task-${summary.id}`)
+  await expect(card).toContainText('Queued')
+  await expect(page.getByTestId(`task-cancel-${summary.id}`)).toBeVisible()
+  await expect(page.getByTestId(`task-regenerate-${summary.id}`)).toHaveCount(0)
+})
+
 test('a failed slot renders the concrete persisted diagnostic instead of only a generic reason', async ({
   mount,
   page

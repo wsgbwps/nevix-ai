@@ -159,14 +159,15 @@ function TaskCard({
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const detail = workbench.taskDetails[task.id]
+  const snapshot = detail?.task ?? task
   const spec = detail?.specification ?? null
-  const terminal = isTerminalTaskStatus(task.status)
-  const indeterminate = task.terminalCause !== null
+  const terminal = isTerminalTaskStatus(snapshot.status)
+  const indeterminate = snapshot.terminalCause !== null
   const retryUncompleted =
     terminal &&
     !indeterminate &&
-    task.status !== 'succeeded' &&
-    task.status !== 'cancelled' &&
+    snapshot.status !== 'succeeded' &&
+    snapshot.status !== 'cancelled' &&
     !hasPolicyRejectedSlot(detail)
   // The composer is a fixed surface that owns the live draft; re-editing a
   // task means editing that draft and regenerating.
@@ -175,14 +176,14 @@ function TaskCard({
   }
   return (
     <section
-      aria-label={String(t(statusKey(task.status)))}
-      data-testid={`task-${task.id}`}
+      aria-label={String(t(statusKey(snapshot.status)))}
+      data-testid={`task-${snapshot.id}`}
       className="animate-in fade-in slide-in-from-bottom-2 flex flex-col gap-2.5 duration-300"
     >
       <div className="flex items-start gap-2.5">
         {spec !== null && spec.references.length > 0 && (
           <TaskReferencePile
-            taskId={task.id}
+            taskId={snapshot.id}
             references={spec.references}
             materials={workbench.materials}
             thumbnails={workbench.thumbnails}
@@ -204,9 +205,9 @@ function TaskCard({
             </div>
           )}
           <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
-            <span className="text-foreground/70 font-medium">{t(statusKey(task.status))}</span>
+            <span className="text-foreground/70 font-medium">{t(statusKey(snapshot.status))}</span>
             <span>
-              {t(mediaKeys[task.mediaType])}
+              {t(mediaKeys[snapshot.mediaType])}
               {spec !== null && ` · ${spec.model}`}
             </span>
             {spec?.ratio != null && (
@@ -221,18 +222,18 @@ function TaskCard({
                 <span>{spec.resolution}</span>
               </>
             )}
-            <TaskDetailsMenu task={task} spec={spec} />
+            <TaskDetailsMenu task={snapshot} spec={spec} />
           </div>
         </div>
       </div>
       <div className={galleryGridClass}>
-        {(detail?.slots ?? placeholderSlots(task.slotCount)).map((slot) => (
+        {(detail?.slots ?? placeholderSlots(snapshot.slotCount)).map((slot) => (
           <SlotCard
             key={slot.index}
             workbench={workbench}
-            taskId={task.id}
+            taskId={snapshot.id}
             slot={slot}
-            mediaType={task.mediaType}
+            mediaType={snapshot.mediaType}
             fallbackRatio={spec?.ratio ?? null}
           />
         ))}
@@ -240,7 +241,7 @@ function TaskCard({
       <div className="flex items-center gap-1.5">
         <button
           type="button"
-          data-testid={`task-edit-${task.id}`}
+          data-testid={`task-edit-${snapshot.id}`}
           onClick={focusComposerPrompt}
           className={quietButtonClass}
         >
@@ -250,8 +251,8 @@ function TaskCard({
         {!terminal && (
           <button
             type="button"
-            data-testid={`task-cancel-${task.id}`}
-            onClick={() => workbench.cancelTask(task.id)}
+            data-testid={`task-cancel-${snapshot.id}`}
+            onClick={() => workbench.cancelTask(snapshot.id)}
             className={quietButtonClass}
           >
             <BanIcon className="size-3.5" aria-hidden />
@@ -261,7 +262,7 @@ function TaskCard({
         {terminal && (
           <button
             type="button"
-            data-testid={`task-regenerate-${task.id}`}
+            data-testid={`task-regenerate-${snapshot.id}`}
             onClick={workbench.submit}
             disabled={workbench.submitDisabled}
             className={`${quietButtonClass} disabled:opacity-50`}
@@ -273,7 +274,7 @@ function TaskCard({
         {(retryUncompleted || indeterminate) && (
           <DropdownMenu>
             <DropdownMenuTrigger
-              data-testid={`task-more-${task.id}`}
+              data-testid={`task-more-${snapshot.id}`}
               aria-label={String(t('gallery.actions.more'))}
               className={quietButtonClass}
             >
@@ -282,9 +283,9 @@ function TaskCard({
             <DropdownMenuContent align="start" className="w-44 rounded-xl">
               {retryUncompleted && (
                 <DropdownMenuItem
-                  data-testid={`task-retry-${task.id}`}
+                  data-testid={`task-retry-${snapshot.id}`}
                   className="cursor-pointer text-xs"
-                  onSelect={() => workbench.retryTask(task.id)}
+                  onSelect={() => workbench.retryTask(snapshot.id)}
                 >
                   <RepeatIcon className="size-3.5" aria-hidden />
                   {t('gallery.actions.retryUncompleted')}
@@ -292,9 +293,9 @@ function TaskCard({
               )}
               {indeterminate && (
                 <DropdownMenuItem
-                  data-testid={`task-retry-indeterminate-${task.id}`}
+                  data-testid={`task-retry-indeterminate-${snapshot.id}`}
                   className="cursor-pointer text-xs"
-                  onSelect={() => workbench.requestIndeterminateRedo(task.id)}
+                  onSelect={() => workbench.requestIndeterminateRedo(snapshot.id)}
                 >
                   <RepeatIcon className="size-3.5" aria-hidden />
                   {t('gallery.actions.retryUncompleted')}
@@ -304,11 +305,11 @@ function TaskCard({
           </DropdownMenu>
         )}
       </div>
-      {workbench.indeterminateTaskId === task.id && (
+      {workbench.indeterminateTaskId === snapshot.id && (
         <div
           role="alertdialog"
           aria-label={t('gallery.indeterminate.title')}
-          data-testid={`indeterminate-confirm-${task.id}`}
+          data-testid={`indeterminate-confirm-${snapshot.id}`}
           className="bg-warning/10 rounded-lg p-2"
         >
           <p className="text-warning flex items-start gap-1.5 text-[11px] leading-4">
@@ -318,8 +319,8 @@ function TaskCard({
           <div className="mt-2 flex gap-2">
             <button
               type="button"
-              data-testid={`indeterminate-confirm-button-${task.id}`}
-              onClick={() => workbench.confirmIndeterminateRedo(task.id)}
+              data-testid={`indeterminate-confirm-button-${snapshot.id}`}
+              onClick={() => workbench.confirmIndeterminateRedo(snapshot.id)}
               className="text-warning border-warning/60 hover:bg-warning/10 h-7 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
             >
               {t('gallery.indeterminate.confirm')}

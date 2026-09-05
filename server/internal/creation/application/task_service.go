@@ -143,10 +143,11 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 	}
 	if result.Replayed {
 		// The replayed task's slots are read after commit for the response.
-		_, slots, err := s.tasks.GetForOwner(ctx, cmd.Owner, result.Task.ID)
+		task, slots, err := s.tasks.GetForOwner(ctx, cmd.Owner, result.Task.ID)
 		if err != nil {
 			return SubmissionResult{}, err
 		}
+		result.Task = task
 		result.Slots = slots
 		return result, nil
 	}
@@ -333,10 +334,11 @@ func (s *TaskService) RetryUncompleted(ctx context.Context, owner, taskID domain
 		return SubmissionResult{}, blocked
 	}
 	if result.Replayed {
-		_, retriedSlots, err := s.tasks.GetForOwner(ctx, owner, result.Task.ID)
+		retriedTask, retriedSlots, err := s.tasks.GetForOwner(ctx, owner, result.Task.ID)
 		if err != nil {
 			return SubmissionResult{}, err
 		}
+		result.Task = retriedTask
 		result.Slots = retriedSlots
 		return result, nil
 	}
