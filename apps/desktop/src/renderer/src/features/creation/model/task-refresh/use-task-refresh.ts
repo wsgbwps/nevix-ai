@@ -5,9 +5,9 @@ import { TaskRefreshController } from './task-refresh-controller'
 import type { TaskRefreshSnapshot } from './task-refresh-controller'
 
 /** The Workbench's handle on the Generation Task refresh module (ADR-0005):
- * the current display snapshot plus the entry, stream, invalidation, and
- * business-completion inputs. Business actions reconcile through
- * requestReconcile; they never hand the module task facts to display. */
+ * the current display snapshot plus the entry, stream, invalidation,
+ * business-completion, and upward-history inputs. Business actions reconcile
+ * through requestReconcile; they never hand the module task facts to display. */
 export interface TaskRefreshBinding {
   readonly snapshot: TaskRefreshSnapshot
   readonly enter: (sessionId: string) => void
@@ -15,6 +15,8 @@ export interface TaskRefreshBinding {
   readonly notifyInvalidation: () => void
   readonly setStreamLive: (live: boolean) => void
   readonly requestReconcile: () => void
+  /** Asks the module to load the next older history page. */
+  readonly requestOlderTasks: () => void
 }
 
 const idleBinding: TaskRefreshBinding = {
@@ -23,7 +25,8 @@ const idleBinding: TaskRefreshBinding = {
   leave: () => undefined,
   notifyInvalidation: () => undefined,
   setStreamLive: () => undefined,
-  requestReconcile: () => undefined
+  requestReconcile: () => undefined,
+  requestOlderTasks: () => undefined
 }
 
 const noopSubscribe = (): (() => void) => () => undefined
@@ -64,6 +67,7 @@ export function useTaskRefreshModule(runtime: CreationRuntime): TaskRefreshBindi
     leave: () => controller.leave(),
     notifyInvalidation: () => controller.notifyInvalidation(),
     setStreamLive: (live: boolean) => controller.setStreamLive(live),
-    requestReconcile: () => controller.requestReconcile()
+    requestReconcile: () => controller.requestReconcile(),
+    requestOlderTasks: () => controller.requestOlderTasks()
   }
 }

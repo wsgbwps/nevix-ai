@@ -52,6 +52,11 @@ export const creationTranslations = defineResourceTranslations({
         submitFailed: '操作失败：{{code}}',
         detailStale: '详情未更新',
         listStale: '任务列表未更新',
+        history: {
+          loading: '正在加载更早任务…',
+          failed: '更早任务加载失败',
+          end: '已到最早的任务'
+        },
         status: {
           queued: '排队中',
           generating: '生成中',
@@ -364,6 +369,11 @@ export const creationTranslations = defineResourceTranslations({
         submitFailed: 'Action failed: {{code}}',
         detailStale: 'Details not refreshed',
         listStale: 'Task list not refreshed',
+        history: {
+          loading: 'Loading earlier tasks…',
+          failed: 'Earlier tasks failed to load',
+          end: 'You have reached the earliest tasks'
+        },
         status: {
           queued: 'Queued',
           generating: 'Generating',

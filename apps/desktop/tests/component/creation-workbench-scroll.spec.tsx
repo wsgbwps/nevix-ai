@@ -52,6 +52,13 @@ function materialId(tag: string, n: number): string {
   return `material-${tag}-${String(n).padStart(4, '0')}`
 }
 
+// A genuinely-new task for push scenarios: under the paginated fixture the
+// pushed task must be newer than every seeded task to land at the bottom.
+function freshTask(tag: string, minute: number): ScriptedTask {
+  const at = new Date(Date.UTC(2026, 7, 2, 0, minute)).toISOString()
+  return { ...manyMixedTasks(1, tag)[0], createdAt: at, updatedAt: at }
+}
+
 function manyMixedTasks(count: number, tag: string, withReferences = false): ScriptedTask[] {
   return Array.from({ length: count }, (_, index) => {
     const n = index + 1
@@ -210,6 +217,21 @@ async function userScrollTo(
   }, target)
 }
 
+// Pages the scripted history in through the real near-top trigger: each
+// scroll to the workspace top asks the refresh module for one more page
+// until the fixture's keyset history is exhausted (issue #195).
+async function loadFullHistory(page: Page, scroller: Locator, total: number): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await userScrollTo(scroller, 'top')
+        return page.getByTestId('result-gallery').getAttribute('data-total-count')
+      },
+      { timeout: 30_000, interval: 150 }
+    )
+    .toBe(String(total))
+}
+
 test('the initial bottom follow survives a delayed virtualizer correction', async ({
   mount,
   page
@@ -347,7 +369,9 @@ test('a large task history mounts and loads media only around the visible window
 
   const scroller = await settledScroller(page)
   const gallery = page.getByTestId('result-gallery')
-  await expect(gallery).toHaveAttribute('data-total-count', String(tasks.length))
+  // The entry window loads only the newest page; static media bounds hold
+  // before any paging journey accumulates transfers.
+  await expect(gallery).toHaveAttribute('data-total-count', '20')
 
   const mountedCards = gallery.locator('section[data-testid^="task-"]')
   await expect.poll(() => mountedCards.count()).toBeGreaterThan(0)
@@ -369,6 +393,12 @@ test('a large task history mounts and loads media only around the visible window
     () => window.__creationDeckTest?.materialBlobCalls().length ?? 0
   )
   expect(bottomThumbnailLoads).toBeLessThan(20)
+
+  // Paging the whole history in through the near-top trigger keeps both the
+  // loaded set and the mounting bounded: no 50-task display cap exists.
+  await loadFullHistory(page, scroller, tasks.length)
+  await expect(gallery).toHaveAttribute('data-total-count', String(tasks.length))
+  expect(await mountedCards.count()).toBeLessThan(20)
 
   await userScrollTo(scroller, 'top')
   await expect
@@ -403,9 +433,21 @@ test('a new task follows at the bottom but preserves an older reading position',
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
   const scroller = await settledScroller(page)
 
-  const followed = manyMixedTasks(1, 'bottom')[0]
+  const followed = freshTask('bottom', 1)
   await page.evaluate((task) => window.__creationDeckTest?.pushTask(task as never), followed)
   await expect(page.getByTestId(`task-${followed.id}`)).toBeVisible()
+  await expect
+    .poll(async () =>
+      scroller.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+      )
+    )
+    .toBe(true)
+
+  // Read the whole session history upward before pinning the older anchor:
+  // the reading-position contract must hold over the fully paged-in set.
+  await loadFullHistory(page, scroller, tasks.length + 1)
+  await page.getByTestId('back-to-bottom').click()
   await expect
     .poll(async () =>
       scroller.evaluate(
@@ -420,7 +462,7 @@ test('a new task follows at the bottom but preserves an older reading position',
   // in-flight user scroll legitimately still owns the viewport position.
   await page.waitForTimeout(200)
   const anchor = await visibleTaskAnchor(page)
-  const pushed = manyMixedTasks(1, 'new')[0]
+  const pushed = freshTask('new', 2)
   await page.evaluate((task) => window.__creationDeckTest?.pushTask(task as never), pushed)
 
   await expect(page.getByTestId('result-gallery')).toHaveAttribute(
@@ -467,7 +509,7 @@ test('a new task follows at the bottom but preserves an older reading position',
   await page.evaluate(() => {
     window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }))
   })
-  const afterScrollbar = manyMixedTasks(1, 'scrollbar')[0]
+  const afterScrollbar = freshTask('scrollbar', 3)
   await page.evaluate((task) => window.__creationDeckTest?.pushTask(task as never), afterScrollbar)
   await expect(page.getByTestId(`task-${afterScrollbar.id}`)).toBeVisible()
   await expect
@@ -484,6 +526,7 @@ test('action notice changes preserve a long-history reading anchor', async ({ mo
   await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks, submitDeferred: true }} />)
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
   const scroller = await settledScroller(page)
+  await loadFullHistory(page, scroller, tasks.length)
   await userScrollTo(scroller, { fraction: 1 / 3 })
   await expect(page.getByTestId('back-to-bottom')).toBeVisible()
   await page.waitForTimeout(200)
@@ -514,7 +557,10 @@ test('detail and responsive height changes keep the visible task anchor stable',
   page
 }) => {
   await page.setViewportSize({ width: 1200, height: 720 })
-  const tasks = manyMixedTasks(60, 'anchor')
+  // One windowed page: deferred details hold the entry round open, so this
+  // anchor spec stays inside the first page by design — deep-history anchor
+  // coverage lives in the follow and window specs above.
+  const tasks = manyMixedTasks(20, 'anchor')
   await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks, taskDetailsDeferred: true }} />)
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
   const scroller = await settledScroller(page)

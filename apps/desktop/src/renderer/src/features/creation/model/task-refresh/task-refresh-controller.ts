@@ -14,14 +14,27 @@ import { isTerminalTaskStatus } from '../../api/generation-task-http'
 import type {
   GenerationTaskDetail,
   GenerationTaskView,
+  TaskListPageRequest,
   TaskPage
 } from '../../api/generation-task-http'
 import type { CreationApiResult } from '../../api/go-creation-http'
 
 /** The read-only task seam this module consumes; no submit/cancel/retry. */
 export interface TaskRefreshReader {
-  readonly listTasks: (sessionId: string) => Promise<CreationApiResult<TaskPage>>
+  readonly listTasks: (
+    sessionId: string,
+    page?: TaskListPageRequest
+  ) => Promise<CreationApiResult<TaskPage>>
   readonly getTask: (taskId: string) => Promise<CreationApiResult<GenerationTaskDetail>>
+}
+
+/** Upward history pagination state for the entered Creation Session. */
+export interface TaskHistoryStatus {
+  /** True while an older page is known to exist and can still be read. */
+  readonly hasMore: boolean
+  readonly loading: boolean
+  /** The last older-page read failed; loaded pages stay and can be retried. */
+  readonly failed: boolean
 }
 
 /** What the gallery renders for the displayed Creation Session. */
@@ -35,6 +48,7 @@ export interface TaskRefreshSnapshot {
   readonly staleTaskIds: ReadonlySet<string>
   /** True when the latest list read failed; kept tasks stay and nothing masquerades as fresh. */
   readonly listFailed: boolean
+  readonly history: TaskHistoryStatus
 }
 
 export const emptyTaskRefreshSnapshot: TaskRefreshSnapshot = {
@@ -42,7 +56,8 @@ export const emptyTaskRefreshSnapshot: TaskRefreshSnapshot = {
   tasks: [],
   taskDetails: {},
   staleTaskIds: new Set<string>(),
-  listFailed: false
+  listFailed: false,
+  history: { hasMore: false, loading: false, failed: false }
 }
 
 /** Injected scheduling primitives; production wraps the globals, tests drive them manually. */
@@ -73,6 +88,10 @@ const DEFAULT_POLL_INTERVAL_MS = 5_000
 // cadence and immediate reconnect reconcile already satisfy.
 const DEFAULT_ROUND_DEADLINE_MS = 30_000
 
+// The initial and per-batch history page size (ADR-0005): the latest 20 tasks
+// first, 20 more per upward trigger. Tunable by target-device evidence.
+const TASK_PAGE_SIZE = 20
+
 const defaultTimers: TaskRefreshTimers = {
   setRepeating: (callback, ms) => setInterval(callback, ms),
   clearRepeating: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
@@ -88,9 +107,13 @@ interface CachedDetail {
   readonly criterion: string
 }
 
+/** Which list read a round performs. */
+type RoundKind = 'window' | 'history'
+
 /** The single read round allowed in flight per display lifecycle. */
 interface ActiveRound {
   readonly sessionId: string
+  readonly kind: RoundKind
   listSettled: boolean
   readonly pendingDetails: Set<string>
 }
@@ -112,7 +135,11 @@ export class TaskRefreshController {
   private enteredSessionId: string | null = null
   private streamLive = false
   private activeRound: ActiveRound | null = null
-  private pendingFollowUp = false
+  // Triggers arriving while a round runs (or a dispatch is queued) merge into
+  // intents the next round drains — reconcile first, then a pending history
+  // continuation — so neither a refresh nor a history load can swallow the other.
+  private pendingReconcile = false
+  private pendingHistory = false
   private dispatchScheduled = false
   private pollHandle: unknown = null
   private deadlineHandle: unknown = null
@@ -123,6 +150,11 @@ export class TaskRefreshController {
   private readonly details = new Map<string, CachedDetail>()
   private readonly failedDetailIds = new Set<string>()
   private listFailedFlag = false
+
+  // Upward history pagination: the continuation token behind the oldest
+  // loaded task. Null before the first window lands and after the last page.
+  private olderCursor: string | null = null
+  private historyFailedFlag = false
 
   constructor(reader: TaskRefreshReader, options: TaskRefreshOptions = {}) {
     this.reader = reader
@@ -140,11 +172,12 @@ export class TaskRefreshController {
     this.retireActiveRound()
     // A trigger merged while the retired round ran belongs to the previous
     // context; the entry round below is the new lifecycle's own read.
-    this.pendingFollowUp = false
+    this.pendingReconcile = false
+    this.pendingHistory = false
     this.enteredSessionId = sessionId
     this.resetDisplayState()
     this.commit()
-    this.requestRefresh()
+    this.requestRound('window')
   }
 
   /** Ends the display lifecycle: the task view clears, no further reads
@@ -153,7 +186,8 @@ export class TaskRefreshController {
     if (this.suspended) return
     this.retireActiveRound()
     this.enteredSessionId = null
-    this.pendingFollowUp = false
+    this.pendingReconcile = false
+    this.pendingHistory = false
     this.dispatchScheduled = false
     this.resetDisplayState()
     this.commit()
@@ -167,7 +201,8 @@ export class TaskRefreshController {
     this.suspended = true
     this.retireActiveRound()
     this.enteredSessionId = null
-    this.pendingFollowUp = false
+    this.pendingReconcile = false
+    this.pendingHistory = false
     this.dispatchScheduled = false
     if (this.pollHandle !== null) {
       this.timers.clearRepeating(this.pollHandle)
@@ -184,7 +219,7 @@ export class TaskRefreshController {
   /** An SSE creation-invalidation block: the stream only hints that server
    * facts changed; the round re-reads them. */
   notifyInvalidation(): void {
-    this.requestRefresh()
+    this.requestRound('window')
   }
 
   /** SSE liveness. Every down → up transition reconciles immediately — the
@@ -193,13 +228,19 @@ export class TaskRefreshController {
     if (this.suspended || live === this.streamLive) return
     this.streamLive = live
     this.reconcilePollGate()
-    if (live) this.requestRefresh()
+    if (live) this.requestRound('window')
   }
 
   /** A business action completed somewhere that still owns this display;
    * completions for un-displayed contexts never reach the module. */
   requestReconcile(): void {
-    this.requestRefresh()
+    this.requestRound('window')
+  }
+
+  /** Asks for the next older history page. A no-op while none is known to
+   * exist; an intent arriving mid-round continues after that round. */
+  requestOlderTasks(): void {
+    this.requestRound('history')
   }
 
   subscribe(listener: () => void): () => void {
@@ -215,30 +256,50 @@ export class TaskRefreshController {
 
   // --- scheduling -----------------------------------------------------------
 
-  private requestRefresh(): void {
+  private requestRound(kind: RoundKind): void {
     if (this.suspended || this.enteredSessionId === null) return
-    if (this.activeRound !== null) {
-      // At most one round in flight: every trigger arriving mid-round merges
-      // into one follow-up reconciliation, so bursts never fan out.
-      this.pendingFollowUp = true
-      return
+    if (kind === 'window') {
+      this.pendingReconcile = true
+    } else {
+      if (this.olderCursor === null) return
+      this.pendingHistory = true
     }
-    if (this.dispatchScheduled) return
+    if (this.activeRound !== null || this.dispatchScheduled) return
     this.dispatchScheduled = true
     this.scheduleDispatch(() => {
       this.dispatchScheduled = false
-      this.startRound()
+      this.startPendingRound()
     })
   }
 
-  private startRound(): void {
+  /** Starts the highest-priority pending intent as the next single round. */
+  private startPendingRound(): void {
+    if (this.suspended || this.enteredSessionId === null || this.activeRound !== null) return
+    if (this.pendingReconcile) {
+      this.pendingReconcile = false
+      this.startRound('window')
+      return
+    }
+    if (this.pendingHistory) {
+      this.pendingHistory = false
+      // The continuation token can only vanish via enter/leave/reset, which
+      // also clear the intent; the guard still fails safe.
+      if (this.olderCursor !== null) this.startRound('history')
+    }
+  }
+
+  private startRound(kind: RoundKind): void {
     if (this.suspended || this.enteredSessionId === null || this.activeRound !== null) return
     const round: ActiveRound = {
       sessionId: this.enteredSessionId,
+      kind,
       listSettled: false,
       pendingDetails: new Set<string>()
     }
     this.activeRound = round
+    // Committing at start publishes the round's loading state before any
+    // response lands, so UI triggers can see an in-flight history read.
+    this.commit()
     this.deadlineHandle = this.timers.setOneShot(
       () => this.expireRound(round),
       this.roundDeadlineMs
@@ -247,9 +308,13 @@ export class TaskRefreshController {
   }
 
   private async runRound(round: ActiveRound): Promise<void> {
+    const history = round.kind === 'history'
     let page: TaskPage | null = null
     try {
-      const result = await this.reader.listTasks(round.sessionId)
+      const result = await this.reader.listTasks(round.sessionId, {
+        limit: TASK_PAGE_SIZE,
+        cursor: history ? this.olderCursor : null
+      })
       if (result.outcome === 'succeeded') page = result.value
     } catch {
       page = null
@@ -257,28 +322,30 @@ export class TaskRefreshController {
     if (this.activeRound !== round) return
     round.listSettled = true
     if (page === null) {
-      // The list read failed: keep every loaded task and detail, and mark the
-      // list unrefreshed — a failed round must never look like an empty or
-      // deleted history.
-      this.listFailedFlag = true
+      if (history) {
+        // The older-page read failed: loaded pages, details, and the reading
+        // position stay; the failure only marks history retryable.
+        this.historyFailedFlag = true
+      } else {
+        // The list read failed: keep every loaded task and detail, and mark the
+        // list unrefreshed — a failed round must never look like an empty or
+        // deleted history.
+        this.listFailedFlag = true
+      }
       this.commit()
       this.finishRound(round)
       return
     }
-    // The latest window is not the session's whole task set: tasks it no
-    // longer lists stay displayed (and keep their cached details) instead of
-    // being inferred deleted. Their position stays behind the window.
-    const windowIds = new Set(page.tasks.map((task) => task.id))
-    const kept = this.summaries.filter((task) => !windowIds.has(task.id))
-    this.summaries = [...page.tasks, ...kept]
-    this.listFailedFlag = false
+    const fresh: readonly GenerationTaskView[] = history
+      ? this.mergeHistoryPage(page)
+      : this.mergeWindow(page)
     this.commit()
-    // Incremental detail reads: only tasks the fresh window covers have a
-    // fresh criterion, so only they are re-read (new, changed per ADR-0016's
+    // Incremental detail reads: only tasks a successful page just delivered
+    // with a fresh criterion are re-read (new, changed per ADR-0016's
     // `updatedAt` contract, or previously failed). Each read commits on its
     // own — one task's failure never blocks the others.
     const reads: Promise<void>[] = []
-    for (const summary of page.tasks) {
+    for (const summary of fresh) {
       if (!this.needsDetailRead(summary)) continue
       round.pendingDetails.add(summary.id)
       reads.push(this.readDetail(round, summary.id))
@@ -286,6 +353,32 @@ export class TaskRefreshController {
     await Promise.all(reads)
     if (this.activeRound !== round) return
     this.finishRound(round)
+  }
+
+  /** Merges the newest window: window tasks replace their loaded copies and
+   * every previously loaded task outside the window stays displayed. */
+  private mergeWindow(page: TaskPage): readonly GenerationTaskView[] {
+    // The latest window is not the session's whole task set: tasks it no
+    // longer lists stay displayed (and keep their cached details) instead of
+    // being inferred deleted. Their position stays behind the window.
+    const windowIds = new Set(page.tasks.map((task) => task.id))
+    const kept = this.summaries.filter((task) => !windowIds.has(task.id))
+    this.summaries = [...page.tasks, ...kept]
+    this.listFailedFlag = false
+    // The window's own cursor continues history only while nothing older has
+    // been loaded; once older pages exist, their tail cursor stays ahead of it.
+    if (kept.length === 0) this.olderCursor = page.nextCursor
+    return page.tasks
+  }
+
+  /** Appends one strictly-older page behind the oldest loaded task. */
+  private mergeHistoryPage(page: TaskPage): readonly GenerationTaskView[] {
+    const loaded = new Set(this.summaries.map((task) => task.id))
+    const fresh = page.tasks.filter((task) => !loaded.has(task.id))
+    this.summaries = [...this.summaries, ...fresh]
+    this.historyFailedFlag = false
+    this.olderCursor = page.nextCursor
+    return fresh
   }
 
   private async readDetail(round: ActiveRound, taskId: string): Promise<void> {
@@ -322,8 +415,11 @@ export class TaskRefreshController {
       if (this.deadlineHandle !== null) this.timers.clearOneShot(this.deadlineHandle)
       this.deadlineHandle = null
       this.activeRound = null
+      // A history round's loading/failed flags must leave the snapshot when
+      // the round does, not stay stuck at its last mid-round commit.
+      if (round.kind === 'history') this.commit()
     }
-    this.runMergedFollowUp()
+    this.startPendingRound()
   }
 
   private expireRound(round: ActiveRound): void {
@@ -333,9 +429,10 @@ export class TaskRefreshController {
     // Whatever the round never received counts as failed; its late responses
     // are discarded by the round check, and the merged follow-up (or any
     // later trigger) starts fresh.
-    let changed = false
+    let changed = round.kind === 'history'
     if (!round.listSettled) {
-      this.listFailedFlag = true
+      if (round.kind === 'history') this.historyFailedFlag = true
+      else this.listFailedFlag = true
       changed = true
     }
     for (const taskId of round.pendingDetails) {
@@ -344,13 +441,7 @@ export class TaskRefreshController {
     }
     round.pendingDetails.clear()
     if (changed) this.commit()
-    this.runMergedFollowUp()
-  }
-
-  private runMergedFollowUp(): void {
-    if (!this.pendingFollowUp) return
-    this.pendingFollowUp = false
-    this.startRound()
+    this.startPendingRound()
   }
 
   private retireActiveRound(): void {
@@ -365,6 +456,8 @@ export class TaskRefreshController {
     this.details.clear()
     this.failedDetailIds.clear()
     this.listFailedFlag = false
+    this.olderCursor = null
+    this.historyFailedFlag = false
   }
 
   private reconcilePollGate(): void {
@@ -378,7 +471,7 @@ export class TaskRefreshController {
       this.snapshot.tasks.some((task) => !isTerminalTaskStatus(task.status))
     if (shouldPoll && this.pollHandle === null) {
       this.pollHandle = this.timers.setRepeating(() => {
-        this.requestRefresh()
+        this.requestRound('window')
       }, this.pollIntervalMs)
     } else if (!shouldPoll && this.pollHandle !== null) {
       this.timers.clearRepeating(this.pollHandle)
@@ -396,7 +489,12 @@ export class TaskRefreshController {
       tasks: [...this.summaries],
       taskDetails,
       staleTaskIds: new Set(this.failedDetailIds),
-      listFailed: this.listFailedFlag
+      listFailed: this.listFailedFlag,
+      history: {
+        hasMore: this.olderCursor !== null,
+        loading: this.activeRound?.kind === 'history',
+        failed: this.historyFailedFlag
+      }
     }
     for (const listener of this.listeners) listener()
     // Snapshot changes can flip the poll gate (terminal tasks, kept tasks).

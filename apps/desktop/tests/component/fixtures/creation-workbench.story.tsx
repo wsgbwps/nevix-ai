@@ -21,7 +21,8 @@ import type {
 import type {
   GenerationIntent,
   GenerationTaskDetail,
-  GenerationTaskView
+  GenerationTaskView,
+  TaskListPageRequest
 } from '../../../src/renderer/src/features/creation/api/generation-task-http'
 import {
   readLocalDraft,
@@ -264,6 +265,8 @@ export interface DeckTestControls {
   updateTask(task: ScriptedTask): void
   /** How many task-list reads crossed the data plane. */
   listTasksCalls(): number
+  /** Every task-list read's page request, in call order. */
+  listTaskPages(): ReadonlyArray<{ sessionId: string; limit: number; cursor: string | null }>
   /** Task ids in the order their details were read. */
   getTaskCalls(): string[]
   /** Fires the SSE stream's liveness transitions like a real connection. */
@@ -287,6 +290,17 @@ declare global {
 
 function succeeded<T>(value: T): CreationApiResult<T> {
   return { outcome: 'succeeded', value }
+}
+
+// The scripted task list pages like the real endpoint (contracts
+// listSessionGenerationTasks): (created_at DESC, id DESC) keyset order with a
+// compound continuation cursor, so pagination behavior cannot pass against a
+// fixture that dumps every task in one cursorless response (issue #195).
+const taskCursorOf = (task: GenerationTaskView): string => `${task.createdAt}|${task.id}`
+
+function tasksNewestFirst(a: GenerationTaskView, b: GenerationTaskView): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1
+  return a.id === b.id ? 0 : a.id < b.id ? 1 : -1
 }
 
 /** Scripted task behavior: what submitTask does and which tasks pre-exist. */
@@ -417,6 +431,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     retryCalls: Array<{ taskId: string; idempotencyKey: string }>
     cancelledIds: string[]
     listCalls: number
+    listPageRequests: Array<{ sessionId: string; limit: number; cursor: string | null }>
     getTaskCalls: string[]
     remainingListFailures: number
     remainingDetailFailures: Map<string, number>
@@ -434,6 +449,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     retryCalls: [],
     cancelledIds: [],
     listCalls: 0,
+    listPageRequests: [],
     getTaskCalls: [],
     remainingListFailures: options.taskScript?.failListReads ?? 0,
     remainingDetailFailures: new Map(Object.entries(options.taskScript?.failDetailReads ?? {})),
@@ -508,6 +524,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       taskState.eventHandlers?.onInvalidation()
     },
     listTasksCalls: () => taskState.listCalls,
+    listTaskPages: () => taskState.listPageRequests,
     getTaskCalls: () => taskState.getTaskCalls,
     setStreamLive: (live) => taskState.eventHandlers?.onStateChange(live),
     failListReads: (count) => {
@@ -707,33 +724,48 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       if (outcome === 'accepted-response-lost') return { outcome: 'network-failure' }
       return succeeded(detailOf(task))
     },
-    listTasks: async (sessionId) => {
+    listTasks: async (sessionId: string, pageRequest?: TaskListPageRequest) => {
       taskState.listCalls += 1
+      taskState.listPageRequests.push({
+        sessionId,
+        limit: pageRequest?.limit ?? 50,
+        cursor: pageRequest?.cursor ?? null
+      })
       const holds = taskState.listHolds.splice(0)
       for (const held of holds) await held
       if (taskState.remainingListFailures > 0) {
         taskState.remainingListFailures -= 1
         return { outcome: 'network-failure' as const }
       }
-      return succeeded({
-        tasks: taskState.tasks
-          .filter((task) => task.sessionId === sessionId)
-          .map(
-            (task): GenerationTaskView => ({
-              id: task.id,
-              sessionId: task.sessionId,
-              status: task.status,
-              mediaType: task.mediaType,
-              slotCount: task.slotCount,
-              cancelRequested: task.cancelRequested,
-              terminalCause: task.terminalCause,
-              createdAt: task.createdAt,
-              updatedAt: task.updatedAt,
-              terminalAt: task.terminalAt
-            })
-          ),
-        nextCursor: null
-      })
+      const all = taskState.tasks
+        .filter((task) => task.sessionId === sessionId)
+        .sort(tasksNewestFirst)
+        .map(
+          (task): GenerationTaskView => ({
+            id: task.id,
+            sessionId: task.sessionId,
+            status: task.status,
+            mediaType: task.mediaType,
+            slotCount: task.slotCount,
+            cancelRequested: task.cancelRequested,
+            terminalCause: task.terminalCause,
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+            terminalAt: task.terminalAt
+          })
+        )
+      let start = 0
+      if (pageRequest?.cursor) {
+        const at = all.findIndex((task) => taskCursorOf(task) === pageRequest.cursor)
+        start = at === -1 ? all.length : at + 1
+      }
+      const limit = pageRequest?.limit ?? 50
+      const tasks = all.slice(start, start + limit)
+      const nextCursor =
+        tasks.length > 0 && start + tasks.length < all.length
+          ? taskCursorOf(all[start + tasks.length - 1])
+          : null
+      return succeeded({ tasks, nextCursor })
     },
     getTask: async (taskId) => {
       await taskDetailsReady
