@@ -131,21 +131,23 @@ func (r *GenerationTaskRepository) CountActiveReservations(ctx context.Context, 
 
 // InsertAdmittedTask persists task, slots, job, queue item, and reservation
 // inside the caller's transaction. Lock ordering is stable by construction:
-// task → slots (ordered) → job → queue → reservation.
+// task → slots (ordered) → job → queue → reservation. The task pointer also
+// receives the database timestamps returned by its insert for fresh responses.
 func (r *GenerationTaskRepository) InsertAdmittedTask(ctx context.Context, tx domain.TxExecutor, admitted *domain.AdmittedTask) error {
 	task := admitted.Task
 	specJSON, err := json.Marshal(task.Spec)
 	if err != nil {
 		return fmt.Errorf("creation: encode generation specification: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	if err := tx.QueryRow(ctx, `
 		INSERT INTO creation_generation_tasks (
 			id, session_id, owner_user_id, idempotency_key, payload_hash, media_type,
 			specification, manifest_version, status, slot_count
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING created_at, updated_at`,
 		task.ID, task.SessionID, task.OwnerID, task.IdempotencyKey, task.PayloadHash,
 		string(task.Spec.MediaType), specJSON, task.Spec.ManifestVersion,
-		string(task.Status), task.SlotCount); err != nil {
+		string(task.Status), task.SlotCount).Scan(&task.CreatedAt, &task.UpdatedAt); err != nil {
 		return fmt.Errorf("creation: insert generation task: %w", err)
 	}
 	for _, slot := range admitted.Slots {
@@ -250,9 +252,12 @@ func (r *GenerationTaskRepository) ListBySession(ctx context.Context, owner, ses
 	return tasks, next, nil
 }
 
-// GetForOwner resolves one task plus slots for its creator (pool read).
+// GetForOwner resolves one task plus slots for its creator from one snapshot.
 func (r *GenerationTaskRepository) GetForOwner(ctx context.Context, owner, taskID domain.UUID) (domain.GenerationTask, []domain.GenerationSlot, error) {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
 	if err != nil {
 		return domain.GenerationTask{}, nil, fmt.Errorf("creation: begin task read: %w", err)
 	}
@@ -419,7 +424,7 @@ func (r *GenerationTaskRepository) TransitionTask(ctx context.Context, tx domain
 			status = $2,
 			terminal_cause = $3,
 			terminal_at = CASE WHEN $2 = ANY($4::text[]) THEN now() ELSE NULL END,
-			updated_at = now()
+			updated_at = GREATEST(updated_at + interval '1 microsecond', clock_timestamp())
 		WHERE id = $1 AND status = ANY($5::text[])`,
 		taskID, string(to), terminalCauseArg(cause), terminalTaskStatuses, statusesArg(from))
 	if err != nil {
@@ -453,7 +458,10 @@ func (r *GenerationTaskRepository) ReleaseReservation(ctx context.Context, tx do
 func (r *GenerationTaskRepository) RequestCancel(ctx context.Context, tx domain.TxExecutor, owner, taskID domain.UUID) (domain.TaskStatus, bool, error) {
 	row := tx.QueryRow(ctx, `
 		UPDATE creation_generation_tasks SET
-			cancel_requested_at = COALESCE(cancel_requested_at, now()), updated_at = now()
+			cancel_requested_at = COALESCE(cancel_requested_at, now()),
+			updated_at = CASE WHEN cancel_requested_at IS NULL
+				THEN GREATEST(updated_at + interval '1 microsecond', clock_timestamp())
+				ELSE updated_at END
 		WHERE id = $2 AND owner_user_id = $1
 		RETURNING status`, owner, taskID)
 	var status string
@@ -525,6 +533,16 @@ func (r *GenerationTaskRepository) WriteSlotVerdict(ctx context.Context, tx doma
 		mime, size, checksum, blobKey = result.Mime, result.ByteSize, result.Checksum, result.BlobKey
 		width, height, duration = result.WidthPx, result.HeightPx, result.DurationMS
 	}
+	// Lock the parent first to preserve the module-wide task -> slot order.
+	// The parent marker advances only after a first verdict actually lands.
+	var locked int
+	if err := tx.QueryRow(ctx,
+		`SELECT 1 FROM creation_generation_tasks WHERE id = $1 FOR UPDATE`, taskID).Scan(&locked); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("creation: lock task for slot verdict: %w", err)
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE creation_generation_slots SET
 			status = $3, failure_reason = $4,
@@ -541,7 +559,16 @@ func (r *GenerationTaskRepository) WriteSlotVerdict(ctx context.Context, tx doma
 	if err != nil {
 		return false, fmt.Errorf("creation: write slot verdict: %w", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	if tag.RowsAffected() != 1 {
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE creation_generation_tasks
+		SET updated_at = GREATEST(updated_at + interval '1 microsecond', clock_timestamp())
+		WHERE id = $1`, taskID); err != nil {
+		return false, fmt.Errorf("creation: mark slot verdict visible: %w", err)
+	}
+	return true, nil
 }
 
 func failureReasonArg(reason *domain.FailureReason) any {

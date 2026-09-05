@@ -128,13 +128,14 @@ type GenerationTaskRepository interface {
 	CountActiveReservations(ctx context.Context, tx TxExecutor, owner UUID, media MediaType) (int, error)
 	// InsertAdmittedTask persists task, all slots, the first pending job,
 	// the queue item, and the reservation atomically in the caller's
-	// transaction. Any failure rolls the whole admission back.
+	// transaction, and fills the task's database-generated timestamps.
+	// Any failure rolls the whole admission back.
 	InsertAdmittedTask(ctx context.Context, tx TxExecutor, admitted *AdmittedTask) error
 
 	// ListBySession pages one session's tasks newest-first (creator-scoped).
 	ListBySession(ctx context.Context, owner, sessionID UUID, cursor *CompoundCursor, limit int) ([]GenerationTask, *CompoundCursor, error)
-	// GetForOwner resolves one task and its slots for its creator; every
-	// miss collapses into ErrTaskNotFound.
+	// GetForOwner resolves one task and its slots for its creator from one
+	// database snapshot; every miss collapses into ErrTaskNotFound.
 	GetForOwner(ctx context.Context, owner, taskID UUID) (GenerationTask, []GenerationSlot, error)
 	// GetForWorker resolves one task with its slots outside any transaction
 	// for the queue worker; ownership is already proven by the queue row.

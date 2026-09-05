@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -291,7 +292,7 @@ func toTaskResource(task domain.GenerationTask) generationTaskResource {
 		SlotCount:       task.SlotCount,
 		CancelRequested: task.CancelRequested,
 		CreatedAt:       task.CreatedAt.UTC().Format(timeRFC3339),
-		UpdatedAt:       task.UpdatedAt.UTC().Format(timeRFC3339),
+		UpdatedAt:       task.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if task.TerminalCause != nil {
 		cause := string(*task.TerminalCause)

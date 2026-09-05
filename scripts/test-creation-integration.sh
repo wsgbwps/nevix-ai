@@ -174,6 +174,9 @@ assert_creation_integration_executed() {
     TestProviderConnectionSingletonConstraintRejectsSecondActiveRow
     TestStreamSmokeParallelFileFlows
     TestTaskAdmissionAtomicityAndIdempotency
+    TestGenerationTaskDetailUsesOneSnapshot
+    TestGenerationTaskUpdatedAtTracksEveryVisibleDetailChange
+    TestTaskChangeCriterionIsExactAcrossSubmitListAndDetail
     TestTaskGovernanceMatrix
     TestTaskSubmissionLatencyP95
     TestImageTaskLifecycleReachesSucceeded

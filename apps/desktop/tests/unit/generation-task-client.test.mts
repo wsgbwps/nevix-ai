@@ -85,6 +85,31 @@ test('task detail preserves a bounded concrete failure diagnostic', async () => 
   })
 })
 
+test('list and detail preserve the exact fractional updated_at criterion', async () => {
+  const criterion = '2026-09-05T01:02:03.123456Z'
+  const payload = failedTask(null) as {
+    task: Record<string, unknown>
+    slots: unknown[]
+    specification: unknown
+  }
+  payload.task['updated_at'] = criterion
+  const client = createGenerationTaskClient(serverUrl)
+
+  const detail = await withFetch(payload, () =>
+    client.getTask('token', 'dddddddd-0000-4000-8000-00000000diag')
+  )
+  assert.equal(detail.outcome, 'succeeded')
+  if (detail.outcome !== 'succeeded') return
+  assert.equal(detail.value.task.updatedAt, criterion)
+
+  const list = await withFetch({ tasks: [payload.task], next_cursor: null }, () =>
+    client.listTasks('token', 'aaaaaaaa-0000-4000-8000-000000000001')
+  )
+  assert.equal(list.outcome, 'succeeded')
+  if (list.outcome !== 'succeeded') return
+  assert.equal(list.value.tasks[0].updatedAt, criterion)
+})
+
 test('malformed failure diagnostics fail closed instead of being displayed', async () => {
   const client = createGenerationTaskClient(serverUrl)
   const result = await withFetch(
