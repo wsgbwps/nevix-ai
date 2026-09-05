@@ -44,7 +44,7 @@ export const creationTranslations = defineResourceTranslations({
       gallery: {
         resultAlt: '已验证的生成结果',
         taskLabel: '生成任务',
-        submitFailed: '提交被拒绝：{{code}}',
+        submitFailed: '操作失败：{{code}}',
         detailStale: '详情未更新',
         listStale: '任务列表未更新',
         status: {
@@ -120,6 +120,24 @@ export const creationTranslations = defineResourceTranslations({
           body: '该任务的供应商结局未知。重做会创建新任务，可能产生重复生成与重复计费。',
           confirm: '确认重做',
           cancel: '暂不'
+        },
+        actionLifecycle: {
+          inProgress:
+            '操作正在后台继续；你可以继续编辑草稿或离开此页面。停止跟踪不会取消可能已发送的请求。',
+          submissionUnconfirmed:
+            '无法确认提交结果。恢复会使用同一提交标识和点击时冻结的内容；停止本地跟踪不会撤销可能已生效的提交。',
+          materialUnconfirmed:
+            '无法确认素材“{{fileName}}”是否上传成功。请先读取服务端事实，不要盲目重传；停止本地跟踪也不会删除可能已上传的素材。',
+          submissionRestarted:
+            '上次提交的结果未确认。应用重启后不再保留同一提交标识；请先检查服务端任务，再决定是否新建提交。',
+          materialRestarted:
+            '上次素材“{{fileName}}”的上传结果未确认，原文件未跨重启保留。请先检查服务端素材；如需重传请重新选择文件。',
+          retired: '当前登录使用期已结束；旧操作不会借用新的登录继续执行。',
+          unknownFile: '未命名文件',
+          resume: '恢复同一提交',
+          check: '检查服务端结果',
+          stop: '停止本地跟踪',
+          dismiss: '知道了'
         }
       },
       composer: {
@@ -329,7 +347,7 @@ export const creationTranslations = defineResourceTranslations({
       gallery: {
         resultAlt: 'Verified generation result',
         taskLabel: 'Generation task',
-        submitFailed: 'Submission rejected: {{code}}',
+        submitFailed: 'Action failed: {{code}}',
         detailStale: 'Details not refreshed',
         listStale: 'Task list not refreshed',
         status: {
@@ -405,6 +423,25 @@ export const creationTranslations = defineResourceTranslations({
           body: 'The provider outcome is unknown. A redo creates a new task and may repeat generation and billing.',
           confirm: 'Confirm redo',
           cancel: 'Not now'
+        },
+        actionLifecycle: {
+          inProgress:
+            'The action is continuing in the background; you can keep editing or leave this page. Stopping local tracking does not cancel a request that may already have been sent.',
+          submissionUnconfirmed:
+            'The submission outcome could not be confirmed. Resume uses the same submission key and click-frozen content; stopping local tracking does not undo a submission that may have applied.',
+          materialUnconfirmed:
+            'The upload outcome for “{{fileName}}” could not be confirmed. Check server facts before selecting the file again; stopping local tracking does not delete a material that may have uploaded.',
+          submissionRestarted:
+            'The previous submission outcome was unconfirmed. Its submission key is not retained across an app restart; check server tasks before creating a new submission.',
+          materialRestarted:
+            'The upload outcome for “{{fileName}}” was unconfirmed, and the source file was not retained across restart. Check server materials; reselect the file if a new upload is needed.',
+          retired:
+            'This authenticated use period has ended; old actions will not borrow a later sign-in.',
+          unknownFile: 'unnamed file',
+          resume: 'Resume same submission',
+          check: 'Check server results',
+          stop: 'Stop local tracking',
+          dismiss: 'Dismiss'
         }
       },
       composer: {

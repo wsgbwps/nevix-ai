@@ -479,6 +479,36 @@ test('a new task follows at the bottom but preserves an older reading position',
     .toBe(true)
 })
 
+test('action notice changes preserve a long-history reading anchor', async ({ mount, page }) => {
+  const tasks = manyMixedTasks(40, 'action-notice')
+  await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks, submitDeferred: true }} />)
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const scroller = await settledScroller(page)
+  await userScrollTo(scroller, { fraction: 1 / 3 })
+  await expect(page.getByTestId('back-to-bottom')).toBeVisible()
+  await page.waitForTimeout(200)
+
+  const anchor = await visibleTaskAnchor(page)
+  const anchorCard = page.getByTestId(anchor.testId)
+  const expectAnchorStable = async (): Promise<void> => {
+    await expect
+      .poll(async () => Math.abs((await taskOffsetFromScroller(anchorCard, scroller)) - anchor.top))
+      .toBeLessThanOrEqual(1)
+  }
+
+  await page.getByTestId('composer-submit').click()
+  await expect(page.getByTestId('creation-action-notice')).toBeVisible()
+  await expectAnchorStable()
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseSubmissions())
+  await expect(page.getByTestId('creation-action-notice')).toHaveCount(0)
+  await expect(page.getByTestId('result-gallery')).toHaveAttribute(
+    'data-total-count',
+    String(tasks.length + 1)
+  )
+  await expectAnchorStable()
+})
+
 test('detail and responsive height changes keep the visible task anchor stable', async ({
   mount,
   page

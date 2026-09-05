@@ -1,7 +1,8 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
-import { AuthenticationProvider } from '../features/authentication'
+import { AuthenticationProvider, useCurrentSession } from '../features/authentication'
 import { useServerConnection } from '../features/connection'
+import { CreationRuntimeProvider } from '../features/creation'
 import { ServerConnectionStateContext } from './connection-state'
 import { OrdinaryCloseProvider } from './ordinary-close'
 import { routeTree } from './routeTree.gen'
@@ -23,10 +24,32 @@ function App(): React.JSX.Element {
             only the current-session reader; the owned surface and notices live
             inside the Feature. */}
         <AuthenticationProvider serverUrl={connection.url}>
-          <RouterProvider router={router} />
+          <CreationRuntimeComposition serverUrl={connection.url}>
+            <RouterProvider router={router} />
+          </CreationRuntimeComposition>
         </AuthenticationProvider>
       </ServerConnectionStateContext.Provider>
     </OrdinaryCloseProvider>
+  )
+}
+
+function CreationRuntimeComposition({
+  children,
+  serverUrl
+}: {
+  readonly children: ReactNode
+  readonly serverUrl: string | undefined
+}): React.JSX.Element {
+  const session = useCurrentSession()
+  const acquireSession =
+    session.status === 'available' && !session.isSigningOut ? session.acquireSession : undefined
+  const userId =
+    session.status === 'available' && !session.isSigningOut ? session.user.id : undefined
+
+  return (
+    <CreationRuntimeProvider acquireSession={acquireSession} serverUrl={serverUrl} userId={userId}>
+      {children}
+    </CreationRuntimeProvider>
   )
 }
 

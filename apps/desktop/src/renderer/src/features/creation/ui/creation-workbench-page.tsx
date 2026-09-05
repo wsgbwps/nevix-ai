@@ -15,7 +15,7 @@ import {
   DropdownMenuTrigger
 } from '../../../components/ui/dropdown-menu'
 import type { CreationSessionView } from '../api/go-creation-http'
-import { useCreationWorkbench } from '../model/use-workbench'
+import { useCreationWorkbench, type CreationWorkbenchController } from '../model/use-workbench'
 import { textPromptDocument } from '../model/prompt-document'
 import { ComposerMenuContent } from './composer-menu-content'
 import { CreationComposer, EXPANDED_MAX_WIDTH } from './composer'
@@ -401,22 +401,6 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                       </p>
                     </div>
                   </div>
-                  {workbench.submitError !== null && (
-                    <p
-                      role="alert"
-                      data-testid="gallery-submit-error"
-                      className="text-destructive mb-3 text-[11px]"
-                    >
-                      {t('gallery.submitFailed', { code: workbench.submitError })}
-                      <button
-                        type="button"
-                        onClick={workbench.dismissSubmitError}
-                        className="text-muted-foreground ml-2 underline outline-none"
-                      >
-                        {t('gallery.indeterminate.cancel')}
-                      </button>
-                    </p>
-                  )}
                   <ResultGallery key={workspaceKey} workbench={workbench} scrollerRef={scrollRef} />
                 </div>
               )}
@@ -425,6 +409,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
               workbench={workbench}
               scrollerRef={scrollRef}
               wrapperRef={composerWrapRef}
+              statusNotice={<WorkbenchNotices workbench={workbench} />}
               backToBottomVisible={showBackToBottom}
               newTaskWaiting={newTaskWaiting}
               onBackToBottom={scrollToBottom}
@@ -435,6 +420,126 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
         )}
       </main>
     </section>
+  )
+}
+
+function WorkbenchNotices({
+  workbench
+}: {
+  readonly workbench: CreationWorkbenchController
+}): React.JSX.Element {
+  const { t } = useTranslation('creation')
+  return (
+    <>
+      <WorkbenchActionNotice workbench={workbench} />
+      {workbench.submitError !== null && (
+        <p
+          role="alert"
+          data-testid="gallery-submit-error"
+          className="text-destructive mx-auto mb-2 max-w-[720px] text-[11px]"
+        >
+          {t('gallery.submitFailed', { code: workbench.submitError })}
+          <button
+            type="button"
+            onClick={workbench.dismissSubmitError}
+            className="text-muted-foreground ml-2 underline outline-none"
+          >
+            {t('gallery.indeterminate.cancel')}
+          </button>
+        </p>
+      )}
+    </>
+  )
+}
+
+function WorkbenchActionNotice({
+  workbench
+}: {
+  readonly workbench: CreationWorkbenchController
+}): React.JSX.Element | null {
+  const { t } = useTranslation('creation')
+  const state = workbench.actionState.status
+  const persisted = workbench.operationNotice
+  const activeSubmission = state === 'submission-unconfirmed'
+  const activeMaterial = state === 'material-unconfirmed'
+  const afterRestart = state === 'idle' && persisted !== null
+  const persistedMaterialNames = persisted?.materialFileNames ?? []
+  const materialFileName =
+    persistedMaterialNames.length > 0
+      ? persistedMaterialNames.join('”, “')
+      : t('gallery.actionLifecycle.unknownFile')
+
+  let message: string | null = null
+  if (state === 'preparing' || state === 'submitting') {
+    message = t('gallery.actionLifecycle.inProgress')
+  } else if (activeSubmission || activeMaterial) {
+    const parts: string[] = []
+    if (activeSubmission || persisted?.submissionUnconfirmed) {
+      parts.push(t('gallery.actionLifecycle.submissionUnconfirmed'))
+    }
+    if (activeMaterial || persistedMaterialNames.length > 0) {
+      parts.push(t('gallery.actionLifecycle.materialUnconfirmed', { fileName: materialFileName }))
+    }
+    message = parts.join(' ')
+  } else if (state === 'retired') {
+    message = t('gallery.actionLifecycle.retired')
+  } else if (afterRestart) {
+    const parts: string[] = []
+    if (persisted.submissionUnconfirmed) {
+      parts.push(t('gallery.actionLifecycle.submissionRestarted'))
+    }
+    if (persistedMaterialNames.length > 0) {
+      parts.push(t('gallery.actionLifecycle.materialRestarted', { fileName: materialFileName }))
+    }
+    message = parts.join(' ')
+  }
+  if (message === null) return null
+
+  const canStop = state !== 'retired'
+  const canCheck = activeMaterial || persistedMaterialNames.length > 0 || afterRestart
+
+  return (
+    <div
+      role="alert"
+      data-testid="creation-action-notice"
+      className="bg-muted/70 mx-auto mb-2 flex max-w-[720px] items-center justify-between gap-3 rounded-lg border px-3 py-2 text-[11px]"
+    >
+      <p className="text-foreground min-w-0">{message}</p>
+      <div className="flex shrink-0 items-center gap-2">
+        {activeSubmission && (
+          <button
+            type="button"
+            data-testid="creation-resume-submission"
+            onClick={workbench.resumeSubmission}
+            className="hover:bg-accent rounded border px-2 py-1 font-medium"
+          >
+            {t('gallery.actionLifecycle.resume')}
+          </button>
+        )}
+        {canCheck && (
+          <button
+            type="button"
+            data-testid="creation-reconcile-action"
+            onClick={workbench.reconcileAction}
+            className="hover:bg-accent rounded border px-2 py-1 font-medium"
+          >
+            {t('gallery.actionLifecycle.check')}
+          </button>
+        )}
+        {canStop && (
+          <button
+            type="button"
+            data-testid="creation-stop-tracking"
+            onClick={workbench.stopTracking}
+            className="text-muted-foreground hover:text-foreground underline outline-none"
+          >
+            {afterRestart
+              ? t('gallery.actionLifecycle.dismiss')
+              : t('gallery.actionLifecycle.stop')}
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 

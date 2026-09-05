@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { testI18n } from './creation-workbench-i18n'
 import {
   CreationRuntimeContext,
   CreationWorkbenchPage,
+  createCreationRuntime,
   type CreationRuntime
 } from '../../../src/renderer/src/features/creation'
 import type {
@@ -233,6 +235,10 @@ export interface DeckTestControls {
   resultBlobTransfers(): ReadonlyArray<{ taskId: string; slotIndex: number }>
   releaseMaterialBlobs(): void
   releaseResultBlobs(): void
+  releaseMaterialDeletes(): void
+  releaseSessionDeletes(): void
+  deferNextMaterialList(): void
+  materialListCalls(): number
   uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
   taskCalls(): ReadonlyArray<{
     sessionId: string
@@ -246,6 +252,10 @@ export interface DeckTestControls {
   deletedSessionIds(): string[]
   releaseManifest(): void
   releaseTaskDetails(): void
+  releaseUploads(): void
+  releaseSubmissions(): void
+  releaseFirstMaterialList(): void
+  changeLanguage(language: 'en' | 'zh-CN'): Promise<void>
   fireInvalidation(): void
   pushTask(task: ScriptedTask): void
   /** Replaces one task by id in the scripted store and fires invalidation. */
@@ -314,6 +324,8 @@ export interface TaskScript {
   readonly failListReads?: number
   /** Task ids whose first count detail reads fail with a network failure. */
   readonly failDetailReads?: Readonly<Record<string, number>>
+  readonly submitDeferred?: boolean
+  readonly submitOutcomes?: readonly ('succeeded' | 'network-failure' | 'accepted-response-lost')[]
 }
 
 /** The account id scoping the device-local draft store in this story. */
@@ -333,6 +345,15 @@ interface RuntimeOptions {
   readonly materialBlobFailures?: number
   /** Keeps full-preview loads pending until the test releases or aborts them. */
   readonly materialBlobDeferred?: boolean
+  readonly deleteMaterialDeferred?: boolean
+  readonly deleteSessionDeferred?: boolean
+  readonly uploadDeferred?: boolean
+  readonly uploadOutcome?:
+    | 'succeeded'
+    | 'network-failure'
+    | 'accepted-response-lost'
+    | 'request-rejected'
+  readonly deferFirstMaterialListFor?: string
   readonly taskScript?: TaskScript
 }
 
@@ -341,6 +362,7 @@ interface RuntimeOptions {
 // through its production surface (ADR-0017).
 function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const materials = new Map(Object.entries(options.materials ?? {}))
+  let serverSessions = [...options.sessions]
   for (const [key, record] of Object.entries(options.drafts ?? {})) {
     if (record === null) removeLocalDraft(localStorage, storyUserId, key)
     else writeLocalDraft(localStorage, storyUserId, key, record)
@@ -348,6 +370,14 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const deletedIds: string[] = []
   const materialBlobCalls: Array<{ materialId: string; aborted: boolean }> = []
   const materialBlobReleases = new Set<() => void>()
+  const materialDeleteReleases = new Set<() => void>()
+  const sessionDeleteReleases = new Set<() => void>()
+  const uploadReleases = new Set<() => void>()
+  const submissionReleases = new Set<() => void>()
+  let releaseFirstMaterialList: (() => void) | null = null
+  let firstMaterialListDeferred = options.deferFirstMaterialListFor !== undefined
+  let deferNextMaterialList = false
+  let materialListCalls = 0
   let remainingMaterialBlobFailures = options.materialBlobFailures ?? 0
   const uploadCalls: Array<{ sessionId: string; name: string }> = []
   const createdSessions: Array<{ name: string }> = []
@@ -377,29 +407,43 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     }>
     retryCalls: Array<{ taskId: string; idempotencyKey: string }>
     cancelledIds: string[]
-    eventHandlers: { onInvalidation: () => void; onStateChange: (live: boolean) => void } | null
     listCalls: number
     getTaskCalls: string[]
     remainingListFailures: number
     remainingDetailFailures: Map<string, number>
     listHolds: Array<Promise<void>>
     listHoldReleases: Array<() => void>
+    submissionsByKey: Map<string, ScriptedTask>
+    eventHandlers: {
+      onInvalidation: () => void
+      onStateChange: (live: boolean) => void
+      onUnauthorized: () => void
+    } | null
   } = {
     tasks: [],
     submitCalls: [],
     retryCalls: [],
     cancelledIds: [],
-    eventHandlers: null,
     listCalls: 0,
     getTaskCalls: [],
     remainingListFailures: options.taskScript?.failListReads ?? 0,
     remainingDetailFailures: new Map(Object.entries(options.taskScript?.failDetailReads ?? {})),
     listHolds: [],
-    listHoldReleases: []
+    listHoldReleases: [],
+    submissionsByKey: new Map(),
+    eventHandlers: null
   }
   for (const scripted of options.taskScript?.tasks ?? []) {
     taskState.tasks.push({ ...scripted })
   }
+  const submitOutcomes = [...(options.taskScript?.submitOutcomes ?? [])]
+
+  const releaseAll = (releases: Set<() => void>): void => {
+    for (const release of releases) release()
+    releases.clear()
+  }
+  const waitForRelease = (releases: Set<() => void>): Promise<void> =>
+    new Promise((resolve) => releases.add(resolve))
 
   window.__creationDeckTest = {
     draftRecord: (key) => readLocalDraft(localStorage, storyUserId, key),
@@ -414,6 +458,12 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       for (const release of resultBlobReleases) release()
       resultBlobReleases.clear()
     },
+    releaseMaterialDeletes: () => releaseAll(materialDeleteReleases),
+    releaseSessionDeletes: () => releaseAll(sessionDeleteReleases),
+    deferNextMaterialList: () => {
+      deferNextMaterialList = true
+    },
+    materialListCalls: () => materialListCalls,
     uploadCalls: () => uploadCalls,
     taskCalls: () => taskState.submitCalls,
     retryCalls: () => taskState.retryCalls,
@@ -428,6 +478,15 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     releaseTaskDetails: () => {
       releaseTaskDetailsResponse?.()
       releaseTaskDetailsResponse = null
+    },
+    releaseUploads: () => releaseAll(uploadReleases),
+    releaseSubmissions: () => releaseAll(submissionReleases),
+    releaseFirstMaterialList: () => {
+      releaseFirstMaterialList?.()
+      releaseFirstMaterialList = null
+    },
+    changeLanguage: async (language) => {
+      await testI18n.changeLanguage(language)
     },
     fireInvalidation: () => taskState.eventHandlers?.onInvalidation(),
     pushTask: (task) => {
@@ -472,7 +531,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
 
   const ports = {
     userId: storyUserId,
-    listSessions: async () => succeeded({ sessions: options.sessions, nextCursor: null }),
+    listSessions: async () => succeeded({ sessions: serverSessions, nextCursor: null }),
     createSession: async (name) => {
       createdSessions.push({ name: name ?? '' })
       return succeeded({
@@ -487,6 +546,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     },
     deleteSession: async (sessionId) => {
       deletedSessionIds.push(sessionId)
+      if (options.deleteSessionDeferred) await waitForRelease(sessionDeleteReleases)
+      serverSessions = serverSessions.filter((session) => session.id !== sessionId)
       return succeeded(undefined)
     },
     getSessionDetail: async (sessionId) => {
@@ -499,20 +560,50 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
         updatedAt: session.updatedAt
       })
     },
-    listMaterials: async (sessionId) =>
-      succeeded({ materials: materials.get(sessionId) ?? [], nextCursor: null }),
+    listMaterials: async (sessionId) => {
+      materialListCalls += 1
+      if (deferNextMaterialList) {
+        deferNextMaterialList = false
+        await new Promise<void>((resolve) => {
+          releaseFirstMaterialList = resolve
+        })
+      } else if (firstMaterialListDeferred && sessionId === options.deferFirstMaterialListFor) {
+        firstMaterialListDeferred = false
+        await new Promise<void>((resolve) => {
+          releaseFirstMaterialList = resolve
+        })
+        return succeeded({ materials: [], nextCursor: null })
+      }
+      return succeeded({ materials: materials.get(sessionId) ?? [], nextCursor: null })
+    },
     uploadMaterial: async (sessionId, file) => {
       uploadCalls.push({ sessionId, name: file.name })
+      if (options.uploadDeferred) await waitForRelease(uploadReleases)
       const uploaded = material({
         id: 'ffffffff-0000-4000-8000-000000000006',
         kind: 'image',
         fileName: file.name
       })
-      materials.set(sessionId, [...(materials.get(sessionId) ?? []), uploaded])
+      if (
+        options.uploadOutcome !== 'network-failure' &&
+        options.uploadOutcome !== 'request-rejected'
+      ) {
+        materials.set(sessionId, [...(materials.get(sessionId) ?? []), uploaded])
+      }
+      if (
+        options.uploadOutcome === 'network-failure' ||
+        options.uploadOutcome === 'accepted-response-lost'
+      ) {
+        return { outcome: 'network-failure' }
+      }
+      if (options.uploadOutcome === 'request-rejected') {
+        return { outcome: 'request-rejected', code: 'material_too_large' }
+      }
       return succeeded(uploaded)
     },
     deleteMaterial: async (materialId) => {
       deletedIds.push(materialId)
+      if (options.deleteMaterialDeferred) await waitForRelease(materialDeleteReleases)
       for (const [sessionId, list] of materials) {
         materials.set(
           sessionId,
@@ -537,16 +628,18 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
           signal?.addEventListener('abort', release, { once: true })
         })
       }
-      if (signal?.aborted) return null
+      if (signal?.aborted) return { outcome: 'network-failure' }
       if (remainingMaterialBlobFailures > 0) {
         remainingMaterialBlobFailures -= 1
-        return null
+        return { outcome: 'network-failure' }
       }
-      return new Blob(
-        [
-          '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
-        ],
-        { type: 'image/svg+xml' }
+      return succeeded(
+        new Blob(
+          [
+            '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+          ],
+          { type: 'image/svg+xml' }
+        )
       )
     },
     loadCapabilityManifest: async () => {
@@ -563,9 +656,14 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
         idempotencyKey: input.idempotencyKey,
         intent: input.intent
       })
+      if (options.taskScript?.submitDeferred) await waitForRelease(submissionReleases)
       if (options.taskScript?.submitRejection !== undefined) {
         return { outcome: 'request-rejected', code: options.taskScript.submitRejection }
       }
+      const existing = taskState.submissionsByKey.get(input.idempotencyKey)
+      if (existing !== undefined) return succeeded(detailOf(existing))
+      const outcome = submitOutcomes.shift() ?? 'succeeded'
+      if (outcome === 'network-failure') return { outcome: 'network-failure' }
       const task: ScriptedTask = {
         id: 'dddddddd-0000-4000-8000-000000000004',
         sessionId,
@@ -583,6 +681,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
         ]
       }
       taskState.tasks = [task, ...taskState.tasks]
+      taskState.submissionsByKey.set(input.idempotencyKey, task)
+      if (outcome === 'accepted-response-lost') return { outcome: 'network-failure' }
       return succeeded(detailOf(task))
     },
     listTasks: async (sessionId) => {
@@ -668,9 +768,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       }
       if (remainingResultBlobFailures > 0) {
         remainingResultBlobFailures -= 1
-        return null
+        return { outcome: 'network-failure' }
       }
-      return resultBlob()
+      return succeeded(resultBlob())
     },
     subscribeEvents: (handlers) => {
       taskState.eventHandlers = handlers
@@ -679,7 +779,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       }
     }
   }
-  return ports
+  return createCreationRuntime(ports, storyUserId, { storage: localStorage })
 }
 
 function Frame({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
@@ -698,48 +798,64 @@ interface StoryOptions {
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
   readonly materialBlobFailures?: number
   readonly materialBlobDeferred?: boolean
+  readonly deleteMaterialDeferred?: boolean
+  readonly deleteSessionDeferred?: boolean
+  readonly uploadDeferred?: boolean
+  readonly uploadOutcome?:
+    | 'succeeded'
+    | 'network-failure'
+    | 'accepted-response-lost'
+    | 'request-rejected'
+  readonly deferFirstMaterialListFor?: string
   readonly sessions?: readonly CreationSessionView[]
   readonly taskScript?: TaskScript
 }
 
-function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): React.JSX.Element {
-  const sessions = options.sessions ?? [sessionA, sessionB]
-  return (
-    <CreationRuntimeContext.Provider
-      value={installWorkbenchRuntime({
-        manifest: options.manifest === undefined ? activeManifest : options.manifest,
-        manifestFails: options.manifestFails,
-        manifestDeferred: options.manifestDeferred,
-        sessions,
-        taskScript: options.taskScript,
-        materialBlobFailures: options.materialBlobFailures,
-        materialBlobDeferred: options.materialBlobDeferred,
-        drafts: options.drafts ?? {
-          [sessionA.id]: {
-            prompt: '夏季跑鞋主图，暖光背景',
-            promptDocument: {
-              version: 1,
-              nodes: [{ type: 'text', text: '夏季跑鞋主图，暖光背景' }]
-            },
-            mediaType: 'image',
-            manifestVersion: 5,
-            model: 'doubao-seedream-5.0-pro',
-            mode: 'reference-image',
-            ratio: '4:3',
-            resolution: '2K',
-            quantity: 2,
-            durationSeconds: null,
-            references: [
-              { materialId: materialOne.id, role: 'reference' },
-              { materialId: materialTwo.id, role: 'reference' }
-            ]
-          }
+function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
+  return {
+    manifest: options.manifest === undefined ? activeManifest : options.manifest,
+    manifestFails: options.manifestFails,
+    manifestDeferred: options.manifestDeferred,
+    sessions: options.sessions ?? [sessionA, sessionB],
+    taskScript: options.taskScript,
+    materialBlobFailures: options.materialBlobFailures,
+    materialBlobDeferred: options.materialBlobDeferred,
+    deleteMaterialDeferred: options.deleteMaterialDeferred,
+    deleteSessionDeferred: options.deleteSessionDeferred,
+    uploadDeferred: options.uploadDeferred,
+    uploadOutcome: options.uploadOutcome,
+    deferFirstMaterialListFor: options.deferFirstMaterialListFor,
+    drafts: options.drafts ?? {
+      [sessionA.id]: {
+        prompt: '夏季跑鞋主图，暖光背景',
+        promptDocument: {
+          version: 1,
+          nodes: [{ type: 'text', text: '夏季跑鞋主图，暖光背景' }]
         },
-        materials: options.materials ?? {
-          [sessionA.id]: [materialOne, materialTwo]
-        }
-      })}
-    >
+        mediaType: 'image',
+        manifestVersion: 5,
+        model: 'doubao-seedream-5.0-pro',
+        mode: 'reference-image',
+        ratio: '4:3',
+        resolution: '2K',
+        quantity: 2,
+        durationSeconds: null,
+        references: [
+          { materialId: materialOne.id, role: 'reference' },
+          { materialId: materialTwo.id, role: 'reference' }
+        ]
+      }
+    },
+    materials: options.materials ?? {
+      [sessionA.id]: [materialOne, materialTwo]
+    }
+  }
+}
+
+function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): React.JSX.Element {
+  const [runtime] = useState(() => installWorkbenchRuntime(resolvedRuntimeOptions(options)))
+  return (
+    <CreationRuntimeContext.Provider value={runtime}>
       <CreationWorkbenchPage />
     </CreationRuntimeContext.Provider>
   )
@@ -751,6 +867,36 @@ export function CreationWorkbenchStory(options: StoryOptions = {}): React.JSX.El
     <Frame>
       <RuntimeWorkbenchPage options={options} />
     </Frame>
+  )
+}
+
+/** Route-unmount story: the runtime remains above the switched surface just
+ * like App.tsx, while the Workbench hook and all display owners are destroyed. */
+export function CreationWorkbenchNavigationStory(options: StoryOptions = {}): React.JSX.Element {
+  const [runtime] = useState(() => installWorkbenchRuntime(resolvedRuntimeOptions(options)))
+  const [creationVisible, setCreationVisible] = useState(true)
+  return (
+    <I18nextProvider i18n={testI18n}>
+      <CreationRuntimeContext.Provider value={runtime}>
+        <div style={{ height: 600 }} className="flex w-full flex-col">
+          <nav className="flex shrink-0 gap-2 border-b p-2">
+            <button type="button" onClick={() => setCreationVisible(false)}>
+              Open settings
+            </button>
+            <button type="button" onClick={() => setCreationVisible(true)}>
+              Back to creation
+            </button>
+          </nav>
+          <div className="flex min-h-0 flex-1">
+            {creationVisible ? (
+              <CreationWorkbenchPage />
+            ) : (
+              <div data-testid="settings-surface">Settings</div>
+            )}
+          </div>
+        </div>
+      </CreationRuntimeContext.Provider>
+    </I18nextProvider>
   )
 }
 

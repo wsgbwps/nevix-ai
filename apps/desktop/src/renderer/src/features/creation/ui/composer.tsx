@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import gsap from 'gsap'
 import {
@@ -110,6 +110,7 @@ export function CreationComposer({
   workbench,
   scrollerRef,
   wrapperRef,
+  statusNotice,
   backToBottomVisible,
   newTaskWaiting,
   onBackToBottom
@@ -118,6 +119,8 @@ export function CreationComposer({
   readonly scrollerRef: React.RefObject<HTMLDivElement | null>
   /** The page measures this wrapper for the scroller's bottom reserve. */
   readonly wrapperRef: React.RefObject<HTMLDivElement | null>
+  /** Lives outside the scroller so dynamic notices cannot move a virtualized reading anchor. */
+  readonly statusNotice?: ReactNode
   readonly backToBottomVisible: boolean
   readonly newTaskWaiting: boolean
   readonly onBackToBottom: () => void
@@ -222,6 +225,7 @@ export function CreationComposer({
       className="absolute right-6 bottom-5 left-6 z-20 mx-auto max-w-[992px]"
       data-testid="composer"
     >
+      {statusNotice}
       {backToBottomVisible && (
         <button
           type="button"

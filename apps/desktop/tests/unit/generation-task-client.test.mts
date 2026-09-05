@@ -13,7 +13,7 @@ registerHooks({
   }
 })
 
-const { createGenerationTaskClient } =
+const { createGenerationTaskClient, openCreationEventStream } =
   await import('../../src/renderer/src/features/creation/api/generation-task-http.ts')
 
 const serverUrl = 'https://server.example'
@@ -308,4 +308,60 @@ test('submitTask posts the idempotency key with the full generation intent', asy
       { material_id: 'dddddddd-0000-4000-8000-000000000004', role: 'first_frame' }
     ]
   })
+})
+
+test('result download preserves a confirmed unauthorized response', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ error: 'unauthorized', message: '' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  try {
+    const client = createGenerationTaskClient(serverUrl)
+    const result = await client.loadResultBlob(
+      'stale-token',
+      'dddddddd-0000-4000-8000-000000000004',
+      0
+    )
+    assert.deepEqual(result, { outcome: 'unauthorized' })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('event stream reports a confirmed unauthorized response without retrying', async () => {
+  const originalFetch = globalThis.fetch
+  const originalSetTimeout = globalThis.setTimeout
+  let fetchCalls = 0
+  let unauthorizedCalls = 0
+  let unsubscribe = (): void => undefined
+  globalThis.fetch = async () => {
+    fetchCalls += 1
+    return new Response(null, { status: 401 })
+  }
+  globalThis.setTimeout = ((handler: () => void) => {
+    queueMicrotask(handler)
+    return 0
+  }) as typeof globalThis.setTimeout
+
+  try {
+    unsubscribe = openCreationEventStream(serverUrl, async () => 'stale-token', {
+      onInvalidation: () => undefined,
+      onStateChange: (live) => {
+        if (!live && fetchCalls > 1) unsubscribe()
+      },
+      onUnauthorized: () => {
+        unauthorizedCalls += 1
+      }
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    assert.equal(fetchCalls, 1)
+    assert.equal(unauthorizedCalls, 1)
+  } finally {
+    unsubscribe()
+    globalThis.fetch = originalFetch
+    globalThis.setTimeout = originalSetTimeout
+  }
 })
