@@ -7,7 +7,6 @@ import type {
   ReferenceMaterialView
 } from '../api/go-creation-http'
 import type { GenerationTaskDetail, GenerationTaskView } from '../api/generation-task-http'
-import { isTerminalTaskStatus } from '../api/generation-task-http'
 import { loadImageDimensions } from '../lib/image-dimensions'
 import { MaterialUrlOwner } from '../lib/material-url-owner'
 import { ResultBlobCache, type ResultBlobUrlLease } from '../lib/result-blob-cache'
@@ -44,6 +43,7 @@ import {
   type PromptMentionKindLabels
 } from './prompt-document'
 import { useCreationRuntime, type CreationRuntime } from './runtime-context'
+import { useTaskRefreshModule } from './task-refresh/use-task-refresh'
 
 export type WorkbenchStatus = 'loading' | 'ready' | 'error'
 
@@ -143,6 +143,9 @@ export interface CreationWorkbenchController {
   allowedKinds: ReturnType<typeof allowedReferenceKinds>
   tasks: readonly GenerationTaskView[]
   taskDetails: Readonly<Record<string, GenerationTaskDetail>>
+  /** Refresh-module snapshot fields (see TaskRefreshSnapshot). */
+  taskDetailStaleIds: ReadonlySet<string>
+  taskListStale: boolean
   submitDisabled: boolean
   submitBlockedReason: 'unavailable' | 'stale' | 'length' | null
   submit: () => void
@@ -192,18 +195,20 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   } | null>(null)
   const [manifest, setManifest] = useState<CapabilityManifest | null>(null)
   const [manifestStatus, setManifestStatus] = useState<ManifestStatus>('loading')
-  const [tasks, setTasks] = useState<readonly GenerationTaskView[]>([])
-  const [taskDetails, setTaskDetails] = useState<Readonly<Record<string, GenerationTaskDetail>>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [indeterminateTaskId, setIndeterminateTaskId] = useState<string | null>(null)
-  const [eventStreamLive, setEventStreamLive] = useState(false)
-  const [invalidationTick, setInvalidationTick] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [pendingMaterialRemoval, setPendingMaterialRemoval] = useState<{
     readonly materialId: string
     readonly mentionCount: number
   } | null>(null)
   const [referenceRecoveryShown, setReferenceRecoveryShown] = useState(false)
+
+  // The Generation Task refresh module (ADR-0005): scheduling, coalescing,
+  // and consistent task display live behind this binding; business actions
+  // only ask it to reconcile after they complete.
+  const taskRefresh = useTaskRefreshModule(ports)
+  const { tasks, taskDetails } = taskRefresh.snapshot
 
   // Manifest adoption can write through in the same turn it updates React;
   // keep the last seen version synchronous so that write cannot persist the
@@ -234,6 +239,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   if (materialUrlsRef.current === null) materialUrlsRef.current = new MaterialUrlOwner()
   const portsRef = useRef<CreationRuntime>(ports)
   const resultBlobCacheRef = useRef<ResultBlobCache | null>(null)
+  // The SSE subscription must survive snapshot commits, so its effect reads
+  // the binding through a ref instead of depending on its identity.
+  const taskRefreshRef = useRef(taskRefresh)
 
   /** The version a persisted record/submission carries: what the composer
    * last saw, else the restored record's own, else the contract floor. */
@@ -301,6 +309,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     mentionKindLabelsRef.current = mentionKindLabels
     thumbnailIdsRef.current = new Set(Object.keys(thumbnails))
     portsRef.current = ports
+    taskRefreshRef.current = taskRefresh
   })
 
   useEffect(() => {
@@ -463,38 +472,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   )
 
   // --- Generation Task kernel (issue #159) ---------------------------------
-
-  const loadTasks = useCallback(
-    async (sessionId: string) => {
-      if (!ports) return
-      const result = await ports.listTasks(sessionId).catch(() => null)
-      if (!mountedRef.current) return
-      if (selectedIdRef.current !== sessionId) return
-      if (result !== null && result.outcome === 'succeeded') {
-        setTasks(result.value.tasks)
-        const page = result.value.tasks
-        const details: Record<string, GenerationTaskDetail> = {}
-        await Promise.all(
-          page.map(async (task) => {
-            const detail = await ports.getTask(task.id).catch(() => null)
-            if (detail !== null && detail.outcome === 'succeeded') {
-              details[task.id] = detail.value
-            }
-          })
-        )
-        if (!mountedRef.current || selectedIdRef.current !== sessionId) return
-        setTaskDetails(details)
-      } else {
-        setTasks([])
-      }
-    },
-    [ports]
-  )
-
-  const refreshTasks = useCallback(() => {
-    const sessionId = selectedIdRef.current
-    if (sessionId !== null) void loadTasks(sessionId)
-  }, [loadTasks])
+  // Task list/detail reading, refresh scheduling, and consistent display are
+  // owned by the refresh module (ADR-0005): entering a session starts a new
+  // display lifecycle there, and nothing below rewrites task display state.
 
   const selectSession = useCallback(
     async (session: CreationSessionView) => {
@@ -523,8 +503,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       // flag keeps manifest adoption from seeding this transient empty.
       restoreInFlightRef.current = true
       applyLoadedDraft(null, null)
-      setTasks([])
-      setTaskDetails({})
+      taskRefreshRef.current.enter(session.id)
       const [detail, materialPage] = await Promise.all([
         ports.getSessionDetail(session.id).catch(() => null),
         ports.listMaterials(session.id).catch(() => null)
@@ -540,12 +519,12 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         setStatus('error')
         setSelectedId(null)
         selectedIdRef.current = null
+        taskRefreshRef.current.leave()
         return
       }
       setMaterials(materialPage.value.materials)
       materialsRef.current = materialPage.value.materials
       materialIdsRef.current = new Set(materialPage.value.materials.map((material) => material.id))
-      void loadTasks(session.id)
       // The editable draft is device-local state: restore this device's copy
       // and prune reference bindings whose materials no longer exist in the
       // session (deleted from another surface — nothing rewrote them here).
@@ -592,7 +571,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       }
       restoreInFlightRef.current = false
     },
-    [applyLoadedDraft, loadTasks, manifest, manifestDefaultDraft, ports, writeDraftThrough]
+    [applyLoadedDraft, manifest, manifestDefaultDraft, ports, writeDraftThrough]
   )
 
   const setMediaType = useCallback(
@@ -700,8 +679,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     setMaterials([])
     setThumbnails({})
     setThumbnailStates({})
-    setTasks([])
-    setTaskDetails({})
+    taskRefreshRef.current.leave()
     // startNewDraft resolves synchronously, but the same adoption guard as
     // selectSession keeps a manifest response landing mid-reset from seeding.
     restoreInFlightRef.current = true
@@ -765,6 +743,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         setThumbnails({})
         setThumbnailStates({})
         applyLoadedDraft(null, null)
+        taskRefreshRef.current.leave()
       }
       setSessions((current) => current.filter((session) => session.id !== sessionId))
       // The deleted session's device-local draft goes with it.
@@ -1052,33 +1031,21 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     }
   }, [pendingMaterialRemoval, removeMaterialNow])
 
-  // SSE invalidation after every persisted task change; while the stream is
-  // down, polling converges the view within the ten-second contract window.
+  // The SSE stream only hints that server facts changed; the refresh module
+  // owns when to read them, and it answers a lost stream with its own
+  // fallback polling and reconnect reconciliation (ADR-0005).
   useEffect(() => {
     if (!ports) return
     const unsubscribe = ports.subscribeEvents({
       onInvalidation: () => {
-        setInvalidationTick((tick) => tick + 1)
+        taskRefreshRef.current.notifyInvalidation()
       },
-      onStateChange: setEventStreamLive
+      onStateChange: (live) => {
+        taskRefreshRef.current.setStreamLive(live)
+      }
     })
     return unsubscribe
   }, [ports])
-
-  useEffect(() => {
-    if (invalidationTick > 0) refreshTasks()
-  }, [invalidationTick, refreshTasks])
-
-  const hasActiveTasks = useMemo(
-    () => tasks.some((task) => !isTerminalTaskStatus(task.status)),
-    [tasks]
-  )
-
-  useEffect(() => {
-    if (eventStreamLive || !hasActiveTasks) return
-    const interval = setInterval(refreshTasks, 5000)
-    return () => clearInterval(interval)
-  }, [eventStreamLive, hasActiveTasks, refreshTasks])
 
   /**
    * Creates the server session a composing round has been drafting against
@@ -1101,6 +1068,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     composingNewRef.current = false
     setSelectedId(session.id)
     selectedIdRef.current = session.id
+    // The display context switched to the materialized session: its task view
+    // starts a fresh display lifecycle with it.
+    taskRefreshRef.current.enter(session.id)
     writeDraftThrough(draftRef.current)
     const storage = globalThis.localStorage
     if (storage !== undefined) removeLocalDraft(storage, ports.userId, 'new')
@@ -1204,11 +1174,13 @@ export function useCreationWorkbench(): CreationWorkbenchController {
           .catch(() => null)
         finish()
         if (!mountedRef.current) return
+        // A completion for a context the creator already left neither writes
+        // into the current display nor starts reads for it (ADR-0005).
         if (selectedIdRef.current !== sessionId) return
         if (result !== null && result.outcome === 'succeeded') {
           setSubmitError(null)
           setIndeterminateTaskId(null)
-          await loadTasks(sessionId)
+          taskRefreshRef.current.requestReconcile()
         } else if (result !== null && result.outcome === 'request-rejected') {
           setSubmitError(result.code)
         } else {
@@ -1219,7 +1191,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       }
     }
     void run()
-  }, [loadTasks, materializeSession, ports, uploadPendingMaterials, writeDraftThrough])
+  }, [materializeSession, ports, uploadPendingMaterials, writeDraftThrough])
 
   // The composer's submit affordance: a void adapter so the JSX handler can
   // stay a plain reference.
@@ -1231,10 +1203,10 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     (taskId: string) => {
       void ports
         ?.cancelTask(taskId)
-        .then(() => refreshTasks())
+        .then(() => taskRefreshRef.current.requestReconcile())
         .catch(() => undefined)
     },
-    [ports, refreshTasks]
+    [ports]
   )
 
   const retryTaskById = useCallback(
@@ -1244,14 +1216,14 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         .then((result) => {
           if (result.outcome === 'succeeded') {
             setIndeterminateTaskId(null)
-            refreshTasks()
+            taskRefreshRef.current.requestReconcile()
           } else {
             setSubmitError(result.outcome === 'request-rejected' ? result.code : 'network-failure')
           }
         })
         .catch(() => undefined)
     },
-    [ports, refreshTasks]
+    [ports]
   )
 
   const confirmIndeterminateRedo = useCallback(
@@ -1511,6 +1483,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     allowedKinds,
     tasks,
     taskDetails,
+    taskDetailStaleIds: taskRefresh.snapshot.staleTaskIds,
+    taskListStale: taskRefresh.snapshot.listFailed,
     submitDisabled: submitBlocked !== null || submitting,
     submitBlockedReason: submitBlocked,
     submit: submitCallback,

@@ -139,6 +139,12 @@ export function ResultGallery({
   const { tasks } = workbench
   const orderedTasks = useMemo(() => [...tasks].reverse(), [tasks])
   const galleryActive = orderedTasks.length > 0
+  // A failed list read keeps every loaded task and only adds the note.
+  const staleNote = workbench.taskListStale ? (
+    <p className="text-warning/80 text-xs" role="status" data-testid="task-list-stale">
+      {t('gallery.listStale')}
+    </p>
+  ) : null
   const galleryRef = useRef<HTMLDivElement | null>(null)
   const readingAnchorRef = useRef<{ readonly taskId: string; readonly offset: number } | null>(null)
   const restoreReadingAnchorRef = useRef<
@@ -340,9 +346,11 @@ export function ResultGallery({
 
   if (tasks.length === 0) {
     return (
-      <p className="text-muted-foreground text-xs" role="status">
-        {t('workspace.generationPending')}
-      </p>
+      staleNote ?? (
+        <p className="text-muted-foreground text-xs" role="status">
+          {t('workspace.generationPending')}
+        </p>
+      )
     )
   }
   const virtualItems = virtualizer.getVirtualItems()
@@ -354,6 +362,7 @@ export function ResultGallery({
       data-total-count={tasks.length}
       style={{ height: virtualizer.getTotalSize() }}
     >
+      {staleNote}
       {virtualItems.map((virtualItem) => {
         const task = orderedTasks[virtualItem.index]
         return (
@@ -432,6 +441,13 @@ function TaskCard({
           )}
           <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
             <span className="text-foreground/70 font-medium">{t(statusKey(snapshot.status))}</span>
+            {workbench.taskDetailStaleIds.has(snapshot.id) && (
+              // This task's latest detail read failed; the card keeps its
+              // last consistent copy and says so.
+              <span className="text-warning/80" data-testid={`task-detail-stale-${snapshot.id}`}>
+                {t('gallery.detailStale')}
+              </span>
+            )}
             <span>
               {t(mediaKeys[snapshot.mediaType])}
               {spec !== null && ` · ${spec.model}`}

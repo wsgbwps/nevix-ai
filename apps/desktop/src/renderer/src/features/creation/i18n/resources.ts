@@ -45,6 +45,8 @@ export const creationTranslations = defineResourceTranslations({
         resultAlt: '已验证的生成结果',
         taskLabel: '生成任务',
         submitFailed: '提交被拒绝：{{code}}',
+        detailStale: '详情未更新',
+        listStale: '任务列表未更新',
         status: {
           queued: '排队中',
           generating: '生成中',
@@ -328,6 +330,8 @@ export const creationTranslations = defineResourceTranslations({
         resultAlt: 'Verified generation result',
         taskLabel: 'Generation task',
         submitFailed: 'Submission rejected: {{code}}',
+        detailStale: 'Details not refreshed',
+        listStale: 'Task list not refreshed',
         status: {
           queued: 'Queued',
           generating: 'Generating',
