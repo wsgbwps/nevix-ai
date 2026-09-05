@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   FileImageIcon,
@@ -42,33 +42,118 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   const { t } = useTranslation('creation')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [showBackToBottom, setShowBackToBottom] = useState(false)
-  // The gallery displays tasks old→new, so the head of the server's
-  // newest-first page is the newest card at the bottom; a changed head means
-  // new content to reveal there. That jump is instant so the back-to-bottom
-  // pill never flashes mid-glide — only the creator-invited return animates.
+  const [newTaskWaiting, setNewTaskWaiting] = useState(false)
   const newestTaskId = workbench.tasks[0]?.id ?? null
+  const workspaceKey = workbench.composingNew ? 'new' : (workbench.selectedId ?? 'inactive')
   const returningRef = useRef(false)
-  const lastScrollTopRef = useRef(0)
-  useEffect(() => {
-    if (newestTaskId === null) return
+  const followingBottomRef = useRef(false)
+  const userScrollIntentRef = useRef(false)
+  const userScrollDirectionRef = useRef<'up' | 'down' | 'unknown'>('unknown')
+  const scrollbarPointerRef = useRef(false)
+  const readingHistoryRef = useRef(false)
+  const pinnedToBottomRef = useRef(true)
+  const lastWorkspaceRef = useRef(workspaceKey)
+  const lastNewestTaskIdRef = useRef<string | null>(null)
+
+  useLayoutEffect(() => {
+    const releaseScrollbar = (): void => {
+      scrollbarPointerRef.current = false
+    }
+    window.addEventListener('pointerup', releaseScrollbar, true)
+    window.addEventListener('pointercancel', releaseScrollbar, true)
+    return () => {
+      window.removeEventListener('pointerup', releaseScrollbar, true)
+      window.removeEventListener('pointercancel', releaseScrollbar, true)
+    }
+  }, [])
+
+  // A session's first task page opens at the Composer. Later tasks follow
+  // only while the creator is already pinned there; an older reading
+  // position stays put and the existing return control becomes the notice.
+  useLayoutEffect(() => {
+    if (lastWorkspaceRef.current !== workspaceKey) {
+      lastWorkspaceRef.current = workspaceKey
+      lastNewestTaskIdRef.current = null
+      readingHistoryRef.current = false
+      pinnedToBottomRef.current = true
+      setNewTaskWaiting(false)
+      setShowBackToBottom(false)
+    }
+    if (newestTaskId === null) {
+      lastNewestTaskIdRef.current = null
+      return
+    }
+    const previous = lastNewestTaskIdRef.current
+    lastNewestTaskIdRef.current = newestTaskId
+    if (previous !== null && previous === newestTaskId) return
     const scroller = scrollRef.current
     if (scroller === null) return
+    if (previous !== null && readingHistoryRef.current) {
+      setNewTaskWaiting(true)
+      setShowBackToBottom(true)
+      return
+    }
+    readingHistoryRef.current = false
+    followingBottomRef.current = true
+    scroller.scrollTop = scroller.scrollHeight
     const frame = requestAnimationFrame(() => {
       scroller.scrollTo({ top: scroller.scrollHeight })
+      pinnedToBottomRef.current = true
     })
     return () => cancelAnimationFrame(frame)
-  }, [newestTaskId])
+  }, [newestTaskId, workspaceKey])
   const scrollToBottom = (): void => {
     const scroller = scrollRef.current
     if (scroller === null) return
     returningRef.current = true
+    readingHistoryRef.current = false
+    userScrollIntentRef.current = false
+    pinnedToBottomRef.current = true
+    setNewTaskWaiting(false)
     setShowBackToBottom(false)
-    scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' })
+    scroller.scrollTo({ top: scroller.scrollHeight })
   }
 
   // A composing round owns the workspace exactly like a selected session —
   // its session does not exist on the server yet.
   const workspaceActive = workbench.selected !== null || workbench.composingNew
+
+  // Virtual rows and result media can establish their real height after the
+  // task-id effect's first scroll. Continue following those measurements only
+  // while the creator is pinned; a history reader owns their own viewport.
+  useLayoutEffect(() => {
+    if (!workspaceActive) return
+    const scroller = scrollRef.current
+    const content = scroller?.firstElementChild
+    if (scroller === null || !(content instanceof HTMLElement)) return
+    let frame: number | null = null
+    const followMeasuredBottom = (): void => {
+      if (readingHistoryRef.current || !pinnedToBottomRef.current || userScrollIntentRef.current) {
+        return
+      }
+      followingBottomRef.current = true
+      if (frame !== null) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = null
+        if (
+          readingHistoryRef.current ||
+          !pinnedToBottomRef.current ||
+          userScrollIntentRef.current
+        ) {
+          return
+        }
+        scroller.scrollTop = scroller.scrollHeight
+      })
+    }
+    const observer = new ResizeObserver(followMeasuredBottom)
+    observer.observe(content)
+    followMeasuredBottom()
+    return () => {
+      observer.disconnect()
+      if (frame !== null) cancelAnimationFrame(frame)
+      followingBottomRef.current = false
+    }
+  }, [newestTaskId, workspaceActive, workspaceKey])
 
   // The bottom reserve keeps gallery content clear of the floating
   // composer: the wrapper's measured height plus its bottom inset and a
@@ -174,22 +259,121 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
           <>
             <div
               ref={scrollRef}
+              onPointerDownCapture={(event) => {
+                if (event.target !== event.currentTarget) return
+                const distanceFromRight =
+                  event.currentTarget.getBoundingClientRect().right - event.clientX
+                if (distanceFromRight < 0 || distanceFromRight > 24) return
+                scrollbarPointerRef.current = true
+                userScrollDirectionRef.current = 'unknown'
+              }}
+              onWheelCapture={(event) => {
+                if (event.deltaY === 0) return
+                if (event.deltaY > 0 && isScrolledToBottom(event.currentTarget)) return
+                userScrollIntentRef.current = true
+                userScrollDirectionRef.current = event.deltaY < 0 ? 'up' : 'down'
+                if (event.deltaY < 0) {
+                  readingHistoryRef.current = true
+                  pinnedToBottomRef.current = false
+                  followingBottomRef.current = false
+                  returningRef.current = false
+                  setShowBackToBottom(true)
+                }
+              }}
+              onKeyDownCapture={(event) => {
+                if (
+                  event.target instanceof Element &&
+                  event.target.closest(
+                    'button, a, input, textarea, select, [contenteditable="true"], [role="menuitem"]'
+                  ) !== null
+                ) {
+                  return
+                }
+                const movingUp =
+                  event.key === 'ArrowUp' ||
+                  event.key === 'PageUp' ||
+                  event.key === 'Home' ||
+                  (event.key === ' ' && event.shiftKey)
+                const movingDown =
+                  event.key === 'ArrowDown' ||
+                  event.key === 'PageDown' ||
+                  event.key === 'End' ||
+                  (event.key === ' ' && !event.shiftKey)
+                if (movingUp || (movingDown && !isScrolledToBottom(event.currentTarget))) {
+                  userScrollIntentRef.current = true
+                  userScrollDirectionRef.current = movingUp ? 'up' : 'down'
+                }
+                if (movingUp) {
+                  readingHistoryRef.current = true
+                  pinnedToBottomRef.current = false
+                  followingBottomRef.current = false
+                  returningRef.current = false
+                  setShowBackToBottom(true)
+                }
+              }}
+              onTouchMoveCapture={() => {
+                userScrollIntentRef.current = true
+                userScrollDirectionRef.current = 'unknown'
+                readingHistoryRef.current = true
+                pinnedToBottomRef.current = false
+                followingBottomRef.current = false
+                returningRef.current = false
+                setShowBackToBottom(true)
+              }}
               onScroll={() => {
                 const scroller = scrollRef.current
                 if (scroller === null) return
-                const { scrollTop } = scroller
                 const away = !isScrolledToBottom(scroller)
-                // An upward move means the creator took over mid-glide; stop
-                // suppressing the pill so it reflects where they actually are.
-                const tookOver = scrollTop < lastScrollTopRef.current
-                lastScrollTopRef.current = scrollTop
+                const tookOver = userScrollIntentRef.current || scrollbarPointerRef.current
+                const direction = userScrollDirectionRef.current
+                userScrollIntentRef.current = false
+                userScrollDirectionRef.current = 'unknown'
+                if (readingHistoryRef.current) {
+                  if (!away && tookOver && direction !== 'up') {
+                    readingHistoryRef.current = false
+                    pinnedToBottomRef.current = true
+                    setNewTaskWaiting(false)
+                    setShowBackToBottom(false)
+                  } else {
+                    pinnedToBottomRef.current = false
+                    setShowBackToBottom(true)
+                  }
+                  return
+                }
+                if (tookOver) {
+                  followingBottomRef.current = false
+                  returningRef.current = false
+                  pinnedToBottomRef.current = !away
+                  if (away) readingHistoryRef.current = true
+                  else setNewTaskWaiting(false)
+                  setShowBackToBottom(away)
+                  return
+                }
+                if (followingBottomRef.current) {
+                  // Virtual-row measurements can correct the offset after an
+                  // earlier bottom event. Follow remains authoritative until
+                  // the explicit user-input branches above release it.
+                  if (away) {
+                    scroller.scrollTop = scroller.scrollHeight
+                  }
+                  setNewTaskWaiting(false)
+                  setShowBackToBottom(false)
+                  return
+                }
+                if (!away) {
+                  pinnedToBottomRef.current = true
+                  setNewTaskWaiting(false)
+                } else if (!returningRef.current) {
+                  pinnedToBottomRef.current = false
+                  readingHistoryRef.current = true
+                }
                 if (returningRef.current) {
-                  if (!away || tookOver) returningRef.current = false
+                  if (!away) returningRef.current = false
                   else return
                 }
                 setShowBackToBottom(away)
               }}
-              className="h-full overflow-y-auto px-6"
+              className="h-full overflow-y-auto px-6 [overflow-anchor:none]"
             >
               {/* The greeting hero is the empty-session state: clearing the
                   prompt must never hide a session that already holds tasks. */}
@@ -233,7 +417,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                       </button>
                     </p>
                   )}
-                  <ResultGallery workbench={workbench} />
+                  <ResultGallery key={workspaceKey} workbench={workbench} scrollerRef={scrollRef} />
                 </div>
               )}
             </div>
@@ -242,6 +426,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
               scrollerRef={scrollRef}
               wrapperRef={composerWrapRef}
               backToBottomVisible={showBackToBottom}
+              newTaskWaiting={newTaskWaiting}
               onBackToBottom={scrollToBottom}
             />
           </>

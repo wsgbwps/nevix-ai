@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   BanIcon,
   DownloadIcon,
@@ -27,7 +28,7 @@ import type {
   SlotFailureReason
 } from '../api/generation-task-http'
 import type { ReferenceMaterialView } from '../api/go-creation-http'
-import type { CreationWorkbenchController } from '../model/use-workbench'
+import type { CreationWorkbenchController, MaterialThumbnailState } from '../model/use-workbench'
 import { slotResultFilename } from '../lib/result-filename'
 import {
   RESULT_DRAG_MIME,
@@ -128,12 +129,215 @@ const quietButtonClass =
   'text-muted-foreground bg-foreground/[0.06] hover:bg-accent hover:text-foreground flex h-8 items-center gap-1 rounded-md px-2.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50'
 
 export function ResultGallery({
-  workbench
+  workbench,
+  scrollerRef
 }: {
   readonly workbench: CreationWorkbenchController
+  readonly scrollerRef: React.RefObject<HTMLDivElement | null>
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const { tasks } = workbench
+  const orderedTasks = useMemo(() => [...tasks].reverse(), [tasks])
+  const galleryActive = orderedTasks.length > 0
+  const galleryRef = useRef<HTMLDivElement | null>(null)
+  const readingAnchorRef = useRef<{ readonly taskId: string; readonly offset: number } | null>(null)
+  const restoreReadingAnchorRef = useRef<
+    ((anchor: { readonly taskId: string; readonly offset: number }) => void) | null
+  >(null)
+  const previousTaskCountRef = useRef(orderedTasks.length)
+  const [scrollMargin, setScrollMargin] = useState(0)
+  // TanStack Virtual intentionally owns mutable measurement functions; the
+  // React compiler excludes this component instead of memoizing stale ones.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: orderedTasks.length,
+    getScrollElement: () => scrollerRef.current,
+    getItemKey: (index) => orderedTasks[index]?.id ?? index,
+    estimateSize: () => 320,
+    gap: 40,
+    overscan: 3,
+    scrollMargin,
+    anchorTo: 'end',
+    useAnimationFrameWithResizeObserver: true
+  })
+
+  useLayoutEffect(() => {
+    // Creation treats the currently read viewport as the anchor even just
+    // after an upward scroll. Compensate remeasured cards wholly above it;
+    // TanStack's default intentionally skips that case while scrolling back.
+    const adjust: NonNullable<typeof virtualizer.shouldAdjustScrollPositionOnItemSizeChange> = (
+      item,
+      _delta,
+      instance
+    ) => {
+      const offset = (instance.scrollOffset ?? 0) + instance.scrollAdjustments
+      return instance.itemSizeCache.has(item.key)
+        ? item.start + item.size <= offset
+        : item.start < offset
+    }
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = adjust
+    return () => {
+      if (virtualizer.shouldAdjustScrollPositionOnItemSizeChange === adjust) {
+        virtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined
+      }
+    }
+  }, [virtualizer])
+
+  // Width changes can invalidate every measured card at once. Keep the
+  // first intersecting task and its viewport offset until the new responsive
+  // measurements settle; this is the user-facing reading anchor, independent
+  // of which estimates the virtualizer replaces underneath it.
+  useLayoutEffect(() => {
+    const gallery = galleryRef.current
+    const scroller = scrollerRef.current
+    if (gallery === null || scroller === null) return
+    let width = scroller.clientWidth
+    let height = gallery.getBoundingClientRect().height
+    let captureFrame: number | null = null
+    let restoreFrame: number | null = null
+    let restoring = false
+
+    const taskNode = (taskId: string): HTMLElement | null =>
+      [...gallery.querySelectorAll<HTMLElement>('[data-task-id]')].find(
+        (candidate) => candidate.dataset.taskId === taskId
+      ) ?? null
+
+    const capture = (): void => {
+      if (restoring) return
+      const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+      if (distanceFromBottom <= 2) {
+        readingAnchorRef.current = null
+        return
+      }
+      const viewport = scroller.getBoundingClientRect()
+      const node = [...gallery.querySelectorAll<HTMLElement>('[data-task-id]')].find(
+        (candidate) => {
+          const rect = candidate.getBoundingClientRect()
+          return rect.bottom > viewport.top + 1 && rect.top < viewport.bottom - 1
+        }
+      )
+      readingAnchorRef.current =
+        node === undefined
+          ? null
+          : {
+              taskId: node.dataset.taskId ?? '',
+              offset: node.getBoundingClientRect().top - viewport.top
+            }
+    }
+
+    const scheduleCapture = (): void => {
+      if (restoring || captureFrame !== null) return
+      captureFrame = requestAnimationFrame(() => {
+        captureFrame = null
+        capture()
+      })
+    }
+
+    const restore = (
+      saved: NonNullable<typeof readingAnchorRef.current>,
+      attempts: number,
+      stable: number
+    ): void => {
+      restoreFrame = null
+      const node = taskNode(saved.taskId)
+      let nextStable = stable
+      if (node !== null) {
+        const offset = node.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+        const delta = offset - saved.offset
+        if (Math.abs(delta) >= 0.5) {
+          scroller.scrollTop += delta
+          nextStable = 0
+        } else {
+          nextStable += 1
+        }
+      }
+      if (attempts > 0 && nextStable < 2) {
+        restoreFrame = requestAnimationFrame(() => restore(saved, attempts - 1, nextStable))
+        return
+      }
+      restoring = false
+      readingAnchorRef.current = saved
+      scheduleCapture()
+    }
+
+    const startRestore = (saved: NonNullable<typeof readingAnchorRef.current>): void => {
+      restoring = true
+      if (captureFrame !== null) cancelAnimationFrame(captureFrame)
+      if (restoreFrame !== null) cancelAnimationFrame(restoreFrame)
+      captureFrame = null
+      restoreFrame = requestAnimationFrame(() => restore(saved, 12, 0))
+    }
+
+    const observer = new ResizeObserver(() => {
+      const nextWidth = scroller.clientWidth
+      const nextHeight = gallery.getBoundingClientRect().height
+      if (Math.abs(nextWidth - width) < 0.5 && Math.abs(nextHeight - height) < 0.5) return
+      width = nextWidth
+      height = nextHeight
+      if (restoring) return
+      const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+      const saved = readingAnchorRef.current
+      if (distanceFromBottom <= 2 || saved === null) {
+        scheduleCapture()
+        return
+      }
+      startRestore(saved)
+    })
+
+    restoreReadingAnchorRef.current = startRestore
+    capture()
+    observer.observe(scroller)
+    observer.observe(gallery)
+    const onScroll = (): void => {
+      if (restoring) return
+      capture()
+      scheduleCapture()
+    }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      observer.disconnect()
+      scroller.removeEventListener('scroll', onScroll)
+      if (restoreReadingAnchorRef.current === startRestore) {
+        restoreReadingAnchorRef.current = null
+      }
+      if (captureFrame !== null) cancelAnimationFrame(captureFrame)
+      if (restoreFrame !== null) cancelAnimationFrame(restoreFrame)
+    }
+  }, [galleryActive, scrollerRef])
+
+  useLayoutEffect(() => {
+    const previousCount = previousTaskCountRef.current
+    previousTaskCountRef.current = orderedTasks.length
+    if (previousCount === orderedTasks.length) return
+    const saved = readingAnchorRef.current
+    if (saved !== null) restoreReadingAnchorRef.current?.(saved)
+  }, [orderedTasks.length])
+
+  // This list shares the workspace scroller with the title above it. Feed
+  // that live offset to the virtualizer so responsive/header changes do not
+  // turn its item coordinates into fixed-height assumptions.
+  useLayoutEffect(() => {
+    const gallery = galleryRef.current
+    const scroller = scrollerRef.current
+    if (gallery === null || scroller === null) return
+    const measure = (): void => {
+      const next =
+        gallery.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top +
+        scroller.scrollTop
+      setScrollMargin((current) => (Math.abs(current - next) < 0.5 ? current : next))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(gallery.parentElement ?? gallery)
+    observer.observe(scroller)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [orderedTasks.length, scrollerRef])
+
   if (tasks.length === 0) {
     return (
       <p className="text-muted-foreground text-xs" role="status">
@@ -141,11 +345,30 @@ export function ResultGallery({
       </p>
     )
   }
+  const virtualItems = virtualizer.getVirtualItems()
   return (
-    <div className="flex flex-col gap-10" data-testid="result-gallery">
-      {[...tasks].reverse().map((task) => (
-        <TaskCard key={task.id} workbench={workbench} task={task} />
-      ))}
+    <div
+      ref={galleryRef}
+      className="relative w-full"
+      data-testid="result-gallery"
+      data-total-count={tasks.length}
+      style={{ height: virtualizer.getTotalSize() }}
+    >
+      {virtualItems.map((virtualItem) => {
+        const task = orderedTasks[virtualItem.index]
+        return (
+          <div
+            key={virtualItem.key}
+            ref={virtualizer.measureElement}
+            data-index={virtualItem.index}
+            data-task-id={task.id}
+            className="absolute top-0 left-0 w-full"
+            style={{ transform: `translateY(${virtualItem.start - scrollMargin}px)` }}
+          >
+            <TaskCard workbench={workbench} task={task} />
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -178,7 +401,7 @@ function TaskCard({
     <section
       aria-label={String(t(statusKey(snapshot.status)))}
       data-testid={`task-${snapshot.id}`}
-      className="animate-in fade-in slide-in-from-bottom-2 flex flex-col gap-2.5 duration-300"
+      className="flex flex-col gap-2.5"
     >
       <div className="flex items-start gap-2.5">
         {spec !== null && spec.references.length > 0 && (
@@ -187,6 +410,9 @@ function TaskCard({
             references={spec.references}
             materials={workbench.materials}
             thumbnails={workbench.thumbnails}
+            thumbnailStates={workbench.thumbnailStates}
+            onRetainThumbnail={workbench.retainMaterialThumbnail}
+            onRequestThumbnail={workbench.requestMaterialThumbnail}
           />
         )}
         <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -362,15 +588,46 @@ function TaskReferencePile({
   taskId,
   references,
   materials,
-  thumbnails
+  thumbnails,
+  thumbnailStates,
+  onRetainThumbnail,
+  onRequestThumbnail
 }: {
   readonly taskId: string
   readonly references: readonly GenerationSpecificationReferenceView[]
   readonly materials: readonly ReferenceMaterialView[]
   readonly thumbnails: Readonly<Record<string, string>>
+  readonly thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  readonly onRetainThumbnail: (materialId: string) => () => void
+  readonly onRequestThumbnail: (materialId: string) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const byId = new Map(materials.map((material) => [material.id, material] as const))
+  const byId = useMemo(
+    () => new Map(materials.map((material) => [material.id, material] as const)),
+    [materials]
+  )
+  const thumbnailMaterialIdsKey = JSON.stringify(
+    [
+      ...new Set(
+        references.flatMap((reference) => {
+          const material = byId.get(reference.materialId)
+          return material?.kind === 'image' ? [material.id] : []
+        })
+      )
+    ].sort()
+  )
+  // Task refreshes rebuild equivalent frozen-reference arrays. Keying the
+  // lease by ID content prevents each poll from revoking and re-reading it.
+  const thumbnailMaterialIds = useMemo<readonly string[]>(
+    () => JSON.parse(thumbnailMaterialIdsKey) as string[],
+    [thumbnailMaterialIdsKey]
+  )
+  useEffect(() => {
+    const releases = thumbnailMaterialIds.map(onRetainThumbnail)
+    return () => {
+      for (const release of releases) release()
+    }
+  }, [onRetainThumbnail, thumbnailMaterialIds])
   const pitch =
     references.length > 1
       ? Math.min(16, (pileMaxWidth - pileCardWidth) / (references.length - 1))
@@ -381,6 +638,14 @@ function TaskReferencePile({
       aria-label={String(t('gallery.references.pile', { n: references.length }))}
       data-testid={`task-references-${taskId}`}
       className="relative shrink-0 self-start"
+      onMouseEnter={() => {
+        for (const reference of references) {
+          const material = byId.get(reference.materialId)
+          if (material?.kind === 'image' && thumbnails[material.id] === undefined) {
+            onRequestThumbnail(material.id)
+          }
+        }
+      }}
       style={{
         width: pileCardWidth + pitch * (references.length - 1),
         height: pileCardHeight
@@ -399,6 +664,11 @@ function TaskReferencePile({
           <div
             key={position}
             title={title}
+            data-thumbnail-state={
+              material?.kind === 'image'
+                ? (thumbnailStates[reference.materialId] ?? 'unloaded')
+                : undefined
+            }
             className="border-foreground/20 bg-muted absolute top-0 overflow-hidden rounded-[5px] border shadow-sm"
             style={{
               left: position * pitch,
@@ -415,9 +685,31 @@ function TaskReferencePile({
                 className="size-full object-cover"
               />
             ) : (
-              <span className="text-muted-foreground grid size-full place-items-center text-[10px] uppercase">
-                {String(t(referenceKindKeys[reference.kind]))}
+              <span className="text-muted-foreground grid size-full place-content-center justify-items-center gap-0.5 text-[10px] uppercase">
+                <span>{String(t(referenceKindKeys[reference.kind]))}</span>
+                {material?.kind === 'image' &&
+                  thumbnailStates[reference.materialId] === 'loading' && (
+                    <span className="text-[8px] normal-case" role="status">
+                      {t('composer.deck.thumbnailLoading')}
+                    </span>
+                  )}
+                {material?.kind === 'image' &&
+                  thumbnailStates[reference.materialId] === 'failed' && (
+                    <span className="text-[8px] normal-case" role="alert">
+                      {t('composer.deck.thumbnailFailed')}
+                    </span>
+                  )}
               </span>
+            )}
+            {material?.kind === 'image' && thumbnailStates[reference.materialId] === 'failed' && (
+              <button
+                type="button"
+                aria-label={String(t('composer.deck.thumbnailRetry', { name: material.fileName }))}
+                onClick={() => onRequestThumbnail(material.id)}
+                className="bg-card/90 text-muted-foreground hover:text-foreground absolute right-0 bottom-0 z-10 grid size-4 place-items-center rounded-tl-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
+              >
+                <RefreshCwIcon className="size-2.5" aria-hidden />
+              </button>
             )}
           </div>
         )
@@ -575,38 +867,59 @@ function SlotCard({
   readonly fallbackRatio: string | null
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const [url, setUrl] = useState<string | null>(null)
+  const [mediaAttempt, setMediaAttempt] = useState(0)
+  const [media, setMedia] = useState<
+    | { readonly status: 'unloaded' | 'loading' | 'failed'; readonly url: null }
+    | { readonly status: 'ready'; readonly url: string }
+  >({ status: 'unloaded', url: null })
   const succeeded = slot.status === 'succeeded'
-  const loadResultBlobUrl = workbench.loadResultBlobUrl
+  const acquireResultBlobUrl = workbench.acquireResultBlobUrl
 
-  // The verified output renders inside its slot; the blob rides the trusted
-  // data plane like every other byte and is fetched exactly once.
+  // A mounted slot leases its URL. Virtualization can then unmount old cards
+  // and let the byte-budgeted cache evict them without revoking a URL that is
+  // still painted by another consumer.
   useEffect(() => {
     if (!succeeded) return
     let active = true
-    void loadResultBlobUrl(taskId, slot.index)
-      .then((blobUrl) => {
-        if (active && blobUrl !== null) setUrl(blobUrl)
+    let release: (() => void) | null = null
+    queueMicrotask(() => {
+      if (active) setMedia({ status: 'loading', url: null })
+    })
+    void acquireResultBlobUrl(taskId, slot.index)
+      .then((lease) => {
+        if (!active) {
+          lease?.release()
+          return
+        }
+        if (lease === null) {
+          setMedia({ status: 'failed', url: null })
+          return
+        }
+        release = lease.release
+        setMedia({ status: 'ready', url: lease.url })
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (active) setMedia({ status: 'failed', url: null })
+      })
     return () => {
       active = false
+      release?.()
     }
-  }, [mediaType, succeeded, slot.index, taskId, loadResultBlobUrl])
+  }, [acquireResultBlobUrl, mediaAttempt, mediaType, slot.index, succeeded, taskId])
 
   // The download reuses the already-verified bytes (or loads them on demand)
   // and names the file after its task slot.
   const download = (): void => {
-    void workbench
-      .loadResultBlobUrl(taskId, slot.index)
-      .then((blobUrl) => {
-        if (blobUrl === null) return
+    void acquireResultBlobUrl(taskId, slot.index)
+      .then((lease) => {
+        if (lease === null) return
         const anchor = document.createElement('a')
-        anchor.href = blobUrl
+        anchor.href = lease.url
         anchor.download = slotResultFilename(taskId, slot.index, mediaType, slot.result)
         document.body.appendChild(anchor)
         anchor.click()
         anchor.remove()
+        window.setTimeout(lease.release, 0)
       })
       .catch(() => undefined)
   }
@@ -654,6 +967,7 @@ function SlotCard({
     <div
       data-testid={`slot-${taskId}-${slot.index}`}
       data-slot-status={slot.status}
+      data-media-state={succeeded ? media.status : undefined}
       role={succeeded ? undefined : 'status'}
       aria-label={String(t(statusKey(slot.status)))}
       draggable={succeeded}
@@ -665,12 +979,36 @@ function SlotCard({
       style={{ aspectRatio: String(slotAspectRatio(slot, fallbackRatio)) }}
       className="bg-foreground/[0.04] relative overflow-hidden rounded-lg"
     >
-      {succeeded && url !== null ? (
+      {succeeded && media.status === 'ready' ? (
         mediaType === 'image' ? (
-          <img src={url} alt={t('gallery.resultAlt')} className="size-full object-cover" />
+          <img src={media.url} alt={t('gallery.resultAlt')} className="size-full object-cover" />
         ) : (
-          <video src={url} controls className="size-full object-cover" />
+          <video src={media.url} controls className="size-full object-cover" />
         )
+      ) : succeeded ? (
+        <span className="absolute inset-0 grid place-content-center justify-items-center gap-2 p-2 text-center text-[10px]">
+          <span
+            role={media.status === 'failed' ? 'alert' : 'status'}
+            className="text-muted-foreground"
+          >
+            {t(
+              media.status === 'failed'
+                ? 'gallery.media.failed'
+                : media.status === 'loading'
+                  ? 'gallery.media.loading'
+                  : 'gallery.media.unloaded'
+            )}
+          </span>
+          {media.status === 'failed' && (
+            <button
+              type="button"
+              onClick={() => setMediaAttempt((attempt) => attempt + 1)}
+              className="border-border hover:bg-accent rounded-md border px-2 py-1"
+            >
+              {t('gallery.media.retry')}
+            </button>
+          )}
+        </span>
       ) : (
         <span className="absolute inset-0 flex overflow-y-auto p-2">
           <span className="text-muted-foreground my-auto w-full text-center text-[10px] leading-4">

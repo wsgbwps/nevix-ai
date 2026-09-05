@@ -106,6 +106,13 @@ export const creationTranslations = defineResourceTranslations({
           omni: '全能参考'
         },
         backToBottom: '回到底部',
+        newTaskAvailable: '有新任务 · 回到底部',
+        media: {
+          unloaded: '结果尚未加载',
+          loading: '正在加载结果…',
+          failed: '结果媒体加载失败',
+          retry: '重试'
+        },
         indeterminate: {
           title: '重做结果未知的任务',
           body: '该任务的供应商结局未知。重做会创建新任务，可能产生重复生成与重复计费。',
@@ -169,6 +176,9 @@ export const creationTranslations = defineResourceTranslations({
           tile: '参考内容',
           count: '{{n}} 张参考图片',
           remove: '移除 {{name}}',
+          thumbnailLoading: '加载中',
+          thumbnailFailed: '加载失败',
+          thumbnailRetry: '重试加载 {{name}} 缩略图',
           kind: { image: '图', video: '视频', audio: '音' },
           dropInvite: '松手添加参考素材',
           dropReplace: '松手替换该素材',
@@ -379,6 +389,13 @@ export const creationTranslations = defineResourceTranslations({
           omni: 'Omni'
         },
         backToBottom: 'Back to bottom',
+        newTaskAvailable: 'New task · Back to bottom',
+        media: {
+          unloaded: 'Result not loaded',
+          loading: 'Loading result…',
+          failed: 'Result media could not be loaded',
+          retry: 'Retry'
+        },
         indeterminate: {
           title: 'Redo a task with unknown outcome',
           body: 'The provider outcome is unknown. A redo creates a new task and may repeat generation and billing.',
@@ -444,6 +461,9 @@ export const creationTranslations = defineResourceTranslations({
           tile: 'Reference',
           count: '{{n}} reference images',
           remove: 'Remove {{name}}',
+          thumbnailLoading: 'Loading',
+          thumbnailFailed: 'Load failed',
+          thumbnailRetry: 'Retry thumbnail for {{name}}',
           kind: { image: 'IMG', video: 'VID', audio: 'AUD' },
           dropInvite: 'Drop to add as reference',
           dropReplace: 'Drop to replace this material',

@@ -10,7 +10,7 @@ import type { GenerationTaskDetail, GenerationTaskView } from '../api/generation
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import { loadImageDimensions } from '../lib/image-dimensions'
 import { MaterialUrlOwner } from '../lib/material-url-owner'
-import { ResultBlobCache } from '../lib/result-blob-cache'
+import { ResultBlobCache, type ResultBlobUrlLease } from '../lib/result-blob-cache'
 import { resultFilename } from '../lib/result-filename'
 import { planFileDrop, type ResultDragPayload } from './reference-drop'
 import {
@@ -48,6 +48,8 @@ import { useCreationRuntime, type CreationRuntime } from './runtime-context'
 export type WorkbenchStatus = 'loading' | 'ready' | 'error'
 
 export type ManifestStatus = 'loading' | 'ready' | 'unavailable'
+
+export type MaterialThumbnailState = 'loading' | 'failed' | 'ready'
 
 /**
  * The composer's editable mirror of the session draft. Field values are
@@ -100,6 +102,11 @@ export interface CreationWorkbenchController {
   renameSession: (sessionId: string, name: string) => void
   materials: readonly ReferenceMaterialView[]
   thumbnails: Readonly<Record<string, string>>
+  thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  /** Holds one thumbnail while a mounted presentation can paint it. */
+  retainMaterialThumbnail: (materialId: string) => () => void
+  /** Starts an image thumbnail read only when a mounted presentation asks for it. */
+  requestMaterialThumbnail: (materialId: string) => void
   draft: ComposerDraft
   mentionCandidates: readonly PromptMentionCandidate[]
   expandedPrompt: string
@@ -143,8 +150,8 @@ export interface CreationWorkbenchController {
   retryTask: (taskId: string) => void
   submitError: string | null
   dismissSubmitError: () => void
-  /** Streams one succeeded slot's verified output for display. */
-  loadResultBlobUrl: (taskId: string, slotIndex: number) => Promise<string | null>
+  /** Leases one succeeded slot's verified display URL until its card releases it. */
+  acquireResultBlobUrl: (taskId: string, slotIndex: number) => Promise<ResultBlobUrlLease | null>
   /** Reads one server-backed or pending local Reference Material for UI presentation. */
   loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal) => Promise<Blob | null>
   /** Retry of indeterminate work requires the creator's explicit risk confirm. */
@@ -174,6 +181,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const [composingNew, setComposingNew] = useState(false)
   const [materials, setMaterials] = useState<readonly ReferenceMaterialView[]>([])
   const [thumbnails, setThumbnails] = useState<Readonly<Record<string, string>>>({})
+  const [thumbnailStates, setThumbnailStates] = useState<
+    Readonly<Record<string, MaterialThumbnailState>>
+  >({})
   const [draft, setDraft] = useState<ComposerDraft>(emptyComposerDraft)
   const [materialUploadFailed, setMaterialUploadFailed] = useState(false)
   const [materialDropRejection, setMaterialDropRejection] = useState<{
@@ -217,6 +227,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const materialsRef = useRef<readonly ReferenceMaterialView[]>([])
   const mentionKindLabelsRef = useRef<PromptMentionKindLabels>(mentionKindLabels)
   const thumbnailLoadRef = useRef(0)
+  const thumbnailIdsRef = useRef<ReadonlySet<string>>(new Set())
+  const thumbnailRequestsRef = useRef(new Map<string, number>())
+  const thumbnailConsumersRef = useRef(new Map<string, number>())
   const materialUrlsRef = useRef<MaterialUrlOwner | null>(null)
   if (materialUrlsRef.current === null) materialUrlsRef.current = new MaterialUrlOwner()
   const portsRef = useRef<CreationRuntime>(ports)
@@ -268,6 +281,12 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       delete next[materialId]
       return next
     })
+    setThumbnailStates((current) => {
+      if (!(materialId in current)) return current
+      const next = { ...current }
+      delete next[materialId]
+      return next
+    })
   }
 
   // Render cannot write refs; mirror the committed values after commit so
@@ -280,6 +299,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     materialsRef.current = materials
     materialIdsRef.current = new Set(materials.map((material) => material.id))
     mentionKindLabelsRef.current = mentionKindLabels
+    thumbnailIdsRef.current = new Set(Object.keys(thumbnails))
     portsRef.current = ports
   })
 
@@ -421,32 +441,12 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   useEffect(
     () => () => {
       thumbnailLoadRef.current += 1
+      thumbnailRequestsRef.current.clear()
+      thumbnailConsumersRef.current.clear()
       materialUrlsRef.current?.dispose()
       resultBlobCacheRef.current?.dispose()
     },
     []
-  )
-
-  const loadThumbnails = useCallback(
-    async (list: readonly ReferenceMaterialView[]) => {
-      if (!ports) return
-      const load = ++thumbnailLoadRef.current
-      const entries = await Promise.all(
-        list.map(async (material) =>
-          material.kind === 'image'
-            ? ([material.id, await ports.loadMaterialBlob(material.id)] as const)
-            : ([material.id, null] as const)
-        )
-      )
-      if (!mountedRef.current || load !== thumbnailLoadRef.current) return
-      materialUrlsRef.current?.releaseThumbnails()
-      const next: Record<string, string> = {}
-      for (const [id, blob] of entries) {
-        if (blob) next[id] = materialUrlsRef.current!.replaceThumbnail(id, blob)
-      }
-      setThumbnails(next)
-    },
-    [ports]
   )
 
   const applyLoadedDraft = useCallback(
@@ -506,13 +506,18 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       for (const materialId of pendingMaterialFilesRef.current.keys())
         dropPendingMaterial(materialId)
       thumbnailLoadRef.current += 1
+      thumbnailRequestsRef.current.clear()
+      thumbnailConsumersRef.current.clear()
       materialUrlsRef.current?.dispose()
       resultBlobCacheRef.current?.dispose()
       setSelectedId(session.id)
       selectedIdRef.current = session.id
       materialsRef.current = []
+      materialIdsRef.current = new Set()
+      thumbnailIdsRef.current = new Set()
       setMaterials([])
       setThumbnails({})
+      setThumbnailStates({})
       // Optimistic empty draft and task view until the authoritative copies
       // arrive; stale entries must not leak across the switch. The restore
       // flag keeps manifest adoption from seeding this transient empty.
@@ -586,17 +591,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         }
       }
       restoreInFlightRef.current = false
-      await loadThumbnails(materialPage.value.materials)
     },
-    [
-      applyLoadedDraft,
-      loadTasks,
-      loadThumbnails,
-      manifest,
-      manifestDefaultDraft,
-      ports,
-      writeDraftThrough
-    ]
+    [applyLoadedDraft, loadTasks, manifest, manifestDefaultDraft, ports, writeDraftThrough]
   )
 
   const setMediaType = useCallback(
@@ -694,11 +690,16 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       dropPendingMaterial(materialId)
     }
     thumbnailLoadRef.current += 1
+    thumbnailRequestsRef.current.clear()
+    thumbnailConsumersRef.current.clear()
     materialUrlsRef.current?.dispose()
     resultBlobCacheRef.current?.dispose()
     materialsRef.current = []
+    materialIdsRef.current = new Set()
+    thumbnailIdsRef.current = new Set()
     setMaterials([])
     setThumbnails({})
+    setThumbnailStates({})
     setTasks([])
     setTaskDetails({})
     // startNewDraft resolves synchronously, but the same adoption guard as
@@ -753,12 +754,16 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         selectedIdRef.current = null
         setSelectedId(null)
         thumbnailLoadRef.current += 1
+        thumbnailRequestsRef.current.clear()
+        thumbnailConsumersRef.current.clear()
         materialUrlsRef.current?.dispose()
         resultBlobCacheRef.current?.dispose()
         materialsRef.current = []
         materialIdsRef.current = new Set()
+        thumbnailIdsRef.current = new Set()
         setMaterials([])
         setThumbnails({})
+        setThumbnailStates({})
         applyLoadedDraft(null, null)
       }
       setSessions((current) => current.filter((session) => session.id !== sessionId))
@@ -783,26 +788,95 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [ports]
   )
 
-  const loadImageThumbnail = useCallback(
+  const requestMaterialThumbnail = useCallback(
     (materialId: string): void => {
+      if (!ports) return
       const load = thumbnailLoadRef.current
-      void ports
-        ?.loadMaterialBlob(materialId)
+      const material = materialsRef.current.find((candidate) => candidate.id === materialId)
+      if (
+        material?.kind !== 'image' ||
+        (thumbnailConsumersRef.current.get(materialId) ?? 0) === 0 ||
+        thumbnailIdsRef.current.has(materialId) ||
+        thumbnailRequestsRef.current.get(materialId) === load
+      ) {
+        return
+      }
+      thumbnailRequestsRef.current.set(materialId, load)
+      setThumbnailStates((current) => ({ ...current, [materialId]: 'loading' }))
+      const isCurrent = (): boolean =>
+        mountedRef.current &&
+        load === thumbnailLoadRef.current &&
+        materialIdsRef.current.has(materialId) &&
+        (thumbnailConsumersRef.current.get(materialId) ?? 0) > 0
+      const pendingFile = pendingMaterialFilesRef.current.get(materialId)?.file
+      const blob = pendingFile
+        ? Promise.resolve<Blob | null>(pendingFile)
+        : ports.loadMaterialBlob(materialId)
+      void blob
         .then((blob) => {
-          if (
-            !blob ||
-            !mountedRef.current ||
-            load !== thumbnailLoadRef.current ||
-            !materialIdsRef.current.has(materialId)
-          ) {
+          if (!isCurrent()) return
+          if (!blob) {
+            setThumbnailStates((current) => ({ ...current, [materialId]: 'failed' }))
             return
           }
           const url = materialUrlsRef.current!.replaceThumbnail(materialId, blob)
+          thumbnailIdsRef.current = new Set([...thumbnailIdsRef.current, materialId])
           setThumbnails((current) => ({ ...current, [materialId]: url }))
+          setThumbnailStates((current) => ({ ...current, [materialId]: 'ready' }))
         })
-        .catch(() => undefined)
+        .catch(() => {
+          if (isCurrent()) {
+            setThumbnailStates((current) => ({ ...current, [materialId]: 'failed' }))
+          }
+        })
+        .finally(() => {
+          if (thumbnailRequestsRef.current.get(materialId) === load) {
+            thumbnailRequestsRef.current.delete(materialId)
+          }
+        })
     },
     [ports]
+  )
+
+  const retainMaterialThumbnail = useCallback(
+    (materialId: string): (() => void) => {
+      const load = thumbnailLoadRef.current
+      thumbnailConsumersRef.current.set(
+        materialId,
+        (thumbnailConsumersRef.current.get(materialId) ?? 0) + 1
+      )
+      requestMaterialThumbnail(materialId)
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        if (load !== thumbnailLoadRef.current) return
+        const consumers = thumbnailConsumersRef.current.get(materialId) ?? 0
+        if (consumers > 1) {
+          thumbnailConsumersRef.current.set(materialId, consumers - 1)
+          return
+        }
+        thumbnailConsumersRef.current.delete(materialId)
+        materialUrlsRef.current?.releaseMaterial(materialId)
+        thumbnailIdsRef.current = new Set(
+          [...thumbnailIdsRef.current].filter((candidate) => candidate !== materialId)
+        )
+        if (!mountedRef.current) return
+        setThumbnails((current) => {
+          if (!(materialId in current)) return current
+          const next = { ...current }
+          delete next[materialId]
+          return next
+        })
+        setThumbnailStates((current) => {
+          if (!(materialId in current)) return current
+          const next = { ...current }
+          delete next[materialId]
+          return next
+        })
+      }
+    },
+    [requestMaterialThumbnail]
   )
 
   /**
@@ -827,6 +901,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         setMaterials((current) => [...current, material])
         if (previewUrl !== null) {
           setThumbnails((current) => ({ ...current, [id]: previewUrl }))
+          setThumbnailStates((current) => ({ ...current, [id]: 'ready' }))
           void loadImageDimensions(previewUrl).then((dimensions) => {
             if (
               dimensions === null ||
@@ -860,10 +935,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       materialsRef.current = [...materialsRef.current, material]
       materialIdsRef.current = new Set([...materialIdsRef.current, material.id])
       setMaterials((current) => [...current, material])
-      if (material.kind === 'image') loadImageThumbnail(material.id)
       return { id: material.id, kind: material.kind }
     },
-    [loadImageThumbnail, ports]
+    [ports]
   )
 
   /** Drops one material from every local record, thumbnail entry included —
@@ -878,6 +952,16 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       delete next[materialId]
       return next
     })
+    setThumbnailStates((current) => {
+      if (!(materialId in current)) return current
+      const next = { ...current }
+      delete next[materialId]
+      return next
+    })
+    thumbnailIdsRef.current = new Set(
+      [...thumbnailIdsRef.current].filter((candidate) => candidate !== materialId)
+    )
+    thumbnailConsumersRef.current.delete(materialId)
     materialsRef.current = materialsRef.current.filter((material) => material.id !== materialId)
     materialIdsRef.current = new Set(
       [...materialIdsRef.current].filter((candidate) => candidate !== materialId)
@@ -1055,7 +1139,6 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         setMaterials((current) =>
           current.map((material) => (material.id === pendingId ? uploaded : material))
         )
-        if (uploaded.kind === 'image') loadImageThumbnail(uploaded.id)
       }
       if (idMap.size > 0) {
         // Rewrite synchronously in state AND ref: the write-through that
@@ -1076,7 +1159,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       }
       return !failed
     },
-    [loadImageThumbnail, ports, writeDraftThrough]
+    [ports, writeDraftThrough]
   )
 
   const submit = useCallback(() => {
@@ -1190,8 +1273,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     return resultBlobCacheRef.current
   }, [])
 
-  const loadResultBlobUrlFor = useCallback(
-    (taskId: string, slotIndex: number) => ensureResultBlobCache().objectUrl(taskId, slotIndex),
+  const acquireResultBlobUrl = useCallback(
+    (taskId: string, slotIndex: number) =>
+      ensureResultBlobCache().acquireObjectUrl(taskId, slotIndex),
     [ensureResultBlobCache]
   )
 
@@ -1392,6 +1476,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     renameSession,
     materials,
     thumbnails,
+    thumbnailStates,
+    retainMaterialThumbnail,
+    requestMaterialThumbnail,
     draft,
     mentionCandidates,
     expandedPrompt,
@@ -1431,7 +1518,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     retryTask: retryTaskById,
     submitError,
     dismissSubmitError: () => setSubmitError(null),
-    loadResultBlobUrl: loadResultBlobUrlFor,
+    acquireResultBlobUrl,
     loadMaterialPreviewBlob,
     requestIndeterminateRedo: (taskId: string) => setIndeterminateTaskId(taskId),
     confirmIndeterminateRedo,

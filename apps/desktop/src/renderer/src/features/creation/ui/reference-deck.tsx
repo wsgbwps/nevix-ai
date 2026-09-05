@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import gsap from 'gsap'
 import { PlusIcon, XIcon } from 'lucide-react'
@@ -8,6 +8,7 @@ import type {
   MaterialKind,
   ReferenceMaterialView
 } from '../api/go-creation-http'
+import type { MaterialThumbnailState } from '../model/use-workbench'
 import {
   RESULT_DRAG_MIME,
   currentResultDrag,
@@ -58,6 +59,9 @@ export function ReferenceDeck({
   bindings,
   materials,
   thumbnails,
+  thumbnailStates,
+  onRetainThumbnail,
+  onRequestThumbnail,
   cap,
   allowedKinds,
   onAddFiles,
@@ -73,6 +77,9 @@ export function ReferenceDeck({
   readonly materials: readonly ReferenceMaterialView[]
   /** material id -> object URL for image thumbs; absent ids show kind glyphs. */
   readonly thumbnails: Readonly<Record<string, string>>
+  readonly thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  readonly onRetainThumbnail: (materialId: string) => () => void
+  readonly onRequestThumbnail: (materialId: string) => void
   /** Maximum bound cards; the add entry disables at the cap. */
   readonly cap: number
   /** Kinds the current mode's manifest policy allows; empty disables add. */
@@ -110,8 +117,36 @@ export function ReferenceDeck({
     video: String(t('composer.deck.kind.video')),
     audio: String(t('composer.deck.kind.audio'))
   }
-  const byId = new Map(materials.map((material) => [material.id, material] as const))
-  const visible = bindings.filter((binding) => byId.has(binding.materialId))
+  const byId = useMemo(
+    () => new Map(materials.map((material) => [material.id, material] as const)),
+    [materials]
+  )
+  const visible = useMemo(
+    () => bindings.filter((binding) => byId.has(binding.materialId)),
+    [bindings, byId]
+  )
+  const thumbnailMaterialIdsKey = JSON.stringify(
+    [
+      ...new Set(
+        visible.flatMap((binding) => {
+          const material = byId.get(binding.materialId)
+          return material?.kind === 'image' ? [material.id] : []
+        })
+      )
+    ].sort()
+  )
+  // Draft restoration can rebuild equivalent binding arrays. Keying the
+  // lease by ID content keeps those renders from revoking and re-reading it.
+  const thumbnailMaterialIds = useMemo<readonly string[]>(
+    () => JSON.parse(thumbnailMaterialIdsKey) as string[],
+    [thumbnailMaterialIdsKey]
+  )
+  useEffect(() => {
+    const releases = thumbnailMaterialIds.map(onRetainThumbnail)
+    return () => {
+      for (const release of releases) release()
+    }
+  }, [onRetainThumbnail, thumbnailMaterialIds])
   const atCap = visible.length >= cap || allowedKinds.length === 0
   // The picker only offers kinds the published mode's envelope accepts; the
   // server stays the authority and re-validates every binding on save.
@@ -368,6 +403,11 @@ export function ReferenceDeck({
                 key={material.id}
                 role="listitem"
                 data-material-id={material.id}
+                data-thumbnail-state={
+                  material.kind === 'image'
+                    ? (thumbnailStates[material.id] ?? 'unloaded')
+                    : undefined
+                }
                 className="absolute inset-0 transition-[transform,opacity] duration-200 ease-out"
                 style={{
                   zIndex: hoveredId === material.id ? 40 : 20 - depth,
@@ -378,7 +418,12 @@ export function ReferenceDeck({
                     ? `translate(${position * fanPitch}px, 0) rotate(${fanRotations[position % fanRotations.length]}deg)${isDragTarget ? ' translateY(-3px) scale(1.05)' : ''}`
                     : `translate(${depth * 3}px, ${depth * -2}px) rotate(${pileRotations[depth % pileRotations.length]}deg) scale(${1 - depth * 0.025})`
                 }}
-                onMouseEnter={() => setHoveredId(material.id)}
+                onMouseEnter={() => {
+                  setHoveredId(material.id)
+                  if (material.kind === 'image' && thumbnails[material.id] === undefined) {
+                    onRequestThumbnail(material.id)
+                  }
+                }}
                 onMouseLeave={() => setHoveredId(null)}
               >
                 <button
@@ -389,7 +434,12 @@ export function ReferenceDeck({
                     if (node) cardRefs.current.set(material.id, node)
                     else cardRefs.current.delete(material.id)
                   }}
-                  onFocus={() => setFocusedId(material.id)}
+                  onFocus={() => {
+                    setFocusedId(material.id)
+                    if (material.kind === 'image' && thumbnails[material.id] === undefined) {
+                      onRequestThumbnail(material.id)
+                    }
+                  }}
                   onKeyDown={(event) => {
                     switch (event.key) {
                       case 'ArrowRight':
@@ -420,8 +470,18 @@ export function ReferenceDeck({
                   {thumbnails[material.id] ? (
                     <img src={thumbnails[material.id]} alt="" className="size-full object-cover" />
                   ) : (
-                    <span className="text-muted-foreground text-[10px] uppercase">
-                      {kindLabel[material.kind]}
+                    <span className="text-muted-foreground grid justify-items-center gap-0.5 text-[10px] uppercase">
+                      <span>{kindLabel[material.kind]}</span>
+                      {material.kind === 'image' && thumbnailStates[material.id] === 'loading' && (
+                        <span className="text-[8px] normal-case" role="status">
+                          {t('composer.deck.thumbnailLoading')}
+                        </span>
+                      )}
+                      {material.kind === 'image' && thumbnailStates[material.id] === 'failed' && (
+                        <span className="text-[8px] normal-case" role="alert">
+                          {t('composer.deck.thumbnailFailed')}
+                        </span>
+                      )}
                     </span>
                   )}
                 </button>
