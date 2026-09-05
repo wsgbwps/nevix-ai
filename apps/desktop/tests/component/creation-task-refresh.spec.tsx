@@ -64,6 +64,43 @@ test('consecutive SSE invalidations coalesce into one read round', async ({ moun
   expect(await listTasksCalls(page)).toBe(callsAfterEntry + 1)
 })
 
+test('a runtime action reconciles immediately without clearing the current task view', async ({
+  mount,
+  page
+}) => {
+  const current = runningTask('dddddddd-0000-4000-8000-00000000c003', '2026-09-01T09:00:03Z')
+  const acceptedTaskId = 'dddddddd-0000-4000-8000-000000000004'
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [current] }} />)
+  await selectFirstSession(page)
+  await expect(page.getByTestId(`task-${current.id}`)).toBeVisible()
+
+  // A healthy stream disables fallback polling. The action completion must
+  // still request its own reconcile, and that round must preserve the last
+  // consistent snapshot while its list response is pending.
+  const callsAfterEntry = await listTasksCalls(page)
+  await page.evaluate(() => {
+    window.__creationDeckTest?.setStreamLive(true)
+  })
+  await expect.poll(() => listTasksCalls(page)).toBe(callsAfterEntry + 1)
+  const callsAfterReconnect = await listTasksCalls(page)
+  await page.evaluate(() => {
+    window.__creationDeckTest?.holdNextListResponse()
+  })
+  await page.getByTestId('composer-submit').click()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
+    .toHaveLength(1)
+  await expect.poll(() => listTasksCalls(page)).toBe(callsAfterReconnect + 1)
+  await expect(page.getByTestId(`task-${current.id}`)).toBeVisible()
+  await expect(page.getByTestId(`task-${acceptedTaskId}`)).toHaveCount(0)
+
+  await page.evaluate(() => {
+    window.__creationDeckTest?.releaseHeldListResponses()
+  })
+  await expect(page.getByTestId(`task-${acceptedTaskId}`)).toBeVisible()
+  await expect(page.getByTestId(`task-${current.id}`)).toBeVisible()
+})
+
 test('a failed detail read keeps the last consistent card and marks it unrefreshed', async ({
   mount,
   page

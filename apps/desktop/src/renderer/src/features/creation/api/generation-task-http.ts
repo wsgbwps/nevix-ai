@@ -409,7 +409,7 @@ export function createGenerationTaskClient(serverUrl: string): {
     taskId: string,
     idempotencyKey: string
   ): Promise<CreationApiResult<GenerationTaskDetail>>
-  loadResultBlob(token: string, taskId: string, slotIndex: number): Promise<Blob | null>
+  loadResultBlob(token: string, taskId: string, slotIndex: number): Promise<CreationApiResult<Blob>>
 } {
   async function detailOf(
     result: Awaited<ReturnType<typeof request>>
@@ -425,7 +425,7 @@ export function createGenerationTaskClient(serverUrl: string): {
     token: string,
     taskId: string,
     slotIndex: number
-  ): Promise<Blob | null> {
+  ): Promise<CreationApiResult<Blob>> {
     const url = new URL(`/creation/tasks/${taskId}/slots/${slotIndex}/result`, serverUrl)
     let response: Response
     try {
@@ -434,10 +434,15 @@ export function createGenerationTaskClient(serverUrl: string): {
         headers: { Authorization: `Bearer ${token}` }
       })
     } catch {
-      return null
+      return { outcome: 'network-failure' }
     }
-    if (!response.ok) return null
-    return response.blob().catch(() => null)
+    if (response.status === 401) return { outcome: 'unauthorized' }
+    if (!response.ok) return { outcome: 'network-failure' }
+    try {
+      return { outcome: 'succeeded', value: await response.blob() }
+    } catch {
+      return { outcome: 'network-failure' }
+    }
   }
 
   return {
@@ -504,12 +509,17 @@ export function createGenerationTaskClient(serverUrl: string): {
  * Authorization header; there is no Last-Event-ID — the hook answers a lost
  * stream with a refetch and polling convergence. `onInvalidation` fires on
  * each invalidation block; `onStateChange` mirrors liveness so the caller can
- * fall back to polling while the stream is down.
+ * fall back to polling while the stream is down. A confirmed 401 is reported
+ * through `onUnauthorized` and ends the stream instead of retrying.
  */
 export function openCreationEventStream(
   serverUrl: string,
   acquireToken: () => Promise<string | null>,
-  handlers: { onInvalidation: () => void; onStateChange: (live: boolean) => void }
+  handlers: {
+    onInvalidation: () => void
+    onStateChange: (live: boolean) => void
+    onUnauthorized: () => void
+  }
 ): () => void {
   let disposed = false
   let controller: AbortController | null = null
@@ -529,6 +539,11 @@ export function openCreationEventStream(
           headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
           signal: controller.signal
         })
+        if (response.status === 401) {
+          handlers.onStateChange(false)
+          handlers.onUnauthorized()
+          return
+        }
         if (!response.ok || !response.body) {
           handlers.onStateChange(false)
           await new Promise((resolve) => setTimeout(resolve, 2000))

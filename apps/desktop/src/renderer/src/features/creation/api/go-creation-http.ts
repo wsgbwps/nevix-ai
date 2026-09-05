@@ -186,7 +186,11 @@ export function createCreationClient(serverUrl: string): {
   ): Promise<CreationApiResult<ReferenceMaterialView>>
   deleteMaterial(token: string, materialId: string): Promise<CreationApiResult<void>>
   /** Streams one owned material through Go; callers own any derived object URL. */
-  loadMaterialBlob(token: string, materialId: string, signal?: AbortSignal): Promise<Blob | null>
+  loadMaterialBlob(
+    token: string,
+    materialId: string,
+    signal?: AbortSignal
+  ): Promise<CreationApiResult<Blob>>
 } {
   async function listPage<T>(
     parse: (payload: unknown) => T | null,
@@ -345,6 +349,8 @@ export function createCreationClient(serverUrl: string): {
         return { outcome: 'network-failure' }
       }
       if (response.ok) return { outcome: 'succeeded', value: undefined }
+      if (response.status === 401) return { outcome: 'unauthorized' }
+      if (response.status === 403) return { outcome: 'forbidden' }
       return { outcome: 'request-rejected', code: 'not_found' }
     },
     listMaterials: (token, sessionId, cursor) =>
@@ -406,10 +412,15 @@ export function createCreationClient(serverUrl: string): {
           headers: { Authorization: `Bearer ${token}` }
         })
       } catch {
-        return null
+        return { outcome: 'network-failure' }
       }
-      if (!response.ok) return null
-      return response.blob().catch(() => null)
+      if (response.status === 401) return { outcome: 'unauthorized' }
+      if (!response.ok) return { outcome: 'network-failure' }
+      try {
+        return { outcome: 'succeeded', value: await response.blob() }
+      } catch {
+        return { outcome: 'network-failure' }
+      }
     }
   }
 }

@@ -78,7 +78,10 @@ export interface CreationWorkspacePorts {
     file: File
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
-  readonly loadMaterialBlob: (materialId: string, signal?: AbortSignal) => Promise<Blob | null>
+  readonly loadMaterialBlob: (
+    materialId: string,
+    signal?: AbortSignal
+  ) => Promise<CreationApiResult<Blob>>
   readonly loadCapabilityManifest: () => Promise<CreationApiResult<CapabilityManifest>>
   /** Submits one idempotent generation task carrying the full local intent. */
   readonly submitTask: (
@@ -94,14 +97,16 @@ export interface CreationWorkspacePorts {
   ) => Promise<CreationApiResult<GenerationTaskDetail>>
   /** Streams one succeeded slot's verified output as bytes; display URLs are
    * derived Feature-locally by the result cache, never over this seam. */
-  readonly loadResultBlob: (taskId: string, slotIndex: number) => Promise<Blob | null>
+  readonly loadResultBlob: (taskId: string, slotIndex: number) => Promise<CreationApiResult<Blob>>
   /**
    * Opens the creator-scoped SSE invalidation stream; returns unsubscribe.
-   * onStateChange mirrors liveness so the caller can poll while it is down.
+   * onStateChange mirrors liveness so the caller can poll while it is down;
+   * onUnauthorized reports a confirmed credential rejection.
    */
   readonly subscribeEvents: (handlers: {
     onInvalidation: () => void
     onStateChange: (live: boolean) => void
+    onUnauthorized: () => void
   }) => () => void
 }
 

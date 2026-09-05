@@ -13,7 +13,7 @@ registerHooks({
   }
 })
 
-const { readLocalDraft, writeLocalDraft, removeLocalDraft } =
+const { readLocalDraft, writeLocalDraft, removeLocalDraft, setLocalDraftOperationNotice } =
   await import('../../src/renderer/src/features/creation/model/draft-store.ts')
 
 /** Minimal in-memory Storage stand-in; production passes window.localStorage. */
@@ -158,4 +158,25 @@ test('an invalid prompt document preserves the valid fallback and the rest of th
     version: 1,
     nodes: [{ type: 'text', text: record.prompt }]
   })
+})
+
+test('only the minimum unresolved-operation notice persists beside the editable draft', () => {
+  const storage = fakeStorage()
+  const key = 'aaaaaaaa-0000-4000-8000-000000000001'
+  writeLocalDraft(storage, 'user-1', key, record)
+
+  setLocalDraftOperationNotice(storage, 'user-1', key, {
+    submissionUnconfirmed: true,
+    materialFileNames: ['shoe.png', 'detail.png']
+  })
+  assert.deepEqual(readLocalDraft(storage, 'user-1', key)?.operationNotice, {
+    submissionUnconfirmed: true,
+    materialFileNames: ['shoe.png', 'detail.png']
+  })
+  const stored = storage.getItem(`nevix:creation:draft:user-1:${key}`) ?? ''
+  assert.equal(stored.includes('idempotency'), false)
+  assert.equal(stored.includes('File'), false)
+
+  setLocalDraftOperationNotice(storage, 'user-1', key, null)
+  assert.equal(readLocalDraft(storage, 'user-1', key)?.operationNotice, undefined)
 })

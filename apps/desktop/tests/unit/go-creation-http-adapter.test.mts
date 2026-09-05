@@ -126,6 +126,29 @@ test('stable error codes map onto their documented outcomes without guessing', a
   assert.equal(networkFailure.outcome, 'network-failure')
 })
 
+test('deleteSession maps authorization failures and preserves its stable fallback', async () => {
+  const client = createCreationClient(serverUrl)
+  const id = '00000000-0000-4000-8000-000000000009'
+
+  const unauthorized = await withFetch(
+    async () => jsonResponse({ error: 'unauthorized', message: '' }, 401),
+    () => client.deleteSession('stale-token', id)
+  )
+  assert.equal(unauthorized.outcome, 'unauthorized')
+
+  const forbidden = await withFetch(
+    async () => jsonResponse({ error: 'forbidden', message: '' }, 403),
+    () => client.deleteSession('tok', id)
+  )
+  assert.equal(forbidden.outcome, 'forbidden')
+
+  const rejected = await withFetch(
+    async () => jsonResponse({ error: 'material_too_large', message: '' }, 413),
+    () => client.deleteSession('tok', id)
+  )
+  assert.deepEqual(rejected, { outcome: 'request-rejected', code: 'not_found' })
+})
+
 test('malformed payloads fail closed as network-failure instead of inventing shapes', async () => {
   const client = createCreationClient(serverUrl)
   const result = await withFetch(
@@ -171,7 +194,7 @@ test('material download returns the trusted blob and forwards cancellation', asy
   const controller = new AbortController()
   let request: Request | null = null
 
-  const blob = await withFetch(
+  const result = await withFetch(
     async (input, init) => {
       request = new Request(input as RequestInfo | URL, init)
       return new Response(new Uint8Array([1, 2, 3]), {
@@ -185,6 +208,18 @@ test('material download returns the trusted blob and forwards cancellation', asy
   assert.equal(request.url, 'https://server.example/creation/materials/material-1')
   assert.equal(request.headers.get('Authorization'), 'Bearer tok')
   assert.equal(request.signal.aborted, false)
-  assert.equal(blob?.type, 'video/mp4')
-  assert.deepEqual([...new Uint8Array(await blob!.arrayBuffer())], [1, 2, 3])
+  assert.equal(result.outcome, 'succeeded')
+  if (result.outcome !== 'succeeded') return
+  assert.equal(result.value.type, 'video/mp4')
+  assert.deepEqual([...new Uint8Array(await result.value.arrayBuffer())], [1, 2, 3])
+})
+
+test('material download preserves a confirmed unauthorized response', async () => {
+  const client = createCreationClient(serverUrl)
+  const result = await withFetch(
+    async () => jsonResponse({ error: 'unauthorized', message: '' }, 401),
+    () => client.loadMaterialBlob('stale-token', 'material-1')
+  )
+
+  assert.deepEqual(result, { outcome: 'unauthorized' })
 })
