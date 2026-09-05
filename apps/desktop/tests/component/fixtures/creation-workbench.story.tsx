@@ -248,6 +248,23 @@ export interface DeckTestControls {
   releaseTaskDetails(): void
   fireInvalidation(): void
   pushTask(task: ScriptedTask): void
+  /** Replaces one task by id in the scripted store and fires invalidation. */
+  updateTask(task: ScriptedTask): void
+  /** How many task-list reads crossed the data plane. */
+  listTasksCalls(): number
+  /** Task ids in the order their details were read. */
+  getTaskCalls(): string[]
+  /** Fires the SSE stream's liveness transitions like a real connection. */
+  setStreamLive(live: boolean): void
+  /** Makes the next count list reads fail like an unreachable server. */
+  failListReads(count: number): void
+  /** Makes the next count detail reads for one task fail. */
+  failDetailReads(taskId: string, count: number): void
+  /** Holds the next list response until releaseHeldListResponses runs. */
+  holdNextListResponse(): void
+  releaseHeldListResponses(): void
+  /** Replaces one task by id without firing any SSE notification. */
+  replaceTaskSilently(task: ScriptedTask): void
 }
 
 declare global {
@@ -293,6 +310,10 @@ export interface TaskScript {
   readonly resultBlobFailures?: number
   /** When set, submitTask rejects with this stable code. */
   readonly submitRejection?: string
+  /** Number of initial task-list reads that fail with a network failure. */
+  readonly failListReads?: number
+  /** Task ids whose first count detail reads fail with a network failure. */
+  readonly failDetailReads?: Readonly<Record<string, number>>
 }
 
 /** The account id scoping the device-local draft store in this story. */
@@ -357,12 +378,24 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     retryCalls: Array<{ taskId: string; idempotencyKey: string }>
     cancelledIds: string[]
     eventHandlers: { onInvalidation: () => void; onStateChange: (live: boolean) => void } | null
+    listCalls: number
+    getTaskCalls: string[]
+    remainingListFailures: number
+    remainingDetailFailures: Map<string, number>
+    listHolds: Array<Promise<void>>
+    listHoldReleases: Array<() => void>
   } = {
     tasks: [],
     submitCalls: [],
     retryCalls: [],
     cancelledIds: [],
-    eventHandlers: null
+    eventHandlers: null,
+    listCalls: 0,
+    getTaskCalls: [],
+    remainingListFailures: options.taskScript?.failListReads ?? 0,
+    remainingDetailFailures: new Map(Object.entries(options.taskScript?.failDetailReads ?? {})),
+    listHolds: [],
+    listHoldReleases: []
   }
   for (const scripted of options.taskScript?.tasks ?? []) {
     taskState.tasks.push({ ...scripted })
@@ -400,6 +433,40 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     pushTask: (task) => {
       taskState.tasks = [task, ...taskState.tasks]
       taskState.eventHandlers?.onInvalidation()
+    },
+    updateTask: (task) => {
+      taskState.tasks = taskState.tasks.map((entry) => (entry.id === task.id ? task : entry))
+      taskState.eventHandlers?.onInvalidation()
+    },
+    listTasksCalls: () => taskState.listCalls,
+    getTaskCalls: () => taskState.getTaskCalls,
+    setStreamLive: (live) => taskState.eventHandlers?.onStateChange(live),
+    failListReads: (count) => {
+      taskState.remainingListFailures += count
+    },
+    failDetailReads: (taskId, count) => {
+      taskState.remainingDetailFailures.set(
+        taskId,
+        (taskState.remainingDetailFailures.get(taskId) ?? 0) + count
+      )
+    },
+    /** Replaces one task by id in the scripted store without notifying. */
+    replaceTaskSilently: (task) => {
+      taskState.tasks = taskState.tasks.map((entry) => (entry.id === task.id ? task : entry))
+    },
+    holdNextListResponse: () => {
+      let release: () => void = () => undefined
+      taskState.listHolds.push(
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+      )
+      taskState.listHoldReleases.push(release)
+    },
+    releaseHeldListResponses: () => {
+      const releases = taskState.listHoldReleases.splice(0)
+      taskState.listHolds.splice(0)
+      for (const release of releases) release()
     }
   }
 
@@ -518,8 +585,15 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       taskState.tasks = [task, ...taskState.tasks]
       return succeeded(detailOf(task))
     },
-    listTasks: async (sessionId) =>
-      succeeded({
+    listTasks: async (sessionId) => {
+      taskState.listCalls += 1
+      const holds = taskState.listHolds.splice(0)
+      for (const held of holds) await held
+      if (taskState.remainingListFailures > 0) {
+        taskState.remainingListFailures -= 1
+        return { outcome: 'network-failure' as const }
+      }
+      return succeeded({
         tasks: taskState.tasks
           .filter((task) => task.sessionId === sessionId)
           .map(
@@ -537,9 +611,16 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
             })
           ),
         nextCursor: null
-      }),
+      })
+    },
     getTask: async (taskId) => {
       await taskDetailsReady
+      taskState.getTaskCalls.push(taskId)
+      const remaining = taskState.remainingDetailFailures.get(taskId) ?? 0
+      if (remaining > 0) {
+        taskState.remainingDetailFailures.set(taskId, remaining - 1)
+        return { outcome: 'network-failure' as const }
+      }
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
       return succeeded(detailOf(task))
