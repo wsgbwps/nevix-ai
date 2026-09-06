@@ -12,9 +12,7 @@ import type {
   GenerationTaskDetail,
   GenerationTaskView
 } from '../api/generation-task-http'
-import { loadImageDimensions } from '../lib/image-dimensions'
-import { MaterialUrlOwner } from '../lib/material-url-owner'
-import { ResultBlobCache, type ResultBlobUrlLease } from '../lib/result-blob-cache'
+import type { ResultBlobUrlLease } from '../lib/result-blob-cache'
 import { resultFilename } from '../lib/result-filename'
 import { planFileDrop, type ResultDragPayload } from './reference-drop'
 import {
@@ -51,13 +49,15 @@ import {
 import { useCreationRuntime, type CreationRuntime } from './runtime-context'
 import { useTaskRefreshModule } from './task-refresh/use-task-refresh'
 import type { TaskHistoryStatus } from './task-refresh/task-refresh-controller'
+import { useWorkbenchDisplay } from './use-workbench-display'
 import type { WorkbenchActionState } from './workbench-runtime'
+import type { MaterialThumbnailState, WorkbenchDisplayDeps } from './workbench-display-controller'
 
 export type WorkbenchStatus = 'loading' | 'ready' | 'error'
 
 export type ManifestStatus = 'loading' | 'ready' | 'unavailable'
 
-export type MaterialThumbnailState = 'loading' | 'failed' | 'ready'
+export type { MaterialThumbnailState } from './workbench-display-controller'
 
 /**
  * The composer's editable mirror of the session draft. Field values are
@@ -100,27 +100,6 @@ interface StagedMaterial {
   readonly id: string
   readonly kind: ReferenceMaterialView['kind']
   readonly completion?: Promise<CreationApiResult<ReferenceMaterialView>>
-}
-
-function pendingMaterialView(id: string, file: File): ReferenceMaterialView {
-  return {
-    id,
-    kind: file.type.startsWith('video/')
-      ? 'video'
-      : file.type.startsWith('audio/')
-        ? 'audio'
-        : 'image',
-    fileName: file.name,
-    mimeType: file.type,
-    byteSize: file.size,
-    widthPx: null,
-    heightPx: null,
-    pixelCount: null,
-    durationMs: null,
-    checksumSha256: '',
-    claimsVersion: 0,
-    createdAt: new Date(0).toISOString()
-  }
 }
 
 /**
@@ -244,11 +223,6 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   // The `pending:<uuid>` ownership being viewed, when a submitted-but-
   // unmaterialized draft is the active context.
   const [pendingKey, setPendingKey] = useState<string | null>(null)
-  const [materials, setMaterials] = useState<readonly ReferenceMaterialView[]>([])
-  const [thumbnails, setThumbnails] = useState<Readonly<Record<string, string>>>({})
-  const [thumbnailStates, setThumbnailStates] = useState<
-    Readonly<Record<string, MaterialThumbnailState>>
-  >({})
   const [draft, setDraft] = useState<ComposerDraft>(emptyComposerDraft)
   const [materialUploadFailed, setMaterialUploadFailed] = useState(false)
   const [materialDropRejection, setMaterialDropRejection] = useState<{
@@ -276,6 +250,19 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const taskRefresh = useTaskRefreshModule(ports)
   const { tasks, taskDetails } = taskRefresh.snapshot
 
+  // The display-resource module: materials, thumbnails, pending local
+  // files, and result blob leases for the displayed context, with the one
+  // context-switch reset every surface change goes through.
+  const displayDeps = useMemo<WorkbenchDisplayDeps | null>(() => {
+    if (ports === null) return null
+    return {
+      loadMaterialBlob: (materialId, signal) => ports.loadMaterialBlob(materialId, signal),
+      loadResultBlob: (taskId, slotIndex) => ports.loadResultBlob(taskId, slotIndex)
+    }
+  }, [ports])
+  const display = useWorkbenchDisplay(displayDeps)
+  const { materials, thumbnails, thumbnailStates } = display.snapshot
+
   // Manifest adoption can write through in the same turn it updates React;
   // keep the last seen version synchronous so that write cannot persist the
   // previous fallback version.
@@ -296,52 +283,19 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const mountedRef = useRef(false)
   const displayGenerationRef = useRef(0)
   const operationNoticeRef = useRef<LocalDraftOperationNotice | null>(null)
-  const materialIdsRef = useRef<ReadonlySet<string>>(new Set())
-  const materialsRef = useRef<readonly ReferenceMaterialView[]>([])
   const mentionKindLabelsRef = useRef<PromptMentionKindLabels>(mentionKindLabels)
-  const thumbnailLoadRef = useRef(0)
-  const thumbnailIdsRef = useRef<ReadonlySet<string>>(new Set())
-  const thumbnailRequestsRef = useRef(new Map<string, number>())
-  const thumbnailConsumersRef = useRef(new Map<string, number>())
-  const materialUrlsRef = useRef<MaterialUrlOwner | null>(null)
-  if (materialUrlsRef.current === null) materialUrlsRef.current = new MaterialUrlOwner()
   const portsRef = useRef<CreationRuntime>(ports)
-  const resultBlobCacheRef = useRef<ResultBlobCache | null>(null)
   // The SSE subscription must survive snapshot commits, so its effect reads
   // the binding through a ref instead of depending on its identity.
   const taskRefreshRef = useRef(taskRefresh)
+  // Same liveness-idiom as taskRefreshRef: the display binding's identity is
+  // per-render, callbacks read it through a ref to stay memoizable.
+  const displayRef = useRef(display)
 
   /** The version a persisted record/submission carries: what the composer
    * last saw, else the restored record's own, else the contract floor. */
   const intentManifestVersion = (): number =>
     seenManifestVersionRef.current ?? recordManifestVersionRef.current ?? 1
-
-  /**
-   * Files added while composing a session that does not exist yet, keyed by
-   * their synthetic material id. They upload when the session materializes at
-   * submit time; until then nothing about them ever reaches the server.
-   */
-  const pendingMaterialFilesRef = useRef(new Map<string, { file: File }>())
-
-  /** Drops one pending file's local records, revoking its preview URL. */
-  const dropPendingMaterial = (materialId: string): void => {
-    const pending = pendingMaterialFilesRef.current.get(materialId)
-    if (pending === undefined) return
-    pendingMaterialFilesRef.current.delete(materialId)
-    materialUrlsRef.current?.releaseMaterial(materialId)
-    setThumbnails((current) => {
-      if (!(materialId in current)) return current
-      const next = { ...current }
-      delete next[materialId]
-      return next
-    })
-    setThumbnailStates((current) => {
-      if (!(materialId in current)) return current
-      const next = { ...current }
-      delete next[materialId]
-      return next
-    })
-  }
 
   // Render cannot write refs; mirror the committed values after commit so
   // callbacks (write-through, submit, unmount cleanup) always read the latest
@@ -351,12 +305,10 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     selectedIdRef.current = selectedId
     composingNewRef.current = composingNew
     pendingKeyRef.current = pendingKey
-    materialsRef.current = materials
-    materialIdsRef.current = new Set(materials.map((material) => material.id))
     mentionKindLabelsRef.current = mentionKindLabels
-    thumbnailIdsRef.current = new Set(Object.keys(thumbnails))
     portsRef.current = ports
     taskRefreshRef.current = taskRefresh
+    displayRef.current = display
   })
 
   useEffect(() => {
@@ -380,7 +332,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       if (key === null) return
       const candidates = promptMentionCandidates(
         value.references,
-        materialsRef.current,
+        displayRef.current.getSnapshot().materials,
         mentionKindLabelsRef.current
       )
       const record: LocalDraftRecord = {
@@ -498,19 +450,6 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     }
   }, [adoptManifestDefaults, ports])
 
-  // The Feature-local owners revoke thumbnails, pending-file previews, and
-  // cached result URLs when this surface ends.
-  useEffect(
-    () => () => {
-      thumbnailLoadRef.current += 1
-      thumbnailRequestsRef.current.clear()
-      thumbnailConsumersRef.current.clear()
-      materialUrlsRef.current?.dispose()
-      resultBlobCacheRef.current?.dispose()
-    },
-    []
-  )
-
   const applyLoadedDraft = useCallback(
     (
       stored: ComposerDraft | null,
@@ -591,21 +530,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         composingNewRef.current = false
         setPendingKey(null)
         pendingKeyRef.current = null
-        for (const materialId of pendingMaterialFilesRef.current.keys())
-          dropPendingMaterial(materialId)
-        thumbnailLoadRef.current += 1
-        thumbnailRequestsRef.current.clear()
-        thumbnailConsumersRef.current.clear()
-        materialUrlsRef.current?.dispose()
-        resultBlobCacheRef.current?.dispose()
+        displayRef.current.reset()
         setSelectedId(session.id)
         selectedIdRef.current = session.id
-        materialsRef.current = []
-        materialIdsRef.current = new Set()
-        thumbnailIdsRef.current = new Set()
-        setMaterials([])
-        setThumbnails({})
-        setThumbnailStates({})
         // A real display switch must not expose facts or editable state from
         // the prior context while this session restores.
         applyLoadedDraft(null, null)
@@ -641,21 +568,16 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       }
       const staged = ports.actions.stagedMaterials(session.id)
       const stagedIds = new Set(staged.map((entry) => entry.localId))
-      for (const materialId of pendingMaterialFilesRef.current.keys()) {
-        if (!stagedIds.has(materialId)) dropPendingMaterial(materialId)
+      for (const materialId of displayRef.current.pendingFiles().keys()) {
+        if (!stagedIds.has(materialId)) displayRef.current.dropPending(materialId)
       }
       const stagedViews = staged
         .filter(
           (entry) => !materialPage.value.materials.some((material) => material.id === entry.localId)
         )
-        .map((entry) => {
-          pendingMaterialFilesRef.current.set(entry.localId, { file: entry.file })
-          return pendingMaterialView(entry.localId, entry.file)
-        })
+        .map((entry) => displayRef.current.registerPending(entry.localId, entry.file))
       const visibleMaterials = [...materialPage.value.materials, ...stagedViews]
-      setMaterials(visibleMaterials)
-      materialsRef.current = visibleMaterials
-      materialIdsRef.current = new Set(visibleMaterials.map((material) => material.id))
+      displayRef.current.replaceMaterials(visibleMaterials)
       // The editable draft is device-local state: restore this device's copy
       // and prune reference bindings whose materials no longer exist in the
       // session (deleted from another surface — nothing rewrote them here).
@@ -850,20 +772,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     selectedIdRef.current = null
     setPendingKey(null)
     pendingKeyRef.current = null
-    for (const materialId of pendingMaterialFilesRef.current.keys()) {
-      dropPendingMaterial(materialId)
-    }
-    thumbnailLoadRef.current += 1
-    thumbnailRequestsRef.current.clear()
-    thumbnailConsumersRef.current.clear()
-    materialUrlsRef.current?.dispose()
-    resultBlobCacheRef.current?.dispose()
-    materialsRef.current = []
-    materialIdsRef.current = new Set()
-    thumbnailIdsRef.current = new Set()
-    setMaterials([])
-    setThumbnails({})
-    setThumbnailStates({})
+    displayRef.current.reset()
     taskRefreshRef.current.leave()
     // startNewDraft resolves synchronously, but the same adoption guard as
     // selectSession keeps a manifest response landing mid-reset from seeding.
@@ -903,17 +812,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         setSubmitError(null)
         selectedIdRef.current = null
         setSelectedId(null)
-        thumbnailLoadRef.current += 1
-        thumbnailRequestsRef.current.clear()
-        thumbnailConsumersRef.current.clear()
-        materialUrlsRef.current?.dispose()
-        resultBlobCacheRef.current?.dispose()
-        materialsRef.current = []
-        materialIdsRef.current = new Set()
-        thumbnailIdsRef.current = new Set()
-        setMaterials([])
-        setThumbnails({})
-        setThumbnailStates({})
+        displayRef.current.reset()
         applyLoadedDraft(null, null)
         taskRefreshRef.current.leave()
       }
@@ -937,17 +836,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     setSubmitError(null)
     selectedIdRef.current = null
     setSelectedId(null)
-    thumbnailLoadRef.current += 1
-    thumbnailRequestsRef.current.clear()
-    thumbnailConsumersRef.current.clear()
-    materialUrlsRef.current?.dispose()
-    resultBlobCacheRef.current?.dispose()
-    materialsRef.current = []
-    materialIdsRef.current = new Set()
-    thumbnailIdsRef.current = new Set()
-    setMaterials([])
-    setThumbnails({})
-    setThumbnailStates({})
+    displayRef.current.reset()
     applyLoadedDraft(null, null)
     taskRefreshRef.current.leave()
   }, [applyLoadedDraft, sessions, status])
@@ -965,134 +854,6 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     [ports]
   )
 
-  const requestMaterialThumbnail = useCallback(
-    (materialId: string): void => {
-      if (!ports) return
-      const load = thumbnailLoadRef.current
-      const material = materialsRef.current.find((candidate) => candidate.id === materialId)
-      if (
-        material?.kind !== 'image' ||
-        (thumbnailConsumersRef.current.get(materialId) ?? 0) === 0 ||
-        thumbnailIdsRef.current.has(materialId) ||
-        thumbnailRequestsRef.current.get(materialId) === load
-      ) {
-        return
-      }
-      thumbnailRequestsRef.current.set(materialId, load)
-      setThumbnailStates((current) => ({ ...current, [materialId]: 'loading' }))
-      const isCurrent = (): boolean =>
-        mountedRef.current &&
-        load === thumbnailLoadRef.current &&
-        materialIdsRef.current.has(materialId) &&
-        (thumbnailConsumersRef.current.get(materialId) ?? 0) > 0
-      const pendingFile = pendingMaterialFilesRef.current.get(materialId)?.file
-      const blob = pendingFile
-        ? Promise.resolve<Blob | null>(pendingFile)
-        : ports
-            .loadMaterialBlob(materialId)
-            .then((result) => (result.outcome === 'succeeded' ? result.value : null))
-      void blob
-        .then((blob) => {
-          if (!isCurrent()) return
-          if (!blob) {
-            setThumbnailStates((current) => ({ ...current, [materialId]: 'failed' }))
-            return
-          }
-          const url = materialUrlsRef.current!.replaceThumbnail(materialId, blob)
-          thumbnailIdsRef.current = new Set([...thumbnailIdsRef.current, materialId])
-          setThumbnails((current) => ({ ...current, [materialId]: url }))
-          setThumbnailStates((current) => ({ ...current, [materialId]: 'ready' }))
-        })
-        .catch(() => {
-          if (isCurrent()) {
-            setThumbnailStates((current) => ({ ...current, [materialId]: 'failed' }))
-          }
-        })
-        .finally(() => {
-          if (thumbnailRequestsRef.current.get(materialId) === load) {
-            thumbnailRequestsRef.current.delete(materialId)
-          }
-        })
-    },
-    [ports]
-  )
-
-  const retainMaterialThumbnail = useCallback(
-    (materialId: string): (() => void) => {
-      const load = thumbnailLoadRef.current
-      thumbnailConsumersRef.current.set(
-        materialId,
-        (thumbnailConsumersRef.current.get(materialId) ?? 0) + 1
-      )
-      requestMaterialThumbnail(materialId)
-      let released = false
-      return () => {
-        if (released) return
-        released = true
-        if (load !== thumbnailLoadRef.current) return
-        const consumers = thumbnailConsumersRef.current.get(materialId) ?? 0
-        if (consumers > 1) {
-          thumbnailConsumersRef.current.set(materialId, consumers - 1)
-          return
-        }
-        thumbnailConsumersRef.current.delete(materialId)
-        materialUrlsRef.current?.releaseMaterial(materialId)
-        thumbnailIdsRef.current = new Set(
-          [...thumbnailIdsRef.current].filter((candidate) => candidate !== materialId)
-        )
-        if (!mountedRef.current) return
-        setThumbnails((current) => {
-          if (!(materialId in current)) return current
-          const next = { ...current }
-          delete next[materialId]
-          return next
-        })
-        setThumbnailStates((current) => {
-          if (!(materialId in current)) return current
-          const next = { ...current }
-          delete next[materialId]
-          return next
-        })
-      }
-    },
-    [requestMaterialThumbnail]
-  )
-
-  const registerPendingMaterial = useCallback((id: string, file: File): ReferenceMaterialView => {
-    const previewUrl = file.type.startsWith('image/')
-      ? materialUrlsRef.current!.replaceThumbnail(id, file)
-      : null
-    pendingMaterialFilesRef.current.set(id, { file })
-    const material = pendingMaterialView(id, file)
-    materialsRef.current = [...materialsRef.current, material]
-    materialIdsRef.current = new Set([...materialIdsRef.current, id])
-    setMaterials((current) => [...current, material])
-    if (previewUrl !== null) {
-      setThumbnails((current) => ({ ...current, [id]: previewUrl }))
-      void loadImageDimensions(previewUrl).then((dimensions) => {
-        if (
-          dimensions === null ||
-          !mountedRef.current ||
-          !pendingMaterialFilesRef.current.has(id)
-        ) {
-          return
-        }
-        const withDimensions = (entry: ReferenceMaterialView): ReferenceMaterialView =>
-          entry.id === id
-            ? {
-                ...entry,
-                widthPx: dimensions.width,
-                heightPx: dimensions.height,
-                pixelCount: dimensions.width * dimensions.height
-              }
-            : entry
-        materialsRef.current = materialsRef.current.map(withDimensions)
-        setMaterials((current) => current.map(withDimensions))
-      })
-    }
-    return material
-  }, [])
-
   /** Existing-session uploads belong to the renderer-document runtime, so
    * route navigation only drops their display resources. New-session files
    * remain device-local until that later context materializes (ADR-0017). */
@@ -1100,7 +861,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     (file: File): StagedMaterial | null => {
       if (!ports) return null
       const id = crypto.randomUUID()
-      const material = registerPendingMaterial(id, file)
+      const material = displayRef.current.registerPending(id, file)
       const sessionId = selectedIdRef.current
       if (sessionId === null) return { id, kind: material.kind }
       return {
@@ -1109,7 +870,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         completion: ports.actions.stageMaterial(sessionId, id, file)
       }
     },
-    [ports, registerPendingMaterial]
+    [ports]
   )
 
   /** The temporary entry's return path: no server facts are read (no identity
@@ -1127,20 +888,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       selectedIdRef.current = null
       setPendingKey(key)
       pendingKeyRef.current = key
-      for (const materialId of pendingMaterialFilesRef.current.keys()) {
-        dropPendingMaterial(materialId)
-      }
-      thumbnailLoadRef.current += 1
-      thumbnailRequestsRef.current.clear()
-      thumbnailConsumersRef.current.clear()
-      materialUrlsRef.current?.dispose()
-      resultBlobCacheRef.current?.dispose()
-      materialsRef.current = []
-      materialIdsRef.current = new Set()
-      thumbnailIdsRef.current = new Set()
-      setMaterials([])
-      setThumbnails({})
-      setThumbnailStates({})
+      displayRef.current.reset()
       taskRefreshRef.current.leave()
       restoreInFlightRef.current = true
       const actionSnapshot = ports.actions.snapshot(key)
@@ -1149,7 +897,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       const stagedIds = new Set<string>()
       for (const entry of staged) {
         stagedIds.add(entry.localId)
-        registerPendingMaterial(entry.localId, entry.file)
+        displayRef.current.registerPending(entry.localId, entry.file)
       }
       const storage = globalThis.localStorage
       const stored = storage === undefined ? null : readLocalDraft(storage, ports.userId, key)
@@ -1165,44 +913,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       }
       restoreInFlightRef.current = false
     },
-    [
-      applyLoadedDraft,
-      manifest,
-      manifestDefaultDraft,
-      ports,
-      registerPendingMaterial,
-      restoreStoredDraft,
-      writeDraftThrough
-    ]
+    [applyLoadedDraft, manifest, manifestDefaultDraft, ports, restoreStoredDraft, writeDraftThrough]
   )
-
-  /** Drops one material from every local record, thumbnail entry included —
-   * a stale entry would leave consumers (task-card piles) holding a revoked
-   * object URL; the caller settles its bytes (pending file vs server
-   * delete) around this. */
-  const forgetMaterialRecords = useCallback((materialId: string): void => {
-    setMaterials((current) => current.filter((material) => material.id !== materialId))
-    setThumbnails((current) => {
-      if (!(materialId in current)) return current
-      const next = { ...current }
-      delete next[materialId]
-      return next
-    })
-    setThumbnailStates((current) => {
-      if (!(materialId in current)) return current
-      const next = { ...current }
-      delete next[materialId]
-      return next
-    })
-    thumbnailIdsRef.current = new Set(
-      [...thumbnailIdsRef.current].filter((candidate) => candidate !== materialId)
-    )
-    thumbnailConsumersRef.current.delete(materialId)
-    materialsRef.current = materialsRef.current.filter((material) => material.id !== materialId)
-    materialIdsRef.current = new Set(
-      [...materialIdsRef.current].filter((candidate) => candidate !== materialId)
-    )
-  }, [])
 
   const addMaterial = useCallback(
     async (file: File) => {
@@ -1257,21 +969,16 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       } else {
         patchDraft({ promptDocument, references: remaining })
       }
-      forgetMaterialRecords(materialId)
-      materialUrlsRef.current?.releaseMaterial(materialId)
+      displayRef.current.forget(materialId)
+      displayRef.current.dropPending(materialId)
       const sessionId = selectedIdRef.current
       // A locally-held new-session file never reached the server; only its
       // local records die with the removal. Existing-session files may still
       // be uploading, so the runtime resolves their real identity before it
       // retires the server material.
-      if (sessionId === null && pendingMaterialFilesRef.current.has(materialId)) {
-        dropPendingMaterial(materialId)
-        return
-      }
-      dropPendingMaterial(materialId)
       if (sessionId !== null) await ports.actions.deleteMaterial(sessionId, materialId)
     },
-    [bindingsForMode, forgetMaterialRecords, patchDraft, ports]
+    [bindingsForMode, patchDraft, ports]
   )
 
   const requestMaterialRemoval = useCallback(
@@ -1319,7 +1026,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     const frozenDraft = draftRef.current
     const candidates = promptMentionCandidates(
       frozenDraft.references,
-      materialsRef.current,
+      displayRef.current.getSnapshot().materials,
       mentionKindLabelsRef.current
     )
     const { promptDocument, ...plainIntent } = frozenDraft
@@ -1338,7 +1045,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     const key = pendingKeyRef.current ?? `${PENDING_DRAFT_KEY_PREFIX}${crypto.randomUUID()}`
     // Frozen reference order, then deck leftovers: identity binding must not
     // depend on upload completion order.
-    const filesById = new Map(pendingMaterialFilesRef.current)
+    const filesById = new Map(displayRef.current.pendingFiles())
     const files: Array<{ localId: string; file: File }> = []
     const boundIds = new Set<string>()
     for (const reference of frozenDraft.references) {
@@ -1406,39 +1113,6 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const confirmIndeterminateRedo = useCallback(
     (taskId: string) => retryTaskById(taskId),
     [retryTaskById]
-  )
-
-  // The result cache's wire reads the live ports, so a reconnect re-crosses
-  // through the new client instead of a closure-held dead one; creation is
-  // deferred to call time because render-scope closures over refs are
-  // forbidden (react-hooks/refs).
-  const ensureResultBlobCache = useCallback((): ResultBlobCache => {
-    if (resultBlobCacheRef.current === null) {
-      resultBlobCacheRef.current = new ResultBlobCache(async (taskId, slotIndex) => {
-        const currentPorts = portsRef.current
-        if (currentPorts === null) return null
-        const result = await currentPorts.loadResultBlob(taskId, slotIndex)
-        return result.outcome === 'succeeded' ? result.value : null
-      })
-    }
-    return resultBlobCacheRef.current
-  }, [])
-
-  const acquireResultBlobUrl = useCallback(
-    (taskId: string, slotIndex: number) =>
-      ensureResultBlobCache().acquireObjectUrl(taskId, slotIndex),
-    [ensureResultBlobCache]
-  )
-
-  const loadMaterialPreviewBlob = useCallback(
-    async (materialId: string, signal?: AbortSignal): Promise<Blob | null> => {
-      const pending = pendingMaterialFilesRef.current.get(materialId)?.file
-      if (pending !== undefined) return pending
-      if (!ports) return null
-      const result = await ports.loadMaterialBlob(materialId, signal)
-      return result.outcome === 'succeeded' ? result.value : null
-    },
-    [ports]
   )
 
   const staleFields: ReadonlySet<DraftStaleField> = useMemo(
@@ -1553,7 +1227,9 @@ export function useCreationWorkbench(): CreationWorkbenchController {
           (binding) => binding.materialId === materialId
         )
         const replaceable =
-          materialIdsRef.current.has(materialId) &&
+          displayRef.current
+            .getSnapshot()
+            .materials.some((candidate) => candidate.id === materialId) &&
           position >= 0 &&
           countPromptMentions(draftNow.promptDocument, materialId) === 0
         if (!replaceable) {
@@ -1564,7 +1240,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         setMaterialDropRejection(null)
         const sessionIdAtStart = selectedIdRef.current
         const replacementId = crypto.randomUUID()
-        const pendingReplacement = registerPendingMaterial(replacementId, file)
+        const pendingReplacement = displayRef.current.registerPending(replacementId, file)
         const initialKept = draftNow.references.filter(
           (binding) => binding.materialId !== materialId
         )
@@ -1600,28 +1276,22 @@ export function useCreationWorkbench(): CreationWorkbenchController {
               mountedRef.current &&
               selectedIdRef.current === sessionIdAtStart
             ) {
-              forgetMaterialRecords(staged.id)
-              dropPendingMaterial(staged.id)
+              displayRef.current.forget(staged.id)
+              displayRef.current.dropPending(staged.id)
             }
             return
           }
           if (!mountedRef.current || selectedIdRef.current !== sessionIdAtStart) return
-          forgetMaterialRecords(staged.id)
-          dropPendingMaterial(staged.id)
+          displayRef.current.forget(staged.id)
+          displayRef.current.dropPending(staged.id)
           replacement = { id: result.value.id, kind: result.value.kind }
-          if (!materialIdsRef.current.has(result.value.id)) {
-            materialsRef.current = [...materialsRef.current, result.value]
-            materialIdsRef.current = new Set([...materialIdsRef.current, result.value.id])
-            setMaterials((current) => [...current, result.value])
+          const currentMaterials = displayRef.current.getSnapshot().materials
+          if (!currentMaterials.some((material) => material.id === result.value.id)) {
+            displayRef.current.replaceMaterials([...currentMaterials, result.value])
           }
         }
-        if (sessionIdAtStart === null && pendingMaterialFilesRef.current.has(materialId)) {
-          dropPendingMaterial(materialId)
-        } else {
-          materialUrlsRef.current?.releaseMaterial(materialId)
-          dropPendingMaterial(materialId)
-        }
-        forgetMaterialRecords(materialId)
+        displayRef.current.dropPending(materialId)
+        displayRef.current.forget(materialId)
         // Merge into the latest Draft, not the click-time snapshot: prompt,
         // parameter, and other reference edits remain authoritative while
         // the runtime finishes the upload/delete action.
@@ -1647,14 +1317,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         }
       })()
     },
-    [
-      addMaterials,
-      bindingsForMode,
-      forgetMaterialRecords,
-      patchDraft,
-      ports,
-      registerPendingMaterial
-    ]
+    [addMaterials, bindingsForMode, patchDraft, ports]
   )
 
   /**
@@ -1666,7 +1329,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     (payload: ResultDragPayload, targetMaterialId: string | null): void => {
       if (!ports) return
       void (async () => {
-        const blob = (await ensureResultBlobCache().blob(payload.taskId, payload.slotIndex)) ?? null
+        const blob =
+          (await displayRef.current.resultBlob(payload.taskId, payload.slotIndex)) ?? null
         if (!mountedRef.current) return
         if (blob === null) {
           setMaterialUploadFailed(true)
@@ -1682,7 +1346,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         else addMaterials([file])
       })()
     },
-    [addMaterials, ports, replaceMaterial, ensureResultBlobCache]
+    [addMaterials, ports, replaceMaterial]
   )
 
   /** Sidebar entries titled by their persisted prompt. */
@@ -1722,8 +1386,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     materials,
     thumbnails,
     thumbnailStates,
-    retainMaterialThumbnail,
-    requestMaterialThumbnail,
+    retainMaterialThumbnail: display.retain,
+    requestMaterialThumbnail: display.requestThumbnail,
     draft,
     mentionCandidates,
     expandedPrompt,
@@ -1787,8 +1451,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       if (contextKey !== null) ports?.actions.acknowledgeFailure(contextKey)
       setSubmitError(null)
     },
-    acquireResultBlobUrl,
-    loadMaterialPreviewBlob,
+    acquireResultBlobUrl: display.acquireResultBlobUrl,
+    loadMaterialPreviewBlob: display.loadMaterialPreviewBlob,
     requestIndeterminateRedo: (taskId: string) => setIndeterminateTaskId(taskId),
     confirmIndeterminateRedo,
     indeterminateTaskId,
