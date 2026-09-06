@@ -8,6 +8,7 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 > 2026-08-23：连接基座（#104）落地，新增 Server URL / Connection Screen / Connection Probe / Certificate Fingerprint Pin 词群，取代已消亡的「构建期服务器配置」概念。
 > 2026-09-02：任务卡片改由任务自己的冻结 Generation Specification 展示提示词与参数（#186），新增 Draft / Generation Specification 词群以区分「正在编辑」与「提交时冻结」两种生成意图。
 > 2026-09-02：Draft 确定为设备本地状态：仅留存于当前设备、多设备互不相通，提交请求携带完整生成意图，服务端不再保存可编辑草稿。
+> 2026-09-06：Workbench Context 入册，命名创作台「正对着哪个创作内容」及其切换语义，取代散落的 surface / 视图状态说法。
 
 **User**:
 使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
@@ -96,6 +97,10 @@ _Avoid_: 编辑态, 默认态
 **Composer 紧凑态**:
 工作区滚离底部时 Composer 整体收窄收矮成的居中单行形态：素材堆（或收小的添加入口）、单行提示词与提交按钮保留，能力控制行隐藏；点击其内部恢复完整态，直到下一次滚动才收回。
 _Avoid_: 折叠态（与素材堆自身的收拢牌堆撞词）, 最小化
+
+**Workbench Context**:
+Creation Workbench 当前呈现的创作上下文，取值为一个已有 Creation Session、一个仅存本地的待定 Draft、一个尚未提交的新建起点或空白未激活态；进入或离开任一上下文时，任务视图、显示资源与 Draft 编辑状态作为整体一致迁移，切换仪式对所有入口相同。
+_Avoid_: surface, 视图状态, workspace state
 
 **Reading Anchor**:
 结果列表在向上加载历史、宽度变化或卡片重测引起重排时，保持 User 正在阅读的那张任务卡与其视口偏移不变的锚定行为；User 贴底时锚让位于底部跟随，User 主动滚动立即废止在途校正。
