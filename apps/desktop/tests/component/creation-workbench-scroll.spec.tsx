@@ -725,3 +725,85 @@ test('the compact form also shrinks the empty deck add tile', async ({ mount, pa
   const compactTileHeight = (await tile.boundingBox())!.height
   expect(compactTileHeight).toBeLessThan(expandedTileHeight - 12)
 })
+
+// The wheel-flick regression (issue #195 follow-up): a small upward wheel
+// gesture near the top loads exactly one older page, and from the moment the
+// gesture ends the reading anchor must hold pixel-stable on every frame —
+// not merely settle eventually — with no auto-chained page loads. Anchor
+// corrections that reverse the reader's own scroll read as a bounce.
+test('a small upward wheel gesture holds the reading anchor while one older page lands', async ({
+  mount,
+  page
+}) => {
+  const tasks = manyMixedTasks(85, 'flick')
+  await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks }} />)
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  await settledScroller(page)
+  const gallery = page.getByTestId('result-gallery')
+  await expect(gallery).toHaveAttribute('data-total-count', '20')
+
+  // Per-frame sampler: the first card intersecting the viewport is the
+  // reading anchor; its viewport offset must not move once the gesture ends.
+  await page.evaluate(() => {
+    const samples: Array<{ t: number; offset: number | null; count: number }> = []
+    const tick = (): void => {
+      const scroller = document.querySelector('[data-testid="creation-workbench"] main > div')
+      const gallery = document.querySelector('[data-testid="result-gallery"]')
+      if (scroller instanceof HTMLElement && gallery instanceof HTMLElement) {
+        const viewport = scroller.getBoundingClientRect()
+        const card = [...gallery.querySelectorAll<HTMLElement>('[data-task-id]')].find(
+          (candidate) => {
+            const rect = candidate.getBoundingClientRect()
+            return rect.bottom > viewport.top + 1 && rect.top < viewport.bottom - 1
+          }
+        )
+        samples.push({
+          t: Math.round(performance.now()),
+          offset:
+            card === undefined ? null : Math.round(card.getBoundingClientRect().top - viewport.top),
+          count: Number(gallery.dataset.totalCount ?? '0')
+        })
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+    ;(window as unknown as { __flickSamples?: typeof samples }).__flickSamples = samples
+  })
+
+  // A realistic upward flick: real wheel ticks until the first older page
+  // lands, then hands off completely.
+  await page.mouse.move(700, 320)
+  for (let tick = 0; tick < 120; tick += 1) {
+    await page.mouse.wheel(0, -160)
+    if ((await gallery.getAttribute('data-total-count')) === '40') break
+    await page.waitForTimeout(20)
+  }
+  await expect(gallery).toHaveAttribute('data-total-count', '40')
+  const handsOffAt = await page.evaluate(() => Math.round(performance.now()))
+  await page.waitForTimeout(2_000)
+
+  const report = await page.evaluate((since) => {
+    const samples =
+      (
+        window as unknown as {
+          __flickSamples?: Array<{ t: number; offset: number | null; count: number }>
+        }
+      ).__flickSamples ?? []
+    const after = samples.filter((s) => s.t >= since)
+    const offsets = after.filter((s) => s.offset !== null).map((s) => s.offset as number)
+    return {
+      spread: offsets.length > 0 ? Math.max(...offsets) - Math.min(...offsets) : Number.NaN,
+      unmountedFrames: after.filter((s) => s.offset === null).length,
+      countsSeen: [...new Set(after.map((s) => s.count))]
+    }
+  }, handsOffAt)
+  const historyPages = await page.evaluate(() => {
+    const pages = window.__creationDeckTest?.listTaskPages() ?? []
+    return pages.filter((request) => request.cursor !== null).length
+  })
+
+  expect(report.unmountedFrames).toBe(0)
+  expect(report.spread).toBeLessThanOrEqual(2)
+  expect(report.countsSeen).toEqual([40])
+  expect(historyPages).toBe(1)
+})

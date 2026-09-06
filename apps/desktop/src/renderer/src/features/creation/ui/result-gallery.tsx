@@ -148,7 +148,8 @@ export function ResultGallery({
   const galleryRef = useRef<HTMLDivElement | null>(null)
   const readingAnchorRef = useRef<{ readonly taskId: string; readonly offset: number } | null>(null)
   const restoreReadingAnchorRef = useRef<
-    ((anchor: { readonly taskId: string; readonly offset: number }) => void) | null
+    | ((anchor: { readonly taskId: string; readonly offset: number }, immediate: boolean) => void)
+    | null
   >(null)
   const previousTaskCountRef = useRef(orderedTasks.length)
   const [scrollMargin, setScrollMargin] = useState(0)
@@ -202,6 +203,9 @@ export function ResultGallery({
     let captureFrame: number | null = null
     let restoreFrame: number | null = null
     let restoring = false
+    // A restore's own scrollTop write returns as a scroll event; the written
+    // offset separates that echo from a reader's scroll, which must win.
+    let restoreWrite: number | null = null
 
     const taskNode = (taskId: string): HTMLElement | null =>
       [...gallery.querySelectorAll<HTMLElement>('[data-task-id]')].find(
@@ -239,24 +243,26 @@ export function ResultGallery({
       })
     }
 
+    const correctToward = (saved: NonNullable<typeof readingAnchorRef.current>): boolean => {
+      const node = taskNode(saved.taskId)
+      if (node === null) return false
+      const delta =
+        node.getBoundingClientRect().top - scroller.getBoundingClientRect().top - saved.offset
+      if (Math.abs(delta) < 0.5) return false
+      restoreWrite = scroller.scrollTop + delta
+      scroller.scrollTop += delta
+      return true
+    }
+
     const restore = (
       saved: NonNullable<typeof readingAnchorRef.current>,
       attempts: number,
       stable: number
     ): void => {
       restoreFrame = null
-      const node = taskNode(saved.taskId)
       let nextStable = stable
-      if (node !== null) {
-        const offset = node.getBoundingClientRect().top - scroller.getBoundingClientRect().top
-        const delta = offset - saved.offset
-        if (Math.abs(delta) >= 0.5) {
-          scroller.scrollTop += delta
-          nextStable = 0
-        } else {
-          nextStable += 1
-        }
-      }
+      if (correctToward(saved)) nextStable = 0
+      else nextStable += 1
       if (attempts > 0 && nextStable < 2) {
         restoreFrame = requestAnimationFrame(() => restore(saved, attempts - 1, nextStable))
         return
@@ -266,11 +272,17 @@ export function ResultGallery({
       scheduleCapture()
     }
 
-    const startRestore = (saved: NonNullable<typeof readingAnchorRef.current>): void => {
+    const beginRestore = (
+      saved: NonNullable<typeof readingAnchorRef.current>,
+      immediate: boolean
+    ): void => {
       restoring = true
       if (captureFrame !== null) cancelAnimationFrame(captureFrame)
       if (restoreFrame !== null) cancelAnimationFrame(restoreFrame)
       captureFrame = null
+      // Immediate (a page prepended above) corrects before paint — a
+      // deferred correction would paint the wrong anchor for one frame.
+      if (immediate) correctToward(saved)
       restoreFrame = requestAnimationFrame(() => restore(saved, 12, 0))
     }
 
@@ -287,15 +299,24 @@ export function ResultGallery({
         scheduleCapture()
         return
       }
-      startRestore(saved)
+      beginRestore(saved, false)
     })
 
-    restoreReadingAnchorRef.current = startRestore
+    restoreReadingAnchorRef.current = beginRestore
     capture()
     observer.observe(scroller)
     observer.observe(gallery)
     const onScroll = (): void => {
-      if (restoring) return
+      if (restoreWrite !== null) {
+        const echo = restoreWrite
+        restoreWrite = null
+        if (Math.abs(scroller.scrollTop - echo) < 1) return
+      }
+      // The reader scrolled: their position supersedes any in-flight anchor
+      // correction, which would otherwise reverse their scroll as drift.
+      if (restoreFrame !== null) cancelAnimationFrame(restoreFrame)
+      restoreFrame = null
+      restoring = false
       capture()
       scheduleCapture()
     }
@@ -303,7 +324,7 @@ export function ResultGallery({
     return () => {
       observer.disconnect()
       scroller.removeEventListener('scroll', onScroll)
-      if (restoreReadingAnchorRef.current === startRestore) {
+      if (restoreReadingAnchorRef.current === beginRestore) {
         restoreReadingAnchorRef.current = null
       }
       if (captureFrame !== null) cancelAnimationFrame(captureFrame)
@@ -311,17 +332,11 @@ export function ResultGallery({
     }
   }, [galleryActive, scrollerRef])
 
-  useLayoutEffect(() => {
-    const previousCount = previousTaskCountRef.current
-    previousTaskCountRef.current = orderedTasks.length
-    if (previousCount === orderedTasks.length) return
-    const saved = readingAnchorRef.current
-    if (saved !== null) restoreReadingAnchorRef.current?.(saved)
-  }, [orderedTasks.length])
-
   // This list shares the workspace scroller with the title above it. Feed
   // that live offset to the virtualizer so responsive/header changes do not
   // turn its item coordinates into fixed-height assumptions.
+  const establishedMarginRef = useRef<number | null>(null)
+  const measureMarginRef = useRef<(() => void) | null>(null)
   useLayoutEffect(() => {
     const gallery = galleryRef.current
     const scroller = scrollerRef.current
@@ -331,9 +346,22 @@ export function ResultGallery({
         gallery.getBoundingClientRect().top -
         scroller.getBoundingClientRect().top +
         scroller.scrollTop
+      // Content above the gallery (the history note) moving shifts every
+      // card; scroll the same delta before paint to hold the reading
+      // position. First establishment and a bottom-pinned reader (the bottom
+      // follow owns those) do not bump; `established` survives effect
+      // re-runs so a re-run re-establishes instead of double-bumping.
+      const established = establishedMarginRef.current
+      if (established !== null && Math.abs(next - established) >= 0.5) {
+        const distanceFromBottom =
+          scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+        if (distanceFromBottom > 2) scroller.scrollTop += next - established
+      }
+      establishedMarginRef.current = next
       setScrollMargin((current) => (Math.abs(current - next) < 0.5 ? current : next))
     }
     measure()
+    measureMarginRef.current = measure
     const observer = new ResizeObserver(measure)
     observer.observe(gallery.parentElement ?? gallery)
     observer.observe(scroller)
@@ -341,8 +369,25 @@ export function ResultGallery({
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', measure)
+      if (measureMarginRef.current === measure) measureMarginRef.current = null
     }
   }, [orderedTasks.length, scrollerRef])
+
+  // The history note's mount/unmount changes the layout above the gallery;
+  // measure in that same commit (a ResizeObserver fires one observable frame
+  // too late) and before the count-change impose, which composes with it.
+  const taskHistory = workbench.taskHistory
+  useLayoutEffect(() => {
+    measureMarginRef.current?.()
+  }, [taskHistory.failed, taskHistory.hasMore, taskHistory.loading])
+
+  useLayoutEffect(() => {
+    const previousCount = previousTaskCountRef.current
+    previousTaskCountRef.current = orderedTasks.length
+    if (previousCount === orderedTasks.length) return
+    const saved = readingAnchorRef.current
+    if (saved !== null) restoreReadingAnchorRef.current?.(saved, true)
+  }, [orderedTasks.length])
 
   if (tasks.length === 0) {
     return (
