@@ -124,6 +124,14 @@ type taskView struct {
 		TerminalCause   *string `json:"terminal_cause"`
 		CreatedAt       string  `json:"created_at"`
 		UpdatedAt       string  `json:"updated_at"`
+		Snapshot        *struct {
+			Prompt     string  `json:"prompt"`
+			Model      string  `json:"model"`
+			Mode       string  `json:"mode"`
+			Ratio      *string `json:"ratio"`
+			Resolution *string `json:"resolution"`
+			Quantity   int     `json:"quantity"`
+		} `json:"snapshot"`
 	} `json:"task"`
 	Specification *struct {
 		Prompt     string  `json:"prompt"`

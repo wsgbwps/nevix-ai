@@ -177,14 +177,18 @@ func (r *GenerationTaskRepository) InsertAdmittedTask(ctx context.Context, tx do
 
 // --- creator-scoped queries -------------------------------------------------
 
-const taskSummaryColumns = `id, session_id, owner_user_id, media_type, status, slot_count,
+// The list summary carries the frozen creation-intent snapshot, so it reads
+// the specification under the same NOT NULL, fail-the-read rule as the detail
+// path.
+const taskSummaryColumns = `id, session_id, owner_user_id, media_type, specification, status, slot_count,
 	terminal_cause, cancel_requested_at IS NOT NULL, created_at, updated_at, terminal_at`
 
 func scanTaskSummary(row pgx.Row) (domain.GenerationTask, error) {
 	var t domain.GenerationTask
 	var media, status string
 	var cause *string
-	if err := row.Scan(&t.ID, &t.SessionID, &t.OwnerID, &media, &status, &t.SlotCount,
+	var specJSON []byte
+	if err := row.Scan(&t.ID, &t.SessionID, &t.OwnerID, &media, &specJSON, &status, &t.SlotCount,
 		&cause, &t.CancelRequested, &t.CreatedAt, &t.UpdatedAt, &t.TerminalAt); err != nil {
 		return domain.GenerationTask{}, err
 	}
@@ -193,6 +197,9 @@ func scanTaskSummary(row pgx.Row) (domain.GenerationTask, error) {
 	if cause != nil {
 		marked := domain.TerminalCause(*cause)
 		t.TerminalCause = &marked
+	}
+	if err := json.Unmarshal(specJSON, &t.Spec); err != nil {
+		return domain.GenerationTask{}, fmt.Errorf("creation: decode generation specification: %w", err)
 	}
 	return t, nil
 }
