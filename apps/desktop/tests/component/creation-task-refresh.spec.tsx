@@ -19,6 +19,7 @@ function runningTask(id: string, updatedAt: string): ScriptedTask {
     status: 'processing',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-09-01T09:00:00Z',

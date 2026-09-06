@@ -825,6 +825,7 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
     status: 'partially_succeeded',
     mediaType: 'image',
     slotCount: 2,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',
@@ -877,6 +878,7 @@ test('a task card keeps detail facts paired with the detail change criterion', a
     status: 'succeeded',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-09-05T01:00:00Z',
@@ -888,6 +890,7 @@ test('a task card keeps detail facts paired with the detail change criterion', a
       status: 'queued',
       mediaType: 'image',
       slotCount: 1,
+      snapshot: null,
       cancelRequested: false,
       terminalCause: null,
       createdAt: '2026-09-05T01:00:00Z',
@@ -916,6 +919,7 @@ test('a failed slot renders the concrete persisted diagnostic instead of only a 
     status: 'failed',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-09-01T02:59:32Z',
@@ -954,6 +958,7 @@ test('cancel requests best-effort convergence on a running task', async ({ mount
     status: 'processing',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',
@@ -979,6 +984,7 @@ test('indeterminate outcomes require an explicit risk confirmation before redo',
     status: 'failed',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: 'provider_outcome_indeterminate',
     createdAt: '2026-08-29T09:00:00Z',
@@ -1019,6 +1025,7 @@ test('an SSE invalidation refetches the task list', async ({ mount, page }) => {
     status: 'processing',
     mediaType: 'video',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:05:00Z',
@@ -1051,6 +1058,7 @@ test('the gallery lists tasks old→new with the newest nearest the composer', a
     status: 'succeeded',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-28T09:00:00Z',
@@ -1064,6 +1072,7 @@ test('the gallery lists tasks old→new with the newest nearest the composer', a
     status: 'processing',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',
@@ -1086,6 +1095,7 @@ test('clearing the prompt keeps the submitted tasks on screen', async ({ mount, 
     status: 'processing',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',
@@ -1116,6 +1126,7 @@ test('a task card shows its frozen specification, never the live draft', async (
     status: 'succeeded',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',
@@ -1155,6 +1166,47 @@ test('a task card shows its frozen specification, never the live draft', async (
   await expect(menu).toContainText('frozen-at-submit prompt')
 })
 
+test('a task card renders its list snapshot before any detail read lands', async ({
+  mount,
+  page
+}) => {
+  const frozen: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000frz2',
+    sessionId: scriptedSessionId,
+    status: 'processing',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: {
+      prompt: 'snapshot-at-submit prompt',
+      model: 'snapshot-model',
+      mode: 'text-to-image',
+      ratio: '4:3',
+      resolution: '2K',
+      quantity: 1,
+      durationSeconds: null,
+      references: []
+    },
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:00:01Z',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  await mount(
+    <CreationWorkbenchStory taskScript={{ tasks: [frozen], taskDetailsDeferred: true }} />
+  )
+  await selectFirstSession(page)
+
+  // The list summary's own snapshot paints the frozen header immediately;
+  // the deferred detail — which carries no specification here — cannot be
+  // the source.
+  const card = page.getByTestId(`task-${frozen.id}`)
+  await expect(card).toContainText('snapshot-at-submit prompt')
+  await expect(card).toContainText('snapshot-model')
+  await expect(card).toContainText('4:3')
+})
+
 test('a task card fans its frozen reference materials', async ({ mount, page }) => {
   // The deck visual replicates on the card: session materials resolve to
   // their thumbnails, while a material deleted after submission keeps only
@@ -1165,6 +1217,7 @@ test('a task card fans its frozen reference materials', async ({ mount, page }) 
     status: 'succeeded',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-09-02T09:00:00Z',
@@ -1220,6 +1273,7 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
     status: 'succeeded',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-09-02T09:00:00Z',
@@ -1295,6 +1349,7 @@ test("a terminal card's slot shape never tracks the live draft ratio", async ({ 
     status: 'cancelled',
     mediaType: 'video',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: true,
     terminalCause: null,
     createdAt: '2026-09-01T09:00:00Z',
@@ -1335,6 +1390,7 @@ test('a task whose detail carries no specification shows task-view facts only', 
     status: 'processing',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',
@@ -1382,6 +1438,7 @@ test('a failed result-media read is explicit and retries from the slot', async (
     status: 'succeeded',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',
@@ -1429,6 +1486,7 @@ test('switching sessions retires a late result-media read before a fresh display
     status: 'succeeded',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',
@@ -1484,6 +1542,7 @@ test('a succeeded image slot offers a keyboard-reachable download', async ({ mou
     status: 'succeeded',
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',
@@ -1546,6 +1605,7 @@ test('a policy-rejected task keeps editing paths but no identical quick retry', 
     status: 'failed',
     mediaType: 'image',
     slotCount: 2,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt: '2026-08-29T09:00:00Z',

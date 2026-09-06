@@ -87,6 +87,7 @@ function taskView(
     status,
     mediaType: 'image',
     slotCount: 1,
+    snapshot: null,
     cancelRequested: false,
     terminalCause: null,
     createdAt,

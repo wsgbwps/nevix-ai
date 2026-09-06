@@ -1938,6 +1938,13 @@ components:
           type: string
           format: date-time
           nullable: true
+        snapshot:
+          description: >-
+            提交时刻冻结的创建意图快照（与详情 specification 同源同形状）；可空——
+            无快照的载荷由消费方回退为任务自带数据（状态/媒体类型/槽位）。
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/GenerationSpecification"
     GenerationFailureDiagnostic:
       type: object
       description: >-
@@ -2057,58 +2064,62 @@ components:
           items:
             $ref: "#/components/schemas/GenerationSlot"
         specification:
-          type: object
           description: 创建者私有的冻结 Generation Specification（仅详情返回）。
-          required:
-            - schema_version
-            - media_type
-            - prompt
-            - model
-            - mode
-            - manifest_version
-            - quantity
-            - references
-          properties:
-            schema_version:
-              type: integer
-            media_type:
-              type: string
-              enum: [image, video]
-            prompt:
-              type: string
-            model:
-              type: string
-            mode:
-              type: string
-            manifest_version:
-              type: integer
-            ratio:
-              type: string
-              nullable: true
-            resolution:
-              type: string
-              nullable: true
-            quantity:
-              type: integer
-            duration_seconds:
-              type: integer
-              nullable: true
-            references:
-              type: array
-              items:
-                type: object
-                required: [material_id, role, kind, claims_version]
-                properties:
-                  material_id:
-                    type: string
-                    format: uuid
-                  role:
-                    type: string
-                  kind:
-                    type: string
-                    enum: [image, video, audio]
-                  claims_version:
-                    type: integer
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/GenerationSpecification"
+    GenerationSpecification:
+      type: object
+      required:
+        - schema_version
+        - media_type
+        - prompt
+        - model
+        - mode
+        - manifest_version
+        - quantity
+        - references
+      properties:
+        schema_version:
+          type: integer
+        media_type:
+          type: string
+          enum: [image, video]
+        prompt:
+          type: string
+        model:
+          type: string
+        mode:
+          type: string
+        manifest_version:
+          type: integer
+        ratio:
+          type: string
+          nullable: true
+        resolution:
+          type: string
+          nullable: true
+        quantity:
+          type: integer
+        duration_seconds:
+          type: integer
+          nullable: true
+        references:
+          type: array
+          items:
+            type: object
+            required: [material_id, role, kind, claims_version]
+            properties:
+              material_id:
+                type: string
+                format: uuid
+              role:
+                type: string
+              kind:
+                type: string
+                enum: [image, video, audio]
+              claims_version:
+                type: integer
     GenerationTaskList:
       type: object
       required:

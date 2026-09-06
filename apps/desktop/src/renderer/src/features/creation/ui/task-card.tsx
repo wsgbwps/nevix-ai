@@ -63,10 +63,10 @@ const quietButtonClass =
  * with.
  *
  * Each card reads the prompt and parameters from the task's own frozen
- * Generation Specification in its detail — never the session draft, which
- * may have moved on. Before the detail arrives the header shows task-view
- * facts only (status, media type), and unsettled slots borrow the draft's
- * ratio purely for placeholder geometry.
+ * Generation Specification — the detail's copy once it arrives, otherwise the
+ * list summary's task snapshot — never the session draft, which may have
+ * moved on. Payloads without any snapshot render task-view facts only
+ * (status, media type).
  */
 export function TaskCard({
   workbench,
@@ -78,7 +78,9 @@ export function TaskCard({
   const { t } = useTranslation('creation')
   const detail = workbench.taskDetails[task.id]
   const snapshot = detail?.task ?? task
-  const spec = detail?.specification ?? null
+  // The frozen intent comes from the detail when it has arrived, otherwise
+  // from the list summary's own snapshot — the live draft is never a source.
+  const spec = detail?.specification ?? task.snapshot ?? null
   const terminal = isTerminalTaskStatus(snapshot.status)
   const indeterminate = snapshot.terminalCause !== null
   const retryUncompleted =
@@ -432,8 +434,8 @@ function TaskReferencePile({
   )
 }
 
-/** The frozen-specification facts behind a task; while no detail (or no
- * specification in it) has arrived, only the task's own identity rows show. */
+/** The frozen-specification facts behind a task; with neither a detail
+ * specification nor a list snapshot, only the task's own identity rows show. */
 function TaskDetailsMenu({
   task,
   spec

@@ -86,6 +86,7 @@ export interface GenerationTaskView {
   readonly createdAt: string
   readonly updatedAt: string
   readonly terminalAt: string | null
+  readonly snapshot: GenerationSpecificationView | null
 }
 
 /** One reference inside the task's frozen specification: the material's
@@ -198,6 +199,12 @@ function parseTask(payload: unknown): GenerationTaskView | null {
   if (slotCountRaw === undefined || slotCountRaw === null || slotCountRaw < 1) return null
   const cancelRaw = isRecord(payload) ? payload['cancel_requested'] : undefined
   if (typeof cancelRaw !== 'boolean') return null
+  // The snapshot is optional like the detail's specification, and equally
+  // strict when present: a malformed snapshot fails the whole task closed
+  // instead of guessing the frozen intent.
+  const rawSnapshot = isRecord(payload) ? payload['snapshot'] : undefined
+  const snapshot = rawSnapshot == null ? null : parseSpecification(rawSnapshot)
+  if (rawSnapshot != null && snapshot === null) return null
   return {
     id,
     sessionId,
@@ -208,7 +215,8 @@ function parseTask(payload: unknown): GenerationTaskView | null {
     terminalCause: nullableStr(payload, 'terminal_cause') ?? null,
     createdAt,
     updatedAt,
-    terminalAt: nullableStr(payload, 'terminal_at') ?? null
+    terminalAt: nullableStr(payload, 'terminal_at') ?? null,
+    snapshot
   }
 }
 

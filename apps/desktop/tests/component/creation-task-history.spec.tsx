@@ -28,6 +28,7 @@ function mixedHistoryTasks(count: number, tag: string): ScriptedTask[] {
       status: failed ? 'failed' : 'succeeded',
       mediaType: video ? 'video' : 'image',
       slotCount: 1,
+      snapshot: null,
       cancelRequested: false,
       terminalCause: null,
       createdAt: created,

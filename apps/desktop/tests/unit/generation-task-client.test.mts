@@ -245,6 +245,70 @@ test('a malformed specification fails the whole detail closed', async () => {
   }
 })
 
+/** A list-summary task whose snapshot varies per case; `undefined` omits the key. */
+function taskSummaryWith(snapshot: unknown): unknown {
+  return {
+    id: 'dddddddd-0000-4000-8000-000000000004',
+    session_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+    status: 'queued',
+    media_type: 'image',
+    slot_count: 2,
+    cancel_requested: false,
+    terminal_cause: null,
+    created_at: '2026-09-01T02:59:32Z',
+    updated_at: '2026-09-01T03:00:00Z',
+    terminal_at: null,
+    ...(snapshot === undefined ? {} : { snapshot })
+  }
+}
+
+test('the frozen snapshot rides list summaries into the gallery view', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  const result = await withFetch(
+    { tasks: [taskSummaryWith(frozenSpecification)], next_cursor: null },
+    () => client.listTasks('token', 'aaaaaaaa-0000-4000-8000-000000000001')
+  )
+
+  assert.equal(result.outcome, 'succeeded')
+  if (result.outcome !== 'succeeded') return
+  assert.deepEqual(result.value.tasks[0].snapshot, {
+    prompt: '夏季跑鞋主图，暖光背景',
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '7:3',
+    resolution: '2K',
+    quantity: 2,
+    durationSeconds: null,
+    references: [
+      { materialId: 'cccccccc-0000-4000-8000-000000000003', role: 'reference', kind: 'image' }
+    ]
+  })
+})
+
+test('a list summary without a snapshot keeps parsing with a null fallback', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  for (const payload of [taskSummaryWith(undefined), taskSummaryWith(null)]) {
+    const result = await withFetch({ tasks: [payload], next_cursor: null }, () =>
+      client.listTasks('token', 'aaaaaaaa-0000-4000-8000-000000000001')
+    )
+    assert.equal(result.outcome, 'succeeded')
+    if (result.outcome !== 'succeeded') return
+    assert.equal(result.value.tasks[0].snapshot, null)
+  }
+})
+
+test('a malformed list snapshot fails the whole page closed', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  const result = await withFetch(
+    {
+      tasks: [taskSummaryWith({ ...frozenSpecification, quantity: undefined })],
+      next_cursor: null
+    },
+    () => client.listTasks('token', 'aaaaaaaa-0000-4000-8000-000000000001')
+  )
+  assert.equal(result.outcome, 'network-failure')
+})
+
 test('submitTask posts the idempotency key with the full generation intent', async () => {
   const calls: Array<{ method: string; url: string; bearer: string | null; body: string | null }> =
     []

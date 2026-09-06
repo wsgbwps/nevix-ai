@@ -271,16 +271,17 @@ func copyBuffer(w http.ResponseWriter, src interface{ Read([]byte) (int, error) 
 // --- wire shapes -------------------------------------------------------------
 
 type generationTaskResource struct {
-	ID              string  `json:"id"`
-	SessionID       string  `json:"session_id"`
-	Status          string  `json:"status"`
-	MediaType       string  `json:"media_type"`
-	SlotCount       int     `json:"slot_count"`
-	CancelRequested bool    `json:"cancel_requested"`
-	TerminalCause   *string `json:"terminal_cause"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-	TerminalAt      *string `json:"terminal_at"`
+	ID              string                  `json:"id"`
+	SessionID       string                  `json:"session_id"`
+	Status          string                  `json:"status"`
+	MediaType       string                  `json:"media_type"`
+	SlotCount       int                     `json:"slot_count"`
+	CancelRequested bool                    `json:"cancel_requested"`
+	TerminalCause   *string                 `json:"terminal_cause"`
+	CreatedAt       string                  `json:"created_at"`
+	UpdatedAt       string                  `json:"updated_at"`
+	TerminalAt      *string                 `json:"terminal_at"`
+	Snapshot        *generationSpecResource `json:"snapshot,omitempty"`
 }
 
 func toTaskResource(task domain.GenerationTask) generationTaskResource {
@@ -293,6 +294,7 @@ func toTaskResource(task domain.GenerationTask) generationTaskResource {
 		CancelRequested: task.CancelRequested,
 		CreatedAt:       task.CreatedAt.UTC().Format(timeRFC3339),
 		UpdatedAt:       task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Snapshot:        toSpecResource(task),
 	}
 	if task.TerminalCause != nil {
 		cause := string(*task.TerminalCause)
@@ -400,14 +402,9 @@ type generationSpecReference struct {
 	ClaimsVersion int    `json:"claims_version"`
 }
 
-func toTaskDetail(task domain.GenerationTask, slots []domain.GenerationSlot) generationTaskDetailResource {
-	detail := generationTaskDetailResource{
-		Task:  toTaskResource(task),
-		Slots: make([]generationSlotResource, 0, len(slots)),
-	}
-	for _, slot := range slots {
-		detail.Slots = append(detail.Slots, toSlotResource(task, slot))
-	}
+// toSpecResource projects the task's frozen specification; the detail's
+// specification and every task summary's snapshot come from this one place.
+func toSpecResource(task domain.GenerationTask) *generationSpecResource {
 	refs := make([]generationSpecReference, 0, len(task.Spec.References))
 	for _, reference := range task.Spec.References {
 		refs = append(refs, generationSpecReference{
@@ -417,7 +414,7 @@ func toTaskDetail(task domain.GenerationTask, slots []domain.GenerationSlot) gen
 			ClaimsVersion: reference.ClaimsVersion,
 		})
 	}
-	detail.Specification = &generationSpecResource{
+	return &generationSpecResource{
 		SchemaVersion:   task.Spec.SchemaVersion,
 		MediaType:       string(task.Media),
 		Prompt:          task.Spec.Prompt,
@@ -430,6 +427,17 @@ func toTaskDetail(task domain.GenerationTask, slots []domain.GenerationSlot) gen
 		DurationSeconds: task.Spec.DurationSeconds,
 		References:      refs,
 	}
+}
+
+func toTaskDetail(task domain.GenerationTask, slots []domain.GenerationSlot) generationTaskDetailResource {
+	detail := generationTaskDetailResource{
+		Task:  toTaskResource(task),
+		Slots: make([]generationSlotResource, 0, len(slots)),
+	}
+	for _, slot := range slots {
+		detail.Slots = append(detail.Slots, toSlotResource(task, slot))
+	}
+	detail.Specification = toSpecResource(task)
 	return detail
 }
 

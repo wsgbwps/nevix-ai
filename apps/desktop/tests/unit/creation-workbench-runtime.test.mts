@@ -84,6 +84,7 @@ function acceptedTask(sessionId: string, id: string): CreationApiResult<Generati
         status: 'queued' as const,
         mediaType: 'image' as const,
         slotCount: 1,
+        snapshot: null,
         cancelRequested: false,
         terminalCause: null,
         createdAt: '2026-09-05T00:00:00Z',
