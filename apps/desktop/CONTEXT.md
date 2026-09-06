@@ -97,6 +97,10 @@ _Avoid_: 编辑态, 默认态
 工作区滚离底部时 Composer 整体收窄收矮成的居中单行形态：素材堆（或收小的添加入口）、单行提示词与提交按钮保留，能力控制行隐藏；点击其内部恢复完整态，直到下一次滚动才收回。
 _Avoid_: 折叠态（与素材堆自身的收拢牌堆撞词）, 最小化
 
+**Reading Anchor**:
+结果列表在向上加载历史、宽度变化或卡片重测引起重排时，保持 User 正在阅读的那张任务卡与其视口偏移不变的锚定行为；User 贴底时锚让位于底部跟随，User 主动滚动立即废止在途校正。
+_Avoid_: scroll restore, 滚动位置记忆
+
 **Asset Library**:
 AI Creation Domain 拥有的媒体资产浏览与复用页面；媒体资产的独立生命周期不使该页面成为独立 Domain，不与 renderer 静态 assets 混同。
 _Avoid_: Media Asset Domain, Asset Workspace
