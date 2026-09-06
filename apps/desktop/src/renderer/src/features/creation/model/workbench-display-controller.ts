@@ -174,10 +174,6 @@ export class WorkbenchDisplayController {
     return material
   }
 
-  hasPending(materialId: string): boolean {
-    return this.#pendingFiles.has(materialId)
-  }
-
   /** Pending files keyed by their synthetic material id; the submit chain
    * freezes them in reference order plus deck leftovers. */
   pendingFiles(): ReadonlyMap<string, PendingMaterialFile> {

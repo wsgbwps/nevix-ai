@@ -34,7 +34,6 @@ export interface WorkbenchDisplayBinding {
     signal?: AbortSignal
   ) => Promise<Blob | null>
   readonly pendingFiles: () => ReadonlyMap<string, PendingMaterialFile>
-  readonly hasPending: (materialId: string) => boolean
 }
 
 const noopSubscribe = (): (() => void) => () => undefined
@@ -53,8 +52,7 @@ const idleDisplayMethods = {
   acquireResultBlobUrl: (): Promise<ResultBlobUrlLease | null> => Promise.resolve(null),
   resultBlob: (): Promise<Blob | null> => Promise.resolve(null),
   loadMaterialPreviewBlob: (): Promise<Blob | null> => Promise.resolve(null),
-  pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => new Map(),
-  hasPending: (): boolean => false
+  pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => new Map()
 }
 
 /** One controller per connected runtime; a runtime identity change replaces
@@ -107,8 +105,7 @@ export function useWorkbenchDisplay(deps: WorkbenchDisplayDeps | null): Workbenc
         controller.resultBlob(taskId, slotIndex),
       loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal): Promise<Blob | null> =>
         controller.loadMaterialPreviewBlob(materialId, signal),
-      pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => controller.pendingFiles(),
-      hasPending: (materialId: string): boolean => controller.hasPending(materialId)
+      pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => controller.pendingFiles()
     }
   }, [controller])
 

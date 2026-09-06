@@ -111,7 +111,6 @@ test('reset() clears snapshots and pending files in the same tick, revoking prev
   const preview = controller.getSnapshot().thumbnails.p1
   assert.ok(preview !== undefined)
   assert.equal(controller.getSnapshot().materials.length, 1)
-  assert.equal(controller.hasPending('p1'), true)
 
   controller.reset()
 
@@ -119,7 +118,6 @@ test('reset() clears snapshots and pending files in the same tick, revoking prev
   assert.deepEqual(snapshot.materials, [])
   assert.deepEqual(snapshot.thumbnails, {})
   assert.deepEqual(snapshot.thumbnailStates, {})
-  assert.equal(controller.hasPending('p1'), false)
   assert.ok(urls.revoked.includes(preview))
 })
 
