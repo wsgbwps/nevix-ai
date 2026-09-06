@@ -391,6 +391,13 @@ function parseTaskPage(payload: unknown): TaskPage | null {
   return { tasks, nextCursor: typeof nextCursor === 'string' ? nextCursor : null }
 }
 
+/** One keyset page of the session's tasks (contracts listSessionGenerationTasks). */
+export interface TaskListPageRequest {
+  readonly limit: number
+  /** The previous page's nextCursor; absent reads the newest page. */
+  readonly cursor?: string | null
+}
+
 /**
  * Creates the generation-task client over one configured server URL. Paths
  * mirror contracts/creation.yaml exactly; parsing fails closed.
@@ -401,7 +408,11 @@ export function createGenerationTaskClient(serverUrl: string): {
     sessionId: string,
     input: TaskSubmitInput
   ): Promise<CreationApiResult<GenerationTaskDetail>>
-  listTasks(token: string, sessionId: string): Promise<CreationApiResult<TaskPage>>
+  listTasks(
+    token: string,
+    sessionId: string,
+    page?: TaskListPageRequest
+  ): Promise<CreationApiResult<TaskPage>>
   getTask(token: string, taskId: string): Promise<CreationApiResult<GenerationTaskDetail>>
   cancelTask(token: string, taskId: string): Promise<CreationApiResult<GenerationTaskDetail>>
   retryTask(
@@ -468,16 +479,19 @@ export function createGenerationTaskClient(serverUrl: string): {
         },
         token
       }).then(detailOf),
-    listTasks: async (token, sessionId) => {
+    listTasks: async (token, sessionId, page) => {
       const result = await request(serverUrl, {
         method: 'GET',
         path: `/creation/sessions/${sessionId}/tasks`,
-        query: { limit: '50' },
+        query: {
+          limit: String(page?.limit ?? 50),
+          ...(page?.cursor ? { cursor: page.cursor } : {})
+        },
         token
       })
       if (result.outcome !== 'succeeded') return result
-      const page = parseTaskPage(result.payload)
-      return page ? { outcome: 'succeeded', value: page } : { outcome: 'network-failure' }
+      const parsed = parseTaskPage(result.payload)
+      return parsed ? { outcome: 'succeeded', value: parsed } : { outcome: 'network-failure' }
     },
     getTask: async (token, taskId) =>
       detailOf(

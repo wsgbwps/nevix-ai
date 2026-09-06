@@ -50,6 +50,7 @@ import {
 } from './prompt-document'
 import { useCreationRuntime, type CreationRuntime } from './runtime-context'
 import { useTaskRefreshModule } from './task-refresh/use-task-refresh'
+import type { TaskHistoryStatus } from './task-refresh/task-refresh-controller'
 import type { WorkbenchActionState } from './workbench-runtime'
 
 export type WorkbenchStatus = 'loading' | 'ready' | 'error'
@@ -195,6 +196,10 @@ export interface CreationWorkbenchController {
   /** Refresh-module snapshot fields (see TaskRefreshSnapshot). */
   taskDetailStaleIds: ReadonlySet<string>
   taskListStale: boolean
+  /** Upward history pagination status (see TaskRefreshSnapshot.history). */
+  taskHistory: TaskHistoryStatus
+  /** Loads the next older history page into the displayed session. */
+  loadOlderTasks: () => void
   submitDisabled: boolean
   submitBlockedReason: 'unavailable' | 'stale' | 'length' | null
   submit: () => void
@@ -1753,6 +1758,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     taskDetails,
     taskDetailStaleIds: taskRefresh.snapshot.staleTaskIds,
     taskListStale: taskRefresh.snapshot.listFailed,
+    taskHistory: taskRefresh.snapshot.history,
+    loadOlderTasks: taskRefresh.requestOlderTasks,
     submitDisabled: submitBlocked !== null || actionBlocksSubmission,
     submitBlockedReason: submitBlocked,
     submit: submitCallback,

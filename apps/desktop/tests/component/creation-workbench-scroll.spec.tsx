@@ -52,6 +52,13 @@ function materialId(tag: string, n: number): string {
   return `material-${tag}-${String(n).padStart(4, '0')}`
 }
 
+// A genuinely-new task for push scenarios: under the paginated fixture the
+// pushed task must be newer than every seeded task to land at the bottom.
+function freshTask(tag: string, minute: number): ScriptedTask {
+  const at = new Date(Date.UTC(2026, 7, 2, 0, minute)).toISOString()
+  return { ...manyMixedTasks(1, tag)[0], createdAt: at, updatedAt: at }
+}
+
 function manyMixedTasks(count: number, tag: string, withReferences = false): ScriptedTask[] {
   return Array.from({ length: count }, (_, index) => {
     const n = index + 1
@@ -210,6 +217,21 @@ async function userScrollTo(
   }, target)
 }
 
+// Pages the scripted history in through the real near-top trigger: each
+// scroll to the workspace top asks the refresh module for one more page
+// until the fixture's keyset history is exhausted (issue #195).
+async function loadFullHistory(page: Page, scroller: Locator, total: number): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await userScrollTo(scroller, 'top')
+        return page.getByTestId('result-gallery').getAttribute('data-total-count')
+      },
+      { timeout: 30_000, interval: 150 }
+    )
+    .toBe(String(total))
+}
+
 test('the initial bottom follow survives a delayed virtualizer correction', async ({
   mount,
   page
@@ -347,7 +369,9 @@ test('a large task history mounts and loads media only around the visible window
 
   const scroller = await settledScroller(page)
   const gallery = page.getByTestId('result-gallery')
-  await expect(gallery).toHaveAttribute('data-total-count', String(tasks.length))
+  // The entry window loads only the newest page; static media bounds hold
+  // before any paging journey accumulates transfers.
+  await expect(gallery).toHaveAttribute('data-total-count', '20')
 
   const mountedCards = gallery.locator('section[data-testid^="task-"]')
   await expect.poll(() => mountedCards.count()).toBeGreaterThan(0)
@@ -369,6 +393,12 @@ test('a large task history mounts and loads media only around the visible window
     () => window.__creationDeckTest?.materialBlobCalls().length ?? 0
   )
   expect(bottomThumbnailLoads).toBeLessThan(20)
+
+  // Paging the whole history in through the near-top trigger keeps both the
+  // loaded set and the mounting bounded: no 50-task display cap exists.
+  await loadFullHistory(page, scroller, tasks.length)
+  await expect(gallery).toHaveAttribute('data-total-count', String(tasks.length))
+  expect(await mountedCards.count()).toBeLessThan(20)
 
   await userScrollTo(scroller, 'top')
   await expect
@@ -403,9 +433,21 @@ test('a new task follows at the bottom but preserves an older reading position',
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
   const scroller = await settledScroller(page)
 
-  const followed = manyMixedTasks(1, 'bottom')[0]
+  const followed = freshTask('bottom', 1)
   await page.evaluate((task) => window.__creationDeckTest?.pushTask(task as never), followed)
   await expect(page.getByTestId(`task-${followed.id}`)).toBeVisible()
+  await expect
+    .poll(async () =>
+      scroller.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+      )
+    )
+    .toBe(true)
+
+  // Read the whole session history upward before pinning the older anchor:
+  // the reading-position contract must hold over the fully paged-in set.
+  await loadFullHistory(page, scroller, tasks.length + 1)
+  await page.getByTestId('back-to-bottom').click()
   await expect
     .poll(async () =>
       scroller.evaluate(
@@ -420,7 +462,7 @@ test('a new task follows at the bottom but preserves an older reading position',
   // in-flight user scroll legitimately still owns the viewport position.
   await page.waitForTimeout(200)
   const anchor = await visibleTaskAnchor(page)
-  const pushed = manyMixedTasks(1, 'new')[0]
+  const pushed = freshTask('new', 2)
   await page.evaluate((task) => window.__creationDeckTest?.pushTask(task as never), pushed)
 
   await expect(page.getByTestId('result-gallery')).toHaveAttribute(
@@ -467,7 +509,7 @@ test('a new task follows at the bottom but preserves an older reading position',
   await page.evaluate(() => {
     window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }))
   })
-  const afterScrollbar = manyMixedTasks(1, 'scrollbar')[0]
+  const afterScrollbar = freshTask('scrollbar', 3)
   await page.evaluate((task) => window.__creationDeckTest?.pushTask(task as never), afterScrollbar)
   await expect(page.getByTestId(`task-${afterScrollbar.id}`)).toBeVisible()
   await expect
@@ -484,6 +526,7 @@ test('action notice changes preserve a long-history reading anchor', async ({ mo
   await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks, submitDeferred: true }} />)
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
   const scroller = await settledScroller(page)
+  await loadFullHistory(page, scroller, tasks.length)
   await userScrollTo(scroller, { fraction: 1 / 3 })
   await expect(page.getByTestId('back-to-bottom')).toBeVisible()
   await page.waitForTimeout(200)
@@ -514,7 +557,10 @@ test('detail and responsive height changes keep the visible task anchor stable',
   page
 }) => {
   await page.setViewportSize({ width: 1200, height: 720 })
-  const tasks = manyMixedTasks(60, 'anchor')
+  // One windowed page: deferred details hold the entry round open, so this
+  // anchor spec stays inside the first page by design — deep-history anchor
+  // coverage lives in the follow and window specs above.
+  const tasks = manyMixedTasks(20, 'anchor')
   await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks, taskDetailsDeferred: true }} />)
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
   const scroller = await settledScroller(page)
@@ -678,4 +724,86 @@ test('the compact form also shrinks the empty deck add tile', async ({ mount, pa
   expect(compactBox.height).toBeLessThan(expandedBox.height - 40)
   const compactTileHeight = (await tile.boundingBox())!.height
   expect(compactTileHeight).toBeLessThan(expandedTileHeight - 12)
+})
+
+// The wheel-flick regression (issue #195 follow-up): a small upward wheel
+// gesture near the top loads exactly one older page, and from the moment the
+// gesture ends the reading anchor must hold pixel-stable on every frame —
+// not merely settle eventually — with no auto-chained page loads. Anchor
+// corrections that reverse the reader's own scroll read as a bounce.
+test('a small upward wheel gesture holds the reading anchor while one older page lands', async ({
+  mount,
+  page
+}) => {
+  const tasks = manyMixedTasks(85, 'flick')
+  await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks }} />)
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  await settledScroller(page)
+  const gallery = page.getByTestId('result-gallery')
+  await expect(gallery).toHaveAttribute('data-total-count', '20')
+
+  // Per-frame sampler: the first card intersecting the viewport is the
+  // reading anchor; its viewport offset must not move once the gesture ends.
+  await page.evaluate(() => {
+    const samples: Array<{ t: number; offset: number | null; count: number }> = []
+    const tick = (): void => {
+      const scroller = document.querySelector('[data-testid="creation-workbench"] main > div')
+      const gallery = document.querySelector('[data-testid="result-gallery"]')
+      if (scroller instanceof HTMLElement && gallery instanceof HTMLElement) {
+        const viewport = scroller.getBoundingClientRect()
+        const card = [...gallery.querySelectorAll<HTMLElement>('[data-task-id]')].find(
+          (candidate) => {
+            const rect = candidate.getBoundingClientRect()
+            return rect.bottom > viewport.top + 1 && rect.top < viewport.bottom - 1
+          }
+        )
+        samples.push({
+          t: Math.round(performance.now()),
+          offset:
+            card === undefined ? null : Math.round(card.getBoundingClientRect().top - viewport.top),
+          count: Number(gallery.dataset.totalCount ?? '0')
+        })
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+    ;(window as unknown as { __flickSamples?: typeof samples }).__flickSamples = samples
+  })
+
+  // A realistic upward flick: real wheel ticks until the first older page
+  // lands, then hands off completely.
+  await page.mouse.move(700, 320)
+  for (let tick = 0; tick < 120; tick += 1) {
+    await page.mouse.wheel(0, -160)
+    if ((await gallery.getAttribute('data-total-count')) === '40') break
+    await page.waitForTimeout(20)
+  }
+  await expect(gallery).toHaveAttribute('data-total-count', '40')
+  const handsOffAt = await page.evaluate(() => Math.round(performance.now()))
+  await page.waitForTimeout(2_000)
+
+  const report = await page.evaluate((since) => {
+    const samples =
+      (
+        window as unknown as {
+          __flickSamples?: Array<{ t: number; offset: number | null; count: number }>
+        }
+      ).__flickSamples ?? []
+    const after = samples.filter((s) => s.t >= since)
+    const offsets = after.filter((s) => s.offset !== null).map((s) => s.offset as number)
+    return {
+      spread: offsets.length > 0 ? Math.max(...offsets) - Math.min(...offsets) : Number.NaN,
+      unmountedFrames: after.filter((s) => s.offset === null).length,
+      countsSeen: [...new Set(after.map((s) => s.count))]
+    }
+  }, handsOffAt)
+  const historyPages = await page.evaluate(() => {
+    const pages = window.__creationDeckTest?.listTaskPages() ?? []
+    return pages.filter((request) => request.cursor !== null).length
+  })
+
+  expect(report.unmountedFrames).toBe(0)
+  expect(report.spread).toBeLessThanOrEqual(2)
+  expect(report.countsSeen).toEqual([40])
+  expect(historyPages).toBe(1)
 })

@@ -15,6 +15,7 @@ import {
   createGenerationTaskClient,
   openCreationEventStream,
   type GenerationTaskDetail,
+  type TaskListPageRequest,
   type TaskPage,
   type TaskSubmitInput
 } from '../api/generation-task-http'
@@ -88,7 +89,12 @@ export interface CreationWorkspacePorts {
     sessionId: string,
     input: TaskSubmitInput
   ) => Promise<CreationApiResult<GenerationTaskDetail>>
-  readonly listTasks: (sessionId: string) => Promise<CreationApiResult<TaskPage>>
+  /** Reads one keyset page of the session's tasks; the refresh module follows
+   * the cursor itself, so this port never drains pages unlike the list ports. */
+  readonly listTasks: (
+    sessionId: string,
+    page?: TaskListPageRequest
+  ) => Promise<CreationApiResult<TaskPage>>
   readonly getTask: (taskId: string) => Promise<CreationApiResult<GenerationTaskDetail>>
   readonly cancelTask: (taskId: string) => Promise<CreationApiResult<GenerationTaskDetail>>
   readonly retryTask: (
@@ -173,7 +179,8 @@ export function createCreationWorkspacePorts(
       withToken((_client, token) => createCapabilityManifestClient(serverUrl).lookup(token)),
     submitTask: (sessionId, input) =>
       withTaskToken((client, token) => client.submitTask(token, sessionId, input)),
-    listTasks: (sessionId) => withTaskToken((client, token) => client.listTasks(token, sessionId)),
+    listTasks: (sessionId, page) =>
+      withTaskToken((client, token) => client.listTasks(token, sessionId, page)),
     getTask: (taskId) => withTaskToken((client, token) => client.getTask(token, taskId)),
     cancelTask: (taskId) => withTaskToken((client, token) => client.cancelTask(token, taskId)),
     retryTask: (taskId, idempotencyKey) =>

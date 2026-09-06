@@ -20,11 +20,17 @@ import {
   type CreationWorkbenchController,
   type PendingDraftEntry
 } from '../model/use-workbench'
+import type { TaskHistoryStatus } from '../model/task-refresh/task-refresh-controller'
 import { textPromptDocument } from '../model/prompt-document'
 import { ComposerMenuContent } from './composer-menu-content'
 import { CreationComposer, EXPANDED_MAX_WIDTH } from './composer'
 import { ResultGallery } from './result-gallery'
 import { isScrolledToBottom } from './use-composer-presence'
+
+// Scrolling within this distance of the workspace top asks the refresh module
+// for the next older history page; one estimated card short of the edge keeps
+// the prepend ahead of the reader.
+const HISTORY_TRIGGER_PX = 240
 
 /**
  * The production Creation Workbench (issue #177): the accepted prototype
@@ -341,6 +347,15 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
               onScroll={() => {
                 const scroller = scrollRef.current
                 if (scroller === null) return
+                const { taskHistory, loadOlderTasks } = workbench
+                if (
+                  taskHistory.hasMore &&
+                  !taskHistory.loading &&
+                  !taskHistory.failed &&
+                  scroller.scrollTop <= HISTORY_TRIGGER_PX
+                ) {
+                  loadOlderTasks()
+                }
                 const away = !isScrolledToBottom(scroller)
                 const tookOver = userScrollIntentRef.current || scrollbarPointerRef.current
                 const direction = userScrollDirectionRef.current
@@ -423,6 +438,12 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                       </p>
                     </div>
                   </div>
+                  {workbench.tasks.length > 0 && (
+                    <TaskHistoryNote
+                      history={workbench.taskHistory}
+                      onRetry={workbench.loadOlderTasks}
+                    />
+                  )}
                   <ResultGallery key={workspaceKey} workbench={workbench} scrollerRef={scrollRef} />
                 </div>
               )}
@@ -443,6 +464,60 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
       </main>
     </section>
   )
+}
+
+/**
+ * The upward-history pagination note above the oldest loaded card: loading,
+ * a retryable failure, or the end of the session's history. The caller gates
+ * it on a landed page — "no more" must never read as a claim about history
+ * that has not been read even once.
+ */
+function TaskHistoryNote({
+  history,
+  onRetry
+}: {
+  readonly history: TaskHistoryStatus
+  readonly onRetry: () => void
+}): React.JSX.Element | null {
+  const { t } = useTranslation('creation')
+  if (history.failed) {
+    return (
+      <div
+        role="alert"
+        data-testid="task-history-failed"
+        className="mb-3 flex items-center gap-2 text-xs"
+      >
+        <span className="text-warning/80">{t('gallery.history.failed')}</span>
+        <button
+          type="button"
+          data-testid="task-history-retry"
+          onClick={onRetry}
+          className="hover:bg-accent rounded border px-2 py-1"
+        >
+          {t('state.retry')}
+        </button>
+      </div>
+    )
+  }
+  if (history.loading) {
+    return (
+      <p
+        role="status"
+        data-testid="task-history-loading"
+        className="text-muted-foreground mb-3 text-xs"
+      >
+        {t('gallery.history.loading')}
+      </p>
+    )
+  }
+  if (!history.hasMore) {
+    return (
+      <p data-testid="task-history-end" className="text-muted-foreground mb-3 text-xs">
+        {t('gallery.history.end')}
+      </p>
+    )
+  }
+  return null
 }
 
 function WorkbenchNotices({

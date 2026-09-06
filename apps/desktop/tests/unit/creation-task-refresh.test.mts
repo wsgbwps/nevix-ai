@@ -78,7 +78,8 @@ function taskView(
   id: string,
   sessionId: string,
   updatedAt: string,
-  status: GenerationTaskView['status'] = 'processing'
+  status: GenerationTaskView['status'] = 'processing',
+  createdAt = '2026-09-01T09:00:00Z'
 ): GenerationTaskView {
   return {
     id,
@@ -88,10 +89,19 @@ function taskView(
     slotCount: 1,
     cancelRequested: false,
     terminalCause: null,
-    createdAt: '2026-09-01T09:00:00Z',
+    createdAt,
     updatedAt,
     terminalAt: null
   }
+}
+
+/** N tasks with distinct creation times, task N the newest (pagination fixture). */
+function historyTasks(count: number, sessionId = 'A'): GenerationTaskView[] {
+  return Array.from({ length: count }, (_, index) => {
+    const n = index + 1
+    const at = new Date(Date.UTC(2026, 8, 1, 9, n)).toISOString()
+    return taskView(`t${String(n).padStart(2, '0')}`, sessionId, at, 'succeeded', at)
+  })
 }
 
 function taskDetailOf(task: GenerationTaskView, slotStatus = 'generating'): GenerationTaskDetail {
@@ -106,6 +116,8 @@ interface Harness {
   controller: TaskRefreshController
   timers: ManualTimers
   listCalls: string[]
+  /** Every list read's page request: session, limit, and continuation cursor. */
+  listPageCalls: Array<{ sessionId: string; limit: number; cursor: string | null }>
   getTaskCalls: string[]
   snapshot: () => ReturnType<TaskRefreshController['getSnapshot']>
   setSession: (sessionId: string, tasks: GenerationTaskView[]) => void
@@ -120,9 +132,20 @@ interface Harness {
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
+// The server orders pages by (created_at DESC, id DESC) with a compound
+// keyset cursor (contracts listSessionGenerationTasks); the harness mirrors
+// that exactly so pagination tests exercise real page semantics.
+const cursorOf = (task: GenerationTaskView): string => `${task.createdAt}|${task.id}`
+
+function newestFirst(a: GenerationTaskView, b: GenerationTaskView): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1
+  return a.id === b.id ? 0 : a.id < b.id ? 1 : -1
+}
+
 async function harness(sessionTasks: Record<string, GenerationTaskView[]> = {}): Promise<Harness> {
   const timers = new ManualTimers()
   const listCalls: string[] = []
+  const listPageCalls: Array<{ sessionId: string; limit: number; cursor: string | null }> = []
   const getTaskCalls: string[] = []
   const sessions = new Map(Object.entries(sessionTasks).map(([id, tasks]) => [id, [...tasks]]))
   let listFailures = 0
@@ -131,8 +154,13 @@ async function harness(sessionTasks: Record<string, GenerationTaskView[]> = {}):
   const listGates: Array<Promise<void>> = []
 
   const reader: TaskRefreshReader = {
-    listTasks: async (sessionId) => {
+    listTasks: async (sessionId, page) => {
       listCalls.push(sessionId)
+      listPageCalls.push({
+        sessionId,
+        limit: page?.limit ?? 50,
+        cursor: page?.cursor ?? null
+      })
       const gate = listGates.shift()
       if (gate !== undefined) await gate
       if (listHangs) await new Promise<void>(() => undefined)
@@ -140,10 +168,19 @@ async function harness(sessionTasks: Record<string, GenerationTaskView[]> = {}):
         listFailures -= 1
         return { outcome: 'network-failure' }
       }
-      return {
-        outcome: 'succeeded',
-        value: { tasks: sessions.get(sessionId) ?? [], nextCursor: null }
+      const all = [...(sessions.get(sessionId) ?? [])].sort(newestFirst)
+      let start = 0
+      if (page?.cursor) {
+        const at = all.findIndex((task) => cursorOf(task) === page.cursor)
+        start = at === -1 ? all.length : at + 1
       }
+      const limit = page?.limit ?? 50
+      const tasks = all.slice(start, start + limit)
+      const nextCursor =
+        tasks.length > 0 && start + tasks.length < all.length
+          ? cursorOf(all[start + tasks.length - 1])
+          : null
+      return { outcome: 'succeeded', value: { tasks, nextCursor } }
     },
     // The server detail always reflects the latest facts for the summary the
     // list returned, mirroring the Go contract's consistent detail read.
@@ -172,6 +209,7 @@ async function harness(sessionTasks: Record<string, GenerationTaskView[]> = {}):
     controller,
     timers,
     listCalls,
+    listPageCalls,
     getTaskCalls,
     snapshot: () => controller.getSnapshot(),
     setSession: (sessionId, tasks) => sessions.set(sessionId, [...tasks]),
@@ -584,4 +622,301 @@ test('tasks falling outside the latest window stay displayed with their details'
   h.flush()
   await settle()
   assert.equal(h.getTaskCalls.filter((id) => id === 't1').length, 1)
+})
+
+// --- upward history pagination (issue #195) ----------------------------------
+
+test('entry reads the newest 20 as one windowed page with the older cursor', async () => {
+  const h = await harness({ A: historyTasks(45) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+
+  assert.deepEqual(h.listPageCalls, [{ sessionId: 'A', limit: 20, cursor: null }])
+  assert.deepEqual(
+    h.snapshot().tasks.map((task) => task.id),
+    Array.from({ length: 20 }, (_, i) => `t${String(45 - i).padStart(2, '0')}`)
+  )
+  assert.equal(h.snapshot().history.hasMore, true)
+  assert.equal(h.snapshot().history.loading, false)
+  assert.equal(h.snapshot().history.failed, false)
+})
+
+test('requestOlderTasks pages history in 20s until exhaustion, reading only fresh details', async () => {
+  const h = await harness({ A: historyTasks(45) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 40)
+  assert.equal(h.snapshot().history.hasMore, true)
+  // The older page continues from the window tail's keyset cursor.
+  assert.deepEqual(h.listPageCalls[1], {
+    sessionId: 'A',
+    limit: 20,
+    cursor: '2026-09-01T09:26:00.000Z|t26'
+  })
+
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 45)
+  assert.equal(h.snapshot().history.hasMore, false)
+
+  // Exhausted: no further read, and the whole history was detailed once.
+  const callsBefore = h.listCalls.length
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.listCalls.length, callsBefore)
+  assert.deepEqual(
+    [...h.getTaskCalls].sort(),
+    Array.from({ length: 45 }, (_, i) => `t${String(i + 1).padStart(2, '0')}`).sort()
+  )
+  // Global order stays newest-first across all three pages.
+  assert.deepEqual(
+    h.snapshot().tasks.map((task) => task.id),
+    Array.from({ length: 45 }, (_, i) => `t${String(45 - i).padStart(2, '0')}`)
+  )
+})
+
+test('a failed older-page read keeps loaded pages, stays retryable, and retries', async () => {
+  const h = await harness({ A: historyTasks(45) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+  const loaded = h.snapshot().tasks.map((task) => task.id)
+
+  h.failListNext(1)
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+
+  assert.deepEqual(
+    h.snapshot().tasks.map((task) => task.id),
+    loaded
+  )
+  assert.equal(h.snapshot().history.failed, true)
+  assert.equal(h.snapshot().history.hasMore, true)
+  assert.equal(h.snapshot().listFailed, false)
+
+  // The retry continues from the same cursor and lands the page.
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 40)
+  assert.equal(h.snapshot().history.failed, false)
+})
+
+test('a history intent during a window round continues after it, and a refresh during a history round is not lost', async () => {
+  const h = await harness({ A: historyTasks(45) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+
+  // A window refresh is in flight when the older-page intent arrives: the
+  // refresh finishes first, then exactly one history round continues.
+  const releaseWindow = h.holdNextList()
+  h.controller.notifyInvalidation()
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  releaseWindow()
+  await settle()
+  h.flush()
+  await settle()
+
+  assert.equal(h.listCalls.length, 3)
+  assert.equal(h.snapshot().tasks.length, 40)
+
+  // Now the reverse interleave: a history round in flight receives a refresh.
+  const releaseHistory = h.holdNextList()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().history.loading, true)
+  h.controller.requestReconcile()
+  releaseHistory()
+  await settle()
+  h.flush()
+  await settle()
+
+  assert.equal(h.snapshot().tasks.length, 45)
+  assert.equal(h.listCalls.length, 5)
+})
+
+test('new tasks arriving between pages keep the older-page continuation seamless', async () => {
+  const all = historyTasks(45)
+  const h = await harness({ A: all })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+
+  // Five brand-new tasks land; the window refresh keeps the five tasks that
+  // fell behind it, so history must continue from the original window tail.
+  const fresh = historyTasks(50).slice(45)
+  h.setSession('A', [...fresh, ...all])
+  h.controller.notifyInvalidation()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 25)
+
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  const ids = h.snapshot().tasks.map((task) => task.id)
+  assert.equal(ids.length, 45)
+  assert.equal(new Set(ids).size, 45)
+  assert.deepEqual(
+    ids.slice(0, 20),
+    Array.from({ length: 20 }, (_, i) => `t${String(50 - i).padStart(2, '0')}`)
+  )
+  assert.deepEqual(ids.slice(20, 25), ['t30', 't29', 't28', 't27', 't26'])
+  assert.deepEqual(
+    ids.slice(25),
+    Array.from({ length: 20 }, (_, i) => `t${String(25 - i).padStart(2, '0')}`)
+  )
+})
+
+test('same-created tasks keep one stable order across page boundaries', async () => {
+  // One shared creation second: the (created_at DESC, id DESC) keyset order
+  // must not reshuffle when a boundary cuts through it.
+  const shared = '2026-09-01T09:00:00Z'
+  const tasks = Array.from({ length: 45 }, (_, index) =>
+    taskView(`t${String(index + 1).padStart(2, '0')}`, 'A', 'u', 'succeeded', shared)
+  )
+  const expected = [...tasks]
+    .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+    .map((t) => t.id)
+
+  const h = await harness({ A: tasks })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+
+  assert.deepEqual(
+    h.snapshot().tasks.map((task) => task.id),
+    expected
+  )
+})
+
+test('a wedged history round expires to a retryable failure without losing pages', async () => {
+  const h = await harness({ A: historyTasks(45) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+
+  h.setListHangs(true)
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().history.loading, true)
+
+  h.timers.advance(30_000)
+  assert.equal(h.snapshot().history.loading, false)
+  assert.equal(h.snapshot().history.failed, true)
+  assert.equal(h.snapshot().tasks.length, 20)
+
+  h.setListHangs(false)
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 40)
+  assert.equal(h.snapshot().history.failed, false)
+})
+
+test('a changed task inside the newest window updates in place without duplicating loaded history', async () => {
+  const h = await harness({ A: historyTasks(25) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 25)
+  assert.equal(h.snapshot().history.hasMore, false)
+  const readsBefore = h.getTaskCalls.length
+
+  // t10 sits inside the newest window and already has a cached detail; its
+  // criterion changes and the older pages must stay exactly where they were.
+  h.setSession(
+    'A',
+    historyTasks(25).map((task) => (task.id === 't10' ? { ...task, updatedAt: 'u-changed' } : task))
+  )
+  h.controller.notifyInvalidation()
+  h.flush()
+  await settle()
+
+  const ids = h.snapshot().tasks.map((task) => task.id)
+  assert.equal(new Set(ids).size, 25)
+  assert.equal(h.snapshot().taskDetails['t10']?.task.updatedAt, 'u-changed')
+  assert.deepEqual(h.getTaskCalls.slice(readsBefore), ['t10'])
+})
+
+test('entering a session resets history pagination state', async () => {
+  const h = await harness({ A: historyTasks(45), B: historyTasks(3) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 40)
+
+  h.controller.enter('B')
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 3)
+  assert.equal(h.snapshot().history.hasMore, false)
+  assert.equal(h.snapshot().history.failed, false)
+
+  // Re-entering A starts from its newest window again under new eligibility.
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 20)
+  assert.equal(h.snapshot().history.hasMore, true)
+})
+
+test('a change to a history-loaded task outside the window never re-reads or reorders it', async () => {
+  const h = await harness({ A: historyTasks(45) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 45)
+  const t03ReadsBefore = h.getTaskCalls.filter((id) => id === 't03').length
+  const t03Detail = h.snapshot().taskDetails['t03']
+
+  // t03 lives in the oldest loaded page, far behind the newest window: no
+  // fresh summary criterion can vouch for it, so its cached detail stays the
+  // last consistent copy (spec #189 §7) instead of being guessed refreshed.
+  h.setSession(
+    'A',
+    historyTasks(45).map((task) => (task.id === 't03' ? { ...task, updatedAt: 'u-changed' } : task))
+  )
+  h.controller.notifyInvalidation()
+  h.flush()
+  await settle()
+
+  assert.equal(h.snapshot().taskDetails['t03'], t03Detail)
+  assert.equal(h.getTaskCalls.filter((id) => id === 't03').length, t03ReadsBefore)
+  assert.deepEqual(
+    h.snapshot().tasks.map((task) => task.id),
+    Array.from({ length: 45 }, (_, i) => `t${String(45 - i).padStart(2, '0')}`)
+  )
 })

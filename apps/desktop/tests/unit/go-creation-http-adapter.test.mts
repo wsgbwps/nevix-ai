@@ -223,3 +223,59 @@ test('material download preserves a confirmed unauthorized response', async () =
 
   assert.deepEqual(result, { outcome: 'unauthorized' })
 })
+
+const { createGenerationTaskClient } =
+  await import('../../src/renderer/src/features/creation/api/generation-task-http.ts')
+
+function taskSummaryWire(id: string): Record<string, unknown> {
+  return {
+    id,
+    session_id: '00000000-0000-4000-8000-000000000001',
+    status: 'succeeded',
+    media_type: 'image',
+    slot_count: 1,
+    cancel_requested: false,
+    terminal_cause: null,
+    created_at: '2026-09-01T09:00:00Z',
+    updated_at: '2026-09-01T09:01:00Z',
+    terminal_at: null
+  }
+}
+
+test('listTasks sends the page limit and the continuation cursor, failing closed on garbage', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  const calls: Array<{ method: string; url: string; bearer: string | null; body: string | null }> =
+    []
+
+  const first = await withFetch(
+    capturedFetch(calls, () =>
+      jsonResponse({ tasks: [taskSummaryWire('task-a')], next_cursor: 'eyJrIjoxfQ' })
+    ),
+    () => client.listTasks('tok', 'session-1', { limit: 20 })
+  )
+  assert.equal(calls[0].url, '/creation/sessions/session-1/tasks?limit=20')
+
+  const older = await withFetch(
+    capturedFetch(calls, () => jsonResponse({ tasks: [], next_cursor: null })),
+    () => client.listTasks('tok', 'session-1', { limit: 20, cursor: 'eyJrIjoxfQ' })
+  )
+  assert.equal(calls[1].url, '/creation/sessions/session-1/tasks?limit=20&cursor=eyJrIjoxfQ')
+
+  // No page request keeps the contract default; a malformed page never parses
+  // into a success.
+  const defaulted = await withFetch(
+    capturedFetch(calls, () => jsonResponse({ tasks: [], next_cursor: null })),
+    () => client.listTasks('tok', 'session-1')
+  )
+  assert.equal(calls[2].url, '/creation/sessions/session-1/tasks?limit=50')
+
+  const malformed = await withFetch(
+    async () => jsonResponse({ tasks: [{ nope: true }], next_cursor: null }),
+    () => client.listTasks('tok', 'session-1', { limit: 20, cursor: 'stale' })
+  )
+
+  assert.equal(first.outcome, 'succeeded')
+  assert.equal(older.outcome, 'succeeded')
+  assert.equal(defaulted.outcome, 'succeeded')
+  assert.deepEqual(malformed, { outcome: 'network-failure' })
+})
