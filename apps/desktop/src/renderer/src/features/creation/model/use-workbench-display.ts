@@ -11,7 +11,9 @@ import {
 
 /** The Workbench's handle on the display-resource module: the rendered
  * snapshot plus the resource operations and the one context-switch reset.
- * `getSnapshot` is the same-tick-fresh read for orchestration callbacks. */
+ * `getSnapshot` is the same-tick-fresh read for orchestration callbacks.
+ * Method identities are stable per runtime: consumer lease effects key on
+ * them and must not re-run per render. */
 export interface WorkbenchDisplayBinding {
   readonly snapshot: WorkbenchDisplaySnapshot
   readonly getSnapshot: () => WorkbenchDisplaySnapshot
@@ -37,23 +39,22 @@ export interface WorkbenchDisplayBinding {
 
 const noopSubscribe = (): (() => void) => () => undefined
 
-const idleDisplayBinding: WorkbenchDisplayBinding = {
-  snapshot: emptyWorkbenchDisplaySnapshot,
-  getSnapshot: () => emptyWorkbenchDisplaySnapshot,
-  reset: () => undefined,
-  replaceMaterials: () => undefined,
+const idleDisplayMethods = {
+  getSnapshot: (): WorkbenchDisplaySnapshot => emptyWorkbenchDisplaySnapshot,
+  reset: (): void => undefined,
+  replaceMaterials: (): void => undefined,
   registerPending: (): ReferenceMaterialView => {
     throw new Error('workbench display module is inactive')
   },
-  dropPending: () => undefined,
-  forget: () => undefined,
-  requestThumbnail: () => undefined,
-  retain: () => () => undefined,
-  acquireResultBlobUrl: () => Promise.resolve(null),
-  resultBlob: () => Promise.resolve(null),
-  loadMaterialPreviewBlob: () => Promise.resolve(null),
-  pendingFiles: () => new Map(),
-  hasPending: () => false
+  dropPending: (): void => undefined,
+  forget: (): void => undefined,
+  requestThumbnail: (): void => undefined,
+  retain: (): (() => void) => () => undefined,
+  acquireResultBlobUrl: (): Promise<ResultBlobUrlLease | null> => Promise.resolve(null),
+  resultBlob: (): Promise<Blob | null> => Promise.resolve(null),
+  loadMaterialPreviewBlob: (): Promise<Blob | null> => Promise.resolve(null),
+  pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => new Map(),
+  hasPending: (): boolean => false
 }
 
 /** One controller per connected runtime; a runtime identity change replaces
@@ -82,22 +83,34 @@ export function useWorkbenchDisplay(deps: WorkbenchDisplayDeps | null): Workbenc
   )
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
-  if (controller === null) return idleDisplayBinding
-  return {
-    snapshot,
-    getSnapshot: () => controller.getSnapshot(),
-    reset: () => controller.reset(),
-    replaceMaterials: (views) => controller.replaceMaterials(views),
-    registerPending: (id, file) => controller.registerPending(id, file),
-    dropPending: (materialId) => controller.dropPending(materialId),
-    forget: (materialId) => controller.forget(materialId),
-    requestThumbnail: (materialId) => controller.requestThumbnail(materialId),
-    retain: (materialId) => controller.retain(materialId),
-    acquireResultBlobUrl: (taskId, slotIndex) => controller.acquireResultBlobUrl(taskId, slotIndex),
-    resultBlob: (taskId, slotIndex) => controller.resultBlob(taskId, slotIndex),
-    loadMaterialPreviewBlob: (materialId, signal) =>
-      controller.loadMaterialPreviewBlob(materialId, signal),
-    pendingFiles: () => controller.pendingFiles(),
-    hasPending: (materialId) => controller.hasPending(materialId)
-  }
+  // One methods object per controller, so every member's identity survives
+  // re-renders (the returned binding itself is per-render, like
+  // TaskRefreshBinding).
+  const methods = useMemo(() => {
+    if (controller === null) return idleDisplayMethods
+    return {
+      getSnapshot: (): WorkbenchDisplaySnapshot => controller.getSnapshot(),
+      reset: (): void => controller.reset(),
+      replaceMaterials: (views: readonly ReferenceMaterialView[]): void =>
+        controller.replaceMaterials(views),
+      registerPending: (id: string, file: File): ReferenceMaterialView =>
+        controller.registerPending(id, file),
+      dropPending: (materialId: string): void => controller.dropPending(materialId),
+      forget: (materialId: string): void => controller.forget(materialId),
+      requestThumbnail: (materialId: string): void => controller.requestThumbnail(materialId),
+      retain: (materialId: string): (() => void) => controller.retain(materialId),
+      acquireResultBlobUrl: (
+        taskId: string,
+        slotIndex: number
+      ): Promise<ResultBlobUrlLease | null> => controller.acquireResultBlobUrl(taskId, slotIndex),
+      resultBlob: (taskId: string, slotIndex: number): Promise<Blob | null> =>
+        controller.resultBlob(taskId, slotIndex),
+      loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal): Promise<Blob | null> =>
+        controller.loadMaterialPreviewBlob(materialId, signal),
+      pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => controller.pendingFiles(),
+      hasPending: (materialId: string): boolean => controller.hasPending(materialId)
+    }
+  }, [controller])
+
+  return { snapshot, ...methods }
 }
