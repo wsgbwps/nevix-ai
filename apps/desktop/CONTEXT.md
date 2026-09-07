@@ -9,6 +9,7 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 > 2026-09-02：任务卡片改由任务自己的冻结 Generation Specification 展示提示词与参数（#186），新增 Draft / Generation Specification 词群以区分「正在编辑」与「提交时冻结」两种生成意图。
 > 2026-09-02：Draft 确定为设备本地状态：仅留存于当前设备、多设备互不相通，提交请求携带完整生成意图，服务端不再保存可编辑草稿。
 > 2026-09-06：Workbench Context 入册，命名创作台「正对着哪个创作内容」及其切换语义，取代散落的 surface / 视图状态说法。
+> 2026-09-07：Generation Parameter 入册，命名生成意图的参数字段族及其单一权威清单，取代散落的「任务参数」说法。
 
 **User**:
 使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
@@ -85,6 +86,10 @@ _Avoid_: @文本, 素材名称, Reference Binding
 **Generation Specification**:
 生成提交时冻结的完整生成意图；它承载提交时刻的真实意图，冻结后永不变更，与会话当前仍可编辑的 Draft 相对。
 _Avoid_: Draft, 任务参数（指 Specification 中的个别字段）
+
+**Generation Parameter**:
+生成意图中除提示词与引用绑定外的参数字段族（媒体类型、模型、模式、比例、分辨率、数量、时长）；字段集合、wire 键名与各媒体适用性只有一份权威清单，编辑中 Draft、本地草稿记录、提交意图与冻结 Generation Specification 对它的表示一律源于该清单。
+_Avoid_: 任务参数（混淆字段族与 Specification 中的冻结取值）, 参数 schema, 字段配置表
 
 **Creation Workbench**:
 AI Creation Domain 拥有的会话式创作页面，承载创作上下文、生成操作、任务状态和结果；它是界面而非 Domain 或新的租户边界。

@@ -6,6 +6,8 @@
 
 2026-09-05 修订：补充已开始提交但尚未物化的 Draft 独立归属，以及跨重启保存的边界；配合 [Desktop ADR-0005](../../apps/desktop/docs/adr/0005-creation-operation-and-task-refresh-lifetimes.md) 的业务动作生命周期决定。本次新增行为已定稿，源码待实施。
 
+2026-09-07 修订：本地草稿记录的解析对比记录更新的 Generation Parameter 字段宽容读取为未设置（null），已存字段类型不符仍整条拒绝——新增生成参数不再使已存草稿静默失效。字段清单及其派生架构见 [Desktop ADR-0006](../../apps/desktop/docs/adr/0006-generation-parameter-field-inventory.md)。
+
 ## 背景
 
 V1 实施中，Draft（可编辑生成意图）承担了两个角色：随写随存（800ms 防抖 PUT `/creation/sessions/{id}/draft` → `creation_sessions.draft_*` 列与 `creation_session_draft_references` 表，迁移 0007）与提交锚点（submitTask 只携带 `idempotency_key + draft_revision`，Server 在准入事务复验 revision 并冻结自己存储的草稿）。#186 让任务卡片改用任务自己的冻结 Generation Specification 后，服务端草稿在 UI 上的消费者清零，剩余存在理由只有「跨设备/重启恢复」与「提交协议」两条。而为这两条付出的成本是 Creation Feature 中最复杂的 seam：自动保存管线与 SaveStatus/retrySave UI、saving/failed 阻塞提交、revision gating、多设备草稿竞态靠单行 UPDATE 串行化。产品对标（即梦网页端）表明输入草稿的持续持久化并非用户预期。
