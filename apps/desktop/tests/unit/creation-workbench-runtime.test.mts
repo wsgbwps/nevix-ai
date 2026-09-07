@@ -151,6 +151,10 @@ test('submission freezes intent before upload and resumes an unconfirmed write v
   upload.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
 
   assert.equal(await first, 'unconfirmed')
+  // A resolved upload leaves staging but keeps answering its server identity,
+  // so a reconciling display can transfer the painted preview onto it.
+  assert.equal(runtime.actions.resolvedMaterialId(sessionA, localMaterial), realMaterial)
+  assert.equal(runtime.actions.resolvedMaterialId(sessionA, 'unknown'), null)
   assert.deepEqual(runtime.actions.snapshot(sessionA), {
     status: 'submission-unconfirmed'
   })

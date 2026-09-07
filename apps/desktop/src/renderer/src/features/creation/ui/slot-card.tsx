@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DownloadIcon } from 'lucide-react'
 import type { GenerationSlotView } from '../api/generation-task-http'
-import type { CreationWorkbenchController } from '../model/use-workbench'
+import type { ResultBlobUrlLease } from '../lib/result-blob-cache'
 import { slotResultFilename } from '../lib/result-filename'
 import {
   RESULT_DRAG_MIME,
@@ -12,11 +12,9 @@ import {
 } from '../model/reference-drop'
 import { diagnosticSourceKey, reasonKey, statusKey } from '../i18n/gallery-keys'
 
-// Slot cells keep the verified result's intrinsic shape — the height scales
-// with the image ratio instead of a fixed square, so one task's images align
-// as an even strip. Settled-shape cells come from the task's own frozen
-// ratio only; the live draft never leaks onto a card (video specs freeze no
-// ratio, so those cells fall back to square).
+// Settled-shape cells come from the task's own frozen ratio only; the live
+// draft never leaks onto a card (video specs freeze no ratio, so those cells
+// fall back to square).
 function slotAspectRatio(slot: GenerationSlotView, fallbackRatio: string | null): number {
   const { widthPx, heightPx } = slot.result ?? {}
   if (
@@ -34,13 +32,16 @@ function slotAspectRatio(slot: GenerationSlotView, fallbackRatio: string | null)
 }
 
 export function SlotCard({
-  workbench,
+  acquireResultBlobUrl,
   taskId,
   slot,
   mediaType,
   fallbackRatio
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly acquireResultBlobUrl: (
+    taskId: string,
+    slotIndex: number
+  ) => Promise<ResultBlobUrlLease | null>
   readonly taskId: string
   readonly slot: GenerationSlotView
   readonly mediaType: 'image' | 'video'
@@ -53,7 +54,6 @@ export function SlotCard({
     | { readonly status: 'ready'; readonly url: string }
   >({ status: 'unloaded', url: null })
   const succeeded = slot.status === 'succeeded'
-  const acquireResultBlobUrl = workbench.acquireResultBlobUrl
 
   // A mounted slot leases its URL. Virtualization can then unmount old cards
   // and let the byte-budgeted cache evict them without revoking a URL that is
@@ -87,8 +87,6 @@ export function SlotCard({
     }
   }, [acquireResultBlobUrl, mediaAttempt, mediaType, slot.index, succeeded, taskId])
 
-  // The download reuses the already-verified bytes (or loads them on demand)
-  // and names the file after its task slot.
   const download = (): void => {
     void acquireResultBlobUrl(taskId, slot.index)
       .then((lease) => {

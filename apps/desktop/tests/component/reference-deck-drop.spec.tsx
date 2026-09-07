@@ -72,6 +72,40 @@ async function selectFirstSession(page: Page): Promise<void> {
   await expect(page.getByTestId('composer')).toBeVisible()
 }
 
+/** Samples every deck card's img src each frame, keyed by file name (stable
+ * across the identity swap): a painted card whose src ever changes is a
+ * visible reload flash, whatever the cause. */
+async function installSrcSampler(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const samples = new Map<string, Set<string>>()
+    ;(window as { __srcSamples?: Map<string, Set<string>> }).__srcSamples = samples
+    const sample = (): void => {
+      for (const card of document.querySelectorAll<HTMLElement>(
+        '[data-testid="deck-strip"] [data-material-id]'
+      )) {
+        const label = card.querySelector('button[aria-label]')?.getAttribute('aria-label')
+        const src = card.querySelector('img')?.src
+        if (label === undefined || src === undefined) continue
+        const seen = samples.get(label) ?? new Set<string>()
+        seen.add(src)
+        samples.set(label, seen)
+      }
+      requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+  })
+}
+
+function srcSamples(page: Page): Promise<Record<string, string[]>> {
+  return page.evaluate(() =>
+    Object.fromEntries(
+      [...((window as { __srcSamples?: Map<string, Set<string>> }).__srcSamples ?? [])].map(
+        ([label, srcs]) => [label, [...srcs]]
+      )
+    )
+  )
+}
+
 test('a file dropped on the deck appends through the ordinary upload path', async ({
   mount,
   page
@@ -88,6 +122,127 @@ test('a file dropped on the deck appends through the ordinary upload path', asyn
   expect((await uploadCalls(page))[0]?.name).toBe('photo.png')
   await expect(cards).toHaveCount(3)
   await expect(page.getByTestId('composer-drop-rejected')).toHaveCount(0)
+})
+
+test('the first card on an empty deck never re-mounts: one card node across the upload resolution', async ({
+  mount,
+  page
+}) => {
+  const emptyDeckDraft: LocalDraftRecord = {
+    prompt: 'Fresh',
+    promptDocument: { version: 1, nodes: [{ type: 'text', text: 'Fresh' }] },
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'text-to-image',
+    ratio: '1:1',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: []
+  }
+  await mount(
+    <CreationWorkbenchStory drafts={{ [scriptedSessionId]: emptyDeckDraft }} uploadDeferred />
+  )
+  await selectFirstSession(page)
+  await expect(page.getByTestId('deck-strip')).toHaveCount(0)
+
+  // Counts every card mount; MutationObserver reports only subtree roots,
+  // so cards riding inside a fresh subtree are tagged by walking it. A
+  // remount restarts fade-in-0 from invisible: the visible blink.
+  await page.evaluate(() => {
+    const deck = document.querySelector('[data-testid="reference-deck"]')
+    if (deck === null) throw new Error('no deck')
+    const tag = (node: Node): void => {
+      if (!(node instanceof HTMLElement)) return
+      const cards = [
+        ...(node.matches('[data-material-id]') ? [node] : []),
+        ...node.querySelectorAll<HTMLElement>('[data-material-id]')
+      ]
+      for (const card of cards) {
+        if (card.dataset.cardMount === 'seen') continue
+        card.dataset.cardMount = 'seen'
+        const w = window as { __cardMountCount?: number }
+        w.__cardMountCount = (w.__cardMountCount ?? 0) + 1
+      }
+    }
+    const observer = new MutationObserver((records) => {
+      for (const record of records) record.addedNodes.forEach(tag)
+    })
+    observer.observe(deck, { childList: true, subtree: true })
+  })
+
+  await dropOn(page, '[data-testid="reference-deck"]', [{ name: 'photo.png', type: 'image/png' }])
+  await expect.poll(() => uploadCalls(page)).toHaveLength(1)
+
+  // While the upload is in flight the pending card already paints; the img
+  // element is the painted-vs-glyph signal (the CSS-less spec gives a broken
+  // fixture no box, so visibility is unusable here).
+  const card = page.locator('[data-testid="deck-strip"] [data-material-id]')
+  await expect(card).toHaveCount(1)
+  await expect(card.locator('img')).toHaveCount(1)
+  expect(await card.getAttribute('data-material-id')).not.toBe(
+    'ffffffff-0000-4000-8000-000000000006'
+  )
+  await settleFrames(page)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
+  // Polling the reconciled identity means the swap, if any, has happened.
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document
+          .querySelector('[data-testid="deck-strip"] [data-material-id]')
+          ?.getAttribute('data-material-id')
+      )
+    )
+    .toBe('ffffffff-0000-4000-8000-000000000006')
+  await settleFrames(page)
+
+  const mounts = await page.evaluate(
+    () => (window as { __cardMountCount?: number }).__cardMountCount ?? 0
+  )
+  expect(mounts).toBe(1)
+  await expect(card.locator('img')).toHaveCount(1)
+})
+
+test('a still-uploading card keeps its painted preview while a sibling upload resolves', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory uploadDeferred />)
+  await selectFirstSession(page)
+  await expect(page.locator('[data-testid="deck-strip"] [data-material-id]')).toHaveCount(2)
+
+  const cardId = (name: string): Promise<string | null> =>
+    page
+      .locator(`[data-testid="deck-strip"] [aria-label="${name}"]`)
+      .evaluate((button) =>
+        button.closest<HTMLElement>('[data-material-id]')?.getAttribute('data-material-id')
+      )
+
+  await installSrcSampler(page)
+
+  await dropOn(page, '[data-testid="reference-deck"]', [{ name: 'a.png', type: 'image/png' }])
+  await expect.poll(() => uploadCalls(page)).toHaveLength(1)
+  await dropOn(page, '[data-testid="reference-deck"]', [{ name: 'b.png', type: 'image/png' }])
+  await expect.poll(() => uploadCalls(page)).toHaveLength(2)
+  await settleFrames(page)
+
+  // a.png resolves; the restore re-registers the still-staged b.png.
+  await page.evaluate(() => window.__creationDeckTest?.releaseNextUpload())
+  await expect.poll(() => cardId('a.png')).toBe('ffffffff-0000-4000-8000-000000000006')
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
+  await expect.poll(() => cardId('b.png')).toBe('ffffffff-0000-4000-8000-000000000007')
+  await settleFrames(page)
+  await expect(page.locator('[data-testid="deck-strip"] img')).toHaveCount(4)
+
+  // No painted card ever swapped its src, at any lifecycle point.
+  const samples = await srcSamples(page)
+  for (const [label, srcs] of Object.entries(samples)) {
+    expect(srcs, `${label} flashed through ${srcs?.length} URLs`).toHaveLength(1)
+  }
 })
 
 test('a mixed batch adds the admissible file and reports the rejected remainder', async ({
@@ -123,6 +278,7 @@ test('a wholly inadmissible batch is rejected without any upload', async ({ moun
 test('a single file dropped on one card replaces it in place', async ({ mount, page }) => {
   await mount(<CreationWorkbenchStory />)
   await selectFirstSession(page)
+  await installSrcSampler(page)
 
   const cards = page.locator('[data-testid="deck-strip"] [data-material-id]')
   await expect(cards).toHaveCount(2)
@@ -136,7 +292,20 @@ test('a single file dropped on one card replaces it in place', async ({ mount, p
   expect((await uploadCalls(page))[0]?.name).toBe('swap.png')
   await expect.poll(() => deleteMaterialCalls(page)).toEqual([firstMaterialId])
   await expect(cards).toHaveCount(2)
-  await expect(page.locator('[data-testid="deck-strip"] [aria-label="swap.png"]')).toHaveCount(1)
+  const swapped = page.locator('[data-testid="deck-strip"] [aria-label="swap.png"]')
+  await expect(swapped).toHaveCount(1)
+  await settleFrames(page)
+
+  // The swapped-in card carries its preview: no src change, no blob refetch
+  // for its server id; the untouched sibling never reloads.
+  const samples = await srcSamples(page)
+  expect(samples['swap.png']).toHaveLength(1)
+  expect(samples['banner.png']).toHaveLength(1)
+  const blobCalls = await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])
+  expect(
+    blobCalls.some((call) => call.materialId === 'ffffffff-0000-4000-8000-000000000006'),
+    'the replacement preview must carry; a fetch here means a glyph phase'
+  ).toBe(false)
 })
 
 test('a card the prompt still mentions never gets replaced; the drop appends', async ({

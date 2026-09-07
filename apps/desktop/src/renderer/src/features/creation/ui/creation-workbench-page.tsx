@@ -17,8 +17,8 @@ import {
 import type { CreationSessionView } from '../api/go-creation-http'
 import {
   useCreationWorkbench,
-  type CreationWorkbenchController,
-  type PendingDraftEntry
+  type PendingDraftEntry,
+  type WorkbenchContextHandle
 } from '../model/use-workbench'
 import type { TaskHistoryStatus } from '../model/task-refresh/task-refresh-controller'
 import { textPromptDocument } from '../model/prompt-document'
@@ -33,29 +33,19 @@ import { isScrolledToBottom } from './use-composer-presence'
 const HISTORY_TRIGGER_PX = 240
 
 /**
- * The production Creation Workbench (issue #177): the accepted prototype
- * layout — a private session list on the left, one continuous workspace on
- * the right, and the fixed bottom Composer with the inline reference deck and
- * upward capability controls. Loading/empty/error stay explicit so cached
- * data can never masquerade as authoritative server facts.
- *
- * Intentional deviations from the prototype snapshot (6e465e8): no asset
- * library entry (this slice has no production asset-library destination), no
- * list-collapse control (dead controls are not shipped), and session rows
- * carry a hover actions menu (rename, delete) instead of inline controls.
- * The "new conversation" row enters a composing round without a server
- * session; the session materializes only at first submit (see
- * useCreationWorkbench).
+ * The production Creation Workbench (issue #177). Loading/empty/error stay
+ * explicit so cached data can never masquerade as authoritative server
+ * facts.
  */
 export function CreationWorkbenchPage(): React.JSX.Element | null {
-  const workbench = useCreationWorkbench()
+  const { context, composer, gallery } = useCreationWorkbench()
   const { t } = useTranslation('creation')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [showBackToBottom, setShowBackToBottom] = useState(false)
   const [newTaskWaiting, setNewTaskWaiting] = useState(false)
-  const newestTaskId = workbench.tasks[0]?.id ?? null
-  const workspaceKey =
-    workbench.pendingKey ?? (workbench.composingNew ? 'new' : (workbench.selectedId ?? 'inactive'))
+  const newestTaskId = gallery.tasks[0]?.id ?? null
+  // The controller's authoritative context key doubles as the gallery remount key.
+  const workspaceKey = context.contextKey
   const returningRef = useRef(false)
   const followingBottomRef = useRef(false)
   const userScrollIntentRef = useRef(false)
@@ -128,9 +118,9 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   // Composing and pending drafts own the workspace like a selected session —
   // neither exists on the server yet.
   const workspaceActive =
-    workbench.selected !== null || workbench.composingNew || workbench.pendingKey !== null
+    context.selected !== null || context.composingNew || context.pendingKey !== null
   const pendingWorkspaceTitle =
-    workbench.pendingDrafts.find((entry) => entry.key === workbench.pendingKey)?.title ?? ''
+    context.pendingDrafts.find((entry) => entry.key === context.pendingKey)?.title ?? ''
 
   // Virtual rows and result media can establish their real height after the
   // task-id effect's first scroll. Continue following those measurements only
@@ -200,7 +190,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
     return () => observer.disconnect()
   }, [workspaceActive])
 
-  if (!workbench.ports) return null
+  if (!context.ports) return null
 
   return (
     <section className="flex min-h-0 flex-1 overflow-hidden" data-testid="creation-workbench">
@@ -215,7 +205,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
           <button
             type="button"
             data-testid="session-new"
-            onClick={workbench.startNewDraft}
+            onClick={context.startNewDraft}
             className="hover:bg-foreground/[0.04] flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
           >
             <span className="bg-foreground/[0.06] text-foreground grid size-7 shrink-0 place-items-center rounded-md border">
@@ -227,47 +217,47 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1">
-          {workbench.sessions.length === 0 &&
-          workbench.pendingDrafts.length === 0 &&
-          workbench.status === 'ready' ? (
+          {context.sessions.length === 0 &&
+          context.pendingDrafts.length === 0 &&
+          context.status === 'ready' ? (
             <p className="text-muted-foreground px-1 py-2 text-xs" role="status">
               {t('sessions.empty')}
             </p>
           ) : (
             <ul className="grid gap-0.5" data-testid="session-list">
-              {workbench.pendingDrafts.map((entry) => (
+              {context.pendingDrafts.map((entry) => (
                 <PendingSessionRow
                   key={entry.key}
                   entry={entry}
-                  selected={workbench.pendingKey === entry.key}
-                  onSelect={() => workbench.openPendingDraft(entry.key)}
+                  selected={context.pendingKey === entry.key}
+                  onSelect={() => context.openPendingDraft(entry.key)}
                 />
               ))}
-              {workbench.sessions.map((session, index) => (
+              {context.sessions.map((session, index) => (
                 <SessionRow
                   key={session.id}
                   session={session}
                   index={index}
-                  selected={workbench.selectedId === session.id}
-                  onSelect={() => workbench.selectSession(session)}
-                  onDelete={() => workbench.deleteSession(session.id)}
-                  onRename={(name) => workbench.renameSession(session.id, name)}
+                  selected={context.selectedId === session.id}
+                  onSelect={() => context.selectSession(session)}
+                  onDelete={() => context.deleteSession(session.id)}
+                  onRename={(name) => context.renameSession(session.id, name)}
                 />
               ))}
             </ul>
           )}
-          {workbench.status === 'loading' && (
+          {context.status === 'loading' && (
             <p role="status" className="text-muted-foreground px-1 py-2 text-xs">
               {t('state.loading')}
             </p>
           )}
-          {workbench.status === 'error' && (
+          {context.status === 'error' && (
             <div role="alert" className="grid gap-1 px-1 py-2">
               <p className="text-xs">{t('state.loadFailed')}</p>
               <button
                 type="button"
                 className="hover:bg-accent rounded border px-2 py-1 text-xs"
-                onClick={workbench.reload}
+                onClick={context.reload}
               >
                 {t('state.retry')}
               </button>
@@ -347,7 +337,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
               onScroll={() => {
                 const scroller = scrollRef.current
                 if (scroller === null) return
-                const { taskHistory, loadOlderTasks } = workbench
+                const { taskHistory, loadOlderTasks } = gallery
                 if (
                   taskHistory.hasMore &&
                   !taskHistory.loading &&
@@ -410,11 +400,11 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
             >
               {/* The greeting hero is the empty-session state: clearing the
                   prompt must never hide a session that already holds tasks. */}
-              {workbench.expandedPrompt.length === 0 && workbench.tasks.length === 0 ? (
+              {composer.expandedPrompt.length === 0 && gallery.tasks.length === 0 ? (
                 <div className="mx-auto flex min-h-full max-w-[720px] flex-col items-center justify-center pb-10">
                   <EmptyDraftHero
                     onUseTemplate={(prompt) =>
-                      workbench.patchDraft({ promptDocument: textPromptDocument(prompt) })
+                      composer.patchDraft({ promptDocument: textPromptDocument(prompt) })
                     }
                   />
                 </div>
@@ -423,36 +413,36 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                   <div className="mb-3 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <h1 className="text-foreground truncate text-base font-semibold">
-                        {workbench.pendingKey !== null
+                        {context.pendingKey !== null
                           ? pendingWorkspaceTitle.length > 0
                             ? pendingWorkspaceTitle
                             : t('sessions.unnamed')
-                          : workbench.selected !== null && workbench.selected.name.length > 0
-                            ? workbench.selected.name
+                          : context.selected !== null && context.selected.name.length > 0
+                            ? context.selected.name
                             : t('sessions.unnamed')}
                       </h1>
                       <p className="text-muted-foreground mt-1 text-[10px]">
-                        {workbench.draft.mediaType !== null
-                          ? t(`composer.media.${workbench.draft.mediaType}`)
+                        {composer.draft.mediaType !== null
+                          ? t(`composer.media.${composer.draft.mediaType}`)
                           : t('workspace.draftMeta')}
                       </p>
                     </div>
                   </div>
-                  {workbench.tasks.length > 0 && (
+                  {gallery.tasks.length > 0 && (
                     <TaskHistoryNote
-                      history={workbench.taskHistory}
-                      onRetry={workbench.loadOlderTasks}
+                      history={gallery.taskHistory}
+                      onRetry={gallery.loadOlderTasks}
                     />
                   )}
-                  <ResultGallery key={workspaceKey} workbench={workbench} scrollerRef={scrollRef} />
+                  <ResultGallery key={workspaceKey} gallery={gallery} scrollerRef={scrollRef} />
                 </div>
               )}
             </div>
             <CreationComposer
-              workbench={workbench}
+              composer={composer}
               scrollerRef={scrollRef}
               wrapperRef={composerWrapRef}
-              statusNotice={<WorkbenchNotices workbench={workbench} />}
+              statusNotice={<WorkbenchNotices context={context} />}
               backToBottomVisible={showBackToBottom}
               newTaskWaiting={newTaskWaiting}
               onBackToBottom={scrollToBottom}
@@ -521,24 +511,24 @@ function TaskHistoryNote({
 }
 
 function WorkbenchNotices({
-  workbench
+  context
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly context: WorkbenchContextHandle
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   return (
     <>
-      <WorkbenchActionNotice workbench={workbench} />
-      {workbench.submitError !== null && (
+      <WorkbenchActionNotice context={context} />
+      {context.submitError !== null && (
         <p
           role="alert"
           data-testid="gallery-submit-error"
           className="text-destructive mx-auto mb-2 max-w-[720px] text-[11px]"
         >
-          {t('gallery.submitFailed', { code: workbench.submitError })}
+          {t('gallery.submitFailed', { code: context.submitError })}
           <button
             type="button"
-            onClick={workbench.dismissSubmitError}
+            onClick={context.dismissSubmitError}
             className="text-muted-foreground ml-2 underline outline-none"
           >
             {t('gallery.indeterminate.cancel')}
@@ -550,13 +540,13 @@ function WorkbenchNotices({
 }
 
 function WorkbenchActionNotice({
-  workbench
+  context
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly context: WorkbenchContextHandle
 }): React.JSX.Element | null {
   const { t } = useTranslation('creation')
-  const state = workbench.actionState.status
-  const persisted = workbench.operationNotice
+  const state = context.actionState.status
+  const persisted = context.operationNotice
   const activeSubmission = state === 'submission-unconfirmed'
   const activeMaterial = state === 'material-unconfirmed'
   const activeSession = state === 'session-unconfirmed'
@@ -615,7 +605,7 @@ function WorkbenchActionNotice({
           <button
             type="button"
             data-testid="creation-resume-submission"
-            onClick={workbench.resumeSubmission}
+            onClick={context.resumeSubmission}
             className="hover:bg-accent rounded border px-2 py-1 font-medium"
           >
             {t('gallery.actionLifecycle.resume')}
@@ -625,7 +615,7 @@ function WorkbenchActionNotice({
           <button
             type="button"
             data-testid="creation-reconcile-action"
-            onClick={workbench.reconcileAction}
+            onClick={context.reconcileAction}
             className="hover:bg-accent rounded border px-2 py-1 font-medium"
           >
             {t('gallery.actionLifecycle.check')}
@@ -635,7 +625,7 @@ function WorkbenchActionNotice({
           <button
             type="button"
             data-testid="creation-stop-tracking"
-            onClick={workbench.stopTracking}
+            onClick={context.stopTracking}
             className="text-muted-foreground hover:text-foreground underline outline-none"
           >
             {afterRestart
@@ -648,13 +638,8 @@ function WorkbenchActionNotice({
   )
 }
 
-/**
- * The list rows mirror the prototype's compact density (prototype 6e465e8):
- * one line with a gradient thumbnail tile and the name. Hovering reveals the
- * actions trigger; its menu carries rename (edited inline in the row) and
- * delete. The tile is purely decorative — the list endpoint carries no cover
- * or media state.
- */
+/** The list rows' tile is purely decorative — the list endpoint carries no
+ * cover or media state. */
 const rowGradients = [
   'from-cyan-950 to-slate-800',
   'from-sky-950 to-zinc-800',
@@ -779,10 +764,8 @@ function SessionRow({
   )
 }
 
-/**
- * A temporary entry for a draft with no Creation Session identity: clicking
- * returns to its context. No menu — nothing on the server owns it.
- */
+/** A draft with no Creation Session identity; no menu — nothing on the
+ * server owns it. */
 function PendingSessionRow({
   entry,
   selected,
@@ -845,13 +828,8 @@ function SessionTile({ index }: { readonly index: number }): React.JSX.Element {
   )
 }
 
-/**
- * The empty-draft workspace state follows the accepted prototype's empty
- * session: greeting hero plus starter template cards; picking one fills the
- * draft prompt (prototype `onPromptChange`) and autosaves. The prototype's
- * "Official Template" badge is intentionally dropped — production carries no
- * fake third-party branding.
- */
+/** Starter templates fill the draft prompt. No "Official Template" badge —
+ * production carries no fake third-party branding. */
 const templateCards = [
   { key: 'scene', Icon: ImageIcon, gradient: 'from-amber-950 via-stone-900 to-sky-950' },
   { key: 'series', Icon: ImageIcon, gradient: 'from-sky-950 via-zinc-900 to-violet-950' },

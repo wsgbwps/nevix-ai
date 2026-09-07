@@ -43,6 +43,7 @@ export interface WorkbenchActions {
   readonly snapshot: (sessionId: string) => WorkbenchActionState
   readonly subscribe: (listener: (event: CreationRuntimeEvent) => void) => () => void
   readonly stagedMaterials: (sessionId: string) => readonly StagedMaterialFile[]
+  readonly resolvedMaterialId: (sessionId: string, localId: string) => string | null
   readonly stageMaterial: (
     sessionId: string,
     localId: string,
@@ -836,6 +837,8 @@ export function createCreationRuntime(
       }
       return staged
     },
+    resolvedMaterialId: (sessionId, localId) =>
+      resolvedMaterialIds.get(materialKey(sessionId, localId)) ?? null,
     stageMaterial,
     replaceMaterial,
     submit,

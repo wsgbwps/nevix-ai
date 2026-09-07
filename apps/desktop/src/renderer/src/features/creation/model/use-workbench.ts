@@ -76,16 +76,14 @@ interface StagedMaterial {
 }
 
 /**
- * The Workbench orchestration (issue #177): context switching, the session
- * list, and draft restore live in the Workbench Context controller (issue
- * #206); task display in the refresh module (ADR-0005); materials and
- * display resources in the display module. What remains here is submission
- * freezing, the SSE bridge, parameter derivation, the material UI policy,
- * and the thin event route into the context controller. Provider
+ * The Workbench composition point (issues #177, #206, #208). Provider
  * availability never gates editing — only the candidate menus and stale
  * verdicts come from the manifest.
  */
-export interface CreationWorkbenchController {
+
+/** The presented Workbench Context: identity, entry actions, the session
+ * list, and the action-lifecycle notices. */
+export interface WorkbenchContextHandle {
   ports: CreationRuntime
   status: WorkbenchStatus
   reload: () => void
@@ -97,42 +95,61 @@ export interface CreationWorkbenchController {
   /** The `pending:<uuid>` ownership being viewed, when a submitted-but-
    * unmaterialized draft is the active context. */
   pendingKey: string | null
+  contextKey: string
   /** Temporary session-list entries for drafts without a session identity. */
   pendingDrafts: readonly PendingDraftEntry[]
-  /** Returns to one pending draft's context through its temporary entry. */
   openPendingDraft: (key: string) => void
   selectSession: (session: CreationSessionView) => void
   startNewDraft: () => void
   deleteSession: (sessionId: string) => void
   renameSession: (sessionId: string, name: string) => void
-  materials: readonly ReferenceMaterialView[]
-  thumbnails: Readonly<Record<string, string>>
-  thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
-  /** Holds one thumbnail while a mounted presentation can paint it. */
-  retainMaterialThumbnail: (materialId: string) => () => void
-  /** Starts an image thumbnail read only when a mounted presentation asks for it. */
-  requestMaterialThumbnail: (materialId: string) => void
+  actionState: WorkbenchActionState
+  operationNotice: LocalDraftOperationNotice | null
+  resumeSubmission: () => void
+  stopTracking: () => void
+  reconcileAction: () => void
+  submitError: string | null
+  dismissSubmitError: () => void
+}
+
+/** The composer surface: the editable draft, its capability candidates and
+ * stale verdicts, the reference deck, and the submit affordance. */
+export interface WorkbenchComposerHandle {
   draft: ComposerDraft
+  patchDraft: (patch: Partial<ComposerDraft>) => void
+  setMediaType: (media: DraftMediaType) => void
+  setModel: (model: string) => void
+  setMode: (mode: string) => void
+  manifest: CapabilityManifest | null
+  manifestStatus: ManifestStatus
+  staleFields: ReadonlySet<DraftStaleField>
+  deckCap: ReturnType<typeof referenceCap>
+  allowedKinds: ReturnType<typeof allowedReferenceKinds>
   mentionCandidates: readonly PromptMentionCandidate[]
   expandedPrompt: string
   promptLength: number
   promptMaxChars: number
   promptInvalid: boolean
-  patchDraft: (patch: Partial<ComposerDraft>) => void
-  setMediaType: (media: DraftMediaType) => void
-  setModel: (model: string) => void
-  setMode: (mode: string) => void
-  addMaterial: (file: File) => void
+  submit: () => void
+  submitDisabled: boolean
+  submitBlockedReason: 'unavailable' | 'stale' | 'length' | null
+  materials: readonly ReferenceMaterialView[]
+  thumbnails: Readonly<Record<string, string>>
+  thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  /** Resolved server id -> staged local id, for the deck's stable card key. */
+  cardKeyAliases: Readonly<Record<string, string>>
+  /** Holds one thumbnail while a mounted presentation can paint it. */
+  retainMaterialThumbnail: (materialId: string) => () => void
+  /** Starts an image thumbnail read only when a mounted presentation asks for it. */
+  requestMaterialThumbnail: (materialId: string) => void
+  /** Materials the prompt's Reference Mentions still name; replacing one would orphan them. */
+  mentionedMaterialIds: ReadonlySet<string>
   /** Admits a dropped file batch against the mode's policy and adds what it accepts. */
   addMaterials: (files: readonly File[]) => void
   /** Swaps one bound card for a new file, keeping the deck position. */
   replaceMaterial: (materialId: string, file: File) => void
   /** Re-uploads a succeeded task result as a new Reference Material (ADR-0018). */
   addResultAsMaterial: (payload: ResultDragPayload, targetMaterialId: string | null) => void
-  /** Materials the prompt's Reference Mentions still name; replacing one would orphan them. */
-  mentionedMaterialIds: ReadonlySet<string>
-  /** Last drop's admission summary; null while nothing was rejected. */
-  materialDropRejection: { readonly added: number; readonly rejected: number } | null
   removeMaterial: (materialId: string) => void
   pendingMaterialRemoval: { readonly materialId: string; readonly mentionCount: number } | null
   confirmMaterialRemoval: () => void
@@ -141,44 +158,47 @@ export interface CreationWorkbenchController {
   dismissReferenceRecovery: () => void
   /** True while the latest material upload failed; cleared by the next attempt. */
   materialUploadFailed: boolean
-  manifest: CapabilityManifest | null
-  manifestStatus: ManifestStatus
-  staleFields: ReadonlySet<DraftStaleField>
-  deckCap: ReturnType<typeof referenceCap>
-  allowedKinds: ReturnType<typeof allowedReferenceKinds>
-  tasks: readonly GenerationTaskView[]
-  taskDetails: Readonly<Record<string, GenerationTaskDetail>>
-  /** Refresh-module snapshot fields (see TaskRefreshSnapshot). */
-  taskDetailStaleIds: ReadonlySet<string>
-  taskListStale: boolean
-  /** Upward history pagination status (see TaskRefreshSnapshot.history). */
-  taskHistory: TaskHistoryStatus
-  /** Loads the next older history page into the displayed session. */
-  loadOlderTasks: () => void
-  submitDisabled: boolean
-  submitBlockedReason: 'unavailable' | 'stale' | 'length' | null
-  submit: () => void
-  actionState: WorkbenchActionState
-  operationNotice: LocalDraftOperationNotice | null
-  resumeSubmission: () => void
-  stopTracking: () => void
-  reconcileAction: () => void
-  cancelTask: (taskId: string) => void
-  retryTask: (taskId: string) => void
-  submitError: string | null
-  dismissSubmitError: () => void
-  /** Leases one succeeded slot's verified display URL until its card releases it. */
-  acquireResultBlobUrl: (taskId: string, slotIndex: number) => Promise<ResultBlobUrlLease | null>
+  /** Last drop's admission summary; null while nothing was rejected. */
+  materialDropRejection: { readonly added: number; readonly rejected: number } | null
   /** Reads one server-backed or pending local Reference Material for UI presentation. */
   loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal) => Promise<Blob | null>
+  /** The prompt editor's document identity: the user-scoped context key. */
+  documentKey: string
+}
+
+/** The workspace surface: the task view with its refresh facts, the task
+ * actions, result blob leases, and the reference pile's material display. */
+export interface WorkbenchGalleryHandle {
+  tasks: readonly GenerationTaskView[]
+  taskDetails: Readonly<Record<string, GenerationTaskDetail>>
+  taskDetailStaleIds: ReadonlySet<string>
+  taskListStale: boolean
+  taskHistory: TaskHistoryStatus
+  loadOlderTasks: () => void
+  /** Leases one succeeded slot's verified display URL until its card releases it. */
+  acquireResultBlobUrl: (taskId: string, slotIndex: number) => Promise<ResultBlobUrlLease | null>
+  cancelTask: (taskId: string) => void
+  retryTask: (taskId: string) => void
   /** Retry of indeterminate work requires the creator's explicit risk confirm. */
   requestIndeterminateRedo: (taskId: string) => void
   confirmIndeterminateRedo: (taskId: string) => void
   indeterminateTaskId: string | null
   dismissIndeterminate: () => void
+  /** The regenerate affordance re-submits the composer's draft. */
+  submit: () => void
+  submitDisabled: boolean
+  materials: readonly ReferenceMaterialView[]
+  thumbnails: Readonly<Record<string, string>>
+  thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  retainMaterialThumbnail: (materialId: string) => () => void
+  requestMaterialThumbnail: (materialId: string) => void
 }
 
-export function useCreationWorkbench(): CreationWorkbenchController {
+export function useCreationWorkbench(): {
+  readonly context: WorkbenchContextHandle
+  readonly composer: WorkbenchComposerHandle
+  readonly gallery: WorkbenchGalleryHandle
+} {
   const ports = useCreationRuntime()
   const { t } = useTranslation('creation')
   const mentionKindLabels = useMemo<PromptMentionKindLabels>(
@@ -197,15 +217,13 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   // contexts the display is not showing.
   const [entriesRevision, setEntriesRevision] = useState(0)
 
-  // The Generation Task refresh module (ADR-0005): scheduling, coalescing,
-  // and consistent task display live behind this binding; business actions
-  // only ask it to reconcile after they complete.
+  // The Generation Task refresh module (ADR-0005); business actions only ask
+  // it to reconcile after they complete.
   const taskRefresh = useTaskRefreshModule(ports)
   const { tasks, taskDetails } = taskRefresh.snapshot
 
-  // The display-resource module: materials, thumbnails, pending local
-  // files, and result blob leases for the displayed context, with the one
-  // context-switch reset every surface change goes through.
+  // The display-resource module; every surface change goes through its one
+  // context-switch reset.
   const displayDeps = useMemo<WorkbenchDisplayDeps | null>(() => {
     if (ports === null) return null
     return {
@@ -224,8 +242,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
   const taskRefreshRef = useRef(taskRefresh)
   const displayRef = useRef(display)
 
-  // The Workbench Context controller (issue #206) owns the context state
-  // machine, the session list, draft restore, and the switching ritual.
+  // The Workbench Context controller (issue #206).
   const contextDeps = useMemo<WorkbenchContextDeps | null>(() => {
     if (ports === null) return null
     return {
@@ -237,6 +254,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
       actions: {
         snapshot: (key) => ports.actions.snapshot(key),
         stagedMaterials: (key) => ports.actions.stagedMaterials(key),
+        resolvedMaterialId: (sessionId, localId) =>
+          ports.actions.resolvedMaterialId(sessionId, localId),
         deleteSession: (sessionId) => ports.actions.deleteSession(sessionId),
         acknowledgeFailure: (key) => ports.actions.acknowledgeFailure(key)
       },
@@ -245,6 +264,8 @@ export function useCreationWorkbench(): CreationWorkbenchController {
         replaceMaterials: (views) => displayRef.current.replaceMaterials(views),
         registerPending: (id, file) => displayRef.current.registerPending(id, file),
         dropPending: (materialId) => displayRef.current.dropPending(materialId),
+        transferPending: (localId, resolvedId) =>
+          displayRef.current.transferPending(localId, resolvedId),
         pendingFiles: () => displayRef.current.pendingFiles(),
         getSnapshot: () => displayRef.current.getSnapshot()
       },
@@ -282,8 +303,7 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     contextController?.setMentionLabels(mentionKindLabels)
   }, [contextController, mentionKindLabels])
 
-  // The manifest loads independently of sessions: its failure degrades the
-  // candidate menus and stale verdicts, never drafting itself.
+  // The manifest loads independently of sessions.
   useEffect(() => {
     if (!ports) return
     let active = true
@@ -784,10 +804,13 @@ export function useCreationWorkbench(): CreationWorkbenchController {
             return
           }
           if (!mountedRef.current || currentSelectedId() !== sessionIdAtStart) return
-          displayRef.current.forget(staged.id)
-          displayRef.current.dropPending(staged.id)
+          // Forgetting here is the same blink the restore merge's
+          // transferPending exists to prevent.
+          displayRef.current.transferPending(staged.id, result.value.id)
           replacement = { id: result.value.id, kind: result.value.kind }
-          const currentMaterials = displayRef.current.getSnapshot().materials
+          const currentMaterials = displayRef.current
+            .getSnapshot()
+            .materials.filter((material) => material.id !== staged.id)
           if (!currentMaterials.some((material) => material.id === result.value.id)) {
             displayRef.current.replaceMaterials([...currentMaterials, result.value])
           }
@@ -874,103 +897,118 @@ export function useCreationWorkbench(): CreationWorkbenchController {
     })
   }, [entriesRevision, ports])
 
+  // The composer's submit circle and the gallery's regenerate gate on one verdict.
+  const submitDisabled = submitBlocked !== null || actionBlocksSubmission
+
   return {
-    ports,
-    status: ctx.status,
-    reload: (): void => contextController?.reload(),
-    sessions: ctx.sessions,
-    selected: ctx.selected,
-    selectedId: ctx.selectedId,
-    composingNew: ctx.composingNew,
-    pendingKey: ctx.pendingKey,
-    pendingDrafts,
-    openPendingDraft: (key: string) => {
-      contextController?.enterContext({ kind: 'pending', key })
+    context: {
+      ports,
+      status: ctx.status,
+      reload: (): void => contextController?.reload(),
+      sessions: ctx.sessions,
+      selected: ctx.selected,
+      selectedId: ctx.selectedId,
+      composingNew: ctx.composingNew,
+      pendingKey: ctx.pendingKey,
+      contextKey: ctx.contextKey,
+      pendingDrafts,
+      openPendingDraft: (key: string) => {
+        contextController?.enterContext({ kind: 'pending', key })
+      },
+      selectSession: (session: CreationSessionView) => {
+        contextController?.enterContext({ kind: 'session', session })
+      },
+      startNewDraft: () => {
+        contextController?.enterContext({ kind: 'new' })
+      },
+      deleteSession: (sessionId: string) => {
+        contextController?.deleteSession(sessionId)
+      },
+      renameSession: (sessionId: string, name: string) => {
+        contextController?.renameSession(sessionId, name)
+      },
+      actionState: ctx.actionState,
+      operationNotice: ctx.operationNotice,
+      resumeSubmission: () => {
+        const key = ctx.actionKey
+        if (key !== null) void ports?.actions.resumeSubmission(key)
+      },
+      stopTracking: () => {
+        if (!ports || contextController === undefined) return
+        const key = contextController.getSnapshot().actionKey
+        if (key === null) return
+        ports.actions.stopTracking(key)
+        contextController.reconcileCurrentContext()
+      },
+      reconcileAction: () => {
+        contextController?.reconcileCurrentContext()
+      },
+      submitError: ctx.submitError,
+      dismissSubmitError: () => {
+        contextController?.acknowledgeActionFailure()
+      }
     },
-    selectSession: (session: CreationSessionView) => {
-      contextController?.enterContext({ kind: 'session', session })
+    composer: {
+      draft: ctx.draft,
+      patchDraft,
+      setMediaType,
+      setModel,
+      setMode,
+      manifest,
+      manifestStatus,
+      staleFields,
+      deckCap,
+      allowedKinds,
+      mentionCandidates,
+      expandedPrompt,
+      promptLength,
+      promptMaxChars,
+      promptInvalid,
+      submit: submitCallback,
+      submitDisabled,
+      submitBlockedReason: submitBlocked,
+      materials,
+      thumbnails,
+      thumbnailStates,
+      cardKeyAliases: display.snapshot.cardKeyAliases,
+      retainMaterialThumbnail: display.retain,
+      requestMaterialThumbnail: display.requestThumbnail,
+      mentionedMaterialIds,
+      addMaterials,
+      replaceMaterial,
+      addResultAsMaterial,
+      removeMaterial: requestMaterialRemoval,
+      pendingMaterialRemoval: ctx.pendingMaterialRemoval,
+      confirmMaterialRemoval,
+      dismissMaterialRemoval: () => contextController?.notePendingMaterialRemoval(null),
+      referenceRecoveryShown: ctx.referenceRecoveryShown,
+      dismissReferenceRecovery: () => contextController?.dismissReferenceRecovery(),
+      materialUploadFailed: ctx.materialUploadFailed,
+      materialDropRejection: ctx.materialDropRejection,
+      loadMaterialPreviewBlob: display.loadMaterialPreviewBlob,
+      documentKey: `${ports?.userId ?? ''}:${ctx.contextKey}`
     },
-    startNewDraft: () => {
-      contextController?.enterContext({ kind: 'new' })
-    },
-    deleteSession: (sessionId: string) => {
-      contextController?.deleteSession(sessionId)
-    },
-    renameSession: (sessionId: string, name: string) => {
-      contextController?.renameSession(sessionId, name)
-    },
-    materials,
-    thumbnails,
-    thumbnailStates,
-    retainMaterialThumbnail: display.retain,
-    requestMaterialThumbnail: display.requestThumbnail,
-    draft: ctx.draft,
-    mentionCandidates,
-    expandedPrompt,
-    promptLength,
-    promptMaxChars,
-    promptInvalid,
-    patchDraft,
-    setMediaType,
-    setModel,
-    setMode,
-    addMaterial: (file: File) => {
-      void addMaterial(file)
-    },
-    addMaterials,
-    replaceMaterial,
-    addResultAsMaterial,
-    mentionedMaterialIds,
-    materialDropRejection: ctx.materialDropRejection,
-    removeMaterial: requestMaterialRemoval,
-    pendingMaterialRemoval: ctx.pendingMaterialRemoval,
-    confirmMaterialRemoval,
-    dismissMaterialRemoval: () => contextController?.notePendingMaterialRemoval(null),
-    referenceRecoveryShown: ctx.referenceRecoveryShown,
-    dismissReferenceRecovery: () => contextController?.dismissReferenceRecovery(),
-    materialUploadFailed: ctx.materialUploadFailed,
-    manifest,
-    manifestStatus,
-    staleFields,
-    deckCap,
-    allowedKinds,
-    tasks,
-    taskDetails,
-    taskDetailStaleIds: taskRefresh.snapshot.staleTaskIds,
-    taskListStale: taskRefresh.snapshot.listFailed,
-    taskHistory: taskRefresh.snapshot.history,
-    loadOlderTasks: taskRefresh.requestOlderTasks,
-    submitDisabled: submitBlocked !== null || actionBlocksSubmission,
-    submitBlockedReason: submitBlocked,
-    submit: submitCallback,
-    actionState: ctx.actionState,
-    operationNotice: ctx.operationNotice,
-    resumeSubmission: () => {
-      const key = ctx.pendingKey ?? ctx.selectedId
-      if (key !== null) void ports?.actions.resumeSubmission(key)
-    },
-    stopTracking: () => {
-      if (!ports || contextController === undefined) return
-      const surface = contextController.getSnapshot()
-      const key = surface.pendingKey ?? surface.selectedId
-      if (key === null) return
-      ports.actions.stopTracking(key)
-      contextController.reconcileCurrentContext()
-    },
-    reconcileAction: () => {
-      contextController?.reconcileCurrentContext()
-    },
-    cancelTask: cancelTaskById,
-    retryTask: retryTaskById,
-    submitError: ctx.submitError,
-    dismissSubmitError: () => {
-      contextController?.acknowledgeActionFailure()
-    },
-    acquireResultBlobUrl: display.acquireResultBlobUrl,
-    loadMaterialPreviewBlob: display.loadMaterialPreviewBlob,
-    requestIndeterminateRedo: (taskId: string) => setIndeterminateTaskId(taskId),
-    confirmIndeterminateRedo,
-    indeterminateTaskId,
-    dismissIndeterminate: () => setIndeterminateTaskId(null)
+    gallery: {
+      tasks,
+      taskDetails,
+      taskDetailStaleIds: taskRefresh.snapshot.staleTaskIds,
+      taskListStale: taskRefresh.snapshot.listFailed,
+      taskHistory: taskRefresh.snapshot.history,
+      loadOlderTasks: taskRefresh.requestOlderTasks,
+      acquireResultBlobUrl: display.acquireResultBlobUrl,
+      cancelTask: cancelTaskById,
+      retryTask: retryTaskById,
+      requestIndeterminateRedo: (taskId: string) => setIndeterminateTaskId(taskId),
+      confirmIndeterminateRedo,
+      indeterminateTaskId,
+      dismissIndeterminate: () => setIndeterminateTaskId(null),
+      submit: submitCallback,
+      submitDisabled,
+      materials,
+      thumbnails,
+      thumbnailStates,
+      retainMaterialThumbnail: display.retain,
+      requestMaterialThumbnail: display.requestThumbnail
+    }
   }
 }

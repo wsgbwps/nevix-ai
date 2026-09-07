@@ -32,12 +32,15 @@ export interface WorkbenchDisplaySnapshot {
   readonly materials: readonly ReferenceMaterialView[]
   readonly thumbnails: Readonly<Record<string, string>>
   readonly thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  /** Resolved server id -> staged local id, for a stable React key. */
+  readonly cardKeyAliases: Readonly<Record<string, string>>
 }
 
 export const emptyWorkbenchDisplaySnapshot: WorkbenchDisplaySnapshot = {
   materials: [],
   thumbnails: {},
-  thumbnailStates: {}
+  thumbnailStates: {},
+  cardKeyAliases: {}
 }
 
 export interface PendingMaterialFile {
@@ -77,6 +80,7 @@ export class WorkbenchDisplayController {
   #thumbnailLoad = 0
   #thumbnailRequests = new Map<string, number>()
   #thumbnailConsumers = new Map<string, number>()
+  #cardKeyAliases: Readonly<Record<string, string>> = {}
   #resultBlobCache: ResultBlobCache | null = null
   #active = false
   #snapshot: WorkbenchDisplaySnapshot = emptyWorkbenchDisplaySnapshot
@@ -131,6 +135,7 @@ export class WorkbenchDisplayController {
     this.#thumbnailIds = new Set()
     this.#thumbnails = {}
     this.#thumbnailStates = {}
+    this.#cardKeyAliases = {}
     this.#changed()
   }
 
@@ -143,15 +148,23 @@ export class WorkbenchDisplayController {
   }
 
   /** Adds one device-local file as a pending material with an immediate
-   * image preview URL; its real upload is the caller's business action. */
+   * image preview URL; its real upload is the caller's business action.
+   * A re-registering still-live pending keeps its painted preview URL —
+   * rebuilding it would flash the card through a reload. */
   registerPending(id: string, file: File): ReferenceMaterialView {
+    this.#pendingFiles.set(id, { file })
+    const live = this.#materials.find((material) => material.id === id)
+    if (live !== undefined && (!file.type.startsWith('image/') || id in this.#thumbnails)) {
+      return live
+    }
     const previewUrl = file.type.startsWith('image/')
       ? this.#materialUrls.replaceThumbnail(id, file)
       : null
-    this.#pendingFiles.set(id, { file })
-    const material = pendingMaterialView(id, file)
-    this.#materials = [...this.#materials, material]
-    this.#materialIds = new Set([...this.#materialIds, id])
+    const material = live ?? pendingMaterialView(id, file)
+    if (live === undefined) {
+      this.#materials = [...this.#materials, material]
+      this.#materialIds = new Set([...this.#materialIds, id])
+    }
     if (previewUrl !== null) {
       this.#thumbnails = { ...this.#thumbnails, [id]: previewUrl }
       this.#thumbnailIds = new Set([...this.#thumbnailIds, id])
@@ -186,6 +199,44 @@ export class WorkbenchDisplayController {
     this.#pendingFiles.delete(materialId)
     this.#materialUrls.releaseMaterial(materialId)
     this.#deleteThumbnailEntry(materialId)
+  }
+
+  /** Moves one resolved pending material's records onto its server identity:
+   * the preview URL re-keys instead of revoking, and the card keeps the
+   * staged local id as its React key — so the swap neither regresses the
+   * card to the kind glyph nor remounts it (a remount replays the entrance
+   * animation from invisible: a visible blink). */
+  transferPending(localId: string, resolvedId: string): void {
+    if (!this.#pendingFiles.has(localId) || localId === resolvedId) return
+    this.#pendingFiles.delete(localId)
+    // The alias is snapshot-visible, so every path below notifies.
+    this.#cardKeyAliases = { ...this.#cardKeyAliases, [resolvedId]: localId }
+    if (this.#thumbnails[resolvedId] !== undefined) {
+      // The resolved identity already paints; the local preview just retires.
+      this.#materialUrls.releaseMaterial(localId)
+      this.#deleteThumbnailEntry(localId)
+      this.#changed()
+      return
+    }
+    this.#materialUrls.renameMaterial(localId, resolvedId)
+    const preview = this.#thumbnails[localId]
+    const state = this.#thumbnailStates[localId]
+    if (preview === undefined && state === undefined) {
+      this.#changed()
+      return
+    }
+    const thumbnails = { ...this.#thumbnails }
+    const states = { ...this.#thumbnailStates }
+    delete thumbnails[localId]
+    delete states[localId]
+    if (preview !== undefined) thumbnails[resolvedId] = preview
+    if (state !== undefined) states[resolvedId] = state
+    this.#thumbnails = thumbnails
+    this.#thumbnailStates = states
+    this.#thumbnailIds = new Set(
+      [...this.#thumbnailIds].map((id) => (id === localId ? resolvedId : id))
+    )
+    this.#changed()
   }
 
   /** Drops one material from every local record — thumbnail entry and owned
@@ -327,7 +378,8 @@ export class WorkbenchDisplayController {
     this.#snapshot = {
       materials: this.#materials,
       thumbnails: this.#thumbnails,
-      thumbnailStates: this.#thumbnailStates
+      thumbnailStates: this.#thumbnailStates,
+      cardKeyAliases: this.#cardKeyAliases
     }
     for (const notify of [...this.#listeners]) notify()
   }

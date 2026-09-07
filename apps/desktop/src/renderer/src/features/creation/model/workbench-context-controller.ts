@@ -92,6 +92,7 @@ export interface WorkbenchContextDisplaySeam {
   replaceMaterials(views: readonly ReferenceMaterialView[]): void
   registerPending(id: string, file: File): ReferenceMaterialView
   dropPending(materialId: string): void
+  transferPending(localId: string, resolvedId: string): void
   pendingFiles(): ReadonlyMap<string, PendingMaterialFile>
   getSnapshot(): { readonly materials: readonly ReferenceMaterialView[] }
 }
@@ -108,6 +109,7 @@ export interface WorkbenchContextTasksSeam {
 export interface WorkbenchContextActionsSeam {
   snapshot(key: string): WorkbenchActionState
   stagedMaterials(key: string): readonly StagedMaterialFile[]
+  resolvedMaterialId(sessionId: string, localId: string): string | null
   deleteSession(sessionId: string): Promise<CreationApiResult<void>>
   acknowledgeFailure(key: string): void
 }
@@ -138,6 +140,11 @@ export interface WorkbenchContextSnapshot {
   readonly selectedId: string | null
   readonly composingNew: boolean
   readonly pendingKey: string | null
+  /** The authoritative context key; every consumer-side key derives from it. */
+  readonly contextKey: string
+  /** The current context's runtime action key; `new` and `inactive` own no
+   * runtime action of their own. */
+  readonly actionKey: string | null
   readonly draft: ComposerDraft
   readonly actionState: WorkbenchActionState
   /** Derived from the current context's action snapshot; never a stale
@@ -160,6 +167,8 @@ export const emptyWorkbenchContextSnapshot: WorkbenchContextSnapshot = {
   selectedId: null,
   composingNew: false,
   pendingKey: null,
+  contextKey: 'inactive',
+  actionKey: null,
   draft: emptyComposerDraft(),
   actionState: { status: 'idle' },
   submitError: null,
@@ -538,7 +547,12 @@ export class WorkbenchContextController {
     const staged = this.#deps.actions.stagedMaterials(session.id)
     const stagedIds = new Set(staged.map((entry) => entry.localId))
     for (const materialId of this.#deps.display.pendingFiles().keys()) {
-      if (!stagedIds.has(materialId)) this.#deps.display.dropPending(materialId)
+      if (stagedIds.has(materialId)) continue
+      // The draft binding remaps onto the resolved identity in this same
+      // restore; every other orphan pending still just drops.
+      const resolvedId = this.#deps.actions.resolvedMaterialId(session.id, materialId)
+      if (resolvedId !== null) this.#deps.display.transferPending(materialId, resolvedId)
+      else this.#deps.display.dropPending(materialId)
     }
     const stagedViews = staged
       .filter(
@@ -727,12 +741,18 @@ export class WorkbenchContextController {
     return this.#pendingKey ?? this.#selectedId
   }
 
-  /** The draft-store key: the pending ownership, else `new` while
-   * composing, else the session (ADR-0017). */
+  /** The draft-store key; the blank state persists nothing (ADR-0017). */
   #draftKey(): string | null {
+    const key = this.#contextKeyValue()
+    return key === 'inactive' ? null : key
+  }
+
+  /** The one spelling of the presented context: the pending ownership, else
+   * `new` while composing, else the session id, else `inactive`. */
+  #contextKeyValue(): string {
     if (this.#pendingKey !== null) return this.#pendingKey
     if (this.#composingNew) return 'new'
-    return this.#selectedId
+    return this.#selectedId ?? 'inactive'
   }
 
   #changed(): void {
@@ -746,6 +766,8 @@ export class WorkbenchContextController {
       selectedId: this.#selectedId,
       composingNew: this.#composingNew,
       pendingKey: this.#pendingKey,
+      contextKey: this.#contextKeyValue(),
+      actionKey: this.#actionKey(),
       draft: this.#draft,
       actionState: this.#actionState,
       submitError: this.#submitError,

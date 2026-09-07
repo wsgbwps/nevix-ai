@@ -37,3 +37,19 @@ test('thumbnail URLs are replaced and released by one explicit owner', () => {
   owner.dispose()
   assert.deepEqual(revoked, ['blob:1', 'blob:2', 'blob:3'])
 })
+
+test('renameMaterial re-keys a URL onto its resolved identity without revoking it', () => {
+  const revoked: string[] = []
+  const owner = new MaterialUrlOwner({
+    createObjectURL: () => 'blob:preview',
+    revokeObjectURL: (url) => revoked.push(url)
+  })
+  owner.replaceThumbnail('pending-1', new Blob())
+
+  owner.renameMaterial('pending-1', 'server-1')
+
+  assert.deepEqual(revoked, [])
+  owner.releaseMaterial('pending-1')
+  owner.releaseMaterial('server-1')
+  assert.deepEqual(revoked, ['blob:preview'])
+})

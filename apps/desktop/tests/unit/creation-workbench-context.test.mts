@@ -15,7 +15,7 @@ registerHooks({
 
 const { WorkbenchContextController } =
   await import('../../src/renderer/src/features/creation/model/workbench-context-controller.ts')
-const { readLocalDraft, writeLocalDraft } =
+const { readLocalDraft, writeLocalDraft, remapLocalDraftMaterial } =
   await import('../../src/renderer/src/features/creation/model/draft-store.ts')
 const { textPromptDocument } =
   await import('../../src/renderer/src/features/creation/model/prompt-document.ts')
@@ -127,6 +127,7 @@ class FakeDisplay {
   readonly replaced: ReferenceMaterialView[][] = []
   readonly registered: string[] = []
   readonly dropped: string[] = []
+  readonly transferred: [localId: string, resolvedId: string][] = []
   readonly #pending = new Map<string, PendingMaterialFile>()
   #materials: readonly ReferenceMaterialView[] = []
 
@@ -151,6 +152,11 @@ class FakeDisplay {
   dropPending(materialId: string): void {
     this.#pending.delete(materialId)
     this.dropped.push(materialId)
+  }
+
+  transferPending(localId: string, resolvedId: string): void {
+    this.#pending.delete(localId)
+    this.transferred.push([localId, resolvedId])
   }
 
   pendingFiles(): ReadonlyMap<string, PendingMaterialFile> {
@@ -203,6 +209,7 @@ class Harness {
   readonly actions = {
     states: new Map<string, WorkbenchActionState>(),
     staged: new Map<string, readonly StagedMaterialFile[]>(),
+    resolved: new Map<string, string>(),
     acknowledged: [] as string[],
     deleted: [] as string[],
     deleteResult: { outcome: 'succeeded' } as CreationApiResult<void>,
@@ -210,6 +217,8 @@ class Harness {
       this.actions.states.get(key) ?? { status: 'idle' },
     stagedMaterials: (key: string): readonly StagedMaterialFile[] =>
       this.actions.staged.get(key) ?? [],
+    resolvedMaterialId: (sessionId: string, localId: string): string | null =>
+      this.actions.resolved.get(`${sessionId}:${localId}`) ?? null,
     deleteSession: (sessionId: string): Promise<CreationApiResult<void>> => {
       this.actions.deleted.push(sessionId)
       return Promise.resolve(this.actions.deleteResult)
@@ -297,6 +306,42 @@ test('the session row: optimistic reset, async merge, staged reconcile, record r
   assert.equal(snapshot.draft.model, 'stored-model')
   assert.deepEqual(snapshot.draft.references, [{ materialId: 'm1', role: 'reference' }])
   assert.equal(controller.manifestVersionForIntent(), 4)
+})
+
+test('the session row: a reconciling restore transfers a resolved staged upload, not drops it', async () => {
+  const { controller, storage, display, script, actions } = harness()
+  writeLocalDraft(
+    storage,
+    'user-1',
+    's1',
+    draftRecord({ references: [{ materialId: 'p1', role: 'reference' }] })
+  )
+  script.materials.set('s1', ok({ materials: [], nextCursor: null }))
+  actions.staged.set('s1', [{ localId: 'p1', file: imageFile('a.png') }])
+  await flush()
+
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+  await flush()
+  assert.ok(!display.dropped.includes('p1'))
+
+  // Resolved: out of staging, identity answerable, draft remapped.
+  actions.staged.set('s1', [])
+  actions.resolved.set('s1:p1', 'm1')
+  script.materials.set('s1', ok({ materials: [materialView('m1')], nextCursor: null }))
+  remapLocalDraftMaterial(storage, 'user-1', 's1', 'p1', 'm1')
+
+  controller.noteRuntimeEvent({ type: 'reconcile', sessionId: 's1' })
+  await flush()
+
+  assert.deepEqual(display.transferred, [['p1', 'm1']])
+  assert.ok(!display.dropped.includes('p1'))
+  assert.deepEqual(controller.getSnapshot().draft.references, [
+    { materialId: 'm1', role: 'reference' }
+  ])
+  assert.deepEqual(
+    display.replaced.at(-1)?.map((material) => material.id),
+    ['m1']
+  )
 })
 
 test('the session row: an enter failure surfaces the outage and tears down', async () => {
@@ -394,6 +439,30 @@ test('the inactive row drops every context and file', async () => {
   assert.equal(tasks.leaveCount, 1)
 })
 
+test('the context key is the one spelling every transition updates', async () => {
+  const { controller } = harness()
+  await flush()
+  assert.equal(controller.getSnapshot().contextKey, 'inactive')
+  assert.equal(controller.getSnapshot().actionKey, null)
+
+  controller.enterContext({ kind: 'new' })
+  assert.equal(controller.getSnapshot().contextKey, 'new')
+  assert.equal(controller.getSnapshot().actionKey, null)
+
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+  await flush()
+  assert.equal(controller.getSnapshot().contextKey, 's1')
+  assert.equal(controller.getSnapshot().actionKey, 's1')
+
+  controller.enterContext({ kind: 'pending', key: 'pending:p1' })
+  assert.equal(controller.getSnapshot().contextKey, 'pending:p1')
+  assert.equal(controller.getSnapshot().actionKey, 'pending:p1')
+
+  controller.enterContext({ kind: 'inactive' })
+  assert.equal(controller.getSnapshot().contextKey, 'inactive')
+  assert.equal(controller.getSnapshot().actionKey, null)
+})
+
 test('deleting the viewed session interrupts its in-flight restore', async () => {
   const { controller, display, script } = harness()
   const slowDetail = deferred<CreationApiResult<CreationSessionView>>()
@@ -474,6 +543,7 @@ test('a suspended lifecycle never adopts its first mount list read (StrictMode)'
     actions: {
       snapshot: (): WorkbenchActionState => ({ status: 'idle' }),
       stagedMaterials: (): readonly StagedMaterialFile[] => [],
+      resolvedMaterialId: (): string | null => null,
       deleteSession: (): Promise<CreationApiResult<void>> =>
         Promise.resolve({ outcome: 'succeeded' }),
       acknowledgeFailure: (): void => undefined

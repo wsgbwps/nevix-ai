@@ -60,6 +60,7 @@ export function ReferenceDeck({
   materials,
   thumbnails,
   thumbnailStates,
+  cardKeyAliases,
   onRetainThumbnail,
   onRequestThumbnail,
   cap,
@@ -78,6 +79,8 @@ export function ReferenceDeck({
   /** material id -> object URL for image thumbs; absent ids show kind glyphs. */
   readonly thumbnails: Readonly<Record<string, string>>
   readonly thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  /** Resolved server id -> staged local id, for a stable card key. */
+  readonly cardKeyAliases: Readonly<Record<string, string>>
   readonly onRetainThumbnail: (materialId: string) => () => void
   readonly onRequestThumbnail: (materialId: string) => void
   /** Maximum bound cards; the add entry disables at the cap. */
@@ -141,12 +144,35 @@ export function ReferenceDeck({
     () => JSON.parse(thumbnailMaterialIdsKey) as string[],
     [thumbnailMaterialIdsKey]
   )
+  // Delta-managed per id: releasing the whole set on any membership change
+  // would revoke and reload every painted thumbnail, flashing every card.
+  const thumbnailLeasesRef = useRef(new Map<string, () => void>())
+  const appliedRetainRef = useRef(onRetainThumbnail)
   useEffect(() => {
-    const releases = thumbnailMaterialIds.map(onRetainThumbnail)
-    return () => {
-      for (const release of releases) release()
+    const leases = thumbnailLeasesRef.current
+    if (appliedRetainRef.current !== onRetainThumbnail) {
+      for (const release of leases.values()) release()
+      leases.clear()
+      appliedRetainRef.current = onRetainThumbnail
+    }
+    for (const id of [...leases.keys()]) {
+      if (!thumbnailMaterialIds.includes(id)) {
+        leases.get(id)?.()
+        leases.delete(id)
+      }
+    }
+    for (const id of thumbnailMaterialIds) {
+      if (!leases.has(id)) leases.set(id, onRetainThumbnail(id))
     }
   }, [onRetainThumbnail, thumbnailMaterialIds])
+  useEffect(
+    () => () => {
+      for (const release of thumbnailLeasesRef.current.values()) release()
+      // StrictMode's effect replay must re-acquire, never skip.
+      thumbnailLeasesRef.current.clear()
+    },
+    []
+  )
   const atCap = visible.length >= cap || allowedKinds.length === 0
   // The picker only offers kinds the published mode's envelope accepts; the
   // server stays the authority and re-validates every binding on save.
@@ -400,7 +426,7 @@ export function ReferenceDeck({
             const isDragTarget = drag.targetId === material.id
             return (
               <div
-                key={material.id}
+                key={cardKeyAliases[material.id] ?? material.id}
                 role="listitem"
                 data-material-id={material.id}
                 data-thumbnail-state={

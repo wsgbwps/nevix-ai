@@ -24,7 +24,7 @@ import type {
   GenerationTaskView
 } from '../api/generation-task-http'
 import type { ReferenceMaterialView } from '../api/go-creation-http'
-import type { CreationWorkbenchController, MaterialThumbnailState } from '../model/use-workbench'
+import type { MaterialThumbnailState, WorkbenchGalleryHandle } from '../model/use-workbench'
 import { modeKeys } from '../i18n/mode-keys'
 import { statusKey } from '../i18n/gallery-keys'
 import { SlotCard } from './slot-card'
@@ -52,34 +52,26 @@ const roleKeys = {
 const galleryGridClass = 'grid grid-cols-2 gap-2 md:grid-cols-4'
 
 // Task action chips carry a persistent subtle fill so consecutive task cards
-// read as separate groups; hover deepens it via accent.
+// read as separate groups.
 const quietButtonClass =
   'text-muted-foreground bg-foreground/[0.06] hover:bg-accent hover:text-foreground flex h-8 items-center gap-1 rounded-md px-2.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50'
 
 /**
- * Every task renders three stacked blocks (the header — the frozen reference
- * pile, prompt, and parameter row — the slot strip, the task actions), and
- * states live inside the slots; there is no separate banner to correlate
- * with.
- *
  * Each card reads the prompt and parameters from the task's own frozen
  * Generation Specification — the detail's copy once it arrives, otherwise the
  * list summary's task snapshot — never the session draft, which may have
- * moved on. Payloads without any snapshot render task-view facts only
- * (status, media type).
+ * moved on.
  */
 export function TaskCard({
-  workbench,
+  gallery,
   task
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly gallery: WorkbenchGalleryHandle
   readonly task: GenerationTaskView
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const detail = workbench.taskDetails[task.id]
+  const detail = gallery.taskDetails[task.id]
   const snapshot = detail?.task ?? task
-  // The frozen intent comes from the detail when it has arrived, otherwise
-  // from the list summary's own snapshot — the live draft is never a source.
   const spec = detail?.specification ?? task.snapshot ?? null
   const terminal = isTerminalTaskStatus(snapshot.status)
   const indeterminate = snapshot.terminalCause !== null
@@ -105,11 +97,11 @@ export function TaskCard({
           <TaskReferencePile
             taskId={snapshot.id}
             references={spec.references}
-            materials={workbench.materials}
-            thumbnails={workbench.thumbnails}
-            thumbnailStates={workbench.thumbnailStates}
-            onRetainThumbnail={workbench.retainMaterialThumbnail}
-            onRequestThumbnail={workbench.requestMaterialThumbnail}
+            materials={gallery.materials}
+            thumbnails={gallery.thumbnails}
+            thumbnailStates={gallery.thumbnailStates}
+            onRetainThumbnail={gallery.retainMaterialThumbnail}
+            onRequestThumbnail={gallery.requestMaterialThumbnail}
           />
         )}
         <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -129,7 +121,7 @@ export function TaskCard({
           )}
           <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
             <span className="text-foreground/70 font-medium">{t(statusKey(snapshot.status))}</span>
-            {workbench.taskDetailStaleIds.has(snapshot.id) && (
+            {gallery.taskDetailStaleIds.has(snapshot.id) && (
               // This task's latest detail read failed; the card keeps its
               // last consistent copy and says so.
               <span className="text-warning/80" data-testid={`task-detail-stale-${snapshot.id}`}>
@@ -160,7 +152,7 @@ export function TaskCard({
         {(detail?.slots ?? placeholderSlots(snapshot.slotCount)).map((slot) => (
           <SlotCard
             key={slot.index}
-            workbench={workbench}
+            acquireResultBlobUrl={gallery.acquireResultBlobUrl}
             taskId={snapshot.id}
             slot={slot}
             mediaType={snapshot.mediaType}
@@ -182,7 +174,7 @@ export function TaskCard({
           <button
             type="button"
             data-testid={`task-cancel-${snapshot.id}`}
-            onClick={() => workbench.cancelTask(snapshot.id)}
+            onClick={() => gallery.cancelTask(snapshot.id)}
             className={quietButtonClass}
           >
             <BanIcon className="size-3.5" aria-hidden />
@@ -193,8 +185,8 @@ export function TaskCard({
           <button
             type="button"
             data-testid={`task-regenerate-${snapshot.id}`}
-            onClick={workbench.submit}
-            disabled={workbench.submitDisabled}
+            onClick={gallery.submit}
+            disabled={gallery.submitDisabled}
             className={`${quietButtonClass} disabled:opacity-50`}
           >
             <RefreshCwIcon className="size-3.5" aria-hidden />
@@ -215,7 +207,7 @@ export function TaskCard({
                 <DropdownMenuItem
                   data-testid={`task-retry-${snapshot.id}`}
                   className="cursor-pointer text-xs"
-                  onSelect={() => workbench.retryTask(snapshot.id)}
+                  onSelect={() => gallery.retryTask(snapshot.id)}
                 >
                   <RepeatIcon className="size-3.5" aria-hidden />
                   {t('gallery.actions.retryUncompleted')}
@@ -225,7 +217,7 @@ export function TaskCard({
                 <DropdownMenuItem
                   data-testid={`task-retry-indeterminate-${snapshot.id}`}
                   className="cursor-pointer text-xs"
-                  onSelect={() => workbench.requestIndeterminateRedo(snapshot.id)}
+                  onSelect={() => gallery.requestIndeterminateRedo(snapshot.id)}
                 >
                   <RepeatIcon className="size-3.5" aria-hidden />
                   {t('gallery.actions.retryUncompleted')}
@@ -235,7 +227,7 @@ export function TaskCard({
           </DropdownMenu>
         )}
       </div>
-      {workbench.indeterminateTaskId === snapshot.id && (
+      {gallery.indeterminateTaskId === snapshot.id && (
         <div
           role="alertdialog"
           aria-label={t('gallery.indeterminate.title')}
@@ -250,14 +242,14 @@ export function TaskCard({
             <button
               type="button"
               data-testid={`indeterminate-confirm-button-${snapshot.id}`}
-              onClick={() => workbench.confirmIndeterminateRedo(snapshot.id)}
+              onClick={() => gallery.confirmIndeterminateRedo(snapshot.id)}
               className="text-warning border-warning/60 hover:bg-warning/10 h-7 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
             >
               {t('gallery.indeterminate.confirm')}
             </button>
             <button
               type="button"
-              onClick={workbench.dismissIndeterminate}
+              onClick={gallery.dismissIndeterminate}
               className="text-muted-foreground border-border hover:bg-accent h-7 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
             >
               {t('gallery.indeterminate.cancel')}
@@ -278,10 +270,9 @@ function MetaSeparator(): React.JSX.Element {
 }
 
 // The card's reference pile replicates the deck's fan in a static, read-only
-// form: deck-faced cards overlap left→right with alternating tilts, the
-// later position on top (Reference Material, CONTEXT.md, covers the
-// frozen-identity boundary). The pitch compresses so any frozen reference
-// count stays inside the header row.
+// form (Reference Material, CONTEXT.md, covers the frozen-identity boundary).
+// The pitch compresses so any frozen reference count stays inside the header
+// row.
 const fanRotations = [-5, 3, -3, 4, -4, 2.5]
 const pileShifts = [0, -1.5, 1.5]
 const pileCardWidth = 34

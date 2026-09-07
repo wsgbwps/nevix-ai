@@ -233,3 +233,86 @@ test('acquireResultBlobUrl resolves null when the result read fails', async () =
   const lease = await controller.acquireResultBlobUrl('task-1', 0)
   assert.equal(lease, null)
 })
+
+test('transferPending re-keys the painted preview onto the server identity without a refetch', async () => {
+  const urls = fakeUrls()
+  const blobLoads: string[] = []
+  const controller = createController(urls, async (materialId) => {
+    blobLoads.push(materialId)
+    return { outcome: 'succeeded', value: new Blob(['thumb']) }
+  })
+  controller.registerPending('pending-1', imageFile('a.png'))
+  const release = controller.retain('pending-1')
+  const preview = controller.getSnapshot().thumbnails['pending-1']
+  assert.ok(preview !== undefined)
+
+  controller.transferPending('pending-1', 'server-1')
+
+  // The card re-keys with its thumbnail already painted: same URL, no glyph
+  // frame, no blob re-fetch — and its React key alias lets the deck keep the
+  // mounted node across the swap.
+  const snapshot = controller.getSnapshot()
+  assert.equal(snapshot.thumbnails['server-1'], preview)
+  assert.equal(snapshot.thumbnails['pending-1'], undefined)
+  assert.deepEqual(snapshot.cardKeyAliases, { 'server-1': 'pending-1' })
+  assert.equal(controller.pendingFiles().has('pending-1'), false)
+
+  // The deck's lease effect re-keys around the transfer; the stale lease's
+  // release must not disturb the transferred entry, and a fresh lease must
+  // not trigger a load.
+  release()
+  const releaseServer = controller.retain('server-1')
+  await flush()
+  await flush()
+  assert.equal(controller.getSnapshot().thumbnails['server-1'], preview)
+  assert.deepEqual(blobLoads, [])
+  assert.ok(!urls.revoked.includes(preview))
+  releaseServer()
+})
+
+test('reset clears the card key aliases with the rest of the generation', () => {
+  const urls = fakeUrls()
+  const controller = createController(urls)
+  controller.registerPending('pending-1', imageFile('a.png'))
+  controller.transferPending('pending-1', 'server-1')
+  assert.deepEqual(controller.getSnapshot().cardKeyAliases, { 'server-1': 'pending-1' })
+
+  controller.reset()
+
+  assert.deepEqual(controller.getSnapshot().cardKeyAliases, {})
+})
+
+test('re-registering a live pending refreshes the file handle without rebuilding its preview URL', () => {
+  const urls = fakeUrls()
+  const controller = createController(urls)
+  controller.registerPending('pending-1', imageFile('a.png'))
+  const preview = controller.getSnapshot().thumbnails['pending-1']
+  assert.ok(preview !== undefined)
+
+  const view = controller.registerPending('pending-1', imageFile('a.png'))
+
+  assert.equal(view.id, 'pending-1')
+  assert.equal(controller.getSnapshot().thumbnails['pending-1'], preview)
+  assert.equal(controller.getSnapshot().materials.length, 1)
+  assert.deepEqual(urls.revoked, [])
+})
+
+test('transferPending stays same-tick fresh for a non-image pending', () => {
+  const urls = fakeUrls()
+  const controller = createController(urls)
+  let notifications = 0
+  controller.subscribe(() => {
+    notifications += 1
+  })
+  controller.registerPending(
+    'pending-1',
+    new File([new Uint8Array([1])], 'a.mp4', { type: 'video/mp4' })
+  )
+  const before = notifications
+
+  controller.transferPending('pending-1', 'server-1')
+
+  assert.ok(notifications > before)
+  assert.deepEqual(controller.getSnapshot().cardKeyAliases, { 'server-1': 'pending-1' })
+  assert.equal(controller.pendingFiles().has('pending-1'), false)
+})
