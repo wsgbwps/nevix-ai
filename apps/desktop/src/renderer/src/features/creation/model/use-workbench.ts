@@ -136,6 +136,8 @@ export interface WorkbenchComposerHandle {
   materials: readonly ReferenceMaterialView[]
   thumbnails: Readonly<Record<string, string>>
   thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  /** Resolved server id -> staged local id, for the deck's stable card key. */
+  cardKeyAliases: Readonly<Record<string, string>>
   /** Holds one thumbnail while a mounted presentation can paint it. */
   retainMaterialThumbnail: (materialId: string) => () => void
   /** Starts an image thumbnail read only when a mounted presentation asks for it. */
@@ -252,6 +254,8 @@ export function useCreationWorkbench(): {
       actions: {
         snapshot: (key) => ports.actions.snapshot(key),
         stagedMaterials: (key) => ports.actions.stagedMaterials(key),
+        resolvedMaterialId: (sessionId, localId) =>
+          ports.actions.resolvedMaterialId(sessionId, localId),
         deleteSession: (sessionId) => ports.actions.deleteSession(sessionId),
         acknowledgeFailure: (key) => ports.actions.acknowledgeFailure(key)
       },
@@ -260,6 +264,8 @@ export function useCreationWorkbench(): {
         replaceMaterials: (views) => displayRef.current.replaceMaterials(views),
         registerPending: (id, file) => displayRef.current.registerPending(id, file),
         dropPending: (materialId) => displayRef.current.dropPending(materialId),
+        transferPending: (localId, resolvedId) =>
+          displayRef.current.transferPending(localId, resolvedId),
         pendingFiles: () => displayRef.current.pendingFiles(),
         getSnapshot: () => displayRef.current.getSnapshot()
       },
@@ -798,10 +804,13 @@ export function useCreationWorkbench(): {
             return
           }
           if (!mountedRef.current || currentSelectedId() !== sessionIdAtStart) return
-          displayRef.current.forget(staged.id)
-          displayRef.current.dropPending(staged.id)
+          // Forgetting here is the same blink the restore merge's
+          // transferPending exists to prevent.
+          displayRef.current.transferPending(staged.id, result.value.id)
           replacement = { id: result.value.id, kind: result.value.kind }
-          const currentMaterials = displayRef.current.getSnapshot().materials
+          const currentMaterials = displayRef.current
+            .getSnapshot()
+            .materials.filter((material) => material.id !== staged.id)
           if (!currentMaterials.some((material) => material.id === result.value.id)) {
             displayRef.current.replaceMaterials([...currentMaterials, result.value])
           }
@@ -961,6 +970,7 @@ export function useCreationWorkbench(): {
       materials,
       thumbnails,
       thumbnailStates,
+      cardKeyAliases: display.snapshot.cardKeyAliases,
       retainMaterialThumbnail: display.retain,
       requestMaterialThumbnail: display.requestThumbnail,
       mentionedMaterialIds,

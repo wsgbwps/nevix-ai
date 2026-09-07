@@ -92,6 +92,7 @@ export interface WorkbenchContextDisplaySeam {
   replaceMaterials(views: readonly ReferenceMaterialView[]): void
   registerPending(id: string, file: File): ReferenceMaterialView
   dropPending(materialId: string): void
+  transferPending(localId: string, resolvedId: string): void
   pendingFiles(): ReadonlyMap<string, PendingMaterialFile>
   getSnapshot(): { readonly materials: readonly ReferenceMaterialView[] }
 }
@@ -108,6 +109,7 @@ export interface WorkbenchContextTasksSeam {
 export interface WorkbenchContextActionsSeam {
   snapshot(key: string): WorkbenchActionState
   stagedMaterials(key: string): readonly StagedMaterialFile[]
+  resolvedMaterialId(sessionId: string, localId: string): string | null
   deleteSession(sessionId: string): Promise<CreationApiResult<void>>
   acknowledgeFailure(key: string): void
 }
@@ -545,7 +547,12 @@ export class WorkbenchContextController {
     const staged = this.#deps.actions.stagedMaterials(session.id)
     const stagedIds = new Set(staged.map((entry) => entry.localId))
     for (const materialId of this.#deps.display.pendingFiles().keys()) {
-      if (!stagedIds.has(materialId)) this.#deps.display.dropPending(materialId)
+      if (stagedIds.has(materialId)) continue
+      // The draft binding remaps onto the resolved identity in this same
+      // restore; every other orphan pending still just drops.
+      const resolvedId = this.#deps.actions.resolvedMaterialId(session.id, materialId)
+      if (resolvedId !== null) this.#deps.display.transferPending(materialId, resolvedId)
+      else this.#deps.display.dropPending(materialId)
     }
     const stagedViews = staged
       .filter(

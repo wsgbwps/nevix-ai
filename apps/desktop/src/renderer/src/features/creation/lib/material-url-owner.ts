@@ -15,6 +15,14 @@ export class MaterialUrlOwner {
     return url
   }
 
+  /** The caller guarantees `toId` owns no URL yet. */
+  renameMaterial(fromId: string, toId: string): void {
+    const url = this.#thumbnails.get(fromId)
+    if (url === undefined) return
+    this.#thumbnails.delete(fromId)
+    this.#thumbnails.set(toId, url)
+  }
+
   releaseMaterial(materialId: string): void {
     const thumbnail = this.#thumbnails.get(materialId)
     if (thumbnail !== undefined) {

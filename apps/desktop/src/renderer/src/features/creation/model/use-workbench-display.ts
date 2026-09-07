@@ -21,6 +21,7 @@ export interface WorkbenchDisplayBinding {
   readonly replaceMaterials: (views: readonly ReferenceMaterialView[]) => void
   readonly registerPending: (id: string, file: File) => ReferenceMaterialView
   readonly dropPending: (materialId: string) => void
+  readonly transferPending: (localId: string, resolvedId: string) => void
   readonly forget: (materialId: string) => void
   readonly requestThumbnail: (materialId: string) => void
   readonly retain: (materialId: string) => () => void
@@ -46,6 +47,7 @@ const idleDisplayMethods = {
     throw new Error('workbench display module is inactive')
   },
   dropPending: (): void => undefined,
+  transferPending: (): void => undefined,
   forget: (): void => undefined,
   requestThumbnail: (): void => undefined,
   retain: (): (() => void) => () => undefined,
@@ -94,6 +96,8 @@ export function useWorkbenchDisplay(deps: WorkbenchDisplayDeps | null): Workbenc
       registerPending: (id: string, file: File): ReferenceMaterialView =>
         controller.registerPending(id, file),
       dropPending: (materialId: string): void => controller.dropPending(materialId),
+      transferPending: (localId: string, resolvedId: string): void =>
+        controller.transferPending(localId, resolvedId),
       forget: (materialId: string): void => controller.forget(materialId),
       requestThumbnail: (materialId: string): void => controller.requestThumbnail(materialId),
       retain: (materialId: string): (() => void) => controller.retain(materialId),

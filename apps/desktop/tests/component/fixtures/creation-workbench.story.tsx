@@ -241,6 +241,8 @@ export interface DeckTestControls {
   deferNextMaterialList(): void
   materialListCalls(): number
   uploadCalls(): ReadonlyArray<{ sessionId: string; name: string }>
+  /** Releases only the oldest held upload, for sequenced resolutions. */
+  releaseNextUpload(): void
   taskCalls(): ReadonlyArray<{
     sessionId: string
     idempotencyKey: string
@@ -403,6 +405,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   let materialListCalls = 0
   let remainingMaterialBlobFailures = options.materialBlobFailures ?? 0
   const uploadCalls: Array<{ sessionId: string; name: string }> = []
+  // First upload answers with the id the legacy specs pin; later ones increment.
+  let uploadSequence = 0
   const createdSessions: Array<{ name: string }> = []
   const renameCalls: Array<{ sessionId: string; name: string }> = []
   const deletedSessionIds: string[] = []
@@ -506,6 +510,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       releaseTaskDetailsResponse = null
     },
     releaseUploads: () => releaseAll(uploadReleases),
+    releaseNextUpload: (): void => {
+      uploadReleases.values().next().value?.()
+    },
     releaseSubmissions: () => releaseAll(submissionReleases),
     releaseFirstMaterialList: () => {
       releaseFirstMaterialList?.()
@@ -618,8 +625,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     uploadMaterial: async (sessionId, file) => {
       uploadCalls.push({ sessionId, name: file.name })
       if (options.uploadDeferred) await waitForRelease(uploadReleases)
+      uploadSequence += 1
       const uploaded = material({
-        id: 'ffffffff-0000-4000-8000-000000000006',
+        id: `ffffffff-0000-4000-8000-0000000000${String(5 + uploadSequence).padStart(2, '0')}`,
         kind: 'image',
         fileName: file.name
       })
