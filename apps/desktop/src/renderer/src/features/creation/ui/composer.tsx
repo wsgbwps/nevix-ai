@@ -352,9 +352,11 @@ export function CreationComposer({
               triggerClass={`${controlClass} ${draft.mediaType !== null && !staleFields.has('mediaType') ? 'text-cyan-600 dark:text-cyan-300' : ''} ${staleFields.has('mediaType') ? staleTriggerClass : ''}`}
             />
             {media !== null && <ModelMenu composer={composer} triggerClass={controlClass} />}
+            {/* ModeMenu's video-only gate is product semantics (image modes
+                derive from the deck), not a manifest fact. */}
             {media === 'video' && controls && <ModeMenu composer={composer} />}
             {media !== null && controls && <ParamsMenu composer={composer} />}
-            {media === 'video' && controls && <DurationMenu composer={composer} />}
+            {controls && <DurationMenu composer={composer} />}
             {/* Reserves the absolute submit circle's slot so the longest
                 capability pill never underlaps it. */}
             <div className="ml-auto size-8 shrink-0" aria-hidden />
@@ -647,10 +649,7 @@ function ParamsMenu({
   const quantities = capability.quantities ?? []
   // The exact pixel size the server will submit for this selection; hidden
   // while any dimension is stale or the combination is unpublished.
-  const size =
-    media === 'image'
-      ? publishedSize(manifest, media, draft.model, draft.ratio, draft.resolution)
-      : null
+  const size = publishedSize(manifest, media, draft.model, draft.ratio, draft.resolution)
   const staleRatio = staleFields.has('ratio') ? draft.ratio : null
   const staleResolution = staleFields.has('resolution') ? draft.resolution : null
   const staleQuantity = staleFields.has('quantity') ? draft.quantity : null
@@ -664,10 +663,10 @@ function ParamsMenu({
         className={`${controlClass} ${staleParams ? staleTriggerClass : ''}`}
       >
         <RatioGlyph ratio={draft.ratio} max={14} />
-        {media === 'image' && draft.ratio !== null && <span>{draft.ratio}</span>}
-        {media === 'image' && draft.ratio !== null && draft.resolution !== null && <Separator />}
+        {draft.ratio !== null && <span>{draft.ratio}</span>}
+        {draft.ratio !== null && draft.resolution !== null && <Separator />}
         {draft.resolution !== null && <span>{draft.resolution}</span>}
-        {media === 'image' && draft.quantity !== null && (
+        {draft.quantity !== null && (
           <>
             <Separator />
             <span>{draft.quantity}</span>
@@ -682,7 +681,7 @@ function ParamsMenu({
         className="w-[420px] p-4 shadow-2xl"
       >
         <div className="grid gap-4">
-          {media === 'image' && ratios.length > 0 && (
+          {ratios.length > 0 && (
             <ParamGroup label={t('composer.params.ratio')}>
               {staleRatio !== null && <StaleRow value={staleRatio} />}
               <OptionStrip
@@ -715,7 +714,7 @@ function ParamsMenu({
               />
             </ParamGroup>
           )}
-          {media === 'image' && quantities.length > 0 && (
+          {quantities.length > 0 && (
             <ParamGroup label={t('composer.params.quantity')}>
               {staleQuantity !== null && <StaleRow value={String(staleQuantity)} />}
               <OptionStrip
@@ -759,7 +758,9 @@ function DurationMenu({
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const { draft, manifest, staleFields } = composer
-  const capability = mediaCapability(manifest, 'video')
+  const media = draft.mediaType
+  if (media === null) return <></>
+  const capability = mediaCapability(manifest, media)
   if (capability === null || !capability.available) return <></>
   const durations = capability.durations ?? []
   if (durations.length === 0) return <></>

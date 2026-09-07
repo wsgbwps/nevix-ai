@@ -7,6 +7,11 @@
  */
 import type { CreationApiResult, DraftReferenceView, MaterialKind } from './go-creation-http'
 import { request } from './go-creation-http'
+import {
+  GENERATION_PARAMETER_WIRE_KEYS,
+  generationParameterWireValues,
+  type GenerationParameterValues
+} from './generation-parameter'
 
 /** One generation task's one-way status (contracts GenerationTask.status). */
 export type GenerationTaskStatus =
@@ -131,16 +136,9 @@ export interface TaskSubmitInput {
 
 /** Plain transport intent frozen by the server. Desktop-only mention identity
  * is expanded before crossing this trusted seam. */
-export interface GenerationIntent {
+export interface GenerationIntent extends GenerationParameterValues {
   readonly prompt: string
-  readonly mediaType: 'image' | 'video' | null
   readonly manifestVersion: number
-  readonly model: string | null
-  readonly mode: string | null
-  readonly ratio: string | null
-  readonly resolution: string | null
-  readonly quantity: number | null
-  readonly durationSeconds: number | null
   readonly references: readonly DraftReferenceView[]
 }
 
@@ -189,7 +187,7 @@ function parseTask(payload: unknown): GenerationTaskView | null {
   const id = str(payload, 'id')
   const sessionId = str(payload, 'session_id')
   const statusRaw = str(payload, 'status')
-  const mediaType = str(payload, 'media_type')
+  const mediaType = str(payload, GENERATION_PARAMETER_WIRE_KEYS.mediaType)
   const createdAt = str(payload, 'created_at')
   const updatedAt = str(payload, 'updated_at')
   if (!id || !sessionId || !createdAt || !updatedAt) return null
@@ -328,15 +326,16 @@ const SPEC_REFERENCE_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'au
 // diagnostic).
 function parseSpecification(raw: unknown): GenerationSpecificationView | null {
   if (!isRecord(raw)) return null
+  const wireKeys = GENERATION_PARAMETER_WIRE_KEYS
   const prompt = str(raw, 'prompt')
-  const model = str(raw, 'model')
-  const mode = str(raw, 'mode')
-  const mediaType = str(raw, 'media_type')
+  const model = str(raw, wireKeys.model)
+  const mode = str(raw, wireKeys.mode)
+  const mediaType = str(raw, wireKeys.mediaType)
   if (prompt === null || model === null || mode === null) return null
   if (mediaType !== 'image' && mediaType !== 'video') return null
   if (nullableNum(raw, 'schema_version') == null) return null
   if (nullableNum(raw, 'manifest_version') == null) return null
-  const quantity = nullableNum(raw, 'quantity')
+  const quantity = nullableNum(raw, wireKeys.quantity)
   if (quantity === null || quantity === undefined || quantity < 1) return null
   const references = raw['references']
   if (!Array.isArray(references)) return null
@@ -359,9 +358,9 @@ function parseSpecification(raw: unknown): GenerationSpecificationView | null {
     prompt,
     model,
     mode,
-    ratio: nullableStr(raw, 'ratio') ?? null,
-    resolution: nullableStr(raw, 'resolution') ?? null,
-    durationSeconds: nullableNum(raw, 'duration_seconds') ?? null,
+    ratio: nullableStr(raw, wireKeys.ratio) ?? null,
+    resolution: nullableStr(raw, wireKeys.resolution) ?? null,
+    durationSeconds: nullableNum(raw, wireKeys.durationSeconds) ?? null,
     quantity,
     references: parsedReferences
   }
@@ -472,14 +471,8 @@ export function createGenerationTaskClient(serverUrl: string): {
         body: {
           idempotency_key: input.idempotencyKey,
           prompt: input.intent.prompt,
-          media_type: input.intent.mediaType,
+          ...generationParameterWireValues(input.intent),
           manifest_version: input.intent.manifestVersion,
-          model: input.intent.model,
-          mode: input.intent.mode,
-          ratio: input.intent.ratio,
-          resolution: input.intent.resolution,
-          quantity: input.intent.quantity,
-          duration_seconds: input.intent.durationSeconds,
           references: input.intent.references.map((reference) => ({
             material_id: reference.materialId,
             role: reference.role

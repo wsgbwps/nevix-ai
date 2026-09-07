@@ -10,22 +10,20 @@
  */
 
 import type { DraftReferenceRole, DraftReferenceView } from '../api/go-creation-http'
+import {
+  generationParameterWireValues,
+  parseGenerationParameterValues,
+  type GenerationParameterValues
+} from '../api/generation-parameter'
 import { parsePromptDocument, remapPromptMentions, type PromptDocument } from './prompt-document'
 
 /** Key prefix for drafts whose submission began without a session identity. */
 export const PENDING_DRAFT_KEY_PREFIX = 'pending:'
 
-export interface LocalDraftRecord {
+export interface LocalDraftRecord extends GenerationParameterValues {
   readonly prompt: string
   readonly promptDocument: PromptDocument
-  readonly mediaType: 'image' | 'video' | null
   readonly manifestVersion: number
-  readonly model: string | null
-  readonly mode: string | null
-  readonly ratio: string | null
-  readonly resolution: string | null
-  readonly quantity: number | null
-  readonly durationSeconds: number | null
   readonly references: DraftReferenceView[]
   readonly operationNotice?: LocalDraftOperationNotice
 }
@@ -76,14 +74,8 @@ export function writeLocalDraft(
       JSON.stringify({
         prompt: record.prompt,
         prompt_document: record.promptDocument,
-        media_type: record.mediaType,
+        ...generationParameterWireValues(record),
         manifest_version: record.manifestVersion,
-        model: record.model,
-        mode: record.mode,
-        ratio: record.ratio,
-        resolution: record.resolution,
-        quantity: record.quantity,
-        duration_seconds: record.durationSeconds,
         references: record.references.map((reference) => ({
           material_id: reference.materialId,
           role: reference.role
@@ -110,26 +102,13 @@ function parseLocalDraftRecord(payload: unknown): LocalDraftRecord | null {
   if (!isRecord(payload)) return null
   const prompt = stringField(payload, 'prompt')
   const manifestVersion = numberField(payload, 'manifest_version')
-  const mediaType = nullableString(payload, 'media_type')
-  const model = nullableString(payload, 'model')
-  const mode = nullableString(payload, 'mode')
-  const ratio = nullableString(payload, 'ratio')
-  const resolution = nullableString(payload, 'resolution')
-  const quantity = nullableNumber(payload, 'quantity')
-  const durationSeconds = nullableNumber(payload, 'duration_seconds')
+  const parameters = parseGenerationParameterValues(payload)
   const operationNotice = parseOperationNotice(payload.operation_notice)
   if (
     prompt === null ||
     manifestVersion === undefined ||
     manifestVersion < 1 ||
-    mediaType === undefined ||
-    (mediaType !== null && mediaType !== 'image' && mediaType !== 'video') ||
-    model === undefined ||
-    mode === undefined ||
-    ratio === undefined ||
-    resolution === undefined ||
-    quantity === undefined ||
-    durationSeconds === undefined ||
+    parameters === null ||
     !Array.isArray(payload.references) ||
     operationNotice === null
   ) {
@@ -148,14 +127,8 @@ function parseLocalDraftRecord(payload: unknown): LocalDraftRecord | null {
   return {
     prompt,
     promptDocument: parsePromptDocument(payload.prompt_document, prompt),
-    mediaType,
+    ...parameters,
     manifestVersion,
-    model,
-    mode,
-    ratio,
-    resolution,
-    quantity,
-    durationSeconds,
     references,
     ...(operationNotice === undefined ? {} : { operationNotice })
   }
@@ -208,18 +181,6 @@ function stringField(source: Record<string, unknown>, field: string): string | n
 function numberField(source: Record<string, unknown>, field: string): number | undefined {
   const value = source[field]
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function nullableString(source: Record<string, unknown>, field: string): string | null | undefined {
-  if (!(field in source)) return undefined
-  const value = source[field]
-  return value === null || typeof value === 'string' ? value : undefined
-}
-
-function nullableNumber(source: Record<string, unknown>, field: string): number | null | undefined {
-  if (!(field in source)) return undefined
-  const value = source[field]
-  return value === null || (typeof value === 'number' && Number.isFinite(value)) ? value : undefined
 }
 
 export function removeLocalDraft(storage: Storage, userId: string, key: string): void {

@@ -406,6 +406,60 @@ test('video mention hover stays metadata-only and full preview retries then reus
   ).toHaveLength(2)
 })
 
+test('the duration menu shows for a video draft while durations are published', async ({
+  mount,
+  page
+}) => {
+  const videoId = '12121212-0000-4000-8000-000000000012'
+  const video = scriptedMaterial(videoId, 'video', 'walkthrough.mp4')
+
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{ [scriptedSessionId]: videoMentionDraft(videoId) }}
+      materials={{ [scriptedSessionId]: [video] }}
+    />
+  )
+  await selectFirstSession(page)
+  await expect(page.getByTestId('composer-duration')).toBeVisible()
+})
+
+test('the duration menu disappears when the manifest publishes no durations', async ({
+  mount,
+  page
+}) => {
+  const videoId = '12121212-0000-4000-8000-000000000012'
+  const video = scriptedMaterial(videoId, 'video', 'walkthrough.mp4')
+  const durationsUnpublished: CapabilityManifest = {
+    schemaVersion: 2,
+    manifestVersion: 6,
+    updatedAt: '2026-08-29T10:00:00Z',
+    image: { available: false, reason: 'not_configured', action: 'contact_admin' },
+    video: {
+      available: true,
+      reason: null,
+      action: null,
+      models: [
+        {
+          model: 'doubao-seedance-2-5',
+          resolutions: ['480p', '720p', '1080p'],
+          defaultResolution: '720p'
+        }
+      ],
+      modes: [{ id: 'omni-reference', referenceMaterial: { total: { min: 0, max: 5 } } }],
+      prompt: { minChars: 1, maxChars: 2000 }
+    }
+  }
+  await mount(
+    <CreationWorkbenchStory
+      manifest={durationsUnpublished}
+      drafts={{ [scriptedSessionId]: videoMentionDraft(videoId) }}
+      materials={{ [scriptedSessionId]: [video] }}
+    />
+  )
+  await selectFirstSession(page)
+  await expect(page.getByTestId('composer-duration')).toHaveCount(0)
+})
+
 test('selecting a session does not bulk-read thumbnails for unused materials', async ({
   mount,
   page
