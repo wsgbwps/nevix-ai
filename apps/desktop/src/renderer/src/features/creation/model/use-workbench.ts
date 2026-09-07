@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { CapabilityManifest } from '../api/capability-manifest-http'
+import { manifestDefaultParameters } from '../api/generation-parameter'
 import type {
   CreationApiResult,
   CreationSessionView,
@@ -376,9 +377,7 @@ export function useCreationWorkbench(): {
         model: model?.model ?? null,
         mode: published ? ((published.modes ?? [])[0]?.id ?? null) : null,
         resolution: model?.defaultResolution ?? null,
-        ratio: published?.defaults?.ratio ?? null,
-        quantity: published?.defaults?.quantity ?? null,
-        durationSeconds: published?.defaults?.duration ?? null
+        ...manifestDefaultParameters(published)
       })
     },
     [manifest, patchDraft, ports]

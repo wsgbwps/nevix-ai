@@ -14,6 +14,11 @@
  * derived from the current context's action snapshot.
  */
 import type { CapabilityManifest } from '../api/capability-manifest-http'
+import {
+  emptyGenerationParameters,
+  manifestDefaultParameters,
+  type GenerationParameterValues
+} from '../api/generation-parameter'
 import type {
   CreationApiResult,
   CreationSessionView,
@@ -61,27 +66,14 @@ export type WorkbenchContextKey =
  * exactly what the creator sees; the manifest only adds candidate menus and
  * stale verdicts, it never rewrites these values.
  */
-export interface ComposerDraft {
+export interface ComposerDraft extends GenerationParameterValues {
   promptDocument: PromptDocument
-  mediaType: DraftMediaType | null
-  model: string | null
-  mode: string | null
-  ratio: string | null
-  resolution: string | null
-  quantity: number | null
-  durationSeconds: number | null
   references: DraftReferenceView[]
 }
 
 export const emptyComposerDraft = (): ComposerDraft => ({
   promptDocument: textPromptDocument(''),
-  mediaType: null,
-  model: null,
-  mode: null,
-  ratio: null,
-  resolution: null,
-  quantity: null,
-  durationSeconds: null,
+  ...emptyGenerationParameters(),
   references: []
 })
 
@@ -204,10 +196,8 @@ function manifestDefaultDraft(value: CapabilityManifest): ComposerDraft | null {
     mediaType: media,
     model: model?.model ?? null,
     mode: first ? first.id : null,
-    ratio: capability.defaults?.ratio ?? null,
     resolution: model?.defaultResolution ?? null,
-    quantity: capability.defaults?.quantity ?? null,
-    durationSeconds: capability.defaults?.duration ?? null,
+    ...manifestDefaultParameters(capability),
     references: []
   }
 }

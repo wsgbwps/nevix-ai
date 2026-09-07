@@ -14,8 +14,14 @@ import type {
   CapabilityModel
 } from '../api/capability-manifest-http'
 import type { DraftReferenceRole, MaterialKind } from '../api/go-creation-http'
+import {
+  publishedParameterRules,
+  type DraftMediaType,
+  type GenerationParameterId,
+  type GenerationParameterValues
+} from '../api/generation-parameter'
 
-export type DraftMediaType = 'image' | 'video'
+export type { DraftMediaType }
 
 /**
  * The material kinds a draft role structurally accepts — the client twin of
@@ -65,24 +71,9 @@ export function allowedReferenceKinds(
 export const fallbackReferenceCap = 4
 
 /** The fields of a draft the manifest can individually validate. */
-export type DraftStaleField =
-  | 'mediaType'
-  | 'model'
-  | 'mode'
-  | 'ratio'
-  | 'resolution'
-  | 'quantity'
-  | 'durationSeconds'
-  | 'references'
+export type DraftStaleField = GenerationParameterId | 'references'
 
-interface DraftCapabilityState {
-  readonly mediaType: DraftMediaType | null
-  readonly model: string | null
-  readonly mode: string | null
-  readonly ratio: string | null
-  readonly resolution: string | null
-  readonly quantity: number | null
-  readonly durationSeconds: number | null
+interface DraftCapabilityState extends GenerationParameterValues {
   readonly references: readonly { readonly materialId: string; readonly role: DraftReferenceRole }[]
 }
 
@@ -266,18 +257,13 @@ export function staleDraftFields(
     stale.add('references')
     return stale
   }
-  if (media === 'image') {
-    if (draft.ratio !== null && !(capability.ratios ?? []).includes(draft.ratio)) {
-      stale.add('ratio')
+  // A field the media does not publish gets no verdict here — the admission
+  // freeze judges its value server-side.
+  for (const rule of publishedParameterRules(capability)) {
+    const value = draft[rule.id]
+    if (value === null ? !rule.mayStayUnset : !rule.candidates.includes(value)) {
+      stale.add(rule.id)
     }
-    if (draft.quantity === null || !(capability.quantities ?? []).includes(draft.quantity)) {
-      stale.add('quantity')
-    }
-  } else if (
-    draft.durationSeconds === null ||
-    !(capability.durations ?? []).includes(draft.durationSeconds)
-  ) {
-    stale.add('durationSeconds')
   }
   if (
     draft.resolution === null ||
