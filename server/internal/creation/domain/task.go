@@ -217,6 +217,20 @@ func JobIsTerminal(s JobStatus) bool {
 	}
 }
 
+// The complete status vocabularies, exhaustively crossed in tests so an
+// undocumented value cannot survive review; the kernel router validates its
+// snapshot against them.
+var (
+	allTaskStatuses = []TaskStatus{
+		TaskQueued, TaskSubmitting, TaskProcessing, TaskPersisting, TaskCancelling,
+		TaskSucceeded, TaskPartiallySucceeded, TaskFailed, TaskCancelled, TaskTimedOut,
+	}
+	allJobStatuses = []JobStatus{
+		JobPending, JobSubmitting, JobProcessing, JobCancelling,
+		JobCompleted, JobFailed, JobCancelled, JobTimedOut, JobIndeterminate,
+	}
+)
+
 // taskTransitions is the migration contract from #150 (提交合同): keyed by
 // source, listing the reachable statuses. A "zero-success terminal" edge is
 // expanded to failed/cancelled/timed_out — succeeded shapes are impossible
