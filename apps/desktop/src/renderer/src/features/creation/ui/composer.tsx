@@ -38,7 +38,7 @@ import {
   resolutionCandidates,
   type DraftMediaType
 } from '../model/capability'
-import type { CreationWorkbenchController } from '../model/use-workbench'
+import type { WorkbenchComposerHandle } from '../model/use-workbench'
 import { modeKeys } from '../i18n/mode-keys'
 import { ComposerMenuContent } from './composer-menu-content'
 import { PromptEditor } from './prompt-editor'
@@ -46,9 +46,6 @@ import { ReferenceMaterialPreview } from './reference-material-preview'
 import { ratioGlyphDiagonalSize, ratioGlyphSize } from './ratio-glyph'
 import { ReferenceDeck } from './reference-deck'
 import { useComposerPresence } from './use-composer-presence'
-
-// Dynamic verdict vocabularies resolve through explicit key maps — the same
-// shape the provider-connection surface uses for wire codes.
 
 const reasonKeys = {
   not_configured: 'composer.unavailable.reasons.not_configured',
@@ -64,9 +61,6 @@ const actionKeys = {
   contact_admin: 'composer.unavailable.actions.contact_admin'
 } as const
 
-// Control-row and menu surfaces from the accepted prototype (6e465e8),
-// expressed through theme tokens: an h-8 pill per capability, menus opening
-// upward as compact rounded-xl surfaces in the reference design's proportions.
 const controlClass =
   'group flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-accent px-2.5 text-[10px] text-foreground/80 outline-none transition-colors hover:bg-input data-[state=open]:bg-input'
 
@@ -95,19 +89,14 @@ const SUBMIT_BOTTOM = 16
 const SUBMIT_SIZE = 32
 
 /**
- * The fixed bottom Composer (issue #177, prototype 6e465e8): prompt text
- * area, the inline reference deck, and the capability controls expanding
- * upward from the bottom row. Every candidate comes from the Capability
- * Manifest; draft values the manifest removed stay displayed with a stable
- * stale marker and are never rewritten. This slice creates no Generation
- * Task — the submit affordance stays disabled rather than faking success.
- *
- * The surface is dual-state (完整态/紧凑态, see apps/desktop/CONTEXT.md):
- * `useComposerPresence` owns presence; this component tweens the geometry
- * and hosts the back-to-bottom pill at the container's top-right corner.
+ * The fixed bottom Composer (issue #177). Every candidate comes from the
+ * Capability Manifest; draft values the manifest removed stay displayed with
+ * a stable stale marker and are never rewritten. The surface is dual-state
+ * (完整态/紧凑态, see apps/desktop/CONTEXT.md): `useComposerPresence` owns
+ * presence, this component tweens the geometry.
  */
 export function CreationComposer({
-  workbench,
+  composer,
   scrollerRef,
   wrapperRef,
   statusNotice,
@@ -115,7 +104,7 @@ export function CreationComposer({
   newTaskWaiting,
   onBackToBottom
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly composer: WorkbenchComposerHandle
   readonly scrollerRef: React.RefObject<HTMLDivElement | null>
   /** The page measures this wrapper for the scroller's bottom reserve. */
   readonly wrapperRef: React.RefObject<HTMLDivElement | null>
@@ -126,7 +115,7 @@ export function CreationComposer({
   readonly onBackToBottom: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { draft, manifest, manifestStatus, staleFields } = workbench
+  const { draft, manifest, manifestStatus, staleFields } = composer
   const rowRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const promptRef = useRef<HTMLDivElement>(null)
@@ -239,7 +228,6 @@ export function CreationComposer({
       )}
       <div
         ref={cardRef}
-        // Blank-surface clicks expand and hand the caret to the prompt.
         onClick={(event) => {
           if (
             (event.target as HTMLElement).closest(
@@ -266,19 +254,19 @@ export function CreationComposer({
             <ReferenceDeck
               compact={!expanded}
               bindings={draft.references}
-              materials={workbench.materials}
-              thumbnails={workbench.thumbnails}
-              thumbnailStates={workbench.thumbnailStates}
-              onRetainThumbnail={workbench.retainMaterialThumbnail}
-              onRequestThumbnail={workbench.requestMaterialThumbnail}
-              cap={workbench.deckCap}
-              allowedKinds={workbench.allowedKinds}
-              onAddFiles={workbench.addMaterials}
-              onReplace={workbench.replaceMaterial}
-              onDropResult={workbench.addResultAsMaterial}
-              mentionedMaterialIds={workbench.mentionedMaterialIds}
+              materials={composer.materials}
+              thumbnails={composer.thumbnails}
+              thumbnailStates={composer.thumbnailStates}
+              onRetainThumbnail={composer.retainMaterialThumbnail}
+              onRequestThumbnail={composer.requestMaterialThumbnail}
+              cap={composer.deckCap}
+              allowedKinds={composer.allowedKinds}
+              onAddFiles={composer.addMaterials}
+              onReplace={composer.replaceMaterial}
+              onDropResult={composer.addResultAsMaterial}
+              mentionedMaterialIds={composer.mentionedMaterialIds}
               onDragHover={pin}
-              onRemove={workbench.removeMaterial}
+              onRemove={composer.removeMaterial}
             />
             {staleFields.has('references') && draft.references.length > 0 && (
               <p
@@ -289,7 +277,7 @@ export function CreationComposer({
                 {t('composer.stale.references')}
               </p>
             )}
-            {workbench.materialUploadFailed && (
+            {composer.materialUploadFailed && (
               <p
                 role="alert"
                 data-testid="composer-upload-failed"
@@ -298,15 +286,15 @@ export function CreationComposer({
                 {t('composer.deck.uploadFailed')}
               </p>
             )}
-            {workbench.materialDropRejection && (
+            {composer.materialDropRejection && (
               <p
                 role="status"
                 data-testid="composer-drop-rejected"
                 className="text-warning mt-1 max-w-56 text-[10px] leading-4"
               >
                 {t('composer.deck.dropRejected', {
-                  added: workbench.materialDropRejection.added,
-                  rejected: workbench.materialDropRejection.rejected
+                  added: composer.materialDropRejection.added,
+                  rejected: composer.materialDropRejection.rejected
                 })}
               </p>
             )}
@@ -315,9 +303,9 @@ export function CreationComposer({
             <div ref={promptRef} className="h-28 w-full">
               <PromptEditor
                 document={draft.promptDocument}
-                documentKey={`${workbench.ports?.userId ?? ''}:${workbench.composingNew ? 'new' : (workbench.selectedId ?? 'inactive')}`}
-                candidates={workbench.mentionCandidates}
-                thumbnails={workbench.thumbnails}
+                documentKey={composer.documentKey}
+                candidates={composer.mentionCandidates}
+                thumbnails={composer.thumbnails}
                 maxChars={promptCap}
                 placeholder={
                   draft.references.length > 0
@@ -327,7 +315,7 @@ export function CreationComposer({
                 label={String(t('composer.promptLabel'))}
                 emptyLabel={String(t('composer.mention.empty'))}
                 noResultsLabel={String(t('composer.mention.noResults'))}
-                onChange={(promptDocument) => workbench.patchDraft({ promptDocument })}
+                onChange={(promptDocument) => composer.patchDraft({ promptDocument })}
                 onPreview={(materialId, focusTarget) => {
                   setPreviewReturnFocus(focusTarget)
                   setPreviewMaterialId(materialId)
@@ -339,15 +327,15 @@ export function CreationComposer({
                 }
               />
             </div>
-            {(workbench.promptLength >= Math.max(0, workbench.promptMaxChars - 100) ||
-              workbench.promptLength > workbench.promptMaxChars) && (
+            {(composer.promptLength >= Math.max(0, composer.promptMaxChars - 100) ||
+              composer.promptLength > composer.promptMaxChars) && (
               <p
-                className={`mt-1 text-right text-[10px] ${workbench.promptInvalid ? 'text-destructive' : 'text-muted-foreground'}`}
-                role={workbench.promptInvalid ? 'alert' : undefined}
+                className={`mt-1 text-right text-[10px] ${composer.promptInvalid ? 'text-destructive' : 'text-muted-foreground'}`}
+                role={composer.promptInvalid ? 'alert' : undefined}
               >
                 {t('composer.mention.length', {
-                  current: workbench.promptLength,
-                  max: workbench.promptMaxChars
+                  current: composer.promptLength,
+                  max: composer.promptMaxChars
                 })}
               </p>
             )}
@@ -359,13 +347,13 @@ export function CreationComposer({
         <div ref={controlClipRef} className="overflow-hidden">
           <div className="mt-2 flex min-w-0 items-center gap-1.5 border-t pt-2">
             <MediaMenu
-              workbench={workbench}
+              composer={composer}
               triggerClass={`${controlClass} ${draft.mediaType !== null && !staleFields.has('mediaType') ? 'text-cyan-600 dark:text-cyan-300' : ''} ${staleFields.has('mediaType') ? staleTriggerClass : ''}`}
             />
-            {media !== null && <ModelMenu workbench={workbench} triggerClass={controlClass} />}
-            {media === 'video' && controls && <ModeMenu workbench={workbench} />}
-            {media !== null && controls && <ParamsMenu workbench={workbench} />}
-            {media === 'video' && controls && <DurationMenu workbench={workbench} />}
+            {media !== null && <ModelMenu composer={composer} triggerClass={controlClass} />}
+            {media === 'video' && controls && <ModeMenu composer={composer} />}
+            {media !== null && controls && <ParamsMenu composer={composer} />}
+            {media === 'video' && controls && <DurationMenu composer={composer} />}
             {/* Reserves the absolute submit circle's slot so the longest
                 capability pill never underlaps it. */}
             <div className="ml-auto size-8 shrink-0" aria-hidden />
@@ -374,24 +362,24 @@ export function CreationComposer({
         <button
           type="button"
           ref={submitRef}
-          disabled={workbench.submitDisabled}
-          onClick={workbench.submit}
+          disabled={composer.submitDisabled}
+          onClick={composer.submit}
           title={
-            workbench.submitBlockedReason === 'stale'
+            composer.submitBlockedReason === 'stale'
               ? String(t('composer.stale.badge'))
-              : workbench.submitBlockedReason === 'length' &&
-                  workbench.promptLength > workbench.promptMaxChars
-                ? String(t('composer.mention.overLimit', { max: workbench.promptMaxChars }))
-                : workbench.submitBlockedReason === 'unavailable'
+              : composer.submitBlockedReason === 'length' &&
+                  composer.promptLength > composer.promptMaxChars
+                ? String(t('composer.mention.overLimit', { max: composer.promptMaxChars }))
+                : composer.submitBlockedReason === 'unavailable'
                   ? String(t('composer.unavailable.template', { reason: '', action: '' }))
                   : String(t('composer.submit'))
           }
           aria-label={String(t('composer.submit'))}
-          aria-disabled={workbench.submitDisabled}
+          aria-disabled={composer.submitDisabled}
           data-testid="composer-submit"
           className={
             'absolute right-4 bottom-4 flex size-8 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50 ' +
-            (workbench.submitDisabled
+            (composer.submitDisabled
               ? 'bg-accent text-muted-foreground'
               : 'bg-cyan-600 text-white hover:bg-cyan-500 dark:bg-cyan-500 dark:hover:bg-cyan-400')
           }
@@ -399,39 +387,39 @@ export function CreationComposer({
           <ArrowUpIcon className="size-4" aria-hidden />
         </button>
       </div>
-      {workbench.referenceRecoveryShown && (
+      {composer.referenceRecoveryShown && (
         <div
           role="status"
           className="bg-card text-warning absolute right-0 bottom-full mb-2 rounded-lg border px-3 py-2 text-[11px] shadow-lg"
         >
-          <button type="button" onClick={workbench.dismissReferenceRecovery}>
+          <button type="button" onClick={composer.dismissReferenceRecovery}>
             {t('composer.mention.recovered')}
           </button>
         </div>
       )}
       <ReferenceMaterialPreview
-        materials={workbench.materials}
-        candidates={workbench.mentionCandidates}
-        thumbnails={workbench.thumbnails}
+        materials={composer.materials}
+        candidates={composer.mentionCandidates}
+        thumbnails={composer.thumbnails}
         hover={mentionHover}
         openMaterialId={previewMaterialId}
         returnFocus={previewReturnFocus}
         onOpenChange={(open) => {
           if (!open) setPreviewMaterialId(null)
         }}
-        loadPreviewBlob={workbench.loadMaterialPreviewBlob}
+        loadPreviewBlob={composer.loadMaterialPreviewBlob}
       />
       <Dialog
-        open={workbench.pendingMaterialRemoval !== null}
+        open={composer.pendingMaterialRemoval !== null}
         onOpenChange={(open) => {
-          if (!open) workbench.dismissMaterialRemoval()
+          if (!open) composer.dismissMaterialRemoval()
         }}
       >
         <DialogContent>
           <DialogTitle>{t('composer.mention.removeTitle')}</DialogTitle>
           <DialogDescription>
             {t('composer.mention.removeBody', {
-              count: workbench.pendingMaterialRemoval?.mentionCount ?? 0
+              count: composer.pendingMaterialRemoval?.mentionCount ?? 0
             })}
           </DialogDescription>
           <DialogFooter>
@@ -443,7 +431,7 @@ export function CreationComposer({
             <button
               type="button"
               className="bg-destructive text-destructive-foreground rounded-lg px-3 py-1.5"
-              onClick={workbench.confirmMaterialRemoval}
+              onClick={composer.confirmMaterialRemoval}
             >
               {t('composer.mention.removeConfirm')}
             </button>
@@ -455,14 +443,14 @@ export function CreationComposer({
 }
 
 function MediaMenu({
-  workbench,
+  composer,
   triggerClass
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly composer: WorkbenchComposerHandle
   readonly triggerClass: string
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { manifest, manifestStatus, draft, staleFields } = workbench
+  const { manifest, manifestStatus, draft, staleFields } = composer
   const options: ReadonlyArray<{
     readonly media: DraftMediaType
     readonly available: boolean | null
@@ -501,7 +489,7 @@ function MediaMenu({
               key={media}
               disabled={available === false}
               className={menuItemClass}
-              onSelect={() => workbench.setMediaType(media)}
+              onSelect={() => composer.setMediaType(media)}
             >
               {media === 'video' ? (
                 <VideoIcon className="size-4" aria-hidden />
@@ -532,7 +520,7 @@ function MediaMenu({
 }
 
 function manifestImageVideoReason(
-  manifest: NonNullable<CreationWorkbenchController['manifest']>,
+  manifest: NonNullable<WorkbenchComposerHandle['manifest']>,
   media: DraftMediaType
 ): CapabilityReason | null {
   const entry = media === 'image' ? manifest.image : manifest.video
@@ -540,14 +528,14 @@ function manifestImageVideoReason(
 }
 
 function ModelMenu({
-  workbench,
+  composer,
   triggerClass
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly composer: WorkbenchComposerHandle
   readonly triggerClass: string
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { manifest, draft, staleFields } = workbench
+  const { manifest, draft, staleFields } = composer
   const media = draft.mediaType
   if (media === null) return <></>
   const candidates = modelCandidates(manifest, media)
@@ -574,7 +562,7 @@ function ModelMenu({
           <DropdownMenuItem
             key={model}
             className="min-h-14 cursor-pointer rounded-xl px-3 py-2"
-            onSelect={() => workbench.setModel(model)}
+            onSelect={() => composer.setModel(model)}
           >
             <span className="border-border bg-accent grid size-9 shrink-0 place-items-center rounded-lg border">
               <SparklesIcon className="size-4" aria-hidden />
@@ -595,13 +583,9 @@ function ModelMenu({
   )
 }
 
-function ModeMenu({
-  workbench
-}: {
-  readonly workbench: CreationWorkbenchController
-}): React.JSX.Element {
+function ModeMenu({ composer }: { readonly composer: WorkbenchComposerHandle }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { manifest, draft, staleFields } = workbench
+  const { manifest, draft, staleFields } = composer
   const media = draft.mediaType
   if (media === null) return <></>
   const candidates = modeCandidates(manifest, media)
@@ -631,7 +615,7 @@ function ModeMenu({
           <DropdownMenuItem
             key={mode}
             className={menuItemClass}
-            onSelect={() => workbench.setMode(mode)}
+            onSelect={() => composer.setMode(mode)}
           >
             <SlidersHorizontalIcon className="size-4" aria-hidden />
             {t(modeKeys[mode])}
@@ -644,12 +628,12 @@ function ModeMenu({
 }
 
 function ParamsMenu({
-  workbench
+  composer
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly composer: WorkbenchComposerHandle
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { draft, manifest, staleFields } = workbench
+  const { draft, manifest, staleFields } = composer
   const media = draft.mediaType
   const capability = media === null ? null : mediaCapability(manifest, media)
   if (media === null || capability === null || !capability.available) return <></>
@@ -704,7 +688,7 @@ function ParamsMenu({
                 items={ratios}
                 isSelected={(ratio) => ratio === draft.ratio}
                 layout="h-[52px] flex-col gap-2.5"
-                onSelect={(ratio) => workbench.patchDraft({ ratio })}
+                onSelect={(ratio) => composer.patchDraft({ ratio })}
                 render={(ratio) => (
                   <>
                     {/* Fixed-height slot: every glyph shares one band so the
@@ -725,7 +709,7 @@ function ParamsMenu({
                 items={resolutions}
                 isSelected={(resolution) => resolution === draft.resolution}
                 layout="h-10 text-[13px]"
-                onSelect={(resolution) => workbench.patchDraft({ resolution })}
+                onSelect={(resolution) => composer.patchDraft({ resolution })}
                 render={(resolution) => resolution}
               />
             </ParamGroup>
@@ -737,7 +721,7 @@ function ParamsMenu({
                 items={quantities}
                 isSelected={(quantity) => quantity === draft.quantity}
                 layout="h-9 text-[13px]"
-                onSelect={(quantity) => workbench.patchDraft({ quantity })}
+                onSelect={(quantity) => composer.patchDraft({ quantity })}
                 render={(quantity) => quantity}
               />
             </ParamGroup>
@@ -767,14 +751,13 @@ function ParamsMenu({
   )
 }
 
-/** The prototype's dedicated video-length control, fed by manifest options. */
 function DurationMenu({
-  workbench
+  composer
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly composer: WorkbenchComposerHandle
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { draft, manifest, staleFields } = workbench
+  const { draft, manifest, staleFields } = composer
   const capability = mediaCapability(manifest, 'video')
   if (capability === null || !capability.available) return <></>
   const durations = capability.durations ?? []
@@ -813,7 +796,7 @@ function DurationMenu({
           items={durations}
           isSelected={(duration) => duration === draft.durationSeconds}
           layout="h-9 text-[11px]"
-          onSelect={(duration) => workbench.patchDraft({ durationSeconds: duration })}
+          onSelect={(duration) => composer.patchDraft({ durationSeconds: duration })}
           render={(duration) => t('composer.params.seconds', { n: duration })}
         />
       </ComposerMenuContent>
@@ -881,9 +864,7 @@ function OptionStrip<T extends string | number>({
 // The ratio cell icon: a border box at the published ratio's real proportions
 // (21:9 reads as a wide strip, 9:16 as a tall one). The params strip passes
 // `diagonal` so every ratio previews at the same perceived size; without it
-// the longest edge scales to `max` (the inline trigger). A missing or
-// malformed ratio falls back to a neutral square so video and stale drafts
-// keep an icon.
+// the longest edge scales to `max` (the inline trigger).
 function RatioGlyph({
   ratio,
   max = 20,

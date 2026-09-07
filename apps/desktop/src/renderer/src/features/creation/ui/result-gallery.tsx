@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { CreationWorkbenchController } from '../model/use-workbench'
+import type { WorkbenchGalleryHandle } from '../model/use-workbench'
 import { useReadingAnchor } from './use-reading-anchor'
 import { TaskCard } from './task-card'
 
@@ -10,17 +10,17 @@ import { TaskCard } from './task-card'
  * and the reversal is display-only.
  */
 export function ResultGallery({
-  workbench,
+  gallery,
   scrollerRef
 }: {
-  readonly workbench: CreationWorkbenchController
+  readonly gallery: WorkbenchGalleryHandle
   readonly scrollerRef: React.RefObject<HTMLDivElement | null>
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { tasks } = workbench
+  const { tasks } = gallery
   const orderedTasks = useMemo(() => [...tasks].reverse(), [tasks])
   // A failed list read keeps every loaded task and only adds the note.
-  const staleNote = workbench.taskListStale ? (
+  const staleNote = gallery.taskListStale ? (
     <p className="text-warning/80 text-xs" role="status" data-testid="task-list-stale">
       {t('gallery.listStale')}
     </p>
@@ -34,7 +34,7 @@ export function ResultGallery({
   // too late); a same-commit count change composes — the anchor hook's
   // margin effect re-measures on its own count dep, and a repeat measure
   // no-ops.
-  const taskHistory = workbench.taskHistory
+  const taskHistory = gallery.taskHistory
   useLayoutEffect(() => {
     remeasure()
   }, [remeasure, taskHistory.failed, taskHistory.hasMore, taskHistory.loading])
@@ -69,7 +69,7 @@ export function ResultGallery({
             className="absolute top-0 left-0 w-full"
             style={{ transform: `translateY(${virtualItem.start - scrollMargin}px)` }}
           >
-            <TaskCard workbench={workbench} task={task} />
+            <TaskCard gallery={gallery} task={task} />
           </div>
         )
       })}

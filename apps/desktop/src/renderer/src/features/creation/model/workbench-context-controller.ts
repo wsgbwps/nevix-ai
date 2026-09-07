@@ -138,6 +138,11 @@ export interface WorkbenchContextSnapshot {
   readonly selectedId: string | null
   readonly composingNew: boolean
   readonly pendingKey: string | null
+  /** The authoritative context key; every consumer-side key derives from it. */
+  readonly contextKey: string
+  /** The current context's runtime action key; `new` and `inactive` own no
+   * runtime action of their own. */
+  readonly actionKey: string | null
   readonly draft: ComposerDraft
   readonly actionState: WorkbenchActionState
   /** Derived from the current context's action snapshot; never a stale
@@ -160,6 +165,8 @@ export const emptyWorkbenchContextSnapshot: WorkbenchContextSnapshot = {
   selectedId: null,
   composingNew: false,
   pendingKey: null,
+  contextKey: 'inactive',
+  actionKey: null,
   draft: emptyComposerDraft(),
   actionState: { status: 'idle' },
   submitError: null,
@@ -727,12 +734,18 @@ export class WorkbenchContextController {
     return this.#pendingKey ?? this.#selectedId
   }
 
-  /** The draft-store key: the pending ownership, else `new` while
-   * composing, else the session (ADR-0017). */
+  /** The draft-store key; the blank state persists nothing (ADR-0017). */
   #draftKey(): string | null {
+    const key = this.#contextKeyValue()
+    return key === 'inactive' ? null : key
+  }
+
+  /** The one spelling of the presented context: the pending ownership, else
+   * `new` while composing, else the session id, else `inactive`. */
+  #contextKeyValue(): string {
     if (this.#pendingKey !== null) return this.#pendingKey
     if (this.#composingNew) return 'new'
-    return this.#selectedId
+    return this.#selectedId ?? 'inactive'
   }
 
   #changed(): void {
@@ -746,6 +759,8 @@ export class WorkbenchContextController {
       selectedId: this.#selectedId,
       composingNew: this.#composingNew,
       pendingKey: this.#pendingKey,
+      contextKey: this.#contextKeyValue(),
+      actionKey: this.#actionKey(),
       draft: this.#draft,
       actionState: this.#actionState,
       submitError: this.#submitError,

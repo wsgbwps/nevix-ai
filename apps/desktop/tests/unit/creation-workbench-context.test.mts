@@ -394,6 +394,30 @@ test('the inactive row drops every context and file', async () => {
   assert.equal(tasks.leaveCount, 1)
 })
 
+test('the context key is the one spelling every transition updates', async () => {
+  const { controller } = harness()
+  await flush()
+  assert.equal(controller.getSnapshot().contextKey, 'inactive')
+  assert.equal(controller.getSnapshot().actionKey, null)
+
+  controller.enterContext({ kind: 'new' })
+  assert.equal(controller.getSnapshot().contextKey, 'new')
+  assert.equal(controller.getSnapshot().actionKey, null)
+
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+  await flush()
+  assert.equal(controller.getSnapshot().contextKey, 's1')
+  assert.equal(controller.getSnapshot().actionKey, 's1')
+
+  controller.enterContext({ kind: 'pending', key: 'pending:p1' })
+  assert.equal(controller.getSnapshot().contextKey, 'pending:p1')
+  assert.equal(controller.getSnapshot().actionKey, 'pending:p1')
+
+  controller.enterContext({ kind: 'inactive' })
+  assert.equal(controller.getSnapshot().contextKey, 'inactive')
+  assert.equal(controller.getSnapshot().actionKey, null)
+})
+
 test('deleting the viewed session interrupts its in-flight restore', async () => {
   const { controller, display, script } = harness()
   const slowDetail = deferred<CreationApiResult<CreationSessionView>>()
