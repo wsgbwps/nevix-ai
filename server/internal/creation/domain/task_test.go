@@ -5,19 +5,6 @@ import (
 	"time"
 )
 
-// The full status vocabularies, exhaustively crossed in the matrix tests
-// below so an undocumented edge cannot survive review.
-var (
-	allTaskStatuses = []TaskStatus{
-		TaskQueued, TaskSubmitting, TaskProcessing, TaskPersisting, TaskCancelling,
-		TaskSucceeded, TaskPartiallySucceeded, TaskFailed, TaskCancelled, TaskTimedOut,
-	}
-	allJobStatuses = []JobStatus{
-		JobPending, JobSubmitting, JobProcessing, JobCancelling,
-		JobCompleted, JobFailed, JobCancelled, JobTimedOut, JobIndeterminate,
-	}
-)
-
 func TestTaskTransitionMatrixMatchesSpec(t *testing.T) {
 	allowed := map[[2]TaskStatus]bool{}
 	for _, edges := range []struct {

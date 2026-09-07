@@ -29,6 +29,7 @@ type TaskService struct {
 	manifest    *ManifestService
 	runner      domain.WriteRunner
 	notify      InvalidationSink
+	applier     verdictApplier
 }
 
 func NewTaskService(
@@ -43,6 +44,7 @@ func NewTaskService(
 	return &TaskService{
 		tasks: tasks, materials: materials, connections: connections,
 		governance: governance, manifest: manifest, runner: runner, notify: notify,
+		applier: verdictApplier{tasks: tasks, connections: connections, notify: notify},
 	}
 }
 
@@ -364,49 +366,22 @@ func (s *TaskService) Cancel(ctx context.Context, owner, taskID domain.UUID) err
 			// The worker drives cancelling for anything already accepted.
 			return nil
 		}
-		transitioned, err := s.tasks.TransitionTask(ctx, sc.Tx(), taskID,
-			[]domain.TaskStatus{domain.TaskQueued}, domain.TaskCancelled, nil)
+		// Immediate convergence of the never-started task through the shared
+		// verdict routine (ADR-0019). TaskGuard pins the queued claim; a
+		// worker that claimed the task converges from the intent marker.
+		verdict, err := domain.VerdictFor(domain.KernelState{TaskStatus: status},
+			domain.KernelEvent{Kind: domain.EventCancelUnstarted})
 		if err != nil {
 			return err
 		}
-		if !transitioned {
-			// A worker claimed the task between the read and the guarded
-			// update; its cancel path converges from the intent marker.
-			return nil
-		}
-		task, slots, job, err := s.tasks.GetForOwnerInTx(ctx, sc.Tx(), owner, taskID)
+		verdict.TaskGuard = domain.TaskQueued
+		verdict.TaskTo = domain.TaskCancelled
+		queueID, _, _, err := s.tasks.GetQueueItemByTask(ctx, sc.Tx(), taskID)
 		if err != nil {
 			return err
 		}
-		if job.ID != (domain.UUID{}) && job.Status == domain.JobPending {
-			if _, err := s.tasks.TransitionJob(ctx, sc.Tx(), job.ID,
-				[]domain.JobStatus{domain.JobPending}, domain.JobCancelled, nil); err != nil {
-				return err
-			}
-		}
-		for _, slot := range slots {
-			if slot.Status == nil {
-				if _, err := s.tasks.WriteSlotVerdict(ctx, sc.Tx(), task.ID, slot.Index,
-					domain.SlotCancelled, nil, nil, nil); err != nil {
-					return err
-				}
-			}
-		}
-		if _, err := s.tasks.ReleaseReservation(ctx, sc.Tx(), task.ID); err != nil {
-			return err
-		}
-		queueID, _, _, err := s.tasks.GetQueueItemByTask(ctx, sc.Tx(), task.ID)
-		if err != nil {
-			return err
-		}
-		if err := s.tasks.RetireQueueItem(ctx, sc.Tx(), queueID); err != nil {
-			return err
-		}
-		_ = task
-		if s.notify != nil {
-			sc.AfterCommit(func() { s.notify.NotifyGenerationChanged(owner) })
-		}
-		return nil
+		_, _, err = s.applier.apply(ctx, sc, owner, queueID, taskID, verdict)
+		return err
 	})
 }
 
