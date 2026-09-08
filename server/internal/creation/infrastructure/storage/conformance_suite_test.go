@@ -1,11 +1,7 @@
-// The single conformance suite both production blob adapters must satisfy
-// (filesystem and S3-compatible): streaming put with checksums and hard
-// ceilings, whole and windowed reads with correct sizes, seek behavior at
-// box-header distances, deletion semantics including absent-key idempotence,
-// bounded-buffer cancellation, and prompt resource release after
-// cancellation. It lives in this package's test compilation unit (not an
-// importable testkit) per the server test-support rules; both adapters'
-// tests call runConformanceSuite with their own isolated store factory.
+// The shared conformance suite every BlobStore adapter must satisfy covers
+// bounded streaming, whole and windowed reads, seek, deletion, and cancel.
+// It remains package-local test support; each adapter supplies an isolated
+// store factory.
 package storage
 
 import (
@@ -195,16 +191,19 @@ func runConformanceSuite(t *testing.T, newStore newStoreForTest) {
 	t.Run("CanceledPutReturnsPromptlyWithoutObject", func(t *testing.T) {
 		store := newStore(t)
 		ctx, cancel := context.WithCancel(context.Background())
-		slow := io.MultiReader(bytes.NewReader(payload(t, 64<<10)), infiniteZeros{})
-		done := make(chan struct{})
+		slow := io.MultiReader(bytes.NewReader(payload(t, 64<<10)), slowZeros{})
+		done := make(chan error, 1)
 		go func() {
-			defer close(done)
-			_, _ = store.Put(ctx, "suite/canceled-put", slow, largeMaxBytes)
+			_, err := store.Put(ctx, "suite/canceled-put", slow, largeMaxBytes)
+			done <- err
 		}()
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 		select {
-		case <-done:
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("canceled put error = %v, want context.Canceled", err)
+			}
 		case <-time.After(5 * time.Second):
 			t.Fatal("canceled put did not return within 5s; buffering is not bounded")
 		}
@@ -214,11 +213,11 @@ func runConformanceSuite(t *testing.T, newStore newStoreForTest) {
 	})
 }
 
-// infiniteZeros simulates a producer that never finishes on its own, which
-// is what cancellation actually has to interrupt.
-type infiniteZeros struct{}
+// slowZeros simulates a producer that never finishes before cancellation.
+type slowZeros struct{}
 
-func (infiniteZeros) Read(p []byte) (int, error) {
+func (slowZeros) Read(p []byte) (int, error) {
+	time.Sleep(5 * time.Millisecond)
 	for i := range p {
 		p[i] = 0
 	}

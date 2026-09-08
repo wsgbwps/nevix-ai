@@ -23,6 +23,14 @@ var (
 	// ErrTooLarge reports that the streamed upload exceeded the kind's byte
 	// ceiling; the partial blob is discarded by the caller.
 	ErrTooLarge = errors.New("material exceeds size limit")
+	// ErrBlobNotFound is the provider-neutral absent-object verdict.
+	ErrBlobNotFound = errors.New("blob not found")
+	// ErrBlobConflict reports that the exact key already contains an object;
+	// production stores never overwrite one object with another.
+	ErrBlobConflict = errors.New("blob already exists")
+	// ErrObjectStorageUnavailable collapses provider, credential, transport,
+	// and service details at the trusted boundary.
+	ErrObjectStorageUnavailable = errors.New("object storage unavailable")
 	// ErrUnsupportedMedia reports content whose sniffed family is outside
 	// the accepted set, or whose extension disagrees with the verified family.
 	ErrUnsupportedMedia = errors.New("unsupported media type")
