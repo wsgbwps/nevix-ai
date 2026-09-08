@@ -10,7 +10,7 @@
 
 2026-09-05 修订：为任务增量刷新补充单任务详情一致读取与可靠变化判据的合同；#190 已验证并复用 `updatedAt`，不增加 `revision` 或 migration。实现与测试证据见下文。
 
-2026-09-08 修订（[#214](https://github.com/wsgbwps/nevix-ai/issues/214) 前置）：增加单一 OSS/COS Object Storage Connection 的实例级配置与凭据 seam；永久 Reference Material 改为 creator-private 持久上传租约、Desktop 单次预签名 PUT 与 Go 权威 finalize。Creation Credential Master Key 同时保护 AI Provider 与 Object Storage 凭据。
+2026-09-08 修订（规格 [#215](https://github.com/wsgbwps/nevix-ai/issues/215)，[#214](https://github.com/wsgbwps/nevix-ai/issues/214) 前置）：增加单一 OSS/COS Object Storage Connection 的实例级配置与凭据 seam；永久 Reference Material 改为 creator-private 持久上传租约、Desktop 单次预签名 PUT 与 Go 权威 finalize。Creation Credential Master Key 同时保护 AI Provider 与 Object Storage 凭据。
 
 ## 背景
 
@@ -125,6 +125,7 @@ Go 唯一可信数据面与桌面端连接规则归 [ADR-0014](0014-go-sole-trus
 - 仓库目录契约在根 `README.md` 命名 `deploy/` 与 `scripts/` 的交付资产归属；公网交付切片不得临时新建顶层 source owner。
 - 部署不再包含 Production Readiness evidence 文件、环境变量、secrets volume 路径或复制后重启步骤；旧文件即使仍留在主机也不被 Server 读取。
 - Object Storage 与 Reference Material Upload 落地前必须同步修订 OpenAPI、Desktop CSP/恢复、真实 OSS/COS smoke 与交付清单；filesystem/通用 S3 产品路径和原 multipart 上传不保留兼容层。
+- [#215](https://github.com/wsgbwps/nevix-ai/issues/215) 的全部实施切片与验收条件完成前，不开始 [#214](https://github.com/wsgbwps/nevix-ai/issues/214) 的 Provider Transfer Object 与两阶段 Provider 提交实现；本次架构 prefactor 本身不解除该阻塞。
 
 ## 非目标
 

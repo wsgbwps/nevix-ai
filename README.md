@@ -45,7 +45,7 @@ nevix-ai/
 
 采用 Feature-Sliced + Vertical Slice + DDD，个人开发，按功能垂直切分，代码物理隔离。详见 [ADR-0002](docs/adr/0002-feature-sliced-vertical-slice.md)。
 
-AI 创作使用跨 Desktop、Server 与 OpenAPI 的唯一 canonical owner `creation`；图片、视频、灵感页、创作工作台与资产库不拆分独立 Domain/Module。详见 [ADR-0012](docs/adr/0012-unified-ai-creation-owner.md)。
+AI 创作使用跨 Desktop、Server 与 OpenAPI 的唯一 canonical owner `creation`；Object Storage Connection、Reference Material Upload 与 Provider Transfer Object 也归该 owner：Server Creation Module 承担可信配置与对象生命周期，Desktop Creation Feature 承担设置交互、受限直传和恢复，Electron Main 承担精确上传 origin 与 CSP。图片、视频、灵感页、创作工作台、资产库与存储适配器均不拆分独立 Domain/Module。详见 [ADR-0012](docs/adr/0012-unified-ai-creation-owner.md) 与 [ADR-0016](docs/adr/0016-ai-creation-v1-trusted-seams.md)。
 
 数据平面收敛为 Go server 唯一可信数据面：桌面端不持有数据库或外部连接凭据，登录、会话、用户、审计、文件授权/元数据/下载与推送都走 Go API，持久层为 PostgreSQL；Desktop 唯一的文件字节直连是 Go 授权的 creator-private Reference Material 单对象预签名 PUT，仍由 Go finalize。授权在 Go 层以两个路由 guard（`RequireActiveUser` / `RequireAdmin`）加 owning Module 行级检查落位。完整决策见 [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md)、[ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md) 与 [ADR-0016](docs/adr/0016-ai-creation-v1-trusted-seams.md)。
 

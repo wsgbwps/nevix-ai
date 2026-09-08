@@ -8,7 +8,7 @@
 
 2026-08-26 修订（AI Creation V1 实施规格 [#150](https://github.com/wsgbwps/nevix-ai/issues/150)）：官方公网 Compose 形状定为「固定版本/摘要的 Nginx 只暴露 HTTPS 443」，客户部署只接受 https Server URL；主密钥与 TLS 材料纳入备份范围；交付资产 canonical owner 命名见「部署形状」与「备份」。
 
-2026-09-08 修订（[#214](https://github.com/wsgbwps/nevix-ai/issues/214) 前置）：Storage 产品合同收敛为每个 Deployment Instance 最多一条由 Admin 配置的 OSS 或 COS Object Storage Connection；filesystem、NAS、通用 S3、MinIO runtime、任意 endpoint 与本地 `blobs` volume 退场。永久 Reference Material 采用 Go 授权的单次预签名 PUT，可信 seam 见 ADR-0014 与 ADR-0016。
+2026-09-08 修订（规格 [#215](https://github.com/wsgbwps/nevix-ai/issues/215)，[#214](https://github.com/wsgbwps/nevix-ai/issues/214) 前置）：Storage 产品合同收敛为每个 Deployment Instance 最多一条由 Admin 配置的 OSS 或 COS Object Storage Connection；filesystem、NAS、通用 S3、MinIO runtime、任意 endpoint 与本地 `blobs` volume 退场。永久 Reference Material 采用 Go 授权的单次预签名 PUT，可信 seam 见 ADR-0014 与 ADR-0016。
 
 ## 背景
 
@@ -43,6 +43,7 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 ### Object Storage Connection
 
 - 每个 Deployment Instance 最多一条 Object Storage Connection，provider 在 `oss|cos` 中二选一；Server 只构造当前选中的 provider-specific adapter。首位 Admin 完成 Instance Claim 后在 AI Creation Settings 配置，Desktop 只提交输入，Go 加密保存凭据；不保留 env 第二来源。
+- 每个实例运行时只检查当前连接的 provider；OSS 与 COS 的真实 smoke 是彼此独立的发布兼容性验证，不会让实例同时构造、连接或比较两家 provider。
 - Server 未配置、凭据不可解密或连接瞬时不可用时仍正常启动；Identity、Instance Claim、登录与 Settings 可用，依赖 Storage 的 Creation 操作以稳定 `object_storage_unavailable` fail closed，`/health` 不绑定外部 Storage 可用性。
 - 客户 IT 预置私有 bucket、实例专用长期最小权限 AK/SK、CORS、关闭版本控制，并只对 `provider-transfer/` 设置 lifecycle。Nevix 不创建或修改云资源；Go 在激活候选配置前验证私有性、对象读写/Range/Delete、预签名 PUT、禁止覆盖与生产 `Origin: null` CORS preflight。
 - 连接只接受 provider、region、bucket 与对应 AK/SK，使用官方公网 virtual-host endpoint；endpoint 由 Server 推导。不支持 STS、内网 endpoint、加速域名、自定义域名、filesystem、NAS、通用 S3、MinIO runtime 或任意 endpoint。

@@ -6,18 +6,29 @@
 `Dockerfile.server`（Go server 镜像）与 `.env.example`。备份与恢复脚本及手册归
 仓库 `scripts/`（后续切片交付；本手册先给入口）。
 
-目标形态：面向**固定公网 IP** 的单租户部署。Go、PostgreSQL 与未来 filesystem
-Storage 只存在于 Docker internal network，宿主机唯一发布端口是 nginx 的 443；
-所有上游镜像按 digest 钉扎。V1 分发渠道即本仓库检出（镜像由部署机本地构建），
-正式镜像分发渠道推迟到打包分发阶段（ADR-0013）。
+> **#215 过渡状态：**本页冻结的 V1 Object Storage 合同只有 OSS/COS。当前 checkout
+> 的 Compose、环境样例与 Server 镜像仍保留待后续切片删除的 legacy filesystem/blob
+> 实现；下列涉及该 volume 的现行操作只用于过渡期测试数据，不代表产品支持、迁移或
+> 备份承诺。#215 全部切片完成前不得把本栈作为 #214 的交付基础。
+
+冻结的 V1 目标形态：面向**固定公网 IP** 的单租户部署。Go、PostgreSQL 与管理端口
+只存在于 Docker internal network，宿主机唯一发布端口是 nginx 的 443；对象数据位于
+客户 IT 预置的唯一私有 OSS 或 COS bucket，并通过 Server 推导的官方公网 endpoint
+访问，不作为 Compose service 或本地 volume 交付。所有上游镜像按 digest 钉扎。V1
+分发渠道即本仓库检出（镜像由部署机本地构建），正式镜像分发渠道推迟到打包分发
+阶段（ADR-0013）。
 
 ## 1. 前置条件
 
 - Linux 主机，可安装 Docker Engine 与 Compose v2（`docker compose version`）。
 - 一个**固定公网 IP**，防火墙/安全组放行 TCP 443 入站，且不放行其他本栈端口。
+- V1 目标要求客户 IT 预置一条实例专用的私有 OSS 或 COS bucket，关闭版本控制，
+  配置最小权限 AK/SK、生产 `Origin: null` CORS，并保证 Server 与 Desktop 可访问其
+  官方公网 endpoint；当前 legacy Compose 尚不消费该配置。
 - 规划 ~300 用户、峰值 ≤10 并发生成任务的规模画像（ADR-0013）。
-- 规划磁盘：pgdata（数据库）、tls（证书私钥，极小）。参考素材 blob 卷随存储
-  切片交付，届时单独规划。
+- 当前 checkout 规划 pgdata（数据库）、tls（证书私钥，极小）、secrets（凭据主密钥，
+  极小）与 legacy blobs；后者仅承载可丢弃的过渡期测试数据。V1 目标删除 blobs volume，
+  对象数据不进入本地 volume。
 
 ## 2. 首次部署
 
@@ -141,12 +152,16 @@ docker compose logs cert-watch          # 关注 "expires within 90 days"
   docker compose cp ./tls-backup/server.pem cert-watch:/etc/nginx/tls/   # 示例；
   # 实际用临时容器或 volume 操作写回，并保持 key 0600
   ```
-- **Provider 主密钥 secrets 卷**（issue #157）：`secrets` 卷内的
-  `provider-credential-master.key`（32 字节，0600，目录 0700）。与数据库同窗口备份；
-  丢失后连接进入 credential_unavailable，只能由 Admin 重新认证并重输 Provider Key
-  恢复（ADR-0016），服务器绝不静默重建该文件。恢复时写回卷内并保持 0600。
-- 未来参考素材 blob 卷纳入同一备份窗口；组合备份与恢复的正式脚本及手册归仓库
-  `scripts/`，随对应切片交付（ADR-0013）。
+- **凭据主密钥 secrets 卷**：当前文件为 `provider-credential-master.key`（32 字节、
+  0600，目录 0700）；#215 后续切片将其语义扩展并命名为 Creation Credential Master
+  Key，以同一数据库外主密钥保护 AI Provider 与 Object Storage 凭据。它与数据库同
+  窗口备份；丢失后依赖对应密文的 Connection 进入 `credential_unavailable`，Server
+  绝不静默重建替代密钥（ADR-0016）。
+- **legacy blobs 卷**：仅属于当前 checkout 的过渡期 filesystem 实现和可丢弃测试数据；
+  不进入 V1 备份边界，也没有迁移或兼容承诺，随 #215 后续切片删除。
+- **V1 Object Storage bucket**：备份、保留和恢复完全归客户 IT；Nevix 不提供与
+  PostgreSQL 协调的快照、bucket 扫描或 orphan 导入。组合备份与恢复的正式脚本及
+  手册归仓库 `scripts/`，随对应切片交付（ADR-0013）。
 
 ## 7. AI Creation 发布前 smoke
 
@@ -161,6 +176,11 @@ Nevix 开发者在首次正式发布、固定模型变化或供应商合同变�
    提交、异步查询、结果转存和媒体读取成功。
 3. 将结果记入 release checklist 或对应 issue。失败时停止本次发布并修复；检查结果
    不作为部署文件，也不影响已部署 Server 启动。
+
+#215 的 provider adapter 与 smoke 入口落地后，Object Storage adapter、权限合同、签名
+或兼容逻辑变化以及正式发布前，开发者分别运行真实 OSS 与 COS smoke，并记录结果和
+精确 key 清理结果。两条 smoke 只验证发布兼容性；每个 Deployment Instance 运行时仍
+只构造和检查其当前 provider。
 
 ## 8. 失败排查
 
@@ -184,7 +204,8 @@ Nevix 开发者在首次正式发布、固定模型变化或供应商合同变�
   （后续切片的 `secure_transport_required` 依赖它）。
 - 证书身份只允许两种变化：空卷首次生成，或 `CERT_FORCE_NEW=true` 显式轮换；
   其他一切持久化状态（损坏/过期/IP 变化）fail closed，绝不允许自动重建。
-- `proxy_buffering`/`proxy_request_buffering` 保持 off：SSE、上传、下载、Range
-  与大文件响应端到端流式。
+- `proxy_buffering`/`proxy_request_buffering` 保持 off：SSE、当前 legacy upload、下载、
+  Range 与大文件响应端到端流式；#215 落地后 Reference Material 的已授权 PUT 直达
+  当前 bucket，不经过 nginx。
 - 自动化合同测试：`scripts/tests/deploy-stack.test.mjs`（`make harness-test`
   运行）。改动 compose/nginx/cert-init 后先跑测试再交付。
