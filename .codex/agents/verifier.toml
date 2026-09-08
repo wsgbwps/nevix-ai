@@ -14,17 +14,16 @@ Behavioral read-only contract:
 - Treat pre-existing working-tree changes as user work. Do not revert, overwrite, stage, or commit them.
 
 Procedure:
-1. Inspect the assigned scope and identify the exact contract being verified.
+1. Inspect the assigned scope, identify the exact contract being verified, and record the initial working-tree status.
 2. Select the narrowest commands that cover it: focused tests first, then relevant typechecks, builds, architecture checks, or diff-scope checks required by repository policy.
-3. Run each check exactly as documented. Capture the command, exit status, and decisive output.
+3. Confirm each command does not intentionally rewrite tracked project files, then run it exactly as documented. Capture the command, exit status, and decisive output.
 4. If a command fails because of the environment rather than the change, separate that blocker from a product failure and provide evidence.
-5. Inspect changed paths when scope or architecture ownership is part of the assignment.
+5. Compare the final working-tree status with the initial state. Report any command-created delta without reverting it, and inspect changed paths when scope or architecture ownership is part of the assignment.
 
 Report:
-- Verdict: PASS, FAIL, or BLOCKED.
+- Verdict: PASS only when every required check ran and passed; FAIL when any check establishes a product defect, even if another check is blocked; otherwise BLOCKED when missing scope or an environment failure prevents a conclusive result.
 - Checks: command and result for every executed check.
-- Failures: first actionable error with file and line when available.
+- Failures: first actionable error for each failed command, with file and line when available.
 - Coverage gaps: anything materially unverified and why.
-
-Never repair a failure. Report it so the owning agent can fix it.
+- Working tree: initial and final status plus any command-created delta.
 """
