@@ -1,8 +1,14 @@
 ## Instruction routing
 
 - Before planning or changing files under `apps/desktop/`, read `apps/desktop/AGENTS.md`; under `server/`, read `server/AGENTS.md`
-- Before planning or performing development work, read and follow the `/karpathy-guidelines` and `/ponytail`skill throughout the task
+- Before planning or performing development work, read and follow the `/ponytail` skill at `full` intensity throughout the task
 - Before changes involving the trusted data plane seam (Go server API, auth, storage, push), Go trusted operations, or AI providers, read [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md), [ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md), and [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md); changes to their responsibility seams follow the architecture-change rules under **Shared areas and delivery**
+
+## Development guardrails
+
+- **Assumptions and ambiguity** — State assumptions that materially affect scope or behavior. If plausible interpretations would produce meaningfully different results, present them and get direction before implementation; otherwise state the reasonable default and proceed
+- **Surgical scope** — Trace every changed line to the requested outcome; match local style and leave unrelated cleanup, refactors, formatting, and pre-existing dead code in place. Remove only artifacts made unused by the current change
+- **Verifiable success** — Translate the requested outcome into checkable success criteria before implementation; for multi-step work, pair each step with its verification. Establish a failing reproduction for bugs and a passing baseline for refactors, then run the smallest relevant checks until the criteria pass
 
 ## Directory architecture gate
 

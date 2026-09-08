@@ -115,12 +115,6 @@
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
       "computedHash": "2449db6ab1ded9581f69fcc56c1f64818112d05e271fd4c5da23c6523f9d3d9d"
     },
-    "karpathy-guidelines": {
-      "source": "szkocot/andrej-karpathy-skills",
-      "sourceType": "github",
-      "skillPath": "skills/karpathy-guidelines/SKILL.md",
-      "computedHash": "41e8ca055bbde13d240776a14a076a59614057200340c243130a76ba4e64cac8"
-    },
     "prototype": {
       "source": "mattpocock/skills",
       "sourceType": "github",
