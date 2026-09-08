@@ -47,7 +47,7 @@ nevix-ai/
 
 AI 创作使用跨 Desktop、Server 与 OpenAPI 的唯一 canonical owner `creation`；图片、视频、灵感页、创作工作台与资产库不拆分独立 Domain/Module。详见 [ADR-0012](docs/adr/0012-unified-ai-creation-owner.md)。
 
-数据平面收敛为 Go server 唯一可信数据面：桌面端不持有任何数据库凭据，登录、会话、用户与审计等全部数据访问都走 Go API，持久层为 PostgreSQL；授权在 Go 层以两个路由 guard（`RequireActiveUser` / `RequireAdmin`）加 handler 内行级检查落位。完整决策见 [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md) 与 [ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md)。
+数据平面收敛为 Go server 唯一可信数据面：桌面端不持有数据库或外部连接凭据，登录、会话、用户、审计、文件授权/元数据/下载与推送都走 Go API，持久层为 PostgreSQL；Desktop 唯一的文件字节直连是 Go 授权的 creator-private Reference Material 单对象预签名 PUT，仍由 Go finalize。授权在 Go 层以两个路由 guard（`RequireActiveUser` / `RequireAdmin`）加 owning Module 行级检查落位。完整决策见 [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md)、[ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md) 与 [ADR-0016](docs/adr/0016-ai-creation-v1-trusted-seams.md)。
 
 AI Creation 的可见性基线是 creator-private：Creation Session、Reference Material、Generation Task 与其结果只对创建者可读，Admin 治理不是读取私有内容的旁路；只有成功 Media Asset 与有效 Team Publication 对全体 active User 可见。客户部署只接受 https（显式开发模式才允许 loopback http），官方公网 Compose 只由 Nginx 暴露 443。跨 Module 可信 seam（共享 Audit Append、Creation 写事务、认证注入、Session 吊销后断流、本地 AEAD）见 [ADR-0016](docs/adr/0016-ai-creation-v1-trusted-seams.md)，交付形状见 [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md)。
 

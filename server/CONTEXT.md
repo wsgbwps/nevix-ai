@@ -9,16 +9,36 @@ Go 后端服务，按业务复杂度决定分层深度。
 _Avoid_: service, package, domain
 
 **AI Creation Module**:
-Server 中 canonical owner 名为 `creation`、与 Desktop AI Creation Domain 共享同一 AI 创作业务 owner 的 Module，边界覆盖图片与视频生成的可信命令、供应商连接和异步编排；媒体类型和供应商 adapter 不单独构成 Module。
+Server 中 canonical owner 名为 `creation`、与 Desktop AI Creation Domain 共享同一 AI 创作业务 owner 的 Module，边界覆盖图片与视频生成的可信命令、AI Provider/Object Storage Connection 和异步编排；媒体类型和 provider adapter 不单独构成 Module。
 _Avoid_: Video Generation Module, Image Generation Module, Provider Module, videogen
 
-**Provider Credential Master Key（供应商凭据主密钥）**:
-Deployment Instance 用于加密 AI Provider Connection 凭据的本地主密钥，持久化在 PostgreSQL 之外；丢失或不可用只使供应商连接 fail closed，不影响其他业务数据。
-_Avoid_: Kapon API Key, Database Encryption Key, Secret Store
+**Reference Material（参考素材）**:
+Creator 上传并确认权利、经验证后供 Generation Specification 引用的 creator-private 媒体；其业务事实与 Provider 传输产生的临时副本彼此独立。
+_Avoid_: Permanent Object, Provider Asset, Upload
+
+**Reference Material Upload（参考素材上传）**:
+Creator 为一个 Creation Session 发起、在到期前绑定单一对象身份与权利声明的短期上传授权；只有成功 finalize 才产生 Reference Material，未完成的上传不是业务素材。
+_Avoid_: Uploading Reference Material, Storage Grant, Temporary Reference Material
+
+**Provider Transfer Object（供应商传输对象）**:
+从 Reference Material 派生、只为一次 Provider 取件窗口存在的临时媒体副本；它不是 Reference Material、Media Asset 或独立业务资产，过期或清理不改变源素材。
+_Avoid_: Temporary Asset, Reference Material Copy, Provider Asset
+
+**Object Storage Connection（对象存储连接）**:
+Deployment Instance 与一个由客户 IT 预置的私有 bucket 之间、供 AI Creation 使用的唯一受管连接；每个实例最多一条，provider 在 OSS 与 COS 中二选一，其选择、位置和可用性是实例级事实。
+_Avoid_: Storage Backend, S3 Connection, Storage Account, Custom Endpoint
+
+**Creation Credential Master Key（创作凭据主密钥）**:
+Deployment Instance 用于保护 AI Provider Connection 与 Object Storage Connection 凭据的本地主密钥；丢失或不可用只使依赖相应凭据的 AI Creation 能力 fail closed，不影响其他业务数据。
+_Avoid_: Provider Credential Master Key, Kapon API Key, Database Encryption Key, Secret Store
 
 **Encrypted Provider Credential（加密供应商凭据）**:
-由 Provider Credential Master Key 保护并随 AI Provider Connection 存入 PostgreSQL 的密文；明文只在 Server 完成受信操作期间存在，不向 Desktop 回传。
+由 Creation Credential Master Key 保护并随 AI Provider Connection 保存的密文；明文只在 Server 完成受信操作期间存在，不向 Desktop 回传。
 _Avoid_: API Key, Provider Credential Reference, Plaintext Secret
+
+**Encrypted Object Storage Credential（加密对象存储凭据）**:
+由 Creation Credential Master Key 以独立用途绑定保护并随 Object Storage Connection 保存的 AK/SK 密文；Desktop 只提交明文，不保存、读取或回显它。
+_Avoid_: Storage Key, S3 Credential, Plaintext Access Key
 
 **Aggregate Root**:
 拥有一致性边界的领域实体，仅在复杂 module 中使用（如 AI Creation Module）。

@@ -6,6 +6,8 @@
 
 2026-08-26 修订（AI Creation V1 实施规格 [#150](https://github.com/wsgbwps/nevix-ai/issues/150)）：客户部署只接受 https Server URL，取代「放行 RFC1918 http 地址」；TLS 终结与官方公网 Compose 形状改为由 ADR-0013 定义的官方 Nginx 栈，见「TLS 与桌面端连接」。
 
+2026-09-08 修订（[#214](https://github.com/wsgbwps/nevix-ai/issues/214) 前置）：Go 继续独占文件授权、元数据与 finalize，但永久 Reference Material 上传改为 Go 签发的 creator-private 单对象预签名 PUT；Desktop 不获得 AK/SK、任意 key 或读/List/Delete 能力。Provider Transfer Object 的限时供应商 GET 同属 Go 授权的窄例外。
+
 ## 背景
 
 ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supabase、由 RLS 保护的前提上。私有化后无 Supabase、无 RLS，数据通路只剩一条：要么 Go 吞下全部数据访问，要么客户端直连数据库。前者有把 Go 退化为表驱动浅代理的风险（ADR-0004 当年刻意避免的形状），后者毁掉凭据纪律。本 ADR 定义新 seam。
@@ -14,13 +16,17 @@ ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supa
 
 ### 唯一通路与端点形态
 
-- Desktop 不持有任何数据库凭据；全部数据访问——认证、业务 CRUD、文件、推送——经 Go HTTP API，契约在 `contracts/`（OpenAPI）。
+- Desktop 不持有任何数据库凭据；认证、业务 CRUD、文件授权与元数据、下载和推送都经 Go HTTP API，契约在 `contracts/`（OpenAPI）。唯一字节直连例外是 Go 已授权并限定为单一对象写入的 Reference Material Upload，不能扩张为客户端 Storage 数据面。
 - Go API 按业务语义暴露资源端点（vertical slice），不做通用 CRUD 网关：每个端点有业务名字与业务规则落点。API 面的扩张是接受的代价，换取授权与校验有单一落点。
 - 写路径延续 trusted command 纪律：需要写 Audit Log 的写操作在写事务内同写审计行。
 
-### 文件出口
+### 文件授权与传输
 
-- 文件一律经 Go server 出口，不做预签名直连——直连会绕过 Go 层授权。元数据只在 Postgres，Storage 后端是纯 blob 仓（双后端选择见 [ADR-0013](0013-onprem-single-tenant-delivery.md)）。
+- Go 是文件授权和元数据的唯一可信数据面。每个 Deployment Instance 最多一条 OSS 或 COS Object Storage Connection；元数据只在 PostgreSQL，bucket 是纯 blob 仓（交付与配置见 [ADR-0013](0013-onprem-single-tenant-delivery.md)）。
+- 永久 Reference Material 上传采用三步窄 seam：Creator 向 Go 申请 Reference Material Upload；Desktop Renderer 只凭 60 分钟、随机精确 key、固定请求头且禁止覆盖的预签名 PUT 写入当前 bucket；Desktop 再向 Go finalize。Go 校验 authenticated Creator 与 Creation Session ownership，HEAD 后完整有界读取、媒体 probe、实际 kind 限额和 SHA-256 全部通过，才在 verified write transaction 中创建 immutable Reference Material。
+- signed PUT 不授予读、List、Delete、换 key 或第二个对象能力，Desktop 永远拿不到 Access Key/Secret。上传租约 creator-private、持久且单次 finalize；abort、过期或验证失败按精确 key 清理，Admin 无读取或完成他人上传的旁路。
+- Reference Material 下载仍经 Go 授权和有界流式出口。Provider Transfer Object 由 Go 从已授权素材派生并为外部 AI Provider 生成限时 HTTPS GET URL；该 URL 不构成 Desktop Storage 权限。
+- signed URL 是短期敏感能力：只允许出现在当前授权调用方的内存和必要出站请求中，不持久化，不进入普通日志、Audit Log、错误、剪贴板或遥测。具体状态机与凭据纪律见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
 
 ### 推送通道
 
@@ -37,7 +43,7 @@ ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supa
 ### 数据库凭据纪律
 
 - 延续单一最小权限 LOGIN 角色（沿袭 `identity_app`）直接登录；启动时验证 `session_user = current_user`，每个写事务内复验；owner/migration 凭据跑应用非法。细节见 [ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)。
-- 客户端永远拿不到 PostgreSQL 凭据或任何第三方供应商密钥（沿袭 ADR-0004 原则）。
+- 客户端永远拿不到 PostgreSQL 凭据、AI Provider Key 或 Object Storage AK/SK；受限预签名 URL 是 Go 授权的短期单对象能力，不是底层凭据。
 
 ### 部署单元
 
@@ -49,10 +55,12 @@ ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supa
 - **客户端直连 Postgres**：凭据暴露 + 连接风暴，违反凭据纪律；否决。
 - **Server 内置 TLS**：compose 与证书轮换都变成我们的支持工单；官方公网 Compose 以固定 Nginx 终结 TLS，Go 保持只听 HTTP（2026-08-26 修订后仍是本决策）。否决。
 - **WebSocket**：v1 无真实双向/高频需求，SSE 覆盖单向下行；出现需求时另立 ADR。
+- **永久素材字节继续全部经 Go**（2026-09-08）：授权最简单，但让最大 200 MiB 单次上传持续占用 Go 入站带宽和连接，且客户端到云 bucket 已有安全的原生直传能力。选择数据库租约 + 精确预签名 PUT + Go finalize，在不暴露 AK/SK、不放弃 creator ownership 与权威内容验证的前提下移除代理上传；multipart、断点续传和通用 Storage Grant 仍否决。
 
 ## 后果
 
 - `contracts/` 的 OpenAPI 面显著扩大（原直读路径全部 API 化），每个端点须有业务语义命名。
+- `contracts/creation.yaml` 增加 Object Storage Connection/capability 与 Reference Material Upload 申请、状态、finalize、abort 合同；原子 multipart Reference Material 上传在同一切片删除，不保留兼容 route。
 - 读路径延迟增加（内网单跳，画像内可接受）；SSE 使 Go 成为展示加速的单点，但真相在 Postgres，断流可恢复。
 - 外部供应商状态进入可信后端的可靠通道是幂等完成 seam：V1 以异步提交与查询收敛，重复 poll/完成/取消不产生重复副作用；在 Kapon 官方 webhook endpoint、签名与重放合同获得证据前不创建 route、表或猜测性验签，未来 webhook 必须复用同一幂等完成 seam并保持验签、去重、幂等（原则沿袭 ADR-0004，[#150](https://github.com/wsgbwps/nevix-ai/issues/150)）。
 

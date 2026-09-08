@@ -8,9 +8,11 @@
 
 ## Relationships
 
-- **Desktop → Server**: Desktop 的全部数据访问——认证、业务 CRUD、文件与推送——经 Go HTTP API（Bearer session token，SSE 为 fetch-stream），契约定义在 `contracts/`（OpenAPI）；Desktop 不持有数据库凭据，server URL 为运行时配置，自签证书走 TOFU 指纹钉扎
+- **Desktop → Server**: Desktop 的认证、业务 CRUD、文件授权/元数据/下载与推送经 Go HTTP API（Bearer session token，SSE 为 fetch-stream），契约定义在 `contracts/`（OpenAPI）；Desktop 不持有数据库或外部连接凭据，server URL 为运行时配置，自签证书走 TOFU 指纹钉扎
+- **Desktop AI Creation → Object Storage**: Creator 只凭 Go 签发的短时、单对象、禁止覆盖的 Reference Material Upload URL 向当前实例唯一的 OSS 或 COS bucket 执行 PUT；Go finalize 前不存在 Reference Material，下载仍经 Go
 - **Desktop AI Creation → Server AI Creation Module**: 两侧与可信 OpenAPI seam 共享 canonical owner `creation`；图片/视频、页面与供应商 adapter 不产生并行业务 owner
 - **Server → PostgreSQL**: Server 以单一最小权限角色直连数据库，构造时与每个写事务内验证运行身份（[ADR-0015](./docs/adr/0015-single-tenant-user-system-and-go-authorization.md)）
+- **Server → Object Storage**: 每个 Deployment Instance 最多一条 Object Storage Connection，provider 在 OSS/COS 中二选一；Go 独占 AK/SK、配置验证、对象读取/删除、上传 finalize 与 Provider Transfer Object 授权
 - **Server → AI 供应商**: 复杂 module 在 infrastructure 中通过 adapter 接入供应商；V1 无 webhook route，供应商临时结果经 Server 有界流式转存（实施规格归 issue #150，可信 seam 见 [ADR-0016](./docs/adr/0016-ai-creation-v1-trusted-seams.md)）
 - **Desktop 内部**: 渲染进程通过 IPC Channel 与主进程通信，类型声明分散在各 domain 的 `shared/ipc/<domain>/types.ts`
 

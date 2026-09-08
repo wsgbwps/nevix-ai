@@ -60,8 +60,12 @@ Desktop 中拥有一组内聚业务责任与术语的组织范围；Domain 只�
 _Avoid_: module（与 Go 侧混淆）, service
 
 **AI Creation Domain**:
-以从灵感复用、图片与视频生成，到媒体资产沉淀与发布复用的完整创作闭环为边界、canonical owner 名为 `creation` 的 Desktop Domain；供应商连接属于该闭环，媒体类型、页面和独立生命周期的聚合均不单独构成 Domain。
+以从灵感复用、图片与视频生成，到媒体资产沉淀与发布复用的完整创作闭环为边界、canonical owner 名为 `creation` 的 Desktop Domain；AI Provider 与 Object Storage Connection 属于该闭环，媒体类型、页面和独立生命周期的聚合均不单独构成 Domain。
 _Avoid_: Generation Domain, Image Generation Domain, Video Generation Domain, Media Asset Domain, Inspiration Domain
+
+**Object Storage Connection（对象存储连接）**:
+首位 Admin 在 Instance Claim 后为整个 Deployment Instance 选择和配置的唯一 bucket 连接，provider 在 OSS 与 COS 中二选一；Desktop 只呈现 AI Creation 设置并提交输入，它不是 Connection Screen 配置或设备本地设置。
+_Avoid_: Storage Backend, S3 Connection, Desktop Storage Setting, Custom Endpoint
 
 **Inspiration Page**:
 AI Creation Domain 拥有的灵感浏览与复用页面，组合 Official Selection 与当前部署实例的 Discovery；它不是独立 Domain 或 app-owned 跨 Feature 聚合页。
@@ -78,6 +82,10 @@ _Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 
 **Reference Material**:
 User 在创作台向当前会话上传、供生成引用的原始媒体（图片/视频/音频）；它属于会话、可独立删除，身份是素材 id。提交时冻结进 Generation Specification 的是对它的引用（素材 id、role、kind、claims 版本）而非素材本体；素材删除后任务里的冻结引用悬空，界面按素材缺失回退展示，不影响已生成结果。它与 Asset Library 的媒体资产分属两个生命阶段，V1 互不连通。
 _Avoid_: 素材库, Attachment, 上传文件
+
+**Reference Material Upload（参考素材上传）**:
+User 为当前 Creation Session 发起、由 Server 短期授权的一次对象存储直传；它在 finalize 成功前不是 Reference Material，失败、取消或过期不得进入素材列表或 Generation Specification。
+_Avoid_: Uploading Reference Material, Storage Grant, Temporary Reference Material
 
 **Reference Mention**:
 Draft 提示词内、随本地 Draft 持久化的结构化指代，稳定绑定当前已添加 Reference Material 的身份；界面将其呈现为不可拆分的行内 chip，并按当前参考素材顺序在各媒体类型内动态编号和本地化类型名称，不按素材 role 命名。它不决定素材是否参与生成，提交时按当前 Interface Language 展开为同一类型名称与编号的普通文本且不把身份冻结进 Generation Specification；V1 也不从主体库或 Asset Library 引入候选。
