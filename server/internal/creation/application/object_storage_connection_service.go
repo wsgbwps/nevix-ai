@@ -276,7 +276,9 @@ func (s *ObjectStorageConnectionService) Recover(ctx context.Context, principal 
 	var provider *domain.ProviderConnection
 	if loadErr != nil {
 		if active, providerErr := s.providers.GetActive(ctx); providerErr == nil {
-			provider = &active
+			if active.Envelope != nil && active.Envelope.KeyID != key.ID {
+				provider = &active
+			}
 		} else if !errors.Is(providerErr, domain.ErrConnectionNotConfigured) {
 			return domain.ObjectStorageConnection{}, providerErr
 		}
