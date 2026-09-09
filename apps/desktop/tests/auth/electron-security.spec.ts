@@ -40,11 +40,13 @@ test('the real Authentication BrowserWindow has hardened web preferences', async
       expect(
         await launched.page.evaluate(() => ({
           apiKeys: Object.keys(window.api).sort(),
+          creationKeys: Object.keys(window.api.creation).sort(),
           hasNodeProcess: 'process' in window,
           hasAuthenticationBridge: 'authentication' in window
         }))
       ).toEqual({
-        apiKeys: ['invoke', 'on'],
+        apiKeys: ['creation', 'invoke', 'on'],
+        creationKeys: ['cancelReferenceMaterialUpload', 'uploadReferenceMaterial'],
         hasNodeProcess: false,
         hasAuthenticationBridge: false
       })

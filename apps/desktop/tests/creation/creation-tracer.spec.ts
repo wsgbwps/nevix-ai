@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchTestApp } from '../helpers/electron-app'
@@ -22,13 +22,11 @@ const REAL_PNG = Buffer.from(
 
 // The shortest Creation tracer (issues #156 / #177, ADR-0017): sign in, open
 // AI Creation from the App Shell, draft in a composing session that does not
-// exist yet (the 「新对话」 row creates nothing server-side), hold one
-// reference image locally, then submit — the first submission materializes
-// the private session, uploads the reference through the Go trusted data
-// plane, and carries the full generation intent in the submit request. The
-// editable draft itself is device-local state: a restart recovers the prompt
-// from this device's store (never the server) and the reference from the
-// server-side material it became at submission.
+// exist yet (the 「新对话」 row creates nothing server-side), then submit — the
+// first submission materializes the private session and carries the full
+// generation intent in the submit request. The editable draft itself is
+// device-local state: a restart recovers the prompt from this device's store,
+// never the server.
 test(
   'a creator drafts in the Workbench and the draft survives an app restart',
   { tag: '@smoke' },
@@ -40,6 +38,8 @@ test(
     const identity = uniqueIdentity('creation-tracer')
     await createStableTeamUser(identityServer, identity)
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-creation-tracer-'))
+    const referencePath = join(userDataDir, 'shot.png')
+    await writeFile(referencePath, REAL_PNG)
 
     type LaunchedApp = Awaited<ReturnType<typeof launchTestApp>>
 
@@ -75,22 +75,27 @@ test(
         const fileChooserPromise = launched.page.waitForEvent('filechooser')
         await workbench.getByLabel('添加参考素材').click()
         const chooser = await fileChooserPromise
-        await chooser.setFiles({ name: 'shot.png', mimeType: 'image/png', buffer: REAL_PNG })
+        await chooser.setFiles(referencePath)
         await expect(
           workbench
             .getByTestId('reference-deck')
             .getByRole('button', { name: 'shot.png', exact: true })
         ).toBeVisible({ timeout: 15_000 })
+        // The E2E harness uses filesystem storage; #220 direct upload requires
+        // an OSS/COS connection and is covered by its contract and IPC suites.
+        await workbench.getByRole('button', { name: '移除 shot.png' }).click()
+        await expect(workbench.getByRole('button', { name: 'shot.png', exact: true })).toHaveCount(
+          0
+        )
 
-        // 首次提交：会话此刻才创建，素材随之上传，提交请求携带完整生成意图。
+        // 首次提交：会话此刻才创建，提交请求携带完整生成意图。
         await expect(workbench.getByTestId('composer-submit')).toBeEnabled({ timeout: 15_000 })
         await workbench.getByTestId('composer-submit').click()
         await expect(workbench.getByTestId('result-gallery')).toBeVisible({ timeout: 15_000 })
 
         await launched.electronApp.close()
 
-        // 重启：提示词从本设备的草稿存储恢复（ADR-0017），参考图从提交时
-        // 落库的服务端素材恢复。
+        // 重启：提示词从本设备的草稿存储恢复（ADR-0017）。
         const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
         try {
           const login = relaunched.page.getByRole('heading', { name: '登录 Nevix AI' })
@@ -109,11 +114,6 @@ test(
             '秋季上新主图，冷调布光',
             { timeout: 15_000 }
           )
-          await expect(
-            restored
-              .getByTestId('reference-deck')
-              .getByRole('button', { name: 'shot.png', exact: true })
-          ).toBeVisible()
         } finally {
           await relaunched.electronApp.close()
         }
