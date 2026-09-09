@@ -47,8 +47,7 @@ const (
 	// ActionProviderConnectionDelete authorizes deleting the Provider
 	// Connection.
 	ActionProviderConnectionDelete = "provider_connection.delete"
-	// ActionObjectStorageConnectionCreate authorizes the instance's first
-	// Object Storage Connection after its candidate canary succeeds.
+	// ActionObjectStorageConnectionCreate authorizes first-time Object Storage configuration.
 	ActionObjectStorageConnectionCreate = "object_storage_connection.create"
 )
 

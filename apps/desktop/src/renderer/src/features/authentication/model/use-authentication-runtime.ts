@@ -71,7 +71,6 @@ export interface AuthenticationRuntime {
   readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   /** The last server-validated session user; undefined whenever no session is open. */
   readonly sessionUser: UserAccount | undefined
-  /** One in-memory post-claim fact; ordinary login, registration, and restore never publish it. */
   readonly instanceClaimAcquisitionPending: boolean
   readonly consumeInstanceClaimAcquisition: () => void
   /** Reads the live runtime at each invocation; only a currently authenticated session answers. */

@@ -16,7 +16,6 @@ import (
 
 var canaryPayload = []byte("nevix object storage canary")
 
-// VerifyConnection checks one candidate through its selected production adapter.
 func VerifyConnection(ctx context.Context, candidate domain.ObjectStorageCandidate) (domain.ObjectStorageLocation, error) {
 	location, err := NormalizeLocation(Location{
 		Provider: Provider(candidate.Location.Provider),

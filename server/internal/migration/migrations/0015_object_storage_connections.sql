@@ -1,8 +1,3 @@
--- The instance's single Object Storage Connection (issue #218). Candidate
--- cloud verification happens before this row is inserted; the active partial
--- unique index is the concurrent-create CAS, while the sequence never reuses a
--- revision after rollback or future termination/recreation.
---
 -- Up-only (ADR-0013): no Down section is ever provided.
 
 -- +goose Up

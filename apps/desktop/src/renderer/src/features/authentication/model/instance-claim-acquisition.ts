@@ -1,6 +1,6 @@
 import { useAuthenticationRuntimeContext } from './runtime-context'
 
-/** One in-memory fact published only by a successful Instance Claim. */
+/** A one-shot startup handoff published only by a successful Instance Claim. */
 export interface InstanceClaimAcquisition {
   readonly pending: boolean
   readonly consume: () => void

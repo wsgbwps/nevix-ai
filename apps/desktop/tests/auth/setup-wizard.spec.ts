@@ -55,9 +55,6 @@ test('the first-run wizard initializes an empty server; later devices see only s
         .getByRole('button', { name: 'Create administrator and continue' })
         .click()
 
-      // The initialize response carries a working admin session and takes the
-      // first Admin directly to AI Creation Settings, where the instance's two
-      // required connections are configured.
       await expect(
         firstDevice.page.getByRole('heading', { name: 'AI creation', exact: true })
       ).toBeVisible()

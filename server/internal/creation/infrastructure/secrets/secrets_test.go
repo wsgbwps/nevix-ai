@@ -119,8 +119,6 @@ func TestObjectStorageEnvelopeBindsProviderAndPurposeWithoutChangingKaponAAD(t *
 		t.Fatalf("purpose swap error = %v, want ErrCredentialSealed", err)
 	}
 
-	// The pre-existing Kapon codec remains byte-for-byte compatible with its
-	// original AAD path while the new purpose gets a separate binding.
 	kaponEnvelope, err := Seal(key, connection, []byte("provider-key-material"))
 	if err != nil {
 		t.Fatalf("seal Kapon credential: %v", err)

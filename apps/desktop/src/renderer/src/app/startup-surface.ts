@@ -12,7 +12,6 @@ export interface StartupSurfaceInput {
   /** Coarse current-session availability: every pre-authentication state counts as unavailable. */
   readonly sessionAvailable: boolean
   readonly pathname: string
-  /** One in-memory acquisition fact published only by a successful Instance Claim. */
   readonly instanceClaimAcquired?: boolean
 }
 

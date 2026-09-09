@@ -4,7 +4,6 @@ import { useCurrentSession, useInstanceClaimAcquisition } from '../features/auth
 import { useServerConnectionState } from './connection-state'
 import { resolveStartupSurface } from './startup-surface'
 
-/** Coordinates pre-business routing and consumes the one-shot claim handoff. */
 export function StartupCoordinator(): React.JSX.Element {
   const router = useRouter()
   const location = useLocation()

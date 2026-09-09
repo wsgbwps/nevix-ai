@@ -30,12 +30,11 @@ type ObjectStorageLocation struct {
 	Bucket   string
 }
 
-// Origin derives the only public cloud origin admitted for this canonical location.
+// Origin returns the allowlisted virtual-host origin for this canonical location.
 func (l ObjectStorageLocation) Origin() string {
 	return "https://" + l.Host()
 }
 
-// Host derives the only public virtual-host endpoint admitted for this location.
 func (l ObjectStorageLocation) Host() string {
 	if l.Provider == ObjectStorageProviderOSS {
 		return l.Bucket + ".oss-" + l.Region + ".aliyuncs.com"
