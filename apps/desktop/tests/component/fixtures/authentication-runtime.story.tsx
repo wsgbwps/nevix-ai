@@ -5,6 +5,7 @@ import { createI18nOptions } from '../../../src/shared/i18n/i18next-options'
 import {
   authenticationResources,
   AuthenticationSurface,
+  useInstanceClaimAcquisition,
   useCurrentSession
 } from '../../../src/renderer/src/features/authentication'
 import { TestAuthenticationProvider } from '../../../src/renderer/src/features/authentication/ui/test-authentication-provider'
@@ -129,6 +130,7 @@ function getControls(): AuthenticationModuleTestControls {
 /** Observes the external current-session result; tests assert on this output. */
 function CurrentSessionObserver(): React.JSX.Element {
   const session = useCurrentSession()
+  const instanceClaimAcquisition = useInstanceClaimAcquisition()
   const [acquisitionResult, setAcquisitionResult] = useState('not-acquired')
   const [capturedAcquire, setCapturedAcquire] = useState<
     (() => Promise<{ readonly token: string } | undefined>) | undefined
@@ -144,6 +146,16 @@ function CurrentSessionObserver(): React.JSX.Element {
   return (
     <div data-testid="current-session">
       <output data-testid="session-status">{session.status}</output>
+      <output data-testid="instance-claim-acquisition">
+        {String(instanceClaimAcquisition.pending)}
+      </output>
+      <button
+        type="button"
+        data-testid="consume-instance-claim-acquisition"
+        onClick={instanceClaimAcquisition.consume}
+      >
+        consume claim acquisition
+      </button>
       <button type="button" data-testid="acquire-session" onClick={() => void acquire()}>
         acquire session
       </button>

@@ -4,6 +4,11 @@ export {
   ProviderConnectionSettings,
   type ProviderConnectionProofAction
 } from './ui/provider-connection-settings'
+export {
+  ObjectStorageConnectionSettings,
+  type ObjectStorageConnectionProofAction,
+  type ObjectStorageConnectionSettingsContribution
+} from './ui/object-storage-connection-settings'
 export { CreationRuntimeContext, useCreationRuntime } from './model/runtime-context'
 export type { CreationRuntime } from './model/runtime-context'
 export { CreationRuntimeProvider } from './model/runtime-provider'

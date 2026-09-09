@@ -69,3 +69,25 @@ test('every pre-authenticated session state is a pre-business surface, not a she
     { render: 'outlet' }
   )
 })
+
+test('only a successful Instance Claim enters AI Creation Settings', () => {
+  assert.deepEqual(
+    resolveStartupSurface({
+      connectionStatus: 'configured',
+      sessionAvailable: true,
+      pathname: '/auth',
+      instanceClaimAcquired: true
+    }),
+    { navigate: '/settings', settingsSection: 'aiCreation' }
+  )
+
+  assert.deepEqual(
+    resolveStartupSurface({
+      connectionStatus: 'configured',
+      sessionAvailable: true,
+      pathname: '/auth',
+      instanceClaimAcquired: false
+    }),
+    { navigate: '/' }
+  )
+})

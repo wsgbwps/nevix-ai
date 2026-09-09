@@ -575,6 +575,131 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
+  /creation/object-storage-connection:
+    get:
+      operationId: getObjectStorageConnection
+      summary: 读取 Object Storage Connection 的脱敏 Admin 状态
+      description: |-
+        未配置时返回且只返回 state=unconfigured。已配置时返回规范化位置、实例级 revision、
+        固定掩码后的 Access Key 状态和安全检查观察；永不返回 AK/SK、signed URL、object key 或原始供应商响应。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 当前脱敏配置状态；未配置不是错误。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectStorageConnection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createObjectStorageConnection
+      summary: 首次创建并验证实例唯一的 Object Storage Connection
+      description: |-
+        Admin 在可信 HTTPS 上提交 exact-action proof、provider、region、bucket 与长期 AK/SK。
+        Server 先在事务外规范化并完成完整 canary；只有全部成功才加密候选，并在一个 verified
+        Creation 写事务中以单例 CAS/revision 激活和追加 object_storage_connection_created 审计。
+        失败候选不持久化，proof 一经成功消费不恢复。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectStorageConnectionCreateInput"
+      responses:
+        "201":
+          description: 候选通过 canary 并已原子激活。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectStorageConnection"
+        "400":
+          description: 请求字段/位置不合法、transport 不可信或 proof 无效。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - invalid_request
+                          - secure_transport_required
+                          - reauth_proof_invalid
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 已存在连接、proof 动作不匹配或 proof 已消费。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - object_storage_connection_exists
+                          - reauth_proof_action_mismatch
+                          - reauth_proof_already_consumed
+        "410":
+          description: proof 已过期。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - reauth_proof_expired
+        "503":
+          description: canary 或凭据建立失败；响应不区分供应商、网络与凭据细节。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      error:
+                        enum:
+                          - object_storage_unavailable
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/object-storage-capability:
+    get:
+      operationId: getObjectStorageCapability
+      summary: 读取 active User 的最小 Object Storage capability
+      description: |-
+        未配置时只返回 available=false。ready 时只增加 provider、精确 upload_origin 与 connection_revision；
+        credential_unavailable 时返回 available=false、provider 与 revision，但不返回 origin。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 当前最小 capability。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectStorageCapability"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /creation/capability-manifest:
     get:
       operationId: getCapabilityManifest
@@ -1446,6 +1571,126 @@ components:
           minLength: 1
           maxLength: 4096
           description: 候选 Kapon Provider Key；只在服务端检查/加密期间短暂存在，永不回显。
+    ObjectStorageConnectionCreateInput:
+      type: object
+      required:
+        - proof
+        - provider
+        - region
+        - bucket
+        - access_key_id
+        - secret_access_key
+      properties:
+        proof:
+          type: string
+          description: 绑定 object_storage_connection.create 的单次 Reauthentication Proof。
+        provider:
+          type: string
+          description: 大小写与首尾空白规范化后必须为 oss 或 cos。
+        region:
+          type: string
+          maxLength: 32
+          description: 官方公网 region；Server 规范化并拒绝 internal/accelerate/CDN 等 endpoint 变体。
+        bucket:
+          type: string
+          maxLength: 63
+          description: provider 官方 bucket 名；Server 规范化后推导唯一公网 virtual-host endpoint。
+        access_key_id:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 长期最小权限 Access Key ID；只在 canary/加密期间短暂存在，永不回显。
+        secret_access_key:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 长期最小权限 Secret Access Key；只在 canary/加密期间短暂存在，永不回显。
+    ObjectStorageConnection:
+      type: object
+      required:
+        - state
+      properties:
+        state:
+          type: string
+          enum: [unconfigured, ready, credential_unavailable]
+        provider:
+          type: string
+          enum: [oss, cos]
+        region:
+          type: string
+        bucket:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        credential:
+          type: object
+          required:
+            - access_key_id_masked
+            - secret_access_key_configured
+          properties:
+            access_key_id_masked:
+              type: string
+              description: 固定 **** 前缀加 Access Key ID 最后至多四字符；不是可恢复的凭据。
+            secret_access_key_configured:
+              type: boolean
+              enum: [true]
+        observation:
+          type: object
+          required:
+            - checked_at
+            - outcome
+          properties:
+            checked_at:
+              type: string
+              format: date-time
+            outcome:
+              type: string
+              enum: [completed]
+    ObjectStorageCapability:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - available
+          properties:
+            available:
+              const: false
+        - type: object
+          additionalProperties: false
+          required:
+            - available
+            - provider
+            - upload_origin
+            - connection_revision
+          properties:
+            available:
+              const: true
+            provider:
+              type: string
+              enum: [oss, cos]
+            upload_origin:
+              type: string
+              format: uri
+              description: ready 时返回的精确官方 HTTPS origin。
+            connection_revision:
+              type: integer
+              minimum: 1
+        - type: object
+          additionalProperties: false
+          required:
+            - available
+            - provider
+            - connection_revision
+          properties:
+            available:
+              const: false
+            provider:
+              type: string
+              enum: [oss, cos]
+            connection_revision:
+              type: integer
+              minimum: 1
     ProviderConnection:
       type: object
       required:

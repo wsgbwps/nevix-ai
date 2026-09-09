@@ -172,6 +172,10 @@ assert_creation_integration_executed() {
     TestReplaceCandidateFailureKeepsOldCredentialAndSuccessSwitchesIndependently
     TestMasterKeyFailureFailsClosedWithoutSilentRegeneration
     TestProviderConnectionSingletonConstraintRejectsSecondActiveRow
+    TestObjectStorageConnectionPublicContract
+    TestObjectStorageConcurrentFirstCreateHasOneWinner
+    TestObjectStorageConnectionSingletonAndMonotonicRevision
+    TestConnectionCanaryExercisesRequiredOperationsAndCleansUp
     TestStreamSmokeParallelFileFlows
     TestTaskAdmissionAtomicityAndIdempotency
     TestGenerationTaskDetailUsesOneSnapshot

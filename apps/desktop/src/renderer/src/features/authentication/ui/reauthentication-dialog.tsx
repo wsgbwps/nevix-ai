@@ -23,7 +23,8 @@ import { PasswordInput } from './password-input'
 const ACTION_LABEL_KEYS = {
   'provider_connection.create': 'reauth.actionProviderConnectionCreate',
   'provider_connection.replace': 'reauth.actionProviderConnectionReplace',
-  'provider_connection.delete': 'reauth.actionProviderConnectionDelete'
+  'provider_connection.delete': 'reauth.actionProviderConnectionDelete',
+  'object_storage_connection.create': 'reauth.actionObjectStorageConnectionCreate'
 } as const satisfies Record<ReauthAction, string>
 
 /** One observable submission verdict; every branch maps to a stable message. */

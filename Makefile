@@ -1,4 +1,4 @@
-.PHONY: dev build lint server postgres postgres-down docker-ready test-e2e test-e2e-smoke test-identity-integration test-creation-oss-smoke test-creation-cos-smoke harness-test setup
+.PHONY: dev build lint server postgres postgres-down docker-ready test-e2e test-e2e-smoke test-identity-integration test-creation-integration test-creation-oss-smoke test-creation-cos-smoke harness-test setup
 
 dev:
 	pnpm dev

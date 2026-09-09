@@ -16,12 +16,13 @@ func TestValidActionAcceptsOnlyTheClosedExactActionSet(t *testing.T) {
 		ActionProviderConnectionCreate,
 		ActionProviderConnectionReplace,
 		ActionProviderConnectionDelete,
+		ActionObjectStorageConnectionCreate,
 	} {
 		if !ValidAction(action) {
 			t.Fatalf("closed-set action %q rejected", action)
 		}
 	}
-	// Nothing outside the three declared actions is pre-built: guesses,
+	// Nothing outside the declared actions is pre-built: guesses,
 	// prefixes, and look-alikes all fail closed.
 	for _, action := range []string{
 		"", "provider_connection", "provider_connection.delete-all",

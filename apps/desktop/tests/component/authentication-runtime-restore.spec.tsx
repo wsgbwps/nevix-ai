@@ -47,6 +47,7 @@ test('a securely stored session restores into the current session without a fres
   await expect(component.getByTestId('session-email')).toHaveText(memberUser.email)
   await expect(component.getByTestId('session-role')).toHaveText('member')
   await expect(component.getByTestId('session-user-id')).toHaveText(memberUser.id)
+  await expect(component.getByTestId('instance-claim-acquisition')).toHaveText('false')
   // Validation is the authority for account facts, and the owned surface
   // renders nothing once the session is available.
   await expect(component.getByRole('heading', { name: 'Sign in to Nevix AI' })).toHaveCount(0)

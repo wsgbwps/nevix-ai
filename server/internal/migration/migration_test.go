@@ -85,3 +85,32 @@ func TestBaselineCreatesUserSystemTables(t *testing.T) {
 		}
 	}
 }
+
+func TestObjectStorageMigrationOwnsSingletonRevisionAndLeastPrivilege(t *testing.T) {
+	sqlBytes, err := migrationFS.ReadFile("migrations/0015_object_storage_connections.sql")
+	if err != nil {
+		t.Fatalf("read object storage migration: %v", err)
+	}
+	sql := string(sqlBytes)
+	for _, required := range []string{
+		"CREATE SEQUENCE public.object_storage_connection_revision_seq",
+		"CREATE TABLE public.object_storage_connections",
+		"WHERE terminated_at IS NULL",
+		"nextval('public.object_storage_connection_revision_seq'::regclass)",
+		"GRANT SELECT, INSERT, UPDATE ON public.object_storage_connections TO identity_app",
+		"GRANT USAGE ON SEQUENCE public.object_storage_connection_revision_seq TO identity_app",
+		"object_storage_connection.create",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("object storage migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"GRANT DELETE ON public.object_storage_connections",
+		"GRANT ALL",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("object storage migration grants forbidden capability %q", forbidden)
+		}
+	}
+}

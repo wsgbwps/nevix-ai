@@ -155,23 +155,33 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 // Reauthentication Proofs the high-risk connection commands require. Both
 // are deliberately narrow — Creation never touches credential verification.
 type Deps struct {
-	SessionAuthenticator authz.SessionAuthenticator
-	ReauthVerifier       authz.ReauthProofVerifier
+	SessionAuthenticator  authz.SessionAuthenticator
+	ReauthVerifier        authz.ReauthProofVerifier
+	ObjectStorageVerifier ObjectStorageVerifier
+}
+
+type ObjectStorageCandidate = domain.ObjectStorageCandidate
+type ObjectStorageLocation = domain.ObjectStorageLocation
+type ObjectStorageVerifier func(context.Context, ObjectStorageCandidate) (ObjectStorageLocation, error)
+
+func (f ObjectStorageVerifier) Verify(ctx context.Context, candidate domain.ObjectStorageCandidate) (domain.ObjectStorageLocation, error) {
+	return f(ctx, candidate)
 }
 
 // Module is the Creation Module's composition surface.
 type Module struct {
-	sessions    *creationhttp.SessionHandler
-	materials   *creationhttp.MaterialHandler
-	connection  *creationhttp.ProviderConnectionHandler
-	manifest    *creationhttp.CapabilityManifestHandler
-	tasks       *creationhttp.GenerationTaskHandler
-	governance  *creationhttp.GovernanceHandler
-	hub         *creationhttp.InvalidationHub
-	worker      *application.TaskWorker
-	guard       *authz.Guard
-	corsOrigins []string
-	store       domain.BlobStore
+	sessions      *creationhttp.SessionHandler
+	materials     *creationhttp.MaterialHandler
+	connection    *creationhttp.ProviderConnectionHandler
+	objectStorage *creationhttp.ObjectStorageConnectionHandler
+	manifest      *creationhttp.CapabilityManifestHandler
+	tasks         *creationhttp.GenerationTaskHandler
+	governance    *creationhttp.GovernanceHandler
+	hub           *creationhttp.InvalidationHub
+	worker        *application.TaskWorker
+	guard         *authz.Guard
+	corsOrigins   []string
+	store         domain.BlobStore
 }
 
 // NewModule constructs Creation over its own domain-local write transaction
@@ -195,6 +205,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	sessionRepos := postgres.NewSessionRepository(pool)
 	materialRepos := postgres.NewMaterialRepository(pool)
 	connectionRepos := postgres.NewConnectionRepository(pool)
+	objectStorageRepos := postgres.NewObjectStorageConnectionRepository(pool)
 	taskRepos := postgres.NewGenerationTaskRepository(pool)
 	governanceRepos := postgres.NewGovernanceRepository(pool)
 	assetRepos := postgres.NewMediaAssetRepository(pool)
@@ -202,6 +213,11 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	sessionService := application.NewSessionService(sessionRepos, tx)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
 	connectionService := application.NewConnectionService(connectionRepos, taskRepos, connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
+	objectStorageVerifier := deps.ObjectStorageVerifier
+	if objectStorageVerifier == nil {
+		objectStorageVerifier = storage.VerifyConnection
+	}
+	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), objectStorageVerifier, deps.ReauthVerifier)
 	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, governanceRepos, manifestService, tx, hub)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
@@ -213,17 +229,18 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL)
 	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, store, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
 	return &Module{
-		sessions:    creationhttp.NewSessionHandler(sessionService),
-		materials:   creationhttp.NewMaterialHandler(materialService),
-		connection:  creationhttp.NewProviderConnectionHandler(connectionService),
-		manifest:    creationhttp.NewCapabilityManifestHandler(manifestService),
-		tasks:       creationhttp.NewGenerationTaskHandler(taskService, store),
-		governance:  creationhttp.NewGovernanceHandler(governanceService, connectionService),
-		hub:         hub,
-		worker:      worker,
-		guard:       authz.NewGuard(deps.SessionAuthenticator),
-		corsOrigins: cfg.CORSAllowedOrigins,
-		store:       store,
+		sessions:      creationhttp.NewSessionHandler(sessionService),
+		materials:     creationhttp.NewMaterialHandler(materialService),
+		connection:    creationhttp.NewProviderConnectionHandler(connectionService),
+		objectStorage: creationhttp.NewObjectStorageConnectionHandler(objectStorageService),
+		manifest:      creationhttp.NewCapabilityManifestHandler(manifestService),
+		tasks:         creationhttp.NewGenerationTaskHandler(taskService, store),
+		governance:    creationhttp.NewGovernanceHandler(governanceService, connectionService),
+		hub:           hub,
+		worker:        worker,
+		guard:         authz.NewGuard(deps.SessionAuthenticator),
+		corsOrigins:   cfg.CORSAllowedOrigins,
+		store:         store,
 	}, nil
 }
 

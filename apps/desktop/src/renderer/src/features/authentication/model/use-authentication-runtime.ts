@@ -71,6 +71,9 @@ export interface AuthenticationRuntime {
   readonly rememberedEmailPersistenceNoticeSurface: 'login' | 'authenticated' | undefined
   /** The last server-validated session user; undefined whenever no session is open. */
   readonly sessionUser: UserAccount | undefined
+  /** One in-memory post-claim fact; ordinary login, registration, and restore never publish it. */
+  readonly instanceClaimAcquisitionPending: boolean
+  readonly consumeInstanceClaimAcquisition: () => void
   /** Reads the live runtime at each invocation; only a currently authenticated session answers. */
   readonly acquireSession: () => Promise<SessionAcquisition | undefined>
   readonly setRememberEmailSelected: (selected: boolean) => void
@@ -127,6 +130,7 @@ export function useAuthenticationRuntime(
   const [rememberedEmailPersistenceNoticeSurface, setRememberedEmailPersistenceNoticeSurface] =
     useState<'login' | 'authenticated'>()
   const [sessionUser, setSessionUser] = useState<UserAccount>()
+  const [instanceClaimAcquisitionPending, setInstanceClaimAcquisitionPending] = useState(false)
   // Bind permanently to the first configured server URL in this renderer
   // document; a different URL (or losing it) afterwards is a composition
   // error — server changes clear the session and reload the renderer instead
@@ -193,6 +197,10 @@ export function useAuthenticationRuntime(
     setError(undefined)
   }, [])
 
+  const consumeInstanceClaimAcquisition = useCallback((): void => {
+    setInstanceClaimAcquisitionPending(false)
+  }, [])
+
   const retireRememberedEmailPersistenceNotice = useCallback((): void => {
     if (!hasShownRememberedEmailPersistenceNoticeRef.current) return
     setRememberedEmailPersistenceNoticeSurface(undefined)
@@ -223,6 +231,7 @@ export function useAuthenticationRuntime(
   const settleUnauthenticated = useCallback(
     (nextNotice: AuthenticationNotice | undefined): void => {
       credentialsRef.current = undefined
+      setInstanceClaimAcquisitionPending(false)
       setSessionUser(undefined)
       retireRememberedEmailPersistenceNotice()
       setError(undefined)
@@ -619,6 +628,7 @@ export function useAuthenticationRuntime(
         const replacement = await sessionPersistence.replace(claim.session)
         if (generation !== generationRef.current) return
         sessionPersistenceDegradedRef.current = replacement.outcome !== 'persisted'
+        setInstanceClaimAcquisitionPending(true)
         settleSession(claim.session)
       } catch {
         if (generation !== generationRef.current) return
@@ -738,6 +748,8 @@ export function useAuthenticationRuntime(
     isRememberedEmailPersistenceUnavailable: rememberedEmailPersistenceUnavailable,
     rememberedEmailPersistenceNoticeSurface,
     sessionUser,
+    instanceClaimAcquisitionPending,
+    consumeInstanceClaimAcquisition,
     acquireSession,
     setRememberEmailSelected,
     consumeRememberedEmailPersistenceNotice,

@@ -3,8 +3,8 @@ import type { AuthenticationRuntime } from './use-authentication-runtime'
 
 /**
  * The renderer-document Authentication runtime context. Only the
- * Authentication-owned provider, owned surface, and current-session reader
- * touch it; app code consumes `useCurrentSession` instead.
+ * Authentication-owned provider, owned surface, and narrow public readers
+ * touch it; app code consumes those readers instead.
  */
 export const AuthenticationRuntimeContext = createContext<AuthenticationRuntime | null>(null)
 

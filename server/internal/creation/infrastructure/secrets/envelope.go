@@ -18,6 +18,10 @@ const envelopeVersion = 1
 // provider, and the credential purpose — so a ciphertext moved to another
 // connection (or another use) fails to open (ADR-0016).
 func Seal(key domain.CredentialKey, connectionID domain.UUID, plaintext []byte) (domain.ProviderCredentialEnvelope, error) {
+	return seal(key, plaintext, additionalData(connectionID))
+}
+
+func seal(key domain.CredentialKey, plaintext, aad []byte) (domain.ProviderCredentialEnvelope, error) {
 	aead, err := newAEAD(key)
 	if err != nil {
 		return domain.ProviderCredentialEnvelope{}, err
@@ -26,7 +30,7 @@ func Seal(key domain.CredentialKey, connectionID domain.UUID, plaintext []byte) 
 	if _, err := rand.Read(nonce); err != nil {
 		return domain.ProviderCredentialEnvelope{}, fmt.Errorf("secrets: generate nonce: %w", err)
 	}
-	ciphertext := aead.Seal(nil, nonce, plaintext, additionalData(connectionID))
+	ciphertext := aead.Seal(nil, nonce, plaintext, aad)
 	return domain.ProviderCredentialEnvelope{
 		Version:    envelopeVersion,
 		KeyID:      key.ID,
@@ -40,6 +44,10 @@ func Seal(key domain.CredentialKey, connectionID domain.UUID, plaintext []byte) 
 // ErrCredentialSealed; the caller maps it to credential_unavailable without
 // distinguishing causes.
 func Open(key domain.CredentialKey, connectionID domain.UUID, envelope domain.ProviderCredentialEnvelope) ([]byte, error) {
+	return open(key, envelope, additionalData(connectionID))
+}
+
+func open(key domain.CredentialKey, envelope domain.ProviderCredentialEnvelope, aad []byte) ([]byte, error) {
 	if envelope.Version != envelopeVersion {
 		return nil, fmt.Errorf("secrets: unsupported envelope version %d", envelope.Version)
 	}
@@ -47,17 +55,34 @@ func Open(key domain.CredentialKey, connectionID domain.UUID, envelope domain.Pr
 	if err != nil {
 		return nil, err
 	}
-	plaintext, err := aead.Open(nil, envelope.Nonce, envelope.Ciphertext, additionalData(connectionID))
+	plaintext, err := aead.Open(nil, envelope.Nonce, envelope.Ciphertext, aad)
 	if err != nil {
 		return nil, domain.ErrCredentialSealed
 	}
 	return plaintext, nil
 }
 
+// SealObjectStorage binds an access-key pair to its connection, provider,
+// purpose, and envelope version so ciphertext cannot cross credential contexts.
+func SealObjectStorage(key domain.CredentialKey, connectionID domain.UUID, provider domain.ObjectStorageProvider, plaintext []byte) (domain.ObjectStorageCredentialEnvelope, error) {
+	envelope, err := seal(key, plaintext, objectStorageAdditionalData(connectionID, provider))
+	return domain.ObjectStorageCredentialEnvelope(envelope), err
+}
+
+// OpenObjectStorage verifies the Object Storage AAD and exposes no distinct
+// failure that could reveal which binding or key material was wrong.
+func OpenObjectStorage(key domain.CredentialKey, connectionID domain.UUID, provider domain.ObjectStorageProvider, envelope domain.ObjectStorageCredentialEnvelope) ([]byte, error) {
+	return open(key, domain.ProviderCredentialEnvelope(envelope), objectStorageAdditionalData(connectionID, provider))
+}
+
 // additionalData is the AAD string binding a ciphertext to exactly one
 // connection identity, the reviewed provider, and the credential purpose.
 func additionalData(connectionID domain.UUID) []byte {
 	return []byte(fmt.Sprintf("nevix.creation.provider_credential.v%d|%s|kapon|provider_key", envelopeVersion, connectionID.String()))
+}
+
+func objectStorageAdditionalData(connectionID domain.UUID, provider domain.ObjectStorageProvider) []byte {
+	return []byte(fmt.Sprintf("nevix.creation.object_storage_credential.v%d|%s|%s|access_key_pair", envelopeVersion, connectionID.String(), provider))
 }
 
 // newAEAD builds the AES-256-GCM cipher for one master key.

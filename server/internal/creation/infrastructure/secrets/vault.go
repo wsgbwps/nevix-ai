@@ -28,3 +28,11 @@ func (v *Vault) Seal(key domain.CredentialKey, connectionID domain.UUID, plainte
 func (v *Vault) Open(key domain.CredentialKey, connectionID domain.UUID, envelope domain.ProviderCredentialEnvelope) ([]byte, error) {
 	return Open(key, connectionID, envelope)
 }
+
+func (v *Vault) SealObjectStorage(key domain.CredentialKey, connectionID domain.UUID, provider domain.ObjectStorageProvider, plaintext []byte) (domain.ObjectStorageCredentialEnvelope, error) {
+	return SealObjectStorage(key, connectionID, provider, plaintext)
+}
+
+func (v *Vault) OpenObjectStorage(key domain.CredentialKey, connectionID domain.UUID, provider domain.ObjectStorageProvider, envelope domain.ObjectStorageCredentialEnvelope) ([]byte, error) {
+	return OpenObjectStorage(key, connectionID, provider, envelope)
+}

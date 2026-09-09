@@ -96,6 +96,43 @@ func TestEnvelopeRejectsAADAndCiphertextTampering(t *testing.T) {
 	}
 }
 
+func TestObjectStorageEnvelopeBindsProviderAndPurposeWithoutChangingKaponAAD(t *testing.T) {
+	store := NewKeyStore(privateTempDir(t))
+	key, err := store.Ensure()
+	if err != nil {
+		t.Fatalf("ensure key: %v", err)
+	}
+	connection := domain.NewUUID()
+	plaintext := []byte(`{"access_key_id":"ak","secret_access_key":"sk"}`)
+	envelope, err := SealObjectStorage(key, connection, domain.ObjectStorageProviderOSS, plaintext)
+	if err != nil {
+		t.Fatalf("seal object storage credential: %v", err)
+	}
+	opened, err := OpenObjectStorage(key, connection, domain.ObjectStorageProviderOSS, envelope)
+	if err != nil || string(opened) != string(plaintext) {
+		t.Fatalf("object storage round trip = %q, %v", opened, err)
+	}
+	if _, err := OpenObjectStorage(key, connection, domain.ObjectStorageProviderCOS, envelope); !errors.Is(err, domain.ErrCredentialSealed) {
+		t.Fatalf("provider swap error = %v, want ErrCredentialSealed", err)
+	}
+	if _, err := Open(key, connection, domain.ProviderCredentialEnvelope(envelope)); !errors.Is(err, domain.ErrCredentialSealed) {
+		t.Fatalf("purpose swap error = %v, want ErrCredentialSealed", err)
+	}
+
+	// The pre-existing Kapon codec remains byte-for-byte compatible with its
+	// original AAD path while the new purpose gets a separate binding.
+	kaponEnvelope, err := Seal(key, connection, []byte("provider-key-material"))
+	if err != nil {
+		t.Fatalf("seal Kapon credential: %v", err)
+	}
+	if opened, err := Open(key, connection, kaponEnvelope); err != nil || string(opened) != "provider-key-material" {
+		t.Fatalf("open Kapon credential = %q, %v", opened, err)
+	}
+	if _, err := OpenObjectStorage(key, connection, domain.ObjectStorageProviderOSS, domain.ObjectStorageCredentialEnvelope(kaponEnvelope)); !errors.Is(err, domain.ErrCredentialSealed) {
+		t.Fatalf("Kapon envelope opened as object storage credential: %v", err)
+	}
+}
+
 func TestKeyStoreEnsureCreatesPrivateAtomicArtifact(t *testing.T) {
 	dir := privateTempDir(t)
 	store := NewKeyStore(dir)

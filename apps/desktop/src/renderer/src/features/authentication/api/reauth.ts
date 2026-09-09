@@ -9,7 +9,8 @@ import type { IdentityApiFailure, IdentityApiResult } from './client'
 export const REAUTH_ACTIONS = [
   'provider_connection.create',
   'provider_connection.replace',
-  'provider_connection.delete'
+  'provider_connection.delete',
+  'object_storage_connection.create'
 ] as const
 
 export type ReauthAction = (typeof REAUTH_ACTIONS)[number]
