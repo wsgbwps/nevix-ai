@@ -85,6 +85,32 @@ func TestProviderConnectionSingletonConstraintRejectsSecondActiveRow(t *testing.
 	}); err != nil {
 		t.Fatalf("insert after termination: %v", err)
 	}
+	newEnvelope := &domain.ProviderCredentialEnvelope{Version: 1, KeyID: "replacement-key", Nonce: []byte("abcdefghijkl"), Ciphertext: []byte("replacement")}
+	if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+		return repo.ReplaceCredential(ctx, sc.Tx(), third.ID, newEnvelope,
+			domain.CredentialStateValid, domain.MediaCapabilityAvailable, domain.MediaCapabilityAvailable,
+			time.Now().UTC(), domain.CheckOutcomeCompleted)
+	}); err != nil {
+		t.Fatalf("replace credential: %v", err)
+	}
+	var staleMarked bool
+	if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+		var err error
+		staleMarked, err = repo.MarkCredentialUnavailableIfKeyID(ctx, sc.Tx(), third.ID, "test-key")
+		return err
+	}); err != nil {
+		t.Fatalf("stale fail-closed CAS: %v", err)
+	}
+	if staleMarked {
+		t.Fatal("stale key id marked the replacement credential unavailable")
+	}
+	loaded, err := repo.GetActive(ctx)
+	if err != nil {
+		t.Fatalf("get replacement connection: %v", err)
+	}
+	if loaded.CredentialState != domain.CredentialStateValid || loaded.Envelope == nil || loaded.Envelope.KeyID != "replacement-key" {
+		t.Fatalf("replacement connection changed by stale fail-closed CAS: %+v", loaded)
+	}
 
 	// The database CHECK itself rejects an active row without its envelope.
 	_, err = owner.Exec(ctx, `

@@ -70,7 +70,6 @@ const (
 	CodeObjectStorageNotConfigured     = "object_storage_connection_not_configured"
 	CodeObjectStorageRevisionConflict  = "object_storage_connection_revision_conflict"
 	CodeObjectStorageLocationFrozen    = "object_storage_location_frozen"
-	CodeObjectStorageConnectionInUse   = "object_storage_connection_in_use"
 	CodeObjectStorageRecoveryRequired  = "object_storage_recovery_required"
 	CodeObjectStorageRecoveryNotNeeded = "object_storage_recovery_not_required"
 	CodeObjectStorageUnavailable       = "object_storage_unavailable"
@@ -113,8 +112,6 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageRevisionConflict, Message: "The Object Storage Connection changed; reload and try again."}
 	case isError(err, domain.ErrObjectStorageLocationFrozen):
 		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageLocationFrozen, Message: "The Object Storage location is permanently frozen."}
-	case isError(err, domain.ErrObjectStorageConnectionInUse):
-		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageConnectionInUse, Message: "The Object Storage Connection still owns durable or in-flight data."}
 	case isError(err, domain.ErrObjectStorageRecoveryRequired):
 		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageRecoveryRequired, Message: "The shared credential key is unavailable; explicit recovery is required."}
 	case isError(err, domain.ErrObjectStorageRecoveryNotRequired):

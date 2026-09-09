@@ -87,7 +87,6 @@ var (
 	ErrObjectStorageConnectionExists        = errors.New("object storage connection already exists")
 	ErrObjectStorageRevisionConflict        = errors.New("object storage connection revision conflict")
 	ErrObjectStorageLocationFrozen          = errors.New("object storage location is frozen")
-	ErrObjectStorageConnectionInUse         = errors.New("object storage connection is in use")
 	ErrObjectStorageRecoveryRequired        = errors.New("object storage credential recovery required")
 	ErrObjectStorageRecoveryNotRequired     = errors.New("object storage credential recovery is not required")
 	ErrInvalidObjectStorageCandidate        = errors.New("invalid object storage candidate")

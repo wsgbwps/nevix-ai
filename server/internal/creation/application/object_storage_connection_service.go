@@ -285,8 +285,8 @@ func (s *ObjectStorageConnectionService) Recover(ctx context.Context, principal 
 		if err := s.connections.RecoverCredential(ctx, sc.Tx(), &updated, expectedRevision); err != nil {
 			return err
 		}
-		if provider != nil {
-			if err := s.providers.MarkCredentialUnavailable(ctx, sc.Tx(), provider.ID); err != nil {
+		if provider != nil && provider.Envelope != nil {
+			if _, err := s.providers.MarkCredentialUnavailableIfKeyID(ctx, sc.Tx(), provider.ID, provider.Envelope.KeyID); err != nil {
 				return err
 			}
 		}

@@ -16,7 +16,6 @@ func TestObjectStorageMaintenanceErrorsHaveStablePublicCodes(t *testing.T) {
 		{domain.ErrObjectStorageConnectionNotConfigured, http.StatusNotFound, "object_storage_connection_not_configured"},
 		{domain.ErrObjectStorageRevisionConflict, http.StatusConflict, "object_storage_connection_revision_conflict"},
 		{domain.ErrObjectStorageLocationFrozen, http.StatusConflict, "object_storage_location_frozen"},
-		{domain.ErrObjectStorageConnectionInUse, http.StatusConflict, "object_storage_connection_in_use"},
 		{domain.ErrObjectStorageRecoveryRequired, http.StatusConflict, "object_storage_recovery_required"},
 		{domain.ErrObjectStorageRecoveryNotRequired, http.StatusConflict, "object_storage_recovery_not_required"},
 	}

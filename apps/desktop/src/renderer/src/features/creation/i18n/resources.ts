@@ -388,7 +388,6 @@ export const creationTranslations = defineResourceTranslations({
           notConfigured: '尚未配置对象存储连接。',
           revisionConflict: '对象存储连接已发生变化，请刷新后重试。',
           locationFrozen: '首个永久对象创建后，对象存储位置已冻结。',
-          inUse: '对象存储连接正在使用中，无法替换或删除。',
           recoveryRequired: '凭据需要先显式恢复。',
           recoveryNotRequired: '当前凭据不需要恢复。',
           unavailable: '无法验证对象存储配置；请检查位置、权限与私有性后重试。',
@@ -804,7 +803,6 @@ export const creationTranslations = defineResourceTranslations({
           notConfigured: 'No Object Storage Connection is configured.',
           revisionConflict: 'The Object Storage Connection changed. Refresh and retry.',
           locationFrozen: 'The object storage location is frozen after the first permanent object.',
-          inUse: 'The Object Storage Connection is in use and cannot be replaced or deleted.',
           recoveryRequired: 'The credential must be explicitly recovered first.',
           recoveryNotRequired: 'The current credential does not require recovery.',
           unavailable:

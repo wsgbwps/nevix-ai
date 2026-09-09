@@ -783,6 +783,7 @@ paths:
       description: |-
         Admin 在可信 HTTPS 上提交独立 rotate proof、expected_revision 与新 AK/SK。
         Server 先在事务外验证候选，再以 revision CAS 原子替换密文并追加脱敏审计；失败保留旧密文与 revision。
+        已签名 URL 仍依赖旧云端 key；计划轮换应保留旧 key 至少 24 小时以覆盖 Provider Transfer Object 窗口。紧急外部撤销可使在途操作 fail closed。
       security:
         - bearerAuth: []
       requestBody:
@@ -1351,7 +1352,6 @@ components:
                     enum:
                       - object_storage_connection_revision_conflict
                       - object_storage_location_frozen
-                      - object_storage_connection_in_use
                       - object_storage_recovery_required
                       - object_storage_recovery_not_required
                       - reauth_proof_action_mismatch

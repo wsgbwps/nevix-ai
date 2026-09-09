@@ -90,7 +90,6 @@ const ERROR_CODE_KEYS = {
   object_storage_connection_not_configured: 'objectStorage.errors.notConfigured',
   object_storage_connection_revision_conflict: 'objectStorage.errors.revisionConflict',
   object_storage_location_frozen: 'objectStorage.errors.locationFrozen',
-  object_storage_connection_in_use: 'objectStorage.errors.inUse',
   object_storage_recovery_required: 'objectStorage.errors.recoveryRequired',
   object_storage_recovery_not_required: 'objectStorage.errors.recoveryNotRequired',
   object_storage_unavailable: 'objectStorage.errors.unavailable',
