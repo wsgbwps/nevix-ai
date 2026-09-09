@@ -47,12 +47,15 @@ const (
 	// ActionProviderConnectionDelete authorizes deleting the Provider
 	// Connection.
 	ActionProviderConnectionDelete = "provider_connection.delete"
+	// ActionObjectStorageConnectionCreate authorizes first-time Object Storage configuration.
+	ActionObjectStorageConnectionCreate = "object_storage_connection.create"
 )
 
 var validActions = map[string]struct{}{
-	ActionProviderConnectionCreate:  {},
-	ActionProviderConnectionReplace: {},
-	ActionProviderConnectionDelete:  {},
+	ActionProviderConnectionCreate:      {},
+	ActionProviderConnectionReplace:     {},
+	ActionProviderConnectionDelete:      {},
+	ActionObjectStorageConnectionCreate: {},
 }
 
 // ValidAction reports whether action belongs to the closed exact-action set.

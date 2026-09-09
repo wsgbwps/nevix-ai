@@ -71,7 +71,8 @@ type harness struct {
 type harnessOptions struct {
 	// runWorkers starts the module's queue worker alongside the HTTP
 	// surface so task-lifecycle scenarios observe real convergence.
-	runWorkers bool
+	runWorkers            bool
+	objectStorageVerifier creation.ObjectStorageVerifier
 }
 
 func newHarness(t *testing.T) *harness {
@@ -142,8 +143,9 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		t.Fatalf("harness config must pass LoadConfig: %v", err)
 	}
 	creationConfigDeps := creation.Deps{
-		SessionAuthenticator: identityModule.SessionAuthenticator(),
-		ReauthVerifier:       identityModule.ReauthProofs(),
+		SessionAuthenticator:  identityModule.SessionAuthenticator(),
+		ReauthVerifier:        identityModule.ReauthProofs(),
+		ObjectStorageVerifier: opts.objectStorageVerifier,
 	}
 
 	bus := event.NewInMemoryBus()

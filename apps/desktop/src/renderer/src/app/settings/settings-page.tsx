@@ -33,8 +33,14 @@ import {
   type IssuedReauthProof,
   type ReauthAction
 } from '../../features/authentication'
-import { ProviderConnectionSettings } from '../../features/creation'
-import type { ProviderConnectionProofAction } from '../../features/creation'
+import {
+  ObjectStorageConnectionSettings,
+  ProviderConnectionSettings
+} from '../../features/creation'
+import type {
+  ObjectStorageConnectionProofAction,
+  ProviderConnectionProofAction
+} from '../../features/creation'
 import { useServerConnectionState } from '../connection-state'
 import { useSettingsCoordinator, type SettingsContribution } from './settings-coordinator'
 import {
@@ -62,8 +68,13 @@ const PROVIDER_CONNECTION_REAUTH_ACTIONS = {
   delete: 'provider_connection.delete'
 } as const satisfies Record<ProviderConnectionProofAction, ReauthAction>
 
+const OBJECT_STORAGE_CONNECTION_REAUTH_ACTIONS = {
+  create: 'object_storage_connection.create'
+} as const satisfies Record<ObjectStorageConnectionProofAction, ReauthAction>
+
 /** One governance card inside the Users section; each reports its own leave semantics. */
 type UsersSectionSlot = 'userManagement' | 'joinCodes'
+type AiCreationSectionSlot = 'providerConnection' | 'objectStorageConnection'
 
 export function SettingsPage(): React.JSX.Element | null {
   const { t } = useTranslation('app')
@@ -116,16 +127,42 @@ export function SettingsPage(): React.JSX.Element | null {
       )
     )
   }, [contributionReporters, usersSlotContributions])
+  const [aiCreationSlotContributions, setAiCreationSlotContributions] = useState<
+    Partial<Record<AiCreationSectionSlot, SettingsContribution>>
+  >({})
+  const aiCreationSlotReporters = useMemo(
+    () => ({
+      providerConnection: (next: SettingsContribution): void =>
+        setAiCreationSlotContributions((previous) => ({
+          ...previous,
+          providerConnection: next
+        })),
+      objectStorageConnection: (next: SettingsContribution): void =>
+        setAiCreationSlotContributions((previous) => ({
+          ...previous,
+          objectStorageConnection: next
+        }))
+    }),
+    []
+  )
+  useEffect(() => {
+    contributionReporters.aiCreation(
+      reduceLeaveSemantics(
+        aiCreationSlotContributions.providerConnection ?? CLEAN_LEAVE_SEMANTICS,
+        aiCreationSlotContributions.objectStorageConnection ?? CLEAN_LEAVE_SEMANTICS
+      )
+    )
+  }, [aiCreationSlotContributions, contributionReporters])
   const coordinator = useSettingsCoordinator({ entry: { ...entry, section }, contribution })
   // The AI Creation Settings card asks for one exact-action proof; the
   // Authentication-owned confirmation dialog renders here so peer Features
   // never import each other (app/settings is the composition point).
-  const [proofAction, setProofAction] = useState<ProviderConnectionProofAction | undefined>()
+  const [proofAction, setProofAction] = useState<ReauthAction>()
   const proofResolver = useRef<((proof: IssuedReauthProof | undefined) => void) | undefined>(
     undefined
   )
   const acquireProof = useCallback(
-    (action: ProviderConnectionProofAction) =>
+    (action: ReauthAction) =>
       new Promise<{ readonly proof: string } | undefined>((resolve) => {
         proofResolver.current = (issued) => {
           proofResolver.current = undefined
@@ -135,6 +172,16 @@ export function SettingsPage(): React.JSX.Element | null {
         setProofAction(action)
       }),
     []
+  )
+  const acquireProviderConnectionProof = useCallback(
+    (action: ProviderConnectionProofAction) =>
+      acquireProof(PROVIDER_CONNECTION_REAUTH_ACTIONS[action]),
+    [acquireProof]
+  )
+  const acquireObjectStorageConnectionProof = useCallback(
+    (action: ObjectStorageConnectionProofAction) =>
+      acquireProof(OBJECT_STORAGE_CONNECTION_REAUTH_ACTIONS[action]),
+    [acquireProof]
   )
   const handleServerConnectionSaved = useCallback(async (): Promise<void> => {
     // A new URL becomes the renderer's runtime connect-src only after a
@@ -192,8 +239,17 @@ export function SettingsPage(): React.JSX.Element | null {
             isAdmin={isAdmin}
             getSession={session.acquireSession}
             serverUrl={connection.url ?? ''}
-            acquireProof={acquireProof}
-            onContributionChange={contributionReporters.aiCreation}
+            acquireProof={acquireProviderConnectionProof}
+            onContributionChange={aiCreationSlotReporters.providerConnection}
+          />
+        </div>
+        <div className="bg-card rounded-lg border">
+          <ObjectStorageConnectionSettings
+            isAdmin={isAdmin}
+            getSession={session.acquireSession}
+            serverUrl={connection.url ?? ''}
+            acquireProof={acquireObjectStorageConnectionProof}
+            onContributionChange={aiCreationSlotReporters.objectStorageConnection}
           />
         </div>
       </section>
@@ -332,7 +388,7 @@ export function SettingsPage(): React.JSX.Element | null {
       {proofAction !== undefined ? (
         <ReauthenticationDialog
           open
-          action={PROVIDER_CONNECTION_REAUTH_ACTIONS[proofAction]}
+          action={proofAction}
           serverUrl={connection.url ?? ''}
           acquireSession={session.acquireSession}
           onProof={(issued) => proofResolver.current?.(issued)}

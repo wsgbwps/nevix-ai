@@ -22,9 +22,11 @@
 
 - Linux 主机，可安装 Docker Engine 与 Compose v2（`docker compose version`）。
 - 一个**固定公网 IP**，防火墙/安全组放行 TCP 443 入站，且不放行其他本栈端口。
-- V1 目标要求客户 IT 预置一条实例专用的私有 OSS 或 COS bucket，关闭版本控制，
-  配置最小权限 AK/SK、生产 `Origin: null` CORS，并保证 Server 与 Desktop 可访问其
-  官方公网 endpoint；当前 legacy Compose 尚不消费该配置。
+- V1 目标要求客户 IT 预置一个私有 OSS 或 COS bucket，关闭版本控制，并配置权限精确
+  覆盖 Nevix 所需 bucket/prefix 的 AK/SK。阿里云 OSS 可使用任意现有 RAM 用户；专用
+  RAM 用户只作为隔离影响面的推荐项，禁止使用阿里云主账号 AK。共享 AK 的轮换、停用
+  或泄露会同时影响其他应用。Electron Main 原生流式上传不要求 bucket CORS；当前
+  legacy Compose 尚不消费该配置。
 - 规划 ~300 用户、峰值 ≤10 并发生成任务的规模画像（ADR-0013）。
 - 当前 checkout 规划 pgdata（数据库）、tls（证书私钥，极小）、secrets（凭据主密钥，
   极小）与 legacy blobs；后者仅承载可丢弃的过渡期测试数据。V1 目标删除 blobs volume，

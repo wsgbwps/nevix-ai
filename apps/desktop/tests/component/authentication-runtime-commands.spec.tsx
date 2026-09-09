@@ -40,6 +40,7 @@ test('a successful sign-in establishes the current session and enters the shell 
   await expect(component.getByTestId('session-status')).toHaveText('available')
   await expect(component.getByTestId('session-email')).toHaveText(memberUser.email)
   await expect(component.getByTestId('session-role')).toHaveText('member')
+  await expect(component.getByTestId('instance-claim-acquisition')).toHaveText('false')
   await expect(component.getByRole('heading', { name: 'Sign in to Nevix AI' })).toHaveCount(0)
 
   await component.getByTestId('acquire-session').click()
@@ -152,6 +153,7 @@ test('a join-code holder self-registers from the owned surface into the shell', 
   await component.getByRole('button', { name: 'Register' }).click()
   await expect(component.getByTestId('session-status')).toHaveText('available')
   await expect(component.getByTestId('session-email')).toHaveText('new.member@example.com')
+  await expect(component.getByTestId('instance-claim-acquisition')).toHaveText('false')
 })
 
 test('registration keeps the form usable for taken emails and rate-limited attempts', async ({

@@ -12,13 +12,13 @@ import {
 const identityServer = readIdentityServerConfig()
 
 /**
- * AI Creation Settings through the real desktop and the real Go server
- * (issue #157): the Admin sees the not-configured surface, the configure
+ * Object Storage Settings through the real desktop and the real Go server
+ * (issue #218): the Admin sees the not-configured surface, the create
  * command demands exact-action reauthentication, and — because the E2E
  * server runs plain HTTP, exactly like a deployment that skipped the
  * trusted HTTPS marker — the proof endpoint itself answers
  * secure_transport_required and the desktop surfaces the stable advice.
- * Members see the per-media status-only card.
+ * Members see only the unavailable advice.
  */
 
 async function signIn(page: Page, email: string, password: string): Promise<void> {
@@ -36,7 +36,7 @@ async function openAiCreationSection(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'AI 创作', exact: true })).toBeVisible()
 }
 
-test('the Admin reaches the proof gate and the server refuses non-HTTPS transport', async () => {
+test('the Admin reaches the Object Storage proof gate and the server refuses non-HTTPS transport', async () => {
   test.setTimeout(120_000)
   test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
   if (!identityServer) return
@@ -54,23 +54,31 @@ test('the Admin reaches the proof gate and the server refuses non-HTTPS transpor
       await expect(page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
 
       await openAiCreationSection(page)
-      await expect(page.getByText('尚未配置 AI 供应商连接')).toBeVisible()
+      const storage = page.getByRole('region', { name: '对象存储' })
+      await expect(storage.getByText('尚未配置对象存储。')).toBeVisible()
 
-      // Requesting configuration demands the exact-action confirmation
-      // first; with the confirmation as the only open modal, its failure
-      // surfaces stably. The disposable E2E server is plain HTTP, so the
-      // proof endpoint refuses with secure_transport_required and the
-      // dialog shows the stable guidance — no key was entered, no proof
-      // consumed, and the connection stays unconfigured.
-      await page.getByRole('button', { name: '配置连接' }).click()
+      await storage.getByLabel('Region').fill('oss-cn-hangzhou')
+      await storage.getByLabel('Bucket').fill('private-bucket')
+      await storage.getByLabel('Access Key ID').fill('test-access-key-id')
+      await storage.getByLabel('Secret Access Key').fill('test-secret-access-key')
+      await expect(storage.getByRole('button', { name: '保存并验证' })).toBeEnabled()
+      await storage.getByLabel('Secret Access Key').press('Enter')
       const reauthDialog = page.getByRole('dialog', { name: '确认当前密码' })
-      await expect(reauthDialog.getByText('首次配置供应商连接', { exact: true })).toBeVisible()
+      await expect(reauthDialog.getByText('首次配置对象存储连接', { exact: true })).toBeVisible()
       await reauthDialog.getByLabel('当前密码').fill(identityServer!.adminPassword)
       await reauthDialog.getByRole('button', { name: '验证并继续' }).click()
       await expect(reauthDialog.getByText(/HTTPS/)).toBeVisible()
       await reauthDialog.getByRole('button', { name: '取消' }).click()
       await expect(reauthDialog).toHaveCount(0)
-      await expect(page.getByText('尚未配置 AI 供应商连接')).toBeVisible()
+      await expect(storage.getByText('尚未配置对象存储。')).toBeVisible()
+
+      // Leave the shared Settings harness clean: a failed proof intentionally
+      // preserves the draft, so the test clears it before closing the window.
+      await storage.getByLabel('Region').fill('')
+      await storage.getByLabel('Bucket').fill('')
+      await storage.getByLabel('Access Key ID').fill('')
+      await storage.getByLabel('Secret Access Key').fill('')
+      await expect(storage.getByRole('button', { name: '保存并验证' })).toBeDisabled()
     } finally {
       await app.electronApp.close()
     }
@@ -95,7 +103,7 @@ test('the Admin reaches the proof gate and the server refuses non-HTTPS transpor
         Authorization: `Bearer ${loginBody.token}`
       },
       body: JSON.stringify({
-        action: 'provider_connection.create',
+        action: 'object_storage_connection.create',
         password: identityServer!.adminPassword
       })
     })
@@ -106,7 +114,7 @@ test('the Admin reaches the proof gate and the server refuses non-HTTPS transpor
   }
 })
 
-test('a Member sees per-media status and advice only, with no management commands', async () => {
+test('a Member sees Object Storage unavailable advice with no management commands', async () => {
   test.setTimeout(120_000)
   test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
   if (!identityServer) return
@@ -127,12 +135,9 @@ test('a Member sees per-media status and advice only, with no management command
       await expect(page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
 
       await openAiCreationSection(page)
-      await expect(page.getByText('图片生成', { exact: true })).toBeVisible()
-      await expect(page.getByText('视频生成', { exact: true })).toBeVisible()
-      await expect(page.getByText('不可用').first()).toBeVisible()
-      await expect(page.getByText('请联系管理员处理。')).toHaveCount(2)
-      await expect(page.getByRole('button', { name: '配置连接' })).toHaveCount(0)
-      await expect(page.getByRole('button', { name: '暂停' })).toHaveCount(0)
+      const storage = page.getByRole('region', { name: '对象存储' })
+      await expect(storage.getByText('对象存储不可用，请联系管理员。')).toBeVisible()
+      await expect(storage.getByRole('button')).toHaveCount(0)
     } finally {
       await app.electronApp.close()
     }

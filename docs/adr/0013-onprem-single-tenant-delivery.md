@@ -10,6 +10,8 @@
 
 2026-09-08 修订（规格 [#215](https://github.com/wsgbwps/nevix-ai/issues/215)，[#214](https://github.com/wsgbwps/nevix-ai/issues/214) 前置）：Storage 产品合同收敛为每个 Deployment Instance 最多一条由 Admin 配置的 OSS 或 COS Object Storage Connection；filesystem、NAS、通用 S3、MinIO runtime、任意 endpoint 与本地 `blobs` volume 退场。永久 Reference Material 采用 Go 授权的单次预签名 PUT，可信 seam 见 ADR-0014 与 ADR-0016。
 
+2026-09-09 修订（[#218](https://github.com/wsgbwps/nevix-ai/issues/218) 真实 OSS 验证）：Reference Material 改由 Electron Main 从本地磁盘原生流式 PUT，不再要求 bucket CORS；连接 canary 继续接受 401、403 或 404 的匿名读取拒绝并拒绝任何 2xx。阿里云 OSS 可使用权限精确覆盖 Nevix 所需 bucket/prefix 的现有 RAM 用户 AK/SK；专用 RAM 用户只是推荐项，阿里云主账号 AK 禁止使用。
+
 ## 背景
 
 Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付到客户内网，一套部署对应一个客户。无生产数据，旧表直接删掉重建（旧世界经 `saas-final` tag 存档），不开新仓库。Supabase 整体退场，只留 Postgres，auth 收进 Go server。
@@ -45,7 +47,7 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 - 每个 Deployment Instance 最多一条 Object Storage Connection，provider 在 `oss|cos` 中二选一；Server 只构造当前选中的 provider-specific adapter。首位 Admin 完成 Instance Claim 后在 AI Creation Settings 配置，Desktop 只提交输入，Go 加密保存凭据；不保留 env 第二来源。
 - 每个实例运行时只检查当前连接的 provider；OSS 与 COS 的真实 smoke 是彼此独立的发布兼容性验证，不会让实例同时构造、连接或比较两家 provider。
 - Server 未配置、凭据不可解密或连接瞬时不可用时仍正常启动；Identity、Instance Claim、登录与 Settings 可用，依赖 Storage 的 Creation 操作以稳定 `object_storage_unavailable` fail closed，`/health` 不绑定外部 Storage 可用性。
-- 客户 IT 预置私有 bucket、实例专用长期最小权限 AK/SK、CORS、关闭版本控制，并只对 `provider-transfer/` 设置 lifecycle。Nevix 不创建或修改云资源；Go 在激活候选配置前验证私有性、对象读写/Range/Delete、预签名 PUT、禁止覆盖与生产 `Origin: null` CORS preflight。
+- 客户 IT 预置私有 bucket、长期最小权限 AK/SK、关闭版本控制，并只对 `provider-transfer/` 设置 lifecycle。阿里云 OSS 可使用任意现有 RAM 用户，只要其权限精确覆盖 Nevix 所需 bucket/prefix；专用 RAM 用户只作为隔离影响面的推荐项。禁止使用阿里云主账号 AK；共享 AK 的轮换、停用或泄露会同时影响其他应用。Nevix 不创建或修改云资源；Go 在激活候选配置前验证匿名读取以 401、403 或 404 拒绝且绝不返回 2xx、对象读写/Range/Delete、预签名 PUT、禁止覆盖与精确清理。Electron Main 原生上传不要求 bucket CORS，canary 不发送 CORS OPTIONS。
 - 连接只接受 provider、region、bucket 与对应 AK/SK，使用官方公网 virtual-host endpoint；endpoint 由 Server 推导。不支持 STS、内网 endpoint、加速域名、自定义域名、filesystem、NAS、通用 S3、MinIO runtime 或任意 endpoint。
 - 没有永久对象、有效 Reference Material Upload、Provider Transfer Object 或待清理对象时可以替换或删除连接；首个永久对象产生后冻结 provider、region 与 bucket，只允许同位置轮换凭据。V1 无 bucket 迁移。
 - 元数据只在 PostgreSQL；Object Storage 是纯 blob 仓。永久 Reference Material 的预签名直传授权、finalize 与下载 seam 见 ADR-0014/0016。
@@ -101,5 +103,5 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 
 - `supabase/` 目录、Supabase 相关 E2E/CI harness 随用户系统迁移拆除。
 - 部署手册（compose 样例、.env 模板、实例认领顺序、双 Admin 建议、备份/恢复、nginx TLS 配置、PG 大版本升级步骤）随交付工作落地，归 `deploy/` 与 `scripts/` 的 canonical owner。
-- Storage 切片删除 `blobs` volume、filesystem/NAS/S3 runtime 配置和旧 blob 备份步骤；部署手册改为客户预置单一 OSS/COS bucket、最小 IAM、CORS、版本控制关闭与 `provider-transfer/` lifecycle 的验收清单。
+- Storage 切片删除 `blobs` volume、filesystem/NAS/S3 runtime 配置和旧 blob 备份步骤；部署手册改为客户预置单一 OSS/COS bucket、最小 IAM、版本控制关闭与 `provider-transfer/` lifecycle 的验收清单，并明确 Electron Main 原生上传不要求 bucket CORS。
 - README 中 electron-updater 的不实表述已修正（仓库从未实现 auto-updater）。

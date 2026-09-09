@@ -315,6 +315,51 @@ export const creationTranslations = defineResourceTranslations({
             internal_error: '服务器内部错误，请稍后重试。'
           }
         }
+      },
+      objectStorage: {
+        title: '对象存储',
+        description:
+          '为 AI 创作配置实例唯一的阿里云 OSS 或腾讯云 COS 私有 bucket。凭据只由服务器加密保存。',
+        empty: '尚未配置对象存储。',
+        memberUnavailable: '对象存储不可用，请联系管理员。',
+        providers: { oss: '阿里云 OSS', cos: '腾讯云 COS' },
+        state: {
+          loading: '正在读取对象存储状态…',
+          loadFailed: '无法读取对象存储状态。',
+          ready: '已就绪',
+          credentialUnavailable: '凭据不可用'
+        },
+        form: {
+          provider: 'Provider',
+          region: 'Region',
+          bucket: 'Bucket',
+          accessKeyId: 'Access Key ID',
+          secretAccessKey: 'Secret Access Key',
+          submit: '保存并验证',
+          saving: '正在验证…'
+        },
+        fields: {
+          revision: 'Revision',
+          configured: '已配置',
+          notConfigured: '未配置',
+          lastCheck: '最近验证'
+        },
+        revision: 'Revision {{revision}}',
+        observation: { completed: '验证完成' },
+        errors: {
+          network: '网络错误，请稍后重试。',
+          unauthorized: '登录已过期，请重新登录后再试。',
+          forbidden: '需要管理员权限。',
+          invalidRequest: '配置不合法，请检查输入。',
+          secureTransportRequired: '该操作要求已确认的 HTTPS 连接。',
+          reauthInvalid: '身份确认无效，请重新验证密码。',
+          reauthExpired: '身份确认已过期，请重新验证密码。',
+          reauthMismatch: '身份确认与该操作不匹配，请重新验证。',
+          reauthConsumed: '身份确认已被使用，请重新验证密码。',
+          exists: '对象存储连接已存在。',
+          unavailable: '无法验证对象存储配置；请检查位置、权限与私有性后重试。',
+          internal: '无法保存对象存储配置，请稍后重试。'
+        }
       }
     }
   },
@@ -646,6 +691,52 @@ export const creationTranslations = defineResourceTranslations({
               'The provider is temporarily unavailable; retry shortly.',
             internal_error: 'A server error occurred; try again later.'
           }
+        }
+      },
+      objectStorage: {
+        title: 'Object storage',
+        description:
+          "Configure the instance's single private Alibaba Cloud OSS or Tencent Cloud COS bucket for AI Creation. Credentials are encrypted only by the server.",
+        empty: 'Object storage is not configured yet.',
+        memberUnavailable: 'Object storage is unavailable. Contact an administrator.',
+        providers: { oss: 'Alibaba Cloud OSS', cos: 'Tencent Cloud COS' },
+        state: {
+          loading: 'Loading object storage status…',
+          loadFailed: 'Object storage status could not be loaded.',
+          ready: 'Ready',
+          credentialUnavailable: 'Credential unavailable'
+        },
+        form: {
+          provider: 'Provider',
+          region: 'Region',
+          bucket: 'Bucket',
+          accessKeyId: 'Access Key ID',
+          secretAccessKey: 'Secret Access Key',
+          submit: 'Save and verify',
+          saving: 'Verifying…'
+        },
+        fields: {
+          revision: 'Revision',
+          configured: 'Configured',
+          notConfigured: 'Not configured',
+          lastCheck: 'Last verification'
+        },
+        revision: 'Revision {{revision}}',
+        observation: { completed: 'Completed' },
+        errors: {
+          network: 'A network error occurred; try again shortly.',
+          unauthorized: 'Your session expired; sign in again and retry.',
+          forbidden: 'Administrator role required.',
+          invalidRequest: 'The configuration is invalid; check the inputs.',
+          secureTransportRequired: 'This command requires a proven HTTPS connection.',
+          reauthInvalid: 'The confirmation is invalid; verify your password again.',
+          reauthExpired: 'The confirmation expired; verify your password again.',
+          reauthMismatch: 'The confirmation authorizes a different action; verify again.',
+          reauthConsumed: 'The confirmation was already used; verify your password again.',
+          exists: 'An Object Storage Connection already exists.',
+          unavailable:
+            'The Object Storage Connection could not be verified. Check its location, permissions, and privacy, then retry.',
+          internal: 'The Object Storage Connection could not be saved; try again later.'
         }
       }
     }

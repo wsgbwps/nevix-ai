@@ -3,8 +3,11 @@
 package storage
 
 import (
+	"context"
 	"os"
 	"testing"
+
+	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
 func TestOSSRealSmoke(t *testing.T) {
@@ -19,8 +22,20 @@ func TestOSSRealSmoke(t *testing.T) {
 		}
 		t.Skip("OSS smoke environment is not configured")
 	}
-	runRealCloudSmoke(t,
-		Location{Provider: ProviderOSS, Region: region, Bucket: bucket},
-		Credentials{AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey},
-	)
+	location := Location{Provider: ProviderOSS, Region: region, Bucket: bucket}
+	credentials := Credentials{AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey}
+	t.Run("basic adapter conformance", func(t *testing.T) {
+		runRealCloudSmoke(t, location, credentials)
+	})
+	t.Run("production connection canary", func(t *testing.T) {
+		_, err := VerifyConnection(context.Background(), domain.ObjectStorageCandidate{
+			Location: location,
+			Credentials: domain.ObjectStorageCredentials{
+				AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 }

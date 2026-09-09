@@ -84,7 +84,7 @@ User 在创作台向当前会话上传、供生成引用的原始媒体（图片
 _Avoid_: 素材库, Attachment, 上传文件
 
 **Reference Material Upload（参考素材上传）**:
-User 为当前 Creation Session 发起、由 Server 短期授权的一次对象存储直传；它在 finalize 成功前不是 Reference Material，失败、取消或过期不得进入素材列表或 Generation Specification。
+User 为当前 Creation Session 发起、由 Server 短期授权的一次对象存储直传；Renderer 只选择文件并展示进度/结果，Preload 取得但不回传真实路径，Electron Main 从磁盘流式 PUT。它在 finalize 成功前不是 Reference Material，失败、取消或过期不得进入素材列表或 Generation Specification。
 _Avoid_: Uploading Reference Material, Storage Grant, Temporary Reference Material
 
 **Provider Transfer Object（供应商传输对象）**:

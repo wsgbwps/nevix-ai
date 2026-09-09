@@ -79,6 +79,11 @@ test('a protected instance demands the setup code and validates it before claimi
   await component.getByRole('button', { name: 'Create administrator and continue' }).click()
   await expect(component.getByTestId('session-status')).toHaveText('available')
   await expect(component.getByTestId('session-role')).toHaveText('admin')
+  await expect(component.getByTestId('instance-claim-acquisition')).toHaveText('true')
+  await component.getByTestId('consume-instance-claim-acquisition').click()
+  await expect(component.getByTestId('instance-claim-acquisition')).toHaveText('false')
+  await component.getByTestId('consume-instance-claim-acquisition').click()
+  await expect(component.getByTestId('instance-claim-acquisition')).toHaveText('false')
 })
 
 test('a failed setup probe shows a retryable error instead of guessing the instance state', async ({

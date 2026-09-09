@@ -222,14 +222,18 @@ type fakeCloudObject struct {
 }
 
 type fakeCloudTransport struct {
-	provider Provider
-	mu       sync.Mutex
-	objects  map[string]fakeCloudObject
-	last     http.Header
+	provider        Provider
+	mu              sync.Mutex
+	objects         map[string]fakeCloudObject
+	last            http.Header
+	methods         map[string]int
+	failMethod      string
+	sawAnonymousGet bool
+	sawRangeGet     bool
 }
 
 func newFakeCloudTransport(provider Provider) *fakeCloudTransport {
-	return &fakeCloudTransport{provider: provider, objects: make(map[string]fakeCloudObject)}
+	return &fakeCloudTransport{provider: provider, objects: make(map[string]fakeCloudObject), methods: make(map[string]int)}
 }
 
 func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -240,6 +244,13 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if err != nil {
 		return nil, err
 	}
+	f.mu.Lock()
+	f.methods[req.Method]++
+	if req.Method == f.failMethod {
+		f.mu.Unlock()
+		return f.errorResponse(req, http.StatusServiceUnavailable, "ServiceUnavailable", fakeSensitiveProviderMessage), nil
+	}
+	f.mu.Unlock()
 	switch key {
 	case fakeProviderErrorKey:
 		return f.errorResponse(req, http.StatusServiceUnavailable, "ServiceUnavailable", fakeSensitiveProviderMessage), nil
@@ -296,6 +307,13 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 		headers.Set(f.metadataHeaderName(), object.uploadID)
 		return f.response(req, http.StatusOK, headers, nil), nil
 	case http.MethodGet:
+		if req.Header.Get("Authorization") == "" && req.URL.Query().Get("x-oss-signature") == "" && req.URL.Query().Get("q-signature") == "" {
+			f.sawAnonymousGet = true
+			return f.errorResponse(req, http.StatusForbidden, "AccessDenied", "private"), nil
+		}
+		if req.Header.Get("Range") != "" {
+			f.sawRangeGet = true
+		}
 		object, exists := f.objects[key]
 		if !exists {
 			return f.errorResponse(req, http.StatusNotFound, "NoSuchKey", "missing"), nil
@@ -311,6 +329,10 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 	default:
 		return nil, fmt.Errorf("unexpected cloud control-plane or list request: %s %s", req.Method, req.URL)
 	}
+}
+
+func (f *fakeCloudTransport) sawMethod(method string) bool {
+	return f.methods[method] > 0
 }
 
 func (f *fakeCloudTransport) unrelatedConflictCode() string {

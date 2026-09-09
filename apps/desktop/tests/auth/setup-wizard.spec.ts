@@ -55,14 +55,20 @@ test('the first-run wizard initializes an empty server; later devices see only s
         .getByRole('button', { name: 'Create administrator and continue' })
         .click()
 
-      // The initialize response carries a working admin session: the shell opens
-      // directly, with no forced first-login password change in between.
       await expect(
-        firstDevice.page.getByRole('heading', { name: 'Create with Nevix AI' })
+        firstDevice.page.getByRole('heading', { name: 'AI creation', exact: true })
       ).toBeVisible()
+      await expect(firstDevice.page.getByText('Object storage', { exact: true })).toBeVisible()
       await expect(
         firstDevice.page.getByRole('heading', { name: 'Set a new password' })
       ).toHaveCount(0)
+
+      // The claim redirect is consumed after successful navigation. Ordinary
+      // shell navigation must not pull this same session back into Settings.
+      await firstDevice.page.getByRole('button', { name: 'Back to app' }).click()
+      await expect(
+        firstDevice.page.getByRole('heading', { name: 'Create with Nevix AI' })
+      ).toBeVisible()
 
       // Ending the session on the initializing device lands on the ordinary
       // sign-in boundary, never back on the wizard: the instance has its

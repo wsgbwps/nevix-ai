@@ -3,6 +3,7 @@ import type { ServerConnectionStatus } from '../features/connection'
 export const STARTUP_ROUTES = {
   connection: '/connect',
   authentication: '/auth',
+  settings: '/settings',
   home: '/'
 } as const
 
@@ -11,10 +12,14 @@ export interface StartupSurfaceInput {
   /** Coarse current-session availability: every pre-authentication state counts as unavailable. */
   readonly sessionAvailable: boolean
   readonly pathname: string
+  readonly instanceClaimAcquired?: boolean
 }
 
 export type StartupSurfaceDecision =
-  | { readonly navigate: (typeof STARTUP_ROUTES)[keyof typeof STARTUP_ROUTES] }
+  | {
+      readonly navigate: (typeof STARTUP_ROUTES)[keyof typeof STARTUP_ROUTES]
+      readonly settingsSection?: 'aiCreation'
+    }
   | { readonly render: 'outlet' }
 
 /**
@@ -28,7 +33,8 @@ export type StartupSurfaceDecision =
 export function resolveStartupSurface({
   connectionStatus,
   sessionAvailable,
-  pathname
+  pathname,
+  instanceClaimAcquired = false
 }: StartupSurfaceInput): StartupSurfaceDecision {
   if (connectionStatus === 'unconfigured') {
     return pathname === STARTUP_ROUTES.connection
@@ -40,6 +46,10 @@ export function resolveStartupSurface({
     return pathname === STARTUP_ROUTES.authentication
       ? { render: 'outlet' }
       : { navigate: STARTUP_ROUTES.authentication }
+  }
+
+  if (instanceClaimAcquired) {
+    return { navigate: STARTUP_ROUTES.settings, settingsSection: 'aiCreation' }
   }
 
   if (pathname === STARTUP_ROUTES.authentication || pathname === STARTUP_ROUTES.connection) {

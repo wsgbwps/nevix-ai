@@ -26,6 +26,9 @@ func (m *Module) routes() []creationhttp.Route {
 		{Method: "POST", Path: "/creation/provider-connection/recheck", Guard: creationhttp.GuardAdmin, Handler: m.connection.Recheck},
 		{Method: "DELETE", Path: "/creation/provider-connection", Guard: creationhttp.GuardAdmin, Handler: m.connection.Delete},
 		{Method: "GET", Path: "/creation/media-capabilities", Handler: m.connection.ListMediaCapabilities},
+		{Method: "GET", Path: "/creation/object-storage-connection", Guard: creationhttp.GuardAdmin, Handler: m.objectStorage.Get},
+		{Method: "POST", Path: "/creation/object-storage-connection", Guard: creationhttp.GuardAdmin, Handler: m.objectStorage.Create},
+		{Method: "GET", Path: "/creation/object-storage-capability", Handler: m.objectStorage.GetCapability},
 		{Method: "GET", Path: "/creation/capability-manifest", Handler: m.manifest.GetManifest},
 		// Generation task kernel (issue #159): creator-private task routes.
 		{Method: "POST", Path: "/creation/sessions/{sessionID}/tasks", Handler: m.tasks.SubmitTask},

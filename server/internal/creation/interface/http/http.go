@@ -56,16 +56,18 @@ const (
 	CodeCapabilityStale     = "capability_stale"
 	CodeMediaUnavailable    = "media_unavailable"
 
-	CodeNotConfigured               = "provider_connection_not_configured"
-	CodeConnectionExists            = "provider_connection_exists"
-	CodeActiveGenerationTasks       = "active_generation_tasks_exist"
-	CodeCredentialInvalid           = "provider_credential_invalid"
-	CodeCheckTemporarilyUnavailable = "provider_check_temporarily_unavailable"
-	CodeSecureTransportRequired     = "secure_transport_required"
-	CodeReauthProofInvalid          = "reauth_proof_invalid"
-	CodeReauthProofExpired          = "reauth_proof_expired"
-	CodeReauthProofActionMismatch   = "reauth_proof_action_mismatch"
-	CodeReauthProofAlreadyConsumed  = "reauth_proof_already_consumed"
+	CodeNotConfigured                 = "provider_connection_not_configured"
+	CodeConnectionExists              = "provider_connection_exists"
+	CodeActiveGenerationTasks         = "active_generation_tasks_exist"
+	CodeCredentialInvalid             = "provider_credential_invalid"
+	CodeCheckTemporarilyUnavailable   = "provider_check_temporarily_unavailable"
+	CodeSecureTransportRequired       = "secure_transport_required"
+	CodeReauthProofInvalid            = "reauth_proof_invalid"
+	CodeReauthProofExpired            = "reauth_proof_expired"
+	CodeReauthProofActionMismatch     = "reauth_proof_action_mismatch"
+	CodeReauthProofAlreadyConsumed    = "reauth_proof_already_consumed"
+	CodeObjectStorageConnectionExists = "object_storage_connection_exists"
+	CodeObjectStorageUnavailable      = "object_storage_unavailable"
 )
 
 // MapError translates domain outcomes onto the stable codes; nil collapses
@@ -97,6 +99,12 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusNotFound, Code: CodeNotConfigured, Message: "No AI provider connection is configured."}
 	case isError(err, domain.ErrConnectionExists):
 		return &Error{Status: http.StatusConflict, Code: CodeConnectionExists, Message: "An AI provider connection already exists."}
+	case isError(err, domain.ErrObjectStorageConnectionExists):
+		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageConnectionExists, Message: "An Object Storage Connection already exists."}
+	case isError(err, domain.ErrInvalidObjectStorageCandidate):
+		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The Object Storage location is invalid."}
+	case isError(err, domain.ErrObjectStorageUnavailable):
+		return &Error{Status: http.StatusServiceUnavailable, Code: CodeObjectStorageUnavailable, Message: "Object storage is unavailable."}
 	case isError(err, domain.ErrActiveGenerationTasksExist):
 		return &Error{Status: http.StatusConflict, Code: CodeActiveGenerationTasks, Message: "The connection cannot be deleted while generation tasks are still active."}
 	case isError(err, domain.ErrGovernanceUserNotFound):

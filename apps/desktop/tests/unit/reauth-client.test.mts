@@ -41,11 +41,12 @@ const issueSuccessBody = {
   expires_at: '2026-09-01T00:05:00Z'
 }
 
-test('the closed exact-action set admits only the three declared actions', () => {
+test('the closed exact-action set admits only the declared actions', () => {
   assert.deepEqual(REAUTH_ACTIONS, [
     'provider_connection.create',
     'provider_connection.replace',
-    'provider_connection.delete'
+    'provider_connection.delete',
+    'object_storage_connection.create'
   ])
   for (const action of REAUTH_ACTIONS) {
     assert.equal(isReauthAction(action), true)

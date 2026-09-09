@@ -18,3 +18,7 @@ export {
   type SessionAcquisition,
   type SessionUserSummary
 } from './model/current-session'
+export {
+  useInstanceClaimAcquisition,
+  type InstanceClaimAcquisition
+} from './model/instance-claim-acquisition'

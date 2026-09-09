@@ -10,19 +10,15 @@ import (
 )
 
 // Provider is the closed Object Storage provider set supported by Creation.
-type Provider string
+type Provider = domain.ObjectStorageProvider
 
 const (
-	ProviderOSS Provider = "oss"
-	ProviderCOS Provider = "cos"
+	ProviderOSS = domain.ObjectStorageProviderOSS
+	ProviderCOS = domain.ObjectStorageProviderCOS
 )
 
 // Location is the non-secret, canonical Object Storage location.
-type Location struct {
-	Provider Provider
-	Region   string
-	Bucket   string
-}
+type Location = domain.ObjectStorageLocation
 
 // Credentials are one provider's long-lived key pair. They must remain
 // transient in Go and must never be logged or returned to Desktop.
@@ -57,7 +53,7 @@ func NormalizeLocation(raw Location) (Location, error) {
 			return Location{}, errors.New("creation: invalid OSS bucket name")
 		}
 	case ProviderCOS:
-		if !cosBucketPattern.MatchString(location.Bucket) || len(location.host()) > 60 {
+		if !cosBucketPattern.MatchString(location.Bucket) || len(location.Host()) > 60 {
 			return Location{}, errors.New("creation: invalid COS bucket name")
 		}
 	}
@@ -71,17 +67,6 @@ func hasNonPublicEndpointMarker(region string) bool {
 		}
 	}
 	return false
-}
-
-// Origin returns the exact official public virtual-host origin for a
-// normalized location.
-func (l Location) Origin() string { return "https://" + l.host() }
-
-func (l Location) host() string {
-	if l.Provider == ProviderOSS {
-		return l.Bucket + ".oss-" + l.Region + ".aliyuncs.com"
-	}
-	return l.Bucket + ".cos." + l.Region + ".myqcloud.com"
 }
 
 // NewBlobStore constructs exactly one production adapter for the selected
