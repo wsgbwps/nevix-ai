@@ -88,6 +88,8 @@ export function classifyPaths(paths) {
       isOneOf(path, [
         "scripts/test-identity-integration.sh",
         "scripts/test-creation-integration.sh",
+        "scripts/test-creation-oss-smoke.sh",
+        "scripts/test-creation-cos-smoke.sh",
       ])
     ) {
       checks.add("server");

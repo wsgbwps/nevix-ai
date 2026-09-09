@@ -119,6 +119,13 @@ test("the server integration harness entry runs Server CI", () => {
   assert.deepEqual(selected(["scripts/test-creation-integration.sh"]), {
     server: true,
   });
+  assert.deepEqual(
+    selected([
+      "scripts/test-creation-oss-smoke.sh",
+      "scripts/test-creation-cos-smoke.sh",
+    ]),
+    { server: true },
+  );
 });
 
 test("root JavaScript manifests cover product and harness consumers", () => {

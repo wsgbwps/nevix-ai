@@ -106,6 +106,36 @@ type PutResult struct {
 	SHA256Sum [32]byte
 }
 
+// UploadIDMetadataKey is the provider-neutral key used to bind a direct PUT
+// to its durable Reference Material Upload lease.
+const UploadIDMetadataKey = "upload-id"
+
+// BlobInfo is the provider-neutral subset of authoritative object metadata
+// that finalize needs. ETag is intentionally absent: it is not content proof.
+type BlobInfo struct {
+	ByteSize    int64
+	ContentType string
+	Metadata    map[string]string
+}
+
+// PresignPutRequest describes the only Desktop write authority Creation may
+// issue: one exact key, MIME, upload identity, and bounded lifetime.
+type PresignPutRequest struct {
+	Key         string
+	ContentType string
+	UploadID    string
+	ExpiresIn   time.Duration
+}
+
+// PresignedPut is the ephemeral request material returned to the current
+// creator. Callers must send exactly Method, URL, and Headers.
+type PresignedPut struct {
+	Method    string
+	URL       string
+	Headers   map[string]string
+	ExpiresAt time.Time
+}
+
 // ReadSeekCloser is what a stored blob reads back as. Seekable production
 // adapters are a hard requirement: MP4 probing reads box headers near both
 // ends of large files without buffering them whole.
@@ -128,6 +158,14 @@ type BlobStore interface {
 	// Delete removes the blob. Deleting an absent key succeeds: cleanup paths
 	// are best-effort by contract.
 	Delete(ctx context.Context, key string) error
+}
+
+// DirectUploadBlobStore is the BlobStore capability required by Object
+// Storage Connection canary and Reference Material Upload finalize.
+type DirectUploadBlobStore interface {
+	BlobStore
+	Head(ctx context.Context, key string) (BlobInfo, error)
+	PresignPut(ctx context.Context, request PresignPutRequest) (PresignedPut, error)
 }
 
 // MediaFacts are the authoritative observations one probe established for a

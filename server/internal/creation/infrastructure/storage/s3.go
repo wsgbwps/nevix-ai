@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"os"
 
@@ -114,56 +113,3 @@ func (s *S3Store) Delete(ctx context.Context, key string) error {
 	}
 	return nil
 }
-
-// drainPutError keeps a canceled pump from leaking the put goroutine.
-func drainPutError(ch chan error) {
-	for range ch {
-	}
-}
-
-// pumpInto copies src into the S3 upload pipe under the same rules the
-// filesystem adapter streams by: fixed buffer, periodic cancellation checks,
-// hard ceiling, checksum accumulation.
-func pumpInto(ctx context.Context, src io.Reader, dst *io.PipeWriter, maxBytes int64, hasher hash.Hash) (domain.PutResult, error) {
-	buffer := make([]byte, copyBufferLen)
-	var written int64
-	fail := func(err error) (domain.PutResult, error) {
-		dst.CloseWithError(err)
-		return domain.PutResult{}, fmt.Errorf("%w: %v", errPumpFailed, err)
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return fail(fmt.Errorf("blob upload canceled: %w", ctx.Err()))
-		default:
-		}
-		n, readErr := src.Read(buffer)
-		if n > 0 {
-			chunk := buffer[:n]
-			total := written + int64(n)
-			if total > maxBytes {
-				dst.CloseWithError(domain.ErrTooLarge)
-				return domain.PutResult{}, fmt.Errorf("%w: more than %d bytes", domain.ErrTooLarge, maxBytes)
-			}
-			hasher.Write(chunk)
-			if _, writeErr := dst.Write(chunk); writeErr != nil {
-				return fail(writeErr)
-			}
-			written = total
-		}
-		if readErr == io.EOF {
-			dst.Close()
-			var sum [32]byte
-			copy(sum[:], hasher.Sum(nil))
-			return domain.PutResult{ByteSize: written, SHA256Sum: sum}, nil
-		}
-		if readErr != nil {
-			if ctx.Err() != nil || errors.Is(readErr, context.Canceled) {
-				return fail(fmt.Errorf("blob upload canceled: %w", readErr))
-			}
-			return fail(readErr)
-		}
-	}
-}
-
-var errPumpFailed = errors.New("pump failed")
