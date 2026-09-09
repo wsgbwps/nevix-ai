@@ -28,6 +28,7 @@ const (
 // its sanitized audit row in the same transaction (ADR-0016).
 type ConnectionService struct {
 	connections domain.ProviderConnectionRepository
+	storage     domain.ObjectStorageConnectionRepository
 	tasks       domain.GenerationTaskRepository
 	signals     domain.ConnectionSignals
 	runner      domain.WriteRunner
@@ -38,6 +39,7 @@ type ConnectionService struct {
 
 func NewConnectionService(
 	connections domain.ProviderConnectionRepository,
+	storage domain.ObjectStorageConnectionRepository,
 	tasks domain.GenerationTaskRepository,
 	signals domain.ConnectionSignals,
 	runner domain.WriteRunner,
@@ -45,7 +47,7 @@ func NewConnectionService(
 	checker domain.ProviderCheckClient,
 	proofs authz.ReauthProofVerifier,
 ) *ConnectionService {
-	return &ConnectionService{connections: connections, tasks: tasks, signals: signals, runner: runner, vault: vault, checker: checker, proofs: proofs}
+	return &ConnectionService{connections: connections, storage: storage, tasks: tasks, signals: signals, runner: runner, vault: vault, checker: checker, proofs: proofs}
 }
 
 // GetActive returns the active connection for the admin view.
@@ -106,7 +108,7 @@ func (s *ConnectionService) Configure(ctx context.Context, principal authz.Princ
 	} else if !errors.Is(err, domain.ErrConnectionNotConfigured) {
 		return domain.ProviderConnection{}, err
 	}
-	key, err := s.vault.EnsureKey()
+	key, err := s.credentialKeyForFirstConnection(ctx)
 	if err != nil {
 		return domain.ProviderConnection{}, fmt.Errorf("creation: establish provider credential master key: %w", err)
 	}
@@ -151,13 +153,23 @@ func (s *ConnectionService) Configure(ctx context.Context, principal authz.Princ
 	return s.connections.GetActive(ctx)
 }
 
+func (s *ConnectionService) credentialKeyForFirstConnection(ctx context.Context) (domain.CredentialKey, error) {
+	key, err := s.vault.LoadKey()
+	if err == nil {
+		return key, nil
+	}
+	if _, storageErr := s.storage.GetActive(ctx); !errors.Is(storageErr, domain.ErrObjectStorageConnectionNotConfigured) {
+		return domain.CredentialKey{}, fmt.Errorf("creation: object storage ciphertext already exists: %w", domain.ErrCredentialSealed)
+	}
+	return s.vault.EnsureKey()
+}
+
 // Replace switches the Provider Key through a candidate: consume the replace
 // proof, check the candidate while the stored envelope stays untouched, then
 // atomically swap envelope and states in one audited transaction. A failed
 // candidate leaves the previous credential and capabilities byte-identical.
-// The command doubles as the credential recovery path: when the master key
-// cannot be loaded, the reauthenticated admin re-establishes it here before
-// the new ciphertext is written (ADR-0016 凭据恢复).
+// It recovers a missing shared key only when no Object Storage ciphertext
+// exists; otherwise that connection's explicit recovery owns key creation.
 func (s *ConnectionService) Replace(ctx context.Context, principal authz.Principal, proof, candidateKey string) (domain.ProviderConnection, error) {
 	if err := s.proofs.VerifyProof(ctx, principal, proofActionReplace, proof); err != nil {
 		return domain.ProviderConnection{}, err
@@ -166,14 +178,11 @@ func (s *ConnectionService) Replace(ctx context.Context, principal authz.Princip
 	if err != nil {
 		return domain.ProviderConnection{}, err
 	}
-	// EnsureKey is the sanctioned recovery: it returns a loadable existing
-	// key as-is and re-establishes the file only when it is missing or
-	// unusable — never silently under a readable key.
-	key, err := s.vault.EnsureKey()
-	if err != nil {
-		return domain.ProviderConnection{}, fmt.Errorf("creation: establish provider credential master key: %w", err)
-	}
 	result, err := s.checkCandidate(ctx, candidateKey)
+	if err != nil {
+		return domain.ProviderConnection{}, err
+	}
+	key, err := s.credentialKeyForReplacement(ctx)
 	if err != nil {
 		return domain.ProviderConnection{}, err
 	}
@@ -197,6 +206,32 @@ func (s *ConnectionService) Replace(ctx context.Context, principal authz.Princip
 		return domain.ProviderConnection{}, err
 	}
 	return s.connections.GetActive(ctx)
+}
+
+func (s *ConnectionService) credentialKeyForReplacement(ctx context.Context) (domain.CredentialKey, error) {
+	key, err := s.vault.LoadKey()
+	if err == nil {
+		return key, nil
+	}
+	storage, storageErr := s.storage.GetActive(ctx)
+	if storageErr == nil {
+		markErr := s.runner.Run(ctx, func(sc domain.WriteScope) error {
+			_, err := s.storage.MarkCredentialUnavailable(ctx, sc.Tx(), storage.ID, storage.Revision)
+			return err
+		})
+		if markErr != nil {
+			return domain.CredentialKey{}, markErr
+		}
+		return domain.CredentialKey{}, domain.ErrObjectStorageRecoveryRequired
+	}
+	if !errors.Is(storageErr, domain.ErrObjectStorageConnectionNotConfigured) {
+		return domain.CredentialKey{}, storageErr
+	}
+	key, err = s.vault.EnsureKey()
+	if err != nil {
+		return domain.CredentialKey{}, fmt.Errorf("creation: establish provider credential master key: %w", err)
+	}
+	return key, nil
 }
 
 // Delete terminates the connection: consume the delete proof, then clear the

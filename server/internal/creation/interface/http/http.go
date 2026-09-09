@@ -56,18 +56,24 @@ const (
 	CodeCapabilityStale     = "capability_stale"
 	CodeMediaUnavailable    = "media_unavailable"
 
-	CodeNotConfigured                 = "provider_connection_not_configured"
-	CodeConnectionExists              = "provider_connection_exists"
-	CodeActiveGenerationTasks         = "active_generation_tasks_exist"
-	CodeCredentialInvalid             = "provider_credential_invalid"
-	CodeCheckTemporarilyUnavailable   = "provider_check_temporarily_unavailable"
-	CodeSecureTransportRequired       = "secure_transport_required"
-	CodeReauthProofInvalid            = "reauth_proof_invalid"
-	CodeReauthProofExpired            = "reauth_proof_expired"
-	CodeReauthProofActionMismatch     = "reauth_proof_action_mismatch"
-	CodeReauthProofAlreadyConsumed    = "reauth_proof_already_consumed"
-	CodeObjectStorageConnectionExists = "object_storage_connection_exists"
-	CodeObjectStorageUnavailable      = "object_storage_unavailable"
+	CodeNotConfigured                  = "provider_connection_not_configured"
+	CodeConnectionExists               = "provider_connection_exists"
+	CodeActiveGenerationTasks          = "active_generation_tasks_exist"
+	CodeCredentialInvalid              = "provider_credential_invalid"
+	CodeCheckTemporarilyUnavailable    = "provider_check_temporarily_unavailable"
+	CodeSecureTransportRequired        = "secure_transport_required"
+	CodeReauthProofInvalid             = "reauth_proof_invalid"
+	CodeReauthProofExpired             = "reauth_proof_expired"
+	CodeReauthProofActionMismatch      = "reauth_proof_action_mismatch"
+	CodeReauthProofAlreadyConsumed     = "reauth_proof_already_consumed"
+	CodeObjectStorageConnectionExists  = "object_storage_connection_exists"
+	CodeObjectStorageNotConfigured     = "object_storage_connection_not_configured"
+	CodeObjectStorageRevisionConflict  = "object_storage_connection_revision_conflict"
+	CodeObjectStorageLocationFrozen    = "object_storage_location_frozen"
+	CodeObjectStorageConnectionInUse   = "object_storage_connection_in_use"
+	CodeObjectStorageRecoveryRequired  = "object_storage_recovery_required"
+	CodeObjectStorageRecoveryNotNeeded = "object_storage_recovery_not_required"
+	CodeObjectStorageUnavailable       = "object_storage_unavailable"
 )
 
 // MapError translates domain outcomes onto the stable codes; nil collapses
@@ -101,6 +107,18 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusConflict, Code: CodeConnectionExists, Message: "An AI provider connection already exists."}
 	case isError(err, domain.ErrObjectStorageConnectionExists):
 		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageConnectionExists, Message: "An Object Storage Connection already exists."}
+	case isError(err, domain.ErrObjectStorageConnectionNotConfigured):
+		return &Error{Status: http.StatusNotFound, Code: CodeObjectStorageNotConfigured, Message: "No Object Storage Connection is configured."}
+	case isError(err, domain.ErrObjectStorageRevisionConflict):
+		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageRevisionConflict, Message: "The Object Storage Connection changed; reload and try again."}
+	case isError(err, domain.ErrObjectStorageLocationFrozen):
+		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageLocationFrozen, Message: "The Object Storage location is permanently frozen."}
+	case isError(err, domain.ErrObjectStorageConnectionInUse):
+		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageConnectionInUse, Message: "The Object Storage Connection still owns durable or in-flight data."}
+	case isError(err, domain.ErrObjectStorageRecoveryRequired):
+		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageRecoveryRequired, Message: "The shared credential key is unavailable; explicit recovery is required."}
+	case isError(err, domain.ErrObjectStorageRecoveryNotRequired):
+		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageRecoveryNotNeeded, Message: "Credential recovery is not required for the current connection state."}
 	case isError(err, domain.ErrInvalidObjectStorageCandidate):
 		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The Object Storage location is invalid."}
 	case isError(err, domain.ErrObjectStorageUnavailable):

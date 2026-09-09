@@ -17,6 +17,10 @@ func TestValidActionAcceptsOnlyTheClosedExactActionSet(t *testing.T) {
 		ActionProviderConnectionReplace,
 		ActionProviderConnectionDelete,
 		ActionObjectStorageConnectionCreate,
+		ActionObjectStorageConnectionReplace,
+		ActionObjectStorageConnectionRotate,
+		ActionObjectStorageConnectionDelete,
+		ActionObjectStorageConnectionRecover,
 	} {
 		if !ValidAction(action) {
 			t.Fatalf("closed-set action %q rejected", action)

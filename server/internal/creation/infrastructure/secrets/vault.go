@@ -1,6 +1,8 @@
 package secrets
 
 import (
+	"sync"
+
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
@@ -8,13 +10,18 @@ import (
 // store plus the AES-256-GCM envelope codec behind one domain port.
 type Vault struct {
 	store *KeyStore
+	mu    sync.Mutex
 }
 
 // NewVault binds the vault to one secrets directory.
 func NewVault(dir string) *Vault { return &Vault{store: NewKeyStore(dir)} }
 
 // EnsureKey implements the explicit reauthenticated establishment path.
-func (v *Vault) EnsureKey() (domain.CredentialKey, error) { return v.store.Ensure() }
+func (v *Vault) EnsureKey() (domain.CredentialKey, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.store.Ensure()
+}
 
 // LoadKey implements the never-write load path.
 func (v *Vault) LoadKey() (domain.CredentialKey, error) { return v.store.Load() }

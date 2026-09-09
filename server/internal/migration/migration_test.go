@@ -114,3 +114,35 @@ func TestObjectStorageMigrationOwnsSingletonRevisionAndLeastPrivilege(t *testing
 		}
 	}
 }
+
+func TestObjectStorageMaintenanceMigrationOwnsFreezeAndExactActions(t *testing.T) {
+	sqlBytes, err := migrationFS.ReadFile("migrations/0016_object_storage_connection_maintenance.sql")
+	if err != nil {
+		t.Fatalf("read object storage maintenance migration: %v", err)
+	}
+	sql := string(sqlBytes)
+	for _, required := range []string{
+		"location_frozen_at",
+		"temporarily_unavailable",
+		"object_storage_connection.replace",
+		"object_storage_connection.rotate",
+		"object_storage_connection.delete",
+		"object_storage_connection.recover",
+		"creation_reference_materials",
+		"creation_media_assets",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("object storage maintenance migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"GRANT DELETE ON public.object_storage_connections",
+		"GRANT ALL",
+		"CREATE TABLE public.reference_material_uploads",
+		"CREATE TABLE public.provider_transfer_objects",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("object storage maintenance migration contains forbidden expansion %q", forbidden)
+		}
+	}
+}

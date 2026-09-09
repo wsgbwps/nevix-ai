@@ -497,8 +497,8 @@ paths:
         消费 exact-action Reauthentication Proof（provider_connection.replace）后，以候选
         Provider Key 完成 Connection Check。候选失败即丢弃：旧密文与能力保持原样（Proof 已
         消费，不恢复）；候选通过则原子切换密文与状态 —— 即使只看到一个媒体的模型也可切换，
-        另一媒体独立置为 unavailable。主密钥不可用时本命令同时是恢复通道：先安全建立新主密钥
-        文件，再写入新密文。请求必须经已证明的 HTTPS 传输。
+        另一媒体独立置为 unavailable。主密钥不可用且不存在 Object Storage 密文时，本命令可恢复
+        共享密钥；一旦 Object Storage 密文存在，只能先走其显式 recovery，绝不静默换钥。请求必须经已证明的 HTTPS 传输。
       security:
         - bearerAuth: []
       requestBody:
@@ -523,7 +523,7 @@ paths:
         "404":
           $ref: "#/components/responses/ProviderConnectionNotConfigured"
         "409":
-          $ref: "#/components/responses/ReauthProofActionMismatch"
+          $ref: "#/components/responses/ProviderConnectionReplaceConflict"
         "410":
           $ref: "#/components/responses/ReauthProofExpired"
         "500":
@@ -676,6 +676,181 @@ paths:
                       error:
                         enum:
                           - object_storage_unavailable
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: replaceObjectStorageConnection
+      summary: 在空实例上替换 Object Storage 位置与凭据
+      description: |-
+        Admin 在可信 HTTPS 上提交 exact-action proof 与 expected_revision。Server 在事务外完整验证候选，
+        仅当不存在永久对象且位置尚未永久冻结时，以 revision CAS 原子替换位置、凭据并追加脱敏审计。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectStorageConnectionMaintenanceInput"
+      responses:
+        "200":
+          description: 候选验证成功且 CAS 替换完成。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectStorageConnection"
+        "400":
+          $ref: "#/components/responses/ObjectStorageMaintenanceBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ObjectStorageNotConfigured"
+        "409":
+          $ref: "#/components/responses/ObjectStorageMaintenanceConflict"
+        "410":
+          $ref: "#/components/responses/ReauthProofExpired"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteObjectStorageConnection
+      summary: 删除尚未承载永久对象的 Object Storage Connection
+      description: |-
+        Admin 在可信 HTTPS 上提交独立 delete proof 与 expected_revision；只有位置未冻结且不存在
+        归属事实时才以 CAS 清除密文并终止连接，同时追加脱敏审计。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectStorageConnectionDeleteInput"
+      responses:
+        "200":
+          description: 连接已终止。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectStorageConnection"
+        "400":
+          $ref: "#/components/responses/ObjectStorageMaintenanceBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ObjectStorageNotConfigured"
+        "409":
+          $ref: "#/components/responses/ObjectStorageMaintenanceConflict"
+        "410":
+          $ref: "#/components/responses/ReauthProofExpired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/object-storage-connection/recheck:
+    post:
+      operationId: recheckObjectStorageConnection
+      summary: 使用已保存凭据重新检查 Object Storage Connection
+      description: |-
+        仅 Admin 可调用，不消费 Reauthentication Proof。检查只更新 checked_at 与
+        completed/temporarily_unavailable 观察，不改变位置、凭据、状态或 revision。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 安全观察已更新。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectStorageConnection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ObjectStorageNotConfigured"
+        "409":
+          $ref: "#/components/responses/ObjectStorageMaintenanceConflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/object-storage-connection/credential:
+    put:
+      operationId: rotateObjectStorageCredential
+      summary: 在冻结不变的位置轮换 Object Storage 凭据
+      description: |-
+        Admin 在可信 HTTPS 上提交独立 rotate proof、expected_revision 与新 AK/SK。
+        Server 先在事务外验证候选，再以 revision CAS 原子替换密文并追加脱敏审计；失败保留旧密文与 revision。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectStorageCredentialInput"
+      responses:
+        "200":
+          description: 新凭据验证并激活。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectStorageConnection"
+        "400":
+          $ref: "#/components/responses/ObjectStorageMaintenanceBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ObjectStorageNotConfigured"
+        "409":
+          $ref: "#/components/responses/ObjectStorageMaintenanceConflict"
+        "410":
+          $ref: "#/components/responses/ReauthProofExpired"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/object-storage-connection/credential/recover:
+    post:
+      operationId: recoverObjectStorageCredential
+      summary: 显式恢复丢失共享密钥后的 Object Storage 凭据
+      description: |-
+        仅 credential_unavailable 状态可用。Admin 在可信 HTTPS 上提交独立 recover proof、
+        expected_revision 与当前位置的新 AK/SK；候选验证成功后建立共享密钥、以 CAS 写入新密文，
+        并让同一旧密钥下其余密文 fail closed，永不静默重建。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectStorageCredentialInput"
+      responses:
+        "200":
+          description: 共享密钥和当前 Object Storage 凭据已恢复。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectStorageConnection"
+        "400":
+          $ref: "#/components/responses/ObjectStorageMaintenanceBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ObjectStorageNotConfigured"
+        "409":
+          $ref: "#/components/responses/ObjectStorageMaintenanceConflict"
+        "410":
+          $ref: "#/components/responses/ReauthProofExpired"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
         "500":
           $ref: "#/components/responses/InternalError"
   /creation/object-storage-capability:
@@ -1137,6 +1312,62 @@ components:
                   error:
                     enum:
                       - not_found
+    ObjectStorageMaintenanceBadRequest:
+      description: 请求形状或位置不合法、transport 不可信，或 proof 无效。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - invalid_request
+                      - secure_transport_required
+                      - reauth_proof_invalid
+    ObjectStorageNotConfigured:
+      description: 当前没有 active Object Storage Connection。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - object_storage_connection_not_configured
+    ObjectStorageMaintenanceConflict:
+      description: revision、永久位置锁、归属事实、恢复状态或单次 proof 与当前命令冲突。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - object_storage_connection_revision_conflict
+                      - object_storage_location_frozen
+                      - object_storage_connection_in_use
+                      - object_storage_recovery_required
+                      - object_storage_recovery_not_required
+                      - reauth_proof_action_mismatch
+                      - reauth_proof_already_consumed
+    ObjectStorageUnavailable:
+      description: Object Storage 候选检查或凭据处理暂时不可用；不暴露供应商原始详情。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - object_storage_unavailable
     MaterialTooLarge:
       description: material_too_large —— 上传体积超过该媒体类别的上限（image 10 MiB、audio 50 MiB、video 200 MiB）；超限流被服务端中断。
       content:
@@ -1261,6 +1492,21 @@ components:
                       - secure_transport_required
                       - reauth_proof_invalid
                       - provider_credential_invalid
+    ProviderConnectionReplaceConflict:
+      description: |-
+        Proof 动作/单次消费冲突，或共享密钥丢失且 Object Storage 密文要求先完成显式恢复。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - reauth_proof_action_mismatch
+                      - reauth_proof_already_consumed
+                      - object_storage_recovery_required
     ProviderConnectionDeleteRejected:
       description: |-
         删除被拒绝 —— invalid_request、secure_transport_required、reauth_proof_invalid。
@@ -1605,6 +1851,77 @@ components:
           minLength: 1
           maxLength: 1024
           description: 长期最小权限 Secret Access Key；只在 canary/加密期间短暂存在，永不回显。
+    ObjectStorageConnectionMaintenanceInput:
+      type: object
+      required:
+        - proof
+        - expected_revision
+        - provider
+        - region
+        - bucket
+        - access_key_id
+        - secret_access_key
+      properties:
+        proof:
+          type: string
+          description: 绑定 object_storage_connection.replace 的单次 Reauthentication Proof。
+        expected_revision:
+          type: integer
+          minimum: 1
+          description: Admin 最近读取的连接 revision；CAS 冲突必须重新加载。
+        provider:
+          type: string
+          enum: [oss, cos]
+        region:
+          type: string
+          minLength: 1
+          maxLength: 32
+        bucket:
+          type: string
+          minLength: 1
+          maxLength: 63
+        access_key_id:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        secret_access_key:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    ObjectStorageCredentialInput:
+      type: object
+      required:
+        - proof
+        - expected_revision
+        - access_key_id
+        - secret_access_key
+      properties:
+        proof:
+          type: string
+          description: 绑定 rotate 或 recover 命令的单次 exact-action Reauthentication Proof。
+        expected_revision:
+          type: integer
+          minimum: 1
+        access_key_id:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        secret_access_key:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    ObjectStorageConnectionDeleteInput:
+      type: object
+      required:
+        - proof
+        - expected_revision
+      properties:
+        proof:
+          type: string
+          description: 绑定 object_storage_connection.delete 的单次 Reauthentication Proof。
+        expected_revision:
+          type: integer
+          minimum: 1
     ObjectStorageConnection:
       type: object
       required:
@@ -1623,6 +1940,9 @@ components:
         revision:
           type: integer
           minimum: 1
+        location_frozen:
+          type: boolean
+          description: 一旦首个永久对象落地便永久为 true；只阻止位置替换和删除，不阻止同位置凭据轮换。
         credential:
           type: object
           required:
@@ -1646,7 +1966,7 @@ components:
               format: date-time
             outcome:
               type: string
-              enum: [completed]
+              enum: [completed, temporarily_unavailable]
     ObjectStorageCapability:
       oneOf:
         - type: object

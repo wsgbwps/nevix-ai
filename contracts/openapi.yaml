@@ -98,6 +98,12 @@ paths:
     $ref: "./creation.yaml#/paths/~1creation~1media-capabilities"
   /creation/object-storage-connection:
     $ref: "./creation.yaml#/paths/~1creation~1object-storage-connection"
+  /creation/object-storage-connection/recheck:
+    $ref: "./creation.yaml#/paths/~1creation~1object-storage-connection~1recheck"
+  /creation/object-storage-connection/credential:
+    $ref: "./creation.yaml#/paths/~1creation~1object-storage-connection~1credential"
+  /creation/object-storage-connection/credential/recover:
+    $ref: "./creation.yaml#/paths/~1creation~1object-storage-connection~1credential~1recover"
   /creation/object-storage-capability:
     $ref: "./creation.yaml#/paths/~1creation~1object-storage-capability"
   /creation/capability-manifest:
