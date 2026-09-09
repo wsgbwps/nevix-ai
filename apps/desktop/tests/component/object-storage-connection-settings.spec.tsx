@@ -109,16 +109,15 @@ test('Admin rechecks without proof and can start each exact maintenance action',
   })
 
   await component.getByRole('button', { name: 'Replace location' }).click()
-  await expect(
-    component.getByRole('dialog', { name: 'Replace object storage location' })
-  ).toBeVisible()
+  const replaceDialog = page.getByRole('dialog', { name: 'Replace object storage location' })
+  await expect(replaceDialog).toBeVisible()
   expect(await page.evaluate(() => window.__objectStorageConnectionTest?.proofCalls())).toEqual([
     'replace'
   ])
-  await component.getByRole('button', { name: 'Cancel' }).click()
+  await replaceDialog.getByRole('button', { name: 'Cancel' }).click()
 
   await component.getByRole('button', { name: 'Rotate credential' }).click()
-  const rotateDialog = component.getByRole('dialog', { name: 'Rotate object storage credential' })
+  const rotateDialog = page.getByRole('dialog', { name: 'Rotate object storage credential' })
   await expect(rotateDialog).toBeVisible()
   await expect(
     rotateDialog.getByText(/retain the old cloud key for at least 24 hours/i)
@@ -131,7 +130,7 @@ test('Admin rechecks without proof and can start each exact maintenance action',
   await rotateDialog.getByRole('button', { name: 'Cancel' }).click()
 
   await component.getByRole('button', { name: 'Delete connection' }).click()
-  const deleteDialog = component.getByRole('dialog', { name: 'Delete object storage connection?' })
+  const deleteDialog = page.getByRole('dialog', { name: 'Delete object storage connection?' })
   await expect(deleteDialog).toBeVisible()
   await deleteDialog.getByRole('button', { name: 'Delete connection' }).click()
   await expect(component.getByText('Object storage is not configured yet.')).toBeVisible()
@@ -157,7 +156,7 @@ test('credential-unavailable state prominently offers proof-protected recovery',
   await expect(component.getByRole('alert')).toContainText('Recovery is required')
   await component.getByRole('button', { name: 'Recover credential' }).click()
   await expect(
-    component.getByRole('dialog', { name: 'Recover object storage credential' })
+    page.getByRole('dialog', { name: 'Recover object storage credential' })
   ).toBeVisible()
   expect(await page.evaluate(() => window.__objectStorageConnectionTest?.proofCalls())).toEqual([
     'recover'
@@ -186,7 +185,7 @@ test('a failed credential candidate keeps the old masked connection and spends i
   )
 
   await component.getByRole('button', { name: 'Rotate credential' }).click()
-  const dialog = component.getByRole('dialog', { name: 'Rotate object storage credential' })
+  const dialog = page.getByRole('dialog', { name: 'Rotate object storage credential' })
   await dialog.getByLabel('Access Key ID').fill('replacement-access-key')
   await dialog.getByLabel('Secret Access Key').fill('replacement-secret')
   await dialog.getByRole('button', { name: 'Verify and save' }).click()
