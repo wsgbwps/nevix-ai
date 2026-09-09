@@ -111,7 +111,12 @@ export const userManagementTranslations = defineResourceTranslations({
         provider_connection_paused: '暂停 AI 供应商连接',
         provider_connection_resumed: '恢复 AI 供应商连接',
         provider_connection_checked: '重检 AI 供应商连接',
-        provider_connection_deleted: '删除 AI 供应商连接'
+        provider_connection_deleted: '删除 AI 供应商连接',
+        object_storage_connection_created: '创建对象存储连接',
+        object_storage_connection_replaced: '替换对象存储连接',
+        object_storage_connection_credential_rotated: '轮换对象存储凭据',
+        object_storage_connection_deleted: '删除对象存储连接',
+        object_storage_connection_credential_recovered: '恢复对象存储凭据'
       }
     },
     joinCodes: {
@@ -286,7 +291,12 @@ export const userManagementTranslations = defineResourceTranslations({
         provider_connection_paused: 'AI provider connection paused',
         provider_connection_resumed: 'AI provider connection resumed',
         provider_connection_checked: 'AI provider connection rechecked',
-        provider_connection_deleted: 'AI provider connection deleted'
+        provider_connection_deleted: 'AI provider connection deleted',
+        object_storage_connection_created: 'Object Storage Connection created',
+        object_storage_connection_replaced: 'Object Storage Connection replaced',
+        object_storage_connection_credential_rotated: 'Object storage credential rotated',
+        object_storage_connection_deleted: 'Object Storage Connection deleted',
+        object_storage_connection_credential_recovered: 'Object storage credential recovered'
       }
     },
     joinCodes: {

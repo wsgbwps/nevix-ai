@@ -1,4 +1,4 @@
-import { request, type CreationApiResult } from './go-creation-http'
+import { request, type CreationApiFailure, type CreationApiResult } from './go-creation-http'
 
 export type ObjectStorageProvider = 'oss' | 'cos'
 export type ObjectStorageConnectionState = 'unconfigured' | 'ready' | 'credential_unavailable'
@@ -10,7 +10,7 @@ export interface ObjectStorageCredentialView {
 
 export interface ObjectStorageObservationView {
   readonly checkedAt: string
-  readonly outcome: 'completed'
+  readonly outcome: 'completed' | 'temporarily_unavailable'
 }
 
 export type ObjectStorageConnectionView =
@@ -21,6 +21,7 @@ export type ObjectStorageConnectionView =
       readonly region: string
       readonly bucket: string
       readonly revision: number
+      readonly locationFrozen: boolean
       readonly credential: ObjectStorageCredentialView
       readonly observation?: ObjectStorageObservationView
     }
@@ -32,6 +33,22 @@ export interface ObjectStorageConnectionInput {
   readonly bucket: string
   readonly accessKeyId: string
   readonly secretAccessKey: string
+}
+
+export interface ObjectStorageConnectionReplacementInput extends ObjectStorageConnectionInput {
+  readonly expectedRevision: number
+}
+
+export interface ObjectStorageCredentialReplacementInput {
+  readonly proof: string
+  readonly expectedRevision: number
+  readonly accessKeyId: string
+  readonly secretAccessKey: string
+}
+
+export interface ObjectStorageConnectionDeleteInput {
+  readonly proof: string
+  readonly expectedRevision: number
 }
 
 export type ObjectStorageCapabilityView =
@@ -52,6 +69,25 @@ export function createObjectStorageConnectionClient(serverUrl: string): {
   create(
     token: string,
     input: ObjectStorageConnectionInput
+  ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
+  recheck(
+    token: string
+  ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
+  replace(
+    token: string,
+    input: ObjectStorageConnectionReplacementInput
+  ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
+  rotate(
+    token: string,
+    input: ObjectStorageCredentialReplacementInput
+  ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
+  deleteConnection(
+    token: string,
+    input: ObjectStorageConnectionDeleteInput
+  ): Promise<CreationApiResult<ObjectStorageConnectionView>>
+  recover(
+    token: string,
+    input: ObjectStorageCredentialReplacementInput
   ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
   getCapability(token: string): Promise<CreationApiResult<ObjectStorageCapabilityView>>
 } {
@@ -80,11 +116,61 @@ export function createObjectStorageConnectionClient(serverUrl: string): {
           secret_access_key: input.secretAccessKey
         }
       })
+      return parseConfiguredConnectionResult(result)
+    },
+    recheck: async (token) => {
+      const result = await request(serverUrl, {
+        method: 'POST',
+        path: '/creation/object-storage-connection/recheck',
+        token
+      })
+      return parseConfiguredConnectionResult(result)
+    },
+    replace: async (token, input) => {
+      const result = await request(serverUrl, {
+        method: 'PUT',
+        path: '/creation/object-storage-connection',
+        token,
+        body: {
+          proof: input.proof,
+          expected_revision: input.expectedRevision,
+          provider: input.provider,
+          region: input.region,
+          bucket: input.bucket,
+          access_key_id: input.accessKeyId,
+          secret_access_key: input.secretAccessKey
+        }
+      })
+      return parseConfiguredConnectionResult(result)
+    },
+    rotate: async (token, input) => {
+      const result = await request(serverUrl, {
+        method: 'PUT',
+        path: '/creation/object-storage-connection/credential',
+        token,
+        body: credentialReplacementBody(input)
+      })
+      return parseConfiguredConnectionResult(result)
+    },
+    deleteConnection: async (token, input) => {
+      const result = await request(serverUrl, {
+        method: 'DELETE',
+        path: '/creation/object-storage-connection',
+        token,
+        body: { proof: input.proof, expected_revision: input.expectedRevision }
+      })
       if (result.outcome !== 'succeeded') return result
       const view = parseConnection(result.payload)
-      return view?.state === 'ready' || view?.state === 'credential_unavailable'
-        ? { outcome: 'succeeded', value: view }
-        : { outcome: 'network-failure' }
+      return view ? { outcome: 'succeeded', value: view } : { outcome: 'network-failure' }
+    },
+    recover: async (token, input) => {
+      const result = await request(serverUrl, {
+        method: 'POST',
+        path: '/creation/object-storage-connection/credential/recover',
+        token,
+        body: credentialReplacementBody(input)
+      })
+      return parseConfiguredConnectionResult(result)
     },
     getCapability: async (token) => {
       const result = await request(serverUrl, {
@@ -99,6 +185,15 @@ export function createObjectStorageConnectionClient(serverUrl: string): {
   }
 }
 
+function credentialReplacementBody(input: ObjectStorageCredentialReplacementInput): unknown {
+  return {
+    proof: input.proof,
+    expected_revision: input.expectedRevision,
+    access_key_id: input.accessKeyId,
+    secret_access_key: input.secretAccessKey
+  }
+}
+
 function parseConnection(payload: unknown): ObjectStorageConnectionView | undefined {
   if (!isRecord(payload)) return undefined
   if (payload.state === 'unconfigured') return { state: 'unconfigured' }
@@ -108,8 +203,18 @@ function parseConnection(payload: unknown): ObjectStorageConnectionView | undefi
   const region = readNonEmptyString(payload.region)
   const bucket = readNonEmptyString(payload.bucket)
   const revision = readPositiveInteger(payload.revision)
+  const locationFrozen = payload.location_frozen
   const credential = parseCredential(payload.credential)
-  if (!provider || !region || !bucket || revision === undefined || !credential) return undefined
+  if (
+    !provider ||
+    !region ||
+    !bucket ||
+    revision === undefined ||
+    typeof locationFrozen !== 'boolean' ||
+    !credential
+  ) {
+    return undefined
+  }
 
   const observation =
     payload.observation === undefined ? undefined : parseObservation(payload.observation)
@@ -121,6 +226,7 @@ function parseConnection(payload: unknown): ObjectStorageConnectionView | undefi
     region,
     bucket,
     revision,
+    locationFrozen,
     credential,
     ...(observation ? { observation } : {})
   }
@@ -141,9 +247,20 @@ function parseCredential(payload: unknown): ObjectStorageCredentialView | undefi
 function parseObservation(payload: unknown): ObjectStorageObservationView | undefined {
   if (!isRecord(payload)) return undefined
   const checkedAt = readNonEmptyString(payload.checked_at)
-  return checkedAt && payload.outcome === 'completed'
-    ? { checkedAt, outcome: 'completed' }
+  const outcome = payload.outcome
+  return checkedAt && (outcome === 'completed' || outcome === 'temporarily_unavailable')
+    ? { checkedAt, outcome }
     : undefined
+}
+
+function parseConfiguredConnectionResult(
+  result: { readonly outcome: 'succeeded'; readonly payload: unknown } | CreationApiFailure
+): CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>> {
+  if (result.outcome !== 'succeeded') return result
+  const view = parseConnection(result.payload)
+  return view?.state === 'ready' || view?.state === 'credential_unavailable'
+    ? { outcome: 'succeeded', value: view }
+    : { outcome: 'network-failure' }
 }
 
 function parseCapability(payload: unknown): ObjectStorageCapabilityView | undefined {

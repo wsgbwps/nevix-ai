@@ -345,7 +345,35 @@ export const creationTranslations = defineResourceTranslations({
           lastCheck: '最近验证'
         },
         revision: 'Revision {{revision}}',
-        observation: { completed: '验证完成' },
+        observation: { completed: '验证完成', temporarily_unavailable: '暂时不可用' },
+        actions: {
+          recheck: '重新检查已保存凭据',
+          replace: '替换位置',
+          rotate: '轮换凭据',
+          delete: '删除连接',
+          recover: '恢复凭据'
+        },
+        recovery: {
+          required: '需要显式恢复：重新输入凭据以恢复对象存储连接。'
+        },
+        locationFrozen: '对象存储位置已冻结；你仍可重新检查或轮换凭据。',
+        dialog: {
+          replaceTitle: '替换对象存储位置',
+          replaceDescription: '只有空实例可以替换位置；候选验证失败不会更改当前连接。',
+          rotateTitle: '轮换对象存储凭据',
+          rotateDescription:
+            '计划轮换时，旧云端 key 至少保留 24 小时以覆盖已签名 URL；紧急撤销会让在途操作安全失败。',
+          recoverTitle: '恢复对象存储凭据',
+          recoverDescription: '主密钥丢失后，重新输入凭据并显式恢复当前连接。',
+          cancel: '取消',
+          submit: '验证并保存',
+          submitting: '正在验证…'
+        },
+        deleteDialog: {
+          title: '删除对象存储连接？',
+          description: '只有空实例可以删除连接。此操作需要重新确认管理员密码。',
+          confirm: '删除连接'
+        },
         errors: {
           network: '网络错误，请稍后重试。',
           unauthorized: '登录已过期，请重新登录后再试。',
@@ -357,6 +385,12 @@ export const creationTranslations = defineResourceTranslations({
           reauthMismatch: '身份确认与该操作不匹配，请重新验证。',
           reauthConsumed: '身份确认已被使用，请重新验证密码。',
           exists: '对象存储连接已存在。',
+          notConfigured: '尚未配置对象存储连接。',
+          revisionConflict: '对象存储连接已发生变化，请刷新后重试。',
+          locationFrozen: '首个永久对象创建后，对象存储位置已冻结。',
+          inUse: '对象存储连接正在使用中，无法替换或删除。',
+          recoveryRequired: '凭据需要先显式恢复。',
+          recoveryNotRequired: '当前凭据不需要恢复。',
           unavailable: '无法验证对象存储配置；请检查位置、权限与私有性后重试。',
           internal: '无法保存对象存储配置，请稍后重试。'
         }
@@ -722,7 +756,40 @@ export const creationTranslations = defineResourceTranslations({
           lastCheck: 'Last verification'
         },
         revision: 'Revision {{revision}}',
-        observation: { completed: 'Completed' },
+        observation: { completed: 'Completed', temporarily_unavailable: 'Temporarily unavailable' },
+        actions: {
+          recheck: 'Recheck saved credential',
+          replace: 'Replace location',
+          rotate: 'Rotate credential',
+          delete: 'Delete connection',
+          recover: 'Recover credential'
+        },
+        recovery: {
+          required:
+            'Recovery is required. Re-enter the credential to restore the Object Storage Connection.'
+        },
+        locationFrozen:
+          'The storage location is frozen. You can still recheck or rotate its credential.',
+        dialog: {
+          replaceTitle: 'Replace object storage location',
+          replaceDescription:
+            'Only an empty instance can replace its location. A failed candidate leaves the current connection unchanged.',
+          rotateTitle: 'Rotate object storage credential',
+          rotateDescription:
+            'For planned rotation, retain the old cloud key for at least 24 hours to cover existing signed URLs. Emergency revocation makes in-flight operations fail closed.',
+          recoverTitle: 'Recover object storage credential',
+          recoverDescription:
+            'After master-key loss, re-enter the credential to explicitly recover this connection.',
+          cancel: 'Cancel',
+          submit: 'Verify and save',
+          submitting: 'Verifying…'
+        },
+        deleteDialog: {
+          title: 'Delete object storage connection?',
+          description:
+            'Only an empty instance can delete its connection. This action requires confirming the administrator password again.',
+          confirm: 'Delete connection'
+        },
         errors: {
           network: 'A network error occurred; try again shortly.',
           unauthorized: 'Your session expired; sign in again and retry.',
@@ -734,6 +801,12 @@ export const creationTranslations = defineResourceTranslations({
           reauthMismatch: 'The confirmation authorizes a different action; verify again.',
           reauthConsumed: 'The confirmation was already used; verify your password again.',
           exists: 'An Object Storage Connection already exists.',
+          notConfigured: 'No Object Storage Connection is configured.',
+          revisionConflict: 'The Object Storage Connection changed. Refresh and retry.',
+          locationFrozen: 'The object storage location is frozen after the first permanent object.',
+          inUse: 'The Object Storage Connection is in use and cannot be replaced or deleted.',
+          recoveryRequired: 'The credential must be explicitly recovered first.',
+          recoveryNotRequired: 'The current credential does not require recovery.',
           unavailable:
             'The Object Storage Connection could not be verified. Check its location, permissions, and privacy, then retry.',
           internal: 'The Object Storage Connection could not be saved; try again later.'

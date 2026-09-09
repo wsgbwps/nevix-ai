@@ -46,7 +46,11 @@ test('the closed exact-action set admits only the declared actions', () => {
     'provider_connection.create',
     'provider_connection.replace',
     'provider_connection.delete',
-    'object_storage_connection.create'
+    'object_storage_connection.create',
+    'object_storage_connection.replace',
+    'object_storage_connection.rotate',
+    'object_storage_connection.delete',
+    'object_storage_connection.recover'
   ])
   for (const action of REAUTH_ACTIONS) {
     assert.equal(isReauthAction(action), true)
