@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -157,6 +158,7 @@ type Deps struct {
 	ReauthVerifier           authz.ReauthProofVerifier
 	ObjectStorageVerifier    ObjectStorageVerifier
 	DirectUploadStoreFactory DirectUploadStoreFactory
+	Now                      func() time.Time
 }
 
 type ObjectStorageCandidate = domain.ObjectStorageCandidate
@@ -202,6 +204,7 @@ type Module struct {
 	governance    *creationhttp.GovernanceHandler
 	hub           *creationhttp.InvalidationHub
 	worker        *application.TaskWorker
+	uploadCleanup *application.ReferenceMaterialUploadCleanupWorker
 	guard         *authz.Guard
 	corsOrigins   []string
 	store         domain.BlobStore
@@ -245,8 +248,12 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	if directStoreFactory == nil {
 		directStoreFactory = domain.DirectUploadStoreFactory(storage.NewBlobStore)
 	}
+	now := deps.Now
+	if now == nil {
+		now = time.Now
+	}
 	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, credentialVault, objectStorageVerifier, directStoreFactory, deps.ReauthVerifier)
-	materialService := application.NewMaterialService(materialRepos, sessionRepos, uploadRepos, taskRepos, store, objectStorageService, media.Prober{}, tx)
+	materialService := application.NewMaterialService(materialRepos, sessionRepos, uploadRepos, taskRepos, store, objectStorageService, media.Prober{}, tx, now)
 	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, governanceRepos, manifestService, tx, hub)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
@@ -257,6 +264,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	// Authorization header.
 	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL)
 	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, store, objectStorageService, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
+	uploadCleanup := application.NewReferenceMaterialUploadCleanupWorker(uploadRepos, objectStorageService, tx, now)
 	return &Module{
 		sessions:      creationhttp.NewSessionHandler(sessionService),
 		materials:     creationhttp.NewMaterialHandler(materialService),
@@ -267,6 +275,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 		governance:    creationhttp.NewGovernanceHandler(governanceService, connectionService),
 		hub:           hub,
 		worker:        worker,
+		uploadCleanup: uploadCleanup,
 		guard:         authz.NewGuard(deps.SessionAuthenticator),
 		corsOrigins:   cfg.CORSAllowedOrigins,
 		store:         store,
@@ -302,11 +311,21 @@ func (m *Module) Register(r chi.Router, _ event.Bus) {
 	creationhttp.Mount(r, routes, httpGuards(m.guard))
 }
 
-// RunWorkers drives the PostgreSQL generation queue until context
-// cancellation; the worker's error (if any) is surfaced to the composition
-// root's lifecycle contract.
+// RunWorkers drives both durable Creation queues until cancellation. A fatal
+// claim error cancels its sibling and is surfaced to the composition root.
 func (m *Module) RunWorkers(ctx context.Context) error {
-	return m.worker.Run(ctx)
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan error, 2)
+	go func() { results <- m.worker.Run(workerCtx) }()
+	go func() { results <- m.uploadCleanup.Run(workerCtx) }()
+	first := <-results
+	cancel()
+	second := <-results
+	if first != nil {
+		return first
+	}
+	return second
 }
 
 // httpGuards adapts the shared guard to the transport table.

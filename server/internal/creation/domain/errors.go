@@ -46,6 +46,15 @@ var (
 	// ErrReferenceMaterialUploadMetadataMismatch covers missing or mismatched
 	// upload-id/Content-Type object metadata, including an absent object.
 	ErrReferenceMaterialUploadMetadataMismatch = errors.New("reference material upload metadata mismatch")
+	// ErrReferenceMaterialUploadVerifying is a stable retryable conflict while
+	// another verifier owns the live fenced lease.
+	ErrReferenceMaterialUploadVerifying = errors.New("reference material upload is being verified")
+	// ErrReferenceMaterialUploadTerminal reports an upload whose immutable
+	// tombstone requires a new idempotency key.
+	ErrReferenceMaterialUploadTerminal = errors.New("reference material upload is terminal")
+	// ErrReferenceMaterialUploadPutRequired asks recovery to reselect the file
+	// and retry the same upload while its original PUT authority is still live.
+	ErrReferenceMaterialUploadPutRequired = errors.New("reference material upload requires put")
 	// ErrUnreadableMedia reports family-valid content that fails authoritative
 	// decoding: dimensions, pixel count, duration, or sample structure could
 	// not be established.

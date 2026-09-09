@@ -215,6 +215,22 @@ test('AbortSignal cancels an active native request', async () => {
   })
 })
 
+test('a native PUT cannot remain active into the finalize-only grace window', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  await withFixture(Buffer.alloc(128 * 1024, 5), async (path) => {
+    let request: FakeRequest | undefined
+    ;(globalThis as typeof globalThis & ElectronRequestGlobal).__nevixElectronRequest = () =>
+      (request = new FakeRequest(false))
+    const completion = putFile(path, signed, 128 * 1024)
+    while (request?.writes.length !== 1) await new Promise((resolve) => setImmediate(resolve))
+
+    t.mock.timers.tick(29 * 60_000)
+
+    assert.deepEqual(await completion, { outcome: 'uncertain' })
+    assert.equal(request.aborted, true)
+  })
+})
+
 test('AbortSignal also cancels a stalled Server control-plane request', async () => {
   let request: FakeRequest | undefined
   ;(globalThis as typeof globalThis & ElectronRequestGlobal).__nevixElectronRequest = () =>

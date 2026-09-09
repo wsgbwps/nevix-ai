@@ -2,6 +2,7 @@ package integrationtest
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -286,6 +287,7 @@ func TestDeleteMaterialRemovesRowAndBlobCleanupSchedules(t *testing.T) {
 	session := h.createSession(t, token, sessionName("delete-material"))
 	status, body := h.doUpload(t, "POST", "/creation/sessions/"+session.ID+"/materials", token, "bye.png", pngBytes(t))
 	view := mustUpload(t, status, body)
+	h.directStore.failDeletes(1)
 
 	if status, body := h.doRequest(t, "DELETE", "/creation/materials/"+view.ID, token, nil); status != http.StatusNoContent {
 		t.Fatalf("delete material: %d %s", status, body)
@@ -301,6 +303,51 @@ func TestDeleteMaterialRemovesRowAndBlobCleanupSchedules(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("deleted material row still present")
+	}
+	var uploadID, objectKey, uploadStatus string
+	var cleanupAttempt int
+	var cleanupDue bool
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		SELECT id, object_key, status, cleanup_attempt_count,
+		       cleanup_next_attempt_at IS NOT NULL AND cleanup_confirmed_at IS NULL
+		FROM creation_reference_material_uploads WHERE material_id = $1::uuid`, view.ID).Scan(
+		&uploadID, &objectKey, &uploadStatus, &cleanupAttempt, &cleanupDue,
+	); err != nil {
+		t.Fatalf("read durable material cleanup: %v", err)
+	}
+	if uploadStatus != "finalized" || cleanupAttempt != 1 || !cleanupDue {
+		t.Fatalf("durable material cleanup status=%s attempt=%d due=%t", uploadStatus, cleanupAttempt, cleanupDue)
+	}
+	if _, err := h.directStore.Head(h.ctx, objectKey); err != nil {
+		t.Fatalf("failed immediate delete did not leave its test object: %v", err)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE creation_reference_material_uploads
+		SET created_at = now() - interval '91 minutes',
+		    put_deadline = now() - interval '31 minutes',
+		    finalize_deadline = now() - interval '1 minute',
+		    cleanup_next_attempt_at = now()
+		WHERE id = $1::uuid`, uploadID); err != nil {
+		t.Fatalf("make finalized cleanup due: %v", err)
+	}
+	workerCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.creation.RunWorkers(workerCtx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := h.ownerPool.QueryRow(h.ctx, `
+			SELECT cleanup_confirmed_at IS NOT NULL
+			FROM creation_reference_material_uploads WHERE id = $1::uuid`, uploadID).Scan(&cleanupDue); err == nil && cleanupDue {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("stop finalized cleanup worker: %v", err)
+	}
+	if !cleanupDue {
+		t.Fatal("finalized material cleanup did not survive the failed immediate delete")
 	}
 }
 

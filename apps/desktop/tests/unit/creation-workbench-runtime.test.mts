@@ -27,6 +27,10 @@ const { createCreationRuntime } =
   await import('../../src/renderer/src/features/creation/model/workbench-runtime.ts')
 const { readLocalDraft, writeLocalDraft } =
   await import('../../src/renderer/src/features/creation/model/draft-store.ts')
+const { listReferenceMaterialUploadRecoveries, putReferenceMaterialUploadRecovery } =
+  await import('../../src/renderer/src/features/creation/model/reference-material-upload-recovery.ts')
+const { listReferenceMaterialDeleteRecoveries, putReferenceMaterialDeleteRecovery } =
+  await import('../../src/renderer/src/features/creation/model/reference-material-delete-recovery.ts')
 
 const sessionA = 'aaaaaaaa-0000-4000-8000-000000000001'
 const localMaterial = 'local-material-1'
@@ -96,6 +100,1014 @@ function acceptedTask(sessionId: string, id: string): CreationApiResult<Generati
     }
   }
 }
+
+test('restart recovery checks server state first, remaps the draft, and clears only safe facts', async () => {
+  const storage = fakeStorage()
+  writeLocalDraft(storage, 'user-1', sessionA, {
+    ...plainIntent('recover upload'),
+    promptDocument: { version: 1, nodes: [{ type: 'mention', materialId: localMaterial }] },
+    references: [{ materialId: localMaterial, role: 'reference' }]
+  })
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const calls: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async () => {
+        calls.push('recover')
+        return { outcome: 'succeeded' as const, value: uploadedMaterial() }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  assert.equal(runtime.actions.snapshot(sessionA).status, 'material-unconfirmed')
+  assert.deepEqual(
+    runtime.actions.recoveryMaterials(sessionA).map((entry) => entry.id),
+    [localMaterial]
+  )
+  await runtime.actions.recoverMaterialUploads()
+
+  assert.deepEqual(calls, ['recover'])
+  assert.equal(runtime.actions.resolvedMaterialId(sessionA, localMaterial), realMaterial)
+  assert.deepEqual(
+    runtime.actions.recoveryMaterials(sessionA).map((entry) => entry.id),
+    [realMaterial]
+  )
+  runtime.actions.observeMaterials(
+    sessionA,
+    [realMaterial],
+    runtime.actions.beginMaterialsObservation(sessionA)
+  )
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+  assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [
+    { materialId: realMaterial, role: 'reference' }
+  ])
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
+
+test('terminal restart recovery removes the old binding so a fresh selection gets a new key', async () => {
+  const storage = fakeStorage()
+  writeLocalDraft(storage, 'user-1', sessionA, {
+    ...plainIntent('replace terminal upload'),
+    promptDocument: { version: 1, nodes: [{ type: 'mention', materialId: localMaterial }] },
+    references: [{ materialId: localMaterial, role: 'reference' }]
+  })
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async () => ({
+        outcome: 'request-rejected' as const,
+        code: 'upload_terminal'
+      })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  await runtime.actions.recoverMaterialUploads()
+
+  assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [])
+  assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.promptDocument.nodes, [])
+  assert.deepEqual(runtime.actions.snapshot(sessionA), {
+    status: 'failed',
+    code: 'upload_requires_new_key'
+  })
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
+
+test('retiring the authenticated runtime cancels an in-flight restart recovery', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  let cancelled = false
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async (_recovery, signal) =>
+        new Promise((resolve) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              cancelled = true
+              resolve({ outcome: 'request-rejected', code: 'upload_cancelled' })
+            },
+            { once: true }
+          )
+        })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  const recovery = runtime.actions.recoverMaterialUploads()
+  await Promise.resolve()
+  runtime.retire()
+  await recovery
+
+  assert.equal(cancelled, true)
+  assert.deepEqual(runtime.actions.snapshot(sessionA), { status: 'retired' })
+})
+
+test('removing a recovery placeholder fences the in-flight recovery and clears its facts', async () => {
+  const storage = fakeStorage()
+  writeLocalDraft(storage, 'user-1', sessionA, {
+    ...plainIntent('remove recovering upload'),
+    promptDocument: { version: 1, nodes: [{ type: 'mention', materialId: localMaterial }] },
+    references: [{ materialId: localMaterial, role: 'reference' }]
+  })
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  let cancelled = false
+  const serverDeletes: string[] = []
+  const uploadAborts: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async (_recovery, signal) =>
+        new Promise((resolve) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              cancelled = true
+              resolve({ outcome: 'request-rejected', code: 'upload_cancelled' })
+            },
+            { once: true }
+          )
+        }),
+      abortMaterialUpload: async (recovery) => {
+        uploadAborts.push(recovery.uploadId ?? '')
+        return { outcome: 'succeeded', value: null }
+      },
+      deleteMaterial: async (materialId) => {
+        serverDeletes.push(materialId)
+        return { outcome: 'succeeded', value: undefined }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  const recovery = runtime.actions.recoverMaterialUploads()
+  await Promise.resolve()
+
+  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+    outcome: 'succeeded',
+    value: undefined
+  })
+  await recovery
+
+  assert.equal(cancelled, true)
+  assert.deepEqual(uploadAborts, ['upload-1'])
+  assert.deepEqual(serverDeletes, [])
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+  assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [])
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
+
+test('removing a recovery placeholder deletes a material finalized by the abort race', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const serverDeletes: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async (_recovery, signal) =>
+        new Promise((resolve) => {
+          signal?.addEventListener(
+            'abort',
+            () => resolve({ outcome: 'request-rejected', code: 'upload_cancelled' }),
+            { once: true }
+          )
+        }),
+      abortMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }),
+      deleteMaterial: async (materialId) => {
+        serverDeletes.push(materialId)
+        return { outcome: 'succeeded', value: undefined }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  const recovery = runtime.actions.recoverMaterialUploads()
+  await Promise.resolve()
+
+  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+    outcome: 'succeeded',
+    value: undefined
+  })
+  await recovery
+
+  assert.deepEqual(serverDeletes, [realMaterial])
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
+
+test('a finalized-race delete intent survives an unconfirmed request and restart', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const runtime = createCreationRuntime(
+    {
+      abortMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }),
+      deleteMaterial: async () => ({ outcome: 'network-failure' })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+    outcome: 'network-failure'
+  })
+  assert.deepEqual(
+    listReferenceMaterialDeleteRecoveries(storage, 'user-1', 'https://server.example'),
+    [{ sessionId: sessionA, materialId: realMaterial }]
+  )
+
+  const retried: string[] = []
+  const nextLogin = createCreationRuntime(
+    {
+      deleteMaterial: async (materialId) => {
+        retried.push(materialId)
+        return { outcome: 'request-rejected', code: 'not_found' }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  await nextLogin.actions.recoverMaterialUploads()
+
+  assert.deepEqual(retried, [realMaterial])
+  assert.deepEqual(
+    listReferenceMaterialDeleteRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
+
+test('a pending delete replay does not block an unrelated upload recovery', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialDeleteRecovery(storage, 'user-1', 'https://server.example', {
+    sessionId: sessionA,
+    materialId: realMaterial
+  })
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-2',
+    idempotencyKey: 'local-material-2',
+    sessionId: sessionA,
+    fileName: 'other.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const deletion = deferred<CreationApiResult<void>>()
+  let recoverCalls = 0
+  const runtime = createCreationRuntime(
+    {
+      deleteMaterial: async () => deletion.promise,
+      recoverMaterialUpload: async () => {
+        recoverCalls += 1
+        return { outcome: 'network-failure' }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  const recovery = runtime.actions.recoverMaterialUploads()
+  await Promise.resolve()
+  assert.equal(recoverCalls, 1)
+
+  deletion.resolve({ outcome: 'network-failure' })
+  await recovery
+})
+
+test('a failed durable abort cannot be reversed into finalize recovery after cancellation', async () => {
+  const storage = fakeStorage()
+  const active = deferred<CreationApiResult<ReferenceMaterialView>>()
+  let cancelled = false
+  const runtime = createCreationRuntime(
+    {
+      uploadMaterial: async (_sessionId, _file, options) => {
+        options?.onLease?.({
+          uploadId: 'upload-1',
+          idempotencyKey: localMaterial,
+          sessionId: sessionA,
+          fileName: 'shoe.png',
+          declaredKind: 'image',
+          declaredMimeType: 'image/png',
+          declaredByteSize: 4,
+          putExpiresAt: '2026-09-09T09:00:00Z',
+          finalizeExpiresAt: '2026-09-09T09:30:00Z'
+        })
+        options?.signal?.addEventListener('abort', () => {
+          cancelled = true
+        })
+        return active.promise
+      },
+      abortMaterialUpload: async () => ({ outcome: 'network-failure' as const })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  const staged = runtime.actions.stageMaterial(
+    sessionA,
+    localMaterial,
+    new File(['shoe'], 'shoe.png', { type: 'image/png' })
+  )
+  await Promise.resolve()
+
+  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+    outcome: 'network-failure'
+  })
+  assert.equal(cancelled, true)
+
+  active.resolve({ outcome: 'request-rejected', code: 'upload_cancelled' })
+  assert.deepEqual(await staged, { outcome: 'request-rejected', code: 'action-retired' })
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
+
+test('an unauthorized durable abort cannot finalize after the next login', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const runtime = createCreationRuntime(
+    {
+      abortMaterialUpload: async () => ({ outcome: 'unauthorized' })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+    outcome: 'unauthorized'
+  })
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+
+  let recoverCalls = 0
+  const nextLogin = createCreationRuntime(
+    {
+      recoverMaterialUpload: async () => {
+        recoverCalls += 1
+        return { outcome: 'network-failure' }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  await nextLogin.actions.recoverMaterialUploads()
+  assert.equal(recoverCalls, 0)
+})
+
+test('a lease event arriving after durable deletion cannot revive the recovery fact', async () => {
+  const storage = fakeStorage()
+  const active = deferred<CreationApiResult<ReferenceMaterialView>>()
+  let emitLateLease = (): void => undefined
+  const runtime = createCreationRuntime(
+    {
+      uploadMaterial: async (_sessionId, _file, options) => {
+        emitLateLease = () =>
+          options?.onLease?.({
+            uploadId: 'upload-1',
+            idempotencyKey: localMaterial,
+            sessionId: sessionA,
+            fileName: 'shoe.png',
+            declaredKind: 'image',
+            declaredMimeType: 'image/png',
+            declaredByteSize: 4,
+            putExpiresAt: '2026-09-09T09:00:00Z',
+            finalizeExpiresAt: '2026-09-09T09:30:00Z'
+          })
+        return active.promise
+      },
+      abortMaterialUpload: async () => ({ outcome: 'succeeded', value: null })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  const staged = runtime.actions.stageMaterial(
+    sessionA,
+    localMaterial,
+    new File(['shoe'], 'shoe.png', { type: 'image/png' })
+  )
+  await Promise.resolve()
+
+  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+    outcome: 'succeeded',
+    value: undefined
+  })
+  emitLateLease()
+  active.resolve({ outcome: 'request-rejected', code: 'upload_cancelled' })
+  await staged
+
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
+
+test('recovery skips a queued fact removed while an earlier status request is pending', async () => {
+  const storage = fakeStorage()
+  const sessionB = 'bbbbbbbb-0000-4000-8000-000000000002'
+  const first = deferred<CreationApiResult<ReferenceMaterialView>>()
+  for (const [sessionId, key] of [
+    [sessionA, localMaterial],
+    [sessionB, 'local-material-2']
+  ] as const) {
+    putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+      uploadId: `upload-${key}`,
+      idempotencyKey: key,
+      sessionId,
+      fileName: `${key}.png`,
+      declaredKind: 'image',
+      declaredMimeType: 'image/png',
+      declaredByteSize: 4,
+      putExpiresAt: '2026-09-09T09:00:00Z',
+      finalizeExpiresAt: '2026-09-09T09:30:00Z'
+    })
+  }
+  const calls: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async (recovery) => {
+        calls.push(recovery.sessionId)
+        return first.promise
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  const recovering = runtime.actions.recoverMaterialUploads()
+  await Promise.resolve()
+
+  runtime.actions.stopTracking(sessionB)
+  first.resolve({ outcome: 'network-failure' })
+  await recovering
+
+  assert.deepEqual(calls, [sessionA])
+})
+
+test('recovery does not start while durable deletion owns the upload key', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const abort = deferred<CreationApiResult<ReferenceMaterialView | null>>()
+  let recoverCalls = 0
+  const runtime = createCreationRuntime(
+    {
+      abortMaterialUpload: async () => abort.promise,
+      recoverMaterialUpload: async () => {
+        recoverCalls += 1
+        return { outcome: 'network-failure' }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  const deletion = runtime.actions.deleteMaterial(sessionA, localMaterial)
+  await Promise.resolve()
+
+  await runtime.actions.recoverMaterialUploads()
+  assert.equal(recoverCalls, 0)
+
+  abort.resolve({ outcome: 'succeeded', value: null })
+  assert.deepEqual(await deletion, { outcome: 'succeeded', value: undefined })
+})
+
+test('deleting a recovered material also removes its temporary recovery view', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const serverDeletes: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }),
+      deleteMaterial: async (materialId) => {
+        serverDeletes.push(materialId)
+        return { outcome: 'succeeded', value: undefined }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  await runtime.actions.recoverMaterialUploads()
+
+  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, realMaterial), {
+    outcome: 'succeeded',
+    value: undefined
+  })
+
+  assert.deepEqual(serverDeletes, [realMaterial])
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+})
+
+test('deleting a recovered placeholder clears its local-to-server identity bridge', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const serverDeletes: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }),
+      deleteMaterial: async (materialId) => {
+        serverDeletes.push(materialId)
+        return { outcome: 'succeeded', value: undefined }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  await runtime.actions.recoverMaterialUploads()
+
+  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+    outcome: 'succeeded',
+    value: undefined
+  })
+
+  assert.deepEqual(serverDeletes, [realMaterial])
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+  assert.equal(runtime.actions.resolvedMaterialId(sessionA, localMaterial), null)
+})
+
+test('a stale pre-recovery material read preserves the bridge until a fresh read confirms absence', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  const staleObservation = runtime.actions.beginMaterialsObservation(sessionA)
+  await runtime.actions.recoverMaterialUploads()
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [uploadedMaterial()])
+
+  runtime.actions.observeMaterials(sessionA, [], staleObservation)
+
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [uploadedMaterial()])
+  assert.equal(runtime.actions.resolvedMaterialId(sessionA, localMaterial), realMaterial)
+
+  runtime.actions.observeMaterials(
+    sessionA,
+    [],
+    runtime.actions.beginMaterialsObservation(sessionA)
+  )
+
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+  assert.equal(runtime.actions.resolvedMaterialId(sessionA, localMaterial), null)
+})
+
+test('an active terminal rejection removes the stale draft binding and recovery fact', async () => {
+  const storage = fakeStorage()
+  writeLocalDraft(storage, 'user-1', sessionA, {
+    ...plainIntent('terminal active upload'),
+    promptDocument: { version: 1, nodes: [{ type: 'mention', materialId: localMaterial }] },
+    references: [{ materialId: localMaterial, role: 'reference' }]
+  })
+  const runtime = createCreationRuntime(
+    {
+      uploadMaterial: async () => ({
+        outcome: 'request-rejected',
+        code: 'upload_terminal'
+      })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  assert.deepEqual(
+    await runtime.actions.stageMaterial(
+      sessionA,
+      localMaterial,
+      new File(['shoe'], 'shoe.png', { type: 'image/png' })
+    ),
+    { outcome: 'request-rejected', code: 'upload_terminal' }
+  )
+
+  assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [])
+  assert.deepEqual(runtime.actions.snapshot(sessionA), {
+    status: 'failed',
+    code: 'upload_requires_new_key'
+  })
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
+
+test('a rejection proven to precede the lease removes its provisional recovery fact', async () => {
+  const storage = fakeStorage()
+  const runtime = createCreationRuntime(
+    {
+      uploadMaterial: async () => ({
+        outcome: 'request-rejected',
+        code: 'invalid_local_file'
+      })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  await runtime.actions.stageMaterial(
+    sessionA,
+    localMaterial,
+    new File(['shoe'], 'shoe.png', { type: 'image/png' })
+  )
+
+  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
+
+test('a post-lease retryable rejection keeps the recovery binding visible', async () => {
+  const storage = fakeStorage()
+  writeLocalDraft(storage, 'user-1', sessionA, {
+    ...plainIntent('retry upload'),
+    promptDocument: { version: 1, nodes: [] },
+    references: [{ materialId: localMaterial, role: 'reference' }]
+  })
+  let uploadCalls = 0
+  const runtime = createCreationRuntime(
+    {
+      uploadMaterial: async (_sessionId, _file, options) => {
+        uploadCalls += 1
+        options?.onLease?.({
+          uploadId: 'upload-1',
+          idempotencyKey: localMaterial,
+          sessionId: sessionA,
+          fileName: 'shoe.png',
+          declaredKind: 'image',
+          declaredMimeType: 'image/png',
+          declaredByteSize: 4,
+          putExpiresAt: '2026-09-09T09:00:00Z',
+          finalizeExpiresAt: '2026-09-09T09:30:00Z'
+        })
+        return { outcome: 'request-rejected', code: 'reference_material_upload_verifying' }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  await runtime.actions.stageMaterial(
+    sessionA,
+    localMaterial,
+    new File(['shoe'], 'shoe.png', { type: 'image/png' })
+  )
+
+  assert.equal(runtime.actions.canReselectMaterial(sessionA, localMaterial), false)
+  assert.deepEqual(
+    await runtime.actions.replaceMaterial(
+      sessionA,
+      localMaterial,
+      localMaterial,
+      new File(['shoe'], 'shoe.png', { type: 'image/png' }),
+      'reference'
+    ),
+    { outcome: 'request-rejected', code: 'upload_reselection_not_ready' }
+  )
+  assert.equal(uploadCalls, 1)
+  assert.deepEqual(
+    runtime.actions.recoveryMaterials(sessionA).map((material) => material.id),
+    [localMaterial]
+  )
+  assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [
+    { materialId: localMaterial, role: 'reference' }
+  ])
+})
+
+test('a random replacement id cannot bypass a pending upload recovery gate', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  let uploadCalls = 0
+  let deleteCalls = 0
+  const runtime = createCreationRuntime(
+    {
+      uploadMaterial: async () => {
+        uploadCalls += 1
+        return { outcome: 'succeeded', value: uploadedMaterial() }
+      },
+      deleteMaterial: async () => {
+        deleteCalls += 1
+        return { outcome: 'succeeded', value: undefined }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  assert.deepEqual(
+    await runtime.actions.replaceMaterial(
+      sessionA,
+      localMaterial,
+      'random-replacement-id',
+      new File(['shoe'], 'shoe.png', { type: 'image/png' }),
+      'reference'
+    ),
+    { outcome: 'request-rejected', code: 'upload_reselection_not_ready' }
+  )
+  assert.equal(uploadCalls, 0)
+  assert.equal(deleteCalls, 0)
+})
+
+test('file reselection continues the same recoverable upload key without deleting its result', async () => {
+  const storage = fakeStorage()
+  writeLocalDraft(storage, 'user-1', sessionA, {
+    ...plainIntent('reselect upload'),
+    promptDocument: { version: 1, nodes: [] },
+    references: [{ materialId: localMaterial, role: 'reference' }]
+  })
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const serverDeletes: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async () => ({
+        outcome: 'request-rejected',
+        code: 'upload_requires_reselection'
+      }),
+      uploadMaterial: async (_sessionId, _file, options) => {
+        assert.equal(options?.idempotencyKey, localMaterial)
+        return { outcome: 'succeeded', value: uploadedMaterial() }
+      },
+      deleteMaterial: async (materialId) => {
+        serverDeletes.push(materialId)
+        return { outcome: 'succeeded', value: undefined }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  await runtime.actions.recoverMaterialUploads()
+  assert.equal(runtime.actions.canReselectMaterial(sessionA, localMaterial), true)
+
+  assert.deepEqual(
+    await runtime.actions.replaceMaterial(
+      sessionA,
+      localMaterial,
+      localMaterial,
+      new File(['shoe'], 'shoe.png', { type: 'image/png' }),
+      'reference'
+    ),
+    { outcome: 'succeeded', value: uploadedMaterial() }
+  )
+
+  assert.deepEqual(serverDeletes, [])
+  assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [
+    { materialId: realMaterial, role: 'reference' }
+  ])
+})
+
+test('file reselection stays disabled while startup recovery is in flight', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  const recoveryResult = deferred<CreationApiResult<ReferenceMaterialView>>()
+  let uploadCalls = 0
+  const runtime = createCreationRuntime(
+    {
+      recoverMaterialUpload: async () => recoveryResult.promise,
+      uploadMaterial: async () => {
+        uploadCalls += 1
+        return { outcome: 'succeeded', value: uploadedMaterial() }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+
+  const recovery = runtime.actions.recoverMaterialUploads()
+  await Promise.resolve()
+
+  assert.equal(runtime.actions.canReselectMaterial(sessionA, localMaterial), false)
+  assert.deepEqual(
+    await runtime.actions.replaceMaterial(
+      sessionA,
+      localMaterial,
+      localMaterial,
+      new File(['shoe'], 'shoe.png', { type: 'image/png' }),
+      'reference'
+    ),
+    { outcome: 'request-rejected', code: 'upload_reselection_not_ready' }
+  )
+  assert.equal(uploadCalls, 0)
+
+  recoveryResult.resolve({ outcome: 'network-failure' })
+  await recovery
+})
+
+test('status recovery unlocks same-key reselection after an active unconfirmed upload', async () => {
+  const storage = fakeStorage()
+  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
+    uploadId: 'upload-1',
+    idempotencyKey: localMaterial,
+    sessionId: sessionA,
+    fileName: 'shoe.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 4,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  })
+  let uploads = 0
+  const serverDeletes: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      uploadMaterial: async (_sessionId, _file, options) => {
+        uploads += 1
+        assert.equal(options?.idempotencyKey, localMaterial)
+        return uploads === 1
+          ? { outcome: 'network-failure' as const }
+          : { outcome: 'succeeded' as const, value: uploadedMaterial() }
+      },
+      recoverMaterialUpload: async () => ({
+        outcome: 'request-rejected' as const,
+        code: 'upload_requires_reselection'
+      }),
+      deleteMaterial: async (materialId) => {
+        serverDeletes.push(materialId)
+        return { outcome: 'succeeded', value: undefined }
+      }
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
+  )
+  assert.deepEqual(
+    await runtime.actions.stageMaterial(
+      sessionA,
+      localMaterial,
+      new File(['shoe'], 'shoe.png', { type: 'image/png' })
+    ),
+    { outcome: 'network-failure' }
+  )
+
+  await runtime.actions.recoverMaterialUploads()
+  assert.deepEqual(
+    await runtime.actions.replaceMaterial(
+      sessionA,
+      localMaterial,
+      localMaterial,
+      new File(['shoe'], 'shoe.png', { type: 'image/png' }),
+      'reference'
+    ),
+    { outcome: 'succeeded', value: uploadedMaterial() }
+  )
+
+  assert.equal(uploads, 2)
+  assert.deepEqual(serverDeletes, [])
+})
 
 const plainIntent = (prompt: string): GenerationIntent => ({
   prompt,
@@ -727,6 +1739,10 @@ test('material and session deletion wait for the submission that retains them', 
       const runtime = createCreationRuntime(
         {
           uploadMaterial: async () => upload.promise,
+          abortMaterialUpload: async () => ({
+            outcome: 'succeeded',
+            value: uploadedMaterial()
+          }),
           deleteMaterial: async (materialId: string) => {
             deleted.push(materialId)
             return { outcome: 'succeeded', value: undefined }
@@ -771,6 +1787,10 @@ test('material and session deletion wait for the submission that retains them', 
           uploadSignal = options?.signal
           return upload.promise
         },
+        abortMaterialUpload: async () => ({
+          outcome: 'succeeded',
+          value: uploadedMaterial()
+        }),
         deleteMaterial: async (materialId: string) => {
           deleted.push(materialId)
           return deletedResult.promise
@@ -791,19 +1811,18 @@ test('material and session deletion wait for the submission that retains them', 
     assert.equal(uploadSignal?.aborted, true)
 
     upload.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
-    assert.equal((await staged).outcome, 'succeeded')
-    await Promise.resolve()
-    assert.deepEqual(deleted, [realMaterial])
-    assert.deepEqual(reconciled, [sessionA])
+    assert.deepEqual(await staged, { outcome: 'request-rejected', code: 'action-retired' })
 
     deletedResult.resolve({ outcome: 'succeeded', value: undefined })
     assert.equal((await removal).outcome, 'succeeded')
-    assert.deepEqual(reconciled, [sessionA, sessionA])
+    assert.deepEqual(deleted, [realMaterial])
+    assert.deepEqual(reconciled, [sessionA])
   })
 
   await t.test(
     'cancelling a pending upload for removal does not leave a failure notice',
     async () => {
+      const storage = fakeStorage()
       const deleted: string[] = []
       const runtime = createCreationRuntime(
         {
@@ -819,12 +1838,14 @@ test('material and session deletion wait for the submission that retains them', 
                 { once: true }
               )
             }),
+          abortMaterialUpload: async () => ({ outcome: 'succeeded', value: null }),
           deleteMaterial: async (materialId: string) => {
             deleted.push(materialId)
             return { outcome: 'succeeded', value: undefined }
           }
         },
-        'user-1'
+        'user-1',
+        { storage, recoveryScope: 'https://server.example' }
       )
       const staged = runtime.actions.stageMaterial(
         sessionA,
@@ -836,14 +1857,18 @@ test('material and session deletion wait for the submission that retains them', 
 
       assert.deepEqual(await staged, {
         outcome: 'request-rejected',
-        code: 'upload_cancelled'
+        code: 'action-retired'
       })
       assert.deepEqual(await removal, {
-        outcome: 'request-rejected',
-        code: 'upload_cancelled'
+        outcome: 'succeeded',
+        value: undefined
       })
       assert.deepEqual(runtime.actions.snapshot(sessionA), { status: 'idle' })
       assert.deepEqual(deleted, [])
+      assert.deepEqual(
+        listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+        []
+      )
     }
   )
 

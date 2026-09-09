@@ -141,6 +141,19 @@ func (h *MaterialHandler) FinalizeReferenceMaterialUpload(w http.ResponseWriter,
 	encodeJSON(w, http.StatusOK, toReferenceMaterialUploadStatusResponse(status))
 }
 
+func (h *MaterialHandler) AbortReferenceMaterialUpload(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "uploadID")
+	if !ok {
+		return
+	}
+	status, err := h.materials.AbortUpload(r.Context(), creatorID(w, r), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, toReferenceMaterialUploadStatusResponse(status))
+}
+
 func toReferenceMaterialUploadStatusResponse(status application.ReferenceMaterialUploadStatus) referenceMaterialUploadStatusResponse {
 	response := referenceMaterialUploadStatusResponse{Upload: toReferenceMaterialUploadResource(status.Upload)}
 	if status.Material != nil {

@@ -11,11 +11,24 @@ import {
   moveLocalDraft,
   remapLocalDraftMaterial,
   removeLocalDraft,
+  removeLocalDraftMaterial,
   replaceLocalDraftMaterial,
   setLocalDraftOperationNotice,
   type LocalDraftOperationNotice
 } from './draft-store'
+import {
+  listReferenceMaterialUploadRecoveries,
+  putReferenceMaterialUploadRecovery,
+  removeReferenceMaterialUploadRecovery
+} from './reference-material-upload-recovery'
+import {
+  listReferenceMaterialDeleteRecoveries,
+  putReferenceMaterialDeleteRecovery,
+  removeReferenceMaterialDeleteRecovery,
+  type ReferenceMaterialDeleteRecovery
+} from './reference-material-delete-recovery'
 import type { CreationWorkspacePorts } from './ports'
+import type { CreationReferenceMaterialUploadRecovery } from '../../../../../shared/ipc/creation/types'
 
 export type WorkbenchActionState =
   | { readonly status: 'idle' }
@@ -50,6 +63,14 @@ export interface WorkbenchActions {
   readonly snapshot: (sessionId: string) => WorkbenchActionState
   readonly subscribe: (listener: (event: CreationRuntimeEvent) => void) => () => void
   readonly stagedMaterials: (sessionId: string) => readonly StagedMaterialFile[]
+  readonly recoveryMaterials: (sessionId: string) => readonly ReferenceMaterialView[]
+  readonly beginMaterialsObservation: (sessionId: string) => number
+  readonly observeMaterials: (
+    sessionId: string,
+    materialIds: readonly string[],
+    observation: number
+  ) => void
+  readonly canReselectMaterial: (sessionId: string, materialId: string) => boolean
   readonly resolvedMaterialId: (sessionId: string, localId: string) => string | null
   readonly stageMaterial: (
     sessionId: string,
@@ -76,6 +97,7 @@ export interface WorkbenchActions {
   /** Temporary session-list entries, persisted ones included. */
   readonly pendingDrafts: () => readonly string[]
   readonly resumeSubmission: (sessionId: string) => Promise<WorkbenchActionResult>
+  readonly recoverMaterialUploads: () => Promise<void>
   readonly acknowledgeFailure: (sessionId: string) => void
   readonly stopTracking: (sessionId: string) => void
   readonly deleteMaterial: (
@@ -99,6 +121,7 @@ export type CreationRuntime = CreationWorkspacePorts & {
 interface RuntimeOptions {
   readonly createId?: () => string
   readonly storage?: Storage
+  readonly recoveryScope?: string
 }
 
 interface PendingMaterial {
@@ -127,6 +150,7 @@ interface SubmissionChain {
 
 interface DeferredMaterialDelete {
   readonly materialId: string
+  readonly execute: (sessionId: string, materialId: string) => Promise<CreationApiResult<void>>
   readonly resolve: (result: CreationApiResult<void>) => void
 }
 
@@ -148,11 +172,21 @@ export function createCreationRuntime(
   const createId = options.createId ?? (() => crypto.randomUUID())
   const storage =
     options.storage ?? (typeof globalThis.localStorage === 'undefined' ? undefined : localStorage)
+  const recoveryScope = options.recoveryScope ?? 'default'
   const listeners = new Set<(event: CreationRuntimeEvent) => void>()
   const materialGenerations = new Map<string, number>()
   const pendingMaterials = new Map<string, PendingMaterial>()
   const resolvedMaterialIds = new Map<string, string>()
   const ambiguousMaterials = new Map<string, string>()
+  const recoveryPending = new Map<string, CreationReferenceMaterialUploadRecovery>()
+  const recoveredMaterials = new Map<string, ReferenceMaterialView>()
+  const recoveredMaterialObservationFloors = new Map<string, number>()
+  const materialObservationEpochs = new Map<string, number>()
+  const recoveryControllers = new Map<string, AbortController>()
+  const recoveryDeleting = new Set<string>()
+  const reselectionAllowed = new Set<string>()
+  const materialDeletePending = new Map<string, ReferenceMaterialDeleteRecovery>()
+  const materialDeleteRuns = new Map<string, Promise<CreationApiResult<void>>>()
   const chains = new Map<string, SubmissionChain>()
   const settledStates = new Map<string, WorkbenchActionState>()
   // Entries persisted by an earlier authenticated use period survive a reload.
@@ -168,8 +202,39 @@ export function createCreationRuntime(
   const eventSubscriptions = new Set<() => void>()
   let generation = 0
   let retired = false
+  let recoveryRun: Promise<void> | null = null
 
   const materialKey = (sessionId: string, localId: string): string => `${sessionId}:${localId}`
+  const clearRecoveredMaterial = (key: string): void => {
+    recoveredMaterials.delete(key)
+    recoveredMaterialObservationFloors.delete(key)
+  }
+  const recordRecoveredMaterial = (
+    key: string,
+    sessionId: string,
+    material: ReferenceMaterialView
+  ): void => {
+    recoveredMaterials.set(key, material)
+    recoveredMaterialObservationFloors.set(key, (materialObservationEpochs.get(sessionId) ?? 0) + 1)
+  }
+  const canReselectMaterial = (sessionId: string, materialId: string): boolean => {
+    const key = materialKey(sessionId, materialId)
+    return (
+      recoveryPending.has(key) &&
+      reselectionAllowed.has(key) &&
+      !pendingMaterials.has(key) &&
+      !recoveryControllers.has(key) &&
+      !recoveryDeleting.has(key)
+    )
+  }
+  if (storage !== undefined) {
+    for (const recovery of listReferenceMaterialUploadRecoveries(storage, userId, recoveryScope)) {
+      recoveryPending.set(materialKey(recovery.sessionId, recovery.idempotencyKey), recovery)
+    }
+    for (const recovery of listReferenceMaterialDeleteRecoveries(storage, userId, recoveryScope)) {
+      materialDeletePending.set(materialKey(recovery.sessionId, recovery.materialId), recovery)
+    }
+  }
   const emit = (event: CreationRuntimeEvent): void => {
     for (const listener of listeners) listener(event)
   }
@@ -185,6 +250,9 @@ export function createCreationRuntime(
       if (ambiguousMaterials.has(key) || (includeSent && material.state === 'uploading')) {
         names.push(material.fileName)
       }
+    }
+    for (const [key, recovery] of recoveryPending) {
+      if (key.startsWith(`${sessionId}:`)) names.push(recovery.fileName)
     }
     return [...new Set(names)]
   }
@@ -246,6 +314,7 @@ export function createCreationRuntime(
       if (material.state !== 'succeeded') affectedSessions.add(material.sessionId)
       material.controller.abort()
     }
+    for (const controller of recoveryControllers.values()) controller.abort()
     for (const sessionId of affectedSessions) {
       persistNotice(sessionId, operationNoticeFor(sessionId, true))
     }
@@ -257,6 +326,15 @@ export function createCreationRuntime(
     pendingMaterials.clear()
     resolvedMaterialIds.clear()
     ambiguousMaterials.clear()
+    recoveryPending.clear()
+    recoveredMaterials.clear()
+    recoveredMaterialObservationFloors.clear()
+    materialObservationEpochs.clear()
+    recoveryControllers.clear()
+    recoveryDeleting.clear()
+    reselectionAllowed.clear()
+    materialDeletePending.clear()
+    materialDeleteRuns.clear()
     for (const unsubscribe of eventSubscriptions) {
       try {
         unsubscribe()
@@ -303,6 +381,8 @@ export function createCreationRuntime(
     getSessionDetail: guardResult(ports.getSessionDetail),
     listMaterials: guardResult(ports.listMaterials),
     uploadMaterial: guardResult(ports.uploadMaterial),
+    recoverMaterialUpload: guardResult(ports.recoverMaterialUpload),
+    abortMaterialUpload: guardResult(ports.abortMaterialUpload),
     createMaterialFromResult: guardResult(ports.createMaterialFromResult),
     deleteMaterial: guardResult(ports.deleteMaterial),
     loadCapabilityManifest: guardResult(ports.loadCapabilityManifest),
@@ -355,9 +435,55 @@ export function createCreationRuntime(
     const materialGeneration = ++generation
     materialGenerations.set(key, materialGeneration)
     const controller = new AbortController()
+    const priorRecovery = recoveryPending.get(key)
+    const priorReselectionAllowed = reselectionAllowed.delete(key)
+    clearRecoveredMaterial(key)
+    const provisionalRecovery: CreationReferenceMaterialUploadRecovery = {
+      idempotencyKey: localId,
+      sessionId,
+      fileName: file.name,
+      declaredKind: materialKindFor(file.type),
+      declaredMimeType: file.type,
+      declaredByteSize: file.size
+    }
+    recoveryPending.set(key, provisionalRecovery)
+    if (storage !== undefined) {
+      putReferenceMaterialUploadRecovery(storage, userId, recoveryScope, provisionalRecovery)
+    }
+    let leaseObserved = false
+    const settlePreLeaseRecovery = (): void => {
+      if (leaseObserved) return
+      if (priorRecovery !== undefined) {
+        recoveryPending.set(key, priorRecovery)
+        if (priorReselectionAllowed) reselectionAllowed.add(key)
+        if (storage !== undefined) {
+          putReferenceMaterialUploadRecovery(storage, userId, recoveryScope, priorRecovery)
+        }
+        return
+      }
+      recoveryPending.delete(key)
+      if (storage !== undefined) {
+        removeReferenceMaterialUploadRecovery(storage, userId, recoveryScope, localId)
+      }
+    }
     const wirePromise = ports
       .uploadMaterial(sessionId, file, {
         signal: controller.signal,
+        idempotencyKey: localId,
+        onLease: (recovery) => {
+          if (
+            retired ||
+            materialGenerations.get(key) !== materialGeneration ||
+            recoveryDeleting.has(key)
+          ) {
+            return
+          }
+          leaseObserved = true
+          recoveryPending.set(key, recovery)
+          if (storage !== undefined) {
+            putReferenceMaterialUploadRecovery(storage, userId, recoveryScope, recovery)
+          }
+        },
         onProgress: ({ sentBytes, totalBytes }) => {
           if (materialGenerations.get(key) !== materialGeneration || retired) return
           emit({
@@ -376,6 +502,7 @@ export function createCreationRuntime(
           materialGenerations.delete(key)
           pendingMaterials.delete(key)
           ambiguousMaterials.delete(key)
+          settlePreLeaseRecovery()
         }
         normalizeFailure(result)
         return result
@@ -387,6 +514,8 @@ export function createCreationRuntime(
       if (result.outcome === 'succeeded') {
         resolvedMaterialIds.set(key, result.value.id)
         ambiguousMaterials.delete(key)
+        recoveryPending.delete(key)
+        reselectionAllowed.delete(key)
         const completed = pendingMaterials.get(key)
         if (completed !== undefined) {
           // The Go material identity now carries the action; release the
@@ -396,11 +525,13 @@ export function createCreationRuntime(
         }
         if (storage !== undefined) {
           remapLocalDraftMaterial(storage, userId, sessionId, localId, result.value.id)
+          removeReferenceMaterialUploadRecovery(storage, userId, recoveryScope, localId)
         }
         materialFailures.delete(key)
         syncNotice(sessionId)
         if (reconcileOnSuccess) emit({ type: 'reconcile', sessionId })
       } else if (result.outcome === 'network-failure') {
+        if (priorRecovery !== undefined && !leaseObserved) settlePreLeaseRecovery()
         const pending = pendingMaterials.get(key)
         if (pending !== undefined) pending.state = 'unconfirmed'
         ambiguousMaterials.set(key, file.name)
@@ -410,12 +541,44 @@ export function createCreationRuntime(
         materialGenerations.delete(key)
         pendingMaterials.delete(key)
         ambiguousMaterials.delete(key)
+        recoveryPending.delete(key)
+        reselectionAllowed.delete(key)
+        if (storage !== undefined) {
+          removeReferenceMaterialUploadRecovery(storage, userId, recoveryScope, localId)
+        }
+        syncNotice(sessionId)
+        changed(sessionId)
+      } else if (result.outcome === 'request-rejected' && result.code === 'upload_terminal') {
+        materialGenerations.delete(key)
+        pendingMaterials.delete(key)
+        ambiguousMaterials.delete(key)
+        recoveryPending.delete(key)
+        clearRecoveredMaterial(key)
+        reselectionAllowed.delete(key)
+        if (storage !== undefined) {
+          removeReferenceMaterialUploadRecovery(storage, userId, recoveryScope, localId)
+          removeLocalDraftMaterial(storage, userId, sessionId, localId)
+        }
+        materialFailures.set(key, { status: 'failed', code: 'upload_requires_new_key' })
+        syncNotice(sessionId)
+        changed(sessionId)
+        emit({ type: 'reconcile', sessionId })
+      } else if (
+        result.outcome === 'request-rejected' &&
+        result.code === 'upload_requires_reselection'
+      ) {
+        materialGenerations.delete(key)
+        pendingMaterials.delete(key)
+        ambiguousMaterials.delete(key)
+        reselectionAllowed.add(key)
+        materialFailures.set(key, { status: 'failed', code: result.code })
         syncNotice(sessionId)
         changed(sessionId)
       } else {
         materialGenerations.delete(key)
         pendingMaterials.delete(key)
         ambiguousMaterials.delete(key)
+        settlePreLeaseRecovery()
         materialFailures.set(key, {
           status: 'failed',
           code: result.outcome === 'request-rejected' ? result.code : result.outcome
@@ -442,6 +605,97 @@ export function createCreationRuntime(
   const stageMaterial: WorkbenchActions['stageMaterial'] = (sessionId, localId, file) =>
     stageMaterialFor(sessionId, localId, file, true)
 
+  const driveMaterialUploadRecovery = async (): Promise<void> => {
+    if (retired || storage === undefined) return
+    const recoveries = listReferenceMaterialUploadRecoveries(storage, userId, recoveryScope)
+    for (const recovery of recoveries) {
+      if (retired) return
+      const key = materialKey(recovery.sessionId, recovery.idempotencyKey)
+      const currentRecovery = recoveryPending.get(key)
+      if (currentRecovery === undefined || recoveryDeleting.has(key)) continue
+      const controller = new AbortController()
+      recoveryControllers.set(key, controller)
+      const result = await guardedPorts
+        .recoverMaterialUpload(currentRecovery, controller.signal)
+        .catch(() => ({ outcome: 'network-failure' }) as const)
+        .finally(() => {
+          if (recoveryControllers.get(key) === controller) recoveryControllers.delete(key)
+        })
+      if (retired) return
+      if (recoveryPending.get(key) !== currentRecovery || recoveryDeleting.has(key)) continue
+      if (result.outcome === 'succeeded') {
+        resolvedMaterialIds.set(key, result.value.id)
+        recoveryPending.delete(key)
+        recordRecoveredMaterial(key, recovery.sessionId, result.value)
+        reselectionAllowed.delete(key)
+        remapLocalDraftMaterial(
+          storage,
+          userId,
+          recovery.sessionId,
+          recovery.idempotencyKey,
+          result.value.id
+        )
+        removeReferenceMaterialUploadRecovery(
+          storage,
+          userId,
+          recoveryScope,
+          recovery.idempotencyKey
+        )
+        materialFailures.delete(key)
+        emit({ type: 'reconcile', sessionId: recovery.sessionId })
+        continue
+      }
+      if (result.outcome === 'request-rejected' && result.code === 'upload_terminal') {
+        recoveryPending.delete(key)
+        clearRecoveredMaterial(key)
+        reselectionAllowed.delete(key)
+        removeLocalDraftMaterial(storage, userId, recovery.sessionId, recovery.idempotencyKey)
+        removeReferenceMaterialUploadRecovery(
+          storage,
+          userId,
+          recoveryScope,
+          recovery.idempotencyKey
+        )
+        materialFailures.set(key, {
+          status: 'failed',
+          code: 'upload_requires_new_key'
+        })
+        emit({ type: 'reconcile', sessionId: recovery.sessionId })
+        continue
+      }
+      if (result.outcome === 'request-rejected' && result.code === 'upload_requires_reselection') {
+        materialGenerations.delete(key)
+        pendingMaterials.delete(key)
+        ambiguousMaterials.delete(key)
+        reselectionAllowed.add(key)
+      }
+      recoveryPending.set(key, currentRecovery)
+      syncNotice(recovery.sessionId)
+      changed(recovery.sessionId)
+    }
+  }
+
+  const driveMaterialDeleteRecovery = async (): Promise<void> => {
+    for (const recovery of materialDeletePending.values()) {
+      if (retired) return
+      const result = await runDurableMaterialDelete(recovery.sessionId, recovery.materialId)
+      if (!retired && result.outcome === 'succeeded') {
+        emit({ type: 'reconcile', sessionId: recovery.sessionId })
+      }
+    }
+  }
+
+  const recoverMaterialUploads = (): Promise<void> => {
+    if (recoveryRun !== null) return recoveryRun
+    const run = Promise.all([driveMaterialDeleteRecovery(), driveMaterialUploadRecovery()])
+      .then(() => undefined)
+      .finally(() => {
+        if (recoveryRun === run) recoveryRun = null
+      })
+    recoveryRun = run
+    return run
+  }
+
   const currentChain = (sessionId: string, chain: SubmissionChain): boolean =>
     !retired && chains.get(sessionId)?.generation === chain.generation
 
@@ -458,9 +712,44 @@ export function createCreationRuntime(
 
   const runMaterialDelete = async (materialId: string): Promise<CreationApiResult<void>> => {
     if (retired) return { outcome: 'unauthorized' }
-    return normalizeFailure(
-      await ports.deleteMaterial(materialId).catch(() => ({ outcome: 'network-failure' }) as const)
-    )
+    const result = await ports
+      .deleteMaterial(materialId)
+      .catch(() => ({ outcome: 'network-failure' }) as const)
+    return retired ? { outcome: 'unauthorized' } : normalizeFailure(result)
+  }
+
+  const runDurableMaterialDelete = (
+    sessionId: string,
+    materialId: string
+  ): Promise<CreationApiResult<void>> => {
+    if (retired) return Promise.resolve({ outcome: 'unauthorized' })
+    const key = materialKey(sessionId, materialId)
+    const existing = materialDeleteRuns.get(key)
+    if (existing !== undefined) return existing
+    const recovery = { sessionId, materialId }
+    materialDeletePending.set(key, recovery)
+    if (storage !== undefined) {
+      putReferenceMaterialDeleteRecovery(storage, userId, recoveryScope, recovery)
+    }
+    const run = runMaterialDelete(materialId)
+      .then((result) => {
+        if (
+          result.outcome === 'succeeded' ||
+          (result.outcome === 'request-rejected' && result.code === 'not_found')
+        ) {
+          materialDeletePending.delete(key)
+          if (storage !== undefined) {
+            removeReferenceMaterialDeleteRecovery(storage, userId, recoveryScope, materialId)
+          }
+          return { outcome: 'succeeded', value: undefined } as const
+        }
+        return result
+      })
+      .finally(() => {
+        if (materialDeleteRuns.get(key) === run) materialDeleteRuns.delete(key)
+      })
+    materialDeleteRuns.set(key, run)
+    return run
   }
 
   const runMaterialDeleteForSession = async (
@@ -470,7 +759,7 @@ export function createCreationRuntime(
     if (retired) return { outcome: 'unauthorized' }
     const key = materialKey(sessionId, materialId)
     const finishDelete = async (targetId: string): Promise<CreationApiResult<void>> => {
-      const result = await runMaterialDelete(targetId)
+      const result = await runDurableMaterialDelete(sessionId, targetId)
       if (result.outcome === 'succeeded') materialFailures.delete(key)
       return result
     }
@@ -508,7 +797,7 @@ export function createCreationRuntime(
     const materialDeletes = deferredMaterialDeletes.get(sessionId) ?? []
     deferredMaterialDeletes.delete(sessionId)
     for (const deletion of materialDeletes) {
-      void runMaterialDeleteForSession(sessionId, deletion.materialId).then(deletion.resolve)
+      void deletion.execute(sessionId, deletion.materialId).then(deletion.resolve)
     }
     const sessionDeletes = deferredSessionDeletes.get(sessionId) ?? []
     deferredSessionDeletes.delete(sessionId)
@@ -766,24 +1055,101 @@ export function createCreationRuntime(
     return sendSubmission(session.id, chain)
   }
 
-  const requestMaterialDelete: WorkbenchActions['deleteMaterial'] = (sessionId, materialId) => {
+  const requestMaterialDelete = (
+    sessionId: string,
+    materialId: string,
+    execute: (
+      sessionId: string,
+      materialId: string
+    ) => Promise<CreationApiResult<void>> = runMaterialDeleteForSession
+  ): Promise<CreationApiResult<void>> => {
     const chain = chains.get(sessionId)
     const retained = chain?.frozenIntent.references.some(
       (reference) =>
         reference.materialId === materialId ||
         resolvedMaterialIds.get(materialKey(sessionId, reference.materialId)) === materialId
     )
-    if (!retained) return runMaterialDeleteForSession(sessionId, materialId)
+    if (!retained) return execute(sessionId, materialId)
     return new Promise((resolve) => {
       const queued = deferredMaterialDeletes.get(sessionId) ?? []
-      queued.push({ materialId, resolve })
+      queued.push({ materialId, execute, resolve })
       deferredMaterialDeletes.set(sessionId, queued)
     })
   }
 
   const deleteMaterial: WorkbenchActions['deleteMaterial'] = async (sessionId, materialId) => {
-    pendingMaterials.get(materialKey(sessionId, materialId))?.controller.abort()
-    const result = await requestMaterialDelete(sessionId, materialId)
+    if (retired) return { outcome: 'unauthorized' }
+    const key = materialKey(sessionId, materialId)
+    const pending = pendingMaterials.get(key)
+    pending?.controller.abort()
+    const recovery = recoveryPending.get(key)
+    if (recovery !== undefined) {
+      // Explicit deletion owns this key from here. Fence the active upload's
+      // late completion before aborting either IPC operation.
+      materialGenerations.delete(key)
+      pendingMaterials.delete(key)
+      ambiguousMaterials.delete(key)
+      materialFailures.delete(key)
+      recoveryPending.delete(key)
+      reselectionAllowed.delete(key)
+      if (storage !== undefined) {
+        removeReferenceMaterialUploadRecovery(
+          storage,
+          userId,
+          recoveryScope,
+          recovery.idempotencyKey
+        )
+        removeLocalDraftMaterial(storage, userId, sessionId, recovery.idempotencyKey)
+      }
+      syncNotice(sessionId)
+      recoveryDeleting.add(key)
+      recoveryControllers.get(key)?.abort()
+      const controller = new AbortController()
+      recoveryControllers.set(key, controller)
+      const aborted = await guardedPorts
+        .abortMaterialUpload(recovery, controller.signal)
+        .catch(() => ({ outcome: 'network-failure' }) as const)
+        .finally(() => {
+          if (recoveryControllers.get(key) === controller) recoveryControllers.delete(key)
+        })
+      if (retired) return { outcome: 'unauthorized' }
+      if (aborted.outcome !== 'succeeded') {
+        recoveryDeleting.delete(key)
+        clearRecoveredMaterial(key)
+        resolvedMaterialIds.delete(key)
+        emit({ type: 'reconcile', sessionId })
+        return aborted
+      }
+      if (aborted.value !== null) {
+        resolvedMaterialIds.set(key, aborted.value.id)
+        recordRecoveredMaterial(key, sessionId, aborted.value)
+        const deletion = await runDurableMaterialDelete(sessionId, aborted.value.id)
+        if (deletion.outcome !== 'succeeded') {
+          recoveryDeleting.delete(key)
+          emit({ type: 'reconcile', sessionId })
+          return deletion
+        }
+      }
+      recoveryDeleting.delete(key)
+      clearRecoveredMaterial(key)
+      resolvedMaterialIds.delete(key)
+      if (storage !== undefined && aborted.value !== null) {
+        removeLocalDraftMaterial(storage, userId, sessionId, aborted.value.id)
+      }
+      emit({ type: 'reconcile', sessionId })
+      return { outcome: 'succeeded', value: undefined }
+    }
+    const result = await runMaterialDeleteForSession(sessionId, materialId)
+    if (result.outcome === 'succeeded') {
+      clearRecoveredMaterial(key)
+      resolvedMaterialIds.delete(key)
+      for (const [recoveryKey, recovered] of recoveredMaterials) {
+        if (recoveryKey.startsWith(`${sessionId}:`) && recovered.id === materialId) {
+          clearRecoveredMaterial(recoveryKey)
+          resolvedMaterialIds.delete(recoveryKey)
+        }
+      }
+    }
     if (!retired) emit({ type: 'reconcile', sessionId })
     return result
   }
@@ -795,12 +1161,22 @@ export function createCreationRuntime(
     file,
     role
   ) => {
+    const key = materialKey(sessionId, localId)
+    const previousKey = materialKey(sessionId, previousMaterialId)
+    const continuingRecovery =
+      previousMaterialId === localId && canReselectMaterial(sessionId, localId)
+    if (recoveryPending.has(previousKey) && !continuingRecovery) {
+      return { outcome: 'request-rejected', code: 'upload_reselection_not_ready' }
+    }
     const result = await stageMaterialFor(sessionId, localId, file, false)
     if (result.outcome !== 'succeeded') return result
-    const key = materialKey(sessionId, localId)
     if (retired) return { outcome: 'unauthorized' }
     if (resolvedMaterialIds.get(key) !== result.value.id) {
       return { outcome: 'request-rejected', code: 'action-retired' }
+    }
+    if (continuingRecovery) {
+      emit({ type: 'reconcile', sessionId })
+      return result
     }
     if (storage !== undefined) {
       replaceLocalDraftMaterial(
@@ -839,9 +1215,11 @@ export function createCreationRuntime(
       retired
         ? { status: 'retired' }
         : (chains.get(sessionId)?.state ??
+          settledStates.get(sessionId) ??
+          materialFailureFor(sessionId) ??
           (materialFileNamesFor(sessionId, false).length > 0
             ? { status: 'material-unconfirmed' }
-            : (settledStates.get(sessionId) ?? materialFailureFor(sessionId) ?? idleState))),
+            : idleState)),
     subscribe: (listener) => {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -868,6 +1246,49 @@ export function createCreationRuntime(
       }
       return staged
     },
+    recoveryMaterials: (sessionId) => {
+      if (retired) return []
+      const prefix = `${sessionId}:`
+      const views: ReferenceMaterialView[] = []
+      for (const [key, recovery] of recoveryPending) {
+        if (!key.startsWith(prefix)) continue
+        views.push({
+          id: recovery.idempotencyKey,
+          kind: recovery.declaredKind,
+          fileName: recovery.fileName,
+          mimeType: recovery.declaredMimeType,
+          byteSize: recovery.declaredByteSize,
+          widthPx: null,
+          heightPx: null,
+          pixelCount: null,
+          durationMs: null,
+          checksumSha256: '',
+          claimsVersion: 0,
+          createdAt:
+            recovery.putExpiresAt ?? recovery.finalizeExpiresAt ?? new Date(0).toISOString()
+        })
+      }
+      for (const [key, material] of recoveredMaterials) {
+        if (key.startsWith(prefix)) views.push(material)
+      }
+      return views
+    },
+    beginMaterialsObservation: (sessionId) => {
+      const observation = (materialObservationEpochs.get(sessionId) ?? 0) + 1
+      materialObservationEpochs.set(sessionId, observation)
+      return observation
+    },
+    observeMaterials: (sessionId, materialIds, observation) => {
+      const observed = new Set(materialIds)
+      for (const [key, material] of recoveredMaterials) {
+        if (!key.startsWith(`${sessionId}:`)) continue
+        const floor = recoveredMaterialObservationFloors.get(key) ?? Number.MAX_SAFE_INTEGER
+        if (!observed.has(material.id) && observation < floor) continue
+        clearRecoveredMaterial(key)
+        resolvedMaterialIds.delete(key)
+      }
+    },
+    canReselectMaterial,
     resolvedMaterialId: (sessionId, localId) =>
       resolvedMaterialIds.get(materialKey(sessionId, localId)) ?? null,
     stageMaterial,
@@ -882,6 +1303,7 @@ export function createCreationRuntime(
       }
       return sendSubmission(sessionId, chain)
     },
+    recoverMaterialUploads,
     acknowledgeFailure: (sessionId) => {
       if (retired) return
       settledStates.delete(sessionId)
@@ -895,6 +1317,32 @@ export function createCreationRuntime(
       for (const key of [...ambiguousMaterials.keys()]) {
         if (key.startsWith(`${sessionId}:`)) ambiguousMaterials.delete(key)
       }
+      for (const key of [...recoveryPending.keys()]) {
+        if (!key.startsWith(`${sessionId}:`)) continue
+        recoveryPending.delete(key)
+        recoveryControllers.get(key)?.abort()
+        recoveryControllers.delete(key)
+        recoveryDeleting.delete(key)
+        reselectionAllowed.delete(key)
+      }
+      for (const key of [...recoveredMaterials.keys()]) {
+        if (key.startsWith(`${sessionId}:`)) clearRecoveredMaterial(key)
+      }
+      if (storage !== undefined) {
+        for (const recovery of listReferenceMaterialUploadRecoveries(
+          storage,
+          userId,
+          recoveryScope
+        )) {
+          if (recovery.sessionId !== sessionId) continue
+          removeReferenceMaterialUploadRecovery(
+            storage,
+            userId,
+            recoveryScope,
+            recovery.idempotencyKey
+          )
+        }
+      }
       syncNotice(sessionId)
       // Deferred deletions synchronously capture the old Promise or resolved
       // identity before the runtime releases its references below.
@@ -904,11 +1352,15 @@ export function createCreationRuntime(
           pendingMaterials.delete(key)
           materialGenerations.delete(key)
           resolvedMaterialIds.delete(key)
+          clearRecoveredMaterial(key)
+          reselectionAllowed.delete(key)
         }
       }
+      materialObservationEpochs.delete(sessionId)
       changed(sessionId)
     },
-    deleteMaterial,
+    deleteMaterial: (sessionId, materialId) =>
+      requestMaterialDelete(sessionId, materialId, deleteMaterial),
     deleteSession: (sessionId) => {
       if (!chains.has(sessionId)) return runSessionDelete(sessionId)
       return new Promise((resolve) => {
@@ -920,4 +1372,10 @@ export function createCreationRuntime(
   }
 
   return { ...guardedPorts, userId, actions, retire }
+}
+
+function materialKindFor(mimeType: string): 'image' | 'video' | 'audio' {
+  if (mimeType.startsWith('video/')) return 'video'
+  if (mimeType.startsWith('audio/')) return 'audio'
+  return 'image'
 }

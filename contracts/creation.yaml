@@ -268,8 +268,6 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/ReferenceMaterialUploadExpired"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -279,7 +277,9 @@ paths:
         Head 验证对象存在、实际长度与签名 upload-id metadata 后，Go 有界完整 Get 并计算 SHA-256，
         复用内容嗅探、结构 probe、实际 kind 限额与图片 envelope。ETag、文件名、Desktop metadata、
         声明 kind/MIME 都不是内容证明；声明 kind 与实际 kind 不一致时拒绝。只有全部验证与最终
-        creator/Session 复核成功，才在短事务内创建不可变 Reference Material。重复 finalize 返回同一素材。
+        creator/Session 复核成功，才在短事务内创建不可变 Reference Material。pending 先以 CAS
+        取得带 fencing token 的 30 分钟 verifying lease；外部 I/O 全部在事务外。live verifier 返回
+        稳定可重试冲突，过期 lease 可接管，重复 finalized 返回同一素材。
       security:
         - bearerAuth: []
       parameters:
@@ -296,7 +296,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/ReferenceMaterialUploadExpired"
+          $ref: "#/components/responses/ReferenceMaterialUploadConflict"
         "413":
           $ref: "#/components/responses/MaterialTooLarge"
         "415":
@@ -307,6 +307,29 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
+    delete:
+      operationId: abortReferenceMaterialUpload
+      summary: 终止未完成的 Reference Material Upload
+      description: |-
+        creator-private、幂等地把 pending/verifying Upload 置为 terminal，并立即按数据库中的精确
+        object key 尝试删除；删除失败由持久 cleanup facts 与后台退避继续收敛。finalized Upload 不变。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/uploadID"
+      responses:
+        "200":
+          description: 当前 Upload 状态；未完成 Upload 已进入 terminal。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferenceMaterialUploadStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /creation/sessions/{sessionID}/materials/from-result:
     post:
       operationId: createReferenceMaterialFromResult
@@ -1521,7 +1544,8 @@ components:
     ReferenceMaterialUploadConflict:
       description: |-
         409 —— idempotency_payload_conflict 表示同一 creator 的 key 已绑定不同 payload；
-        reference_material_upload_expired 表示该租约已越过 90 分钟最终截止时间，必须使用新 key。
+        reference_material_upload_expired/terminal 表示旧 Upload 必须使用新 key；verifying 表示已有
+        live verifier，应稍后重试；put_required 表示 PUT 窗口内对象尚不存在，应重选文件继续同一 Upload。
       content:
         application/json:
           schema:
@@ -1533,6 +1557,9 @@ components:
                     enum:
                       - idempotency_payload_conflict
                       - reference_material_upload_expired
+                      - reference_material_upload_terminal
+                      - reference_material_upload_verifying
+                      - reference_material_upload_put_required
     ReferenceMaterialUploadExpired:
       description: reference_material_upload_expired —— 租约已越过最终截止时间，必须创建新的 Upload。
       content:
@@ -2003,7 +2030,7 @@ components:
           format: uuid
         status:
           type: string
-          enum: [pending, finalized]
+          enum: [pending, verifying, finalized, terminal]
         file_name:
           type: string
           maxLength: 255

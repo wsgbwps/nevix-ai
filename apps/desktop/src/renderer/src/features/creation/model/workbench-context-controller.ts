@@ -101,6 +101,9 @@ export interface WorkbenchContextTasksSeam {
 export interface WorkbenchContextActionsSeam {
   snapshot(key: string): WorkbenchActionState
   stagedMaterials(key: string): readonly StagedMaterialFile[]
+  recoveryMaterials?(key: string): readonly ReferenceMaterialView[]
+  beginMaterialsObservation?(key: string): number
+  observeMaterials?(key: string, materialIds: readonly string[], observation: number): void
   resolvedMaterialId(sessionId: string, localId: string): string | null
   deleteSession(sessionId: string): Promise<CreationApiResult<void>>
   acknowledgeFailure(key: string): void
@@ -503,6 +506,7 @@ export class WorkbenchContextController {
     this.#restoreWindow = true
     if (mode === 'enter') this.#deps.tasks.enter(session.id)
     else this.#deps.tasks.requestReconcile()
+    const materialObservation = this.#deps.actions.beginMaterialsObservation?.(session.id) ?? 0
     const [detail, materialPage] = await Promise.all([
       this.#deps.getSessionDetail(session.id).catch(() => null),
       this.#deps.listMaterials(session.id).catch(() => null)
@@ -549,7 +553,17 @@ export class WorkbenchContextController {
         (entry) => !materialPage.value.materials.some((material) => material.id === entry.localId)
       )
       .map((entry) => this.#deps.display.registerPending(entry.localId, entry.file))
-    const visibleMaterials = [...materialPage.value.materials, ...stagedViews]
+    this.#deps.actions.observeMaterials?.(
+      session.id,
+      materialPage.value.materials.map((material) => material.id),
+      materialObservation
+    )
+    const recoveryViews = (this.#deps.actions.recoveryMaterials?.(session.id) ?? []).filter(
+      (recovery) =>
+        !materialPage.value.materials.some((material) => material.id === recovery.id) &&
+        !stagedViews.some((material) => material.id === recovery.id)
+    )
+    const visibleMaterials = [...materialPage.value.materials, ...stagedViews, ...recoveryViews]
     this.#deps.display.replaceMaterials(visibleMaterials)
     // The editable draft is device-local state: restore this device's copy
     // and prune reference bindings whose materials no longer exist in the

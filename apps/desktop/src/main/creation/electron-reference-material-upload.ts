@@ -1,6 +1,5 @@
 import { app, net, session } from 'electron'
 import { open } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
 import { currentServerConnectionUrl } from '../connection'
 import { readCurrentSessionToken } from '../authentication'
 import type {
@@ -16,10 +15,12 @@ import type {
 type Failure = Exclude<CreationReferenceMaterialUploadResult, { outcome: 'succeeded' }>
 type Result<T> = { readonly outcome: 'succeeded'; readonly value: T } | Failure
 
+// A signed PUT cannot outlive the server's 30-minute finalize-only grace.
+const referenceMaterialPutTimeoutMs = 29 * 60_000
+
 export const electronReferenceMaterialUploadDependencies: ReferenceMaterialUploadDependencies = {
   serverUrl: currentServerConnectionUrl,
   sessionToken: readCurrentSessionToken,
-  createId: randomUUID,
   developmentMode: () => !app.isPackaged,
   inspectFile: async (path) => {
     const handle = await open(path, 'r')
@@ -113,11 +114,26 @@ export const electronReferenceMaterialUploadDependencies: ReferenceMaterialUploa
     return upload && material
       ? { outcome: 'succeeded', value: { upload, material } }
       : { outcome: 'network-failure' }
+  },
+  abortUpload: async (serverUrl, token, uploadId, signal) => {
+    const response = await requestJson(
+      'DELETE',
+      new URL(`/creation/reference-material-uploads/${uploadId}`, serverUrl),
+      token,
+      undefined,
+      signal
+    )
+    if (response.outcome !== 'succeeded') return response
+    const upload = parseUpload(response.value)
+    const material = isRecord(response.value) ? parseMaterial(response.value.material) : null
+    return upload
+      ? { outcome: 'succeeded', value: { upload, ...(material ? { material } : {}) } }
+      : { outcome: 'network-failure' }
   }
 }
 
 async function requestJson(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'DELETE',
   url: URL,
   token: string,
   body?: unknown,
@@ -219,6 +235,7 @@ export async function putFile(
     let sent = false
     let settled = false
     const progressTimer: { value?: ReturnType<typeof setInterval> } = {}
+    const transferTimer: { value?: ReturnType<typeof setTimeout> } = {}
     const source = handle.createReadStream({
       autoClose: false,
       start: 0,
@@ -228,6 +245,7 @@ export async function putFile(
       if (settled) return
       settled = true
       if (progressTimer.value !== undefined) clearInterval(progressTimer.value)
+      if (transferTimer.value !== undefined) clearTimeout(transferTimer.value)
       signal?.removeEventListener('abort', cancel)
       source.destroy()
       void handle.close().catch(() => undefined)
@@ -255,6 +273,10 @@ export async function putFile(
     }
     if (signal?.aborted) return cancel()
     signal?.addEventListener('abort', cancel, { once: true })
+    transferTimer.value = setTimeout(() => {
+      request.abort()
+      finish(sent ? 'uncertain' : 'not-sent')
+    }, referenceMaterialPutTimeoutMs)
     request.on('redirect', () => {
       request.abort()
       finish(sent ? 'uncertain' : 'not-sent')

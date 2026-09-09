@@ -3,7 +3,10 @@ import type {
   CreationReferenceMaterialUploadRequest,
   CreationReferenceMaterialUploadResult
 } from '../../../shared/ipc/creation/types'
-import { CREATION_REFERENCE_MATERIAL_UPLOAD_PROGRESS_CHANNEL } from '../../../shared/ipc/creation/types'
+import {
+  CREATION_REFERENCE_MATERIAL_UPLOAD_LEASE_CHANNEL,
+  CREATION_REFERENCE_MATERIAL_UPLOAD_PROGRESS_CHANNEL
+} from '../../../shared/ipc/creation/types'
 import { requireTrustedTopLevelRendererSender } from '../../window/trusted-renderer-sender'
 import {
   beginReferenceMaterialUpload,
@@ -11,6 +14,7 @@ import {
 } from '../active-reference-material-uploads'
 import { electronReferenceMaterialUploadDependencies } from '../electron-reference-material-upload'
 import { runReferenceMaterialUpload } from '../reference-material-upload'
+import { isCanonicalUuid } from './reference-material-upload-validation'
 
 export async function uploadReferenceMaterialHandler(
   event: Electron.IpcMainInvokeEvent,
@@ -29,6 +33,14 @@ export async function uploadReferenceMaterialHandler(
     return await runReferenceMaterialUpload(
       request,
       electronReferenceMaterialUploadDependencies,
+      (recovery) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send(CREATION_REFERENCE_MATERIAL_UPLOAD_LEASE_CHANNEL, {
+            operationId: request.operationId,
+            recovery
+          })
+        }
+      },
       (sentBytes, totalBytes) => {
         if (!event.sender.isDestroyed()) {
           event.sender.send(CREATION_REFERENCE_MATERIAL_UPLOAD_PROGRESS_CHANNEL, {
@@ -49,11 +61,12 @@ function validateRequest(raw: unknown): CreationReferenceMaterialUploadRequest {
   if (!isRecord(raw)) throw new Error('Reference Material upload received an invalid request')
   const keys = Object.keys(raw)
   if (
-    keys.length !== 7 ||
+    keys.length !== 8 ||
     typeof raw.operationId !== 'string' ||
     raw.operationId.length === 0 ||
-    typeof raw.sessionId !== 'string' ||
-    raw.sessionId.length === 0 ||
+    typeof raw.idempotencyKey !== 'string' ||
+    raw.idempotencyKey.length === 0 ||
+    !isCanonicalUuid(raw.sessionId) ||
     typeof raw.localPath !== 'string' ||
     raw.localPath.length === 0 ||
     !isAbsolute(raw.localPath) ||

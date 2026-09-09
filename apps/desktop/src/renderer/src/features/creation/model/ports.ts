@@ -20,6 +20,11 @@ import {
   type TaskPage,
   type TaskSubmitInput
 } from '../api/generation-task-http'
+import type {
+  CreationReferenceMaterialUploadAbortResult,
+  CreationReferenceMaterialUploadRecovery,
+  CreationReferenceMaterialUploadResult
+} from '../../../../../shared/ipc/creation/types'
 
 /** How every trusted call sources its credential: per operation, never cached.
  * Structurally matches the authentication Feature's session acquisition so
@@ -28,6 +33,8 @@ export type TokenSource = () => Promise<{ readonly token: string } | undefined>
 
 export interface MaterialUploadOptions {
   readonly signal?: AbortSignal
+  readonly idempotencyKey?: string
+  readonly onLease?: (recovery: Required<CreationReferenceMaterialUploadRecovery>) => void
   readonly onProgress?: (progress: {
     readonly sentBytes: number
     readonly totalBytes: number
@@ -88,6 +95,14 @@ export interface CreationWorkspacePorts {
     file: File,
     options?: MaterialUploadOptions
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
+  readonly recoverMaterialUpload: (
+    recovery: CreationReferenceMaterialUploadRecovery,
+    signal?: AbortSignal
+  ) => Promise<CreationReferenceMaterialUploadResult>
+  readonly abortMaterialUpload: (
+    recovery: CreationReferenceMaterialUploadRecovery,
+    signal?: AbortSignal
+  ) => Promise<CreationReferenceMaterialUploadAbortResult>
   readonly createMaterialFromResult: (
     sessionId: string,
     input: CreateMaterialFromResultInput
@@ -196,10 +211,46 @@ export function createCreationWorkspacePorts(
           operationId,
           sessionId,
           file,
-          options?.onProgress
+          options?.onProgress,
+          {
+            idempotencyKey: options?.idempotencyKey ?? operationId,
+            onLease: options?.onLease
+          }
         )
       } finally {
         options?.signal?.removeEventListener('abort', cancel)
+      }
+    },
+    recoverMaterialUpload: async (recovery, signal) => {
+      const operationId = crypto.randomUUID()
+      const cancel = (): void => {
+        void window.api.creation.cancelReferenceMaterialUpload(operationId).catch(() => undefined)
+      }
+      signal?.addEventListener('abort', cancel, { once: true })
+      try {
+        if (signal?.aborted) {
+          cancel()
+          return { outcome: 'request-rejected', code: 'upload_cancelled' }
+        }
+        return await window.api.creation.recoverReferenceMaterialUpload(operationId, recovery)
+      } finally {
+        signal?.removeEventListener('abort', cancel)
+      }
+    },
+    abortMaterialUpload: async (recovery, signal) => {
+      const operationId = crypto.randomUUID()
+      const cancel = (): void => {
+        void window.api.creation.cancelReferenceMaterialUpload(operationId).catch(() => undefined)
+      }
+      signal?.addEventListener('abort', cancel, { once: true })
+      try {
+        if (signal?.aborted) {
+          cancel()
+          return { outcome: 'request-rejected', code: 'upload_cancelled' }
+        }
+        return await window.api.creation.abortReferenceMaterialUpload(operationId, recovery)
+      } finally {
+        signal?.removeEventListener('abort', cancel)
       }
     },
     createMaterialFromResult: (sessionId, input) =>

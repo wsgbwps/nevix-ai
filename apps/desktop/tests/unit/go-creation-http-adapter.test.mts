@@ -149,6 +149,23 @@ test('deleteSession maps authorization failures and preserves its stable fallbac
   assert.deepEqual(rejected, { outcome: 'request-rejected', code: 'not_found' })
 })
 
+test('deleteMaterial treats only 404 as terminal and keeps server failures retryable', async () => {
+  const client = createCreationClient(serverUrl)
+  const id = '00000000-0000-4000-8000-000000000009'
+
+  const missing = await withFetch(
+    async () => jsonResponse({ error: 'not_found', message: '' }, 404),
+    () => client.deleteMaterial('tok', id)
+  )
+  assert.deepEqual(missing, { outcome: 'request-rejected', code: 'not_found' })
+
+  const unavailable = await withFetch(
+    async () => jsonResponse({ error: 'service_unavailable', message: '' }, 503),
+    () => client.deleteMaterial('tok', id)
+  )
+  assert.deepEqual(unavailable, { outcome: 'network-failure' })
+})
+
 test('malformed payloads fail closed as network-failure instead of inventing shapes', async () => {
   const client = createCreationClient(serverUrl)
   const result = await withFetch(

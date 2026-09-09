@@ -53,8 +53,17 @@ type ReferenceMaterialUploadRepository interface {
 	UpsertByIdempotency(ctx context.Context, tx TxExecutor, upload *ReferenceMaterialUpload) (ReferenceMaterialUpload, error)
 	GetByIdempotency(ctx context.Context, owner UUID, key string) (ReferenceMaterialUpload, error)
 	GetForOwner(ctx context.Context, owner, id UUID) (ReferenceMaterialUpload, error)
-	LockForFinalize(ctx context.Context, tx TxExecutor, owner, id UUID) (ReferenceMaterialUpload, error)
-	MarkFinalized(ctx context.Context, tx TxExecutor, owner, id UUID, finalizedAt time.Time) error
+	LockForMutation(ctx context.Context, tx TxExecutor, owner, id UUID) (ReferenceMaterialUpload, error)
+	CreatorCanFinalize(ctx context.Context, tx TxExecutor, owner, sessionID UUID) (bool, error)
+	MarkVerifying(ctx context.Context, tx TxExecutor, owner, id, token UUID, leaseUntil time.Time) error
+	MarkPending(ctx context.Context, tx TxExecutor, owner, id, token UUID) error
+	MarkFinalized(ctx context.Context, tx TxExecutor, owner, id, token UUID, finalizedAt time.Time) error
+	MarkTerminal(ctx context.Context, tx TxExecutor, owner, id UUID, token *UUID, terminalAt time.Time) error
+	ScheduleFinalizedMaterialCleanup(ctx context.Context, tx TxExecutor, cleanup *ReferenceMaterialUpload) error
+	TerminalizeExpiredOrInvalid(ctx context.Context, tx TxExecutor, now time.Time, limit int) error
+	LockDueCleanups(ctx context.Context, tx TxExecutor, now time.Time, limit int) ([]ReferenceMaterialUpload, error)
+	MarkCleanupAttempt(ctx context.Context, tx TxExecutor, id UUID, nextAttemptAt time.Time) (ReferenceMaterialUploadCleanup, error)
+	MarkCleanupConfirmed(ctx context.Context, tx TxExecutor, id UUID, attempt int, confirmedAt time.Time) error
 }
 
 // CompoundCursor is one opaque compound keyset token over (created_at, id).

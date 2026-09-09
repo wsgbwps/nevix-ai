@@ -258,6 +258,10 @@ export function useCreationWorkbench(): {
       actions: {
         snapshot: (key) => ports.actions.snapshot(key),
         stagedMaterials: (key) => ports.actions.stagedMaterials(key),
+        recoveryMaterials: (key) => ports.actions.recoveryMaterials(key),
+        beginMaterialsObservation: (key) => ports.actions.beginMaterialsObservation(key),
+        observeMaterials: (key, materialIds, observation) =>
+          ports.actions.observeMaterials(key, materialIds, observation),
         resolvedMaterialId: (sessionId, localId) =>
           ports.actions.resolvedMaterialId(sessionId, localId),
         deleteSession: (sessionId) => ports.actions.deleteSession(sessionId),
@@ -767,7 +771,11 @@ export function useCreationWorkbench(): {
         contextController?.noteMaterialUploadFailed(false)
         contextController?.noteMaterialDropRejection(null)
         const sessionIdAtStart = currentSelectedId()
-        const replacementId = crypto.randomUUID()
+        const replacementId =
+          sessionIdAtStart !== null &&
+          ports.actions.canReselectMaterial(sessionIdAtStart, materialId)
+            ? materialId
+            : crypto.randomUUID()
         const pendingReplacement = displayRef.current.registerPending(replacementId, file)
         const initialKept = draftNow.references.filter(
           (binding) => binding.materialId !== materialId
@@ -1045,7 +1053,13 @@ export function useCreationWorkbench(): {
         contextController.reconcileCurrentContext()
       },
       reconcileAction: () => {
-        contextController?.reconcileCurrentContext()
+        if (ports === null) {
+          contextController?.reconcileCurrentContext()
+          return
+        }
+        void ports.actions
+          .recoverMaterialUploads()
+          .finally(() => contextController?.reconcileCurrentContext())
       },
       submitError: ctx.submitError,
       dismissSubmitError: () => {

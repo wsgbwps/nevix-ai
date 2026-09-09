@@ -22,10 +22,12 @@ registerHooks({
         shortCircuit: true
       }
     }
-    if (specifier.endsWith('reference-material-upload')) {
+    if (/\/reference-material-upload$/.test(specifier)) {
       return {
         url: moduleSource(
-          `export const runReferenceMaterialUpload = (...args) => globalThis.__nevixRunUpload(...args)`
+          `export const runReferenceMaterialUpload = (...args) => globalThis.__nevixRunUpload(...args)
+           export const recoverReferenceMaterialUpload = (...args) => globalThis.__nevixRecoverUpload(...args)
+           export const abortReferenceMaterialUploadRecovery = (...args) => globalThis.__nevixAbortUpload(...args)`
         ),
         shortCircuit: true
       }
@@ -55,6 +57,8 @@ interface HandlerGlobals {
   __nevixEndUpload?: (id: string) => void
   __nevixCancelUpload?: (id: string) => void
   __nevixRunUpload?: (...args: unknown[]) => Promise<{ outcome: 'network-failure' }>
+  __nevixRecoverUpload?: (...args: unknown[]) => Promise<{ outcome: 'network-failure' }>
+  __nevixAbortUpload?: (...args: unknown[]) => Promise<{ outcome: 'network-failure' }>
 }
 
 const globals = globalThis as typeof globalThis & HandlerGlobals
@@ -62,6 +66,10 @@ const { uploadReferenceMaterialHandler } =
   await import('../../src/main/creation/ipc/upload-reference-material.ts')
 const { cancelReferenceMaterialUploadHandler } =
   await import('../../src/main/creation/ipc/cancel-reference-material-upload.ts')
+const { recoverReferenceMaterialUploadHandler } =
+  await import('../../src/main/creation/ipc/recover-reference-material-upload.ts')
+const { abortReferenceMaterialUploadHandler } =
+  await import('../../src/main/creation/ipc/abort-reference-material-upload.ts')
 
 const event = {
   sender: {
@@ -72,7 +80,8 @@ const event = {
 
 const request = {
   operationId: 'operation-1',
-  sessionId: 'session-1',
+  idempotencyKey: 'local-material-1',
+  sessionId: '00000000-0000-4000-8000-000000000010',
   localPath: '/private/tmp/photo.png',
   fileName: 'photo.png',
   declaredKind: 'image',
@@ -123,6 +132,10 @@ test('upload handler accepts only an absolute path and always retires its operat
     () => uploadReferenceMaterialHandler(event, { ...request, localPath: 'relative.png' }),
     /invalid request/
   )
+  await assert.rejects(
+    () => uploadReferenceMaterialHandler(event, { ...request, sessionId: '../sessions/victim' }),
+    /invalid request/
+  )
   assert.deepEqual(lifecycle, ['begin:operation-1', 'run', 'end:operation-1'])
 })
 
@@ -137,4 +150,92 @@ test('cancel handler validates a primitive operation identity', () => {
     () => cancelReferenceMaterialUploadHandler(event, { operationId: '', extra: true }),
     /invalid request/
   )
+})
+
+test('recovery handler accepts only the closed restart-safe fact set', async () => {
+  const lifecycle: string[] = []
+  globals.__nevixTrustSender = () => undefined
+  globals.__nevixBeginUpload = (id) => {
+    lifecycle.push(`begin:${id}`)
+    return new AbortController()
+  }
+  globals.__nevixEndUpload = (id) => lifecycle.push(`end:${id}`)
+  globals.__nevixRecoverUpload = async (...args) => {
+    assert.equal(args[2] instanceof AbortSignal, true)
+    lifecycle.push('recover')
+    return { outcome: 'network-failure' }
+  }
+  const recovery = {
+    uploadId: '00000000-0000-4000-8000-000000000020',
+    idempotencyKey: 'local-material-1',
+    sessionId: '00000000-0000-4000-8000-000000000010',
+    fileName: 'photo.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 3,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  }
+
+  assert.deepEqual(
+    await recoverReferenceMaterialUploadHandler(event, {
+      operationId: 'recovery-operation-1',
+      recovery
+    }),
+    {
+      outcome: 'network-failure'
+    }
+  )
+  assert.deepEqual(lifecycle, ['begin:recovery-operation-1', 'recover', 'end:recovery-operation-1'])
+  await assert.rejects(
+    () =>
+      recoverReferenceMaterialUploadHandler(event, {
+        operationId: 'recovery-operation-2',
+        recovery: { ...recovery, localPath: '/private/tmp/x' }
+      }),
+    /invalid facts/
+  )
+  await assert.rejects(
+    () =>
+      recoverReferenceMaterialUploadHandler(event, {
+        operationId: 'recovery-operation-3',
+        recovery: { ...recovery, uploadId: '../../creation/sessions/victim' }
+      }),
+    /invalid facts/
+  )
+})
+
+test('durable abort handler shares validation and owns a cancellable operation', async () => {
+  const lifecycle: string[] = []
+  globals.__nevixTrustSender = () => undefined
+  globals.__nevixBeginUpload = (id) => {
+    lifecycle.push(`begin:${id}`)
+    return new AbortController()
+  }
+  globals.__nevixEndUpload = (id) => lifecycle.push(`end:${id}`)
+  globals.__nevixAbortUpload = async (...args) => {
+    assert.equal(args[2] instanceof AbortSignal, true)
+    lifecycle.push('abort')
+    return { outcome: 'network-failure' }
+  }
+  const recovery = {
+    uploadId: '00000000-0000-4000-8000-000000000020',
+    idempotencyKey: 'local-material-1',
+    sessionId: '00000000-0000-4000-8000-000000000010',
+    fileName: 'photo.png',
+    declaredKind: 'image',
+    declaredMimeType: 'image/png',
+    declaredByteSize: 3,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  }
+
+  assert.deepEqual(
+    await abortReferenceMaterialUploadHandler(event, {
+      operationId: 'abort-operation-1',
+      recovery
+    }),
+    { outcome: 'network-failure' }
+  )
+  assert.deepEqual(lifecycle, ['begin:abort-operation-1', 'abort', 'end:abort-operation-1'])
 })
