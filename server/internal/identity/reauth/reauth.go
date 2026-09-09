@@ -49,13 +49,25 @@ const (
 	ActionProviderConnectionDelete = "provider_connection.delete"
 	// ActionObjectStorageConnectionCreate authorizes first-time Object Storage configuration.
 	ActionObjectStorageConnectionCreate = "object_storage_connection.create"
+	// ActionObjectStorageConnectionReplace authorizes changing an empty instance's location.
+	ActionObjectStorageConnectionReplace = "object_storage_connection.replace"
+	// ActionObjectStorageConnectionRotate authorizes rotating credentials at the frozen location.
+	ActionObjectStorageConnectionRotate = "object_storage_connection.rotate"
+	// ActionObjectStorageConnectionDelete authorizes deleting an empty instance's connection.
+	ActionObjectStorageConnectionDelete = "object_storage_connection.delete"
+	// ActionObjectStorageConnectionRecover authorizes explicit recovery after credential key loss.
+	ActionObjectStorageConnectionRecover = "object_storage_connection.recover"
 )
 
 var validActions = map[string]struct{}{
-	ActionProviderConnectionCreate:      {},
-	ActionProviderConnectionReplace:     {},
-	ActionProviderConnectionDelete:      {},
-	ActionObjectStorageConnectionCreate: {},
+	ActionProviderConnectionCreate:       {},
+	ActionProviderConnectionReplace:      {},
+	ActionProviderConnectionDelete:       {},
+	ActionObjectStorageConnectionCreate:  {},
+	ActionObjectStorageConnectionReplace: {},
+	ActionObjectStorageConnectionRotate:  {},
+	ActionObjectStorageConnectionDelete:  {},
+	ActionObjectStorageConnectionRecover: {},
 }
 
 // ValidAction reports whether action belongs to the closed exact-action set.

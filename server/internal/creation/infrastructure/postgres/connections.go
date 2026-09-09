@@ -93,6 +93,20 @@ func (r *ConnectionRepository) MarkCredentialUnavailable(ctx context.Context, tx
 		string(domain.MediaCapabilityUnavailable), string(domain.MediaCapabilityUnavailable))
 }
 
+// MarkCredentialUnavailableIfKeyID leaves a concurrently replaced envelope untouched.
+func (r *ConnectionRepository) MarkCredentialUnavailableIfKeyID(ctx context.Context, tx domain.TxExecutor, id domain.UUID, expectedKeyID string) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE provider_connections SET
+			credential_state = $3, image_capability = $4, video_capability = $5, updated_at = now()
+		WHERE id = $1 AND credential_key_id = $2 AND terminated_at IS NULL`,
+		id, expectedKeyID, string(domain.CredentialStateCredentialUnavailable),
+		string(domain.MediaCapabilityUnavailable), string(domain.MediaCapabilityUnavailable))
+	if err != nil {
+		return false, fmt.Errorf("creation: conditionally mark provider credential unavailable: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // updateActive executes one update and requires it to have addressed the
 // active row; zero rows raced with termination and surface not-configured.
 func (r *ConnectionRepository) updateActive(ctx context.Context, tx domain.TxExecutor, sql string, args ...any) error {

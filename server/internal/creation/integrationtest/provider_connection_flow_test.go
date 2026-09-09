@@ -531,6 +531,7 @@ func TestMasterKeyFailureFailsClosedWithoutSilentRegeneration(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)
 	h.resetProviderConnections(t)
+	h.resetObjectStorageConnections(t)
 	admin := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
 
 	h.kapon.acceptKey(providerKeyOne)

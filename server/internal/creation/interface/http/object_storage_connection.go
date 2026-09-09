@@ -29,13 +29,14 @@ type objectStorageObservationView struct {
 }
 
 type objectStorageConnectionView struct {
-	State       string                        `json:"state"`
-	Provider    string                        `json:"provider,omitempty"`
-	Region      string                        `json:"region,omitempty"`
-	Bucket      string                        `json:"bucket,omitempty"`
-	Revision    *int64                        `json:"revision,omitempty"`
-	Credential  *objectStorageCredentialView  `json:"credential,omitempty"`
-	Observation *objectStorageObservationView `json:"observation,omitempty"`
+	State          string                        `json:"state"`
+	Provider       string                        `json:"provider,omitempty"`
+	Region         string                        `json:"region,omitempty"`
+	Bucket         string                        `json:"bucket,omitempty"`
+	Revision       *int64                        `json:"revision,omitempty"`
+	LocationFrozen *bool                         `json:"location_frozen,omitempty"`
+	Credential     *objectStorageCredentialView  `json:"credential,omitempty"`
+	Observation    *objectStorageObservationView `json:"observation,omitempty"`
 }
 
 func objectStorageAdminView(connection domain.ObjectStorageConnection) objectStorageConnectionView {
@@ -47,6 +48,8 @@ func objectStorageAdminView(connection domain.ObjectStorageConnection) objectSto
 	view.Region = connection.Region
 	view.Bucket = connection.Bucket
 	view.Revision = &connection.Revision
+	locationFrozen := connection.LocationFrozenAt != nil
+	view.LocationFrozen = &locationFrozen
 	view.Credential = &objectStorageCredentialView{
 		AccessKeyIDMasked: connection.AccessKeyIDMasked, SecretAccessKeyConfigured: true,
 	}
@@ -66,12 +69,20 @@ func (h *ObjectStorageConnectionHandler) Get(w http.ResponseWriter, r *http.Requ
 }
 
 type objectStorageConnectionInput struct {
-	Proof           *string `json:"proof"`
-	Provider        *string `json:"provider"`
-	Region          *string `json:"region"`
-	Bucket          *string `json:"bucket"`
-	AccessKeyID     *string `json:"access_key_id"`
-	SecretAccessKey *string `json:"secret_access_key"`
+	Proof            *string `json:"proof"`
+	ExpectedRevision *int64  `json:"expected_revision"`
+	Provider         *string `json:"provider"`
+	Region           *string `json:"region"`
+	Bucket           *string `json:"bucket"`
+	AccessKeyID      *string `json:"access_key_id"`
+	SecretAccessKey  *string `json:"secret_access_key"`
+}
+
+type objectStorageCredentialInput struct {
+	Proof            *string `json:"proof"`
+	ExpectedRevision *int64  `json:"expected_revision"`
+	AccessKeyID      *string `json:"access_key_id"`
+	SecretAccessKey  *string `json:"secret_access_key"`
 }
 
 func (h *ObjectStorageConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +125,126 @@ func validObjectStorageInput(input objectStorageConnectionInput) bool {
 		}
 	}
 	return true
+}
+
+func validObjectStorageMaintenanceInput(input objectStorageConnectionInput) bool {
+	return input.ExpectedRevision != nil && *input.ExpectedRevision > 0 && validObjectStorageInput(input)
+}
+
+func validObjectStorageCredentialInput(input objectStorageCredentialInput) bool {
+	if input.Proof == nil || input.ExpectedRevision == nil || *input.ExpectedRevision <= 0 || input.AccessKeyID == nil || input.SecretAccessKey == nil {
+		return false
+	}
+	for _, value := range []*string{input.AccessKeyID, input.SecretAccessKey} {
+		if strings.TrimSpace(*value) == "" || len(*value) > 1024 {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *ObjectStorageConnectionHandler) Recheck(w http.ResponseWriter, r *http.Request) {
+	connection, err := h.service.Recheck(r.Context())
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, objectStorageAdminView(connection))
+}
+
+func (h *ObjectStorageConnectionHandler) Replace(w http.ResponseWriter, r *http.Request) {
+	if !requireSecureTransport(w, r) {
+		return
+	}
+	principal, ok := authz.PrincipalFrom(r.Context())
+	if !ok {
+		WriteError(w, &Error{Status: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "Authentication required."})
+		return
+	}
+	var input objectStorageConnectionInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if !validObjectStorageMaintenanceInput(input) {
+		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "Request body must include proof, expected_revision, provider, region, bucket, access_key_id, and secret_access_key."})
+		return
+	}
+	connection, err := h.service.Replace(r.Context(), principal, *input.Proof, *input.ExpectedRevision, domain.ObjectStorageCandidate{
+		Location:    domain.ObjectStorageLocation{Provider: domain.ObjectStorageProvider(*input.Provider), Region: *input.Region, Bucket: *input.Bucket},
+		Credentials: domain.ObjectStorageCredentials{AccessKeyID: *input.AccessKeyID, SecretAccessKey: *input.SecretAccessKey},
+	})
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, objectStorageAdminView(connection))
+}
+
+func (h *ObjectStorageConnectionHandler) Rotate(w http.ResponseWriter, r *http.Request) {
+	h.credentialCommand(w, r, false)
+}
+
+func (h *ObjectStorageConnectionHandler) Recover(w http.ResponseWriter, r *http.Request) {
+	h.credentialCommand(w, r, true)
+}
+
+func (h *ObjectStorageConnectionHandler) credentialCommand(w http.ResponseWriter, r *http.Request, recoverCredential bool) {
+	if !requireSecureTransport(w, r) {
+		return
+	}
+	principal, ok := authz.PrincipalFrom(r.Context())
+	if !ok {
+		WriteError(w, &Error{Status: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "Authentication required."})
+		return
+	}
+	var input objectStorageCredentialInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if !validObjectStorageCredentialInput(input) {
+		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "Request body must include proof, expected_revision, access_key_id, and secret_access_key."})
+		return
+	}
+	credentials := domain.ObjectStorageCredentials{AccessKeyID: *input.AccessKeyID, SecretAccessKey: *input.SecretAccessKey}
+	var connection domain.ObjectStorageConnection
+	var err error
+	if recoverCredential {
+		connection, err = h.service.Recover(r.Context(), principal, *input.Proof, *input.ExpectedRevision, credentials)
+	} else {
+		connection, err = h.service.Rotate(r.Context(), principal, *input.Proof, *input.ExpectedRevision, credentials)
+	}
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, objectStorageAdminView(connection))
+}
+
+func (h *ObjectStorageConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !requireSecureTransport(w, r) {
+		return
+	}
+	principal, ok := authz.PrincipalFrom(r.Context())
+	if !ok {
+		WriteError(w, &Error{Status: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "Authentication required."})
+		return
+	}
+	var input struct {
+		Proof            *string `json:"proof"`
+		ExpectedRevision *int64  `json:"expected_revision"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.Proof == nil || input.ExpectedRevision == nil || *input.ExpectedRevision <= 0 {
+		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "Request body must include proof and expected_revision."})
+		return
+	}
+	if err := h.service.Delete(r.Context(), principal, *input.Proof, *input.ExpectedRevision); err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, objectStorageConnectionView{State: string(domain.ObjectStorageStateUnconfigured)})
 }
 
 type objectStorageCapabilityView struct {

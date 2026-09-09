@@ -2208,6 +2208,10 @@ paths:
                     - provider_connection.replace
                     - provider_connection.delete
                     - object_storage_connection.create
+                    - object_storage_connection.replace
+                    - object_storage_connection.rotate
+                    - object_storage_connection.delete
+                    - object_storage_connection.recover
                   description: 封闭的精确动作集（#154）；不预建其他高风险动作。
                 password:
                   type: string
@@ -2234,6 +2238,10 @@ paths:
                       - provider_connection.replace
                       - provider_connection.delete
                       - object_storage_connection.create
+                      - object_storage_connection.replace
+                      - object_storage_connection.rotate
+                      - object_storage_connection.delete
+                      - object_storage_connection.recover
                   expires_at:
                     type: string
                     format: date-time
@@ -2331,6 +2339,10 @@ paths:
                     - provider_connection.replace
                     - provider_connection.delete
                     - object_storage_connection.create
+                    - object_storage_connection.replace
+                    - object_storage_connection.rotate
+                    - object_storage_connection.delete
+                    - object_storage_connection.recover
                   description: 请求授权的精确动作；必须与 Proof 绑定动作一致。
       responses:
         "200":
@@ -2355,6 +2367,10 @@ paths:
                       - provider_connection.replace
                       - provider_connection.delete
                       - object_storage_connection.create
+                      - object_storage_connection.replace
+                      - object_storage_connection.rotate
+                      - object_storage_connection.delete
+                      - object_storage_connection.recover
                   consumed_at:
                     type: string
                     format: date-time

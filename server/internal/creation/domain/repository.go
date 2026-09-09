@@ -70,6 +70,9 @@ type ProviderConnectionRepository interface {
 	// MarkCredentialUnavailable fails the connection closed (master key or
 	// envelope failure) with both media unavailable.
 	MarkCredentialUnavailable(ctx context.Context, tx TxExecutor, id UUID) error
+	// MarkCredentialUnavailableIfKeyID fails closed only while the caller's
+	// observed envelope is still current; a concurrently replaced credential wins.
+	MarkCredentialUnavailableIfKeyID(ctx context.Context, tx TxExecutor, id UUID, expectedKeyID string) (bool, error)
 	// Terminate clears the envelope columns and stamps terminated_at inside
 	// the caller's write transaction; the identity row is retained.
 	Terminate(ctx context.Context, tx TxExecutor, id UUID) error

@@ -10,7 +10,11 @@ export const REAUTH_ACTIONS = [
   'provider_connection.create',
   'provider_connection.replace',
   'provider_connection.delete',
-  'object_storage_connection.create'
+  'object_storage_connection.create',
+  'object_storage_connection.replace',
+  'object_storage_connection.rotate',
+  'object_storage_connection.delete',
+  'object_storage_connection.recover'
 ] as const
 
 export type ReauthAction = (typeof REAUTH_ACTIONS)[number]

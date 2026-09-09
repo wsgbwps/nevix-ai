@@ -69,7 +69,11 @@ const PROVIDER_CONNECTION_REAUTH_ACTIONS = {
 } as const satisfies Record<ProviderConnectionProofAction, ReauthAction>
 
 const OBJECT_STORAGE_CONNECTION_REAUTH_ACTIONS = {
-  create: 'object_storage_connection.create'
+  create: 'object_storage_connection.create',
+  replace: 'object_storage_connection.replace',
+  rotate: 'object_storage_connection.rotate',
+  delete: 'object_storage_connection.delete',
+  recover: 'object_storage_connection.recover'
 } as const satisfies Record<ObjectStorageConnectionProofAction, ReauthAction>
 
 /** One governance card inside the Users section; each reports its own leave semantics. */

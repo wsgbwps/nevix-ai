@@ -48,3 +48,18 @@ test('the reauth proof actions are presented with localized labels', () => {
   assert.equal(actionsFor('zh-CN')['reauth_proof_issued'], '签发重验证授权')
   assert.equal(actionsFor('en')['reauth_proof_consumed'], 'Reauthentication proof consumed')
 })
+
+test('object storage maintenance audit actions use the server vocabulary in both languages', () => {
+  const expected = [
+    'object_storage_connection_created',
+    'object_storage_connection_replaced',
+    'object_storage_connection_credential_rotated',
+    'object_storage_connection_deleted',
+    'object_storage_connection_credential_recovered'
+  ]
+  for (const action of expected) {
+    assert.equal(AUDIT_ACTION_KEYS.includes(action as never), true)
+    assert.equal(typeof actionsFor('zh-CN')[action], 'string')
+    assert.equal(typeof actionsFor('en')[action], 'string')
+  }
+})

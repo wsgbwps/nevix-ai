@@ -172,3 +172,15 @@ test('each declared action is presented with its own label', async ({ mount, pag
     }
   ])
 })
+
+test('object storage maintenance proof names the exact recovery action', async ({
+  mount,
+  page
+}) => {
+  await mount(<ReauthenticationDialogStory action="object_storage_connection.recover" />)
+  const dialog = page.getByRole('dialog')
+
+  await expect(
+    dialog.getByText('Recover the Object Storage Connection credential', { exact: true })
+  ).toBeVisible()
+})

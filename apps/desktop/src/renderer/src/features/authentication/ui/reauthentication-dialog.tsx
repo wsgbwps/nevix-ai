@@ -24,7 +24,11 @@ const ACTION_LABEL_KEYS = {
   'provider_connection.create': 'reauth.actionProviderConnectionCreate',
   'provider_connection.replace': 'reauth.actionProviderConnectionReplace',
   'provider_connection.delete': 'reauth.actionProviderConnectionDelete',
-  'object_storage_connection.create': 'reauth.actionObjectStorageConnectionCreate'
+  'object_storage_connection.create': 'reauth.actionObjectStorageConnectionCreate',
+  'object_storage_connection.replace': 'reauth.actionObjectStorageConnectionReplace',
+  'object_storage_connection.rotate': 'reauth.actionObjectStorageConnectionRotate',
+  'object_storage_connection.delete': 'reauth.actionObjectStorageConnectionDelete',
+  'object_storage_connection.recover': 'reauth.actionObjectStorageConnectionRecover'
 } as const satisfies Record<ReauthAction, string>
 
 /** One observable submission verdict; every branch maps to a stable message. */

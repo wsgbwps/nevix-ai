@@ -209,15 +209,16 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	taskRepos := postgres.NewGenerationTaskRepository(pool)
 	governanceRepos := postgres.NewGovernanceRepository(pool)
 	assetRepos := postgres.NewMediaAssetRepository(pool)
+	credentialVault := secrets.NewVault(cfg.SecretsDir)
 	hub := creationhttp.NewInvalidationHub()
 	sessionService := application.NewSessionService(sessionRepos, tx)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
-	connectionService := application.NewConnectionService(connectionRepos, taskRepos, connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
+	connectionService := application.NewConnectionService(connectionRepos, objectStorageRepos, taskRepos, connectionRepos, tx, credentialVault, kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
 	objectStorageVerifier := deps.ObjectStorageVerifier
 	if objectStorageVerifier == nil {
 		objectStorageVerifier = storage.VerifyConnection
 	}
-	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, secrets.NewVault(cfg.SecretsDir), objectStorageVerifier, deps.ReauthVerifier)
+	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, credentialVault, objectStorageVerifier, deps.ReauthVerifier)
 	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, governanceRepos, manifestService, tx, hub)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)

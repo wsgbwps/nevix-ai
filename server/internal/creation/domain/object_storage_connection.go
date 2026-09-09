@@ -71,6 +71,7 @@ type ObjectStorageConnection struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	TerminatedAt      *time.Time
+	LocationFrozenAt  *time.Time
 }
 
 func MaskObjectStorageAccessKeyID(accessKeyID string) string {
@@ -84,6 +85,10 @@ func MaskObjectStorageAccessKeyID(accessKeyID string) string {
 var (
 	ErrObjectStorageConnectionNotConfigured = errors.New("object storage connection not configured")
 	ErrObjectStorageConnectionExists        = errors.New("object storage connection already exists")
+	ErrObjectStorageRevisionConflict        = errors.New("object storage connection revision conflict")
+	ErrObjectStorageLocationFrozen          = errors.New("object storage location is frozen")
+	ErrObjectStorageRecoveryRequired        = errors.New("object storage credential recovery required")
+	ErrObjectStorageRecoveryNotRequired     = errors.New("object storage credential recovery is not required")
 	ErrInvalidObjectStorageCandidate        = errors.New("invalid object storage candidate")
 )
 
@@ -92,7 +97,12 @@ var (
 type ObjectStorageConnectionRepository interface {
 	Insert(ctx context.Context, tx TxExecutor, connection *ObjectStorageConnection) error
 	GetActive(ctx context.Context) (ObjectStorageConnection, error)
-	MarkCredentialUnavailable(ctx context.Context, tx TxExecutor, id UUID) error
+	UpdateObservation(ctx context.Context, tx TxExecutor, id UUID, expectedRevision int64, checkedAt time.Time, outcome CheckOutcome) error
+	ReplaceLocation(ctx context.Context, tx TxExecutor, connection *ObjectStorageConnection, expectedRevision int64) error
+	RotateCredential(ctx context.Context, tx TxExecutor, connection *ObjectStorageConnection, expectedRevision int64) error
+	RecoverCredential(ctx context.Context, tx TxExecutor, connection *ObjectStorageConnection, expectedRevision int64) error
+	Terminate(ctx context.Context, tx TxExecutor, id UUID, expectedRevision int64) error
+	MarkCredentialUnavailable(ctx context.Context, tx TxExecutor, id UUID, expectedRevision int64) (bool, error)
 }
 
 // ObjectStorageCredentialVault keeps the master key outside PostgreSQL and
