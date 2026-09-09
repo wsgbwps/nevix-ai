@@ -32,10 +32,8 @@ import (
 // part of a public HTTP response.
 var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 
-// Config is the Module's deployment configuration: which blob adapter backs
-// reference materials, where the Provider Credential master key lives, the
-// process-wide Kapon route, and the browser-origin whitelist shared with
-// Identity.
+// Config carries the legacy generation-result blob adapter until #222 removes
+// it, plus the credential master-key path, Kapon route, and CORS origins.
 type Config struct {
 	StorageDriver      string // "filesystem" or "s3"
 	StorageRoot        string // filesystem driver: absolute blob root
@@ -155,14 +153,39 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 // Reauthentication Proofs the high-risk connection commands require. Both
 // are deliberately narrow — Creation never touches credential verification.
 type Deps struct {
-	SessionAuthenticator  authz.SessionAuthenticator
-	ReauthVerifier        authz.ReauthProofVerifier
-	ObjectStorageVerifier ObjectStorageVerifier
+	SessionAuthenticator     authz.SessionAuthenticator
+	ReauthVerifier           authz.ReauthProofVerifier
+	ObjectStorageVerifier    ObjectStorageVerifier
+	DirectUploadStoreFactory DirectUploadStoreFactory
 }
 
 type ObjectStorageCandidate = domain.ObjectStorageCandidate
 type ObjectStorageLocation = domain.ObjectStorageLocation
 type ObjectStorageVerifier func(context.Context, ObjectStorageCandidate) (ObjectStorageLocation, error)
+type ObjectStorageCredentials = domain.ObjectStorageCredentials
+type ObjectStorageProvider = domain.ObjectStorageProvider
+type DirectUploadBlobStore = domain.DirectUploadBlobStore
+type DirectUploadStoreFactory = domain.DirectUploadStoreFactory
+type BlobInfo = domain.BlobInfo
+type PresignPutRequest = domain.PresignPutRequest
+type PresignedPut = domain.PresignedPut
+type PutResult = domain.PutResult
+type BlobRange = domain.BlobRange
+type ReadSeekCloser = domain.ReadSeekCloser
+
+const (
+	ObjectStorageProviderOSS = domain.ObjectStorageProviderOSS
+	ObjectStorageProviderCOS = domain.ObjectStorageProviderCOS
+	UploadIDMetadataKey      = domain.UploadIDMetadataKey
+)
+
+var (
+	FullBlobRange          = domain.FullBlobRange
+	ErrTooLarge            = domain.ErrTooLarge
+	ErrBlobConflict        = domain.ErrBlobConflict
+	ErrBlobNotFound        = domain.ErrBlobNotFound
+	ErrRangeNotSatisfiable = domain.ErrRangeNotSatisfiable
+)
 
 func (f ObjectStorageVerifier) Verify(ctx context.Context, candidate domain.ObjectStorageCandidate) (domain.ObjectStorageLocation, error) {
 	return f(ctx, candidate)
@@ -184,9 +207,9 @@ type Module struct {
 	store         domain.BlobStore
 }
 
-// NewModule constructs Creation over its own domain-local write transaction
-// runner (identity_app round trip proven at construction), selects the blob
-// adapter from configuration, and fails loudly on wiring gaps.
+// NewModule constructs Creation over its domain-local write transaction
+// runner and the call-time Object Storage resolver. The configured legacy
+// blob adapter remains only for generation results until #222.
 func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (*Module, error) {
 	if deps.SessionAuthenticator == nil {
 		return nil, errors.New("creation: NewModule requires a SessionAuthenticator from the composition root")
@@ -204,6 +227,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	}
 	sessionRepos := postgres.NewSessionRepository(pool)
 	materialRepos := postgres.NewMaterialRepository(pool)
+	uploadRepos := postgres.NewReferenceMaterialUploadRepository(pool)
 	connectionRepos := postgres.NewConnectionRepository(pool)
 	objectStorageRepos := postgres.NewObjectStorageConnectionRepository(pool)
 	taskRepos := postgres.NewGenerationTaskRepository(pool)
@@ -212,13 +236,17 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	credentialVault := secrets.NewVault(cfg.SecretsDir)
 	hub := creationhttp.NewInvalidationHub()
 	sessionService := application.NewSessionService(sessionRepos, tx)
-	materialService := application.NewMaterialService(materialRepos, sessionRepos, store, media.Prober{}, tx)
 	connectionService := application.NewConnectionService(connectionRepos, objectStorageRepos, taskRepos, connectionRepos, tx, credentialVault, kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
 	objectStorageVerifier := deps.ObjectStorageVerifier
 	if objectStorageVerifier == nil {
 		objectStorageVerifier = storage.VerifyConnection
 	}
-	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, credentialVault, objectStorageVerifier, deps.ReauthVerifier)
+	directStoreFactory := deps.DirectUploadStoreFactory
+	if directStoreFactory == nil {
+		directStoreFactory = domain.DirectUploadStoreFactory(storage.NewBlobStore)
+	}
+	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, credentialVault, objectStorageVerifier, directStoreFactory, deps.ReauthVerifier)
+	materialService := application.NewMaterialService(materialRepos, sessionRepos, uploadRepos, taskRepos, store, objectStorageService, media.Prober{}, tx)
 	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, governanceRepos, manifestService, tx, hub)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
@@ -228,7 +256,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	// Provider Key exists only between its resolve and the adapter's
 	// Authorization header.
 	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL)
-	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, store, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
+	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, store, objectStorageService, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
 	return &Module{
 		sessions:      creationhttp.NewSessionHandler(sessionService),
 		materials:     creationhttp.NewMaterialHandler(materialService),

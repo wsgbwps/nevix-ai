@@ -53,15 +53,18 @@ func integrationRequested() bool { return os.Getenv(requestedEnvVar) == "1" }
 // for assertions and repairs, the identity_app runtime pool both Modules
 // share, and an HTTP surface mounted exactly like cmd/server/main.go.
 type harness struct {
-	t           *testing.T
-	ctx         context.Context
-	ownerPool   *pgxpool.Pool // DDL credential — fixtures/assertions only (ADR-0014)
-	runtimePool *pgxpool.Pool // authenticates directly as identity_app
-	serverURL   string
-	closeServer func()
-	secretsDir  string
-	kapon       *fakeKapon
-	identity    *identity.Module // narrow seams injected into Creation, exposed for direct NewModule scenarios
+	t            *testing.T
+	ctx          context.Context
+	ownerPool    *pgxpool.Pool // DDL credential — fixtures/assertions only (ADR-0014)
+	runtimePool  *pgxpool.Pool // authenticates directly as identity_app
+	serverURL    string
+	closeServer  func()
+	secretsDir   string
+	kapon        *fakeKapon
+	identity     *identity.Module // narrow seams injected into Creation, exposed for direct NewModule scenarios
+	directStore  *fakeDirectUploadStore
+	storageMu    sync.Mutex
+	storageReady bool
 	// Bounded client for smoke flows so an accidental server stall fails
 	// fast instead of hanging the whole package past the go-test alarm.
 	smokeClient *http.Client
@@ -142,10 +145,19 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 	if err != nil {
 		t.Fatalf("harness config must pass LoadConfig: %v", err)
 	}
+	directStore := newFakeDirectUploadStore(t)
+	objectStorageVerifier := opts.objectStorageVerifier
+	if objectStorageVerifier == nil {
+		objectStorageVerifier = successfulObjectStorageVerifier(t)
+	}
 	creationConfigDeps := creation.Deps{
 		SessionAuthenticator:  identityModule.SessionAuthenticator(),
 		ReauthVerifier:        identityModule.ReauthProofs(),
-		ObjectStorageVerifier: opts.objectStorageVerifier,
+		ObjectStorageVerifier: objectStorageVerifier,
+		DirectUploadStoreFactory: func(location creation.ObjectStorageLocation, _ creation.ObjectStorageCredentials) (creation.DirectUploadBlobStore, error) {
+			directStore.setProvider(location.Provider)
+			return directStore, nil
+		},
 	}
 
 	bus := event.NewInMemoryBus()
@@ -171,7 +183,7 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		}
 	})
 
-	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon, identity: identityModule}
+	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon, identity: identityModule, directStore: directStore}
 	h.startServer(router)
 	t.Cleanup(h.closeServer)
 	return h

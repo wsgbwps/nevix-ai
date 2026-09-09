@@ -549,6 +549,40 @@ test('per-Domain preload imports and Channel constants fail', () => {
   assert.equal(result.violations.filter((v) => v.rule === 'preload/generic-bridge').length, 2)
 })
 
+test('the exact Creation native-file preload bridge exception passes', () => {
+  const files = canonicalTree()
+  files['src/main/creation/native-upload.ts'] = 'export function upload(): void {}\n'
+  files['src/shared/ipc/creation/types.ts'] = 'export interface NativeUpload {}\n'
+  files['src/preload/creation-upload.ts'] = [
+    "import type { NativeUpload } from '../shared/ipc/creation/types'",
+    '',
+    'export function createCreationUploadBridge(): NativeUpload { return {} }',
+    ''
+  ].join('\n')
+  files['src/preload/index.ts'] = [
+    "import { contextBridge, ipcRenderer, webUtils } from 'electron'",
+    "import type { IpcChannelMap } from '@ipc/channels'",
+    "import { INVOKE_CHANNEL_ALLOWLIST } from '../shared/ipc/channel-allowlist'",
+    "import type { NativeUpload } from '../shared/ipc/creation/types'",
+    "import { createCreationUploadBridge } from './creation-upload'",
+    '',
+    'void ipcRenderer',
+    'void webUtils',
+    'void INVOKE_CHANNEL_ALLOWLIST',
+    'void ({} as IpcChannelMap)',
+    'void ({} as NativeUpload)',
+    "contextBridge.exposeInMainWorld('api', { creation: createCreationUploadBridge() })",
+    ''
+  ].join('\n')
+  files['src/preload/index.d.ts'] = [
+    "import type { NativeUpload } from '../shared/ipc/creation/types'",
+    'declare global { interface Window { creation: NativeUpload } }',
+    ''
+  ].join('\n')
+
+  assert.deepEqual(run(files).violations, [])
+})
+
 test('deep import into a Feature from outside fails', () => {
   const files = canonicalTree()
   files['src/renderer/src/app/App.tsx'] = files['src/renderer/src/app/App.tsx'].replace(

@@ -29,6 +29,7 @@ type TaskWorker struct {
 	connections domain.ConnectionSignals
 	credentials domain.CallCredentialSource
 	store       domain.BlobStore
+	references  *ObjectStorageConnectionService
 	prober      domain.MediaProber
 	gateway     domain.ProviderGateway
 	assets      domain.MediaAssetRepository
@@ -51,6 +52,7 @@ func NewTaskWorker(
 	connections domain.ConnectionSignals,
 	credentials domain.CallCredentialSource,
 	store domain.BlobStore,
+	references *ObjectStorageConnectionService,
 	prober domain.MediaProber,
 	gateway domain.ProviderGateway,
 	assets domain.MediaAssetRepository,
@@ -60,7 +62,7 @@ func NewTaskWorker(
 ) *TaskWorker {
 	return &TaskWorker{
 		tasks: tasks, materials: materials, connections: connections, credentials: credentials,
-		store: store, prober: prober, gateway: gateway, assets: assets, notify: notify, runner: runner,
+		store: store, references: references, prober: prober, gateway: gateway, assets: assets, notify: notify, runner: runner,
 		fetch:      &http.Client{Timeout: 5 * time.Minute},
 		leaseOwner: leaseOwner,
 		lease:      30 * time.Second,
@@ -227,6 +229,23 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	if err != nil {
 		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
 	}
+	request, err := w.buildSubmitRequest(ctx, task, media)
+	if err != nil {
+		if errors.Is(err, domain.ErrMaterialNotFound) || errors.Is(err, domain.ErrSessionNotFound) || errors.Is(err, domain.ErrBlobNotFound) {
+			reason := domain.ReasonInvalidInput
+			return w.applyEvent(ctx, queueID, task.ID, state, domain.KernelEvent{
+				Kind:   domain.EventSubmitRejected,
+				Reason: &reason,
+				Diagnostic: domain.NewFailureDiagnostic(
+					domain.DiagnosticSourceStorage,
+					"reference_material_unavailable",
+					"A referenced material is no longer available",
+					nil, "", "",
+				),
+			}, time.Time{})
+		}
+		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
+	}
 
 	// Marker transaction: ok=false means a cancel converged first — stand
 	// down; nothing external may run.
@@ -245,7 +264,7 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	state.SubmitAttempts = attempts
 
 	// External submit, outside any transaction.
-	outcome, submitErr := w.gateway.Submit(ctx, credential, w.buildSubmitRequest(ctx, task, media))
+	outcome, submitErr := w.gateway.Submit(ctx, credential, request)
 	switch {
 	case submitErr == nil:
 		w.recordSuccess(pressure)
@@ -308,7 +327,7 @@ func (w *TaskWorker) holdSubmitRetry(ctx context.Context, queueID, jobID domain.
 
 // buildSubmitRequest assembles the transport-ready request from the frozen
 // specification and the creator's stored materials.
-func (w *TaskWorker) buildSubmitRequest(ctx context.Context, task domain.GenerationTask, media domain.MediaType) domain.SubmitRequest {
+func (w *TaskWorker) buildSubmitRequest(ctx context.Context, task domain.GenerationTask, media domain.MediaType) (domain.SubmitRequest, error) {
 	req := domain.SubmitRequest{
 		Media:      media,
 		Model:      task.Spec.Model,
@@ -320,34 +339,41 @@ func (w *TaskWorker) buildSubmitRequest(ctx context.Context, task domain.Generat
 		DurationS:  task.Spec.DurationSeconds,
 		References: make([]domain.GatewayReference, 0, len(task.Spec.References)),
 	}
+	if len(task.Spec.References) == 0 {
+		return req, nil
+	}
+	store, _, err := w.references.ResolveStore(ctx)
+	if err != nil {
+		return domain.SubmitRequest{}, err
+	}
 	for _, reference := range task.Spec.References {
-		data := w.referenceDataURL(ctx, task.OwnerID, reference.MaterialID)
-		if data == "" {
-			continue
+		data, err := w.referenceDataURL(ctx, store, task.OwnerID, reference.MaterialID)
+		if err != nil {
+			return domain.SubmitRequest{}, err
 		}
 		req.References = append(req.References, domain.GatewayReference{Role: reference.Role, Kind: reference.Kind, Data: data})
 	}
-	return req
+	return req, nil
 }
 
 // referenceDataURL loads one creator-owned material and encodes it as a data
 // URL, bounded by the kind's ingestion ceiling.
-func (w *TaskWorker) referenceDataURL(ctx context.Context, owner, materialID domain.UUID) string {
+func (w *TaskWorker) referenceDataURL(ctx context.Context, store domain.BlobStore, owner, materialID domain.UUID) (string, error) {
 	material, err := w.materials.GetForRead(ctx, owner, materialID)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	reader, _, err := w.store.Open(ctx, material.BlobKey, domain.FullBlobRange)
+	reader, _, err := store.Open(ctx, material.BlobKey, domain.FullBlobRange)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	defer reader.Close()
 	limited := io.LimitReader(reader, material.Kind.SizeLimit()+1)
 	raw, err := io.ReadAll(limited)
 	if err != nil || int64(len(raw)) > material.Kind.SizeLimit() {
-		return ""
+		return "", domain.ErrObjectStorageUnavailable
 	}
-	return "data:" + material.MimeType + ";base64," + base64.StdEncoding.EncodeToString(raw)
+	return "data:" + material.MimeType + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
 }
 
 // drivePoll polls one accepted external job and converges its verdict.

@@ -4,7 +4,9 @@
 # 能读写自己的会话与素材；其他 Member 或 Admin 即使猜测 id 也得到与不存在完全一致的 404 not_found，
 # 不能读取 prompt、素材或私有媒体。本切片（AI Creation V1 06/16）不提供任何 Admin 治理路由。
 #
-# 文件流纪律（ADR-0014）：上传与下载一律经 Go 有界流式传输；Desktop 不获得 Storage 凭据或直传授权。
+# 文件流纪律（ADR-0014）：永久素材上传由 Go 签发单对象、短期、不可覆盖的 PUT 授权，
+# Electron Main 从本地文件原生流式直传；finalize 与下载仍经 Go 权威校验/授权。Renderer 不接触
+# 本地路径、文件字节、签名 URL/headers 或 Storage 凭据。
 paths:
   /creation/sessions:
     post:
@@ -199,14 +201,16 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /creation/sessions/{sessionID}/reference-material-uploads:
     post:
-      operationId: uploadReferenceMaterial
-      summary: 上传 Reference Material 并原子记录权利声明
+      operationId: createReferenceMaterialUpload
+      summary: 创建 creator-private Reference Material Upload
       description: |-
-        唯一 V1 入料动作：multipart/form-data 单一 file part。上传动作本身即为权利确认——
-        actor、时间、声明版本与素材 identity 在同一可信命令中原子落库；写库失败则素材完全不可用，
-        blob 一并清理。服务端权威验证 MIME、扩展名、大小、实际尺寸、像素数、时长与可读性；
-        客户端校验只用于即时反馈。声明版本升级不影响既有素材（不追溯阻塞）。
+        为当前创建者在目标活跃 Session 内创建持久 Upload 租约，预留随机最终素材 identity/key，
+        并返回仅可 PUT 该对象的 60 分钟授权。声明 kind 只用于申请阶段的 10/50/200 MiB 提前限额；
+        内容定论由 finalize 的完整 Get/probe 给出。相同 creator + idempotency_key + payload 返回同一
+        Upload 与原截止时间；payload 不同或租约已过期回答 409。签名 URL/headers 只能由可信
+        Electron Main 在本次操作内存中使用。
       security:
         - bearerAuth: []
       parameters:
@@ -214,39 +218,122 @@ paths:
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
-              type: object
-              required:
-                - file
-              properties:
-                file:
-                  type: string
-                  format: binary
-                  description: 素材文件本体；filename 必填（≤255 字符），part 的 Content-Type 仅作提示，服务端按内容嗅探定论。
-            encoding:
-              file:
-                contentType: image/jpeg, image/png, image/webp, video/mp4, audio/mpeg, audio/x-wav, audio/mp4
+              $ref: "#/components/schemas/ReferenceMaterialUploadCreateInput"
       responses:
         "201":
-          description: 素材已入库并可立即在牌堆使用。
+          description: Upload 已持久化并返回单对象短期 PUT 授权。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferenceMaterialUploadAuthorization"
+        "200":
+          description: 幂等重放返回既有 Upload 与其原始截止时间；60 分钟内同时重新签发同等窄权限，进入 finalize-only 窗口后不再返回 upload_request。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferenceMaterialUploadAuthorization"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ReferenceMaterialUploadConflict"
+        "413":
+          $ref: "#/components/responses/MaterialTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/reference-material-uploads/{uploadID}:
+    get:
+      operationId: getReferenceMaterialUpload
+      summary: 查询当前创建者的 Upload 状态
+      description: PUT 响应不确定时的恢复入口；只返回租约与已完成素材，不返回签名 URL、请求头或对象 key。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/uploadID"
+      responses:
+        "200":
+          description: creator-private Upload 状态。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferenceMaterialUploadStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ReferenceMaterialUploadExpired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: finalizeReferenceMaterialUpload
+      summary: 权威验证并 finalize Reference Material Upload
+      description: |-
+        Head 验证对象存在、实际长度与签名 upload-id metadata 后，Go 有界完整 Get 并计算 SHA-256，
+        复用内容嗅探、结构 probe、实际 kind 限额与图片 envelope。ETag、文件名、Desktop metadata、
+        声明 kind/MIME 都不是内容证明；声明 kind 与实际 kind 不一致时拒绝。只有全部验证与最终
+        creator/Session 复核成功，才在短事务内创建不可变 Reference Material。重复 finalize 返回同一素材。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/uploadID"
+      responses:
+        "200":
+          description: 已 finalize；包含同一 Upload 与不可变素材。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferenceMaterialUploadFinalized"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ReferenceMaterialUploadExpired"
+        "413":
+          $ref: "#/components/responses/MaterialTooLarge"
+        "415":
+          $ref: "#/components/responses/MaterialUnsupportedMedia"
+        "422":
+          $ref: "#/components/responses/ReferenceMaterialFinalizeRejected"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/sessions/{sessionID}/materials/from-result:
+    post:
+      operationId: createReferenceMaterialFromResult
+      summary: 将当前创建者的成功生成结果转换为永久素材
+      description: |-
+        Server 在可信边界内读取当前创建者的成功 Task slot，并把结果流式写入当前 Object Storage，
+        再执行与 Upload finalize 相同的完整 probe/hash 与最终 Session ownership 复核。结果 bytes、
+        blob key、签名 URL/headers 均不进入 Renderer；新素材拥有独立 identity、object 与权利声明。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReferenceMaterialFromResultInput"
+      responses:
+        "201":
+          description: 新的不可变 Reference Material。
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReferenceMaterial"
         "400":
-          description: 请求不合法 —— invalid_request 指缺失 file part / 多余字段 / filename 违规；upload_malformed 指 multipart 结构损坏或在传输中被截断。
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Error"
-                  - type: object
-                    properties:
-                      error:
-                        enum:
-                          - invalid_request
-                          - upload_malformed
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -259,6 +346,8 @@ paths:
           $ref: "#/components/responses/MaterialUnreadableMedia"
         "500":
           $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
   /creation/materials/{materialID}:
     get:
       operationId: downloadReferenceMaterial
@@ -1231,6 +1320,14 @@ components:
       schema:
         type: string
         format: uuid
+    uploadID:
+      name: uploadID
+      in: path
+      required: true
+      description: creator-private Reference Material Upload id（UUID）。
+      schema:
+        type: string
+        format: uuid
     pageLimit:
       name: limit
       in: query
@@ -1357,7 +1454,7 @@ components:
                       - reauth_proof_action_mismatch
                       - reauth_proof_already_consumed
     ObjectStorageUnavailable:
-      description: Object Storage 候选检查或凭据处理暂时不可用；不暴露供应商原始详情。
+      description: Object Storage 候选检查、实例未配置或当前凭据/服务暂时不可用；不暴露供应商原始详情。
       content:
         application/json:
           schema:
@@ -1404,6 +1501,50 @@ components:
                   error:
                     enum:
                       - material_unreadable_media
+    ReferenceMaterialFinalizeRejected:
+      description: |-
+        finalize 权威验证拒绝 —— material_unreadable_media 表示媒体无法解码；
+        material_upload_size_mismatch 表示 Head 长度与租约声明不同；
+        material_upload_metadata_mismatch 表示签名 upload-id metadata 缺失或不一致。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - material_unreadable_media
+                      - material_upload_size_mismatch
+                      - material_upload_metadata_mismatch
+    ReferenceMaterialUploadConflict:
+      description: |-
+        409 —— idempotency_payload_conflict 表示同一 creator 的 key 已绑定不同 payload；
+        reference_material_upload_expired 表示该租约已越过 90 分钟最终截止时间，必须使用新 key。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - idempotency_payload_conflict
+                      - reference_material_upload_expired
+    ReferenceMaterialUploadExpired:
+      description: reference_material_upload_expired —— 租约已越过最终截止时间，必须创建新的 Upload。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum:
+                      - reference_material_upload_expired
     RangeNotSatisfiable:
       description: 非法或不可满足的 Range（多区间、语法错误、start 越过 EOF）。
       content:
@@ -1803,6 +1944,160 @@ components:
         created_at:
           type: string
           format: date-time
+    ReferenceMaterialUploadCreateInput:
+      type: object
+      additionalProperties: false
+      required:
+        - idempotency_key
+        - file_name
+        - declared_kind
+        - declared_mime_type
+        - declared_byte_size
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: creator-scoped 幂等键；过期后必须生成新键。
+        file_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: 仅供展示与扩展名一致性校验，不是内容证明。
+        declared_kind:
+          type: string
+          enum: [image, video, audio]
+          description: 只用于申请阶段提前限额；finalize 以实际 probe 为准并要求 family 一致。
+        declared_mime_type:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: 绑定到 PUT Content-Type 的传输声明，不是实际内容证明。
+        declared_byte_size:
+          type: integer
+          minimum: 1
+          maximum: 209715200
+          description: 绑定租约并由 Head 复核；仍受 declared kind 的更窄限额约束。
+    ReferenceMaterialUpload:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - session_id
+        - status
+        - file_name
+        - declared_kind
+        - declared_mime_type
+        - declared_byte_size
+        - claims_version
+        - connection_revision
+        - put_expires_at
+        - finalize_expires_at
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, finalized]
+        file_name:
+          type: string
+          maxLength: 255
+        declared_kind:
+          type: string
+          enum: [image, video, audio]
+        declared_mime_type:
+          type: string
+        declared_byte_size:
+          type: integer
+          minimum: 1
+        claims_version:
+          type: integer
+          minimum: 1
+        connection_revision:
+          type: integer
+          minimum: 1
+        put_expires_at:
+          type: string
+          format: date-time
+        finalize_expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        finalized_at:
+          type: string
+          format: date-time
+          nullable: true
+    ReferenceMaterialUploadAuthorization:
+      type: object
+      additionalProperties: false
+      required: [upload]
+      properties:
+        upload:
+          $ref: "#/components/schemas/ReferenceMaterialUpload"
+        upload_request:
+          type: object
+          additionalProperties: false
+          required: [method, url, headers, expires_at]
+          properties:
+            method:
+              type: string
+              enum: [PUT]
+            url:
+              type: string
+              format: uri
+              description: 当前 Upload 单对象短期授权；只允许存在于 Electron Main 操作内存。
+            headers:
+              type: object
+              additionalProperties:
+                type: string
+              description: 闭集签名头：Content-Type、provider upload-id metadata 与防覆盖头。
+            expires_at:
+              type: string
+              format: date-time
+          description: 仅在原 60 分钟 PUT 窗口内出现；之后 Upload 仍可 finalize 到 90 分钟截止。
+    ReferenceMaterialUploadStatus:
+      type: object
+      additionalProperties: false
+      required: [upload]
+      properties:
+        upload:
+          $ref: "#/components/schemas/ReferenceMaterialUpload"
+        material:
+          allOf:
+            - $ref: "#/components/schemas/ReferenceMaterial"
+          nullable: true
+    ReferenceMaterialUploadFinalized:
+      type: object
+      additionalProperties: false
+      required: [upload, material]
+      properties:
+        upload:
+          $ref: "#/components/schemas/ReferenceMaterialUpload"
+        material:
+          $ref: "#/components/schemas/ReferenceMaterial"
+    ReferenceMaterialFromResultInput:
+      type: object
+      additionalProperties: false
+      required: [task_id, slot_index, file_name]
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        slot_index:
+          type: integer
+          minimum: 0
+          maximum: 3
+        file_name:
+          type: string
+          minLength: 1
+          maxLength: 255
     ProviderConnectionCredentialInput:
       type: object
       required:

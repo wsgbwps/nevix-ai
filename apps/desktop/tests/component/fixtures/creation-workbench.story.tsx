@@ -234,6 +234,12 @@ export interface DeckTestControls {
   deleteMaterialCalls(): string[]
   materialBlobCalls(): ReadonlyArray<{ materialId: string; aborted: boolean }>
   resultBlobTransfers(): ReadonlyArray<{ taskId: string; slotIndex: number }>
+  resultReuseCalls(): ReadonlyArray<{
+    sessionId: string
+    taskId: string
+    slotIndex: number
+    fileName: string
+  }>
   releaseMaterialBlobs(): void
   releaseResultBlobs(): void
   releaseMaterialDeletes(): void
@@ -411,6 +417,12 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const renameCalls: Array<{ sessionId: string; name: string }> = []
   const deletedSessionIds: string[] = []
   const resultBlobTransfers: Array<{ taskId: string; slotIndex: number }> = []
+  const resultReuseCalls: Array<{
+    sessionId: string
+    taskId: string
+    slotIndex: number
+    fileName: string
+  }> = []
   const resultBlobReleases = new Set<() => void>()
   let remainingResultBlobFailures = options.taskScript?.resultBlobFailures ?? 0
   let releaseManifestResponse: (() => void) | null = null
@@ -479,6 +491,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     deleteMaterialCalls: () => deletedIds,
     materialBlobCalls: () => materialBlobCalls,
     resultBlobTransfers: () => resultBlobTransfers,
+    resultReuseCalls: () => resultReuseCalls,
     releaseMaterialBlobs: () => {
       for (const release of materialBlobReleases) release()
       materialBlobReleases.clear()
@@ -622,8 +635,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       }
       return succeeded({ materials: materials.get(sessionId) ?? [], nextCursor: null })
     },
-    uploadMaterial: async (sessionId, file) => {
+    uploadMaterial: async (sessionId, file, uploadOptions) => {
       uploadCalls.push({ sessionId, name: file.name })
+      uploadOptions?.onProgress?.({ sentBytes: Math.ceil(file.size / 2), totalBytes: file.size })
       if (options.uploadDeferred) await waitForRelease(uploadReleases)
       uploadSequence += 1
       const uploaded = material({
@@ -647,6 +661,36 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
         return { outcome: 'request-rejected', code: 'material_too_large' }
       }
       return succeeded(uploaded)
+    },
+    createMaterialFromResult: async (sessionId, input) => {
+      resultReuseCalls.push({ sessionId, ...input })
+      uploadSequence += 1
+      const task = taskState.tasks.find((candidate) => candidate.id === input.taskId)
+      const source = task?.slots.find((slot) => slot.index === input.slotIndex)?.result
+      const created = material({
+        id: `ffffffff-0000-4000-8000-0000000000${String(5 + uploadSequence).padStart(2, '0')}`,
+        kind: task?.mediaType ?? 'image',
+        fileName: input.fileName
+      })
+      const withFacts = {
+        ...created,
+        ...(source
+          ? {
+              mimeType: source.mimeType,
+              byteSize: source.byteSize,
+              widthPx: source.widthPx,
+              heightPx: source.heightPx,
+              pixelCount:
+                source.widthPx !== null && source.heightPx !== null
+                  ? source.widthPx * source.heightPx
+                  : null,
+              durationMs: source.durationMs,
+              checksumSha256: source.checksumSha256
+            }
+          : {})
+      }
+      materials.set(sessionId, [...(materials.get(sessionId) ?? []), withFacts])
+      return succeeded(withFacts)
     },
     deleteMaterial: async (materialId) => {
       deletedIds.push(materialId)

@@ -20,6 +20,11 @@ const PRELOAD_ALLOWED_IMPORTS = new Set([
   '@ipc/channels',
   '../shared/ipc/channel-allowlist'
 ])
+const CREATION_NATIVE_UPLOAD_PRELOAD_IMPORTS = new Map([
+  ['src/preload/creation-upload.ts', new Set(['../shared/ipc/creation/types'])],
+  ['src/preload/index.ts', new Set(['../shared/ipc/creation/types', './creation-upload'])],
+  ['src/preload/index.d.ts', new Set(['../shared/ipc/creation/types'])]
+])
 const SOURCE_FILE = /\.(ts|tsx|mts|cts)$/
 const CHANNEL_KEY = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/
 const CHANNEL_LITERAL = /'([a-z][a-z0-9-]*:[a-z][a-z0-9-]*)'/g
@@ -559,12 +564,15 @@ function checkPreload(files, collector) {
   for (const path of sourceFilesUnder(files, PRELOAD)) {
     const text = files.get(path) ?? ''
     for (const { spec, line } of importsOf(text)) {
-      if (!PRELOAD_ALLOWED_IMPORTS.has(spec)) {
+      if (
+        !PRELOAD_ALLOWED_IMPORTS.has(spec) &&
+        !CREATION_NATIVE_UPLOAD_PRELOAD_IMPORTS.get(path)?.has(spec)
+      ) {
         collector.report(
           'preload/generic-bridge',
           path,
           `Preload imports "${spec}".`,
-          'Preload stays a generic typed bridge importing only electron, @ipc/channels, and the shared Channel allowlist; no per-Domain code or registry.',
+          'Preload stays generic except for the exact Creation native-file bridge imports fixed by ADR-0014/0016; no other per-Domain code or registry.',
           line
         )
       }

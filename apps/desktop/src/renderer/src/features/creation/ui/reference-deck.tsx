@@ -60,6 +60,7 @@ export function ReferenceDeck({
   materials,
   thumbnails,
   thumbnailStates,
+  uploadProgress,
   cardKeyAliases,
   onRetainThumbnail,
   onRequestThumbnail,
@@ -79,6 +80,9 @@ export function ReferenceDeck({
   /** material id -> object URL for image thumbs; absent ids show kind glyphs. */
   readonly thumbnails: Readonly<Record<string, string>>
   readonly thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  readonly uploadProgress: Readonly<
+    Record<string, { readonly sentBytes: number; readonly totalBytes: number }>
+  >
   /** Resolved server id -> staged local id, for a stable card key. */
   readonly cardKeyAliases: Readonly<Record<string, string>>
   readonly onRetainThumbnail: (materialId: string) => () => void
@@ -91,7 +95,7 @@ export function ReferenceDeck({
   readonly onAddFiles: (files: readonly File[]) => void
   /** Single-payload drop on one card: swaps that material, keeping position. */
   readonly onReplace: (materialId: string, file: File) => void
-  /** Result-card drop: re-uploads the slot output as a new material. */
+  /** Result-card drop: promotes the slot output to a new material. */
   readonly onDropResult: (payload: ResultDragPayload, targetMaterialId: string | null) => void
   /** Materials the prompt's mentions still name; they are never replace targets. */
   readonly mentionedMaterialIds: ReadonlySet<string>
@@ -305,8 +309,8 @@ export function ReferenceDeck({
       const payload =
         decodeResultDrag(dataTransfer.getData(RESULT_DRAG_MIME)) ?? currentResultDrag()
       if (payload === null) return
-      // Admission is judged before any bytes move: a denied result must
-      // not stream its whole blob just to be discarded (ADR-0018).
+      // Admission is judged before requesting server-side promotion, so a
+      // denied result never starts a mutation (ADR-0018).
       const kindOk = allowedKinds.includes(payload.mediaType)
       const targetId = replaceTargetFrom(event)
       const replaceId = targetId !== null && kindOk ? targetId : null
@@ -424,6 +428,7 @@ export function ReferenceDeck({
             // its card holds focus; the pointer equivalent is card hover.
             const showRemove = expanded && (hoveredId === material.id || isFocused)
             const isDragTarget = drag.targetId === material.id
+            const progress = uploadProgress[material.id]
             return (
               <div
                 key={cardKeyAliases[material.id] ?? material.id}
@@ -508,6 +513,18 @@ export function ReferenceDeck({
                           {t('composer.deck.thumbnailFailed')}
                         </span>
                       )}
+                    </span>
+                  )}
+                  {progress !== undefined && (
+                    <span
+                      data-testid="material-upload-progress"
+                      role="status"
+                      aria-label={t('composer.deck.uploadProgress', {
+                        percent: Math.round((progress.sentBytes / progress.totalBytes) * 100)
+                      })}
+                      className="absolute right-1 bottom-1 rounded bg-black/70 px-1 text-[8px] text-white"
+                    >
+                      {Math.round((progress.sentBytes / progress.totalBytes) * 100)}%
                     </span>
                   )}
                 </button>

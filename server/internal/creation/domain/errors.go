@@ -17,9 +17,6 @@ var (
 	// ErrInvalidCursor reports a cursor token that is malformed or does not
 	// carry the compound sort keys of its list.
 	ErrInvalidCursor = errors.New("invalid pagination cursor")
-	// ErrMalformedUpload reports multipart framing damage: no file part,
-	// truncated body, or a part missing the mandatory filename.
-	ErrMalformedUpload = errors.New("malformed upload")
 	// ErrTooLarge reports that the streamed upload exceeded the kind's byte
 	// ceiling; the partial blob is discarded by the caller.
 	ErrTooLarge = errors.New("material exceeds size limit")
@@ -34,6 +31,21 @@ var (
 	// ErrUnsupportedMedia reports content whose sniffed family is outside
 	// the accepted set, or whose extension disagrees with the verified family.
 	ErrUnsupportedMedia = errors.New("unsupported media type")
+	// ErrReferenceMaterialUploadNotFound folds absent, foreign, and deleted-
+	// session uploads into one non-enumerable response.
+	ErrReferenceMaterialUploadNotFound = errors.New("reference material upload not found")
+	// ErrReferenceMaterialUploadExpired requires a new idempotency key; the
+	// old exact object authority is never extended.
+	ErrReferenceMaterialUploadExpired = errors.New("reference material upload expired")
+	// ErrReferenceMaterialUploadInvalid reports a malformed declared upload
+	// envelope before any authority is persisted or signed.
+	ErrReferenceMaterialUploadInvalid = errors.New("invalid reference material upload")
+	// ErrReferenceMaterialUploadSizeMismatch is the authoritative Head/Open
+	// length mismatch at finalize.
+	ErrReferenceMaterialUploadSizeMismatch = errors.New("reference material upload size mismatch")
+	// ErrReferenceMaterialUploadMetadataMismatch covers missing or mismatched
+	// upload-id/Content-Type object metadata, including an absent object.
+	ErrReferenceMaterialUploadMetadataMismatch = errors.New("reference material upload metadata mismatch")
 	// ErrUnreadableMedia reports family-valid content that fails authoritative
 	// decoding: dimensions, pixel count, duration, or sample structure could
 	// not be established.

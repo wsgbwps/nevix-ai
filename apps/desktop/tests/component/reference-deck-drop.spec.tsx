@@ -6,9 +6,9 @@ import type { LocalDraftRecord } from '../src/renderer/src/features/creation/mod
  * Drop-surface tests for the reference deck (issue #177 drag-drop follow-up):
  * external files append through the ordinary upload path, a mixed batch
  * reports its rejected remainder, a single file on one card swaps it in
- * place, a mentioned card refuses replacement, and a dragged slot result
- * re-uploads under its download-twin name (ADR-0018) — while a kind-denied
- * result is refused at the surface, before any bytes stream. Drops are
+ * place, a mentioned card refuses replacement, and a dragged slot result is
+ * promoted under its download-twin name (ADR-0018) — while a kind-denied
+ * result is refused at the surface, before any conversion command. Drops are
  * dispatched as real DataTransfer events; only visible UI and the story's
  * port-call handle are asserted.
  */
@@ -54,6 +54,14 @@ function resultBlobTransfers(
   page: Page
 ): Promise<ReadonlyArray<{ taskId: string; slotIndex: number }>> {
   return page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers() ?? [])
+}
+
+function resultReuseCalls(
+  page: Page
+): Promise<
+  ReadonlyArray<{ sessionId: string; taskId: string; slotIndex: number; fileName: string }>
+> {
+  return page.evaluate(() => window.__creationDeckTest?.resultReuseCalls() ?? [])
 }
 
 /** Lets queued render effects flush, so a negative transfer assertion cannot
@@ -181,6 +189,7 @@ test('the first card on an empty deck never re-mounts: one card node across the 
   const card = page.locator('[data-testid="deck-strip"] [data-material-id]')
   await expect(card).toHaveCount(1)
   await expect(card.locator('img')).toHaveCount(1)
+  await expect(card.getByTestId('material-upload-progress')).toHaveText('50%')
   expect(await card.getAttribute('data-material-id')).not.toBe(
     'ffffffff-0000-4000-8000-000000000006'
   )
@@ -375,7 +384,7 @@ test('the fan lays cards out oldest-to-newest, so a later drop joins the right e
   expect(bannerX - posterX).toBe(photoX - bannerX)
 })
 
-test('a dragged slot result re-uploads as a material under its download name', async ({
+test('a dragged slot result uses the server conversion command under its download name', async ({
   mount,
   page
 }) => {
@@ -417,22 +426,33 @@ test('a dragged slot result re-uploads as a material under its download name', a
     />
   )
   await selectFirstSession(page)
+  await expect.poll(() => resultBlobTransfers(page)).toHaveLength(1)
+  const transfersBeforeDrop = await resultBlobTransfers(page)
 
   await dropOn(page, '[data-testid="reference-deck"]', [], {
     type: 'application/x-nevix-creation-result',
     data: JSON.stringify({ taskId, slotIndex: 0, mediaType: 'image' })
   })
 
-  await expect.poll(() => uploadCalls(page)).toHaveLength(1)
-  const uploads = await uploadCalls(page)
-  expect(uploads[0]?.name).toMatch(/^nevix-eeeeeeee-1\./)
+  await expect.poll(() => resultReuseCalls(page)).toHaveLength(1)
+  const [reuse] = await resultReuseCalls(page)
+  expect(reuse).toEqual({
+    sessionId: scriptedSessionId,
+    taskId,
+    slotIndex: 0,
+    fileName: 'nevix-eeeeeeee-1.png'
+  })
+  expect(await uploadCalls(page)).toHaveLength(0)
+  expect(await resultBlobTransfers(page)).toEqual(transfersBeforeDrop)
   await expect(page.locator('[data-testid="deck-strip"] [data-material-id]')).toHaveCount(3)
 })
 
-test('a kind-denied slot result is refused before any bytes stream', async ({ mount, page }) => {
+test('a kind-denied slot result is refused before any conversion command', async ({
+  mount,
+  page
+}) => {
   // The image-only deck denies the video payload at the drop surface, so
-  // the ADR-0018 re-upload path (and its blob fetch) never starts; a fetch
-  // would be followed by an upload, making uploadCalls the observable.
+  // the ADR-0018 server-side promotion command never starts.
   await mount(<CreationWorkbenchStory />)
   await selectFirstSession(page)
 
@@ -449,17 +469,18 @@ test('a kind-denied slot result is refused before any bytes stream', async ({ mo
   })
 
   await expect.poll(() => uploadCalls(page), { timeout: 500 }).toHaveLength(0)
+  await expect.poll(() => resultReuseCalls(page), { timeout: 500 }).toHaveLength(0)
   await expect(cards).toHaveCount(2)
   await expect(page.getByTestId('composer-drop-rejected')).toHaveCount(0)
 })
 
-test('a dragged slot result re-uploads without fetching its object URL (renderer CSP forbids blob: fetches)', async ({
+test('a dragged slot result converts without fetching its bytes into the renderer', async ({
   mount,
   page
 }) => {
   // Mirror the renderer CSP (blob: is display-only — renderer-csp.ts): make
-  // fetch(blob:) reject here as it does in production, so the re-upload path
-  // proves it takes bytes through its port, never an object-URL fetch.
+  // fetch(blob:) reject here as it does in production. Conversion must still
+  // remain entirely behind the creator-authorized Server command.
   await page.evaluate(() => {
     const originalFetch = window.fetch.bind(window)
     window.fetch = (input, init) => {
@@ -507,13 +528,17 @@ test('a dragged slot result re-uploads without fetching its object URL (renderer
     />
   )
   await selectFirstSession(page)
+  await expect.poll(() => resultBlobTransfers(page)).toHaveLength(1)
+  const transfersBeforeDrop = await resultBlobTransfers(page)
 
   await dropOn(page, '[data-testid="reference-deck"]', [], {
     type: 'application/x-nevix-creation-result',
     data: JSON.stringify({ taskId, slotIndex: 0, mediaType: 'image' })
   })
 
-  await expect.poll(() => uploadCalls(page)).toHaveLength(1)
+  await expect.poll(() => resultReuseCalls(page)).toHaveLength(1)
+  expect(await resultBlobTransfers(page)).toEqual(transfersBeforeDrop)
+  expect(await uploadCalls(page)).toHaveLength(0)
   await expect(page.getByTestId('composer-upload-failed')).toHaveCount(0)
 })
 

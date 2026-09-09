@@ -34,6 +34,33 @@ var (
 	loadErr         error
 )
 
+func TestReferenceMaterialUploadContractSurface(t *testing.T) {
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{"POST", "/creation/sessions/00000000-0000-0000-0000-000000000001/reference-material-uploads"},
+		{"GET", "/creation/reference-material-uploads/00000000-0000-0000-0000-000000000001"},
+		{"POST", "/creation/reference-material-uploads/00000000-0000-0000-0000-000000000001"},
+		{"POST", "/creation/sessions/00000000-0000-0000-0000-000000000001/materials/from-result"},
+	} {
+		creationOperation(t, route.method, route.path)
+	}
+
+	materials := resolvePointer(t, moduleFile(t, "creation.yaml"), "/paths/~1creation~1sessions~1{sessionID}~1materials")
+	if _, hasLegacyMultipart := materials["post"]; hasLegacyMultipart {
+		t.Fatal("legacy multipart material upload must not remain in the public contract")
+	}
+
+	upload := resolvePointer(t, moduleFile(t, "creation.yaml"), "/components/schemas/ReferenceMaterialUpload")
+	properties, _ := upload["properties"].(map[string]any)
+	for _, sensitive := range []string{"owner_user_id", "object_key", "payload_hash", "upload_request", "signed_url"} {
+		if _, exposed := properties[sensitive]; exposed {
+			t.Fatalf("upload status contract exposes sensitive field %q", sensitive)
+		}
+	}
+}
+
 func loadContracts(t *testing.T) (map[string]any, map[string]map[string]any) {
 	t.Helper()
 	conformanceOnce.Do(func() {

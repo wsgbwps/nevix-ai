@@ -1,6 +1,15 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcChannelMap, IpcEventMap } from '@ipc/channels'
 import { EVENT_CHANNEL_ALLOWLIST, INVOKE_CHANNEL_ALLOWLIST } from '../shared/ipc/channel-allowlist'
+import {
+  CREATION_REFERENCE_MATERIAL_UPLOAD_CANCEL_CHANNEL,
+  CREATION_REFERENCE_MATERIAL_UPLOAD_CHANNEL,
+  CREATION_REFERENCE_MATERIAL_UPLOAD_PROGRESS_CHANNEL,
+  type CreationReferenceMaterialUploadProgress,
+  type CreationReferenceMaterialUploadRequest,
+  type CreationReferenceMaterialUploadResult
+} from '../shared/ipc/creation/types'
+import { createCreationUploadBridge } from './creation-upload'
 
 function typedInvoke<K extends keyof IpcChannelMap>(
   channel: K,
@@ -28,7 +37,29 @@ function typedOn<K extends keyof IpcEventMap>(
   }
 }
 
-const api = { invoke: typedInvoke, on: typedOn }
+const creation = createCreationUploadBridge({
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+  invokeUpload: (request: CreationReferenceMaterialUploadRequest) =>
+    ipcRenderer.invoke(
+      CREATION_REFERENCE_MATERIAL_UPLOAD_CHANNEL,
+      request
+    ) as Promise<CreationReferenceMaterialUploadResult>,
+  invokeCancel: (operationId) =>
+    ipcRenderer.invoke(CREATION_REFERENCE_MATERIAL_UPLOAD_CANCEL_CHANNEL, { operationId }),
+  onProgress: (listener) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      progress: CreationReferenceMaterialUploadProgress
+    ): void => {
+      listener(progress)
+    }
+    ipcRenderer.on(CREATION_REFERENCE_MATERIAL_UPLOAD_PROGRESS_CHANNEL, handler)
+    return () =>
+      ipcRenderer.removeListener(CREATION_REFERENCE_MATERIAL_UPLOAD_PROGRESS_CHANNEL, handler)
+  }
+})
+
+const api = { invoke: typedInvoke, on: typedOn, creation }
 
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld('api', api)

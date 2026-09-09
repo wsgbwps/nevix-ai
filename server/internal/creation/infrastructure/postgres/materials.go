@@ -57,6 +57,12 @@ func (r *MaterialRepository) GetForRead(ctx context.Context, owner, id domain.UU
 	return scanMaterial(row)
 }
 
+func (r *MaterialRepository) GetForReadInTx(ctx context.Context, tx domain.TxExecutor, owner, id domain.UUID) (domain.ReferenceMaterial, error) {
+	row := tx.QueryRow(ctx,
+		`SELECT `+materialColumns+materialOwnershipJoin+` WHERE m.id = $2`, owner, id)
+	return scanMaterial(row)
+}
+
 // ListBySession pages a session's materials oldest-first: pile order equals
 // upload order.
 func (r *MaterialRepository) ListBySession(ctx context.Context, owner, sessionID domain.UUID, cursor *domain.CompoundCursor, limit int) ([]domain.ReferenceMaterial, *domain.CompoundCursor, error) {

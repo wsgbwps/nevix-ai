@@ -135,6 +135,19 @@ test('getSnapshot() is same-tick fresh after mutations and notifies subscribers'
   assert.ok(notifications >= 1)
 })
 
+test('dropping a pending upload clears progress in the same tick without a thumbnail', () => {
+  const controller = createController(fakeUrls())
+  controller.registerPending(
+    'pending-audio',
+    new File([new Uint8Array([1, 2, 3])], 'voice.mp3', { type: 'audio/mpeg' })
+  )
+  controller.updateUploadProgress('pending-audio', 1, 3)
+
+  controller.dropPending('pending-audio')
+
+  assert.deepEqual(controller.getSnapshot().uploadProgress, {})
+})
+
 test('an in-flight thumbnail load cannot land after reset()', async () => {
   const urls = fakeUrls()
   const load = deferred<CreationApiResult<Blob>>()

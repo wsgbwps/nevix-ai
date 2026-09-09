@@ -3,7 +3,7 @@ import type { SlotResultView } from '../api/generation-task-http'
 /**
  * The single naming convention for a task slot's verified output — the name
  * the download button writes to disk and the name a dragged result carries
- * when re-uploaded as reference material (ADR-0018), so the same bytes keep
+ * when promoted to reference material (ADR-0018), so the same output keeps
  * the same name in both places. The extension follows the actual MIME type
  * (the vendor commonly returns JPEG), never a fixed png.
  */

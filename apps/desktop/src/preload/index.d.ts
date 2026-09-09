@@ -1,6 +1,9 @@
 import type { IpcChannelMap, IpcEventMap } from '@ipc/channels'
+import type { CreationNativeUploadApi } from '../shared/ipc/creation/types'
 
 interface TypedApi {
+  readonly creation: CreationNativeUploadApi
+
   invoke<K extends keyof IpcChannelMap>(
     channel: K,
     ...args: IpcChannelMap[K] extends { request: infer Req } ? [Req] : []

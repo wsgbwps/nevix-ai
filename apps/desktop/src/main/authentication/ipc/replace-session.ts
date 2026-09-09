@@ -1,4 +1,4 @@
-import { replacePersistedSession } from '../session-store'
+import { replaceCurrentSession } from '..'
 import { requireTrustedTopLevelRendererSender } from '../../window/trusted-renderer-sender'
 import type { PersistedSessionWrite } from '../../../shared/ipc/authentication/types'
 
@@ -25,5 +25,5 @@ export async function replaceSessionHandler(
     throw new Error('Session storage received an unusable Session payload')
   }
 
-  return replacePersistedSession(session)
+  return replaceCurrentSession(session)
 }

@@ -163,7 +163,15 @@ assert_creation_integration_executed() {
     TestSessionListKeysetPaginationIsStableAndCompound
     TestUploadRecordsAtomicRightsFacts
     TestUploadValidationPipelineStableReasons
-    TestUploadRejectsFormsWithoutFilePart
+    TestUploadCreateRejectsMissingDeclaredFacts
+    TestReferenceMaterialUploadHappyPathIsDurableAndIdempotent
+    TestReferenceMaterialUploadEnforcesCreatorAndSessionPrivacy
+    TestReferenceMaterialUploadRejectsEveryDeclaredKindAboveItsLimitBeforeSigning
+    TestReferenceMaterialUploadSignsOnlyEachProvidersClosedHeaderSet
+    TestReferenceMaterialUploadRejectsHeadAndContentMismatchBeforeMaterialCreation
+    TestReferenceMaterialUploadExpiredLeaseRequiresNewIdempotencyKey
+    TestSuccessfulGenerationResultBecomesIndependentReferenceMaterialInsideServer
+    TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage
     TestDownloadServesRangeAndChecksumHeaders
     TestDeleteMaterialRemovesRowAndBlobCleanupSchedules
     TestContractErrorEnvelopeShapeOnEveryCreationErrorPath
@@ -174,6 +182,7 @@ assert_creation_integration_executed() {
     TestProviderConnectionSingletonConstraintRejectsSecondActiveRow
     TestObjectStorageConnectionPublicContract
     TestObjectStorageConcurrentFirstCreateHasOneWinner
+    TestObjectStoragePendingUploadBlocksLocationMutationButAllowsRotation
     TestObjectStorageConnectionSingletonAndMonotonicRevision
     TestConnectionCanaryExercisesRequiredOperationsAndCleansUp
     TestStreamSmokeParallelFileFlows

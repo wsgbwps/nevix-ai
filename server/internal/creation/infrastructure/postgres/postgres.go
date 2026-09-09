@@ -50,6 +50,13 @@ func (r *SessionRepository) Get(ctx context.Context, owner, id domain.UUID) (dom
 	return scanSession(row)
 }
 
+func (r *SessionRepository) GetInTx(ctx context.Context, tx domain.TxExecutor, owner, id domain.UUID) (domain.Session, error) {
+	row := tx.QueryRow(ctx,
+		`SELECT `+sessionColumns+`, owner_user_id FROM creation_sessions WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL FOR UPDATE`,
+		id, owner)
+	return scanSession(row)
+}
+
 // List pages active sessions newest-first under the compound keyset.
 func (r *SessionRepository) List(ctx context.Context, owner domain.UUID, cursor *domain.CompoundCursor, limit int) ([]domain.Session, *domain.CompoundCursor, error) {
 	args := []any{owner, cursorTime(cursor), cursorID(cursor), limit + 1}
