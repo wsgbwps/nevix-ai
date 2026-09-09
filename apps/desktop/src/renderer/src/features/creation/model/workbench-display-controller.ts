@@ -34,13 +34,17 @@ export interface WorkbenchDisplaySnapshot {
   readonly thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
   /** Resolved server id -> staged local id, for a stable React key. */
   readonly cardKeyAliases: Readonly<Record<string, string>>
+  readonly uploadProgress: Readonly<
+    Record<string, { readonly sentBytes: number; readonly totalBytes: number }>
+  >
 }
 
 export const emptyWorkbenchDisplaySnapshot: WorkbenchDisplaySnapshot = {
   materials: [],
   thumbnails: {},
   thumbnailStates: {},
-  cardKeyAliases: {}
+  cardKeyAliases: {},
+  uploadProgress: {}
 }
 
 export interface PendingMaterialFile {
@@ -81,6 +85,9 @@ export class WorkbenchDisplayController {
   #thumbnailRequests = new Map<string, number>()
   #thumbnailConsumers = new Map<string, number>()
   #cardKeyAliases: Readonly<Record<string, string>> = {}
+  #uploadProgress: Readonly<
+    Record<string, { readonly sentBytes: number; readonly totalBytes: number }>
+  > = {}
   #resultBlobCache: ResultBlobCache | null = null
   #active = false
   #snapshot: WorkbenchDisplaySnapshot = emptyWorkbenchDisplaySnapshot
@@ -136,6 +143,7 @@ export class WorkbenchDisplayController {
     this.#thumbnails = {}
     this.#thumbnailStates = {}
     this.#cardKeyAliases = {}
+    this.#uploadProgress = {}
     this.#changed()
   }
 
@@ -197,8 +205,10 @@ export class WorkbenchDisplayController {
   dropPending(materialId: string): void {
     if (!this.#pendingFiles.has(materialId)) return
     this.#pendingFiles.delete(materialId)
+    this.#deleteUploadProgress(materialId)
     this.#materialUrls.releaseMaterial(materialId)
     this.#deleteThumbnailEntry(materialId)
+    this.#changed()
   }
 
   /** Moves one resolved pending material's records onto its server identity:
@@ -209,6 +219,7 @@ export class WorkbenchDisplayController {
   transferPending(localId: string, resolvedId: string): void {
     if (!this.#pendingFiles.has(localId) || localId === resolvedId) return
     this.#pendingFiles.delete(localId)
+    this.#deleteUploadProgress(localId)
     // The alias is snapshot-visible, so every path below notifies.
     this.#cardKeyAliases = { ...this.#cardKeyAliases, [resolvedId]: localId }
     if (this.#thumbnails[resolvedId] !== undefined) {
@@ -246,8 +257,10 @@ export class WorkbenchDisplayController {
     this.#materials = this.#materials.filter((material) => material.id !== materialId)
     this.#materialIds = new Set([...this.#materialIds].filter((id) => id !== materialId))
     this.#thumbnailConsumers.delete(materialId)
+    this.#deleteUploadProgress(materialId)
     this.#materialUrls.releaseMaterial(materialId)
     this.#deleteThumbnailEntry(materialId)
+    this.#changed()
   }
 
   requestThumbnail(materialId: string): void {
@@ -297,6 +310,18 @@ export class WorkbenchDisplayController {
       })
   }
 
+  updateUploadProgress(materialId: string, sentBytes: number, totalBytes: number): void {
+    if (!this.#pendingFiles.has(materialId) || totalBytes <= 0) return
+    this.#uploadProgress = {
+      ...this.#uploadProgress,
+      [materialId]: {
+        sentBytes: Math.max(0, Math.min(sentBytes, totalBytes)),
+        totalBytes
+      }
+    }
+    this.#changed()
+  }
+
   /** Holds one thumbnail while a mounted presentation can paint it. */
   retain(materialId: string): () => void {
     const load = this.#thumbnailLoad
@@ -327,10 +352,6 @@ export class WorkbenchDisplayController {
    * releases it (ADR-0018 byte-budgeted cache). */
   acquireResultBlobUrl(taskId: string, slotIndex: number): Promise<ResultBlobUrlLease | null> {
     return this.#ensureResultBlobCache().acquireObjectUrl(taskId, slotIndex)
-  }
-
-  resultBlob(taskId: string, slotIndex: number): Promise<Blob | null> {
-    return this.#ensureResultBlobCache().blob(taskId, slotIndex)
   }
 
   /** Reads one server-backed or pending local Reference Material for UI
@@ -374,12 +395,20 @@ export class WorkbenchDisplayController {
     this.#changed()
   }
 
+  #deleteUploadProgress(materialId: string): void {
+    if (!(materialId in this.#uploadProgress)) return
+    const progress = { ...this.#uploadProgress }
+    delete progress[materialId]
+    this.#uploadProgress = progress
+  }
+
   #changed(): void {
     this.#snapshot = {
       materials: this.#materials,
       thumbnails: this.#thumbnails,
       thumbnailStates: this.#thumbnailStates,
-      cardKeyAliases: this.#cardKeyAliases
+      cardKeyAliases: this.#cardKeyAliases,
+      uploadProgress: this.#uploadProgress
     }
     for (const notify of [...this.#listeners]) notify()
   }

@@ -257,6 +257,7 @@ export function CreationComposer({
               materials={composer.materials}
               thumbnails={composer.thumbnails}
               thumbnailStates={composer.thumbnailStates}
+              uploadProgress={composer.uploadProgress}
               cardKeyAliases={composer.cardKeyAliases}
               onRetainThumbnail={composer.retainMaterialThumbnail}
               onRequestThumbnail={composer.requestMaterialThumbnail}

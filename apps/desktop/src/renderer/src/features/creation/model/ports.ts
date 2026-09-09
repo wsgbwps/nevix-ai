@@ -6,6 +6,7 @@ import {
   createCreationClient,
   type CreationApiResult,
   type CreationSessionView,
+  type CreateMaterialFromResultInput,
   type MaterialPage,
   type ReferenceMaterialView,
   type SessionDetailView,
@@ -24,6 +25,14 @@ import {
  * Structurally matches the authentication Feature's session acquisition so
  * no peer-feature import is needed here. */
 export type TokenSource = () => Promise<{ readonly token: string } | undefined>
+
+export interface MaterialUploadOptions {
+  readonly signal?: AbortSignal
+  readonly onProgress?: (progress: {
+    readonly sentBytes: number
+    readonly totalBytes: number
+  }) => void
+}
 
 /**
  * The Workbench's business seam: the page and its components see only these
@@ -76,7 +85,12 @@ export interface CreationWorkspacePorts {
   ) => Promise<CreationApiResult<MaterialPage>>
   readonly uploadMaterial: (
     sessionId: string,
-    file: File
+    file: File,
+    options?: MaterialUploadOptions
+  ) => Promise<CreationApiResult<ReferenceMaterialView>>
+  readonly createMaterialFromResult: (
+    sessionId: string,
+    input: CreateMaterialFromResultInput
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
   readonly loadMaterialBlob: (
@@ -167,8 +181,29 @@ export function createCreationWorkspacePorts(
         )
         return unmapMaterialPage(drained)
       }),
-    uploadMaterial: (sessionId, file) =>
-      withToken((client, token) => client.uploadMaterial(token, sessionId, file)),
+    uploadMaterial: async (sessionId, file, options) => {
+      const operationId = crypto.randomUUID()
+      const cancel = (): void => {
+        void window.api.creation.cancelReferenceMaterialUpload(operationId).catch(() => undefined)
+      }
+      options?.signal?.addEventListener('abort', cancel, { once: true })
+      try {
+        if (options?.signal?.aborted) {
+          cancel()
+          return { outcome: 'request-rejected', code: 'upload_cancelled' }
+        }
+        return await window.api.creation.uploadReferenceMaterial(
+          operationId,
+          sessionId,
+          file,
+          options?.onProgress
+        )
+      } finally {
+        options?.signal?.removeEventListener('abort', cancel)
+      }
+    },
+    createMaterialFromResult: (sessionId, input) =>
+      withToken((client, token) => client.createMaterialFromResult(token, sessionId, input)),
     deleteMaterial: (materialId) =>
       withToken((client, token) => client.deleteMaterial(token, materialId)),
     loadMaterialBlob: (materialId, signal) =>

@@ -22,10 +22,7 @@ type Location = domain.ObjectStorageLocation
 
 // Credentials are one provider's long-lived key pair. They must remain
 // transient in Go and must never be logged or returned to Desktop.
-type Credentials struct {
-	AccessKeyID     string
-	SecretAccessKey string
-}
+type Credentials = domain.ObjectStorageCredentials
 
 var (
 	regionPattern    = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)+$`)

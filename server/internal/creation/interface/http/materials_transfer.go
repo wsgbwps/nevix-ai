@@ -4,14 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"hash"
 	"io"
 	"log/slog"
-	"mime"
 	"net/http"
 
+	"github.com/nevix-ai/server/internal/creation/application"
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
@@ -19,71 +18,168 @@ import (
 // matter the blob size.
 const streamBufferLen = 256 << 10
 
-// UploadMaterial answers POST /creation/sessions/{sessionID}/materials. The
-// single file part streams straight into the storage seam; nothing about the
-// body is buffered whole, and the authoritative sniff/extension/probe
-// pipeline runs inside the service.
-func (h *MaterialHandler) UploadMaterial(w http.ResponseWriter, r *http.Request) {
+type createReferenceMaterialUploadRequest struct {
+	IdempotencyKey   *string `json:"idempotency_key"`
+	FileName         *string `json:"file_name"`
+	DeclaredKind     *string `json:"declared_kind"`
+	DeclaredMIMEType *string `json:"declared_mime_type"`
+	DeclaredByteSize *int64  `json:"declared_byte_size"`
+}
+
+type referenceMaterialUploadResource struct {
+	ID                 string  `json:"id"`
+	SessionID          string  `json:"session_id"`
+	Status             string  `json:"status"`
+	FileName           string  `json:"file_name"`
+	DeclaredKind       string  `json:"declared_kind"`
+	DeclaredMIMEType   string  `json:"declared_mime_type"`
+	DeclaredByteSize   int64   `json:"declared_byte_size"`
+	ClaimsVersion      int     `json:"claims_version"`
+	ConnectionRevision int64   `json:"connection_revision"`
+	PutExpiresAt       string  `json:"put_expires_at"`
+	FinalizeExpiresAt  string  `json:"finalize_expires_at"`
+	CreatedAt          string  `json:"created_at"`
+	FinalizedAt        *string `json:"finalized_at,omitempty"`
+}
+
+func toReferenceMaterialUploadResource(upload domain.ReferenceMaterialUpload) referenceMaterialUploadResource {
+	var finalizedAt *string
+	if upload.FinalizedAt != nil {
+		formatted := upload.FinalizedAt.UTC().Format(timeRFC3339)
+		finalizedAt = &formatted
+	}
+	return referenceMaterialUploadResource{
+		ID: upload.ID.String(), SessionID: upload.SessionID.String(), Status: string(upload.Status),
+		FileName: upload.FileName, DeclaredKind: string(upload.DeclaredKind),
+		DeclaredMIMEType: upload.DeclaredMIMEType, DeclaredByteSize: upload.DeclaredByteSize,
+		ClaimsVersion: upload.ClaimsVersion, ConnectionRevision: upload.ConnectionRevision,
+		PutExpiresAt:      upload.PutDeadline.UTC().Format(timeRFC3339),
+		FinalizeExpiresAt: upload.FinalizeDeadline.UTC().Format(timeRFC3339),
+		CreatedAt:         upload.CreatedAt.UTC().Format(timeRFC3339), FinalizedAt: finalizedAt,
+	}
+}
+
+type referenceMaterialUploadRequestResource struct {
+	Method    string            `json:"method"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers"`
+	ExpiresAt string            `json:"expires_at"`
+}
+
+type referenceMaterialUploadAuthorizationResponse struct {
+	Upload        referenceMaterialUploadResource         `json:"upload"`
+	UploadRequest *referenceMaterialUploadRequestResource `json:"upload_request,omitempty"`
+}
+
+type referenceMaterialUploadStatusResponse struct {
+	Upload   referenceMaterialUploadResource `json:"upload"`
+	Material *materialResource               `json:"material,omitempty"`
+}
+
+// CreateReferenceMaterialUpload persists one creator-private upload lease and
+// returns only its exact, expiring PUT request.
+func (h *MaterialHandler) CreateReferenceMaterialUpload(w http.ResponseWriter, r *http.Request) {
 	sessionID, ok := pathUUID(w, r, "sessionID")
 	if !ok {
 		return
 	}
-	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType != "multipart/form-data" {
-		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "Uploads must be multipart/form-data."})
+	var req createReferenceMaterialUploadRequest
+	if !decodeJSON(w, r, &req) {
 		return
 	}
-	formReader, err := r.MultipartReader()
+	if req.IdempotencyKey == nil || req.FileName == nil || req.DeclaredKind == nil || req.DeclaredMIMEType == nil || req.DeclaredByteSize == nil {
+		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The upload declaration is incomplete."})
+		return
+	}
+	authorization, err := h.materials.CreateUpload(r.Context(), creatorID(w, r), sessionID, application.ReferenceMaterialUploadInput{
+		IdempotencyKey: *req.IdempotencyKey, FileName: *req.FileName,
+		DeclaredKind: domain.Kind(*req.DeclaredKind), DeclaredMIMEType: *req.DeclaredMIMEType,
+		DeclaredByteSize: *req.DeclaredByteSize,
+	})
 	if err != nil {
-		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeUploadMalformed, Message: "The multipart body could not be read."})
+		fail(w, r, err)
 		return
 	}
+	status := http.StatusOK
+	if authorization.Created {
+		status = http.StatusCreated
+	}
+	response := referenceMaterialUploadAuthorizationResponse{Upload: toReferenceMaterialUploadResource(authorization.Upload)}
+	if authorization.Request != nil {
+		response.UploadRequest = &referenceMaterialUploadRequestResource{
+			Method: authorization.Request.Method, URL: authorization.Request.URL,
+			Headers:   authorization.Request.Headers,
+			ExpiresAt: authorization.Request.ExpiresAt.UTC().Format(timeRFC3339),
+		}
+	}
+	encodeJSON(w, status, response)
+}
 
-	// The file part must be captured WITHOUT walking further parts: calling
-	// NextPart again makes multipart.Reader consume whatever this part has
-	// not streamed yet, so the only strictness available once streaming starts
-	// is the documented schema — one file part (extra framing parts are left
-	// for net/http to drain with the request).
-	var fileName string
-	var body io.Reader
-	sawFile := false
-	for !sawFile {
-		part, partErr := formReader.NextPart()
-		if partErr == io.EOF {
-			break
-		}
-		if partErr != nil {
-			WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeUploadMalformed, Message: "The multipart body was truncated or malformed."})
-			return
-		}
-		if part.FormName() != "file" {
-			part.Close()
-			continue // metadata fields are legal framing; the schema ignores them
-		}
-		if part.FileName() == "" {
-			part.Close()
-			WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The file part must carry a filename."})
-			return
-		}
-		fileName = part.FileName()
-		body = part
-		defer part.Close()
-		sawFile = true
-	}
-	if !sawFile {
-		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The file part is required."})
+func (h *MaterialHandler) GetReferenceMaterialUpload(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "uploadID")
+	if !ok {
 		return
 	}
+	status, err := h.materials.GetUpload(r.Context(), creatorID(w, r), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, toReferenceMaterialUploadStatusResponse(status))
+}
 
-	material, uploadErr := h.materials.Upload(r.Context(), creatorID(w, r), sessionID, fileName, body)
-	if uploadErr != nil {
-		fail(w, r, uploadErr)
+func (h *MaterialHandler) FinalizeReferenceMaterialUpload(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "uploadID")
+	if !ok {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	if encodeErr := json.NewEncoder(w).Encode(toMaterialResource(material)); encodeErr != nil {
-		slog.Error("creation: encode upload response", "error", encodeErr)
+	status, err := h.materials.FinalizeUpload(r.Context(), creatorID(w, r), id)
+	if err != nil {
+		fail(w, r, err)
+		return
 	}
+	encodeJSON(w, http.StatusOK, toReferenceMaterialUploadStatusResponse(status))
+}
+
+func toReferenceMaterialUploadStatusResponse(status application.ReferenceMaterialUploadStatus) referenceMaterialUploadStatusResponse {
+	response := referenceMaterialUploadStatusResponse{Upload: toReferenceMaterialUploadResource(status.Upload)}
+	if status.Material != nil {
+		material := toMaterialResource(*status.Material)
+		response.Material = &material
+	}
+	return response
+}
+
+type referenceMaterialFromResultRequest struct {
+	TaskID    *string `json:"task_id"`
+	SlotIndex *int    `json:"slot_index"`
+	FileName  *string `json:"file_name"`
+}
+
+func (h *MaterialHandler) CreateReferenceMaterialFromResult(w http.ResponseWriter, r *http.Request) {
+	sessionID, ok := pathUUID(w, r, "sessionID")
+	if !ok {
+		return
+	}
+	var req referenceMaterialFromResultRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.TaskID == nil || req.SlotIndex == nil || req.FileName == nil {
+		WriteError(w, &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "task_id, slot_index, and file_name are required."})
+		return
+	}
+	taskID, err := domain.ParseUUID(*req.TaskID)
+	if err != nil {
+		WriteError(w, &Error{Status: http.StatusNotFound, Code: CodeNotFound, Message: "The requested resource was not found."})
+		return
+	}
+	material, err := h.materials.CreateFromResult(r.Context(), creatorID(w, r), sessionID, taskID, *req.SlotIndex, *req.FileName)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusCreated, toMaterialResource(material))
 }
 
 // DownloadMaterial answers GET /creation/materials/{materialID}, serving the

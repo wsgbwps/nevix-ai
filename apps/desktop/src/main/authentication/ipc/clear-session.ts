@@ -1,4 +1,4 @@
-import { clearPersistedSession } from '../session-store'
+import { clearCurrentSession } from '..'
 import { requireTrustedTopLevelRendererSender } from '../../window/trusted-renderer-sender'
 
 export async function clearSessionHandler(
@@ -10,5 +10,5 @@ export async function clearSessionHandler(
     'Session storage is available only to the trusted renderer'
   )
   if (args.length !== 0) throw new Error('Session clear does not accept a payload')
-  await clearPersistedSession()
+  await clearCurrentSession()
 }

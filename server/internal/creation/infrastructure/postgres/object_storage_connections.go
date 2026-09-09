@@ -71,6 +71,9 @@ func (r *ObjectStorageConnectionRepository) UpdateObservation(ctx context.Contex
 }
 
 func (r *ObjectStorageConnectionRepository) ReplaceLocation(ctx context.Context, tx domain.TxExecutor, connection *domain.ObjectStorageConnection, expectedRevision int64) error {
+	if err := r.lockLocationMutation(ctx, tx, connection.ID, expectedRevision, domain.ObjectStorageStateReady); err != nil {
+		return err
+	}
 	err := scanObjectStorageConnection(tx.QueryRow(ctx, `
 		UPDATE object_storage_connections SET
 			provider = $3, region = $4, bucket = $5,
@@ -117,6 +120,9 @@ func (r *ObjectStorageConnectionRepository) replaceCredential(ctx context.Contex
 }
 
 func (r *ObjectStorageConnectionRepository) Terminate(ctx context.Context, tx domain.TxExecutor, id domain.UUID, expectedRevision int64) error {
+	if err := r.lockLocationMutation(ctx, tx, id, expectedRevision, ""); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE object_storage_connections SET
 			envelope_version = NULL, credential_key_id = NULL,
@@ -129,6 +135,44 @@ func (r *ObjectStorageConnectionRepository) Terminate(ctx context.Context, tx do
 	}
 	if tag.RowsAffected() == 0 {
 		return r.classifyCASFailure(ctx, tx, expectedRevision, true, "")
+	}
+	return nil
+}
+
+func (r *ObjectStorageConnectionRepository) lockLocationMutation(ctx context.Context, tx domain.TxExecutor, id domain.UUID, expectedRevision int64, requiredState domain.ObjectStorageState) error {
+	var revision int64
+	var state string
+	var frozenAt *time.Time
+	err := tx.QueryRow(ctx, `
+		SELECT revision, state, location_frozen_at
+		FROM object_storage_connections
+		WHERE id = $1 AND terminated_at IS NULL
+		FOR UPDATE`, id).Scan(&revision, &state, &frozenAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrObjectStorageConnectionNotConfigured
+	}
+	if err != nil {
+		return fmt.Errorf("creation: lock object storage location: %w", err)
+	}
+	if revision != expectedRevision {
+		return domain.ErrObjectStorageRevisionConflict
+	}
+	if frozenAt != nil {
+		return domain.ErrObjectStorageLocationFrozen
+	}
+	if requiredState == domain.ObjectStorageStateReady && state == string(domain.ObjectStorageStateCredentialUnavailable) {
+		return domain.ErrObjectStorageRecoveryRequired
+	}
+	var pendingUpload bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM creation_reference_material_uploads
+			WHERE status = 'pending' AND connection_revision = $1
+		)`, expectedRevision).Scan(&pendingUpload); err != nil {
+		return fmt.Errorf("creation: inspect pending reference material uploads: %w", err)
+	}
+	if pendingUpload {
+		return domain.ErrObjectStorageLocationFrozen
 	}
 	return nil
 }

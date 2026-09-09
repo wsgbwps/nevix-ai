@@ -1,9 +1,9 @@
 /**
  * The creation half of the trusted data plane (contracts/creation.yaml).
- * Every call rides the current session's opaque Bearer token; the token never
- * enters a URL, and every byte of a material flows through the Go trusted
- * data plane — the renderer receives only streamed bytes and JSON views
- * (ADR-0014), never Storage credentials or direct-upload grants.
+ * JSON commands ride the current session's opaque Bearer token, which never
+ * enters a URL. Local file bytes move through Main's native upload seam; the
+ * Renderer receives only streamed display bytes and JSON views (ADR-0014),
+ * never Storage credentials, direct-upload grants, or raw local paths.
  */
 
 export type MaterialKind = 'image' | 'video' | 'audio'
@@ -54,6 +54,12 @@ export interface ReferenceMaterialView {
 export interface MaterialPage {
   readonly materials: readonly ReferenceMaterialView[]
   readonly nextCursor: string | null
+}
+
+export interface CreateMaterialFromResultInput {
+  readonly taskId: string
+  readonly slotIndex: number
+  readonly fileName: string
 }
 
 /**
@@ -179,10 +185,11 @@ export function createCreationClient(serverUrl: string): {
     sessionId: string,
     cursor?: string | null
   ): Promise<CreationApiResult<MaterialPage>>
-  uploadMaterial(
+  uploadMaterial(sessionId: string, file: File): Promise<CreationApiResult<ReferenceMaterialView>>
+  createMaterialFromResult(
     token: string,
     sessionId: string,
-    file: File
+    input: CreateMaterialFromResultInput
   ): Promise<CreationApiResult<ReferenceMaterialView>>
   deleteMaterial(token: string, materialId: string): Promise<CreationApiResult<void>>
   /** Streams one owned material through Go; callers own any derived object URL. */
@@ -355,34 +362,21 @@ export function createCreationClient(serverUrl: string): {
     },
     listMaterials: (token, sessionId, cursor) =>
       listPage(parseMaterialPage, `/creation/sessions/${sessionId}/materials`, token, cursor),
-    uploadMaterial: async (token, sessionId, file) => {
-      const form = new FormData()
-      form.append('file', file, file.name)
-      const url = new URL(`/creation/sessions/${sessionId}/materials`, serverUrl)
-      let response: Response
-      try {
-        response = await fetch(url, {
-          method: 'POST',
-          redirect: 'error',
-          headers: { Authorization: `Bearer ${token}` },
-          body: form
-        })
-      } catch {
-        return { outcome: 'network-failure' }
-      }
-      if (!response.ok) {
-        const failureStatus = response.status
-        const code =
-          failureStatus === 401
-            ? 'unauthorized'
-            : failureStatus === 403
-              ? 'forbidden'
-              : (readErrorCode(await safeJson(response)) ?? 'upload-malformed')
-        if (failureStatus === 401) return { outcome: 'unauthorized' }
-        if (failureStatus === 403) return { outcome: 'forbidden' }
-        return { outcome: 'request-rejected', code }
-      }
-      const material = parseMaterial(await safeJson(response))
+    uploadMaterial: (sessionId, file) =>
+      window.api.creation.uploadReferenceMaterial(crypto.randomUUID(), sessionId, file),
+    createMaterialFromResult: async (token, sessionId, input) => {
+      const result = await request(serverUrl, {
+        method: 'POST',
+        path: `/creation/sessions/${sessionId}/materials/from-result`,
+        body: {
+          task_id: input.taskId,
+          slot_index: input.slotIndex,
+          file_name: input.fileName
+        },
+        token
+      })
+      if (result.outcome !== 'succeeded') return result
+      const material = parseMaterial(result.payload)
       return material ? { outcome: 'succeeded', value: material } : { outcome: 'network-failure' }
     },
     deleteMaterial: async (token, materialId) => {
@@ -422,13 +416,5 @@ export function createCreationClient(serverUrl: string): {
         return { outcome: 'network-failure' }
       }
     }
-  }
-}
-
-async function safeJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json()
-  } catch {
-    return null
   }
 }

@@ -31,6 +31,13 @@ export type CreationRuntimeEvent =
   | { readonly type: 'changed'; readonly sessionId: string }
   | { readonly type: 'reconcile'; readonly sessionId: string }
   | { readonly type: 'sessions-reconcile'; readonly sessionId: string }
+  | {
+      readonly type: 'material-progress'
+      readonly sessionId: string
+      readonly localId: string
+      readonly sentBytes: number
+      readonly totalBytes: number
+    }
   /** A pending draft's session materialized: its chain rekeyed onto the real
    * session identity and its local draft record moved onto the session key. */
   | {
@@ -101,6 +108,7 @@ interface PendingMaterial {
   readonly file: File | null
   readonly wirePromise: Promise<CreationApiResult<ReferenceMaterialView>>
   readonly promise: Promise<CreationApiResult<ReferenceMaterialView>>
+  readonly controller: AbortController
   state: 'uploading' | 'unconfirmed' | 'succeeded'
 }
 
@@ -236,6 +244,7 @@ export function createCreationRuntime(
     }
     for (const material of pendingMaterials.values()) {
       if (material.state !== 'succeeded') affectedSessions.add(material.sessionId)
+      material.controller.abort()
     }
     for (const sessionId of affectedSessions) {
       persistNotice(sessionId, operationNoticeFor(sessionId, true))
@@ -294,6 +303,7 @@ export function createCreationRuntime(
     getSessionDetail: guardResult(ports.getSessionDetail),
     listMaterials: guardResult(ports.listMaterials),
     uploadMaterial: guardResult(ports.uploadMaterial),
+    createMaterialFromResult: guardResult(ports.createMaterialFromResult),
     deleteMaterial: guardResult(ports.deleteMaterial),
     loadCapabilityManifest: guardResult(ports.loadCapabilityManifest),
     submitTask: guardResult(ports.submitTask),
@@ -344,8 +354,21 @@ export function createCreationRuntime(
 
     const materialGeneration = ++generation
     materialGenerations.set(key, materialGeneration)
+    const controller = new AbortController()
     const wirePromise = ports
-      .uploadMaterial(sessionId, file)
+      .uploadMaterial(sessionId, file, {
+        signal: controller.signal,
+        onProgress: ({ sentBytes, totalBytes }) => {
+          if (materialGenerations.get(key) !== materialGeneration || retired) return
+          emit({
+            type: 'material-progress',
+            sessionId,
+            localId,
+            sentBytes,
+            totalBytes
+          })
+        }
+      })
       .catch((): CreationApiResult<ReferenceMaterialView> => ({ outcome: 'network-failure' }))
     const promise = wirePromise.then((result) => {
       if (result.outcome === 'unauthorized') {
@@ -383,6 +406,12 @@ export function createCreationRuntime(
         ambiguousMaterials.set(key, file.name)
         syncNotice(sessionId)
         changed(sessionId)
+      } else if (result.outcome === 'request-rejected' && result.code === 'upload_cancelled') {
+        materialGenerations.delete(key)
+        pendingMaterials.delete(key)
+        ambiguousMaterials.delete(key)
+        syncNotice(sessionId)
+        changed(sessionId)
       } else {
         materialGenerations.delete(key)
         pendingMaterials.delete(key)
@@ -404,6 +433,7 @@ export function createCreationRuntime(
       file,
       wirePromise,
       promise,
+      controller,
       state: 'uploading'
     })
     return promise
@@ -752,6 +782,7 @@ export function createCreationRuntime(
   }
 
   const deleteMaterial: WorkbenchActions['deleteMaterial'] = async (sessionId, materialId) => {
+    pendingMaterials.get(materialKey(sessionId, materialId))?.controller.abort()
     const result = await requestMaterialDelete(sessionId, materialId)
     if (!retired) emit({ type: 'reconcile', sessionId })
     return result

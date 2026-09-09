@@ -84,6 +84,12 @@ paths:
     $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}"
   /creation/sessions/{sessionID}/materials:
     $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}~1materials"
+  /creation/sessions/{sessionID}/reference-material-uploads:
+    $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}~1reference-material-uploads"
+  /creation/reference-material-uploads/{uploadID}:
+    $ref: "./creation.yaml#/paths/~1creation~1reference-material-uploads~1{uploadID}"
+  /creation/sessions/{sessionID}/materials/from-result:
+    $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}~1materials~1from-result"
   /creation/sessions/{sessionID}/tasks:
     $ref: "./creation.yaml#/paths/~1creation~1sessions~1{sessionID}~1tasks"
   /creation/materials/{materialID}:

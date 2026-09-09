@@ -224,6 +224,82 @@ test('material download preserves a confirmed unauthorized response', async () =
   assert.deepEqual(result, { outcome: 'unauthorized' })
 })
 
+test('local upload delegates the original File to the native bridge without a Renderer token', async () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const calls: Array<{ operationId: string; sessionId: string; file: File }> = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      api: {
+        creation: {
+          uploadReferenceMaterial: async (operationId: string, sessionId: string, file: File) => {
+            calls.push({ operationId, sessionId, file })
+            return { outcome: 'network-failure' as const }
+          },
+          cancelReferenceMaterialUpload: async () => undefined
+        }
+      }
+    }
+  })
+  const file = new File(['png'], 'photo.png', { type: 'image/png' })
+  try {
+    const result = await createCreationClient(serverUrl).uploadMaterial('session-1', file)
+
+    assert.deepEqual(result, { outcome: 'network-failure' })
+    assert.equal(calls.length, 1)
+    assert.match(calls[0]?.operationId ?? '', /^[0-9a-f-]{36}$/)
+    assert.equal(calls[0]?.sessionId, 'session-1')
+    assert.equal(calls[0]?.file, file)
+  } finally {
+    if (originalWindow === undefined) Reflect.deleteProperty(globalThis, 'window')
+    else Object.defineProperty(globalThis, 'window', originalWindow)
+  }
+})
+
+test('result reuse creates a material through the server command without downloading bytes', async () => {
+  const calls: Array<{ method: string; url: string; bearer: string | null; body: string | null }> =
+    []
+  const client = createCreationClient(serverUrl)
+  const result = await withFetch(
+    capturedFetch(calls, () =>
+      jsonResponse({
+        id: 'material-1',
+        kind: 'image',
+        file_name: 'nevix-eeeeeeee-1.png',
+        mime_type: 'image/png',
+        byte_size: 3,
+        width_px: 1,
+        height_px: 1,
+        pixel_count: 1,
+        duration_ms: null,
+        checksum_sha256: 'aa'.repeat(32),
+        claims_version: 1,
+        created_at: '2026-09-09T08:00:00Z'
+      })
+    ),
+    () =>
+      client.createMaterialFromResult('tok', 'session-1', {
+        taskId: 'eeeeeeee-0000-4000-8000-000000000001',
+        slotIndex: 0,
+        fileName: 'nevix-eeeeeeee-1.png'
+      })
+  )
+
+  assert.equal(result.outcome, 'succeeded')
+  assert.deepEqual(calls, [
+    {
+      method: 'POST',
+      url: '/creation/sessions/session-1/materials/from-result',
+      bearer: 'Bearer tok',
+      body: JSON.stringify({
+        task_id: 'eeeeeeee-0000-4000-8000-000000000001',
+        slot_index: 0,
+        file_name: 'nevix-eeeeeeee-1.png'
+      })
+    }
+  ])
+})
+
 const { createGenerationTaskClient } =
   await import('../../src/renderer/src/features/creation/api/generation-task-http.ts')
 

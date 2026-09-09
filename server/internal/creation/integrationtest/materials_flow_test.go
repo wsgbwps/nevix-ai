@@ -5,9 +5,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
-	"mime/multipart"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 type materialView struct {
@@ -30,46 +32,65 @@ type materialList struct {
 	NextCursor *string        `json:"next_cursor"`
 }
 
-// doUpload streams one multipart body through the real handler.
+// doUpload keeps the older material-flow scenarios focused on their original
+// assertions while driving the current three-step direct-upload contract.
 func (h *harness) doUpload(t *testing.T, method, path, token, fileName string, fileBody []byte) (int, []byte) {
 	t.Helper()
-	body := &bytes.Buffer{}
-	form := multipart.NewWriter(body)
-	defer form.Close()
-	part, err := form.CreateFormFile("file", fileName)
+	if method != http.MethodPost || !strings.HasPrefix(path, "/creation/sessions/") || !strings.HasSuffix(path, "/materials") {
+		t.Fatalf("test upload helper received unsupported target %s %s", method, path)
+	}
+	h.ensureObjectStorage(t)
+	sessionID := strings.TrimSuffix(strings.TrimPrefix(path, "/creation/sessions/"), "/materials")
+	kind, mimeType := declaredMediaForTest(fileName)
+	status, responseBody, authorization := h.createMaterialUpload(t, token, sessionID, uploadCreateInput(
+		"integration-upload-"+time.Now().UTC().Format("20060102T150405.000000000"),
+		fileName, kind, mimeType, int64(len(fileBody)),
+	))
+	if status != http.StatusCreated {
+		return status, responseBody
+	}
+	putAuthorizedUpload(t, authorization, fileBody)
+	status, responseBody = h.doRequest(t, http.MethodPost, "/creation/reference-material-uploads/"+authorization.Upload.ID, token, nil)
+	if status != http.StatusOK {
+		assertContractResponse(t, http.MethodPost, "/creation/reference-material-uploads/x", status, responseBody)
+		return status, responseBody
+	}
+	assertContractResponse(t, http.MethodPost, "/creation/reference-material-uploads/x", status, responseBody)
+	var finalized materialUploadStatusView
+	mustDecode(t, responseBody, &finalized)
+	if finalized.Material == nil {
+		t.Fatalf("finalize succeeded without material: %s", responseBody)
+	}
+	materialBody, err := json.Marshal(finalized.Material)
 	if err != nil {
-		t.Fatalf("form file: %v", err)
+		t.Fatalf("marshal finalized material: %v", err)
 	}
-	if _, err := part.Write(fileBody); err != nil {
-		t.Fatalf("write form part: %v", err)
+	return http.StatusCreated, materialBody
+}
+
+func declaredMediaForTest(fileName string) (string, string) {
+	switch strings.ToLower(filepath.Ext(fileName)) {
+	case ".jpg", ".jpeg":
+		return "image", "image/jpeg"
+	case ".webp":
+		return "image", "image/webp"
+	case ".mp4":
+		return "video", "video/mp4"
+	case ".mp3":
+		return "audio", "audio/mpeg"
+	case ".wav":
+		return "audio", "audio/x-wav"
+	case ".m4a":
+		return "audio", "audio/mp4"
+	default:
+		return "image", "image/png"
 	}
-	if err := form.Close(); err != nil {
-		t.Fatalf("close form: %v", err)
-	}
-	req, err := http.NewRequest(method, h.serverURL+path, bytes.NewReader(body.Bytes()))
-	if err != nil {
-		t.Fatalf("build upload: %v", err)
-	}
-	req.Header.Set("Content-Type", form.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("%s %s: %v", method, path, err)
-	}
-	defer resp.Body.Close()
-	respBody, readErr := io.ReadAll(resp.Body)
-	if readErr != nil {
-		t.Fatalf("read upload response: %v", readErr)
-	}
-	return resp.StatusCode, respBody
 }
 
 func mustUpload(t *testing.T, status int, body []byte) materialView {
 	if status != http.StatusCreated {
 		t.Fatalf("upload: status=%d body=%s", status, body)
 	}
-	// The concrete session path maps onto the templated contract route.
-	assertContractResponse(t, "POST", "/creation/sessions/x/materials", status, body)
 	var view materialView
 	mustDecode(t, body, &view)
 	return view
@@ -309,40 +330,18 @@ func assertErrorEnvelope(t *testing.T, body []byte, status int) {
 	}
 }
 
-func TestUploadRejectsFormsWithoutFilePart(t *testing.T) {
+func TestUploadCreateRejectsMissingDeclaredFacts(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)
 	token := h.loginToken(t, creatorEmail, harnessPassword)
 	session := h.createSession(t, token, sessionName("no-file"))
-	path := "/creation/sessions/" + session.ID + "/materials"
-
-	formBody := &bytes.Buffer{}
-	form := multipart.NewWriter(formBody)
-	field, err := form.CreateFormField("note")
-	if err != nil {
-		t.Fatalf("form field: %v", err)
+	path := "/creation/sessions/" + session.ID + "/reference-material-uploads"
+	status, body := h.doRequest(t, http.MethodPost, path, token, map[string]any{"file_name": "missing.png"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400 body=%s", status, body)
 	}
-	if _, err := field.Write([]byte("not a file")); err != nil {
-		t.Fatalf("write field: %v", err)
-	}
-	form.Close()
-
-	req, err := http.NewRequest("POST", h.serverURL+path, bytes.NewReader(formBody.Bytes()))
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	req.Header.Set("Content-Type", form.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status=%d want 400 body=%s", resp.StatusCode, body)
-	}
-	assertErrorEnvelope(t, body, resp.StatusCode)
+	assertErrorEnvelope(t, body, status)
+	assertContractResponse(t, http.MethodPost, "/creation/sessions/x/reference-material-uploads", status, body)
 }
 
 // Minimal ISO-BMFF builders mirroring the shapes the server's MP4 walker
@@ -440,13 +439,22 @@ func TestUploadVideoMaterialPersistsVideoFacts(t *testing.T) {
 func TestUploadRejectsOversizedMP4AudioUnderVideoCeiling(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)
+	h.ensureObjectStorage(t)
 	token := h.loginToken(t, creatorEmail, harnessPassword)
 	session := h.createSession(t, token, sessionName("m4a-cap"))
 
 	audioLimit := 50 << 20
-	status, body := h.doUpload(t, "POST", "/creation/sessions/"+session.ID+"/materials", token, "voiceover.m4a", audioOnlyMP4Fixture(audioLimit+1<<20))
+	payload := audioOnlyMP4Fixture(audioLimit + 1<<20)
+	status, body, upload := h.createMaterialUpload(t, token, session.ID, uploadCreateInput(
+		"actual-audio-over-limit", "declared-video.mp4", "video", "video/mp4", int64(len(payload)),
+	))
+	if status != http.StatusCreated {
+		t.Fatalf("create video-declared upload: status=%d body=%s", status, body)
+	}
+	putAuthorizedUpload(t, upload, payload)
+	status, body = h.doRequest(t, http.MethodPost, "/creation/reference-material-uploads/"+upload.Upload.ID, token, nil)
 	if status != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized m4a: status=%d body=%s", status, body)
 	}
-	assertContractResponse(t, "POST", "/creation/sessions/x/materials", status, body)
+	assertContractResponse(t, http.MethodPost, "/creation/reference-material-uploads/x", status, body)
 }

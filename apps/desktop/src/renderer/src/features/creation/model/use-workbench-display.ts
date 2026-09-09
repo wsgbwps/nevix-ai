@@ -22,6 +22,7 @@ export interface WorkbenchDisplayBinding {
   readonly registerPending: (id: string, file: File) => ReferenceMaterialView
   readonly dropPending: (materialId: string) => void
   readonly transferPending: (localId: string, resolvedId: string) => void
+  readonly updateUploadProgress: (materialId: string, sentBytes: number, totalBytes: number) => void
   readonly forget: (materialId: string) => void
   readonly requestThumbnail: (materialId: string) => void
   readonly retain: (materialId: string) => () => void
@@ -29,7 +30,6 @@ export interface WorkbenchDisplayBinding {
     taskId: string,
     slotIndex: number
   ) => Promise<ResultBlobUrlLease | null>
-  readonly resultBlob: (taskId: string, slotIndex: number) => Promise<Blob | null>
   readonly loadMaterialPreviewBlob: (
     materialId: string,
     signal?: AbortSignal
@@ -48,11 +48,11 @@ const idleDisplayMethods = {
   },
   dropPending: (): void => undefined,
   transferPending: (): void => undefined,
+  updateUploadProgress: (): void => undefined,
   forget: (): void => undefined,
   requestThumbnail: (): void => undefined,
   retain: (): (() => void) => () => undefined,
   acquireResultBlobUrl: (): Promise<ResultBlobUrlLease | null> => Promise.resolve(null),
-  resultBlob: (): Promise<Blob | null> => Promise.resolve(null),
   loadMaterialPreviewBlob: (): Promise<Blob | null> => Promise.resolve(null),
   pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => new Map()
 }
@@ -98,6 +98,8 @@ export function useWorkbenchDisplay(deps: WorkbenchDisplayDeps | null): Workbenc
       dropPending: (materialId: string): void => controller.dropPending(materialId),
       transferPending: (localId: string, resolvedId: string): void =>
         controller.transferPending(localId, resolvedId),
+      updateUploadProgress: (materialId: string, sentBytes: number, totalBytes: number): void =>
+        controller.updateUploadProgress(materialId, sentBytes, totalBytes),
       forget: (materialId: string): void => controller.forget(materialId),
       requestThumbnail: (materialId: string): void => controller.requestThumbnail(materialId),
       retain: (materialId: string): (() => void) => controller.retain(materialId),
@@ -105,8 +107,6 @@ export function useWorkbenchDisplay(deps: WorkbenchDisplayDeps | null): Workbenc
         taskId: string,
         slotIndex: number
       ): Promise<ResultBlobUrlLease | null> => controller.acquireResultBlobUrl(taskId, slotIndex),
-      resultBlob: (taskId: string, slotIndex: number): Promise<Blob | null> =>
-        controller.resultBlob(taskId, slotIndex),
       loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal): Promise<Blob | null> =>
         controller.loadMaterialPreviewBlob(materialId, signal),
       pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => controller.pendingFiles()

@@ -764,9 +764,13 @@ test('material and session deletion wait for the submission that retains them', 
     const deletedResult = deferred<unknown>()
     const deleted: string[] = []
     const reconciled: string[] = []
+    let uploadSignal: AbortSignal | undefined
     const runtime = createCreationRuntime(
       {
-        uploadMaterial: async () => upload.promise,
+        uploadMaterial: async (_sessionId, _file, options) => {
+          uploadSignal = options?.signal
+          return upload.promise
+        },
         deleteMaterial: async (materialId: string) => {
           deleted.push(materialId)
           return deletedResult.promise
@@ -784,6 +788,8 @@ test('material and session deletion wait for the submission that retains them', 
     )
     const removal = runtime.actions.deleteMaterial(sessionA, localMaterial)
 
+    assert.equal(uploadSignal?.aborted, true)
+
     upload.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
     assert.equal((await staged).outcome, 'succeeded')
     await Promise.resolve()
@@ -794,6 +800,52 @@ test('material and session deletion wait for the submission that retains them', 
     assert.equal((await removal).outcome, 'succeeded')
     assert.deepEqual(reconciled, [sessionA, sessionA])
   })
+
+  await t.test(
+    'cancelling a pending upload for removal does not leave a failure notice',
+    async () => {
+      const deleted: string[] = []
+      const runtime = createCreationRuntime(
+        {
+          uploadMaterial: async (_sessionId, _file, options) =>
+            new Promise((resolve) => {
+              options?.signal?.addEventListener(
+                'abort',
+                () =>
+                  resolve({
+                    outcome: 'request-rejected' as const,
+                    code: 'upload_cancelled'
+                  }),
+                { once: true }
+              )
+            }),
+          deleteMaterial: async (materialId: string) => {
+            deleted.push(materialId)
+            return { outcome: 'succeeded', value: undefined }
+          }
+        },
+        'user-1'
+      )
+      const staged = runtime.actions.stageMaterial(
+        sessionA,
+        localMaterial,
+        new File(['shoe'], 'shoe.png', { type: 'image/png' })
+      )
+
+      const removal = runtime.actions.deleteMaterial(sessionA, localMaterial)
+
+      assert.deepEqual(await staged, {
+        outcome: 'request-rejected',
+        code: 'upload_cancelled'
+      })
+      assert.deepEqual(await removal, {
+        outcome: 'request-rejected',
+        code: 'upload_cancelled'
+      })
+      assert.deepEqual(runtime.actions.snapshot(sessionA), { status: 'idle' })
+      assert.deepEqual(deleted, [])
+    }
+  )
 
   await t.test('material addressed by its resolved identity', async () => {
     const accepted = deferred<unknown>()

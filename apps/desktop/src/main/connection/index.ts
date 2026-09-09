@@ -3,6 +3,8 @@ import { readServerConnection } from './connection-store'
 import { registerPinnedCertificateVerification } from './certificate-verify'
 import { registerRendererCspInjection } from './renderer-csp-injection'
 
+export { currentServerConnectionUrl } from './connection-store'
+
 /**
  * Public interface of the connection Domain: boots the persisted server
  * connection into memory and installs the two runtime guards — TOFU

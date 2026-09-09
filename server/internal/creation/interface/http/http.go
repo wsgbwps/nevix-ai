@@ -41,7 +41,6 @@ func WriteError(w http.ResponseWriter, e *Error) {
 const (
 	CodeInvalidRequest      = "invalid_request"
 	CodeInvalidCursor       = "invalid_cursor"
-	CodeUploadMalformed     = "upload_malformed"
 	CodeUnauthorized        = "unauthorized"
 	CodePasswordChangeReq   = "password_change_required"
 	CodeNotFound            = "not_found"
@@ -50,6 +49,9 @@ const (
 	CodeUnreadableMedia     = "material_unreadable_media"
 	CodeRangeNotSatisfiable = "range_not_satisfiable"
 	CodeInternalError       = "internal_error"
+	CodeUploadExpired       = "reference_material_upload_expired"
+	CodeUploadSizeMismatch  = "material_upload_size_mismatch"
+	CodeUploadMetaMismatch  = "material_upload_metadata_mismatch"
 
 	CodeIdempotencyConflict = "idempotency_payload_conflict"
 	CodeIntentNotReady      = "intent_not_ready"
@@ -82,12 +84,11 @@ func MapError(err error) *Error {
 	case err == nil:
 		return nil
 	case isError(err, domain.ErrSessionNotFound), isError(err, domain.ErrMaterialNotFound),
-		isError(err, domain.ErrTaskNotFound), isError(err, domain.ErrNoIncompleteSlots):
+		isError(err, domain.ErrTaskNotFound), isError(err, domain.ErrNoIncompleteSlots),
+		isError(err, domain.ErrReferenceMaterialUploadNotFound):
 		return &Error{Status: http.StatusNotFound, Code: CodeNotFound, Message: "The requested resource was not found."}
 	case isError(err, domain.ErrInvalidCursor):
 		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidCursor, Message: "The pagination cursor is not valid."}
-	case isError(err, domain.ErrMalformedUpload):
-		return &Error{Status: http.StatusBadRequest, Code: CodeUploadMalformed, Message: "The upload could not be read as multipart form data."}
 	case isError(err, domain.ErrTooLarge):
 		return &Error{Status: http.StatusRequestEntityTooLarge, Code: CodeTooLarge, Message: "The file exceeds the size limit for its media kind."}
 	case isError(err, domain.ErrUnsupportedMedia):
@@ -120,6 +121,16 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The Object Storage location is invalid."}
 	case isError(err, domain.ErrObjectStorageUnavailable):
 		return &Error{Status: http.StatusServiceUnavailable, Code: CodeObjectStorageUnavailable, Message: "Object storage is unavailable."}
+	case isError(err, domain.ErrReferenceMaterialUploadInvalid):
+		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The reference material upload request is invalid."}
+	case isError(err, domain.ErrIdempotencyPayloadConflict):
+		return &Error{Status: http.StatusConflict, Code: CodeIdempotencyConflict, Message: "This idempotency key was already used with a different payload."}
+	case isError(err, domain.ErrReferenceMaterialUploadExpired):
+		return &Error{Status: http.StatusConflict, Code: CodeUploadExpired, Message: "The reference material upload has expired; create a new upload with a new idempotency key."}
+	case isError(err, domain.ErrReferenceMaterialUploadSizeMismatch):
+		return &Error{Status: http.StatusUnprocessableEntity, Code: CodeUploadSizeMismatch, Message: "The uploaded object size does not match the declared byte size."}
+	case isError(err, domain.ErrReferenceMaterialUploadMetadataMismatch):
+		return &Error{Status: http.StatusUnprocessableEntity, Code: CodeUploadMetaMismatch, Message: "The uploaded object metadata does not match its upload authorization."}
 	case isError(err, domain.ErrActiveGenerationTasksExist):
 		return &Error{Status: http.StatusConflict, Code: CodeActiveGenerationTasks, Message: "The connection cannot be deleted while generation tasks are still active."}
 	case isError(err, domain.ErrGovernanceUserNotFound):

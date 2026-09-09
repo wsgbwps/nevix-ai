@@ -8,10 +8,10 @@ import (
 	"image/png"
 	"io"
 	"math/rand"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +26,7 @@ import (
 func TestStreamSmokeParallelFileFlows(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)
+	h.ensureObjectStorage(t)
 	tokens := []string{
 		h.loginToken(t, creatorEmail, harnessPassword),
 		h.loginToken(t, otherCreatorEmail, harnessPassword),
@@ -168,10 +169,9 @@ func (h *harness) listMaterialsForSmoke(path, token string) (materialList, error
 	return listing, nil
 }
 
-// uploadThenCancel proves prompt resource release under a dying upload: a
-// client with its own hard deadline abandons the body mid-stream. The
-// dedicated client owns teardown (no leaked pipes or blocked writers), which
-// is exactly the guarantee a real browser abort gives the server.
+// uploadThenCancel abandons the direct PUT mid-stream. The Upload row remains
+// pending for #221's recovery policy; this smoke only proves the transfer
+// releases its local resources promptly and never turns into a Go multipart.
 func (h *harness) uploadThenCancel(
 	t *testing.T,
 	path, token string,
@@ -180,48 +180,47 @@ func (h *harness) uploadThenCancel(
 	recordCancel func(),
 ) {
 	t.Helper()
+	sessionID := strings.TrimSuffix(strings.TrimPrefix(path, "/creation/sessions/"), "/materials")
+	status, body, authorization := h.createMaterialUpload(t, token, sessionID, uploadCreateInput(
+		"smoke-cancel-"+time.Now().UTC().Format("20060102T150405.000000000"),
+		"canceled-upload.png", "image", "image/png", int64(len(payload)),
+	))
+	if status != http.StatusCreated {
+		record(status)
+		t.Logf("create canceled upload: %s", body)
+		return
+	}
 	reader, writer := io.Pipe()
-	form := multipart.NewWriter(writer)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req, err := http.NewRequestWithContext(ctx, "POST", h.serverURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, authorization.UploadRequest.Method, authorization.UploadRequest.URL, reader)
 	if err != nil {
 		cancel()
 		record(400)
 		return
 	}
-	req.Header.Set("Content-Type", form.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+token)
+	for name, value := range authorization.UploadRequest.Headers {
+		req.Header.Set(name, value)
+	}
 
 	go func() {
-		var bodyErr error
-		part, partErr := form.CreateFormFile("file", "canceled-upload.png")
-		switch {
-		case partErr != nil:
-			bodyErr = partErr
-		default:
-			if _, copyErr := io.Copy(part, bytes.NewReader(payload)); copyErr != nil {
-				bodyErr = copyErr
-			} else {
-				bodyErr = form.Close()
+		for offset := 0; offset < len(payload); {
+			stop := offset + 16<<10
+			if stop > len(payload) {
+				stop = len(payload)
 			}
+			if _, err := writer.Write(payload[offset:stop]); err != nil {
+				_ = writer.CloseWithError(err)
+				return
+			}
+			offset = stop
+			time.Sleep(10 * time.Millisecond)
 		}
-		// The transport's writeLoop drains this pipe; it must terminate on
-		// every producer path. Leaving it open after a failed copy wedges the
-		// abandoned request forever: mapRoundTripError waits on writeLoopDone,
-		// and the writeLoop waits on a pipe nobody will ever write or close.
-		if bodyErr != nil {
-			writer.CloseWithError(bodyErr)
-		} else {
-			writer.Close()
-		}
+		_ = writer.Close()
 	}()
 
-	aborting := &http.Client{
-		Transport: http.DefaultTransport,
-		Timeout:   250 * time.Millisecond, // the cancellation itself
-	}
-	resp, doErr := aborting.Do(req)
+	time.AfterFunc(30*time.Millisecond, cancel)
+	resp, doErr := h.smokeClient.Do(req)
 	cancel()
 	if doErr != nil {
 		// Abandoned client-side, as designed; a client abandonment is not a

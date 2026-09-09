@@ -137,6 +137,9 @@ export interface WorkbenchComposerHandle {
   materials: readonly ReferenceMaterialView[]
   thumbnails: Readonly<Record<string, string>>
   thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
+  uploadProgress: Readonly<
+    Record<string, { readonly sentBytes: number; readonly totalBytes: number }>
+  >
   /** Resolved server id -> staged local id, for the deck's stable card key. */
   cardKeyAliases: Readonly<Record<string, string>>
   /** Holds one thumbnail while a mounted presentation can paint it. */
@@ -149,7 +152,7 @@ export interface WorkbenchComposerHandle {
   addMaterials: (files: readonly File[]) => void
   /** Swaps one bound card for a new file, keeping the deck position. */
   replaceMaterial: (materialId: string, file: File) => void
-  /** Re-uploads a succeeded task result as a new Reference Material (ADR-0018). */
+  /** Converts a succeeded task result into a new Reference Material (ADR-0018). */
   addResultAsMaterial: (payload: ResultDragPayload, targetMaterialId: string | null) => void
   removeMaterial: (materialId: string) => void
   pendingMaterialRemoval: { readonly materialId: string; readonly mentionCount: number } | null
@@ -233,7 +236,7 @@ export function useCreationWorkbench(): {
     }
   }, [ports])
   const display = useWorkbenchDisplay(displayDeps)
-  const { materials, thumbnails, thumbnailStates } = display.snapshot
+  const { materials, thumbnails, thumbnailStates, uploadProgress } = display.snapshot
 
   const mountedRef = useRef(false)
   const mentionKindLabelsRef = useRef<PromptMentionKindLabels>(mentionKindLabels)
@@ -330,6 +333,10 @@ export function useCreationWorkbench(): {
   useEffect(() => {
     if (!ports || contextController === undefined) return
     return ports.actions.subscribe((event) => {
+      if (event.type === 'material-progress') {
+        displayRef.current.updateUploadProgress(event.localId, event.sentBytes, event.totalBytes)
+        return
+      }
       if (event.type === 'sessions-reconcile') {
         contextController.reload()
         setEntriesRevision((revision) => revision + 1)
@@ -852,33 +859,131 @@ export function useCreationWorkbench(): {
     ]
   )
 
-  /**
-   * A dragged result re-enters through the plain upload path (ADR-0018):
-   * verified bytes stream back through the trusted data plane and upload
-   * as a brand-new material named like its download twin.
-   */
+  /** A dragged result is copied by the creator-authorized Server command;
+   * result bytes and Storage capabilities never enter the Renderer. */
   const addResultAsMaterial = useCallback(
     (payload: ResultDragPayload, targetMaterialId: string | null): void => {
       if (!ports) return
       void (async () => {
-        const blob =
-          (await displayRef.current.resultBlob(payload.taskId, payload.slotIndex)) ?? null
-        if (!mountedRef.current) return
-        if (blob === null) {
+        const sessionId = currentSelectedId()
+        if (sessionId === null) return
+        contextController?.noteMaterialUploadFailed(false)
+        contextController?.noteMaterialDropRejection(null)
+        const resultFacts = taskDetails[payload.taskId]?.slots.find(
+          (slot) => slot.index === payload.slotIndex
+        )?.result
+        const result = await ports
+          .createMaterialFromResult(sessionId, {
+            taskId: payload.taskId,
+            slotIndex: payload.slotIndex,
+            fileName: resultFilename(
+              payload.taskId,
+              payload.slotIndex,
+              payload.mediaType,
+              resultFacts?.mimeType ?? null
+            )
+          })
+          .catch(() => ({ outcome: 'network-failure' }) as const)
+        if (!mountedRef.current || currentSelectedId() !== sessionId) return
+        if (result.outcome !== 'succeeded') {
           contextController?.noteMaterialUploadFailed(true)
           return
         }
-        const mimeType = blob.type !== '' ? blob.type : null
-        const file = new File(
-          [blob],
-          resultFilename(payload.taskId, payload.slotIndex, payload.mediaType, mimeType),
-          { type: blob.type }
-        )
-        if (targetMaterialId !== null) replaceMaterial(targetMaterialId, file)
-        else addMaterials([file])
+        const created = result.value
+        const draftAtResult = currentDraft()
+        const targetPosition =
+          targetMaterialId === null
+            ? -1
+            : draftAtResult.references.findIndex(
+                (binding) => binding.materialId === targetMaterialId
+              )
+        const replaceable =
+          targetMaterialId !== null &&
+          targetPosition >= 0 &&
+          displayRef.current
+            .getSnapshot()
+            .materials.some((candidate) => candidate.id === targetMaterialId) &&
+          countPromptMentions(draftAtResult.promptDocument, targetMaterialId) === 0
+
+        if (replaceable && targetMaterialId !== null) {
+          const fallbackRole = created.kind === 'image' ? 'reference' : 'omni'
+          const deletion = await ports.actions.deleteMaterial(sessionId, targetMaterialId)
+          if (!mountedRef.current || currentSelectedId() !== sessionId) return
+          if (deletion.outcome !== 'succeeded') {
+            contextController?.noteMaterialUploadFailed(true)
+            return
+          }
+          displayRef.current.dropPending(targetMaterialId)
+          displayRef.current.forget(targetMaterialId)
+          displayRef.current.replaceMaterials([
+            ...displayRef.current
+              .getSnapshot()
+              .materials.filter((material) => material.id !== targetMaterialId),
+            created
+          ])
+          const latestDraft = currentDraft()
+          const latestPosition = latestDraft.references.findIndex(
+            (binding) => binding.materialId === targetMaterialId
+          )
+          if (latestPosition < 0) return
+          const kept = latestDraft.references.filter(
+            (binding) => binding.materialId !== targetMaterialId
+          )
+          const insertAt = Math.min(latestPosition, kept.length)
+          const role =
+            (latestDraft.mediaType !== null
+              ? roleForPosition(latestDraft.mediaType, latestDraft.mode, insertAt)
+              : null) ?? fallbackRole
+          kept.splice(insertAt, 0, { materialId: created.id, role })
+          if (latestDraft.mediaType === 'image') {
+            patchDraft({
+              references: bindingsForMode('image', 'reference-image', kept),
+              mode: 'reference-image'
+            })
+          } else {
+            patchDraft({ references: kept })
+          }
+          return
+        }
+
+        displayRef.current.replaceMaterials([
+          ...displayRef.current
+            .getSnapshot()
+            .materials.filter((material) => material.id !== created.id),
+          created
+        ])
+        const latestDraft = currentDraft()
+        const role =
+          (latestDraft.mediaType !== null
+            ? roleForPosition(
+                latestDraft.mediaType,
+                latestDraft.mode,
+                latestDraft.references.length
+              )
+            : null) ?? (created.kind === 'image' ? 'reference' : 'omni')
+        const references = [
+          ...latestDraft.references,
+          { materialId: created.id, role }
+        ] satisfies DraftReferenceView[]
+        if (latestDraft.mediaType === 'image') {
+          patchDraft({
+            references: bindingsForMode('image', 'reference-image', references),
+            mode: 'reference-image'
+          })
+        } else {
+          patchDraft({ references })
+        }
       })()
     },
-    [addMaterials, contextController, ports, replaceMaterial]
+    [
+      bindingsForMode,
+      contextController,
+      currentDraft,
+      currentSelectedId,
+      patchDraft,
+      ports,
+      taskDetails
+    ]
   )
 
   /** Sidebar entries titled by their persisted prompt. */
@@ -969,6 +1074,7 @@ export function useCreationWorkbench(): {
       materials,
       thumbnails,
       thumbnailStates,
+      uploadProgress,
       cardKeyAliases: display.snapshot.cardKeyAliases,
       retainMaterialThumbnail: display.retain,
       requestMaterialThumbnail: display.requestThumbnail,

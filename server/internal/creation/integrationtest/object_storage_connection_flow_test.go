@@ -48,7 +48,10 @@ func successfulObjectStorageVerifier(t *testing.T) creation.ObjectStorageVerifie
 
 func (h *harness) resetObjectStorageConnections(t *testing.T) {
 	t.Helper()
-	if _, err := h.ownerPool.Exec(h.ctx, `TRUNCATE public.object_storage_connections`); err != nil {
+	h.storageMu.Lock()
+	h.storageReady = false
+	h.storageMu.Unlock()
+	if _, err := h.ownerPool.Exec(h.ctx, `TRUNCATE public.object_storage_connections CASCADE`); err != nil {
 		t.Fatalf("reset object storage connections: %v", err)
 	}
 }
@@ -333,6 +336,7 @@ func TestObjectStorageCredentialLossFailsClosedWithoutBlockingReads(t *testing.T
 	h := newObjectStorageHarness(t, successfulObjectStorageVerifier(t))
 	h.ensureAccounts(t)
 	h.resetObjectStorageConnections(t)
+	t.Cleanup(func() { h.resetObjectStorageConnections(t) })
 	admin := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
 	member := h.loginToken(t, creatorEmail, harnessPassword)
 	if status, body := h.createObjectStorageConnection(t, admin); status != http.StatusCreated {

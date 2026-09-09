@@ -28,6 +28,7 @@ type ObjectStorageConnectionService struct {
 	runner       domain.WriteRunner
 	vault        domain.ObjectStorageCredentialVault
 	verifier     domain.ObjectStorageVerifier
+	storeFactory domain.DirectUploadStoreFactory
 	proofs       authz.ReauthProofVerifier
 	activationMu sync.Mutex
 }
@@ -38,11 +39,12 @@ func NewObjectStorageConnectionService(
 	runner domain.WriteRunner,
 	vault domain.ObjectStorageCredentialVault,
 	verifier domain.ObjectStorageVerifier,
+	storeFactory domain.DirectUploadStoreFactory,
 	proofs authz.ReauthProofVerifier,
 ) *ObjectStorageConnectionService {
 	return &ObjectStorageConnectionService{
 		connections: connections, providers: providers, runner: runner,
-		vault: vault, verifier: verifier, proofs: proofs,
+		vault: vault, verifier: verifier, storeFactory: storeFactory, proofs: proofs,
 	}
 }
 
@@ -78,6 +80,31 @@ func (s *ObjectStorageConnectionService) Capability(ctx context.Context) (Object
 		capability.UploadOrigin = connection.Origin()
 	}
 	return capability, nil
+}
+
+// ResolveStore opens the active Object Storage adapter without retaining
+// decrypted credentials. All failures collapse at this trusted boundary.
+func (s *ObjectStorageConnectionService) ResolveStore(ctx context.Context) (domain.DirectUploadBlobStore, domain.ObjectStorageConnection, error) {
+	if s.storeFactory == nil {
+		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
+	}
+	connection, err := s.connections.GetActive(ctx)
+	if err != nil || connection.State != domain.ObjectStorageStateReady {
+		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
+	}
+	candidate, plaintext, err := s.storedCandidate(connection)
+	if err != nil {
+		_, _ = s.markCredentialUnavailable(ctx, connection)
+		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
+	}
+	defer wipe(plaintext)
+	store, err := s.storeFactory(connection.ObjectStorageLocation, candidate.Credentials)
+	candidate.Credentials.AccessKeyID = ""
+	candidate.Credentials.SecretAccessKey = ""
+	if err != nil {
+		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
+	}
+	return store, connection, nil
 }
 
 // Create verifies the candidate outside the audited activation transaction.

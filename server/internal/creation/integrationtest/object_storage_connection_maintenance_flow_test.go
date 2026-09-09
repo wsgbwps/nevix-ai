@@ -307,6 +307,57 @@ func TestObjectStorageEmptyConnectionCanBeDeleted(t *testing.T) {
 	assertSanitizedObjectStorageAudit(t, h, "object_storage_connection_deleted")
 }
 
+func TestObjectStoragePendingUploadBlocksLocationMutationButAllowsRotation(t *testing.T) {
+	h := newObjectStorageHarness(t, func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
+		if candidate.Location.Provider == "cos" {
+			return creation.ObjectStorageLocation{Provider: "cos", Region: "ap-shanghai", Bucket: "nevix-private-cos"}, nil
+		}
+		return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-hangzhou", Bucket: "nevix-private"}, nil
+	})
+	h.ensureAccounts(t)
+	h.resetObjectStorageConnections(t)
+	admin := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
+	creator := h.loginToken(t, creatorEmail, harnessPassword)
+	if status, body := h.createObjectStorageConnection(t, admin); status != http.StatusCreated {
+		t.Fatalf("create: status=%d body=%s", status, body)
+	}
+	initial := h.objectStorageSnapshot(t)
+	session := h.createSession(t, creator, sessionName("object-storage-upload-latch"))
+	payload := pngBytes(t)
+	status, body, _ := h.createMaterialUpload(t, creator, session.ID, uploadCreateInput(
+		"object-storage-upload-latch", "latch.png", "image", "image/png", int64(len(payload)),
+	))
+	if status != http.StatusCreated {
+		t.Fatalf("create upload lease: status=%d body=%s", status, body)
+	}
+
+	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{
+		"proof": h.issueProof(t, admin, "object_storage_connection.replace"), "expected_revision": initial.revision,
+		"provider": "cos", "region": "ap-shanghai", "bucket": "nevix-private-cos",
+		"access_key_id": "cos-replacement-key", "secret_access_key": "cos-replacement-secret",
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("replace with pending upload: status=%d body=%s", status, body)
+	}
+	assertErrorCode(t, body, "object_storage_location_frozen")
+
+	status, body = h.doSecureRequest(t, http.MethodDelete, "/creation/object-storage-connection", admin, map[string]any{
+		"proof": h.issueProof(t, admin, "object_storage_connection.delete"), "expected_revision": initial.revision,
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("delete with pending upload: status=%d body=%s", status, body)
+	}
+	assertErrorCode(t, body, "object_storage_location_frozen")
+
+	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection/credential", admin, map[string]any{
+		"proof": h.issueProof(t, admin, "object_storage_connection.rotate"), "expected_revision": initial.revision,
+		"access_key_id": objectStorageRotatedAccessKey, "secret_access_key": objectStorageRotatedSecretKey,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("rotate with pending upload: status=%d body=%s", status, body)
+	}
+}
+
 func TestObjectStorageExplicitRecoveryOwnsMissingSharedKey(t *testing.T) {
 	h := newObjectStorageHarness(t, func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
 		if candidate.Credentials.AccessKeyID == "recovery-rejected-key" {

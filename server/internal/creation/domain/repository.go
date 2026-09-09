@@ -17,6 +17,9 @@ type SessionRepository interface {
 	// Get resolves one active (non-deleted) session owned by the acting user.
 	// Ingestion reuses it to fail before streaming bytes.
 	Get(ctx context.Context, owner, id UUID) (Session, error)
+	// GetInTx repeats the ownership/liveness check in the final short write
+	// transaction after Storage I/O has completed.
+	GetInTx(ctx context.Context, tx TxExecutor, owner, id UUID) (Session, error)
 	List(ctx context.Context, owner UUID, cursor *CompoundCursor, limit int) ([]Session, *CompoundCursor, error)
 	Rename(ctx context.Context, tx TxExecutor, owner, id UUID, name string) (Session, error)
 	Delete(ctx context.Context, tx TxExecutor, owner, id UUID) error
@@ -31,6 +34,7 @@ type MaterialRepository interface {
 	// GetForRead resolves one material for its creator through an active
 	// session; every failure shape collapses into ErrMaterialNotFound.
 	GetForRead(ctx context.Context, owner, id UUID) (ReferenceMaterial, error)
+	GetForReadInTx(ctx context.Context, tx TxExecutor, owner, id UUID) (ReferenceMaterial, error)
 	ListBySession(ctx context.Context, owner, sessionID UUID, cursor *CompoundCursor, limit int) ([]ReferenceMaterial, *CompoundCursor, error)
 	// Delete removes the material row only when both the material and its
 	// session belong to the acting creator and the session is still active.
@@ -40,6 +44,17 @@ type MaterialRepository interface {
 	// inside the caller's transaction; materials outside the session are
 	// absent, and admission treats absence as a rejection fact.
 	LoadMaterialsInSession(ctx context.Context, tx TxExecutor, owner, sessionID UUID, ids []UUID) ([]ReferenceMaterial, error)
+}
+
+// ReferenceMaterialUploadRepository persists creator-scoped upload leases.
+// UpsertByIdempotency returns the caller's candidate when fresh and the
+// already-bound row when the creator reuses a key.
+type ReferenceMaterialUploadRepository interface {
+	UpsertByIdempotency(ctx context.Context, tx TxExecutor, upload *ReferenceMaterialUpload) (ReferenceMaterialUpload, error)
+	GetByIdempotency(ctx context.Context, owner UUID, key string) (ReferenceMaterialUpload, error)
+	GetForOwner(ctx context.Context, owner, id UUID) (ReferenceMaterialUpload, error)
+	LockForFinalize(ctx context.Context, tx TxExecutor, owner, id UUID) (ReferenceMaterialUpload, error)
+	MarkFinalized(ctx context.Context, tx TxExecutor, owner, id UUID, finalizedAt time.Time) error
 }
 
 // CompoundCursor is one opaque compound keyset token over (created_at, id).
