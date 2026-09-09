@@ -357,7 +357,7 @@ export const creationTranslations = defineResourceTranslations({
           reauthMismatch: '身份确认与该操作不匹配，请重新验证。',
           reauthConsumed: '身份确认已被使用，请重新验证密码。',
           exists: '对象存储连接已存在。',
-          unavailable: '无法验证对象存储配置；请检查位置、权限、私有性与 CORS 后重试。',
+          unavailable: '无法验证对象存储配置；请检查位置、权限与私有性后重试。',
           internal: '无法保存对象存储配置，请稍后重试。'
         }
       }
@@ -735,7 +735,7 @@ export const creationTranslations = defineResourceTranslations({
           reauthConsumed: 'The confirmation was already used; verify your password again.',
           exists: 'An Object Storage Connection already exists.',
           unavailable:
-            'The Object Storage Connection could not be verified. Check its location, permissions, privacy, and CORS, then retry.',
+            'The Object Storage Connection could not be verified. Check its location, permissions, and privacy, then retry.',
           internal: 'The Object Storage Connection could not be saved; try again later.'
         }
       }

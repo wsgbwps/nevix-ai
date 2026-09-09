@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -35,13 +36,16 @@ func TestConnectionCanaryExercisesRequiredOperationsAndCleansUp(t *testing.T) {
 			if len(backend.objects) != 0 {
 				t.Fatalf("canary left objects behind: %d", len(backend.objects))
 			}
-			for _, method := range []string{http.MethodPut, http.MethodHead, http.MethodGet, http.MethodDelete, http.MethodOptions} {
+			for _, method := range []string{http.MethodPut, http.MethodHead, http.MethodGet, http.MethodDelete} {
 				if !backend.sawMethod(method) {
 					t.Fatalf("canary never exercised %s", method)
 				}
 			}
-			if !backend.sawAnonymousGet || !backend.sawOriginNullPreflight || !backend.sawRangeGet {
-				t.Fatalf("canary observations: anonymous=%t origin-null=%t range=%t", backend.sawAnonymousGet, backend.sawOriginNullPreflight, backend.sawRangeGet)
+			if backend.sawMethod(http.MethodOptions) {
+				t.Fatal("canary exercised CORS preflight")
+			}
+			if !backend.sawAnonymousGet || !backend.sawRangeGet {
+				t.Fatalf("canary observations: anonymous=%t range=%t", backend.sawAnonymousGet, backend.sawRangeGet)
 			}
 		})
 	}
@@ -69,6 +73,36 @@ func TestConnectionCanaryFailureCleansPartialObjectAndReturnsOnlyStableError(t *
 	defer backend.mu.Unlock()
 	if len(backend.objects) != 0 {
 		t.Fatalf("failed canary left objects behind: %d", len(backend.objects))
+	}
+}
+
+func TestPrivateAnonymousGetAcceptsOnlyPrivateDenialStatuses(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		wantErr bool
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized},
+		{name: "forbidden", status: http.StatusForbidden},
+		{name: "not found", status: http.StatusNotFound},
+		{name: "ok", status: http.StatusOK, wantErr: true},
+		{name: "no content", status: http.StatusNoContent, wantErr: true},
+		{name: "provider failure", status: http.StatusInternalServerError, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			defer server.Close()
+
+			err := requirePrivateAnonymousGet(context.Background(), server.Client(), server.URL)
+			if tc.wantErr && !errors.Is(err, domain.ErrObjectStorageUnavailable) {
+				t.Fatalf("error = %v, want ErrObjectStorageUnavailable", err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("error = %v, want nil", err)
+			}
+		})
 	}
 }
 

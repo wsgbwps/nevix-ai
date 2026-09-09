@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
@@ -77,9 +75,6 @@ func verifyConnectionCanary(ctx context.Context, location Location, store domain
 	if err != nil {
 		return domain.ErrObjectStorageUnavailable
 	}
-	if err := requireOriginNullPreflight(ctx, client, signed); err != nil {
-		return domain.ErrObjectStorageUnavailable
-	}
 	if status := executeSignedPut(ctx, client, signed, canaryPayload); status < 200 || status >= 300 {
 		return domain.ErrObjectStorageUnavailable
 	}
@@ -135,40 +130,8 @@ func requirePrivateAnonymousGet(ctx context.Context, client *http.Client, rawURL
 		return domain.ErrObjectStorageUnavailable
 	}
 	drainAndClose(resp.Body)
-	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusNotFound {
 		return domain.ErrObjectStorageUnavailable
-	}
-	return nil
-}
-
-func requireOriginNullPreflight(ctx context.Context, client *http.Client, signed domain.PresignedPut) error {
-	names := make([]string, 0, len(signed.Headers))
-	for name := range signed.Headers {
-		names = append(names, strings.ToLower(name))
-	}
-	sort.Strings(names)
-	req, err := http.NewRequestWithContext(ctx, http.MethodOptions, signed.URL, nil)
-	if err != nil {
-		return domain.ErrObjectStorageUnavailable
-	}
-	req.Header.Set("Origin", "null")
-	req.Header.Set("Access-Control-Request-Method", http.MethodPut)
-	req.Header.Set("Access-Control-Request-Headers", strings.Join(names, ","))
-	resp, err := client.Do(req)
-	if err != nil {
-		return domain.ErrObjectStorageUnavailable
-	}
-	drainAndClose(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || resp.Header.Get("Access-Control-Allow-Origin") != "null" {
-		return domain.ErrObjectStorageUnavailable
-	}
-	if !headerListContains(resp.Header.Get("Access-Control-Allow-Methods"), http.MethodPut) {
-		return domain.ErrObjectStorageUnavailable
-	}
-	for _, name := range names {
-		if !headerListContains(resp.Header.Get("Access-Control-Allow-Headers"), name) {
-			return domain.ErrObjectStorageUnavailable
-		}
 	}
 	return nil
 }
@@ -187,15 +150,6 @@ func executeSignedPut(ctx context.Context, client *http.Client, signed domain.Pr
 	}
 	drainAndClose(resp.Body)
 	return resp.StatusCode
-}
-
-func headerListContains(raw, expected string) bool {
-	for _, value := range strings.Split(raw, ",") {
-		if strings.EqualFold(strings.TrimSpace(value), expected) {
-			return true
-		}
-	}
-	return false
 }
 
 func objectURL(origin, key string) string {

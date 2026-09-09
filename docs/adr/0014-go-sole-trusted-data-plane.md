@@ -8,6 +8,8 @@
 
 2026-09-08 修订（规格 [#215](https://github.com/wsgbwps/nevix-ai/issues/215)，[#214](https://github.com/wsgbwps/nevix-ai/issues/214) 前置）：Go 继续独占文件授权、元数据与 finalize，但永久 Reference Material 上传改为 Go 签发的 creator-private 单对象预签名 PUT；Desktop 不获得 AK/SK、任意 key 或读/List/Delete 能力。Provider Transfer Object 的限时供应商 GET 同属 Go 授权的窄例外。
 
+2026-09-09 修订（[#218](https://github.com/wsgbwps/nevix-ai/issues/218)，后续实现归 [#220](https://github.com/wsgbwps/nevix-ai/issues/220)）：预签名 PUT 的字节传输由 Renderer `fetch` 改为 Electron Main 原生流式请求。Renderer 只选择文件并展示进度/结果，Preload 只把 `webUtils.getPathForFile(file)` 得到的路径经窄 IPC 交给 Main 且不回传 Renderer；Go 的签名、授权、finalize 与 HEAD/内容校验责任不变。
+
 ## 背景
 
 ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supabase、由 RLS 保护的前提上。私有化后无 Supabase、无 RLS，数据通路只剩一条：要么 Go 吞下全部数据访问，要么客户端直连数据库。前者有把 Go 退化为表驱动浅代理的风险（ADR-0004 当年刻意避免的形状），后者毁掉凭据纪律。本 ADR 定义新 seam。
@@ -24,7 +26,8 @@ ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supa
 
 - Go 是文件授权和元数据的唯一可信数据面。每个 Deployment Instance 最多一条 OSS 或 COS Object Storage Connection；元数据只在 PostgreSQL，bucket 是纯 blob 仓（交付与配置见 [ADR-0013](0013-onprem-single-tenant-delivery.md)）。
 - Creation Module 独占 Object Storage Connection 配置、凭据加密、provider 选择与 canary、短期 URL 签名、权威 finalize、读取授权和精确 key 清理；Desktop 只承担设置交互与已授权 PUT，不引入 Storage Domain 或第二条可信数据面。
-- 永久 Reference Material 上传采用三步窄 seam：Creator 向 Go 申请 Reference Material Upload；Desktop Renderer 只凭 60 分钟、随机精确 key、固定请求头且禁止覆盖的预签名 PUT 写入当前 bucket；Desktop 再向 Go finalize。Go 校验 authenticated Creator 与 Creation Session ownership，HEAD 后完整有界读取、媒体 probe、实际 kind 限额和 SHA-256 全部通过，才在 verified write transaction 中创建 immutable Reference Material。
+- 永久 Reference Material 上传采用三步窄 seam：Creator 向 Go 申请 Reference Material Upload；Electron Main 只凭 60 分钟、随机精确 key、固定 PUT 方法、固定请求头且禁止覆盖的预签名 URL 从本地磁盘流式写入当前 bucket；Desktop 再向 Go finalize。Go 校验 authenticated Creator 与 Creation Session ownership，HEAD 后完整有界读取、媒体 probe、实际 kind 限额和 SHA-256 全部通过，才在 verified write transaction 中创建 immutable Reference Material。
+- Renderer 只向专用 Preload 桥传入用户选择的 `File` 并接收进度、取消结果与最终结果；Preload 使用 `webUtils.getPathForFile(file)` 取得磁盘路径，经窄类型 IPC 交给 Main，绝不把完整路径返回 Renderer，也不把完整文件转为 ArrayBuffer 经 IPC 传输。Main 必须验证可信顶层 Renderer、常规磁盘文件、HTTPS、Go 返回的精确 OSS/COS origin、PUT 方法和闭集签名请求头，拒绝重定向、任意路径、任意 URL、任意方法和额外请求头；V1 直接使用 Main，不增加 Utility Process、自定义 protocol、multipart 或断点续传。
 - signed PUT 不授予读、List、Delete、换 key 或第二个对象能力，Desktop 永远拿不到 Access Key/Secret。上传租约 creator-private、持久且单次 finalize；abort、过期或验证失败按精确 key 清理，Admin 无读取或完成他人上传的旁路。
 - Reference Material 下载仍经 Go 授权和有界流式出口。Provider Transfer Object 由 Go 从已授权素材派生并为外部 AI Provider 生成限时 HTTPS GET URL；该 URL 不构成 Desktop Storage 权限。
 - signed URL 是短期敏感能力：只允许出现在当前授权调用方的内存和必要出站请求中，不持久化，不进入普通日志、Audit Log、错误、剪贴板或遥测。具体状态机与凭据纪律见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
@@ -38,7 +41,7 @@ ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supa
 
 ### TLS 与桌面端连接
 
-- Go server 只听 HTTP，TLS 由部署栈终结：官方公网 Compose 以固定版本/摘要的 Nginx 暴露唯一 HTTPS 443 入口，Go、PostgreSQL 与管理端口只在 internal network；Object Storage 是客户预置的外部云资源，Go 与受授权 Desktop PUT 只访问 Server 推导的官方公网 endpoint（交付形状与证书生命周期的权威说明见 [ADR-0013](0013-onprem-single-tenant-delivery.md)）。
+- Go server 只听 HTTP，TLS 由部署栈终结：官方公网 Compose 以固定版本/摘要的 Nginx 暴露唯一 HTTPS 443 入口，Go、PostgreSQL 与管理端口只在 internal network；Object Storage 是客户预置的外部云资源，Go 与受授权 Electron Main PUT 只访问 Server 推导的官方公网 endpoint（交付形状与证书生命周期的权威说明见 [ADR-0013](0013-onprem-single-tenant-delivery.md)）。
 - Desktop 运行时配置 server URL（不再是构建期烧死）；客户部署只接受 https，显式 development mode 才允许 loopback http。https 自签证书采用 TOFU 指纹钉扎——首连由用户与独立渠道获得的指纹核对后确认并按 host/IP 持久 pin；证书变化、IP 变化、损坏或显式轮换要求重新确认，任何路径不得全局跳过证书验证。
 
 ### 数据库凭据纪律

@@ -222,15 +222,14 @@ type fakeCloudObject struct {
 }
 
 type fakeCloudTransport struct {
-	provider               Provider
-	mu                     sync.Mutex
-	objects                map[string]fakeCloudObject
-	last                   http.Header
-	methods                map[string]int
-	failMethod             string
-	sawAnonymousGet        bool
-	sawOriginNullPreflight bool
-	sawRangeGet            bool
+	provider        Provider
+	mu              sync.Mutex
+	objects         map[string]fakeCloudObject
+	last            http.Header
+	methods         map[string]int
+	failMethod      string
+	sawAnonymousGet bool
+	sawRangeGet     bool
 }
 
 func newFakeCloudTransport(provider Provider) *fakeCloudTransport {
@@ -247,15 +246,6 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 	f.mu.Lock()
 	f.methods[req.Method]++
-	if req.Method == http.MethodOptions && req.Header.Get("Origin") == "null" {
-		f.sawOriginNullPreflight = true
-		headers := make(http.Header)
-		headers.Set("Access-Control-Allow-Origin", "null")
-		headers.Set("Access-Control-Allow-Methods", http.MethodPut)
-		headers.Set("Access-Control-Allow-Headers", req.Header.Get("Access-Control-Request-Headers"))
-		f.mu.Unlock()
-		return f.response(req, http.StatusNoContent, headers, nil), nil
-	}
 	if req.Method == f.failMethod {
 		f.mu.Unlock()
 		return f.errorResponse(req, http.StatusServiceUnavailable, "ServiceUnavailable", fakeSensitiveProviderMessage), nil

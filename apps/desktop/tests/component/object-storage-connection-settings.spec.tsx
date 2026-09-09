@@ -53,6 +53,7 @@ test('a failed candidate stays editable and reports only stable safe guidance', 
 
   await expect(component.getByText('Object storage is not configured yet.')).toBeVisible()
   await expect(component.getByText(/could not be verified/i)).toBeVisible()
+  await expect(component.getByText(/cors/i)).toHaveCount(0)
   await expect(component.getByLabel('Access Key ID')).toHaveValue('LTAI1234567890')
 })
 
