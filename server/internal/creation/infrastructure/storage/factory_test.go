@@ -95,6 +95,10 @@ func TestFactoryConstructsOnlySelectedProviderWithoutConnecting(t *testing.T) {
 					t.Fatalf("selected COS, got %T", got)
 				}
 			}
+			_, err = NewReferenceTransport(location, Credentials{AccessKeyID: "ak", SecretAccessKey: "sk"})
+			if err != nil {
+				t.Fatalf("NewReferenceTransport: %v", err)
+			}
 		})
 	}
 }
