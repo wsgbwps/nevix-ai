@@ -209,6 +209,7 @@ class Harness {
   readonly actions = {
     states: new Map<string, WorkbenchActionState>(),
     staged: new Map<string, readonly StagedMaterialFile[]>(),
+    recovering: new Map<string, readonly ReferenceMaterialView[]>(),
     resolved: new Map<string, string>(),
     acknowledged: [] as string[],
     deleted: [] as string[],
@@ -217,6 +218,15 @@ class Harness {
       this.actions.states.get(key) ?? { status: 'idle' },
     stagedMaterials: (key: string): readonly StagedMaterialFile[] =>
       this.actions.staged.get(key) ?? [],
+    recoveryMaterials: (key: string): readonly ReferenceMaterialView[] =>
+      this.actions.recovering.get(key) ?? [],
+    observeMaterials: (key: string, materialIds: readonly string[]): void => {
+      const observed = new Set(materialIds)
+      this.actions.recovering.set(
+        key,
+        (this.actions.recovering.get(key) ?? []).filter((material) => !observed.has(material.id))
+      )
+    },
     resolvedMaterialId: (sessionId: string, localId: string): string | null =>
       this.actions.resolved.get(`${sessionId}:${localId}`) ?? null,
     deleteSession: (sessionId: string): Promise<CreationApiResult<void>> => {
@@ -341,6 +351,33 @@ test('the session row: a reconciling restore transfers a resolved staged upload,
   assert.deepEqual(
     display.replaced.at(-1)?.map((material) => material.id),
     ['m1']
+  )
+})
+
+test('the session row preserves a restart-recovery binding before the server material appears', async () => {
+  const { controller, storage, script, actions, display } = harness()
+  writeLocalDraft(
+    storage,
+    'user-1',
+    's1',
+    draftRecord({ references: [{ materialId: 'recovering-1', role: 'reference' }] })
+  )
+  script.materials.set('s1', ok({ materials: [], nextCursor: null }))
+  actions.recovering.set('s1', [materialView('recovering-1')])
+  await flush()
+
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+  await flush()
+
+  assert.deepEqual(controller.getSnapshot().draft.references, [
+    { materialId: 'recovering-1', role: 'reference' }
+  ])
+  assert.deepEqual(readLocalDraft(storage, 'user-1', 's1')?.references, [
+    { materialId: 'recovering-1', role: 'reference' }
+  ])
+  assert.deepEqual(
+    display.replaced.at(-1)?.map((material) => material.id),
+    ['recovering-1']
   )
 })
 

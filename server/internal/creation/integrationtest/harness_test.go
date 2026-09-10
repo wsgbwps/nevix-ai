@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -62,6 +63,7 @@ type harness struct {
 	secretsDir   string
 	kapon        *fakeKapon
 	identity     *identity.Module // narrow seams injected into Creation, exposed for direct NewModule scenarios
+	creation     *creation.Module
 	directStore  *fakeDirectUploadStore
 	storageMu    sync.Mutex
 	storageReady bool
@@ -76,6 +78,7 @@ type harnessOptions struct {
 	// surface so task-lifecycle scenarios observe real convergence.
 	runWorkers            bool
 	objectStorageVerifier creation.ObjectStorageVerifier
+	now                   func() time.Time
 }
 
 func newHarness(t *testing.T) *harness {
@@ -154,6 +157,7 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		SessionAuthenticator:  identityModule.SessionAuthenticator(),
 		ReauthVerifier:        identityModule.ReauthProofs(),
 		ObjectStorageVerifier: objectStorageVerifier,
+		Now:                   opts.now,
 		DirectUploadStoreFactory: func(location creation.ObjectStorageLocation, _ creation.ObjectStorageCredentials) (creation.DirectUploadBlobStore, error) {
 			directStore.setProvider(location.Provider)
 			return directStore, nil
@@ -162,9 +166,10 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 
 	bus := event.NewInMemoryBus()
 	router := chi.NewRouter()
+	var creationModule *creation.Module
 	router.Group(func(r chi.Router) { identityModule.Register(r, bus) })
 	router.Group(func(r chi.Router) {
-		creationModule, err := creation.NewModule(ctx, runtimePool, creationConfig, creationConfigDeps)
+		creationModule, err = creation.NewModule(ctx, runtimePool, creationConfig, creationConfigDeps)
 		if err != nil {
 			t.Fatalf("construct creation module: %v", err)
 		}
@@ -183,7 +188,7 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		}
 	})
 
-	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon, identity: identityModule, directStore: directStore}
+	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon, identity: identityModule, creation: creationModule, directStore: directStore}
 	h.startServer(router)
 	t.Cleanup(h.closeServer)
 	return h

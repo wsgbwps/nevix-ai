@@ -50,6 +50,9 @@ const (
 	CodeRangeNotSatisfiable = "range_not_satisfiable"
 	CodeInternalError       = "internal_error"
 	CodeUploadExpired       = "reference_material_upload_expired"
+	CodeUploadVerifying     = "reference_material_upload_verifying"
+	CodeUploadTerminal      = "reference_material_upload_terminal"
+	CodeUploadPutRequired   = "reference_material_upload_put_required"
 	CodeUploadSizeMismatch  = "material_upload_size_mismatch"
 	CodeUploadMetaMismatch  = "material_upload_metadata_mismatch"
 
@@ -127,6 +130,12 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusConflict, Code: CodeIdempotencyConflict, Message: "This idempotency key was already used with a different payload."}
 	case isError(err, domain.ErrReferenceMaterialUploadExpired):
 		return &Error{Status: http.StatusConflict, Code: CodeUploadExpired, Message: "The reference material upload has expired; create a new upload with a new idempotency key."}
+	case isError(err, domain.ErrReferenceMaterialUploadVerifying):
+		return &Error{Status: http.StatusConflict, Code: CodeUploadVerifying, Message: "The reference material upload is already being verified; retry later."}
+	case isError(err, domain.ErrReferenceMaterialUploadTerminal):
+		return &Error{Status: http.StatusConflict, Code: CodeUploadTerminal, Message: "The reference material upload is terminal; create a new upload with a new idempotency key."}
+	case isError(err, domain.ErrReferenceMaterialUploadPutRequired):
+		return &Error{Status: http.StatusConflict, Code: CodeUploadPutRequired, Message: "The object is absent; reselect the file and retry this upload before its PUT deadline."}
 	case isError(err, domain.ErrReferenceMaterialUploadSizeMismatch):
 		return &Error{Status: http.StatusUnprocessableEntity, Code: CodeUploadSizeMismatch, Message: "The uploaded object size does not match the declared byte size."}
 	case isError(err, domain.ErrReferenceMaterialUploadMetadataMismatch):

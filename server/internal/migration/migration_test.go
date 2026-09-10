@@ -146,3 +146,24 @@ func TestObjectStorageMaintenanceMigrationOwnsFreezeAndExactActions(t *testing.T
 		}
 	}
 }
+
+func TestReferenceMaterialUploadResilienceMigrationOwnsLeaseAndCleanupFacts(t *testing.T) {
+	sqlBytes, err := migrationFS.ReadFile("migrations/0018_reference_material_upload_resilience.sql")
+	if err != nil {
+		t.Fatalf("read reference material upload resilience migration: %v", err)
+	}
+	sql := string(sqlBytes)
+	for _, required := range []string{
+		"verification_token",
+		"verification_lease_until",
+		"cleanup_attempt_count",
+		"cleanup_next_attempt_at",
+		"cleanup_confirmed_at",
+		"status IN ('pending', 'verifying', 'finalized', 'terminal')",
+		"WHERE status IN ('terminal', 'finalized') AND cleanup_confirmed_at IS NULL",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("reference material upload resilience migration missing %q", required)
+		}
+	}
+}

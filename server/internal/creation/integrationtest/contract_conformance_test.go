@@ -42,6 +42,7 @@ func TestReferenceMaterialUploadContractSurface(t *testing.T) {
 		{"POST", "/creation/sessions/00000000-0000-0000-0000-000000000001/reference-material-uploads"},
 		{"GET", "/creation/reference-material-uploads/00000000-0000-0000-0000-000000000001"},
 		{"POST", "/creation/reference-material-uploads/00000000-0000-0000-0000-000000000001"},
+		{"DELETE", "/creation/reference-material-uploads/00000000-0000-0000-0000-000000000001"},
 		{"POST", "/creation/sessions/00000000-0000-0000-0000-000000000001/materials/from-result"},
 	} {
 		creationOperation(t, route.method, route.path)

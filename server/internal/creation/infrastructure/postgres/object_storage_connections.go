@@ -163,15 +163,16 @@ func (r *ObjectStorageConnectionRepository) lockLocationMutation(ctx context.Con
 	if requiredState == domain.ObjectStorageStateReady && state == string(domain.ObjectStorageStateCredentialUnavailable) {
 		return domain.ErrObjectStorageRecoveryRequired
 	}
-	var pendingUpload bool
+	var unresolvedUpload bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM creation_reference_material_uploads
-			WHERE status = 'pending' AND connection_revision = $1
-		)`, expectedRevision).Scan(&pendingUpload); err != nil {
-		return fmt.Errorf("creation: inspect pending reference material uploads: %w", err)
+			WHERE (status IN ('pending', 'verifying')
+			   OR (cleanup_next_attempt_at IS NOT NULL AND cleanup_confirmed_at IS NULL))
+		)`).Scan(&unresolvedUpload); err != nil {
+		return fmt.Errorf("creation: inspect unresolved reference material uploads: %w", err)
 	}
-	if pendingUpload {
+	if unresolvedUpload {
 		return domain.ErrObjectStorageLocationFrozen
 	}
 	return nil

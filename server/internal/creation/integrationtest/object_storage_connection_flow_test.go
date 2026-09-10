@@ -51,7 +51,7 @@ func (h *harness) resetObjectStorageConnections(t *testing.T) {
 	h.storageMu.Lock()
 	h.storageReady = false
 	h.storageMu.Unlock()
-	if _, err := h.ownerPool.Exec(h.ctx, `TRUNCATE public.object_storage_connections CASCADE`); err != nil {
+	if _, err := h.ownerPool.Exec(h.ctx, `TRUNCATE public.creation_reference_material_uploads, public.object_storage_connections CASCADE`); err != nil {
 		t.Fatalf("reset object storage connections: %v", err)
 	}
 }

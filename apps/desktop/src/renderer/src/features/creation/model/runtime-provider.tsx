@@ -21,12 +21,17 @@ export function CreationRuntimeProvider({
   const runtime = useMemo(
     () =>
       acquireSession !== undefined && userId !== undefined && serverUrl !== undefined
-        ? createCreationRuntime(createCreationWorkspacePorts(serverUrl, acquireSession), userId)
+        ? createCreationRuntime(createCreationWorkspacePorts(serverUrl, acquireSession), userId, {
+            recoveryScope: serverUrl
+          })
         : null,
     [acquireSession, serverUrl, userId]
   )
 
   useRuntimeRetirementLease(runtime)
+  useLayoutEffect(() => {
+    void runtime?.actions.recoverMaterialUploads()
+  }, [runtime])
 
   return (
     <CreationRuntimeContext.Provider value={runtime}>{children}</CreationRuntimeContext.Provider>

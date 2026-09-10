@@ -324,7 +324,7 @@ func TestObjectStoragePendingUploadBlocksLocationMutationButAllowsRotation(t *te
 	initial := h.objectStorageSnapshot(t)
 	session := h.createSession(t, creator, sessionName("object-storage-upload-latch"))
 	payload := pngBytes(t)
-	status, body, _ := h.createMaterialUpload(t, creator, session.ID, uploadCreateInput(
+	status, body, upload := h.createMaterialUpload(t, creator, session.ID, uploadCreateInput(
 		"object-storage-upload-latch", "latch.png", "image", "image/png", int64(len(payload)),
 	))
 	if status != http.StatusCreated {
@@ -356,6 +356,29 @@ func TestObjectStoragePendingUploadBlocksLocationMutationButAllowsRotation(t *te
 	if status != http.StatusOK {
 		t.Fatalf("rotate with pending upload: status=%d body=%s", status, body)
 	}
+	rotated := h.objectStorageSnapshot(t)
+	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{
+		"proof": h.issueProof(t, admin, "object_storage_connection.replace"), "expected_revision": rotated.revision,
+		"provider": "cos", "region": "ap-shanghai", "bucket": "nevix-private-cos",
+		"access_key_id": "cos-replacement-key", "secret_access_key": "cos-replacement-secret",
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("replace after rotation with old-revision upload: status=%d body=%s", status, body)
+	}
+	assertErrorCode(t, body, "object_storage_location_frozen")
+
+	h.directStore.failDeletes(1)
+	status, body = h.doRequest(t, http.MethodDelete, "/creation/reference-material-uploads/"+upload.Upload.ID, creator, nil)
+	if status != http.StatusOK {
+		t.Fatalf("terminalize pending upload: status=%d body=%s", status, body)
+	}
+	status, body = h.doSecureRequest(t, http.MethodDelete, "/creation/object-storage-connection", admin, map[string]any{
+		"proof": h.issueProof(t, admin, "object_storage_connection.delete"), "expected_revision": rotated.revision,
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("delete with unresolved terminal cleanup: status=%d body=%s", status, body)
+	}
+	assertErrorCode(t, body, "object_storage_location_frozen")
 }
 
 func TestObjectStorageExplicitRecoveryOwnsMissingSharedKey(t *testing.T) {

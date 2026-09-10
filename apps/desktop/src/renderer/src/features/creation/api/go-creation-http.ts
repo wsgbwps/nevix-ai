@@ -62,6 +62,8 @@ export interface CreateMaterialFromResultInput {
   readonly fileName: string
 }
 
+const materialDeleteTimeoutMs = 30_000
+
 /**
  * Every trusted-command failure the Workbench can observe. Clients branch on
  * the contract's `error` code only; unmapped answers stay generic so an
@@ -380,12 +382,13 @@ export function createCreationClient(serverUrl: string): {
       return material ? { outcome: 'succeeded', value: material } : { outcome: 'network-failure' }
     },
     deleteMaterial: async (token, materialId) => {
-      const url = new URL(`/creation/materials/${materialId}`, serverUrl)
+      const url = new URL(`/creation/materials/${encodeURIComponent(materialId)}`, serverUrl)
       let response: Response
       try {
         response = await fetch(url, {
           method: 'DELETE',
           redirect: 'error',
+          signal: AbortSignal.timeout(materialDeleteTimeoutMs),
           headers: { Authorization: `Bearer ${token}` }
         })
       } catch {
@@ -394,7 +397,8 @@ export function createCreationClient(serverUrl: string): {
       if (response.ok) return { outcome: 'succeeded', value: undefined }
       if (response.status === 401) return { outcome: 'unauthorized' }
       if (response.status === 403) return { outcome: 'forbidden' }
-      return { outcome: 'request-rejected', code: 'not_found' }
+      if (response.status === 404) return { outcome: 'request-rejected', code: 'not_found' }
+      return { outcome: 'network-failure' }
     },
     loadMaterialBlob: async (token, materialId, signal) => {
       const url = new URL(`/creation/materials/${materialId}`, serverUrl)

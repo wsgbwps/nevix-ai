@@ -19,6 +19,7 @@ func (m *Module) routes() []creationhttp.Route {
 		{Method: "POST", Path: "/creation/sessions/{sessionID}/reference-material-uploads", Handler: m.materials.CreateReferenceMaterialUpload},
 		{Method: "GET", Path: "/creation/reference-material-uploads/{uploadID}", Handler: m.materials.GetReferenceMaterialUpload},
 		{Method: "POST", Path: "/creation/reference-material-uploads/{uploadID}", Handler: m.materials.FinalizeReferenceMaterialUpload},
+		{Method: "DELETE", Path: "/creation/reference-material-uploads/{uploadID}", Handler: m.materials.AbortReferenceMaterialUpload},
 		{Method: "POST", Path: "/creation/sessions/{sessionID}/materials/from-result", Handler: m.materials.CreateReferenceMaterialFromResult},
 		{Method: "GET", Path: "/creation/materials/{materialID}", Handler: m.materials.DownloadMaterial},
 		{Method: "DELETE", Path: "/creation/materials/{materialID}", Handler: m.materials.DeleteMaterial},

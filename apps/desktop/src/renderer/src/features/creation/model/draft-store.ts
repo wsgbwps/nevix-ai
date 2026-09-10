@@ -15,7 +15,12 @@ import {
   parseGenerationParameterValues,
   type GenerationParameterValues
 } from '../api/generation-parameter'
-import { parsePromptDocument, remapPromptMentions, type PromptDocument } from './prompt-document'
+import {
+  parsePromptDocument,
+  remapPromptMentions,
+  removePromptMentions,
+  type PromptDocument
+} from './prompt-document'
 
 /** Key prefix for drafts whose submission began without a session identity. */
 export const PENDING_DRAFT_KEY_PREFIX = 'pending:'
@@ -253,6 +258,21 @@ export function remapLocalDraftMaterial(
     references: record.references.map((reference) =>
       reference.materialId === localId ? { ...reference, materialId } : reference
     )
+  })
+}
+
+export function removeLocalDraftMaterial(
+  storage: Storage,
+  userId: string,
+  key: string,
+  materialId: string
+): void {
+  const record = readLocalDraft(storage, userId, key)
+  if (record === null) return
+  writeLocalDraft(storage, userId, key, {
+    ...record,
+    promptDocument: removePromptMentions(record.promptDocument, materialId),
+    references: record.references.filter((reference) => reference.materialId !== materialId)
   })
 }
 

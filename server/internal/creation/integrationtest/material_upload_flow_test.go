@@ -225,7 +225,7 @@ func TestReferenceMaterialUploadEnforcesCreatorAndSessionPrivacy(t *testing.T) {
 	}
 
 	for _, actor := range []string{other, admin} {
-		for _, method := range []string{http.MethodGet, http.MethodPost} {
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
 			status, body := h.doRequest(t, method, "/creation/reference-material-uploads/"+upload.Upload.ID, actor, nil)
 			if status != http.StatusNotFound {
 				t.Fatalf("foreign %s observed upload: status=%d body=%s", method, status, body)
@@ -330,6 +330,8 @@ func TestReferenceMaterialUploadRejectsHeadAndContentMismatchBeforeMaterialCreat
 		t.Fatalf("size mismatch finalize: status=%d body=%s", status, body)
 	}
 	assertErrorCode(t, body, "material_upload_size_mismatch")
+	assertUploadDatabaseState(t, h, sizeMismatch.Upload.ID, "terminal", true, false)
+	assertExactUploadKeyWasDeleted(t, h, sizeMismatch.Upload.ID)
 
 	status, body, metadataMismatch := h.createMaterialUpload(t, creator, session.ID,
 		uploadCreateInput("metadata-mismatch", "metadata.png", "image", "image/png", int64(len(png))))
@@ -344,6 +346,8 @@ func TestReferenceMaterialUploadRejectsHeadAndContentMismatchBeforeMaterialCreat
 	}
 	assertContractResponse(t, http.MethodPost, "/creation/reference-material-uploads/x", status, body)
 	assertErrorCode(t, body, "material_upload_metadata_mismatch")
+	assertUploadDatabaseState(t, h, metadataMismatch.Upload.ID, "terminal", true, false)
+	assertExactUploadKeyWasDeleted(t, h, metadataMismatch.Upload.ID)
 
 	status, body, kindMismatch := h.createMaterialUpload(t, creator, session.ID,
 		uploadCreateInput("kind-mismatch", "wrong.mp3", "audio", "audio/mpeg", int64(len(png))))
@@ -356,6 +360,8 @@ func TestReferenceMaterialUploadRejectsHeadAndContentMismatchBeforeMaterialCreat
 		t.Fatalf("kind mismatch finalize: status=%d body=%s", status, body)
 	}
 	assertErrorCode(t, body, "material_unsupported_media")
+	assertUploadDatabaseState(t, h, kindMismatch.Upload.ID, "terminal", true, false)
+	assertExactUploadKeyWasDeleted(t, h, kindMismatch.Upload.ID)
 
 	var materialRows int
 	if err := h.ownerPool.QueryRow(h.ctx, `SELECT count(*) FROM creation_reference_materials WHERE session_id = $1::uuid`, session.ID).Scan(&materialRows); err != nil || materialRows != 0 {
@@ -442,6 +448,69 @@ func TestSuccessfulGenerationResultBecomesIndependentReferenceMaterialInsideServ
 	})
 	if status != http.StatusNotFound {
 		t.Fatalf("foreign result conversion: status=%d body=%s", status, body)
+	}
+
+	var objectKey string
+	if err := h.ownerPool.QueryRow(h.ctx,
+		`SELECT blob_key FROM creation_reference_materials WHERE id = $1::uuid`, material.ID,
+	).Scan(&objectKey); err != nil {
+		t.Fatalf("read converted material key: %v", err)
+	}
+	png := pngBytes(t)
+	status, body, _ = h.createMaterialUpload(t, creator, draft.SessionID, uploadCreateInput(
+		"material-delete-"+material.ID,
+		"collision.png", "image", "image/png", int64(len(png)),
+	))
+	if status != http.StatusCreated {
+		t.Fatalf("pre-create public idempotency collision: status=%d body=%s", status, body)
+	}
+	h.directStore.failDeletes(1)
+	if status, body := h.doRequest(t, http.MethodDelete, "/creation/materials/"+material.ID, creator, nil); status != http.StatusNoContent {
+		t.Fatalf("delete converted material: status=%d body=%s", status, body)
+	}
+	var cleanupID string
+	var cleanupDue bool
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		SELECT id, cleanup_next_attempt_at IS NOT NULL AND cleanup_confirmed_at IS NULL
+		FROM creation_reference_material_uploads
+		WHERE material_id = $1::uuid AND object_key = $2`, material.ID, objectKey,
+	).Scan(&cleanupID, &cleanupDue); err != nil {
+		t.Fatalf("read converted material cleanup: %v", err)
+	}
+	if !cleanupDue {
+		t.Fatal("converted material delete did not persist cleanup after provider failure")
+	}
+	if _, err := h.directStore.Head(h.ctx, objectKey); err != nil {
+		t.Fatalf("failed immediate converted-material delete did not leave test object: %v", err)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE creation_reference_material_uploads
+		SET cleanup_next_attempt_at = now()
+		WHERE id = $1::uuid`, cleanupID); err != nil {
+		t.Fatalf("make converted material cleanup due: %v", err)
+	}
+	workerCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.creation.RunWorkers(workerCtx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := h.ownerPool.QueryRow(h.ctx, `
+			SELECT cleanup_confirmed_at IS NOT NULL
+			FROM creation_reference_material_uploads WHERE id = $1::uuid`, cleanupID,
+		).Scan(&cleanupDue); err == nil && cleanupDue {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("stop converted material cleanup worker: %v", err)
+	}
+	if !cleanupDue {
+		t.Fatal("converted material cleanup worker did not confirm deletion")
+	}
+	if _, err := h.directStore.Head(h.ctx, objectKey); err == nil {
+		t.Fatal("converted material object survived durable cleanup")
 	}
 }
 

@@ -24,7 +24,10 @@ test('the preload bridge resolves a real File path and never returns it to the r
       return { outcome: 'network-failure' }
     },
     invokeCancel: async () => undefined,
-    onProgress: () => () => undefined
+    invokeRecover: async () => ({ outcome: 'network-failure' }),
+    invokeAbort: async () => ({ outcome: 'network-failure' }),
+    onProgress: () => () => undefined,
+    onLease: () => () => undefined
   })
   const file = new File(['png'], 'photo.png', { type: 'image/png' })
 
@@ -33,6 +36,7 @@ test('the preload bridge resolves a real File path and never returns it to the r
   assert.deepEqual(invoked, [
     {
       operationId: 'operation-1',
+      idempotencyKey: 'operation-1',
       sessionId: 'session-1',
       localPath: '/private/tmp/photo.png',
       fileName: 'photo.png',
@@ -54,7 +58,10 @@ test('a programmatic File without a native path is rejected before private IPC',
       return { outcome: 'network-failure' }
     },
     invokeCancel: async () => undefined,
-    onProgress: () => () => undefined
+    invokeRecover: async () => ({ outcome: 'network-failure' }),
+    invokeAbort: async () => ({ outcome: 'network-failure' }),
+    onProgress: () => () => undefined,
+    onLease: () => () => undefined
   })
 
   const result = await bridge.uploadReferenceMaterial(
@@ -80,7 +87,10 @@ test('a non-File value is rejected before path resolution or private IPC', async
       return { outcome: 'network-failure' }
     },
     invokeCancel: async () => undefined,
-    onProgress: () => () => undefined
+    invokeRecover: async () => ({ outcome: 'network-failure' }),
+    invokeAbort: async () => ({ outcome: 'network-failure' }),
+    onProgress: () => () => undefined,
+    onLease: () => () => undefined
   })
 
   const result = await bridge.uploadReferenceMaterial('operation-1', 'session-1', {} as File)
@@ -101,7 +111,10 @@ test('a path-resolution error becomes a stable rejection without private IPC', a
       return { outcome: 'network-failure' }
     },
     invokeCancel: async () => undefined,
-    onProgress: () => () => undefined
+    invokeRecover: async () => ({ outcome: 'network-failure' }),
+    invokeAbort: async () => ({ outcome: 'network-failure' }),
+    onProgress: () => () => undefined,
+    onLease: () => () => undefined
   })
 
   const result = await bridge.uploadReferenceMaterial(
@@ -125,12 +138,15 @@ test('the bridge filters progress and exposes primitive operation cancellation',
     getPathForFile: () => '/private/tmp/photo.png',
     invokeUpload: async () => pending.promise,
     invokeCancel: async (operationId) => void cancellations.push(operationId),
+    invokeRecover: async () => ({ outcome: 'network-failure' }),
+    invokeAbort: async () => ({ outcome: 'network-failure' }),
     onProgress: (next) => {
       listener = next
       return () => {
         listener = null
       }
-    }
+    },
+    onLease: () => () => undefined
   })
   const completion = bridge.uploadReferenceMaterial(
     'operation-1',
@@ -148,4 +164,66 @@ test('the bridge filters progress and exposes primitive operation cancellation',
   assert.deepEqual(progress, [2])
   assert.deepEqual(cancellations, ['operation-1'])
   assert.equal(listener, null)
+})
+
+test('restart recovery carries a cancellable operation identity across the bridge', async () => {
+  const invoked: unknown[] = []
+  const bridge = createCreationUploadBridge({
+    getPathForFile: () => '',
+    invokeUpload: async () => ({ outcome: 'network-failure' }),
+    invokeCancel: async () => undefined,
+    invokeRecover: async (request) => {
+      invoked.push(request)
+      return { outcome: 'network-failure' }
+    },
+    invokeAbort: async () => ({ outcome: 'network-failure' }),
+    onProgress: () => () => undefined,
+    onLease: () => () => undefined
+  })
+  const recovery = {
+    uploadId: 'upload-1',
+    idempotencyKey: 'local-1',
+    sessionId: 'session-1',
+    fileName: 'photo.png',
+    declaredKind: 'image' as const,
+    declaredMimeType: 'image/png',
+    declaredByteSize: 3,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  }
+
+  await bridge.recoverReferenceMaterialUpload('recovery-operation-1', recovery)
+
+  assert.deepEqual(invoked, [{ operationId: 'recovery-operation-1', recovery }])
+})
+
+test('durable upload abort uses its own bridge command', async () => {
+  const invoked: unknown[] = []
+  const bridge = createCreationUploadBridge({
+    getPathForFile: () => '',
+    invokeUpload: async () => ({ outcome: 'network-failure' }),
+    invokeCancel: async () => undefined,
+    invokeRecover: async () => ({ outcome: 'network-failure' }),
+    invokeAbort: async (request) => {
+      invoked.push(request)
+      return { outcome: 'succeeded', value: null }
+    },
+    onProgress: () => () => undefined,
+    onLease: () => () => undefined
+  })
+  const recovery = {
+    uploadId: 'upload-1',
+    idempotencyKey: 'local-1',
+    sessionId: 'session-1',
+    fileName: 'photo.png',
+    declaredKind: 'image' as const,
+    declaredMimeType: 'image/png',
+    declaredByteSize: 3,
+    putExpiresAt: '2026-09-09T09:00:00Z',
+    finalizeExpiresAt: '2026-09-09T09:30:00Z'
+  }
+
+  await bridge.abortReferenceMaterialUpload('abort-operation-1', recovery)
+
+  assert.deepEqual(invoked, [{ operationId: 'abort-operation-1', recovery }])
 })

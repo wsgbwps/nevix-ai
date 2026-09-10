@@ -30,6 +30,30 @@ type MaterialService struct {
 	storage  *ObjectStorageConnectionService
 	prober   domain.MediaProber
 	runner   domain.WriteRunner
+	now      func() time.Time
+}
+
+const referenceMaterialImmediateCleanupTimeout = 30 * time.Second
+
+type uploadProbeReader struct {
+	domain.ReadSeekCloser
+	providerErr error
+}
+
+func (r *uploadProbeReader) Read(p []byte) (int, error) {
+	n, err := r.ReadSeekCloser.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		r.providerErr = err
+	}
+	return n, err
+}
+
+func (r *uploadProbeReader) Seek(offset int64, whence int) (int64, error) {
+	position, err := r.ReadSeekCloser.Seek(offset, whence)
+	if err != nil {
+		r.providerErr = err
+	}
+	return position, err
 }
 
 func NewMaterialService(
@@ -41,10 +65,14 @@ func NewMaterialService(
 	storage *ObjectStorageConnectionService,
 	prober domain.MediaProber,
 	runner domain.WriteRunner,
+	now func() time.Time,
 ) *MaterialService {
+	if now == nil {
+		now = time.Now
+	}
 	return &MaterialService{
 		repos: repos, sessions: sessions, uploads: uploads, tasks: tasks,
-		results: results, storage: storage, prober: prober, runner: runner,
+		results: results, storage: storage, prober: prober, runner: runner, now: now,
 	}
 }
 
@@ -85,7 +113,7 @@ func (s *MaterialService) CreateUpload(ctx context.Context, owner, sessionID dom
 	if _, err := s.sessions.Get(ctx, owner, sessionID); err != nil {
 		return ReferenceMaterialUploadAuthorization{}, err
 	}
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	payload, _ := json.Marshal(struct {
 		SessionID        string      `json:"session_id"`
 		FileName         string      `json:"file_name"`
@@ -144,9 +172,15 @@ func (s *MaterialService) authorizeUpload(ctx context.Context, upload domain.Ref
 	if !bytes.Equal(upload.PayloadHash, payloadHash) {
 		return ReferenceMaterialUploadAuthorization{}, domain.ErrIdempotencyPayloadConflict
 	}
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	authorization := ReferenceMaterialUploadAuthorization{Upload: upload, Created: created}
 	if upload.Status == domain.ReferenceMaterialUploadFinalized {
+		return authorization, nil
+	}
+	if upload.Status == domain.ReferenceMaterialUploadTerminal {
+		return ReferenceMaterialUploadAuthorization{}, domain.ErrReferenceMaterialUploadTerminal
+	}
+	if upload.Status == domain.ReferenceMaterialUploadVerifying {
 		return authorization, nil
 	}
 	if !now.Before(upload.FinalizeDeadline) {
@@ -165,7 +199,7 @@ func (s *MaterialService) authorizeUpload(ctx context.Context, upload domain.Ref
 	}
 	presigned, err := store.PresignPut(ctx, domain.PresignPutRequest{
 		Key: upload.ObjectKey, ContentType: upload.DeclaredMIMEType,
-		UploadID: upload.ID.String(), ExpiresIn: time.Until(upload.PutDeadline),
+		UploadID: upload.ID.String(), ExpiresIn: upload.PutDeadline.Sub(now),
 	})
 	if err != nil {
 		return ReferenceMaterialUploadAuthorization{}, domain.ErrObjectStorageUnavailable
@@ -209,9 +243,17 @@ func (s *MaterialService) GetUpload(ctx context.Context, owner, id domain.UUID) 
 	if err != nil {
 		return ReferenceMaterialUploadStatus{}, err
 	}
-	if upload.Status != domain.ReferenceMaterialUploadFinalized && !time.Now().UTC().Before(upload.FinalizeDeadline) {
-		return ReferenceMaterialUploadStatus{}, domain.ErrReferenceMaterialUploadExpired
+	if (upload.Status == domain.ReferenceMaterialUploadPending || upload.Status == domain.ReferenceMaterialUploadVerifying) && !s.now().UTC().Before(upload.FinalizeDeadline) {
+		status, err := s.terminalizeUpload(ctx, owner, id)
+		if err != nil {
+			return ReferenceMaterialUploadStatus{}, err
+		}
+		return status, nil
 	}
+	return s.statusFromUpload(ctx, owner, upload)
+}
+
+func (s *MaterialService) statusFromUpload(ctx context.Context, owner domain.UUID, upload domain.ReferenceMaterialUpload) (ReferenceMaterialUploadStatus, error) {
 	status := ReferenceMaterialUploadStatus{Upload: upload}
 	if upload.Status == domain.ReferenceMaterialUploadFinalized {
 		material, err := s.repos.GetForRead(ctx, owner, upload.MaterialID)
@@ -224,41 +266,50 @@ func (s *MaterialService) GetUpload(ctx context.Context, owner, id domain.UUID) 
 }
 
 func (s *MaterialService) FinalizeUpload(ctx context.Context, owner, id domain.UUID) (ReferenceMaterialUploadStatus, error) {
-	upload, err := s.uploads.GetForOwner(ctx, owner, id)
+	upload, token, terminalized, err := s.claimVerification(ctx, owner, id)
 	if err != nil {
 		return ReferenceMaterialUploadStatus{}, err
 	}
 	if upload.Status == domain.ReferenceMaterialUploadFinalized {
-		return s.GetUpload(ctx, owner, id)
+		return s.statusFromUpload(ctx, owner, upload)
 	}
-	if !time.Now().UTC().Before(upload.FinalizeDeadline) {
-		return ReferenceMaterialUploadStatus{}, domain.ErrReferenceMaterialUploadExpired
+	if terminalized {
+		s.cleanupUpload(ctx, upload, nil)
+		return ReferenceMaterialUploadStatus{}, domain.ErrReferenceMaterialUploadTerminal
 	}
 	store, _, err := s.storage.ResolveStore(ctx)
 	if err != nil {
-		return ReferenceMaterialUploadStatus{}, err
+		return ReferenceMaterialUploadStatus{}, s.releaseVerification(ctx, upload, token, domain.ErrObjectStorageUnavailable, nil)
 	}
 	info, err := store.Head(ctx, upload.ObjectKey)
 	if err != nil {
 		if errors.Is(err, domain.ErrBlobNotFound) {
-			return ReferenceMaterialUploadStatus{}, domain.ErrReferenceMaterialUploadMetadataMismatch
+			if s.now().UTC().Before(upload.PutDeadline) {
+				return ReferenceMaterialUploadStatus{}, s.releaseVerification(ctx, upload, token, domain.ErrReferenceMaterialUploadPutRequired, store)
+			}
+			return ReferenceMaterialUploadStatus{}, s.rejectVerification(ctx, upload, token, domain.ErrReferenceMaterialUploadMetadataMismatch, store)
 		}
-		return ReferenceMaterialUploadStatus{}, domain.ErrObjectStorageUnavailable
+		return ReferenceMaterialUploadStatus{}, s.releaseVerification(ctx, upload, token, domain.ErrObjectStorageUnavailable, store)
 	}
 	if info.ByteSize != upload.DeclaredByteSize {
-		return ReferenceMaterialUploadStatus{}, domain.ErrReferenceMaterialUploadSizeMismatch
+		return ReferenceMaterialUploadStatus{}, s.rejectVerification(ctx, upload, token, domain.ErrReferenceMaterialUploadSizeMismatch, store)
 	}
 	if info.ContentType != upload.DeclaredMIMEType || info.Metadata[domain.UploadIDMetadataKey] != upload.ID.String() {
-		return ReferenceMaterialUploadStatus{}, domain.ErrReferenceMaterialUploadMetadataMismatch
+		return ReferenceMaterialUploadStatus{}, s.rejectVerification(ctx, upload, token, domain.ErrReferenceMaterialUploadMetadataMismatch, store)
 	}
 	material, err := s.formMaterial(ctx, store, upload.MaterialID, upload.SessionID, upload.FileName, upload.ObjectKey, upload.DeclaredByteSize, &upload.DeclaredKind, upload.ClaimsVersion)
 	if err != nil {
-		return ReferenceMaterialUploadStatus{}, err
+		if isTransientUploadVerificationError(err) {
+			return ReferenceMaterialUploadStatus{}, s.releaseVerification(ctx, upload, token, err, store)
+		}
+		return ReferenceMaterialUploadStatus{}, s.rejectVerification(ctx, upload, token, err, store)
 	}
 	var finalized domain.ReferenceMaterialUpload
 	var persisted domain.ReferenceMaterial
+	var postErr error
+	var cleanup bool
 	err = s.runner.Run(ctx, func(scope domain.WriteScope) error {
-		locked, err := s.uploads.LockForFinalize(ctx, scope.Tx(), owner, id)
+		locked, err := s.uploads.LockForMutation(ctx, scope.Tx(), owner, id)
 		if err != nil {
 			return err
 		}
@@ -267,28 +318,222 @@ func (s *MaterialService) FinalizeUpload(ctx context.Context, owner, id domain.U
 			finalized = locked
 			return err
 		}
-		if _, err := s.sessions.GetInTx(ctx, scope.Tx(), owner, locked.SessionID); err != nil {
+		if locked.Status == domain.ReferenceMaterialUploadTerminal {
+			finalized = locked
+			postErr = domain.ErrReferenceMaterialUploadTerminal
+			return nil
+		}
+		if locked.Status != domain.ReferenceMaterialUploadVerifying || locked.VerificationToken == nil || *locked.VerificationToken != token {
+			postErr = domain.ErrReferenceMaterialUploadVerifying
+			return nil
+		}
+		now := s.now().UTC()
+		eligible, err := s.uploads.CreatorCanFinalize(ctx, scope.Tx(), owner, locked.SessionID)
+		if err != nil {
 			return err
 		}
-		if !time.Now().UTC().Before(locked.FinalizeDeadline) {
-			return domain.ErrReferenceMaterialUploadExpired
+		if !eligible || !now.Before(locked.FinalizeDeadline) {
+			if err := s.uploads.MarkTerminal(ctx, scope.Tx(), owner, id, &token, now); err != nil {
+				return err
+			}
+			locked.Status = domain.ReferenceMaterialUploadTerminal
+			locked.TerminalAt = &now
+			locked.VerificationToken = nil
+			locked.VerificationLeaseUntil = nil
+			locked.CleanupAttemptCount = 1
+			nextCleanup := now.Add(referenceMaterialCleanupBackoff(1))
+			locked.CleanupNextAttemptAt = &nextCleanup
+			finalized = locked
+			cleanup = true
+			postErr = domain.ErrReferenceMaterialUploadTerminal
+			return nil
 		}
 		if err := s.repos.Insert(ctx, scope.Tx(), &material); err != nil {
 			return err
 		}
-		finalizedAt := time.Now().UTC()
-		if err := s.uploads.MarkFinalized(ctx, scope.Tx(), owner, id, finalizedAt); err != nil {
+		finalizedAt := now
+		if err := s.uploads.MarkFinalized(ctx, scope.Tx(), owner, id, token, finalizedAt); err != nil {
 			return err
 		}
 		locked.Status = domain.ReferenceMaterialUploadFinalized
 		locked.FinalizedAt = &finalizedAt
+		locked.VerificationToken = nil
+		locked.VerificationLeaseUntil = nil
 		finalized, persisted = locked, material
 		return nil
 	})
 	if err != nil {
 		return ReferenceMaterialUploadStatus{}, err
 	}
+	if cleanup {
+		s.cleanupUpload(ctx, finalized, store)
+	}
+	if postErr != nil {
+		return ReferenceMaterialUploadStatus{}, postErr
+	}
 	return ReferenceMaterialUploadStatus{Upload: finalized, Material: &persisted}, nil
+}
+
+// AbortUpload terminalizes an unfinished authority before issuing one exact-key
+// best-effort delete. Finalized uploads are immutable and simply replay.
+func (s *MaterialService) AbortUpload(ctx context.Context, owner, id domain.UUID) (ReferenceMaterialUploadStatus, error) {
+	return s.terminalizeUpload(ctx, owner, id)
+}
+
+func (s *MaterialService) claimVerification(ctx context.Context, owner, id domain.UUID) (domain.ReferenceMaterialUpload, domain.UUID, bool, error) {
+	var upload domain.ReferenceMaterialUpload
+	var token domain.UUID
+	terminalized := false
+	var postErr error
+	err := s.runner.Run(ctx, func(scope domain.WriteScope) error {
+		locked, err := s.uploads.LockForMutation(ctx, scope.Tx(), owner, id)
+		if err != nil {
+			return err
+		}
+		now := s.now().UTC()
+		switch locked.Status {
+		case domain.ReferenceMaterialUploadFinalized:
+			upload = locked
+			return nil
+		case domain.ReferenceMaterialUploadTerminal:
+			postErr = domain.ErrReferenceMaterialUploadTerminal
+			return nil
+		case domain.ReferenceMaterialUploadVerifying:
+			if locked.VerificationLeaseUntil != nil && now.Before(*locked.VerificationLeaseUntil) {
+				postErr = domain.ErrReferenceMaterialUploadVerifying
+				return nil
+			}
+		}
+		eligible, err := s.uploads.CreatorCanFinalize(ctx, scope.Tx(), owner, locked.SessionID)
+		if err != nil {
+			return err
+		}
+		if !eligible || !now.Before(locked.FinalizeDeadline) {
+			if err := s.uploads.MarkTerminal(ctx, scope.Tx(), owner, id, locked.VerificationToken, now); err != nil {
+				return err
+			}
+			locked.Status = domain.ReferenceMaterialUploadTerminal
+			locked.TerminalAt = &now
+			locked.VerificationToken = nil
+			locked.VerificationLeaseUntil = nil
+			locked.CleanupAttemptCount = 1
+			nextCleanup := now.Add(referenceMaterialCleanupBackoff(1))
+			locked.CleanupNextAttemptAt = &nextCleanup
+			upload = locked
+			terminalized = true
+			return nil
+		}
+		token = domain.NewUUID()
+		leaseUntil := now.Add(domain.ReferenceMaterialVerificationLifetime)
+		if err := s.uploads.MarkVerifying(ctx, scope.Tx(), owner, id, token, leaseUntil); err != nil {
+			return err
+		}
+		locked.Status = domain.ReferenceMaterialUploadVerifying
+		locked.VerificationToken = &token
+		locked.VerificationLeaseUntil = &leaseUntil
+		upload = locked
+		return nil
+	})
+	if err != nil {
+		return domain.ReferenceMaterialUpload{}, domain.UUID{}, false, err
+	}
+	if postErr != nil {
+		return domain.ReferenceMaterialUpload{}, domain.UUID{}, false, postErr
+	}
+	return upload, token, terminalized, nil
+}
+
+func (s *MaterialService) terminalizeUpload(ctx context.Context, owner, id domain.UUID) (ReferenceMaterialUploadStatus, error) {
+	var upload domain.ReferenceMaterialUpload
+	var cleanup bool
+	err := s.runner.Run(ctx, func(scope domain.WriteScope) error {
+		locked, err := s.uploads.LockForMutation(ctx, scope.Tx(), owner, id)
+		if err != nil {
+			return err
+		}
+		upload = locked
+		if locked.Status == domain.ReferenceMaterialUploadFinalized || locked.Status == domain.ReferenceMaterialUploadTerminal {
+			return nil
+		}
+		now := s.now().UTC()
+		if err := s.uploads.MarkTerminal(ctx, scope.Tx(), owner, id, locked.VerificationToken, now); err != nil {
+			return err
+		}
+		upload.Status = domain.ReferenceMaterialUploadTerminal
+		upload.TerminalAt = &now
+		upload.VerificationToken = nil
+		upload.VerificationLeaseUntil = nil
+		upload.CleanupAttemptCount = 1
+		nextCleanup := now.Add(referenceMaterialCleanupBackoff(1))
+		upload.CleanupNextAttemptAt = &nextCleanup
+		cleanup = true
+		return nil
+	})
+	if err != nil {
+		return ReferenceMaterialUploadStatus{}, err
+	}
+	if cleanup {
+		s.cleanupUpload(ctx, upload, nil)
+	}
+	return s.statusFromUpload(ctx, owner, upload)
+}
+
+func (s *MaterialService) rejectVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.DirectUploadBlobStore) error {
+	now := s.now().UTC()
+	err := s.runner.Run(ctx, func(scope domain.WriteScope) error {
+		return s.uploads.MarkTerminal(ctx, scope.Tx(), upload.OwnerID, upload.ID, &token, now)
+	})
+	if err != nil {
+		return err
+	}
+	upload.Status = domain.ReferenceMaterialUploadTerminal
+	upload.TerminalAt = &now
+	upload.CleanupAttemptCount = 1
+	nextCleanup := now.Add(referenceMaterialCleanupBackoff(1))
+	upload.CleanupNextAttemptAt = &nextCleanup
+	s.cleanupUpload(ctx, upload, store)
+	return verdict
+}
+
+func (s *MaterialService) releaseVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.DirectUploadBlobStore) error {
+	if !s.now().UTC().Before(upload.FinalizeDeadline) {
+		return s.rejectVerification(ctx, upload, token, domain.ErrReferenceMaterialUploadExpired, store)
+	}
+	err := s.runner.Run(ctx, func(scope domain.WriteScope) error {
+		return s.uploads.MarkPending(ctx, scope.Tx(), upload.OwnerID, upload.ID, token)
+	})
+	if err != nil {
+		return err
+	}
+	return verdict
+}
+
+func (s *MaterialService) cleanupUpload(ctx context.Context, upload domain.ReferenceMaterialUpload, store domain.DirectUploadBlobStore) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), referenceMaterialImmediateCleanupTimeout)
+	defer cancel()
+	if store == nil {
+		resolved, _, err := s.storage.ResolveStore(cleanupCtx)
+		if err != nil {
+			return
+		}
+		store = resolved
+	}
+	if err := store.Delete(cleanupCtx, upload.ObjectKey); err != nil {
+		return
+	}
+	if s.now().UTC().Before(upload.FinalizeDeadline) {
+		return
+	}
+	confirmedAt := s.now().UTC()
+	if err := s.runner.Run(cleanupCtx, func(scope domain.WriteScope) error {
+		return s.uploads.MarkCleanupConfirmed(cleanupCtx, scope.Tx(), upload.ID, upload.CleanupAttemptCount, confirmedAt)
+	}); err != nil {
+		slog.Warn(OrphanBlobLogWarning, "code", "cleanup_confirmation_failed")
+	}
+}
+
+func isTransientUploadVerificationError(err error) bool {
+	return errors.Is(err, domain.ErrObjectStorageUnavailable)
 }
 
 func (s *MaterialService) CreateFromResult(ctx context.Context, owner, sessionID, taskID domain.UUID, slotIndex int, fileName string) (domain.ReferenceMaterial, error) {
@@ -385,7 +630,11 @@ func (s *MaterialService) formMaterial(ctx context.Context, store domain.BlobSto
 	if _, err := reader.Seek(0, io.SeekStart); err != nil {
 		return domain.ReferenceMaterial{}, domain.ErrObjectStorageUnavailable
 	}
-	identified, err := s.prober.Identify(reader)
+	probeReader := &uploadProbeReader{ReadSeekCloser: reader}
+	identified, err := s.prober.Identify(probeReader)
+	if probeReader.providerErr != nil {
+		return domain.ReferenceMaterial{}, domain.ErrObjectStorageUnavailable
+	}
 	if err != nil {
 		return domain.ReferenceMaterial{}, err
 	}
@@ -459,23 +708,48 @@ func orphanLog(_ error) {
 	slog.Warn(OrphanBlobLogWarning, "code", "object_storage_unavailable")
 }
 
-// Delete drops the row inside a verified transaction and schedules blob
-// cleanup strictly after commit.
+// Delete drops the row and durably schedules exact-key blob cleanup in one
+// transaction; the immediate provider delete runs only after commit.
 func (s *MaterialService) Delete(ctx context.Context, owner, id domain.UUID) error {
-	if _, err := s.repos.GetForRead(ctx, owner, id); err != nil {
-		return err
-	}
-	store, _, err := s.storage.ResolveStore(ctx)
+	material, err := s.repos.GetForRead(ctx, owner, id)
 	if err != nil {
 		return err
+	}
+	store, connection, err := s.storage.ResolveStore(ctx)
+	if err != nil {
+		return err
+	}
+	now := s.now().UTC()
+	createdAt := now.Add(-domain.ReferenceMaterialFinalizeLifetime)
+	finalizedAt := now
+	cleanupNextAttemptAt := now.Add(time.Minute)
+	cleanupID := domain.NewUUID()
+	// Result-derived materials have no direct-upload row, so deletion creates
+	// the same finalized tombstone the exact-key cleanup worker already owns.
+	cleanup := domain.ReferenceMaterialUpload{
+		ID: cleanupID, OwnerID: owner, SessionID: material.SessionID,
+		MaterialID: material.ID, ObjectKey: material.BlobKey, FileName: material.FileName,
+		DeclaredKind: material.Kind, DeclaredMIMEType: material.MimeType,
+		DeclaredByteSize: material.ByteSize, ClaimsVersion: material.ClaimsVersion,
+		IdempotencyKey: "material-cleanup-" + cleanupID.String(),
+		PayloadHash:    material.ChecksumSHA256, ConnectionRevision: connection.Revision,
+		PutDeadline:      createdAt.Add(domain.ReferenceMaterialPutLifetime),
+		FinalizeDeadline: now, Status: domain.ReferenceMaterialUploadFinalized,
+		CreatedAt: createdAt, FinalizedAt: &finalizedAt, CleanupAttemptCount: 1,
+		CleanupNextAttemptAt: &cleanupNextAttemptAt,
 	}
 	return s.runner.Run(ctx, func(scope domain.WriteScope) error {
 		blobKey, err := s.repos.Delete(ctx, scope.Tx(), owner, id)
 		if err != nil {
 			return err
 		}
+		if err := s.uploads.ScheduleFinalizedMaterialCleanup(ctx, scope.Tx(), &cleanup); err != nil {
+			return err
+		}
 		scope.AfterCommit(func() {
-			if delErr := store.Delete(context.WithoutCancel(ctx), blobKey); delErr != nil {
+			deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), referenceMaterialImmediateCleanupTimeout)
+			defer cancel()
+			if delErr := store.Delete(deleteCtx, blobKey); delErr != nil {
 				orphanLog(delErr)
 			}
 		})

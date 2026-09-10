@@ -4,9 +4,15 @@ import { EVENT_CHANNEL_ALLOWLIST, INVOKE_CHANNEL_ALLOWLIST } from '../shared/ipc
 import {
   CREATION_REFERENCE_MATERIAL_UPLOAD_CANCEL_CHANNEL,
   CREATION_REFERENCE_MATERIAL_UPLOAD_CHANNEL,
+  CREATION_REFERENCE_MATERIAL_UPLOAD_ABORT_CHANNEL,
+  CREATION_REFERENCE_MATERIAL_UPLOAD_LEASE_CHANNEL,
   CREATION_REFERENCE_MATERIAL_UPLOAD_PROGRESS_CHANNEL,
+  CREATION_REFERENCE_MATERIAL_UPLOAD_RECOVER_CHANNEL,
+  type CreationReferenceMaterialUploadLease,
+  type CreationReferenceMaterialUploadAbortResult,
   type CreationReferenceMaterialUploadProgress,
   type CreationReferenceMaterialUploadRequest,
+  type CreationReferenceMaterialUploadRecoveryRequest,
   type CreationReferenceMaterialUploadResult
 } from '../shared/ipc/creation/types'
 import { createCreationUploadBridge } from './creation-upload'
@@ -46,6 +52,16 @@ const creation = createCreationUploadBridge({
     ) as Promise<CreationReferenceMaterialUploadResult>,
   invokeCancel: (operationId) =>
     ipcRenderer.invoke(CREATION_REFERENCE_MATERIAL_UPLOAD_CANCEL_CHANNEL, { operationId }),
+  invokeRecover: (request: CreationReferenceMaterialUploadRecoveryRequest) =>
+    ipcRenderer.invoke(
+      CREATION_REFERENCE_MATERIAL_UPLOAD_RECOVER_CHANNEL,
+      request
+    ) as Promise<CreationReferenceMaterialUploadResult>,
+  invokeAbort: (request: CreationReferenceMaterialUploadRecoveryRequest) =>
+    ipcRenderer.invoke(
+      CREATION_REFERENCE_MATERIAL_UPLOAD_ABORT_CHANNEL,
+      request
+    ) as Promise<CreationReferenceMaterialUploadAbortResult>,
   onProgress: (listener) => {
     const handler = (
       _: Electron.IpcRendererEvent,
@@ -56,6 +72,15 @@ const creation = createCreationUploadBridge({
     ipcRenderer.on(CREATION_REFERENCE_MATERIAL_UPLOAD_PROGRESS_CHANNEL, handler)
     return () =>
       ipcRenderer.removeListener(CREATION_REFERENCE_MATERIAL_UPLOAD_PROGRESS_CHANNEL, handler)
+  },
+  onLease: (listener) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      lease: CreationReferenceMaterialUploadLease
+    ): void => listener(lease)
+    ipcRenderer.on(CREATION_REFERENCE_MATERIAL_UPLOAD_LEASE_CHANNEL, handler)
+    return () =>
+      ipcRenderer.removeListener(CREATION_REFERENCE_MATERIAL_UPLOAD_LEASE_CHANNEL, handler)
   }
 })
 
