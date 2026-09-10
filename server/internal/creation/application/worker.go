@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -221,33 +220,23 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	if until := w.holdUntil(pressure); until.After(time.Now()) {
 		return w.reschedule(ctx, queueID, until, true)
 	}
-	// Resolve the decrypted Provider Key before the marker transaction: a
-	// resolution failure means nothing external executed, so the item holds
-	// like a pause (budget not consumed) instead of converging as
-	// indeterminate. The plaintext exists only until the call returns.
+	request, err := w.buildSubmitRequest(ctx, task, media)
+	if err != nil {
+		return w.rejectReferencePreparation(ctx, queueID, task.ID, state, err)
+	}
+	prepared, err := w.gateway.PrepareReferences(ctx, job.ID, request)
+	if err != nil {
+		if len(request.References) == 0 {
+			return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
+		}
+		return w.rejectReferencePreparation(ctx, queueID, task.ID, state, err)
+	}
+	// Resolve the decrypted Provider Key only after every reference is ready.
+	// A resolution failure means nothing external executed, so the item holds
+	// without spending the submit budget. The plaintext exists only until the
+	// call returns.
 	credential, err := w.credentials.ActiveCallCredential(ctx)
 	if err != nil {
-		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
-	}
-	store, _, err := w.storage.ResolveStore(ctx)
-	if err != nil {
-		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
-	}
-	request, err := w.buildSubmitRequest(ctx, store, task, media)
-	if err != nil {
-		if errors.Is(err, domain.ErrMaterialNotFound) || errors.Is(err, domain.ErrSessionNotFound) || errors.Is(err, domain.ErrBlobNotFound) {
-			reason := domain.ReasonInvalidInput
-			return w.applyEvent(ctx, queueID, task.ID, state, domain.KernelEvent{
-				Kind:   domain.EventSubmitRejected,
-				Reason: &reason,
-				Diagnostic: domain.NewFailureDiagnostic(
-					domain.DiagnosticSourceStorage,
-					"reference_material_unavailable",
-					"A referenced material is no longer available",
-					nil, "", "",
-				),
-			}, time.Time{})
-		}
 		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
 	}
 
@@ -268,7 +257,7 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	state.SubmitAttempts = attempts
 
 	// External submit, outside any transaction.
-	outcome, submitErr := w.gateway.Submit(ctx, credential, request)
+	outcome, submitErr := w.gateway.Submit(ctx, credential, prepared)
 	switch {
 	case submitErr == nil:
 		w.recordSuccess(pressure)
@@ -329,9 +318,9 @@ func (w *TaskWorker) holdSubmitRetry(ctx context.Context, queueID, jobID domain.
 	})
 }
 
-// buildSubmitRequest assembles the transport-ready request from the frozen
+// buildSubmitRequest assembles the provider-neutral request from the frozen
 // specification and the creator's stored materials.
-func (w *TaskWorker) buildSubmitRequest(ctx context.Context, store domain.BlobStore, task domain.GenerationTask, media domain.MediaType) (domain.SubmitRequest, error) {
+func (w *TaskWorker) buildSubmitRequest(ctx context.Context, task domain.GenerationTask, media domain.MediaType) (domain.SubmitRequest, error) {
 	req := domain.SubmitRequest{
 		Media:      media,
 		Model:      task.Spec.Model,
@@ -341,39 +330,41 @@ func (w *TaskWorker) buildSubmitRequest(ctx context.Context, store domain.BlobSt
 		Ratio:      task.Spec.Ratio,
 		Resolution: task.Spec.Resolution,
 		DurationS:  task.Spec.DurationSeconds,
-		References: make([]domain.GatewayReference, 0, len(task.Spec.References)),
+		References: make([]domain.ReferenceSource, 0, len(task.Spec.References)),
 	}
 	if len(task.Spec.References) == 0 {
 		return req, nil
 	}
 	for _, reference := range task.Spec.References {
-		data, err := w.referenceDataURL(ctx, store, task.OwnerID, reference.MaterialID)
+		material, err := w.materials.GetForRead(ctx, task.OwnerID, reference.MaterialID)
 		if err != nil {
 			return domain.SubmitRequest{}, err
 		}
-		req.References = append(req.References, domain.GatewayReference{Role: reference.Role, Kind: reference.Kind, Data: data})
+		if material.Kind != reference.Kind || material.ClaimsVersion != reference.ClaimsVersion {
+			return domain.SubmitRequest{}, domain.ErrInvalidReferenceSource
+		}
+		source, err := w.storage.ReferenceSource(material, reference.Role)
+		if err != nil {
+			return domain.SubmitRequest{}, err
+		}
+		req.References = append(req.References, source)
 	}
 	return req, nil
 }
 
-// referenceDataURL loads one creator-owned material and encodes it as a data
-// URL, bounded by the kind's ingestion ceiling.
-func (w *TaskWorker) referenceDataURL(ctx context.Context, store domain.BlobStore, owner, materialID domain.UUID) (string, error) {
-	material, err := w.materials.GetForRead(ctx, owner, materialID)
-	if err != nil {
-		return "", err
+func (w *TaskWorker) rejectReferencePreparation(ctx context.Context, queueID, taskID domain.UUID, state domain.KernelState, err error) error {
+	reason := domain.ReasonInternalError
+	code := "reference_preparation_failed"
+	message := "A referenced material could not be prepared"
+	if errors.Is(err, domain.ErrMaterialNotFound) || errors.Is(err, domain.ErrSessionNotFound) || errors.Is(err, domain.ErrBlobNotFound) {
+		reason = domain.ReasonInvalidInput
+		code = "reference_material_unavailable"
+		message = "A referenced material is no longer available"
 	}
-	reader, _, err := store.Open(ctx, material.BlobKey, domain.FullBlobRange)
-	if err != nil {
-		return "", err
-	}
-	defer reader.Close()
-	limited := io.LimitReader(reader, material.Kind.SizeLimit()+1)
-	raw, err := io.ReadAll(limited)
-	if err != nil || int64(len(raw)) > material.Kind.SizeLimit() {
-		return "", domain.ErrObjectStorageUnavailable
-	}
-	return "data:" + material.MimeType + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+	return w.applyEvent(ctx, queueID, taskID, state, domain.KernelEvent{
+		Kind: domain.EventSubmitRejected, Reason: &reason,
+		Diagnostic: domain.NewFailureDiagnostic(domain.DiagnosticSourceStorage, code, message, nil, "", ""),
+	}, time.Time{})
 }
 
 // drivePoll polls one accepted external job and converges its verdict.

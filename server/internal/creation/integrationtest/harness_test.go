@@ -54,19 +54,20 @@ func integrationRequested() bool { return os.Getenv(requestedEnvVar) == "1" }
 // for assertions and repairs, the identity_app runtime pool both Modules
 // share, and an HTTP surface mounted exactly like cmd/server/main.go.
 type harness struct {
-	t            *testing.T
-	ctx          context.Context
-	ownerPool    *pgxpool.Pool // DDL credential — fixtures/assertions only (ADR-0014)
-	runtimePool  *pgxpool.Pool // authenticates directly as identity_app
-	serverURL    string
-	closeServer  func()
-	secretsDir   string
-	kapon        *fakeKapon
-	identity     *identity.Module // narrow seams injected into Creation, exposed for direct NewModule scenarios
-	creation     *creation.Module
-	directStore  *fakeDirectUploadStore
-	storageMu    sync.Mutex
-	storageReady bool
+	t                  *testing.T
+	ctx                context.Context
+	ownerPool          *pgxpool.Pool // DDL credential — fixtures/assertions only (ADR-0014)
+	runtimePool        *pgxpool.Pool // authenticates directly as identity_app
+	serverURL          string
+	closeServer        func()
+	secretsDir         string
+	kapon              *fakeKapon
+	identity           *identity.Module // narrow seams injected into Creation, exposed for direct NewModule scenarios
+	creation           *creation.Module
+	directStore        *fakeDirectUploadStore
+	referenceTransport *fakeReferenceTransport
+	storageMu          sync.Mutex
+	storageReady       bool
 	// Bounded client for smoke flows so an accidental server stall fails
 	// fast instead of hanging the whole package past the go-test alarm.
 	smokeClient *http.Client
@@ -78,6 +79,7 @@ type harnessOptions struct {
 	// surface so task-lifecycle scenarios observe real convergence.
 	runWorkers            bool
 	objectStorageVerifier creation.ObjectStorageVerifier
+	referenceTransport    *fakeReferenceTransport
 	now                   func() time.Time
 }
 
@@ -142,6 +144,10 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		t.Fatalf("harness config must pass LoadConfig: %v", err)
 	}
 	directStore := newFakeDirectUploadStore(t)
+	referenceTransport := opts.referenceTransport
+	if referenceTransport == nil {
+		referenceTransport = &fakeReferenceTransport{}
+	}
 	objectStorageVerifier := opts.objectStorageVerifier
 	if objectStorageVerifier == nil {
 		objectStorageVerifier = successfulObjectStorageVerifier(t)
@@ -154,6 +160,9 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		DirectUploadStoreFactory: func(location creation.ObjectStorageLocation, _ creation.ObjectStorageCredentials) (creation.DirectUploadBlobStore, error) {
 			directStore.setProvider(location.Provider)
 			return directStore, nil
+		},
+		ReferenceTransportFactory: func(creation.ObjectStorageLocation, creation.ObjectStorageCredentials) (creation.ReferenceTransport, error) {
+			return referenceTransport, nil
 		},
 	}
 
@@ -181,7 +190,7 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		}
 	})
 
-	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon, identity: identityModule, creation: creationModule, directStore: directStore}
+	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon, identity: identityModule, creation: creationModule, directStore: directStore, referenceTransport: referenceTransport}
 	h.startServer(router)
 	t.Cleanup(h.closeServer)
 	return h

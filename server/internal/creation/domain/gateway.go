@@ -114,10 +114,26 @@ func ClassifyFailureReason(err error) FailureReason {
 	return ReasonTemporarilyUnavailable
 }
 
-// SubmitRequest is one external execution request built from the frozen
-// specification. Reference payloads are transport-ready data URLs the kernel
-// assembled from its own storage — the gateway never reads task rows.
+// SubmitRequest is one provider-neutral execution request built from the
+// frozen specification. References expose only immutable facts and fresh
+// sequential streams; the application never constructs transport URLs.
 type SubmitRequest struct {
+	Media      MediaType
+	Model      string
+	Mode       string
+	Prompt     string
+	Quantity   int
+	Ratio      *string
+	Resolution *string
+	DurationS  *int
+	References []ReferenceSource
+}
+
+// PreparedSubmitRequest is the small, in-memory-only request returned by a
+// ProviderGateway after every reference has become a provider fetch URL. The
+// application passes this value through unchanged and never persists or logs
+// it.
+type PreparedSubmitRequest struct {
 	Media      MediaType
 	Model      string
 	Mode       string
@@ -152,11 +168,12 @@ func OutputMimeAccepted(media MediaType, mime string) bool {
 	return true
 }
 
-// GatewayReference is one ordered reference with its role and data URL.
+// GatewayReference is one ordered prepared reference with its original role,
+// kind, and provider fetch URL.
 type GatewayReference struct {
 	Role DraftRole
 	Kind Kind
-	Data string // data URL
+	URL  string
 }
 
 // SubmitOutcome is the synchronous portion of a submission: async providers
@@ -189,9 +206,12 @@ type PollOutcome struct {
 // authenticates one call; adapters set the Authorization header from it and
 // never persist, log, or wrap it into an error.
 type ProviderGateway interface {
+	// PrepareReferences streams every reference through the adapter-owned
+	// ReferenceTransport before any provider submit marker is persisted.
+	PrepareReferences(ctx context.Context, providerJobID UUID, req SubmitRequest) (PreparedSubmitRequest, error)
 	// Submit starts one external generation. A lost outcome returns
 	// ErrSubmitIndeterminate; classified errors otherwise.
-	Submit(ctx context.Context, credential string, req SubmitRequest) (SubmitOutcome, error)
+	Submit(ctx context.Context, credential string, req PreparedSubmitRequest) (SubmitOutcome, error)
 	// Poll queries one external job. Polling is provably safe to retry.
 	Poll(ctx context.Context, credential string, ref string) (PollOutcome, error)
 	// Cancel asks the provider to stop one accepted job; convergence stays

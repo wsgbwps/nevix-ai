@@ -33,12 +33,13 @@ type imageScript struct {
 // the pinned wire contract's observable shape (issue #160). n echoes the
 // batch field the vendor contract does not define — it must stay absent.
 type recordedImageCall struct {
-	bearer string
-	size   string
-	n      int
-	model  string
-	prompt string
-	images int
+	bearer    string
+	size      string
+	n         int
+	model     string
+	prompt    string
+	images    int
+	imageURLs []string
 }
 
 // videoTaskScript drives the async video task family.
@@ -95,6 +96,7 @@ func (g *generationFake) lastImageCall() *recordedImageCall {
 		return nil
 	}
 	recorded := *g.lastImage
+	recorded.imageURLs = append([]string(nil), g.lastImage.imageURLs...)
 	return &recorded
 }
 
@@ -128,12 +130,13 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		}
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		g.lastImage = &recordedImageCall{
-			bearer: r.Header.Get("Authorization"),
-			size:   payload.Size,
-			n:      payload.N,
-			model:  payload.Model,
-			prompt: payload.Prompt,
-			images: len(payload.Image),
+			bearer:    r.Header.Get("Authorization"),
+			size:      payload.Size,
+			n:         payload.N,
+			model:     payload.Model,
+			prompt:    payload.Prompt,
+			images:    len(payload.Image),
+			imageURLs: append([]string(nil), payload.Image...),
 		}
 		script := g.image
 		if script.status != 0 {
