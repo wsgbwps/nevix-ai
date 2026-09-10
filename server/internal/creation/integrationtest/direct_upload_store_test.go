@@ -34,6 +34,9 @@ type fakeDirectUploadStore struct {
 	headStarted        chan struct{}
 	releaseHead        chan struct{}
 	openReadError      error
+	putStarted         chan struct{}
+	releasePut         chan struct{}
+	conflictAfterPut   bool
 	deleteFailures     int
 	deleteFailureKeys  map[string]struct{}
 	deleteBlockingKeys map[string]struct{}
@@ -93,6 +96,22 @@ func (s *fakeDirectUploadStore) failNextHead(err error) {
 func (s *fakeDirectUploadStore) failNextProbeRead(err error) {
 	s.mu.Lock()
 	s.openReadError = err
+	s.mu.Unlock()
+}
+
+func (s *fakeDirectUploadStore) blockNextPut() (<-chan struct{}, chan<- struct{}) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	s.mu.Lock()
+	s.putStarted = started
+	s.releasePut = release
+	s.mu.Unlock()
+	return started, release
+}
+
+func (s *fakeDirectUploadStore) conflictAfterNextPut() {
+	s.mu.Lock()
+	s.conflictAfterPut = true
 	s.mu.Unlock()
 }
 
@@ -174,12 +193,29 @@ func (s *fakeDirectUploadStore) Put(ctx context.Context, key string, src io.Read
 		return creation.PutResult{}, creation.ErrTooLarge
 	}
 	s.mu.Lock()
+	started, release := s.putStarted, s.releasePut
+	s.putStarted, s.releasePut = nil, nil
+	conflictAfterPut := s.conflictAfterPut
+	s.conflictAfterPut = false
+	s.mu.Unlock()
+	if started != nil {
+		close(started)
+		select {
+		case <-ctx.Done():
+			return creation.PutResult{}, ctx.Err()
+		case <-release:
+		}
+	}
+	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.objects[key]; exists {
 		return creation.PutResult{}, creation.ErrBlobConflict
 	}
 	s.objects[key] = append([]byte(nil), body...)
 	s.info[key] = creation.BlobInfo{ByteSize: int64(len(body)), Metadata: map[string]string{}}
+	if conflictAfterPut {
+		return creation.PutResult{}, creation.ErrBlobConflict
+	}
 	return creation.PutResult{ByteSize: int64(len(body)), SHA256Sum: sha256.Sum256(body)}, nil
 }
 

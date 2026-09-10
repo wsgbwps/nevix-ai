@@ -72,8 +72,8 @@ test-e2e: docker-ready
 test-identity-integration: docker-ready
 	./scripts/test-identity-integration.sh
 
-# Creation Module integration: real PostgreSQL + MinIO, zero skips, sentinels
-# (issue #156). Also runs the short file-stream smoke.
+# Creation Module integration: real PostgreSQL, injected test fakes, and
+# test-only MinIO conformance; zero skips and sentinels (issue #222).
 test-creation-integration: docker-ready
 	./scripts/test-creation-integration.sh
 

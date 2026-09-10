@@ -107,6 +107,10 @@ func (s *ObjectStorageConnectionService) ResolveStore(ctx context.Context) (doma
 	return store, connection, nil
 }
 
+func (s *ObjectStorageConnectionService) lockForUse(ctx context.Context, tx domain.TxExecutor, expected domain.ObjectStorageConnection) error {
+	return s.connections.LockForUse(ctx, tx, expected)
+}
+
 // Create verifies the candidate outside the audited activation transaction.
 func (s *ObjectStorageConnectionService) Create(ctx context.Context, principal authz.Principal, proof string, candidate domain.ObjectStorageCandidate) (domain.ObjectStorageConnection, error) {
 	if err := s.proofs.VerifyProof(ctx, principal, proofActionObjectStorageCreate, proof); err != nil {

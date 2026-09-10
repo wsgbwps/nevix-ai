@@ -8,6 +8,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +21,7 @@ func runRealCloudSmoke(t *testing.T, location Location, credentials Credentials)
 	t.Helper()
 	store, err := NewBlobStore(location, credentials)
 	if err != nil {
-		t.Fatalf("construct %s adapter: %v", location.Provider, err)
+		t.Fatalf("construct %s adapter failed", location.Provider)
 	}
 
 	stamp := time.Now().UTC()
@@ -32,32 +34,32 @@ func runRealCloudSmoke(t *testing.T, location Location, credentials Credentials)
 		for _, key := range keys {
 			if err := store.Delete(ctx, key); err != nil {
 				cleanup = "fail"
-				t.Errorf("%s smoke exact-key cleanup failed: %v", location.Provider, err)
+				t.Errorf("%s smoke exact-key cleanup failed", location.Provider)
 			}
 		}
 		result := "pass"
 		if t.Failed() {
 			result = "fail"
 		}
-		t.Logf("object-storage-smoke provider=%s date=%s result=%s cleanup=%s", location.Provider, stamp.Format(time.DateOnly), result, cleanup)
+		t.Logf("object-storage-smoke provider=%s adapter_version=%s date=%s result=%s cleanup=%s", location.Provider, adapterVersion(location.Provider), stamp.Format(time.DateOnly), result, cleanup)
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	payload := []byte("nevix object storage conformance")
 	if _, err := store.Put(ctx, keys[0], bytes.NewReader(payload), 1024); err != nil {
-		t.Fatalf("Put: %v", err)
+		t.Fatal("Put failed")
 	}
 	if _, err := store.Put(ctx, keys[0], strings.NewReader("overwrite"), 1024); !errors.Is(err, domain.ErrBlobConflict) {
 		t.Fatalf("second Put error = %v, want conflict", err)
 	}
 	info, err := store.Head(ctx, keys[0])
 	if err != nil || info.ByteSize != int64(len(payload)) {
-		t.Fatalf("Head = %#v, %v", info, err)
+		t.Fatalf("Head failed or returned byte_size=%d", info.ByteSize)
 	}
 	reader, size, err := store.Open(ctx, keys[0], domain.BlobRange{Offset: 6, Length: 6})
 	if err != nil {
-		t.Fatalf("Open range: %v", err)
+		t.Fatal("Open range failed")
 	}
 	window, readErr := io.ReadAll(reader)
 	reader.Close()
@@ -77,19 +79,19 @@ func runRealCloudSmoke(t *testing.T, location Location, credentials Credentials)
 		ExpiresIn:   10 * time.Minute,
 	})
 	if err != nil {
-		t.Fatalf("PresignPut: %v", err)
+		t.Fatal("PresignPut failed")
 	}
 	putSigned := func(body string) int {
 		req, err := http.NewRequestWithContext(ctx, signed.Method, signed.URL, io.NopCloser(strings.NewReader(body)))
 		if err != nil {
-			t.Fatalf("build signed PUT: %v", err)
+			t.Fatal("build signed PUT failed")
 		}
 		for name, value := range signed.Headers {
 			req.Header.Set(name, value)
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			t.Fatalf("execute signed PUT: %v", err)
+			t.Fatal("execute signed PUT failed")
 		}
 		resp.Body.Close()
 		return resp.StatusCode
@@ -102,12 +104,32 @@ func runRealCloudSmoke(t *testing.T, location Location, credentials Credentials)
 	}
 	signedInfo, err := store.Head(ctx, keys[1])
 	if err != nil || signedInfo.ContentType != "application/octet-stream" || signedInfo.Metadata[domain.UploadIDMetadataKey] != "smoke-upload" {
-		t.Fatalf("signed Head = %#v, %v", signedInfo, err)
+		t.Fatal("signed Head failed or returned unexpected safe metadata")
 	}
 	if err := store.Delete(ctx, keys[0]); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatal("Delete failed")
 	}
 	if _, err := store.Head(ctx, keys[0]); !errors.Is(err, domain.ErrBlobNotFound) {
 		t.Fatalf("Head after Delete error = %v", err)
 	}
+}
+
+func adapterVersion(provider Provider) string {
+	if version := os.Getenv("NEVIX_OBJECT_STORAGE_ADAPTER_VERSION"); version != "" {
+		return version
+	}
+	modulePath := "github.com/aliyun/alibabacloud-oss-go-sdk-v2"
+	if provider == ProviderCOS {
+		modulePath = "github.com/tencentyun/cos-go-sdk-v5"
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, dependency := range info.Deps {
+		if dependency.Path == modulePath {
+			return dependency.Version
+		}
+	}
+	return "unknown"
 }

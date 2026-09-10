@@ -128,6 +128,18 @@ test("the server integration harness entry runs Server CI", () => {
   );
 });
 
+test("ordinary Server CI never requests real cloud credentials or smoke runs", () => {
+  const workflow = readFileSync(
+    join(REPOSITORY, ".github/workflows/server-ci.yml"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(workflow, /NEVIX_(?:OSS|COS)_SMOKE_/);
+  assert.doesNotMatch(workflow, /test-creation-(?:oss|cos)-smoke/);
+  assert.doesNotMatch(workflow, /\bcloudsmoke\b/);
+  assert.doesNotMatch(workflow, /\bsecrets\s*:/);
+});
+
 test("root JavaScript manifests cover product and harness consumers", () => {
   assert.deepEqual(selected(["package.json"]), {
     desktop: true,

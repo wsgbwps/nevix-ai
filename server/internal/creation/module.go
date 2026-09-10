@@ -33,28 +33,17 @@ import (
 // part of a public HTTP response.
 var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 
-// Config carries the legacy generation-result blob adapter until #222 removes
-// it, plus the credential master-key path, Kapon route, and CORS origins.
+// Config carries process-level Creation configuration. Object Storage is an
+// instance product fact loaded from PostgreSQL, never a deployment variable.
 type Config struct {
-	StorageDriver      string // "filesystem" or "s3"
-	StorageRoot        string // filesystem driver: absolute blob root
-	S3Endpoint         string
-	S3Region           string
-	S3Bucket           string
-	S3AccessKeyID      string
-	S3SecretAccessKey  string
-	S3Secure           bool
 	SecretsDir         string // secrets volume root holding the master key file
 	KaponBaseURL       string // reviewed fixed route; unset means the default
 	CORSAllowedOrigins []string
 }
 
-// LoadConfig validates the Module's deployment variables strictly: unknown
-// values fail startup rather than guess an adapter, and S3 settings are only
-// required when that driver is selected. The storage variable names are the
-// deployment-wide ones ADR-0013 fixes (STORAGE_BACKEND, STORAGE_FS_ROOT,
-// S3_*). CORS reads the same variable Identity consumes — one deployment
-// whitelist, read per Module because Modules do not share wiring code.
+// LoadConfig validates the Module's process-level deployment variables. CORS
+// reads the same variable Identity consumes — one deployment whitelist, read
+// per Module because Modules do not share wiring code.
 func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	origins, err := loadCORSAllowedOrigins(lookupValue(lookup, "CORS_ALLOWED_ORIGINS"))
 	if err != nil {
@@ -62,49 +51,6 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	}
 	cfg := Config{CORSAllowedOrigins: origins}
 
-	driver, _ := lookup("STORAGE_BACKEND")
-	switch driver {
-	case "filesystem":
-		cfg.StorageDriver = driver
-		root, ok := lookup("STORAGE_FS_ROOT")
-		if !ok || strings.TrimSpace(root) == "" {
-			return Config{}, errors.New("creation: missing required deployment variable: STORAGE_FS_ROOT")
-		}
-		cfg.StorageRoot = root
-	case "s3":
-		cfg.StorageDriver = driver
-		for _, required := range []struct {
-			varName string
-			target  *string
-		}{
-			{"S3_ENDPOINT", &cfg.S3Endpoint},
-			{"S3_BUCKET", &cfg.S3Bucket},
-			{"S3_ACCESS_KEY_ID", &cfg.S3AccessKeyID},
-			{"S3_SECRET_ACCESS_KEY", &cfg.S3SecretAccessKey},
-		} {
-			value, present := lookup(required.varName)
-			if !present || value == "" {
-				return Config{}, fmt.Errorf("creation: missing required deployment variable: %s", required.varName)
-			}
-			*required.target = value
-		}
-		cfg.S3Region = lookupValue(lookup, "S3_REGION")
-		if cfg.S3Region == "" {
-			cfg.S3Region = "us-east-1"
-		}
-		switch raw := lookupValue(lookup, "S3_SECURE"); raw {
-		case "", "true":
-			cfg.S3Secure = true
-		case "false":
-			cfg.S3Secure = false
-		default:
-			return Config{}, fmt.Errorf("creation: S3_SECURE must be true or false, got %q", raw)
-		}
-	case "":
-		return Config{}, errors.New("creation: missing required deployment variable: STORAGE_BACKEND")
-	default:
-		return Config{}, fmt.Errorf("creation: STORAGE_BACKEND must be filesystem or s3, got %q", driver)
-	}
 	secretsDir, ok := lookup("NEVIX_CREATION_SECRETS_DIR")
 	if !ok || strings.TrimSpace(secretsDir) == "" {
 		return Config{}, errors.New("creation: missing required deployment variable: NEVIX_CREATION_SECRETS_DIR (the secrets volume holding the Provider Credential master key)")
@@ -207,12 +153,10 @@ type Module struct {
 	uploadCleanup *application.ReferenceMaterialUploadCleanupWorker
 	guard         *authz.Guard
 	corsOrigins   []string
-	store         domain.BlobStore
 }
 
 // NewModule constructs Creation over its domain-local write transaction
-// runner and the call-time Object Storage resolver. The configured legacy
-// blob adapter remains only for generation results until #222.
+// runner and the call-time Object Storage resolver.
 func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (*Module, error) {
 	if deps.SessionAuthenticator == nil {
 		return nil, errors.New("creation: NewModule requires a SessionAuthenticator from the composition root")
@@ -222,10 +166,6 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	}
 	tx := writetx.New(pool)
 	if err := tx.VerifyStartupIdentity(ctx); err != nil {
-		return nil, err
-	}
-	store, err := buildStore(ctx, cfg)
-	if err != nil {
 		return nil, err
 	}
 	sessionRepos := postgres.NewSessionRepository(pool)
@@ -253,17 +193,17 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 		now = time.Now
 	}
 	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, credentialVault, objectStorageVerifier, directStoreFactory, deps.ReauthVerifier)
-	materialService := application.NewMaterialService(materialRepos, sessionRepos, uploadRepos, taskRepos, store, objectStorageService, media.Prober{}, tx, now)
+	materialService := application.NewMaterialService(materialRepos, sessionRepos, uploadRepos, taskRepos, objectStorageService, media.Prober{}, tx, now)
 	manifestService := application.NewManifestService(connectionRepos)
-	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, governanceRepos, manifestService, tx, hub)
+	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, objectStorageService, governanceRepos, manifestService, tx, hub)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
-	// The worker shares the module's storage adapter and speaks the fixed
-	// Kapon generation route; both stay behind the domain gateway seam. The
-	// connection service is the call-time credential source: the decrypted
+	// The worker resolves the current Object Storage Connection and speaks the
+	// fixed Kapon generation route. The connection service is the call-time
+	// credential source: the decrypted
 	// Provider Key exists only between its resolve and the adapter's
 	// Authorization header.
 	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL)
-	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, store, objectStorageService, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
+	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, objectStorageService, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
 	uploadCleanup := application.NewReferenceMaterialUploadCleanupWorker(uploadRepos, objectStorageService, tx, now)
 	return &Module{
 		sessions:      creationhttp.NewSessionHandler(sessionService),
@@ -271,14 +211,13 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 		connection:    creationhttp.NewProviderConnectionHandler(connectionService),
 		objectStorage: creationhttp.NewObjectStorageConnectionHandler(objectStorageService),
 		manifest:      creationhttp.NewCapabilityManifestHandler(manifestService),
-		tasks:         creationhttp.NewGenerationTaskHandler(taskService, store),
+		tasks:         creationhttp.NewGenerationTaskHandler(taskService, objectStorageService),
 		governance:    creationhttp.NewGovernanceHandler(governanceService, connectionService),
 		hub:           hub,
 		worker:        worker,
 		uploadCleanup: uploadCleanup,
 		guard:         authz.NewGuard(deps.SessionAuthenticator),
 		corsOrigins:   cfg.CORSAllowedOrigins,
-		store:         store,
 	}, nil
 }
 
@@ -286,19 +225,6 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 // leases never collide with a stale predecessor's.
 func workerLeaseOwner() string {
 	return "creation-worker-" + domain.NewUUID().String()[:8]
-}
-
-// buildStore instantiates the configured production adapter; nothing else in
-// the Module knows which backend holds blobs.
-func buildStore(ctx context.Context, cfg Config) (domain.BlobStore, error) {
-	switch cfg.StorageDriver {
-	case "filesystem":
-		return storage.NewFilesystem(cfg.StorageRoot)
-	case "s3":
-		return storage.NewS3(ctx, cfg.S3Endpoint, cfg.S3AccessKeyID, cfg.S3SecretAccessKey, cfg.S3Region, cfg.S3Bucket, cfg.S3Secure)
-	default:
-		return nil, fmt.Errorf("creation: unsupported storage driver %q", cfg.StorageDriver)
-	}
 }
 
 // Register mounts the static route table inside one chi group with this

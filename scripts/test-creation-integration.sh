@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Supported local and CI entry for the Creation Module integration suite
-# (issue #156). Starts one pinned throwaway PostgreSQL plus one MinIO, runs
-# the real Go Creation suites against both (zero skips, representative
+# (issue #156). Starts one pinned throwaway PostgreSQL plus test-only MinIO,
+# runs the real Go Creation suites against both (zero skips, representative
 # sentinels), and tears down only the stack it owns.
 set -euo pipefail
 
@@ -53,11 +53,6 @@ require_free_port() {
 cleanup() {
   local exit_status="$1"
 
-  # storage_root removal belongs here: a second `trap … EXIT` after the one
-  # below would replace it and silently skip the lock release on every run.
-  if [[ -n "${storage_root:-}" ]]; then
-    rm -rf "$storage_root"
-  fi
   if [[ -n "${secrets_dir:-}" ]]; then
     rm -rf "$secrets_dir"
   fi
@@ -83,7 +78,6 @@ require_free_port "$s3_host_port"
 
 postgres_password="$(openssl rand -hex 32)"
 identity_app_password="$(openssl rand -hex 32)"
-storage_root="$(mktemp -d "${TMPDIR:-/tmp}/nevix-creation-storage.XXXXXX")"
 secrets_dir="$(mktemp -d "${TMPDIR:-/tmp}/nevix-creation-secrets.XXXXXX")"
 
 echo "==> Starting pinned PostgreSQL ($postgres_image) on 127.0.0.1:$postgres_host_port"
@@ -190,22 +184,24 @@ assert_creation_integration_executed() {
     TestObjectStorageConnectionPublicContract
     TestObjectStorageConcurrentFirstCreateHasOneWinner
     TestObjectStoragePendingUploadBlocksLocationMutationButAllowsRotation
+    TestObjectStorageLocationMutationWaitsForActiveGeneration
     TestObjectStorageConnectionSingletonAndMonotonicRevision
     TestConnectionCanaryExercisesRequiredOperationsAndCleansUp
     TestStreamSmokeParallelFileFlows
     TestTaskAdmissionAtomicityAndIdempotency
+    TestTaskAdmissionRequiresObjectStorageBeforeProviderWork
     TestGenerationTaskDetailUsesOneSnapshot
     TestGenerationTaskUpdatedAtTracksEveryVisibleDetailChange
     TestTaskChangeCriterionIsExactAcrossSubmitListAndDetail
     TestTaskGovernanceMatrix
     TestTaskSubmissionLatencyP95
     TestImageTaskLifecycleReachesSucceeded
+    TestGenerationResultTransferRecoversAfterPutBeforeVerdictCrash
     TestVideoTaskLifecycleRunsAsync
     TestIndeterminateSubmitNeverAutoRetries
     TestProvider402PersistsCreditBlock
     TestSSEInvalidationIsCommitScopedAndCreatorScoped
-    TestFilesystemConformance
-    TestS3ConformanceSuiteAgainstMinIO
+    TestMinIOConformanceSuite
     TestApplyIsIdempotentWhenAlreadyCurrent
   )
 
@@ -241,12 +237,11 @@ export NEVIX_CREATION_INTEGRATION_REQUESTED=1
 export NEVIX_DATABASE_URL="postgresql://postgres:${postgres_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
 export NEVIX_IDENTITY_DATABASE_URL="postgresql://identity_app:${identity_app_password}@127.0.0.1:${postgres_host_port}/postgres?sslmode=disable"
 export NEVIX_CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173"
-export STORAGE_FS_ROOT="$storage_root"
 export NEVIX_CREATION_SECRETS_DIR="$secrets_dir"
-export NEVIX_CREATION_TEST_S3_ENDPOINT="127.0.0.1:$s3_host_port"
-export NEVIX_CREATION_TEST_S3_ACCESS_KEY_ID="nevix-creation-test"
-export NEVIX_CREATION_TEST_S3_SECRET_ACCESS_KEY="$s3_secret"
-export NEVIX_CREATION_TEST_S3_SECURE="false"
+export NEVIX_CREATION_TEST_MINIO_ENDPOINT="127.0.0.1:$s3_host_port"
+export NEVIX_CREATION_TEST_MINIO_ACCESS_KEY_ID="nevix-creation-test"
+export NEVIX_CREATION_TEST_MINIO_SECRET_ACCESS_KEY="$s3_secret"
+export NEVIX_CREATION_TEST_MINIO_SECURE="false"
 export NEVIX_CREATION_SMOKE_SECONDS="${NEVIX_CREATION_SMOKE_SECONDS:-60}"
 
 test_log="$(mktemp -t nevix-creation-integration.XXXXXX)"

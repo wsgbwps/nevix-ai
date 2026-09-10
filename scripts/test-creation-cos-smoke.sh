@@ -15,4 +15,7 @@ for name in "${required[@]}"; do
 done
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../server"
-NEVIX_COS_SMOKE_REQUESTED=1 go test -tags=cloudsmoke ./internal/creation/infrastructure/storage -run '^TestCOSRealSmoke$' -count=1 -v
+adapter_version="$(go list -m -f '{{.Version}}' github.com/tencentyun/cos-go-sdk-v5)"
+NEVIX_COS_SMOKE_REQUESTED=1 \
+  NEVIX_OBJECT_STORAGE_ADAPTER_VERSION="$adapter_version" \
+  go test -tags=cloudsmoke ./internal/creation/infrastructure/storage -run '^TestCOSRealSmoke$' -count=1 -v

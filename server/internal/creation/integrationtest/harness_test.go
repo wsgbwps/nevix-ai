@@ -1,8 +1,8 @@
 // Package integrationtest drives the Creation Module through its only public
 // seams — LoadConfig/NewModule/Register/RunWorkers plus the mounted HTTP
 // surface — against real PostgreSQL, the real Identity Module (mounted like
-// the composition root does, so principals come from actual logins), and the
-// production filesystem Storage adapter. Without
+// the composition root does, so principals come from actual logins), and an
+// explicitly injected test-only Object Storage fake. Without
 // NEVIX_CREATION_INTEGRATION_REQUESTED every test skips when its environment
 // is missing; with it set, a missing environment is fatal and the run must
 // finish with zero skips.
@@ -92,7 +92,6 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 	ownerURL := requireEnv(t, "NEVIX_DATABASE_URL")
 	runtimeURL := requireEnv(t, "NEVIX_IDENTITY_DATABASE_URL")
 	corsOrigin := requireEnv(t, "NEVIX_CORS_ALLOWED_ORIGINS")
-	storageRoot := requireEnv(t, "STORAGE_FS_ROOT")
 	secretsDir := requireEnv(t, "NEVIX_CREATION_SECRETS_DIR")
 
 	ownerPool, err := pgxpool.New(ctx, ownerURL)
@@ -115,8 +114,6 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 	identityConfig := identity.Config{CORSAllowedOrigins: []string{corsOrigin}}
 	kapon := newFakeKapon(t)
 	creationConfig := creation.Config{
-		StorageDriver:      "filesystem",
-		StorageRoot:        storageRoot,
 		SecretsDir:         secretsDir,
 		KaponBaseURL:       kapon.URL(),
 		CORSAllowedOrigins: []string{corsOrigin},
@@ -133,10 +130,6 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		switch key {
 		case "CORS_ALLOWED_ORIGINS":
 			return corsOrigin, true
-		case "STORAGE_BACKEND":
-			return "filesystem", true
-		case "STORAGE_FS_ROOT":
-			return storageRoot, true
 		case "NEVIX_CREATION_SECRETS_DIR":
 			return secretsDir, true
 		case "KAPON_BASE_URL":

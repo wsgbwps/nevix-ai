@@ -12,7 +12,8 @@ import (
 // connection and idempotent full-intent submission helpers (ADR-0017).
 
 // readyTaskHarness builds a harness whose manifest is fully active and whose
-// provider connection is configured against the fake Kapon route.
+// provider and Object Storage connections are configured through their public
+// commands against test-only dependencies.
 func readyTaskHarness(t *testing.T, opts harnessOptions) (*harness, string, string) {
 	t.Helper()
 	h := newHarnessWithOptions(t, opts)
@@ -32,6 +33,11 @@ func readyTaskHarness(t *testing.T, opts harnessOptions) (*harness, string, stri
 	status, body := h.configureConnection(t, adminToken, "task-kernel-key")
 	if status != http.StatusCreated && status != http.StatusOK {
 		t.Fatalf("configure connection: status=%d body=%s", status, body)
+	}
+	h.resetObjectStorageConnections(t)
+	status, body = h.createObjectStorageConnection(t, adminToken)
+	if status != http.StatusCreated {
+		t.Fatalf("configure Object Storage connection: status=%d body=%s", status, body)
 	}
 	return h, adminToken, creatorEmail
 }

@@ -55,6 +55,31 @@ func (r *ObjectStorageConnectionRepository) GetActive(ctx context.Context) (doma
 	return connection, err
 }
 
+// LockForUse holds the selected location stable until the caller commits its
+// durable object reference. Credential rotation remains valid because it does
+// not change provider, region, or bucket.
+func (r *ObjectStorageConnectionRepository) LockForUse(ctx context.Context, tx domain.TxExecutor, expected domain.ObjectStorageConnection) error {
+	var id domain.UUID
+	var provider domain.ObjectStorageProvider
+	var region, bucket string
+	var state domain.ObjectStorageState
+	err := tx.QueryRow(ctx, `
+		SELECT id, provider, region, bucket, state
+		FROM object_storage_connections
+		WHERE terminated_at IS NULL
+		FOR SHARE`).Scan(&id, &provider, &region, &bucket, &state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrObjectStorageConnectionNotConfigured
+	}
+	if err != nil {
+		return fmt.Errorf("creation: lock object storage connection for use: %w", err)
+	}
+	if id != expected.ID || provider != expected.Provider || region != expected.Region || bucket != expected.Bucket || state != domain.ObjectStorageStateReady {
+		return domain.ErrObjectStorageRevisionConflict
+	}
+	return nil
+}
+
 func (r *ObjectStorageConnectionRepository) UpdateObservation(ctx context.Context, tx domain.TxExecutor, id domain.UUID, expectedRevision int64, checkedAt time.Time, outcome domain.CheckOutcome) error {
 	tag, err := tx.Exec(ctx, `
 		UPDATE object_storage_connections
@@ -173,6 +198,17 @@ func (r *ObjectStorageConnectionRepository) lockLocationMutation(ctx context.Con
 		return fmt.Errorf("creation: inspect unresolved reference material uploads: %w", err)
 	}
 	if unresolvedUpload {
+		return domain.ErrObjectStorageLocationFrozen
+	}
+	var activeTransfer bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM creation_generation_tasks
+			WHERE object_storage_connection_id = $1 AND terminal_at IS NULL
+		)`, id).Scan(&activeTransfer); err != nil {
+		return fmt.Errorf("creation: inspect active generation transfers: %w", err)
+	}
+	if activeTransfer {
 		return domain.ErrObjectStorageLocationFrozen
 	}
 	return nil

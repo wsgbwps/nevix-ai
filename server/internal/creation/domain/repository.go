@@ -158,6 +158,10 @@ type GenerationTaskRepository interface {
 	// transaction, and fills the task's database-generated timestamps.
 	// Any failure rolls the whole admission back.
 	InsertAdmittedTask(ctx context.Context, tx TxExecutor, admitted *AdmittedTask) error
+	// BindObjectStorageConnection records that output transfer has begun
+	// against the singleton storage connection. The binding is internal and
+	// immutable for the task; it fences location mutation until termination.
+	BindObjectStorageConnection(ctx context.Context, tx TxExecutor, taskID, connectionID UUID) error
 
 	// ListBySession pages one session's tasks newest-first (creator-scoped).
 	ListBySession(ctx context.Context, owner, sessionID UUID, cursor *CompoundCursor, limit int) ([]GenerationTask, *CompoundCursor, error)

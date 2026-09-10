@@ -11,6 +11,8 @@ set -euo pipefail
 # configures the provider connection: the creation tracers submit real
 # generation tasks (ADR-0017 first-submission materialization), which the
 # capability gate refuses while no provider is available.
+# Server binaries use the e2e build tag; its in-memory Object Storage
+# dependencies are not compiled into production builds.
 mode="${1:-full}"
 case "$mode" in
   full | smoke | settings | image) ;;
@@ -361,7 +363,7 @@ build_linux_server_binary() {
     *) goarch=amd64 ;;
   esac
   (cd "$repo_root/server" &&
-    CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build \
+    CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=e2e \
       -o "$identity_server_binary_dir/server-linux" ./cmd/server)
 }
 
@@ -378,9 +380,8 @@ run_disposable_server() {
     -e DATABASE_URL="postgresql://identity_app:${identity_app_password}@postgres:5432/${target_database}?sslmode=disable" \
     -e MIGRATION_DATABASE_URL="postgresql://postgres:${postgres_password}@postgres:5432/${target_database}?sslmode=disable" \
     -e CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
-    -e STORAGE_BACKEND=filesystem \
-    -e STORAGE_FS_ROOT=/tmp/nevix-creation-storage \
     -e NEVIX_CREATION_SECRETS_DIR=/tmp/nevix-creation-secrets \
+    -e NEVIX_E2E_SERVER=1 \
     "$@" \
     -v "$identity_server_binary_dir:/binaries:ro" \
     "$setup_server_image" /binaries/server-linux >/dev/null
@@ -441,13 +442,10 @@ start_identity_server() {
   identity_server_binary="$identity_server_binary_dir/server"
   (
     cd "$repo_root/server"
-    go build -o "$identity_server_binary" ./cmd/server
+    go test -c -tags=e2e -o "$identity_server_binary" ./cmd/server
   )
 
   identity_server_log="$(mktemp -t nevix-identity-e2e.XXXXXX.log)"
-  # Reference-material storage rides the filesystem adapter in a private temp
-  # root; the suite only exercises creator-private flows through Go (ADR-0014).
-  CREATION_STORAGE_ROOT="$(mktemp -d -t nevix-creation-storage.XXXXXX)"
   CREATION_SECRETS_ROOT="$(mktemp -d -t nevix-creation-secrets.XXXXXX)"
   # Optional fake Kapon route for AI Creation E2E (issue #157): point
   # KAPON_E2E_BASE_URL at a local fake to exercise provider flows end to end;
@@ -458,9 +456,8 @@ start_identity_server() {
   DATABASE_URL="$database_url" \
     MIGRATION_DATABASE_URL="$identity_database_url" \
     CORS_ALLOWED_ORIGINS="http://127.0.0.1:5173" \
-    STORAGE_BACKEND=filesystem \
-    STORAGE_FS_ROOT="$CREATION_STORAGE_ROOT" \
     NEVIX_CREATION_SECRETS_DIR="$CREATION_SECRETS_ROOT" \
+    NEVIX_E2E_SERVER=1 \
     "$identity_server_binary" >"$identity_server_log" 2>&1 &
   identity_server_pid=$!
   wait_for_identity_server
@@ -513,6 +510,22 @@ configure_provider_connection() {
   curl -fsk -X POST "$tls_url/creation/provider-connection" \
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
     -d "{\"proof\":\"$proof\",\"provider_key\":\"test-key\"}" >/dev/null
+}
+
+configure_object_storage_connection() {
+  local tls_url="https://$tls_host:$tls_port"
+  local token proof
+  token="$(curl -fsk -X POST "$tls_url/identity/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}" \
+    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).token)')"
+  proof="$(curl -fsk -X POST "$tls_url/identity/admin/reauth/proofs" \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -d "{\"action\":\"object_storage_connection.create\",\"password\":\"$admin_initial_password\"}" \
+    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).proof)')"
+  curl -fsk -X POST "$tls_url/creation/object-storage-connection" \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -d "{\"proof\":\"$proof\",\"provider\":\"oss\",\"region\":\"cn-hangzhou\",\"bucket\":\"nevix-e2e-private\",\"access_key_id\":\"nevix-e2e-access\",\"secret_access_key\":\"nevix-e2e-secret\"}" >/dev/null
 }
 
 # The TLS terminator fronts the identity server with a self-signed certificate
@@ -609,6 +622,24 @@ tls_fingerprint() {
     | cut -d= -f2
 }
 
+run_playwright() {
+  NEVIX_TEST_SERVER_URL="$server_url" \
+    NEVIX_TEST_ADMIN_EMAIL="$admin_email" \
+    NEVIX_TEST_ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
+    NEVIX_TEST_SETUP_SERVER_URL="$setup_server_url" \
+    NEVIX_TEST_SETUP_CODE="$setup_code" \
+    NEVIX_TEST_OPEN_SERVER_URL="$open_server_url" \
+    NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR="$identity_server_failure_marker_dir" \
+    NEVIX_TEST_TLS_URL="https://$tls_host:$tls_port" \
+    NEVIX_TEST_TLS_DIR="$tls_terminator_dir" \
+    NEVIX_TEST_TLS_FINGERPRINT_A="$(tls_fingerprint a)" \
+    NEVIX_TEST_TLS_FINGERPRINT_B="$(tls_fingerprint b)" \
+    NEVIX_TEST_TLS_FINGERPRINT_C="$(tls_fingerprint c)" \
+    NEVIX_TEST_TLS_CA_CERT="$tls_ca_dir/ca-cert.pem" \
+    NEVIX_E2E_RUN_ID="$e2e_run_id" \
+    pnpm exec playwright test "$@"
+}
+
 trap 'exit_status=$?; trap - EXIT; cleanup "$exit_status"; exit $?' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -649,8 +680,13 @@ if [[ "$mode" != "settings" ]]; then
   configure_provider_connection
   echo "==> Fake Kapon generation route ready on $KAPON_E2E_BASE_URL (provider connection configured)"
 fi
+if [[ "$mode" == "image" || "$mode" == "smoke" ]]; then
+  configure_object_storage_connection
+  echo "==> Test-only Object Storage Connection configured"
+fi
 
 pnpm exec electron-vite build --mode test
+e2e_run_id="$(date +%s)-$$"
 
 # The suite shares one identity server: join-code state is global to it, and
 # settings specs assert the active-code list's emptiness. Registration specs
@@ -658,7 +694,9 @@ pnpm exec electron-vite build --mode test
 # active code to those assertions — the suite runs serially, keeping every
 # global-state assertion deterministic.
 playwright_args=(--workers=1)
-if [[ "$mode" == "smoke" ]]; then
+if [[ "$mode" == "full" ]]; then
+  playwright_args+=(--grep-invert '@image|@storage')
+elif [[ "$mode" == "smoke" ]]; then
   playwright_args+=(--grep '@smoke')
 elif [[ "$mode" == "settings" ]]; then
   playwright_args+=(
@@ -678,21 +716,13 @@ if [[ "$failure_injection" == "after-renderer-launch" ]]; then
   identity_server_failure_injector_pid=$!
 fi
 
-NEVIX_TEST_SERVER_URL="$server_url" \
-  NEVIX_TEST_ADMIN_EMAIL="$admin_email" \
-  NEVIX_TEST_ADMIN_INITIAL_PASSWORD="$admin_initial_password" \
-  NEVIX_TEST_SETUP_SERVER_URL="$setup_server_url" \
-  NEVIX_TEST_SETUP_CODE="$setup_code" \
-  NEVIX_TEST_OPEN_SERVER_URL="$open_server_url" \
-  NEVIX_TEST_IDENTITY_SERVER_FAILURE_MARKER_DIR="$identity_server_failure_marker_dir" \
-  NEVIX_TEST_TLS_URL="https://$tls_host:$tls_port" \
-  NEVIX_TEST_TLS_DIR="$tls_terminator_dir" \
-  NEVIX_TEST_TLS_FINGERPRINT_A="$(tls_fingerprint a)" \
-  NEVIX_TEST_TLS_FINGERPRINT_B="$(tls_fingerprint b)" \
-  NEVIX_TEST_TLS_FINGERPRINT_C="$(tls_fingerprint c)" \
-  NEVIX_TEST_TLS_CA_CERT="$tls_ca_dir/ca-cert.pem" \
-  NEVIX_E2E_RUN_ID="$(date +%s)-$$" \
-  pnpm exec playwright test "${playwright_args[@]}"
+run_playwright "${playwright_args[@]}"
+
+if [[ "$mode" == "full" && -z "$failure_injection" ]]; then
+  configure_object_storage_connection
+  echo "==> Test-only Object Storage Connection configured"
+  run_playwright tests/creation/creation-tracer.spec.ts tests/creation/creation-image.spec.ts --workers=1
+fi
 
 if [[ -n "$identity_server_failure_injector_pid" ]]; then
   wait "$identity_server_failure_injector_pid"

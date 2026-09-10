@@ -441,6 +441,25 @@ test("the deploy env template carries every required variable", () => {
   }
 });
 
+test("the official stack has no legacy blob runtime surface", () => {
+  assert.equal(compose.volumes.blobs, undefined, "the stack must not declare a blobs volume");
+  assert.deepEqual(services.server.volumes, ["secrets:/var/lib/nevix/secrets"]);
+  for (const key of [
+    "STORAGE_BACKEND",
+    "STORAGE_FS_ROOT",
+    "S3_ENDPOINT",
+    "S3_REGION",
+    "S3_BUCKET",
+    "S3_ACCESS_KEY_ID",
+    "S3_SECRET_ACCESS_KEY",
+    "S3_SECURE",
+  ]) {
+    assert.equal(services.server.environment[key], undefined, `${key} is not runtime configuration`);
+    assert.doesNotMatch(envExample, new RegExp(`^${key}=`, "m"), `${key} is absent from .env.example`);
+  }
+  assert.doesNotMatch(readDeploy("Dockerfile.server"), /\/var\/lib\/nevix\/storage/);
+});
+
 // ---------------------------------------------------------------------------
 // Runtime behavior (Docker-gated)
 // ---------------------------------------------------------------------------
