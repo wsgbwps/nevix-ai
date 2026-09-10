@@ -69,6 +69,20 @@ func hasNonPublicEndpointMarker(region string) bool {
 // NewBlobStore constructs exactly one production adapter for the selected
 // canonical provider. Construction performs no bucket or control-plane call.
 func NewBlobStore(location Location, credentials Credentials) (domain.DirectUploadBlobStore, error) {
+	return newCloudStore(location, credentials)
+}
+
+// NewReferenceTransport constructs the narrow Provider Transfer Object seam
+// over the selected production adapter.
+func NewReferenceTransport(location Location, credentials Credentials) (domain.ReferenceTransport, error) {
+	store, err := newCloudStore(location, credentials)
+	if err != nil {
+		return nil, err
+	}
+	return newReferenceTransport(store), nil
+}
+
+func newCloudStore(location Location, credentials Credentials) (referenceObjectStore, error) {
 	location, err := NormalizeLocation(location)
 	if err != nil {
 		return nil, err

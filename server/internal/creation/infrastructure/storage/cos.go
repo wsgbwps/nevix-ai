@@ -56,11 +56,27 @@ func newCOSStore(raw Location, credentials Credentials, baseHTTPClient *http.Cli
 }
 
 func (s *cosStore) Put(ctx context.Context, key string, src io.Reader, maxBytes int64) (domain.PutResult, error) {
+	return s.put(ctx, key, src, maxBytes, "", nil)
+}
+
+func (s *cosStore) putProviderTransfer(ctx context.Context, key string, src io.Reader, maxBytes int64, contentType string, metadata map[string]string) (domain.PutResult, error) {
+	return s.put(ctx, key, src, maxBytes, contentType, metadata)
+}
+
+func (s *cosStore) put(ctx context.Context, key string, src io.Reader, maxBytes int64, contentType string, metadata map[string]string) (domain.PutResult, error) {
 	result, err := streamBoundedPut(ctx, src, maxBytes, func(body io.Reader) error {
 		headers := make(http.Header)
 		headers.Set("x-cos-forbid-overwrite", "true")
+		metadataHeaders := make(http.Header, len(metadata))
+		for name, value := range metadata {
+			metadataHeaders.Set("x-cos-meta-"+name, value)
+		}
+		options := &cos.ObjectPutOptions{ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
+			ContentType: contentType,
+			XCosMetaXXX: &metadataHeaders,
+		}}
 		putContext := context.WithValue(ctx, cos.XOptionalKey, &cos.XOptionalValue{Header: &headers})
-		response, putErr := s.client.Object.Put(putContext, key, body, nil)
+		response, putErr := s.client.Object.Put(putContext, key, body, options)
 		if response != nil && response.Body != nil {
 			response.Body.Close()
 		}
@@ -70,6 +86,17 @@ func (s *cosStore) Put(ctx context.Context, key string, src io.Reader, maxBytes 
 		return domain.PutResult{}, err
 	}
 	return result, nil
+}
+
+func (s *cosStore) presignGet(ctx context.Context, key string, expiresIn time.Duration) (string, error) {
+	signedURL, err := s.client.Object.GetPresignedURL2(ctx, http.MethodGet, key, expiresIn, nil)
+	if err != nil {
+		return "", safeCOSError("presign get", err)
+	}
+	if err := validatePresignedOrigin(signedURL.String(), s.location.Origin()); err != nil {
+		return "", err
+	}
+	return signedURL.String(), nil
 }
 
 func (s *cosStore) Head(ctx context.Context, key string) (domain.BlobInfo, error) {
@@ -85,8 +112,10 @@ func (s *cosStore) Head(ctx context.Context, key string) (domain.BlobInfo, error
 		return domain.BlobInfo{}, fmt.Errorf("creation: COS head response: %w", domain.ErrObjectStorageUnavailable)
 	}
 	metadata := map[string]string{}
-	if uploadID := response.Header.Get("x-cos-meta-" + domain.UploadIDMetadataKey); uploadID != "" {
-		metadata[domain.UploadIDMetadataKey] = uploadID
+	for name, values := range response.Header {
+		if metadataName, ok := strings.CutPrefix(strings.ToLower(name), "x-cos-meta-"); ok && len(values) > 0 {
+			metadata[metadataName] = values[0]
+		}
 	}
 	return domain.BlobInfo{
 		ByteSize:    byteSize,

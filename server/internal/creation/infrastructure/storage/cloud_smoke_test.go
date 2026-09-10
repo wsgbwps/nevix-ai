@@ -5,6 +5,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net/http"
@@ -26,7 +27,8 @@ func runRealCloudSmoke(t *testing.T, location Location, credentials Credentials)
 
 	stamp := time.Now().UTC()
 	prefix := "nevix-smoke/" + string(location.Provider) + "/" + stamp.Format("20060102T150405Z") + "/" + domain.NewUUID().String() + "/"
-	keys := []string{prefix + "server-put", prefix + "signed-put"}
+	providerJobID := domain.NewUUID()
+	keys := []string{prefix + "server-put", prefix + "signed-put", providerTransferKey(providerJobID, 0)}
 	t.Cleanup(func() {
 		cleanup := "pass"
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -111,6 +113,45 @@ func runRealCloudSmoke(t *testing.T, location Location, credentials Credentials)
 	}
 	if _, err := store.Head(ctx, keys[0]); !errors.Is(err, domain.ErrBlobNotFound) {
 		t.Fatalf("Head after Delete error = %v", err)
+	}
+
+	transport, err := NewReferenceTransport(location, credentials)
+	if err != nil {
+		t.Fatal("construct ReferenceTransport failed")
+	}
+	transferPayload := []byte("nevix provider transfer conformance")
+	transferDigest := sha256.Sum256(transferPayload)
+	prepared, err := transport.Prepare(ctx, providerJobID, 0, domain.ReferenceSource{
+		Role: domain.RoleReference, Kind: domain.KindImage, MIMEType: "image/png",
+		ByteSize: int64(len(transferPayload)), SHA256Sum: transferDigest,
+		Open: func(context.Context) (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(transferPayload)), nil
+		},
+	})
+	if err != nil {
+		t.Fatal("prepare Provider Transfer Object failed")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, prepared.URL, nil)
+	if err != nil {
+		t.Fatal("build Provider Transfer Object GET failed")
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal("fetch Provider Transfer Object failed")
+	}
+	gotTransfer, readErr := io.ReadAll(response.Body)
+	response.Body.Close()
+	if readErr != nil || response.StatusCode < 200 || response.StatusCode >= 300 || !bytes.Equal(gotTransfer, transferPayload) {
+		t.Fatal("Provider Transfer Object was not directly readable")
+	}
+	if err := transport.Release(ctx, providerJobID, 0); err != nil {
+		t.Fatal("release Provider Transfer Object failed")
+	}
+	if err := transport.Release(ctx, providerJobID, 0); err != nil {
+		t.Fatal("repeat Provider Transfer Object release failed")
+	}
+	if _, err := store.Head(ctx, keys[2]); !errors.Is(err, domain.ErrBlobNotFound) {
+		t.Fatal("Provider Transfer Object remained after release")
 	}
 }
 

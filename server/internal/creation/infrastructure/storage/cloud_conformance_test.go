@@ -31,6 +31,10 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 		})
 	})
 
+	t.Run("ReferenceTransport", func(t *testing.T) {
+		runReferenceTransportConformanceSuite(t, provider, newStore)
+	})
+
 	t.Run("HeadReportsAuthoritativeFacts", func(t *testing.T) {
 		backend := newFakeCloudTransport(provider)
 		store := newStore(t, backend)
@@ -218,7 +222,7 @@ const (
 type fakeCloudObject struct {
 	body        []byte
 	contentType string
-	uploadID    string
+	metadata    map[string]string
 }
 
 type fakeCloudTransport struct {
@@ -228,6 +232,11 @@ type fakeCloudTransport struct {
 	last            http.Header
 	methods         map[string]int
 	failMethod      string
+	cancelOnHead    context.CancelFunc
+	deleteGate      <-chan struct{}
+	headSizeDelta   int64
+	headContentType string
+	omitMetadata    string
 	sawAnonymousGet bool
 	sawRangeGet     bool
 }
@@ -246,11 +255,27 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 	f.mu.Lock()
 	f.methods[req.Method]++
+	cancelOnHead := f.cancelOnHead
+	if req.Method == http.MethodHead {
+		f.cancelOnHead = nil
+	}
+	deleteGate := f.deleteGate
 	if req.Method == f.failMethod {
 		f.mu.Unlock()
 		return f.errorResponse(req, http.StatusServiceUnavailable, "ServiceUnavailable", fakeSensitiveProviderMessage), nil
 	}
 	f.mu.Unlock()
+	if req.Method == http.MethodHead && cancelOnHead != nil {
+		cancelOnHead()
+		return nil, req.Context().Err()
+	}
+	if req.Method == http.MethodDelete && deleteGate != nil {
+		select {
+		case <-deleteGate:
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
 	switch key {
 	case fakeProviderErrorKey:
 		return f.errorResponse(req, http.StatusServiceUnavailable, "ServiceUnavailable", fakeSensitiveProviderMessage), nil
@@ -285,10 +310,16 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 		if readErr != nil {
 			return nil, readErr
 		}
+		metadata := map[string]string{}
+		for name, values := range req.Header {
+			if metadataName, ok := strings.CutPrefix(strings.ToLower(name), f.metadataHeaderPrefix()); ok && len(values) > 0 {
+				metadata[metadataName] = values[0]
+			}
+		}
 		f.objects[key] = fakeCloudObject{
 			body:        body,
 			contentType: req.Header.Get("Content-Type"),
-			uploadID:    req.Header.Get(f.metadataHeaderName()),
+			metadata:    metadata,
 		}
 		headers := make(http.Header)
 		if f.provider == ProviderCOS {
@@ -302,9 +333,17 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 			return f.errorResponse(req, http.StatusNotFound, "NoSuchKey", "missing"), nil
 		}
 		headers := make(http.Header)
-		headers.Set("Content-Length", strconv.Itoa(len(object.body)))
-		headers.Set("Content-Type", object.contentType)
-		headers.Set(f.metadataHeaderName(), object.uploadID)
+		headers.Set("Content-Length", strconv.FormatInt(int64(len(object.body))+f.headSizeDelta, 10))
+		contentType := object.contentType
+		if f.headContentType != "" {
+			contentType = f.headContentType
+		}
+		headers.Set("Content-Type", contentType)
+		for name, value := range object.metadata {
+			if name != f.omitMetadata {
+				headers.Set(f.metadataHeaderPrefix()+name, value)
+			}
+		}
 		return f.response(req, http.StatusOK, headers, nil), nil
 	case http.MethodGet:
 		if req.Header.Get("Authorization") == "" && req.URL.Query().Get("x-oss-signature") == "" && req.URL.Query().Get("q-signature") == "" {
@@ -327,7 +366,7 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 		delete(f.objects, key)
 		return f.response(req, http.StatusNoContent, nil, nil), nil
 	default:
-		return nil, fmt.Errorf("unexpected cloud control-plane or list request: %s %s", req.Method, req.URL)
+		return nil, fmt.Errorf("unexpected cloud control-plane or list request: %s", req.Method)
 	}
 }
 
@@ -357,10 +396,14 @@ func (f *fakeCloudTransport) forbidOverwriteHeader() string {
 }
 
 func (f *fakeCloudTransport) metadataHeaderName() string {
+	return f.metadataHeaderPrefix() + domain.UploadIDMetadataKey
+}
+
+func (f *fakeCloudTransport) metadataHeaderPrefix() string {
 	if f.provider == ProviderOSS {
-		return "x-oss-meta-" + domain.UploadIDMetadataKey
+		return "x-oss-meta-"
 	}
-	return "x-cos-meta-" + domain.UploadIDMetadataKey
+	return "x-cos-meta-"
 }
 
 func (f *fakeCloudTransport) response(req *http.Request, status int, headers http.Header, body []byte) *http.Response {

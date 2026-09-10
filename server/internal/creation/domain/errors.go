@@ -28,6 +28,15 @@ var (
 	// ErrObjectStorageUnavailable collapses provider, credential, transport,
 	// and service details at the trusted boundary.
 	ErrObjectStorageUnavailable = errors.New("object storage unavailable")
+	// ErrInvalidReferenceSource reports an incomplete or internally
+	// inconsistent provider-neutral source before any transfer starts.
+	ErrInvalidReferenceSource = errors.New("invalid reference source")
+	// ErrReferenceSourceSizeMismatch reports a stream whose actual byte count
+	// differs from its immutable Reference Material fact.
+	ErrReferenceSourceSizeMismatch = errors.New("reference source size mismatch")
+	// ErrReferenceSourceChecksumMismatch reports a stream whose SHA-256 differs
+	// from its immutable Reference Material fact.
+	ErrReferenceSourceChecksumMismatch = errors.New("reference source checksum mismatch")
 	// ErrUnsupportedMedia reports content whose sniffed family is outside
 	// the accepted set, or whose extension disagrees with the verified family.
 	ErrUnsupportedMedia = errors.New("unsupported media type")

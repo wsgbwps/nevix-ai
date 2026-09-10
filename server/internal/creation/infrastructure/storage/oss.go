@@ -43,19 +43,49 @@ func newOSSStore(raw Location, credentialsValue Credentials, httpClient *http.Cl
 }
 
 func (s *ossStore) Put(ctx context.Context, key string, src io.Reader, maxBytes int64) (domain.PutResult, error) {
+	return s.put(ctx, key, src, maxBytes, "", nil)
+}
+
+func (s *ossStore) putProviderTransfer(ctx context.Context, key string, src io.Reader, maxBytes int64, contentType string, metadata map[string]string) (domain.PutResult, error) {
+	return s.put(ctx, key, src, maxBytes, contentType, metadata)
+}
+
+func (s *ossStore) put(ctx context.Context, key string, src io.Reader, maxBytes int64, contentType string, metadata map[string]string) (domain.PutResult, error) {
 	result, err := streamBoundedPut(ctx, src, maxBytes, func(body io.Reader) error {
-		_, putErr := s.client.PutObject(ctx, &oss.PutObjectRequest{
+		request := &oss.PutObjectRequest{
 			Bucket:          oss.Ptr(s.location.Bucket),
 			Key:             oss.Ptr(key),
 			Body:            body,
 			ForbidOverwrite: oss.Ptr("true"),
-		})
+			Metadata:        metadata,
+		}
+		if contentType != "" {
+			request.ContentType = oss.Ptr(contentType)
+		}
+		_, putErr := s.client.PutObject(ctx, request)
 		return safeOSSError("put", putErr)
 	})
 	if err != nil {
 		return domain.PutResult{}, err
 	}
 	return result, nil
+}
+
+func (s *ossStore) presignGet(ctx context.Context, key string, expiresIn time.Duration) (string, error) {
+	result, err := s.client.Presign(ctx, &oss.GetObjectRequest{
+		Bucket: oss.Ptr(s.location.Bucket),
+		Key:    oss.Ptr(key),
+	}, oss.PresignExpires(expiresIn))
+	if err != nil {
+		return "", safeOSSError("presign get", err)
+	}
+	if result.Method != http.MethodGet || len(result.SignedHeaders) != 0 {
+		return "", fmt.Errorf("creation: OSS presign GET contract: %w", domain.ErrObjectStorageUnavailable)
+	}
+	if err := validatePresignedOrigin(result.URL, s.location.Origin()); err != nil {
+		return "", err
+	}
+	return result.URL, nil
 }
 
 func (s *ossStore) Head(ctx context.Context, key string) (domain.BlobInfo, error) {
