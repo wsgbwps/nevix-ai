@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -305,6 +306,64 @@ func TestObjectStorageEmptyConnectionCanBeDeleted(t *testing.T) {
 	}
 	assertContractResponse(t, http.MethodDelete, "/creation/object-storage-connection", status, body)
 	assertSanitizedObjectStorageAudit(t, h, "object_storage_connection_deleted")
+}
+
+func TestObjectStorageLocationMutationWaitsForActiveGeneration(t *testing.T) {
+	verifier := func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
+		if strings.EqualFold(strings.TrimSpace(string(candidate.Location.Provider)), "cos") {
+			return creation.ObjectStorageLocation{Provider: "cos", Region: "ap-shanghai", Bucket: "nevix-private-1250000000"}, nil
+		}
+		return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-hangzhou", Bucket: "nevix-private"}, nil
+	}
+	h, admin, creator := readyTaskHarness(t, harnessOptions{objectStorageVerifier: verifier})
+	member := h.loginToken(t, creator, harnessPassword)
+	h.kapon.generation.setImage(imageScript{outputs: 1})
+	draft := h.imageTaskIntent(t, member, "活跃任务固定存储位置", 1)
+	status, body := h.submitTask(t, member, "active-task-storage-fence", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: status=%d body=%s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+	current := h.objectStorageSnapshot(t)
+
+	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{
+		"proof": h.issueProof(t, admin, "object_storage_connection.replace"), "expected_revision": current.revision,
+		"provider": "cos", "region": "ap-shanghai", "bucket": "nevix-private-1250000000",
+		"access_key_id": "cos-active-task-key", "secret_access_key": "cos-active-task-secret",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("queued task must not freeze an unused location: status=%d body=%s", status, body)
+	}
+	replaced := h.objectStorageSnapshot(t)
+	putStarted, releasePut := h.directStore.blockNextPut()
+	workerCtx, cancelWorker := context.WithCancel(context.Background())
+	workerDone := make(chan error, 1)
+	go func() { workerDone <- h.creation.RunWorkers(workerCtx) }()
+	select {
+	case <-putStarted:
+	case <-time.After(5 * time.Second):
+		cancelWorker()
+		t.Fatal("generation transfer did not reach Object Storage")
+	}
+
+	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{
+		"proof": h.issueProof(t, admin, "object_storage_connection.replace"), "expected_revision": replaced.revision,
+		"provider": "oss", "region": "cn-hangzhou", "bucket": "another-private-bucket",
+		"access_key_id": objectStorageAccessKey, "secret_access_key": objectStorageSecretKey,
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("replace during bound output transfer: status=%d body=%s", status, body)
+	}
+	assertErrorCode(t, body, "object_storage_location_frozen")
+	close(releasePut)
+	view := h.awaitTaskTerminal(t, member, taskID)
+	cancelWorker()
+	if err := <-workerDone; err != nil {
+		t.Fatalf("stop worker: %v", err)
+	}
+	if view.Task.Status != "succeeded" {
+		t.Fatalf("bound generation did not converge: %s (%s)", view.Task.Status, slotVerdicts(view))
+	}
 }
 
 func TestObjectStoragePendingUploadBlocksLocationMutationButAllowsRotation(t *testing.T) {

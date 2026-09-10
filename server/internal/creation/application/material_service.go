@@ -26,7 +26,6 @@ type MaterialService struct {
 	sessions domain.SessionRepository
 	uploads  domain.ReferenceMaterialUploadRepository
 	tasks    domain.GenerationTaskRepository
-	results  domain.BlobStore
 	storage  *ObjectStorageConnectionService
 	prober   domain.MediaProber
 	runner   domain.WriteRunner
@@ -61,7 +60,6 @@ func NewMaterialService(
 	sessions domain.SessionRepository,
 	uploads domain.ReferenceMaterialUploadRepository,
 	tasks domain.GenerationTaskRepository,
-	results domain.BlobStore,
 	storage *ObjectStorageConnectionService,
 	prober domain.MediaProber,
 	runner domain.WriteRunner,
@@ -72,7 +70,7 @@ func NewMaterialService(
 	}
 	return &MaterialService{
 		repos: repos, sessions: sessions, uploads: uploads, tasks: tasks,
-		results: results, storage: storage, prober: prober, runner: runner, now: now,
+		storage: storage, prober: prober, runner: runner, now: now,
 	}
 }
 
@@ -565,7 +563,7 @@ func (s *MaterialService) CreateFromResult(ctx context.Context, owner, sessionID
 	if err != nil {
 		return domain.ReferenceMaterial{}, err
 	}
-	source, sourceSize, err := s.results.Open(ctx, *slot.ResultBlobKey, domain.FullBlobRange)
+	source, sourceSize, err := store.Open(ctx, *slot.ResultBlobKey, domain.FullBlobRange)
 	if err != nil {
 		return domain.ReferenceMaterial{}, domain.ErrObjectStorageUnavailable
 	}

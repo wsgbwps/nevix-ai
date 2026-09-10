@@ -46,7 +46,12 @@ test('the real Authentication BrowserWindow has hardened web preferences', async
         }))
       ).toEqual({
         apiKeys: ['creation', 'invoke', 'on'],
-        creationKeys: ['cancelReferenceMaterialUpload', 'uploadReferenceMaterial'],
+        creationKeys: [
+          'abortReferenceMaterialUpload',
+          'cancelReferenceMaterialUpload',
+          'recoverReferenceMaterialUpload',
+          'uploadReferenceMaterial'
+        ],
         hasNodeProcess: false,
         hasAuthenticationBridge: false
       })

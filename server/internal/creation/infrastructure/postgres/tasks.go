@@ -175,6 +175,22 @@ func (r *GenerationTaskRepository) InsertAdmittedTask(ctx context.Context, tx do
 	return nil
 }
 
+func (r *GenerationTaskRepository) BindObjectStorageConnection(ctx context.Context, tx domain.TxExecutor, taskID, connectionID domain.UUID) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE creation_generation_tasks
+		SET object_storage_connection_id = $2
+		WHERE id = $1 AND terminal_at IS NULL
+		  AND (object_storage_connection_id IS NULL OR object_storage_connection_id = $2)`,
+		taskID, connectionID)
+	if err != nil {
+		return fmt.Errorf("creation: bind generation transfer storage: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return domain.ErrObjectStorageRevisionConflict
+	}
+	return nil
+}
+
 // --- creator-scoped queries -------------------------------------------------
 
 // The list summary carries the frozen creation-intent snapshot, so it reads

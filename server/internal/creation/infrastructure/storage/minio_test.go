@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -18,19 +17,16 @@ import (
 // keeping our own pump buffers at streamBufferLen-sized granularity.
 const minioChunkSize uint64 = 64 << 20
 
-// S3Store talks to any S3-compatible endpoint (MinIO for tests, customer
-// object storage in deployments). Credentials stay inside the Server
-// process; Desktop clients only ever see streamed bytes through Go.
-type S3Store struct {
+// minIOStore is the test-only adapter used by the automated conformance
+// harness. Production construction is closed to OSS and COS in factory.go.
+type minIOStore struct {
 	client *minio.Client
 	bucket string
 }
 
-// NewS3 pins the endpoint settings and proves the bucket exists once at
-// construction time so misconfiguration fails at boot, not mid-upload.
-func NewS3(ctx context.Context, endpoint, accessKeyID, secretAccessKey, region, bucket string, secure bool) (*S3Store, error) {
+func newMinIOStore(ctx context.Context, endpoint, accessKeyID, secretAccessKey, region, bucket string, secure bool) (*minIOStore, error) {
 	if endpoint == "" || bucket == "" || accessKeyID == "" || secretAccessKey == "" {
-		return nil, errors.New("creation: S3 storage requires endpoint, bucket, access key id, and secret access key")
+		return nil, errors.New("creation: MinIO test storage requires endpoint, bucket, access key id, and secret access key")
 	}
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
@@ -38,12 +34,12 @@ func NewS3(ctx context.Context, endpoint, accessKeyID, secretAccessKey, region, 
 		Region: region,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creation: build S3 storage client: %w", err)
+		return nil, fmt.Errorf("creation: build MinIO test client: %w", err)
 	}
 	if _, err := client.BucketExists(ctx, bucket); err != nil {
-		return nil, fmt.Errorf("creation: verify S3 bucket %q: %w", bucket, err)
+		return nil, fmt.Errorf("creation: verify MinIO test bucket %q: %w", bucket, err)
 	}
-	return &S3Store{client: client, bucket: bucket}, nil
+	return &minIOStore{client: client, bucket: bucket}, nil
 }
 
 // Put pumps bounded chunks into the provider with exactly one buffer of
@@ -51,7 +47,7 @@ func NewS3(ctx context.Context, endpoint, accessKeyID, secretAccessKey, region, 
 // this side so no extra round trip is spent learning facts about stored
 // bytes. Oversize or cancellation seals the pipe with an error, which makes
 // minio-go abort its multipart transfer instead of completing silently.
-func (s *S3Store) Put(ctx context.Context, key string, src io.Reader, maxBytes int64) (domain.PutResult, error) {
+func (s *minIOStore) Put(ctx context.Context, key string, src io.Reader, maxBytes int64) (domain.PutResult, error) {
 	pipeReader, pipeWriter := io.Pipe()
 	hasher := sha256.New()
 
@@ -83,23 +79,23 @@ func (s *S3Store) Put(ctx context.Context, key string, src io.Reader, maxBytes i
 	case copyErr != nil && errors.Is(copyErr, domain.ErrTooLarge):
 		return domain.PutResult{}, copyErr
 	case copyErr != nil || pumpErr != nil:
-		return domain.PutResult{}, fmt.Errorf("creation: put blob to S3: %w", errors.Join(copyErr, pumpErr))
+		return domain.PutResult{}, fmt.Errorf("creation: put blob to MinIO test storage: %w", errors.Join(copyErr, pumpErr))
 	}
 	return result, nil
 }
 
 // Open returns a lazily-seekable reader over one window plus the whole-blob
 // size (one HEAD round trip on this adapter).
-func (s *S3Store) Open(ctx context.Context, key string, rng domain.BlobRange) (domain.ReadSeekCloser, int64, error) {
+func (s *minIOStore) Open(ctx context.Context, key string, rng domain.BlobRange) (domain.ReadSeekCloser, int64, error) {
 	info, err := s.client.StatObject(ctx, s.bucket, key, minio.StatObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
-			return nil, 0, fmt.Errorf("creation: open blob %q: %w", key, os.ErrNotExist)
+			return nil, 0, fmt.Errorf("creation: open MinIO test blob %q: %w", key, domain.ErrBlobNotFound)
 		}
 		return nil, 0, fmt.Errorf("creation: probe blob %q: %w", key, err)
 	}
-	window, err := newS3Window(ctx, s, key, rng, info.Size)
+	window, err := newMinIOWindow(ctx, s, key, rng, info.Size)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -107,7 +103,7 @@ func (s *S3Store) Open(ctx context.Context, key string, rng domain.BlobRange) (d
 }
 
 // Delete removes the object; provider-side absence already satisfies cleanup.
-func (s *S3Store) Delete(ctx context.Context, key string) error {
+func (s *minIOStore) Delete(ctx context.Context, key string) error {
 	if err := s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{}); err != nil {
 		return fmt.Errorf("creation: delete blob %q: %w", key, err)
 	}

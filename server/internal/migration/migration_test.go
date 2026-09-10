@@ -167,3 +167,20 @@ func TestReferenceMaterialUploadResilienceMigrationOwnsLeaseAndCleanupFacts(t *t
 		}
 	}
 }
+
+func TestGenerationTransferBindingMigrationOwnsNarrowStorageFence(t *testing.T) {
+	sqlBytes, err := migrationFS.ReadFile("migrations/0019_generation_transfer_storage_binding.sql")
+	if err != nil {
+		t.Fatalf("read generation transfer storage binding migration: %v", err)
+	}
+	sql := string(sqlBytes)
+	for _, required := range []string{
+		"object_storage_connection_id",
+		"REFERENCES public.object_storage_connections (id)",
+		"WHERE object_storage_connection_id IS NOT NULL AND terminal_at IS NULL",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("generation transfer storage binding migration missing %q", required)
+		}
+	}
+}

@@ -16,12 +16,12 @@ import (
 
 // GenerationTaskHandler owns the generation task routes (creator-private).
 type GenerationTaskHandler struct {
-	tasks *application.TaskService
-	store domain.BlobStore
+	tasks   *application.TaskService
+	storage *application.ObjectStorageConnectionService
 }
 
-func NewGenerationTaskHandler(tasks *application.TaskService, store domain.BlobStore) *GenerationTaskHandler {
-	return &GenerationTaskHandler{tasks: tasks, store: store}
+func NewGenerationTaskHandler(tasks *application.TaskService, storage *application.ObjectStorageConnectionService) *GenerationTaskHandler {
+	return &GenerationTaskHandler{tasks: tasks, storage: storage}
 }
 
 // TaskSubmitRejected statuses carry the Retry-After advice seconds; the
@@ -227,9 +227,14 @@ func (h *GenerationTaskHandler) DownloadSlotResult(w http.ResponseWriter, r *htt
 		WriteError(w, &Error{Status: http.StatusNotFound, Code: CodeNotFound, Message: "The requested resource was not found."})
 		return
 	}
-	reader, _, err := h.store.Open(r.Context(), *slot.ResultBlobKey, domain.FullBlobRange)
+	store, _, err := h.storage.ResolveStore(r.Context())
 	if err != nil {
 		fail(w, r, err)
+		return
+	}
+	reader, _, err := store.Open(r.Context(), *slot.ResultBlobKey, domain.FullBlobRange)
+	if err != nil {
+		fail(w, r, domain.ErrObjectStorageUnavailable)
 		return
 	}
 	defer reader.Close()

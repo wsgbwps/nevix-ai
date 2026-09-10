@@ -11,6 +11,16 @@ import (
 
 type openRemoteRange func(context.Context, int64, int64) (io.ReadCloser, error)
 
+func clampOffset(offset, size int64) int64 {
+	if offset < 0 {
+		return 0
+	}
+	if offset > size {
+		return size
+	}
+	return offset
+}
+
 // remoteWindow provides seek without buffering a cloud object: each seek
 // closes the current response and the next read opens one exact byte range.
 type remoteWindow struct {

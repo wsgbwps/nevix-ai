@@ -4,14 +4,9 @@
 对外暴露 443 的完整栈）、`nginx/nginx.conf`（TLS/流式/限速边缘）、`cert-init/`
 （自签证书生命周期）、`postgres/init-identity-app.sh`（首启凭据预置）、
 `Dockerfile.server`（Go server 镜像）与 `.env.example`。备份与恢复脚本及手册归
-仓库 `scripts/`（后续切片交付；本手册先给入口）。
+仓库 `scripts/`；本手册给出交付入口和责任边界。
 
-> **#215 过渡状态：**本页冻结的 V1 Object Storage 合同只有 OSS/COS。当前 checkout
-> 的 Compose、环境样例与 Server 镜像仍保留待后续切片删除的 legacy filesystem/blob
-> 实现；下列涉及该 volume 的现行操作只用于过渡期测试数据，不代表产品支持、迁移或
-> 备份承诺。#215 全部切片完成前不得把本栈作为 #214 的交付基础。
-
-冻结的 V1 目标形态：面向**固定公网 IP** 的单租户部署。Go、PostgreSQL 与管理端口
+本栈面向**固定公网 IP** 的单租户部署。Go、PostgreSQL 与管理端口
 只存在于 Docker internal network，宿主机唯一发布端口是 nginx 的 443；对象数据位于
 客户 IT 预置的唯一私有 OSS 或 COS bucket，并通过 Server 推导的官方公网 endpoint
 访问，不作为 Compose service 或本地 volume 交付。所有上游镜像按 digest 钉扎。V1
@@ -22,15 +17,14 @@
 
 - Linux 主机，可安装 Docker Engine 与 Compose v2（`docker compose version`）。
 - 一个**固定公网 IP**，防火墙/安全组放行 TCP 443 入站，且不放行其他本栈端口。
-- V1 目标要求客户 IT 预置一个私有 OSS 或 COS bucket，关闭版本控制，并配置权限精确
-  覆盖 Nevix 所需 bucket/prefix 的 AK/SK。阿里云 OSS 可使用任意现有 RAM 用户；专用
-  RAM 用户只作为隔离影响面的推荐项，禁止使用阿里云主账号 AK。共享 AK 的轮换、停用
-  或泄露会同时影响其他应用。Electron Main 原生流式上传不要求 bucket CORS；当前
-  legacy Compose 尚不消费该配置。
+- 客户 IT 预置一个私有 OSS 或 COS bucket，关闭版本控制，提供长期、最小权限且权限
+  精确覆盖 Nevix 所需 bucket/prefix 的 AK/SK，并只对 `provider-transfer/` 配置
+  lifecycle。Electron Main 原生流式上传不要求 bucket CORS。阿里云 OSS 可使用权限
+  精确覆盖上述范围的现有 RAM 用户；专用 RAM 用户只作为隔离影响面的推荐项，禁止使用
+  阿里云主账号 AK。共享 AK 的轮换、停用或泄露会同时影响其他应用。
 - 规划 ~300 用户、峰值 ≤10 并发生成任务的规模画像（ADR-0013）。
-- 当前 checkout 规划 pgdata（数据库）、tls（证书私钥，极小）、secrets（凭据主密钥，
-  极小）与 legacy blobs；后者仅承载可丢弃的过渡期测试数据。V1 目标删除 blobs volume，
-  对象数据不进入本地 volume。
+- 规划 pgdata（数据库）、tls（证书私钥，极小）与 secrets（Creation Credential
+  Master Key，极小）三个本地持久化卷；对象数据不进入本地 volume。
 
 ## 2. 首次部署
 
@@ -64,6 +58,17 @@ docker compose logs server | grep -oE 'setup_code=[0-9A-Z]{4}-[0-9A-Z]{4}'
 
 > 受隔离内网（确认无未授权访问路径）可显式设 `NEVIX_SETUP_CODE_REQUIRED=false`
 > 放开认领。该决定必须由部署方显式做出——公网部署保持 true。
+
+### 配置 Object Storage Connection
+
+完成 Instance Claim 后，首位 Admin 在 AI Creation Settings 选择 OSS 或 COS，并提交
+region、bucket 与 AK/SK。该连接是保存在 PostgreSQL 的实例级产品事实；不要把 AK/SK
+写入 `.env`，Server 会按 provider 与 region 推导官方公网 endpoint。未配置、凭据无法
+解密或 bucket 暂时不可用时，Server 与账号功能仍可启动和使用，依赖对象存储的 Creation
+操作统一以 `object_storage_unavailable` fail closed。
+
+V1 不支持 filesystem、NAS、通用 S3、MinIO runtime、任意 endpoint、STS、内网 endpoint、
+加速域名或自定义域名。MinIO 只用于自动化测试，不是客户部署选项。
 
 ### 连通性验收
 
@@ -123,7 +128,9 @@ docker compose logs cert-watch          # 关注 "expires within 90 days"
 
 部署方应把该日志纳入例行巡检；看到告警即按第 4 节主动轮换。
 
-## 6. 备份与恢复入口
+## 6. 备份与恢复边界
+
+Nevix 备份范围仅包括 PostgreSQL、Creation Credential Master Key 与 TLS 材料：
 
 - **数据库**：`pgdata` 卷。备份入口是 `pg_dump`（本机执行）：
   ```bash
@@ -154,16 +161,14 @@ docker compose logs cert-watch          # 关注 "expires within 90 days"
   docker compose cp ./tls-backup/server.pem cert-watch:/etc/nginx/tls/   # 示例；
   # 实际用临时容器或 volume 操作写回，并保持 key 0600
   ```
-- **凭据主密钥 secrets 卷**：当前文件为 `provider-credential-master.key`（32 字节、
-  0600，目录 0700）；#215 后续切片将其语义扩展并命名为 Creation Credential Master
-  Key，以同一数据库外主密钥保护 AI Provider 与 Object Storage 凭据。它与数据库同
-  窗口备份；丢失后依赖对应密文的 Connection 进入 `credential_unavailable`，Server
-  绝不静默重建替代密钥（ADR-0016）。
-- **legacy blobs 卷**：仅属于当前 checkout 的过渡期 filesystem 实现和可丢弃测试数据；
-  不进入 V1 备份边界，也没有迁移或兼容承诺，随 #215 后续切片删除。
-- **V1 Object Storage bucket**：备份、保留和恢复完全归客户 IT；Nevix 不提供与
-  PostgreSQL 协调的快照、bucket 扫描或 orphan 导入。组合备份与恢复的正式脚本及
-  手册归仓库 `scripts/`，随对应切片交付（ADR-0013）。
+- **Creation Credential Master Key**：位于 secrets 卷，当前文件为
+  `provider-credential-master.key`（32 字节、0600，目录 0700），保护 AI Provider 与
+  Object Storage 凭据。它与数据库同窗口备份；丢失后依赖对应密文的 Connection 进入
+  `credential_unavailable`，Server 绝不静默重建替代密钥（ADR-0016）。
+- **Object Storage bucket**：备份、保留和恢复完全归客户 IT。Nevix 不申请 List
+  权限，不提供 PostgreSQL 与 bucket 的协调快照、基于 List 的 reconciliation、多余对象
+  导入或缺失对象自动修复。恢复后数据库引用缺失 blob 时对应业务读取 fail closed；
+  bucket 中的多余对象不会被 Nevix 列举或导入（ADR-0013）。
 
 ## 7. AI Creation 发布前 smoke
 
@@ -179,10 +184,10 @@ Nevix 开发者在首次正式发布、固定模型变化或供应商合同变�
 3. 将结果记入 release checklist 或对应 issue。失败时停止本次发布并修复；检查结果
    不作为部署文件，也不影响已部署 Server 启动。
 
-#215 的 provider adapter 与 smoke 入口落地后，Object Storage adapter、权限合同、签名
-或兼容逻辑变化以及正式发布前，开发者分别运行真实 OSS 与 COS smoke，并记录结果和
-精确 key 清理结果。两条 smoke 只验证发布兼容性；每个 Deployment Instance 运行时仍
-只构造和检查其当前 provider。
+Object Storage adapter、权限合同、endpoint/CORS/presign 逻辑变化以及正式发布前，
+开发者分别运行真实 OSS 与 COS smoke，并记录权限 canary、预签名 PUT、防覆盖、
+Open/Range/Delete/cancel、无 CORS OPTIONS 依赖和精确 key 清理结果。两条 smoke 只验证
+发布兼容性；每个 Deployment Instance 运行时仍只构造和检查其当前 provider。
 
 ## 8. 失败排查
 
@@ -203,11 +208,10 @@ Nevix 开发者在首次正式发布、固定模型变化或供应商合同变�
 - 宿主机唯一发布端口是 nginx 443；不得给 postgres/server 添加 `ports`。
 - 上游镜像引用必须带 digest；本地构建镜像的 FROM 必须带 digest。
 - nginx 必须删除外部 Forwarded/X-Forwarded-\* 后只写可信 HTTPS 标记
-  （后续切片的 `secure_transport_required` 依赖它）。
+  （`secure_transport_required` 依赖它）。
 - 证书身份只允许两种变化：空卷首次生成，或 `CERT_FORCE_NEW=true` 显式轮换；
   其他一切持久化状态（损坏/过期/IP 变化）fail closed，绝不允许自动重建。
-- `proxy_buffering`/`proxy_request_buffering` 保持 off：SSE、当前 legacy upload、下载、
-  Range 与大文件响应端到端流式；#215 落地后 Reference Material 的已授权 PUT 直达
-  当前 bucket，不经过 nginx。
+- `proxy_buffering`/`proxy_request_buffering` 保持 off：SSE、下载、Range 与大文件响应
+  端到端流式；Reference Material 的已授权 PUT 直达当前 bucket，不经过 nginx。
 - 自动化合同测试：`scripts/tests/deploy-stack.test.mjs`（`make harness-test`
   运行）。改动 compose/nginx/cert-init 后先跑测试再交付。

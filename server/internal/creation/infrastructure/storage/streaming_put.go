@@ -11,6 +11,8 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
+const copyBufferLen = 256 << 10
+
 func drainPutError(ch chan error) {
 	for range ch {
 	}

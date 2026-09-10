@@ -15,4 +15,7 @@ for name in "${required[@]}"; do
 done
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../server"
-NEVIX_OSS_SMOKE_REQUESTED=1 go test -tags=cloudsmoke ./internal/creation/infrastructure/storage -run '^TestOSSRealSmoke$' -count=1 -v
+adapter_version="$(go list -m -f '{{.Version}}' github.com/aliyun/alibabacloud-oss-go-sdk-v2)"
+NEVIX_OSS_SMOKE_REQUESTED=1 \
+  NEVIX_OBJECT_STORAGE_ADAPTER_VERSION="$adapter_version" \
+  go test -tags=cloudsmoke ./internal/creation/infrastructure/storage -run '^TestOSSRealSmoke$' -count=1 -v

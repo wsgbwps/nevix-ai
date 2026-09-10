@@ -35,7 +35,7 @@ func TestOSSRealSmoke(t *testing.T) {
 			},
 		})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal("production connection canary failed")
 		}
 	})
 }

@@ -11,35 +11,34 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// TestS3ConformanceSuiteAgainstMinIO runs the identical blob contract over
-// an S3-compatible backend. The harness provisions MinIO and exports the
-// NEVIX_CREATION_TEST_S3_* variables; without them ordinary runs skip, while
-// a requested run fails loudly.
-func TestS3ConformanceSuiteAgainstMinIO(t *testing.T) {
-	endpoint := os.Getenv("NEVIX_CREATION_TEST_S3_ENDPOINT")
-	accessKey := os.Getenv("NEVIX_CREATION_TEST_S3_ACCESS_KEY_ID")
-	secretKey := os.Getenv("NEVIX_CREATION_TEST_S3_SECRET_ACCESS_KEY")
+// TestMinIOConformanceSuite runs the identical blob contract over a test-only
+// MinIO backend. The harness exports NEVIX_CREATION_TEST_MINIO_* variables;
+// without them ordinary runs skip, while a requested run fails loudly.
+func TestMinIOConformanceSuite(t *testing.T) {
+	endpoint := os.Getenv("NEVIX_CREATION_TEST_MINIO_ENDPOINT")
+	accessKey := os.Getenv("NEVIX_CREATION_TEST_MINIO_ACCESS_KEY_ID")
+	secretKey := os.Getenv("NEVIX_CREATION_TEST_MINIO_SECRET_ACCESS_KEY")
 	requested := os.Getenv("NEVIX_CREATION_INTEGRATION_REQUESTED") == "1"
 	if endpoint == "" || accessKey == "" || secretKey == "" {
 		if requested {
-			t.Fatal("requested Creation integration is missing NEVIX_CREATION_TEST_S3_* variables; run ./scripts/test-creation-integration.sh")
+			t.Fatal("requested Creation integration is missing NEVIX_CREATION_TEST_MINIO_* variables; run ./scripts/test-creation-integration.sh")
 		}
-		t.Skip("skipping: S3 conformance environment is not configured")
+		t.Skip("skipping: MinIO conformance environment is not configured")
 	}
 	bucket := "nevix-creation-conformance"
-	if raw := os.Getenv("NEVIX_CREATION_TEST_S3_BUCKET"); raw != "" {
+	if raw := os.Getenv("NEVIX_CREATION_TEST_MINIO_BUCKET"); raw != "" {
 		bucket = raw
 	}
-	secure := os.Getenv("NEVIX_CREATION_TEST_S3_SECURE") == "true"
+	secure := os.Getenv("NEVIX_CREATION_TEST_MINIO_SECURE") == "true"
 
 	ctx := context.Background()
 	provisionBucket(t, ctx, endpoint, bucket, accessKey, secretKey, secure)
 
 	runConformanceSuite(t, func(t *testing.T) domain.BlobStore {
 		t.Helper()
-		store, err := NewS3(ctx, endpoint, accessKey, secretKey, "us-east-1", bucket, secure)
+		store, err := newMinIOStore(ctx, endpoint, accessKey, secretKey, "us-east-1", bucket, secure)
 		if err != nil {
-			t.Fatalf("new S3 store: %v", err)
+			t.Fatalf("new MinIO store: %v", err)
 		}
 		return store
 	})
@@ -54,11 +53,11 @@ func provisionBucket(t *testing.T, ctx context.Context, endpoint, bucket, access
 		Secure: secure,
 	})
 	if err != nil {
-		t.Fatalf("bootstrap S3 client: %v", err)
+		t.Fatalf("bootstrap MinIO client: %v", err)
 	}
 	exists, err := client.BucketExists(ctx, bucket)
 	if err != nil {
-		t.Fatalf("probe S3 bucket %q: %v", bucket, err)
+		t.Fatalf("probe MinIO bucket %q: %v", bucket, err)
 	}
 	if exists {
 		return
@@ -68,6 +67,6 @@ func provisionBucket(t *testing.T, ctx context.Context, endpoint, bucket, access
 		if errResponse.Code == "BucketAlreadyOwnedByYou" || errResponse.Code == "BucketAlreadyExists" {
 			return
 		}
-		t.Fatalf("create S3 bucket %q: %v", bucket, err)
+		t.Fatalf("create MinIO bucket %q: %v", bucket, err)
 	}
 }

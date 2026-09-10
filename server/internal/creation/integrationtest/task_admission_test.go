@@ -130,6 +130,37 @@ func TestTaskAdmissionAtomicityAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestTaskAdmissionRequiresObjectStorageBeforeProviderWork(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{})
+	token := h.loginToken(t, creator, harnessPassword)
+	draft := h.imageTaskIntent(t, token, "存储不可用时不调用供应商", 1)
+	requestsBefore := h.kapon.generation.imageRequests()
+	status, body := h.submitTask(t, token, "storage-replay", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("seed replayable task: status=%d body=%s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+	if _, err := h.ownerPool.Exec(h.ctx, `UPDATE object_storage_connections SET state = 'credential_unavailable' WHERE terminated_at IS NULL`); err != nil {
+		t.Fatalf("make Object Storage unavailable without deleting the admitted task: %v", err)
+	}
+
+	status, body = h.submitTask(t, token, "storage-replay", draft)
+	if status != http.StatusOK || decodeTaskView(t, body).Task.ID != taskID {
+		t.Fatalf("storage loss must not break an admitted idempotent replay: status=%d body=%s", status, body)
+	}
+	status, body = h.submitTask(t, token, "storage-required", draft)
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured storage must reject admission with 503, got %d: %s", status, body)
+	}
+	assertErrorCode(t, body, "object_storage_unavailable")
+	if got := h.kapon.generation.imageRequests(); got != requestsBefore {
+		t.Fatalf("storage rejection reached the provider: requests=%d want=%d", got, requestsBefore)
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks WHERE session_id = $1::uuid`, draft.SessionID); got != 1 {
+		t.Fatalf("storage rejection changed the one replayed task into %d tasks", got)
+	}
+}
+
 // TestTaskAdmissionRejectsIntentPayloads covers the intent-payload
 // rejections: incomplete intent, foreign manifest version, values outside the
 // current manifest, and references that violate the structural envelope or the

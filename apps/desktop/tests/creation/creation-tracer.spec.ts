@@ -29,7 +29,7 @@ const REAL_PNG = Buffer.from(
 // never the server.
 test(
   'a creator drafts in the Workbench and the draft survives an app restart',
-  { tag: '@smoke' },
+  { tag: ['@smoke', '@storage'] },
   async () => {
     test.setTimeout(150_000)
     test.skip(!identityServer, 'requires the disposable identity server built by the E2E command')
@@ -81,8 +81,8 @@ test(
             .getByTestId('reference-deck')
             .getByRole('button', { name: 'shot.png', exact: true })
         ).toBeVisible({ timeout: 15_000 })
-        // The E2E harness uses filesystem storage; #220 direct upload requires
-        // an OSS/COS connection and is covered by its contract and IPC suites.
+        // Upload starts only on submit. Removing the staged file keeps this
+        // tracer focused on task/result persistence rather than native PUT.
         await workbench.getByRole('button', { name: '移除 shot.png' }).click()
         await expect(workbench.getByRole('button', { name: 'shot.png', exact: true })).toHaveCount(
           0

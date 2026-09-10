@@ -10,12 +10,12 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// s3Window is one seekable [start,stop) window over an S3 object. Streams
-// are opened lazily at the current position so probing and Range downloads
+// minIOWindow is one seekable [start,stop) window over a MinIO test object.
+// Streams are opened lazily at the current position so probing and Range downloads
 // only transfer the bytes they actually touch; context death closes the
 // active stream promptly instead of waiting for connection teardown.
-type s3Window struct {
-	store        *S3Store
+type minIOWindow struct {
+	store        *minIOStore
 	key          string
 	ctx          context.Context
 	start, stop  int64
@@ -24,7 +24,7 @@ type s3Window struct {
 	currentStart int64
 }
 
-func newS3Window(ctx context.Context, store *S3Store, key string, rng domain.BlobRange, size int64) (*s3Window, error) {
+func newMinIOWindow(ctx context.Context, store *minIOStore, key string, rng domain.BlobRange, size int64) (*minIOWindow, error) {
 	start := clampOffset(rng.Offset, size)
 	stop := size
 	if rng.Length >= 0 {
@@ -36,7 +36,7 @@ func newS3Window(ctx context.Context, store *S3Store, key string, rng domain.Blo
 	if start > stop {
 		start = stop
 	}
-	window := &s3Window{
+	window := &minIOWindow{
 		store: store,
 		key:   key,
 		ctx:   ctx,
@@ -54,7 +54,7 @@ func newS3Window(ctx context.Context, store *S3Store, key string, rng domain.Blo
 // openAt starts a fresh provider stream covering [from, stop). MinIO maps a
 // bad range onto the documented behavior of returning fewer bytes; EOF past
 // stop is enforced locally instead.
-func (w *s3Window) openAt(from int64) error {
+func (w *minIOWindow) openAt(from int64) error {
 	opts := minio.GetObjectOptions{}
 	var rangeHeader string
 	switch {
@@ -81,7 +81,7 @@ func (w *s3Window) openAt(from int64) error {
 	return nil
 }
 
-func (w *s3Window) Read(p []byte) (int, error) {
+func (w *minIOWindow) Read(p []byte) (int, error) {
 	if w.pos >= w.stop {
 		return 0, io.EOF
 	}
@@ -101,7 +101,7 @@ func (w *s3Window) Read(p []byte) (int, error) {
 // Seek supports absolute, relative, and end-relative movement within the
 // window; movement always closes the live stream so the next Read reopens
 // exactly where needed rather than draining skipped bytes.
-func (w *s3Window) Seek(offset int64, whence int) (int64, error) {
+func (w *minIOWindow) Seek(offset int64, whence int) (int64, error) {
 	base := w.pos
 	switch whence {
 	case io.SeekStart:
@@ -121,14 +121,14 @@ func (w *s3Window) Seek(offset int64, whence int) (int64, error) {
 	return next - w.start, nil
 }
 
-func (w *s3Window) closeCurrent() {
+func (w *minIOWindow) closeCurrent() {
 	if w.current != nil {
 		w.current.Close()
 		w.current = nil
 	}
 }
 
-func (w *s3Window) Close() error {
+func (w *minIOWindow) Close() error {
 	w.closeCurrent()
 	return nil
 }

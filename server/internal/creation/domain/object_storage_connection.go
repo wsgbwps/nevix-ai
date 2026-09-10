@@ -102,6 +102,7 @@ var (
 type ObjectStorageConnectionRepository interface {
 	Insert(ctx context.Context, tx TxExecutor, connection *ObjectStorageConnection) error
 	GetActive(ctx context.Context) (ObjectStorageConnection, error)
+	LockForUse(ctx context.Context, tx TxExecutor, expected ObjectStorageConnection) error
 	UpdateObservation(ctx context.Context, tx TxExecutor, id UUID, expectedRevision int64, checkedAt time.Time, outcome CheckOutcome) error
 	ReplaceLocation(ctx context.Context, tx TxExecutor, connection *ObjectStorageConnection, expectedRevision int64) error
 	RotateCredential(ctx context.Context, tx TxExecutor, connection *ObjectStorageConnection, expectedRevision int64) error

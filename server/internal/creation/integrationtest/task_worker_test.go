@@ -1,17 +1,21 @@
 package integrationtest
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nevix-ai/server/internal/creation"
 )
 
 // Worker-driven task lifecycle scenarios (issue #159): real queue worker,
-// real filesystem storage, fake Kapon generation endpoints, and the
-// one-way state machine observed end to end through public HTTP.
+// a database-configured Object Storage Connection backed by a test fake,
+// fake Kapon endpoints, and the one-way state machine observed through HTTP.
 
 // TestImageTaskLifecycleReachesSucceeded: a synchronous image task advances
 // queued → submitting → persisting → succeeded, transfers and verifies every
@@ -58,10 +62,110 @@ func TestImageTaskLifecycleReachesSucceeded(t *testing.T) {
 	if len(raw) == 0 {
 		t.Fatal("result download must carry bytes")
 	}
+	// Removing the customer-owned object must fail closed on every read. The
+	// runtime neither rewrites the recorded result nor attempts blob repair.
+	var resultKey string
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		SELECT result_blob_key
+		FROM creation_generation_slots
+		WHERE task_id = $1::uuid AND slot_index = 0
+	`, taskID).Scan(&resultKey); err != nil {
+		t.Fatalf("read result object key: %v", err)
+	}
+	if err := h.directStore.Delete(h.ctx, resultKey); err != nil {
+		t.Fatalf("remove result object: %v", err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		status, body = h.doRequest(t, "GET", "/creation/tasks/"+taskID+"/slots/0/result", token, nil)
+		if status != http.StatusServiceUnavailable {
+			t.Fatalf("missing result must fail closed with 503, got %d: %s", status, body)
+		}
+		assertErrorCode(t, body, "object_storage_unavailable")
+	}
+	if got := countRows(t, h.ownerPool, `
+		SELECT count(*)
+		FROM creation_generation_slots
+		WHERE task_id = $1::uuid AND slot_index = 0
+		  AND status = 'succeeded' AND result_blob_key = $2
+	`, taskID, resultKey); got != 1 {
+		t.Fatalf("missing object must not rewrite the recorded result, got %d matching rows", got)
+	}
 	// A foreign creator gets the uniform 404.
 	otherToken := h.loginToken(t, otherCreatorEmail, harnessPassword)
 	if status, _ := h.doRequest(t, "GET", "/creation/tasks/"+taskID+"/slots/0/result", otherToken, nil); status != http.StatusNotFound {
 		t.Fatalf("foreign download must be 404, got %d", status)
+	}
+}
+
+func TestGenerationResultTransferRecoversAfterPutBeforeVerdictCrash(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{})
+	token := h.loginToken(t, creator, harnessPassword)
+	h.kapon.generation.setImage(imageScript{outputs: 1})
+
+	draft := h.imageTaskIntent(t, token, "复用已完整写入的结果", 1)
+	status, body := h.submitTask(t, token, "result-put-before-verdict", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	view := decodeTaskView(t, body)
+	taskID := view.Task.ID
+	h.directStore.conflictAfterNextPut()
+
+	workerCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.creation.RunWorkers(workerCtx) }()
+	view = h.awaitTaskTerminal(t, token, taskID)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("stop worker: %v", err)
+	}
+	if view.Task.Status != "succeeded" || len(view.Slots) != 1 || view.Slots[0].Result == nil {
+		t.Fatalf("pre-existing verified result did not converge idempotently: %s (%s)", view.Task.Status, slotVerdicts(view))
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, taskID); got != 1 {
+		t.Fatalf("idempotent convergence formed %d media assets", got)
+	}
+}
+
+func TestGenerationResultTransferNeverImportsPreexistingObject(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{})
+	token := h.loginToken(t, creator, harnessPassword)
+	h.kapon.generation.setImage(imageScript{outputs: 1})
+
+	draft := h.imageTaskIntent(t, token, "不导入既有桶对象", 1)
+	status, body := h.submitTask(t, token, "result-preexisting-object", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+	resultKey := "generation-results/" + taskID[0:2] + "/" + taskID[2:4] + "/" + taskID + "-slot-0"
+	preexisting := pngBytesSized(t, 300, 256)
+	if _, err := h.directStore.Put(h.ctx, resultKey, bytes.NewReader(preexisting), int64(len(preexisting))); err != nil {
+		t.Fatalf("seed unrelated object: %v", err)
+	}
+
+	workerCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.creation.RunWorkers(workerCtx) }()
+	view := h.awaitTaskTerminal(t, token, taskID)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("stop worker: %v", err)
+	}
+	if view.Task.Status != "failed" || len(view.Slots) != 1 || view.Slots[0].Result != nil {
+		t.Fatalf("unrelated exact-key object must fail closed: %s (%s)", view.Task.Status, slotVerdicts(view))
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, taskID); got != 0 {
+		t.Fatalf("unrelated object formed %d media assets", got)
+	}
+	stored, _, err := h.directStore.Open(h.ctx, resultKey, creation.FullBlobRange)
+	if err != nil {
+		t.Fatalf("unrelated object was deleted: %v", err)
+	}
+	defer stored.Close()
+	got, err := io.ReadAll(stored)
+	if err != nil || !bytes.Equal(got, preexisting) {
+		t.Fatalf("unrelated object changed: read_error=%v", err)
 	}
 }
 

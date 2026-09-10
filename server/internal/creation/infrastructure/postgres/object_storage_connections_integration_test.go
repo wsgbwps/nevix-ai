@@ -29,7 +29,7 @@ func TestObjectStorageConnectionSingletonAndMonotonicRevision(t *testing.T) {
 		t.Fatalf("connect owner pool: %v", err)
 	}
 	defer owner.Close()
-	if _, err := owner.Exec(ctx, `TRUNCATE public.creation_reference_material_uploads, public.object_storage_connections`); err != nil {
+	if _, err := owner.Exec(ctx, `TRUNCATE public.creation_generation_tasks, public.creation_reference_material_uploads, public.object_storage_connections CASCADE`); err != nil {
 		t.Fatalf("reset table: %v", err)
 	}
 
@@ -43,7 +43,7 @@ func TestObjectStorageConnectionSingletonAndMonotonicRevision(t *testing.T) {
 			return
 		}
 		defer cleanupPool.Close()
-		if _, err := cleanupPool.Exec(context.Background(), `TRUNCATE public.creation_reference_material_uploads, public.object_storage_connections`); err != nil {
+		if _, err := cleanupPool.Exec(context.Background(), `TRUNCATE public.creation_generation_tasks, public.creation_reference_material_uploads, public.object_storage_connections CASCADE`); err != nil {
 			t.Errorf("cleanup object storage connections: %v", err)
 		}
 	})

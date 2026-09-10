@@ -1,7 +1,9 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -28,8 +30,7 @@ type TaskWorker struct {
 	materials   domain.MaterialRepository
 	connections domain.ConnectionSignals
 	credentials domain.CallCredentialSource
-	store       domain.BlobStore
-	references  *ObjectStorageConnectionService
+	storage     *ObjectStorageConnectionService
 	prober      domain.MediaProber
 	gateway     domain.ProviderGateway
 	assets      domain.MediaAssetRepository
@@ -51,8 +52,7 @@ func NewTaskWorker(
 	materials domain.MaterialRepository,
 	connections domain.ConnectionSignals,
 	credentials domain.CallCredentialSource,
-	store domain.BlobStore,
-	references *ObjectStorageConnectionService,
+	storage *ObjectStorageConnectionService,
 	prober domain.MediaProber,
 	gateway domain.ProviderGateway,
 	assets domain.MediaAssetRepository,
@@ -62,7 +62,7 @@ func NewTaskWorker(
 ) *TaskWorker {
 	return &TaskWorker{
 		tasks: tasks, materials: materials, connections: connections, credentials: credentials,
-		store: store, references: references, prober: prober, gateway: gateway, assets: assets, notify: notify, runner: runner,
+		storage: storage, prober: prober, gateway: gateway, assets: assets, notify: notify, runner: runner,
 		fetch:      &http.Client{Timeout: 5 * time.Minute},
 		leaseOwner: leaseOwner,
 		lease:      30 * time.Second,
@@ -229,7 +229,11 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	if err != nil {
 		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
 	}
-	request, err := w.buildSubmitRequest(ctx, task, media)
+	store, _, err := w.storage.ResolveStore(ctx)
+	if err != nil {
+		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
+	}
+	request, err := w.buildSubmitRequest(ctx, store, task, media)
 	if err != nil {
 		if errors.Is(err, domain.ErrMaterialNotFound) || errors.Is(err, domain.ErrSessionNotFound) || errors.Is(err, domain.ErrBlobNotFound) {
 			reason := domain.ReasonInvalidInput
@@ -327,7 +331,7 @@ func (w *TaskWorker) holdSubmitRetry(ctx context.Context, queueID, jobID domain.
 
 // buildSubmitRequest assembles the transport-ready request from the frozen
 // specification and the creator's stored materials.
-func (w *TaskWorker) buildSubmitRequest(ctx context.Context, task domain.GenerationTask, media domain.MediaType) (domain.SubmitRequest, error) {
+func (w *TaskWorker) buildSubmitRequest(ctx context.Context, store domain.BlobStore, task domain.GenerationTask, media domain.MediaType) (domain.SubmitRequest, error) {
 	req := domain.SubmitRequest{
 		Media:      media,
 		Model:      task.Spec.Model,
@@ -341,10 +345,6 @@ func (w *TaskWorker) buildSubmitRequest(ctx context.Context, task domain.Generat
 	}
 	if len(task.Spec.References) == 0 {
 		return req, nil
-	}
-	store, _, err := w.references.ResolveStore(ctx)
-	if err != nil {
-		return domain.SubmitRequest{}, err
 	}
 	for _, reference := range task.Spec.References {
 		data, err := w.referenceDataURL(ctx, store, task.OwnerID, reference.MaterialID)
@@ -474,7 +474,11 @@ func (w *TaskWorker) transferAndPersist(ctx context.Context, queueID domain.UUID
 	if err != nil {
 		return err
 	}
-	writes, err := w.transferOutputs(ctx, task, slots, outputs)
+	store, storageConnection, err := w.resolveAndBindTransferStore(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	writes, err := w.transferOutputs(ctx, store, task, slots, outputs)
 	if err != nil {
 		return err
 	}
@@ -483,7 +487,42 @@ func (w *TaskWorker) transferAndPersist(ctx context.Context, queueID domain.UUID
 		return err
 	}
 	verdict.Slots = writes
-	return w.applyRun(ctx, queueID, taskID, verdict)
+	err = w.runner.Run(ctx, func(sc domain.WriteScope) error {
+		if err := w.storage.lockForUse(ctx, sc.Tx(), storageConnection); err != nil {
+			return err
+		}
+		_, _, err := w.applier.apply(ctx, sc, domain.UUID{}, queueID, taskID, verdict)
+		return err
+	})
+	if errors.Is(err, domain.ErrObjectStorageConnectionNotConfigured) || errors.Is(err, domain.ErrObjectStorageRevisionConflict) {
+		// Keep completed writes for the deterministic retry path. Deleting
+		// here could remove an exact-key object that predated this attempt.
+		return domain.ErrObjectStorageUnavailable
+	}
+	return err
+}
+
+func (w *TaskWorker) resolveAndBindTransferStore(ctx context.Context, taskID domain.UUID) (domain.BlobStore, domain.ObjectStorageConnection, error) {
+	for range 2 {
+		store, connection, err := w.storage.ResolveStore(ctx)
+		if err != nil {
+			return nil, domain.ObjectStorageConnection{}, err
+		}
+		err = w.runner.Run(ctx, func(sc domain.WriteScope) error {
+			if err := w.storage.lockForUse(ctx, sc.Tx(), connection); err != nil {
+				return err
+			}
+			return w.tasks.BindObjectStorageConnection(ctx, sc.Tx(), taskID, connection.ID)
+		})
+		if err == nil {
+			return store, connection, nil
+		}
+		if !errors.Is(err, domain.ErrObjectStorageConnectionNotConfigured) &&
+			!errors.Is(err, domain.ErrObjectStorageRevisionConflict) {
+			return nil, domain.ObjectStorageConnection{}, err
+		}
+	}
+	return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
 }
 
 // transferOutputs streams every provider output into the module's storage,
@@ -491,7 +530,7 @@ func (w *TaskWorker) transferAndPersist(ctx context.Context, queueID domain.UUID
 // writes. Outputs already exceeding the slot count are ignored (provider
 // over-supply never forms results); slot shortfall marks the missing slots
 // failed as temporarily unavailable so the creator can retry them.
-func (w *TaskWorker) transferOutputs(ctx context.Context, task domain.GenerationTask, slots []domain.GenerationSlot, outputs []domain.GatewayOutput) ([]domain.SlotVerdictWrite, error) {
+func (w *TaskWorker) transferOutputs(ctx context.Context, store domain.BlobStore, task domain.GenerationTask, slots []domain.GenerationSlot, outputs []domain.GatewayOutput) ([]domain.SlotVerdictWrite, error) {
 	writes := make([]domain.SlotVerdictWrite, 0, len(slots))
 	claimed := map[int]bool{}
 	for _, output := range outputs {
@@ -509,7 +548,7 @@ func (w *TaskWorker) transferOutputs(ctx context.Context, task domain.Generation
 			break // provider over-supply: never form extra results
 		}
 		claimed[index] = true
-		result, err := w.transferOne(ctx, task.Spec.MediaType, task.ID, index, output)
+		result, err := w.transferOne(ctx, store, task.Spec.MediaType, task.ID, index, output)
 		if err != nil {
 			reason := domain.ReasonTemporarilyUnavailable
 			writes = append(writes, domain.SlotVerdictWrite{
@@ -539,12 +578,11 @@ func (w *TaskWorker) transferOutputs(ctx context.Context, task domain.Generation
 	return writes, nil
 }
 
-// transferOne streams one output into storage and probes it. The blob key
-// is deterministic per (task, slot), so a lease-expiry retry overwrites the
-// same object instead of duplicating results. The probe's facts must match
-// the media's output contract (image outputs are JPEG or PNG); a mismatch is
-// a transfer verification failure, never an accepted result.
-func (w *TaskWorker) transferOne(ctx context.Context, media domain.MediaType, taskID domain.UUID, index int, output domain.GatewayOutput) (*domain.SlotResult, error) {
+// transferOne streams one output into storage and probes it. A conflicting
+// exact key is accepted only when both the current provider output and stored
+// object have identical bounded size and SHA-256 facts. That recovers a lost
+// Put response without importing an unrelated customer-owned bucket object.
+func (w *TaskWorker) transferOne(ctx context.Context, store domain.BlobStore, media domain.MediaType, taskID domain.UUID, index int, output domain.GatewayOutput) (*domain.SlotResult, error) {
 	blobKey := domain.GenerationResultBlobKey(taskID, index)
 	// The download stream is bounded by the defensive per-output ceiling;
 	// the blob store enforces the same limit on its side.
@@ -553,8 +591,9 @@ func (w *TaskWorker) transferOne(ctx context.Context, media domain.MediaType, ta
 		return nil, err
 	}
 	defer reader.Close()
-	put, err := w.store.Put(ctx, blobKey, reader, domain.GenerationResultMaxBytes)
-	if err != nil {
+	put, err := store.Put(ctx, blobKey, reader, domain.GenerationResultMaxBytes)
+	conflict := errors.Is(err, domain.ErrBlobConflict)
+	if err != nil && !conflict {
 		return nil, diagnosedFailure(
 			domain.DiagnosticSourceStorage,
 			"output_store_write_failed",
@@ -563,7 +602,67 @@ func (w *TaskWorker) transferOne(ctx context.Context, media domain.MediaType, ta
 			err,
 		)
 	}
-	stored, size, err := w.store.Open(ctx, blobKey, domain.FullBlobRange)
+	if conflict {
+		sourceSize, sourceChecksum, err := w.fingerprintProviderOutput(ctx, output)
+		if err != nil {
+			return nil, err
+		}
+		result, err := w.verifyStoredResult(ctx, store, media, blobKey, nil)
+		if err != nil {
+			return nil, err
+		}
+		if result.ByteSize != sourceSize || !bytes.Equal(result.Checksum, sourceChecksum[:]) {
+			return nil, diagnosedFailure(
+				domain.DiagnosticSourceStorage,
+				"output_store_conflict",
+				"Nevix could not safely resume the provider output transfer",
+				nil,
+				domain.ErrBlobConflict,
+			)
+		}
+		return result, nil
+	}
+	result, err := w.verifyStoredResult(ctx, store, media, blobKey, &put)
+	if err != nil {
+		_ = store.Delete(ctx, blobKey)
+		return nil, err
+	}
+	return result, nil
+}
+
+func (w *TaskWorker) fingerprintProviderOutput(ctx context.Context, output domain.GatewayOutput) (int64, [sha256.Size]byte, error) {
+	reader, err := w.openProviderOutput(ctx, output.URL)
+	if err != nil {
+		return 0, [sha256.Size]byte{}, err
+	}
+	defer reader.Close()
+	digest := sha256.New()
+	size, err := io.Copy(digest, io.LimitReader(reader, domain.GenerationResultMaxBytes+1))
+	if err != nil {
+		return 0, [sha256.Size]byte{}, diagnosedFailure(
+			domain.DiagnosticSourceProvider,
+			"provider_output_read_failed",
+			"Nevix could not reread the provider output for safe transfer recovery",
+			nil,
+			err,
+		)
+	}
+	if size > domain.GenerationResultMaxBytes {
+		return 0, [sha256.Size]byte{}, diagnosedFailure(
+			domain.DiagnosticSourceProvider,
+			"provider_output_too_large",
+			"The provider output exceeds the supported size",
+			nil,
+			domain.ErrTooLarge,
+		)
+	}
+	var checksum [sha256.Size]byte
+	copy(checksum[:], digest.Sum(nil))
+	return size, checksum, nil
+}
+
+func (w *TaskWorker) verifyStoredResult(ctx context.Context, store domain.BlobStore, media domain.MediaType, blobKey string, completedWrite *domain.PutResult) (*domain.SlotResult, error) {
+	stored, size, err := store.Open(ctx, blobKey, domain.FullBlobRange)
 	if err != nil {
 		return nil, diagnosedFailure(
 			domain.DiagnosticSourceStorage,
@@ -574,6 +673,15 @@ func (w *TaskWorker) transferOne(ctx context.Context, media domain.MediaType, ta
 		)
 	}
 	defer stored.Close()
+	if size < 0 || size > domain.GenerationResultMaxBytes {
+		return nil, diagnosedFailure(
+			domain.DiagnosticSourceStorage,
+			"output_store_verification_failed",
+			"Nevix could not verify the stored provider output",
+			nil,
+			domain.ErrTooLarge,
+		)
+	}
 	identified, err := w.prober.Identify(stored)
 	if err != nil {
 		return nil, diagnosedFailure(
@@ -584,7 +692,6 @@ func (w *TaskWorker) transferOne(ctx context.Context, media domain.MediaType, ta
 			err,
 		)
 	}
-	_ = size
 	if !domain.OutputMimeAccepted(media, identified.Facts.MimeType) {
 		return nil, diagnosedFailure(
 			domain.DiagnosticSourceMediaProbe,
@@ -594,10 +701,48 @@ func (w *TaskWorker) transferOne(ctx context.Context, media domain.MediaType, ta
 			errors.New("creation: provider output failed output verification"),
 		)
 	}
+	checksum := []byte(nil)
+	if completedWrite != nil {
+		if completedWrite.ByteSize != size {
+			return nil, diagnosedFailure(
+				domain.DiagnosticSourceStorage,
+				"output_store_verification_failed",
+				"Nevix could not verify the stored provider output",
+				nil,
+				errors.New("creation: stored provider output differs from the completed write"),
+			)
+		}
+		checksum = append(checksum, completedWrite.SHA256Sum[:]...)
+	} else {
+		if _, err := stored.Seek(0, io.SeekStart); err != nil {
+			return nil, diagnosedFailure(
+				domain.DiagnosticSourceStorage,
+				"output_store_read_failed",
+				"Nevix could not reopen the stored provider output for verification",
+				nil,
+				err,
+			)
+		}
+		digest := sha256.New()
+		read, err := io.Copy(digest, io.LimitReader(stored, domain.GenerationResultMaxBytes+1))
+		if err != nil || read != size {
+			if err == nil {
+				err = errors.New("creation: stored provider output length changed during verification")
+			}
+			return nil, diagnosedFailure(
+				domain.DiagnosticSourceStorage,
+				"output_store_read_failed",
+				"Nevix could not read the stored provider output for verification",
+				nil,
+				err,
+			)
+		}
+		checksum = digest.Sum(nil)
+	}
 	return &domain.SlotResult{
 		Mime:       identified.Facts.MimeType,
-		ByteSize:   put.ByteSize,
-		Checksum:   put.SHA256Sum[:],
+		ByteSize:   size,
+		Checksum:   checksum,
 		BlobKey:    blobKey,
 		WidthPx:    identified.Facts.WidthPx,
 		HeightPx:   identified.Facts.HeightPx,

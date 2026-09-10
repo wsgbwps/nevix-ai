@@ -25,6 +25,7 @@ type TaskService struct {
 	tasks       domain.GenerationTaskRepository
 	materials   domain.MaterialRepository
 	connections domain.ConnectionSignals
+	storage     *ObjectStorageConnectionService
 	governance  domain.GovernanceRepository
 	manifest    *ManifestService
 	runner      domain.WriteRunner
@@ -36,13 +37,14 @@ func NewTaskService(
 	tasks domain.GenerationTaskRepository,
 	materials domain.MaterialRepository,
 	connections domain.ConnectionSignals,
+	storage *ObjectStorageConnectionService,
 	governance domain.GovernanceRepository,
 	manifest *ManifestService,
 	runner domain.WriteRunner,
 	notify InvalidationSink,
 ) *TaskService {
 	return &TaskService{
-		tasks: tasks, materials: materials, connections: connections,
+		tasks: tasks, materials: materials, connections: connections, storage: storage,
 		governance: governance, manifest: manifest, runner: runner, notify: notify,
 		applier: verdictApplier{tasks: tasks, connections: connections, notify: notify},
 	}
@@ -84,6 +86,7 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 	if err := cmd.Intent.Validate(); err != nil {
 		return SubmissionResult{}, err
 	}
+	_, storageConnection, storageErr := s.storage.ResolveStore(ctx)
 	var (
 		result  SubmissionResult
 		blocked error
@@ -121,6 +124,12 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 			result.Replayed = true
 			result.Task = existing
 			return nil
+		}
+		if storageErr != nil {
+			return domain.ErrObjectStorageUnavailable
+		}
+		if err := s.storage.lockForUse(ctx, sc.Tx(), storageConnection); err != nil {
+			return domain.ErrObjectStorageUnavailable
 		}
 
 		task, err := s.admitSpecification(ctx, sc, cmd.Owner, cmd.SessionID, spec, key)
@@ -297,6 +306,7 @@ func (s *TaskService) RetryUncompleted(ctx context.Context, owner, taskID domain
 	}
 	spec := original.Spec
 	spec.Quantity = incomplete
+	_, storageConnection, storageErr := s.storage.ResolveStore(ctx)
 
 	var (
 		result  SubmissionResult
@@ -315,6 +325,12 @@ func (s *TaskService) RetryUncompleted(ctx context.Context, owner, taskID domain
 			result.Replayed = true
 			result.Task = existing
 			return nil
+		}
+		if storageErr != nil {
+			return domain.ErrObjectStorageUnavailable
+		}
+		if err := s.storage.lockForUse(ctx, sc.Tx(), storageConnection); err != nil {
+			return domain.ErrObjectStorageUnavailable
 		}
 		task, err := s.admitSpecification(ctx, sc, owner, original.SessionID, &spec, key)
 		if err != nil {
