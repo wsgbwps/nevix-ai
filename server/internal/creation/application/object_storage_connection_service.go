@@ -88,19 +88,27 @@ func (s *ObjectStorageConnectionService) Capability(ctx context.Context) (Object
 // ResolveStore opens the active Object Storage adapter without retaining
 // decrypted credentials. All failures collapse at this trusted boundary.
 func (s *ObjectStorageConnectionService) ResolveStore(ctx context.Context) (domain.DirectUploadBlobStore, domain.ObjectStorageConnection, error) {
-	if s.storeFactory == nil {
+	store, connection, err := s.resolveStoreForReference(ctx)
+	if err != nil {
 		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
+	}
+	return store, connection, nil
+}
+
+func (s *ObjectStorageConnectionService) resolveStoreForReference(ctx context.Context) (domain.DirectUploadBlobStore, domain.ObjectStorageConnection, error) {
+	if s.storeFactory == nil {
+		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageConfiguration
 	}
 	connection, candidate, plaintext, err := s.resolveStoredCandidate(ctx)
 	if err != nil {
-		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
+		return nil, domain.ObjectStorageConnection{}, err
 	}
 	defer wipe(plaintext)
 	store, err := s.storeFactory(connection.ObjectStorageLocation, candidate.Credentials)
 	candidate.Credentials.AccessKeyID = ""
 	candidate.Credentials.SecretAccessKey = ""
 	if err != nil {
-		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
+		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageConfiguration
 	}
 	return store, connection, nil
 }
@@ -110,10 +118,13 @@ func (s *ObjectStorageConnectionService) ResolveStore(ctx context.Context) (doma
 // a BlobStore.
 func (s *ObjectStorageConnectionService) ResolveReferenceTransport(ctx context.Context) (domain.ReferenceTransport, error) {
 	if s.referenceFactory == nil {
-		return nil, domain.ErrObjectStorageUnavailable
+		return nil, domain.ErrObjectStorageConfiguration
 	}
 	connection, candidate, plaintext, err := s.resolveStoredCandidate(ctx)
 	if err != nil {
+		if errors.Is(err, domain.ErrObjectStorageConfiguration) {
+			return nil, err
+		}
 		return nil, domain.ErrObjectStorageUnavailable
 	}
 	defer wipe(plaintext)
@@ -121,20 +132,26 @@ func (s *ObjectStorageConnectionService) ResolveReferenceTransport(ctx context.C
 	candidate.Credentials.AccessKeyID = ""
 	candidate.Credentials.SecretAccessKey = ""
 	if err != nil {
-		return nil, domain.ErrObjectStorageUnavailable
+		return nil, domain.ErrObjectStorageConfiguration
 	}
 	return transport, nil
 }
 
 func (s *ObjectStorageConnectionService) resolveStoredCandidate(ctx context.Context) (domain.ObjectStorageConnection, domain.ObjectStorageCandidate, []byte, error) {
 	connection, err := s.connections.GetActive(ctx)
-	if err != nil || connection.State != domain.ObjectStorageStateReady {
-		return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, domain.ErrObjectStorageUnavailable
+	if err != nil {
+		if errors.Is(err, domain.ErrObjectStorageConnectionNotConfigured) {
+			return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, domain.ErrObjectStorageConfiguration
+		}
+		return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, err
+	}
+	if connection.State != domain.ObjectStorageStateReady {
+		return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, domain.ErrObjectStorageConfiguration
 	}
 	candidate, plaintext, err := s.storedCandidate(connection)
 	if err != nil {
 		_, _ = s.markCredentialUnavailable(ctx, connection)
-		return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, domain.ErrObjectStorageUnavailable
+		return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, domain.ErrObjectStorageConfiguration
 	}
 	return connection, candidate, plaintext, nil
 }
@@ -153,16 +170,26 @@ func (s *ObjectStorageConnectionService) ReferenceSource(material domain.Referen
 		Role: role, Kind: material.Kind, MIMEType: material.MimeType,
 		ByteSize: material.ByteSize, SHA256Sum: checksum,
 		Open: func(ctx context.Context) (io.ReadCloser, error) {
-			store, _, err := s.ResolveStore(ctx)
+			store, _, err := s.resolveStoreForReference(ctx)
 			if err != nil {
+				if errors.Is(err, domain.ErrObjectStorageConfiguration) {
+					return nil, err
+				}
 				return nil, domain.ErrObjectStorageUnavailable
 			}
 			reader, size, err := store.Open(ctx, material.BlobKey, domain.FullBlobRange)
 			if err != nil {
-				if errors.Is(err, domain.ErrBlobNotFound) {
-					return nil, domain.ErrBlobNotFound
+				for _, classified := range []error{
+					domain.ErrBlobNotFound,
+					domain.ErrObjectStorageUnavailable,
+					domain.ErrObjectStorageRateLimited,
+					domain.ErrObjectStorageConfiguration,
+				} {
+					if errors.Is(err, classified) {
+						return nil, classified
+					}
 				}
-				return nil, domain.ErrObjectStorageUnavailable
+				return nil, domain.ErrInvalidReferenceSource
 			}
 			if size != material.ByteSize {
 				_ = reader.Close()

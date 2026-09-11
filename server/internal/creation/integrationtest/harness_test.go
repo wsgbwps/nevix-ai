@@ -81,6 +81,8 @@ type harnessOptions struct {
 	objectStorageVerifier creation.ObjectStorageVerifier
 	referenceTransport    *fakeReferenceTransport
 	now                   func() time.Time
+	referenceWait         func(context.Context, time.Duration) error
+	referenceJitter       func(time.Duration) time.Duration
 }
 
 func newHarness(t *testing.T) *harness {
@@ -164,6 +166,8 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		ReferenceTransportFactory: func(creation.ObjectStorageLocation, creation.ObjectStorageCredentials) (creation.ReferenceTransport, error) {
 			return referenceTransport, nil
 		},
+		ReferencePreparationWait:   opts.referenceWait,
+		ReferencePreparationJitter: opts.referenceJitter,
 	}
 
 	bus := event.NewInMemoryBus()

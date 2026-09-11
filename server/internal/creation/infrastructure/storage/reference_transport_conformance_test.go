@@ -235,7 +235,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 			{name: "larger", declared: []byte("short"), actual: strings.NewReader("longer"), want: domain.ErrReferenceSourceSizeMismatch},
 			{name: "smaller", declared: []byte("longer"), actual: strings.NewReader("short"), want: domain.ErrReferenceSourceSizeMismatch},
 			{name: "checksum", declared: []byte("right"), actual: strings.NewReader("wrong"), want: domain.ErrReferenceSourceChecksumMismatch},
-			{name: "read failure", declared: []byte("right"), actual: io.MultiReader(strings.NewReader("ri"), errorReader{}), want: domain.ErrObjectStorageUnavailable},
+			{name: "read failure", declared: []byte("right"), actual: io.MultiReader(strings.NewReader("ri"), errorReader{}), want: domain.ErrInvalidReferenceSource},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -279,8 +279,8 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 			},
 		}
 		_, err := transport.Prepare(context.Background(), domain.NewUUID(), 0, source)
-		if !errors.Is(err, domain.ErrObjectStorageUnavailable) || strings.Contains(err.Error(), errorReaderSecret) {
-			t.Fatalf("Prepare error = %v, want sanitized ErrObjectStorageUnavailable", err)
+		if !errors.Is(err, domain.ErrInvalidReferenceSource) || strings.Contains(err.Error(), errorReaderSecret) {
+			t.Fatalf("Prepare error = %v, want sanitized ErrInvalidReferenceSource", err)
 		}
 		backend.mu.Lock()
 		remaining := len(backend.objects)
@@ -294,10 +294,11 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 		tests := []struct {
 			name   string
 			mutate func(*fakeCloudTransport)
+			want   error
 		}{
-			{name: "size", mutate: func(f *fakeCloudTransport) { f.headSizeDelta = 1 }},
-			{name: "mime", mutate: func(f *fakeCloudTransport) { f.headContentType = "application/octet-stream" }},
-			{name: "metadata", mutate: func(f *fakeCloudTransport) { f.omitMetadata = sha256MetadataKey }},
+			{name: "size", mutate: func(f *fakeCloudTransport) { f.headSizeDelta = 1 }, want: domain.ErrReferenceSourceSizeMismatch},
+			{name: "mime", mutate: func(f *fakeCloudTransport) { f.headContentType = "application/octet-stream" }, want: domain.ErrReferenceSourceMetadataMismatch},
+			{name: "metadata", mutate: func(f *fakeCloudTransport) { f.omitMetadata = sha256MetadataKey }, want: domain.ErrReferenceSourceMetadataMismatch},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -310,8 +311,8 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 					ByteSize: int64(len(data)), SHA256Sum: digest,
 					Open: func(context.Context) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(data)), nil },
 				}
-				if _, err := transport.Prepare(context.Background(), domain.NewUUID(), 0, source); !errors.Is(err, domain.ErrObjectStorageUnavailable) {
-					t.Fatalf("Prepare error = %v, want ErrObjectStorageUnavailable", err)
+				if _, err := transport.Prepare(context.Background(), domain.NewUUID(), 0, source); !errors.Is(err, tc.want) {
+					t.Fatalf("Prepare error = %v, want %v", err, tc.want)
 				}
 				backend.mu.Lock()
 				remaining := len(backend.objects)
@@ -320,6 +321,77 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 					t.Fatalf("failed target verification left %d objects", remaining)
 				}
 			})
+		}
+	})
+
+	t.Run("ClassifiesProviderFailuresForBoundedRetry", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			status int
+			code   string
+			want   error
+		}{
+			{name: "request timeout", status: http.StatusRequestTimeout, code: "RequestTimeout", want: domain.ErrObjectStorageUnavailable},
+			{name: "rate limited", status: http.StatusTooManyRequests, code: "TooManyRequests", want: domain.ErrObjectStorageRateLimited},
+			{name: "service unavailable", status: http.StatusServiceUnavailable, code: "ServiceUnavailable", want: domain.ErrObjectStorageUnavailable},
+			{name: "wrong-region redirect", status: http.StatusMovedPermanently, code: "PermanentRedirect", want: domain.ErrObjectStorageConfiguration},
+			{name: "access denied", status: http.StatusForbidden, code: "AccessDenied", want: domain.ErrObjectStorageConfiguration},
+			{name: "missing bucket", status: http.StatusNotFound, code: "NoSuchBucket", want: domain.ErrObjectStorageConfiguration},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				transport, backend := newReferenceTransportForTest(t, provider, newStore)
+				backend.failMethod = http.MethodPut
+				backend.failStatus = tc.status
+				backend.failCode = tc.code
+				_, err := transport.Prepare(context.Background(), domain.NewUUID(), 0, referenceSource([]byte("classified")))
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("Prepare error = %v, want %v", err, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("RecoversUnknownWriteFromTheSameVerifiedObject", func(t *testing.T) {
+		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		backend.commitThenFailPut = true
+		jobID := domain.NewUUID()
+		source := referenceSource([]byte("committed before response loss"))
+		if _, err := transport.Prepare(context.Background(), jobID, 4, source); !errors.Is(err, domain.ErrObjectStorageUnavailable) {
+			t.Fatalf("first Prepare error = %v, want transient unknown write", err)
+		}
+		prepared, err := transport.Prepare(context.Background(), jobID, 4, source)
+		if err != nil {
+			t.Fatalf("recover same-key object: %v", err)
+		}
+		backend.mu.Lock()
+		objectCount := len(backend.objects)
+		putCount := backend.methods[http.MethodPut]
+		backend.mu.Unlock()
+		if objectCount != 1 || putCount != 2 || prepared.URL == "" {
+			t.Fatalf("same-key recovery objects/puts/url = %d/%d/%q", objectCount, putCount, prepared.URL)
+		}
+	})
+
+	t.Run("RewritesCorruptObjectAfterUnknownWrite", func(t *testing.T) {
+		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		backend.commitThenFailPut = true
+		backend.corruptCommittedBody = true
+		jobID := domain.NewUUID()
+		source := referenceSource([]byte("expected object bytes"))
+		if _, err := transport.Prepare(context.Background(), jobID, 5, source); !errors.Is(err, domain.ErrObjectStorageUnavailable) {
+			t.Fatalf("first Prepare error = %v, want transient unknown write", err)
+		}
+		prepared, err := transport.Prepare(context.Background(), jobID, 5, source)
+		if err != nil {
+			t.Fatalf("rewrite corrupt same-key object: %v", err)
+		}
+		backend.mu.Lock()
+		objectCount := len(backend.objects)
+		putCount := backend.methods[http.MethodPut]
+		backend.mu.Unlock()
+		if objectCount != 1 || putCount != 3 || prepared.URL == "" {
+			t.Fatalf("same-key rewrite objects/puts/url = %d/%d/%q", objectCount, putCount, prepared.URL)
 		}
 	})
 

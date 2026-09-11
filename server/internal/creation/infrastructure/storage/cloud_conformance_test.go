@@ -168,8 +168,8 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 		store := newStore(t, backend)
 		for _, key := range []string{fakeMissingBucketKey, fakeUnrelatedConflictKey} {
 			_, err := store.Head(context.Background(), key)
-			if !errors.Is(err, domain.ErrObjectStorageUnavailable) {
-				t.Fatalf("Head(%q) error = %v, want ErrObjectStorageUnavailable", key, err)
+			if !errors.Is(err, domain.ErrObjectStorageConfiguration) {
+				t.Fatalf("Head(%q) error = %v, want ErrObjectStorageConfiguration", key, err)
 			}
 			if errors.Is(err, domain.ErrBlobNotFound) || errors.Is(err, domain.ErrBlobConflict) {
 				t.Fatalf("Head(%q) misclassified provider error: %v", key, err)
@@ -187,8 +187,8 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 			if _, err := store.Head(context.Background(), fakeCodeLessMissingKey); !errors.Is(err, domain.ErrBlobNotFound) {
 				t.Fatalf("missing key error = %v, want ErrBlobNotFound", err)
 			}
-			if _, err := store.Head(context.Background(), fakeCodeLessMissingBucket); !errors.Is(err, domain.ErrObjectStorageUnavailable) {
-				t.Fatalf("missing bucket error = %v, want ErrObjectStorageUnavailable", err)
+			if _, err := store.Head(context.Background(), fakeCodeLessMissingBucket); !errors.Is(err, domain.ErrObjectStorageConfiguration) {
+				t.Fatalf("missing bucket error = %v, want ErrObjectStorageConfiguration", err)
 			}
 		})
 	}
@@ -226,19 +226,23 @@ type fakeCloudObject struct {
 }
 
 type fakeCloudTransport struct {
-	provider        Provider
-	mu              sync.Mutex
-	objects         map[string]fakeCloudObject
-	last            http.Header
-	methods         map[string]int
-	failMethod      string
-	cancelOnHead    context.CancelFunc
-	deleteGate      <-chan struct{}
-	headSizeDelta   int64
-	headContentType string
-	omitMetadata    string
-	sawAnonymousGet bool
-	sawRangeGet     bool
+	provider             Provider
+	mu                   sync.Mutex
+	objects              map[string]fakeCloudObject
+	last                 http.Header
+	methods              map[string]int
+	failMethod           string
+	failStatus           int
+	failCode             string
+	commitThenFailPut    bool
+	corruptCommittedBody bool
+	cancelOnHead         context.CancelFunc
+	deleteGate           <-chan struct{}
+	headSizeDelta        int64
+	headContentType      string
+	omitMetadata         string
+	sawAnonymousGet      bool
+	sawRangeGet          bool
 }
 
 func newFakeCloudTransport(provider Provider) *fakeCloudTransport {
@@ -261,8 +265,16 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 	deleteGate := f.deleteGate
 	if req.Method == f.failMethod {
+		status := f.failStatus
+		if status == 0 {
+			status = http.StatusServiceUnavailable
+		}
+		code := f.failCode
+		if code == "" {
+			code = "ServiceUnavailable"
+		}
 		f.mu.Unlock()
-		return f.errorResponse(req, http.StatusServiceUnavailable, "ServiceUnavailable", fakeSensitiveProviderMessage), nil
+		return f.errorResponse(req, status, code, fakeSensitiveProviderMessage), nil
 	}
 	f.mu.Unlock()
 	if req.Method == http.MethodHead && cancelOnHead != nil {
@@ -316,10 +328,20 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 				metadata[metadataName] = values[0]
 			}
 		}
+		storedBody := body
+		if f.corruptCommittedBody && len(storedBody) > 0 {
+			storedBody = append([]byte(nil), storedBody...)
+			storedBody[0] ^= 0xff
+			f.corruptCommittedBody = false
+		}
 		f.objects[key] = fakeCloudObject{
-			body:        body,
+			body:        storedBody,
 			contentType: req.Header.Get("Content-Type"),
 			metadata:    metadata,
+		}
+		if f.commitThenFailPut {
+			f.commitThenFailPut = false
+			return nil, errors.New("response lost after committed put")
 		}
 		headers := make(http.Header)
 		if f.provider == ProviderCOS {

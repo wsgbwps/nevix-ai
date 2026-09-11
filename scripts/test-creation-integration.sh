@@ -173,6 +173,12 @@ assert_creation_integration_executed() {
     TestReferenceMaterialUploadAbortExpiryAndDurableCleanupConverge
     TestSuccessfulGenerationResultBecomesIndependentReferenceMaterialInsideServer
     TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage
+    TestReferencePreparationFailureClassesPersistBeforeKapon
+    TestReferencePreparationBudgetStopsRetriesBeforeKapon
+    TestReferencePreparationPartialFailureCleansEveryAttemptedObject
+    TestReferencePreparationRestartReusesJobAndObjectIdentityWithFreshURL
+    TestCredentialFailureAfterPreparationCleansBeforeHoldAndCancel
+    TestReferencePreparationCleanupErrorsRemainSanitized
     TestDownloadServesRangeAndChecksumHeaders
     TestDeleteMaterialRemovesRowAndBlobCleanupSchedules
     TestContractErrorEnvelopeShapeOnEveryCreationErrorPath

@@ -100,12 +100,14 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 // Reauthentication Proofs the high-risk connection commands require. Both
 // are deliberately narrow — Creation never touches credential verification.
 type Deps struct {
-	SessionAuthenticator      authz.SessionAuthenticator
-	ReauthVerifier            authz.ReauthProofVerifier
-	ObjectStorageVerifier     ObjectStorageVerifier
-	DirectUploadStoreFactory  DirectUploadStoreFactory
-	ReferenceTransportFactory ReferenceTransportFactory
-	Now                       func() time.Time
+	SessionAuthenticator       authz.SessionAuthenticator
+	ReauthVerifier             authz.ReauthProofVerifier
+	ObjectStorageVerifier      ObjectStorageVerifier
+	DirectUploadStoreFactory   DirectUploadStoreFactory
+	ReferenceTransportFactory  ReferenceTransportFactory
+	Now                        func() time.Time
+	ReferencePreparationWait   func(context.Context, time.Duration) error
+	ReferencePreparationJitter func(time.Duration) time.Duration
 }
 
 type ObjectStorageCandidate = domain.ObjectStorageCandidate
@@ -140,7 +142,10 @@ var (
 	ErrBlobNotFound                    = domain.ErrBlobNotFound
 	ErrRangeNotSatisfiable             = domain.ErrRangeNotSatisfiable
 	ErrObjectStorageUnavailable        = domain.ErrObjectStorageUnavailable
+	ErrObjectStorageRateLimited        = domain.ErrObjectStorageRateLimited
+	ErrObjectStorageConfiguration      = domain.ErrObjectStorageConfiguration
 	ErrReferenceSourceSizeMismatch     = domain.ErrReferenceSourceSizeMismatch
+	ErrReferenceSourceMetadataMismatch = domain.ErrReferenceSourceMetadataMismatch
 	ErrReferenceSourceChecksumMismatch = domain.ErrReferenceSourceChecksumMismatch
 )
 
@@ -215,7 +220,9 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	// credential source: the decrypted
 	// Provider Key exists only between its resolve and the adapter's
 	// Authorization header.
-	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL, objectStorageService)
+	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL, objectStorageService, kapon.ReferencePreparationTiming{
+		Now: now, Wait: deps.ReferencePreparationWait, Jitter: deps.ReferencePreparationJitter,
+	})
 	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, objectStorageService, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
 	uploadCleanup := application.NewReferenceMaterialUploadCleanupWorker(uploadRepos, objectStorageService, tx, now)
 	return &Module{

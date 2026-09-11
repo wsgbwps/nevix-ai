@@ -230,6 +230,7 @@ func safeCOSError(operation string, err error) error {
 		case "FileAlreadyExists":
 			return fmt.Errorf("creation: COS %s: %w", operation, domain.ErrBlobConflict)
 		}
+		return fmt.Errorf("creation: COS %s: %w", operation, classifyCloudServiceStatus(responseErr.Response.StatusCode))
 	}
 	return fmt.Errorf("creation: COS %s: %w", operation, domain.ErrObjectStorageUnavailable)
 }

@@ -237,7 +237,9 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	// call returns.
 	credential, err := w.credentials.ActiveCallCredential(ctx)
 	if err != nil {
-		releaseProviderTransfers(w.gateway, job.ID, job.Status, len(task.Spec.References))
+		if ctx.Err() == nil {
+			releaseProviderTransfers(w.gateway, job.ID, job.Status, len(request.References))
+		}
 		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
 	}
 
@@ -252,10 +254,11 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 		return runErr
 	})
 	if err != nil {
+		releaseProviderTransfers(w.gateway, job.ID, job.Status, len(request.References))
 		return err
 	}
 	if !marked {
-		releaseProviderTransfers(w.gateway, job.ID, domain.JobCancelled, len(task.Spec.References))
+		releaseProviderTransfers(w.gateway, job.ID, domain.JobCancelled, len(request.References))
 		return nil
 	}
 	// The marker's durable count is the budget the transient verdict spends.
@@ -358,11 +361,24 @@ func (w *TaskWorker) buildSubmitRequest(ctx context.Context, task domain.Generat
 }
 
 func (w *TaskWorker) rejectReferencePreparation(ctx context.Context, queueID, taskID domain.UUID, state domain.KernelState, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
 	reason := domain.ReasonInternalError
 	code := "reference_preparation_failed"
 	message := "A referenced material could not be prepared"
-	if errors.Is(err, domain.ErrMaterialNotFound) || errors.Is(err, domain.ErrSessionNotFound) || errors.Is(err, domain.ErrBlobNotFound) {
-		reason = domain.ReasonInvalidInput
+	switch {
+	case errors.Is(err, domain.ErrObjectStorageConfiguration):
+		reason = domain.ReasonActionRequired
+		code = "reference_storage_action_required"
+		message = "Object Storage configuration requires administrator action"
+	case errors.Is(err, context.DeadlineExceeded),
+		errors.Is(err, domain.ErrObjectStorageUnavailable),
+		errors.Is(err, domain.ErrObjectStorageRateLimited):
+		reason = domain.ReasonTemporarilyUnavailable
+		code = "reference_storage_temporarily_unavailable"
+		message = "Reference preparation is temporarily unavailable"
+	case errors.Is(err, domain.ErrMaterialNotFound), errors.Is(err, domain.ErrSessionNotFound), errors.Is(err, domain.ErrBlobNotFound):
 		code = "reference_material_unavailable"
 		message = "A referenced material is no longer available"
 	}

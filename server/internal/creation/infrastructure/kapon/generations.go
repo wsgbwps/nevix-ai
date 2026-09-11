@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -43,6 +44,25 @@ type GenerationsClient struct {
 	imageSubmitTimeout time.Duration
 	pollTimeout        time.Duration
 	cancelTimeout      time.Duration
+	referenceNow       func() time.Time
+	referenceWait      func(context.Context, time.Duration) error
+	referenceJitter    func(time.Duration) time.Duration
+}
+
+const (
+	referencePreparationBudget = 10 * time.Minute
+	referenceCleanupTimeout    = 10 * time.Second
+	referencePrepareAttempts   = 4
+)
+
+var referenceRetryBackoff = [...]time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+
+// ReferencePreparationTiming makes the fixed preparation budget and jitter
+// observable without weakening their production defaults.
+type ReferencePreparationTiming struct {
+	Now    func() time.Time
+	Wait   func(context.Context, time.Duration) error
+	Jitter func(time.Duration) time.Duration
 }
 
 // imageSize resolves the frozen (model, ratio, resolution) triple onto the
@@ -84,15 +104,30 @@ func imageWireModel(model string) string {
 }
 
 // NewGenerationsClient binds the generation adapter to the validated route.
-func NewGenerationsClient(baseURL string, references domain.ReferenceTransportResolver) *GenerationsClient {
-	return &GenerationsClient{
+func NewGenerationsClient(baseURL string, references domain.ReferenceTransportResolver, timing ...ReferencePreparationTiming) *GenerationsClient {
+	client := &GenerationsClient{
 		baseURL:            strings.TrimRight(baseURL, "/"),
 		http:               &http.Client{},
 		references:         references,
 		imageSubmitTimeout: 60 * time.Second,
 		pollTimeout:        15 * time.Second,
 		cancelTimeout:      15 * time.Second,
+		referenceNow:       time.Now,
+		referenceWait:      waitForReferenceRetry,
+		referenceJitter:    jitterReferenceRetry,
 	}
+	if len(timing) > 0 {
+		if timing[0].Now != nil {
+			client.referenceNow = timing[0].Now
+		}
+		if timing[0].Wait != nil {
+			client.referenceWait = timing[0].Wait
+		}
+		if timing[0].Jitter != nil {
+			client.referenceJitter = timing[0].Jitter
+		}
+	}
+	return client
 }
 
 // compile-time proof the adapter satisfies the kernel's seam.
@@ -112,7 +147,10 @@ func (c *GenerationsClient) PrepareReferences(ctx context.Context, providerJobID
 		}
 		return domain.PreparedSubmitRequest{}, domain.ErrObjectStorageUnavailable
 	}
-	transport, err := c.references.ResolveReferenceTransport(ctx)
+	phaseCtx, cancel := context.WithTimeout(ctx, referencePreparationBudget)
+	defer cancel()
+	deadline := c.referenceNow().Add(referencePreparationBudget)
+	transport, err := c.references.ResolveReferenceTransport(phaseCtx)
 	if err != nil {
 		return domain.PreparedSubmitRequest{}, err
 	}
@@ -120,11 +158,13 @@ func (c *GenerationsClient) PrepareReferences(ctx context.Context, providerJobID
 		return prepared, nil
 	}
 	for ordinal, source := range req.References {
-		object, err := transport.Prepare(ctx, providerJobID, ordinal, source)
+		object, err := c.prepareReference(phaseCtx, deadline, transport, providerJobID, ordinal, source)
 		if err != nil {
+			c.releaseAfterPreparationFailure(ctx, transport, providerJobID, ordinal+1)
 			return domain.PreparedSubmitRequest{}, err
 		}
 		if !isPublicHTTPSURL(object.URL) {
+			c.releaseAfterPreparationFailure(ctx, transport, providerJobID, ordinal+1)
 			return domain.PreparedSubmitRequest{}, domain.ErrInvalidReferenceSource
 		}
 		prepared.References = append(prepared.References, domain.GatewayReference{
@@ -145,6 +185,86 @@ func (c *GenerationsClient) ReleaseReference(ctx context.Context, providerJobID 
 		return err
 	}
 	return transport.Release(ctx, providerJobID, ordinal)
+}
+
+func (c *GenerationsClient) prepareReference(ctx context.Context, deadline time.Time, transport domain.ReferenceTransport, providerJobID domain.UUID, ordinal int, source domain.ReferenceSource) (domain.ProviderTransferObject, error) {
+	for attempt := 0; attempt < referencePrepareAttempts; attempt++ {
+		remaining := deadline.Sub(c.referenceNow())
+		if remaining <= 0 {
+			return domain.ProviderTransferObject{}, context.DeadlineExceeded
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, remaining)
+		object, err := transport.Prepare(attemptCtx, providerJobID, ordinal, source)
+		cancel()
+		if err == nil {
+			return object, nil
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return domain.ProviderTransferObject{}, ctxErr
+		}
+		if deadline.Sub(c.referenceNow()) <= 0 {
+			return domain.ProviderTransferObject{}, context.DeadlineExceeded
+		}
+		if !isRetryableReferencePreparation(err) || attempt == referencePrepareAttempts-1 {
+			return domain.ProviderTransferObject{}, err
+		}
+		delay := c.referenceJitter(referenceRetryBackoff[attempt])
+		if delay < 0 {
+			delay = 0
+		}
+		remaining = deadline.Sub(c.referenceNow())
+		if delay > remaining {
+			delay = remaining
+		}
+		if err := c.referenceWait(ctx, delay); err != nil {
+			return domain.ProviderTransferObject{}, err
+		}
+	}
+	panic("reference preparation attempt bound escaped")
+}
+
+func isRetryableReferencePreparation(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, domain.ErrObjectStorageUnavailable) ||
+		errors.Is(err, domain.ErrObjectStorageRateLimited)
+}
+
+func waitForReferenceRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func jitterReferenceRetry(base time.Duration) time.Duration {
+	spread := base / 5
+	return base - spread + time.Duration(rand.Int64N(int64(2*spread)+1))
+}
+
+func (c *GenerationsClient) releaseAfterPreparationFailure(ctx context.Context, transport domain.ReferenceTransport, providerJobID domain.UUID, referenceCount int) {
+	if err := releasePreparedReferences(ctx, transport, providerJobID, referenceCount); err != nil {
+		slog.Warn("creation: provider transfer cleanup incomplete", "category", "cleanup_failed", "reference_count", referenceCount)
+	}
+}
+
+func releasePreparedReferences(ctx context.Context, transport domain.ReferenceTransport, providerJobID domain.UUID, referenceCount int) error {
+	failed := false
+	for ordinal := 0; ordinal < referenceCount; ordinal++ {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), referenceCleanupTimeout)
+		err := transport.Release(cleanupCtx, providerJobID, ordinal)
+		cancel()
+		if err != nil {
+			failed = true
+		}
+	}
+	if failed {
+		return domain.ErrObjectStorageUnavailable
+	}
+	return nil
 }
 
 func isPublicHTTPSURL(raw string) bool {

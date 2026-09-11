@@ -188,6 +188,7 @@ func safeOSSError(operation string, err error) error {
 		case "FileAlreadyExists":
 			return fmt.Errorf("creation: OSS %s: %w", operation, domain.ErrBlobConflict)
 		}
+		return fmt.Errorf("creation: OSS %s: %w", operation, classifyCloudServiceStatus(serviceErr.StatusCode))
 	}
 	return fmt.Errorf("creation: OSS %s: %w", operation, domain.ErrObjectStorageUnavailable)
 }
