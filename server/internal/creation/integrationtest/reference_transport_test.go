@@ -31,18 +31,43 @@ type releasedReferenceRecord struct {
 }
 
 type fakeReferenceTransport struct {
-	mu            sync.Mutex
-	records       []preparedReferenceRecord
-	releases      []releasedReferenceRecord
-	objects       map[string]bool
-	releaseErrors map[int]error
-	releasePanics map[int]any
-	beforePrepare func(creation.UUID, int) error
-	afterPrepare  func(creation.UUID, int) error
-	beforeRelease func(context.Context, creation.UUID, int) error
+	mu              sync.Mutex
+	records         []preparedReferenceRecord
+	prepareCalls    []referencePrepareAttempt
+	releaseCalls    []releasedReferenceRecord
+	objects         map[string]string
+	releaseErrors   map[int]error
+	releasePanics   map[int]any
+	beforePrepare   func(creation.UUID, int) error
+	prepareError    func(creation.UUID, int, int) error
+	afterPrepare    func(creation.UUID, int) error
+	beforeRelease   func(context.Context, creation.UUID, int) error
+	releaseError    func(creation.UUID, int) error
+	freshURLs       bool
+	freshURLVersion int
+}
+
+type referencePrepareAttempt struct {
+	jobID   creation.UUID
+	ordinal int
+	attempt int
+}
+
+type referenceReleaseAttempt struct {
+	jobID   creation.UUID
+	ordinal int
 }
 
 func (t *fakeReferenceTransport) Prepare(ctx context.Context, jobID creation.UUID, ordinal int, source creation.ReferenceSource) (creation.ProviderTransferObject, error) {
+	t.mu.Lock()
+	attempt := 1
+	for _, call := range t.prepareCalls {
+		if call.jobID == jobID && call.ordinal == ordinal {
+			attempt++
+		}
+	}
+	t.prepareCalls = append(t.prepareCalls, referencePrepareAttempt{jobID: jobID, ordinal: ordinal, attempt: attempt})
+	t.mu.Unlock()
 	if t.beforePrepare != nil {
 		if err := t.beforePrepare(jobID, ordinal); err != nil {
 			return creation.ProviderTransferObject{}, err
@@ -69,23 +94,33 @@ func (t *fakeReferenceTransport) Prepare(ctx context.Context, jobID creation.UUI
 	if readSum != source.SHA256Sum {
 		return creation.ProviderTransferObject{}, creation.ErrReferenceSourceChecksumMismatch
 	}
+	if t.prepareError != nil {
+		if err := t.prepareError(jobID, ordinal, attempt); err != nil {
+			return creation.ProviderTransferObject{}, err
+		}
+	}
 	t.mu.Lock()
+	if t.objects == nil {
+		t.objects = make(map[string]string)
+	}
+	url := referenceURL(jobID, ordinal)
+	if t.freshURLs {
+		t.freshURLVersion++
+		url += "&version=" + itoaFixture(t.freshURLVersion)
+	}
+	t.objects[referenceObjectIdentity(jobID, ordinal)] = url
 	t.records = append(t.records, preparedReferenceRecord{
 		jobID: jobID, ordinal: ordinal, role: string(source.Role), kind: string(source.Kind),
 		mimeType: source.MIMEType, byteSize: source.ByteSize, checksum: source.SHA256Sum,
 		readSize: readSize, readSum: readSum,
 	})
-	if t.objects == nil {
-		t.objects = map[string]bool{}
-	}
-	t.objects[referenceIdentity(jobID.String(), ordinal)] = true
 	t.mu.Unlock()
 	if t.afterPrepare != nil {
 		if err := t.afterPrepare(jobID, ordinal); err != nil {
 			return creation.ProviderTransferObject{}, err
 		}
 	}
-	return creation.ProviderTransferObject{URL: referenceURL(jobID, ordinal)}, nil
+	return creation.ProviderTransferObject{URL: url}, nil
 }
 
 func (t *fakeReferenceTransport) Release(ctx context.Context, jobID creation.UUID, ordinal int) error {
@@ -96,19 +131,27 @@ func (t *fakeReferenceTransport) Release(ctx context.Context, jobID creation.UUI
 	}
 	_, hasDeadline := ctx.Deadline()
 	t.mu.Lock()
-	t.releases = append(t.releases, releasedReferenceRecord{
+	t.releaseCalls = append(t.releaseCalls, releasedReferenceRecord{
 		jobID: jobID, ordinal: ordinal, hasDeadline: hasDeadline, contextErr: ctx.Err(),
 	})
 	panicValue := t.releasePanics[ordinal]
 	err := t.releaseErrors[ordinal]
-	if panicValue == nil && err == nil {
-		delete(t.objects, referenceIdentity(jobID.String(), ordinal))
-	}
 	t.mu.Unlock()
 	if panicValue != nil {
 		panic(panicValue)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if t.releaseError != nil {
+		if err := t.releaseError(jobID, ordinal); err != nil {
+			return err
+		}
+	}
+	t.mu.Lock()
+	delete(t.objects, referenceObjectIdentity(jobID, ordinal))
+	t.mu.Unlock()
+	return nil
 }
 
 func (t *fakeReferenceTransport) prepared() []preparedReferenceRecord {
@@ -120,7 +163,7 @@ func (t *fakeReferenceTransport) prepared() []preparedReferenceRecord {
 func (t *fakeReferenceTransport) released() []releasedReferenceRecord {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return append([]releasedReferenceRecord(nil), t.releases...)
+	return append([]releasedReferenceRecord(nil), t.releaseCalls...)
 }
 
 func awaitReferenceReleases(t *testing.T, transport *fakeReferenceTransport, count int) []releasedReferenceRecord {
@@ -158,21 +201,48 @@ func (t *fakeReferenceTransport) seed(jobID string, referenceCount int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.objects == nil {
-		t.objects = map[string]bool{}
+		t.objects = map[string]string{}
 	}
 	for ordinal := range referenceCount {
-		t.objects[referenceIdentity(jobID, ordinal)] = true
+		t.objects[referenceIdentity(jobID, ordinal)] = "seeded"
 	}
 }
 
 func (t *fakeReferenceTransport) exists(jobID string, ordinal int) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.objects[referenceIdentity(jobID, ordinal)]
+	_, ok := t.objects[referenceIdentity(jobID, ordinal)]
+	return ok
 }
 
 func referenceIdentity(jobID string, ordinal int) string {
 	return jobID + "/" + itoaFixture(ordinal)
+}
+
+func (t *fakeReferenceTransport) attempts() []referencePrepareAttempt {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]referencePrepareAttempt(nil), t.prepareCalls...)
+}
+
+func (t *fakeReferenceTransport) releases() []referenceReleaseAttempt {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	releases := make([]referenceReleaseAttempt, len(t.releaseCalls))
+	for index, call := range t.releaseCalls {
+		releases[index] = referenceReleaseAttempt{jobID: call.jobID, ordinal: call.ordinal}
+	}
+	return releases
+}
+
+func (t *fakeReferenceTransport) objectCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.objects)
+}
+
+func referenceObjectIdentity(jobID creation.UUID, ordinal int) string {
+	return referenceIdentity(jobID.String(), ordinal)
 }
 
 func referenceURL(jobID creation.UUID, ordinal int) string {

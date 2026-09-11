@@ -26,8 +26,15 @@ var (
 	// production stores never overwrite one object with another.
 	ErrBlobConflict = errors.New("blob already exists")
 	// ErrObjectStorageUnavailable collapses provider, credential, transport,
-	// and service details at the trusted boundary.
+	// and service details at the trusted boundary when the operation is safe
+	// to retry.
 	ErrObjectStorageUnavailable = errors.New("object storage unavailable")
+	// ErrObjectStorageRateLimited reports explicit provider throttling. The
+	// preparation budget may retry it without exposing provider details.
+	ErrObjectStorageRateLimited = errors.New("object storage rate limited")
+	// ErrObjectStorageConfiguration reports credentials, permissions, bucket,
+	// or other operator-owned configuration that needs corrective action.
+	ErrObjectStorageConfiguration = errors.New("object storage configuration requires action")
 	// ErrInvalidReferenceSource reports an incomplete or internally
 	// inconsistent provider-neutral source before any transfer starts.
 	ErrInvalidReferenceSource = errors.New("invalid reference source")
@@ -37,6 +44,9 @@ var (
 	// ErrReferenceSourceChecksumMismatch reports a stream whose SHA-256 differs
 	// from its immutable Reference Material fact.
 	ErrReferenceSourceChecksumMismatch = errors.New("reference source checksum mismatch")
+	// ErrReferenceSourceMetadataMismatch reports a prepared object's MIME or
+	// provider-transfer metadata disagreement with immutable source facts.
+	ErrReferenceSourceMetadataMismatch = errors.New("reference source metadata mismatch")
 	// ErrUnsupportedMedia reports content whose sniffed family is outside
 	// the accepted set, or whose extension disagrees with the verified family.
 	ErrUnsupportedMedia = errors.New("unsupported media type")

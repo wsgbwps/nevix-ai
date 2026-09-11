@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
@@ -50,6 +51,49 @@ func (t *recordingReferenceTransport) Release(_ context.Context, jobID domain.UU
 		ordinal int
 	}{jobID: jobID, ordinal: ordinal})
 	return nil
+}
+
+type scriptedReferenceTransport struct {
+	prepareErrors map[int][]error
+	prepareCalls  []int
+	releaseErrors map[int]error
+	releaseCalls  []int
+}
+
+func (t *scriptedReferenceTransport) Prepare(ctx context.Context, jobID domain.UUID, ordinal int, source domain.ReferenceSource) (domain.ProviderTransferObject, error) {
+	reader, err := source.Open(ctx)
+	if err != nil {
+		return domain.ProviderTransferObject{}, err
+	}
+	_, readErr := io.Copy(io.Discard, reader)
+	closeErr := reader.Close()
+	if readErr != nil {
+		return domain.ProviderTransferObject{}, readErr
+	}
+	if closeErr != nil {
+		return domain.ProviderTransferObject{}, closeErr
+	}
+	t.prepareCalls = append(t.prepareCalls, ordinal)
+	errorsForOrdinal := t.prepareErrors[ordinal]
+	if attempt := countOrdinal(t.prepareCalls, ordinal); attempt <= len(errorsForOrdinal) && errorsForOrdinal[attempt-1] != nil {
+		return domain.ProviderTransferObject{}, errorsForOrdinal[attempt-1]
+	}
+	return domain.ProviderTransferObject{URL: "https://provider-transfer.example/" + jobID.String() + "/" + string(rune('0'+ordinal))}, nil
+}
+
+func (t *scriptedReferenceTransport) Release(_ context.Context, _ domain.UUID, ordinal int) error {
+	t.releaseCalls = append(t.releaseCalls, ordinal)
+	return t.releaseErrors[ordinal]
+}
+
+func countOrdinal(ordinals []int, want int) int {
+	count := 0
+	for _, ordinal := range ordinals {
+		if ordinal == want {
+			count++
+		}
+	}
+	return count
 }
 
 type staticReferenceTransportResolver struct{ transport domain.ReferenceTransport }
@@ -138,6 +182,151 @@ func TestReleaseReferenceDelegatesDeterministicIdentity(t *testing.T) {
 		transport.releaseCalls[0].jobID != jobID || transport.releaseCalls[0].ordinal != 3 {
 		t.Fatalf("release lost deterministic identity: resolver=%d calls=%+v", resolver.calls, transport.releaseCalls)
 	}
+}
+
+func TestPrepareReferencesRetriesOneReferenceAtMostFourTimes(t *testing.T) {
+	transport := &scriptedReferenceTransport{prepareErrors: map[int][]error{
+		0: {
+			domain.ErrObjectStorageUnavailable,
+			domain.ErrObjectStorageRateLimited,
+			domain.ErrObjectStorageUnavailable,
+			domain.ErrObjectStorageUnavailable,
+		},
+	}}
+	now := time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC)
+	var waits, jitterBases []time.Duration
+	client := NewGenerationsClient("https://models.kapon.test", staticReferenceTransportResolver{transport: transport}, ReferencePreparationTiming{
+		Now: func() time.Time { return now },
+		Wait: func(_ context.Context, delay time.Duration) error {
+			waits = append(waits, delay)
+			now = now.Add(delay)
+			return nil
+		},
+		Jitter: func(base time.Duration) time.Duration {
+			jitterBases = append(jitterBases, base)
+			return base
+		},
+	})
+	opens := 0
+	_, err := client.PrepareReferences(context.Background(), domain.NewUUID(), domain.SubmitRequest{
+		Media: domain.MediaImage,
+		References: []domain.ReferenceSource{{
+			Role: domain.RoleReference, Kind: domain.KindImage, MIMEType: "image/png",
+			ByteSize: 1, SHA256Sum: sha256.Sum256([]byte("x")),
+			Open: func(context.Context) (io.ReadCloser, error) {
+				opens++
+				return io.NopCloser(strings.NewReader("x")), nil
+			},
+		}},
+	})
+	if !errors.Is(err, domain.ErrObjectStorageUnavailable) {
+		t.Fatalf("PrepareReferences error = %v, want exhausted transient error", err)
+	}
+	if opens != 4 || len(transport.prepareCalls) != 4 {
+		t.Fatalf("opens/prepares = %d/%d, want 4/4", opens, len(transport.prepareCalls))
+	}
+	wantWaits := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+	if !equalDurations(waits, wantWaits) || !equalDurations(jitterBases, wantWaits) {
+		t.Fatalf("waits/jitter bases = %v/%v, want %v", waits, jitterBases, wantWaits)
+	}
+	if len(transport.releaseCalls) != 1 || transport.releaseCalls[0] != 0 {
+		t.Fatalf("cleanup ordinals = %v, want [0]", transport.releaseCalls)
+	}
+}
+
+func TestPrepareReferencesDoesNotRetryHardFailures(t *testing.T) {
+	for _, hardFailure := range []error{
+		domain.ErrObjectStorageConfiguration,
+		domain.ErrBlobNotFound,
+		domain.ErrInvalidReferenceSource,
+		domain.ErrReferenceSourceSizeMismatch,
+		domain.ErrReferenceSourceMetadataMismatch,
+		domain.ErrReferenceSourceChecksumMismatch,
+	} {
+		t.Run(hardFailure.Error(), func(t *testing.T) {
+			transport := &scriptedReferenceTransport{prepareErrors: map[int][]error{0: {hardFailure}}}
+			client := NewGenerationsClient("https://models.kapon.test", staticReferenceTransportResolver{transport: transport}, ReferencePreparationTiming{
+				Wait: func(context.Context, time.Duration) error {
+					t.Fatal("hard failure waited for a retry")
+					return nil
+				},
+			})
+			_, err := client.PrepareReferences(context.Background(), domain.NewUUID(), domain.SubmitRequest{
+				Media: domain.MediaImage,
+				References: []domain.ReferenceSource{{
+					Role: domain.RoleReference, Kind: domain.KindImage, MIMEType: "image/png",
+					ByteSize: 1, SHA256Sum: sha256.Sum256([]byte("x")), Open: stringSource("x"),
+				}},
+			})
+			if !errors.Is(err, hardFailure) || len(transport.prepareCalls) != 1 {
+				t.Fatalf("PrepareReferences error/calls = %v/%v, want %v/one", err, transport.prepareCalls, hardFailure)
+			}
+		})
+	}
+}
+
+func TestPrepareReferencesSharesOneBudgetAndCleansEveryAttemptedOrdinal(t *testing.T) {
+	transport := &scriptedReferenceTransport{
+		prepareErrors: map[int][]error{1: {domain.ErrBlobNotFound}},
+		releaseErrors: map[int]error{0: domain.ErrObjectStorageUnavailable},
+	}
+	now := time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC)
+	client := NewGenerationsClient("https://models.kapon.test", staticReferenceTransportResolver{transport: transport}, ReferencePreparationTiming{
+		Now:    func() time.Time { return now },
+		Wait:   func(context.Context, time.Duration) error { return nil },
+		Jitter: func(base time.Duration) time.Duration { return base },
+	})
+	_, err := client.PrepareReferences(context.Background(), domain.NewUUID(), domain.SubmitRequest{
+		Media: domain.MediaImage,
+		References: []domain.ReferenceSource{
+			{Role: domain.RoleReference, Kind: domain.KindImage, MIMEType: "image/png", ByteSize: 1, SHA256Sum: sha256.Sum256([]byte("a")), Open: stringSource("a")},
+			{Role: domain.RoleReference, Kind: domain.KindImage, MIMEType: "image/png", ByteSize: 1, SHA256Sum: sha256.Sum256([]byte("b")), Open: stringSource("b")},
+		},
+	})
+	if !errors.Is(err, domain.ErrBlobNotFound) {
+		t.Fatalf("PrepareReferences error = %v, want original hard failure", err)
+	}
+	if len(transport.prepareCalls) != 2 || transport.prepareCalls[0] != 0 || transport.prepareCalls[1] != 1 {
+		t.Fatalf("prepare order = %v, want [0 1]", transport.prepareCalls)
+	}
+	if len(transport.releaseCalls) != 2 || transport.releaseCalls[0] != 0 || transport.releaseCalls[1] != 1 {
+		t.Fatalf("cleanup after one release failure = %v, want [0 1]", transport.releaseCalls)
+	}
+}
+
+func TestPrepareReferencesStopsWhenSharedBudgetExpires(t *testing.T) {
+	transport := &scriptedReferenceTransport{prepareErrors: map[int][]error{0: {domain.ErrObjectStorageUnavailable}}}
+	now := time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC)
+	client := NewGenerationsClient("https://models.kapon.test", staticReferenceTransportResolver{transport: transport}, ReferencePreparationTiming{
+		Now: func() time.Time { return now },
+		Wait: func(_ context.Context, _ time.Duration) error {
+			now = now.Add(10 * time.Minute)
+			return nil
+		},
+		Jitter: func(base time.Duration) time.Duration { return base },
+	})
+	_, err := client.PrepareReferences(context.Background(), domain.NewUUID(), domain.SubmitRequest{
+		Media: domain.MediaImage,
+		References: []domain.ReferenceSource{{
+			Role: domain.RoleReference, Kind: domain.KindImage, MIMEType: "image/png",
+			ByteSize: 1, SHA256Sum: sha256.Sum256([]byte("x")), Open: stringSource("x"),
+		}},
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || len(transport.prepareCalls) != 1 {
+		t.Fatalf("PrepareReferences error/calls = %v/%v, want budget exhaustion after one attempt", err, transport.prepareCalls)
+	}
+}
+
+func equalDurations(got, want []time.Duration) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestVideoSubmitMapsPreparedReferenceKindsAndRolesToURLs(t *testing.T) {

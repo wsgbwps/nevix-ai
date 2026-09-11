@@ -57,12 +57,18 @@ func pumpInto(ctx context.Context, src io.Reader, dst *io.PipeWriter, maxBytes i
 			if ctx.Err() != nil || errors.Is(readErr, context.Canceled) {
 				return fail(fmt.Errorf("blob upload canceled: %w", readErr))
 			}
-			return fail(readErr)
+			return fail(&sourceReadError{err: readErr})
 		}
 	}
 }
 
 var errPumpFailed = errors.New("pump failed")
+
+type sourceReadError struct{ err error }
+
+func (e *sourceReadError) Error() string { return "source read failed" }
+
+func (e *sourceReadError) Unwrap() error { return e.err }
 
 func streamBoundedPut(ctx context.Context, src io.Reader, maxBytes int64, upload func(io.Reader) error) (domain.PutResult, error) {
 	pipeReader, pipeWriter := io.Pipe()
