@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
@@ -22,6 +24,7 @@ type verdictApplier struct {
 	connections domain.ConnectionSignals
 	assets      domain.MediaAssetRepository // worker-only: output transfer forms assets
 	notify      InvalidationSink
+	gateway     domain.ProviderGateway // worker-only: terminal commits release prepared references
 }
 
 // apply runs one verdict's write-set inside the caller's verified
@@ -129,22 +132,22 @@ func (a verdictApplier) applyAdvance(ctx context.Context, sc domain.WriteScope, 
 
 // landJobEdge applies the strict terminal-verdict job edge: already
 // terminal as another verdict is a lost convergence, reported as an error.
-func (a verdictApplier) landJobEdge(ctx context.Context, sc domain.WriteScope, freshJob domain.ProviderJob, to domain.JobStatus) error {
+func (a verdictApplier) landJobEdge(ctx context.Context, sc domain.WriteScope, freshJob domain.ProviderJob, to domain.JobStatus) (bool, error) {
 	if domain.JobIsTerminal(freshJob.Status) {
 		if freshJob.Status != to {
-			return fmt.Errorf("creation: provider job already terminal as %s", freshJob.Status)
+			return false, fmt.Errorf("creation: provider job already terminal as %s", freshJob.Status)
 		}
-		return nil
+		return false, nil
 	}
 	ok, err := a.tasks.TransitionJob(ctx, sc.Tx(), freshJob.ID,
 		[]domain.JobStatus{freshJob.Status}, to, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !ok {
-		return errors.New("creation: provider job terminal transition lost")
+		return false, errors.New("creation: provider job terminal transition lost")
 	}
-	return nil
+	return true, nil
 }
 
 // applyTransferred lands transferred, verified outputs: write-once slot
@@ -154,7 +157,8 @@ func (a verdictApplier) applyTransferred(ctx context.Context, sc domain.WriteSco
 	if err != nil {
 		return err
 	}
-	if err := a.landJobEdge(ctx, sc, freshJob, verdict.JobTo); err != nil {
+	landed, err := a.landJobEdge(ctx, sc, freshJob, verdict.JobTo)
+	if err != nil {
 		return err
 	}
 	// Optional table-guarded edge; a cancelling task keeps its status and the
@@ -200,6 +204,9 @@ func (a verdictApplier) applyTransferred(ctx context.Context, sc domain.WriteSco
 		return err
 	}
 	a.notifyOwner(sc, freshTask.OwnerID)
+	if landed {
+		a.releaseProviderTransfersAfterCommit(sc, freshJob.ID, verdict.JobTo, len(freshTask.Spec.References))
+	}
 	return nil
 }
 
@@ -232,7 +239,8 @@ func (a verdictApplier) applyTerminal(ctx context.Context, sc domain.WriteScope,
 			return nil
 		}
 	}
-	if err := a.landJobEdge(ctx, sc, freshJob, verdict.JobTo); err != nil {
+	landed, err := a.landJobEdge(ctx, sc, freshJob, verdict.JobTo)
+	if err != nil {
 		return err
 	}
 	slotStatus, slotReason := domain.SlotVerdictForJob(verdict.JobTo, verdict.Reason)
@@ -249,6 +257,9 @@ func (a verdictApplier) applyTerminal(ctx context.Context, sc domain.WriteScope,
 		return err
 	}
 	a.notifyOwner(sc, freshTask.OwnerID)
+	if landed {
+		a.releaseProviderTransfersAfterCommit(sc, freshJob.ID, verdict.JobTo, len(freshTask.Spec.References))
+	}
 	return nil
 }
 
@@ -313,4 +324,46 @@ func (a verdictApplier) notifyOwner(sc domain.WriteScope, owner domain.UUID) {
 		return
 	}
 	sc.AfterCommit(func() { a.notify.NotifyGenerationChanged(owner) })
+}
+
+func (a verdictApplier) releaseProviderTransfersAfterCommit(sc domain.WriteScope, jobID domain.UUID, status domain.JobStatus, referenceCount int) {
+	if a.gateway == nil || !providerTransferCleanupEligible(status) || referenceCount == 0 {
+		return
+	}
+	sc.AfterCommit(func() { releaseProviderTransfers(a.gateway, jobID, status, referenceCount) })
+}
+
+const providerTransferCleanupTimeout = 30 * time.Second
+
+func providerTransferCleanupEligible(status domain.JobStatus) bool {
+	switch status {
+	case domain.JobCompleted, domain.JobFailed, domain.JobCancelled, domain.JobTimedOut:
+		return true
+	default:
+		return false
+	}
+}
+
+func releaseProviderTransfers(gateway domain.ProviderGateway, jobID domain.UUID, status domain.JobStatus, referenceCount int) {
+	failedCount := 0
+	for ordinal := range referenceCount {
+		if !releaseProviderTransfer(gateway, jobID, ordinal) {
+			failedCount++
+		}
+	}
+	if failedCount > 0 {
+		slog.Warn("creation: provider transfer cleanup incomplete",
+			"job_status", status,
+			"reference_count", referenceCount,
+			"failed_count", failedCount,
+		)
+	}
+}
+
+func releaseProviderTransfer(gateway domain.ProviderGateway, jobID domain.UUID, ordinal int) (released bool) {
+	released = false
+	defer func() { _ = recover() }()
+	ctx, cancel := context.WithTimeout(context.Background(), providerTransferCleanupTimeout)
+	defer cancel()
+	return gateway.ReleaseReference(ctx, jobID, ordinal) == nil
 }

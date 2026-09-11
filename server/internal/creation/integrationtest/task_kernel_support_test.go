@@ -44,14 +44,16 @@ type recordedImageCall struct {
 
 // videoTaskScript drives the async video task family.
 type videoTaskScript struct {
-	status       int    // forced HTTP status on create/poll (0 = normal)
-	failAfter    int    // polls before the task fails with the given code
-	failCode     string // provider error code ("content_policy" → input policy)
-	timeoutAfter int    // polls before the task reports authoritative expiry
-	succeedAfter int    // polls before the task succeeds (default 1)
-	cancelOK     bool   // cancel requests succeed
-	requests     int    // observed create calls
-	polls        int    // observed poll calls
+	status              int    // forced HTTP status on create/poll (0 = normal)
+	failAfter           int    // polls before the task fails with the given code
+	failCode            string // provider error code ("content_policy" → input policy)
+	timeoutAfter        int    // polls before the task reports authoritative expiry
+	succeedAfter        int    // polls before the task succeeds (default 1)
+	cancelOK            bool   // cancel requests succeed
+	cancelAuthoritative bool   // a successful cancel becomes the next poll verdict
+	cancelled           bool
+	requests            int // observed create calls
+	polls               int // observed poll calls
 }
 
 type generationFake struct {
@@ -192,8 +194,8 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		return true
 
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/contents/generations/tasks/"):
+		g.video.polls++
 		script := g.video
-		script.polls++
 		g.video.requests++
 		if script.status != 0 {
 			w.WriteHeader(script.status)
@@ -201,13 +203,15 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		}
 		remaining := script.succeedAfter
 		switch {
-		case remaining > 0:
-			g.video.succeedAfter--
-			w.Write([]byte(`{"id":"t","status":"queued"}`))
+		case script.cancelAuthoritative && script.cancelled:
+			w.Write([]byte(`{"id":"t","status":"cancelled"}`))
 		case script.timeoutAfter > 0 && script.polls > script.timeoutAfter:
 			w.Write([]byte(`{"id":"t","status":"expired"}`))
 		case script.failAfter > 0 && script.polls > script.failAfter:
 			w.Write([]byte(`{"id":"t","status":"failed","error":{"code":"` + script.failCode + `","message":"x"}}`))
+		case remaining > 0:
+			g.video.succeedAfter--
+			w.Write([]byte(`{"id":"t","status":"queued"}`))
 		default:
 			w.Write([]byte(`{"id":"t","status":"succeeded","content":{"video_url":"http://` + r.Host + `/provider-outputs/video/0"}}`))
 		}
@@ -215,6 +219,7 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 
 	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/contents/generations/tasks/"):
 		if g.video.cancelOK {
+			g.video.cancelled = true
 			w.Write([]byte(`{"id":"t","status":"cancelling"}`))
 		} else {
 			w.WriteHeader(http.StatusConflict)

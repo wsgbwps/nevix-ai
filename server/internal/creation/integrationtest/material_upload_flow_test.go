@@ -738,6 +738,14 @@ func TestCancelDuringReferencePreparationRejectsMarkerBeforeKapon(t *testing.T) 
 	if got := h.kapon.generation.imageRequests(); got != 0 {
 		t.Fatalf("rejected submit marker still reached Kapon %d times", got)
 	}
+	records := h.referenceTransport.prepared()
+	if len(records) != 1 {
+		t.Fatalf("prepared references = %+v, want one", records)
+	}
+	releases := awaitReferenceReleases(t, h.referenceTransport, 1)
+	if releases[0].jobID != records[0].jobID || releases[0].ordinal != 0 || h.referenceTransport.exists(records[0].jobID.String(), 0) {
+		t.Fatalf("pre-marker cancellation did not immediately release its prepared object: %+v", releases)
+	}
 }
 
 func assertNoSensitiveUploadFields(t *testing.T, body []byte) {
