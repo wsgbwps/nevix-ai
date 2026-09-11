@@ -194,13 +194,13 @@ func TestImageOutputsFormUniqueMediaAssets(t *testing.T) {
 	}
 }
 
-// TestPartialSuccessFormsAssetsOnlyForSucceededSlots: a provider shortfall
-// fails only the missing slots; their absence from the asset table keeps the
-// aggregate's succeeded-only invariant.
+// TestPartialSuccessFormsAssetsOnlyForSucceededSlots: one known output
+// transfer fails; its absence from the asset table keeps the aggregate's
+// succeeded-only invariant.
 func TestPartialSuccessFormsAssetsOnlyForSucceededSlots(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{outputs: 1, emptyOutputsOn: 2})
+	h.kapon.generation.setImage(imageScript{outputs: 1, outputStatus: http.StatusBadGateway, outputStatusOn: 2})
 
 	draft := h.imageTaskIntent(t, token, "部分资产", 3)
 	status, body := h.submitTask(t, token, "img-partial-assets", draft)
@@ -210,7 +210,7 @@ func TestPartialSuccessFormsAssetsOnlyForSucceededSlots(t *testing.T) {
 	view := decodeTaskView(t, body)
 	view = h.awaitTaskTerminal(t, token, view.Task.ID)
 	if view.Task.Status != "partially_succeeded" {
-		t.Fatalf("shortfall must aggregate partially_succeeded, got %s", view.Task.Status)
+		t.Fatalf("one failed output transfer must aggregate partially_succeeded, got %s", view.Task.Status)
 	}
 	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, view.Task.ID); got != 2 {
 		t.Fatalf("only succeeded slots form assets, got %d", got)

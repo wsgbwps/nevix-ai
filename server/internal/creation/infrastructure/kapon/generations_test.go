@@ -34,6 +34,10 @@ func newGenerationsClient(t *testing.T, handler http.HandlerFunc) *GenerationsCl
 	return NewGenerationsClient(server.URL, nil)
 }
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
 // imageSizeCase is one accepted (model, ratio, resolution) combination.
 type imageSizeCase struct {
 	model      string
@@ -211,8 +215,8 @@ func TestImageSubmitWireContract(t *testing.T) {
 		Ratio:      &ratio,
 		Resolution: &resolution,
 		References: []domain.GatewayReference{
-			{URL: "https://objects.example/reference-0"},
-			{URL: "https://objects.example/reference-1"},
+			{URL: "https://objects.example/reference-0", ExpiresAt: time.Now().Add(time.Hour)},
+			{URL: "https://objects.example/reference-1", ExpiresAt: time.Now().Add(time.Hour)},
 		},
 	})
 	if err != nil {
@@ -268,9 +272,9 @@ func TestImageSubmitWireContract(t *testing.T) {
 	}
 }
 
-// TestImageSubmitClassifiedErrors: the adapter's whole provider opinion —
-// 402 credit, 429 with Retry-After, 5xx transient, policy rejections, and a
-// lost synchronous answer converging as indeterminate.
+// TestImageSubmitClassifiedErrors pins the conservative submit contract:
+// only an exact safe rejection is retryable; ordinary 429/4xx are explicit
+// failures, while generic 5xx and lost responses are indeterminate.
 func TestImageSubmitClassifiedErrors(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -285,21 +289,22 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 			}
 		}, nil},
 		{"rate limited", http.StatusTooManyRequests, "", func(t *testing.T, err error) {
-			if !domain.IsRateLimited(err) {
-				t.Fatalf("429 must classify rate limited, got %v", err)
-			}
-			if got := domain.RetryAfterOf(err); got == nil || *got != 7*time.Second {
-				t.Fatalf("Retry-After must carry 7s, got %v", got)
+			var rejected *domain.ProviderRejectedError
+			if !errors.As(err, &rejected) || rejected.Reason != domain.ReasonTemporarilyUnavailable || domain.IsSubmitRetryable(err) {
+				t.Fatalf("429 without a safe contract code must fail definitively, got %v", err)
 			}
 		}, retryAfter(7 * time.Second)},
 		{"unavailable", http.StatusServiceUnavailable, "", func(t *testing.T, err error) {
-			if !domain.IsProviderUnavailable(err) {
-				t.Fatalf("5xx must classify transient, got %v", err)
+			if !domain.IsSubmitIndeterminate(err) {
+				t.Fatalf("generic 5xx may follow external execution and must be indeterminate, got %v", err)
 			}
 		}, nil},
 		{"model route unavailable", http.StatusServiceUnavailable, `{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE","type":"model_routing_error","message":"provider-private-detail","request_id":"kapon-private-request-id","arbitrary_secret":"must-not-cross"}}`, func(t *testing.T, err error) {
-			if !domain.IsProviderUnavailable(err) {
-				t.Fatalf("model-route 503 must remain retryable, got %v", err)
+			if !domain.IsSubmitRetryable(err) {
+				t.Fatalf("the exact no-route rejection must be safely retryable, got %v", err)
+			}
+			if got := domain.SubmitRetryPressureOf(err); got != domain.SubmitRetryCooldown {
+				t.Fatalf("model-route 503 pressure = %v, want cooldown", got)
 			}
 			if got := domain.ClassifyFailureReason(err); got != domain.ReasonProviderRouteUnavailable {
 				t.Fatalf("model-route 503 reason = %s, want provider_route_unavailable", got)
@@ -319,9 +324,17 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 				t.Fatalf("arbitrary provider response field crossed the adapter: %+v", diagnostic)
 			}
 		}, nil},
+		{"model route rate limited", http.StatusTooManyRequests, `{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE"}}`, func(t *testing.T, err error) {
+			if !domain.IsSubmitRetryable(err) {
+				t.Fatalf("the exact no-route rejection must be safely retryable, got %v", err)
+			}
+			if got := domain.SubmitRetryPressureOf(err); got != domain.SubmitRetryBackoff {
+				t.Fatalf("model-route 429 pressure = %v, want backoff", got)
+			}
+		}, retryAfter(7 * time.Second)},
 		{"unrecognized route error", http.StatusServiceUnavailable, `{"error":{"code":"MODEL_GROUP_SOME_UNAVAILABLE","type":"model_routing_error","message":"provider-private-detail","request_id":"kapon-private-request-id"}}`, func(t *testing.T, err error) {
-			if !domain.IsProviderUnavailable(err) {
-				t.Fatalf("unknown 503 must remain retryable, got %v", err)
+			if !domain.IsSubmitIndeterminate(err) {
+				t.Fatalf("an unrecognized 503 must be indeterminate, got %v", err)
 			}
 			if got := domain.ClassifyFailureReason(err); got != domain.ReasonTemporarilyUnavailable {
 				t.Fatalf("unknown 503 reason = %s, want temporarily_unavailable", got)
@@ -332,6 +345,18 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 				!strings.Contains(diagnostic.Message, `"size":"2048x2048"`) || diagnostic.RequestID == nil ||
 				*diagnostic.RequestID != "kapon-private-request-id" {
 				t.Fatalf("unrecognized provider code must still remain diagnosable: %+v", diagnostic)
+			}
+		}, nil},
+		{"safe code on ordinary 4xx", http.StatusBadRequest, `{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE"}}`, func(t *testing.T, err error) {
+			var rejected *domain.ProviderRejectedError
+			if !errors.As(err, &rejected) || domain.IsSubmitRetryable(err) {
+				t.Fatalf("a safe code outside its contracted pressure statuses must fail definitively, got %v", err)
+			}
+		}, nil},
+		{"credential rejected", http.StatusUnauthorized, "", func(t *testing.T, err error) {
+			var rejected *domain.ProviderRejectedError
+			if !errors.As(err, &rejected) || rejected.Reason != domain.ReasonTemporarilyUnavailable || domain.IsSubmitRetryable(err) {
+				t.Fatalf("401 is an explicit submit failure, got %v", err)
 			}
 		}, nil},
 		{"unsupported model capability", http.StatusBadRequest, `{"error":{"code":"invalid_request_error","type":"invalid_request_error","message":"The request parameters or model capability are not supported."},"request_id":"kapon-top-level-request-id"}`, func(t *testing.T, err error) {
@@ -404,11 +429,8 @@ func TestSuccessfulSubmitWithoutOutputIdentityKeepsDiagnostic(t *testing.T) {
 				Media: domain.MediaImage, Model: domain.ImageModelID,
 				Ratio: &ratio, Resolution: &resolution, Quantity: 1,
 			},
-			code: "provider_output_missing",
-			assert: func(err error) bool {
-				var rejected *domain.ProviderRejectedError
-				return errors.As(err, &rejected) && rejected.Reason == domain.ReasonInternalError
-			},
+			code:   "provider_output_missing",
+			assert: domain.IsSubmitIndeterminate,
 		},
 		{
 			name: "video task ID missing",
@@ -436,6 +458,103 @@ func TestSuccessfulSubmitWithoutOutputIdentityKeepsDiagnostic(t *testing.T) {
 	}
 }
 
+func TestSubmitUsesIndependentThirtySecondDeadline(t *testing.T) {
+	client := NewGenerationsClient("https://models.kapon.test", nil)
+	if client.submitTimeout != 30*time.Second {
+		t.Fatalf("submit timeout = %s, want 30s", client.submitTimeout)
+	}
+}
+
+func TestSubmitDeadlineAfterDeliveryIsIndeterminate(t *testing.T) {
+	var calls atomic.Int64
+	client := newGenerationsClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		time.Sleep(100 * time.Millisecond)
+		w.Write([]byte(`{"data":[{"url":"https://cdn.example/late.png"}]}`))
+	})
+	client.submitTimeout = 20 * time.Millisecond
+	ratio, resolution := "1:1", "1K"
+	_, err := client.Submit(context.Background(), "credential", domain.PreparedSubmitRequest{
+		Media: domain.MediaImage, Model: domain.ImageModelID, Quantity: 1,
+		Ratio: &ratio, Resolution: &resolution,
+	})
+	if !domain.IsSubmitIndeterminate(err) || calls.Load() != 1 {
+		t.Fatalf("delivered timeout error=%v calls=%d, want indeterminate/1", err, calls.Load())
+	}
+}
+
+func TestMalformedSuccessfulSubmitIsIndeterminate(t *testing.T) {
+	var calls atomic.Int64
+	client := newGenerationsClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Write([]byte(`{`))
+	})
+	ratio, resolution := "1:1", "1K"
+	_, err := client.Submit(context.Background(), "credential", domain.PreparedSubmitRequest{
+		Media: domain.MediaImage, Model: domain.ImageModelID, Quantity: 1,
+		Ratio: &ratio, Resolution: &resolution,
+	})
+	if !domain.IsSubmitIndeterminate(err) || calls.Load() != 1 {
+		t.Fatalf("malformed success error=%v calls=%d, want indeterminate/1", err, calls.Load())
+	}
+}
+
+func TestExpiredPreparedReferenceFailsBeforeProviderIO(t *testing.T) {
+	var calls atomic.Int64
+	client := newGenerationsClient(t, func(http.ResponseWriter, *http.Request) { calls.Add(1) })
+	client.referenceNow = func() time.Time { return time.Unix(100, 0) }
+	ratio, resolution := "1:1", "1K"
+	_, err := client.Submit(context.Background(), "credential", domain.PreparedSubmitRequest{
+		Media: domain.MediaImage, Model: domain.ImageModelID, Quantity: 1,
+		Ratio: &ratio, Resolution: &resolution,
+		References: []domain.GatewayReference{{
+			URL: "https://objects.example/reference", ExpiresAt: time.Unix(99, 0),
+		}},
+	})
+	var rejected *domain.ProviderRejectedError
+	if !errors.As(err, &rejected) || calls.Load() != 0 {
+		t.Fatalf("expired reference error=%v provider calls=%d, want explicit preflight failure/0", err, calls.Load())
+	}
+}
+
+func TestConfirmedUnsentSubmitIsSafelyRetryable(t *testing.T) {
+	client := NewGenerationsClient("https://models.kapon.test", nil)
+	client.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial failed before request write")
+	})
+	ratio, resolution := "1:1", "1K"
+	_, err := client.Submit(context.Background(), "credential", domain.PreparedSubmitRequest{
+		Media: domain.MediaImage, Model: domain.ImageModelID, Quantity: 1,
+		Ratio: &ratio, Resolution: &resolution,
+	})
+	if !domain.IsSubmitRetryable(err) {
+		t.Fatalf("a confirmed-unsent request must be safely retryable, got %v", err)
+	}
+	if got := domain.SubmitRetryPressureOf(err); got != domain.SubmitRetryBackoff {
+		t.Fatalf("confirmed-unsent pressure = %v, want backoff", got)
+	}
+}
+
+func TestImageFanoutPartialDeliveryIsIndeterminate(t *testing.T) {
+	var calls atomic.Int64
+	client := newGenerationsClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Write([]byte(`{"data":[{"url":"https://cdn.example/output.png"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE"}}`))
+	})
+	ratio, resolution := "1:1", "1K"
+	_, err := client.Submit(context.Background(), "credential", domain.PreparedSubmitRequest{
+		Media: domain.MediaImage, Model: domain.ImageModelID, Quantity: 2,
+		Ratio: &ratio, Resolution: &resolution,
+	})
+	if !domain.IsSubmitIndeterminate(err) || calls.Load() != 2 {
+		t.Fatalf("partial fan-out delivery error=%v calls=%d, want indeterminate/2", err, calls.Load())
+	}
+}
+
 func TestProviderDiagnosticsRedactCallSecrets(t *testing.T) {
 	const (
 		credential = "provider-secret-key-123"
@@ -454,7 +573,7 @@ func TestProviderDiagnosticsRedactCallSecrets(t *testing.T) {
 	_, err := client.Submit(context.Background(), credential, domain.PreparedSubmitRequest{
 		Media: domain.MediaImage, Model: domain.ImageModelID, Prompt: prompt,
 		Ratio: &ratio, Resolution: &resolution, Quantity: 1,
-		References: []domain.GatewayReference{{URL: reference}},
+		References: []domain.GatewayReference{{URL: reference, ExpiresAt: time.Now().Add(time.Hour)}},
 	})
 	if err == nil {
 		t.Fatal("provider rejection expected")

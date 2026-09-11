@@ -11,12 +11,14 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
@@ -35,18 +37,15 @@ import (
 // pinned by the fake-Kapon tests; the video slice (#161) refines the exact
 // vendor payload mapping during its real-invocation acceptance.
 type GenerationsClient struct {
-	baseURL    string
-	http       *http.Client
-	references domain.ReferenceTransportResolver
-	// imageSubmitTimeout bounds the synchronous image call; losing the
-	// response means the outcome is indistinguishable from unexecuted, so
-	// the kernel treats it as indeterminate.
-	imageSubmitTimeout time.Duration
-	pollTimeout        time.Duration
-	cancelTimeout      time.Duration
-	referenceNow       func() time.Time
-	referenceWait      func(context.Context, time.Duration) error
-	referenceJitter    func(time.Duration) time.Duration
+	baseURL         string
+	http            *http.Client
+	references      domain.ReferenceTransportResolver
+	submitTimeout   time.Duration
+	pollTimeout     time.Duration
+	cancelTimeout   time.Duration
+	referenceNow    func() time.Time
+	referenceWait   func(context.Context, time.Duration) error
+	referenceJitter func(time.Duration) time.Duration
 }
 
 const (
@@ -106,15 +105,15 @@ func imageWireModel(model string) string {
 // NewGenerationsClient binds the generation adapter to the validated route.
 func NewGenerationsClient(baseURL string, references domain.ReferenceTransportResolver, timing ...ReferencePreparationTiming) *GenerationsClient {
 	client := &GenerationsClient{
-		baseURL:            strings.TrimRight(baseURL, "/"),
-		http:               &http.Client{},
-		references:         references,
-		imageSubmitTimeout: 60 * time.Second,
-		pollTimeout:        15 * time.Second,
-		cancelTimeout:      15 * time.Second,
-		referenceNow:       time.Now,
-		referenceWait:      waitForReferenceRetry,
-		referenceJitter:    jitterReferenceRetry,
+		baseURL:         strings.TrimRight(baseURL, "/"),
+		http:            &http.Client{},
+		references:      references,
+		submitTimeout:   30 * time.Second,
+		pollTimeout:     15 * time.Second,
+		cancelTimeout:   15 * time.Second,
+		referenceNow:    time.Now,
+		referenceWait:   waitForReferenceRetry,
+		referenceJitter: jitterReferenceRetry,
 	}
 	if len(timing) > 0 {
 		if timing[0].Now != nil {
@@ -163,12 +162,12 @@ func (c *GenerationsClient) PrepareReferences(ctx context.Context, providerJobID
 			c.releaseAfterPreparationFailure(ctx, transport, providerJobID, ordinal+1)
 			return domain.PreparedSubmitRequest{}, err
 		}
-		if !isPublicHTTPSURL(object.URL) {
+		if !isPublicHTTPSURL(object.URL) || !object.ExpiresAt.After(c.referenceNow()) {
 			c.releaseAfterPreparationFailure(ctx, transport, providerJobID, ordinal+1)
 			return domain.PreparedSubmitRequest{}, domain.ErrInvalidReferenceSource
 		}
 		prepared.References = append(prepared.References, domain.GatewayReference{
-			Role: source.Role, Kind: source.Kind, URL: object.URL,
+			Role: source.Role, Kind: source.Kind, URL: object.URL, ExpiresAt: object.ExpiresAt,
 		})
 	}
 	return prepared, nil
@@ -286,6 +285,19 @@ func isPublicHTTPSURL(raw string) bool {
 // call returns outputs; a lost response is indeterminate); video media is
 // asynchronous (returns the external reference to poll).
 func (c *GenerationsClient) Submit(ctx context.Context, credential string, req domain.PreparedSubmitRequest) (domain.SubmitOutcome, error) {
+	for _, reference := range req.References {
+		if !reference.ExpiresAt.After(c.referenceNow()) {
+			diagnostic := domain.NewFailureDiagnostic(
+				domain.DiagnosticSourceStorage,
+				"prepared_reference_expired",
+				"The prepared provider reference expired before submission",
+				nil, "", "",
+			)
+			return domain.SubmitOutcome{}, domain.WithFailureDiagnostic(
+				&domain.ProviderRejectedError{Reason: domain.ReasonInternalError}, diagnostic,
+			)
+		}
+	}
 	if req.Media == domain.MediaImage {
 		return c.submitImage(ctx, credential, req)
 	}
@@ -328,14 +340,14 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 		wg.Add(1)
 		go func(slot int) {
 			defer wg.Done()
-			callCtx, cancel := context.WithTimeout(ctx, c.imageSubmitTimeout)
+			callCtx, cancel := context.WithTimeout(ctx, c.submitTimeout)
 			defer cancel()
 			var parsed struct {
 				Data []struct {
 					URL string `json:"url"`
 				} `json:"data"`
 			}
-			errs[slot] = c.call(callCtx, credential, http.MethodPost, "/v1/images/generations", body, &parsed)
+			errs[slot] = classifySubmitError(c.call(callCtx, credential, http.MethodPost, "/v1/images/generations", body, &parsed))
 			if errs[slot] != nil {
 				return
 			}
@@ -347,18 +359,36 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 		}(i)
 	}
 	wg.Wait()
-	for _, err := range errs {
-		if errors.Is(err, errTransportLost) {
-			// A lost synchronous answer cannot be distinguished from an
-			// executed generation: the outcome is indeterminate and the
-			// system must never guess a re-submit.
-			return domain.SubmitOutcome{}, domain.WithFailureDiagnostic(domain.ErrSubmitIndeterminate, domain.FailureDiagnosticOf(err))
-		}
-	}
-	for _, err := range errs {
-		if err != nil {
+	successful := 0
+	for slot, err := range errs {
+		if domain.IsSubmitIndeterminate(err) {
 			return domain.SubmitOutcome{}, err
 		}
+		if err == nil && len(urls[slot]) == 0 {
+			return domain.SubmitOutcome{}, missingOutputIndeterminate()
+		}
+	}
+	var retryable error
+	for _, err := range errs {
+		if err == nil {
+			successful++
+			continue
+		}
+		if domain.IsSubmitRetryable(err) {
+			retryable = err
+			continue
+		}
+		return domain.SubmitOutcome{}, err
+	}
+	if retryable != nil {
+		if successful > 0 {
+			// Some fan-out calls created outputs, so retrying the whole request
+			// could duplicate them even though another child was safely rejected.
+			return domain.SubmitOutcome{}, domain.WithFailureDiagnostic(
+				domain.ErrSubmitIndeterminate, domain.FailureDiagnosticOf(retryable),
+			)
+		}
+		return domain.SubmitOutcome{}, retryable
 	}
 	outcome := domain.SubmitOutcome{}
 	for _, slot := range urls {
@@ -366,19 +396,17 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 			outcome.Outputs = append(outcome.Outputs, domain.GatewayOutput{URL: url})
 		}
 	}
-	if len(outcome.Outputs) == 0 {
-		diagnostic := domain.NewFailureDiagnostic(
-			domain.DiagnosticSourceProvider,
-			"provider_output_missing",
-			"Kapon returned a successful image response without an output URL",
-			nil, "", "",
-		)
-		return domain.SubmitOutcome{}, domain.WithFailureDiagnostic(
-			&domain.ProviderRejectedError{Reason: domain.ReasonInternalError},
-			diagnostic,
-		)
-	}
 	return outcome, nil
+}
+
+func missingOutputIndeterminate() error {
+	diagnostic := domain.NewFailureDiagnostic(
+		domain.DiagnosticSourceProvider,
+		"provider_output_missing",
+		"Kapon returned a successful image response without an output URL",
+		nil, "", "",
+	)
+	return domain.WithFailureDiagnostic(domain.ErrSubmitIndeterminate, diagnostic)
 }
 
 func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, req domain.PreparedSubmitRequest) (domain.SubmitOutcome, error) {
@@ -404,17 +432,12 @@ func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, 
 		content = append(content, item)
 	}
 	body := map[string]any{"model": req.Model, "content": content}
-	callCtx, cancel := context.WithTimeout(ctx, c.pollTimeout)
+	callCtx, cancel := context.WithTimeout(ctx, c.submitTimeout)
 	defer cancel()
 	var parsed struct {
 		ID string `json:"id"`
 	}
-	if err := c.call(callCtx, credential, http.MethodPost, "/v1/contents/generations/tasks", body, &parsed); err != nil {
-		if errors.Is(err, errTransportLost) {
-			// The async task may or may not exist; without an external
-			// identity there is nothing safe to poll or retry.
-			return domain.SubmitOutcome{}, domain.WithFailureDiagnostic(domain.ErrSubmitIndeterminate, domain.FailureDiagnosticOf(err))
-		}
+	if err := classifySubmitError(c.call(callCtx, credential, http.MethodPost, "/v1/contents/generations/tasks", body, &parsed)); err != nil {
 		return domain.SubmitOutcome{}, err
 	}
 	if parsed.ID == "" {
@@ -444,7 +467,7 @@ func (c *GenerationsClient) Poll(ctx context.Context, credential string, ref str
 		Error *providerJobError `json:"error"`
 	}
 	if err := c.call(callCtx, credential, http.MethodGet, "/v1/contents/generations/tasks/"+ref, nil, &parsed); err != nil {
-		if errors.Is(err, errTransportLost) {
+		if errors.Is(err, errRequestUnsent) || errors.Is(err, errTransportLost) {
 			return domain.PollOutcome{}, domain.WithFailureDiagnostic(domain.ErrProviderUnavailable, domain.FailureDiagnosticOf(err))
 		}
 		return domain.PollOutcome{}, err
@@ -496,7 +519,7 @@ func (c *GenerationsClient) Cancel(ctx context.Context, credential string, ref s
 	defer cancel()
 	if err := c.call(callCtx, credential, http.MethodPost, "/v1/contents/generations/tasks/"+ref,
 		map[string]any{"action": "cancel"}, nil); err != nil {
-		if errors.Is(err, errTransportLost) {
+		if errors.Is(err, errRequestUnsent) || errors.Is(err, errTransportLost) {
 			return domain.WithFailureDiagnostic(domain.ErrProviderUnavailable, domain.FailureDiagnosticOf(err))
 		}
 		return err
@@ -508,7 +531,57 @@ func (c *GenerationsClient) Cancel(ctx context.Context, credential string, ref s
 // answer: connection failure, timeout, or an unreadable body. Submit paths
 // treat it as an unidentified outcome; idempotent paths treat it as
 // transient.
-var errTransportLost = errors.New("kapon: transport lost")
+var (
+	errRequestUnsent = errors.New("kapon: request confirmed unsent")
+	errTransportLost = errors.New("kapon: transport lost")
+)
+
+// safeSubmitRejectionCode is Kapon's explicit no-route rejection: no model
+// group accepted the request, so 429/503 responses carrying it created no job.
+const safeSubmitRejectionCode = "MODEL_GROUP_ALL_UNAVAILABLE"
+
+// classifySubmitError tightens the generic HTTP classification for the
+// side-effecting Submit operation. A status class alone never proves that no
+// external work exists.
+func classifySubmitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	diagnostic := domain.FailureDiagnosticOf(err)
+	if errors.Is(err, errRequestUnsent) {
+		return domain.WithFailureDiagnostic(&domain.SubmitRetryableError{
+			Reason: domain.ReasonTemporarilyUnavailable,
+		}, diagnostic)
+	}
+	if errors.Is(err, errTransportLost) {
+		return domain.WithFailureDiagnostic(domain.ErrSubmitIndeterminate, diagnostic)
+	}
+	if diagnostic != nil && diagnostic.Code == safeSubmitRejectionCode &&
+		diagnostic.HTTPStatus != nil &&
+		(*diagnostic.HTTPStatus == http.StatusTooManyRequests || *diagnostic.HTTPStatus == http.StatusServiceUnavailable) {
+		pressure := domain.SubmitRetryBackoff
+		if domain.IsProviderUnavailable(err) {
+			pressure = domain.SubmitRetryCooldown
+		}
+		return domain.WithFailureDiagnostic(&domain.SubmitRetryableError{
+			Reason: domain.ReasonProviderRouteUnavailable, Pressure: pressure, RetryAfter: domain.RetryAfterOf(err),
+		}, diagnostic)
+	}
+	if domain.IsRateLimited(err) {
+		return domain.WithFailureDiagnostic(
+			&domain.ProviderRejectedError{Reason: domain.ReasonTemporarilyUnavailable}, diagnostic,
+		)
+	}
+	if domain.IsProviderUnavailable(err) {
+		if diagnostic != nil && diagnostic.HTTPStatus != nil && *diagnostic.HTTPStatus >= 500 {
+			return domain.WithFailureDiagnostic(domain.ErrSubmitIndeterminate, diagnostic)
+		}
+		return domain.WithFailureDiagnostic(
+			&domain.ProviderRejectedError{Reason: domain.ReasonTemporarilyUnavailable}, diagnostic,
+		)
+	}
+	return err
+}
 
 // call performs one classified HTTP round trip carrying the call's Provider
 // Key in the Authorization header only — the credential is never persisted,
@@ -541,6 +614,11 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 		req.Header.Set("Authorization", "Bearer "+credential)
 	}
 
+	var gotConnection atomic.Bool
+	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) {
+		gotConnection.Store(true)
+	}}
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	resp, err := c.http.Do(req)
 	if err != nil {
 		summary := redactedRequestSummary(body)
@@ -555,6 +633,9 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 			"Kapon request failed before a response was received"+shapeSuffix(summary, c.baseURL),
 			nil, "", "",
 		)
+		if !gotConnection.Load() {
+			return domain.WithFailureDiagnostic(errRequestUnsent, diagnostic)
+		}
 		return domain.WithFailureDiagnostic(errTransportLost, diagnostic)
 	}
 	defer resp.Body.Close()
@@ -606,7 +687,7 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 			diagnostic,
 		)
 	case resp.StatusCode >= 500:
-		if providerFailure.Code == "MODEL_GROUP_ALL_UNAVAILABLE" {
+		if providerFailure.Code == safeSubmitRejectionCode {
 			return domain.WithFailureDiagnostic(
 				&domain.ProviderUnavailableError{Reason: domain.ReasonProviderRouteUnavailable},
 				diagnostic,

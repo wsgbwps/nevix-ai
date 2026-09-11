@@ -120,7 +120,9 @@ func (t *fakeReferenceTransport) Prepare(ctx context.Context, jobID creation.UUI
 			return creation.ProviderTransferObject{}, err
 		}
 	}
-	return creation.ProviderTransferObject{URL: url}, nil
+	return creation.ProviderTransferObject{
+		URL: url, ExpiresAt: time.Now().Add(creation.ProviderTransferLifetime),
+	}, nil
 }
 
 func (t *fakeReferenceTransport) Release(ctx context.Context, jobID creation.UUID, ordinal int) error {

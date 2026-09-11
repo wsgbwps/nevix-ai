@@ -285,7 +285,7 @@ func (r *GenerationTaskRepository) GetForOwner(ctx context.Context, owner, taskI
 		return domain.GenerationTask{}, nil, fmt.Errorf("creation: begin task read: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	task, slots, _, err := readTaskWithSlotsAndJob(ctx, tx, owner, taskID)
+	task, slots, _, err := readTaskWithSlotsAndJob(ctx, tx, owner, taskID, false)
 	return task, slots, err
 }
 
@@ -297,7 +297,7 @@ func (r *GenerationTaskRepository) GetForWorker(ctx context.Context, taskID doma
 		return domain.GenerationTask{}, nil, domain.ProviderJob{}, fmt.Errorf("creation: begin worker read: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	return readTaskWithSlotsAndJob(ctx, tx, domain.UUID{}, taskID)
+	return readTaskWithSlotsAndJob(ctx, tx, domain.UUID{}, taskID, false)
 }
 
 // taskReadExec is the statement surface a task detail read needs; both the
@@ -309,18 +309,22 @@ type taskReadExec interface {
 
 // readTaskWithSlotsAndJob shares the task detail read; a zero owner skips
 // the ownership predicate (worker path).
-func readTaskWithSlotsAndJob(ctx context.Context, exec taskReadExec, owner, taskID domain.UUID) (domain.GenerationTask, []domain.GenerationSlot, domain.ProviderJob, error) {
+func readTaskWithSlotsAndJob(ctx context.Context, exec taskReadExec, owner, taskID domain.UUID, forUpdate bool) (domain.GenerationTask, []domain.GenerationSlot, domain.ProviderJob, error) {
 	ownerPredicate := "AND owner_user_id = $2"
 	args := []any{taskID, owner}
 	if owner == (domain.UUID{}) {
 		ownerPredicate = ""
 		args = []any{taskID}
 	}
+	lockClause := ""
+	if forUpdate {
+		lockClause = " FOR UPDATE"
+	}
 	task, err := scanTaskFull(exec.QueryRow(ctx, `
 		SELECT id, session_id, owner_user_id, idempotency_key, payload_hash, media_type,
 		       specification, manifest_version, status, slot_count,
 		       terminal_cause, cancel_requested_at IS NOT NULL, created_at, updated_at, terminal_at
-		FROM creation_generation_tasks WHERE id = $1 `+ownerPredicate, args...))
+		FROM creation_generation_tasks WHERE id = $1 `+ownerPredicate+lockClause, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.GenerationTask{}, nil, domain.ProviderJob{}, domain.ErrTaskNotFound
 	}
@@ -355,7 +359,7 @@ func readTaskWithSlotsAndJob(ctx context.Context, exec taskReadExec, owner, task
 	var status *string
 	err = exec.QueryRow(ctx, `
 		SELECT id, task_id, media_type, status, external_ref, last_outcome, submit_attempts, created_at, updated_at, terminal_at
-		FROM creation_provider_jobs WHERE task_id = $1 ORDER BY created_at DESC LIMIT 1`, taskID).
+		FROM creation_provider_jobs WHERE task_id = $1 ORDER BY created_at DESC LIMIT 1`+lockClause, taskID).
 		Scan(&job.ID, &job.TaskID, &job.Media, &status, &job.ExternalRef, &job.Outcome, &job.SubmitAttempts, &job.CreatedAt, &job.UpdatedAt, &job.TerminalAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return task, slots, domain.ProviderJob{}, nil
@@ -698,7 +702,7 @@ func (r *GenerationTaskRepository) GetQueueItemByTask(ctx context.Context, tx do
 // GetForOwnerInTx resolves one owned task plus slots on the caller's
 // transaction, so cancel convergence reads the exact state it mutates.
 func (r *GenerationTaskRepository) GetForOwnerInTx(ctx context.Context, tx domain.TxExecutor, owner, taskID domain.UUID) (domain.GenerationTask, []domain.GenerationSlot, domain.ProviderJob, error) {
-	return readTaskWithSlotsAndJob(ctx, tx, owner, taskID)
+	return readTaskWithSlotsAndJob(ctx, tx, owner, taskID, true)
 }
 
 // ResetQueueBudget zeroes the attempt counter of a claimed item so holds
@@ -711,8 +715,8 @@ func (r *GenerationTaskRepository) ResetQueueBudget(ctx context.Context, tx doma
 	return nil
 }
 
-// MarkJobSubmitRetryable records a definitively identified transient submit
-// rejection on the submitting job, licensing the next bounded re-submit.
+// MarkJobSubmitRetryable persists the domain's proven-safe submit outcome on
+// the submitting job, licensing the next bounded re-submit.
 func (r *GenerationTaskRepository) MarkJobSubmitRetryable(ctx context.Context, tx domain.TxExecutor, jobID domain.UUID) error {
 	if _, err := tx.Exec(ctx, `
 		UPDATE creation_provider_jobs SET last_outcome = 'transient_rejected', updated_at = now()

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,6 +159,143 @@ func TestPreSubmitCredentialFailureCleansPreparedReferencesAfterCancellation(t *
 	}
 	if got := h.kapon.generation.imageRequests(); got != 0 {
 		t.Fatalf("credential failure after cancellation reached Kapon %d times", got)
+	}
+}
+
+func TestCredentialRecoveryRepreparesReferencesReleasedBeforeFirstSubmit(t *testing.T) {
+	h, _, creatorEmailAddress := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	creator := h.loginToken(t, creatorEmailAddress, harnessPassword)
+	var credentialCiphertext []byte
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		SELECT credential_ciphertext FROM provider_connections WHERE terminated_at IS NULL
+	`).Scan(&credentialCiphertext); err != nil {
+		t.Fatalf("read credential envelope: %v", err)
+	}
+	var prepareCount atomic.Int32
+	h.referenceTransport.afterPrepare = func(creation.UUID, int) error {
+		if prepareCount.Add(1) == 1 {
+			_, err := h.ownerPool.Exec(h.ctx, `
+				UPDATE provider_connections
+				SET credential_ciphertext = set_byte(credential_ciphertext, 0, 255 - get_byte(credential_ciphertext, 0))
+				WHERE terminated_at IS NULL
+			`)
+			return err
+		}
+		return nil
+	}
+	var providerSawPreparedObject atomic.Bool
+	h.kapon.generation.setImage(imageScript{outputs: 1, beforeResponse: func() {
+		records := h.referenceTransport.prepared()
+		if len(records) > 0 {
+			providerSawPreparedObject.Store(h.referenceTransport.exists(records[0].jobID.String(), 0))
+		}
+	}})
+
+	taskID := h.submitTaskWithImageReferences(t, creator, "credential-reprepare", "image", 1)
+	releases := awaitReferenceReleases(t, h.referenceTransport, 1)
+	if h.referenceTransport.exists(releases[0].jobID.String(), 0) {
+		t.Fatal("credential failure left the first prepared object")
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE provider_connections SET credential_ciphertext = $1 WHERE terminated_at IS NULL
+	`, credentialCiphertext); err != nil {
+		t.Fatalf("restore credential envelope: %v", err)
+	}
+	view := h.awaitTaskTerminal(t, creator, taskID)
+	if view.Task.Status != "succeeded" {
+		t.Fatalf("credential recovery status = %s, want succeeded", view.Task.Status)
+	}
+	if records := h.referenceTransport.prepared(); len(records) != 2 {
+		t.Fatalf("prepared references = %+v, want the released object rebuilt", records)
+	}
+	if !providerSawPreparedObject.Load() {
+		t.Fatal("provider received a URL whose prepared object had been released")
+	}
+	if got := h.kapon.generation.imageRequests(); got != 1 {
+		t.Fatalf("credential recovery reached Kapon %d times, want one submit", got)
+	}
+}
+
+func TestSafeRetryKeepsPreparedReferencesAcrossCredentialFailure(t *testing.T) {
+	h, _, creatorEmailAddress := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	creator := h.loginToken(t, creatorEmailAddress, harnessPassword)
+	var credentialCiphertext []byte
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		SELECT credential_ciphertext FROM provider_connections WHERE terminated_at IS NULL
+	`).Scan(&credentialCiphertext); err != nil {
+		t.Fatalf("read credential envelope: %v", err)
+	}
+	one := 1
+	h.kapon.generation.setImage(imageScript{
+		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE", retryAfterSeconds: &one,
+	})
+
+	taskID := h.submitTaskWithImageReferences(t, creator, "safe-retry-credential", "image", 1)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if countRows(t, h.ownerPool, `
+			SELECT count(*) FROM creation_provider_jobs
+			WHERE task_id = $1::uuid AND submit_attempts = 1 AND last_outcome = 'transient_rejected'
+		`, taskID) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("safe rejection was not persisted before credential sealing")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE provider_connections
+		SET credential_ciphertext = set_byte(credential_ciphertext, 0, 255 - get_byte(credential_ciphertext, 0))
+		WHERE terminated_at IS NULL
+	`); err != nil {
+		t.Fatalf("corrupt credential envelope: %v", err)
+	}
+	var providerSawPreparedObject atomic.Bool
+	h.kapon.generation.setImage(imageScript{outputs: 1, beforeResponse: func() {
+		records := h.referenceTransport.prepared()
+		if len(records) > 0 {
+			providerSawPreparedObject.Store(h.referenceTransport.exists(records[0].jobID.String(), 0))
+		}
+	}})
+
+	for {
+		var heldAfterCredentialFailure bool
+		if err := h.ownerPool.QueryRow(h.ctx, `
+			SELECT run_after > now() + interval '3 seconds'
+			FROM creation_generation_queue WHERE task_id = $1::uuid
+		`, taskID).Scan(&heldAfterCredentialFailure); err != nil {
+			t.Fatalf("read credential hold: %v", err)
+		}
+		if heldAfterCredentialFailure {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("safe retry did not reach the credential failure hold")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	records := h.referenceTransport.prepared()
+	if len(records) != 1 || !h.referenceTransport.exists(records[0].jobID.String(), 0) {
+		t.Fatalf("credential failure released the safe retry's prepared object: %+v", records)
+	}
+	if releases := h.referenceTransport.released(); len(releases) != 0 {
+		t.Fatalf("credential failure released safe-retry transfers: %+v", releases)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE provider_connections SET credential_ciphertext = $1 WHERE terminated_at IS NULL
+	`, credentialCiphertext); err != nil {
+		t.Fatalf("restore credential envelope: %v", err)
+	}
+	view := h.awaitTaskTerminal(t, creator, taskID)
+	if view.Task.Status != "succeeded" {
+		t.Fatalf("safe retry credential recovery status = %s, want succeeded", view.Task.Status)
+	}
+	if !providerSawPreparedObject.Load() {
+		t.Fatal("safe retry submitted a URL whose prepared object had been released")
+	}
+	if got := h.kapon.generation.imageRequests(); got != 2 {
+		t.Fatalf("safe retry reached Kapon %d times, want one rejection and one success", got)
 	}
 }
 

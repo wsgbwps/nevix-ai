@@ -21,20 +21,19 @@ type KernelState struct {
 	SubmitAttempts  int
 }
 
-// transientRejected reports the definitively identified transient submit
-// rejection (explicit 429/503 — nothing executed externally), which makes a
-// bounded re-submit provably safe.
+// transientRejected reports a submit proven not to have started external
+// work: either confirmed unsent or rejected by an allowlisted provider code.
 func (s KernelState) transientRejected() bool {
 	return s.JobOutcome != nil && *s.JobOutcome == JobOutcomeTransientRejected
 }
 
-// transientSubmitAttemptLimit matches the four-step 429/503 pressure
+// SubmitAttemptLimit matches the four-step safe-submit pressure
 // ladders. The queue-wide allowance remains larger for accepted async jobs
 // that need many safe polls; an unaccepted submit must surface its terminal
 // verdict after this much provider pressure instead of waiting for that
 // unrelated polling budget. Waiting between attempts stays application's;
 // spending this budget is the state machine's.
-const transientSubmitAttemptLimit = 4
+const SubmitAttemptLimit = 4
 
 // KernelAction names the next step for one claimed item: an external call,
 // a convergence, or a guard park.
@@ -72,8 +71,8 @@ func NextAction(state KernelState) (KernelAction, error) {
 		case state.JobStatus == JobPending:
 			return ActionConvergeCancelled, nil
 		case state.JobStatus == JobSubmitting && !state.HasExternalRef && state.transientRejected():
-			// The provider definitively rejected the submit, so no external
-			// work exists and the creator's cancel can converge locally.
+			// Durable proof shows no external work started, so the creator's
+			// cancel can converge locally.
 			return ActionConvergeCancelled, nil
 		case state.JobStatus == JobSubmitting && !state.HasExternalRef:
 			// Crash between the submit marker and its outcome: the outcome
@@ -84,8 +83,8 @@ func NextAction(state KernelState) (KernelAction, error) {
 		case state.JobStatus == JobCancelling && state.HasExternalRef:
 			return ActionCancelJob, nil
 		case state.JobStatus == JobCancelling:
-			// Ref-less cancelling has no durable proof that the provider
-			// rejected the submit; fail safe instead of inventing cancel.
+			// Ref-less cancelling has no durable proof that external work was
+			// absent; fail safe instead of inventing cancel.
 			return ActionConvergeLost, nil
 		default:
 			return ActionConvergeSettled, nil
@@ -93,11 +92,17 @@ func NextAction(state KernelState) (KernelAction, error) {
 	}
 	switch {
 	case state.JobStatus == JobPending:
-		return ActionSubmit, nil
+		if state.TaskStatus == TaskQueued && !state.HasExternalRef && state.JobOutcome == nil && state.SubmitAttempts == 0 {
+			return ActionSubmit, nil
+		}
+		return ActionPark, nil
 	case state.JobStatus == JobSubmitting && state.HasExternalRef:
 		return ActionPoll, nil
 	case state.JobStatus == JobSubmitting && state.transientRejected():
-		return ActionSubmit, nil
+		if state.TaskStatus == TaskSubmitting && state.SubmitAttempts > 0 && state.SubmitAttempts < SubmitAttemptLimit {
+			return ActionSubmit, nil
+		}
+		return ActionPark, nil
 	case state.JobStatus == JobSubmitting:
 		return ActionConvergeLost, nil
 	case state.JobStatus == JobProcessing && state.HasExternalRef:
@@ -140,7 +145,7 @@ type KernelEventKind string
 
 const (
 	EventSubmitAccepted  KernelEventKind = "submit_accepted"  // async acceptance; ExternalRef required
-	EventSubmitTransient KernelEventKind = "submit_transient" // identified 429/503 rejection
+	EventSubmitTransient KernelEventKind = "submit_transient" // confirmed unsent or allowlisted rejection
 	EventCreditBlocked   KernelEventKind = "credit_blocked"   // explicit provider 402
 	EventSubmitRejected  KernelEventKind = "submit_rejected"  // definitive classified rejection
 	EventSubmitTimedOut  KernelEventKind = "submit_timed_out" // provider-authoritative submit timeout
@@ -174,7 +179,7 @@ const (
 	VerdictPromoted     KernelVerdictKind = "promoted"      // first poll promoted the job
 	VerdictCancelMarked KernelVerdictKind = "cancel_marked" // intent recorded on the accepted job
 	VerdictTransferred  KernelVerdictKind = "transferred"   // outputs landed: completed + slot results
-	VerdictRetryHold    KernelVerdictKind = "retry_hold"    // transient rejection under budget: hold, don't converge
+	VerdictRetryHold    KernelVerdictKind = "retry_hold"    // proven-safe submit under budget: hold, don't converge
 	VerdictTerminal     KernelVerdictKind = "terminal"      // full convergence write-set
 )
 
@@ -217,7 +222,7 @@ func VerdictFor(state KernelState, event KernelEvent) (KernelVerdict, error) {
 		}
 		return KernelVerdict{Kind: VerdictRefBound, JobTo: JobSubmitting, ExternalRef: event.ExternalRef}, nil
 	case EventSubmitTransient:
-		if state.SubmitAttempts >= transientSubmitAttemptLimit {
+		if state.SubmitAttempts >= SubmitAttemptLimit {
 			return KernelVerdict{Kind: VerdictTerminal, JobTo: JobFailed, Reason: event.Reason, Diagnostic: event.Diagnostic}, nil
 		}
 		return KernelVerdict{Kind: VerdictRetryHold}, nil

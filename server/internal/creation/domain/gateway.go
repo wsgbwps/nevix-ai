@@ -20,9 +20,9 @@ var (
 	// persisted). The kernel must never guess a new external request; the
 	// job ends indeterminate and only a creator's explicit redo proceeds.
 	ErrSubmitIndeterminate = errors.New("provider submit outcome is indeterminate")
-	// ErrProviderUnavailable reports transient provider pressure or unknown
-	// availability: timeouts on safe calls, 429 without more detail, 5xx.
-	// Bounded retry with backoff applies.
+	// ErrProviderUnavailable reports transient pressure on idempotent provider
+	// calls. Submit adapters must tighten this classification because status
+	// classes alone never prove that no external work was created.
 	ErrProviderUnavailable = errors.New("provider temporarily unavailable")
 	// ErrProviderRateLimited reports an explicit 429; RetryAfter carries the
 	// provider's Retry-After when present.
@@ -76,6 +76,43 @@ func (e *ProviderUnavailableError) Error() string { return "provider temporarily
 
 func (e *ProviderUnavailableError) Is(target error) bool { return target == ErrProviderUnavailable }
 
+// SubmitRetryableError is the narrow proof that the provider did not create
+// external work. Only an adapter's confirmed-unsent transport result or an
+// explicitly allowlisted provider rejection may construct this outcome.
+type SubmitRetryableError struct {
+	Reason     FailureReason
+	Pressure   SubmitRetryPressure
+	RetryAfter *time.Duration
+}
+
+func (e *SubmitRetryableError) Error() string { return "provider submit is safe to retry" }
+
+// SubmitRetryPressure selects the existing short-backoff or availability-
+// cooldown policy without making diagnostics participate in control flow.
+type SubmitRetryPressure uint8
+
+const (
+	SubmitRetryBackoff SubmitRetryPressure = iota
+	SubmitRetryCooldown
+)
+
+// IsSubmitRetryable reports that repeating this exact prepared request cannot
+// duplicate provider work.
+func IsSubmitRetryable(err error) bool {
+	var retryable *SubmitRetryableError
+	return errors.As(err, &retryable)
+}
+
+// SubmitRetryPressureOf extracts the typed pressure policy from a proven-safe
+// submit outcome. Callers use it only after IsSubmitRetryable succeeds.
+func SubmitRetryPressureOf(err error) SubmitRetryPressure {
+	var retryable *SubmitRetryableError
+	if errors.As(err, &retryable) {
+		return retryable.Pressure
+	}
+	return SubmitRetryBackoff
+}
+
 // IsSubmitIndeterminate reports an unidentified submit outcome.
 func IsSubmitIndeterminate(err error) bool { return errors.Is(err, ErrSubmitIndeterminate) }
 
@@ -91,8 +128,13 @@ func IsProviderUnavailable(err error) bool { return errors.Is(err, ErrProviderUn
 // IsProviderTimedOut reports the provider's authoritative timeout.
 func IsProviderTimedOut(err error) bool { return errors.Is(err, ErrProviderTimedOut) }
 
-// RetryAfterOf extracts the Retry-After hint from a classified 429.
+// RetryAfterOf extracts the Retry-After hint from a classified pressure
+// response, including a submit-specific safe rejection.
 func RetryAfterOf(err error) *time.Duration {
+	var submit *SubmitRetryableError
+	if errors.As(err, &submit) {
+		return submit.RetryAfter
+	}
 	var limited *RateLimitedError
 	if errors.As(err, &limited) {
 		return limited.RetryAfter
@@ -103,6 +145,10 @@ func RetryAfterOf(err error) *time.Duration {
 // ClassifyFailureReason maps a classified gateway error onto the stable
 // failure taxonomy for slot verdicts.
 func ClassifyFailureReason(err error) FailureReason {
+	var submit *SubmitRetryableError
+	if errors.As(err, &submit) {
+		return submit.Reason
+	}
 	var rejected *ProviderRejectedError
 	if errors.As(err, &rejected) {
 		return rejected.Reason
@@ -171,9 +217,10 @@ func OutputMimeAccepted(media MediaType, mime string) bool {
 // GatewayReference is one ordered prepared reference with its original role,
 // kind, and provider fetch URL.
 type GatewayReference struct {
-	Role DraftRole
-	Kind Kind
-	URL  string
+	Role      DraftRole
+	Kind      Kind
+	URL       string
+	ExpiresAt time.Time
 }
 
 // SubmitOutcome is the synchronous portion of a submission: async providers

@@ -56,6 +56,13 @@ func (a verdictApplier) applySubmitMarker(ctx context.Context, sc domain.WriteSc
 	if err != nil {
 		return 0, false, err
 	}
+	action, err := domain.NextAction(kernelState(freshTask, freshJob))
+	if err != nil {
+		return 0, false, err
+	}
+	if action != domain.ActionSubmit {
+		return 0, false, nil
+	}
 	if freshTask.Status != verdict.TaskTo {
 		if !domain.TaskCanTransition(freshTask.Status, verdict.TaskTo) {
 			return 0, false, nil
@@ -69,8 +76,7 @@ func (a verdictApplier) applySubmitMarker(ctx context.Context, sc domain.WriteSc
 			return 0, false, nil
 		}
 	}
-	attempts, ok, err := a.tasks.BeginJobSubmitAttempt(ctx, sc.Tx(), freshJob.ID,
-		[]domain.JobStatus{freshJob.Status})
+	attempts, ok, err := a.tasks.BeginJobSubmitAttempt(ctx, sc.Tx(), freshJob.ID, []domain.JobStatus{freshJob.Status})
 	if err != nil {
 		return 0, false, err
 	}
