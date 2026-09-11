@@ -197,9 +197,8 @@ type GenerationTaskRepository interface {
 	// prior transient outcome, and increments the provider-call count exactly
 	// once immediately before one external submit. attempts is valid when ok.
 	BeginJobSubmitAttempt(ctx context.Context, tx TxExecutor, jobID UUID, from []JobStatus) (attempts int, ok bool, err error)
-	// MarkJobSubmitRetryable records that the in-flight submit ended in a
-	// definitively identified transient rejection (explicit 429/503), which
-	// makes a bounded re-submit safe; the next submit attempt clears it.
+	// MarkJobSubmitRetryable records that the submit was confirmed unsent or
+	// received an allowlisted safe rejection; the next attempt clears it.
 	MarkJobSubmitRetryable(ctx context.Context, tx TxExecutor, jobID UUID) error
 	// WriteSlotVerdict writes one slot's terminal verdict write-once; an
 	// already-settled slot keeps its first verdict and returns false.

@@ -128,6 +128,7 @@ func (t *referenceTransport) Prepare(ctx context.Context, providerJobID domain.U
 		cleanupObject(err)
 		return domain.ProviderTransferObject{}, err
 	}
+	expiresAt := time.Now().Add(domain.ProviderTransferLifetime)
 	signedURL, err := t.store.presignGet(ctx, key, domain.ProviderTransferLifetime)
 	if err != nil {
 		mapped := safeReferenceStorageError(ctx, err)
@@ -136,7 +137,7 @@ func (t *referenceTransport) Prepare(ctx context.Context, providerJobID domain.U
 		}
 		return domain.ProviderTransferObject{}, mapped
 	}
-	return domain.ProviderTransferObject{URL: signedURL}, nil
+	return domain.ProviderTransferObject{URL: signedURL, ExpiresAt: expiresAt}, nil
 }
 
 func (t *referenceTransport) recoverConflictingObject(ctx context.Context, key string, source domain.ReferenceSource, metadata map[string]string, cleanupObject func(error)) (bool, error) {

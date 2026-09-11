@@ -537,7 +537,10 @@ func TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage(t *t
 		}
 		return nil
 	}
-	h.kapon.generation.setImage(imageScript{outputs: 1})
+	one := 1
+	h.kapon.generation.setImage(imageScript{
+		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE", retryAfterSeconds: &one,
+	})
 	draft := h.buildTaskIntent(t, creator, session.ID, taskIntent{
 		SessionID: session.ID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
 		Mode: "reference-image", Ratio: "1:1", Resolution: "2K", Quantity: 1,
@@ -550,7 +553,22 @@ func TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage(t *t
 	if status != http.StatusCreated {
 		t.Fatalf("submit task with uploaded reference: status=%d body=%s", status, body)
 	}
-	task := h.awaitTaskTerminal(t, creator, decodeTaskView(t, body).Task.ID)
+	taskID := decodeTaskView(t, body).Task.ID
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if got := countRows(t, h.ownerPool, `
+			SELECT count(*) FROM creation_provider_jobs
+			WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 1
+		`, taskID); got == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("safe rejection was never persisted before retry")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	h.kapon.generation.setImage(imageScript{outputs: 1})
+	task := h.awaitTaskTerminal(t, creator, taskID)
 	if task.Task.Status != "succeeded" {
 		t.Fatalf("task using uploaded reference did not succeed: %+v", task)
 	}
@@ -581,7 +599,7 @@ func TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage(t *t
 	}
 	if got := countRows(t, h.ownerPool, `
 		SELECT count(*) FROM creation_provider_jobs
-		WHERE id = $1::uuid AND status = 'completed' AND submit_attempts = 1
+		WHERE id = $1::uuid AND status = 'completed' AND submit_attempts = 2
 	`, records[0].jobID.String()); got != 1 {
 		t.Fatalf("prepared job did not persist the expected submit result: %d", got)
 	}
@@ -745,6 +763,12 @@ func TestCancelDuringReferencePreparationRejectsMarkerBeforeKapon(t *testing.T) 
 	releases := awaitReferenceReleases(t, h.referenceTransport, 1)
 	if releases[0].jobID != records[0].jobID || releases[0].ordinal != 0 || h.referenceTransport.exists(records[0].jobID.String(), 0) {
 		t.Fatalf("pre-marker cancellation did not immediately release its prepared object: %+v", releases)
+	}
+	if got := countRows(t, h.ownerPool, `
+		SELECT count(*) FROM creation_provider_jobs
+		WHERE task_id = $1::uuid AND submit_attempts = 0
+	`, view.Task.ID); got != 1 {
+		t.Fatal("pre-marker cancellation consumed a submit attempt")
 	}
 }
 

@@ -42,7 +42,7 @@ func (t *recordingReferenceTransport) Prepare(ctx context.Context, jobID domain.
 		return domain.ProviderTransferObject{}, err
 	}
 	t.calls = append(t.calls, referencePrepareCall{jobID: jobID, ordinal: ordinal, source: source, body: string(body)})
-	return domain.ProviderTransferObject{URL: t.urls[ordinal]}, nil
+	return domain.ProviderTransferObject{URL: t.urls[ordinal], ExpiresAt: time.Now().Add(domain.ProviderTransferLifetime)}, nil
 }
 
 func (t *recordingReferenceTransport) Release(_ context.Context, jobID domain.UUID, ordinal int) error {
@@ -78,7 +78,10 @@ func (t *scriptedReferenceTransport) Prepare(ctx context.Context, jobID domain.U
 	if attempt := countOrdinal(t.prepareCalls, ordinal); attempt <= len(errorsForOrdinal) && errorsForOrdinal[attempt-1] != nil {
 		return domain.ProviderTransferObject{}, errorsForOrdinal[attempt-1]
 	}
-	return domain.ProviderTransferObject{URL: "https://provider-transfer.example/" + jobID.String() + "/" + string(rune('0'+ordinal))}, nil
+	return domain.ProviderTransferObject{
+		URL:       "https://provider-transfer.example/" + jobID.String() + "/" + string(rune('0'+ordinal)),
+		ExpiresAt: time.Date(9999, time.December, 31, 0, 0, 0, 0, time.UTC),
+	}, nil
 }
 
 func (t *scriptedReferenceTransport) Release(_ context.Context, _ domain.UUID, ordinal int) error {
@@ -164,7 +167,7 @@ func TestPrepareReferencesPreservesFactsAndBuildsURLOnlyRequest(t *testing.T) {
 	if len(prepared.References) != 2 || prepared.References[0].Role != domain.RoleFirstFrame ||
 		prepared.References[0].Kind != domain.KindImage || prepared.References[0].URL != transport.urls[0] ||
 		prepared.References[1].Role != domain.RoleOmni || prepared.References[1].Kind != domain.KindVideo ||
-		prepared.References[1].URL != transport.urls[1] {
+		prepared.References[1].URL != transport.urls[1] || prepared.References[0].ExpiresAt.IsZero() || prepared.References[1].ExpiresAt.IsZero() {
 		t.Fatalf("prepared request lost reference facts: %+v", prepared.References)
 	}
 }
@@ -342,10 +345,10 @@ func TestVideoSubmitMapsPreparedReferenceKindsAndRolesToURLs(t *testing.T) {
 	_, err := client.Submit(context.Background(), "credential", domain.PreparedSubmitRequest{
 		Media: domain.MediaVideo, Model: domain.VideoModelID, Prompt: "prompt", Quantity: 1,
 		References: []domain.GatewayReference{
-			{Role: domain.RoleFirstFrame, Kind: domain.KindImage, URL: "https://objects.example/first"},
-			{Role: domain.RoleLastFrame, Kind: domain.KindImage, URL: "https://objects.example/last"},
-			{Role: domain.RoleOmni, Kind: domain.KindVideo, URL: "https://objects.example/video"},
-			{Role: domain.RoleOmni, Kind: domain.KindAudio, URL: "https://objects.example/audio"},
+			{Role: domain.RoleFirstFrame, Kind: domain.KindImage, URL: "https://objects.example/first", ExpiresAt: time.Now().Add(time.Hour)},
+			{Role: domain.RoleLastFrame, Kind: domain.KindImage, URL: "https://objects.example/last", ExpiresAt: time.Now().Add(time.Hour)},
+			{Role: domain.RoleOmni, Kind: domain.KindVideo, URL: "https://objects.example/video", ExpiresAt: time.Now().Add(time.Hour)},
+			{Role: domain.RoleOmni, Kind: domain.KindAudio, URL: "https://objects.example/audio", ExpiresAt: time.Now().Add(time.Hour)},
 		},
 	})
 	if err != nil {

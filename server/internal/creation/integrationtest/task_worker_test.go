@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -206,13 +207,13 @@ func TestVideoTaskLifecycleRunsAsync(t *testing.T) {
 	}
 }
 
-// TestPartialSuccessKeepsEverySucceededSlot: a provider shortfall fails only
-// the missing slots and the task aggregates partially_succeeded; retrying
-// the uncompleted slots creates a brand-new task.
+// TestPartialSuccessKeepsEverySucceededSlot: one known output transfer fails
+// without discarding the others; retrying the uncompleted slot creates a
+// brand-new task.
 func TestPartialSuccessKeepsEverySucceededSlotAndRetryCreatesNewTask(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{outputs: 1, emptyOutputsOn: 2})
+	h.kapon.generation.setImage(imageScript{outputs: 1, outputStatus: http.StatusBadGateway, outputStatusOn: 2})
 
 	draft := h.imageTaskIntent(t, token, "部分成功", 3)
 	status, body := h.submitTask(t, token, "partial", draft)
@@ -222,7 +223,7 @@ func TestPartialSuccessKeepsEverySucceededSlotAndRetryCreatesNewTask(t *testing.
 	view := decodeTaskView(t, body)
 	view = h.awaitTaskTerminal(t, token, view.Task.ID)
 	if view.Task.Status != "partially_succeeded" {
-		t.Fatalf("shortfall must aggregate partially_succeeded, got %s (%s)", view.Task.Status, slotVerdicts(view))
+		t.Fatalf("one failed output transfer must aggregate partially_succeeded, got %s (%s)", view.Task.Status, slotVerdicts(view))
 	}
 	succeeded, failed := 0, 0
 	for _, slot := range view.Slots {
@@ -231,7 +232,7 @@ func TestPartialSuccessKeepsEverySucceededSlotAndRetryCreatesNewTask(t *testing.
 			succeeded++
 		case "failed":
 			if slot.FailureReason == nil || *slot.FailureReason != "temporarily_unavailable" {
-				t.Fatalf("shortfall slots fail as temporarily_unavailable, got %v", slot.FailureReason)
+				t.Fatalf("failed output transfer must be temporarily_unavailable, got %v", slot.FailureReason)
 			}
 			failed++
 		default:
@@ -347,7 +348,9 @@ func TestCancelConvergesBestEffort(t *testing.T) {
 func TestCancelOfReflessSubmitConverges(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{status: http.StatusTooManyRequests})
+	h.kapon.generation.setImage(imageScript{
+		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE",
+	})
 
 	draft := h.imageTaskIntent(t, token, "取消未受理提交", 1)
 	status, body := h.submitTask(t, token, "cancel-refless", draft)
@@ -385,28 +388,168 @@ func TestCancelOfReflessSubmitConverges(t *testing.T) {
 // job indeterminate, the task failed with the indeterminate cause, and no
 // new provider request is ever guessed.
 func TestIndeterminateSubmitNeverAutoRetries(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		script imageScript
+	}{
+		{name: "lost response", script: imageScript{abort: true}},
+		{name: "generic 5xx", script: imageScript{status: http.StatusServiceUnavailable}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+			token := h.loginToken(t, creator, harnessPassword)
+			h.kapon.generation.setImage(tc.script)
+
+			draft := h.imageTaskIntent(t, token, "未知结局", 1)
+			status, body := h.submitTask(t, token, "indeterminate", draft)
+			if status != http.StatusCreated {
+				t.Fatalf("submit: %d %s", status, body)
+			}
+			view := decodeTaskView(t, body)
+			view = h.awaitTaskTerminal(t, token, view.Task.ID)
+			if view.Task.Status != "failed" || view.Task.TerminalCause == nil || *view.Task.TerminalCause != "provider_outcome_indeterminate" {
+				t.Fatalf("lost submit must fail with the indeterminate cause, got %s %v", view.Task.Status, view.Task.TerminalCause)
+			}
+			for _, slot := range view.Slots {
+				if slot.Status != "indeterminate" || slot.FailureReason == nil || *slot.FailureReason != "processing_indeterminate" {
+					t.Fatalf("slots must end indeterminate/processing_indeterminate: %s", slotVerdicts(view))
+				}
+			}
+			// No guessing: exactly one external submit attempt ever happened.
+			if got := h.kapon.generation.imageRequests(); got != 1 {
+				t.Fatalf("indeterminate must never auto-retry, observed %d submit attempts", got)
+			}
+		})
+	}
+}
+
+func TestImageFanoutAmbiguousDeliveryNeverRetries(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{abort: true})
+	h.kapon.generation.setImage(imageScript{outputs: 1, abortOn: 2})
 
-	draft := h.imageTaskIntent(t, token, "未知结局", 1)
-	status, body := h.submitTask(t, token, "indeterminate", draft)
+	draft := h.imageTaskIntent(t, token, "扇出未知结局", 2)
+	status, body := h.submitTask(t, token, "fanout-indeterminate", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
-	view := decodeTaskView(t, body)
-	view = h.awaitTaskTerminal(t, token, view.Task.ID)
+	view := h.awaitTaskTerminal(t, token, decodeTaskView(t, body).Task.ID)
 	if view.Task.Status != "failed" || view.Task.TerminalCause == nil || *view.Task.TerminalCause != "provider_outcome_indeterminate" {
-		t.Fatalf("lost submit must fail with the indeterminate cause, got %s %v", view.Task.Status, view.Task.TerminalCause)
+		t.Fatalf("ambiguous fan-out must converge indeterminate, got %s %v", view.Task.Status, view.Task.TerminalCause)
 	}
-	for _, slot := range view.Slots {
-		if slot.Status != "indeterminate" || slot.FailureReason == nil || *slot.FailureReason != "processing_indeterminate" {
-			t.Fatalf("slots must end indeterminate/processing_indeterminate: %s", slotVerdicts(view))
-		}
+	if got := h.kapon.generation.imageRequests(); got != 2 {
+		t.Fatalf("ambiguous fan-out issued %d provider calls, want exactly 2 initial children", got)
 	}
-	// No guessing: exactly one external submit attempt ever happened.
+}
+
+func blockImageSubmitAfterMarker(t *testing.T, h *harness) (<-chan struct{}, func()) {
+	t.Helper()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var enteredOnce sync.Once
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	h.kapon.generation.setImage(imageScript{outputs: 1, beforeResponse: func() {
+		enteredOnce.Do(func() { close(entered) })
+		<-release
+	}})
+	t.Cleanup(unblock)
+	return entered, unblock
+}
+
+func awaitSubmitMarker(t *testing.T, h *harness, taskID string, entered <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("provider call never crossed the durable submit marker")
+	}
+	assertMarkerOnlySubmit(t, h, taskID, "in-flight provider call lacked its durable marker")
+}
+
+func assertMarkerOnlySubmit(t *testing.T, h *harness, taskID, message string) {
+	t.Helper()
+	if got := countRows(t, h.ownerPool, `
+		SELECT count(*) FROM creation_provider_jobs
+		WHERE task_id = $1::uuid AND status = 'submitting'
+		  AND submit_attempts = 1 AND external_ref IS NULL AND last_outcome IS NULL
+	`, taskID); got != 1 {
+		t.Fatalf("%s: %d", message, got)
+	}
+}
+
+func TestCancelAfterSubmitMarkerKeepsSingleInFlightOutcome(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	entered, release := blockImageSubmitAfterMarker(t, h)
+
+	draft := h.imageTaskIntent(t, token, "marker 后取消", 1)
+	status, body := h.submitTask(t, token, "cancel-after-marker", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+	awaitSubmitMarker(t, h, taskID, entered)
+	if status, body = h.doRequest(t, http.MethodPost, "/creation/tasks/"+taskID+"/cancel", token, nil); status != http.StatusOK {
+		t.Fatalf("cancel after marker: %d %s", status, body)
+	}
+	release()
+	view := h.awaitTaskTerminal(t, token, taskID)
+	if view.Task.Status != "succeeded" || !view.Task.CancelRequested {
+		t.Fatalf("the already-started submit must retain its outcome, got %s cancel=%v", view.Task.Status, view.Task.CancelRequested)
+	}
 	if got := h.kapon.generation.imageRequests(); got != 1 {
-		t.Fatalf("indeterminate must never auto-retry, observed %d submit attempts", got)
+		t.Fatalf("post-marker cancel observed %d provider calls, want 1", got)
+	}
+}
+
+func TestWorkerRestartAfterSubmitMarkerNeverResubmits(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{})
+	token := h.loginToken(t, creator, harnessPassword)
+	entered, release := blockImageSubmitAfterMarker(t, h)
+
+	draft := h.imageTaskIntent(t, token, "marker 后进程退出", 1)
+	status, body := h.submitTask(t, token, "restart-after-marker", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.creation.RunWorkers(workerCtx) }()
+	awaitSubmitMarker(t, h, taskID, entered)
+	stopWorker()
+	release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("stop first worker: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first worker did not stop")
+	}
+	assertMarkerOnlySubmit(t, h, taskID, "crash window did not retain the marker-only state")
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE creation_generation_queue
+		SET run_after = now(), lease_owner = NULL, lease_until = NULL
+		WHERE task_id = $1::uuid
+	`, taskID); err != nil {
+		t.Fatalf("expire crashed worker lease: %v", err)
+	}
+
+	restartCtx, stopRestart := context.WithCancel(context.Background())
+	restarted := make(chan error, 1)
+	go func() { restarted <- h.creation.RunWorkers(restartCtx) }()
+	view := h.awaitTaskTerminal(t, token, taskID)
+	stopRestart()
+	if err := <-restarted; err != nil {
+		t.Fatalf("stop restarted worker: %v", err)
+	}
+	if view.Task.Status != "failed" || view.Task.TerminalCause == nil || *view.Task.TerminalCause != "provider_outcome_indeterminate" {
+		t.Fatalf("marker-only restart must converge indeterminate, got %s %v", view.Task.Status, view.Task.TerminalCause)
+	}
+	if got := h.kapon.generation.imageRequests(); got != 1 {
+		t.Fatalf("restart blindly resubmitted provider work: %d calls", got)
 	}
 }
 
@@ -455,13 +598,16 @@ func TestProvider402PersistsCreditBlock(t *testing.T) {
 	}
 }
 
-// TestProviderRateLimitedBacksOffBounded: an explicit 429 keeps the job
-// pending with backoff (never terminal) and then converges when the
-// provider recovers.
-func TestProviderRateLimitedBacksOffBounded(t *testing.T) {
+// TestProviderSafeRejectionBacksOffBounded: a provider response carrying the
+// exact safe-rejection code keeps the job submitting, then converges when the
+// provider recovers. The 429 status alone is not the safety proof.
+func TestProviderSafeRejectionBacksOffBounded(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{status: http.StatusTooManyRequests})
+	one := 1
+	h.kapon.generation.setImage(imageScript{
+		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE", retryAfterSeconds: &one,
+	})
 
 	draft := h.imageTaskIntent(t, token, "限速退避", 1)
 	status, body := h.submitTask(t, token, "rate-1", draft)
@@ -469,10 +615,16 @@ func TestProviderRateLimitedBacksOffBounded(t *testing.T) {
 		t.Fatalf("submit: %d %s", status, body)
 	}
 	view := decodeTaskView(t, body)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, _, current := h.getTask(t, token, view.Task.ID); current.Task.Status == "submitting" {
-			break // the marker persisted; the job is backing off, not terminal
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if got := countRows(t, h.ownerPool, `
+			SELECT count(*) FROM creation_provider_jobs
+			WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 1
+		`, view.Task.ID); got == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("safe rejection was never persisted before retry")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -671,7 +823,7 @@ func TestTransientRejectionAttemptLimitConverges(t *testing.T) {
 	token := h.loginToken(t, creator, harnessPassword)
 	one := 1
 	h.kapon.generation.setImage(imageScript{
-		status: http.StatusTooManyRequests, retryAfterSeconds: &one,
+		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE", retryAfterSeconds: &one,
 	})
 
 	draft := h.imageTaskIntent(t, token, "预算耗尽", 1)

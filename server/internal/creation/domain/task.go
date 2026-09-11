@@ -396,12 +396,10 @@ type GenerationSlot struct {
 	ResultDurationMS *int
 }
 
-// JobOutcomeTransientRejected marks a submit whose outcome was definitively
-// identified as a transient rejection (explicit 429/503 answer: nothing
-// executed externally), so a bounded re-submit is provably safe. A nil/empty
-// outcome state on a submitting job without an external reference means the
-// outcome was never identified — that path converges indeterminate, never a
-// guessed re-submit.
+// JobOutcomeTransientRejected marks a submit proven not to have started
+// external work: either confirmed unsent or rejected by an allowlisted
+// provider code. A nil/empty outcome on a ref-less submitting job remains
+// unidentified and converges indeterminate, never to a guessed re-submit.
 const JobOutcomeTransientRejected = "transient_rejected"
 
 // ProviderJob is one external execution attempt owned by a task.

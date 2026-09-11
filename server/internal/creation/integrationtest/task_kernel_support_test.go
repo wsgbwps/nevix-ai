@@ -16,17 +16,19 @@ import (
 // imageScript is one scripted synchronous image generation answer. Requests
 // arrive one per requested image (the vendor contract has no batch
 // parameter, so the adapter fans quantity out); `outputs` URLs ride every
-// normal answer, and `emptyOutputsOn` (1-based request ordinal) answers an
-// output-less success to model a vendor shortfall on one fanned-out request.
+// normal answer. `outputStatusOn` (1-based download ordinal) fails one known
+// output transfer while leaving the other results available.
 type imageScript struct {
 	status            int    // forced HTTP status (0 = answer normally)
 	outputs           int    // number of output URLs returned when status == 0
 	outputStatus      int    // forced output-download status (0 = serve fixture bytes)
+	outputStatusOn    int    // 1-based download ordinal receiving outputStatus (0 = every download)
 	abort             bool   // drop the connection mid-response (outcome unknown)
+	abortOn           int    // 1-based request ordinal dropped mid-response
 	code              string // structured provider error code for scripted error answers
 	jpeg              bool   // serve JPEG output bytes (output-verification failure path)
 	retryAfterSeconds *int   // optional Retry-After header for 429 answers
-	emptyOutputsOn    int    // 1-based request ordinal answered with zero outputs
+	beforeResponse    func() // optional barrier after receipt and before the response
 }
 
 // recordedImageCall is the adapter-conformance record of one image submit:
@@ -65,6 +67,7 @@ type generationFake struct {
 	video      videoTaskScript
 	nextID     int
 	outputReq  int
+	outputGets int
 	lastImage  *recordedImageCall
 }
 
@@ -141,6 +144,9 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 			imageURLs: append([]string(nil), payload.Image...),
 		}
 		script := g.image
+		if script.beforeResponse != nil {
+			script.beforeResponse()
+		}
 		if script.status != 0 {
 			if script.retryAfterSeconds != nil {
 				w.Header().Set("Retry-After", itoaFixture(*script.retryAfterSeconds))
@@ -151,16 +157,10 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 			}
 			return true
 		}
-		if script.abort {
+		if script.abort || script.abortOn == g.outputReq {
 			// Drop the connection without an HTTP answer: from the client's
 			// side the outcome is unknowable.
 			panic(http.ErrAbortHandler)
-		}
-		if script.emptyOutputsOn == g.outputReq {
-			// A 200 without outputs on one fanned-out request: the submit
-			// succeeds but the provider delivered fewer images than asked.
-			w.Write([]byte(`{"data":[]}`))
-			return true
 		}
 		urls := make([]string, 0, script.outputs)
 		for i := 0; i < script.outputs; i++ {
@@ -227,7 +227,8 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		return true
 
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/provider-outputs/image/"):
-		if g.image.outputStatus != 0 {
+		g.outputGets++
+		if g.image.outputStatus != 0 && (g.image.outputStatusOn == 0 || g.image.outputStatusOn == g.outputGets) {
 			w.WriteHeader(g.image.outputStatus)
 			return true
 		}

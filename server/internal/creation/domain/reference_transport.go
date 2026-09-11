@@ -24,7 +24,8 @@ type ReferenceSource struct {
 // ProviderTransferObject is the temporary fetch authority returned by a
 // ReferenceTransport. URL is sensitive and must remain in the provider call.
 type ProviderTransferObject struct {
-	URL string
+	URL       string
+	ExpiresAt time.Time
 }
 
 // ReferenceTransport prepares and releases one exact Provider Transfer

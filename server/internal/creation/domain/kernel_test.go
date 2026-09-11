@@ -115,12 +115,24 @@ func TestNextActionEnumeratesEveryReachableState(t *testing.T) {
 			for _, job := range allJobStatuses {
 				for _, ref := range []bool{false, true} {
 					for _, outcome := range outcomeCandidates {
-						state := kernelState(task, cancel, job, ref, outcome, 0)
+						attempts := 0
+						if outcome != nil && *outcome == JobOutcomeTransientRejected {
+							attempts = 1
+						}
+						state := kernelState(task, cancel, job, ref, outcome, attempts)
 						got, err := NextAction(state)
 						if err != nil {
 							t.Fatalf("NextAction(%+v) errored: %v", state, err)
 						}
 						want := routingExpectations[routingKey{cancel: cancel, shape: classify(job, ref, outcome)}]
+						if !cancel && want == ActionSubmit {
+							freshPending := task == TaskQueued && job == JobPending && !ref && outcome == nil && attempts == 0
+							safeRetry := task == TaskSubmitting && job == JobSubmitting && !ref &&
+								outcome != nil && *outcome == JobOutcomeTransientRejected && attempts < SubmitAttemptLimit
+							if !freshPending && !safeRetry {
+								want = ActionPark
+							}
+						}
 						if got != want {
 							t.Errorf("NextAction(task=%s cancel=%v job=%s ref=%v outcome=%v) = %s, want %s",
 								task, cancel, job, ref, outcome, got, want)
@@ -173,6 +185,36 @@ func TestNextActionRejectsUnknownStatuses(t *testing.T) {
 	}
 }
 
+func TestSubmitMarkerRoutingUsesOnlyFreshSafeState(t *testing.T) {
+	cases := []struct {
+		name  string
+		state KernelState
+		want  bool
+	}{
+		{"fresh pending", kernelState(TaskQueued, false, JobPending, false, nil, 0), true},
+		{"safe retry below budget", kernelState(TaskSubmitting, false, JobSubmitting, false, &outcomeTransient, SubmitAttemptLimit-1), true},
+		{"cancel requested", kernelState(TaskQueued, true, JobPending, false, nil, 0), false},
+		{"pending with stale outcome", kernelState(TaskQueued, false, JobPending, false, &outcomeTransient, 0), false},
+		{"submitting without safe outcome", kernelState(TaskSubmitting, false, JobSubmitting, false, nil, 1), false},
+		{"submitting with external reference", kernelState(TaskSubmitting, false, JobSubmitting, true, &outcomeTransient, 1), false},
+		{"safe retry budget exhausted", kernelState(TaskSubmitting, false, JobSubmitting, false, &outcomeTransient, SubmitAttemptLimit), false},
+		{"terminal task", kernelState(TaskFailed, false, JobPending, false, nil, 0), false},
+		{"wrong task phase", kernelState(TaskProcessing, false, JobPending, false, nil, 0), false},
+		{"wrong job phase", kernelState(TaskQueued, false, JobProcessing, false, nil, 0), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			action, err := NextAction(tc.state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := action == ActionSubmit; got != tc.want {
+				t.Fatalf("NextAction(%+v) = %s, submit=%v, want %v", tc.state, action, got, tc.want)
+			}
+		})
+	}
+}
+
 // Pins ADR-0019's four crash-recovery entries verbatim (#212 acceptance).
 func TestKernelCrashRecoveryIsPinned(t *testing.T) {
 	t.Run("submitting without ref and without outcome converges indeterminate", func(t *testing.T) {
@@ -198,7 +240,7 @@ func TestKernelCrashRecoveryIsPinned(t *testing.T) {
 		}
 	})
 
-	t.Run("identified transient rejection re-submits within the bounded budget", func(t *testing.T) {
+	t.Run("proven-safe submit outcome re-submits within the bounded budget", func(t *testing.T) {
 		outcome := JobOutcomeTransientRejected
 		state := kernelState(TaskSubmitting, false, JobSubmitting, false, &outcome, 1)
 		action, err := NextAction(state)
@@ -206,14 +248,14 @@ func TestKernelCrashRecoveryIsPinned(t *testing.T) {
 			t.Fatal(err)
 		}
 		if action != ActionSubmit {
-			t.Fatalf("transient rejection must license a bounded re-submit, got %s", action)
+			t.Fatalf("proven-safe outcome must license a bounded re-submit, got %s", action)
 		}
 		verdict, err := VerdictFor(state, KernelEvent{Kind: EventSubmitTransient})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if verdict.Kind != VerdictRetryHold {
-			t.Fatalf("under budget the transient rejection must hold, got %+v", verdict)
+			t.Fatalf("under budget the proven-safe outcome must hold, got %+v", verdict)
 		}
 	})
 
@@ -237,7 +279,7 @@ func TestKernelCrashRecoveryIsPinned(t *testing.T) {
 
 	t.Run("spending the submit budget converges JobFailed", func(t *testing.T) {
 		reason := ReasonProviderRouteUnavailable
-		state := kernelState(TaskSubmitting, false, JobSubmitting, false, &outcomeTransient, transientSubmitAttemptLimit)
+		state := kernelState(TaskSubmitting, false, JobSubmitting, false, &outcomeTransient, SubmitAttemptLimit)
 		verdict, err := VerdictFor(state, KernelEvent{Kind: EventSubmitTransient, Reason: &reason})
 		if err != nil {
 			t.Fatal(err)
@@ -246,7 +288,7 @@ func TestKernelCrashRecoveryIsPinned(t *testing.T) {
 			t.Fatalf("exhausted budget must converge JobFailed with the classified reason, got %+v", verdict)
 		}
 		// The boundary is exact: one attempt under the limit still holds.
-		state.SubmitAttempts = transientSubmitAttemptLimit - 1
+		state.SubmitAttempts = SubmitAttemptLimit - 1
 		verdict, err = VerdictFor(state, KernelEvent{Kind: EventSubmitTransient, Reason: &reason})
 		if err != nil {
 			t.Fatal(err)
@@ -274,14 +316,14 @@ func TestVerdictForProjectsEveryEvent(t *testing.T) {
 			want:  KernelVerdict{Kind: VerdictRefBound, JobTo: JobSubmitting, ExternalRef: &ref},
 		},
 		{
-			name:  "transient rejection under budget holds",
+			name:  "proven-safe outcome under budget holds",
 			state: kernelState(TaskSubmitting, false, JobSubmitting, false, nil, 1),
 			event: KernelEvent{Kind: EventSubmitTransient},
 			want:  KernelVerdict{Kind: VerdictRetryHold},
 		},
 		{
-			name:  "transient rejection at the budget converges JobFailed",
-			state: kernelState(TaskSubmitting, false, JobSubmitting, false, &outcomeTransient, transientSubmitAttemptLimit),
+			name:  "proven-safe outcome at the budget converges JobFailed",
+			state: kernelState(TaskSubmitting, false, JobSubmitting, false, &outcomeTransient, SubmitAttemptLimit),
 			event: KernelEvent{Kind: EventSubmitTransient, Reason: &reason, Diagnostic: diagnostic},
 			want:  KernelVerdict{Kind: VerdictTerminal, JobTo: JobFailed, Reason: &reason, Diagnostic: diagnostic},
 		},

@@ -43,6 +43,7 @@ type TaskWorker struct {
 	idleEvery  time.Duration
 
 	pressure providerPressure
+	prepared map[domain.UUID]domain.PreparedSubmitRequest
 	applier  verdictApplier
 }
 
@@ -67,6 +68,7 @@ func NewTaskWorker(
 		lease:      30 * time.Second,
 		pollEvery:  3 * time.Second,
 		idleEvery:  time.Second,
+		prepared:   make(map[domain.UUID]domain.PreparedSubmitRequest),
 		applier:    verdictApplier{tasks: tasks, connections: connections, assets: assets, notify: notify, gateway: gateway},
 	}
 }
@@ -75,6 +77,7 @@ func NewTaskWorker(
 // error is returned so the composition root's RunWorkers contract surfaces
 // it; transient claim misses just idle.
 func (w *TaskWorker) Run(ctx context.Context) error {
+	defer clear(w.prepared)
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -123,6 +126,9 @@ func (w *TaskWorker) process(ctx context.Context, item domain.ClaimedQueueItem) 
 		return err
 	}
 	media := task.Spec.MediaType
+	if action != domain.ActionSubmit {
+		delete(w.prepared, job.ID)
+	}
 	switch action {
 	case domain.ActionPark:
 		return w.park(ctx, item.QueueID)
@@ -220,16 +226,21 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	if until := w.holdUntil(pressure); until.After(time.Now()) {
 		return w.reschedule(ctx, queueID, until, true)
 	}
-	request, err := w.buildSubmitRequest(ctx, task, media)
-	if err != nil {
-		return w.rejectReferencePreparation(ctx, queueID, task.ID, state, err)
-	}
-	prepared, err := w.gateway.PrepareReferences(ctx, job.ID, request)
-	if err != nil {
-		if len(request.References) == 0 {
-			return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
+	referenceCount := len(task.Spec.References)
+	prepared, cached := w.prepared[job.ID]
+	if !cached {
+		request, err := w.buildSubmitRequest(ctx, task, media)
+		if err != nil {
+			return w.rejectReferencePreparation(ctx, queueID, task.ID, state, err)
 		}
-		return w.rejectReferencePreparation(ctx, queueID, task.ID, state, err)
+		prepared, err = w.gateway.PrepareReferences(ctx, job.ID, request)
+		if err != nil {
+			if len(request.References) == 0 {
+				return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
+			}
+			return w.rejectReferencePreparation(ctx, queueID, task.ID, state, err)
+		}
+		w.prepared[job.ID] = prepared
 	}
 	// Resolve the decrypted Provider Key only after every reference is ready.
 	// A resolution failure means nothing external executed, so the item holds
@@ -237,8 +248,11 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	// call returns.
 	credential, err := w.credentials.ActiveCallCredential(ctx)
 	if err != nil {
-		if ctx.Err() == nil {
-			releaseProviderTransfers(w.gateway, job.ID, job.Status, len(request.References))
+		if job.SubmitAttempts == 0 {
+			delete(w.prepared, job.ID)
+			if ctx.Err() == nil {
+				releaseProviderTransfers(w.gateway, job.ID, job.Status, referenceCount)
+			}
 		}
 		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
 	}
@@ -254,11 +268,15 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 		return runErr
 	})
 	if err != nil {
-		releaseProviderTransfers(w.gateway, job.ID, job.Status, len(request.References))
+		if job.SubmitAttempts == 0 || job.Outcome == nil || *job.Outcome != domain.JobOutcomeTransientRejected {
+			delete(w.prepared, job.ID)
+			releaseProviderTransfers(w.gateway, job.ID, job.Status, referenceCount)
+		}
 		return err
 	}
 	if !marked {
-		releaseProviderTransfers(w.gateway, job.ID, domain.JobCancelled, len(request.References))
+		delete(w.prepared, job.ID)
+		releaseProviderTransfers(w.gateway, job.ID, domain.JobCancelled, referenceCount)
 		return nil
 	}
 	// The marker's durable count is the budget the transient verdict spends.
@@ -266,6 +284,9 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 
 	// External submit, outside any transaction.
 	outcome, submitErr := w.gateway.Submit(ctx, credential, prepared)
+	if !domain.IsSubmitRetryable(submitErr) {
+		delete(w.prepared, job.ID)
+	}
 	switch {
 	case submitErr == nil:
 		w.recordSuccess(pressure)
@@ -282,17 +303,8 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	case domain.IsCreditBlocked(submitErr):
 		return w.applyEvent(ctx, queueID, task.ID, state,
 			domain.KernelEvent{Kind: domain.EventCreditBlocked, Diagnostic: domain.FailureDiagnosticOf(submitErr)}, time.Time{})
-	case domain.IsRateLimited(submitErr) || domain.IsProviderUnavailable(submitErr):
-		var until time.Time
-		if domain.IsRateLimited(submitErr) {
-			until = w.recordRateLimited(pressure, domain.RetryAfterOf(submitErr))
-		} else {
-			var alert bool
-			until, alert = w.recordUnavailable(pressure)
-			if alert {
-				slog.Error("creation: provider availability degraded — repeated 503 pressure", "media", string(media))
-			}
-		}
+	case domain.IsSubmitRetryable(submitErr):
+		until := w.submitRetryHoldUntil(pressure, media, submitErr)
 		verdict, err := domain.VerdictFor(state, domain.KernelEvent{
 			Kind:       domain.EventSubmitTransient,
 			Reason:     failureReasonPtr(domain.ClassifyFailureReason(submitErr)),
@@ -304,6 +316,7 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 		if verdict.Kind == domain.VerdictRetryHold {
 			return w.holdSubmitRetry(ctx, queueID, job.ID, until)
 		}
+		delete(w.prepared, job.ID)
 		return w.applyRun(ctx, queueID, task.ID, verdict)
 	default:
 		kind := domain.EventSubmitRejected
@@ -315,8 +328,19 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	}
 }
 
-// holdSubmitRetry records the identified transient rejection on the
-// submitting job, licensing the next marker at the backoff instant.
+func (w *TaskWorker) submitRetryHoldUntil(pressure string, media domain.MediaType, err error) time.Time {
+	if domain.SubmitRetryPressureOf(err) == domain.SubmitRetryCooldown {
+		until, alert := w.recordUnavailable(pressure)
+		if alert {
+			slog.Error("creation: provider availability degraded — repeated 503 pressure", "media", string(media))
+		}
+		return until
+	}
+	return w.recordRateLimited(pressure, domain.RetryAfterOf(err))
+}
+
+// holdSubmitRetry records the domain's proven-safe submit outcome, licensing
+// the next marker at the backoff instant.
 func (w *TaskWorker) holdSubmitRetry(ctx context.Context, queueID, jobID domain.UUID, until time.Time) error {
 	return w.runner.Run(ctx, func(sc domain.WriteScope) error {
 		if err := w.tasks.MarkJobSubmitRetryable(ctx, sc.Tx(), jobID); err != nil {
@@ -783,7 +807,7 @@ func (w *TaskWorker) reschedule(ctx context.Context, queueID domain.UUID, runAft
 	})
 }
 
-// providerPressure is the in-memory 429/503 backoff state. The persistent
+// providerPressure is the in-memory provider backoff state. The persistent
 // 402 credit block lives in the database; these cooldowns are process-local
 // by design (bounded windows that self-heal).
 type providerPressure struct {
