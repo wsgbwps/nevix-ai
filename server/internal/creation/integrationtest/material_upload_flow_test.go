@@ -3,7 +3,10 @@ package integrationtest
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -519,13 +522,28 @@ func TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage(t *t
 	h.ensureObjectStorage(t)
 	creator := h.loginToken(t, creatorEmailAddress, harnessPassword)
 	session := h.createSession(t, creator, sessionName("uploaded-reference-worker"))
-	materialID := h.uploadImage(t, creator, session.ID, "reference.png")
+	firstMaterialID := h.uploadImage(t, creator, session.ID, "first-reference.png")
+	secondMaterialID := h.uploadImage(t, creator, session.ID, "second-reference.png")
+	h.referenceTransport.beforePrepare = func(jobID creation.UUID, ordinal int) error {
+		var status string
+		var attempts int
+		if err := h.ownerPool.QueryRow(h.ctx, `
+			SELECT status, submit_attempts FROM creation_provider_jobs WHERE id = $1::uuid
+		`, jobID.String()).Scan(&status, &attempts); err != nil {
+			return fmt.Errorf("read pre-marker job: %w", err)
+		}
+		if status != "pending" || attempts != 0 || h.kapon.generation.imageRequests() != 0 {
+			return fmt.Errorf("reference %d prepared after submit boundary: status=%s attempts=%d provider_calls=%d", ordinal, status, attempts, h.kapon.generation.imageRequests())
+		}
+		return nil
+	}
 	h.kapon.generation.setImage(imageScript{outputs: 1})
 	draft := h.buildTaskIntent(t, creator, session.ID, taskIntent{
 		SessionID: session.ID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
 		Mode: "reference-image", Ratio: "1:1", Resolution: "2K", Quantity: 1,
 		Prompt: "使用已直传的永久素材", References: []any{
-			map[string]any{"material_id": materialID, "role": "reference"},
+			map[string]any{"material_id": firstMaterialID, "role": "reference"},
+			map[string]any{"material_id": secondMaterialID, "role": "reference"},
 		},
 	})
 	status, body := h.submitTask(t, creator, "uploaded-reference-worker-task", draft)
@@ -537,8 +555,188 @@ func TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage(t *t
 		t.Fatalf("task using uploaded reference did not succeed: %+v", task)
 	}
 	call := h.kapon.generation.lastImageCall()
-	if call == nil || call.images != 1 {
+	if call == nil || call.images != 2 {
 		t.Fatalf("generation worker did not read the uploaded reference from Object Storage: %+v", call)
+	}
+	records := h.referenceTransport.prepared()
+	if len(records) != 2 || records[0].ordinal != 0 || records[1].ordinal != 1 || records[0].jobID != records[1].jobID {
+		t.Fatalf("ordered preparation records = %+v", records)
+	}
+	wantBytes := pngBytes(t)
+	wantSum := sha256.Sum256(wantBytes)
+	for _, record := range records {
+		if record.role != "reference" || record.kind != "image" || record.mimeType != "image/png" ||
+			record.byteSize != int64(len(wantBytes)) || record.checksum != wantSum || record.readSize != int64(len(wantBytes)) || record.readSum != wantSum {
+			t.Fatalf("ReferenceSource lost immutable material facts: %+v", record)
+		}
+	}
+	wantURLs := []string{referenceURL(records[0].jobID, 0), referenceURL(records[0].jobID, 1)}
+	if len(call.imageURLs) != 2 || call.imageURLs[0] != wantURLs[0] || call.imageURLs[1] != wantURLs[1] {
+		t.Fatalf("Kapon image references = %v, want %v", call.imageURLs, wantURLs)
+	}
+	for _, rawURL := range call.imageURLs {
+		if !strings.HasPrefix(rawURL, "https://") || strings.Contains(rawURL, "data:") || strings.Contains(rawURL, "base64") {
+			t.Fatalf("Kapon received a non-HTTPS reference: %q", rawURL)
+		}
+	}
+	if got := countRows(t, h.ownerPool, `
+		SELECT count(*) FROM creation_provider_jobs
+		WHERE id = $1::uuid AND status = 'completed' AND submit_attempts = 1
+	`, records[0].jobID.String()); got != 1 {
+		t.Fatalf("prepared job did not persist the expected submit result: %d", got)
+	}
+	var persistedJob string
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		SELECT row_to_json(job)::text FROM creation_provider_jobs AS job WHERE id = $1::uuid
+	`, records[0].jobID.String()).Scan(&persistedJob); err != nil {
+		t.Fatalf("read persisted provider job: %v", err)
+	}
+	if strings.Contains(persistedJob, "provider-transfer.example") {
+		t.Fatalf("prepared reference URL was persisted: %s", persistedJob)
+	}
+}
+
+func TestNearVideoLimitReferenceStreamsWithoutWholePayloadBuffering(t *testing.T) {
+	h, _, creatorEmailAddress := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	creator := h.loginToken(t, creatorEmailAddress, harnessPassword)
+	session := h.createSession(t, creator, sessionName("near-video-reference-limit"))
+	status, body := h.doUpload(t, http.MethodPost, "/creation/sessions/"+session.ID+"/materials", creator, "large-reference.mp4", mp4Fixture())
+	if status != http.StatusCreated {
+		t.Fatalf("upload seed video: status=%d body=%s", status, body)
+	}
+	materialID := extractField(t, body, "id")
+
+	const fill = byte(0xA7)
+	byteSize := int64(200<<20) - 1
+	checksum := repeatedByteChecksum(fill, byteSize)
+	var blobKey string
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		UPDATE creation_reference_materials
+		SET byte_size = $2, checksum_sha256 = $3
+		WHERE id = $1::uuid
+		RETURNING blob_key
+	`, materialID, byteSize, checksum[:]).Scan(&blobKey); err != nil {
+		t.Fatalf("install generated near-limit material facts: %v", err)
+	}
+	h.directStore.replaceWithGeneratedObject(blobKey, byteSize, fill)
+	h.kapon.generation.setVideo(videoTaskScript{succeedAfter: 0})
+
+	draft := h.buildTaskIntent(t, creator, session.ID, taskIntent{
+		MediaType: "video", Model: "doubao-seedance-2-5", Mode: "omni-reference",
+		Resolution: "720p", Duration: 5, Prompt: "近上限流式参考素材",
+		References: []any{map[string]any{"material_id": materialID, "role": "omni"}},
+	})
+	status, body = h.submitTask(t, creator, "near-video-reference-limit", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit near-limit task: status=%d body=%s", status, body)
+	}
+	view := h.awaitTaskTerminal(t, creator, decodeTaskView(t, body).Task.ID)
+	if view.Task.Status != "succeeded" {
+		t.Fatalf("near-limit reference task did not succeed: %s (%s)", view.Task.Status, slotVerdicts(view))
+	}
+	records := h.referenceTransport.prepared()
+	if len(records) != 1 || records[0].byteSize != byteSize || records[0].readSize != byteSize || records[0].checksum != checksum || records[0].readSum != checksum {
+		t.Fatalf("near-limit stream facts changed: %+v", records)
+	}
+	if largest := h.directStore.largestGeneratedRead(); largest <= 0 || largest > 32<<10 {
+		t.Fatalf("near-limit source read chunk = %d, want 1..32768 bytes", largest)
+	}
+}
+
+func repeatedByteChecksum(value byte, size int64) [32]byte {
+	hash := sha256.New()
+	block := bytes.Repeat([]byte{value}, 32<<10)
+	for remaining := size; remaining > 0; {
+		chunk := int64(len(block))
+		if chunk > remaining {
+			chunk = remaining
+		}
+		_, _ = hash.Write(block[:chunk])
+		remaining -= chunk
+	}
+	var sum [32]byte
+	copy(sum[:], hash.Sum(nil))
+	return sum
+}
+
+func TestReferenceSourceFailuresEndBeforeKaponSubmit(t *testing.T) {
+	h, _, creatorEmailAddress := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	creator := h.loginToken(t, creatorEmailAddress, harnessPassword)
+
+	run := func(name string, fail func()) {
+		t.Helper()
+		session := h.createSession(t, creator, sessionName(name))
+		materialID := h.uploadImage(t, creator, session.ID, name+".png")
+		fail()
+		draft := h.buildTaskIntent(t, creator, session.ID, taskIntent{
+			MediaType: "image", Model: "doubao-seedream-5.0-pro", Mode: "reference-image",
+			Ratio: "1:1", Resolution: "2K", Quantity: 1, Prompt: name,
+			References: []any{map[string]any{"material_id": materialID, "role": "reference"}},
+		})
+		status, body := h.submitTask(t, creator, name, draft)
+		if status != http.StatusCreated {
+			t.Fatalf("submit %s: status=%d body=%s", name, status, body)
+		}
+		view := h.awaitTaskTerminal(t, creator, decodeTaskView(t, body).Task.ID)
+		if view.Task.Status != "failed" || len(view.Slots) != 1 || view.Slots[0].FailureReason == nil || *view.Slots[0].FailureReason != "internal_error" {
+			t.Fatalf("%s did not persist an explicit preparation failure: %s (%s)", name, view.Task.Status, slotVerdicts(view))
+		}
+		var jobStatus string
+		var submitAttempts int
+		if err := h.ownerPool.QueryRow(h.ctx, `
+			SELECT status, submit_attempts FROM creation_provider_jobs WHERE task_id = $1::uuid
+		`, view.Task.ID).Scan(&jobStatus, &submitAttempts); err != nil {
+			t.Fatalf("read %s provider job: %v", name, err)
+		}
+		if jobStatus != "failed" || submitAttempts != 0 {
+			t.Fatalf("%s provider job = %s/%d, want failed/0 before marker", name, jobStatus, submitAttempts)
+		}
+	}
+
+	run("reference-open-failure", func() {
+		h.directStore.failNextReferenceOpen(errors.New("sensitive source open failure"))
+	})
+	run("reference-read-failure", func() {
+		h.directStore.failNextReferenceRead(errors.New("sensitive source read failure"))
+	})
+	if got := h.kapon.generation.imageRequests(); got != 0 {
+		t.Fatalf("preparation failures reached Kapon %d times", got)
+	}
+}
+
+func TestCancelDuringReferencePreparationRejectsMarkerBeforeKapon(t *testing.T) {
+	h, _, creatorEmailAddress := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	creator := h.loginToken(t, creatorEmailAddress, harnessPassword)
+	session := h.createSession(t, creator, sessionName("cancel-during-reference-preparation"))
+	materialID := h.uploadImage(t, creator, session.ID, "cancel-reference.png")
+	h.referenceTransport.beforePrepare = func(jobID creation.UUID, _ int) error {
+		var taskID string
+		if err := h.ownerPool.QueryRow(h.ctx, `
+			SELECT task_id FROM creation_provider_jobs WHERE id = $1::uuid
+		`, jobID.String()).Scan(&taskID); err != nil {
+			return fmt.Errorf("resolve task for pre-marker cancellation: %w", err)
+		}
+		status, body := h.doRequest(t, http.MethodPost, "/creation/tasks/"+taskID+"/cancel", creator, nil)
+		if status != http.StatusOK {
+			return fmt.Errorf("cancel during reference preparation: status=%d body=%s", status, body)
+		}
+		return nil
+	}
+	draft := h.buildTaskIntent(t, creator, session.ID, taskIntent{
+		MediaType: "image", Model: "doubao-seedream-5.0-pro", Mode: "reference-image",
+		Ratio: "1:1", Resolution: "2K", Quantity: 1, Prompt: "准备中取消",
+		References: []any{map[string]any{"material_id": materialID, "role": "reference"}},
+	})
+	status, body := h.submitTask(t, creator, "cancel-during-reference-preparation", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit cancellable task: status=%d body=%s", status, body)
+	}
+	view := h.awaitTaskTerminal(t, creator, decodeTaskView(t, body).Task.ID)
+	if view.Task.Status != "cancelled" {
+		t.Fatalf("pre-marker cancellation status = %s, want cancelled", view.Task.Status)
+	}
+	if got := h.kapon.generation.imageRequests(); got != 0 {
+		t.Fatalf("rejected submit marker still reached Kapon %d times", got)
 	}
 }
 

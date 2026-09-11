@@ -100,11 +100,12 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 // Reauthentication Proofs the high-risk connection commands require. Both
 // are deliberately narrow — Creation never touches credential verification.
 type Deps struct {
-	SessionAuthenticator     authz.SessionAuthenticator
-	ReauthVerifier           authz.ReauthProofVerifier
-	ObjectStorageVerifier    ObjectStorageVerifier
-	DirectUploadStoreFactory DirectUploadStoreFactory
-	Now                      func() time.Time
+	SessionAuthenticator      authz.SessionAuthenticator
+	ReauthVerifier            authz.ReauthProofVerifier
+	ObjectStorageVerifier     ObjectStorageVerifier
+	DirectUploadStoreFactory  DirectUploadStoreFactory
+	ReferenceTransportFactory ReferenceTransportFactory
+	Now                       func() time.Time
 }
 
 type ObjectStorageCandidate = domain.ObjectStorageCandidate
@@ -114,6 +115,11 @@ type ObjectStorageCredentials = domain.ObjectStorageCredentials
 type ObjectStorageProvider = domain.ObjectStorageProvider
 type DirectUploadBlobStore = domain.DirectUploadBlobStore
 type DirectUploadStoreFactory = domain.DirectUploadStoreFactory
+type ReferenceTransport = domain.ReferenceTransport
+type ReferenceTransportFactory = domain.ReferenceTransportFactory
+type ReferenceSource = domain.ReferenceSource
+type ProviderTransferObject = domain.ProviderTransferObject
+type UUID = domain.UUID
 type BlobInfo = domain.BlobInfo
 type PresignPutRequest = domain.PresignPutRequest
 type PresignedPut = domain.PresignedPut
@@ -128,11 +134,14 @@ const (
 )
 
 var (
-	FullBlobRange          = domain.FullBlobRange
-	ErrTooLarge            = domain.ErrTooLarge
-	ErrBlobConflict        = domain.ErrBlobConflict
-	ErrBlobNotFound        = domain.ErrBlobNotFound
-	ErrRangeNotSatisfiable = domain.ErrRangeNotSatisfiable
+	FullBlobRange                      = domain.FullBlobRange
+	ErrTooLarge                        = domain.ErrTooLarge
+	ErrBlobConflict                    = domain.ErrBlobConflict
+	ErrBlobNotFound                    = domain.ErrBlobNotFound
+	ErrRangeNotSatisfiable             = domain.ErrRangeNotSatisfiable
+	ErrObjectStorageUnavailable        = domain.ErrObjectStorageUnavailable
+	ErrReferenceSourceSizeMismatch     = domain.ErrReferenceSourceSizeMismatch
+	ErrReferenceSourceChecksumMismatch = domain.ErrReferenceSourceChecksumMismatch
 )
 
 func (f ObjectStorageVerifier) Verify(ctx context.Context, candidate domain.ObjectStorageCandidate) (domain.ObjectStorageLocation, error) {
@@ -188,11 +197,15 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	if directStoreFactory == nil {
 		directStoreFactory = domain.DirectUploadStoreFactory(storage.NewBlobStore)
 	}
+	referenceTransportFactory := deps.ReferenceTransportFactory
+	if referenceTransportFactory == nil {
+		referenceTransportFactory = domain.ReferenceTransportFactory(storage.NewReferenceTransport)
+	}
 	now := deps.Now
 	if now == nil {
 		now = time.Now
 	}
-	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, credentialVault, objectStorageVerifier, directStoreFactory, deps.ReauthVerifier)
+	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, credentialVault, objectStorageVerifier, directStoreFactory, referenceTransportFactory, deps.ReauthVerifier)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, uploadRepos, taskRepos, objectStorageService, media.Prober{}, tx, now)
 	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, objectStorageService, governanceRepos, manifestService, tx, hub)
@@ -202,7 +215,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	// credential source: the decrypted
 	// Provider Key exists only between its resolve and the adapter's
 	// Authorization header.
-	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL)
+	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL, objectStorageService)
 	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, objectStorageService, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
 	uploadCleanup := application.NewReferenceMaterialUploadCleanupWorker(uploadRepos, objectStorageService, tx, now)
 	return &Module{

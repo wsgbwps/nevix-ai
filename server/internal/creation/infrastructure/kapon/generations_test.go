@@ -31,7 +31,7 @@ func newGenerationsClient(t *testing.T, handler http.HandlerFunc) *GenerationsCl
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return NewGenerationsClient(server.URL)
+	return NewGenerationsClient(server.URL, nil)
 }
 
 // imageSizeCase is one accepted (model, ratio, resolution) combination.
@@ -67,7 +67,7 @@ func buildAcceptedCrossProduct() []imageSizeCase {
 func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 	for _, combo := range acceptedCrossProduct {
 		model, ratio, resolution := combo.model, combo.ratio, combo.resolution
-		req := domain.SubmitRequest{
+		req := domain.PreparedSubmitRequest{
 			Media:      domain.MediaImage,
 			Model:      model,
 			Ratio:      &ratio,
@@ -85,28 +85,28 @@ func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 	// The vendor doc's distinguishing examples stay pinned: one tier label,
 	// different pixels per model.
 	proRatio, proTier := "16:9", "2K"
-	proSize, err := imageSize(domain.SubmitRequest{Media: domain.MediaImage, Model: domain.ImageModelID, Ratio: &proRatio, Resolution: &proTier})
+	proSize, err := imageSize(domain.PreparedSubmitRequest{Media: domain.MediaImage, Model: domain.ImageModelID, Ratio: &proRatio, Resolution: &proTier})
 	if err != nil || proSize != "2816x1584" {
 		t.Fatalf("pro 16:9 2K = %q, %v; want 2816x1584", proSize, err)
 	}
 	nRatio, nTier := "16:9", "2K"
-	nSize, err := imageSize(domain.SubmitRequest{Media: domain.MediaImage, Model: domain.ImageModelBaseID, Ratio: &nRatio, Resolution: &nTier})
+	nSize, err := imageSize(domain.PreparedSubmitRequest{Media: domain.MediaImage, Model: domain.ImageModelBaseID, Ratio: &nRatio, Resolution: &nTier})
 	if err != nil || nSize != "2848x1600" {
 		t.Fatalf("n 16:9 2K = %q, %v; want 2848x1600", nSize, err)
 	}
 
 	// Unknown and missing combinations fail closed.
-	if _, err := imageSize(domain.SubmitRequest{Media: domain.MediaImage}); err == nil {
+	if _, err := imageSize(domain.PreparedSubmitRequest{Media: domain.MediaImage}); err == nil {
 		t.Fatal("missing ratio/resolution must fail closed")
 	}
 	ratio, resolution := "7:5", "2K"
-	if _, err := imageSize(domain.SubmitRequest{Model: domain.ImageModelID, Ratio: &ratio, Resolution: &resolution}); err == nil {
+	if _, err := imageSize(domain.PreparedSubmitRequest{Model: domain.ImageModelID, Ratio: &ratio, Resolution: &resolution}); err == nil {
 		t.Fatal("combination outside the accepted cross product must fail closed")
 	}
 	// A tier another model publishes still fails closed on a model whose own
 	// set lacks it.
 	foreignRatio, foreignTier := "1:1", "4K"
-	if _, err := imageSize(domain.SubmitRequest{Model: domain.ImageModelID, Ratio: &foreignRatio, Resolution: &foreignTier}); err == nil {
+	if _, err := imageSize(domain.PreparedSubmitRequest{Model: domain.ImageModelID, Ratio: &foreignRatio, Resolution: &foreignTier}); err == nil {
 		t.Fatal("4K on pro must fail closed: the tier belongs to n only")
 	}
 }
@@ -203,7 +203,7 @@ func TestImageSubmitWireContract(t *testing.T) {
 		auths = append(auths, auth)
 	})
 	ratio, resolution := "4:3", "2K"
-	outcome, err := client.Submit(context.Background(), "kapon-key-1", domain.SubmitRequest{
+	outcome, err := client.Submit(context.Background(), "kapon-key-1", domain.PreparedSubmitRequest{
 		Media:      domain.MediaImage,
 		Model:      "doubao-seedream-5.0-pro",
 		Prompt:     "商品主图",
@@ -211,8 +211,8 @@ func TestImageSubmitWireContract(t *testing.T) {
 		Ratio:      &ratio,
 		Resolution: &resolution,
 		References: []domain.GatewayReference{
-			{Data: "data:image/png;base64,AAA"},
-			{Data: "data:image/jpeg;base64,BBB"},
+			{URL: "https://objects.example/reference-0"},
+			{URL: "https://objects.example/reference-1"},
 		},
 	})
 	if err != nil {
@@ -252,7 +252,7 @@ func TestImageSubmitWireContract(t *testing.T) {
 		}
 		image, ok := body["image"].([]any)
 		if !ok || len(image) != 2 ||
-			image[0] != "data:image/png;base64,AAA" || image[1] != "data:image/jpeg;base64,BBB" {
+			image[0] != "https://objects.example/reference-0" || image[1] != "https://objects.example/reference-1" {
 			t.Fatalf("reference order must be preserved: %v", body["image"])
 		}
 	}
@@ -363,7 +363,7 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 		}, nil},
 	}
 	ratio, resolution := "1:1", "2K"
-	req := domain.SubmitRequest{Media: domain.MediaImage, Model: "doubao-seedream-5.0-pro", Ratio: &ratio, Resolution: &resolution}
+	req := domain.PreparedSubmitRequest{Media: domain.MediaImage, Model: "doubao-seedream-5.0-pro", Ratio: &ratio, Resolution: &resolution}
 	for _, testCase := range cases {
 		client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
 			if testCase.retryIn != nil {
@@ -394,13 +394,13 @@ func TestSuccessfulSubmitWithoutOutputIdentityKeepsDiagnostic(t *testing.T) {
 	ratio, resolution := "1:1", "1K"
 	tests := []struct {
 		name    string
-		request domain.SubmitRequest
+		request domain.PreparedSubmitRequest
 		code    string
 		assert  func(error) bool
 	}{
 		{
 			name: "image output URL missing",
-			request: domain.SubmitRequest{
+			request: domain.PreparedSubmitRequest{
 				Media: domain.MediaImage, Model: domain.ImageModelID,
 				Ratio: &ratio, Resolution: &resolution, Quantity: 1,
 			},
@@ -412,7 +412,7 @@ func TestSuccessfulSubmitWithoutOutputIdentityKeepsDiagnostic(t *testing.T) {
 		},
 		{
 			name: "video task ID missing",
-			request: domain.SubmitRequest{
+			request: domain.PreparedSubmitRequest{
 				Media: domain.MediaVideo, Model: domain.VideoModelID, Quantity: 1,
 			},
 			code:   "provider_job_id_missing",
@@ -440,17 +440,21 @@ func TestProviderDiagnosticsRedactCallSecrets(t *testing.T) {
 	const (
 		credential = "provider-secret-key-123"
 		prompt     = "sensitive product prompt"
-		reference  = "data:image/png;base64,SENSITIVE"
+		reference  = "https://objects.example/sensitive-reference?signature=SENSITIVE"
 	)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
 	client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error":{"code":"invalid_request_error","type":"invalid_request_error","message":"Bearer provider-secret-key-123 sensitive product prompt data:image/png;base64,SENSITIVE https://cdn.example/private","request_id":"provider-secret-key-123"}}`))
+		w.Write([]byte(`{"error":{"code":"invalid_request_error","type":"invalid_request_error","message":"Bearer provider-secret-key-123 sensitive product prompt https://objects.example/sensitive-reference?signature=SENSITIVE https://cdn.example/private","request_id":"provider-secret-key-123"}}`))
 	})
 	ratio, resolution := "1:1", "1K"
-	_, err := client.Submit(context.Background(), credential, domain.SubmitRequest{
+	_, err := client.Submit(context.Background(), credential, domain.PreparedSubmitRequest{
 		Media: domain.MediaImage, Model: domain.ImageModelID, Prompt: prompt,
 		Ratio: &ratio, Resolution: &resolution, Quantity: 1,
-		References: []domain.GatewayReference{{Data: reference}},
+		References: []domain.GatewayReference{{URL: reference}},
 	})
 	if err == nil {
 		t.Fatal("provider rejection expected")
@@ -460,7 +464,7 @@ func TestProviderDiagnosticsRedactCallSecrets(t *testing.T) {
 		diagnostic.ProviderType == nil || *diagnostic.ProviderType != "invalid_request_error" {
 		t.Fatalf("safe standard fields were lost: %+v", diagnostic)
 	}
-	serialized := fmt.Sprintf("%+v", diagnostic)
+	serialized := fmt.Sprintf("%v\n%+v\n%s", err, diagnostic, logs.String())
 	for _, forbidden := range []string{credential, prompt, reference, "https://cdn.example/private"} {
 		if strings.Contains(serialized, forbidden) {
 			t.Fatalf("provider diagnostic leaked %q: %+v", forbidden, diagnostic)
@@ -583,7 +587,7 @@ func TestPollPreservesTerminalDiagnostics(t *testing.T) {
 // may have executed.
 func TestImageSubmitFanOutFailureSemantics(t *testing.T) {
 	ratio, resolution := "1:1", "2K"
-	req := domain.SubmitRequest{
+	req := domain.PreparedSubmitRequest{
 		Media: domain.MediaImage, Model: domain.ImageModelID, Prompt: "p",
 		Quantity: 3, Ratio: &ratio, Resolution: &resolution,
 	}
@@ -655,7 +659,7 @@ func TestImageSubmitRejectionCarriesRedactedRequestShape(t *testing.T) {
 		w.Write([]byte(`{"error":{"code":"invalid_request_error","type":"invalid_request_error","message":"The request parameters or model capability are not supported."},"request_id":"replay-1"}`))
 	})
 	ratio, resolution := "9:16", "1K"
-	_, err := client.Submit(context.Background(), "k", domain.SubmitRequest{
+	_, err := client.Submit(context.Background(), "k", domain.PreparedSubmitRequest{
 		Media: domain.MediaImage, Model: domain.ImageModelID, Prompt: prompt,
 		Quantity: 2, Ratio: &ratio, Resolution: &resolution,
 	})

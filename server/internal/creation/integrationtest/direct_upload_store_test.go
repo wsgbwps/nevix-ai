@@ -23,24 +23,33 @@ type fakeUploadGrant struct {
 }
 
 type fakeDirectUploadStore struct {
-	mu                 sync.Mutex
-	provider           creation.ObjectStorageProvider
-	objects            map[string][]byte
-	info               map[string]creation.BlobInfo
-	grants             map[string]fakeUploadGrant
-	nextGrant          int64
-	server             *httptest.Server
-	headError          error
-	headStarted        chan struct{}
-	releaseHead        chan struct{}
-	openReadError      error
-	putStarted         chan struct{}
-	releasePut         chan struct{}
-	conflictAfterPut   bool
-	deleteFailures     int
-	deleteFailureKeys  map[string]struct{}
-	deleteBlockingKeys map[string]struct{}
-	deletedKeys        []string
+	mu                  sync.Mutex
+	provider            creation.ObjectStorageProvider
+	objects             map[string][]byte
+	generatedObjects    map[string]generatedObject
+	info                map[string]creation.BlobInfo
+	grants              map[string]fakeUploadGrant
+	nextGrant           int64
+	server              *httptest.Server
+	headError           error
+	headStarted         chan struct{}
+	releaseHead         chan struct{}
+	openReadError       error
+	openError           error
+	sequentialReadError error
+	putStarted          chan struct{}
+	releasePut          chan struct{}
+	conflictAfterPut    bool
+	deleteFailures      int
+	deleteFailureKeys   map[string]struct{}
+	deleteBlockingKeys  map[string]struct{}
+	deletedKeys         []string
+	maxGeneratedRead    int
+}
+
+type generatedObject struct {
+	size int64
+	fill byte
 }
 
 func newFakeDirectUploadStore(t *testing.T) *fakeDirectUploadStore {
@@ -48,6 +57,7 @@ func newFakeDirectUploadStore(t *testing.T) *fakeDirectUploadStore {
 	store := &fakeDirectUploadStore{
 		provider:           creation.ObjectStorageProviderOSS,
 		objects:            map[string][]byte{},
+		generatedObjects:   map[string]generatedObject{},
 		info:               map[string]creation.BlobInfo{},
 		grants:             map[string]fakeUploadGrant{},
 		deleteFailureKeys:  map[string]struct{}{},
@@ -56,6 +66,21 @@ func newFakeDirectUploadStore(t *testing.T) *fakeDirectUploadStore {
 	store.server = httptest.NewServer(http.HandlerFunc(store.serveUpload))
 	t.Cleanup(store.server.Close)
 	return store
+}
+
+func (s *fakeDirectUploadStore) replaceWithGeneratedObject(key string, size int64, fill byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.generatedObjects[key] = generatedObject{size: size, fill: fill}
+	info := s.info[key]
+	info.ByteSize = size
+	s.info[key] = info
+}
+
+func (s *fakeDirectUploadStore) largestGeneratedRead() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxGeneratedRead
 }
 
 func (s *fakeDirectUploadStore) setProvider(provider creation.ObjectStorageProvider) {
@@ -96,6 +121,18 @@ func (s *fakeDirectUploadStore) failNextHead(err error) {
 func (s *fakeDirectUploadStore) failNextProbeRead(err error) {
 	s.mu.Lock()
 	s.openReadError = err
+	s.mu.Unlock()
+}
+
+func (s *fakeDirectUploadStore) failNextReferenceOpen(err error) {
+	s.mu.Lock()
+	s.openError = err
+	s.mu.Unlock()
+}
+
+func (s *fakeDirectUploadStore) failNextReferenceRead(err error) {
+	s.mu.Lock()
+	s.sequentialReadError = err
 	s.mu.Unlock()
 }
 
@@ -255,11 +292,41 @@ func (s *fakeDirectUploadStore) Open(ctx context.Context, key string, rng creati
 		return nil, 0, err
 	}
 	s.mu.Lock()
+	if s.openError != nil {
+		err := s.openError
+		s.openError = nil
+		s.mu.Unlock()
+		return nil, 0, err
+	}
 	body, ok := s.objects[key]
+	generated, generatedOK := s.generatedObjects[key]
 	copyOfBody := append([]byte(nil), body...)
 	readError := s.openReadError
 	s.openReadError = nil
+	sequentialReadError := s.sequentialReadError
+	s.sequentialReadError = nil
 	s.mu.Unlock()
+	if generatedOK {
+		start := rng.Offset
+		stop := generated.size
+		if rng.Length >= 0 && start+rng.Length < stop {
+			stop = start + rng.Length
+		}
+		if start < 0 || start > generated.size || stop < start {
+			return nil, 0, creation.ErrRangeNotSatisfiable
+		}
+		return &generatedReadSeekCloser{
+			size: stop - start,
+			fill: generated.fill,
+			observe: func(size int) {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				if size > s.maxGeneratedRead {
+					s.maxGeneratedRead = size
+				}
+			},
+		}, generated.size, nil
+	}
 	if !ok {
 		return nil, 0, creation.ErrBlobNotFound
 	}
@@ -272,6 +339,9 @@ func (s *fakeDirectUploadStore) Open(ctx context.Context, key string, rng creati
 		return nil, 0, creation.ErrRangeNotSatisfiable
 	}
 	reader := bytes.NewReader(copyOfBody[start:stop])
+	if sequentialReadError != nil {
+		return &readSeekFailure{reader: reader, err: sequentialReadError}, int64(len(copyOfBody)), nil
+	}
 	if readError != nil {
 		return &failReadAfterSeek{reader: reader, err: readError}, int64(len(copyOfBody)), nil
 	}
@@ -300,10 +370,54 @@ func (s *fakeDirectUploadStore) Delete(ctx context.Context, key string) error {
 		return ctx.Err()
 	}
 	delete(s.objects, key)
+	delete(s.generatedObjects, key)
 	delete(s.info, key)
 	s.mu.Unlock()
 	return nil
 }
+
+type generatedReadSeekCloser struct {
+	size     int64
+	position int64
+	fill     byte
+	observe  func(int)
+}
+
+func (r *generatedReadSeekCloser) Read(buffer []byte) (int, error) {
+	if r.position >= r.size {
+		return 0, io.EOF
+	}
+	remaining := r.size - r.position
+	if int64(len(buffer)) > remaining {
+		buffer = buffer[:remaining]
+	}
+	for index := range buffer {
+		buffer[index] = r.fill
+	}
+	r.position += int64(len(buffer))
+	r.observe(len(buffer))
+	return len(buffer), nil
+}
+
+func (r *generatedReadSeekCloser) Seek(offset int64, whence int) (int64, error) {
+	next := offset
+	switch whence {
+	case io.SeekCurrent:
+		next = r.position + offset
+	case io.SeekEnd:
+		next = r.size + offset
+	case io.SeekStart:
+	default:
+		return 0, errors.New("invalid seek origin")
+	}
+	if next < 0 {
+		return 0, errors.New("negative seek position")
+	}
+	r.position = next
+	return next, nil
+}
+
+func (*generatedReadSeekCloser) Close() error { return nil }
 
 func (s *fakeDirectUploadStore) PresignPut(ctx context.Context, request creation.PresignPutRequest) (creation.PresignedPut, error) {
 	if err := ctx.Err(); err != nil {
@@ -336,6 +450,29 @@ func (s *fakeDirectUploadStore) PresignPut(ctx context.Context, request creation
 type readSeekNopCloser struct{ *bytes.Reader }
 
 func (readSeekNopCloser) Close() error { return nil }
+
+type readSeekFailure struct {
+	reader *bytes.Reader
+	err    error
+	read   bool
+}
+
+func (r *readSeekFailure) Read(p []byte) (int, error) {
+	if r.read {
+		return 0, r.err
+	}
+	r.read = true
+	if len(p) > 8 {
+		p = p[:8]
+	}
+	return r.reader.Read(p)
+}
+
+func (r *readSeekFailure) Seek(offset int64, whence int) (int64, error) {
+	return r.reader.Seek(offset, whence)
+}
+
+func (*readSeekFailure) Close() error { return nil }
 
 type failReadAfterSeek struct {
 	reader *bytes.Reader

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"strconv"
 	"sync"
@@ -23,14 +24,15 @@ const (
 )
 
 type ObjectStorageConnectionService struct {
-	connections  domain.ObjectStorageConnectionRepository
-	providers    domain.ProviderConnectionRepository
-	runner       domain.WriteRunner
-	vault        domain.ObjectStorageCredentialVault
-	verifier     domain.ObjectStorageVerifier
-	storeFactory domain.DirectUploadStoreFactory
-	proofs       authz.ReauthProofVerifier
-	activationMu sync.Mutex
+	connections      domain.ObjectStorageConnectionRepository
+	providers        domain.ProviderConnectionRepository
+	runner           domain.WriteRunner
+	vault            domain.ObjectStorageCredentialVault
+	verifier         domain.ObjectStorageVerifier
+	storeFactory     domain.DirectUploadStoreFactory
+	referenceFactory domain.ReferenceTransportFactory
+	proofs           authz.ReauthProofVerifier
+	activationMu     sync.Mutex
 }
 
 func NewObjectStorageConnectionService(
@@ -40,11 +42,12 @@ func NewObjectStorageConnectionService(
 	vault domain.ObjectStorageCredentialVault,
 	verifier domain.ObjectStorageVerifier,
 	storeFactory domain.DirectUploadStoreFactory,
+	referenceFactory domain.ReferenceTransportFactory,
 	proofs authz.ReauthProofVerifier,
 ) *ObjectStorageConnectionService {
 	return &ObjectStorageConnectionService{
 		connections: connections, providers: providers, runner: runner,
-		vault: vault, verifier: verifier, storeFactory: storeFactory, proofs: proofs,
+		vault: vault, verifier: verifier, storeFactory: storeFactory, referenceFactory: referenceFactory, proofs: proofs,
 	}
 }
 
@@ -88,13 +91,8 @@ func (s *ObjectStorageConnectionService) ResolveStore(ctx context.Context) (doma
 	if s.storeFactory == nil {
 		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
 	}
-	connection, err := s.connections.GetActive(ctx)
-	if err != nil || connection.State != domain.ObjectStorageStateReady {
-		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
-	}
-	candidate, plaintext, err := s.storedCandidate(connection)
+	connection, candidate, plaintext, err := s.resolveStoredCandidate(ctx)
 	if err != nil {
-		_, _ = s.markCredentialUnavailable(ctx, connection)
 		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
 	}
 	defer wipe(plaintext)
@@ -105,6 +103,74 @@ func (s *ObjectStorageConnectionService) ResolveStore(ctx context.Context) (doma
 		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
 	}
 	return store, connection, nil
+}
+
+// ResolveReferenceTransport returns only the temporary transfer capability;
+// the Kapon adapter never receives the active connection, its credentials, or
+// a BlobStore.
+func (s *ObjectStorageConnectionService) ResolveReferenceTransport(ctx context.Context) (domain.ReferenceTransport, error) {
+	if s.referenceFactory == nil {
+		return nil, domain.ErrObjectStorageUnavailable
+	}
+	connection, candidate, plaintext, err := s.resolveStoredCandidate(ctx)
+	if err != nil {
+		return nil, domain.ErrObjectStorageUnavailable
+	}
+	defer wipe(plaintext)
+	transport, err := s.referenceFactory(connection.ObjectStorageLocation, candidate.Credentials)
+	candidate.Credentials.AccessKeyID = ""
+	candidate.Credentials.SecretAccessKey = ""
+	if err != nil {
+		return nil, domain.ErrObjectStorageUnavailable
+	}
+	return transport, nil
+}
+
+func (s *ObjectStorageConnectionService) resolveStoredCandidate(ctx context.Context) (domain.ObjectStorageConnection, domain.ObjectStorageCandidate, []byte, error) {
+	connection, err := s.connections.GetActive(ctx)
+	if err != nil || connection.State != domain.ObjectStorageStateReady {
+		return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, domain.ErrObjectStorageUnavailable
+	}
+	candidate, plaintext, err := s.storedCandidate(connection)
+	if err != nil {
+		_, _ = s.markCredentialUnavailable(ctx, connection)
+		return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, domain.ErrObjectStorageUnavailable
+	}
+	return connection, candidate, plaintext, nil
+}
+
+// ReferenceSource captures only immutable Reference Material facts. Each Open
+// resolves the current credential and returns a fresh sequential reader for
+// the same frozen object without exposing its key or the BlobStore to the
+// worker or Provider gateway.
+func (s *ObjectStorageConnectionService) ReferenceSource(material domain.ReferenceMaterial, role domain.DraftRole) (domain.ReferenceSource, error) {
+	if len(material.ChecksumSHA256) != 32 || material.BlobKey == "" || material.ByteSize <= 0 || !role.AcceptsKind(material.Kind) {
+		return domain.ReferenceSource{}, domain.ErrInvalidReferenceSource
+	}
+	var checksum [32]byte
+	copy(checksum[:], material.ChecksumSHA256)
+	return domain.ReferenceSource{
+		Role: role, Kind: material.Kind, MIMEType: material.MimeType,
+		ByteSize: material.ByteSize, SHA256Sum: checksum,
+		Open: func(ctx context.Context) (io.ReadCloser, error) {
+			store, _, err := s.ResolveStore(ctx)
+			if err != nil {
+				return nil, domain.ErrObjectStorageUnavailable
+			}
+			reader, size, err := store.Open(ctx, material.BlobKey, domain.FullBlobRange)
+			if err != nil {
+				if errors.Is(err, domain.ErrBlobNotFound) {
+					return nil, domain.ErrBlobNotFound
+				}
+				return nil, domain.ErrObjectStorageUnavailable
+			}
+			if size != material.ByteSize {
+				_ = reader.Close()
+				return nil, domain.ErrReferenceSourceSizeMismatch
+			}
+			return reader, nil
+		},
+	}, nil
 }
 
 func (s *ObjectStorageConnectionService) lockForUse(ctx context.Context, tx domain.TxExecutor, expected domain.ObjectStorageConnection) error {

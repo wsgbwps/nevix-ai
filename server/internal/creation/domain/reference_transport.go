@@ -33,3 +33,10 @@ type ReferenceTransport interface {
 	Prepare(ctx context.Context, providerJobID UUID, ordinal int, source ReferenceSource) (ProviderTransferObject, error)
 	Release(ctx context.Context, providerJobID UUID, ordinal int) error
 }
+
+// ReferenceTransportResolver opens the current connection's narrow transfer
+// adapter at preparation time. Provider gateways depend on this contract,
+// never on Object Storage credentials or BlobStore.
+type ReferenceTransportResolver interface {
+	ResolveReferenceTransport(context.Context) (ReferenceTransport, error)
+}

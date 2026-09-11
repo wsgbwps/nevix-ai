@@ -63,6 +63,10 @@ type ObjectStorageVerifier interface {
 // after the synchronous call returns.
 type DirectUploadStoreFactory func(ObjectStorageLocation, ObjectStorageCredentials) (DirectUploadBlobStore, error)
 
+// ReferenceTransportFactory constructs only the Provider Transfer Object
+// capability from one decrypted connection.
+type ReferenceTransportFactory func(ObjectStorageLocation, ObjectStorageCredentials) (ReferenceTransport, error)
+
 type ObjectStorageConnection struct {
 	ID UUID
 	ObjectStorageLocation

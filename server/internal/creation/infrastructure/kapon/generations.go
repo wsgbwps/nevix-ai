@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -32,8 +34,9 @@ import (
 // pinned by the fake-Kapon tests; the video slice (#161) refines the exact
 // vendor payload mapping during its real-invocation acceptance.
 type GenerationsClient struct {
-	baseURL string
-	http    *http.Client
+	baseURL    string
+	http       *http.Client
+	references domain.ReferenceTransportResolver
 	// imageSubmitTimeout bounds the synchronous image call; losing the
 	// response means the outcome is indistinguishable from unexecuted, so
 	// the kernel treats it as indeterminate.
@@ -47,7 +50,7 @@ type GenerationsClient struct {
 // manifest publishes as display sizes, so the wire value can never drift
 // from what the Workbench showed. A missing combination is an internal
 // contract violation, never a silent downgrade.
-func imageSize(req domain.SubmitRequest) (string, error) {
+func imageSize(req domain.PreparedSubmitRequest) (string, error) {
 	if req.Ratio == nil || req.Resolution == nil {
 		return "", &domain.ProviderRejectedError{Reason: domain.ReasonInternalError}
 	}
@@ -81,10 +84,11 @@ func imageWireModel(model string) string {
 }
 
 // NewGenerationsClient binds the generation adapter to the validated route.
-func NewGenerationsClient(baseURL string) *GenerationsClient {
+func NewGenerationsClient(baseURL string, references domain.ReferenceTransportResolver) *GenerationsClient {
 	return &GenerationsClient{
 		baseURL:            strings.TrimRight(baseURL, "/"),
 		http:               &http.Client{},
+		references:         references,
 		imageSubmitTimeout: 60 * time.Second,
 		pollTimeout:        15 * time.Second,
 		cancelTimeout:      15 * time.Second,
@@ -94,17 +98,68 @@ func NewGenerationsClient(baseURL string) *GenerationsClient {
 // compile-time proof the adapter satisfies the kernel's seam.
 var _ domain.ProviderGateway = (*GenerationsClient)(nil)
 
+// PrepareReferences streams ordered sources through the current Object
+// Storage connection and returns only the resulting HTTPS authorities.
+func (c *GenerationsClient) PrepareReferences(ctx context.Context, providerJobID domain.UUID, req domain.SubmitRequest) (domain.PreparedSubmitRequest, error) {
+	prepared := domain.PreparedSubmitRequest{
+		Media: req.Media, Model: req.Model, Mode: req.Mode, Prompt: req.Prompt,
+		Quantity: req.Quantity, Ratio: req.Ratio, Resolution: req.Resolution, DurationS: req.DurationS,
+		References: make([]domain.GatewayReference, 0, len(req.References)),
+	}
+	if c.references == nil {
+		if len(req.References) == 0 {
+			return prepared, nil
+		}
+		return domain.PreparedSubmitRequest{}, domain.ErrObjectStorageUnavailable
+	}
+	transport, err := c.references.ResolveReferenceTransport(ctx)
+	if err != nil {
+		return domain.PreparedSubmitRequest{}, err
+	}
+	if len(req.References) == 0 {
+		return prepared, nil
+	}
+	for ordinal, source := range req.References {
+		object, err := transport.Prepare(ctx, providerJobID, ordinal, source)
+		if err != nil {
+			return domain.PreparedSubmitRequest{}, err
+		}
+		if !isPublicHTTPSURL(object.URL) {
+			return domain.PreparedSubmitRequest{}, domain.ErrInvalidReferenceSource
+		}
+		prepared.References = append(prepared.References, domain.GatewayReference{
+			Role: source.Role, Kind: source.Kind, URL: object.URL,
+		})
+	}
+	return prepared, nil
+}
+
+func isPublicHTTPSURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsUnspecified() && !ip.IsMulticast()
+	}
+	return true
+}
+
 // Submit starts one external generation. Image media is synchronous (the
 // call returns outputs; a lost response is indeterminate); video media is
 // asynchronous (returns the external reference to poll).
-func (c *GenerationsClient) Submit(ctx context.Context, credential string, req domain.SubmitRequest) (domain.SubmitOutcome, error) {
+func (c *GenerationsClient) Submit(ctx context.Context, credential string, req domain.PreparedSubmitRequest) (domain.SubmitOutcome, error) {
 	if req.Media == domain.MediaImage {
 		return c.submitImage(ctx, credential, req)
 	}
 	return c.submitVideo(ctx, credential, req)
 }
 
-func (c *GenerationsClient) submitImage(ctx context.Context, credential string, req domain.SubmitRequest) (domain.SubmitOutcome, error) {
+func (c *GenerationsClient) submitImage(ctx context.Context, credential string, req domain.PreparedSubmitRequest) (domain.SubmitOutcome, error) {
 	size, err := imageSize(req)
 	if err != nil {
 		return domain.SubmitOutcome{}, err
@@ -125,7 +180,7 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 	if len(req.References) > 0 {
 		images := make([]string, 0, len(req.References))
 		for _, reference := range req.References {
-			images = append(images, reference.Data)
+			images = append(images, reference.URL)
 		}
 		body["image"] = images
 	}
@@ -193,7 +248,7 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 	return outcome, nil
 }
 
-func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, req domain.SubmitRequest) (domain.SubmitOutcome, error) {
+func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, req domain.PreparedSubmitRequest) (domain.SubmitOutcome, error) {
 	command := req.Prompt
 	if req.Resolution != nil {
 		command += " --resolution " + *req.Resolution
@@ -203,14 +258,15 @@ func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, 
 	}
 	content := []map[string]any{{"type": "text", "text": command}}
 	for _, reference := range req.References {
-		item := map[string]any{"type": "image_url", "image_url": map[string]string{"url": reference.Data}}
+		typeName := string(reference.Kind) + "_url"
+		item := map[string]any{"type": typeName, typeName: map[string]string{"url": reference.URL}}
 		switch reference.Role {
 		case domain.RoleFirstFrame:
 			item["role"] = "first_frame"
 		case domain.RoleLastFrame:
 			item["role"] = "last_frame"
 		default:
-			item["role"] = "reference"
+			item["role"] = "reference_" + string(reference.Kind)
 		}
 		content = append(content, item)
 	}

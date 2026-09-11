@@ -1,10 +1,12 @@
 package integrationtest
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Slice-10 image-formation scenarios (issue #160): the generation call
@@ -46,6 +48,9 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 	if call.n != 0 || call.images != 0 {
 		t.Fatalf("text-to-image must send no undocumented batch field and no references, got n=%d images=%d", call.n, call.images)
 	}
+	if prepared := h.referenceTransport.prepared(); len(prepared) != 0 {
+		t.Fatalf("text-to-image prepared %d Provider Transfer Objects", len(prepared))
+	}
 
 	// The provider receives the model-specific pixel size derived from the
 	// selected ratio and resolution tier.
@@ -60,6 +65,62 @@ func TestImageSubmitCarriesCredentialAndPinnedSize(t *testing.T) {
 	h.awaitTaskTerminal(t, token, decodeTaskView(t, body).Task.ID)
 	if call := h.kapon.generation.lastImageCall(); call.size != "1424x800" {
 		t.Fatalf("Seedream 5.0 Pro 16:9 1K requires size=1424x800, got %q", call.size)
+	}
+}
+
+func TestReferenceFreeTaskKeepsStorageReadinessGateWithoutTransferObject(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{})
+	token := h.loginToken(t, creator, harnessPassword)
+	draft := h.imageTaskIntent(t, token, "无参考素材仍需存储可用", 1)
+	status, body := h.submitTask(t, token, "reference-free-storage-gate", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit reference-free task: %d %s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE object_storage_connections
+		SET state = 'credential_unavailable'
+		WHERE terminated_at IS NULL
+	`); err != nil {
+		t.Fatalf("make Object Storage unavailable after admission: %v", err)
+	}
+
+	workerCtx, cancelWorker := context.WithCancel(context.Background())
+	defer cancelWorker()
+	workerDone := make(chan error, 1)
+	go func() { workerDone <- h.creation.RunWorkers(workerCtx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	held := false
+	for time.Now().Before(deadline) {
+		if got := countRows(t, h.ownerPool, `
+			SELECT count(*)
+			FROM creation_generation_tasks AS task
+			JOIN creation_provider_jobs AS job ON job.task_id = task.id
+			JOIN creation_generation_queue AS queue ON queue.task_id = task.id
+			WHERE task.id = $1::uuid AND task.status = 'queued'
+			  AND job.status = 'pending' AND job.submit_attempts = 0
+			  AND queue.run_after > now()
+		`, taskID); got == 1 {
+			held = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !held {
+		t.Fatal("reference-free task did not preserve its pre-submit storage hold")
+	}
+	if status, body := h.doRequest(t, http.MethodPost, "/creation/tasks/"+taskID+"/cancel", token, nil); status != http.StatusOK {
+		t.Fatalf("cancel held task: status=%d body=%s", status, body)
+	}
+	cancelWorker()
+	if err := <-workerDone; err != nil {
+		t.Fatalf("stop storage-gated worker: %v", err)
+	}
+	if got := h.kapon.generation.imageRequests(); got != 0 {
+		t.Fatalf("storage-gated reference-free task reached Kapon %d times", got)
+	}
+	if prepared := h.referenceTransport.prepared(); len(prepared) != 0 {
+		t.Fatalf("reference-free task prepared %d Provider Transfer Objects", len(prepared))
 	}
 }
 
