@@ -22,8 +22,12 @@ type referencePrepareCall struct {
 }
 
 type recordingReferenceTransport struct {
-	calls []referencePrepareCall
-	urls  []string
+	calls        []referencePrepareCall
+	releaseCalls []struct {
+		jobID   domain.UUID
+		ordinal int
+	}
+	urls []string
 }
 
 func (t *recordingReferenceTransport) Prepare(ctx context.Context, jobID domain.UUID, ordinal int, source domain.ReferenceSource) (domain.ProviderTransferObject, error) {
@@ -40,7 +44,13 @@ func (t *recordingReferenceTransport) Prepare(ctx context.Context, jobID domain.
 	return domain.ProviderTransferObject{URL: t.urls[ordinal]}, nil
 }
 
-func (*recordingReferenceTransport) Release(context.Context, domain.UUID, int) error { return nil }
+func (t *recordingReferenceTransport) Release(_ context.Context, jobID domain.UUID, ordinal int) error {
+	t.releaseCalls = append(t.releaseCalls, struct {
+		jobID   domain.UUID
+		ordinal int
+	}{jobID: jobID, ordinal: ordinal})
+	return nil
+}
 
 type staticReferenceTransportResolver struct{ transport domain.ReferenceTransport }
 
@@ -112,6 +122,21 @@ func TestPrepareReferencesPreservesFactsAndBuildsURLOnlyRequest(t *testing.T) {
 		prepared.References[1].Role != domain.RoleOmni || prepared.References[1].Kind != domain.KindVideo ||
 		prepared.References[1].URL != transport.urls[1] {
 		t.Fatalf("prepared request lost reference facts: %+v", prepared.References)
+	}
+}
+
+func TestReleaseReferenceDelegatesDeterministicIdentity(t *testing.T) {
+	transport := &recordingReferenceTransport{}
+	resolver := &recordingReferenceTransportResolver{transport: transport}
+	client := NewGenerationsClient("https://models.kapon.test", resolver)
+	jobID := domain.NewUUID()
+
+	if err := client.ReleaseReference(context.Background(), jobID, 3); err != nil {
+		t.Fatalf("release reference: %v", err)
+	}
+	if resolver.calls != 1 || len(transport.releaseCalls) != 1 ||
+		transport.releaseCalls[0].jobID != jobID || transport.releaseCalls[0].ordinal != 3 {
+		t.Fatalf("release lost deterministic identity: resolver=%d calls=%+v", resolver.calls, transport.releaseCalls)
 	}
 }
 

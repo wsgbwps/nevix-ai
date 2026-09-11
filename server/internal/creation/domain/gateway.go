@@ -209,6 +209,9 @@ type ProviderGateway interface {
 	// PrepareReferences streams every reference through the adapter-owned
 	// ReferenceTransport before any provider submit marker is persisted.
 	PrepareReferences(ctx context.Context, providerJobID UUID, req SubmitRequest) (PreparedSubmitRequest, error)
+	// ReleaseReference removes one deterministic Provider Transfer Object
+	// without exposing its key or prepared URL to the application.
+	ReleaseReference(ctx context.Context, providerJobID UUID, ordinal int) error
 	// Submit starts one external generation. A lost outcome returns
 	// ErrSubmitIndeterminate; classified errors otherwise.
 	Submit(ctx context.Context, credential string, req PreparedSubmitRequest) (SubmitOutcome, error)

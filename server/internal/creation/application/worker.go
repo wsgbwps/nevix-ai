@@ -67,7 +67,7 @@ func NewTaskWorker(
 		lease:      30 * time.Second,
 		pollEvery:  3 * time.Second,
 		idleEvery:  time.Second,
-		applier:    verdictApplier{tasks: tasks, connections: connections, assets: assets, notify: notify},
+		applier:    verdictApplier{tasks: tasks, connections: connections, assets: assets, notify: notify, gateway: gateway},
 	}
 }
 
@@ -237,6 +237,7 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	// call returns.
 	credential, err := w.credentials.ActiveCallCredential(ctx)
 	if err != nil {
+		releaseProviderTransfers(w.gateway, job.ID, job.Status, len(task.Spec.References))
 		return w.reschedule(ctx, queueID, time.Now().Add(5*time.Second), true)
 	}
 
@@ -250,8 +251,12 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 		attempts, marked = licensed, ok
 		return runErr
 	})
-	if err != nil || !marked {
+	if err != nil {
 		return err
+	}
+	if !marked {
+		releaseProviderTransfers(w.gateway, job.ID, domain.JobCancelled, len(task.Spec.References))
+		return nil
 	}
 	// The marker's durable count is the budget the transient verdict spends.
 	state.SubmitAttempts = attempts

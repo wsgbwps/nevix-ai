@@ -134,6 +134,19 @@ func (c *GenerationsClient) PrepareReferences(ctx context.Context, providerJobID
 	return prepared, nil
 }
 
+// ReleaseReference delegates exact-key deletion to the adapter-owned
+// ReferenceTransport; the application never sees the key or signed URL.
+func (c *GenerationsClient) ReleaseReference(ctx context.Context, providerJobID domain.UUID, ordinal int) error {
+	if c.references == nil {
+		return domain.ErrObjectStorageUnavailable
+	}
+	transport, err := c.references.ResolveReferenceTransport(ctx)
+	if err != nil {
+		return err
+	}
+	return transport.Release(ctx, providerJobID, ordinal)
+}
+
 func isPublicHTTPSURL(raw string) bool {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
