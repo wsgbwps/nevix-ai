@@ -205,6 +205,82 @@ func TestReferencePreparationRestartReusesJobAndObjectIdentityWithFreshURL(t *te
 	}
 }
 
+func TestSafeSubmitRetryAfterWorkerRestartRepreparesDeterministicReference(t *testing.T) {
+	transport := &fakeReferenceTransport{freshURLs: true}
+	h, _, creatorEmailAddress := readyTaskHarness(t, harnessOptions{referenceTransport: transport})
+	creator := h.loginToken(t, creatorEmailAddress, harnessPassword)
+	one := 1
+	h.kapon.generation.setImage(imageScript{
+		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE", retryAfterSeconds: &one,
+	})
+	taskID := h.submitReferencePreparationTask(t, creator, "safe-retry-restart", 1)
+
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- h.creation.RunWorkers(firstCtx) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if countRows(t, h.ownerPool, `
+			SELECT count(*) FROM creation_provider_jobs
+			WHERE task_id = $1::uuid AND submit_attempts = 1 AND last_outcome = 'transient_rejected'
+		`, taskID) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancelFirst()
+			t.Fatal("safe rejection was not persisted before worker restart")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancelFirst()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("stop first worker pass: %v", err)
+	}
+	firstAttempts := transport.attempts()
+	if len(firstAttempts) != 1 || transport.objectCount() != 1 || h.kapon.generation.imageRequests() != 1 {
+		t.Fatalf("first pass attempts/objects/provider = %+v/%d/%d", firstAttempts, transport.objectCount(), h.kapon.generation.imageRequests())
+	}
+
+	h.kapon.generation.setImage(imageScript{outputs: 1})
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE creation_generation_queue
+		SET run_after = now(), lease_owner = NULL, lease_until = NULL
+		WHERE task_id = $1::uuid
+	`, taskID); err != nil {
+		t.Fatalf("release safe-retry queue item: %v", err)
+	}
+	secondCtx, cancelSecond := context.WithCancel(context.Background())
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- h.creation.RunWorkers(secondCtx) }()
+	view := h.awaitTaskTerminal(t, creator, taskID)
+	cancelSecond()
+	if err := <-secondDone; err != nil {
+		t.Fatalf("stop second worker pass: %v", err)
+	}
+	if view.Task.Status != "succeeded" {
+		t.Fatalf("safe retry restart status = %s (%s)", view.Task.Status, slotVerdicts(view))
+	}
+	attempts := transport.attempts()
+	if len(attempts) != 2 || attempts[0].jobID != attempts[1].jobID || attempts[0].ordinal != 0 || attempts[1].ordinal != 0 {
+		t.Fatalf("safe retry restart changed preparation identity: %+v", attempts)
+	}
+	call := h.kapon.generation.lastImageCall()
+	wantURL := referenceURL(attempts[0].jobID, 0) + "&version=2"
+	if call == nil || len(call.imageURLs) != 1 || call.imageURLs[0] != wantURL {
+		t.Fatalf("safe retry restart Kapon URL = %+v, want fresh %q", call, wantURL)
+	}
+	var jobStatus string
+	var submitAttempts int
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		SELECT status, submit_attempts FROM creation_provider_jobs WHERE task_id = $1::uuid
+	`, taskID).Scan(&jobStatus, &submitAttempts); err != nil {
+		t.Fatalf("read safe-retry restarted job: %v", err)
+	}
+	if jobStatus != "completed" || submitAttempts != 2 || h.kapon.generation.imageRequests() != 2 || transport.objectCount() != 0 {
+		t.Fatalf("safe retry restart job/provider/object state = %s/%d/%d/%d", jobStatus, submitAttempts, h.kapon.generation.imageRequests(), transport.objectCount())
+	}
+}
+
 func TestCredentialFailureAfterPreparationCleansBeforeHoldAndCancel(t *testing.T) {
 	transport := &fakeReferenceTransport{}
 	h, _, creatorEmailAddress := readyTaskHarness(t, harnessOptions{referenceTransport: transport})

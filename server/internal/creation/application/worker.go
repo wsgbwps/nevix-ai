@@ -229,17 +229,6 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 	referenceCount := len(task.Spec.References)
 	prepared, cached := w.prepared[job.ID]
 	if !cached {
-		if job.SubmitAttempts > 0 {
-			diagnostic := domain.NewFailureDiagnostic(
-				domain.DiagnosticSourceStorage,
-				"prepared_submit_request_lost",
-				"The safe submit retry could not reuse its original prepared request",
-				nil, "", "",
-			)
-			return w.applyEvent(ctx, queueID, task.ID, state, domain.KernelEvent{
-				Kind: domain.EventSubmitRejected, Reason: failureReasonPtr(domain.ReasonInternalError), Diagnostic: diagnostic,
-			}, time.Time{})
-		}
 		request, err := w.buildSubmitRequest(ctx, task, media)
 		if err != nil {
 			return w.rejectReferencePreparation(ctx, queueID, task.ID, state, err)
@@ -279,8 +268,10 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 		return runErr
 	})
 	if err != nil {
-		delete(w.prepared, job.ID)
-		releaseProviderTransfers(w.gateway, job.ID, job.Status, referenceCount)
+		if job.SubmitAttempts == 0 || job.Outcome == nil || *job.Outcome != domain.JobOutcomeTransientRejected {
+			delete(w.prepared, job.ID)
+			releaseProviderTransfers(w.gateway, job.ID, job.Status, referenceCount)
+		}
 		return err
 	}
 	if !marked {
