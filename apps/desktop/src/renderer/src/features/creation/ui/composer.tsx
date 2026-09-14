@@ -411,7 +411,7 @@ export function CreationComposer({
         onOpenChange={(open) => {
           if (!open) setPreviewMaterialId(null)
         }}
-        loadPreviewBlob={composer.loadMaterialPreviewBlob}
+        loadPreviewSource={composer.loadMaterialPreviewSource}
       />
       <Dialog
         open={composer.pendingMaterialRemoval !== null}

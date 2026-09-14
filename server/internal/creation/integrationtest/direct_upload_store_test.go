@@ -462,6 +462,13 @@ func (s *fakeDirectUploadStore) PresignThumbnail(ctx context.Context, key string
 	return "https://thumb.example/" + key + "?" + process + "&sig=ephemeral", nil
 }
 
+func (s *fakeDirectUploadStore) PresignPreview(ctx context.Context, key string, kind creation.Kind, expiresIn time.Duration) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return "https://preview.example/" + key + "?kind=" + string(kind) + "&sig=ephemeral", nil
+}
+
 type readSeekFailure struct {
 	reader *bytes.Reader
 	err    error

@@ -400,6 +400,36 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/materials/{materialID}/preview-url:
+    get:
+      operationId: getReferenceMaterialPreviewUrl
+      summary: 签发参考素材预览的限时直连 GET
+      description: |-
+        经 Go 归属校验后，为任意 kind 的素材签发约 10 分钟、单一精确 key 的预签名 HTTPS
+        GET URL：image 经 provider 端缩小（宽 ≤2048、WebP），video/audio 为原始字节
+        （Range 不参与 GET 签名，seek 可用）；Renderer 直接放入 <img>/<video>/<audio> 加载。
+        URL 只读、不可列举、不暴露 AK/SK，签发时的归属校验是唯一授权点，TTL 过期即失效
+        （元素 error 后重新授权获取）。他人或不存在 id 一律 404（猜测无信息泄漏）；素材
+        本体的认证下载仍走 GET /creation/materials/{materialID}。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/materialID"
+      responses:
+        "200":
+          description: 一次有效的预览显示授权。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaterialPreviewUrl"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
   /creation/materials/{materialID}:
     get:
       operationId: downloadReferenceMaterial
@@ -2044,6 +2074,20 @@ components:
         url:
           type: string
           description: 短期预签名 HTTPS GET（含 provider 缩放参数）；不持久化、不进日志。
+        expires_at:
+          type: string
+          format: date-time
+          description: 授权失效时刻（RFC 3339 UTC）；过期后需重新获取。
+    MaterialPreviewUrl:
+      type: object
+      additionalProperties: false
+      required:
+        - url
+        - expires_at
+      properties:
+        url:
+          type: string
+          description: 短期预签名 HTTPS GET（image 含 provider 预览缩放参数，媒体为原始字节）；不持久化、不进日志。
         expires_at:
           type: string
           format: date-time

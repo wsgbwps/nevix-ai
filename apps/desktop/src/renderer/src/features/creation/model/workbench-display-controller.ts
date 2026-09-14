@@ -14,7 +14,7 @@
  */
 import type {
   CreationApiResult,
-  MaterialThumbnailUrlView,
+  MaterialUrlView,
   ReferenceMaterialView
 } from '../api/go-creation-http'
 import { loadImageDimensions } from '../lib/image-dimensions'
@@ -23,15 +23,14 @@ import { ResultBlobCache, type ResultBlobUrlLease } from '../lib/result-blob-cac
 
 export type MaterialThumbnailState = 'loading' | 'failed' | 'ready'
 
+/** What one material's full preview paints from: the staged local File (its
+ * object URL) or Go's short-lived presigned URL (ADR-0014). */
+export type MaterialPreviewSource = File | MaterialUrlView
+
 /** The read seam this module consumes; no business commands cross it. */
 export interface WorkbenchDisplayDeps {
-  readonly loadMaterialBlob: (
-    materialId: string,
-    signal?: AbortSignal
-  ) => Promise<CreationApiResult<Blob>>
-  readonly loadThumbnailUrl: (
-    materialId: string
-  ) => Promise<CreationApiResult<MaterialThumbnailUrlView>>
+  readonly loadPreviewUrl: (materialId: string) => Promise<CreationApiResult<MaterialUrlView>>
+  readonly loadThumbnailUrl: (materialId: string) => Promise<CreationApiResult<MaterialUrlView>>
   readonly loadResultBlob: (taskId: string, slotIndex: number) => Promise<CreationApiResult<Blob>>
   readonly urls?: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>
 }
@@ -303,7 +302,7 @@ export class WorkbenchDisplayController {
     const pendingFile = this.#pendingFiles.get(materialId)?.file
     // A pending file still paints from its local object URL; a stored
     // material paints from the short-lived presigned URL Go authorizes.
-    const resolution: Promise<File | MaterialThumbnailUrlView | null> =
+    const resolution: Promise<File | MaterialUrlView | null> =
       pendingFile !== undefined
         ? Promise.resolve(pendingFile)
         : this.#deps
@@ -388,12 +387,10 @@ export class WorkbenchDisplayController {
     return this.#ensureResultBlobCache().acquireObjectUrl(taskId, slotIndex)
   }
 
-  /** Reads one server-backed or pending local Reference Material for UI
-   * presentation. */
-  async loadMaterialPreviewBlob(materialId: string, signal?: AbortSignal): Promise<Blob | null> {
+  async loadMaterialPreviewSource(materialId: string): Promise<MaterialPreviewSource | null> {
     const pending = this.#pendingFiles.get(materialId)?.file
     if (pending !== undefined) return pending
-    const result = await this.#deps.loadMaterialBlob(materialId, signal)
+    const result = await this.#deps.loadPreviewUrl(materialId)
     return result.outcome === 'succeeded' ? result.value : null
   }
 

@@ -84,6 +84,18 @@ func (s *ossStore) PresignThumbnail(ctx context.Context, key string, expiresIn t
 	return s.presignGetProcess(ctx, key, oss.Ptr(ossThumbnailProcess), expiresIn)
 }
 
+// ossPreviewProcess is the image-processing chain signed into every preview
+// GET: proportional shrink to at most 2048px wide, never upscale, WebP
+// output.
+const ossPreviewProcess = "image/resize,m_lfit,w_2048/format,webp"
+
+func (s *ossStore) PresignPreview(ctx context.Context, key string, kind domain.Kind, expiresIn time.Duration) (string, error) {
+	if kind != domain.KindImage {
+		return s.presignGet(ctx, key, expiresIn)
+	}
+	return s.presignGetProcess(ctx, key, oss.Ptr(ossPreviewProcess), expiresIn)
+}
+
 func (s *ossStore) presignGetProcess(ctx context.Context, key string, process *string, expiresIn time.Duration) (string, error) {
 	result, err := s.client.Presign(ctx, &oss.GetObjectRequest{
 		Bucket:  oss.Ptr(s.location.Bucket),

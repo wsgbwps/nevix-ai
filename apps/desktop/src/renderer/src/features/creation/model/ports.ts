@@ -8,7 +8,7 @@ import {
   type CreationSessionView,
   type CreateMaterialFromResultInput,
   type MaterialPage,
-  type MaterialThumbnailUrlView,
+  type MaterialUrlView,
   type ReferenceMaterialView,
   type SessionDetailView,
   type SessionPage
@@ -109,15 +109,12 @@ export interface CreationWorkspacePorts {
     input: CreateMaterialFromResultInput
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
-  readonly loadMaterialBlob: (
-    materialId: string,
-    signal?: AbortSignal
-  ) => Promise<CreationApiResult<Blob>>
   /** Fetches one owned image material's short-lived presigned thumbnail URL
    * (ADR-0014 renderer display grant). */
-  readonly loadThumbnailUrl: (
-    materialId: string
-  ) => Promise<CreationApiResult<MaterialThumbnailUrlView>>
+  readonly loadThumbnailUrl: (materialId: string) => Promise<CreationApiResult<MaterialUrlView>>
+  /** Fetches one owned material's short-lived presigned preview URL
+   * (ADR-0014 renderer display grant). */
+  readonly loadPreviewUrl: (materialId: string) => Promise<CreationApiResult<MaterialUrlView>>
   readonly loadCapabilityManifest: () => Promise<CreationApiResult<CapabilityManifest>>
   /** Submits one idempotent generation task carrying the full local intent. */
   readonly submitTask: (
@@ -263,10 +260,10 @@ export function createCreationWorkspacePorts(
       withToken((client, token) => client.createMaterialFromResult(token, sessionId, input)),
     deleteMaterial: (materialId) =>
       withToken((client, token) => client.deleteMaterial(token, materialId)),
-    loadMaterialBlob: (materialId, signal) =>
-      withToken((client, token) => client.loadMaterialBlob(token, materialId, signal)),
     loadThumbnailUrl: (materialId) =>
       withToken((client, token) => client.loadMaterialThumbnailUrl(token, materialId)),
+    loadPreviewUrl: (materialId) =>
+      withToken((client, token) => client.loadMaterialPreviewUrl(token, materialId)),
     // The manifest client shares the request helper's failure mapping; only
     // the parser differs, so it rides the same per-call token acquisition.
     loadCapabilityManifest: () =>

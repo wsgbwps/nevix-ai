@@ -4,6 +4,7 @@ import type { ResultBlobUrlLease } from '../lib/result-blob-cache'
 import {
   emptyWorkbenchDisplaySnapshot,
   WorkbenchDisplayController,
+  type MaterialPreviewSource,
   type PendingMaterialFile,
   type WorkbenchDisplayDeps,
   type WorkbenchDisplaySnapshot
@@ -30,10 +31,7 @@ export interface WorkbenchDisplayBinding {
     taskId: string,
     slotIndex: number
   ) => Promise<ResultBlobUrlLease | null>
-  readonly loadMaterialPreviewBlob: (
-    materialId: string,
-    signal?: AbortSignal
-  ) => Promise<Blob | null>
+  readonly loadMaterialPreviewSource: (materialId: string) => Promise<MaterialPreviewSource | null>
   readonly pendingFiles: () => ReadonlyMap<string, PendingMaterialFile>
 }
 
@@ -53,7 +51,7 @@ const idleDisplayMethods = {
   requestThumbnail: (): void => undefined,
   retain: (): (() => void) => () => undefined,
   acquireResultBlobUrl: (): Promise<ResultBlobUrlLease | null> => Promise.resolve(null),
-  loadMaterialPreviewBlob: (): Promise<Blob | null> => Promise.resolve(null),
+  loadMaterialPreviewSource: (): Promise<MaterialPreviewSource | null> => Promise.resolve(null),
   pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => new Map()
 }
 
@@ -107,8 +105,8 @@ export function useWorkbenchDisplay(deps: WorkbenchDisplayDeps | null): Workbenc
         taskId: string,
         slotIndex: number
       ): Promise<ResultBlobUrlLease | null> => controller.acquireResultBlobUrl(taskId, slotIndex),
-      loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal): Promise<Blob | null> =>
-        controller.loadMaterialPreviewBlob(materialId, signal),
+      loadMaterialPreviewSource: (materialId: string): Promise<MaterialPreviewSource | null> =>
+        controller.loadMaterialPreviewSource(materialId),
       pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => controller.pendingFiles()
     }
   }, [controller])

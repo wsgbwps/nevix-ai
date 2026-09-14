@@ -388,11 +388,11 @@ test('a large task history mounts and loads media only around the visible window
   ).toBeLessThan(20)
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+      page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)
     )
     .toBeGreaterThan(0)
   const bottomThumbnailLoads = await page.evaluate(
-    () => window.__creationDeckTest?.materialBlobCalls().length ?? 0
+    () => window.__creationDeckTest?.materialUrlCalls().length ?? 0
   )
   expect(bottomThumbnailLoads).toBeLessThan(20)
 
@@ -409,21 +409,21 @@ test('a large task history mounts and loads media only around the visible window
   expect(await mountedCards.count()).toBeLessThan(20)
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+      page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)
     )
     .toBeGreaterThan(bottomThumbnailLoads)
   const afterTopThumbnailLoads = await page.evaluate(
-    () => window.__creationDeckTest?.materialBlobCalls().length ?? 0
+    () => window.__creationDeckTest?.materialUrlCalls().length ?? 0
   )
 
-  // Returning to the first window must reacquire its thumbnails: rows that
-  // retired at the top released their display URLs instead of accumulating.
+  // Returning to the first window stays instant: retired remote entries are
+  // one URL string kept until their signed TTL, so remounting rows do not
+  // re-authorize what the same context already displayed.
   await userScrollTo(scroller, 'bottom')
-  await expect
-    .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
-    )
-    .toBeGreaterThan(afterTopThumbnailLoads)
+  await page.waitForTimeout(300)
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)).toBe(
+    afterTopThumbnailLoads
+  )
 })
 
 test('a new task follows at the bottom but preserves an older reading position', async ({

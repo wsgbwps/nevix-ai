@@ -327,6 +327,56 @@ func TestThumbnailURLAuthorizesCreatorOnlyForImages(t *testing.T) {
 	}
 }
 
+func TestPreviewURLAuthorizesCreatorForEveryKind(t *testing.T) {
+	h := newHarness(t)
+	h.ensureAccounts(t)
+	token := h.loginToken(t, creatorEmail, harnessPassword)
+	otherToken := h.loginToken(t, otherCreatorEmail, harnessPassword)
+	session := h.createSession(t, token, sessionName("preview-url"))
+	status, body := h.doUpload(t, "POST", "/creation/sessions/"+session.ID+"/materials", token, "shot.png", pngBytes(t))
+	view := mustUpload(t, status, body)
+	videoStatus, videoBody := h.doUpload(t, "POST", "/creation/sessions/"+session.ID+"/materials", token, "clip.mp4", mp4Fixture())
+	video := mustUpload(t, videoStatus, videoBody)
+
+	authorize := func(t *testing.T, endpoint string) {
+		t.Helper()
+		unauthenticated, _ := h.doRequest(t, http.MethodGet, endpoint, "", nil)
+		if unauthenticated != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated preview-url = %d, want 401", unauthenticated)
+		}
+		code, payload := h.doRequest(t, http.MethodGet, endpoint, token, nil)
+		if code != http.StatusOK {
+			t.Fatalf("creator preview-url = %d, want 200", code)
+		}
+		var authorization struct {
+			URL       string `json:"url"`
+			ExpiresAt string `json:"expires_at"`
+		}
+		mustDecode(t, payload, &authorization)
+		if authorization.URL == "" || !strings.HasPrefix(authorization.URL, "https://") {
+			t.Fatalf("preview url must be a non-empty https URL: %s", payload)
+		}
+		expiresAt, err := time.Parse(time.RFC3339, authorization.ExpiresAt)
+		if err != nil || time.Until(expiresAt) <= 0 || time.Until(expiresAt) > 15*time.Minute {
+			t.Fatalf("preview expires_at = %q (%v), want a near-future TTL", authorization.ExpiresAt, err)
+		}
+		if code, _ := h.doRequest(t, http.MethodGet, endpoint, otherToken, nil); code != http.StatusNotFound {
+			t.Fatalf("foreign preview-url = %d, want 404", code)
+		}
+	}
+	t.Run("image", func(t *testing.T) {
+		authorize(t, "/creation/materials/"+view.ID+"/preview-url")
+	})
+	t.Run("video", func(t *testing.T) {
+		authorize(t, "/creation/materials/"+video.ID+"/preview-url")
+	})
+	t.Run("unknown", func(t *testing.T) {
+		if code, _ := h.doRequest(t, http.MethodGet, "/creation/materials/00000000-0000-0000-0000-000000000001/preview-url", token, nil); code != http.StatusNotFound {
+			t.Fatalf("unknown preview-url = %d, want 404", code)
+		}
+	})
+}
+
 func TestDeleteMaterialRemovesRowAndBlobCleanupSchedules(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)

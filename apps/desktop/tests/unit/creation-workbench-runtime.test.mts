@@ -1458,9 +1458,12 @@ test('a confirmed invalid session on any Creation read retires the pending actio
         laterReadCalls += 1
         return { outcome: 'network-failure' as const }
       },
-      loadMaterialBlob: async () => {
+      loadPreviewUrl: async () => {
         blobCalls += 1
-        return { outcome: 'succeeded' as const, value: new Blob() }
+        return {
+          outcome: 'succeeded' as const,
+          value: { url: 'https://bucket.example/m?sig=x', expiresAt: '2026-09-14T12:00:00Z' }
+        }
       },
       subscribeEvents: () => {
         subscriptionCalls += 1
@@ -1500,7 +1503,7 @@ test('a confirmed invalid session on any Creation read retires the pending actio
   assert.equal(unsubscribeCalls, 1)
 
   assert.equal((await runtime.listTasks(sessionA)).outcome, 'unauthorized')
-  assert.equal((await runtime.loadMaterialBlob(realMaterial)).outcome, 'unauthorized')
+  assert.equal((await runtime.loadPreviewUrl(realMaterial)).outcome, 'unauthorized')
   runtime.subscribeEvents({
     onInvalidation: () => undefined,
     onStateChange: () => undefined,
@@ -1516,7 +1519,7 @@ test('a confirmed invalid session from a blob read retires every later Creation 
   let unsubscribeCalls = 0
   const runtime = createCreationRuntime(
     {
-      loadMaterialBlob: async () => ({ outcome: 'unauthorized' as const }),
+      loadPreviewUrl: async () => ({ outcome: 'unauthorized' as const }),
       listTasks: async () => {
         laterReadCalls += 1
         return { outcome: 'network-failure' as const }
@@ -1533,7 +1536,7 @@ test('a confirmed invalid session from a blob read retires every later Creation 
     onUnauthorized: () => undefined
   })
 
-  assert.equal((await runtime.loadMaterialBlob(realMaterial)).outcome, 'unauthorized')
+  assert.equal((await runtime.loadPreviewUrl(realMaterial)).outcome, 'unauthorized')
 
   assert.deepEqual(runtime.actions.snapshot(sessionA), { status: 'retired' })
   assert.equal(unsubscribeCalls, 1)

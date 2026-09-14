@@ -362,7 +362,7 @@ test('removing a mentioned material confirms the count and cannot be undone in t
   await expect(page.getByRole('button', { name: 'Image 1' })).toHaveCount(0)
 })
 
-test('video mention hover stays metadata-only and full preview retries then reuses its URL', async ({
+test('video mention hover stays metadata-only and full preview retries and re-authorizes on reopen', async ({
   mount,
   page
 }) => {
@@ -372,7 +372,7 @@ test('video mention hover stays metadata-only and full preview retries then reus
     <CreationWorkbenchStory
       drafts={{ [scriptedSessionId]: videoMentionDraft(videoId) }}
       materials={{ [scriptedSessionId]: [video] }}
-      materialBlobFailures={1}
+      materialUrlFailures={1}
     />
   )
   await selectFirstSession(page)
@@ -383,9 +383,7 @@ test('video mention hover stays metadata-only and full preview retries then reus
 
   await chip.hover()
   await expect(page.getByTestId('reference-hover-preview')).toContainText('3s')
-  expect(await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])).toEqual(
-    []
-  )
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? [])).toEqual([])
 
   await chip.click()
   const preview = page.getByTestId('reference-full-preview')
@@ -393,17 +391,18 @@ test('video mention hover stays metadata-only and full preview retries then reus
   await preview.getByRole('button', { name: 'Retry' }).click()
   await expect(preview.locator('video')).toBeVisible()
   await expect
-    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? []))
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
     .toHaveLength(2)
 
+  // A remote preview is never cached across opens: each reopen re-authorizes,
+  // so the signed TTL resets instead of expiring under a long-lived dialog.
   await page.keyboard.press('Escape')
   await expect(chip).toBeFocused()
   await chip.click()
   await expect(preview.locator('video')).toBeVisible()
-  await page.waitForTimeout(50)
-  expect(
-    await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])
-  ).toHaveLength(2)
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
+    .toHaveLength(3)
 })
 
 test('the duration menu shows for a video draft while durations are published', async ({
@@ -476,9 +475,7 @@ test('selecting a session does not bulk-read thumbnails for unused materials', a
   await selectFirstSession(page)
   await page.waitForTimeout(100)
 
-  expect(await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])).toEqual(
-    []
-  )
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? [])).toEqual([])
 })
 
 test('a visible material thumbnail exposes loading, failure, and retry states', async ({
@@ -505,38 +502,41 @@ test('a visible material thumbnail exposes loading, failure, and retry states', 
       materials={{
         [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
       }}
-      materialBlobFailures={1}
-      materialBlobDeferred
+      materialUrlFailures={1}
+      materialUrlDeferred
     />
   )
   await selectFirstSession(page)
 
   const card = page.locator(`[data-material-id="${firstMaterialId}"]`)
   await expect(card).toHaveAttribute('data-thumbnail-state', 'loading')
-  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialBlobs())
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
   await expect(card).toHaveAttribute('data-thumbnail-state', 'failed')
   await expect(card.getByRole('alert')).toContainText('Load failed')
 
   await card.hover()
   await expect(card).toHaveAttribute('data-thumbnail-state', 'loading')
-  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialBlobs())
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
   await expect(card).toHaveAttribute('data-thumbnail-state', 'ready')
   await expect(card.locator('img')).toBeVisible()
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+      page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)
     )
     .toBe(2)
 })
 
-test('closing a loading full preview aborts the material request', async ({ mount, page }) => {
+test('a full-preview authorization landing after the dialog closes is discarded', async ({
+  mount,
+  page
+}) => {
   const videoId = '13131313-0000-4000-8000-000000000013'
   const video = scriptedMaterial(videoId, 'video', 'deferred.mp4')
   await mount(
     <CreationWorkbenchStory
       drafts={{ [scriptedSessionId]: videoMentionDraft(videoId) }}
       materials={{ [scriptedSessionId]: [video] }}
-      materialBlobDeferred
+      materialUrlDeferred
     />
   )
   await selectFirstSession(page)
@@ -545,16 +545,25 @@ test('closing a loading full preview aborts the material request', async ({ moun
   await chip.click()
   await expect(page.getByTestId('reference-full-preview')).toContainText('Loading material')
   await expect
-    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? []))
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
     .toHaveLength(1)
 
   await page.keyboard.press('Escape')
-  await expect
-    .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls()[0]?.aborted)
-    )
-    .toBe(true)
   await expect(chip).toBeFocused()
+  // The deferred authorization resolves only after the dialog closed; its
+  // result must not paint anywhere, and the next open fetches afresh.
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
+  await page.waitForTimeout(50)
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)).toBe(
+    1
+  )
+
+  await chip.click()
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
+  await expect(page.getByTestId('reference-full-preview').locator('video')).toBeVisible()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
+    .toHaveLength(2)
 })
 
 test('a pending image mention hover preserves the local file ratio', async ({ mount, page }) => {
@@ -1352,8 +1361,8 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
       materials={{
         [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
       }}
-      materialBlobFailures={1}
-      materialBlobDeferred
+      materialUrlFailures={1}
+      materialUrlDeferred
     />
   )
   await selectFirstSession(page)
@@ -1361,19 +1370,19 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
   const pile = page.getByTestId(`task-references-${withReference.id}`)
   const thumbnail = pile.locator(`[data-thumbnail-state]`)
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'loading')
-  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialBlobs())
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'failed')
 
   const retry = pile.getByRole('button', { name: 'Retry thumbnail for poster.png' })
   await retry.focus()
   await page.keyboard.press('Enter')
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'loading')
-  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialBlobs())
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'ready')
   await expect(thumbnail.locator('img')).toBeVisible()
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+      page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)
     )
     .toBe(2)
 
@@ -1388,9 +1397,9 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
   await expect(page.getByTestId(`task-${pushed.id}`)).toBeVisible()
   await expect(thumbnail.locator('img')).toBeVisible()
   await page.waitForTimeout(50)
-  expect(
-    await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
-  ).toBe(2)
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)).toBe(
+    2
+  )
 })
 
 test("a terminal card's slot shape never tracks the live draft ratio", async ({ mount, page }) => {

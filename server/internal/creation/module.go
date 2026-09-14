@@ -122,6 +122,7 @@ type ReferenceTransportFactory = domain.ReferenceTransportFactory
 type ReferenceSource = domain.ReferenceSource
 type ProviderTransferObject = domain.ProviderTransferObject
 type UUID = domain.UUID
+type Kind = domain.Kind
 type BlobInfo = domain.BlobInfo
 type PresignPutRequest = domain.PresignPutRequest
 type PresignedPut = domain.PresignedPut

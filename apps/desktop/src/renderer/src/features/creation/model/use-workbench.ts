@@ -53,7 +53,11 @@ import {
   type WorkbenchStatus
 } from './workbench-context-controller'
 import type { WorkbenchActionState } from './workbench-runtime'
-import type { MaterialThumbnailState, WorkbenchDisplayDeps } from './workbench-display-controller'
+import type {
+  MaterialPreviewSource,
+  MaterialThumbnailState,
+  WorkbenchDisplayDeps
+} from './workbench-display-controller'
 
 export type { ComposerDraft, WorkbenchStatus } from './workbench-context-controller'
 export { emptyComposerDraft } from './workbench-context-controller'
@@ -164,8 +168,8 @@ export interface WorkbenchComposerHandle {
   materialUploadFailed: boolean
   /** Last drop's admission summary; null while nothing was rejected. */
   materialDropRejection: { readonly added: number; readonly rejected: number } | null
-  /** Reads one server-backed or pending local Reference Material for UI presentation. */
-  loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal) => Promise<Blob | null>
+  /** Resolves one material's preview display source (see MaterialPreviewSource). */
+  loadMaterialPreviewSource: (materialId: string) => Promise<MaterialPreviewSource | null>
   /** The prompt editor's document identity: the user-scoped context key. */
   documentKey: string
 }
@@ -231,7 +235,7 @@ export function useCreationWorkbench(): {
   const displayDeps = useMemo<WorkbenchDisplayDeps | null>(() => {
     if (ports === null) return null
     return {
-      loadMaterialBlob: (materialId, signal) => ports.loadMaterialBlob(materialId, signal),
+      loadPreviewUrl: (materialId) => ports.loadPreviewUrl(materialId),
       loadThumbnailUrl: (materialId) => ports.loadThumbnailUrl(materialId),
       loadResultBlob: (taskId, slotIndex) => ports.loadResultBlob(taskId, slotIndex)
     }
@@ -1105,7 +1109,7 @@ export function useCreationWorkbench(): {
       dismissReferenceRecovery: () => contextController?.dismissReferenceRecovery(),
       materialUploadFailed: ctx.materialUploadFailed,
       materialDropRejection: ctx.materialDropRejection,
-      loadMaterialPreviewBlob: display.loadMaterialPreviewBlob,
+      loadMaterialPreviewSource: display.loadMaterialPreviewSource,
       documentKey: `${ports?.userId ?? ''}:${ctx.contextKey}`
     },
     gallery: {

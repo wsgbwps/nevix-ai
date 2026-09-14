@@ -162,7 +162,7 @@ type BlobStore interface {
 
 // DirectUploadBlobStore is the BlobStore capability bundle resolved from the
 // active Object Storage Connection: canary, Reference Material Upload
-// finalize, and creator thumbnail display authorization.
+// finalize, and creator display (thumbnail/preview) authorization.
 type DirectUploadBlobStore interface {
 	BlobStore
 	Head(ctx context.Context, key string) (BlobInfo, error)
@@ -171,6 +171,10 @@ type DirectUploadBlobStore interface {
 	// the provider resizes to the thumbnail variant at fetch time; the
 	// processing parameters are part of the signature.
 	PresignThumbnail(ctx context.Context, key string, expiresIn time.Duration) (string, error)
+	// PresignPreview issues the full-preview signed GET for one exact key:
+	// KindImage gets the provider's preview resize (part of the signature),
+	// other kinds stream raw bytes (Range never enters the signature).
+	PresignPreview(ctx context.Context, key string, kind Kind, expiresIn time.Duration) (string, error)
 }
 
 // MediaFacts are the authoritative observations one probe established for a

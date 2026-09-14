@@ -391,7 +391,7 @@ export function createCreationRuntime(
     getTask: guardResult(ports.getTask),
     cancelTask: guardResult(ports.cancelTask),
     retryTask: guardResult(ports.retryTask),
-    loadMaterialBlob: guardResult(ports.loadMaterialBlob),
+    loadPreviewUrl: guardResult(ports.loadPreviewUrl),
     loadResultBlob: guardResult(ports.loadResultBlob),
     subscribeEvents: (handlers) => {
       if (retired) return () => undefined

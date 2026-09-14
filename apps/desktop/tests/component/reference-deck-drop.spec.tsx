@@ -310,7 +310,7 @@ test('a single file dropped on one card replaces it in place', async ({ mount, p
   const samples = await srcSamples(page)
   expect(samples['swap.png']).toHaveLength(1)
   expect(samples['banner.png']).toHaveLength(1)
-  const blobCalls = await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])
+  const blobCalls = await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? [])
   expect(
     blobCalls.some((call) => call.materialId === 'ffffffff-0000-4000-8000-000000000006'),
     'the replacement preview must carry; a fetch here means a glyph phase'

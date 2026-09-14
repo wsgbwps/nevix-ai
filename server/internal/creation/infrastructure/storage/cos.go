@@ -100,6 +100,17 @@ func (s *cosStore) PresignThumbnail(ctx context.Context, key string, expiresIn t
 	return s.presignGetQuery(ctx, key, &url.Values{cosThumbnailProcess: {""}}, expiresIn)
 }
 
+// cosPreviewProcess is the CI basic-processing action signed into every
+// preview GET: shrink to at most 2048px wide, WebP output.
+const cosPreviewProcess = "imageMogr2/thumbnail/2048x/format/webp"
+
+func (s *cosStore) PresignPreview(ctx context.Context, key string, kind domain.Kind, expiresIn time.Duration) (string, error) {
+	if kind != domain.KindImage {
+		return s.presignGet(ctx, key, expiresIn)
+	}
+	return s.presignGetQuery(ctx, key, &url.Values{cosPreviewProcess: {""}}, expiresIn)
+}
+
 func (s *cosStore) presignGetQuery(ctx context.Context, key string, query *url.Values, expiresIn time.Duration) (string, error) {
 	// opt is interface{}: a typed-nil *PresignedURLOptions would not equal
 	// nil inside the SDK, so the no-query path passes a literal nil.

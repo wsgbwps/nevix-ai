@@ -7,6 +7,7 @@ import {
   DialogTitle
 } from '../../../components/ui/dialog'
 import type { ReferenceMaterialView } from '../api/go-creation-http'
+import type { MaterialPreviewSource } from '../model/workbench-display-controller'
 import type { PromptMentionCandidate } from '../model/prompt-document'
 import { ReferenceKindIcon } from './reference-kind-icon'
 import { hoverPreviewRect } from './reference-preview-geometry'
@@ -24,7 +25,7 @@ export function ReferenceMaterialPreview({
   openMaterialId,
   returnFocus,
   onOpenChange,
-  loadPreviewBlob
+  loadPreviewSource
 }: {
   readonly materials: readonly ReferenceMaterialView[]
   readonly candidates: readonly PromptMentionCandidate[]
@@ -33,7 +34,7 @@ export function ReferenceMaterialPreview({
   readonly openMaterialId: string | null
   readonly returnFocus: HTMLElement | null
   readonly onOpenChange: (open: boolean) => void
-  readonly loadPreviewBlob: (materialId: string, signal?: AbortSignal) => Promise<Blob | null>
+  readonly loadPreviewSource: (materialId: string) => Promise<MaterialPreviewSource | null>
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const [attempt, setAttempt] = useState(0)
@@ -43,6 +44,8 @@ export function ReferenceMaterialPreview({
     readonly status: 'failed' | 'ready'
     readonly url: string | null
   } | null>(null)
+  // Only staged local files need an object URL held open; a presigned URL is
+  // one string, so re-opening a stored material always re-authorizes fresh.
   const cachedUrl = useRef<{ readonly materialId: string; readonly url: string } | null>(null)
   const byId = useMemo(
     () => new Map(materials.map((material) => [material.id, material] as const)),
@@ -83,26 +86,52 @@ export function ReferenceMaterialPreview({
       URL.revokeObjectURL(cachedUrl.current.url)
       cachedUrl.current = null
     }
-    const controller = new AbortController()
-    void loadPreviewBlob(openMaterialId, controller.signal)
-      .then((blob) => {
-        if (controller.signal.aborted) return
-        const url = blob === null ? null : URL.createObjectURL(blob)
-        if (url !== null) cachedUrl.current = { materialId: openMaterialId, url }
-        setFull({
-          materialId: openMaterialId,
-          attempt,
-          status: url === null ? 'failed' : 'ready',
-          url
-        })
+    let done = false
+    void loadPreviewSource(openMaterialId)
+      .then((source) => {
+        if (done) return
+        if (source === null) {
+          setFull({ materialId: openMaterialId, attempt, status: 'failed', url: null })
+          return
+        }
+        if (source instanceof File) {
+          const url = URL.createObjectURL(source)
+          cachedUrl.current = { materialId: openMaterialId, url }
+          setFull({ materialId: openMaterialId, attempt, status: 'ready', url })
+          return
+        }
+        setFull({ materialId: openMaterialId, attempt, status: 'ready', url: source.url })
       })
       .catch(() => {
-        if (!controller.signal.aborted) {
+        if (!done) {
           setFull({ materialId: openMaterialId, attempt, status: 'failed', url: null })
         }
       })
-    return () => controller.abort()
-  }, [attempt, byId, loadPreviewBlob, openMaterialId])
+    return () => {
+      done = true
+    }
+  }, [attempt, byId, loadPreviewSource, openMaterialId])
+
+  // A media element erroring on an expired presigned URL gets one automatic
+  // re-authorization per material per open; a successful load or closing the
+  // dialog resets that budget, and persistent failures fall through to the
+  // manual retry state.
+  const autoRetryRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (openMaterialId === null) autoRetryRef.current = null
+  }, [openMaterialId])
+  const retrySource = (): void => {
+    if (openMaterialId === null) return
+    if (autoRetryRef.current === openMaterialId) {
+      setFull({ materialId: openMaterialId, attempt, status: 'failed', url: null })
+      return
+    }
+    autoRetryRef.current = openMaterialId
+    setAttempt((value) => value + 1)
+  }
+  const noteSourceLoaded = (): void => {
+    autoRetryRef.current = null
+  }
 
   const openMaterial = openMaterialId === null ? null : (byId.get(openMaterialId) ?? null)
   const openLabel = openMaterialId === null ? '' : (labelById.get(openMaterialId) ?? '')
@@ -150,7 +179,13 @@ export function ReferenceMaterialPreview({
             </div>
           )}
           {currentFull?.status === 'ready' && currentFull.url !== null && openMaterial !== null && (
-            <FullMedium material={openMaterial} label={openLabel} url={currentFull.url} />
+            <FullMedium
+              material={openMaterial}
+              label={openLabel}
+              url={currentFull.url}
+              onError={retrySource}
+              onLoaded={noteSourceLoaded}
+            />
           )}
         </DialogContent>
       </Dialog>
@@ -224,17 +259,47 @@ function HoverPreview({
 function FullMedium({
   material,
   label,
-  url
+  url,
+  onError,
+  onLoaded
 }: {
   readonly material: ReferenceMaterialView
   readonly label: string
   readonly url: string
+  readonly onError: () => void
+  readonly onLoaded: () => void
 }): React.JSX.Element {
   if (material.kind === 'image') {
-    return <img src={url} alt={label} className="max-h-[75vh] w-full object-contain" />
+    return (
+      <img
+        src={url}
+        alt={label}
+        onLoad={onLoaded}
+        onError={onError}
+        className="max-h-[75vh] w-full object-contain"
+      />
+    )
   }
   if (material.kind === 'video') {
-    return <video src={url} aria-label={label} className="max-h-[75vh] w-full" controls />
+    return (
+      <video
+        src={url}
+        aria-label={label}
+        onLoadedData={onLoaded}
+        onError={onError}
+        className="max-h-[75vh] w-full"
+        controls
+      />
+    )
   }
-  return <audio src={url} aria-label={label} className="w-full" controls />
+  return (
+    <audio
+      src={url}
+      aria-label={label}
+      onLoadedData={onLoaded}
+      onError={onError}
+      className="w-full"
+      controls
+    />
+  )
 }

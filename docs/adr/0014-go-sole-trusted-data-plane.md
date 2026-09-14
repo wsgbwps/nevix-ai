@@ -10,7 +10,7 @@
 
 2026-09-09 修订（[#218](https://github.com/wsgbwps/nevix-ai/issues/218)，后续实现归 [#220](https://github.com/wsgbwps/nevix-ai/issues/220)）：预签名 PUT 的字节传输由 Renderer `fetch` 改为 Electron Main 原生流式请求。Renderer 只选择文件并展示进度/结果，Preload 只把 `webUtils.getPathForFile(file)` 得到的路径经窄 IPC 交给 Main 且不回传 Renderer；Go 的签名、授权、finalize 与 HEAD/内容校验责任不变。
 
-2026-09-14 修订（方案见 `.scratch/thumbnail-presigned-get/plan.md`）：Reference Material 缩略图显示增加第三条 Go 授权窄例外——Creator 通过 owner 校验后获得约 10 分钟、单一精确 key、provider 端缩小到缩略图尺寸（宽 ≤320、WebP）的预签名 GET URL，直接进入 Renderer `<img>`；素材本体的认证下载仍经 Go 有界流式出口不变。
+2026-09-14 修订（方案见 `.scratch/thumbnail-presigned-get/plan.md` 与 `preview-plan.md`）：Reference Material 的显示类读取增加第三条 Go 授权窄例外——Creator 通过 owner 校验后获得约 10 分钟、单一精确 key 的预签名 GET URL，直接进入 Renderer 媒体元素：缩略图为 provider 端缩小（宽 ≤320、WebP）进 `<img>`，悬停/点开预览为图片缩小（宽 ≤2048、WebP）或视频/音频原始字节进 `<img>/<video>/<audio>`（Range 不参与 GET 签名，seek 可用；CSP 相应放行 `img-src https:` 并补 `media-src 'self' blob: https:`）；素材本体的认证下载仍经 Go 有界流式出口不变。
 
 ## 背景
 
@@ -31,8 +31,8 @@ ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supa
 - 永久 Reference Material 上传采用三步窄 seam：Creator 向 Go 申请 Reference Material Upload；Electron Main 只凭 60 分钟、随机精确 key、固定 PUT 方法、固定请求头且禁止覆盖的预签名 URL 从本地磁盘流式写入当前 bucket；Desktop 再向 Go finalize。Go 校验 authenticated Creator 与 Creation Session ownership，HEAD 后完整有界读取、媒体 probe、实际 kind 限额和 SHA-256 全部通过，才在 verified write transaction 中创建 immutable Reference Material。
 - Renderer 只向专用 Preload 桥传入用户选择的 `File` 并接收进度、取消结果与最终结果；Preload 使用 `webUtils.getPathForFile(file)` 取得磁盘路径，经窄类型 IPC 交给 Main，绝不把完整路径返回 Renderer，也不把完整文件转为 ArrayBuffer 经 IPC 传输。Main 必须验证可信顶层 Renderer、常规磁盘文件、HTTPS、Go 返回的精确 OSS/COS origin、PUT 方法和闭集签名请求头，拒绝重定向、任意路径、任意 URL、任意方法和额外请求头；V1 直接使用 Main，不增加 Utility Process、自定义 protocol、multipart 或断点续传。
 - signed PUT 不授予读、List、Delete、换 key 或第二个对象能力，Desktop 永远拿不到 Access Key/Secret。上传租约 creator-private、持久且单次 finalize；abort、过期或验证失败按精确 key 清理，Admin 无读取或完成他人上传的旁路。
-- Reference Material 下载仍经 Go 授权和有界流式出口。Provider Transfer Object 由 Go 从已授权素材派生并为外部 AI Provider 生成限时 HTTPS GET URL；该 URL 不构成 Desktop Storage 权限。2026-09-14 起，Reference Material 的缩略图显示走同级的第三条窄例外：Go 在 Creator 归属校验后签发约 10 分钟、单一精确 key、provider 端缩小（宽 ≤320、WebP）的预签名 GET URL，Renderer 直接放入 `<img src>` 加载；该 URL 只读、不可列举、不暴露 AK/SK，签发时的归属校验是唯一授权点，TTL 过期即失效。
-- signed URL 是短期敏感能力：只允许出现在当前授权调用方的内存和必要出站请求中（Electron Main 的授权 PUT、Go 到 Provider 的 Transfer GET、当前 Creator Renderer 的缩略图显示请求），不持久化，不进入普通日志、Audit Log、错误、剪贴板或遥测。具体状态机与凭据纪律见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
+- Reference Material 下载仍经 Go 授权和有界流式出口。Provider Transfer Object 由 Go 从已授权素材派生并为外部 AI Provider 生成限时 HTTPS GET URL；该 URL 不构成 Desktop Storage 权限。2026-09-14 起，Reference Material 的显示类读取走同级的第三条窄例外：Go 在 Creator 归属校验后签发约 10 分钟、单一精确 key 的预签名 GET URL——缩略图带 provider 端缩小（宽 ≤320、WebP），预览大图为图片缩小（宽 ≤2048、WebP）或视频/音频原始字节——Renderer 直接放入 `<img>/<video>/<audio>` 加载（元素 error 后重新授权）；该 URL 只读、不可列举、不暴露 AK/SK，签发时的归属校验是唯一授权点，TTL 过期即失效。
+- signed URL 是短期敏感能力：只允许出现在当前授权调用方的内存和必要出站请求中（Electron Main 的授权 PUT、Go 到 Provider 的 Transfer GET、当前 Creator Renderer 的缩略图/预览显示请求），不持久化，不进入普通日志、Audit Log、错误、剪贴板或遥测。具体状态机与凭据纪律见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
 
 ### 推送通道
 

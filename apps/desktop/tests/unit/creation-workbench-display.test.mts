@@ -18,7 +18,7 @@ const { WorkbenchDisplayController } =
 import type { WorkbenchDisplayDeps } from '../../src/renderer/src/features/creation/model/workbench-display-controller.ts'
 import type {
   CreationApiResult,
-  MaterialThumbnailUrlView,
+  MaterialUrlView,
   ReferenceMaterialView
 } from '../../src/renderer/src/features/creation/api/go-creation-http.ts'
 
@@ -68,12 +68,12 @@ function imageFile(name: string): File {
 }
 
 const networkFailure = (): CreationApiResult<Blob> => ({ outcome: 'network-failure' })
-const thumbnailUrlFailure = (): CreationApiResult<MaterialThumbnailUrlView> => ({
+const thumbnailUrlFailure = (): CreationApiResult<MaterialUrlView> => ({
   outcome: 'network-failure'
 })
 
 /** A grant far enough ahead to stay live for the test's lifetime. */
-const liveGrant = (url: string): MaterialThumbnailUrlView => ({
+const liveGrant = (url: string): MaterialUrlView => ({
   url,
   expiresAt: new Date(Date.now() + 30 * 60_000).toISOString()
 })
@@ -107,10 +107,11 @@ after(() => {
 function createController(
   urls: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>,
   loadThumbnailUrl: WorkbenchDisplayDeps['loadThumbnailUrl'] = async () => thumbnailUrlFailure(),
-  loadResultBlob: WorkbenchDisplayDeps['loadResultBlob'] = async () => networkFailure()
+  loadResultBlob: WorkbenchDisplayDeps['loadResultBlob'] = async () => networkFailure(),
+  loadPreviewUrl: WorkbenchDisplayDeps['loadPreviewUrl'] = async () => thumbnailUrlFailure()
 ): WorkbenchDisplayController {
   const controller = new WorkbenchDisplayController({
-    loadMaterialBlob: async () => networkFailure(),
+    loadPreviewUrl,
     loadThumbnailUrl,
     loadResultBlob,
     urls
@@ -165,7 +166,7 @@ test('dropping a pending upload clears progress in the same tick without a thumb
 
 test('an in-flight thumbnail load cannot land after reset()', async () => {
   const urls = fakeUrls()
-  const load = deferred<CreationApiResult<MaterialThumbnailUrlView>>()
+  const load = deferred<CreationApiResult<MaterialUrlView>>()
   const controller = createController(urls, () => load.promise)
   controller.replaceMaterials([materialView('m1')])
   const release = controller.retain('m1')
@@ -237,11 +238,11 @@ test('the last release still retires a local preview object URL', () => {
 
 test('an expired remote thumbnail re-authorizes on the next request', async () => {
   const urls = fakeUrls()
-  const stale: MaterialThumbnailUrlView = {
+  const stale: MaterialUrlView = {
     url: 'https://thumb.example/m1?sig=stale',
     expiresAt: new Date(Date.now() - 60_000).toISOString()
   }
-  const fresh = deferred<CreationApiResult<MaterialThumbnailUrlView>>()
+  const fresh = deferred<CreationApiResult<MaterialUrlView>>()
   const loads: string[] = []
   const controller = createController(urls, (materialId) => {
     loads.push(materialId)
@@ -430,4 +431,32 @@ test('transferPending stays same-tick fresh for a non-image pending', () => {
   assert.ok(notifications > before)
   assert.deepEqual(controller.getSnapshot().cardKeyAliases, { 'server-1': 'pending-1' })
   assert.equal(controller.pendingFiles().has('pending-1'), false)
+})
+
+test('a stored material previews from its presigned URL', async () => {
+  const grant = liveGrant('https://preview.example/m1')
+  const controller = createController(
+    fakeUrls(),
+    async () => thumbnailUrlFailure(),
+    async () => networkFailure(),
+    async () => ({ outcome: 'succeeded', value: grant })
+  )
+  controller.replaceMaterials([materialView('m1')])
+
+  assert.deepEqual(await controller.loadMaterialPreviewSource('m1'), grant)
+})
+
+test('a pending material previews from its local file', async () => {
+  const controller = createController(fakeUrls())
+  const file = imageFile('a.png')
+  controller.registerPending('pending-1', file)
+
+  assert.equal(await controller.loadMaterialPreviewSource('pending-1'), file)
+})
+
+test('a failed preview authorization yields null', async () => {
+  const controller = createController(fakeUrls())
+  controller.replaceMaterials([materialView('m1')])
+
+  assert.equal(await controller.loadMaterialPreviewSource('m1'), null)
 })

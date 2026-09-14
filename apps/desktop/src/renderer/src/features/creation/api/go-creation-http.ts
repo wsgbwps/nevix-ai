@@ -62,8 +62,8 @@ export interface CreateMaterialFromResultInput {
   readonly fileName: string
 }
 
-/** One creator's ephemeral thumbnail display grant (ADR-0014). */
-export interface MaterialThumbnailUrlView {
+/** One creator's ephemeral display grant (ADR-0014). */
+export interface MaterialUrlView {
   readonly url: string
   readonly expiresAt: string
 }
@@ -200,17 +200,16 @@ export function createCreationClient(serverUrl: string): {
     input: CreateMaterialFromResultInput
   ): Promise<CreationApiResult<ReferenceMaterialView>>
   deleteMaterial(token: string, materialId: string): Promise<CreationApiResult<void>>
-  /** Streams one owned material through Go; callers own any derived object URL. */
-  loadMaterialBlob(
-    token: string,
-    materialId: string,
-    signal?: AbortSignal
-  ): Promise<CreationApiResult<Blob>>
-  /** Fetches one owned image material's short-lived presigned display URL. */
+  /** Fetches one owned image material's short-lived presigned thumbnail URL. */
   loadMaterialThumbnailUrl(
     token: string,
     materialId: string
-  ): Promise<CreationApiResult<MaterialThumbnailUrlView>>
+  ): Promise<CreationApiResult<MaterialUrlView>>
+  /** Fetches one owned material's short-lived presigned preview URL. */
+  loadMaterialPreviewUrl(
+    token: string,
+    materialId: string
+  ): Promise<CreationApiResult<MaterialUrlView>>
 } {
   async function listPage<T>(
     parse: (payload: unknown) => T | null,
@@ -300,6 +299,35 @@ export function createCreationClient(serverUrl: string): {
       checksumSha256: checksum,
       claimsVersion: claimsVersionRaw,
       createdAt
+    }
+  }
+
+  async function fetchMaterialUrl(
+    token: string,
+    path: string
+  ): Promise<CreationApiResult<MaterialUrlView>> {
+    const url = new URL(path, serverUrl)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        redirect: 'error',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+    } catch {
+      return { outcome: 'network-failure' }
+    }
+    if (response.status === 401) return { outcome: 'unauthorized' }
+    if (response.status === 404) return { outcome: 'request-rejected', code: 'not_found' }
+    if (!response.ok) return { outcome: 'network-failure' }
+    try {
+      const payload: unknown = await response.json()
+      const signedUrl = readStringField(payload, 'url')
+      const expiresAt = readStringField(payload, 'expires_at')
+      return signedUrl && expiresAt
+        ? { outcome: 'succeeded', value: { url: signedUrl, expiresAt } }
+        : { outcome: 'network-failure' }
+    } catch {
+      return { outcome: 'network-failure' }
     }
   }
 
@@ -411,50 +439,9 @@ export function createCreationClient(serverUrl: string): {
       if (response.status === 404) return { outcome: 'request-rejected', code: 'not_found' }
       return { outcome: 'network-failure' }
     },
-    loadMaterialBlob: async (token, materialId, signal) => {
-      const url = new URL(`/creation/materials/${materialId}`, serverUrl)
-      let response: Response
-      try {
-        response = await fetch(url, {
-          redirect: 'error',
-          signal,
-          headers: { Authorization: `Bearer ${token}` }
-        })
-      } catch {
-        return { outcome: 'network-failure' }
-      }
-      if (response.status === 401) return { outcome: 'unauthorized' }
-      if (!response.ok) return { outcome: 'network-failure' }
-      try {
-        return { outcome: 'succeeded', value: await response.blob() }
-      } catch {
-        return { outcome: 'network-failure' }
-      }
-    },
-    loadMaterialThumbnailUrl: async (token, materialId) => {
-      const url = new URL(`/creation/materials/${materialId}/thumbnail-url`, serverUrl)
-      let response: Response
-      try {
-        response = await fetch(url, {
-          redirect: 'error',
-          headers: { Authorization: `Bearer ${token}` }
-        })
-      } catch {
-        return { outcome: 'network-failure' }
-      }
-      if (response.status === 401) return { outcome: 'unauthorized' }
-      if (response.status === 404) return { outcome: 'request-rejected', code: 'not_found' }
-      if (!response.ok) return { outcome: 'network-failure' }
-      try {
-        const payload: unknown = await response.json()
-        const signedUrl = readStringField(payload, 'url')
-        const expiresAt = readStringField(payload, 'expires_at')
-        return signedUrl && expiresAt
-          ? { outcome: 'succeeded', value: { url: signedUrl, expiresAt } }
-          : { outcome: 'network-failure' }
-      } catch {
-        return { outcome: 'network-failure' }
-      }
-    }
+    loadMaterialThumbnailUrl: (token, materialId) =>
+      fetchMaterialUrl(token, `/creation/materials/${materialId}/thumbnail-url`),
+    loadMaterialPreviewUrl: (token, materialId) =>
+      fetchMaterialUrl(token, `/creation/materials/${materialId}/preview-url`)
   }
 }
