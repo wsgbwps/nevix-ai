@@ -18,6 +18,7 @@ const { WorkbenchDisplayController } =
 import type { WorkbenchDisplayDeps } from '../../src/renderer/src/features/creation/model/workbench-display-controller.ts'
 import type {
   CreationApiResult,
+  MaterialThumbnailUrlView,
   ReferenceMaterialView
 } from '../../src/renderer/src/features/creation/api/go-creation-http.ts'
 
@@ -67,6 +68,15 @@ function imageFile(name: string): File {
 }
 
 const networkFailure = (): CreationApiResult<Blob> => ({ outcome: 'network-failure' })
+const thumbnailUrlFailure = (): CreationApiResult<MaterialThumbnailUrlView> => ({
+  outcome: 'network-failure'
+})
+
+/** A grant far enough ahead to stay live for the test's lifetime. */
+const liveGrant = (url: string): MaterialThumbnailUrlView => ({
+  url,
+  expiresAt: new Date(Date.now() + 30 * 60_000).toISOString()
+})
 
 // loadImageDimensions instantiates the DOM Image; pending image files
 // always probe dimensions, so every test runs against this deterministic
@@ -96,10 +106,15 @@ after(() => {
 
 function createController(
   urls: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>,
-  loadMaterialBlob: WorkbenchDisplayDeps['loadMaterialBlob'] = async () => networkFailure(),
+  loadThumbnailUrl: WorkbenchDisplayDeps['loadThumbnailUrl'] = async () => thumbnailUrlFailure(),
   loadResultBlob: WorkbenchDisplayDeps['loadResultBlob'] = async () => networkFailure()
 ): WorkbenchDisplayController {
-  const controller = new WorkbenchDisplayController({ loadMaterialBlob, loadResultBlob, urls })
+  const controller = new WorkbenchDisplayController({
+    loadMaterialBlob: async () => networkFailure(),
+    loadThumbnailUrl,
+    loadResultBlob,
+    urls
+  })
   controller.activate()
   return controller
 }
@@ -150,7 +165,7 @@ test('dropping a pending upload clears progress in the same tick without a thumb
 
 test('an in-flight thumbnail load cannot land after reset()', async () => {
   const urls = fakeUrls()
-  const load = deferred<CreationApiResult<Blob>>()
+  const load = deferred<CreationApiResult<MaterialThumbnailUrlView>>()
   const controller = createController(urls, () => load.promise)
   controller.replaceMaterials([materialView('m1')])
   const release = controller.retain('m1')
@@ -158,7 +173,7 @@ test('an in-flight thumbnail load cannot land after reset()', async () => {
 
   controller.reset()
   release()
-  load.resolve({ outcome: 'succeeded', value: new Blob(['bytes']) })
+  load.resolve({ outcome: 'succeeded', value: liveGrant('https://thumb.example/m1') })
   await flush()
   await flush()
 
@@ -181,10 +196,12 @@ test('a late release from a retired generation leaves the new one untouched', ()
   assert.equal(controller.getSnapshot().materials.length, 1)
 })
 
-test('thumbnail leases refcount: the last release retires the entry', async () => {
+test('thumbnail leases refcount: releases keep a remote URL entry painting', async () => {
   const urls = fakeUrls()
-  const blob = new Blob(['thumb'])
-  const controller = createController(urls, async () => ({ outcome: 'succeeded', value: blob }))
+  const controller = createController(urls, async () => ({
+    outcome: 'succeeded',
+    value: liveGrant('https://thumb.example/m1')
+  }))
   controller.replaceMaterials([materialView('m1')])
   const releaseFirst = controller.retain('m1')
   const releaseSecond = controller.retain('m1')
@@ -197,26 +214,111 @@ test('thumbnail leases refcount: the last release retires the entry', async () =
   releaseFirst()
   assert.ok(controller.getSnapshot().thumbnails.m1 !== undefined)
 
+  // A remote entry is one string until its TTL: dropping it at zero
+  // consumers would re-authorize on every scroll-through.
   releaseSecond()
-  assert.equal(controller.getSnapshot().thumbnails.m1, undefined)
-  assert.equal(controller.getSnapshot().thumbnailStates.m1, undefined)
+  assert.ok(controller.getSnapshot().thumbnails.m1 !== undefined)
+  assert.deepEqual(urls.revoked, [])
 })
 
-test('forget() releases a server-backed material thumbnail URL and tolerates the late release', async () => {
+test('the last release still retires a local preview object URL', () => {
   const urls = fakeUrls()
-  const blob = new Blob(['thumb'])
-  const controller = createController(urls, async () => ({ outcome: 'succeeded', value: blob }))
+  const controller = createController(urls)
+  controller.registerPending('pending-1', imageFile('a.png'))
+  const release = controller.retain('pending-1')
+  const preview = controller.getSnapshot().thumbnails['pending-1']
+  assert.ok(preview !== undefined)
+
+  release()
+
+  assert.equal(controller.getSnapshot().thumbnails['pending-1'], undefined)
+  assert.ok(urls.revoked.includes(preview))
+})
+
+test('an expired remote thumbnail re-authorizes on the next request', async () => {
+  const urls = fakeUrls()
+  const stale: MaterialThumbnailUrlView = {
+    url: 'https://thumb.example/m1?sig=stale',
+    expiresAt: new Date(Date.now() - 60_000).toISOString()
+  }
+  const fresh = deferred<CreationApiResult<MaterialThumbnailUrlView>>()
+  const loads: string[] = []
+  const controller = createController(urls, (materialId) => {
+    loads.push(materialId)
+    return loads.length === 1
+      ? Promise.resolve({ outcome: 'succeeded', value: stale })
+      : fresh.promise
+  })
+  controller.replaceMaterials([materialView('m1')])
+
+  const firstRelease = controller.retain('m1')
+  await flush()
+  await flush()
+  assert.equal(controller.getSnapshot().thumbnails.m1, 'https://thumb.example/m1?sig=stale')
+  firstRelease()
+
+  // The stale grant is past its TTL: a new consumer re-authorizes, and while
+  // that is in flight the stale URL stops painting instead of awaiting a
+  // bucket 403.
+  const secondRelease = controller.retain('m1')
+  await flush()
+  assert.equal(controller.getSnapshot().thumbnails.m1, undefined)
+  assert.equal(controller.getSnapshot().thumbnailStates.m1, 'loading')
+
+  fresh.resolve({ outcome: 'succeeded', value: liveGrant('https://thumb.example/m1?sig=fresh') })
+  await flush()
+  await flush()
+  assert.equal(controller.getSnapshot().thumbnails.m1, 'https://thumb.example/m1?sig=fresh')
+  assert.deepEqual(loads, ['m1', 'm1'])
+  secondRelease()
+})
+
+test('a failed thumbnail authorization paints the failed state and retries on a later retain', async () => {
+  const urls = fakeUrls()
+  let failures = 0
+  const controller = createController(urls, () => {
+    if (failures === 0) {
+      failures += 1
+      return Promise.resolve({ outcome: 'network-failure' })
+    }
+    return Promise.resolve({
+      outcome: 'succeeded',
+      value: liveGrant('https://thumb.example/m1')
+    })
+  })
+  controller.replaceMaterials([materialView('m1')])
+
+  const firstRelease = controller.retain('m1')
+  await flush()
+  await flush()
+  assert.equal(controller.getSnapshot().thumbnailStates.m1, 'failed')
+  assert.equal(controller.getSnapshot().thumbnails.m1, undefined)
+
+  firstRelease()
+  const secondRelease = controller.retain('m1')
+  await flush()
+  await flush()
+  assert.equal(controller.getSnapshot().thumbnailStates.m1, 'ready')
+  assert.equal(controller.getSnapshot().thumbnails.m1, 'https://thumb.example/m1')
+  secondRelease()
+})
+
+test('forget() drops a remote thumbnail entry and tolerates the late release', async () => {
+  const urls = fakeUrls()
+  const controller = createController(urls, async () => ({
+    outcome: 'succeeded',
+    value: liveGrant('https://thumb.example/m1')
+  }))
   controller.replaceMaterials([materialView('m1')])
   const release = controller.retain('m1')
   await flush()
   await flush()
-  const url = controller.getSnapshot().thumbnails.m1
-  assert.ok(url !== undefined)
+  assert.ok(controller.getSnapshot().thumbnails.m1 !== undefined)
 
   controller.forget('m1')
 
   assert.equal(controller.getSnapshot().materials.length, 0)
-  assert.ok(urls.revoked.includes(url))
+  assert.equal(controller.getSnapshot().thumbnails.m1, undefined)
   release()
   assert.equal(controller.getSnapshot().thumbnails.m1, undefined)
 })
@@ -249,10 +351,10 @@ test('acquireResultBlobUrl resolves null when the result read fails', async () =
 
 test('transferPending re-keys the painted preview onto the server identity without a refetch', async () => {
   const urls = fakeUrls()
-  const blobLoads: string[] = []
+  const urlLoads: string[] = []
   const controller = createController(urls, async (materialId) => {
-    blobLoads.push(materialId)
-    return { outcome: 'succeeded', value: new Blob(['thumb']) }
+    urlLoads.push(materialId)
+    return { outcome: 'succeeded', value: liveGrant(`https://thumb.example/${materialId}`) }
   })
   controller.registerPending('pending-1', imageFile('a.png'))
   const release = controller.retain('pending-1')
@@ -278,7 +380,7 @@ test('transferPending re-keys the painted preview onto the server identity witho
   await flush()
   await flush()
   assert.equal(controller.getSnapshot().thumbnails['server-1'], preview)
-  assert.deepEqual(blobLoads, [])
+  assert.deepEqual(urlLoads, [])
   assert.ok(!urls.revoked.includes(preview))
   releaseServer()
 })

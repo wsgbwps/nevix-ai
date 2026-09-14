@@ -23,6 +23,12 @@ export class MaterialUrlOwner {
     this.#thumbnails.set(toId, url)
   }
 
+  /** Whether replaceThumbnail currently owns an object URL for this id;
+   * remote presigned entries never count. */
+  owns(materialId: string): boolean {
+    return this.#thumbnails.has(materialId)
+  }
+
   releaseMaterial(materialId: string): void {
     const thumbnail = this.#thumbnails.get(materialId)
     if (thumbnail !== undefined) {

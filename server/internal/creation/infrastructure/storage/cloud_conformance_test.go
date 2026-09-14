@@ -151,6 +151,49 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 		}
 	})
 
+	t.Run("PresignedThumbnailSignsResizeIntoTheSignature", func(t *testing.T) {
+		backend := newFakeCloudTransport(provider)
+		store := newStore(t, backend)
+		ctx := context.Background()
+		if _, err := store.Put(ctx, "suite/thumb", strings.NewReader("image-bytes"), 1024); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		signedURL, err := store.PresignThumbnail(ctx, "suite/thumb", 10*time.Minute)
+		if err != nil {
+			t.Fatalf("PresignThumbnail: %v", err)
+		}
+		parsed, err := url.Parse(signedURL)
+		if err != nil {
+			t.Fatalf("parse signed URL: %v", err)
+		}
+		if got := parsed.Scheme + "://" + parsed.Host; got != backend.origin() {
+			t.Fatalf("signed origin = %q, want %q", got, backend.origin())
+		}
+		query := parsed.Query()
+		if provider == ProviderOSS {
+			if got := query.Get("x-oss-process"); got != "image/resize,m_lfit,w_320/format,webp" {
+				t.Fatalf("x-oss-process = %q, want the 320px WebP resize chain", got)
+			}
+		} else if _, ok := query["imageMogr2/thumbnail/320x/format/webp"]; !ok {
+			t.Fatalf("signed query lacks the CI process action: %s", parsed.RawQuery)
+		}
+		// The bare GET the URL authorizes (no Authorization header) must pass
+		// the provider-side signature check the fake enforces.
+		signedReq, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL, nil)
+		if err != nil {
+			t.Fatalf("build signed GET: %v", err)
+		}
+		resp, err := (&http.Client{Transport: backend}).Do(signedReq)
+		if err != nil {
+			t.Fatalf("signed thumbnail GET: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || string(body) != "image-bytes" {
+			t.Fatalf("signed thumbnail GET = %d %q, want the stored object", resp.StatusCode, body)
+		}
+	})
+
 	t.Run("MapsProviderErrorsWithoutLeakingResponses", func(t *testing.T) {
 		backend := newFakeCloudTransport(provider)
 		store := newStore(t, backend)

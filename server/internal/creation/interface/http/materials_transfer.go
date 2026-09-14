@@ -76,6 +76,29 @@ type referenceMaterialUploadStatusResponse struct {
 	Material *materialResource               `json:"material,omitempty"`
 }
 
+type materialThumbnailResponse struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// GetMaterialThumbnailURL authorizes one creator's thumbnail display and
+// answers the exact, expiring signed GET the renderer's <img> loads.
+func (h *MaterialHandler) GetMaterialThumbnailURL(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "materialID")
+	if !ok {
+		return
+	}
+	authorization, err := h.materials.AuthorizeThumbnail(r.Context(), creatorID(w, r), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, materialThumbnailResponse{
+		URL:       authorization.URL,
+		ExpiresAt: authorization.ExpiresAt.Format(timeRFC3339),
+	})
+}
+
 // CreateReferenceMaterialUpload persists one creator-private upload lease and
 // returns only its exact, expiring PUT request.
 func (h *MaterialHandler) CreateReferenceMaterialUpload(w http.ResponseWriter, r *http.Request) {

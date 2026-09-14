@@ -451,6 +451,17 @@ type readSeekNopCloser struct{ *bytes.Reader }
 
 func (readSeekNopCloser) Close() error { return nil }
 
+func (s *fakeDirectUploadStore) PresignThumbnail(ctx context.Context, key string, expiresIn time.Duration) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	process := "x-oss-process=image%2Fresize%2Cm_lfit%2Cw_320%2Fformat%2Cwebp"
+	if s.provider == creation.ObjectStorageProviderCOS {
+		process = "imageMogr2%2Fthumbnail%2F320x%2Fformat%2Fwebp"
+	}
+	return "https://thumb.example/" + key + "?" + process + "&sig=ephemeral", nil
+}
+
 type readSeekFailure struct {
 	reader *bytes.Reader
 	err    error

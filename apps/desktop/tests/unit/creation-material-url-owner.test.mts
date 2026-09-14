@@ -53,3 +53,16 @@ test('renameMaterial re-keys a URL onto its resolved identity without revoking i
   owner.releaseMaterial('server-1')
   assert.deepEqual(revoked, ['blob:preview'])
 })
+
+test('owns reports exactly the ids with a live object URL', () => {
+  const owner = new MaterialUrlOwner({
+    createObjectURL: () => 'blob:preview',
+    revokeObjectURL: () => undefined
+  })
+  assert.equal(owner.owns('pending-1'), false)
+  owner.replaceThumbnail('pending-1', new Blob())
+  assert.equal(owner.owns('pending-1'), true)
+  assert.equal(owner.owns('server-1'), false)
+  owner.releaseMaterial('pending-1')
+  assert.equal(owner.owns('pending-1'), false)
+})

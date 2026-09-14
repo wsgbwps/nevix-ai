@@ -34,6 +34,9 @@ type MaterialService struct {
 
 const referenceMaterialImmediateCleanupTimeout = 30 * time.Second
 
+// Expiry sends the renderer back to Go for a fresh thumbnail authorization.
+const thumbnailURLLifetime = 10 * time.Minute
+
 type uploadProbeReader struct {
 	domain.ReadSeekCloser
 	providerErr error
@@ -674,6 +677,35 @@ func normalizeMaterialFileName(raw string) (string, error) {
 		return "", domain.ErrReferenceMaterialUploadInvalid
 	}
 	return base, nil
+}
+
+// MaterialThumbnailAuthorization is one creator's ephemeral thumbnail display
+// grant.
+type MaterialThumbnailAuthorization struct {
+	URL       string
+	ExpiresAt time.Time
+}
+
+// AuthorizeThumbnail checks image-material ownership and issues the
+// short-lived signed GET the renderer paints thumbnails from; non-image ids
+// collapse into not_found so guessing learns nothing.
+func (s *MaterialService) AuthorizeThumbnail(ctx context.Context, owner, id domain.UUID) (MaterialThumbnailAuthorization, error) {
+	material, err := s.repos.GetForRead(ctx, owner, id)
+	if err != nil {
+		return MaterialThumbnailAuthorization{}, err
+	}
+	if material.Kind != domain.KindImage {
+		return MaterialThumbnailAuthorization{}, domain.ErrMaterialNotFound
+	}
+	store, _, err := s.storage.ResolveStore(ctx)
+	if err != nil {
+		return MaterialThumbnailAuthorization{}, err
+	}
+	signedURL, err := store.PresignThumbnail(ctx, material.BlobKey, thumbnailURLLifetime)
+	if err != nil {
+		return MaterialThumbnailAuthorization{}, domain.ErrObjectStorageUnavailable
+	}
+	return MaterialThumbnailAuthorization{URL: signedURL, ExpiresAt: s.now().UTC().Add(thumbnailURLLifetime)}, nil
 }
 
 // OpenForDownload authorizes one material for its creator and opens the

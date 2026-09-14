@@ -232,6 +232,7 @@ export function useCreationWorkbench(): {
     if (ports === null) return null
     return {
       loadMaterialBlob: (materialId, signal) => ports.loadMaterialBlob(materialId, signal),
+      loadThumbnailUrl: (materialId) => ports.loadThumbnailUrl(materialId),
       loadResultBlob: (taskId, slotIndex) => ports.loadResultBlob(taskId, slotIndex)
     }
   }, [ports])

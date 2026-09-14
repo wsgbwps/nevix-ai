@@ -8,6 +8,7 @@ import {
   type CreationSessionView,
   type CreateMaterialFromResultInput,
   type MaterialPage,
+  type MaterialThumbnailUrlView,
   type ReferenceMaterialView,
   type SessionDetailView,
   type SessionPage
@@ -112,6 +113,11 @@ export interface CreationWorkspacePorts {
     materialId: string,
     signal?: AbortSignal
   ) => Promise<CreationApiResult<Blob>>
+  /** Fetches one owned image material's short-lived presigned thumbnail URL
+   * (ADR-0014 renderer display grant). */
+  readonly loadThumbnailUrl: (
+    materialId: string
+  ) => Promise<CreationApiResult<MaterialThumbnailUrlView>>
   readonly loadCapabilityManifest: () => Promise<CreationApiResult<CapabilityManifest>>
   /** Submits one idempotent generation task carrying the full local intent. */
   readonly submitTask: (
@@ -259,6 +265,8 @@ export function createCreationWorkspacePorts(
       withToken((client, token) => client.deleteMaterial(token, materialId)),
     loadMaterialBlob: (materialId, signal) =>
       withToken((client, token) => client.loadMaterialBlob(token, materialId, signal)),
+    loadThumbnailUrl: (materialId) =>
+      withToken((client, token) => client.loadMaterialThumbnailUrl(token, materialId)),
     // The manifest client shares the request helper's failure mapping; only
     // the parser differs, so it rides the same per-call token acquisition.
     loadCapabilityManifest: () =>

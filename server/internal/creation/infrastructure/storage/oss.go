@@ -72,9 +72,23 @@ func (s *ossStore) put(ctx context.Context, key string, src io.Reader, maxBytes 
 }
 
 func (s *ossStore) presignGet(ctx context.Context, key string, expiresIn time.Duration) (string, error) {
+	return s.presignGetProcess(ctx, key, nil, expiresIn)
+}
+
+// ossThumbnailProcess is the image-processing chain signed into every
+// thumbnail GET: proportional shrink to at most 320px wide, never upscale,
+// WebP output.
+const ossThumbnailProcess = "image/resize,m_lfit,w_320/format,webp"
+
+func (s *ossStore) PresignThumbnail(ctx context.Context, key string, expiresIn time.Duration) (string, error) {
+	return s.presignGetProcess(ctx, key, oss.Ptr(ossThumbnailProcess), expiresIn)
+}
+
+func (s *ossStore) presignGetProcess(ctx context.Context, key string, process *string, expiresIn time.Duration) (string, error) {
 	result, err := s.client.Presign(ctx, &oss.GetObjectRequest{
-		Bucket: oss.Ptr(s.location.Bucket),
-		Key:    oss.Ptr(key),
+		Bucket:  oss.Ptr(s.location.Bucket),
+		Key:     oss.Ptr(key),
+		Process: process,
 	}, oss.PresignExpires(expiresIn))
 	if err != nil {
 		return "", safeOSSError("presign get", err)

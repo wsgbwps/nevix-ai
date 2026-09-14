@@ -1,7 +1,8 @@
 /**
  * The Workbench display-resource module: it owns the displayed context's
- * Reference Material views, their thumbnails and object URLs, the
- * device-local pending material files, and the verified result blob leases
+ * Reference Material views, their short-lived presigned thumbnail URLs (or,
+ * for staged files, local preview object URLs), the device-local pending
+ * material files, and the verified result blob leases
  * (ADR-0018). A single `reset()` retires one display generation — the one
  * context-switch ritual every surface change goes through, keeping the
  * `pending:<uuid>` / `new` / session ownership semantics of ADR-0017.
@@ -11,7 +12,11 @@
  * after reset, getSnapshot stays fresh within the same tick — are testable
  * against scripted deps.
  */
-import type { CreationApiResult, ReferenceMaterialView } from '../api/go-creation-http'
+import type {
+  CreationApiResult,
+  MaterialThumbnailUrlView,
+  ReferenceMaterialView
+} from '../api/go-creation-http'
 import { loadImageDimensions } from '../lib/image-dimensions'
 import { MaterialUrlOwner } from '../lib/material-url-owner'
 import { ResultBlobCache, type ResultBlobUrlLease } from '../lib/result-blob-cache'
@@ -24,6 +29,9 @@ export interface WorkbenchDisplayDeps {
     materialId: string,
     signal?: AbortSignal
   ) => Promise<CreationApiResult<Blob>>
+  readonly loadThumbnailUrl: (
+    materialId: string
+  ) => Promise<CreationApiResult<MaterialThumbnailUrlView>>
   readonly loadResultBlob: (taskId: string, slotIndex: number) => Promise<CreationApiResult<Blob>>
   readonly urls?: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>
 }
@@ -72,12 +80,19 @@ function pendingMaterialView(id: string, file: File): ReferenceMaterialView {
   }
 }
 
+/** Signed thumbnail URLs need to outlive their TTL by a moment: the <img>
+ * fetch must complete before the signature stops verifying. */
+const thumbnailUrlGuardMs = 60_000
+
 export class WorkbenchDisplayController {
   readonly #deps: WorkbenchDisplayDeps
   readonly #materialUrls: MaterialUrlOwner
   #materials: readonly ReferenceMaterialView[] = []
   #thumbnails: Readonly<Record<string, string>> = {}
   #thumbnailStates: Readonly<Record<string, MaterialThumbnailState>> = {}
+  /** Remote thumbnail URLs are usable until their signed TTL (epoch ms);
+   * local object-URL previews have no entry. */
+  #thumbnailExpiry: Readonly<Record<string, number>> = {}
   #materialIds: ReadonlySet<string> = new Set()
   #thumbnailIds: ReadonlySet<string> = new Set()
   #pendingFiles = new Map<string, PendingMaterialFile>()
@@ -142,6 +157,7 @@ export class WorkbenchDisplayController {
     this.#thumbnailIds = new Set()
     this.#thumbnails = {}
     this.#thumbnailStates = {}
+    this.#thumbnailExpiry = {}
     this.#cardKeyAliases = {}
     this.#uploadProgress = {}
     this.#changed()
@@ -269,12 +285,15 @@ export class WorkbenchDisplayController {
     if (
       material?.kind !== 'image' ||
       (this.#thumbnailConsumers.get(materialId) ?? 0) === 0 ||
-      this.#thumbnailIds.has(materialId) ||
+      this.#hasLiveThumbnail(materialId) ||
       this.#thumbnailRequests.get(materialId) === load
     ) {
       return
     }
     this.#thumbnailRequests.set(materialId, load)
+    // A stale expired entry must stop painting while it re-authorizes, or a
+    // failed refresh leaves the card on a URL the bucket will 403.
+    if (this.#thumbnailIds.has(materialId)) this.#deleteThumbnailEntry(materialId)
     this.#setThumbnailState(materialId, 'loading')
     const isCurrent = (): boolean =>
       this.#active &&
@@ -282,22 +301,34 @@ export class WorkbenchDisplayController {
       this.#materialIds.has(materialId) &&
       (this.#thumbnailConsumers.get(materialId) ?? 0) > 0
     const pendingFile = this.#pendingFiles.get(materialId)?.file
-    const blob: Promise<Blob | null> =
+    // A pending file still paints from its local object URL; a stored
+    // material paints from the short-lived presigned URL Go authorizes.
+    const resolution: Promise<File | MaterialThumbnailUrlView | null> =
       pendingFile !== undefined
         ? Promise.resolve(pendingFile)
         : this.#deps
-            .loadMaterialBlob(materialId)
+            .loadThumbnailUrl(materialId)
             .then((result) => (result.outcome === 'succeeded' ? result.value : null))
-    void blob
+    void resolution
       .then((value) => {
         if (!isCurrent()) return
         if (value === null) {
           this.#setThumbnailState(materialId, 'failed')
           return
         }
-        const url = this.#materialUrls.replaceThumbnail(materialId, value)
+        if (value instanceof File) {
+          this.#thumbnails = {
+            ...this.#thumbnails,
+            [materialId]: this.#materialUrls.replaceThumbnail(materialId, value)
+          }
+        } else {
+          this.#thumbnails = { ...this.#thumbnails, [materialId]: value.url }
+          this.#thumbnailExpiry = {
+            ...this.#thumbnailExpiry,
+            [materialId]: Date.parse(value.expiresAt) - thumbnailUrlGuardMs
+          }
+        }
         this.#thumbnailIds = new Set([...this.#thumbnailIds, materialId])
-        this.#thumbnails = { ...this.#thumbnails, [materialId]: url }
         this.#setThumbnailState(materialId, 'ready')
       })
       .catch(() => {
@@ -339,6 +370,9 @@ export class WorkbenchDisplayController {
         return
       }
       this.#thumbnailConsumers.delete(materialId)
+      // Local object-URL previews die with their last consumer; a remote URL
+      // entry is one string living to its TTL, so remounts stay instant.
+      if (!this.#materialUrls.owns(materialId)) return
       this.#materialUrls.releaseMaterial(materialId)
       this.#thumbnailIds = new Set(
         [...this.#thumbnailIds].filter((candidate) => candidate !== materialId)
@@ -381,17 +415,30 @@ export class WorkbenchDisplayController {
     this.#changed()
   }
 
+  #hasLiveThumbnail(materialId: string): boolean {
+    if (!this.#thumbnailIds.has(materialId)) return false
+    const expiresAt = this.#thumbnailExpiry[materialId]
+    return expiresAt === undefined || Date.now() < expiresAt
+  }
+
   #deleteThumbnailEntry(materialId: string): void {
-    if (!(materialId in this.#thumbnails) && !(materialId in this.#thumbnailStates)) return
+    if (
+      !(materialId in this.#thumbnails) &&
+      !(materialId in this.#thumbnailStates) &&
+      !(materialId in this.#thumbnailExpiry)
+    ) {
+      return
+    }
     const thumbnails = { ...this.#thumbnails }
     delete thumbnails[materialId]
     this.#thumbnails = thumbnails
     const states = { ...this.#thumbnailStates }
     delete states[materialId]
     this.#thumbnailStates = states
-    this.#thumbnailIds = new Set(
-      [...this.#thumbnailIds].filter((candidate) => candidate !== materialId)
-    )
+    const expiry = { ...this.#thumbnailExpiry }
+    delete expiry[materialId]
+    this.#thumbnailExpiry = expiry
+    this.#thumbnailIds = new Set([...this.#thumbnailIds].filter((id) => id !== materialId))
     this.#changed()
   }
 

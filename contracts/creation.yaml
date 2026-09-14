@@ -371,6 +371,35 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/materials/{materialID}/thumbnail-url:
+    get:
+      operationId: getReferenceMaterialThumbnailUrl
+      summary: 签发参考素材缩略图的限时直连 GET
+      description: |-
+        经 Go 归属校验后，为 image 素材签发约 10 分钟、单一精确 key、provider 端缩小
+        （宽 ≤320、WebP）的预签名 HTTPS GET URL；Renderer 直接放入 <img> 加载。URL 只读、
+        不可列举、不暴露 AK/SK，签发时的归属校验是唯一授权点，TTL 过期即失效并需重新
+        获取。非 image、他人或不存在 id 一律 404（猜测无信息泄漏）；素材本体的认证下载
+        仍走 GET /creation/materials/{materialID}。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/materialID"
+      responses:
+        "200":
+          description: 一次有效的缩略图显示授权。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaterialThumbnailUrl"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
   /creation/materials/{materialID}:
     get:
       operationId: downloadReferenceMaterial
@@ -2005,6 +2034,20 @@ components:
           minimum: 1
           maximum: 209715200
           description: 绑定租约并由 Head 复核；仍受 declared kind 的更窄限额约束。
+    MaterialThumbnailUrl:
+      type: object
+      additionalProperties: false
+      required:
+        - url
+        - expires_at
+      properties:
+        url:
+          type: string
+          description: 短期预签名 HTTPS GET（含 provider 缩放参数）；不持久化、不进日志。
+        expires_at:
+          type: string
+          format: date-time
+          description: 授权失效时刻（RFC 3339 UTC）；过期后需重新获取。
     ReferenceMaterialUpload:
       type: object
       additionalProperties: false

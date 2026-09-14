@@ -89,7 +89,25 @@ func (s *cosStore) put(ctx context.Context, key string, src io.Reader, maxBytes 
 }
 
 func (s *cosStore) presignGet(ctx context.Context, key string, expiresIn time.Duration) (string, error) {
-	signedURL, err := s.client.Object.GetPresignedURL2(ctx, http.MethodGet, key, expiresIn, nil)
+	return s.presignGetQuery(ctx, key, nil, expiresIn)
+}
+
+// cosThumbnailProcess is the CI basic-processing action signed into every
+// thumbnail GET: shrink to at most 320px wide, never upscale, WebP output.
+const cosThumbnailProcess = "imageMogr2/thumbnail/320x/format/webp"
+
+func (s *cosStore) PresignThumbnail(ctx context.Context, key string, expiresIn time.Duration) (string, error) {
+	return s.presignGetQuery(ctx, key, &url.Values{cosThumbnailProcess: {""}}, expiresIn)
+}
+
+func (s *cosStore) presignGetQuery(ctx context.Context, key string, query *url.Values, expiresIn time.Duration) (string, error) {
+	// opt is interface{}: a typed-nil *PresignedURLOptions would not equal
+	// nil inside the SDK, so the no-query path passes a literal nil.
+	var options any
+	if query != nil {
+		options = &cos.PresignedURLOptions{Query: query}
+	}
+	signedURL, err := s.client.Object.GetPresignedURL2(ctx, http.MethodGet, key, expiresIn, options)
 	if err != nil {
 		return "", safeCOSError("presign get", err)
 	}

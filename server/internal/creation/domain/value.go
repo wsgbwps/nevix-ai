@@ -160,12 +160,17 @@ type BlobStore interface {
 	Delete(ctx context.Context, key string) error
 }
 
-// DirectUploadBlobStore is the BlobStore capability required by Object
-// Storage Connection canary and Reference Material Upload finalize.
+// DirectUploadBlobStore is the BlobStore capability bundle resolved from the
+// active Object Storage Connection: canary, Reference Material Upload
+// finalize, and creator thumbnail display authorization.
 type DirectUploadBlobStore interface {
 	BlobStore
 	Head(ctx context.Context, key string) (BlobInfo, error)
 	PresignPut(ctx context.Context, request PresignPutRequest) (PresignedPut, error)
+	// PresignThumbnail issues a short-lived signed GET for one exact key that
+	// the provider resizes to the thumbnail variant at fetch time; the
+	// processing parameters are part of the signature.
+	PresignThumbnail(ctx context.Context, key string, expiresIn time.Duration) (string, error)
 }
 
 // MediaFacts are the authoritative observations one probe established for a

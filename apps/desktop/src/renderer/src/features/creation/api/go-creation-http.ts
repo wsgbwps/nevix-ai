@@ -62,6 +62,12 @@ export interface CreateMaterialFromResultInput {
   readonly fileName: string
 }
 
+/** One creator's ephemeral thumbnail display grant (ADR-0014). */
+export interface MaterialThumbnailUrlView {
+  readonly url: string
+  readonly expiresAt: string
+}
+
 const materialDeleteTimeoutMs = 30_000
 
 /**
@@ -200,6 +206,11 @@ export function createCreationClient(serverUrl: string): {
     materialId: string,
     signal?: AbortSignal
   ): Promise<CreationApiResult<Blob>>
+  /** Fetches one owned image material's short-lived presigned display URL. */
+  loadMaterialThumbnailUrl(
+    token: string,
+    materialId: string
+  ): Promise<CreationApiResult<MaterialThumbnailUrlView>>
 } {
   async function listPage<T>(
     parse: (payload: unknown) => T | null,
@@ -416,6 +427,31 @@ export function createCreationClient(serverUrl: string): {
       if (!response.ok) return { outcome: 'network-failure' }
       try {
         return { outcome: 'succeeded', value: await response.blob() }
+      } catch {
+        return { outcome: 'network-failure' }
+      }
+    },
+    loadMaterialThumbnailUrl: async (token, materialId) => {
+      const url = new URL(`/creation/materials/${materialId}/thumbnail-url`, serverUrl)
+      let response: Response
+      try {
+        response = await fetch(url, {
+          redirect: 'error',
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      } catch {
+        return { outcome: 'network-failure' }
+      }
+      if (response.status === 401) return { outcome: 'unauthorized' }
+      if (response.status === 404) return { outcome: 'request-rejected', code: 'not_found' }
+      if (!response.ok) return { outcome: 'network-failure' }
+      try {
+        const payload: unknown = await response.json()
+        const signedUrl = readStringField(payload, 'url')
+        const expiresAt = readStringField(payload, 'expires_at')
+        return signedUrl && expiresAt
+          ? { outcome: 'succeeded', value: { url: signedUrl, expiresAt } }
+          : { outcome: 'network-failure' }
       } catch {
         return { outcome: 'network-failure' }
       }
