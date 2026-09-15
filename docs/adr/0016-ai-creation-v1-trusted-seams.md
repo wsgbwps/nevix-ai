@@ -14,7 +14,7 @@
 
 2026-09-09 修订（[#218](https://github.com/wsgbwps/nevix-ai/issues/218)，后续实现归 [#220](https://github.com/wsgbwps/nevix-ai/issues/220)）：Reference Material 的单次预签名 PUT 改由 Electron Main 原生流式执行，删除生产 bucket CORS 与连接 canary OPTIONS 依赖。Go 的短期单对象签名、禁止覆盖和权威 finalize 不变；Renderer 不接触磁盘路径、文件字节或签名 URL。
 
-2026-09-14 修订（方案见 `.scratch/thumbnail-presigned-get/plan.md` 与 `preview-plan.md`）：Reference Material 的显示类读取改用 Go 授权的第三条窄例外——Creator 通过 owner 校验后获得约 10 分钟、单一精确 key 的预签名 GET URL：缩略图为 provider 端缩小（宽 ≤320、WebP）进 Renderer `<img>`，预览大图为图片缩小（宽 ≤2048、WebP）或视频/音频原始字节进 `<video>/<audio>`（CSP 相应放行 `img-src https:` 并补 `media-src`）；素材本体下载仍经 Go 授权出口，canary 与 finalize 责任不变。
+2026-09-14 修订：Reference Material 的显示类读取改用 Go 授权的第三条窄例外——Creator 通过 owner 校验后获得约 10 分钟、单一精确 key 的预签名 GET URL：缩略图为 provider 端缩小（宽 ≤320、WebP）进 Renderer `<img>`，预览大图为图片缩小（宽 ≤2048、WebP）或视频/音频原始字节进 `<video>/<audio>`（CSP 相应放行 `img-src https:` 并补 `media-src`）；素材本体下载仍经 Go 授权出口，canary 与 finalize 责任不变。
 
 ## 背景
 
@@ -28,7 +28,7 @@ AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 de
 
 - **Organization、Membership、Owner**：多组织概念已随单租户私有化移除（[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)）；发布词汇使用 Team Publication，角色只有 Admin/Member。
 - **Supabase（Auth/RLS/Data client/Storage Policy）、Supabase Broadcast**：Supabase 整体退场（[ADR-0013](0013-onprem-single-tenant-delivery.md)、[ADR-0014](0014-go-sole-trusted-data-plane.md)），授权在 Go 层，推送是 SSE。
-- **通用 Storage Grant / 无约束预签名直连**：仍然退场。2026-09-08 只增加两条由 Go 授权的窄能力：Desktop Creator 对一个随机 key 的限时 Reference Material PUT，以及外部 AI Provider 对一个 Provider Transfer Object 的限时 GET；二者都不暴露 AK/SK、List、任意 key 或跨对象能力（[ADR-0014](0014-go-sole-trusted-data-plane.md)）。
+- **通用 Storage Grant / 无约束预签名直连**：仍然退场。当前只保留三条由 Go 授权的窄能力：Desktop Creator 对一个随机 key 的限时 Reference Material PUT、外部 AI Provider 对一个 Provider Transfer Object 的限时 GET，以及当前 Creator Renderer 对一个 Reference Material 精确 key 的限时缩略图/预览 GET；三者都不暴露 AK/SK、List、任意 key 或跨对象能力（[ADR-0014](0014-go-sole-trusted-data-plane.md)）。
 - **独立 creation 数据库角色**：不存在按域拆分的第二执行角色；Creation 写事务直接以最小权限 `identity_app` LOGIN 角色运行（见下）。
 - **Deployment Administrator**：不存在产品内的部署管理员主体；部署侧责任（认领、证书、备份）由部署方经 Instance Claim 与交付资产承担，治理主体只有 Admin/Member。
 - **外部 Secret Store 前置要求**：Creation 外部连接凭据使用本地 AEAD（见下），不依赖 Vault 等外部服务。

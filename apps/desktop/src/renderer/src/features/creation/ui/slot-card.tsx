@@ -11,32 +11,17 @@ import {
   endResultDrag
 } from '../model/reference-drop'
 import { diagnosticSourceKey, reasonKey, statusKey } from '../i18n/gallery-keys'
-
-// Settled-shape cells come from the task's own frozen ratio only; the live
-// draft never leaks onto a card (video specs freeze no ratio, so those cells
-// fall back to square).
-function slotAspectRatio(slot: GenerationSlotView, fallbackRatio: string | null): number {
-  const { widthPx, heightPx } = slot.result ?? {}
-  if (
-    widthPx !== null &&
-    widthPx !== undefined &&
-    heightPx !== null &&
-    heightPx !== undefined &&
-    widthPx > 0 &&
-    heightPx > 0
-  ) {
-    return widthPx / heightPx
-  }
-  const [width, height] = (fallbackRatio ?? '').split(':').map(Number)
-  return width > 0 && height > 0 ? width / height : 1
-}
+import { Skeleton } from '../../../components/ui/skeleton'
+import { ImageWithSkeleton, VideoWithSkeleton } from './media-with-skeleton'
 
 export function SlotCard({
   acquireResultBlobUrl,
   taskId,
   slot,
   mediaType,
-  fallbackRatio
+  aspectRatio,
+  mediaKey,
+  onMediaSettled
 }: {
   readonly acquireResultBlobUrl: (
     taskId: string,
@@ -45,12 +30,15 @@ export function SlotCard({
   readonly taskId: string
   readonly slot: GenerationSlotView
   readonly mediaType: 'image' | 'video'
-  readonly fallbackRatio: string | null
+  readonly aspectRatio: number
+  readonly mediaKey: string
+  readonly onMediaSettled: (mediaKey: string) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const [mediaAttempt, setMediaAttempt] = useState(0)
   const [media, setMedia] = useState<
-    | { readonly status: 'unloaded' | 'loading' | 'failed'; readonly url: null }
+    | { readonly status: 'unloaded' | 'failed'; readonly url: null }
+    | { readonly status: 'loading'; readonly url: string | null }
     | { readonly status: 'ready'; readonly url: string }
   >({ status: 'unloaded', url: null })
   const succeeded = slot.status === 'succeeded'
@@ -73,19 +61,32 @@ export function SlotCard({
         }
         if (lease === null) {
           setMedia({ status: 'failed', url: null })
+          onMediaSettled(mediaKey)
           return
         }
         release = lease.release
-        setMedia({ status: 'ready', url: lease.url })
+        setMedia({ status: 'loading', url: lease.url })
       })
       .catch(() => {
-        if (active) setMedia({ status: 'failed', url: null })
+        if (active) {
+          setMedia({ status: 'failed', url: null })
+          onMediaSettled(mediaKey)
+        }
       })
     return () => {
       active = false
       release?.()
     }
-  }, [acquireResultBlobUrl, mediaAttempt, mediaType, slot.index, succeeded, taskId])
+  }, [
+    acquireResultBlobUrl,
+    mediaAttempt,
+    mediaKey,
+    mediaType,
+    onMediaSettled,
+    slot.index,
+    succeeded,
+    taskId
+  ])
 
   const download = (): void => {
     void acquireResultBlobUrl(taskId, slot.index)
@@ -140,6 +141,7 @@ export function SlotCard({
     ghostRef.current?.remove()
     ghostRef.current = null
   }
+  const mediaUrl = media.url
 
   return (
     <div
@@ -154,39 +156,61 @@ export function SlotCard({
         else event.preventDefault()
       }}
       onDragEnd={dragEnd}
-      style={{ aspectRatio: String(slotAspectRatio(slot, fallbackRatio)) }}
+      style={{ aspectRatio: String(aspectRatio) }}
       className="bg-foreground/[0.04] relative overflow-hidden rounded-lg"
     >
-      {succeeded && media.status === 'ready' ? (
+      {succeeded && mediaUrl !== null ? (
         mediaType === 'image' ? (
-          <img src={media.url} alt={t('gallery.resultAlt')} className="size-full object-cover" />
+          <ImageWithSkeleton
+            src={mediaUrl}
+            alt={t('gallery.resultAlt')}
+            loadingLabel={String(t('gallery.media.loading'))}
+            className="size-full object-cover"
+            onLoad={() => {
+              setMedia({ status: 'ready', url: mediaUrl })
+              onMediaSettled(mediaKey)
+            }}
+            onError={() => {
+              setMedia({ status: 'failed', url: null })
+              onMediaSettled(mediaKey)
+            }}
+          />
         ) : (
-          <video src={media.url} controls className="size-full object-cover" />
+          <VideoWithSkeleton
+            src={mediaUrl}
+            controls
+            loadingLabel={String(t('gallery.media.loading'))}
+            className="size-full object-cover"
+            onLoadedData={() => {
+              setMedia({ status: 'ready', url: mediaUrl })
+              onMediaSettled(mediaKey)
+            }}
+            onError={() => {
+              setMedia({ status: 'failed', url: null })
+              onMediaSettled(mediaKey)
+            }}
+          />
         )
-      ) : succeeded ? (
+      ) : succeeded && media.status === 'failed' ? (
         <span className="absolute inset-0 grid place-content-center justify-items-center gap-2 p-2 text-center text-[10px]">
-          <span
-            role={media.status === 'failed' ? 'alert' : 'status'}
-            className="text-muted-foreground"
-          >
-            {t(
-              media.status === 'failed'
-                ? 'gallery.media.failed'
-                : media.status === 'loading'
-                  ? 'gallery.media.loading'
-                  : 'gallery.media.unloaded'
-            )}
+          <span role="alert" className="text-muted-foreground">
+            {t('gallery.media.failed')}
           </span>
-          {media.status === 'failed' && (
-            <button
-              type="button"
-              onClick={() => setMediaAttempt((attempt) => attempt + 1)}
-              className="border-border hover:bg-accent rounded-md border px-2 py-1"
-            >
-              {t('gallery.media.retry')}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setMediaAttempt((attempt) => attempt + 1)}
+            className="border-border hover:bg-accent rounded-md border px-2 py-1"
+          >
+            {t('gallery.media.retry')}
+          </button>
         </span>
+      ) : succeeded ? (
+        <>
+          <Skeleton aria-hidden className="absolute inset-0 size-full rounded-none" />
+          <span role="status" className="sr-only">
+            {t('gallery.media.loading')}
+          </span>
+        </>
       ) : (
         <span className="absolute inset-0 flex overflow-y-auto p-2">
           <span className="text-muted-foreground my-auto w-full text-center text-[10px] leading-4">

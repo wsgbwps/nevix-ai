@@ -391,6 +391,7 @@ export function createCreationRuntime(
     getTask: guardResult(ports.getTask),
     cancelTask: guardResult(ports.cancelTask),
     retryTask: guardResult(ports.retryTask),
+    loadThumbnailUrl: guardResult(ports.loadThumbnailUrl),
     loadPreviewUrl: guardResult(ports.loadPreviewUrl),
     loadResultBlob: guardResult(ports.loadResultBlob),
     subscribeEvents: (handlers) => {

@@ -160,10 +160,8 @@ type BlobStore interface {
 	Delete(ctx context.Context, key string) error
 }
 
-// DirectUploadBlobStore is the BlobStore capability bundle resolved from the
-// active Object Storage Connection: canary, Reference Material Upload
-// finalize, and creator display (thumbnail/preview) authorization.
-type DirectUploadBlobStore interface {
+// ObjectStorageBlobStore is the full blob capability resolved from the active Object Storage Connection.
+type ObjectStorageBlobStore interface {
 	BlobStore
 	Head(ctx context.Context, key string) (BlobInfo, error)
 	PresignPut(ctx context.Context, request PresignPutRequest) (PresignedPut, error)

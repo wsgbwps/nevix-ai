@@ -323,7 +323,12 @@ export function createCreationClient(serverUrl: string): {
       const payload: unknown = await response.json()
       const signedUrl = readStringField(payload, 'url')
       const expiresAt = readStringField(payload, 'expires_at')
-      return signedUrl && expiresAt
+      if (!signedUrl || !expiresAt) return { outcome: 'network-failure' }
+      const parsedUrl = new URL(signedUrl)
+      const expiresAtMs = Date.parse(expiresAt)
+      return parsedUrl.protocol === 'https:' &&
+        Number.isFinite(expiresAtMs) &&
+        expiresAtMs > Date.now()
         ? { outcome: 'succeeded', value: { url: signedUrl, expiresAt } }
         : { outcome: 'network-failure' }
     } catch {

@@ -35,9 +35,15 @@ async function dropOn(
       if (target === null) throw new Error(`no element for ${selector}`)
       const dataTransfer = new DataTransfer()
       for (const file of files) {
-        dataTransfer.items.add(
-          new File([new Uint8Array([137, 80, 78, 71])], file.name, { type: file.type })
-        )
+        const bytes = file.type.startsWith('image/')
+          ? Uint8Array.from(
+              atob(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+              ),
+              (byte) => byte.charCodeAt(0)
+            )
+          : new Uint8Array([1])
+        dataTransfer.items.add(new File([bytes], file.name, { type: file.type }))
       }
       if (extra !== undefined) dataTransfer.setData(extra.type, extra.data)
       target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }))

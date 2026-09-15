@@ -41,7 +41,7 @@ func VerifyConnection(ctx context.Context, candidate domain.ObjectStorageCandida
 	}, nil
 }
 
-func verifyConnectionCanary(ctx context.Context, location Location, store domain.DirectUploadBlobStore, client *http.Client, prefix string) (resultErr error) {
+func verifyConnectionCanary(ctx context.Context, location Location, store domain.ObjectStorageBlobStore, client *http.Client, prefix string) (resultErr error) {
 	serverKey := prefix + "/server"
 	signedKey := prefix + "/signed"
 	keys := []string{serverKey, signedKey}
@@ -97,7 +97,7 @@ func verifyConnectionCanary(ctx context.Context, location Location, store domain
 	return nil
 }
 
-func verifyOpen(ctx context.Context, store domain.DirectUploadBlobStore, key string) error {
+func verifyOpen(ctx context.Context, store domain.ObjectStorageBlobStore, key string) error {
 	reader, size, err := store.Open(ctx, key, domain.FullBlobRange)
 	if err != nil {
 		return err

@@ -565,6 +565,14 @@ test('detail and responsive height changes keep the visible task anchor stable',
   const tasks = manyMixedTasks(20, 'anchor')
   await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks, taskDetailsDeferred: true }} />)
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const taskSkeleton = page.locator('[data-testid^="task-skeleton-"]').first()
+  const shimmer = taskSkeleton.locator('[data-slot="skeleton"]').first()
+  await expect(taskSkeleton.locator('[data-task-skeleton-part="heading"]')).toHaveCount(1)
+  await expect(taskSkeleton.locator('[data-task-skeleton-part="media"]')).toHaveCount(1)
+  await expect(shimmer).toBeVisible()
+  await expect
+    .poll(() => shimmer.evaluate((element) => getComputedStyle(element, '::after').animationName))
+    .toBe('skeleton-shimmer')
   const scroller = await settledScroller(page)
   await userScrollTo(scroller, { fraction: 1 / 2 })
   // Let the virtualizer finish the creator's upward scroll before treating

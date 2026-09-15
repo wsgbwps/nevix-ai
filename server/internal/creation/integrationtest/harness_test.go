@@ -159,7 +159,7 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 		ReauthVerifier:        identityModule.ReauthProofs(),
 		ObjectStorageVerifier: objectStorageVerifier,
 		Now:                   opts.now,
-		DirectUploadStoreFactory: func(location creation.ObjectStorageLocation, _ creation.ObjectStorageCredentials) (creation.DirectUploadBlobStore, error) {
+		ObjectStorageBlobStoreFactory: func(location creation.ObjectStorageLocation, _ creation.ObjectStorageCredentials) (creation.ObjectStorageBlobStore, error) {
 			directStore.setProvider(location.Provider)
 			return directStore, nil
 		},

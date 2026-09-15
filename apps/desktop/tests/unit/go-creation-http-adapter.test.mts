@@ -208,6 +208,7 @@ test('malformed session detail payloads fail closed', async () => {
 
 test('material preview URL authorization answers a signed GET pair', async () => {
   const client = createCreationClient(serverUrl)
+  const expiresAt = new Date(Date.now() + 60_000).toISOString()
   let request: Request | null = null
 
   const result = await withFetch(
@@ -215,7 +216,7 @@ test('material preview URL authorization answers a signed GET pair', async () =>
       request = new Request(input as RequestInfo | URL, init)
       return jsonResponse({
         url: 'https://bucket.example/m1?sig=x',
-        expires_at: '2026-09-14T12:00:00Z'
+        expires_at: expiresAt
       })
     },
     () => client.loadMaterialPreviewUrl('tok', 'material-1')
@@ -226,8 +227,29 @@ test('material preview URL authorization answers a signed GET pair', async () =>
   assert.equal(request.headers.get('Authorization'), 'Bearer tok')
   assert.deepEqual(result, {
     outcome: 'succeeded',
-    value: { url: 'https://bucket.example/m1?sig=x', expiresAt: '2026-09-14T12:00:00Z' }
+    value: { url: 'https://bucket.example/m1?sig=x', expiresAt }
   })
+})
+
+test('material URL authorization rejects insecure, malformed, and expired grants', async () => {
+  const client = createCreationClient(serverUrl)
+  const invalidPayloads = [
+    {
+      url: 'http://bucket.example/m1?sig=x',
+      expires_at: new Date(Date.now() + 60_000).toISOString()
+    },
+    { url: 'not a url', expires_at: new Date(Date.now() + 60_000).toISOString() },
+    { url: 'https://bucket.example/m1?sig=x', expires_at: 'not a date' },
+    { url: 'https://bucket.example/m1?sig=x', expires_at: new Date(Date.now() - 1).toISOString() }
+  ]
+
+  for (const payload of invalidPayloads) {
+    const result = await withFetch(
+      async () => jsonResponse(payload),
+      () => client.loadMaterialPreviewUrl('tok', 'material-1')
+    )
+    assert.deepEqual(result, { outcome: 'network-failure' })
+  }
 })
 
 test('material preview URL authorization preserves a confirmed unauthorized response', async () => {

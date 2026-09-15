@@ -79,9 +79,8 @@ function pendingMaterialView(id: string, file: File): ReferenceMaterialView {
   }
 }
 
-/** Signed thumbnail URLs need to outlive their TTL by a moment: the <img>
- * fetch must complete before the signature stops verifying. */
-const thumbnailUrlGuardMs = 60_000
+// Refresh before expiry so an image fetch can finish under a valid signature.
+const thumbnailRefreshMarginMs = 60_000
 
 export class WorkbenchDisplayController {
   readonly #deps: WorkbenchDisplayDeps
@@ -89,9 +88,7 @@ export class WorkbenchDisplayController {
   #materials: readonly ReferenceMaterialView[] = []
   #thumbnails: Readonly<Record<string, string>> = {}
   #thumbnailStates: Readonly<Record<string, MaterialThumbnailState>> = {}
-  /** Remote thumbnail URLs are usable until their signed TTL (epoch ms);
-   * local object-URL previews have no entry. */
-  #thumbnailExpiry: Readonly<Record<string, number>> = {}
+  #thumbnailRefreshAt: Readonly<Record<string, number>> = {}
   #materialIds: ReadonlySet<string> = new Set()
   #thumbnailIds: ReadonlySet<string> = new Set()
   #pendingFiles = new Map<string, PendingMaterialFile>()
@@ -156,7 +153,7 @@ export class WorkbenchDisplayController {
     this.#thumbnailIds = new Set()
     this.#thumbnails = {}
     this.#thumbnailStates = {}
-    this.#thumbnailExpiry = {}
+    this.#thumbnailRefreshAt = {}
     this.#cardKeyAliases = {}
     this.#uploadProgress = {}
     this.#changed()
@@ -322,9 +319,9 @@ export class WorkbenchDisplayController {
           }
         } else {
           this.#thumbnails = { ...this.#thumbnails, [materialId]: value.url }
-          this.#thumbnailExpiry = {
-            ...this.#thumbnailExpiry,
-            [materialId]: Date.parse(value.expiresAt) - thumbnailUrlGuardMs
+          this.#thumbnailRefreshAt = {
+            ...this.#thumbnailRefreshAt,
+            [materialId]: Date.parse(value.expiresAt) - thumbnailRefreshMarginMs
           }
         }
         this.#thumbnailIds = new Set([...this.#thumbnailIds, materialId])
@@ -338,6 +335,13 @@ export class WorkbenchDisplayController {
           this.#thumbnailRequests.delete(materialId)
         }
       })
+  }
+
+  reportThumbnailFailure(materialId: string, source: string): void {
+    if (!this.#active || this.#thumbnails[materialId] !== source) return
+    this.#materialUrls.releaseMaterial(materialId)
+    this.#deleteThumbnailEntry(materialId)
+    this.#setThumbnailState(materialId, 'failed')
   }
 
   updateUploadProgress(materialId: string, sentBytes: number, totalBytes: number): void {
@@ -369,8 +373,8 @@ export class WorkbenchDisplayController {
         return
       }
       this.#thumbnailConsumers.delete(materialId)
-      // Local object-URL previews die with their last consumer; a remote URL
-      // entry is one string living to its TTL, so remounts stay instant.
+      // Local object URLs die with their last consumer; keep remote URLs
+      // cached across remounts and refresh them near expiry.
       if (!this.#materialUrls.owns(materialId)) return
       this.#materialUrls.releaseMaterial(materialId)
       this.#thumbnailIds = new Set(
@@ -414,15 +418,15 @@ export class WorkbenchDisplayController {
 
   #hasLiveThumbnail(materialId: string): boolean {
     if (!this.#thumbnailIds.has(materialId)) return false
-    const expiresAt = this.#thumbnailExpiry[materialId]
-    return expiresAt === undefined || Date.now() < expiresAt
+    const refreshAt = this.#thumbnailRefreshAt[materialId]
+    return refreshAt === undefined || Date.now() < refreshAt
   }
 
   #deleteThumbnailEntry(materialId: string): void {
     if (
       !(materialId in this.#thumbnails) &&
       !(materialId in this.#thumbnailStates) &&
-      !(materialId in this.#thumbnailExpiry)
+      !(materialId in this.#thumbnailRefreshAt)
     ) {
       return
     }
@@ -432,9 +436,9 @@ export class WorkbenchDisplayController {
     const states = { ...this.#thumbnailStates }
     delete states[materialId]
     this.#thumbnailStates = states
-    const expiry = { ...this.#thumbnailExpiry }
-    delete expiry[materialId]
-    this.#thumbnailExpiry = expiry
+    const refreshAt = { ...this.#thumbnailRefreshAt }
+    delete refreshAt[materialId]
+    this.#thumbnailRefreshAt = refreshAt
     this.#thumbnailIds = new Set([...this.#thumbnailIds].filter((id) => id !== materialId))
     this.#changed()
   }

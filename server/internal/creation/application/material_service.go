@@ -169,7 +169,7 @@ func (s *MaterialService) CreateUpload(ctx context.Context, owner, sessionID dom
 	return s.authorizeUpload(ctx, upload, candidate.PayloadHash, upload.ID == candidate.ID, store)
 }
 
-func (s *MaterialService) authorizeUpload(ctx context.Context, upload domain.ReferenceMaterialUpload, payloadHash []byte, created bool, store domain.DirectUploadBlobStore) (ReferenceMaterialUploadAuthorization, error) {
+func (s *MaterialService) authorizeUpload(ctx context.Context, upload domain.ReferenceMaterialUpload, payloadHash []byte, created bool, store domain.ObjectStorageBlobStore) (ReferenceMaterialUploadAuthorization, error) {
 	if !bytes.Equal(upload.PayloadHash, payloadHash) {
 		return ReferenceMaterialUploadAuthorization{}, domain.ErrIdempotencyPayloadConflict
 	}
@@ -479,7 +479,7 @@ func (s *MaterialService) terminalizeUpload(ctx context.Context, owner, id domai
 	return s.statusFromUpload(ctx, owner, upload)
 }
 
-func (s *MaterialService) rejectVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.DirectUploadBlobStore) error {
+func (s *MaterialService) rejectVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.ObjectStorageBlobStore) error {
 	now := s.now().UTC()
 	err := s.runner.Run(ctx, func(scope domain.WriteScope) error {
 		return s.uploads.MarkTerminal(ctx, scope.Tx(), upload.OwnerID, upload.ID, &token, now)
@@ -496,7 +496,7 @@ func (s *MaterialService) rejectVerification(ctx context.Context, upload domain.
 	return verdict
 }
 
-func (s *MaterialService) releaseVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.DirectUploadBlobStore) error {
+func (s *MaterialService) releaseVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.ObjectStorageBlobStore) error {
 	if !s.now().UTC().Before(upload.FinalizeDeadline) {
 		return s.rejectVerification(ctx, upload, token, domain.ErrReferenceMaterialUploadExpired, store)
 	}
@@ -509,7 +509,7 @@ func (s *MaterialService) releaseVerification(ctx context.Context, upload domain
 	return verdict
 }
 
-func (s *MaterialService) cleanupUpload(ctx context.Context, upload domain.ReferenceMaterialUpload, store domain.DirectUploadBlobStore) {
+func (s *MaterialService) cleanupUpload(ctx context.Context, upload domain.ReferenceMaterialUpload, store domain.ObjectStorageBlobStore) {
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), referenceMaterialImmediateCleanupTimeout)
 	defer cancel()
 	if store == nil {

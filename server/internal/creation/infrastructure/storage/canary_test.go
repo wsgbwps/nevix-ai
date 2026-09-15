@@ -17,7 +17,7 @@ func TestConnectionCanaryExercisesRequiredOperationsAndCleansUp(t *testing.T) {
 			backend := newFakeCloudTransport(provider)
 			location := canaryTestLocation(provider)
 			client := &http.Client{Transport: backend}
-			var store domain.DirectUploadBlobStore
+			var store domain.ObjectStorageBlobStore
 			var err error
 			if provider == ProviderOSS {
 				store, err = newOSSStore(location, Credentials{AccessKeyID: "ak", SecretAccessKey: "sk"}, client)

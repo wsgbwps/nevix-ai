@@ -32,7 +32,7 @@ func creationDependencies(identityModule *identity.Module) creation.Deps {
 		ObjectStorageVerifier: func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
 			return candidate.Location, nil
 		},
-		DirectUploadStoreFactory: func(_ creation.ObjectStorageLocation, _ creation.ObjectStorageCredentials) (creation.DirectUploadBlobStore, error) {
+		ObjectStorageBlobStoreFactory: func(_ creation.ObjectStorageLocation, _ creation.ObjectStorageCredentials) (creation.ObjectStorageBlobStore, error) {
 			return store, nil
 		},
 	}

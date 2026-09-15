@@ -1544,6 +1544,24 @@ test('a confirmed invalid session from a blob read retires every later Creation 
   assert.equal(laterReadCalls, 0)
 })
 
+test('an unauthorized thumbnail read retires every later Creation call', async () => {
+  let thumbnailCalls = 0
+  const runtime = createCreationRuntime(
+    {
+      loadThumbnailUrl: async () => {
+        thumbnailCalls += 1
+        return { outcome: 'unauthorized' as const }
+      }
+    },
+    'user-1'
+  )
+
+  assert.equal((await runtime.loadThumbnailUrl(realMaterial)).outcome, 'unauthorized')
+  assert.deepEqual(runtime.actions.snapshot(sessionA), { status: 'retired' })
+  assert.equal((await runtime.loadThumbnailUrl(realMaterial)).outcome, 'unauthorized')
+  assert.equal(thumbnailCalls, 1)
+})
+
 test('a confirmed invalid session from SSE retires the authenticated use period', async () => {
   let streamHandlers: Parameters<CreationWorkspacePorts['subscribeEvents']>[0] | null = null
   let unsubscribeCalls = 0

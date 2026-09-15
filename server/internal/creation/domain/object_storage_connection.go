@@ -58,10 +58,9 @@ type ObjectStorageVerifier interface {
 	Verify(ctx context.Context, candidate ObjectStorageCandidate) (ObjectStorageLocation, error)
 }
 
-// DirectUploadStoreFactory constructs the current provider adapter from one
-// decrypted connection. Callers erase their plaintext buffer immediately
-// after the synchronous call returns.
-type DirectUploadStoreFactory func(ObjectStorageLocation, ObjectStorageCredentials) (DirectUploadBlobStore, error)
+// ObjectStorageBlobStoreFactory constructs the active provider adapter from decrypted credentials.
+// Callers erase their plaintext buffer immediately after the synchronous call returns.
+type ObjectStorageBlobStoreFactory func(ObjectStorageLocation, ObjectStorageCredentials) (ObjectStorageBlobStore, error)
 
 // ReferenceTransportFactory constructs only the Provider Transfer Object
 // capability from one decrypted connection.

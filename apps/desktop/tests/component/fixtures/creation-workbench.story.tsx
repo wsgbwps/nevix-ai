@@ -399,6 +399,8 @@ interface RuntimeOptions {
   readonly materialUrlFailures?: number
   /** Keeps display-URL authorizations pending until the test releases them. */
   readonly materialUrlDeferred?: boolean
+  /** Overrides the scripted image URL so tests can control its network load. */
+  readonly materialImageUrl?: string
   readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
@@ -545,7 +547,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     return succeeded({
       url:
         scriptedMaterialKind(materialId) === 'image'
-          ? scriptedMaterialSvgUrl
+          ? (options.materialImageUrl ?? scriptedMaterialSvgUrl)
           : scriptedSilentWavUrl,
       expiresAt: new Date(Date.now() + 10 * 60_000).toISOString()
     })
@@ -943,6 +945,7 @@ interface StoryOptions {
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
   readonly materialUrlFailures?: number
   readonly materialUrlDeferred?: boolean
+  readonly materialImageUrl?: string
   readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
@@ -967,6 +970,7 @@ function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
     taskScript: options.taskScript,
     materialUrlFailures: options.materialUrlFailures,
     materialUrlDeferred: options.materialUrlDeferred,
+    materialImageUrl: options.materialImageUrl,
     deleteMaterialDeferred: options.deleteMaterialDeferred,
     deleteSessionDeferred: options.deleteSessionDeferred,
     uploadDeferred: options.uploadDeferred,

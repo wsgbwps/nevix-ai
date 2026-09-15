@@ -115,7 +115,7 @@ func (w *ReferenceMaterialUploadCleanupWorker) runOnce(ctx context.Context) erro
 	return nil
 }
 
-func (w *ReferenceMaterialUploadCleanupWorker) cleanClaim(ctx context.Context, store domain.DirectUploadBlobStore, claim domain.ReferenceMaterialUploadCleanup) {
+func (w *ReferenceMaterialUploadCleanupWorker) cleanClaim(ctx context.Context, store domain.ObjectStorageBlobStore, claim domain.ReferenceMaterialUploadCleanup) {
 	deleteCtx, cancel := context.WithTimeout(ctx, referenceMaterialCleanupTimeout)
 	defer cancel()
 	if err := store.Delete(deleteCtx, claim.ObjectKey); err != nil {

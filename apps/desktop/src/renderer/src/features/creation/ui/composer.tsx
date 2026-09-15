@@ -261,6 +261,7 @@ export function CreationComposer({
               cardKeyAliases={composer.cardKeyAliases}
               onRetainThumbnail={composer.retainMaterialThumbnail}
               onRequestThumbnail={composer.requestMaterialThumbnail}
+              onThumbnailError={composer.reportMaterialThumbnailFailure}
               cap={composer.deckCap}
               allowedKinds={composer.allowedKinds}
               onAddFiles={composer.addMaterials}

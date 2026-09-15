@@ -26,6 +26,7 @@ export interface WorkbenchDisplayBinding {
   readonly updateUploadProgress: (materialId: string, sentBytes: number, totalBytes: number) => void
   readonly forget: (materialId: string) => void
   readonly requestThumbnail: (materialId: string) => void
+  readonly reportThumbnailFailure: (materialId: string, source: string) => void
   readonly retain: (materialId: string) => () => void
   readonly acquireResultBlobUrl: (
     taskId: string,
@@ -49,6 +50,7 @@ const idleDisplayMethods = {
   updateUploadProgress: (): void => undefined,
   forget: (): void => undefined,
   requestThumbnail: (): void => undefined,
+  reportThumbnailFailure: (): void => undefined,
   retain: (): (() => void) => () => undefined,
   acquireResultBlobUrl: (): Promise<ResultBlobUrlLease | null> => Promise.resolve(null),
   loadMaterialPreviewSource: (): Promise<MaterialPreviewSource | null> => Promise.resolve(null),
@@ -100,6 +102,8 @@ export function useWorkbenchDisplay(deps: WorkbenchDisplayDeps | null): Workbenc
         controller.updateUploadProgress(materialId, sentBytes, totalBytes),
       forget: (materialId: string): void => controller.forget(materialId),
       requestThumbnail: (materialId: string): void => controller.requestThumbnail(materialId),
+      reportThumbnailFailure: (materialId: string, source: string): void =>
+        controller.reportThumbnailFailure(materialId, source),
       retain: (materialId: string): (() => void) => controller.retain(materialId),
       acquireResultBlobUrl: (
         taskId: string,

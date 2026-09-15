@@ -18,7 +18,7 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-type newCloudStoreForTest func(t *testing.T, transport http.RoundTripper) domain.DirectUploadBlobStore
+type newCloudStoreForTest func(t *testing.T, transport http.RoundTripper) domain.ObjectStorageBlobStore
 
 func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloudStoreForTest) {
 	t.Helper()

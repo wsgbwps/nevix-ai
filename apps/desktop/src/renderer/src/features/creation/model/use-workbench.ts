@@ -150,6 +150,8 @@ export interface WorkbenchComposerHandle {
   retainMaterialThumbnail: (materialId: string) => () => void
   /** Starts an image thumbnail read only when a mounted presentation asks for it. */
   requestMaterialThumbnail: (materialId: string) => void
+  /** Rejects the current display URL when its image element cannot load it. */
+  reportMaterialThumbnailFailure: (materialId: string, source: string) => void
   /** Materials the prompt's Reference Mentions still name; replacing one would orphan them. */
   mentionedMaterialIds: ReadonlySet<string>
   /** Admits a dropped file batch against the mode's policy and adds what it accepts. */
@@ -200,6 +202,7 @@ export interface WorkbenchGalleryHandle {
   thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
   retainMaterialThumbnail: (materialId: string) => () => void
   requestMaterialThumbnail: (materialId: string) => void
+  reportMaterialThumbnailFailure: (materialId: string, source: string) => void
 }
 
 export function useCreationWorkbench(): {
@@ -1097,6 +1100,7 @@ export function useCreationWorkbench(): {
       cardKeyAliases: display.snapshot.cardKeyAliases,
       retainMaterialThumbnail: display.retain,
       requestMaterialThumbnail: display.requestThumbnail,
+      reportMaterialThumbnailFailure: display.reportThumbnailFailure,
       mentionedMaterialIds,
       addMaterials,
       replaceMaterial,
@@ -1132,7 +1136,8 @@ export function useCreationWorkbench(): {
       thumbnails,
       thumbnailStates,
       retainMaterialThumbnail: display.retain,
-      requestMaterialThumbnail: display.requestThumbnail
+      requestMaterialThumbnail: display.requestThumbnail,
+      reportMaterialThumbnailFailure: display.reportThumbnailFailure
     }
   }
 }

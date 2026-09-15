@@ -526,6 +526,67 @@ test('a visible material thumbnail exposes loading, failure, and retry states', 
     .toBe(2)
 })
 
+test('a material thumbnail keeps a skeleton until the remote image paints', async ({
+  mount,
+  page
+}) => {
+  const mediaUrl = 'https://media.nevix.test/thumbnail.svg'
+  let releaseImage!: () => void
+  const imageReady = new Promise<void>((resolve) => {
+    releaseImage = resolve
+  })
+  let imageAttempts = 0
+  await page.route(mediaUrl, async (route) => {
+    await imageReady
+    imageAttempts += 1
+    if (imageAttempts === 1) {
+      await route.abort('failed')
+      return
+    }
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    })
+  })
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{
+        [scriptedSessionId]: {
+          prompt: 'poster reference',
+          promptDocument: { version: 1, nodes: [{ type: 'text', text: 'poster reference' }] },
+          mediaType: 'image',
+          manifestVersion: 5,
+          model: 'doubao-seedream-5.0-pro',
+          mode: 'reference-image',
+          ratio: '4:3',
+          resolution: '2K',
+          quantity: 1,
+          durationSeconds: null,
+          references: [{ materialId: firstMaterialId, role: 'reference' }]
+        }
+      }}
+      materials={{
+        [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
+      }}
+      materialImageUrl={mediaUrl}
+    />
+  )
+  await selectFirstSession(page)
+
+  const card = page.locator(`[data-material-id="${firstMaterialId}"]`)
+  await expect(card).toHaveAttribute('data-thumbnail-state', 'ready')
+  // This story intentionally omits global CSS; presence here pins the real
+  // Skeleton component while production Tailwind gives it the card's size.
+  await expect(card.locator('[data-slot="skeleton"]')).toHaveCount(1)
+
+  releaseImage()
+  await expect(card).toHaveAttribute('data-thumbnail-state', 'failed')
+  await card.hover()
+  await expect(card).toHaveAttribute('data-thumbnail-state', 'ready')
+  await expect(card.locator('[data-slot="skeleton"]')).toHaveCount(0)
+  await expect(card.locator('img')).toBeVisible()
+})
+
 test('a full-preview authorization landing after the dialog closes is discarded', async ({
   mount,
   page
@@ -1229,7 +1290,7 @@ test('a task card shows its frozen specification, never the live draft', async (
   await expect(menu).toContainText('frozen-at-submit prompt')
 })
 
-test('a task card renders its list snapshot before any detail read lands', async ({
+test('a task card keeps its list snapshot hidden until the detail read settles', async ({
   mount,
   page
 }) => {
@@ -1261,13 +1322,186 @@ test('a task card renders its list snapshot before any detail read lands', async
   )
   await selectFirstSession(page)
 
-  // The list summary's own snapshot paints the frozen header immediately;
-  // the deferred detail — which carries no specification here — cannot be
-  // the source.
   const card = page.getByTestId(`task-${frozen.id}`)
+  const content = page.getByTestId(`task-content-${frozen.id}`)
+  await expect(page.getByTestId(`task-skeleton-${frozen.id}`)).toHaveCount(1)
+  await expect(content).toHaveClass(/invisible/)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseTaskDetails())
+  await expect(page.getByTestId(`task-skeleton-${frozen.id}`)).toHaveCount(0)
+  await expect(content).not.toHaveClass(/invisible/)
+  // Detail has no specification, so the revealed header still comes from
+  // the list response's frozen snapshot rather than the live composer.
   await expect(card).toContainText('snapshot-at-submit prompt')
   await expect(card).toContainText('snapshot-model')
   await expect(card).toContainText('4:3')
+})
+
+test('a task card reveals atomically after its detail and media settle', async ({
+  mount,
+  page
+}) => {
+  const mediaUrl = 'https://media.nevix.test/atomic-task-thumbnail.svg'
+  let releaseReference!: () => void
+  const referenceReady = new Promise<void>((resolve) => {
+    releaseReference = resolve
+  })
+  await page.route(mediaUrl, async (route) => {
+    await referenceReady
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    })
+  })
+  const specification = {
+    prompt: 'atomic task card',
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '1:1',
+    resolution: null,
+    quantity: 1,
+    durationSeconds: null,
+    references: [{ materialId: firstMaterialId, role: 'reference', kind: 'image' }] as const
+  }
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000atom',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: specification,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-14T09:00:00Z',
+    updatedAt: '2026-09-14T09:00:01Z',
+    terminalAt: '2026-09-14T09:00:01Z',
+    slots: [
+      {
+        index: 0,
+        status: 'succeeded',
+        failureReason: null,
+        result: {
+          mimeType: 'image/jpeg',
+          byteSize: 2048,
+          checksumSha256: 'ac'.repeat(32),
+          widthPx: 1024,
+          heightPx: 1024,
+          durationMs: null
+        }
+      }
+    ],
+    specification
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [task], taskDetailsDeferred: true, resultBlobDeferred: true }}
+      drafts={{ [scriptedSessionId]: null }}
+      materials={{
+        [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
+      }}
+      materialImageUrl={mediaUrl}
+    />
+  )
+  await selectFirstSession(page)
+
+  const card = page.getByTestId(`task-${task.id}`)
+  const skeleton = page.getByTestId(`task-skeleton-${task.id}`)
+  const content = page.getByTestId(`task-content-${task.id}`)
+  await expect(skeleton).toHaveCount(1)
+  await expect(skeleton.locator('[data-task-skeleton-part="heading"]')).toHaveCount(1)
+  await expect(skeleton.locator('[data-task-skeleton-part="media"]')).toHaveCount(task.slotCount)
+  await expect(skeleton.locator('[data-slot="skeleton"]').first()).toHaveClass(/skeleton-shimmer/)
+  await expect(content).toHaveClass(/invisible/)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseTaskDetails())
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers().length ?? 0)
+    )
+    .toBe(1)
+  await expect(skeleton).toHaveCount(1)
+
+  releaseReference()
+  await expect
+    .poll(async () =>
+      page
+        .getByTestId(`task-references-${task.id}`)
+        .locator('img')
+        .evaluateAll((images) =>
+          images.every((image) => image instanceof HTMLImageElement && image.complete)
+        )
+    )
+    .toBe(true)
+  await expect(skeleton).toHaveCount(1)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseResultBlobs())
+  await expect(skeleton).toHaveCount(0)
+  await expect(content).not.toHaveClass(/invisible/)
+  await expect(card.locator('img')).toHaveCount(2)
+  await expect(card.locator('img').nth(0)).toBeVisible()
+  await expect(card.locator('img').nth(1)).toBeVisible()
+})
+
+test('a task skeleton uses settled video dimensions when its specification has no ratio', async ({
+  mount,
+  page
+}) => {
+  const specification = {
+    prompt: 'wide video',
+    model: 'video-model',
+    mode: 'text-to-video',
+    ratio: null,
+    resolution: null,
+    quantity: 1,
+    durationSeconds: 5,
+    references: []
+  }
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000wide',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'video',
+    slotCount: 1,
+    snapshot: specification,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-14T09:00:00Z',
+    updatedAt: '2026-09-14T09:00:01Z',
+    terminalAt: '2026-09-14T09:00:01Z',
+    slots: [
+      {
+        index: 0,
+        status: 'succeeded',
+        failureReason: null,
+        result: {
+          mimeType: 'video/mp4',
+          byteSize: 2048,
+          checksumSha256: 'ad'.repeat(32),
+          widthPx: 1920,
+          heightPx: 1080,
+          durationMs: 5000
+        }
+      }
+    ],
+    specification
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [task], resultBlobDeferred: true }}
+      drafts={{ [scriptedSessionId]: null }}
+    />
+  )
+  await selectFirstSession(page)
+
+  const skeleton = page
+    .getByTestId(`task-skeleton-${task.id}`)
+    .locator('[data-task-skeleton-part="media"]')
+  await expect(skeleton).toHaveCount(1)
+  await expect
+    .poll(() =>
+      skeleton.evaluate((element) => Number.parseFloat((element as HTMLElement).style.aspectRatio))
+    )
+    .toBeCloseTo(1920 / 1080, 4)
 })
 
 test('a task card fans its frozen reference materials', async ({ mount, page }) => {
@@ -1330,6 +1564,18 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
   mount,
   page
 }) => {
+  const mediaUrl = 'https://media.nevix.test/task-thumbnail.svg'
+  let releaseImage!: () => void
+  const imageReady = new Promise<void>((resolve) => {
+    releaseImage = resolve
+  })
+  await page.route(mediaUrl, async (route) => {
+    await imageReady
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    })
+  })
   const withReference: ScriptedTask = {
     id: 'dddddddd-0000-4000-8000-00000000rf2',
     sessionId: scriptedSessionId,
@@ -1363,6 +1609,7 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
       }}
       materialUrlFailures={1}
       materialUrlDeferred
+      materialImageUrl={mediaUrl}
     />
   )
   await selectFirstSession(page)
@@ -1379,6 +1626,10 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'loading')
   await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'ready')
+  const taskSkeleton = page.getByTestId(`task-skeleton-${withReference.id}`)
+  await expect(taskSkeleton).toBeVisible()
+  releaseImage()
+  await expect(taskSkeleton).toHaveCount(0)
   await expect(thumbnail.locator('img')).toBeVisible()
   await expect
     .poll(async () =>
@@ -1532,6 +1783,11 @@ test('a failed result-media read is explicit and retries from the slot', async (
   await slot.getByRole('button', { name: 'Retry' }).click()
   await expect(slot).toHaveAttribute('data-media-state', 'ready')
   await expect(slot.locator('img')).toBeVisible()
+  await slot.locator('img').evaluate((image) => image.dispatchEvent(new Event('error')))
+  await expect(slot).toHaveAttribute('data-media-state', 'failed')
+  await slot.getByRole('button', { name: 'Retry' }).click()
+  await expect(slot).toHaveAttribute('data-media-state', 'ready')
+  await expect(slot.locator('img')).toBeVisible()
   await expect
     .poll(async () =>
       page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers().length ?? 0)
@@ -1576,6 +1832,7 @@ test('switching sessions retires a late result-media read before a fresh display
 
   const slot = page.getByTestId(`slot-${task.id}-0`)
   await expect(slot).toHaveAttribute('data-media-state', 'loading')
+  await expect(slot.locator('[data-slot="skeleton"]')).toHaveCount(1)
   await expect
     .poll(async () =>
       page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers().length ?? 0)
@@ -1595,7 +1852,10 @@ test('switching sessions retires a late result-media read before a fresh display
     )
     .toBe(2)
   await page.evaluate(() => window.__creationDeckTest?.releaseResultBlobs())
-  await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute('data-media-state', 'ready')
+  const refreshedSlot = page.getByTestId(`slot-${task.id}-0`)
+  await expect(refreshedSlot).toHaveAttribute('data-media-state', 'ready')
+  await expect(refreshedSlot.locator('[data-slot="skeleton"]')).toHaveCount(0)
+  await expect(refreshedSlot.locator('img')).toBeVisible()
 })
 
 test('a succeeded image slot offers a keyboard-reachable download', async ({ mount, page }) => {
