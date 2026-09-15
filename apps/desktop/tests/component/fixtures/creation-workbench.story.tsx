@@ -304,7 +304,7 @@ function succeeded<T>(value: T): CreationApiResult<T> {
 // data URL (audio-only content, no error event), so media preview tests run
 // the success path without any network.
 const scriptedSilentWavUrl = (() => {
-  const samples = 400
+  const samples = 8000
   const bytes = new Uint8Array(44 + samples)
   const view = new DataView(bytes.buffer)
   const ascii = (offset: number, text: string): void => {
@@ -401,6 +401,7 @@ interface RuntimeOptions {
   readonly materialUrlDeferred?: boolean
   /** Overrides the scripted image URL so tests can control its network load. */
   readonly materialImageUrl?: string
+  readonly materialImageUrls?: readonly string[]
   readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
@@ -518,11 +519,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const waitForRelease = (releases: Set<() => void>): Promise<void> =>
     new Promise((resolve) => releases.add(resolve))
 
-  // One scripted authorization backs both display grants (thumbnail and full
-  // preview): fail-count and defer knobs apply to whichever port fires. The
-  // URLs are inline payloads so the CT page (no network, no CSP) actually
-  // loads them — visibility assertions need paintable media, not a string
-  // that errors and trips the preview dialog's expiry retry.
+  // Use decodable inline media so previews do not enter the error/retry path.
   const scriptedMaterialSvgUrl =
     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='64'%3E%3Crect width='100%25' height='100%25' fill='%2388f'/%3E%3C/svg%3E"
   const scriptedMaterialKind = (materialId: string): ReferenceMaterialView['kind'] => {
@@ -539,6 +536,10 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     | { outcome: 'network-failure' }
   > => {
     materialUrlCalls.push({ materialId })
+    const imageUrl =
+      options.materialImageUrls?.[materialUrlCalls.length - 1] ??
+      options.materialImageUrl ??
+      scriptedMaterialSvgUrl
     if (options.materialUrlDeferred) await waitForRelease(materialUrlReleases)
     if (remainingMaterialUrlFailures > 0) {
       remainingMaterialUrlFailures -= 1
@@ -547,8 +548,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     return succeeded({
       url:
         scriptedMaterialKind(materialId) === 'image'
-          ? (options.materialImageUrl ?? scriptedMaterialSvgUrl)
-          : scriptedSilentWavUrl,
+          ? imageUrl
+          : `${scriptedSilentWavUrl}#grant-${materialUrlCalls.length}`,
       expiresAt: new Date(Date.now() + 10 * 60_000).toISOString()
     })
   }
@@ -946,6 +947,7 @@ interface StoryOptions {
   readonly materialUrlFailures?: number
   readonly materialUrlDeferred?: boolean
   readonly materialImageUrl?: string
+  readonly materialImageUrls?: readonly string[]
   readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
@@ -971,6 +973,7 @@ function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
     materialUrlFailures: options.materialUrlFailures,
     materialUrlDeferred: options.materialUrlDeferred,
     materialImageUrl: options.materialImageUrl,
+    materialImageUrls: options.materialImageUrls,
     deleteMaterialDeferred: options.deleteMaterialDeferred,
     deleteSessionDeferred: options.deleteSessionDeferred,
     uploadDeferred: options.uploadDeferred,

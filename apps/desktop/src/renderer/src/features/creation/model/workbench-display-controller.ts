@@ -89,7 +89,6 @@ export class WorkbenchDisplayController {
   #thumbnails: Readonly<Record<string, string>> = {}
   #thumbnailStates: Readonly<Record<string, MaterialThumbnailState>> = {}
   #thumbnailRefreshAt: Readonly<Record<string, number>> = {}
-  #materialIds: ReadonlySet<string> = new Set()
   #thumbnailIds: ReadonlySet<string> = new Set()
   #pendingFiles = new Map<string, PendingMaterialFile>()
   #thumbnailLoad = 0
@@ -149,7 +148,6 @@ export class WorkbenchDisplayController {
     this.#resultBlobCache?.dispose()
     this.#resultBlobCache = null
     this.#materials = []
-    this.#materialIds = new Set()
     this.#thumbnailIds = new Set()
     this.#thumbnails = {}
     this.#thumbnailStates = {}
@@ -163,8 +161,10 @@ export class WorkbenchDisplayController {
    * plus still-staged local views merged by the caller). */
   replaceMaterials(views: readonly ReferenceMaterialView[]): void {
     this.#materials = views
-    this.#materialIds = new Set(views.map((view) => view.id))
     this.#changed()
+    for (const view of views) {
+      if ((this.#thumbnailConsumers.get(view.id) ?? 0) > 0) this.requestThumbnail(view.id)
+    }
   }
 
   /** Adds one device-local file as a pending material with an immediate
@@ -183,7 +183,6 @@ export class WorkbenchDisplayController {
     const material = live ?? pendingMaterialView(id, file)
     if (live === undefined) {
       this.#materials = [...this.#materials, material]
-      this.#materialIds = new Set([...this.#materialIds, id])
     }
     if (previewUrl !== null) {
       this.#thumbnails = { ...this.#thumbnails, [id]: previewUrl }
@@ -262,16 +261,19 @@ export class WorkbenchDisplayController {
     this.#changed()
   }
 
-  /** Drops one material from every local record — thumbnail entry and owned
-   * object URL included; a stale entry would leave consumers holding a
-   * revoked URL. */
+  /** Removes one material from the editable deck. Its resolved remote
+   * thumbnail remains a task-card cache entry until reset or image failure;
+   * an owned local URL survives only while a display consumer still holds it. */
   forget(materialId: string): void {
     this.#materials = this.#materials.filter((material) => material.id !== materialId)
-    this.#materialIds = new Set([...this.#materialIds].filter((id) => id !== materialId))
-    this.#thumbnailConsumers.delete(materialId)
     this.#deleteUploadProgress(materialId)
-    this.#materialUrls.releaseMaterial(materialId)
-    this.#deleteThumbnailEntry(materialId)
+    const retainedThumbnail =
+      this.#thumbnails[materialId] !== undefined &&
+      ((this.#thumbnailConsumers.get(materialId) ?? 0) > 0 || !this.#materialUrls.owns(materialId))
+    if (!retainedThumbnail) {
+      this.#materialUrls.releaseMaterial(materialId)
+      this.#deleteThumbnailEntry(materialId)
+    }
     this.#changed()
   }
 
@@ -279,7 +281,7 @@ export class WorkbenchDisplayController {
     const load = this.#thumbnailLoad
     const material = this.#materials.find((candidate) => candidate.id === materialId)
     if (
-      material?.kind !== 'image' ||
+      (material !== undefined && material.kind !== 'image') ||
       (this.#thumbnailConsumers.get(materialId) ?? 0) === 0 ||
       this.#hasLiveThumbnail(materialId) ||
       this.#thumbnailRequests.get(materialId) === load
@@ -291,14 +293,11 @@ export class WorkbenchDisplayController {
     // failed refresh leaves the card on a URL the bucket will 403.
     if (this.#thumbnailIds.has(materialId)) this.#deleteThumbnailEntry(materialId)
     this.#setThumbnailState(materialId, 'loading')
-    const isCurrent = (): boolean =>
-      this.#active &&
-      load === this.#thumbnailLoad &&
-      this.#materialIds.has(materialId) &&
-      (this.#thumbnailConsumers.get(materialId) ?? 0) > 0
+    // Frozen task references can authorize without belonging to the editable material list.
+    const isCurrentGeneration = (): boolean => this.#active && load === this.#thumbnailLoad
+    const isCurrentConsumer = (): boolean =>
+      isCurrentGeneration() && (this.#thumbnailConsumers.get(materialId) ?? 0) > 0
     const pendingFile = this.#pendingFiles.get(materialId)?.file
-    // A pending file still paints from its local object URL; a stored
-    // material paints from the short-lived presigned URL Go authorizes.
     const resolution: Promise<File | MaterialUrlView | null> =
       pendingFile !== undefined
         ? Promise.resolve(pendingFile)
@@ -307,17 +306,19 @@ export class WorkbenchDisplayController {
             .then((result) => (result.outcome === 'succeeded' ? result.value : null))
     void resolution
       .then((value) => {
-        if (!isCurrent()) return
+        if (!isCurrentGeneration()) return
         if (value === null) {
-          this.#setThumbnailState(materialId, 'failed')
+          if (isCurrentConsumer()) this.#setThumbnailState(materialId, 'failed')
           return
         }
         if (value instanceof File) {
+          if (!isCurrentConsumer()) return
           this.#thumbnails = {
             ...this.#thumbnails,
             [materialId]: this.#materialUrls.replaceThumbnail(materialId, value)
           }
         } else {
+          // Cache an authorized remote URL even if virtualization retired its card mid-request.
           this.#thumbnails = { ...this.#thumbnails, [materialId]: value.url }
           this.#thumbnailRefreshAt = {
             ...this.#thumbnailRefreshAt,
@@ -328,7 +329,7 @@ export class WorkbenchDisplayController {
         this.#setThumbnailState(materialId, 'ready')
       })
       .catch(() => {
-        if (isCurrent()) this.#setThumbnailState(materialId, 'failed')
+        if (isCurrentConsumer()) this.#setThumbnailState(materialId, 'failed')
       })
       .finally(() => {
         if (this.#thumbnailRequests.get(materialId) === load) {
@@ -374,7 +375,7 @@ export class WorkbenchDisplayController {
       }
       this.#thumbnailConsumers.delete(materialId)
       // Local object URLs die with their last consumer; keep remote URLs
-      // cached across remounts and refresh them near expiry.
+      // cached across task-card remounts and re-authorize near expiry by frozen id.
       if (!this.#materialUrls.owns(materialId)) return
       this.#materialUrls.releaseMaterial(materialId)
       this.#thumbnailIds = new Set(

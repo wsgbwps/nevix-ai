@@ -28,6 +28,7 @@ import type { ReferenceMaterialView } from '../api/go-creation-http'
 import type { MaterialThumbnailState, WorkbenchGalleryHandle } from '../model/use-workbench'
 import { modeKeys } from '../i18n/mode-keys'
 import { statusKey } from '../i18n/gallery-keys'
+import { ImageWithSkeleton } from './media-with-skeleton'
 import { SlotCard } from './slot-card'
 
 const mediaKeys = {
@@ -100,23 +101,12 @@ export function TaskCard({
       return next
     })
   }, [])
-  const referencedImagesSettled = (spec?.references ?? []).every((reference, position) => {
-    const material = gallery.materials.find((candidate) => candidate.id === reference.materialId)
-    if (material?.kind !== 'image') return true
-    if (gallery.thumbnailStates[material.id] === 'failed') return true
-    const source = gallery.thumbnails[material.id]
-    return (
-      source !== undefined &&
-      settledMediaKeys.has(taskThumbnailMediaKey(position, material.id, source))
-    )
-  })
   const resultMediaKeys =
     detail?.slots.flatMap((slot) =>
       slot.status === 'succeeded' ? [taskResultMediaKey(snapshot.id, slot)] : []
     ) ?? []
   const cardSettled =
     (detail !== undefined || gallery.taskDetailStaleIds.has(task.id)) &&
-    referencedImagesSettled &&
     resultMediaKeys.every((key) => settledMediaKeys.has(key))
   const terminal = isTerminalTaskStatus(snapshot.status)
   const indeterminate = snapshot.terminalCause !== null
@@ -177,7 +167,6 @@ export function TaskCard({
               onRetainThumbnail={gallery.retainMaterialThumbnail}
               onRequestThumbnail={gallery.requestMaterialThumbnail}
               onThumbnailError={gallery.reportMaterialThumbnailFailure}
-              onThumbnailLoad={markMediaSettled}
             />
           )}
           <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -371,8 +360,7 @@ function TaskReferencePile({
   thumbnailStates,
   onRetainThumbnail,
   onRequestThumbnail,
-  onThumbnailError,
-  onThumbnailLoad
+  onThumbnailError
 }: {
   readonly taskId: string
   readonly references: readonly GenerationSpecificationReferenceView[]
@@ -382,7 +370,6 @@ function TaskReferencePile({
   readonly onRetainThumbnail: (materialId: string) => () => void
   readonly onRequestThumbnail: (materialId: string) => void
   readonly onThumbnailError: (materialId: string, source: string) => void
-  readonly onThumbnailLoad: (key: string) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const byId = useMemo(
@@ -393,8 +380,7 @@ function TaskReferencePile({
     [
       ...new Set(
         references.flatMap((reference) => {
-          const material = byId.get(reference.materialId)
-          return material?.kind === 'image' ? [material.id] : []
+          return reference.kind === 'image' ? [reference.materialId] : []
         })
       )
     ].sort()
@@ -423,9 +409,8 @@ function TaskReferencePile({
       className="relative shrink-0 self-start"
       onMouseEnter={() => {
         for (const reference of references) {
-          const material = byId.get(reference.materialId)
-          if (material?.kind === 'image' && thumbnails[material.id] === undefined) {
-            onRequestThumbnail(material.id)
+          if (reference.kind === 'image' && thumbnails[reference.materialId] === undefined) {
+            onRequestThumbnail(reference.materialId)
           }
         }
       }}
@@ -444,13 +429,13 @@ function TaskReferencePile({
             : reference.role
         const title = material === undefined ? role : `${material.fileName} · ${role}`
         const thumbnailSource =
-          material?.kind === 'image' ? thumbnails[reference.materialId] : undefined
+          reference.kind === 'image' ? thumbnails[reference.materialId] : undefined
         return (
           <div
             key={position}
             title={title}
             data-thumbnail-state={
-              material?.kind === 'image'
+              reference.kind === 'image'
                 ? (thumbnailStates[reference.materialId] ?? 'unloaded')
                 : undefined
             }
@@ -464,21 +449,23 @@ function TaskReferencePile({
             }}
           >
             {thumbnailSource !== undefined && thumbnailStates[reference.materialId] !== 'failed' ? (
-              <img
+              <ImageWithSkeleton
                 src={thumbnailSource}
                 alt=""
+                loadingLabel={String(t('composer.deck.thumbnailLoading'))}
                 className="size-full object-cover"
-                onLoad={() =>
-                  onThumbnailLoad(
-                    taskThumbnailMediaKey(position, reference.materialId, thumbnailSource)
-                  )
-                }
                 onError={() => onThumbnailError(reference.materialId, thumbnailSource)}
               />
             ) : (
               <span className="text-muted-foreground grid size-full place-content-center justify-items-center gap-0.5 text-[10px] uppercase">
                 <span>{String(t(referenceKindKeys[reference.kind]))}</span>
-                {material?.kind === 'image' &&
+                {reference.kind === 'image' &&
+                  thumbnailStates[reference.materialId] === 'loading' && (
+                    <span className="text-[8px] normal-case" role="status">
+                      {t('composer.deck.thumbnailLoading')}
+                    </span>
+                  )}
+                {reference.kind === 'image' &&
                   thumbnailStates[reference.materialId] === 'failed' && (
                     <span className="text-[8px] normal-case" role="alert">
                       {t('composer.deck.thumbnailFailed')}
@@ -486,11 +473,13 @@ function TaskReferencePile({
                   )}
               </span>
             )}
-            {material?.kind === 'image' && thumbnailStates[reference.materialId] === 'failed' && (
+            {reference.kind === 'image' && thumbnailStates[reference.materialId] === 'failed' && (
               <button
                 type="button"
-                aria-label={String(t('composer.deck.thumbnailRetry', { name: material.fileName }))}
-                onClick={() => onRequestThumbnail(material.id)}
+                aria-label={String(
+                  t('composer.deck.thumbnailRetry', { name: material?.fileName ?? role })
+                )}
+                onClick={() => onRequestThumbnail(reference.materialId)}
                 className="bg-card/90 text-muted-foreground hover:text-foreground absolute right-0 bottom-0 z-10 grid size-4 place-items-center rounded-tl-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
               >
                 <RefreshCwIcon className="size-2.5" aria-hidden />
@@ -601,10 +590,6 @@ function placeholderSlots(count: number): GenerationSlotView[] {
     failureReason: null,
     result: null
   }))
-}
-
-function taskThumbnailMediaKey(position: number, materialId: string, source: string): string {
-  return `thumbnail:${position}:${materialId}:${source}`
 }
 
 function taskResultMediaKey(taskId: string, slot: GenerationSlotView): string {

@@ -222,6 +222,38 @@ test('thumbnail leases refcount: releases keep a remote URL entry painting', asy
   assert.deepEqual(urls.revoked, [])
 })
 
+test('an in-flight remote thumbnail remains cached after its card unmounts', async () => {
+  const urls = fakeUrls()
+  const load = deferred<CreationApiResult<MaterialUrlView>>()
+  const controller = createController(urls, () => load.promise)
+  controller.replaceMaterials([materialView('m1')])
+  const release = controller.retain('m1')
+
+  release()
+  load.resolve({ outcome: 'succeeded', value: liveGrant('https://thumb.example/m1') })
+  await flush()
+  await flush()
+
+  assert.equal(controller.getSnapshot().thumbnails.m1, 'https://thumb.example/m1')
+})
+
+test('a retained task reference loads when its material facts arrive later', async () => {
+  const urls = fakeUrls()
+  const controller = createController(urls, async () => ({
+    outcome: 'succeeded',
+    value: liveGrant('https://thumb.example/m1')
+  }))
+  const release = controller.retain('m1')
+  assert.equal(controller.getSnapshot().thumbnails.m1, undefined)
+
+  controller.replaceMaterials([materialView('m1')])
+  await flush()
+  await flush()
+
+  assert.equal(controller.getSnapshot().thumbnails.m1, 'https://thumb.example/m1')
+  release()
+})
+
 test('the last release still retires a local preview object URL', () => {
   const urls = fakeUrls()
   const controller = createController(urls)
@@ -304,7 +336,7 @@ test('a failed thumbnail authorization paints the failed state and retries on a 
   secondRelease()
 })
 
-test('forget() drops a remote thumbnail entry and tolerates the late release', async () => {
+test('forget() keeps a resolved remote thumbnail independent of the editable deck', async () => {
   const urls = fakeUrls()
   const controller = createController(urls, async () => ({
     outcome: 'succeeded',
@@ -319,8 +351,11 @@ test('forget() drops a remote thumbnail entry and tolerates the late release', a
   controller.forget('m1')
 
   assert.equal(controller.getSnapshot().materials.length, 0)
-  assert.equal(controller.getSnapshot().thumbnails.m1, undefined)
+  assert.equal(controller.getSnapshot().thumbnails.m1, 'https://thumb.example/m1')
   release()
+  assert.equal(controller.getSnapshot().thumbnails.m1, 'https://thumb.example/m1')
+
+  controller.reset()
   assert.equal(controller.getSnapshot().thumbnails.m1, undefined)
 })
 

@@ -6,6 +6,7 @@ import type {
   ReferenceMaterialView
 } from '../src/renderer/src/features/creation/api/go-creation-http'
 import type { ScriptedTask } from './fixtures/creation-workbench.story'
+import type { LocalDraftRecord } from '../src/renderer/src/features/creation/model/draft-store'
 
 // Scroll-contract tests for the Creation Workbench inside the App Shell.
 // This spec deliberately lives apart from creation-workbench.spec.tsx: its
@@ -233,6 +234,60 @@ async function loadFullHistory(page: Page, scroller: Locator, total: number): Pr
     )
     .toBe(String(total))
 }
+
+test('a task reference pile survives thumbnail loading and source material deletion', async ({
+  mount,
+  page
+}) => {
+  const tag = 'pending-reference'
+  const referenceId = materialId(tag, 1)
+  const [task] = manyMixedTasks(1, tag, true)
+  const pendingTask: ScriptedTask = {
+    ...task,
+    status: 'processing',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  const draft: LocalDraftRecord = {
+    prompt: 'Current draft',
+    promptDocument: { version: 1, nodes: [{ type: 'text', text: 'Current draft' }] },
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '4:3',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: [{ materialId: referenceId, role: 'reference' }]
+  }
+  await mount(
+    <CreationWorkbenchRealShellStory
+      taskScript={{ tasks: [pendingTask] }}
+      drafts={{ [scriptedSessionId]: draft }}
+      materials={{ [scriptedSessionId]: referencedMaterials(1, tag) }}
+      materialUrlDeferred
+    />
+  )
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+
+  const pile = page.getByTestId(`task-references-${pendingTask.id}`)
+  await expect(pile).toBeVisible()
+  await expect(pile).toContainText('IMG')
+  await expect(pile.getByRole('status')).toContainText('Loading')
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
+  await expect(pile.locator('img')).toBeVisible()
+
+  await page
+    .getByTestId('reference-deck')
+    .getByRole('button', { name: 'reference-1.png', exact: true })
+    .focus()
+  await page.keyboard.press('Delete')
+
+  await expect(pile).toBeVisible()
+  await expect(pile.locator('img')).toBeVisible()
+})
 
 test('the initial bottom follow survives a delayed virtualizer correction', async ({
   mount,

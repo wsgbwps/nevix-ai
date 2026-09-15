@@ -689,7 +689,7 @@ type MaterialURLAuthorization struct {
 // short-lived signed GET the renderer paints thumbnails from; non-image ids
 // collapse into not_found so guessing learns nothing.
 func (s *MaterialService) AuthorizeThumbnail(ctx context.Context, owner, id domain.UUID) (MaterialURLAuthorization, error) {
-	material, err := s.repos.GetForRead(ctx, owner, id)
+	material, err := s.repos.GetForThumbnail(ctx, owner, id)
 	if err != nil {
 		return MaterialURLAuthorization{}, err
 	}
@@ -749,18 +749,16 @@ func (s *MaterialService) OpenForDownload(ctx context.Context, owner, id domain.
 // stale object never silently survives a failed ingest or delete.
 const OrphanBlobLogWarning = "creation: orphan blob cleanup failed"
 
-// orphanLog reports best-effort cleanup failures without failing requests:
-// a leftover blob is invisible garbage (no row points at it), never user-
-// visible data.
+// orphanLog reports cleanup failures without exposing inaccessible leftover
+// object details or failing an already-committed removal.
 func orphanLog(_ error) {
 	slog.Warn(OrphanBlobLogWarning, "code", "object_storage_unavailable")
 }
 
-// Delete drops the row and durably schedules exact-key blob cleanup in one
-// transaction; the immediate provider delete runs only after commit.
+// Delete removes a material from Composer. A frozen task reference retains its
+// exact object; otherwise the existing durable cleanup path starts after commit.
 func (s *MaterialService) Delete(ctx context.Context, owner, id domain.UUID) error {
-	material, err := s.repos.GetForRead(ctx, owner, id)
-	if err != nil {
+	if _, err := s.repos.GetForRead(ctx, owner, id); err != nil {
 		return err
 	}
 	store, connection, err := s.storage.ResolveStore(ctx)
@@ -771,33 +769,38 @@ func (s *MaterialService) Delete(ctx context.Context, owner, id domain.UUID) err
 	createdAt := now.Add(-domain.ReferenceMaterialFinalizeLifetime)
 	finalizedAt := now
 	cleanupNextAttemptAt := now.Add(time.Minute)
-	cleanupID := domain.NewUUID()
-	// Result-derived materials have no direct-upload row, so deletion creates
-	// the same finalized tombstone the exact-key cleanup worker already owns.
-	cleanup := domain.ReferenceMaterialUpload{
-		ID: cleanupID, OwnerID: owner, SessionID: material.SessionID,
-		MaterialID: material.ID, ObjectKey: material.BlobKey, FileName: material.FileName,
-		DeclaredKind: material.Kind, DeclaredMIMEType: material.MimeType,
-		DeclaredByteSize: material.ByteSize, ClaimsVersion: material.ClaimsVersion,
-		IdempotencyKey: "material-cleanup-" + cleanupID.String(),
-		PayloadHash:    material.ChecksumSHA256, ConnectionRevision: connection.Revision,
-		PutDeadline:      createdAt.Add(domain.ReferenceMaterialPutLifetime),
-		FinalizeDeadline: now, Status: domain.ReferenceMaterialUploadFinalized,
-		CreatedAt: createdAt, FinalizedAt: &finalizedAt, CleanupAttemptCount: 1,
-		CleanupNextAttemptAt: &cleanupNextAttemptAt,
-	}
 	return s.runner.Run(ctx, func(scope domain.WriteScope) error {
-		blobKey, err := s.repos.Delete(ctx, scope.Tx(), owner, id)
+		material, retained, err := s.repos.Remove(ctx, scope.Tx(), owner, id)
 		if err != nil {
 			return err
 		}
-		if err := s.uploads.ScheduleFinalizedMaterialCleanup(ctx, scope.Tx(), &cleanup); err != nil {
+		cleanupID := domain.NewUUID()
+		// Result-derived materials need the same cleanup fact direct uploads already own.
+		cleanup := domain.ReferenceMaterialUpload{
+			ID: cleanupID, OwnerID: owner, SessionID: material.SessionID,
+			MaterialID: material.ID, ObjectKey: material.BlobKey, FileName: material.FileName,
+			DeclaredKind: material.Kind, DeclaredMIMEType: material.MimeType,
+			DeclaredByteSize: material.ByteSize, ClaimsVersion: material.ClaimsVersion,
+			IdempotencyKey: "material-cleanup-" + cleanupID.String(),
+			PayloadHash:    material.ChecksumSHA256, ConnectionRevision: connection.Revision,
+			PutDeadline:      createdAt.Add(domain.ReferenceMaterialPutLifetime),
+			FinalizeDeadline: now, Status: domain.ReferenceMaterialUploadFinalized,
+			CreatedAt: createdAt, FinalizedAt: &finalizedAt,
+		}
+		if !retained {
+			cleanup.CleanupAttemptCount = 1
+			cleanup.CleanupNextAttemptAt = &cleanupNextAttemptAt
+		}
+		if err := s.uploads.RecordFinalizedMaterialCleanup(ctx, scope.Tx(), &cleanup); err != nil {
 			return err
+		}
+		if retained {
+			return nil
 		}
 		scope.AfterCommit(func() {
 			deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), referenceMaterialImmediateCleanupTimeout)
 			defer cancel()
-			if delErr := store.Delete(deleteCtx, blobKey); delErr != nil {
+			if delErr := store.Delete(deleteCtx, material.BlobKey); delErr != nil {
 				orphanLog(delErr)
 			}
 		})

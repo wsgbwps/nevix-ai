@@ -129,10 +129,8 @@ func (r *GenerationTaskRepository) CountActiveReservations(ctx context.Context, 
 	return count, nil
 }
 
-// InsertAdmittedTask persists task, slots, job, queue item, and reservation
-// inside the caller's transaction. Lock ordering is stable by construction:
-// task → slots (ordered) → job → queue → reservation. The task pointer also
-// receives the database timestamps returned by its insert for fresh responses.
+// InsertAdmittedTask atomically persists the task, reference retention, slots,
+// job, queue item, and reservation, returning the task's database timestamps.
 func (r *GenerationTaskRepository) InsertAdmittedTask(ctx context.Context, tx domain.TxExecutor, admitted *domain.AdmittedTask) error {
 	task := admitted.Task
 	specJSON, err := json.Marshal(task.Spec)
@@ -149,6 +147,13 @@ func (r *GenerationTaskRepository) InsertAdmittedTask(ctx context.Context, tx do
 		string(task.Spec.MediaType), specJSON, task.Spec.ManifestVersion,
 		string(task.Status), task.SlotCount).Scan(&task.CreatedAt, &task.UpdatedAt); err != nil {
 		return fmt.Errorf("creation: insert generation task: %w", err)
+	}
+	for _, reference := range task.Spec.References {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO creation_generation_task_references (task_id, material_id)
+			VALUES ($1, $2) ON CONFLICT DO NOTHING`, task.ID, reference.MaterialID); err != nil {
+			return fmt.Errorf("creation: retain generation task reference: %w", err)
+		}
 	}
 	for _, slot := range admitted.Slots {
 		if _, err := tx.Exec(ctx, `

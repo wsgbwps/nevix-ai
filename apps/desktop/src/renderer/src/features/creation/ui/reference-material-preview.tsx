@@ -51,6 +51,7 @@ export function ReferenceMaterialPreview({
     () => new Map(materials.map((material) => [material.id, material] as const)),
     [materials]
   )
+  const openMaterialAvailable = openMaterialId !== null && byId.has(openMaterialId)
   const labelById = useMemo(
     () => new Map(candidates.map((candidate) => [candidate.materialId, candidate.label] as const)),
     [candidates]
@@ -72,7 +73,7 @@ export function ReferenceMaterialPreview({
   }, [byId])
 
   useEffect(() => {
-    if (openMaterialId === null || !byId.has(openMaterialId)) return
+    if (openMaterialId === null || !openMaterialAvailable) return
     if (cachedUrl.current?.materialId === openMaterialId) {
       setFull({
         materialId: openMaterialId,
@@ -110,7 +111,7 @@ export function ReferenceMaterialPreview({
     return () => {
       done = true
     }
-  }, [attempt, byId, loadPreviewSource, openMaterialId])
+  }, [attempt, loadPreviewSource, openMaterialAvailable, openMaterialId])
 
   // A media element erroring on an expired presigned URL gets one automatic
   // re-authorization per material per open; a successful load or closing the

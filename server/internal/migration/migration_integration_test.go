@@ -8,6 +8,7 @@ package migration
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/nevix-ai/server/internal/creation/domain"
 	"github.com/pressly/goose/v3"
 )
 
@@ -59,13 +61,19 @@ func TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase(t *testing.T) {
 	// The established role and least-privilege grants (ADR-0015), including
 	// the DDL boundary: identity_app may not create schema objects.
 	for probe, want := range map[string]bool{
-		`has_table_privilege('identity_app', 'public.users', 'SELECT')`:                                  true,
-		`has_table_privilege('identity_app', 'public.sessions', 'DELETE')`:                               true,
-		`has_table_privilege('identity_app', 'public.audit_logs', 'UPDATE')`:                             false,
-		`has_schema_privilege('identity_app', 'public', 'CREATE')`:                                       false,
-		`EXISTS (SELECT FROM pg_roles WHERE rolname = 'identity_app')`:                                   true,
-		`EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'goose_db_version')`:  true,
-		`EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'schema_migrations')`: false,
+		`has_table_privilege('identity_app', 'public.creation_generation_task_references', 'SELECT')`:                                                                                                          true,
+		`has_table_privilege('identity_app', 'public.creation_generation_task_references', 'INSERT')`:                                                                                                          true,
+		`has_table_privilege('identity_app', 'public.creation_generation_task_references', 'UPDATE')`:                                                                                                          false,
+		`has_table_privilege('identity_app', 'public.creation_generation_task_references', 'DELETE')`:                                                                                                          false,
+		`has_function_privilege('identity_app', 'public.creation_release_removed_material_retention()', 'EXECUTE')`:                                                                                            true,
+		`EXISTS (SELECT FROM pg_proc, LATERAL aclexplode(proacl) acl WHERE oid = 'public.creation_release_removed_material_retention()'::regprocedure AND acl.grantee = 0 AND acl.privilege_type = 'EXECUTE')`: false,
+		`has_table_privilege('identity_app', 'public.users', 'SELECT')`:                                                                                                                                        true,
+		`has_table_privilege('identity_app', 'public.sessions', 'DELETE')`:                                                                                                                                     true,
+		`has_table_privilege('identity_app', 'public.audit_logs', 'UPDATE')`:                                                                                                                                   false,
+		`has_schema_privilege('identity_app', 'public', 'CREATE')`:                                                                                                                                             false,
+		`EXISTS (SELECT FROM pg_roles WHERE rolname = 'identity_app')`:                                                                                                                                         true,
+		`EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'goose_db_version')`:                                                                                                        true,
+		`EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'schema_migrations')`:                                                                                                       false,
 	} {
 		var got bool
 		if err := db.QueryRowContext(ctx, "SELECT "+probe).Scan(&got); err != nil {
@@ -711,6 +719,119 @@ func embeddedMigrationsBefore(t *testing.T, versionLimit int64) fstest.MapFS {
 		selected["migrations/"+entry.Name()] = &fstest.MapFile{Data: contents}
 	}
 	return selected
+}
+
+func TestUpgradeBackfillsExistingTaskReferenceRetention(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	scratchURL := scratchDatabase(t, ctx, requireOwnerURL(t), "nevix_migration_reference_retention")
+	if _, err := applyFS(ctx, scratchURL, embeddedMigrationsBefore(t, 20)); err != nil {
+		t.Fatalf("apply migrations through v19: %v", err)
+	}
+	db := openDB(t, ctx, scratchURL)
+	var ownerID, sessionID, materialID, taskID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.users (email, password_hash, display_name, role, status, must_change_password)
+		VALUES ('retention-upgrade@nevix.test', 'seed-hash', 'retention-upgrade', 'member', 'active', false)
+		RETURNING id`).Scan(&ownerID); err != nil {
+		t.Fatalf("seed creator: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.creation_sessions (owner_user_id, name) VALUES ($1, 'retention-upgrade')
+		RETURNING id`, ownerID).Scan(&sessionID); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.creation_reference_materials
+		(id, session_id, kind, file_name, mime_type, byte_size, checksum_sha256, blob_key,
+		 width_px, height_px, pixel_count)
+		VALUES ('6809b2c4-cb3b-4ab6-ab7f-b7760d98e8df', $1,
+		        'image', 'retained.png', 'image/png', 1, decode(repeat('00', 32), 'hex'),
+		        'reference/retention-upgrade', 1, 1, 1)
+		RETURNING id`, sessionID).Scan(&materialID); err != nil {
+		t.Fatalf("seed material: %v", err)
+	}
+	materialUUID, err := domain.ParseUUID(materialID)
+	if err != nil {
+		t.Fatalf("parse material identity: %v", err)
+	}
+	spec := domain.GenerationSpecification{
+		SchemaVersion: 1, MediaType: "image", Prompt: "retention-upgrade",
+		Model: "seed-model", Mode: "image-reference", ManifestVersion: 1, Quantity: 1,
+		References: []domain.SpecificationReference{
+			{MaterialID: materialUUID, Role: "reference", Kind: "image", ClaimsVersion: 1},
+			{MaterialID: materialUUID, Role: "reference", Kind: "image", ClaimsVersion: 1},
+			{MaterialID: domain.UUID{6: 0x40, 8: 0x80, 15: 1}, Role: "reference", Kind: "image", ClaimsVersion: 1},
+		},
+	}
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("encode historical specification: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.creation_generation_tasks
+		(session_id, owner_user_id, idempotency_key, payload_hash, media_type, specification,
+		 manifest_version, status, slot_count, terminal_at)
+		VALUES ($1, $2, 'retention-upgrade', 'seed-payload', 'image', $3::jsonb,
+		        1, 'failed', 1, now())
+		RETURNING id`, sessionID, ownerID, specJSON).Scan(&taskID); err != nil {
+		t.Fatalf("seed historical references: %v", err)
+	}
+	var stringTaskID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.creation_generation_tasks
+		(session_id, owner_user_id, idempotency_key, payload_hash, media_type, specification,
+		 manifest_version, status, slot_count, terminal_at)
+		VALUES ($1, $2, 'retention-upgrade-string', 'seed-payload', 'image',
+		        jsonb_build_object('references', jsonb_build_array(
+		          jsonb_build_object('material_id', $3::text),
+		          jsonb_build_object('material_id', $3::text),
+		          jsonb_build_object('material_id', '00000000-0000-4000-8000-000000000001'))),
+		        1, 'failed', 1, now())
+		RETURNING id`, sessionID, ownerID, materialID).Scan(&stringTaskID); err != nil {
+		t.Fatalf("seed string-form historical references: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO public.creation_generation_tasks
+		(session_id, owner_user_id, idempotency_key, payload_hash, media_type, specification,
+		 manifest_version, status, slot_count, terminal_at)
+		VALUES ($1, $2, 'retention-upgrade-empty', 'seed-payload', 'image', '{"references": []}',
+		        1, 'failed', 1, now()),
+		       ($1, $2, 'retention-upgrade-missing', 'seed-payload', 'image', '{}',
+		        1, 'failed', 1, now())`, sessionID, ownerID); err != nil {
+		t.Fatalf("seed tasks without references: %v", err)
+	}
+	applied, err := Apply(ctx, scratchURL)
+	if err != nil || len(applied) == 0 || applied[0].Source.Version != 20 {
+		t.Fatalf("upgrade retention migration: applied=%+v err=%v", applied, err)
+	}
+	var count int
+	for _, retainedTaskID := range []string{taskID, stringTaskID} {
+		if err := db.QueryRowContext(ctx, `
+			SELECT count(*) FROM public.creation_generation_task_references
+			WHERE task_id = $1 AND material_id = $2`, retainedTaskID, materialID).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("task %s must retain existing material once: count=%d err=%v", retainedTaskID, count, err)
+		}
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM public.creation_generation_task_references`).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("missing/empty references must not form retention facts: count=%d err=%v", count, err)
+	}
+	var active bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT removed_at IS NULL FROM public.creation_reference_materials WHERE id = $1`, materialID,
+	).Scan(&active); err != nil || !active {
+		t.Fatalf("upgrade must leave Composer material active: active=%t err=%v", active, err)
+	}
+	var preserved bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT specification = $2::jsonb FROM public.creation_generation_tasks WHERE id = $1`, taskID, specJSON,
+	).Scan(&preserved); err != nil || !preserved {
+		t.Fatalf("upgrade must preserve frozen specification: preserved=%t err=%v", preserved, err)
+	}
+	if applied, err := Apply(ctx, scratchURL); err != nil || len(applied) != 0 {
+		t.Fatalf("re-apply after retention upgrade must be a no-op: applied=%+v err=%v", applied, err)
+	}
 }
 
 // embeddedVersions lists the migration file numbers present under

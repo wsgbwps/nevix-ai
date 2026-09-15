@@ -368,7 +368,7 @@ func (w *TaskWorker) buildSubmitRequest(ctx context.Context, task domain.Generat
 		return req, nil
 	}
 	for _, reference := range task.Spec.References {
-		material, err := w.materials.GetForRead(ctx, task.OwnerID, reference.MaterialID)
+		material, err := w.materials.GetForTask(ctx, task.OwnerID, task.ID, reference.MaterialID)
 		if err != nil {
 			return domain.SubmitRequest{}, err
 		}

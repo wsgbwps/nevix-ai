@@ -395,11 +395,11 @@ func TestDeleteMaterialRemovesRowAndBlobCleanupSchedules(t *testing.T) {
 	}
 	var count int
 	if err := h.ownerPool.QueryRow(h.ctx,
-		`SELECT count(*) FROM creation_reference_materials WHERE id = $1::uuid`, view.ID).Scan(&count); err != nil {
+		`SELECT count(*) FROM creation_reference_materials WHERE id = $1::uuid AND removed_at IS NULL`, view.ID).Scan(&count); err != nil {
 		t.Fatalf("count rows: %v", err)
 	}
 	if count != 0 {
-		t.Fatal("deleted material row still present")
+		t.Fatal("removed material remains active")
 	}
 	var uploadID, objectKey, uploadStatus string
 	var cleanupAttempt int
@@ -445,6 +445,9 @@ func TestDeleteMaterialRemovesRowAndBlobCleanupSchedules(t *testing.T) {
 	}
 	if !cleanupDue {
 		t.Fatal("finalized material cleanup did not survive the failed immediate delete")
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_materials WHERE id = $1::uuid`, view.ID); got != 0 {
+		t.Fatal("removed material metadata survived confirmed object cleanup")
 	}
 }
 

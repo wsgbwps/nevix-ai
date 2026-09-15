@@ -25,8 +25,9 @@ type SessionRepository interface {
 	Delete(ctx context.Context, tx TxExecutor, owner, id UUID) error
 }
 
-// MaterialRepository is the persistence port for reference materials. Reads
-// join the owning session so a deleted session's materials disappear with it.
+// MaterialRepository is the persistence port for reference materials. Active
+// reads join the owning session; task/display reads also admit materials
+// retained by an owned Generation Task.
 type MaterialRepository interface {
 	// Insert persists one fully validated material inside the caller's write
 	// transaction scope; blob placement happened earlier outside any tx.
@@ -34,12 +35,17 @@ type MaterialRepository interface {
 	// GetForRead resolves one material for its creator through an active
 	// session; every failure shape collapses into ErrMaterialNotFound.
 	GetForRead(ctx context.Context, owner, id UUID) (ReferenceMaterial, error)
+	// GetForThumbnail resolves active material or a removed material retained
+	// by one of the same creator's immutable tasks.
+	GetForThumbnail(ctx context.Context, owner, id UUID) (ReferenceMaterial, error)
+	// GetForTask resolves only an exact frozen reference retained by this
+	// creator's admitted task, independently of Composer/session removal.
+	GetForTask(ctx context.Context, owner, taskID, materialID UUID) (ReferenceMaterial, error)
 	GetForReadInTx(ctx context.Context, tx TxExecutor, owner, id UUID) (ReferenceMaterial, error)
 	ListBySession(ctx context.Context, owner, sessionID UUID, cursor *CompoundCursor, limit int) ([]ReferenceMaterial, *CompoundCursor, error)
-	// Delete removes the material row only when both the material and its
-	// session belong to the acting creator and the session is still active.
-	// The returned blob key schedules after-commit cleanup.
-	Delete(ctx context.Context, tx TxExecutor, owner, id UUID) (blobKey string, err error)
+	// Remove hides an active material from Composer and future admission. The
+	// retained result reports whether a task still owns its blob lifecycle.
+	Remove(ctx context.Context, tx TxExecutor, owner, id UUID) (material ReferenceMaterial, retained bool, err error)
 	// LoadMaterialsInSession resolves the requested materials with full facts
 	// inside the caller's transaction; materials outside the session are
 	// absent, and admission treats absence as a rejection fact.
@@ -59,7 +65,9 @@ type ReferenceMaterialUploadRepository interface {
 	MarkPending(ctx context.Context, tx TxExecutor, owner, id, token UUID) error
 	MarkFinalized(ctx context.Context, tx TxExecutor, owner, id, token UUID, finalizedAt time.Time) error
 	MarkTerminal(ctx context.Context, tx TxExecutor, owner, id UUID, token *UUID, terminalAt time.Time) error
-	ScheduleFinalizedMaterialCleanup(ctx context.Context, tx TxExecutor, cleanup *ReferenceMaterialUpload) error
+	// RecordFinalizedMaterialCleanup preserves exact-key facts while setting
+	// cleanup dormant for retained material or due for an unretained removal.
+	RecordFinalizedMaterialCleanup(ctx context.Context, tx TxExecutor, cleanup *ReferenceMaterialUpload) error
 	TerminalizeExpiredOrInvalid(ctx context.Context, tx TxExecutor, now time.Time, limit int) error
 	LockDueCleanups(ctx context.Context, tx TxExecutor, now time.Time, limit int) ([]ReferenceMaterialUpload, error)
 	MarkCleanupAttempt(ctx context.Context, tx TxExecutor, id UUID, nextAttemptAt time.Time) (ReferenceMaterialUploadCleanup, error)

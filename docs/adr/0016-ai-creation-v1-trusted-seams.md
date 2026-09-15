@@ -16,6 +16,8 @@
 
 2026-09-14 修订：Reference Material 的显示类读取改用 Go 授权的第三条窄例外——Creator 通过 owner 校验后获得约 10 分钟、单一精确 key 的预签名 GET URL：缩略图为 provider 端缩小（宽 ≤320、WebP）进 Renderer `<img>`，预览大图为图片缩小（宽 ≤2048、WebP）或视频/音频原始字节进 `<video>/<audio>`（CSP 相应放行 `img-src https:` 并补 `media-src`）；素材本体下载仍经 Go 授权出口，canary 与 finalize 责任不变。
 
+2026-09-15 修订：Reference Material 的 Composer 生命周期与冻结 TaskCard 展示生命周期分离。提交准入原子持久化 Generation Task 对素材的保留关系；从 Composer 移除后不再列表或参与新任务，但同一 Creator 的既有任务仍可凭冻结 material id 重新获得短时缩略图 URL。精确对象只在素材已移除且最后一个任务保留关系结束后进入既有持久 cleanup worker。
+
 ## 背景
 
 AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 decision tickets 与多份 ADR 中；旧票建立于 Organization、Supabase/RLS、Desktop 直连数据面等前提之上。#93 清空全部决策前沿并取代早期假设，#150 把最终边界收敛为单一规格。若不在架构文档中固化，实施 agent 容易复活已被取代的设计。本 ADR 与 [ADR-0012](0012-unified-ai-creation-owner.md)（owner 统一）、[ADR-0014](0014-go-sole-trusted-data-plane.md)（数据面）、[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)（用户系统与授权）互补，各自保持单一权威说明。
@@ -62,6 +64,14 @@ Session 认证与 Reauthentication Proof 归 Identity（[ADR-0015](0015-single-t
 - finalize 先以短事务 CAS `pending -> verifying` 并取得 verification lease，再在事务外 HEAD 与完整有界 GET，复用内容 sniff、媒体 probe、实际 kind 限额和 SHA-256；最后在 verified write transaction 中原子创建 Reference Material 并标记 `finalized`。状态仅 `pending|verifying|finalized|terminal`；重复 finalize 返回同一素材，并发验证返回可重试安全码。
 - image/audio/video 上限继续为 10/50/200 MiB。abort、过期、HEAD mismatch 与确定性媒体拒绝进入 terminal 并立即 best-effort DeleteObject；瞬时外部故障在 finalize window 内回到 pending。持久 cleanup worker 只按数据库记录的精确 key、verification lease 与 next-attempt 重试，不 List bucket；对象从一开始位于 `reference-materials/`，不 Copy，customer lifecycle 只作用于 `provider-transfer/`。
 - signed PUT URL 只可在当前 Creator 对应的 Electron Main 上传操作内存中存在，Renderer 不接收；Provider Transfer Object GET URL 只可在 Go 到 AI Provider 的必要调用中存在；2026-09-14 起显示类 GET URL（缩略图与预览大图/媒体）可在当前 Creator 的 Renderer 内存与 `<img>/<video>/<audio>` 加载请求中存在（Go 归属校验后签发、单一精确 key、约 10 分钟、图片带 provider 端缩小，元素 error 后重新授权）。三者均不进入本地持久化、普通日志、Audit Log、错误、剪贴板或遥测。Reference Material 本体下载仍经 Go 授权出口。
+
+### Reference Material 与历史任务保留
+
+- Generation Task 准入在创建不可变 Generation Specification 的同一短事务内，为其中每个素材 identity 写入权威 task-to-material 保留关系；不在读取时扫描 JSONB 推断对象生命周期，也不复制或持久化 signed URL。
+- 既有任务的 Provider Reference Preparation 按其自身的保留关系读取冻结素材事实，不依赖 Composer 列表或 Session 活跃状态；移除素材不能撤销已准入任务的输入。
+- `DELETE /creation/materials/{materialID}` 的业务语义是从 Composer 移除：会话素材列表与后续任务准入只接受未移除素材。没有任务保留关系时，移除沿用现有精确 key 清理；存在保留关系时，素材事实和 blob 保持 creator-private，不调度或执行物理清理。
+- 现有 material-id thumbnail seam 可授权两类图片：仍在 Composer 的活跃素材，或由同一 Creator 的至少一个 Generation Task 保留的已移除素材。后者只供冻结 TaskCard 展示重新签发约十分钟的 provider-resized URL；Preview 与素材本体下载仍只接受活跃素材，另一 User 与 Admin 均无旁路。
+- 物理清理的权威触发条件是“素材已从 Composer 移除，且任务保留关系为零”。删除最后一个保留任务时必须在同一数据库变更中把既有 finalized-upload cleanup fact 置为 due；cleanup worker 仍独占重试、确认和精确 key 删除。V1 没有 Generation Task 删除命令，因此被历史任务保留的对象与该不可变任务同寿；Creation Session 的逻辑删除不释放仍然存在的任务保留关系。
 
 ### Creation domain-local 写事务
 

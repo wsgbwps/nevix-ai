@@ -120,7 +120,6 @@ export const creationTranslations = defineResourceTranslations({
         backToBottom: '回到底部',
         newTaskAvailable: '有新任务 · 回到底部',
         media: {
-          unloaded: '结果尚未加载',
           loading: '正在加载结果…',
           failed: '结果媒体加载失败',
           retry: '重试'
@@ -516,7 +515,6 @@ export const creationTranslations = defineResourceTranslations({
         backToBottom: 'Back to bottom',
         newTaskAvailable: 'New task · Back to bottom',
         media: {
-          unloaded: 'Result not loaded',
           loading: 'Loading result…',
           failed: 'Result media could not be loaded',
           retry: 'Retry'
