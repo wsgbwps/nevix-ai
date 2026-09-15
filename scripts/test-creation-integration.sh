@@ -9,7 +9,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
 postgres_image="postgres:17.5-alpine"
-minio_image="minio/minio:RELEASE.2024-06-13T22-53-53Z"
+minio_image="quay.io/minio/minio:RELEASE.2024-06-13T22-53-53Z"
 postgres_host_port=54391
 s3_host_port=9001
 postgres_container="nevix-creation-test-pg"
