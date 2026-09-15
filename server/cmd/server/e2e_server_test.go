@@ -11,6 +11,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nevix-ai/server/internal/creation"
 	"github.com/nevix-ai/server/internal/identity"
@@ -117,6 +118,17 @@ func (s *e2eBlobStore) Head(ctx context.Context, key string) (creation.BlobInfo,
 
 func (*e2eBlobStore) PresignPut(context.Context, creation.PresignPutRequest) (creation.PresignedPut, error) {
 	return creation.PresignedPut{}, errors.New("direct uploads are outside the Desktop E2E storage fake")
+}
+
+// No object-storage bucket stands behind the Desktop E2E fake, so there is no
+// presigned display URL to mint; the renderer parks affected media in its
+// manual retry state and downloads still stream through the Go endpoint.
+func (*e2eBlobStore) PresignThumbnail(context.Context, string, time.Duration) (string, error) {
+	return "", errors.New("display presigns are outside the Desktop E2E storage fake")
+}
+
+func (*e2eBlobStore) PresignPreview(context.Context, string, creation.Kind, time.Duration) (string, error) {
+	return "", errors.New("display presigns are outside the Desktop E2E storage fake")
 }
 
 type e2eReadSeekCloser struct {
