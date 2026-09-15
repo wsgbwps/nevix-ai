@@ -166,21 +166,8 @@ func (r *ReferenceMaterialUploadRepository) MarkTerminal(ctx context.Context, tx
 	return nil
 }
 
-func (r *ReferenceMaterialUploadRepository) ScheduleFinalizedMaterialCleanup(ctx context.Context, tx domain.TxExecutor, cleanup *domain.ReferenceMaterialUpload) error {
+func (r *ReferenceMaterialUploadRepository) RecordFinalizedMaterialCleanup(ctx context.Context, tx domain.TxExecutor, cleanup *domain.ReferenceMaterialUpload) error {
 	tag, err := tx.Exec(ctx, `
-		UPDATE creation_reference_material_uploads
-		SET cleanup_attempt_count = 1,
-		    cleanup_next_attempt_at = $3,
-		    cleanup_confirmed_at = NULL
-		WHERE owner_user_id = $1 AND material_id = $2 AND status = 'finalized'`,
-		cleanup.OwnerID, cleanup.MaterialID, cleanup.CleanupNextAttemptAt)
-	if err != nil {
-		return fmt.Errorf("creation: schedule finalized reference material cleanup: %w", err)
-	}
-	if tag.RowsAffected() == 1 {
-		return nil
-	}
-	_, err = tx.Exec(ctx, `
 		INSERT INTO creation_reference_material_uploads (
 			id, owner_user_id, session_id, material_id, object_key, file_name,
 			declared_kind, declared_mime_type, declared_byte_size, claims_version,
@@ -189,7 +176,13 @@ func (r *ReferenceMaterialUploadRepository) ScheduleFinalizedMaterialCleanup(ctx
 			cleanup_attempt_count, cleanup_next_attempt_at
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
-		)`,
+		)
+		ON CONFLICT (material_id) DO UPDATE
+		SET cleanup_attempt_count = EXCLUDED.cleanup_attempt_count,
+		    cleanup_next_attempt_at = EXCLUDED.cleanup_next_attempt_at,
+		    cleanup_confirmed_at = NULL
+		WHERE creation_reference_material_uploads.owner_user_id = EXCLUDED.owner_user_id
+		  AND creation_reference_material_uploads.status = 'finalized'`,
 		cleanup.ID, cleanup.OwnerID, cleanup.SessionID, cleanup.MaterialID,
 		cleanup.ObjectKey, cleanup.FileName, string(cleanup.DeclaredKind),
 		cleanup.DeclaredMIMEType, cleanup.DeclaredByteSize, cleanup.ClaimsVersion,
@@ -198,7 +191,10 @@ func (r *ReferenceMaterialUploadRepository) ScheduleFinalizedMaterialCleanup(ctx
 		cleanup.CreatedAt, cleanup.FinalizedAt, cleanup.CleanupAttemptCount,
 		cleanup.CleanupNextAttemptAt)
 	if err != nil {
-		return fmt.Errorf("creation: insert finalized reference material cleanup: %w", err)
+		return fmt.Errorf("creation: record finalized reference material cleanup: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("creation: finalized reference material cleanup fact missing")
 	}
 	return nil
 }
@@ -236,6 +232,10 @@ func (r *ReferenceMaterialUploadRepository) LockDueCleanups(ctx context.Context,
 		FROM creation_reference_material_uploads u
 		WHERE u.status IN ('terminal', 'finalized') AND u.cleanup_confirmed_at IS NULL
 		  AND u.cleanup_next_attempt_at <= $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM creation_generation_task_references retained
+			WHERE retained.material_id = u.material_id
+		  )
 		ORDER BY u.cleanup_next_attempt_at, u.id
 		FOR UPDATE SKIP LOCKED
 		LIMIT $2`, now, limit)
@@ -278,10 +278,20 @@ func (r *ReferenceMaterialUploadRepository) MarkCleanupAttempt(ctx context.Conte
 
 func (r *ReferenceMaterialUploadRepository) MarkCleanupConfirmed(ctx context.Context, tx domain.TxExecutor, id domain.UUID, attempt int, confirmedAt domain.Time) error {
 	_, err := tx.Exec(ctx, `
-		UPDATE creation_reference_material_uploads
-		SET cleanup_confirmed_at = $3, cleanup_next_attempt_at = NULL
-		WHERE id = $1 AND status IN ('terminal', 'finalized') AND cleanup_confirmed_at IS NULL
-		  AND cleanup_attempt_count = $2`, id, attempt, confirmedAt)
+		WITH confirmed AS (
+			UPDATE creation_reference_material_uploads
+			SET cleanup_confirmed_at = $3, cleanup_next_attempt_at = NULL
+			WHERE id = $1 AND status IN ('terminal', 'finalized') AND cleanup_confirmed_at IS NULL
+			  AND cleanup_attempt_count = $2
+			RETURNING material_id
+		)
+		DELETE FROM creation_reference_materials material
+		USING confirmed
+		WHERE material.id = confirmed.material_id AND material.removed_at IS NOT NULL
+		  AND NOT EXISTS (
+			SELECT 1 FROM creation_generation_task_references retained
+			WHERE retained.material_id = material.id
+		  )`, id, attempt, confirmedAt)
 	if err != nil {
 		return fmt.Errorf("creation: confirm reference material cleanup: %w", err)
 	}

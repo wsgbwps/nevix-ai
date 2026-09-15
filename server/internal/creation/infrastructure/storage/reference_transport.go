@@ -26,7 +26,7 @@ const (
 )
 
 type referenceObjectStore interface {
-	domain.DirectUploadBlobStore
+	domain.ObjectStorageBlobStore
 	putProviderTransfer(context.Context, string, io.Reader, int64, string, map[string]string) (domain.PutResult, error)
 	presignGet(context.Context, string, time.Duration) (string, error)
 }

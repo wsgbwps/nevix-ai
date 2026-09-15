@@ -18,7 +18,7 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-type newCloudStoreForTest func(t *testing.T, transport http.RoundTripper) domain.DirectUploadBlobStore
+type newCloudStoreForTest func(t *testing.T, transport http.RoundTripper) domain.ObjectStorageBlobStore
 
 func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloudStoreForTest) {
 	t.Helper()
@@ -151,6 +151,91 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 		}
 	})
 
+	t.Run("PresignedThumbnailSignsResizeIntoTheSignature", func(t *testing.T) {
+		backend := newFakeCloudTransport(provider)
+		store := newStore(t, backend)
+		ctx := context.Background()
+		if _, err := store.Put(ctx, "suite/thumb", strings.NewReader("image-bytes"), 1024); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		signedURL, err := store.PresignThumbnail(ctx, "suite/thumb", 10*time.Minute)
+		if err != nil {
+			t.Fatalf("PresignThumbnail: %v", err)
+		}
+		query := mustParseSignedQuery(t, signedURL, backend.origin())
+		if provider == ProviderOSS {
+			if got := query.Get("x-oss-process"); got != "image/resize,m_lfit,w_320/format,webp" {
+				t.Fatalf("x-oss-process = %q, want the 320px WebP resize chain", got)
+			}
+		} else if _, ok := query["imageMogr2/thumbnail/320x/format/webp"]; !ok {
+			t.Fatalf("signed query lacks the CI process action: %s", signedURL)
+		}
+		// The bare GET the URL authorizes (no Authorization header) must pass
+		// the provider-side signature check the fake enforces.
+		signedReq, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL, nil)
+		if err != nil {
+			t.Fatalf("build signed GET: %v", err)
+		}
+		resp, err := (&http.Client{Transport: backend}).Do(signedReq)
+		if err != nil {
+			t.Fatalf("signed thumbnail GET: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || string(body) != "image-bytes" {
+			t.Fatalf("signed thumbnail GET = %d %q, want the stored object", resp.StatusCode, body)
+		}
+	})
+
+	t.Run("PresignedPreviewSignsImageResizeAndRawMedia", func(t *testing.T) {
+		backend := newFakeCloudTransport(provider)
+		store := newStore(t, backend)
+		ctx := context.Background()
+		if _, err := store.Put(ctx, "suite/preview", strings.NewReader("media-bytes"), 1024); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		imageURL, err := store.PresignPreview(ctx, "suite/preview", domain.KindImage, 10*time.Minute)
+		if err != nil {
+			t.Fatalf("PresignPreview image: %v", err)
+		}
+		imageQuery := mustParseSignedQuery(t, imageURL, backend.origin())
+		if provider == ProviderOSS {
+			if got := imageQuery.Get("x-oss-process"); got != "image/resize,m_lfit,w_2048/format,webp" {
+				t.Fatalf("x-oss-process = %q, want the 2048px WebP resize chain", got)
+			}
+		} else if _, ok := imageQuery["imageMogr2/thumbnail/2048x/format/webp"]; !ok {
+			t.Fatalf("signed query lacks the CI preview action: %s", imageURL)
+		}
+		rawURL, err := store.PresignPreview(ctx, "suite/preview", domain.KindVideo, 10*time.Minute)
+		if err != nil {
+			t.Fatalf("PresignPreview video: %v", err)
+		}
+		rawQuery := mustParseSignedQuery(t, rawURL, backend.origin())
+		if _, ok := rawQuery["x-oss-process"]; ok {
+			t.Fatalf("raw preview GET must not carry a processing chain: %s", rawURL)
+		}
+		if _, ok := rawQuery["imageMogr2/thumbnail/2048x/format/webp"]; ok {
+			t.Fatalf("raw preview GET must not carry the CI preview action: %s", rawURL)
+		}
+		// Both bare GETs must pass the provider-side signature check the fake
+		// enforces, proving the variant query is signed into each URL.
+		for name, signedURL := range map[string]string{"image": imageURL, "raw": rawURL} {
+			signedReq, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL, nil)
+			if err != nil {
+				t.Fatalf("build signed GET (%s): %v", name, err)
+			}
+			resp, err := (&http.Client{Transport: backend}).Do(signedReq)
+			if err != nil {
+				t.Fatalf("signed preview GET (%s): %v", name, err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK || string(body) != "media-bytes" {
+				t.Fatalf("signed preview GET (%s) = %d %q, want the stored object", name, resp.StatusCode, body)
+			}
+		}
+	})
+
 	t.Run("MapsProviderErrorsWithoutLeakingResponses", func(t *testing.T) {
 		backend := newFakeCloudTransport(provider)
 		store := newStore(t, backend)
@@ -192,6 +277,18 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 			}
 		})
 	}
+}
+
+func mustParseSignedQuery(t *testing.T, signedURL, wantOrigin string) url.Values {
+	t.Helper()
+	parsed, err := url.Parse(signedURL)
+	if err != nil {
+		t.Fatalf("parse signed URL: %v", err)
+	}
+	if got := parsed.Scheme + "://" + parsed.Host; got != wantOrigin {
+		t.Fatalf("signed origin = %q, want %q", got, wantOrigin)
+	}
+	return parsed.Query()
 }
 
 func sameHeaders(got, want map[string]string) bool {

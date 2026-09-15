@@ -371,6 +371,66 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/materials/{materialID}/thumbnail-url:
+    get:
+      operationId: getReferenceMaterialThumbnailUrl
+      summary: 签发参考素材缩略图的限时直连 GET
+      description: |-
+        经 Go 归属校验后，为 image 素材签发约 10 分钟、单一精确 key、provider 端缩小
+        （宽 ≤320、WebP）的预签名 HTTPS GET URL；Renderer 直接放入 <img> 加载。URL 只读、
+        不可列举、不暴露 AK/SK，签发时的归属校验是唯一授权点，TTL 过期即失效并需重新
+        获取。非 image、他人或不存在 id 一律 404（猜测无信息泄漏）；素材本体的认证下载
+        仍走 GET /creation/materials/{materialID}。从 Composer 移除后，若仍由同一创建者的
+        既有任务保留，冻结 TaskCard 可继续凭素材 id 获取新的 resize URL，无需当前素材列表。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/materialID"
+      responses:
+        "200":
+          description: 一次有效的缩略图显示授权。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaterialThumbnailUrl"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/materials/{materialID}/preview-url:
+    get:
+      operationId: getReferenceMaterialPreviewUrl
+      summary: 签发参考素材预览的限时直连 GET
+      description: |-
+        经 Go 归属校验后，为任意 kind 的素材签发约 10 分钟、单一精确 key 的预签名 HTTPS
+        GET URL：image 经 provider 端缩小（宽 ≤2048、WebP），video/audio 为原始字节
+        （Range 不参与 GET 签名，seek 可用）；Renderer 直接放入 <img>/<video>/<audio> 加载。
+        URL 只读、不可列举、不暴露 AK/SK，签发时的归属校验是唯一授权点，TTL 过期即失效
+        （元素 error 后重新授权获取）。他人、已移除或不存在 id 一律 404（猜测无信息泄漏）；素材
+        本体的认证下载仍走 GET /creation/materials/{materialID}。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/materialID"
+      responses:
+        "200":
+          description: 一次有效的预览显示授权。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaterialPreviewUrl"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
   /creation/materials/{materialID}:
     get:
       operationId: downloadReferenceMaterial
@@ -379,8 +439,8 @@ paths:
         经 Go 有界流式出口取回素材本体；支持单区间 Range 请求（206 + Content-Range），
         不支持多区间与非法区间（416）。响应携带 X-Content-SHA-256：全量下发时服务端在下发
         过程中即时校验 checksum，不一致将中断连接而非下发损坏数据；部分（206）下发无法从
-        全文 digest 反推区间校验，客户端可凭该头部自行核对。仅创建者可读；他人/Admin 猜测 id
-        得到 404。
+        全文 digest 反推区间校验，客户端可凭该头部自行核对。仅创建者可读未移除素材；
+        他人/Admin 猜测 id 或读取已移除素材得到 404。
       security:
         - bearerAuth: []
       parameters:
@@ -440,15 +500,19 @@ paths:
           $ref: "#/components/responses/InternalError"
     delete:
       operationId: deleteReferenceMaterial
-      summary: 删除当前创建者的 Reference Material
-      description: 删除素材记录及其 blob：仅创建者可删；行删除事务成功后再清理 blob。他人/已删除回答 404。
+      summary: 从 Composer 移除当前创建者的 Reference Material
+      description: |-
+        仅创建者可移除；移除后不再出现在会话素材列表，也不能用于新的任务准入。
+        已有任务的冻结引用继续保留素材事实及精确 blob，可凭 id 重新获取缩略图 URL。
+        素材已移除且最后一个任务保留关系结束后，才进入持久化精确 key 清理。
+        他人或已移除素材回答 404。
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/materialID"
       responses:
         "204":
-          description: 素材记录已删除；blob 清理随 AfterCommit 执行。
+          description: 素材已从 Composer 移除；无任务保留时开始精确 blob 清理。
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -2005,6 +2069,34 @@ components:
           minimum: 1
           maximum: 209715200
           description: 绑定租约并由 Head 复核；仍受 declared kind 的更窄限额约束。
+    MaterialThumbnailUrl:
+      type: object
+      additionalProperties: false
+      required:
+        - url
+        - expires_at
+      properties:
+        url:
+          type: string
+          description: 短期预签名 HTTPS GET（含 provider 缩放参数）；不持久化、不进日志。
+        expires_at:
+          type: string
+          format: date-time
+          description: 授权失效时刻（RFC 3339 UTC）；过期后需重新获取。
+    MaterialPreviewUrl:
+      type: object
+      additionalProperties: false
+      required:
+        - url
+        - expires_at
+      properties:
+        url:
+          type: string
+          description: 短期预签名 HTTPS GET（image 含 provider 预览缩放参数，媒体为原始字节）；不持久化、不进日志。
+        expires_at:
+          type: string
+          format: date-time
+          description: 授权失效时刻（RFC 3339 UTC）；过期后需重新获取。
     ReferenceMaterialUpload:
       type: object
       additionalProperties: false

@@ -4,6 +4,7 @@ import type { ResultBlobUrlLease } from '../lib/result-blob-cache'
 import {
   emptyWorkbenchDisplaySnapshot,
   WorkbenchDisplayController,
+  type MaterialPreviewSource,
   type PendingMaterialFile,
   type WorkbenchDisplayDeps,
   type WorkbenchDisplaySnapshot
@@ -25,15 +26,13 @@ export interface WorkbenchDisplayBinding {
   readonly updateUploadProgress: (materialId: string, sentBytes: number, totalBytes: number) => void
   readonly forget: (materialId: string) => void
   readonly requestThumbnail: (materialId: string) => void
+  readonly reportThumbnailFailure: (materialId: string, source: string) => void
   readonly retain: (materialId: string) => () => void
   readonly acquireResultBlobUrl: (
     taskId: string,
     slotIndex: number
   ) => Promise<ResultBlobUrlLease | null>
-  readonly loadMaterialPreviewBlob: (
-    materialId: string,
-    signal?: AbortSignal
-  ) => Promise<Blob | null>
+  readonly loadMaterialPreviewSource: (materialId: string) => Promise<MaterialPreviewSource | null>
   readonly pendingFiles: () => ReadonlyMap<string, PendingMaterialFile>
 }
 
@@ -51,9 +50,10 @@ const idleDisplayMethods = {
   updateUploadProgress: (): void => undefined,
   forget: (): void => undefined,
   requestThumbnail: (): void => undefined,
+  reportThumbnailFailure: (): void => undefined,
   retain: (): (() => void) => () => undefined,
   acquireResultBlobUrl: (): Promise<ResultBlobUrlLease | null> => Promise.resolve(null),
-  loadMaterialPreviewBlob: (): Promise<Blob | null> => Promise.resolve(null),
+  loadMaterialPreviewSource: (): Promise<MaterialPreviewSource | null> => Promise.resolve(null),
   pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => new Map()
 }
 
@@ -102,13 +102,15 @@ export function useWorkbenchDisplay(deps: WorkbenchDisplayDeps | null): Workbenc
         controller.updateUploadProgress(materialId, sentBytes, totalBytes),
       forget: (materialId: string): void => controller.forget(materialId),
       requestThumbnail: (materialId: string): void => controller.requestThumbnail(materialId),
+      reportThumbnailFailure: (materialId: string, source: string): void =>
+        controller.reportThumbnailFailure(materialId, source),
       retain: (materialId: string): (() => void) => controller.retain(materialId),
       acquireResultBlobUrl: (
         taskId: string,
         slotIndex: number
       ): Promise<ResultBlobUrlLease | null> => controller.acquireResultBlobUrl(taskId, slotIndex),
-      loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal): Promise<Blob | null> =>
-        controller.loadMaterialPreviewBlob(materialId, signal),
+      loadMaterialPreviewSource: (materialId: string): Promise<MaterialPreviewSource | null> =>
+        controller.loadMaterialPreviewSource(materialId),
       pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => controller.pendingFiles()
     }
   }, [controller])

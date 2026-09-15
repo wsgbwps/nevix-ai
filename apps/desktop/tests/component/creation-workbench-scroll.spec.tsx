@@ -6,6 +6,7 @@ import type {
   ReferenceMaterialView
 } from '../src/renderer/src/features/creation/api/go-creation-http'
 import type { ScriptedTask } from './fixtures/creation-workbench.story'
+import type { LocalDraftRecord } from '../src/renderer/src/features/creation/model/draft-store'
 
 // Scroll-contract tests for the Creation Workbench inside the App Shell.
 // This spec deliberately lives apart from creation-workbench.spec.tsx: its
@@ -234,6 +235,60 @@ async function loadFullHistory(page: Page, scroller: Locator, total: number): Pr
     .toBe(String(total))
 }
 
+test('a task reference pile survives thumbnail loading and source material deletion', async ({
+  mount,
+  page
+}) => {
+  const tag = 'pending-reference'
+  const referenceId = materialId(tag, 1)
+  const [task] = manyMixedTasks(1, tag, true)
+  const pendingTask: ScriptedTask = {
+    ...task,
+    status: 'processing',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  const draft: LocalDraftRecord = {
+    prompt: 'Current draft',
+    promptDocument: { version: 1, nodes: [{ type: 'text', text: 'Current draft' }] },
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '4:3',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: [{ materialId: referenceId, role: 'reference' }]
+  }
+  await mount(
+    <CreationWorkbenchRealShellStory
+      taskScript={{ tasks: [pendingTask] }}
+      drafts={{ [scriptedSessionId]: draft }}
+      materials={{ [scriptedSessionId]: referencedMaterials(1, tag) }}
+      materialUrlDeferred
+    />
+  )
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+
+  const pile = page.getByTestId(`task-references-${pendingTask.id}`)
+  await expect(pile).toBeVisible()
+  await expect(pile).toContainText('IMG')
+  await expect(pile.getByRole('status')).toContainText('Loading')
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
+  await expect(pile.locator('img')).toBeVisible()
+
+  await page
+    .getByTestId('reference-deck')
+    .getByRole('button', { name: 'reference-1.png', exact: true })
+    .focus()
+  await page.keyboard.press('Delete')
+
+  await expect(pile).toBeVisible()
+  await expect(pile.locator('img')).toBeVisible()
+})
+
 test('the initial bottom follow survives a delayed virtualizer correction', async ({
   mount,
   page
@@ -388,11 +443,11 @@ test('a large task history mounts and loads media only around the visible window
   ).toBeLessThan(20)
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+      page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)
     )
     .toBeGreaterThan(0)
   const bottomThumbnailLoads = await page.evaluate(
-    () => window.__creationDeckTest?.materialBlobCalls().length ?? 0
+    () => window.__creationDeckTest?.materialUrlCalls().length ?? 0
   )
   expect(bottomThumbnailLoads).toBeLessThan(20)
 
@@ -409,21 +464,21 @@ test('a large task history mounts and loads media only around the visible window
   expect(await mountedCards.count()).toBeLessThan(20)
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+      page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)
     )
     .toBeGreaterThan(bottomThumbnailLoads)
   const afterTopThumbnailLoads = await page.evaluate(
-    () => window.__creationDeckTest?.materialBlobCalls().length ?? 0
+    () => window.__creationDeckTest?.materialUrlCalls().length ?? 0
   )
 
-  // Returning to the first window must reacquire its thumbnails: rows that
-  // retired at the top released their display URLs instead of accumulating.
+  // Returning to the first window stays instant: retired remote entries are
+  // one URL string kept until their signed TTL, so remounting rows do not
+  // re-authorize what the same context already displayed.
   await userScrollTo(scroller, 'bottom')
-  await expect
-    .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
-    )
-    .toBeGreaterThan(afterTopThumbnailLoads)
+  await page.waitForTimeout(300)
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)).toBe(
+    afterTopThumbnailLoads
+  )
 })
 
 test('a new task follows at the bottom but preserves an older reading position', async ({
@@ -565,6 +620,14 @@ test('detail and responsive height changes keep the visible task anchor stable',
   const tasks = manyMixedTasks(20, 'anchor')
   await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks, taskDetailsDeferred: true }} />)
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const taskSkeleton = page.locator('[data-testid^="task-skeleton-"]').first()
+  const shimmer = taskSkeleton.locator('[data-slot="skeleton"]').first()
+  await expect(taskSkeleton.locator('[data-task-skeleton-part="heading"]')).toHaveCount(1)
+  await expect(taskSkeleton.locator('[data-task-skeleton-part="media"]')).toHaveCount(1)
+  await expect(shimmer).toBeVisible()
+  await expect
+    .poll(() => shimmer.evaluate((element) => getComputedStyle(element, '::after').animationName))
+    .toBe('skeleton-shimmer')
   const scroller = await settledScroller(page)
   await userScrollTo(scroller, { fraction: 1 / 2 })
   // Let the virtualizer finish the creator's upward scroll before treating

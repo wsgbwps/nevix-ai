@@ -100,14 +100,14 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 // Reauthentication Proofs the high-risk connection commands require. Both
 // are deliberately narrow — Creation never touches credential verification.
 type Deps struct {
-	SessionAuthenticator       authz.SessionAuthenticator
-	ReauthVerifier             authz.ReauthProofVerifier
-	ObjectStorageVerifier      ObjectStorageVerifier
-	DirectUploadStoreFactory   DirectUploadStoreFactory
-	ReferenceTransportFactory  ReferenceTransportFactory
-	Now                        func() time.Time
-	ReferencePreparationWait   func(context.Context, time.Duration) error
-	ReferencePreparationJitter func(time.Duration) time.Duration
+	SessionAuthenticator          authz.SessionAuthenticator
+	ReauthVerifier                authz.ReauthProofVerifier
+	ObjectStorageVerifier         ObjectStorageVerifier
+	ObjectStorageBlobStoreFactory ObjectStorageBlobStoreFactory
+	ReferenceTransportFactory     ReferenceTransportFactory
+	Now                           func() time.Time
+	ReferencePreparationWait      func(context.Context, time.Duration) error
+	ReferencePreparationJitter    func(time.Duration) time.Duration
 }
 
 type ObjectStorageCandidate = domain.ObjectStorageCandidate
@@ -115,13 +115,14 @@ type ObjectStorageLocation = domain.ObjectStorageLocation
 type ObjectStorageVerifier func(context.Context, ObjectStorageCandidate) (ObjectStorageLocation, error)
 type ObjectStorageCredentials = domain.ObjectStorageCredentials
 type ObjectStorageProvider = domain.ObjectStorageProvider
-type DirectUploadBlobStore = domain.DirectUploadBlobStore
-type DirectUploadStoreFactory = domain.DirectUploadStoreFactory
+type ObjectStorageBlobStore = domain.ObjectStorageBlobStore
+type ObjectStorageBlobStoreFactory = domain.ObjectStorageBlobStoreFactory
 type ReferenceTransport = domain.ReferenceTransport
 type ReferenceTransportFactory = domain.ReferenceTransportFactory
 type ReferenceSource = domain.ReferenceSource
 type ProviderTransferObject = domain.ProviderTransferObject
 type UUID = domain.UUID
+type Kind = domain.Kind
 type BlobInfo = domain.BlobInfo
 type PresignPutRequest = domain.PresignPutRequest
 type PresignedPut = domain.PresignedPut
@@ -199,9 +200,9 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	if objectStorageVerifier == nil {
 		objectStorageVerifier = storage.VerifyConnection
 	}
-	directStoreFactory := deps.DirectUploadStoreFactory
-	if directStoreFactory == nil {
-		directStoreFactory = domain.DirectUploadStoreFactory(storage.NewBlobStore)
+	blobStoreFactory := deps.ObjectStorageBlobStoreFactory
+	if blobStoreFactory == nil {
+		blobStoreFactory = domain.ObjectStorageBlobStoreFactory(storage.NewBlobStore)
 	}
 	referenceTransportFactory := deps.ReferenceTransportFactory
 	if referenceTransportFactory == nil {
@@ -211,7 +212,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	if now == nil {
 		now = time.Now
 	}
-	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, credentialVault, objectStorageVerifier, directStoreFactory, referenceTransportFactory, deps.ReauthVerifier)
+	objectStorageService := application.NewObjectStorageConnectionService(objectStorageRepos, connectionRepos, tx, credentialVault, objectStorageVerifier, blobStoreFactory, referenceTransportFactory, deps.ReauthVerifier)
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, uploadRepos, taskRepos, objectStorageService, media.Prober{}, tx, now)
 	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, objectStorageService, governanceRepos, manifestService, tx, hub)

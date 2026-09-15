@@ -80,7 +80,7 @@ _Avoid_: Official Featured Work, Channel Template, Static Example
 _Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 服务端草稿
 
 **Reference Material**:
-User 在创作台向当前会话上传、供生成引用的原始媒体（图片/视频/音频）；它属于会话、可独立删除，身份是素材 id。提交时冻结进 Generation Specification 的是对它的引用（素材 id、role、kind、claims 版本）而非素材本体；素材删除后任务里的冻结引用悬空，界面按素材缺失回退展示，不影响已生成结果。它与 Asset Library 的媒体资产分属两个生命阶段，V1 互不连通。
+User 在创作台向当前会话上传、供生成引用的原始媒体（图片/视频/音频）；它属于会话、可从 Composer 独立移除，身份是素材 id。提交时冻结进 Generation Specification 的引用（素材 id、role、kind、claims 版本）拥有独立的历史展示生命周期：移除后不能进入新任务，但已有 TaskCard 仍可凭冻结身份重新授权缩略图，直至最后一个保留它的 Generation Task 生命周期结束。它与 Asset Library 的媒体资产分属两个生命阶段，V1 互不连通。
 _Avoid_: 素材库, Attachment, 上传文件
 
 **Reference Material Upload（参考素材上传）**:

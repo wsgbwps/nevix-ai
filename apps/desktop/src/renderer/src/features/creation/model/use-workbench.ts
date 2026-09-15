@@ -53,7 +53,11 @@ import {
   type WorkbenchStatus
 } from './workbench-context-controller'
 import type { WorkbenchActionState } from './workbench-runtime'
-import type { MaterialThumbnailState, WorkbenchDisplayDeps } from './workbench-display-controller'
+import type {
+  MaterialPreviewSource,
+  MaterialThumbnailState,
+  WorkbenchDisplayDeps
+} from './workbench-display-controller'
 
 export type { ComposerDraft, WorkbenchStatus } from './workbench-context-controller'
 export { emptyComposerDraft } from './workbench-context-controller'
@@ -146,6 +150,8 @@ export interface WorkbenchComposerHandle {
   retainMaterialThumbnail: (materialId: string) => () => void
   /** Starts an image thumbnail read only when a mounted presentation asks for it. */
   requestMaterialThumbnail: (materialId: string) => void
+  /** Rejects the current display URL when its image element cannot load it. */
+  reportMaterialThumbnailFailure: (materialId: string, source: string) => void
   /** Materials the prompt's Reference Mentions still name; replacing one would orphan them. */
   mentionedMaterialIds: ReadonlySet<string>
   /** Admits a dropped file batch against the mode's policy and adds what it accepts. */
@@ -164,8 +170,8 @@ export interface WorkbenchComposerHandle {
   materialUploadFailed: boolean
   /** Last drop's admission summary; null while nothing was rejected. */
   materialDropRejection: { readonly added: number; readonly rejected: number } | null
-  /** Reads one server-backed or pending local Reference Material for UI presentation. */
-  loadMaterialPreviewBlob: (materialId: string, signal?: AbortSignal) => Promise<Blob | null>
+  /** Resolves one material's preview display source (see MaterialPreviewSource). */
+  loadMaterialPreviewSource: (materialId: string) => Promise<MaterialPreviewSource | null>
   /** The prompt editor's document identity: the user-scoped context key. */
   documentKey: string
 }
@@ -196,6 +202,7 @@ export interface WorkbenchGalleryHandle {
   thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
   retainMaterialThumbnail: (materialId: string) => () => void
   requestMaterialThumbnail: (materialId: string) => void
+  reportMaterialThumbnailFailure: (materialId: string, source: string) => void
 }
 
 export function useCreationWorkbench(): {
@@ -231,7 +238,8 @@ export function useCreationWorkbench(): {
   const displayDeps = useMemo<WorkbenchDisplayDeps | null>(() => {
     if (ports === null) return null
     return {
-      loadMaterialBlob: (materialId, signal) => ports.loadMaterialBlob(materialId, signal),
+      loadPreviewUrl: (materialId) => ports.loadPreviewUrl(materialId),
+      loadThumbnailUrl: (materialId) => ports.loadThumbnailUrl(materialId),
       loadResultBlob: (taskId, slotIndex) => ports.loadResultBlob(taskId, slotIndex)
     }
   }, [ports])
@@ -1092,6 +1100,7 @@ export function useCreationWorkbench(): {
       cardKeyAliases: display.snapshot.cardKeyAliases,
       retainMaterialThumbnail: display.retain,
       requestMaterialThumbnail: display.requestThumbnail,
+      reportMaterialThumbnailFailure: display.reportThumbnailFailure,
       mentionedMaterialIds,
       addMaterials,
       replaceMaterial,
@@ -1104,7 +1113,7 @@ export function useCreationWorkbench(): {
       dismissReferenceRecovery: () => contextController?.dismissReferenceRecovery(),
       materialUploadFailed: ctx.materialUploadFailed,
       materialDropRejection: ctx.materialDropRejection,
-      loadMaterialPreviewBlob: display.loadMaterialPreviewBlob,
+      loadMaterialPreviewSource: display.loadMaterialPreviewSource,
       documentKey: `${ports?.userId ?? ''}:${ctx.contextKey}`
     },
     gallery: {
@@ -1127,7 +1136,8 @@ export function useCreationWorkbench(): {
       thumbnails,
       thumbnailStates,
       retainMaterialThumbnail: display.retain,
-      requestMaterialThumbnail: display.requestThumbnail
+      requestMaterialThumbnail: display.requestThumbnail,
+      reportMaterialThumbnailFailure: display.reportThumbnailFailure
     }
   }
 }

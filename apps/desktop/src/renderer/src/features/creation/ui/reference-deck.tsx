@@ -16,6 +16,7 @@ import {
   dropWouldAdmit,
   type ResultDragPayload
 } from '../model/reference-drop'
+import { ImageWithSkeleton } from './media-with-skeleton'
 
 /**
  * The Composer's inline reference deck (issue #177): 48x64 photo cards
@@ -64,6 +65,7 @@ export function ReferenceDeck({
   cardKeyAliases,
   onRetainThumbnail,
   onRequestThumbnail,
+  onThumbnailError,
   cap,
   allowedKinds,
   onAddFiles,
@@ -77,7 +79,7 @@ export function ReferenceDeck({
   /** Ordered draft bindings; the deck order is exactly this order. */
   readonly bindings: readonly DraftReferenceView[]
   readonly materials: readonly ReferenceMaterialView[]
-  /** material id -> object URL for image thumbs; absent ids show kind glyphs. */
+  /** material id -> display URL for image thumbs; absent ids show kind glyphs. */
   readonly thumbnails: Readonly<Record<string, string>>
   readonly thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
   readonly uploadProgress: Readonly<
@@ -87,6 +89,7 @@ export function ReferenceDeck({
   readonly cardKeyAliases: Readonly<Record<string, string>>
   readonly onRetainThumbnail: (materialId: string) => () => void
   readonly onRequestThumbnail: (materialId: string) => void
+  readonly onThumbnailError: (materialId: string, source: string) => void
   /** Maximum bound cards; the add entry disables at the cap. */
   readonly cap: number
   /** Kinds the current mode's manifest policy allows; empty disables add. */
@@ -498,16 +501,20 @@ export function ReferenceDeck({
                     isDragTarget && 'border-dashed border-sky-400/80'
                   )}
                 >
-                  {thumbnails[material.id] ? (
-                    <img src={thumbnails[material.id]} alt="" className="size-full object-cover" />
+                  {material.kind === 'image' && thumbnailStates[material.id] !== 'failed' ? (
+                    <ImageWithSkeleton
+                      src={thumbnails[material.id] ?? null}
+                      alt=""
+                      loadingLabel={String(t('composer.deck.thumbnailLoading'))}
+                      className="size-full object-cover"
+                      onError={() => {
+                        const source = thumbnails[material.id]
+                        if (source !== undefined) onThumbnailError(material.id, source)
+                      }}
+                    />
                   ) : (
                     <span className="text-muted-foreground grid justify-items-center gap-0.5 text-[10px] uppercase">
                       <span>{kindLabel[material.kind]}</span>
-                      {material.kind === 'image' && thumbnailStates[material.id] === 'loading' && (
-                        <span className="text-[8px] normal-case" role="status">
-                          {t('composer.deck.thumbnailLoading')}
-                        </span>
-                      )}
                       {material.kind === 'image' && thumbnailStates[material.id] === 'failed' && (
                         <span className="text-[8px] normal-case" role="alert">
                           {t('composer.deck.thumbnailFailed')}

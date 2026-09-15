@@ -30,6 +30,7 @@ type fakeDirectUploadStore struct {
 	info                map[string]creation.BlobInfo
 	grants              map[string]fakeUploadGrant
 	nextGrant           int64
+	nextThumbnailGrant  int64
 	server              *httptest.Server
 	headError           error
 	headStarted         chan struct{}
@@ -450,6 +451,28 @@ func (s *fakeDirectUploadStore) PresignPut(ctx context.Context, request creation
 type readSeekNopCloser struct{ *bytes.Reader }
 
 func (readSeekNopCloser) Close() error { return nil }
+
+func (s *fakeDirectUploadStore) PresignThumbnail(ctx context.Context, key string, expiresIn time.Duration) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	s.nextThumbnailGrant++
+	grant := s.nextThumbnailGrant
+	s.mu.Unlock()
+	process := "x-oss-process=image%2Fresize%2Cm_lfit%2Cw_320%2Fformat%2Cwebp"
+	if s.provider == creation.ObjectStorageProviderCOS {
+		process = "imageMogr2%2Fthumbnail%2F320x%2Fformat%2Fwebp"
+	}
+	return "https://thumb.example/" + key + "?" + process + "&sig=" + strconv.FormatInt(grant, 10), nil
+}
+
+func (s *fakeDirectUploadStore) PresignPreview(ctx context.Context, key string, kind creation.Kind, expiresIn time.Duration) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return "https://preview.example/" + key + "?kind=" + string(kind) + "&sig=ephemeral", nil
+}
 
 type readSeekFailure struct {
 	reader *bytes.Reader

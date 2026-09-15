@@ -253,8 +253,10 @@ export NEVIX_CREATION_SMOKE_SECONDS="${NEVIX_CREATION_SMOKE_SECONDS:-60}"
 test_log="$(mktemp -t nevix-creation-integration.XXXXXX)"
 set +e
 # One serialized run covers the Module-seam integration suite, storage
-# conformance on both adapters, and the short file-stream smoke.
-go test -C server -race -count=1 -p 1 -v ./internal/creation/... ./internal/migration/... | tee "$test_log"
+# conformance on both adapters, and the short file-stream smoke. The
+# sequential -race suite legitimately outgrew Go's 10m per-package default
+# (597s on main before the task-retention scenarios), so name the budget.
+go test -C server -race -count=1 -p 1 -timeout 30m -v ./internal/creation/... ./internal/migration/... | tee "$test_log"
 test_status="${PIPESTATUS[0]}"
 set -e
 if [[ "$test_status" -ne 0 ]]; then

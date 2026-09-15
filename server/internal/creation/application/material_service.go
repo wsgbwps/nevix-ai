@@ -34,6 +34,9 @@ type MaterialService struct {
 
 const referenceMaterialImmediateCleanupTimeout = 30 * time.Second
 
+// Expiry sends the renderer back to Go for a fresh display authorization.
+const materialURLLifetime = 10 * time.Minute
+
 type uploadProbeReader struct {
 	domain.ReadSeekCloser
 	providerErr error
@@ -166,7 +169,7 @@ func (s *MaterialService) CreateUpload(ctx context.Context, owner, sessionID dom
 	return s.authorizeUpload(ctx, upload, candidate.PayloadHash, upload.ID == candidate.ID, store)
 }
 
-func (s *MaterialService) authorizeUpload(ctx context.Context, upload domain.ReferenceMaterialUpload, payloadHash []byte, created bool, store domain.DirectUploadBlobStore) (ReferenceMaterialUploadAuthorization, error) {
+func (s *MaterialService) authorizeUpload(ctx context.Context, upload domain.ReferenceMaterialUpload, payloadHash []byte, created bool, store domain.ObjectStorageBlobStore) (ReferenceMaterialUploadAuthorization, error) {
 	if !bytes.Equal(upload.PayloadHash, payloadHash) {
 		return ReferenceMaterialUploadAuthorization{}, domain.ErrIdempotencyPayloadConflict
 	}
@@ -476,7 +479,7 @@ func (s *MaterialService) terminalizeUpload(ctx context.Context, owner, id domai
 	return s.statusFromUpload(ctx, owner, upload)
 }
 
-func (s *MaterialService) rejectVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.DirectUploadBlobStore) error {
+func (s *MaterialService) rejectVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.ObjectStorageBlobStore) error {
 	now := s.now().UTC()
 	err := s.runner.Run(ctx, func(scope domain.WriteScope) error {
 		return s.uploads.MarkTerminal(ctx, scope.Tx(), upload.OwnerID, upload.ID, &token, now)
@@ -493,7 +496,7 @@ func (s *MaterialService) rejectVerification(ctx context.Context, upload domain.
 	return verdict
 }
 
-func (s *MaterialService) releaseVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.DirectUploadBlobStore) error {
+func (s *MaterialService) releaseVerification(ctx context.Context, upload domain.ReferenceMaterialUpload, token domain.UUID, verdict error, store domain.ObjectStorageBlobStore) error {
 	if !s.now().UTC().Before(upload.FinalizeDeadline) {
 		return s.rejectVerification(ctx, upload, token, domain.ErrReferenceMaterialUploadExpired, store)
 	}
@@ -506,7 +509,7 @@ func (s *MaterialService) releaseVerification(ctx context.Context, upload domain
 	return verdict
 }
 
-func (s *MaterialService) cleanupUpload(ctx context.Context, upload domain.ReferenceMaterialUpload, store domain.DirectUploadBlobStore) {
+func (s *MaterialService) cleanupUpload(ctx context.Context, upload domain.ReferenceMaterialUpload, store domain.ObjectStorageBlobStore) {
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), referenceMaterialImmediateCleanupTimeout)
 	defer cancel()
 	if store == nil {
@@ -676,6 +679,53 @@ func normalizeMaterialFileName(raw string) (string, error) {
 	return base, nil
 }
 
+// MaterialURLAuthorization is one creator's ephemeral display grant.
+type MaterialURLAuthorization struct {
+	URL       string
+	ExpiresAt time.Time
+}
+
+// AuthorizeThumbnail checks image-material ownership and issues the
+// short-lived signed GET the renderer paints thumbnails from; non-image ids
+// collapse into not_found so guessing learns nothing.
+func (s *MaterialService) AuthorizeThumbnail(ctx context.Context, owner, id domain.UUID) (MaterialURLAuthorization, error) {
+	material, err := s.repos.GetForThumbnail(ctx, owner, id)
+	if err != nil {
+		return MaterialURLAuthorization{}, err
+	}
+	if material.Kind != domain.KindImage {
+		return MaterialURLAuthorization{}, domain.ErrMaterialNotFound
+	}
+	store, _, err := s.storage.ResolveStore(ctx)
+	if err != nil {
+		return MaterialURLAuthorization{}, err
+	}
+	signedURL, err := store.PresignThumbnail(ctx, material.BlobKey, materialURLLifetime)
+	if err != nil {
+		return MaterialURLAuthorization{}, domain.ErrObjectStorageUnavailable
+	}
+	return MaterialURLAuthorization{URL: signedURL, ExpiresAt: s.now().UTC().Add(materialURLLifetime)}, nil
+}
+
+// AuthorizePreview checks material ownership (every kind previews) and issues
+// the short-lived signed GET the renderer's full preview paints from: images
+// provider-resized to the preview variant, video and audio as raw bytes.
+func (s *MaterialService) AuthorizePreview(ctx context.Context, owner, id domain.UUID) (MaterialURLAuthorization, error) {
+	material, err := s.repos.GetForRead(ctx, owner, id)
+	if err != nil {
+		return MaterialURLAuthorization{}, err
+	}
+	store, _, err := s.storage.ResolveStore(ctx)
+	if err != nil {
+		return MaterialURLAuthorization{}, err
+	}
+	signedURL, err := store.PresignPreview(ctx, material.BlobKey, material.Kind, materialURLLifetime)
+	if err != nil {
+		return MaterialURLAuthorization{}, domain.ErrObjectStorageUnavailable
+	}
+	return MaterialURLAuthorization{URL: signedURL, ExpiresAt: s.now().UTC().Add(materialURLLifetime)}, nil
+}
+
 // OpenForDownload authorizes one material for its creator and opens the
 // requested storage window; transport concerns (Range grammar, hashing on
 // serve, header math) stay in the interface layer.
@@ -699,18 +749,16 @@ func (s *MaterialService) OpenForDownload(ctx context.Context, owner, id domain.
 // stale object never silently survives a failed ingest or delete.
 const OrphanBlobLogWarning = "creation: orphan blob cleanup failed"
 
-// orphanLog reports best-effort cleanup failures without failing requests:
-// a leftover blob is invisible garbage (no row points at it), never user-
-// visible data.
+// orphanLog reports cleanup failures without exposing inaccessible leftover
+// object details or failing an already-committed removal.
 func orphanLog(_ error) {
 	slog.Warn(OrphanBlobLogWarning, "code", "object_storage_unavailable")
 }
 
-// Delete drops the row and durably schedules exact-key blob cleanup in one
-// transaction; the immediate provider delete runs only after commit.
+// Delete removes a material from Composer. A frozen task reference retains its
+// exact object; otherwise the existing durable cleanup path starts after commit.
 func (s *MaterialService) Delete(ctx context.Context, owner, id domain.UUID) error {
-	material, err := s.repos.GetForRead(ctx, owner, id)
-	if err != nil {
+	if _, err := s.repos.GetForRead(ctx, owner, id); err != nil {
 		return err
 	}
 	store, connection, err := s.storage.ResolveStore(ctx)
@@ -721,33 +769,38 @@ func (s *MaterialService) Delete(ctx context.Context, owner, id domain.UUID) err
 	createdAt := now.Add(-domain.ReferenceMaterialFinalizeLifetime)
 	finalizedAt := now
 	cleanupNextAttemptAt := now.Add(time.Minute)
-	cleanupID := domain.NewUUID()
-	// Result-derived materials have no direct-upload row, so deletion creates
-	// the same finalized tombstone the exact-key cleanup worker already owns.
-	cleanup := domain.ReferenceMaterialUpload{
-		ID: cleanupID, OwnerID: owner, SessionID: material.SessionID,
-		MaterialID: material.ID, ObjectKey: material.BlobKey, FileName: material.FileName,
-		DeclaredKind: material.Kind, DeclaredMIMEType: material.MimeType,
-		DeclaredByteSize: material.ByteSize, ClaimsVersion: material.ClaimsVersion,
-		IdempotencyKey: "material-cleanup-" + cleanupID.String(),
-		PayloadHash:    material.ChecksumSHA256, ConnectionRevision: connection.Revision,
-		PutDeadline:      createdAt.Add(domain.ReferenceMaterialPutLifetime),
-		FinalizeDeadline: now, Status: domain.ReferenceMaterialUploadFinalized,
-		CreatedAt: createdAt, FinalizedAt: &finalizedAt, CleanupAttemptCount: 1,
-		CleanupNextAttemptAt: &cleanupNextAttemptAt,
-	}
 	return s.runner.Run(ctx, func(scope domain.WriteScope) error {
-		blobKey, err := s.repos.Delete(ctx, scope.Tx(), owner, id)
+		material, retained, err := s.repos.Remove(ctx, scope.Tx(), owner, id)
 		if err != nil {
 			return err
 		}
-		if err := s.uploads.ScheduleFinalizedMaterialCleanup(ctx, scope.Tx(), &cleanup); err != nil {
+		cleanupID := domain.NewUUID()
+		// Result-derived materials need the same cleanup fact direct uploads already own.
+		cleanup := domain.ReferenceMaterialUpload{
+			ID: cleanupID, OwnerID: owner, SessionID: material.SessionID,
+			MaterialID: material.ID, ObjectKey: material.BlobKey, FileName: material.FileName,
+			DeclaredKind: material.Kind, DeclaredMIMEType: material.MimeType,
+			DeclaredByteSize: material.ByteSize, ClaimsVersion: material.ClaimsVersion,
+			IdempotencyKey: "material-cleanup-" + cleanupID.String(),
+			PayloadHash:    material.ChecksumSHA256, ConnectionRevision: connection.Revision,
+			PutDeadline:      createdAt.Add(domain.ReferenceMaterialPutLifetime),
+			FinalizeDeadline: now, Status: domain.ReferenceMaterialUploadFinalized,
+			CreatedAt: createdAt, FinalizedAt: &finalizedAt,
+		}
+		if !retained {
+			cleanup.CleanupAttemptCount = 1
+			cleanup.CleanupNextAttemptAt = &cleanupNextAttemptAt
+		}
+		if err := s.uploads.RecordFinalizedMaterialCleanup(ctx, scope.Tx(), &cleanup); err != nil {
 			return err
+		}
+		if retained {
+			return nil
 		}
 		scope.AfterCommit(func() {
 			deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), referenceMaterialImmediateCleanupTimeout)
 			defer cancel()
-			if delErr := store.Delete(deleteCtx, blobKey); delErr != nil {
+			if delErr := store.Delete(deleteCtx, material.BlobKey); delErr != nil {
 				orphanLog(delErr)
 			}
 		})

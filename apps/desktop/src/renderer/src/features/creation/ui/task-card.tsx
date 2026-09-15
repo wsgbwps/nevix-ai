@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   BanIcon,
@@ -15,6 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '../../../components/ui/dropdown-menu'
+import { Skeleton } from '../../../components/ui/skeleton'
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import type {
   GenerationSlotView,
@@ -27,6 +28,7 @@ import type { ReferenceMaterialView } from '../api/go-creation-http'
 import type { MaterialThumbnailState, WorkbenchGalleryHandle } from '../model/use-workbench'
 import { modeKeys } from '../i18n/mode-keys'
 import { statusKey } from '../i18n/gallery-keys'
+import { ImageWithSkeleton } from './media-with-skeleton'
 import { SlotCard } from './slot-card'
 
 const mediaKeys = {
@@ -56,6 +58,22 @@ const galleryGridClass = 'grid grid-cols-2 gap-2 md:grid-cols-4'
 const quietButtonClass =
   'text-muted-foreground bg-foreground/[0.06] hover:bg-accent hover:text-foreground flex h-8 items-center gap-1 rounded-md px-2.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50'
 
+function slotAspectRatio(slot: GenerationSlotView, fallbackRatio: string | null): number {
+  const { widthPx, heightPx } = slot.result ?? {}
+  if (
+    widthPx !== null &&
+    widthPx !== undefined &&
+    heightPx !== null &&
+    heightPx !== undefined &&
+    widthPx > 0 &&
+    heightPx > 0
+  ) {
+    return widthPx / heightPx
+  }
+  const [width, height] = (fallbackRatio ?? '').split(':').map(Number)
+  return width > 0 && height > 0 ? width / height : 1
+}
+
 /**
  * Each card reads the prompt and parameters from the task's own frozen
  * Generation Specification — the detail's copy once it arrives, otherwise the
@@ -73,6 +91,23 @@ export function TaskCard({
   const detail = gallery.taskDetails[task.id]
   const snapshot = detail?.task ?? task
   const spec = detail?.specification ?? task.snapshot ?? null
+  const slots = detail?.slots ?? placeholderSlots(snapshot.slotCount)
+  const [settledMediaKeys, setSettledMediaKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const markMediaSettled = useCallback((key: string): void => {
+    setSettledMediaKeys((current) => {
+      if (current.has(key)) return current
+      const next = new Set(current)
+      next.add(key)
+      return next
+    })
+  }, [])
+  const resultMediaKeys =
+    detail?.slots.flatMap((slot) =>
+      slot.status === 'succeeded' ? [taskResultMediaKey(snapshot.id, slot)] : []
+    ) ?? []
+  const cardSettled =
+    (detail !== undefined || gallery.taskDetailStaleIds.has(task.id)) &&
+    resultMediaKeys.every((key) => settledMediaKeys.has(key))
   const terminal = isTerminalTaskStatus(snapshot.status)
   const indeterminate = snapshot.terminalCause !== null
   const retryUncompleted =
@@ -89,174 +124,212 @@ export function TaskCard({
   return (
     <section
       aria-label={String(t(statusKey(snapshot.status)))}
+      aria-busy={!cardSettled}
       data-testid={`task-${snapshot.id}`}
-      className="flex flex-col gap-2.5"
+      className="relative"
     >
-      <div className="flex items-start gap-2.5">
-        {spec !== null && spec.references.length > 0 && (
-          <TaskReferencePile
-            taskId={snapshot.id}
-            references={spec.references}
-            materials={gallery.materials}
-            thumbnails={gallery.thumbnails}
-            thumbnailStates={gallery.thumbnailStates}
-            onRetainThumbnail={gallery.retainMaterialThumbnail}
-            onRequestThumbnail={gallery.requestMaterialThumbnail}
-          />
-        )}
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          {spec !== null && spec.prompt.length > 0 && (
-            <div className="group/prompt relative">
-              <p className="text-foreground/80 line-clamp-2 text-xs leading-5">{spec.prompt}</p>
-              {/* Hover expansion overlays the card without reflowing it; the
+      {!cardSettled && (
+        <>
+          <div
+            aria-hidden
+            data-testid={`task-skeleton-${snapshot.id}`}
+            className="bg-background absolute inset-0 z-20 flex flex-col gap-2.5"
+          >
+            <Skeleton data-task-skeleton-part="heading" className="h-5 w-52 shrink-0" />
+            <div className={galleryGridClass}>
+              {slots.map((slot) => (
+                <Skeleton
+                  key={slot.index}
+                  data-task-skeleton-part="media"
+                  className="w-full rounded-lg"
+                  style={{ aspectRatio: String(slotAspectRatio(slot, spec?.ratio ?? null)) }}
+                />
+              ))}
+            </div>
+          </div>
+          <span role="status" className="sr-only">
+            {t('gallery.media.loading')}
+          </span>
+        </>
+      )}
+      <div
+        data-testid={`task-content-${snapshot.id}`}
+        className={`flex flex-col gap-2.5 ${cardSettled ? '' : 'invisible'}`}
+      >
+        <div className="flex items-start gap-2.5">
+          {spec !== null && spec.references.length > 0 && (
+            <TaskReferencePile
+              taskId={snapshot.id}
+              references={spec.references}
+              materials={gallery.materials}
+              thumbnails={gallery.thumbnails}
+              thumbnailStates={gallery.thumbnailStates}
+              onRetainThumbnail={gallery.retainMaterialThumbnail}
+              onRequestThumbnail={gallery.requestMaterialThumbnail}
+              onThumbnailError={gallery.reportMaterialThumbnailFailure}
+            />
+          )}
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            {spec !== null && spec.prompt.length > 0 && (
+              <div className="group/prompt relative">
+                <p className="text-foreground/80 line-clamp-2 text-xs leading-5">{spec.prompt}</p>
+                {/* Hover expansion overlays the card without reflowing it; the
                   clone stays a wrapper descendant, so wrapper:hover — not the
                   clone's own hover — holds it open and it cannot flicker. */}
-              <p
-                aria-hidden
-                className="text-foreground/80 bg-background invisible absolute inset-x-0 top-0 z-10 pb-1 text-xs leading-5 group-hover/prompt:visible"
-              >
-                {spec.prompt}
-              </p>
-            </div>
-          )}
-          <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
-            <span className="text-foreground/70 font-medium">{t(statusKey(snapshot.status))}</span>
-            {gallery.taskDetailStaleIds.has(snapshot.id) && (
-              // This task's latest detail read failed; the card keeps its
-              // last consistent copy and says so.
-              <span className="text-warning/80" data-testid={`task-detail-stale-${snapshot.id}`}>
-                {t('gallery.detailStale')}
+                <p
+                  aria-hidden
+                  className="text-foreground/80 bg-background invisible absolute inset-x-0 top-0 z-10 pb-1 text-xs leading-5 group-hover/prompt:visible"
+                >
+                  {spec.prompt}
+                </p>
+              </div>
+            )}
+            <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
+              <span className="text-foreground/70 font-medium">
+                {t(statusKey(snapshot.status))}
               </span>
-            )}
-            <span>
-              {t(mediaKeys[snapshot.mediaType])}
-              {spec !== null && ` · ${spec.model}`}
-            </span>
-            {spec?.ratio != null && (
-              <>
-                <MetaSeparator />
-                <span>{spec.ratio}</span>
-              </>
-            )}
-            {spec?.resolution != null && (
-              <>
-                <MetaSeparator />
-                <span>{spec.resolution}</span>
-              </>
-            )}
-            <TaskDetailsMenu task={snapshot} spec={spec} />
+              {gallery.taskDetailStaleIds.has(snapshot.id) && (
+                // This task's latest detail read failed; the card keeps its
+                // last consistent copy and says so.
+                <span className="text-warning/80" data-testid={`task-detail-stale-${snapshot.id}`}>
+                  {t('gallery.detailStale')}
+                </span>
+              )}
+              <span>
+                {t(mediaKeys[snapshot.mediaType])}
+                {spec !== null && ` · ${spec.model}`}
+              </span>
+              {spec?.ratio != null && (
+                <>
+                  <MetaSeparator />
+                  <span>{spec.ratio}</span>
+                </>
+              )}
+              {spec?.resolution != null && (
+                <>
+                  <MetaSeparator />
+                  <span>{spec.resolution}</span>
+                </>
+              )}
+              <TaskDetailsMenu task={snapshot} spec={spec} />
+            </div>
           </div>
         </div>
-      </div>
-      <div className={galleryGridClass}>
-        {(detail?.slots ?? placeholderSlots(snapshot.slotCount)).map((slot) => (
-          <SlotCard
-            key={slot.index}
-            acquireResultBlobUrl={gallery.acquireResultBlobUrl}
-            taskId={snapshot.id}
-            slot={slot}
-            mediaType={snapshot.mediaType}
-            fallbackRatio={spec?.ratio ?? null}
-          />
-        ))}
-      </div>
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          data-testid={`task-edit-${snapshot.id}`}
-          onClick={focusComposerPrompt}
-          className={quietButtonClass}
-        >
-          <PencilLineIcon className="size-3.5" aria-hidden />
-          {t('gallery.actions.reedit')}
-        </button>
-        {!terminal && (
+        <div className={galleryGridClass}>
+          {slots.map((slot) => {
+            const mediaKey = taskResultMediaKey(snapshot.id, slot)
+            return (
+              <SlotCard
+                key={slot.index}
+                acquireResultBlobUrl={gallery.acquireResultBlobUrl}
+                taskId={snapshot.id}
+                slot={slot}
+                mediaType={snapshot.mediaType}
+                aspectRatio={slotAspectRatio(slot, spec?.ratio ?? null)}
+                mediaKey={mediaKey}
+                onMediaSettled={markMediaSettled}
+              />
+            )
+          })}
+        </div>
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
-            data-testid={`task-cancel-${snapshot.id}`}
-            onClick={() => gallery.cancelTask(snapshot.id)}
+            data-testid={`task-edit-${snapshot.id}`}
+            onClick={focusComposerPrompt}
             className={quietButtonClass}
           >
-            <BanIcon className="size-3.5" aria-hidden />
-            {t('gallery.actions.cancel')}
+            <PencilLineIcon className="size-3.5" aria-hidden />
+            {t('gallery.actions.reedit')}
           </button>
-        )}
-        {terminal && (
-          <button
-            type="button"
-            data-testid={`task-regenerate-${snapshot.id}`}
-            onClick={gallery.submit}
-            disabled={gallery.submitDisabled}
-            className={`${quietButtonClass} disabled:opacity-50`}
-          >
-            <RefreshCwIcon className="size-3.5" aria-hidden />
-            {t('gallery.actions.regenerate')}
-          </button>
-        )}
-        {(retryUncompleted || indeterminate) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              data-testid={`task-more-${snapshot.id}`}
-              aria-label={String(t('gallery.actions.more'))}
+          {!terminal && (
+            <button
+              type="button"
+              data-testid={`task-cancel-${snapshot.id}`}
+              onClick={() => gallery.cancelTask(snapshot.id)}
               className={quietButtonClass}
             >
-              <MoreHorizontalIcon className="size-4" aria-hidden />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-44 rounded-xl">
-              {retryUncompleted && (
-                <DropdownMenuItem
-                  data-testid={`task-retry-${snapshot.id}`}
-                  className="cursor-pointer text-xs"
-                  onSelect={() => gallery.retryTask(snapshot.id)}
-                >
-                  <RepeatIcon className="size-3.5" aria-hidden />
-                  {t('gallery.actions.retryUncompleted')}
-                </DropdownMenuItem>
-              )}
-              {indeterminate && (
-                <DropdownMenuItem
-                  data-testid={`task-retry-indeterminate-${snapshot.id}`}
-                  className="cursor-pointer text-xs"
-                  onSelect={() => gallery.requestIndeterminateRedo(snapshot.id)}
-                >
-                  <RepeatIcon className="size-3.5" aria-hidden />
-                  {t('gallery.actions.retryUncompleted')}
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <BanIcon className="size-3.5" aria-hidden />
+              {t('gallery.actions.cancel')}
+            </button>
+          )}
+          {terminal && (
+            <button
+              type="button"
+              data-testid={`task-regenerate-${snapshot.id}`}
+              onClick={gallery.submit}
+              disabled={gallery.submitDisabled}
+              className={`${quietButtonClass} disabled:opacity-50`}
+            >
+              <RefreshCwIcon className="size-3.5" aria-hidden />
+              {t('gallery.actions.regenerate')}
+            </button>
+          )}
+          {(retryUncompleted || indeterminate) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                data-testid={`task-more-${snapshot.id}`}
+                aria-label={String(t('gallery.actions.more'))}
+                className={quietButtonClass}
+              >
+                <MoreHorizontalIcon className="size-4" aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-44 rounded-xl">
+                {retryUncompleted && (
+                  <DropdownMenuItem
+                    data-testid={`task-retry-${snapshot.id}`}
+                    className="cursor-pointer text-xs"
+                    onSelect={() => gallery.retryTask(snapshot.id)}
+                  >
+                    <RepeatIcon className="size-3.5" aria-hidden />
+                    {t('gallery.actions.retryUncompleted')}
+                  </DropdownMenuItem>
+                )}
+                {indeterminate && (
+                  <DropdownMenuItem
+                    data-testid={`task-retry-indeterminate-${snapshot.id}`}
+                    className="cursor-pointer text-xs"
+                    onSelect={() => gallery.requestIndeterminateRedo(snapshot.id)}
+                  >
+                    <RepeatIcon className="size-3.5" aria-hidden />
+                    {t('gallery.actions.retryUncompleted')}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+        {gallery.indeterminateTaskId === snapshot.id && (
+          <div
+            role="alertdialog"
+            aria-label={t('gallery.indeterminate.title')}
+            data-testid={`indeterminate-confirm-${snapshot.id}`}
+            className="bg-warning/10 rounded-lg p-2"
+          >
+            <p className="text-warning flex items-start gap-1.5 text-[11px] leading-4">
+              <TriangleAlertIcon className="mt-0.5 size-3 shrink-0" aria-hidden />
+              {t('gallery.indeterminate.body')}
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                data-testid={`indeterminate-confirm-button-${snapshot.id}`}
+                onClick={() => gallery.confirmIndeterminateRedo(snapshot.id)}
+                className="text-warning border-warning/60 hover:bg-warning/10 h-7 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+              >
+                {t('gallery.indeterminate.confirm')}
+              </button>
+              <button
+                type="button"
+                onClick={gallery.dismissIndeterminate}
+                className="text-muted-foreground border-border hover:bg-accent h-7 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+              >
+                {t('gallery.indeterminate.cancel')}
+              </button>
+            </div>
+          </div>
         )}
       </div>
-      {gallery.indeterminateTaskId === snapshot.id && (
-        <div
-          role="alertdialog"
-          aria-label={t('gallery.indeterminate.title')}
-          data-testid={`indeterminate-confirm-${snapshot.id}`}
-          className="bg-warning/10 rounded-lg p-2"
-        >
-          <p className="text-warning flex items-start gap-1.5 text-[11px] leading-4">
-            <TriangleAlertIcon className="mt-0.5 size-3 shrink-0" aria-hidden />
-            {t('gallery.indeterminate.body')}
-          </p>
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              data-testid={`indeterminate-confirm-button-${snapshot.id}`}
-              onClick={() => gallery.confirmIndeterminateRedo(snapshot.id)}
-              className="text-warning border-warning/60 hover:bg-warning/10 h-7 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
-            >
-              {t('gallery.indeterminate.confirm')}
-            </button>
-            <button
-              type="button"
-              onClick={gallery.dismissIndeterminate}
-              className="text-muted-foreground border-border hover:bg-accent h-7 rounded-lg border px-2 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
-            >
-              {t('gallery.indeterminate.cancel')}
-            </button>
-          </div>
-        </div>
-      )}
     </section>
   )
 }
@@ -286,7 +359,8 @@ function TaskReferencePile({
   thumbnails,
   thumbnailStates,
   onRetainThumbnail,
-  onRequestThumbnail
+  onRequestThumbnail,
+  onThumbnailError
 }: {
   readonly taskId: string
   readonly references: readonly GenerationSpecificationReferenceView[]
@@ -295,6 +369,7 @@ function TaskReferencePile({
   readonly thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
   readonly onRetainThumbnail: (materialId: string) => () => void
   readonly onRequestThumbnail: (materialId: string) => void
+  readonly onThumbnailError: (materialId: string, source: string) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const byId = useMemo(
@@ -305,8 +380,7 @@ function TaskReferencePile({
     [
       ...new Set(
         references.flatMap((reference) => {
-          const material = byId.get(reference.materialId)
-          return material?.kind === 'image' ? [material.id] : []
+          return reference.kind === 'image' ? [reference.materialId] : []
         })
       )
     ].sort()
@@ -335,9 +409,8 @@ function TaskReferencePile({
       className="relative shrink-0 self-start"
       onMouseEnter={() => {
         for (const reference of references) {
-          const material = byId.get(reference.materialId)
-          if (material?.kind === 'image' && thumbnails[material.id] === undefined) {
-            onRequestThumbnail(material.id)
+          if (reference.kind === 'image' && thumbnails[reference.materialId] === undefined) {
+            onRequestThumbnail(reference.materialId)
           }
         }
       }}
@@ -355,12 +428,14 @@ function TaskReferencePile({
             ? String(t(roleKeys[reference.role as keyof typeof roleKeys]))
             : reference.role
         const title = material === undefined ? role : `${material.fileName} · ${role}`
+        const thumbnailSource =
+          reference.kind === 'image' ? thumbnails[reference.materialId] : undefined
         return (
           <div
             key={position}
             title={title}
             data-thumbnail-state={
-              material?.kind === 'image'
+              reference.kind === 'image'
                 ? (thumbnailStates[reference.materialId] ?? 'unloaded')
                 : undefined
             }
@@ -373,22 +448,24 @@ function TaskReferencePile({
               transform: `translateY(${pileShifts[position % pileShifts.length]}px) rotate(${fanRotations[position % fanRotations.length]}deg)`
             }}
           >
-            {thumbnails[reference.materialId] !== undefined ? (
-              <img
-                src={thumbnails[reference.materialId]}
+            {thumbnailSource !== undefined && thumbnailStates[reference.materialId] !== 'failed' ? (
+              <ImageWithSkeleton
+                src={thumbnailSource}
                 alt=""
+                loadingLabel={String(t('composer.deck.thumbnailLoading'))}
                 className="size-full object-cover"
+                onError={() => onThumbnailError(reference.materialId, thumbnailSource)}
               />
             ) : (
               <span className="text-muted-foreground grid size-full place-content-center justify-items-center gap-0.5 text-[10px] uppercase">
                 <span>{String(t(referenceKindKeys[reference.kind]))}</span>
-                {material?.kind === 'image' &&
+                {reference.kind === 'image' &&
                   thumbnailStates[reference.materialId] === 'loading' && (
                     <span className="text-[8px] normal-case" role="status">
                       {t('composer.deck.thumbnailLoading')}
                     </span>
                   )}
-                {material?.kind === 'image' &&
+                {reference.kind === 'image' &&
                   thumbnailStates[reference.materialId] === 'failed' && (
                     <span className="text-[8px] normal-case" role="alert">
                       {t('composer.deck.thumbnailFailed')}
@@ -396,11 +473,13 @@ function TaskReferencePile({
                   )}
               </span>
             )}
-            {material?.kind === 'image' && thumbnailStates[reference.materialId] === 'failed' && (
+            {reference.kind === 'image' && thumbnailStates[reference.materialId] === 'failed' && (
               <button
                 type="button"
-                aria-label={String(t('composer.deck.thumbnailRetry', { name: material.fileName }))}
-                onClick={() => onRequestThumbnail(material.id)}
+                aria-label={String(
+                  t('composer.deck.thumbnailRetry', { name: material?.fileName ?? role })
+                )}
+                onClick={() => onRequestThumbnail(reference.materialId)}
                 className="bg-card/90 text-muted-foreground hover:text-foreground absolute right-0 bottom-0 z-10 grid size-4 place-items-center rounded-tl-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
               >
                 <RefreshCwIcon className="size-2.5" aria-hidden />
@@ -511,6 +590,10 @@ function placeholderSlots(count: number): GenerationSlotView[] {
     failureReason: null,
     result: null
   }))
+}
+
+function taskResultMediaKey(taskId: string, slot: GenerationSlotView): string {
+  return `result:${taskId}:${slot.index}:${slot.result?.checksumSha256 ?? ''}`
 }
 
 // A policy-rejected slot forbids the quick "retry uncompleted" affordance:

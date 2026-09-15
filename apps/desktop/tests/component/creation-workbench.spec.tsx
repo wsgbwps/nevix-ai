@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/experimental-ct-react'
 import {
   CreationWorkbenchShellStory,
   CreationWorkbenchStory,
+  CreationWorkbenchNavigationStory,
   type ScriptedTask
 } from './fixtures/creation-workbench.story'
 import type { LocalDraftRecord } from '../src/renderer/src/features/creation/model/draft-store'
@@ -362,7 +363,7 @@ test('removing a mentioned material confirms the count and cannot be undone in t
   await expect(page.getByRole('button', { name: 'Image 1' })).toHaveCount(0)
 })
 
-test('video mention hover stays metadata-only and full preview retries then reuses its URL', async ({
+test('video mention hover stays metadata-only and full preview retries and re-authorizes on reopen', async ({
   mount,
   page
 }) => {
@@ -372,7 +373,7 @@ test('video mention hover stays metadata-only and full preview retries then reus
     <CreationWorkbenchStory
       drafts={{ [scriptedSessionId]: videoMentionDraft(videoId) }}
       materials={{ [scriptedSessionId]: [video] }}
-      materialBlobFailures={1}
+      materialUrlFailures={1}
     />
   )
   await selectFirstSession(page)
@@ -383,9 +384,7 @@ test('video mention hover stays metadata-only and full preview retries then reus
 
   await chip.hover()
   await expect(page.getByTestId('reference-hover-preview')).toContainText('3s')
-  expect(await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])).toEqual(
-    []
-  )
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? [])).toEqual([])
 
   await chip.click()
   const preview = page.getByTestId('reference-full-preview')
@@ -393,17 +392,80 @@ test('video mention hover stays metadata-only and full preview retries then reus
   await preview.getByRole('button', { name: 'Retry' }).click()
   await expect(preview.locator('video')).toBeVisible()
   await expect
-    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? []))
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
     .toHaveLength(2)
 
+  // A remote preview is never cached across opens: each reopen re-authorizes,
+  // so the signed TTL resets instead of expiring under a long-lived dialog.
   await page.keyboard.press('Escape')
   await expect(chip).toBeFocused()
   await chip.click()
   await expect(preview.locator('video')).toBeVisible()
-  await page.waitForTimeout(50)
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
+    .toHaveLength(3)
+})
+
+test('an open video keeps playing when another reference upload finishes', async ({
+  mount,
+  page
+}) => {
+  const videoId = '12121212-0000-4000-8000-000000000012'
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{ [scriptedSessionId]: videoMentionDraft(videoId) }}
+      materials={{
+        [scriptedSessionId]: [scriptedMaterial(videoId, 'video', 'walkthrough.mp4')]
+      }}
+      uploadDeferred
+    />
+  )
+  await selectFirstSession(page)
+
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByLabel('Add reference material').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({
+    name: 'another-reference.svg',
+    mimeType: 'image/svg+xml',
+    buffer: Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="16"><rect width="24" height="16" fill="blue"/></svg>'
+    )
+  })
+  await expect(page.getByRole('status', { name: 'Upload progress 50%' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Video 1' }).click()
+  const video = page.getByTestId('reference-full-preview').locator('video')
+  await expect
+    .poll(() => video.evaluate((element) => (element as HTMLVideoElement).readyState))
+    .toBeGreaterThanOrEqual(2)
+  const source = await video.getAttribute('src')
+  await video.evaluate(async (element) => {
+    const medium = element as HTMLVideoElement
+    medium.currentTime = 0.25
+    medium.playbackRate = 0.25
+    medium.muted = true
+    await medium.play()
+  })
+  await expect
+    .poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentTime))
+    .toBeGreaterThan(0.25)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
+  await expect(
+    page.locator('[data-material-id="ffffffff-0000-4000-8000-000000000006"]')
+  ).toBeVisible()
+  await page.waitForTimeout(100)
   expect(
-    await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])
-  ).toHaveLength(2)
+    await video.evaluate((element, initialSource) => {
+      const medium = element as HTMLVideoElement
+      return {
+        sourceUnchanged: medium.getAttribute('src') === initialSource,
+        positionPreserved: medium.currentTime >= 0.25,
+        playing: !medium.paused
+      }
+    }, source)
+  ).toEqual({ sourceUnchanged: true, positionPreserved: true, playing: true })
 })
 
 test('the duration menu shows for a video draft while durations are published', async ({
@@ -476,9 +538,7 @@ test('selecting a session does not bulk-read thumbnails for unused materials', a
   await selectFirstSession(page)
   await page.waitForTimeout(100)
 
-  expect(await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? [])).toEqual(
-    []
-  )
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? [])).toEqual([])
 })
 
 test('a visible material thumbnail exposes loading, failure, and retry states', async ({
@@ -505,38 +565,102 @@ test('a visible material thumbnail exposes loading, failure, and retry states', 
       materials={{
         [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
       }}
-      materialBlobFailures={1}
-      materialBlobDeferred
+      materialUrlFailures={1}
+      materialUrlDeferred
     />
   )
   await selectFirstSession(page)
 
   const card = page.locator(`[data-material-id="${firstMaterialId}"]`)
   await expect(card).toHaveAttribute('data-thumbnail-state', 'loading')
-  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialBlobs())
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
   await expect(card).toHaveAttribute('data-thumbnail-state', 'failed')
   await expect(card.getByRole('alert')).toContainText('Load failed')
 
   await card.hover()
   await expect(card).toHaveAttribute('data-thumbnail-state', 'loading')
-  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialBlobs())
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
   await expect(card).toHaveAttribute('data-thumbnail-state', 'ready')
   await expect(card.locator('img')).toBeVisible()
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+      page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)
     )
     .toBe(2)
 })
 
-test('closing a loading full preview aborts the material request', async ({ mount, page }) => {
+test('a material thumbnail keeps a skeleton until the remote image paints', async ({
+  mount,
+  page
+}) => {
+  const mediaUrl = 'https://media.nevix.test/thumbnail.svg'
+  let releaseImage!: () => void
+  const imageReady = new Promise<void>((resolve) => {
+    releaseImage = resolve
+  })
+  let imageAttempts = 0
+  await page.route(mediaUrl, async (route) => {
+    await imageReady
+    imageAttempts += 1
+    if (imageAttempts === 1) {
+      await route.abort('failed')
+      return
+    }
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    })
+  })
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{
+        [scriptedSessionId]: {
+          prompt: 'poster reference',
+          promptDocument: { version: 1, nodes: [{ type: 'text', text: 'poster reference' }] },
+          mediaType: 'image',
+          manifestVersion: 5,
+          model: 'doubao-seedream-5.0-pro',
+          mode: 'reference-image',
+          ratio: '4:3',
+          resolution: '2K',
+          quantity: 1,
+          durationSeconds: null,
+          references: [{ materialId: firstMaterialId, role: 'reference' }]
+        }
+      }}
+      materials={{
+        [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
+      }}
+      materialImageUrl={mediaUrl}
+    />
+  )
+  await selectFirstSession(page)
+
+  const card = page.locator(`[data-material-id="${firstMaterialId}"]`)
+  await expect(card).toHaveAttribute('data-thumbnail-state', 'ready')
+  // This story intentionally omits global CSS; presence here pins the real
+  // Skeleton component while production Tailwind gives it the card's size.
+  await expect(card.locator('[data-slot="skeleton"]')).toHaveCount(1)
+
+  releaseImage()
+  await expect(card).toHaveAttribute('data-thumbnail-state', 'failed')
+  await card.hover()
+  await expect(card).toHaveAttribute('data-thumbnail-state', 'ready')
+  await expect(card.locator('[data-slot="skeleton"]')).toHaveCount(0)
+  await expect(card.locator('img')).toBeVisible()
+})
+
+test('a full-preview authorization landing after the dialog closes is discarded', async ({
+  mount,
+  page
+}) => {
   const videoId = '13131313-0000-4000-8000-000000000013'
   const video = scriptedMaterial(videoId, 'video', 'deferred.mp4')
   await mount(
     <CreationWorkbenchStory
       drafts={{ [scriptedSessionId]: videoMentionDraft(videoId) }}
       materials={{ [scriptedSessionId]: [video] }}
-      materialBlobDeferred
+      materialUrlDeferred
     />
   )
   await selectFirstSession(page)
@@ -545,16 +669,25 @@ test('closing a loading full preview aborts the material request', async ({ moun
   await chip.click()
   await expect(page.getByTestId('reference-full-preview')).toContainText('Loading material')
   await expect
-    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialBlobCalls() ?? []))
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
     .toHaveLength(1)
 
   await page.keyboard.press('Escape')
-  await expect
-    .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls()[0]?.aborted)
-    )
-    .toBe(true)
   await expect(chip).toBeFocused()
+  // The deferred authorization resolves only after the dialog closed; its
+  // result must not paint anywhere, and the next open fetches afresh.
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
+  await page.waitForTimeout(50)
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)).toBe(
+    1
+  )
+
+  await chip.click()
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
+  await expect(page.getByTestId('reference-full-preview').locator('video')).toBeVisible()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
+    .toHaveLength(2)
 })
 
 test('a pending image mention hover preserves the local file ratio', async ({ mount, page }) => {
@@ -1220,7 +1353,7 @@ test('a task card shows its frozen specification, never the live draft', async (
   await expect(menu).toContainText('frozen-at-submit prompt')
 })
 
-test('a task card renders its list snapshot before any detail read lands', async ({
+test('a task card keeps its list snapshot hidden until the detail read settles', async ({
   mount,
   page
 }) => {
@@ -1252,19 +1385,192 @@ test('a task card renders its list snapshot before any detail read lands', async
   )
   await selectFirstSession(page)
 
-  // The list summary's own snapshot paints the frozen header immediately;
-  // the deferred detail — which carries no specification here — cannot be
-  // the source.
   const card = page.getByTestId(`task-${frozen.id}`)
+  const content = page.getByTestId(`task-content-${frozen.id}`)
+  await expect(page.getByTestId(`task-skeleton-${frozen.id}`)).toHaveCount(1)
+  await expect(content).toHaveClass(/invisible/)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseTaskDetails())
+  await expect(page.getByTestId(`task-skeleton-${frozen.id}`)).toHaveCount(0)
+  await expect(content).not.toHaveClass(/invisible/)
+  // Detail has no specification, so the revealed header still comes from
+  // the list response's frozen snapshot rather than the live composer.
   await expect(card).toContainText('snapshot-at-submit prompt')
   await expect(card).toContainText('snapshot-model')
   await expect(card).toContainText('4:3')
 })
 
+test('a task card reveals atomically after its detail and result media settle', async ({
+  mount,
+  page
+}) => {
+  const mediaUrl = 'https://media.nevix.test/atomic-task-thumbnail.svg'
+  let releaseReference!: () => void
+  const referenceReady = new Promise<void>((resolve) => {
+    releaseReference = resolve
+  })
+  await page.route(mediaUrl, async (route) => {
+    await referenceReady
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    })
+  })
+  const specification = {
+    prompt: 'atomic task card',
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '1:1',
+    resolution: null,
+    quantity: 1,
+    durationSeconds: null,
+    references: [{ materialId: firstMaterialId, role: 'reference', kind: 'image' }] as const
+  }
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000atom',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: specification,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-14T09:00:00Z',
+    updatedAt: '2026-09-14T09:00:01Z',
+    terminalAt: '2026-09-14T09:00:01Z',
+    slots: [
+      {
+        index: 0,
+        status: 'succeeded',
+        failureReason: null,
+        result: {
+          mimeType: 'image/jpeg',
+          byteSize: 2048,
+          checksumSha256: 'ac'.repeat(32),
+          widthPx: 1024,
+          heightPx: 1024,
+          durationMs: null
+        }
+      }
+    ],
+    specification
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [task], taskDetailsDeferred: true, resultBlobDeferred: true }}
+      drafts={{ [scriptedSessionId]: null }}
+      materials={{
+        [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
+      }}
+      materialImageUrl={mediaUrl}
+    />
+  )
+  await selectFirstSession(page)
+
+  const card = page.getByTestId(`task-${task.id}`)
+  const skeleton = page.getByTestId(`task-skeleton-${task.id}`)
+  const content = page.getByTestId(`task-content-${task.id}`)
+  await expect(skeleton).toHaveCount(1)
+  await expect(skeleton.locator('[data-task-skeleton-part="heading"]')).toHaveCount(1)
+  await expect(skeleton.locator('[data-task-skeleton-part="media"]')).toHaveCount(task.slotCount)
+  await expect(skeleton.locator('[data-slot="skeleton"]').first()).toHaveClass(/skeleton-shimmer/)
+  await expect(content).toHaveClass(/invisible/)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseTaskDetails())
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers().length ?? 0)
+    )
+    .toBe(1)
+  await expect(skeleton).toHaveCount(1)
+
+  releaseReference()
+  await expect
+    .poll(async () =>
+      page
+        .getByTestId(`task-references-${task.id}`)
+        .locator('img')
+        .evaluateAll((images) =>
+          images.every((image) => image instanceof HTMLImageElement && image.complete)
+        )
+    )
+    .toBe(true)
+  await expect(skeleton).toHaveCount(1)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseResultBlobs())
+  await expect(skeleton).toHaveCount(0)
+  await expect(content).not.toHaveClass(/invisible/)
+  await expect(card.locator('img')).toHaveCount(2)
+  await expect(card.locator('img').nth(0)).toBeVisible()
+  await expect(card.locator('img').nth(1)).toBeVisible()
+})
+
+test('a task skeleton uses settled video dimensions when its specification has no ratio', async ({
+  mount,
+  page
+}) => {
+  const specification = {
+    prompt: 'wide video',
+    model: 'video-model',
+    mode: 'text-to-video',
+    ratio: null,
+    resolution: null,
+    quantity: 1,
+    durationSeconds: 5,
+    references: []
+  }
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000wide',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'video',
+    slotCount: 1,
+    snapshot: specification,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-14T09:00:00Z',
+    updatedAt: '2026-09-14T09:00:01Z',
+    terminalAt: '2026-09-14T09:00:01Z',
+    slots: [
+      {
+        index: 0,
+        status: 'succeeded',
+        failureReason: null,
+        result: {
+          mimeType: 'video/mp4',
+          byteSize: 2048,
+          checksumSha256: 'ad'.repeat(32),
+          widthPx: 1920,
+          heightPx: 1080,
+          durationMs: 5000
+        }
+      }
+    ],
+    specification
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [task], resultBlobDeferred: true }}
+      drafts={{ [scriptedSessionId]: null }}
+    />
+  )
+  await selectFirstSession(page)
+
+  const skeleton = page
+    .getByTestId(`task-skeleton-${task.id}`)
+    .locator('[data-task-skeleton-part="media"]')
+  await expect(skeleton).toHaveCount(1)
+  await expect
+    .poll(() =>
+      skeleton.evaluate((element) => Number.parseFloat((element as HTMLElement).style.aspectRatio))
+    )
+    .toBeCloseTo(1920 / 1080, 4)
+})
+
 test('a task card fans its frozen reference materials', async ({ mount, page }) => {
-  // The deck visual replicates on the card: session materials resolve to
-  // their thumbnails, while a material deleted after submission keeps only
-  // its frozen kind glyph.
+  // The deck visual replicates on the card, but its display lifecycle is
+  // independent: deleting a Composer material must not clear a thumbnail an
+  // already-rendered task card retained from its frozen specification.
   const withRefs: ScriptedTask = {
     id: 'dddddddd-0000-4000-8000-00000000rf1',
     sessionId: scriptedSessionId,
@@ -1305,22 +1611,134 @@ test('a task card fans its frozen reference materials', async ({ mount, page }) 
   await expect(pile.locator('[title="poster.png · Reference"]')).toHaveCount(1)
   await expect(pile.locator('[title="First frame"]')).toHaveCount(1)
 
-  // Deleting a referenced material drops its thumbnail entry with the
-  // record: the frozen pile falls back to the kind glyph instead of a
-  // revoked object URL.
+  // Composer deletion only removes the editable binding and deck card.
   await page
     .getByTestId('reference-deck')
     .getByRole('button', { name: 'poster.png', exact: true })
     .focus()
   await page.keyboard.press('Delete')
-  await expect(pile.locator('img')).toHaveCount(1)
-  await expect(pile).toContainText('IMG')
+  await expect(pile.locator('img')).toHaveCount(2)
+})
+
+test('a task reference reauthorizes by frozen ID after Composer deletion and Workbench remount', async ({
+  mount,
+  page
+}) => {
+  const firstUrl = 'https://media.nevix.test/retained-reference.svg?signature=first'
+  const secondUrl = 'https://media.nevix.test/retained-reference.svg?signature=second'
+  const thirdUrl = 'https://media.nevix.test/retained-reference.svg?signature=third'
+  await page.route('https://media.nevix.test/retained-reference.svg?*', (route) =>
+    route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    })
+  )
+  const withReference: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000cold',
+    sessionId: scriptedSessionId,
+    status: 'processing',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: null,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-02T09:00:00Z',
+    updatedAt: '2026-09-02T09:00:01Z',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }],
+    specification: {
+      prompt: 'frozen reference survives Composer deletion',
+      model: 'doubao-seedream-5.0-pro',
+      mode: 'reference-image',
+      ratio: '1:1',
+      resolution: '2K',
+      quantity: 1,
+      durationSeconds: null,
+      references: [{ materialId: firstMaterialId, role: 'reference', kind: 'image' }]
+    }
+  }
+  await mount(
+    <CreationWorkbenchNavigationStory
+      taskScript={{ tasks: [withReference] }}
+      drafts={{
+        [scriptedSessionId]: {
+          ...staleDraft,
+          model: 'doubao-seedream-5.0-pro',
+          ratio: '1:1'
+        }
+      }}
+      materials={{
+        [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
+      }}
+      materialUrlDeferred
+      materialImageUrls={[firstUrl, secondUrl, thirdUrl]}
+    />
+  )
+  await selectFirstSession(page)
+
+  const pile = page.getByTestId(`task-references-${withReference.id}`)
+  await expect(pile).toBeVisible()
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
+  await expect(pile.locator('img')).toHaveAttribute('src', firstUrl)
+  await expect(pile.locator('img')).toBeVisible()
+
+  const composerCard = page
+    .getByTestId('reference-deck')
+    .getByRole('button', { name: 'poster.png', exact: true })
+  await composerCard.focus()
+  await page.keyboard.press('Delete')
+  await expect(composerCard).toHaveCount(0)
+  await expect.poll(() => deleteMaterialCalls(page)).toEqual([firstMaterialId])
+
+  // Navigation destroys the Workbench hook and its display controller, not just its render.
+  await page.getByRole('button', { name: 'Open settings', exact: true }).click()
+  await expect(page.getByTestId('settings-surface')).toBeVisible()
+  await expect(pile).toHaveCount(0)
+  await page.getByRole('button', { name: 'Back to creation', exact: true }).click()
+  await selectFirstSession(page)
+  await expect(composerCard).toHaveCount(0)
+  await expect(pile).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
+    .toEqual([{ materialId: firstMaterialId }, { materialId: firstMaterialId }])
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
+  await expect(pile.locator('img')).toHaveAttribute('src', secondUrl)
+  await expect(pile.locator('img')).toBeVisible()
+  await expect(composerCard).toHaveCount(0)
+
+  await pile.locator('img').evaluate((image) => image.dispatchEvent(new Event('error')))
+  const retry = pile.getByRole('button', { name: 'Retry thumbnail for Reference', exact: true })
+  await retry.focus()
+  await page.keyboard.press('Enter')
+  await expect
+    .poll(() => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? []))
+    .toEqual([
+      { materialId: firstMaterialId },
+      { materialId: firstMaterialId },
+      { materialId: firstMaterialId }
+    ])
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
+  await expect(pile.locator('img')).toHaveAttribute('src', thirdUrl)
+  await expect(pile.locator('img')).toBeVisible()
+  await expect(composerCard).toHaveCount(0)
 })
 
 test('a task-reference thumbnail supports keyboard retry without reloading on refresh', async ({
   mount,
   page
 }) => {
+  const mediaUrl = 'https://media.nevix.test/task-thumbnail.svg'
+  let releaseImage!: () => void
+  const imageReady = new Promise<void>((resolve) => {
+    releaseImage = resolve
+  })
+  await page.route(mediaUrl, async (route) => {
+    await imageReady
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
+    })
+  })
   const withReference: ScriptedTask = {
     id: 'dddddddd-0000-4000-8000-00000000rf2',
     sessionId: scriptedSessionId,
@@ -1352,8 +1770,9 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
       materials={{
         [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
       }}
-      materialBlobFailures={1}
-      materialBlobDeferred
+      materialUrlFailures={1}
+      materialUrlDeferred
+      materialImageUrl={mediaUrl}
     />
   )
   await selectFirstSession(page)
@@ -1361,19 +1780,25 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
   const pile = page.getByTestId(`task-references-${withReference.id}`)
   const thumbnail = pile.locator(`[data-thumbnail-state]`)
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'loading')
-  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialBlobs())
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'failed')
 
   const retry = pile.getByRole('button', { name: 'Retry thumbnail for poster.png' })
   await retry.focus()
   await page.keyboard.press('Enter')
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'loading')
-  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialBlobs())
+  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialUrls())
   await expect(thumbnail).toHaveAttribute('data-thumbnail-state', 'ready')
+  const taskSkeleton = page.getByTestId(`task-skeleton-${withReference.id}`)
+  await expect(taskSkeleton).toHaveCount(0)
+  const thumbnailSkeleton = thumbnail.locator('[data-slot="skeleton"]')
+  await expect(thumbnailSkeleton).toHaveCount(1)
+  releaseImage()
+  await expect(thumbnailSkeleton).toHaveCount(0)
   await expect(thumbnail.locator('img')).toBeVisible()
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
+      page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)
     )
     .toBe(2)
 
@@ -1388,9 +1813,9 @@ test('a task-reference thumbnail supports keyboard retry without reloading on re
   await expect(page.getByTestId(`task-${pushed.id}`)).toBeVisible()
   await expect(thumbnail.locator('img')).toBeVisible()
   await page.waitForTimeout(50)
-  expect(
-    await page.evaluate(() => window.__creationDeckTest?.materialBlobCalls().length ?? 0)
-  ).toBe(2)
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)).toBe(
+    2
+  )
 })
 
 test("a terminal card's slot shape never tracks the live draft ratio", async ({ mount, page }) => {
@@ -1523,6 +1948,11 @@ test('a failed result-media read is explicit and retries from the slot', async (
   await slot.getByRole('button', { name: 'Retry' }).click()
   await expect(slot).toHaveAttribute('data-media-state', 'ready')
   await expect(slot.locator('img')).toBeVisible()
+  await slot.locator('img').evaluate((image) => image.dispatchEvent(new Event('error')))
+  await expect(slot).toHaveAttribute('data-media-state', 'failed')
+  await slot.getByRole('button', { name: 'Retry' }).click()
+  await expect(slot).toHaveAttribute('data-media-state', 'ready')
+  await expect(slot.locator('img')).toBeVisible()
   await expect
     .poll(async () =>
       page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers().length ?? 0)
@@ -1567,6 +1997,7 @@ test('switching sessions retires a late result-media read before a fresh display
 
   const slot = page.getByTestId(`slot-${task.id}-0`)
   await expect(slot).toHaveAttribute('data-media-state', 'loading')
+  await expect(slot.locator('[data-slot="skeleton"]')).toHaveCount(1)
   await expect
     .poll(async () =>
       page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers().length ?? 0)
@@ -1586,7 +2017,10 @@ test('switching sessions retires a late result-media read before a fresh display
     )
     .toBe(2)
   await page.evaluate(() => window.__creationDeckTest?.releaseResultBlobs())
-  await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute('data-media-state', 'ready')
+  const refreshedSlot = page.getByTestId(`slot-${task.id}-0`)
+  await expect(refreshedSlot).toHaveAttribute('data-media-state', 'ready')
+  await expect(refreshedSlot.locator('[data-slot="skeleton"]')).toHaveCount(0)
+  await expect(refreshedSlot.locator('img')).toBeVisible()
 })
 
 test('a succeeded image slot offers a keyboard-reachable download', async ({ mount, page }) => {

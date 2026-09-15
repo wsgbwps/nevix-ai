@@ -4,11 +4,14 @@
     <meta charset="UTF-8" />
     <title>Electron</title>
     <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
-    <!-- blob: carries the reference-material thumbnails the Go data plane
-         already streamed into the renderer (object URLs), never a fetch origin. -->
+    <!-- blob: carries staged files' local preview object URLs, never a fetch
+         origin; https: carries the Go-authorized presigned display URLs the
+         renderer paints directly from the object-storage bucket (ADR-0014):
+         thumbnails and preview images in <img>, preview video/audio in
+         <video>/<audio>. media-src pins media loads to those same sources. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-src 'none'"
+      content="script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; object-src 'none'; base-uri 'none'; frame-src 'none'"
     />
   </head>
 

@@ -261,6 +261,7 @@ export function CreationComposer({
               cardKeyAliases={composer.cardKeyAliases}
               onRetainThumbnail={composer.retainMaterialThumbnail}
               onRequestThumbnail={composer.requestMaterialThumbnail}
+              onThumbnailError={composer.reportMaterialThumbnailFailure}
               cap={composer.deckCap}
               allowedKinds={composer.allowedKinds}
               onAddFiles={composer.addMaterials}
@@ -411,7 +412,7 @@ export function CreationComposer({
         onOpenChange={(open) => {
           if (!open) setPreviewMaterialId(null)
         }}
-        loadPreviewBlob={composer.loadMaterialPreviewBlob}
+        loadPreviewSource={composer.loadMaterialPreviewSource}
       />
       <Dialog
         open={composer.pendingMaterialRemoval !== null}

@@ -206,36 +206,57 @@ test('malformed session detail payloads fail closed', async () => {
   assert.equal(missingTimestamp.outcome, 'network-failure')
 })
 
-test('material download returns the trusted blob and forwards cancellation', async () => {
+test('material preview URL authorization answers a signed GET pair', async () => {
   const client = createCreationClient(serverUrl)
-  const controller = new AbortController()
+  const expiresAt = new Date(Date.now() + 60_000).toISOString()
   let request: Request | null = null
 
   const result = await withFetch(
     async (input, init) => {
       request = new Request(input as RequestInfo | URL, init)
-      return new Response(new Uint8Array([1, 2, 3]), {
-        headers: { 'Content-Type': 'video/mp4' }
+      return jsonResponse({
+        url: 'https://bucket.example/m1?sig=x',
+        expires_at: expiresAt
       })
     },
-    () => client.loadMaterialBlob('tok', 'material-1', controller.signal)
+    () => client.loadMaterialPreviewUrl('tok', 'material-1')
   )
 
   assert.ok(request !== null)
-  assert.equal(request.url, 'https://server.example/creation/materials/material-1')
+  assert.equal(request.url, 'https://server.example/creation/materials/material-1/preview-url')
   assert.equal(request.headers.get('Authorization'), 'Bearer tok')
-  assert.equal(request.signal.aborted, false)
-  assert.equal(result.outcome, 'succeeded')
-  if (result.outcome !== 'succeeded') return
-  assert.equal(result.value.type, 'video/mp4')
-  assert.deepEqual([...new Uint8Array(await result.value.arrayBuffer())], [1, 2, 3])
+  assert.deepEqual(result, {
+    outcome: 'succeeded',
+    value: { url: 'https://bucket.example/m1?sig=x', expiresAt }
+  })
 })
 
-test('material download preserves a confirmed unauthorized response', async () => {
+test('material URL authorization rejects insecure, malformed, and expired grants', async () => {
+  const client = createCreationClient(serverUrl)
+  const invalidPayloads = [
+    {
+      url: 'http://bucket.example/m1?sig=x',
+      expires_at: new Date(Date.now() + 60_000).toISOString()
+    },
+    { url: 'not a url', expires_at: new Date(Date.now() + 60_000).toISOString() },
+    { url: 'https://bucket.example/m1?sig=x', expires_at: 'not a date' },
+    { url: 'https://bucket.example/m1?sig=x', expires_at: new Date(Date.now() - 1).toISOString() }
+  ]
+
+  for (const payload of invalidPayloads) {
+    const result = await withFetch(
+      async () => jsonResponse(payload),
+      () => client.loadMaterialPreviewUrl('tok', 'material-1')
+    )
+    assert.deepEqual(result, { outcome: 'network-failure' })
+  }
+})
+
+test('material preview URL authorization preserves a confirmed unauthorized response', async () => {
   const client = createCreationClient(serverUrl)
   const result = await withFetch(
     async () => jsonResponse({ error: 'unauthorized', message: '' }, 401),
-    () => client.loadMaterialBlob('stale-token', 'material-1')
+    () => client.loadMaterialPreviewUrl('stale-token', 'material-1')
   )
 
   assert.deepEqual(result, { outcome: 'unauthorized' })

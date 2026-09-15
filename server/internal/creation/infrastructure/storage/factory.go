@@ -68,7 +68,7 @@ func hasNonPublicEndpointMarker(region string) bool {
 
 // NewBlobStore constructs exactly one production adapter for the selected
 // canonical provider. Construction performs no bucket or control-plane call.
-func NewBlobStore(location Location, credentials Credentials) (domain.DirectUploadBlobStore, error) {
+func NewBlobStore(location Location, credentials Credentials) (domain.ObjectStorageBlobStore, error) {
 	return newCloudStore(location, credentials)
 }
 

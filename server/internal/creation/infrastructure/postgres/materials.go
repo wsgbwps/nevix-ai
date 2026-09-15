@@ -28,7 +28,8 @@ const materialColumns = `
 
 const materialOwnershipJoin = `
 	FROM creation_reference_materials m
-	JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $1 AND s.deleted_at IS NULL`
+	JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $1
+		AND s.deleted_at IS NULL AND m.removed_at IS NULL`
 
 // Insert persists the validated material and stamps its creation time.
 func (r *MaterialRepository) Insert(ctx context.Context, tx domain.TxExecutor, m *domain.ReferenceMaterial) error {
@@ -49,11 +50,42 @@ func (r *MaterialRepository) Insert(ctx context.Context, tx domain.TxExecutor, m
 }
 
 // GetForRead resolves one material through an active owned session; every
-// miss — absent id, foreign creator, deleted session — collapses into
+// miss — absent/removed id, foreign creator, deleted session — collapses into
 // ErrMaterialNotFound so guessing ids learns nothing.
 func (r *MaterialRepository) GetForRead(ctx context.Context, owner, id domain.UUID) (domain.ReferenceMaterial, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT `+materialColumns+materialOwnershipJoin+` WHERE m.id = $2`, owner, id)
+	return scanMaterial(row)
+}
+
+// GetForThumbnail admits a removed material only through an explicit retained
+// task owned by the same creator. A deleted session does not release an
+// immutable task's retention fact.
+func (r *MaterialRepository) GetForThumbnail(ctx context.Context, owner, id domain.UUID) (domain.ReferenceMaterial, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT `+materialColumns+`
+		FROM creation_reference_materials m
+		JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $1
+		WHERE m.id = $2 AND (
+			(m.removed_at IS NULL AND s.deleted_at IS NULL)
+			OR EXISTS (
+				SELECT 1
+				FROM creation_generation_task_references retained
+				JOIN creation_generation_tasks task ON task.id = retained.task_id
+				WHERE retained.material_id = m.id AND task.owner_user_id = $1
+			)
+		)`, owner, id)
+	return scanMaterial(row)
+}
+
+func (r *MaterialRepository) GetForTask(ctx context.Context, owner, taskID, materialID domain.UUID) (domain.ReferenceMaterial, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT `+materialColumns+`
+		FROM creation_reference_materials m
+		JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $1
+		JOIN creation_generation_task_references retained ON retained.material_id = m.id
+		JOIN creation_generation_tasks task ON task.id = retained.task_id AND task.owner_user_id = $1
+		WHERE task.id = $2 AND m.id = $3`, owner, taskID, materialID)
 	return scanMaterial(row)
 }
 
@@ -94,24 +126,29 @@ func (r *MaterialRepository) ListBySession(ctx context.Context, owner, sessionID
 	return truncatePage(materials, limit), next, nil
 }
 
-// Delete removes one material row for its creator via an active session and
-// returns the blob key whose cleanup follows commit.
-func (r *MaterialRepository) Delete(ctx context.Context, tx domain.TxExecutor, owner, id domain.UUID) (string, error) {
-	row := tx.QueryRow(ctx, `
-		DELETE FROM creation_reference_materials m
-		USING creation_sessions s
+// Remove hides one active material from Composer and reports whether an
+// immutable task still retains the exact object.
+func (r *MaterialRepository) Remove(ctx context.Context, tx domain.TxExecutor, owner, id domain.UUID) (domain.ReferenceMaterial, bool, error) {
+	material, err := scanMaterial(tx.QueryRow(ctx, `
+		UPDATE creation_reference_materials m
+		SET removed_at = clock_timestamp()
+		FROM creation_sessions s
 		WHERE s.id = m.session_id AND s.owner_user_id = $1 AND s.deleted_at IS NULL
-		  AND m.id = $2
-		RETURNING m.blob_key`, owner, id)
-	var blobKey string
-	err := row.Scan(&blobKey)
-	if errors.Is(err, noRowsErr) {
-		return "", domain.ErrMaterialNotFound
-	}
+		  AND m.id = $2 AND m.removed_at IS NULL
+		RETURNING `+materialColumns, owner, id))
 	if err != nil {
-		return "", fmt.Errorf("creation: delete reference material: %w", err)
+		return domain.ReferenceMaterial{}, false, err
 	}
-	return blobKey, nil
+	// Read after acquiring the material lock so a just-committed admission or
+	// final task release is visible in this statement's fresh snapshot.
+	var retained bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM creation_generation_task_references WHERE material_id = $1
+		)`, id).Scan(&retained); err != nil {
+		return domain.ReferenceMaterial{}, false, fmt.Errorf("creation: read material retention: %w", err)
+	}
+	return material, retained, nil
 }
 
 func scanMaterial(row rowScanner) (domain.ReferenceMaterial, error) {
@@ -159,7 +196,9 @@ func (r *MaterialRepository) LoadMaterialsInSession(ctx context.Context, tx doma
 		FROM creation_reference_materials m
 		JOIN creation_sessions s ON s.id = m.session_id
 		WHERE m.session_id = $1 AND s.owner_user_id = $2 AND s.deleted_at IS NULL
-		  AND m.id = ANY($3::uuid[])`,
+		  AND m.removed_at IS NULL AND m.id = ANY($3::uuid[])
+		ORDER BY m.id
+		FOR SHARE OF m`,
 		sessionID, owner, ids)
 	if err != nil {
 		return nil, fmt.Errorf("creation: load materials in session: %w", err)

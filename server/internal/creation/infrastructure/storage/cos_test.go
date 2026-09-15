@@ -25,7 +25,7 @@ func TestCOSPutIncludesOverwriteGuard(t *testing.T) {
 }
 
 func TestCOSConformance(t *testing.T) {
-	runCloudConformanceSuite(t, ProviderCOS, func(t *testing.T, transport http.RoundTripper) domain.DirectUploadBlobStore {
+	runCloudConformanceSuite(t, ProviderCOS, func(t *testing.T, transport http.RoundTripper) domain.ObjectStorageBlobStore {
 		t.Helper()
 		store, err := newCOSStore(
 			Location{Provider: ProviderCOS, Region: "ap-shanghai", Bucket: "nevix-test-1250000000"},

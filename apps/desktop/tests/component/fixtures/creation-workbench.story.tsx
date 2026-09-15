@@ -232,7 +232,7 @@ export interface DeckTestControls {
   /** Reads this device's local draft record for one session key ('new' for composing). */
   draftRecord(key: string): LocalDraftRecord | null
   deleteMaterialCalls(): string[]
-  materialBlobCalls(): ReadonlyArray<{ materialId: string; aborted: boolean }>
+  materialUrlCalls(): ReadonlyArray<{ materialId: string }>
   resultBlobTransfers(): ReadonlyArray<{ taskId: string; slotIndex: number }>
   resultReuseCalls(): ReadonlyArray<{
     sessionId: string
@@ -240,7 +240,7 @@ export interface DeckTestControls {
     slotIndex: number
     fileName: string
   }>
-  releaseMaterialBlobs(): void
+  releaseMaterialUrls(): void
   releaseResultBlobs(): void
   releaseMaterialDeletes(): void
   releaseSessionDeletes(): void
@@ -299,6 +299,36 @@ declare global {
 function succeeded<T>(value: T): CreationApiResult<T> {
   return { outcome: 'succeeded', value }
 }
+
+// A hand-rolled silent WAV: Chromium's <video> and <audio> both load it as a
+// data URL (audio-only content, no error event), so media preview tests run
+// the success path without any network.
+const scriptedSilentWavUrl = (() => {
+  const samples = 8000
+  const bytes = new Uint8Array(44 + samples)
+  const view = new DataView(bytes.buffer)
+  const ascii = (offset: number, text: string): void => {
+    for (let index = 0; index < text.length; index += 1) {
+      view.setUint8(offset + index, text.charCodeAt(index))
+    }
+  }
+  ascii(0, 'RIFF')
+  view.setUint32(4, 36 + samples, true)
+  ascii(8, 'WAVE')
+  ascii(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, 8000, true)
+  view.setUint32(28, 8000, true)
+  view.setUint16(32, 1, true)
+  view.setUint16(34, 8, true)
+  ascii(36, 'data')
+  view.setUint32(40, samples, true)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return `data:audio/wav;base64,${btoa(binary)}`
+})()
 
 // The scripted task list pages like the real endpoint (contracts
 // listSessionGenerationTasks): (created_at DESC, id DESC) keyset order with a
@@ -365,10 +395,13 @@ interface RuntimeOptions {
   /** Seeds the device-local draft store (ADR-0017); null entries clear a key. */
   readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
-  /** Number of initial full-preview loads that should fail with no Blob. */
-  readonly materialBlobFailures?: number
-  /** Keeps full-preview loads pending until the test releases or aborts them. */
-  readonly materialBlobDeferred?: boolean
+  /** Number of initial display-URL authorizations that should fail. */
+  readonly materialUrlFailures?: number
+  /** Keeps display-URL authorizations pending until the test releases them. */
+  readonly materialUrlDeferred?: boolean
+  /** Overrides the scripted image URL so tests can control its network load. */
+  readonly materialImageUrl?: string
+  readonly materialImageUrls?: readonly string[]
   readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
@@ -396,8 +429,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     else writeLocalDraft(localStorage, storyUserId, key, record)
   }
   const deletedIds: string[] = []
-  const materialBlobCalls: Array<{ materialId: string; aborted: boolean }> = []
-  const materialBlobReleases = new Set<() => void>()
+  const materialUrlCalls: Array<{ materialId: string }> = []
+  const materialUrlReleases = new Set<() => void>()
   const materialDeleteReleases = new Set<() => void>()
   const sessionDeleteReleases = new Set<() => void>()
   const uploadReleases = new Set<() => void>()
@@ -409,7 +442,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   let firstMaterialListDeferred = options.deferFirstMaterialListFor !== undefined
   let deferNextMaterialList = false
   let materialListCalls = 0
-  let remainingMaterialBlobFailures = options.materialBlobFailures ?? 0
+  let remainingMaterialUrlFailures = options.materialUrlFailures ?? 0
   const uploadCalls: Array<{ sessionId: string; name: string }> = []
   // First upload answers with the id the legacy specs pin; later ones increment.
   let uploadSequence = 0
@@ -486,15 +519,50 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   const waitForRelease = (releases: Set<() => void>): Promise<void> =>
     new Promise((resolve) => releases.add(resolve))
 
+  // Use decodable inline media so previews do not enter the error/retry path.
+  const scriptedMaterialSvgUrl =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='64'%3E%3Crect width='100%25' height='100%25' fill='%2388f'/%3E%3C/svg%3E"
+  const scriptedMaterialKind = (materialId: string): ReferenceMaterialView['kind'] => {
+    for (const list of materials.values()) {
+      const found = list.find((entry) => entry.id === materialId)
+      if (found !== undefined) return found.kind
+    }
+    return 'image'
+  }
+  const scriptedMaterialUrl = async (
+    materialId: string
+  ): Promise<
+    | { outcome: 'succeeded'; value: { url: string; expiresAt: string } }
+    | { outcome: 'network-failure' }
+  > => {
+    materialUrlCalls.push({ materialId })
+    const imageUrl =
+      options.materialImageUrls?.[materialUrlCalls.length - 1] ??
+      options.materialImageUrl ??
+      scriptedMaterialSvgUrl
+    if (options.materialUrlDeferred) await waitForRelease(materialUrlReleases)
+    if (remainingMaterialUrlFailures > 0) {
+      remainingMaterialUrlFailures -= 1
+      return { outcome: 'network-failure' }
+    }
+    return succeeded({
+      url:
+        scriptedMaterialKind(materialId) === 'image'
+          ? imageUrl
+          : `${scriptedSilentWavUrl}#grant-${materialUrlCalls.length}`,
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString()
+    })
+  }
+
   window.__creationDeckTest = {
     draftRecord: (key) => readLocalDraft(localStorage, storyUserId, key),
     deleteMaterialCalls: () => deletedIds,
-    materialBlobCalls: () => materialBlobCalls,
+    materialUrlCalls: () => materialUrlCalls,
     resultBlobTransfers: () => resultBlobTransfers,
     resultReuseCalls: () => resultReuseCalls,
-    releaseMaterialBlobs: () => {
-      for (const release of materialBlobReleases) release()
-      materialBlobReleases.clear()
+    releaseMaterialUrls: () => {
+      for (const release of materialUrlReleases) release()
+      materialUrlReleases.clear()
     },
     releaseResultBlobs: () => {
       for (const release of resultBlobReleases) release()
@@ -703,36 +771,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       }
       return succeeded(undefined)
     },
-    loadMaterialBlob: async (materialId, signal) => {
-      const call = { materialId, aborted: false }
-      materialBlobCalls.push(call)
-      signal?.addEventListener('abort', () => {
-        call.aborted = true
-      })
-      if (options.materialBlobDeferred) {
-        await new Promise<void>((resolve) => {
-          const release = (): void => {
-            materialBlobReleases.delete(release)
-            resolve()
-          }
-          materialBlobReleases.add(release)
-          signal?.addEventListener('abort', release, { once: true })
-        })
-      }
-      if (signal?.aborted) return { outcome: 'network-failure' }
-      if (remainingMaterialBlobFailures > 0) {
-        remainingMaterialBlobFailures -= 1
-        return { outcome: 'network-failure' }
-      }
-      return succeeded(
-        new Blob(
-          [
-            '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="64"><rect width="100%" height="100%" fill="#88f"/></svg>'
-          ],
-          { type: 'image/svg+xml' }
-        )
-      )
-    },
+    loadThumbnailUrl: (materialId) => scriptedMaterialUrl(materialId),
+    loadPreviewUrl: (materialId) => scriptedMaterialUrl(materialId),
     loadCapabilityManifest: async () => {
       await manifestReady
       return options.manifestFails || options.manifest === null
@@ -904,8 +944,10 @@ interface StoryOptions {
   readonly manifestDeferred?: boolean
   readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
-  readonly materialBlobFailures?: number
-  readonly materialBlobDeferred?: boolean
+  readonly materialUrlFailures?: number
+  readonly materialUrlDeferred?: boolean
+  readonly materialImageUrl?: string
+  readonly materialImageUrls?: readonly string[]
   readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
@@ -928,8 +970,10 @@ function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
     manifestDeferred: options.manifestDeferred,
     sessions: options.sessions ?? [sessionA, sessionB],
     taskScript: options.taskScript,
-    materialBlobFailures: options.materialBlobFailures,
-    materialBlobDeferred: options.materialBlobDeferred,
+    materialUrlFailures: options.materialUrlFailures,
+    materialUrlDeferred: options.materialUrlDeferred,
+    materialImageUrl: options.materialImageUrl,
+    materialImageUrls: options.materialImageUrls,
     deleteMaterialDeferred: options.deleteMaterialDeferred,
     deleteSessionDeferred: options.deleteSessionDeferred,
     uploadDeferred: options.uploadDeferred,

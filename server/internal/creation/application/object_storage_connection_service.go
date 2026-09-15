@@ -29,7 +29,7 @@ type ObjectStorageConnectionService struct {
 	runner           domain.WriteRunner
 	vault            domain.ObjectStorageCredentialVault
 	verifier         domain.ObjectStorageVerifier
-	storeFactory     domain.DirectUploadStoreFactory
+	storeFactory     domain.ObjectStorageBlobStoreFactory
 	referenceFactory domain.ReferenceTransportFactory
 	proofs           authz.ReauthProofVerifier
 	activationMu     sync.Mutex
@@ -41,7 +41,7 @@ func NewObjectStorageConnectionService(
 	runner domain.WriteRunner,
 	vault domain.ObjectStorageCredentialVault,
 	verifier domain.ObjectStorageVerifier,
-	storeFactory domain.DirectUploadStoreFactory,
+	storeFactory domain.ObjectStorageBlobStoreFactory,
 	referenceFactory domain.ReferenceTransportFactory,
 	proofs authz.ReauthProofVerifier,
 ) *ObjectStorageConnectionService {
@@ -87,7 +87,7 @@ func (s *ObjectStorageConnectionService) Capability(ctx context.Context) (Object
 
 // ResolveStore opens the active Object Storage adapter without retaining
 // decrypted credentials. All failures collapse at this trusted boundary.
-func (s *ObjectStorageConnectionService) ResolveStore(ctx context.Context) (domain.DirectUploadBlobStore, domain.ObjectStorageConnection, error) {
+func (s *ObjectStorageConnectionService) ResolveStore(ctx context.Context) (domain.ObjectStorageBlobStore, domain.ObjectStorageConnection, error) {
 	store, connection, err := s.resolveStoreForReference(ctx)
 	if err != nil {
 		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
@@ -95,7 +95,7 @@ func (s *ObjectStorageConnectionService) ResolveStore(ctx context.Context) (doma
 	return store, connection, nil
 }
 
-func (s *ObjectStorageConnectionService) resolveStoreForReference(ctx context.Context) (domain.DirectUploadBlobStore, domain.ObjectStorageConnection, error) {
+func (s *ObjectStorageConnectionService) resolveStoreForReference(ctx context.Context) (domain.ObjectStorageBlobStore, domain.ObjectStorageConnection, error) {
 	if s.storeFactory == nil {
 		return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageConfiguration
 	}
