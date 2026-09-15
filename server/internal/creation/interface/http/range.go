@@ -1,6 +1,9 @@
 package creationhttp
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // rangeIntent is the grammar-level result of inspecting a Range header
 // before any size is known.
@@ -25,12 +28,9 @@ func parseRangeIntent(header string) rangeIntent {
 	intent.present = true
 	spec, ok := strings.CutPrefix(header, "bytes=")
 	if !ok || strings.ContainsAny(spec, ", \t") {
-		return intent // unit mismatch or multi-range: ignorable per RFC 9110
+		return intent
 	}
 	if n, ok := parseSuffixForm(spec); ok {
-		if n < 0 {
-			return intent // invalid negative → whole-content fallback
-		}
 		intent.valid, intent.suffix, intent.n = true, true, n
 		return intent
 	}
@@ -85,9 +85,8 @@ func resolveRange(intent rangeIntent, size int64) (servePartial bool, start, sto
 		if intent.start >= size {
 			return false, 0, 0, false
 		}
-		stop = intent.end + 1
-		if stop > size {
-			stop = size
+		if intent.end < size-1 {
+			stop = intent.end + 1
 		}
 		return true, intent.start, stop, true
 	}
@@ -108,13 +107,15 @@ func parseUint64(raw string) int64 {
 	if raw == "" || len(raw) > 19 {
 		return -1
 	}
-	var value int64
 	for i := 0; i < len(raw); i++ {
 		c := raw[i]
 		if c < '0' || c > '9' {
 			return -1
 		}
-		value = value*10 + int64(c-'0')
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return -1
 	}
 	return value
 }

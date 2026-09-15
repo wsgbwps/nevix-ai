@@ -18,7 +18,7 @@ const ManifestSchemaVersion = 2
 // backend id has no suffix, so -n reads like a distinct product. v5: the
 // image reference envelope is per model (pro 10, base 14 reference images)
 // instead of a flat 1–4; each model view publishes its own ceiling.
-const ManifestVersion = 5
+const ManifestVersion = 6
 
 // The V1 allowlisted models (spec #150). Declared here because the manifest
 // publishes them; the Kapon adapter reuses these constants so the catalog
@@ -68,6 +68,7 @@ var (
 		{Model: VideoModelID, Resolutions: []string{"480p", "720p", "1080p"}, DefaultResolution: "720p"},
 	}
 	videoDurations = []int{5, 10}
+	videoRatios    = []string{"adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
 )
 
 // AcceptedImageRatios and AcceptedImageModels expose the accepted value sets
@@ -310,8 +311,8 @@ func modeReferencePolicy(media, mode string) ReferenceMaterialPolicy {
 		}
 	case mode == ModeFirstLastFrame:
 		return ReferenceMaterialPolicy{
-			Total:    CountRange{Min: 1, Max: 2},
-			PerMedia: &PerMediaReferences{Image: ptr(imageReferencePolicy(1, 2, videoImageRefMaxBytes))},
+			Total:    CountRange{Min: 2, Max: 2},
+			PerMedia: &PerMediaReferences{Image: ptr(imageReferencePolicy(2, 2, videoImageRefMaxBytes))},
 		}
 	default: // omni-reference
 		return ReferenceMaterialPolicy{
@@ -369,6 +370,10 @@ func deriveAvailableMedia(media string, models []CapabilityModelView, modes []st
 		defaults.Ratio = defaultImageRatio
 		defaults.Quantity = defaultImageQuantity
 	} else {
+		view.Ratios = append([]string(nil), videoRatios...)
+		view.Quantities = []int{1}
+		defaults.Ratio = "adaptive"
+		defaults.Quantity = 1
 		view.Durations = append([]int(nil), videoDurations...)
 		defaults.Duration = defaultVideoDuration
 	}

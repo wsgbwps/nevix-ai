@@ -6,6 +6,7 @@ set -euo pipefail
 # smoke — Smoke Suite: one test-mode build, then only specs tagged @smoke.
 # settings — Settings Information Architecture: one test-mode build, then the Settings spec.
 # image — Slice-10 image generation: the shortest image spec.
+# video — Slice-11 video generation, playback and download.
 #
 # Every mode except settings boots the fake Kapon generation route and
 # configures the provider connection: the creation tracers submit real
@@ -15,9 +16,9 @@ set -euo pipefail
 # dependencies are not compiled into production builds.
 mode="${1:-full}"
 case "$mode" in
-  full | smoke | settings | image) ;;
+  full | smoke | settings | image | video) ;;
   *)
-    echo "usage: $0 [full|smoke|settings|image]" >&2
+    echo "usage: $0 [full|smoke|settings|image|video]" >&2
     exit 2
     ;;
 esac
@@ -680,7 +681,7 @@ if [[ "$mode" != "settings" ]]; then
   configure_provider_connection
   echo "==> Fake Kapon generation route ready on $KAPON_E2E_BASE_URL (provider connection configured)"
 fi
-if [[ "$mode" == "image" || "$mode" == "smoke" ]]; then
+if [[ "$mode" == "image" || "$mode" == "video" || "$mode" == "smoke" ]]; then
   configure_object_storage_connection
   echo "==> Test-only Object Storage Connection configured"
 fi
@@ -695,7 +696,7 @@ e2e_run_id="$(date +%s)-$$"
 # global-state assertion deterministic.
 playwright_args=(--workers=1)
 if [[ "$mode" == "full" ]]; then
-  playwright_args+=(--grep-invert '@image|@storage')
+  playwright_args+=(--grep-invert '@image|@video|@storage')
 elif [[ "$mode" == "smoke" ]]; then
   playwright_args+=(--grep '@smoke')
 elif [[ "$mode" == "settings" ]]; then
@@ -706,6 +707,8 @@ elif [[ "$mode" == "image" ]]; then
   playwright_args+=(
     tests/creation/creation-image.spec.ts
   )
+elif [[ "$mode" == "video" ]]; then
+  playwright_args+=(tests/creation/creation-video.spec.ts)
 fi
 if [[ "$failure_injection" == "after-renderer-launch" ]]; then
   echo "==> Arming a controlled identity server failure after renderer launch"
@@ -721,7 +724,7 @@ run_playwright "${playwright_args[@]}"
 if [[ "$mode" == "full" && -z "$failure_injection" ]]; then
   configure_object_storage_connection
   echo "==> Test-only Object Storage Connection configured"
-  run_playwright tests/creation/creation-tracer.spec.ts tests/creation/creation-image.spec.ts --workers=1
+  run_playwright tests/creation/creation-tracer.spec.ts tests/creation/creation-image.spec.ts tests/creation/creation-video.spec.ts --workers=1
 fi
 
 if [[ -n "$identity_server_failure_injector_pid" ]]; then

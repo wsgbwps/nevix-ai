@@ -1250,17 +1250,58 @@ paths:
       summary: 下载成功槽位的已验证输出（creator-private 有界流）
       description: |-
         只对创建者开放；流式经 Go 有界传输，不暴露 Storage 凭据。仅成功槽位携带输出；
-        其他槽位与外来任务一律 404。
+        其他槽位与外来任务一律 404。支持标准单区间 Range（206），非法、多区间或
+        不可满足的区间返回 416；完整下载沿流校验 SHA-256，读取或校验失败中断响应。
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/taskID"
         - $ref: "#/components/parameters/slotIndex"
+        - name: Range
+          in: header
+          required: false
+          description: 单区间字节范围（bytes=start-end | bytes=start- | bytes=-suffix）。
+          schema:
+            type: string
       responses:
         "200":
           description: 输出字节流（Content-Type 为转存时验证的 MIME）。
+          headers:
+            Content-Length:
+              schema:
+                type: integer
+            Accept-Ranges:
+              schema:
+                type: string
+                enum: [bytes]
+            X-Content-SHA-256:
+              description: 完整输出的 SHA-256 十六进制摘要。
+              schema:
+                type: string
           content:
-            application/octet-stream:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: 已验证输出的单区间字节流。
+          headers:
+            Content-Range:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+            Accept-Ranges:
+              schema:
+                type: string
+                enum: [bytes]
+            X-Content-SHA-256:
+              description: 完整输出的 SHA-256 十六进制摘要；区间不能独立复算全文摘要。
+              schema:
+                type: string
+          content:
+            "*/*":
               schema:
                 type: string
                 format: binary
@@ -1268,8 +1309,12 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "416":
+          $ref: "#/components/responses/RangeNotSatisfiable"
         "500":
           $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
   /creation/events:
     get:
       operationId: streamCreationEvents
@@ -1905,6 +1950,7 @@ components:
           format: date-time
     TaskSubmitInput:
       type: object
+      description: 视频模式按实际输入归一化；准入与未完成项重试都校验当前 manifest，能力变化不会改写意图。
       required:
         - idempotency_key
         - manifest_version
@@ -1937,10 +1983,12 @@ components:
           type: string
           nullable: true
           maxLength: 64
+          description: 视频无参考为 text-to-video；一张 first_frame 为 first-frame；按 first_frame、last_frame 排列两张图片为 first-last-frame；全为 omni 角色的混合参考为 omni-reference，不混用两类角色。
         ratio:
           type: string
           nullable: true
           maxLength: 16
+          description: 必须来自当前媒体 manifest；视频首帧与首尾帧只接受 adaptive，显式其他值拒绝提交，不静默替换。
         resolution:
           type: string
           nullable: true
@@ -1950,10 +1998,12 @@ components:
           nullable: true
           minimum: 1
           maximum: 4
+          description: 图片数量来自当前 manifest；视频省略或 null 归一化为 1，显式值仅允许 1。
         duration_seconds:
           type: integer
           nullable: true
           minimum: 1
+          description: 视频必填且只接受当前 manifest 已声明的时长，不直接开放供应商全部时长。
         references:
           type: array
           maxItems: 14
@@ -2596,7 +2646,7 @@ components:
         ratios:
           type: array
           nullable: true
-          description: 图片可提交比例（固定顺序，来自版本化 supported ratios）；仅 image 且可用时非空。
+          description: 可提交比例（固定顺序）；视频默认 adaptive，首帧与首尾帧只接受 adaptive。
           items:
             type: string
             enum:
@@ -2608,10 +2658,11 @@ components:
               - "3:2"
               - "2:3"
               - "21:9"
+              - "adaptive"
         quantities:
           type: array
           nullable: true
-          description: 图片可提交数量（升序 1..4）；仅 image 且可用时非空。
+          description: 图片数量为 1..4，视频仅 1；可用时非空。
           items:
             type: integer
             minimum: 1
@@ -3049,6 +3100,7 @@ components:
             - $ref: "#/components/schemas/GenerationSpecification"
     GenerationSpecification:
       type: object
+      description: 准入时冻结的实际生成意图；视频保留归一化模式、原始比例、单条数量及已验收时长。
       required:
         - schema_version
         - media_type
@@ -3070,16 +3122,19 @@ components:
           type: string
         mode:
           type: string
+          description: 视频冻结为 text-to-video、first-frame、first-last-frame 或 omni-reference。
         manifest_version:
           type: integer
         ratio:
           type: string
           nullable: true
+          description: 视频冻结提交的 manifest 比例；首帧与首尾帧为 adaptive。
         resolution:
           type: string
           nullable: true
         quantity:
           type: integer
+          description: 视频恒为 1；未完成项重试产生新任务并保持原任务不变。
         duration_seconds:
           type: integer
           nullable: true

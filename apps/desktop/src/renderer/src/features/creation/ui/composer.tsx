@@ -36,6 +36,7 @@ import {
   modelCandidates,
   publishedSize,
   resolutionCandidates,
+  videoComposerMode,
   type DraftMediaType
 } from '../model/capability'
 import type { WorkbenchComposerHandle } from '../model/use-workbench'
@@ -253,6 +254,7 @@ export function CreationComposer({
           <div className="min-w-0 shrink">
             <ReferenceDeck
               compact={!expanded}
+              frameMode={media === 'video' && videoComposerMode(draft.mode) === 'first-last-frame'}
               bindings={draft.references}
               materials={composer.materials}
               thumbnails={composer.thumbnails}
@@ -593,11 +595,14 @@ function ModeMenu({ composer }: { readonly composer: WorkbenchComposerHandle }):
   const { manifest, draft, staleFields } = composer
   const media = draft.mediaType
   if (media === null) return <></>
-  const candidates = modeCandidates(manifest, media)
+  const candidates = modeCandidates(manifest, media).filter(
+    (mode) => mode === 'first-last-frame' || mode === 'omni-reference'
+  )
+  const chosenMode = videoComposerMode(draft.mode)
   const staleMode = staleFields.has('mode') ? draft.mode : null
   const label =
-    draft.mode !== null && draft.mode in modeKeys
-      ? t(modeKeys[draft.mode as CapabilityMediaMode])
+    chosenMode !== null && chosenMode in modeKeys
+      ? t(modeKeys[chosenMode as CapabilityMediaMode])
       : (draft.mode ?? t('composer.mode.label'))
   return (
     <DropdownMenu>
@@ -624,7 +629,7 @@ function ModeMenu({ composer }: { readonly composer: WorkbenchComposerHandle }):
           >
             <SlidersHorizontalIcon className="size-4" aria-hidden />
             {t(modeKeys[mode])}
-            {draft.mode === mode ? <CheckIcon className="ml-auto size-4" aria-hidden /> : null}
+            {chosenMode === mode ? <CheckIcon className="ml-auto size-4" aria-hidden /> : null}
           </DropdownMenuItem>
         ))}
       </ComposerMenuContent>
@@ -643,7 +648,13 @@ function ParamsMenu({
   const capability = media === null ? null : mediaCapability(manifest, media)
   if (media === null || capability === null || !capability.available) return <></>
 
-  const ratios = capability.ratios ?? []
+  const frameReferences =
+    media === 'video' &&
+    videoComposerMode(draft.mode) === 'first-last-frame' &&
+    draft.references.length > 0
+  const ratios = frameReferences
+    ? (capability.ratios ?? []).filter((ratio) => ratio === 'adaptive')
+    : (capability.ratios ?? [])
   // Resolution tiers are model-scoped: the selected model's own published
   // tiers, empty while the draft's model is stale so only the stale note
   // shows.
@@ -665,7 +676,9 @@ function ParamsMenu({
         className={`${controlClass} ${staleParams ? staleTriggerClass : ''}`}
       >
         <RatioGlyph ratio={draft.ratio} max={14} />
-        {draft.ratio !== null && <span>{draft.ratio}</span>}
+        {draft.ratio !== null && (
+          <span>{draft.ratio === 'adaptive' ? t('composer.params.adaptive') : draft.ratio}</span>
+        )}
         {draft.ratio !== null && draft.resolution !== null && <Separator />}
         {draft.resolution !== null && <span>{draft.resolution}</span>}
         {draft.quantity !== null && (
@@ -698,7 +711,9 @@ function ParamsMenu({
                     <span className="flex h-4 shrink-0 items-center justify-center">
                       <RatioGlyph ratio={ratio} diagonal={16} />
                     </span>
-                    <span className="text-[11px] leading-none">{ratio}</span>
+                    <span className="text-[11px] leading-none">
+                      {ratio === 'adaptive' ? t('composer.params.adaptive') : ratio}
+                    </span>
                   </>
                 )}
               />
@@ -796,13 +811,61 @@ function DurationMenu({
             <StaleRow value={t('composer.params.durationShort', { n: staleDuration })} />
           </div>
         )}
-        <OptionStrip
-          items={durations}
-          isSelected={(duration) => duration === draft.durationSeconds}
-          layout="h-9 text-[11px]"
-          onSelect={(duration) => composer.patchDraft({ durationSeconds: duration })}
-          render={(duration) => t('composer.params.seconds', { n: duration })}
-        />
+        <div className="flex items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <input
+              type="range"
+              aria-label={t('composer.params.duration')}
+              aria-valuetext={t('composer.params.seconds', {
+                n: draft.durationSeconds ?? durations[0]
+              })}
+              min={0}
+              max={Math.max(0, durations.length - 1)}
+              step={1}
+              value={Math.max(0, durations.indexOf(draft.durationSeconds ?? durations[0]))}
+              disabled={durations.length === 1}
+              className="h-1.5 w-full cursor-pointer accent-cyan-600 dark:accent-cyan-300"
+              onChange={(event) =>
+                composer.patchDraft({ durationSeconds: durations[Number(event.target.value)] })
+              }
+            />
+            <div className="text-muted-foreground mt-2 flex justify-between text-[10px]">
+              {durations.map((duration) => (
+                <button
+                  key={duration}
+                  type="button"
+                  aria-label={t('composer.params.seconds', { n: duration })}
+                  aria-pressed={draft.durationSeconds === duration}
+                  className="hover:text-foreground rounded px-1 outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+                  onClick={() => composer.patchDraft({ durationSeconds: duration })}
+                >
+                  {duration}
+                </button>
+              ))}
+            </div>
+          </div>
+          <select
+            aria-label={t('composer.params.duration')}
+            value={
+              draft.durationSeconds !== null && durations.includes(draft.durationSeconds)
+                ? draft.durationSeconds
+                : ''
+            }
+            className="bg-accent h-10 w-20 shrink-0 rounded-xl px-2 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
+            onChange={(event) =>
+              composer.patchDraft({ durationSeconds: Number(event.target.value) })
+            }
+          >
+            <option value="" disabled>
+              {t('composer.params.duration')}
+            </option>
+            {durations.map((duration) => (
+              <option key={duration} value={duration}>
+                {t('composer.params.durationShort', { n: duration })}
+              </option>
+            ))}
+          </select>
+        </div>
       </ComposerMenuContent>
     </DropdownMenu>
   )

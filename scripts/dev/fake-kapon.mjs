@@ -1,16 +1,19 @@
-// 本地开发与图片 E2E 的 fake Kapon（仓库不发布、不进生产镜像）：实现
-// Connection Check 用到的 GET /v1/models，以及切片 10 图片生成路径的
-// POST /v1/images/generations 与临时 URL 输出端点（issue #160）。接受
+// 本地开发与 Creation E2E 的 fake Kapon（不进生产镜像）：实现 models、
+// 图片生成与原生视频 submit/poll/cancel，以及临时输出端点。接受
 // FAKE_KAPON_KEY（默认 test-key），其余一律 401，便于同时验证"候选被拒绝"
 // 的路径。自动化测试不得注入生产 Token（规格 #150）。
 import { createServer } from 'node:http'
 import { deflateSync } from 'node:zlib'
+import { readFileSync } from 'node:fs'
 
 const port = Number(process.env.FAKE_KAPON_PORT ?? 9399)
 const acceptedKey = process.env.FAKE_KAPON_KEY ?? 'test-key'
+const videoBytes = readFileSync(new URL('./fixtures/video-with-audio.mp4', import.meta.url))
+const videoPath = '/volcark/api/v3/contents/generations/tasks'
+const videoTasks = new Map()
+let nextVideoId = 0
 
-// Deterministic 64x64 RGBA PNG: the fake's verified-bytes fixture, encoded
-// in-process so no binary fixture file ships in the tree.
+// Deterministic 64x64 RGBA PNG, encoded in-process.
 const fakePng = (() => {
   const width = 64
   const height = 64
@@ -63,7 +66,7 @@ const fakePng = (() => {
 
 const authorized = (req) => req.headers.authorization === `Bearer ${acceptedKey}`
 
-createServer((req, res) => {
+createServer(async (req, res) => {
   const bearer = req.headers.authorization ?? ''
   const marker = req.headers['x-forwarded-proto'] ?? '(none)'
   if (req.method === 'GET' && req.url === '/v1/models' && authorized(req)) {
@@ -107,6 +110,77 @@ createServer((req, res) => {
   if (req.method === 'GET' && req.url?.startsWith('/provider-outputs/image/')) {
     res.setHeader('content-type', 'image/png')
     res.end(fakePng)
+    return
+  }
+  if (req.url === videoPath && req.method === 'POST') {
+    if (!authorized(req)) {
+      res.writeHead(401).end('{}')
+      return
+    }
+    try {
+      let body = ''
+      for await (const chunk of req) {
+        body += chunk
+        if (body.length > 1 << 20) throw new Error('oversize fixture request')
+      }
+      const payload = JSON.parse(body)
+      if (
+        payload.model !== 'doubao-seedance-2-5' ||
+        !['480p', '720p', '1080p'].includes(payload.resolution) ||
+        ![5, 10].includes(payload.duration) ||
+        !['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'].includes(payload.ratio) ||
+        payload.output_format !== 'mp4' ||
+        payload.generate_audio !== true ||
+        !Array.isArray(payload.content) ||
+        payload.content[0]?.type !== 'text'
+      )
+        throw new Error('unsupported fixture request')
+      const id = `fake-video-${++nextVideoId}`
+      videoTasks.set(id, { polls: 0, cancelled: false })
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ id }))
+    } catch {
+      res.writeHead(400).end(JSON.stringify({ error: { code: 'invalid_request' } }))
+    }
+    return
+  }
+  if (req.url?.startsWith(`${videoPath}/`) && ['GET', 'DELETE'].includes(req.method)) {
+    if (!authorized(req)) {
+      res.writeHead(401).end('{}')
+      return
+    }
+    const id = req.url.slice(videoPath.length + 1)
+    const task = videoTasks.get(id)
+    if (!task) {
+      res.writeHead(404).end('{}')
+      return
+    }
+    if (req.method === 'DELETE') {
+      task.cancelled = true
+      res.writeHead(204).end()
+      return
+    }
+    res.setHeader('content-type', 'application/json')
+    res.end(
+      JSON.stringify(
+        task.cancelled
+          ? { id, status: 'cancelled' }
+          : ++task.polls === 1
+            ? { id, status: 'running' }
+            : {
+                id,
+                status: 'succeeded',
+                content: {
+                  video_url: `http://127.0.0.1:${port}/provider-outputs/video/${id}`
+                }
+              }
+      )
+    )
+    return
+  }
+  if (req.method === 'GET' && req.url?.startsWith('/provider-outputs/video/')) {
+    res.setHeader('content-type', 'video/mp4')
+    res.end(videoBytes)
     return
   }
   console.log(`[fake-kapon] 401 ${req.url}`)

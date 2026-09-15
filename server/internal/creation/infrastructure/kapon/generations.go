@@ -32,10 +32,8 @@ import (
 // references replaced) may reach server logs and the failure diagnostic per
 // ADR-0016, so a provider rejection can be diagnosed without the payload.
 //
-// The wire shapes below (OpenAI-style /v1/images/generations and the async
-// /v1/contents/generations/tasks family) are the kernel's adapter contract,
-// pinned by the fake-Kapon tests; the video slice (#161) refines the exact
-// vendor payload mapping during its real-invocation acceptance.
+// Image calls use Kapon's OpenAI-compatible API; video calls use the native
+// Seedance contract: https://docs.kapon.cloud/doubao/seedance-2-5.
 type GenerationsClient struct {
 	baseURL         string
 	http            *http.Client
@@ -410,14 +408,7 @@ func missingOutputIndeterminate() error {
 }
 
 func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, req domain.PreparedSubmitRequest) (domain.SubmitOutcome, error) {
-	command := req.Prompt
-	if req.Resolution != nil {
-		command += " --resolution " + *req.Resolution
-	}
-	if req.DurationS != nil {
-		command += " --duration " + strconv.Itoa(*req.DurationS)
-	}
-	content := []map[string]any{{"type": "text", "text": command}}
+	content := []map[string]any{{"type": "text", "text": req.Prompt}}
 	for _, reference := range req.References {
 		typeName := string(reference.Kind) + "_url"
 		item := map[string]any{"type": typeName, typeName: map[string]string{"url": reference.URL}}
@@ -431,13 +422,26 @@ func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, 
 		}
 		content = append(content, item)
 	}
-	body := map[string]any{"model": req.Model, "content": content}
+	ratio := "adaptive"
+	if req.Ratio != nil {
+		ratio = *req.Ratio
+	}
+	body := map[string]any{
+		"model": req.Model, "content": content, "ratio": ratio,
+		"generate_audio": true, "output_format": "mp4",
+	}
+	if req.Resolution != nil {
+		body["resolution"] = *req.Resolution
+	}
+	if req.DurationS != nil {
+		body["duration"] = *req.DurationS
+	}
 	callCtx, cancel := context.WithTimeout(ctx, c.submitTimeout)
 	defer cancel()
 	var parsed struct {
 		ID string `json:"id"`
 	}
-	if err := classifySubmitError(c.call(callCtx, credential, http.MethodPost, "/v1/contents/generations/tasks", body, &parsed)); err != nil {
+	if err := classifySubmitError(c.call(callCtx, credential, http.MethodPost, "/volcark/api/v3/contents/generations/tasks", body, &parsed)); err != nil {
 		return domain.SubmitOutcome{}, err
 	}
 	if parsed.ID == "" {
@@ -466,7 +470,7 @@ func (c *GenerationsClient) Poll(ctx context.Context, credential string, ref str
 		} `json:"content"`
 		Error *providerJobError `json:"error"`
 	}
-	if err := c.call(callCtx, credential, http.MethodGet, "/v1/contents/generations/tasks/"+ref, nil, &parsed); err != nil {
+	if err := c.call(callCtx, credential, http.MethodGet, "/volcark/api/v3/contents/generations/tasks/"+ref, nil, &parsed); err != nil {
 		if errors.Is(err, errRequestUnsent) || errors.Is(err, errTransportLost) {
 			return domain.PollOutcome{}, domain.WithFailureDiagnostic(domain.ErrProviderUnavailable, domain.FailureDiagnosticOf(err))
 		}
@@ -517,8 +521,7 @@ func (c *GenerationsClient) Poll(ctx context.Context, credential string, ref str
 func (c *GenerationsClient) Cancel(ctx context.Context, credential string, ref string) error {
 	callCtx, cancel := context.WithTimeout(ctx, c.cancelTimeout)
 	defer cancel()
-	if err := c.call(callCtx, credential, http.MethodPost, "/v1/contents/generations/tasks/"+ref,
-		map[string]any{"action": "cancel"}, nil); err != nil {
+	if err := c.call(callCtx, credential, http.MethodDelete, "/volcark/api/v3/contents/generations/tasks/"+ref, nil, nil); err != nil {
 		if errors.Is(err, errRequestUnsent) || errors.Is(err, errTransportLost) {
 			return domain.WithFailureDiagnostic(domain.ErrProviderUnavailable, domain.FailureDiagnosticOf(err))
 		}
@@ -664,7 +667,7 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 	diagnostic := providerFailure.diagnostic(resp.StatusCode, redactions, shapeSuffix(summary, c.baseURL))
 
 	switch {
-	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusOK || (decode == nil && resp.StatusCode >= 200 && resp.StatusCode < 300):
 	case resp.StatusCode == http.StatusPaymentRequired:
 		return domain.WithFailureDiagnostic(domain.ErrProviderCreditBlocked, diagnostic)
 	case resp.StatusCode == http.StatusTooManyRequests:

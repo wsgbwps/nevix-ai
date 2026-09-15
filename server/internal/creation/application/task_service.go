@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -208,7 +209,17 @@ func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteSco
 		connectionView = &connection
 	}
 	manifest := domain.DeriveCapabilityManifest(connectionView)
-	if err := mediaAvailability(manifest, media); err != nil {
+	draftMedia := domain.DraftMediaType(media)
+	refs := make([]domain.DraftReference, 0, len(spec.References))
+	for _, reference := range spec.References {
+		refs = append(refs, domain.DraftReference{MaterialID: reference.MaterialID, Role: reference.Role})
+	}
+	// Frozen retries keep their source version; admission checks current values.
+	if _, err := freezeSpecification(&domain.GenerationIntent{
+		Prompt: spec.Prompt, MediaType: &draftMedia, ManifestVersion: manifest.ManifestVersion,
+		Model: &spec.Model, Mode: &spec.Mode, Ratio: spec.Ratio, Resolution: spec.Resolution,
+		Quantity: &spec.Quantity, DurationSeconds: spec.DurationSeconds, References: refs,
+	}, manifest); err != nil {
 		return nil, err
 	}
 
@@ -477,9 +488,15 @@ func freezeSpecification(intent *domain.GenerationIntent, manifest domain.Capabi
 		spec.Resolution = intent.Resolution
 		spec.Quantity = *intent.Quantity
 	} else {
-		if intent.DurationSeconds == nil || !intInList(mediaView.Durations, *intent.DurationSeconds) {
+		if !valueInList(mediaView.Ratios, intent.Ratio) ||
+			intent.DurationSeconds == nil || !intInList(mediaView.Durations, *intent.DurationSeconds) ||
+			(intent.Quantity != nil && *intent.Quantity != 1) {
 			return nil, domain.ErrCapabilityStale
 		}
+		if (spec.Mode == domain.ModeFirstFrame || spec.Mode == domain.ModeFirstLastFrame) && *intent.Ratio != "adaptive" {
+			return nil, domain.ErrCapabilityStale
+		}
+		spec.Ratio = intent.Ratio
 		spec.Resolution = intent.Resolution
 		spec.DurationSeconds = intent.DurationSeconds
 		spec.Quantity = 1
@@ -499,6 +516,24 @@ func freezeSpecification(intent *domain.GenerationIntent, manifest domain.Capabi
 	if count < modePolicy.Total.Min || count > maxReferences {
 		return nil, domain.ErrCapabilityStale
 	}
+	if media == domain.DraftMediaVideo {
+		switch spec.Mode {
+		case domain.ModeFirstFrame:
+			if count != 1 || intent.References[0].Role != domain.RoleFirstFrame {
+				return nil, domain.ErrCapabilityStale
+			}
+		case domain.ModeFirstLastFrame:
+			if count != 2 || intent.References[0].Role != domain.RoleFirstFrame || intent.References[1].Role != domain.RoleLastFrame {
+				return nil, domain.ErrCapabilityStale
+			}
+		case domain.ModeOmniReference:
+			for _, reference := range intent.References {
+				if reference.Role != domain.RoleOmni {
+					return nil, domain.ErrCapabilityStale
+				}
+			}
+		}
+	}
 	for _, reference := range intent.References {
 		spec.References = append(spec.References, domain.SpecificationReference{
 			MaterialID: reference.MaterialID,
@@ -512,6 +547,7 @@ func freezeSpecification(intent *domain.GenerationIntent, manifest domain.Capabi
 // verified kind and claims version from the material rows and checks each
 // reference against the mode's per-kind envelope.
 func validateSpecificationReferences(spec *domain.GenerationSpecification, byID map[domain.UUID]domain.ReferenceMaterial) error {
+	counts := make(map[domain.Kind]int)
 	for i := range spec.References {
 		reference := &spec.References[i]
 		material, ok := byID[reference.MaterialID]
@@ -524,7 +560,8 @@ func validateSpecificationReferences(spec *domain.GenerationSpecification, byID 
 		}
 		reference.Kind = material.Kind
 		reference.ClaimsVersion = material.ClaimsVersion
-		if err := referenceWithinEnvelope(spec, reference, material); err != nil {
+		counts[material.Kind]++
+		if err := referenceWithinEnvelope(spec, reference, material, counts[material.Kind]); err != nil {
 			return err
 		}
 	}
@@ -535,48 +572,53 @@ func validateSpecificationReferences(spec *domain.GenerationSpecification, byID 
 // media's published reference envelope. The envelope numbers come from the
 // manifest constants, not the request, so a stale composer cannot smuggle an
 // out-of-envelope material past admission.
-func referenceWithinEnvelope(spec *domain.GenerationSpecification, reference *domain.SpecificationReference, material domain.ReferenceMaterial) error {
+func referenceWithinEnvelope(spec *domain.GenerationSpecification, reference *domain.SpecificationReference, material domain.ReferenceMaterial, count int) error {
 	envelope := domain.MediaReferenceEnvelope(spec.MediaType)
 	if envelope.PerMedia == nil {
 		return domain.ErrCapabilityStale
 	}
 	var maxBytes int64
+	var maxCount int
+	var formats []string
+	var minDurationMS, maxDurationMS int
 	switch reference.Kind {
 	case domain.KindImage:
 		if envelope.PerMedia.Image == nil {
 			return domain.ErrCapabilityStale
 		}
 		maxBytes = int64(envelope.PerMedia.Image.MaxBytes)
+		maxCount = envelope.PerMedia.Image.Count.Max
+		formats = envelope.PerMedia.Image.Formats
 	case domain.KindVideo:
 		if envelope.PerMedia.Video == nil {
 			return domain.ErrCapabilityStale
 		}
 		maxBytes = int64(envelope.PerMedia.Video.MaxBytes)
+		maxCount = envelope.PerMedia.Video.Count.Max
+		formats = envelope.PerMedia.Video.Formats
+		minDurationMS, maxDurationMS = envelope.PerMedia.Video.MinSeconds*1000, envelope.PerMedia.Video.MaxSeconds*1000
 	case domain.KindAudio:
 		if envelope.PerMedia.Audio == nil {
 			return domain.ErrCapabilityStale
 		}
 		maxBytes = int64(envelope.PerMedia.Audio.MaxBytes)
+		maxCount = envelope.PerMedia.Audio.Count.Max
+		formats = envelope.PerMedia.Audio.Formats
+		minDurationMS, maxDurationMS = envelope.PerMedia.Audio.MinSeconds*1000, envelope.PerMedia.Audio.MaxSeconds*1000
 	default:
 		return domain.ErrInvalidIntent
 	}
-	if material.ByteSize > maxBytes {
+	format := map[string]string{
+		"image/jpeg": "jpeg", "image/png": "png", "image/webp": "webp",
+		"video/mp4": "mp4", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/mp4": "m4a",
+	}[material.MimeType]
+	if count > maxCount || material.ByteSize > maxBytes || !slices.Contains(formats, format) {
+		return domain.ErrCapabilityStale
+	}
+	if minDurationMS > 0 && (material.DurationMS == nil || *material.DurationMS < minDurationMS || *material.DurationMS > maxDurationMS) {
 		return domain.ErrCapabilityStale
 	}
 	return nil
-}
-
-// mediaAvailability projects the manifest's unavailability onto the
-// admission error with the same stable reason the Workbench displays.
-func mediaAvailability(manifest domain.CapabilityManifestView, media domain.MediaType) error {
-	view := manifest.Image
-	if media == domain.MediaVideo {
-		view = manifest.Video
-	}
-	if view.Available {
-		return nil
-	}
-	return &domain.MediaUnavailableError{Reason: view.Reason, Action: view.Action}
 }
 
 // publishedModel returns the media's published model entry for one model ID,

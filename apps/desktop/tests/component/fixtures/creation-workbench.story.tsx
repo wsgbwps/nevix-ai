@@ -194,17 +194,23 @@ const activeManifest: CapabilityManifest = {
       { id: 'text-to-video', referenceMaterial: noReferences },
       {
         id: 'first-frame',
-        referenceMaterial: { total: { min: 1, max: 1 }, image: imageEnvelope(1, 1) }
+        referenceMaterial: {
+          total: { min: 1, max: 1 },
+          image: { ...imageEnvelope(1, 1), maxBytes: 10 * 1024 * 1024 }
+        }
       },
       {
         id: 'first-last-frame',
-        referenceMaterial: { total: { min: 1, max: 2 }, image: imageEnvelope(1, 2) }
+        referenceMaterial: {
+          total: { min: 2, max: 2 },
+          image: { ...imageEnvelope(2, 2), maxBytes: 10 * 1024 * 1024 }
+        }
       },
       {
         id: 'omni-reference',
         referenceMaterial: {
           total: { min: 1, max: 4 },
-          image: imageEnvelope(0, 4),
+          image: { ...imageEnvelope(0, 4), maxBytes: 10 * 1024 * 1024 },
           video: {
             count: { min: 0, max: 1 },
             formats: ['mp4'],
@@ -223,7 +229,9 @@ const activeManifest: CapabilityManifest = {
       }
     ],
     durations: [5, 10],
-    defaults: { duration: 5 },
+    ratios: ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
+    quantities: [1],
+    defaults: { ratio: 'adaptive', quantity: 1, duration: 5 },
     prompt: { minChars: 1, maxChars: 2000 }
   }
 }
@@ -710,9 +718,16 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       uploadSequence += 1
       const uploaded = material({
         id: `ffffffff-0000-4000-8000-0000000000${String(5 + uploadSequence).padStart(2, '0')}`,
-        kind: 'image',
+        kind: file.type.startsWith('audio/') ? 'audio' : 'image',
         fileName: file.name
       })
+      if (uploaded.kind === 'audio') {
+        uploaded.mimeType = file.name.endsWith('.wav')
+          ? 'audio/wav'
+          : file.name.endsWith('.m4a')
+            ? 'audio/mp4'
+            : 'audio/mpeg'
+      }
       if (
         options.uploadOutcome !== 'network-failure' &&
         options.uploadOutcome !== 'request-rejected'
@@ -930,15 +945,22 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   return createCreationRuntime(ports, storyUserId, { storage: localStorage })
 }
 
-function Frame({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+function Frame({
+  children,
+  height = 600
+}: {
+  readonly children: React.ReactNode
+  readonly height?: number
+}): React.JSX.Element {
   return (
     <I18nextProvider i18n={testI18n}>
-      <div style={{ height: 600, display: 'flex' }}>{children}</div>
+      <div style={{ height, display: 'flex' }}>{children}</div>
     </I18nextProvider>
   )
 }
 
 interface StoryOptions {
+  readonly height?: number
   readonly manifest?: CapabilityManifest | null
   readonly manifestFails?: boolean
   readonly manifestDeferred?: boolean
@@ -1020,7 +1042,7 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
 /** The standard story: an active manifest and one session holding materials. */
 export function CreationWorkbenchStory(options: StoryOptions = {}): React.JSX.Element {
   return (
-    <Frame>
+    <Frame height={options.height}>
       <RuntimeWorkbenchPage options={options} />
     </Frame>
   )

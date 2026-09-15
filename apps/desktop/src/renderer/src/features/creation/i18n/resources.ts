@@ -174,6 +174,7 @@ export const creationTranslations = defineResourceTranslations({
         params: {
           label: '参数',
           ratio: '比例',
+          adaptive: '自适应',
           resolution: '分辨率',
           quantity: '数量',
           duration: '时长',
@@ -216,7 +217,8 @@ export const creationTranslations = defineResourceTranslations({
           kind: { image: '图', video: '视频', audio: '音' },
           dropInvite: '松手添加参考素材',
           dropReplace: '松手替换该素材',
-          dropRejected: '已添加 {{added}} 个素材，{{rejected}} 个被拒：类型或数量超出当前模式允许'
+          dropRejected:
+            '已添加 {{added}} 个素材，{{rejected}} 个被拒：类型、大小或数量超出当前模式允许'
         },
         mention: {
           kind: { image: '图片', video: '视频', audio: '音频' },
@@ -570,6 +572,7 @@ export const creationTranslations = defineResourceTranslations({
         params: {
           label: 'Parameters',
           ratio: 'Ratio',
+          adaptive: 'Adaptive',
           resolution: 'Resolution',
           quantity: 'Quantity',
           duration: 'Duration',
@@ -615,7 +618,7 @@ export const creationTranslations = defineResourceTranslations({
           dropInvite: 'Drop to add as reference',
           dropReplace: 'Drop to replace this material',
           dropRejected:
-            'Added {{added}} material(s); rejected {{rejected}}: type or count beyond what the current mode allows'
+            'Added {{added}} material(s); rejected {{rejected}}: type, size, or count beyond what the current mode allows'
         },
         mention: {
           kind: { image: 'Image', video: 'Video', audio: 'Audio' },

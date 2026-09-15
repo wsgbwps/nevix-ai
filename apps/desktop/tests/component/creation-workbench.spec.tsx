@@ -426,10 +426,11 @@ test('an open video keeps playing when another reference upload finishes', async
   await page.getByLabel('Add reference material').click()
   const chooser = await chooserPromise
   await chooser.setFiles({
-    name: 'another-reference.svg',
-    mimeType: 'image/svg+xml',
+    name: 'another-reference.png',
+    mimeType: 'image/png',
     buffer: Buffer.from(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="16"><rect width="24" height="16" fill="blue"/></svg>'
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==',
+      'base64'
     )
   })
   await expect(page.getByRole('status', { name: 'Upload progress 50%' })).toBeVisible()
