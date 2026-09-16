@@ -6,7 +6,7 @@ set -euo pipefail
 # smoke — Smoke Suite: one test-mode build, then only specs tagged @smoke.
 # settings — Settings Information Architecture: one test-mode build, then the Settings spec.
 # image — Slice-10 image generation: the shortest image spec.
-# video — Slice-11 video generation, playback and download.
+# video — Video generation, playback and download.
 #
 # Every mode except settings boots the fake Kapon generation route and
 # configures the provider connection: the creation tracers submit real

@@ -2,6 +2,8 @@
 
 > 研究日期：2026-08-20
 > 研究问题：为 GitHub Issue #83 整理首批候选供应商中 **Kapon Cloud 所提供的 Doubao（火山方舟 VolcArk）图片与视频生成**能力、接入资料与仍需由账号所有者确认的合作/凭据事实；不记录任何密钥值。
+>
+> 2026-09-16 更新：Kapon Apifox 的豆包视频生成定义示例使用 `https://svip.kapon.cloud`，请求字段不再包含 `output_format`。部署仍只配置一个 `KAPON_BASE_URL`，在 `https://models.kapon.cloud` 与 `https://svip.kapon.cloud` 中选择，所有 Kapon 调用共用该基址。
 
 ## 结论
 
@@ -31,7 +33,7 @@
 
 ### 通用
 
-- **模型 API 基址：** `https://models.kapon.cloud`。模型调用使用 `Authorization: Bearer <模型调用令牌>`；JSON 请求再加 `Content-Type: application/json`。这是 Kapon 的模型调用令牌，不是个人资料令牌或查询授权令牌；值不应写入本 issue、仓库、聊天或客户端包体。[API 概览](https://docs.kapon.cloud/guide/api-overview)；[API 认证](https://docs.kapon.cloud/guide/authentication)
+- **模型 API 基址：** 部署通过单一 `KAPON_BASE_URL` 在 `https://models.kapon.cloud` 与 `https://svip.kapon.cloud` 中选择，所有 Kapon 调用共用该值。模型调用使用 `Authorization: Bearer <模型调用令牌>`；JSON 请求再加 `Content-Type: application/json`。这是 Kapon 的模型调用令牌，不是个人资料令牌或查询授权令牌；值不应写入本 issue、仓库、聊天或客户端包体。[API 概览](https://docs.kapon.cloud/guide/api-overview)；[API 认证](https://docs.kapon.cloud/guide/authentication)
 - **Kapon 侧无需自行实现 VolcArk 签名。** 文档说明由 Kapon 转发至火山方舟；调用方使用 Kapon 的令牌和模型名。[图片生成](https://docs.kapon.cloud/doubao/image)；[视频（原生）](https://docs.kapon.cloud/doubao/video)
 - **追踪与错误：** 每次响应有 `X-Oneapi-Request-Id`（以及 `request-id` 别名）；失败体含结构化 `error`，其中包括 `error.request_id`。记录该 ID、HTTP 状态、`error.code` 和 `error.type`，而不是令牌或原始敏感上游错误。[请求追踪](https://docs.kapon.cloud/guide/request-id)；[错误码与响应说明](https://docs.kapon.cloud/guide/errors)
 
@@ -43,9 +45,9 @@
 
 ### 视频生成：异步任务
 
-- **完整能力（推荐）：** `POST /volcark/api/v3/contents/generations/tasks` 创建任务；`GET /volcark/api/v3/contents/generations/tasks/{task_id}` 查询；同一路径 `GET` 可列举，`DELETE` 可取消/删除。创建请求使用 `model: "doubao-seedance-2-5"` 与 `content[]`；常用参数为 `resolution`、`ratio`、`duration`、`generate_audio`、`output_format`、`watermark`。[Seedance 2.5](https://docs.kapon.cloud/doubao/seedance-2-5)
+- **完整能力（推荐）：** `POST /volcark/api/v3/contents/generations/tasks` 创建任务；`GET /volcark/api/v3/contents/generations/tasks/{task_id}` 查询；同一路径 `GET` 可列举，`DELETE` 可取消/删除。创建请求使用 `model: "doubao-seedance-2-5"` 与 `content[]`；当前常用参数为 `resolution`、`ratio`、`duration`、`generate_audio` 与 `watermark`。[Seedance 2.5](https://docs.kapon.cloud/doubao/seedance-2-5)
 - **轮询与结果：** 终态为 `queued`、`running`、`succeeded`、`failed` 或 `expired`；成功响应包含 `content.video_url` 和 `usage.completion_tokens`，失败应读取结构化 `error`。实现应将创建与轮询设计为可重试、可持久化的后端任务，并及时将临时产物转存。[Seedance 2.5](https://docs.kapon.cloud/doubao/seedance-2-5)；仓库证据：`docs/adr/0004-supabase-go-trusted-execution-seam.md:28–35`。
-- **OpenAI 风格替代：** `POST /v1/videos` 适合基础文生视频和参考素材；若需要 `content[].role`、`output_format` 或联网搜索等原生能力，官方建议使用原生任务接口。[Seedance 2.5](https://docs.kapon.cloud/doubao/seedance-2-5)
+- **OpenAI 风格替代：** `POST /v1/videos` 适合基础文生视频和参考素材；若需要 `content[].role` 或联网搜索等原生能力，官方建议使用原生任务接口。[Seedance 2.5](https://docs.kapon.cloud/doubao/seedance-2-5)
 
 ### 错误、限流和计费
 
@@ -82,5 +84,6 @@
 - [Kapon：视频（原生）](https://docs.kapon.cloud/doubao/video)（官方 API 文档，2026-08-20 查阅）
 - [Kapon：视频（OpenAI）](https://docs.kapon.cloud/doubao/video-openai)（官方 API 文档，2026-08-20 查阅）
 - [Kapon：API 概览](https://docs.kapon.cloud/guide/api-overview)、[API 认证](https://docs.kapon.cloud/guide/authentication)、[错误码与响应说明](https://docs.kapon.cloud/guide/errors)、[请求追踪](https://docs.kapon.cloud/guide/request-id)（官方平台文档，2026-08-20 查阅）
+- Kapon Apifox「豆包视频生成」API 439271966（用户提供的临时定义，2026-09-16 查阅；临时访问令牌不入库）
 - [火山方舟：图片生成 API](https://docs.volcengine.com/docs/82379/1666945?lang=zh)（上游官方文档入口，2026-08-20 查阅；该站点需要 JavaScript，未以其替代 Kapon 的网关接入契约）
 - 仓库证据：`docs/adr/0004-supabase-go-trusted-execution-seam.md:17–35`、`docs/agents/issue-tracker.md:1–28`（2026-08-20 工作树）。

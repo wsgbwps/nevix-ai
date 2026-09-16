@@ -30,7 +30,6 @@ export type { DraftMediaType }
 
 const frameModes = new Set(['text-to-video', 'first-frame', 'first-last-frame'])
 
-/** Composer choices remain stable while actual inputs determine the submitted mode. */
 export function videoComposerMode(mode: string | null): string | null {
   return mode !== null && frameModes.has(mode) ? 'first-last-frame' : mode
 }
@@ -116,15 +115,7 @@ export function roleAcceptsKind(role: DraftReferenceRole, kind: MaterialKind): b
   }
 }
 
-/**
- * The material kinds the add entry may bind under the current manifest,
- * media, and mode. Video takes the published mode's own per-media envelopes
- * (video modes are explicitly chosen). Image modes derive from the deck —
- * the composer offers no image mode picker — so any available image
- * capability accepts images; adding the first one derives the mode. While no
- * manifest is present every kind stays addable so drafting never depends on
- * provider state; with the media itself unavailable nothing new can be bound.
- */
+/** Returns the material kinds accepted by the composer's current manifest policy. */
 export function allowedReferenceKinds(
   manifest: CapabilityManifest | null,
   media: DraftMediaType | null,

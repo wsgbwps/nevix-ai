@@ -520,10 +520,7 @@ export function useCreationWorkbench(): {
       const binding: DraftReferenceView = { materialId: staged.id, role }
       const nextReferences = [...draft.references, binding]
       if (media === 'image') {
-        // Image modes derive from the deck: any reference means the
-        // reference-image shape, and the bindings re-derive their roles with
-        // it — the composer offers no image mode picker (video modes are
-        // not deck-derivable).
+        // The image composer has no mode picker, so its deck determines the mode.
         patchDraft({
           references: bindingsForMode(media, 'reference-image', nextReferences),
           mode: 'reference-image'
@@ -752,12 +749,7 @@ export function useCreationWorkbench(): {
   )
   const allowedKinds = allowedReferenceKinds(manifest, ctx.draft.mediaType, ctx.draft.mode)
 
-  /**
-   * Adds a dropped batch: admission is judged once against the deck's current
-   * capacity and the mode's kinds, then admitted files flow through the same
-   * upload path as the picker (drop order preserved); the summary line
-   * reports the rejected remainder. The server stays the final authority.
-   */
+  /** Adds files in order, rechecking video limits before each upload. */
   const addMaterials = useCallback(
     (files: readonly File[]): void => {
       if (!ports || files.length === 0) return

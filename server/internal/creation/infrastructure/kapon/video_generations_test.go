@@ -33,8 +33,11 @@ func TestVideoSubmitUsesNativeContract(t *testing.T) {
 	}
 	if body["model"] != "doubao-seedance-2-5" || body["resolution"] != "720p" ||
 		body["ratio"] != "16:9" || body["duration"] != float64(5) ||
-		body["generate_audio"] != true || body["output_format"] != "mp4" {
+		body["generate_audio"] != true {
 		t.Fatalf("native video parameters = %#v", body)
+	}
+	if _, ok := body["output_format"]; ok {
+		t.Fatalf("unsupported output_format sent: %#v", body)
 	}
 	content, ok := body["content"].([]any)
 	if !ok || len(content) != 1 || content[0].(map[string]any)["text"] != "商品旋转展示" {

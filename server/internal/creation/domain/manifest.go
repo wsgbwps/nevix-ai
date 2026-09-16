@@ -11,13 +11,7 @@ package domain
 // (contracts/creation.yaml CapabilityManifest.schema_version).
 const ManifestSchemaVersion = 2
 
-// ManifestVersion is the capability content version. Bump when the accepted
-// capability set changes, such as a model or vendor ratio/size contract
-// change. v4: the base image model id dropped the catalog alias's -n suffix
-// (doubao-seedream-5.0-n → doubao-seedream-5.0) — the vendor's versioned
-// backend id has no suffix, so -n reads like a distinct product. v5: the
-// image reference envelope is per model (pro 10, base 14 reference images)
-// instead of a flat 1–4; each model view publishes its own ceiling.
+// ManifestVersion changes whenever the accepted capability set changes.
 const ManifestVersion = 6
 
 // The V1 allowlisted models (spec #150). Declared here because the manifest

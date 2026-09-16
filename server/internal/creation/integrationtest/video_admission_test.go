@@ -127,7 +127,6 @@ func TestVideoRetryRevalidatesCurrentManifest(t *testing.T) {
 	if status, body := h.doRequest(t, http.MethodPost, "/creation/tasks/"+taskID+"/cancel", token, nil); status != http.StatusOK {
 		t.Fatalf("cancel retry fixture: %d %s", status, body)
 	}
-	// Emulate a historical duration no longer published by the current manifest.
 	if _, err := h.ownerPool.Exec(h.ctx, `
 		UPDATE creation_generation_tasks
 		SET specification = jsonb_set(jsonb_set(specification, '{manifest_version}', to_jsonb($2::integer)), '{duration_seconds}', '7'::jsonb), manifest_version = $2

@@ -1,11 +1,4 @@
-// Package kapon is the reviewed Kapon Cloud adapter (spec #150): V1 uses
-// only the fixed domestic route and its OpenAI-style model catalog. The
-// instance-level Connection Check is exactly one GET /v1/models with the
-// candidate key — token validity plus visibility of the two allowlisted
-// models — and never generates real media. Connection Check returns no
-// provider diagnostics: request IDs, raw error bodies, and the key never leave
-// its paths. Generation-task failures have their separate bounded,
-// creator-private diagnostic contract in generations.go and ADR-0016.
+// Package kapon implements the Kapon Cloud provider adapter.
 package kapon
 
 import (
@@ -20,36 +13,22 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// DefaultBaseURL is the reviewed fixed domestic Kapon route; deployments do
-// not choose endpoints per connection and there is no fallback route.
+// DefaultBaseURL is used when KAPON_BASE_URL is unset.
 const DefaultBaseURL = "https://models.kapon.cloud"
 
-// Allowlisted models (spec #150): image and video each have exactly one.
-// The values live on the domain manifest so the catalog check and the
-// published Capability Manifest can never drift apart.
 const (
 	ImageModel = domain.ImageModelID
 	VideoModel = domain.VideoModelID
 )
 
-// checkTimeout bounds one catalog call; a timeout is a transient outcome,
-// never a credential verdict.
 const checkTimeout = 10 * time.Second
 
-// The adapter speaks the domain's candidate verdicts directly so the
-// application layer never imports this package's error vocabulary: a 401/403
-// is the definitive candidate-invalid verdict; timeouts, transport
-// failures, 429s, and temporary 5xx are transient and never rewrite
-// persisted connection states.
-
-// ModelsCheckClient performs the instance-level connection check against one
-// base route.
+// ModelsCheckClient checks model visibility with a candidate credential.
 type ModelsCheckClient struct {
 	baseURL string
 	http    *http.Client
 }
 
-// NewModelsCheckClient binds the client to a validated base URL.
 func NewModelsCheckClient(baseURL string) *ModelsCheckClient {
 	return &ModelsCheckClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -57,23 +36,25 @@ func NewModelsCheckClient(baseURL string) *ModelsCheckClient {
 	}
 }
 
-// ValidateBaseURL enforces the route policy: https anywhere, or http only on
-// a loopback host (the fake-Kapon test harnesses); everything else is a
-// startup configuration error.
+// ValidateBaseURL permits the two provider origins and loopback test servers.
 func ValidateBaseURL(raw string) error {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("kapon: base URL is not a URL: %w", err)
 	}
+	if parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("kapon: base URL must be an origin without credentials, path, query, or fragment")
+	}
 	switch parsed.Scheme {
 	case "https":
-		if parsed.Host == "" {
-			return fmt.Errorf("kapon: https base URL needs a host")
+		hostname := strings.ToLower(parsed.Hostname())
+		if parsed.Port() == "" && (hostname == "models.kapon.cloud" || hostname == "svip.kapon.cloud") {
+			return nil
 		}
-		return nil
+		return fmt.Errorf("kapon: https base URL must use models.kapon.cloud or svip.kapon.cloud")
 	case "http":
 		hostname := parsed.Hostname()
-		if hostname == "127.0.0.1" || hostname == "::1" || strings.EqualFold(hostname, "localhost") {
+		if parsed.Host != "" && (hostname == "127.0.0.1" || hostname == "::1" || strings.EqualFold(hostname, "localhost")) {
 			return nil
 		}
 		return fmt.Errorf("kapon: http base URL is only allowed on a loopback host")
@@ -82,9 +63,7 @@ func ValidateBaseURL(raw string) error {
 	}
 }
 
-// Check performs the single low-side-effect connection check. The candidate
-// key exists only for the duration of this call; error surfaces carry no key
-// material, request IDs, or raw provider bodies.
+// Check returns the image and video models visible to a candidate credential.
 func (c *ModelsCheckClient) Check(ctx context.Context, candidateKey string) (domain.ProviderCheckResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/models", nil)
 	if err != nil {
@@ -105,8 +84,7 @@ func (c *ModelsCheckClient) Check(ctx context.Context, candidateKey string) (dom
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
 		return domain.ProviderCheckResult{}, domain.ErrCheckTemporarilyUnavailable
 	default:
-		// Any other answer says nothing trustworthy about the credential;
-		// treat it as transient rather than guessing a verdict.
+		// Other statuses do not prove that the candidate credential is invalid.
 		return domain.ProviderCheckResult{}, domain.ErrCheckTemporarilyUnavailable
 	}
 

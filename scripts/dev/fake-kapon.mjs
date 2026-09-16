@@ -1,7 +1,4 @@
-// 本地开发与 Creation E2E 的 fake Kapon（不进生产镜像）：实现 models、
-// 图片生成与原生视频 submit/poll/cancel，以及临时输出端点。接受
-// FAKE_KAPON_KEY（默认 test-key），其余一律 401，便于同时验证"候选被拒绝"
-// 的路径。自动化测试不得注入生产 Token（规格 #150）。
+// Local Creation E2E fake; never inject production tokens (spec #150).
 import { createServer } from 'node:http'
 import { deflateSync } from 'node:zlib'
 import { readFileSync } from 'node:fs'
@@ -129,7 +126,7 @@ createServer(async (req, res) => {
         !['480p', '720p', '1080p'].includes(payload.resolution) ||
         ![5, 10].includes(payload.duration) ||
         !['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'].includes(payload.ratio) ||
-        payload.output_format !== 'mp4' ||
+        Object.hasOwn(payload, 'output_format') ||
         payload.generate_audio !== true ||
         !Array.isArray(payload.content) ||
         payload.content[0]?.type !== 'text'
