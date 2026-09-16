@@ -11,9 +11,14 @@ import type {
   CapabilityManifest,
   CapabilityMedia,
   CapabilityMediaMode,
+  CapabilityMode,
   CapabilityModel
 } from '../api/capability-manifest-http'
-import type { DraftReferenceRole, MaterialKind } from '../api/go-creation-http'
+import type {
+  DraftReferenceRole,
+  MaterialKind,
+  ReferenceMaterialView
+} from '../api/go-creation-http'
 import {
   publishedParameterRules,
   type DraftMediaType,
@@ -22,6 +27,77 @@ import {
 } from '../api/generation-parameter'
 
 export type { DraftMediaType }
+
+const frameModes = new Set(['text-to-video', 'first-frame', 'first-last-frame'])
+
+export function videoComposerMode(mode: string | null): string | null {
+  return mode !== null && frameModes.has(mode) ? 'first-last-frame' : mode
+}
+
+export function normalizedVideoMode(mode: string | null, referenceCount: number): string | null {
+  if (mode === null || (!frameModes.has(mode) && mode !== 'omni-reference')) return mode
+  if (referenceCount === 0) return 'text-to-video'
+  if (mode === 'omni-reference') return mode
+  return referenceCount === 1 ? 'first-frame' : 'first-last-frame'
+}
+
+export function composerReferencePolicy(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType | null,
+  mode: string | null
+): CapabilityMode['referenceMaterial'] | null {
+  if (media === null) return null
+  const capability = mediaCapability(manifest, media)
+  if (!capability?.available) return null
+  const chosen = media === 'video' ? videoComposerMode(mode) : mode
+  return capability.modes?.find((entry) => entry.id === chosen)?.referenceMaterial ?? null
+}
+
+export function materialFitsReferenceEnvelope(
+  material: Pick<
+    ReferenceMaterialView,
+    'kind' | 'mimeType' | 'byteSize' | 'widthPx' | 'heightPx' | 'pixelCount' | 'durationMs'
+  >,
+  policy: NonNullable<ReturnType<typeof composerReferencePolicy>>
+): boolean {
+  const envelope = policy[material.kind]
+  if (!envelope || material.byteSize > envelope.maxBytes) return false
+  const formats: Record<string, string> = {
+    'image/jpeg': 'jpeg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'video/mp4': 'mp4',
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/wave': 'wav',
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a'
+  }
+  const format = formats[material.mimeType]
+  if (format === undefined || !envelope.formats.includes(format)) return false
+  if (material.kind === 'image' && 'minPx' in envelope) {
+    const { widthPx: width, heightPx: height, pixelCount } = material
+    if (
+      (width !== null && (width < envelope.minPx || width > envelope.maxPx)) ||
+      (height !== null && (height < envelope.minPx || height > envelope.maxPx)) ||
+      (pixelCount !== null && pixelCount > envelope.maxPixels)
+    )
+      return false
+    if (width !== null && height !== null) {
+      const aspect = width / height
+      if (aspect < envelope.minAspect || aspect > envelope.maxAspect) return false
+    }
+  } else if ('minSeconds' in envelope && material.durationMs !== null) {
+    if (
+      material.durationMs < envelope.minSeconds * 1000 ||
+      material.durationMs > envelope.maxSeconds * 1000
+    )
+      return false
+  }
+  return true
+}
 
 /**
  * The material kinds a draft role structurally accepts — the client twin of
@@ -39,15 +115,7 @@ export function roleAcceptsKind(role: DraftReferenceRole, kind: MaterialKind): b
   }
 }
 
-/**
- * The material kinds the add entry may bind under the current manifest,
- * media, and mode. Video takes the published mode's own per-media envelopes
- * (video modes are explicitly chosen). Image modes derive from the deck —
- * the composer offers no image mode picker — so any available image
- * capability accepts images; adding the first one derives the mode. While no
- * manifest is present every kind stays addable so drafting never depends on
- * provider state; with the media itself unavailable nothing new can be bound.
- */
+/** Returns the material kinds accepted by the composer's current manifest policy. */
 export function allowedReferenceKinds(
   manifest: CapabilityManifest | null,
   media: DraftMediaType | null,
@@ -58,7 +126,7 @@ export function allowedReferenceKinds(
   const capability = mediaCapability(manifest, media)
   if (capability === null || !capability.available) return []
   if (media === 'image') return ['image']
-  const published = (capability.modes ?? []).find((entry) => entry.id === mode)
+  const published = (capability.modes ?? []).find((entry) => entry.id === videoComposerMode(mode))
   if (!published) return everyKind
   const kinds: MaterialKind[] = []
   if (published.referenceMaterial.image) kinds.push('image')
@@ -190,8 +258,8 @@ export function referenceCap(
     return fallbackReferenceCap
   }
   if (mode === null) return fallbackReferenceCap
-  const bounds = modeReferenceBounds(manifest, media, mode)
-  return bounds === null ? fallbackReferenceCap : bounds.max
+  const policy = composerReferencePolicy(manifest, media, mode)
+  return policy === null ? fallbackReferenceCap : policy.total.max
 }
 
 /**
@@ -208,9 +276,7 @@ export function roleForPosition(
   if (media === 'image') {
     return mode === 'reference-image' ? 'reference' : null
   }
-  switch (mode) {
-    case 'first-frame':
-      return position === 0 ? 'first_frame' : null
+  switch (videoComposerMode(mode)) {
     case 'first-last-frame':
       if (position === 0) return 'first_frame'
       if (position === 1) return 'last_frame'
@@ -231,7 +297,8 @@ export function roleForPosition(
  */
 export function staleDraftFields(
   manifest: CapabilityManifest | null,
-  draft: DraftCapabilityState
+  draft: DraftCapabilityState,
+  materials?: readonly ReferenceMaterialView[]
 ): ReadonlySet<DraftStaleField> {
   const stale = new Set<DraftStaleField>()
   if (manifest === null) return stale
@@ -251,7 +318,16 @@ export function staleDraftFields(
     stale.add('model')
   }
   const publishedModes = new Set(modeCandidates(manifest, media))
-  if (draft.mode === null || !publishedModes.has(draft.mode as CapabilityMediaMode)) {
+  const mode =
+    media === 'video' ? normalizedVideoMode(draft.mode, draft.references.length) : draft.mode
+  if (
+    mode === null ||
+    !publishedModes.has(mode as CapabilityMediaMode) ||
+    (media === 'video' &&
+      draft.mode === 'first-last-frame' &&
+      !publishedModes.has('first-last-frame')) ||
+    (media === 'video' && draft.mode === 'omni-reference' && !publishedModes.has('omni-reference'))
+  ) {
     stale.add('mode')
     // Without a published mode the reference bounds cannot be judged either.
     stale.add('references')
@@ -266,13 +342,19 @@ export function staleDraftFields(
     }
   }
   if (
+    media === 'video' &&
+    (draft.ratio === null ||
+      ((mode === 'first-frame' || mode === 'first-last-frame') && draft.ratio !== 'adaptive'))
+  )
+    stale.add('ratio')
+  if (
     draft.resolution === null ||
     !resolutionCandidates(manifest, media, draft.model).includes(draft.resolution)
   ) {
     stale.add('resolution')
   }
 
-  const bounds = modeReferenceBounds(manifest, media, draft.mode)
+  const bounds = modeReferenceBounds(manifest, media, mode)
   if (bounds === null) {
     stale.add('references')
   } else {
@@ -285,6 +367,30 @@ export function staleDraftFields(
     const max = ceiling !== null && ceiling < bounds.max ? ceiling : bounds.max
     if (draft.references.length < bounds.min || draft.references.length > max) {
       stale.add('references')
+    }
+  }
+  if (media === 'video' && materials !== undefined) {
+    const policy = capability.modes?.find((entry) => entry.id === mode)?.referenceMaterial
+    const byId = new Map(materials.map((material) => [material.id, material]))
+    const counts: Record<MaterialKind, number> = { image: 0, video: 0, audio: 0 }
+    for (const [position, reference] of draft.references.entries()) {
+      const material = byId.get(reference.materialId)
+      if (
+        material === undefined ||
+        !policy ||
+        reference.role !== roleForPosition('video', mode, position) ||
+        !roleAcceptsKind(reference.role, material.kind) ||
+        !materialFitsReferenceEnvelope(material, policy)
+      ) {
+        stale.add('references')
+      }
+      if (material) counts[material.kind] += 1
+    }
+    for (const kind of ['image', 'video', 'audio'] as const) {
+      const limits = policy?.[kind]?.count
+      if (limits ? counts[kind] < limits.min || counts[kind] > limits.max : counts[kind] > 0) {
+        stale.add('references')
+      }
     }
   }
   return stale

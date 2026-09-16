@@ -37,7 +37,7 @@ var ErrUnexpectedDatabaseIdentity = writetx.ErrUnexpectedDatabaseIdentity
 // instance product fact loaded from PostgreSQL, never a deployment variable.
 type Config struct {
 	SecretsDir         string // secrets volume root holding the master key file
-	KaponBaseURL       string // reviewed fixed route; unset means the default
+	KaponBaseURL       string // selected provider route; unset means the default
 	CORSAllowedOrigins []string
 }
 

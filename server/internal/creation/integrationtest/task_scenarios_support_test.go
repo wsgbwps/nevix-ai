@@ -84,6 +84,9 @@ func (h *harness) buildTaskIntent(t *testing.T, token, sessionID string, intent 
 	}
 	intent.SessionID = sessionID
 	intent.ManifestVersion = manifest.ManifestVersion
+	if intent.MediaType == "video" && intent.Ratio == "" && manifest.Video.Defaults != nil {
+		intent.Ratio = manifest.Video.Defaults.Ratio
+	}
 	return intent
 }
 

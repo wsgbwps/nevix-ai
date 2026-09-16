@@ -18,7 +18,10 @@ import { resultFilename } from '../lib/result-filename'
 import { planFileDrop, type ResultDragPayload } from './reference-drop'
 import {
   allowedReferenceKinds,
+  composerReferencePolicy,
+  materialFitsReferenceEnvelope,
   mediaCapability,
+  normalizedVideoMode,
   publishedModel,
   referenceCap,
   roleAcceptsKind,
@@ -380,7 +383,25 @@ export function useCreationWorkbench(): {
     (patch: Partial<ComposerDraft>) => {
       const controller = contextController
       if (controller === undefined) return
-      controller.editDraft({ ...controller.getSnapshot().draft, ...patch })
+      const next = { ...controller.getSnapshot().draft, ...patch }
+      if (
+        next.mediaType === 'video' &&
+        (patch.references !== undefined ||
+          patch.mode !== undefined ||
+          patch.mediaType !== undefined)
+      ) {
+        const kindOf = new Map(
+          displayRef.current.getSnapshot().materials.map((material) => [material.id, material.kind])
+        )
+        next.references = next.references.map((reference, position) => {
+          const role = roleForPosition('video', next.mode, position)
+          const kind = kindOf.get(reference.materialId)
+          return role !== null && kind !== undefined && roleAcceptsKind(role, kind)
+            ? { ...reference, role }
+            : reference
+        })
+      }
+      controller.editDraft(next)
     },
     [contextController]
   )
@@ -394,7 +415,11 @@ export function useCreationWorkbench(): {
       patchDraft({
         mediaType: media,
         model: model?.model ?? null,
-        mode: published ? ((published.modes ?? [])[0]?.id ?? null) : null,
+        mode: published
+          ? media === 'video' && published.modes?.some((mode) => mode.id === 'first-last-frame')
+            ? 'first-last-frame'
+            : ((published.modes ?? [])[0]?.id ?? null)
+          : null,
         resolution: model?.defaultResolution ?? null,
         ...manifestDefaultParameters(published)
       })
@@ -495,10 +520,7 @@ export function useCreationWorkbench(): {
       const binding: DraftReferenceView = { materialId: staged.id, role }
       const nextReferences = [...draft.references, binding]
       if (media === 'image') {
-        // Image modes derive from the deck: any reference means the
-        // reference-image shape, and the bindings re-derive their roles with
-        // it — the composer offers no image mode picker (video modes are
-        // not deck-derivable).
+        // The image composer has no mode picker, so its deck determines the mode.
         patchDraft({
           references: bindingsForMode(media, 'reference-image', nextReferences),
           mode: 'reference-image'
@@ -592,6 +614,10 @@ export function useCreationWorkbench(): {
     const { promptDocument, ...plainIntent } = frozenDraft
     const intent: GenerationIntent = {
       ...plainIntent,
+      mode:
+        frozenDraft.mediaType === 'video'
+          ? normalizedVideoMode(frozenDraft.mode, frozenDraft.references.length)
+          : frozenDraft.mode,
       prompt: expandPromptDocument(promptDocument, candidates),
       manifestVersion: contextController.manifestVersionForIntent(),
       references: frozenDraft.references.map((reference) => ({ ...reference }))
@@ -662,11 +688,8 @@ export function useCreationWorkbench(): {
   )
 
   const staleFields: ReadonlySet<DraftStaleField> = useMemo(
-    () =>
-      staleDraftFields(manifest, {
-        ...ctx.draft
-      }),
-    [ctx.draft, manifest]
+    () => staleDraftFields(manifest, ctx.draft, materials),
+    [ctx.draft, manifest, materials]
   )
 
   const mentionCandidates = useMemo(
@@ -726,29 +749,65 @@ export function useCreationWorkbench(): {
   )
   const allowedKinds = allowedReferenceKinds(manifest, ctx.draft.mediaType, ctx.draft.mode)
 
-  /**
-   * Adds a dropped batch: admission is judged once against the deck's current
-   * capacity and the mode's kinds, then admitted files flow through the same
-   * upload path as the picker (drop order preserved); the summary line
-   * reports the rejected remainder. The server stays the final authority.
-   */
+  /** Adds files in order, rechecking video limits before each upload. */
   const addMaterials = useCallback(
     (files: readonly File[]): void => {
       if (!ports || files.length === 0) return
       void (async () => {
         const remaining = Math.max(0, deckCap - currentDraft().references.length)
-        const plan = planFileDrop(files, allowedKinds, remaining)
+        const video = currentDraft().mediaType === 'video'
+        const plan = planFileDrop(files, allowedKinds, video ? files.length : remaining)
+        let added = 0
+        let rejectedEnvelope = 0
         for (const file of plan.accepted) {
+          const draftNow = currentDraft()
+          if (video && draftNow.references.length >= deckCap) {
+            rejectedEnvelope += 1
+            continue
+          }
+          const policy = composerReferencePolicy(manifest, draftNow.mediaType, draftNow.mode)
+          if (draftNow.mediaType === 'video' && policy !== null) {
+            const kind = file.type.startsWith('video/')
+              ? 'video'
+              : file.type.startsWith('audio/')
+                ? 'audio'
+                : 'image'
+            const materialViews = displayRef.current.getSnapshot().materials
+            const used = draftNow.references.filter((reference) =>
+              materialViews.some(
+                (material) => material.id === reference.materialId && material.kind === kind
+              )
+            ).length
+            if (
+              used >= (policy[kind]?.count.max ?? 0) ||
+              !materialFitsReferenceEnvelope(
+                {
+                  kind,
+                  mimeType: file.type,
+                  byteSize: file.size,
+                  widthPx: null,
+                  heightPx: null,
+                  pixelCount: null,
+                  durationMs: null
+                },
+                policy
+              )
+            ) {
+              rejectedEnvelope += 1
+              continue
+            }
+          }
           await addMaterial(file)
+          added += 1
           if (!mountedRef.current) return
         }
-        const rejected = plan.rejectedKind + plan.rejectedCap
+        const rejected = plan.rejectedKind + plan.rejectedCap + rejectedEnvelope
         if (rejected > 0) {
-          contextController?.noteMaterialDropRejection({ added: plan.accepted.length, rejected })
+          contextController?.noteMaterialDropRejection({ added, rejected })
         }
       })()
     },
-    [addMaterial, allowedKinds, contextController, currentDraft, deckCap, ports]
+    [addMaterial, allowedKinds, contextController, currentDraft, deckCap, manifest, ports]
   )
 
   /**

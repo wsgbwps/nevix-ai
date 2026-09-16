@@ -84,6 +84,9 @@ func (w *TaskWorker) Run(ctx context.Context) error {
 		}
 		item, ok, err := w.tasks.ClaimNextQueueItem(ctx, w.leaseOwner, w.lease)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
+				return nil
+			}
 			return err
 		}
 		if !ok {

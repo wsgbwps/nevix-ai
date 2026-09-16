@@ -1,8 +1,9 @@
 package creationhttp
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -232,43 +233,62 @@ func (h *GenerationTaskHandler) DownloadSlotResult(w http.ResponseWriter, r *htt
 		fail(w, r, err)
 		return
 	}
-	reader, _, err := store.Open(r.Context(), *slot.ResultBlobKey, domain.FullBlobRange)
+	if slot.ResultByteSize == nil || *slot.ResultByteSize <= 0 || len(slot.ResultChecksum) != sha256.Size {
+		fail(w, r, domain.ErrObjectStorageUnavailable)
+		return
+	}
+	size := *slot.ResultByteSize
+	intent := parseRangeIntent(r.Header.Get("Range"))
+	partial, start, stop, satisfiable := resolveRange(intent, size)
+	if intent.present && (!intent.valid || !satisfiable) {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
+		WriteError(w, &Error{Status: http.StatusRequestedRangeNotSatisfiable, Code: CodeRangeNotSatisfiable, Message: "The requested byte range cannot be satisfied."})
+		return
+	}
+	reader, actualSize, err := store.Open(r.Context(), *slot.ResultBlobKey, domain.BlobRange{Offset: start, Length: stop - start})
 	if err != nil {
 		fail(w, r, domain.ErrObjectStorageUnavailable)
 		return
 	}
 	defer reader.Close()
+	if actualSize != size {
+		fail(w, r, domain.ErrObjectStorageUnavailable)
+		return
+	}
 	if slot.ResultMime != nil {
 		w.Header().Set("Content-Type", *slot.ResultMime)
 	}
-	w.WriteHeader(http.StatusOK)
-	// Bounded copy through a modest buffer; the blob was already capped at
-	// transfer time so this loop cannot buffer the object whole.
-	buf := make([]byte, 128<<10)
-	if _, err := copyBuffer(w, reader, buf); err != nil {
-		_ = r.Context().Err()
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("X-Content-SHA-256", hex.EncodeToString(slot.ResultChecksum))
+	w.Header().Set("Content-Length", strconv.FormatInt(stop-start, 10))
+	status := http.StatusOK
+	if partial {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, stop-1, size))
+		status = http.StatusPartialContent
 	}
-}
-
-func copyBuffer(w http.ResponseWriter, src interface{ Read([]byte) (int, error) }, buf []byte) (int64, error) {
-	var total int64
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			written, writeErr := w.Write(buf[:n])
-			total += int64(written)
-			if writeErr != nil {
-				return total, writeErr
-			}
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
+	w.WriteHeader(status)
+	digest := sha256.New()
+	flusher, canFlush := w.(http.Flusher)
+	streamBytes := stop - start
+	// Hold the final byte until the checksum passes so a corrupt body stays incomplete.
+	if !partial {
+		streamBytes--
+	}
+	copied, err := pumpToClient(w, flusher, canFlush, digest, reader, streamBytes)
+	if err != nil || copied != streamBytes {
+		panic(http.ErrAbortHandler)
+	}
+	if !partial {
+		tail := []byte{0}
+		if _, err := io.ReadFull(reader, tail); err != nil {
+			panic(http.ErrAbortHandler)
 		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return total, nil
-			}
-			return total, err
+		digest.Write(tail)
+		if digestMismatch(digest, slot.ResultChecksum) {
+			panic(http.ErrAbortHandler)
+		}
+		if _, err := w.Write(tail); err != nil {
+			panic(http.ErrAbortHandler)
 		}
 	}
 }

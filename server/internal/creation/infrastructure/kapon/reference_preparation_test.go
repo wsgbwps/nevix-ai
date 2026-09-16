@@ -3,11 +3,8 @@ package kapon
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -330,54 +327,6 @@ func equalDurations(got, want []time.Duration) bool {
 		}
 	}
 	return true
-}
-
-func TestVideoSubmitMapsPreparedReferenceKindsAndRolesToURLs(t *testing.T) {
-	var body map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Write([]byte(`{"id":"video-task-1"}`))
-	}))
-	t.Cleanup(server.Close)
-	client := NewGenerationsClient(server.URL, nil)
-	_, err := client.Submit(context.Background(), "credential", domain.PreparedSubmitRequest{
-		Media: domain.MediaVideo, Model: domain.VideoModelID, Prompt: "prompt", Quantity: 1,
-		References: []domain.GatewayReference{
-			{Role: domain.RoleFirstFrame, Kind: domain.KindImage, URL: "https://objects.example/first", ExpiresAt: time.Now().Add(time.Hour)},
-			{Role: domain.RoleLastFrame, Kind: domain.KindImage, URL: "https://objects.example/last", ExpiresAt: time.Now().Add(time.Hour)},
-			{Role: domain.RoleOmni, Kind: domain.KindVideo, URL: "https://objects.example/video", ExpiresAt: time.Now().Add(time.Hour)},
-			{Role: domain.RoleOmni, Kind: domain.KindAudio, URL: "https://objects.example/audio", ExpiresAt: time.Now().Add(time.Hour)},
-		},
-	})
-	if err != nil {
-		t.Fatalf("submit video: %v", err)
-	}
-	content, ok := body["content"].([]any)
-	if !ok || len(content) != 5 {
-		t.Fatalf("video content = %#v, want text plus four references", body["content"])
-	}
-	assertVideoReference := func(index int, kind, role, wantURL string) {
-		t.Helper()
-		item, ok := content[index].(map[string]any)
-		urlField, okURL := item[kind+"_url"].(map[string]any)
-		if !ok || !okURL || item["type"] != kind+"_url" || item["role"] != role || urlField["url"] != wantURL {
-			t.Fatalf("video content[%d] = %#v", index, content[index])
-		}
-	}
-	assertVideoReference(1, "image", "first_frame", "https://objects.example/first")
-	assertVideoReference(2, "image", "last_frame", "https://objects.example/last")
-	assertVideoReference(3, "video", "reference_video", "https://objects.example/video")
-	assertVideoReference(4, "audio", "reference_audio", "https://objects.example/audio")
-	encoded, err := json.Marshal(content)
-	if err != nil {
-		t.Fatalf("marshal content: %v", err)
-	}
-	serialized := string(encoded)
-	if strings.Contains(serialized, "data:") || strings.Contains(serialized, "base64") || strings.Contains(serialized, "asset://") {
-		t.Fatalf("video request contains a non-HTTPS reference authority: %s", serialized)
-	}
 }
 
 func TestPrepareReferencesRejectsNonPublicHTTPSAuthority(t *testing.T) {

@@ -604,12 +604,12 @@ func TestPollAndCancelCarryCredential(t *testing.T) {
 	var pollAuth, cancelAuth string
 	client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/contents/generations/tasks/"):
+		case r.Method == http.MethodGet && r.URL.Path == "/volcark/api/v3/contents/generations/tasks/cgtask-1":
 			pollAuth = r.Header.Get("Authorization")
 			w.Write([]byte(`{"id":"t","status":"succeeded","content":{"video_url":"https://cdn.example/v.mp4"}}`))
-		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/contents/generations/tasks/"):
+		case r.Method == http.MethodDelete && r.URL.Path == "/volcark/api/v3/contents/generations/tasks/cgtask-1":
 			cancelAuth = r.Header.Get("Authorization")
-			w.Write([]byte(`{"id":"t","status":"cancelling"}`))
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

@@ -92,12 +92,15 @@ func TestCheckTransportFailureIsTransient(t *testing.T) {
 }
 
 func TestValidateBaseURLEnforcesRoutePolicy(t *testing.T) {
-	for _, raw := range []string{"https://models.kapon.cloud", "https://example.internal", "http://127.0.0.1:9", "http://localhost:1"} {
+	for _, raw := range []string{"https://models.kapon.cloud", "https://svip.kapon.cloud", "http://127.0.0.1:9", "http://localhost:1"} {
 		if err := ValidateBaseURL(raw); err != nil {
 			t.Fatalf("valid route %q rejected: %v", raw, err)
 		}
 	}
-	for _, raw := range []string{"http://models.kapon.cloud", "https://", "ftp://example", "not a url"} {
+	for _, raw := range []string{
+		"https://example.internal", "https://models.kapon.cloud/path", "https://user@models.kapon.cloud",
+		"http://models.kapon.cloud", "https://", "ftp://example", "not a url",
+	} {
 		if err := ValidateBaseURL(raw); err == nil {
 			t.Fatalf("invalid route %q accepted", raw)
 		}

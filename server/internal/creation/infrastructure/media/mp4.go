@@ -55,6 +55,8 @@ func identifyMP4(seek io.ReadSeeker) (domain.Identified, error) {
 			track, err := parseTrak(seek, child)
 			if err == nil {
 				tracks = append(tracks, track)
+			} else if track.handler == "soun" {
+				return domain.ErrUnreadableMedia
 			}
 		case "mvex":
 			fragmented = true
@@ -259,9 +261,7 @@ func parseMVHD(r io.Reader) (uint32, uint64, error) {
 	}
 }
 
-// parseTrak digs out handler type and the leading sample description's
-// format (+visual dimensions when present). Any parse hiccup yields a zero
-// track that classification simply ignores.
+// parseTrak retains the handler on errors so malformed audio is not treated as silence.
 func parseTrak(seek io.ReadSeeker, trak boxRef) (mp4Track, error) {
 	track := mp4Track{}
 	mdia, ok, err := findBoxInBox(seek, trak, "mdia")
@@ -272,7 +272,7 @@ func parseTrak(seek io.ReadSeeker, trak boxRef) (mp4Track, error) {
 	if err != nil || !ok {
 		return track, errSkipTrack
 	}
-	content := make([]byte, hdlr.size-boxHeaderLen)
+	content := make([]byte, min64(hdlr.size-boxHeaderLen, 12))
 	if _, err := readAtOffset(seek, content, hdlr.start+boxHeaderLen); err != nil {
 		return track, errSkipTrack
 	}
@@ -293,6 +293,10 @@ func parseTrak(seek io.ReadSeeker, trak boxRef) (mp4Track, error) {
 		return track, errSkipTrack
 	}
 	if _, err := readAtOffset(seek, entry, stsd.start+boxHeaderLen); err != nil {
+		return track, errSkipTrack
+	}
+	entrySize := int64(beUint32(entry[8:12]))
+	if beUint32(entry[4:8]) == 0 || entrySize < boxHeaderLen || entrySize > stsd.size-boxHeaderLen-8 {
 		return track, errSkipTrack
 	}
 	track.format = string(entry[12:16])

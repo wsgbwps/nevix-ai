@@ -24,18 +24,7 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// GenerationsClient is the Kapon adapter for real generation calls. It
-// speaks the domain's classified outcomes plus the bounded standard Kapon
-// error envelope used to explain creator-private slot failures. Raw bodies,
-// arbitrary fields, output URLs, keys, headers, and prompts never leave this
-// package's error paths; a redacted request SHAPE (creator content and
-// references replaced) may reach server logs and the failure diagnostic per
-// ADR-0016, so a provider rejection can be diagnosed without the payload.
-//
-// The wire shapes below (OpenAI-style /v1/images/generations and the async
-// /v1/contents/generations/tasks family) are the kernel's adapter contract,
-// pinned by the fake-Kapon tests; the video slice (#161) refines the exact
-// vendor payload mapping during its real-invocation acceptance.
+// GenerationsClient implements provider calls and ADR-0016 diagnostic redaction.
 type GenerationsClient struct {
 	baseURL         string
 	http            *http.Client
@@ -64,11 +53,6 @@ type ReferencePreparationTiming struct {
 	Jitter func(time.Duration) time.Duration
 }
 
-// imageSize resolves the frozen (model, ratio, resolution) triple onto the
-// vendor pixel size from the shared domain table — the same table the
-// manifest publishes as display sizes, so the wire value can never drift
-// from what the Workbench showed. A missing combination is an internal
-// contract violation, never a silent downgrade.
 func imageSize(req domain.PreparedSubmitRequest) (string, error) {
 	if req.Ratio == nil || req.Resolution == nil {
 		return "", &domain.ProviderRejectedError{Reason: domain.ReasonInternalError}
@@ -80,16 +64,8 @@ func imageSize(req domain.PreparedSubmitRequest) (string, error) {
 	return fmt.Sprintf("%dx%d", size.Width, size.Height), nil
 }
 
-// imageWireModels maps a manifest model id onto the request model id the
-// gateway actually accepts. The pro manifest id needs its versioned backend
-// id: the dotted catalog alias resolves per-request across backend pools and
-// intermittently answers invalid_request_error 400 on an identical body
-// (field report 2026-09-01, both hosts; the versioned id 3/3 stable). The
-// base manifest id is a display name the vendor does not list at all — its
-// catalog alias doubao-seedream-5.0-n is the accepted request id, while the
-// versioned id its successes echo (doubao-seedream-5-0-260128) is rejected
-// as an input (user-verified 2026-09-01). Unmapped models travel under their
-// own id. Remove this mapping when Kapon fixes alias routing.
+// The pro alias routes intermittently and the base display ID is rejected.
+// Keep these accepted request IDs until Kapon fixes alias routing (2026-09-01).
 var imageWireModels = map[string]string{
 	domain.ImageModelID:     "doubao-seedream-5-0-pro-260628",
 	domain.ImageModelBaseID: "doubao-seedream-5.0-n",
@@ -129,7 +105,6 @@ func NewGenerationsClient(baseURL string, references domain.ReferenceTransportRe
 	return client
 }
 
-// compile-time proof the adapter satisfies the kernel's seam.
 var _ domain.ProviderGateway = (*GenerationsClient)(nil)
 
 // PrepareReferences streams ordered sources through the current Object
@@ -173,8 +148,7 @@ func (c *GenerationsClient) PrepareReferences(ctx context.Context, providerJobID
 	return prepared, nil
 }
 
-// ReleaseReference delegates exact-key deletion to the adapter-owned
-// ReferenceTransport; the application never sees the key or signed URL.
+// ReleaseReference deletes one prepared provider reference.
 func (c *GenerationsClient) ReleaseReference(ctx context.Context, providerJobID domain.UUID, ordinal int) error {
 	if c.references == nil {
 		return domain.ErrObjectStorageUnavailable
@@ -309,12 +283,7 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 	if err != nil {
 		return domain.SubmitOutcome{}, err
 	}
-	// The vendor 豆包生图 contract (OpenAPI 2026-09) has no batch parameter:
-	// every request generates exactly one image, so a quantity of Q fans out
-	// into Q identical single-image requests, each slot receiving exactly
-	// its own request's answer. The submit stays all-or-nothing — any
-	// definitive rejection fails it, and a lost transport outcome dominates
-	// as indeterminate because those requests may have executed.
+	// Kapon has no image batch parameter, so each requested output needs its own call.
 	body := map[string]any{
 		"model":           imageWireModel(req.Model),
 		"prompt":          req.Prompt,
@@ -410,14 +379,7 @@ func missingOutputIndeterminate() error {
 }
 
 func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, req domain.PreparedSubmitRequest) (domain.SubmitOutcome, error) {
-	command := req.Prompt
-	if req.Resolution != nil {
-		command += " --resolution " + *req.Resolution
-	}
-	if req.DurationS != nil {
-		command += " --duration " + strconv.Itoa(*req.DurationS)
-	}
-	content := []map[string]any{{"type": "text", "text": command}}
+	content := []map[string]any{{"type": "text", "text": req.Prompt}}
 	for _, reference := range req.References {
 		typeName := string(reference.Kind) + "_url"
 		item := map[string]any{"type": typeName, typeName: map[string]string{"url": reference.URL}}
@@ -431,13 +393,26 @@ func (c *GenerationsClient) submitVideo(ctx context.Context, credential string, 
 		}
 		content = append(content, item)
 	}
-	body := map[string]any{"model": req.Model, "content": content}
+	ratio := "adaptive"
+	if req.Ratio != nil {
+		ratio = *req.Ratio
+	}
+	body := map[string]any{
+		"model": req.Model, "content": content, "ratio": ratio,
+		"generate_audio": true,
+	}
+	if req.Resolution != nil {
+		body["resolution"] = *req.Resolution
+	}
+	if req.DurationS != nil {
+		body["duration"] = *req.DurationS
+	}
 	callCtx, cancel := context.WithTimeout(ctx, c.submitTimeout)
 	defer cancel()
 	var parsed struct {
 		ID string `json:"id"`
 	}
-	if err := classifySubmitError(c.call(callCtx, credential, http.MethodPost, "/v1/contents/generations/tasks", body, &parsed)); err != nil {
+	if err := classifySubmitError(c.call(callCtx, credential, http.MethodPost, "/volcark/api/v3/contents/generations/tasks", body, &parsed)); err != nil {
 		return domain.SubmitOutcome{}, err
 	}
 	if parsed.ID == "" {
@@ -466,7 +441,7 @@ func (c *GenerationsClient) Poll(ctx context.Context, credential string, ref str
 		} `json:"content"`
 		Error *providerJobError `json:"error"`
 	}
-	if err := c.call(callCtx, credential, http.MethodGet, "/v1/contents/generations/tasks/"+ref, nil, &parsed); err != nil {
+	if err := c.call(callCtx, credential, http.MethodGet, "/volcark/api/v3/contents/generations/tasks/"+ref, nil, &parsed); err != nil {
 		if errors.Is(err, errRequestUnsent) || errors.Is(err, errTransportLost) {
 			return domain.PollOutcome{}, domain.WithFailureDiagnostic(domain.ErrProviderUnavailable, domain.FailureDiagnosticOf(err))
 		}
@@ -507,7 +482,6 @@ func (c *GenerationsClient) Poll(ctx context.Context, credential string, ref str
 			),
 		}, nil
 	default:
-		// queued/running/unknown non-terminal shapes stay processing.
 		return domain.PollOutcome{Status: domain.PollProcessing}, nil
 	}
 }
@@ -517,8 +491,7 @@ func (c *GenerationsClient) Poll(ctx context.Context, credential string, ref str
 func (c *GenerationsClient) Cancel(ctx context.Context, credential string, ref string) error {
 	callCtx, cancel := context.WithTimeout(ctx, c.cancelTimeout)
 	defer cancel()
-	if err := c.call(callCtx, credential, http.MethodPost, "/v1/contents/generations/tasks/"+ref,
-		map[string]any{"action": "cancel"}, nil); err != nil {
+	if err := c.call(callCtx, credential, http.MethodDelete, "/volcark/api/v3/contents/generations/tasks/"+ref, nil, nil); err != nil {
 		if errors.Is(err, errRequestUnsent) || errors.Is(err, errTransportLost) {
 			return domain.WithFailureDiagnostic(domain.ErrProviderUnavailable, domain.FailureDiagnosticOf(err))
 		}
@@ -527,10 +500,7 @@ func (c *GenerationsClient) Cancel(ctx context.Context, credential string, ref s
 	return nil
 }
 
-// errTransportLost marks a round trip that never produced a classified HTTP
-// answer: connection failure, timeout, or an unreadable body. Submit paths
-// treat it as an unidentified outcome; idempotent paths treat it as
-// transient.
+// errTransportLost means a request may have reached the provider without a usable response.
 var (
 	errRequestUnsent = errors.New("kapon: request confirmed unsent")
 	errTransportLost = errors.New("kapon: transport lost")
@@ -583,12 +553,7 @@ func classifySubmitError(err error) error {
 	return err
 }
 
-// call performs one classified HTTP round trip carrying the call's Provider
-// Key in the Authorization header only — the credential is never persisted,
-// logged, or wrapped into an error. The error mapping is the adapter's whole
-// opinion about the provider: 402 is the definitive credit block, 429
-// carries Retry-After, 5xx/timeouts are transient, and the decoded payload
-// (when the caller wants one) is parsed only on 200.
+// call maps one authenticated provider round trip onto the domain error taxonomy.
 func (c *GenerationsClient) call(ctx context.Context, credential, method, path string, body any, decode any) error {
 	var reader io.Reader
 	if body != nil {
@@ -647,10 +612,7 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 	redactions := providerDiagnosticRedactions(credential, body)
 	summary := redactedRequestSummary(body)
 	if resp.StatusCode != http.StatusOK && summary != "" {
-		// ADR-0016: the redacted request shape — never the creator content —
-		// explains a rejection in server logs and the creator diagnostic. The
-		// target host rides along: the same body can behave differently per
-		// vendor route, and the host is configuration, not a secret.
+		// ADR-0016 permits the redacted shape and configured host, never creator content.
 		slog.Warn("creation: kapon request rejected",
 			"method", method,
 			"path", path,
@@ -664,7 +626,7 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 	diagnostic := providerFailure.diagnostic(resp.StatusCode, redactions, shapeSuffix(summary, c.baseURL))
 
 	switch {
-	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusOK || (decode == nil && resp.StatusCode >= 200 && resp.StatusCode < 300):
 	case resp.StatusCode == http.StatusPaymentRequired:
 		return domain.WithFailureDiagnostic(domain.ErrProviderCreditBlocked, diagnostic)
 	case resp.StatusCode == http.StatusTooManyRequests:
@@ -677,9 +639,7 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 		}
 		return domain.WithFailureDiagnostic(&domain.RateLimitedError{RetryAfter: retryAfter}, diagnostic)
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		// A credential that passed admission but is now rejected stays a
-		// transient condition for in-flight jobs: bounded retry, alarm, and
-		// the admin's recheck owns the credential verdict.
+		// Only the admin connection check may invalidate persisted credentials.
 		return domain.WithFailureDiagnostic(domain.ErrProviderUnavailable, diagnostic)
 	case resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity:
 		return domain.WithFailureDiagnostic(
@@ -792,14 +752,9 @@ func (e providerErrorEnvelope) diagnostic(status int, redactions []string, reque
 	)
 }
 
-// providerRequestSummaryMax bounds the redacted request shape so the
-// diagnostic message it rides stays inside the domain's message budget.
 const providerRequestSummaryMax = 1024
 
-// shapeSuffix renders " | request: {…} | host: …" for the failure
-// diagnostic message. The host is the vendor route configuration, not a
-// secret, and the same body can be accepted on one route and rejected on
-// another — without it a reported shape cannot be attributed to a route.
+// shapeSuffix identifies the configured provider route without exposing a secret.
 func shapeSuffix(summary, host string) string {
 	if summary == "" {
 		return ""
@@ -807,11 +762,7 @@ func shapeSuffix(summary, host string) string {
 	return " | request: " + summary + " | host: " + host
 }
 
-// redactedRequestSummary renders the outbound request body with every
-// sensitive value replaced, so a provider rejection can be diagnosed from
-// the request shape alone. Creator content (prompts, reference images,
-// URLs) never appears; the output is deterministic because encoding/json
-// sorts map keys.
+// redactedRequestSummary keeps structure while removing creator content and URLs.
 func redactedRequestSummary(body any) string {
 	if body == nil {
 		return ""
@@ -826,9 +777,6 @@ func redactedRequestSummary(body any) string {
 	return string(encoded)
 }
 
-// redactRequestBody copies the request, replacing every string under a
-// sensitive key (prompt, reference images, URLs) with a marker while keeping
-// the shape — map keys, slice lengths, flags, numbers — intact.
 func redactRequestBody(value any, sensitive bool) any {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -944,9 +892,7 @@ func providerMessage(message string, status int) string {
 	return "Kapon reported a generation failure"
 }
 
-// readProviderErrorEnvelope retains only Kapon's reviewed standard error
-// fields. The bounded raw body is decoded in this frame and then discarded;
-// arbitrary sibling fields never enter the domain diagnostic.
+// readProviderErrorEnvelope discards fields outside Kapon's bounded error contract.
 func readProviderErrorEnvelope(body io.Reader) providerErrorEnvelope {
 	var parsed struct {
 		Error struct {

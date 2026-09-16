@@ -59,16 +59,17 @@ type videoTaskScript struct {
 }
 
 type generationFake struct {
-	mu         sync.Mutex
-	servedPNG  []byte
-	servedJPEG []byte
-	servedMP4  []byte
-	image      imageScript
-	video      videoTaskScript
-	nextID     int
-	outputReq  int
-	outputGets int
-	lastImage  *recordedImageCall
+	mu           sync.Mutex
+	servedPNG    []byte
+	servedJPEG   []byte
+	servedMP4    []byte
+	image        imageScript
+	video        videoTaskScript
+	nextID       int
+	outputReq    int
+	outputGets   int
+	videoSubmits int
+	lastImage    *recordedImageCall
 }
 
 func newGenerationFake(png, jpeg, mp4 []byte) *generationFake {
@@ -109,6 +110,12 @@ func (g *generationFake) videoRequests() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.video.requests
+}
+
+func (g *generationFake) videoSubmitRequests() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.videoSubmits
 }
 
 // serveGeneration answers the generation endpoints on the same fake server
@@ -178,7 +185,8 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		w.Write([]byte(body))
 		return true
 
-	case r.Method == http.MethodPost && r.URL.Path == "/v1/contents/generations/tasks":
+	case r.Method == http.MethodPost && r.URL.Path == "/volcark/api/v3/contents/generations/tasks":
+		g.videoSubmits++
 		script := g.video
 		script.requests++
 		g.video.requests++
@@ -193,7 +201,7 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		w.Write([]byte(`{"id":"` + id + `"}`))
 		return true
 
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/contents/generations/tasks/"):
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/volcark/api/v3/contents/generations/tasks/"):
 		g.video.polls++
 		script := g.video
 		g.video.requests++
@@ -217,7 +225,7 @@ func (g *generationFake) serveGeneration(w http.ResponseWriter, r *http.Request)
 		}
 		return true
 
-	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/contents/generations/tasks/"):
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/volcark/api/v3/contents/generations/tasks/"):
 		if g.video.cancelOK {
 			g.video.cancelled = true
 			w.Write([]byte(`{"id":"t","status":"cancelling"}`))

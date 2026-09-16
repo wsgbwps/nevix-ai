@@ -57,6 +57,7 @@ function prefersReducedMotion(): boolean {
 
 export function ReferenceDeck({
   compact = false,
+  frameMode = false,
   bindings,
   materials,
   thumbnails,
@@ -76,6 +77,7 @@ export function ReferenceDeck({
   onRemove
 }: {
   readonly compact?: boolean
+  readonly frameMode?: boolean
   /** Ordered draft bindings; the deck order is exactly this order. */
   readonly bindings: readonly DraftReferenceView[]
   readonly materials: readonly ReferenceMaterialView[]
@@ -463,7 +465,11 @@ export function ReferenceDeck({
                 <button
                   type="button"
                   tabIndex={isTop || isFocused ? 0 : -1}
-                  aria-label={material.fileName}
+                  aria-label={
+                    frameMode && (binding.role === 'first_frame' || binding.role === 'last_frame')
+                      ? `${t(binding.role === 'first_frame' ? 'gallery.role.firstFrame' : 'gallery.role.lastFrame')} · ${material.fileName}`
+                      : material.fileName
+                  }
                   ref={(node) => {
                     if (node) cardRefs.current.set(material.id, node)
                     else cardRefs.current.delete(material.id)
@@ -534,6 +540,18 @@ export function ReferenceDeck({
                       {Math.round((progress.sentBytes / progress.totalBytes) * 100)}%
                     </span>
                   )}
+                  {frameMode &&
+                    !compact &&
+                    (binding.role === 'first_frame' || binding.role === 'last_frame') &&
+                    progress === undefined && (
+                      <span className="absolute inset-x-0 bottom-0 bg-black/70 py-0.5 text-[8px] text-white">
+                        {t(
+                          binding.role === 'first_frame'
+                            ? 'gallery.role.firstFrame'
+                            : 'gallery.role.lastFrame'
+                        )}
+                      </span>
+                    )}
                 </button>
                 <button
                   type="button"
