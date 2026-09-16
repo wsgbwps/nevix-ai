@@ -163,6 +163,7 @@ type Module struct {
 	objectStorage *creationhttp.ObjectStorageConnectionHandler
 	manifest      *creationhttp.CapabilityManifestHandler
 	tasks         *creationhttp.GenerationTaskHandler
+	assets        *creationhttp.AssetHandler
 	governance    *creationhttp.GovernanceHandler
 	hub           *creationhttp.InvalidationHub
 	worker        *application.TaskWorker
@@ -216,6 +217,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, uploadRepos, taskRepos, objectStorageService, media.Prober{}, tx, now)
 	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, objectStorageService, governanceRepos, manifestService, tx, hub)
+	assetService := application.NewAssetService(assetRepos, tx)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
 	// The worker resolves the current Object Storage Connection and speaks the
 	// fixed Kapon generation route. The connection service is the call-time
@@ -234,6 +236,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 		objectStorage: creationhttp.NewObjectStorageConnectionHandler(objectStorageService),
 		manifest:      creationhttp.NewCapabilityManifestHandler(manifestService),
 		tasks:         creationhttp.NewGenerationTaskHandler(taskService, objectStorageService),
+		assets:        creationhttp.NewAssetHandler(assetService, objectStorageService),
 		governance:    creationhttp.NewGovernanceHandler(governanceService, connectionService),
 		hub:           hub,
 		worker:        worker,

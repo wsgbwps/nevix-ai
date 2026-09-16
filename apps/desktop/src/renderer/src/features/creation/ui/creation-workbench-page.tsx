@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   FileImageIcon,
@@ -55,6 +55,10 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   const pinnedToBottomRef = useRef(true)
   const lastWorkspaceRef = useRef(workspaceKey)
   const lastNewestTaskIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (context.ports?.actions.consumePreparedSimilarDraft()) context.startNewDraft()
+  }, [context])
 
   useLayoutEffect(() => {
     const releaseScrollbar = (): void => {

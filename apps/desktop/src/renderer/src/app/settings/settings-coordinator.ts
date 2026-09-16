@@ -7,6 +7,7 @@ import {
 } from '../ordinary-close-handler'
 import { installSettingsBackInterception } from './settings-back-navigation'
 import {
+  isSettingsReturnSourcePathname,
   replaceSettingsSection,
   returnToSettingsSource,
   type SettingsEntry,
@@ -24,13 +25,8 @@ import {
 
 export type SettingsContribution = SettingsLeaveSemantics
 
-/**
- * Only the Home surface (`/`) is a re-enterable business source: every other
- * path either belongs to a flow that owns its own lifecycle or no longer
- * exists, so returning there would strand the user mid-flow.
- */
 function canEnterBusinessSource(source: SettingsSourceDescriptor): boolean {
-  return source.pathname === '/'
+  return isSettingsReturnSourcePathname(source.pathname)
 }
 
 interface SettingsCoordinatorOptions {

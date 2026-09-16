@@ -3,6 +3,7 @@ import { Link, useLocation } from '@tanstack/react-router'
 import {
   ChevronsUpDownIcon,
   HomeIcon,
+  ImagesIcon,
   LogOutIcon,
   MoonIcon,
   SettingsIcon,
@@ -91,7 +92,9 @@ export function AppShell({
       ? t('shell.home')
       : location.pathname.startsWith('/creation')
         ? t('shell.creation')
-        : undefined
+        : location.pathname.startsWith('/assets')
+          ? t('shell.assets')
+          : undefined
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -134,6 +137,20 @@ export function AppShell({
                         <HomeIcon />
                         <span className="group-data-[collapsible=icon]:hidden">
                           {t('shell.home')}
+                        </span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={location.pathname === '/assets'}
+                      tooltip={t('shell.assets')}
+                    >
+                      <Link to="/assets">
+                        <ImagesIcon />
+                        <span className="group-data-[collapsible=icon]:hidden">
+                          {t('shell.assets')}
                         </span>
                       </Link>
                     </SidebarMenuButton>

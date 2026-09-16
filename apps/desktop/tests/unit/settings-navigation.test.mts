@@ -7,6 +7,7 @@ import {
   createSettingsEntry,
   isAdminSettingsSection,
   isMatchingSettingsSource,
+  isSettingsReturnSourcePathname,
   readSettingsEntry,
   replaceSettingsSection,
   resolveSettingsSection,
@@ -33,6 +34,12 @@ test('same-path business entries remain distinct Settings return sources', () =>
   assert.equal(isMatchingSettingsSource(first, sourceLocation('business-source-a')), true)
   assert.equal(isMatchingSettingsSource(first, sourceLocation('business-source-b')), false)
   assert.equal(isMatchingSettingsSource(second, sourceLocation('business-source-b')), true)
+})
+
+test('Home and Asset Library are eligible Settings return sources', () => {
+  assert.equal(isSettingsReturnSourcePathname('/'), true)
+  assert.equal(isSettingsReturnSourcePathname('/assets'), true)
+  assert.equal(isSettingsReturnSourcePathname('/creation'), false)
 })
 
 test('Section replacement preserves the source and does not invent URL state', () => {

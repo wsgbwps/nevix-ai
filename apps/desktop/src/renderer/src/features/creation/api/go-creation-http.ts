@@ -124,6 +124,8 @@ export async function request(
     return { outcome: 'network-failure' }
   }
 
+  if (response.status === 204) return { outcome: 'succeeded', payload: undefined }
+
   let payload: unknown
   try {
     payload = await response.json()

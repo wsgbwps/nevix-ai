@@ -1,0 +1,120 @@
+package application
+
+import (
+	"context"
+
+	"github.com/nevix-ai/server/internal/authz"
+	"github.com/nevix-ai/server/internal/creation/domain"
+)
+
+type AssetCapabilities struct {
+	CanDelete        bool
+	CanCreateSimilar bool
+}
+
+type AssetView struct {
+	Asset        domain.MediaAsset
+	Capabilities AssetCapabilities
+}
+
+type AssetDetail struct {
+	Asset         AssetView
+	Siblings      []AssetView
+	PrivateOrigin *domain.AssetPrivateOrigin
+}
+
+type AssetService struct {
+	assets domain.MediaAssetRepository
+	runner domain.WriteRunner
+}
+
+func NewAssetService(assets domain.MediaAssetRepository, runner domain.WriteRunner) *AssetService {
+	return &AssetService{assets: assets, runner: runner}
+}
+
+func (s *AssetService) List(ctx context.Context, principal authz.Principal, filter domain.AssetListFilter, cursor *domain.CompoundCursor, limit int) ([]AssetView, *domain.CompoundCursor, error) {
+	actor, err := domain.ParseUUID(principal.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	assets, next, err := s.assets.ListVisible(ctx, filter, cursor, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	return assetViews(assets, actor, principal.Role == "admin"), next, nil
+}
+
+func (s *AssetService) Get(ctx context.Context, principal authz.Principal, id domain.UUID) (AssetDetail, error) {
+	actor, err := domain.ParseUUID(principal.UserID)
+	if err != nil {
+		return AssetDetail{}, err
+	}
+	asset, err := s.assets.GetVisible(ctx, id)
+	if err != nil {
+		return AssetDetail{}, err
+	}
+	siblings, err := s.assets.ListVisibleSiblings(ctx, asset.TaskID)
+	if err != nil {
+		return AssetDetail{}, err
+	}
+	detail := AssetDetail{
+		Asset:    assetView(asset, actor, principal.Role == "admin"),
+		Siblings: assetViews(siblings, actor, principal.Role == "admin"),
+	}
+	if asset.OwnerID == actor {
+		detail.PrivateOrigin, err = s.assets.GetPrivateOrigin(ctx, asset)
+		if err != nil {
+			return AssetDetail{}, err
+		}
+	}
+	return detail, nil
+}
+
+func (s *AssetService) Resolve(ctx context.Context, principal authz.Principal, id domain.UUID) (domain.MediaAsset, error) {
+	_, err := domain.ParseUUID(principal.UserID)
+	if err != nil {
+		return domain.MediaAsset{}, err
+	}
+	asset, err := s.assets.GetVisible(ctx, id)
+	if err != nil {
+		return domain.MediaAsset{}, err
+	}
+	return asset, nil
+}
+
+func (s *AssetService) Delete(ctx context.Context, principal authz.Principal, id domain.UUID) error {
+	actor, err := domain.ParseUUID(principal.UserID)
+	if err != nil {
+		return err
+	}
+	admin := principal.Role == "admin"
+	asset, err := s.assets.GetVisible(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !admin && asset.OwnerID != actor {
+		return domain.ErrAssetNotFound
+	}
+	return s.runner.Run(ctx, func(sc domain.WriteScope) error {
+		return s.assets.SoftDelete(ctx, sc.Tx(), actor, id, admin)
+	})
+}
+
+func assetViews(assets []domain.MediaAsset, actor domain.UUID, admin bool) []AssetView {
+	views := make([]AssetView, 0, len(assets))
+	for _, asset := range assets {
+		views = append(views, assetView(asset, actor, admin))
+	}
+	return views
+}
+
+func assetView(asset domain.MediaAsset, actor domain.UUID, admin bool) AssetView {
+	owner := asset.OwnerID == actor
+	return AssetView{
+		Asset: asset,
+		Capabilities: AssetCapabilities{
+			CanDelete:        owner || admin,
+			CanCreateSimilar: owner,
+		},
+	}
+}

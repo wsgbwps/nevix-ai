@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as CreationRouteImport } from './routes/creation'
@@ -18,6 +19,11 @@ import { Route as SettingsRouteImport } from './routes/settings'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssetsRoute = AssetsRouteImport.update({
+  id: '/assets',
+  path: '/assets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -43,6 +49,7 @@ const SettingsRoute = SettingsRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/assets': typeof AssetsRoute
   '/auth': typeof AuthRoute
   '/connect': typeof ConnectRoute
   '/creation': typeof CreationRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/assets': typeof AssetsRoute
   '/auth': typeof AuthRoute
   '/connect': typeof ConnectRoute
   '/creation': typeof CreationRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/assets': typeof AssetsRoute
   '/auth': typeof AuthRoute
   '/connect': typeof ConnectRoute
   '/creation': typeof CreationRoute
@@ -65,14 +74,22 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/connect' | '/creation' | '/settings'
+  fullPaths: '/' | '/assets' | '/auth' | '/connect' | '/creation' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/connect' | '/creation' | '/settings'
-  id: '__root__' | '/' | '/auth' | '/connect' | '/creation' | '/settings'
+  to: '/' | '/assets' | '/auth' | '/connect' | '/creation' | '/settings'
+  id:
+    | '__root__'
+    | '/'
+    | '/assets'
+    | '/auth'
+    | '/connect'
+    | '/creation'
+    | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AssetsRoute: typeof AssetsRoute
   AuthRoute: typeof AuthRoute
   ConnectRoute: typeof ConnectRoute
   CreationRoute: typeof CreationRoute
@@ -86,6 +103,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assets': {
+      id: '/assets'
+      path: '/assets'
+      fullPath: '/assets'
+      preLoaderRoute: typeof AssetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -121,6 +145,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AssetsRoute: AssetsRoute,
   AuthRoute: AuthRoute,
   ConnectRoute: ConnectRoute,
   CreationRoute: CreationRoute,

@@ -1,0 +1,214 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { registerHooks } from 'node:module'
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    const isDesktopSource = context.parentURL?.includes('/apps/desktop/src/') === true
+    const resolvedSpecifier =
+      isDesktopSource && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)
+        ? `${specifier}.ts`
+        : specifier
+    return nextResolve(resolvedSpecifier, context)
+  }
+})
+
+const { createAssetLibraryClient } =
+  await import('../../src/renderer/src/features/creation/api/asset-library-http.ts')
+
+const serverUrl = 'https://server.example'
+const imageBytes = new TextEncoder().encode('verified-image')
+const checksum = Buffer.from(await crypto.subtle.digest('SHA-256', imageBytes)).toString('hex')
+
+const asset = {
+  id: 'aaaaaaaa-0000-4000-8000-000000000001',
+  creator: { id: 'user-one', display_name: 'Aster' },
+  media_type: 'image',
+  mime_type: 'image/png',
+  byte_size: imageBytes.byteLength,
+  checksum_sha256: checksum,
+  width_px: 1200,
+  height_px: 800,
+  duration_ms: null,
+  created_at: '2026-09-16T08:00:00Z',
+  capabilities: {
+    can_delete: true,
+    can_create_similar: true
+  }
+}
+
+test('asset list sends the accepted keyset filters and decodes public facts', async () => {
+  const originalFetch = globalThis.fetch
+  let requested: URL | undefined
+  globalThis.fetch = async (input) => {
+    requested = new URL(String(input))
+    return Response.json({ assets: [asset], next_cursor: 'next-page' })
+  }
+  try {
+    const result = await createAssetLibraryClient(serverUrl).list('token', {
+      cursor: 'cursor-one',
+      mediaType: 'image',
+      creator: 'Aster',
+      createdSince: '2026-09-01T00:00:00Z',
+      sort: 'oldest',
+      search: 'Aster',
+      limit: 24
+    })
+    assert.equal(result.outcome, 'succeeded')
+    if (result.outcome !== 'succeeded') return
+    assert.deepEqual(result.value.assets[0], {
+      id: asset.id,
+      creator: { id: 'user-one', displayName: 'Aster' },
+      mediaType: 'image',
+      mimeType: 'image/png',
+      byteSize: imageBytes.byteLength,
+      checksumSha256: checksum,
+      widthPx: 1200,
+      heightPx: 800,
+      durationMs: null,
+      createdAt: '2026-09-16T08:00:00Z',
+      capabilities: { canDelete: true, canCreateSimilar: true }
+    })
+    assert.equal(result.value.nextCursor, 'next-page')
+    assert.deepEqual(Object.fromEntries(requested?.searchParams ?? []), {
+      cursor: 'cursor-one',
+      media_type: 'image',
+      creator: 'Aster',
+      created_since: '2026-09-01T00:00:00Z',
+      sort: 'oldest',
+      search: 'Aster',
+      limit: '24'
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('asset detail exposes private origin only when the server supplies it', async () => {
+  const originalFetch = globalThis.fetch
+  const privateOrigin = {
+    session_id: 'session-one',
+    task_id: 'task-one',
+    slot_index: 0,
+    specification: {
+      media_type: 'image',
+      prompt: 'A quiet launch scene',
+      model: 'doubao-seedream-5.0-pro',
+      mode: 'text-to-image',
+      manifest_version: 7,
+      ratio: '3:2',
+      resolution: '2K',
+      quantity: 1,
+      duration_seconds: null,
+      references: []
+    }
+  }
+  globalThis.fetch = async () =>
+    Response.json({
+      asset,
+      siblings: [{ ...asset, id: 'bbbbbbbb-0000-4000-8000-000000000002' }],
+      private_origin: privateOrigin
+    })
+  try {
+    const result = await createAssetLibraryClient(serverUrl).get('token', asset.id)
+    assert.equal(result.outcome, 'succeeded')
+    if (result.outcome !== 'succeeded') return
+    assert.equal(result.value.siblings[0].id, 'bbbbbbbb-0000-4000-8000-000000000002')
+    assert.deepEqual(result.value.privateOrigin, {
+      sessionId: 'session-one',
+      sessionName: null,
+      taskId: 'task-one',
+      slotIndex: 0,
+      specification: {
+        mediaType: 'image',
+        prompt: 'A quiet launch scene',
+        model: 'doubao-seedream-5.0-pro',
+        mode: 'text-to-image',
+        manifestVersion: 7,
+        ratio: '3:2',
+        resolution: '2K',
+        quantity: 1,
+        durationSeconds: null
+      }
+    })
+
+    globalThis.fetch = async () => Response.json({ asset, siblings: [] })
+    const publicResult = await createAssetLibraryClient(serverUrl).get('token', asset.id)
+    assert.equal(publicResult.outcome, 'succeeded')
+    if (publicResult.outcome === 'succeeded') {
+      assert.equal(publicResult.value.privateOrigin, null)
+    }
+
+    globalThis.fetch = async () =>
+      Response.json({
+        asset,
+        siblings: [],
+        private_origin: { ...privateOrigin, session_name: 7 }
+      })
+    assert.deepEqual(await createAssetLibraryClient(serverUrl).get('token', asset.id), {
+      outcome: 'network-failure'
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('asset content verifies the trusted checksum before returning bytes', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    new Response(imageBytes, {
+      status: 200,
+      headers: { 'Content-Type': 'image/png', 'X-Content-SHA-256': checksum }
+    })
+  try {
+    const client = createAssetLibraryClient(serverUrl)
+    const verified = await client.loadContent('token', asset.id, checksum)
+    assert.equal(verified.outcome, 'succeeded')
+
+    const mismatched = new Response(imageBytes, {
+      status: 200,
+      headers: { 'Content-Type': 'image/png', 'X-Content-SHA-256': '00'.repeat(32) }
+    })
+    globalThis.fetch = async () => mismatched
+    const rejected = await client.loadContent('token', asset.id, checksum)
+    assert.deepEqual(rejected, { outcome: 'request-rejected', code: 'checksum_mismatch' })
+    assert.equal(mismatched.bodyUsed, false)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('asset content maps aborts to the stable download cancellation code', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (_input, init) => {
+    await new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () =>
+        reject(new DOMException('Aborted', 'AbortError'))
+      )
+    })
+    throw new Error('unreachable')
+  }
+  try {
+    const controller = new AbortController()
+    const pending = createAssetLibraryClient(serverUrl).loadContent('token', asset.id, checksum, {
+      signal: controller.signal
+    })
+    controller.abort()
+    assert.deepEqual(await pending, { outcome: 'request-rejected', code: 'download_cancelled' })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('asset delete accepts the contract 204 response without parsing an absent body', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 204 })
+  try {
+    assert.deepEqual(await createAssetLibraryClient(serverUrl).delete('token', asset.id), {
+      outcome: 'succeeded',
+      value: undefined
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

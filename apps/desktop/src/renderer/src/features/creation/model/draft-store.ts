@@ -72,7 +72,7 @@ export function writeLocalDraft(
   userId: string,
   key: string,
   record: LocalDraftRecord
-): void {
+): boolean {
   try {
     storage.setItem(
       storageKey(userId, key),
@@ -97,9 +97,10 @@ export function writeLocalDraft(
             })
       })
     )
+    return true
   } catch {
-    // A full or unavailable store never breaks editing: the draft stays in
-    // memory for this run and simply does not survive a restart.
+    // Editing stays usable when the device-local store is full or unavailable.
+    return false
   }
 }
 

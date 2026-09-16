@@ -184,3 +184,34 @@ func TestGenerationTransferBindingMigrationOwnsNarrowStorageFence(t *testing.T) 
 		}
 	}
 }
+
+func TestAssetLibraryMigrationOwnsVisibilityAndKeysetIndexes(t *testing.T) {
+	sqlBytes, err := migrationFS.ReadFile("migrations/0021_asset_library.sql")
+	if err != nil {
+		t.Fatalf("read asset library migration: %v", err)
+	}
+	sql := string(sqlBytes)
+	for _, required := range []string{
+		"deleted_at",
+		"restricted_at",
+		"creation_media_assets_visible_created_idx",
+		"creation_media_assets_visible_media_created_idx",
+		"creation_media_assets_visible_owner_created_idx",
+		"creation_media_assets_visible_owner_media_created_idx",
+		"WHERE deleted_at IS NULL AND restricted_at IS NULL",
+		"GRANT UPDATE (deleted_at) ON public.creation_media_assets TO identity_app",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("asset library migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"GRANT UPDATE ON public.creation_media_assets",
+		"GRANT DELETE ON public.creation_media_assets",
+		"GRANT UPDATE (restricted_at)",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("asset library migration grants forbidden capability %q", forbidden)
+		}
+	}
+}

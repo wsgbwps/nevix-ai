@@ -64,6 +64,56 @@ func TestReferenceMaterialUploadContractSurface(t *testing.T) {
 	}
 }
 
+func TestAssetLibraryContractSurface(t *testing.T) {
+	var listOperation map[string]any
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/creation/assets"},
+		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001"},
+		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001/content"},
+		{"DELETE", "/creation/assets/00000000-0000-0000-0000-000000000001"},
+	} {
+		operation := creationOperation(t, route.method, route.path)
+		if route.path == "/creation/assets" {
+			listOperation = operation
+		}
+	}
+	parameters, _ := listOperation["parameters"].([]any)
+	foundCreator := false
+	for _, raw := range parameters {
+		parameter, _ := raw.(map[string]any)
+		name, _ := parameter["name"].(string)
+		if name == "creator_id" {
+			t.Fatal("Asset list contract still exposes the internal creator UUID filter")
+		}
+		if name == "creator" {
+			foundCreator = true
+			schema, _ := parameter["schema"].(map[string]any)
+			if schema["maxLength"] != 128 {
+				t.Fatalf("creator maxLength=%v, want 128", schema["maxLength"])
+			}
+		}
+	}
+	if !foundCreator {
+		t.Fatal("Asset list contract is missing the creator display-name prefix filter")
+	}
+
+	asset := resolvePointer(t, moduleFile(t, "creation.yaml"), "/components/schemas/MediaAsset")
+	properties, _ := asset["properties"].(map[string]any)
+	for _, private := range []string{"task_id", "session_id", "slot_index", "prompt", "specification", "blob_key"} {
+		if _, exposed := properties[private]; exposed {
+			t.Fatalf("team-readable Asset contract exposes private/internal field %q", private)
+		}
+	}
+	capabilities := resolvePointer(t, moduleFile(t, "creation.yaml"), "/components/schemas/MediaAssetCapabilities")
+	capabilityProperties, _ := capabilities["properties"].(map[string]any)
+	if _, speculative := capabilityProperties["can_publish"]; speculative {
+		t.Fatal("Asset capabilities expose speculative can_publish before issue #164")
+	}
+}
+
 func loadContracts(t *testing.T) (map[string]any, map[string]map[string]any) {
 	t.Helper()
 	conformanceOnce.Do(func() {

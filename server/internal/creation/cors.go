@@ -26,6 +26,7 @@ func corsMiddleware(allowedOrigins []string, methodsByPath map[string][]string) 
 				return
 			}
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Expose-Headers", "X-Content-SHA-256")
 			w.Header().Add("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			if r.Method == http.MethodOptions {

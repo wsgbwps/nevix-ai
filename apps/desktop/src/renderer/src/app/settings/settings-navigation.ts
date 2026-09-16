@@ -34,6 +34,10 @@ export interface SettingsEntry {
   readonly source: SettingsSourceDescriptor | undefined
 }
 
+export function isSettingsReturnSourcePathname(pathname: string): boolean {
+  return pathname === '/' || pathname === '/assets'
+}
+
 interface HistoryLocationLike {
   readonly pathname: string
   readonly state: unknown

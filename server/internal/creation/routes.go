@@ -48,6 +48,10 @@ func (m *Module) routes() []creationhttp.Route {
 		{Method: "POST", Path: "/creation/tasks/{taskID}/cancel", Handler: m.tasks.CancelTask},
 		{Method: "POST", Path: "/creation/tasks/{taskID}/retry", Handler: m.tasks.RetryUncompleted},
 		{Method: "GET", Path: "/creation/tasks/{taskID}/slots/{slotIndex}/result", Handler: m.tasks.DownloadSlotResult},
+		{Method: "GET", Path: "/creation/assets", Handler: m.assets.List},
+		{Method: "GET", Path: "/creation/assets/{assetID}", Handler: m.assets.Get},
+		{Method: "GET", Path: "/creation/assets/{assetID}/content", Handler: m.assets.Download},
+		{Method: "DELETE", Path: "/creation/assets/{assetID}", Handler: m.assets.Delete},
 		// Creator-scoped SSE invalidation stream.
 		{Method: "GET", Path: "/creation/events", Handler: m.hub.StreamEvents},
 		// Admin generation governance and the persistent credit block.

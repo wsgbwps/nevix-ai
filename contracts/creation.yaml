@@ -1315,6 +1315,177 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/assets:
+    get:
+      operationId: listAssets
+      summary: 列出 Team 可读的成功 Media Asset
+      description: |-
+        只返回已成功形成且未删除、未限制的 Media Asset，不返回 Reference Material、失败槽位、
+        临时结果或 Task 状态。使用 (created_at, id) 复合 keyset cursor；search 仅匹配创建者
+        display_name 前缀或完整 Asset UUID，绝不搜索或暴露私有 prompt。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/pageLimit"
+        - $ref: "#/components/parameters/keysetCursor"
+        - name: media_type
+          in: query
+          schema:
+            type: string
+            enum: [image, video]
+        - name: creator
+          in: query
+          description: 创建者 display_name 的大小写不敏感前缀。
+          schema:
+            type: string
+            maxLength: 128
+        - name: created_since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [newest, oldest]
+            default: newest
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: 当前 Asset 页与下一页 cursor。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assets, next_cursor]
+                properties:
+                  assets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MediaAsset"
+                  next_cursor:
+                    type: string
+                    nullable: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/assets/{assetID}:
+    get:
+      operationId: getAsset
+      summary: 读取一个 Team 可见 Media Asset
+      description: |-
+        返回公开 Asset 事实与同 Task 的其余可见 Asset。只有原创建者收到 private_origin；
+        其他 Member 与 Admin 均不会收到来源 Session/Task id、prompt 或 Generation Specification。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      responses:
+        "200":
+          description: Asset 详情。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaAssetDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteAsset
+      summary: 逻辑删除 Media Asset
+      description: |-
+        仅创建者或 Admin 可执行；仓储谓词再次执行授权。删除只隐藏 Asset，不删除与私有
+        Task result 共享的已验证 blob。不存在、无权、已删除或已限制统一回答 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      responses:
+        "204":
+          description: Asset 已从浏览、下载与复用入口隐藏。
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/assets/{assetID}/content:
+    get:
+      operationId: downloadAssetContent
+      summary: 下载 Team 可见 Asset 的已验证内容
+      description: |-
+        经 Go 有界流式传输，支持标准单区间 Range 与请求取消。完整下载沿流校验 SHA-256；
+        Asset 已删除或已限制时统一 404，且不解析其私有来源。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+        - name: Range
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 完整 Asset 内容。
+          headers:
+            Content-Length:
+              schema:
+                type: integer
+            Accept-Ranges:
+              schema:
+                type: string
+                enum: [bytes]
+            X-Content-SHA-256:
+              schema:
+                type: string
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: 单区间 Asset 内容。
+          headers:
+            Content-Range:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+            Accept-Ranges:
+              schema:
+                type: string
+                enum: [bytes]
+            X-Content-SHA-256:
+              schema:
+                type: string
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "416":
+          $ref: "#/components/responses/RangeNotSatisfiable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
   /creation/events:
     get:
       operationId: streamCreationEvents
@@ -1494,6 +1665,14 @@ components:
         type: integer
         minimum: 0
         maximum: 3
+    assetID:
+      name: assetID
+      in: path
+      required: true
+      description: 目标 Media Asset id（UUID）。
+      schema:
+        type: string
+        format: uuid
     userID:
       name: userID
       in: path
@@ -2898,6 +3077,126 @@ components:
           type: integer
         max_seconds:
           type: integer
+    MediaAsset:
+      type: object
+      required:
+        - id
+        - creator
+        - media_type
+        - mime_type
+        - byte_size
+        - checksum_sha256
+        - created_at
+        - capabilities
+      properties:
+        id:
+          type: string
+          format: uuid
+        creator:
+          type: object
+          required: [id, display_name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            display_name:
+              type: string
+        media_type:
+          type: string
+          enum: [image, video]
+        mime_type:
+          type: string
+        byte_size:
+          type: integer
+          format: int64
+          minimum: 1
+        checksum_sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        width_px:
+          type: integer
+          nullable: true
+        height_px:
+          type: integer
+          nullable: true
+        duration_ms:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        capabilities:
+          $ref: "#/components/schemas/MediaAssetCapabilities"
+    MediaAssetCapabilities:
+      type: object
+      required: [can_delete, can_create_similar]
+      properties:
+        can_delete:
+          type: boolean
+          description: 创建者或 Admin 为 true。
+        can_create_similar:
+          type: boolean
+          description: 仅原创建者为 true；私有 prompt/spec 不向 Team 传播。
+    MediaAssetDetail:
+      type: object
+      required: [asset, siblings]
+      properties:
+        asset:
+          $ref: "#/components/schemas/MediaAsset"
+        siblings:
+          type: array
+          description: 同一来源 Task 中仍可见的成功 Asset，按稳定 slot 顺序排列。
+          items:
+            $ref: "#/components/schemas/MediaAsset"
+        private_origin:
+          nullable: true
+          description: 仅原创建者可见；非创建者的响应省略该字段。
+          allOf:
+            - $ref: "#/components/schemas/MediaAssetPrivateOrigin"
+    MediaAssetPrivateOrigin:
+      type: object
+      required: [session_id, task_id, slot_index, specification]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        session_name:
+          type: string
+          nullable: true
+        task_id:
+          type: string
+          format: uuid
+        slot_index:
+          type: integer
+          minimum: 0
+          maximum: 3
+        specification:
+          type: object
+          required: [prompt, media_type, model, mode, manifest_version, quantity]
+          properties:
+            prompt:
+              type: string
+            media_type:
+              type: string
+              enum: [image, video]
+            model:
+              type: string
+            mode:
+              type: string
+            manifest_version:
+              type: integer
+              minimum: 1
+            ratio:
+              type: string
+              nullable: true
+            resolution:
+              type: string
+              nullable: true
+            quantity:
+              type: integer
+            duration_seconds:
+              type: integer
+              nullable: true
     TaskRetryInput:
       type: object
       required:

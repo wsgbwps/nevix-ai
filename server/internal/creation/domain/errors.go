@@ -121,6 +121,10 @@ var (
 	ErrTaskStateConflict = errors.New("task state transition lost the race")
 )
 
+// ErrAssetNotFound covers absent, deleted, restricted, and unauthorized
+// Asset targets without exposing which predicate failed.
+var ErrAssetNotFound = errors.New("media asset not found")
+
 // MediaUnavailableError reports admission blocked because the target media
 // is not submittable on this instance right now. Reason mirrors the
 // capability/manifest vocabulary the Workbench already displays.

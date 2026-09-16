@@ -1,5 +1,6 @@
 export { creationResourceOwner, creationResources, creationTranslations } from './i18n/resources'
 export { CreationWorkbenchPage } from './ui/creation-workbench-page'
+export { AssetLibraryPage, type AssetLibraryPageProps } from './ui/asset-library-page'
 export {
   ProviderConnectionSettings,
   type ProviderConnectionProofAction
@@ -22,3 +23,11 @@ export type {
 } from './model/workbench-runtime'
 export type { PendingDraftEntry } from './model/use-workbench'
 export type { ReferenceMaterialView } from './api/go-creation-http'
+export type {
+  AssetDetailView,
+  AssetLibraryPorts,
+  AssetPage,
+  AssetPageRequest,
+  AssetPrivateOrigin,
+  MediaAssetView
+} from './api/asset-library-http'

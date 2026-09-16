@@ -51,7 +51,6 @@ test(
         await expect(brandButton).toBeDisabled()
         await expect(launched.page.getByRole('menu')).toHaveCount(0)
 
-        // NavMain 仅“首页”一个真实入口，位于当前路由位置。
         const sidebar = launched.page.locator('[data-slot="sidebar"]')
         const homeEntry = sidebar.getByRole('link', { name: '首页' })
         await expect(homeEntry).toBeVisible()
