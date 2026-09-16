@@ -158,7 +158,6 @@ func TestImageOutputsFormUniqueMediaAssets(t *testing.T) {
 	if distinctSlots != 2 || pngCount != 2 || sizedCount != 2 || widthCount != 2 {
 		t.Fatalf("asset facts incomplete: slots=%d png=%d sized=%d width=%d", distinctSlots, pngCount, sizedCount, widthCount)
 	}
-	// Assets snapshot the creator for the later team-readable surface.
 	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid AND owner_user_id = (SELECT id FROM users WHERE email = $2)`, taskID, creator); got != 2 {
 		t.Fatalf("assets must snapshot the creator owner, got %d", got)
 	}

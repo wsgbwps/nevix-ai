@@ -29,6 +29,8 @@ import {
 } from './reference-material-delete-recovery'
 import type { CreationWorkspacePorts } from './ports'
 import type { CreationReferenceMaterialUploadRecovery } from '../../../../../shared/ipc/creation/types'
+import type { AssetPrivateOrigin } from '../api/asset-library-http'
+import { prepareAssetSimilarDraft, type AssetSimilarDraftResult } from './asset-similar-draft'
 
 export type WorkbenchActionState =
   | { readonly status: 'idle' }
@@ -60,6 +62,11 @@ export type CreationRuntimeEvent =
     }
 
 export interface WorkbenchActions {
+  readonly prepareSimilarDraft: (
+    origin: AssetPrivateOrigin,
+    replaceExisting?: boolean
+  ) => AssetSimilarDraftResult
+  readonly consumePreparedSimilarDraft: () => boolean
   readonly snapshot: (sessionId: string) => WorkbenchActionState
   readonly subscribe: (listener: (event: CreationRuntimeEvent) => void) => () => void
   readonly stagedMaterials: (sessionId: string) => readonly StagedMaterialFile[]
@@ -203,6 +210,7 @@ export function createCreationRuntime(
   let generation = 0
   let retired = false
   let recoveryRun: Promise<void> | null = null
+  let similarDraftPrepared = false
 
   const materialKey = (sessionId: string, localId: string): string => `${sessionId}:${localId}`
   const clearRecoveredMaterial = (key: string): void => {
@@ -374,6 +382,10 @@ export function createCreationRuntime(
   // response came from a display read rather than the action itself.
   const guardedPorts: CreationWorkspacePorts = {
     ...ports,
+    listAssets: guardResult(ports.listAssets),
+    getAsset: guardResult(ports.getAsset),
+    loadAssetContent: guardResult(ports.loadAssetContent),
+    deleteAsset: guardResult(ports.deleteAsset),
     listSessions: guardResult(ports.listSessions),
     createSession: guardResult(ports.createSession),
     renameSession: guardResult(ports.renameSession),
@@ -1212,6 +1224,17 @@ export function createCreationRuntime(
   }
 
   const actions: WorkbenchActions = {
+    prepareSimilarDraft: (origin, replaceExisting = false) => {
+      if (retired || storage === undefined) return 'unavailable'
+      const result = prepareAssetSimilarDraft(storage, userId, origin, replaceExisting)
+      if (result === 'prepared') similarDraftPrepared = true
+      return result
+    },
+    consumePreparedSimilarDraft: () => {
+      if (retired || !similarDraftPrepared) return false
+      similarDraftPrepared = false
+      return true
+    },
     snapshot: (sessionId) =>
       retired
         ? { status: 'retired' }

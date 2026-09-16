@@ -6,6 +6,71 @@ import {
 export const creationTranslations = defineResourceTranslations({
   'zh-CN': {
     creation: {
+      assets: {
+        title: '资产',
+        description: '浏览团队已成功生成的图片和视频',
+        loading: '正在读取资产…',
+        loadFailed: '无法读取资产。',
+        empty: '没有符合条件的资产。',
+        mediaLoading: '正在加载媒体…',
+        mediaFailed: '媒体加载失败',
+        mediaAlt: '资产 {{id}}',
+        media: { image: '图片', video: '视频' },
+        filters: {
+          media: '媒体类型',
+          creator: '创建者',
+          creatorHint: '创建者名称',
+          since: '创建时间',
+          sort: '排序',
+          search: '搜索',
+          searchHint: '创建者名称或资产 ID',
+          all: '全部',
+          newest: '最新优先',
+          oldest: '最早优先',
+          submit: '搜索'
+        },
+        selection: { enter: '选择资产', exit: '退出选择' },
+        selectOne: '选择资产 {{id}}',
+        open: '打开资产 {{id}}',
+        batch: {
+          download_one: '下载 1 个资产',
+          download_other: '下载 {{count}} 个资产',
+          cancel: '取消下载',
+          running: '正在下载 {{done}} / {{total}}',
+          cancelled: '下载已取消 · {{done}} / {{total}}',
+          failed: '下载失败 · {{done}} / {{total}}',
+          complete: '下载完成 · {{done}} / {{total}}'
+        },
+        pagination: '资产分页',
+        previous: '上一页',
+        next: '下一页',
+        detailTitle: '资产 {{id}}',
+        detailDescription: '资产媒体与生成详情',
+        loadingDetail: '正在读取资产详情…',
+        detailFailed: '无法读取资产详情。',
+        siblings: '同一任务的结果',
+        result: '结果 {{n}}',
+        details: {
+          type: '类型',
+          size: '大小',
+          dimensions: '尺寸',
+          outputDuration: '成片时长',
+          seconds: '{{n}} 秒'
+        },
+        origin: { title: '生成来源', session: '创作会话' },
+        download: '下载',
+        downloadStatus: {
+          running: '正在下载…',
+          failed: '下载失败。',
+          complete: '下载完成。'
+        },
+        createSimilar: '做同款',
+        createSimilarUnavailable: '该资产已不可用或你无权使用其生成来源。',
+        replaceDraftConfirm: '当前未提交的草稿将被替换，是否继续？',
+        publish: '发布（即将开放）',
+        delete: '删除',
+        deleteConfirm: '删除这个资产？任务记录仍会保留。'
+      },
       sessions: {
         label: '开启创作',
         empty: '还没有创作会话，从一个空白草稿开始',
@@ -400,6 +465,72 @@ export const creationTranslations = defineResourceTranslations({
   },
   en: {
     creation: {
+      assets: {
+        title: 'Assets',
+        description: 'Browse images and videos successfully created by your team',
+        loading: 'Loading assets…',
+        loadFailed: 'Assets could not be loaded.',
+        empty: 'No assets match these filters.',
+        mediaLoading: 'Loading media…',
+        mediaFailed: 'Media failed to load',
+        mediaAlt: 'Asset {{id}}',
+        media: { image: 'Image', video: 'Video' },
+        filters: {
+          media: 'Media type',
+          creator: 'Creator',
+          creatorHint: 'Creator name',
+          since: 'Created since',
+          sort: 'Sort',
+          search: 'Search',
+          searchHint: 'Creator name or asset ID',
+          all: 'All',
+          newest: 'Newest first',
+          oldest: 'Oldest first',
+          submit: 'Search'
+        },
+        selection: { enter: 'Select assets', exit: 'Exit selection' },
+        selectOne: 'Select asset {{id}}',
+        open: 'Open asset {{id}}',
+        batch: {
+          download_one: 'Download 1 asset',
+          download_other: 'Download {{count}} assets',
+          cancel: 'Cancel download',
+          running: 'Downloading {{done}} / {{total}}',
+          cancelled: 'Download cancelled · {{done}} / {{total}}',
+          failed: 'Download failed · {{done}} / {{total}}',
+          complete: 'Download complete · {{done}} / {{total}}'
+        },
+        pagination: 'Asset pages',
+        previous: 'Previous',
+        next: 'Next',
+        detailTitle: 'Asset {{id}}',
+        detailDescription: 'Asset media and generation details',
+        loadingDetail: 'Loading asset details…',
+        detailFailed: 'Asset details could not be loaded.',
+        siblings: 'Results from the same task',
+        result: 'Result {{n}}',
+        details: {
+          type: 'Type',
+          size: 'Size',
+          dimensions: 'Dimensions',
+          outputDuration: 'Output duration',
+          seconds: '{{n}} s'
+        },
+        origin: { title: 'Generation source', session: 'Creation session' },
+        download: 'Download',
+        downloadStatus: {
+          running: 'Downloading…',
+          failed: 'Download failed.',
+          complete: 'Download complete.'
+        },
+        createSimilar: 'Create similar',
+        createSimilarUnavailable:
+          'This asset is no longer available or its generation source is not accessible.',
+        replaceDraftConfirm: 'Replace the current unsubmitted draft?',
+        publish: 'Publish (coming soon)',
+        delete: 'Delete',
+        deleteConfirm: 'Delete this asset? Its task record will remain.'
+      },
       sessions: {
         label: 'Start creating',
         empty: 'No creation sessions yet; start from a blank draft',

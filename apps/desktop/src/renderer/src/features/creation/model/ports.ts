@@ -21,6 +21,13 @@ import {
   type TaskPage,
   type TaskSubmitInput
 } from '../api/generation-task-http'
+import {
+  createAssetLibraryClient,
+  type AssetContentOptions,
+  type AssetDetailView,
+  type AssetPage,
+  type AssetPageRequest
+} from '../api/asset-library-http'
 import type {
   CreationReferenceMaterialUploadAbortResult,
   CreationReferenceMaterialUploadRecovery,
@@ -79,6 +86,14 @@ async function drainPages<T>(
   return { outcome: 'network-failure' }
 }
 export interface CreationWorkspacePorts {
+  readonly listAssets: (request: AssetPageRequest) => Promise<CreationApiResult<AssetPage>>
+  readonly getAsset: (assetId: string) => Promise<CreationApiResult<AssetDetailView>>
+  readonly loadAssetContent: (
+    assetId: string,
+    checksumSha256: string,
+    options?: AssetContentOptions
+  ) => Promise<CreationApiResult<Blob>>
+  readonly deleteAsset: (assetId: string) => Promise<CreationApiResult<void>>
   readonly listSessions: (cursor?: string | null) => Promise<CreationApiResult<SessionPage>>
   readonly createSession: (name?: string) => Promise<CreationApiResult<CreationSessionView>>
   readonly renameSession: (
@@ -173,7 +188,22 @@ export function createCreationWorkspacePorts(
     return run(createGenerationTaskClient(serverUrl), acquisition.token)
   }
 
+  async function withAssetToken<T>(
+    run: (client: ReturnType<typeof createAssetLibraryClient>, token: string) => Promise<T>
+  ): Promise<T> {
+    const acquisition = await acquireSession()
+    if (!acquisition) throw new Error('creation: session became unavailable')
+    return run(createAssetLibraryClient(serverUrl), acquisition.token)
+  }
+
   return {
+    listAssets: (page) => withAssetToken((client, token) => client.list(token, page)),
+    getAsset: (assetId) => withAssetToken((client, token) => client.get(token, assetId)),
+    loadAssetContent: (assetId, checksumSha256, options) =>
+      withAssetToken((client, token) =>
+        client.loadContent(token, assetId, checksumSha256, options)
+      ),
+    deleteAsset: (assetId) => withAssetToken((client, token) => client.delete(token, assetId)),
     // First calls drain every page behind the keyset cursor; an explicit
     // cursor fetches exactly that page.
     listSessions: (cursor) =>

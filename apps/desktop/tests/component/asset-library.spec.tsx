@@ -1,0 +1,259 @@
+import { expect, test } from '@playwright/experimental-ct-react'
+import { AssetLibraryStory } from './fixtures/asset-library.story'
+
+for (const viewport of [
+  { width: 960, height: 600 },
+  { width: 1280, height: 800 }
+]) {
+  test(`asset wall stays bounded and usable at ${viewport.width}x${viewport.height}`, async ({
+    mount,
+    page
+  }) => {
+    await page.setViewportSize(viewport)
+    await mount(<AssetLibraryStory />)
+    await expect(page.getByRole('heading', { name: 'Assets' })).toBeVisible()
+    await expect(page.getByTestId('asset-card')).toHaveCount(3)
+    await expect(page.getByTestId('asset-group')).toHaveCount(2)
+    await expect(page.locator('body')).toHaveJSProperty('scrollWidth', viewport.width)
+  })
+}
+
+for (const viewport of [
+  { width: 960, height: 600, columns: 5, filterRows: 2 },
+  { width: 1280, height: 800, columns: 8, filterRows: 1 }
+]) {
+  test(`dense wall uses ${viewport.columns} compact columns at ${viewport.width}x${viewport.height}`, async ({
+    mount,
+    page
+  }) => {
+    await page.setViewportSize(viewport)
+    await mount(<AssetLibraryStory dense />)
+    const cards = page.getByTestId('asset-card')
+    await expect(cards).toHaveCount(24)
+
+    const layout = await cards.evaluateAll((elements) => {
+      const rects = elements.map((element) => element.getBoundingClientRect())
+      return {
+        firstRowCount: rects.filter((rect) => Math.abs(rect.top - rects[0].top) < 1).length,
+        minWidth: Math.min(...rects.map((rect) => rect.width)),
+        maxWidth: Math.max(...rects.map((rect) => rect.width)),
+        maxRight: Math.max(...rects.map((rect) => rect.right))
+      }
+    })
+    expect(layout.firstRowCount).toBe(viewport.columns)
+    expect(layout.minWidth).toBeGreaterThan(100)
+    expect(layout.maxWidth).toBeLessThan(190)
+    expect(layout.maxRight).toBeLessThanOrEqual(viewport.width)
+
+    const filterRows = await page.getByTestId('asset-filters').evaluate((form) => {
+      const tops = [...form.children].map((child) => Math.round(child.getBoundingClientRect().top))
+      return new Set(tops).size
+    })
+    expect(filterRows).toBe(viewport.filterRows)
+    await expect(page.locator('body')).toHaveJSProperty('scrollWidth', viewport.width)
+  })
+}
+
+test('filters map to the page port and reset keyset position', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByLabel('Media type').selectOption('video')
+  await page.getByLabel('Creator').fill('Aster')
+  await page.getByLabel('Created since').fill('2026-09-01')
+  await page.getByLabel('Sort').selectOption('oldest')
+  await page.getByLabel('Search').fill('Aster')
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
+    .toMatchObject({
+      mediaType: 'video',
+      creator: 'Aster',
+      sort: 'oldest',
+      search: 'Aster'
+    })
+
+  const callsBeforeResubmit = await page.evaluate(
+    () => window.__assetLibraryTest?.listCalls().length ?? 0
+  )
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().length ?? 0))
+    .toBe(callsBeforeResubmit + 1)
+})
+
+test('wall previews only bounded image candidates and never fetches video originals', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory />)
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.previewCalls()))
+    .toEqual(['asset-one', 'asset-three'])
+})
+
+test('wall preview loading is capped at four concurrent image bodies', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory deferredPreviews />)
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.maxActivePreviews()))
+    .toBe(4)
+  expect(await page.evaluate(() => window.__assetLibraryTest?.previewCalls().length)).toBe(4)
+  await page.evaluate(() => window.__assetLibraryTest?.releasePreviews())
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.previewCalls().length))
+    .toBe(8)
+})
+
+test('detail switches siblings and exposes private reuse without leaking references', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await expect(page.getByRole('dialog')).toContainText('A quiet launch scene')
+  await expect(page.getByRole('button', { name: 'Create similar' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Publish (coming soon)' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Result 2' }).click()
+  await expect(page.getByRole('dialog')).toContainText('asset-two')
+  await expect(page.getByRole('dialog')).toContainText('Output duration3 s')
+  await expect(page.getByRole('dialog')).toContainText('Quantity2')
+  await expect(page.getByRole('dialog')).toContainText('Duration5 s')
+  await page.getByRole('button', { name: 'Create similar' }).click()
+  const reused = await page.evaluate(() => window.__assetLibraryTest?.reused() ?? [])
+  expect(reused).toHaveLength(1)
+  expect(reused[0]).not.toHaveProperty('references')
+})
+
+test('selecting the current sibling keeps its loaded detail visible', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await expect(page.getByRole('dialog')).toContainText('A quiet launch scene')
+  await page.getByRole('button', { name: 'Result 1' }).click()
+  await expect(page.getByRole('dialog')).toContainText('A quiet launch scene')
+})
+
+test('create similar re-fetches the origin and refuses a stale asset', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory staleOnReuse />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await page.getByRole('button', { name: 'Create similar' }).click()
+
+  await expect(page.getByRole('alert')).toContainText('no longer available')
+  expect(await page.evaluate(() => window.__assetLibraryTest?.detailCalls())).toEqual([
+    'asset-one',
+    'asset-one'
+  ])
+  expect(await page.evaluate(() => window.__assetLibraryTest?.reused())).toEqual([])
+})
+
+test('create similar asks before replacing an existing new draft', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory replacementRequired />)
+  page.once('dialog', (dialog) => void dialog.accept())
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await page.getByRole('button', { name: 'Create similar' }).click()
+
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.replacements()))
+    .toEqual([false, true])
+})
+
+test('create similar reports an unavailable local draft store without leaving the library', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory storageFailure />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await page.getByRole('button', { name: 'Create similar' }).click()
+
+  await expect(page.getByRole('alert')).toContainText('no longer available')
+  await expect(page.getByTestId('asset-library')).toBeAttached()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.reused())).toEqual([])
+})
+
+test('private origin and destructive actions stay gated by server capabilities', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory visibility="public" />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).not.toContainText('A quiet launch scene')
+  await expect(dialog.getByRole('button', { name: 'Create similar' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Delete' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Publish (coming soon)' })).toBeDisabled()
+})
+
+test('batch mode has download as its only operation and downloads sequentially', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory downloadMode="deferred" />)
+  await page.getByRole('button', { name: 'Select assets' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+  await page.getByRole('checkbox', { name: 'Select asset asset-two' }).check()
+  await expect(page.getByTestId('batch-toolbar').getByRole('button')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Download 2 assets' }).click()
+  await expect(page.getByRole('status').filter({ hasText: '1 / 2' })).toBeVisible()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.maxActiveDownloads())).toBe(1)
+  await page.evaluate(() => window.__assetLibraryTest?.releaseDownloads())
+  await expect(page.getByRole('status').filter({ hasText: '2 / 2' })).toBeVisible()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.maxActiveDownloads())).toBe(1)
+})
+
+test('batch download can be cancelled with an accessible stable status', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory downloadMode="cancelled" />)
+  await page.getByRole('button', { name: 'Select assets' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+  await page.getByRole('button', { name: 'Download 1 asset' }).click()
+  await page.getByRole('button', { name: 'Cancel download' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Download cancelled' })).toBeVisible()
+})
+
+test('a detached batch cannot overwrite or detach the next page batch', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory downloadMode="sequenced" />)
+  await page.getByRole('button', { name: 'Select assets' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+  await page.getByRole('button', { name: 'Download 1 asset' }).click()
+  await expect(page.getByRole('status').filter({ hasText: '1 / 1' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-two' }).check()
+  await page.getByRole('button', { name: 'Download 1 asset' }).click()
+  await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
+
+  await expect(page.getByRole('status').filter({ hasText: 'Downloading 1 / 1' })).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel download' }).click()
+  await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
+  await expect(page.getByRole('status').filter({ hasText: 'Download cancelled' })).toBeVisible()
+})
+
+test('single download failure is announced instead of failing silently', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory downloadMode="failed" />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Download' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Download failed' })).toBeVisible()
+})
+
+test('single download is aborted when its detail dialog closes', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory downloadMode="cancelled" />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Download' }).click()
+  await page.keyboard.press('Escape')
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.abortedDownloads()))
+    .toBe(1)
+})
+
+test('an empty later keyset page retreats to the previous page', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory emptyNextPage />)
+  await page.getByRole('button', { name: 'Next' }).click()
+  await expect(page.getByTestId('asset-card')).toHaveCount(3)
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__assetLibraryTest?.listCalls().map((call) => call.cursor))
+    )
+    .toEqual([null, 'next', null])
+})

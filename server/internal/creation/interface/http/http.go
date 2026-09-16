@@ -88,7 +88,7 @@ func MapError(err error) *Error {
 		return nil
 	case isError(err, domain.ErrSessionNotFound), isError(err, domain.ErrMaterialNotFound),
 		isError(err, domain.ErrTaskNotFound), isError(err, domain.ErrNoIncompleteSlots),
-		isError(err, domain.ErrReferenceMaterialUploadNotFound):
+		isError(err, domain.ErrReferenceMaterialUploadNotFound), isError(err, domain.ErrAssetNotFound):
 		return &Error{Status: http.StatusNotFound, Code: CodeNotFound, Message: "The requested resource was not found."}
 	case isError(err, domain.ErrInvalidCursor):
 		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidCursor, Message: "The pagination cursor is not valid."}

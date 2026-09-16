@@ -9,6 +9,7 @@ export const appTranslations = defineResourceTranslations({
     shell: {
       home: '首页',
       creation: 'AI 创作',
+      assets: '资产',
       toggleSidebar: '切换侧边栏',
       brand: 'Nevix AI',
       userMenu: '用户菜单',
@@ -43,6 +44,7 @@ export const appTranslations = defineResourceTranslations({
     shell: {
       home: 'Home',
       creation: 'AI Creation',
+      assets: 'Assets',
       toggleSidebar: 'Toggle sidebar',
       brand: 'Nevix AI',
       userMenu: 'User menu',

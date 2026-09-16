@@ -120,6 +120,12 @@ paths:
     $ref: "./creation.yaml#/paths/~1creation~1capability-manifest"
   /creation/tasks/{taskID}:
     $ref: "./creation.yaml#/paths/~1creation~1tasks~1{taskID}"
+  /creation/assets:
+    $ref: "./creation.yaml#/paths/~1creation~1assets"
+  /creation/assets/{assetID}:
+    $ref: "./creation.yaml#/paths/~1creation~1assets~1{assetID}"
+  /creation/assets/{assetID}/content:
+    $ref: "./creation.yaml#/paths/~1creation~1assets~1{assetID}~1content"
 components:
   securitySchemes:
     bearerAuth:

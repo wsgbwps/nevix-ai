@@ -724,7 +724,7 @@ run_playwright "${playwright_args[@]}"
 if [[ "$mode" == "full" && -z "$failure_injection" ]]; then
   configure_object_storage_connection
   echo "==> Test-only Object Storage Connection configured"
-  run_playwright tests/creation/creation-tracer.spec.ts tests/creation/creation-image.spec.ts tests/creation/creation-video.spec.ts --workers=1
+  run_playwright tests/creation/asset-library.spec.ts tests/creation/creation-tracer.spec.ts tests/creation/creation-image.spec.ts tests/creation/creation-video.spec.ts --workers=1
 fi
 
 if [[ -n "$identity_server_failure_injector_pid" ]]; then
