@@ -8,7 +8,7 @@ export const creationTranslations = defineResourceTranslations({
     creation: {
       assets: {
         title: '资产',
-        description: '浏览团队已成功生成的图片和视频',
+        description: '浏览你已成功生成的图片和视频',
         loading: '正在读取资产…',
         loadFailed: '无法读取资产。',
         empty: '没有符合条件的资产。',
@@ -18,12 +18,10 @@ export const creationTranslations = defineResourceTranslations({
         media: { image: '图片', video: '视频' },
         filters: {
           media: '媒体类型',
-          creator: '创建者',
-          creatorHint: '创建者名称',
           since: '创建时间',
           sort: '排序',
           search: '搜索',
-          searchHint: '创建者名称或资产 ID',
+          searchHint: '资产 ID',
           all: '全部',
           newest: '最新优先',
           oldest: '最早优先',
@@ -67,9 +65,48 @@ export const creationTranslations = defineResourceTranslations({
         createSimilar: '做同款',
         createSimilarUnavailable: '该资产已不可用或你无权使用其生成来源。',
         replaceDraftConfirm: '当前未提交的草稿将被替换，是否继续？',
-        publish: '发布（即将开放）',
+        publish: '发布到灵感',
+        publishing: '正在发布…',
+        published: '已发布',
+        withdraw: '撤回发布',
+        publishConfirm: '发布将冻结这个资产、完整生成规格和 {{count}} 个实际参考素材，是否继续？',
+        withdrawConfirm: '撤回后不可恢复；之后可重新发布为一条新内容。是否继续？',
+        publishFailed: '发布状态更新失败，请重试。',
         delete: '删除',
-        deleteConfirm: '删除这个资产？任务记录仍会保留。'
+        deleteConfirm: '删除这个资产？任务记录仍会保留；已发布的内容不会因此撤回。'
+      },
+      inspiration: {
+        title: '灵感',
+        description: '浏览团队发布的创作；管理员还可查看成功资产的发布与限制状态',
+        loading: '正在读取灵感…',
+        loadFailed: '无法读取灵感。',
+        empty: '还没有可浏览的灵感。',
+        noResults: '没有符合当前筛选的内容。',
+        clearFilters: '清除筛选',
+        pagination: '灵感分页',
+        open: '打开灵感 {{id}}',
+        detailTitle: '灵感详情',
+        detailDescription: '媒体、完整生成规格与实际参考素材',
+        loadingDetail: '正在读取详情…',
+        detailFailed: '无法读取详情。',
+        specification: '生成规格',
+        schemaVersion: '规格版本',
+        manifestVersion: '能力清单版本',
+        claimsVersion: '校验版本 {{version}}',
+        references: '实际参考素材',
+        noReferences: '未使用参考素材',
+        previewReference: '预览',
+        previewFailed: '无法加载预览。',
+        withdraw: '撤回',
+        withdrawConfirm: '撤回后不可恢复；是否继续？',
+        actionFailed: '操作失败，请重试。',
+        filters: {
+          media: '媒体类型',
+          creator: '发布者',
+          search: '搜索',
+          searchHint: '发布者名称或内容 ID'
+        },
+        status: { published: '已发布', unpublished: '未发布', restricted: '已限制' }
       },
       sessions: {
         label: '开启创作',
@@ -467,7 +504,7 @@ export const creationTranslations = defineResourceTranslations({
     creation: {
       assets: {
         title: 'Assets',
-        description: 'Browse images and videos successfully created by your team',
+        description: 'Browse images and videos you successfully created',
         loading: 'Loading assets…',
         loadFailed: 'Assets could not be loaded.',
         empty: 'No assets match these filters.',
@@ -477,12 +514,10 @@ export const creationTranslations = defineResourceTranslations({
         media: { image: 'Image', video: 'Video' },
         filters: {
           media: 'Media type',
-          creator: 'Creator',
-          creatorHint: 'Creator name',
           since: 'Created since',
           sort: 'Sort',
           search: 'Search',
-          searchHint: 'Creator name or asset ID',
+          searchHint: 'Asset ID',
           all: 'All',
           newest: 'Newest first',
           oldest: 'Oldest first',
@@ -527,9 +562,52 @@ export const creationTranslations = defineResourceTranslations({
         createSimilarUnavailable:
           'This asset is no longer available or its generation source is not accessible.',
         replaceDraftConfirm: 'Replace the current unsubmitted draft?',
-        publish: 'Publish (coming soon)',
+        publish: 'Publish to Inspiration',
+        publishing: 'Publishing…',
+        published: 'Published',
+        withdraw: 'Withdraw publication',
+        publishConfirm:
+          'Publish this asset with its complete generation specification and {{count}} used reference material(s)?',
+        withdrawConfirm:
+          'Withdrawal is irreversible. You can publish it again later as a new item. Continue?',
+        publishFailed: 'The publication state could not be updated. Try again.',
         delete: 'Delete',
-        deleteConfirm: 'Delete this asset? Its task record will remain.'
+        deleteConfirm:
+          'Delete this asset? Its task record remains, and an existing publication will not be withdrawn.'
+      },
+      inspiration: {
+        title: 'Inspiration',
+        description:
+          'Browse team publications; administrators also see successful assets with publication and restriction state',
+        loading: 'Loading Inspiration…',
+        loadFailed: 'Inspiration could not be loaded.',
+        empty: 'There is no Inspiration to browse yet.',
+        noResults: 'No content matches these filters.',
+        clearFilters: 'Clear filters',
+        pagination: 'Inspiration pages',
+        open: 'Open inspiration {{id}}',
+        detailTitle: 'Inspiration details',
+        detailDescription: 'Media, complete generation specification, and used references',
+        loadingDetail: 'Loading details…',
+        detailFailed: 'Details could not be loaded.',
+        specification: 'Generation specification',
+        schemaVersion: 'Specification version',
+        manifestVersion: 'Capability manifest version',
+        claimsVersion: 'Claims version {{version}}',
+        references: 'Used reference materials',
+        noReferences: 'No reference materials were used',
+        previewReference: 'Preview',
+        previewFailed: 'The preview could not be loaded.',
+        withdraw: 'Withdraw',
+        withdrawConfirm: 'Withdrawal is irreversible. Continue?',
+        actionFailed: 'The action failed. Try again.',
+        filters: {
+          media: 'Media type',
+          creator: 'Publisher',
+          search: 'Search',
+          searchHint: 'Publisher name or content ID'
+        },
+        status: { published: 'Published', unpublished: 'Unpublished', restricted: 'Restricted' }
       },
       sessions: {
         label: 'Start creating',

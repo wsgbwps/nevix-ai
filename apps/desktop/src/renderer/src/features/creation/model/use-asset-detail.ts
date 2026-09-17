@@ -5,6 +5,10 @@ import type {
   AssetPrivateOrigin,
   MediaAssetView
 } from '../api/asset-library-http'
+import type { InspirationPorts } from '../api/inspiration-http'
+
+type AssetDetailPorts = AssetLibraryPorts &
+  Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
 
 export type AssetDetailStatus = 'idle' | 'loading' | 'failed'
 export type AssetDownloadStatus = 'idle' | 'running' | 'failed' | 'complete'
@@ -17,22 +21,25 @@ export function useAssetDetail({
   ports,
   prepareSimilar,
   save,
-  onDeleted
+  onAssetsChanged
 }: {
-  readonly ports: AssetLibraryPorts
+  readonly ports: AssetDetailPorts
   readonly prepareSimilar: PrepareAssetSimilar
   readonly save: (asset: MediaAssetView, blob: Blob) => void
-  readonly onDeleted: () => void
+  readonly onAssetsChanged: () => void
 }): {
   readonly assetId: string | null
   readonly detail: AssetDetailView | null
   readonly status: AssetDetailStatus
   readonly downloadStatus: AssetDownloadStatus
   readonly reuseFailed: boolean
+  readonly publicationStatus: 'idle' | 'running' | 'failed'
   readonly open: (assetId: string) => void
   readonly close: () => void
   readonly download: (asset: MediaAssetView) => Promise<void>
   readonly createSimilar: (confirmReplacement: () => boolean) => Promise<void>
+  readonly publish: (confirmPublication: (referenceCount: number) => boolean) => Promise<void>
+  readonly withdraw: (confirmWithdrawal: () => boolean) => Promise<void>
   readonly remove: (confirmDeletion: () => boolean) => Promise<void>
 } {
   const [assetId, setAssetId] = useState<string | null>(null)
@@ -40,8 +47,23 @@ export function useAssetDetail({
   const [status, setStatus] = useState<AssetDetailStatus>('idle')
   const [downloadStatus, setDownloadStatus] = useState<AssetDownloadStatus>('idle')
   const [reuseFailed, setReuseFailed] = useState(false)
+  const [publicationStatus, setPublicationStatus] = useState<'idle' | 'running' | 'failed'>('idle')
   const downloadController = useRef<AbortController | null>(null)
   const assetIdRef = useRef<string | null>(null)
+  const publishKeys = useRef(new Map<string, string>())
+
+  const refreshDetail = async (selectedId: string): Promise<boolean> => {
+    const result = await ports.getAsset(selectedId)
+    if (
+      assetIdRef.current !== selectedId ||
+      result.outcome !== 'succeeded' ||
+      result.value.asset.id !== selectedId
+    ) {
+      return false
+    }
+    setDetail(result.value)
+    return true
+  }
 
   useEffect(() => {
     if (assetId === null) return
@@ -76,6 +98,7 @@ export function useAssetDetail({
     setStatus('idle')
     setDownloadStatus('idle')
     setReuseFailed(false)
+    setPublicationStatus('idle')
   }
 
   return {
@@ -84,6 +107,7 @@ export function useAssetDetail({
     status,
     downloadStatus,
     reuseFailed,
+    publicationStatus,
     open: (nextAssetId) => {
       if (nextAssetId === assetIdRef.current) return
       downloadController.current?.abort()
@@ -92,6 +116,7 @@ export function useAssetDetail({
       setStatus('loading')
       setDownloadStatus('idle')
       setReuseFailed(false)
+      setPublicationStatus('idle')
       assetIdRef.current = nextAssetId
       setAssetId(nextAssetId)
     },
@@ -103,7 +128,8 @@ export function useAssetDetail({
       setDownloadStatus('running')
       const result = await ports.loadAssetContent(asset.id, asset.checksumSha256, {
         signal: controller.signal,
-        purpose: 'download'
+        purpose: 'download',
+        expectedByteSize: asset.byteSize
       })
       if (controller.signal.aborted || assetIdRef.current !== asset.id) return
       downloadController.current = null
@@ -137,12 +163,46 @@ export function useAssetDetail({
       if (!confirmReplacement()) return
       if (prepareSimilar(result.value.privateOrigin, true) !== 'prepared') setReuseFailed(true)
     },
+    publish: async (confirmPublication) => {
+      if (
+        detail === null ||
+        detail.privateOrigin === null ||
+        !detail.asset.capabilities.canPublish ||
+        !confirmPublication(detail.privateOrigin.references.length)
+      ) {
+        return
+      }
+      const selectedId = detail.asset.id
+      const idempotencyKey = publishKeys.current.get(selectedId) ?? crypto.randomUUID()
+      publishKeys.current.set(selectedId, idempotencyKey)
+      setPublicationStatus('running')
+      const result = await ports.publishAsset(selectedId, idempotencyKey)
+      if (result.outcome !== 'succeeded' || !(await refreshDetail(selectedId))) {
+        setPublicationStatus('failed')
+        return
+      }
+      publishKeys.current.delete(selectedId)
+      setPublicationStatus('idle')
+      onAssetsChanged()
+    },
+    withdraw: async (confirmWithdrawal) => {
+      const publication = detail?.asset.publication
+      if (!publication || !confirmWithdrawal()) return
+      setPublicationStatus('running')
+      const result = await ports.withdrawPublication(publication.id)
+      if (result.outcome !== 'succeeded' || !(await refreshDetail(detail.asset.id))) {
+        setPublicationStatus('failed')
+        return
+      }
+      setPublicationStatus('idle')
+      onAssetsChanged()
+    },
     remove: async (confirmDeletion) => {
       if (detail === null || !confirmDeletion()) return
       const result = await ports.deleteAsset(detail.asset.id)
       if (result.outcome !== 'succeeded') return
       close()
-      onDeleted()
+      onAssetsChanged()
     }
   }
 }

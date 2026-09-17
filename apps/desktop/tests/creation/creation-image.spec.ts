@@ -42,9 +42,7 @@ test(
         await launched.page.getByLabel('邮箱').fill(identity.email)
         await launched.page.getByLabel('密码').fill(identity.password)
         await launched.page.getByRole('button', { name: '登录', exact: true }).click()
-        await expect(
-          launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })
-        ).toBeVisible()
+        await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
         const workbench = launched.page.getByTestId('creation-workbench')
         await launched.page.getByRole('link', { name: 'AI 创作' }).click()

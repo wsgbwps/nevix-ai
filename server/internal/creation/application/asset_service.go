@@ -10,6 +10,7 @@ import (
 type AssetCapabilities struct {
 	CanDelete        bool
 	CanCreateSimilar bool
+	CanPublish       bool
 }
 
 type AssetView struct {
@@ -37,11 +38,11 @@ func (s *AssetService) List(ctx context.Context, principal authz.Principal, filt
 	if err != nil {
 		return nil, nil, err
 	}
-	assets, next, err := s.assets.ListVisible(ctx, filter, cursor, limit)
+	assets, next, err := s.assets.ListVisible(ctx, actor, filter, cursor, limit)
 	if err != nil {
 		return nil, nil, err
 	}
-	return assetViews(assets, actor, principal.Role == "admin"), next, nil
+	return assetViews(assets, actor, false), next, nil
 }
 
 func (s *AssetService) Get(ctx context.Context, principal authz.Principal, id domain.UUID) (AssetDetail, error) {
@@ -49,17 +50,17 @@ func (s *AssetService) Get(ctx context.Context, principal authz.Principal, id do
 	if err != nil {
 		return AssetDetail{}, err
 	}
-	asset, err := s.assets.GetVisible(ctx, id)
+	asset, err := s.assets.GetVisible(ctx, actor, id)
 	if err != nil {
 		return AssetDetail{}, err
 	}
-	siblings, err := s.assets.ListVisibleSiblings(ctx, asset.TaskID)
+	siblings, err := s.assets.ListVisibleSiblings(ctx, actor, asset.TaskID)
 	if err != nil {
 		return AssetDetail{}, err
 	}
 	detail := AssetDetail{
-		Asset:    assetView(asset, actor, principal.Role == "admin"),
-		Siblings: assetViews(siblings, actor, principal.Role == "admin"),
+		Asset:    assetView(asset, actor, false),
+		Siblings: assetViews(siblings, actor, false),
 	}
 	if asset.OwnerID == actor {
 		detail.PrivateOrigin, err = s.assets.GetPrivateOrigin(ctx, asset)
@@ -71,11 +72,11 @@ func (s *AssetService) Get(ctx context.Context, principal authz.Principal, id do
 }
 
 func (s *AssetService) Resolve(ctx context.Context, principal authz.Principal, id domain.UUID) (domain.MediaAsset, error) {
-	_, err := domain.ParseUUID(principal.UserID)
+	actor, err := domain.ParseUUID(principal.UserID)
 	if err != nil {
 		return domain.MediaAsset{}, err
 	}
-	asset, err := s.assets.GetVisible(ctx, id)
+	asset, err := s.assets.GetVisible(ctx, actor, id)
 	if err != nil {
 		return domain.MediaAsset{}, err
 	}
@@ -88,12 +89,10 @@ func (s *AssetService) Delete(ctx context.Context, principal authz.Principal, id
 		return err
 	}
 	admin := principal.Role == "admin"
-	asset, err := s.assets.GetVisible(ctx, id)
-	if err != nil {
-		return err
-	}
-	if !admin && asset.OwnerID != actor {
-		return domain.ErrAssetNotFound
+	if !admin {
+		if _, err := s.assets.GetVisible(ctx, actor, id); err != nil {
+			return err
+		}
 	}
 	return s.runner.Run(ctx, func(sc domain.WriteScope) error {
 		return s.assets.SoftDelete(ctx, sc.Tx(), actor, id, admin)
@@ -115,6 +114,8 @@ func assetView(asset domain.MediaAsset, actor domain.UUID, admin bool) AssetView
 		Capabilities: AssetCapabilities{
 			CanDelete:        owner || admin,
 			CanCreateSimilar: owner,
+			CanPublish: owner && !asset.Restricted &&
+				(asset.ActivePublication == nil || asset.ActivePublication.Restricted),
 		},
 	}
 }

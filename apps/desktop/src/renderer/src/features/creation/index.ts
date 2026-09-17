@@ -1,6 +1,7 @@
 export { creationResourceOwner, creationResources, creationTranslations } from './i18n/resources'
 export { CreationWorkbenchPage } from './ui/creation-workbench-page'
 export { AssetLibraryPage, type AssetLibraryPageProps } from './ui/asset-library-page'
+export { InspirationPage, type InspirationPageProps } from './ui/inspiration-page'
 export {
   ProviderConnectionSettings,
   type ProviderConnectionProofAction
@@ -31,3 +32,12 @@ export type {
   AssetPrivateOrigin,
   MediaAssetView
 } from './api/asset-library-http'
+export type {
+  InspirationDetailView,
+  InspirationItem,
+  InspirationPage as InspirationPageView,
+  InspirationPageRequest,
+  InspirationPorts,
+  PublicationSimilarResult,
+  PublicationView
+} from './api/inspiration-http'

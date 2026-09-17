@@ -739,6 +739,70 @@ test('a stale draft value is preserved verbatim and marked as capability-changed
   await expect(page.getByRole('menu').getByTestId('composer-params-size')).toHaveCount(0)
 })
 
+test('Publication reuse adopts the server Session with remapped references and stale intent', async ({
+  mount,
+  page
+}) => {
+  const sessionId = 'eeeeeeee-0000-4000-8000-000000000164'
+  const materialId = 'ffffffff-0000-4000-8000-000000000164'
+  await mount(
+    <CreationWorkbenchStory
+      publicationSimilar={{
+        session: {
+          id: sessionId,
+          name: 'Publication reuse',
+          createdAt: '2026-09-17T08:00:00Z',
+          updatedAt: '2026-09-17T08:00:00Z'
+        },
+        materials: [
+          {
+            id: materialId,
+            sessionId,
+            kind: 'image',
+            fileName: 'publication-reference.png',
+            mimeType: 'image/png',
+            byteSize: 1024,
+            checksumSha256: 'aa'.repeat(32),
+            widthPx: 24,
+            heightPx: 16,
+            durationMs: null,
+            claimsVersion: 1,
+            createdAt: '2026-09-17T08:00:00Z'
+          }
+        ],
+        specification: {
+          schemaVersion: 1,
+          mediaType: 'image',
+          prompt: 'Preserved Publication intent',
+          model: 'removed-legacy-model',
+          mode: 'reference-image',
+          manifestVersion: 1,
+          ratio: '7:3',
+          resolution: '2K',
+          quantity: 1,
+          durationSeconds: null,
+          references: [{ materialId, role: 'reference', kind: 'image', claimsVersion: 1 }]
+        },
+        submissionBlocked: true
+      }}
+    />
+  )
+
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Preserved Publication intent', {
+    timeout: 5_000
+  })
+  await expect(page.getByTestId('composer-model')).toContainText('removed-legacy-model')
+  await expect(page.locator(`[data-material-id="${materialId}"]`)).toBeVisible()
+  await expect(page.getByTestId('composer-submit')).toBeDisabled()
+  await expect
+    .poll(async () => draftRecord(page, sessionId))
+    .toMatchObject({
+      prompt: 'Preserved Publication intent',
+      model: 'removed-legacy-model',
+      references: [{ materialId, role: 'reference' }]
+    })
+})
+
 test('the model menu lists only manifest candidates plus the stale note', async ({
   mount,
   page

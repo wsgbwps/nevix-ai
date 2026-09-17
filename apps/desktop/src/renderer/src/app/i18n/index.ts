@@ -5,9 +5,8 @@ import {
 
 export const appTranslations = defineResourceTranslations({
   'zh-CN': {
-    heading: '使用 Nevix AI 创作',
     shell: {
-      home: '首页',
+      home: '灵感',
       creation: 'AI 创作',
       assets: '资产',
       toggleSidebar: '切换侧边栏',
@@ -40,9 +39,8 @@ export const appTranslations = defineResourceTranslations({
     }
   },
   en: {
-    heading: 'Create with Nevix AI',
     shell: {
-      home: 'Home',
+      home: 'Inspiration',
       creation: 'AI Creation',
       assets: 'Assets',
       toggleSidebar: 'Toggle sidebar',

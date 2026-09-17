@@ -51,7 +51,7 @@ test('the Admin reaches the Object Storage proof gate and the server refuses non
     try {
       const page = app.page
       await signIn(page, identityServer!.adminEmail, identityServer!.adminPassword)
-      await expect(page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
       await openAiCreationSection(page)
       const storage = page.getByRole('region', { name: '对象存储' })
@@ -132,7 +132,7 @@ test('a Member sees Object Storage unavailable advice with no management command
     try {
       const page = app.page
       await signIn(page, identity.email, identity.password)
-      await expect(page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
       await openAiCreationSection(page)
       const storage = page.getByRole('region', { name: '对象存储' })

@@ -21,10 +21,21 @@ test(
     if (!identityServer) return
 
     const identity = uniqueIdentity('asset-library')
-    const user = await createStableTeamUser(identityServer, identity, '资产库验收用户')
+    await createStableTeamUser(identityServer, identity, '资产库验收用户')
     const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-asset-library-'))
+    const adminUserDataDir = await mkdtemp(join(tmpdir(), 'nevix-asset-library-admin-'))
     const downloadDir = await mkdtemp(join(tmpdir(), 'nevix-asset-library-download-'))
     const prompt = '秋季上新资产库验收，冷调布光'
+    const signIn = async (
+      app: Awaited<ReturnType<typeof launchTestApp>>,
+      email: string,
+      password: string
+    ): Promise<void> => {
+      await app.page.getByLabel('邮箱').fill(email)
+      await app.page.getByLabel('密码').fill(password)
+      await app.page.getByRole('button', { name: '登录', exact: true }).click()
+      await expect(app.page.getByRole('heading', { name: '灵感' })).toBeVisible()
+    }
     try {
       const launched = await launchTestApp({
         userDataDir,
@@ -32,12 +43,7 @@ test(
         serverUrl: identityServer.serverUrl
       })
       try {
-        await launched.page.getByLabel('邮箱').fill(identity.email)
-        await launched.page.getByLabel('密码').fill(identity.password)
-        await launched.page.getByRole('button', { name: '登录', exact: true }).click()
-        await expect(
-          launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })
-        ).toBeVisible()
+        await signIn(launched, identity.email, identity.password)
 
         const workbench = launched.page.getByTestId('creation-workbench')
         await launched.page.getByRole('link', { name: 'AI 创作' }).click()
@@ -63,17 +69,41 @@ test(
         await expect(launched.page.getByTestId('asset-card').locator('img')).toHaveCount(2)
 
         await launched.page.getByLabel('媒体类型').selectOption('image')
-        await launched.page.getByLabel('创建者').fill(user.display_name)
         await launched.page.getByLabel('排序').selectOption('oldest')
-        await launched.page.getByLabel('搜索').fill(user.display_name)
         await launched.page.getByRole('button', { name: '搜索', exact: true }).click()
         await expect(launched.page.getByTestId('asset-card')).toHaveCount(2)
 
         const openButtons = launched.page.getByRole('button', { name: /^打开资产 / })
+        const publishedAssetName = await openButtons.first().getAttribute('aria-label')
+        expect(publishedAssetName).not.toBeNull()
         await openButtons.first().click()
         const dialog = launched.page.getByRole('dialog')
         await expect(dialog).toContainText(prompt)
-        await expect(dialog.getByRole('button', { name: '发布（即将开放）' })).toBeDisabled()
+        launched.page.once('dialog', (confirmation) => void confirmation.accept())
+        await dialog.getByRole('button', { name: '发布到灵感' }).click()
+        await expect(dialog.getByRole('button', { name: '撤回发布' })).toBeVisible()
+
+        const admin = await launchTestApp({
+          userDataDir: adminUserDataDir,
+          systemLanguages: ['zh-CN'],
+          serverUrl: identityServer.serverUrl
+        })
+        try {
+          await signIn(admin, identityServer.adminEmail, identityServer.adminPassword)
+          await admin.page.getByLabel('发布者').fill('资产库验收用户')
+          await admin.page.getByRole('button', { name: '搜索', exact: true }).click()
+          await expect(admin.page.getByTestId('inspiration-card')).toHaveCount(2)
+          await expect(admin.page.getByText('已发布', { exact: true })).toHaveCount(1)
+          await expect(admin.page.getByText('未发布', { exact: true })).toHaveCount(1)
+          await admin.page
+            .getByRole('button', { name: /^打开灵感 / })
+            .first()
+            .click()
+          await expect(admin.page.getByRole('dialog')).toContainText(prompt)
+        } finally {
+          await admin.electronApp.close()
+        }
+
         const otherResult = dialog
           .getByRole('button', { name: /^结果 / })
           .and(launched.page.locator('[data-variant="outline"]'))
@@ -111,27 +141,57 @@ test(
             .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
         ).toBe(true)
 
-        await dialog.getByRole('button', { name: '做同款' }).click()
+        await launched.page.keyboard.press('Escape')
+        await launched.page.getByRole('link', { name: '灵感' }).click()
+        await expect(launched.page.getByTestId('inspiration-card')).toHaveCount(1)
+        await launched.page.getByRole('button', { name: /^打开灵感 / }).click()
+        const inspirationDialog = launched.page.getByRole('dialog')
+        await expect(inspirationDialog).toContainText(prompt)
+        await inspirationDialog.getByRole('button', { name: '做同款' }).click()
         await expect(workbench).toBeVisible()
         await expect(workbench.getByTestId('composer-prompt')).toHaveText(prompt)
         await expect(workbench.getByTestId('composer-params')).toContainText('2')
 
-        await launched.page.getByRole('link', { name: '资产' }).click()
-        await expect(launched.page.getByTestId('asset-card')).toHaveCount(2)
-        await launched.page
-          .getByRole('button', { name: /^打开资产 / })
-          .first()
-          .click()
-        const deleteDialog = launched.page.getByRole('dialog')
-        launched.page.once('dialog', (confirmation) => void confirmation.accept())
-        await deleteDialog.getByRole('button', { name: '删除', exact: true }).click()
-        await expect(deleteDialog).toBeHidden()
-        await expect(launched.page.getByTestId('asset-card')).toHaveCount(1)
+        await launched.electronApp.close()
+        const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
+        try {
+          const login = relaunched.page.getByRole('heading', { name: '登录 Nevix AI' })
+          const toCreation = relaunched.page.getByRole('link', { name: 'AI 创作' })
+          await login.or(toCreation).first().waitFor({ state: 'visible', timeout: 15_000 })
+          if (await login.isVisible()) await signIn(relaunched, identity.email, identity.password)
+          await toCreation.click()
+          const restored = relaunched.page.getByTestId('creation-workbench')
+          await restored.getByRole('button', { name: '未命名创作', exact: true }).first().click()
+          await expect(restored.getByTestId('composer-prompt')).toHaveText(prompt)
+
+          await relaunched.page.getByRole('link', { name: '资产' }).click()
+          await expect(relaunched.page.getByTestId('asset-card')).toHaveCount(2)
+          await relaunched.page
+            .getByRole('button', { name: publishedAssetName ?? '', exact: true })
+            .click()
+          const deleteDialog = relaunched.page.getByRole('dialog')
+          relaunched.page.once('dialog', (confirmation) => void confirmation.accept())
+          await deleteDialog.getByRole('button', { name: '删除', exact: true }).click()
+          await expect(deleteDialog).toBeHidden()
+          await expect(relaunched.page.getByTestId('asset-card')).toHaveCount(1)
+
+          await relaunched.page.getByRole('link', { name: '灵感' }).click()
+          await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(1)
+          await relaunched.page.getByRole('button', { name: /^打开灵感 / }).click()
+          const publishedDialog = relaunched.page.getByRole('dialog')
+          relaunched.page.once('dialog', (confirmation) => void confirmation.accept())
+          await publishedDialog.getByRole('button', { name: '撤回' }).click()
+          await expect(publishedDialog).toBeHidden()
+          await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(0)
+        } finally {
+          await relaunched.electronApp.close()
+        }
       } finally {
         await launched.electronApp.close()
       }
     } finally {
       await rm(userDataDir, { recursive: true, force: true })
+      await rm(adminUserDataDir, { recursive: true, force: true })
       await rm(downloadDir, { recursive: true, force: true })
     }
   }

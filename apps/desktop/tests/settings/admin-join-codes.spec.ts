@@ -43,7 +43,7 @@ test('Admin issues a join code, sees its plaintext, and revokes it', async () =>
     try {
       const page = app.page
       await signIn(page, identityServer!.adminEmail, identityServer!.adminPassword)
-      await expect(page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
       // The join-code card shares the Users settings screen with user
       // management; a fresh deployment has no active codes.

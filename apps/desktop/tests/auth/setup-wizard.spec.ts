@@ -66,9 +66,7 @@ test('the first-run wizard initializes an empty server; later devices see only s
       // The claim redirect is consumed after successful navigation. Ordinary
       // shell navigation must not pull this same session back into Settings.
       await firstDevice.page.getByRole('button', { name: 'Back to app' }).click()
-      await expect(
-        firstDevice.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(firstDevice.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
 
       // Ending the session on the initializing device lands on the ordinary
       // sign-in boundary, never back on the wizard: the instance has its
@@ -109,9 +107,7 @@ test('the first-run wizard initializes an empty server; later devices see only s
       await secondDevice.page.getByLabel('Email').fill(FIRST_ADMIN_EMAIL)
       await secondDevice.page.getByLabel('Password').fill(FIRST_ADMIN_PASSWORD)
       await secondDevice.page.getByRole('button', { name: 'Sign in', exact: true }).click()
-      await expect(
-        secondDevice.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(secondDevice.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
     } finally {
       await secondDevice.electronApp.close()
     }

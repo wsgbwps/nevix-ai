@@ -74,6 +74,7 @@ func TestAssetLibraryContractSurface(t *testing.T) {
 		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001"},
 		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001/content"},
 		{"DELETE", "/creation/assets/00000000-0000-0000-0000-000000000001"},
+		{"POST", "/creation/assets/00000000-0000-0000-0000-000000000001/publication"},
 	} {
 		operation := creationOperation(t, route.method, route.path)
 		if route.path == "/creation/assets" {
@@ -81,7 +82,6 @@ func TestAssetLibraryContractSurface(t *testing.T) {
 		}
 	}
 	parameters, _ := listOperation["parameters"].([]any)
-	foundCreator := false
 	for _, raw := range parameters {
 		parameter, _ := raw.(map[string]any)
 		name, _ := parameter["name"].(string)
@@ -89,15 +89,8 @@ func TestAssetLibraryContractSurface(t *testing.T) {
 			t.Fatal("Asset list contract still exposes the internal creator UUID filter")
 		}
 		if name == "creator" {
-			foundCreator = true
-			schema, _ := parameter["schema"].(map[string]any)
-			if schema["maxLength"] != 128 {
-				t.Fatalf("creator maxLength=%v, want 128", schema["maxLength"])
-			}
+			t.Fatal("creator-private Asset list must not expose a creator filter")
 		}
-	}
-	if !foundCreator {
-		t.Fatal("Asset list contract is missing the creator display-name prefix filter")
 	}
 
 	asset := resolvePointer(t, moduleFile(t, "creation.yaml"), "/components/schemas/MediaAsset")
@@ -109,8 +102,27 @@ func TestAssetLibraryContractSurface(t *testing.T) {
 	}
 	capabilities := resolvePointer(t, moduleFile(t, "creation.yaml"), "/components/schemas/MediaAssetCapabilities")
 	capabilityProperties, _ := capabilities["properties"].(map[string]any)
-	if _, speculative := capabilityProperties["can_publish"]; speculative {
-		t.Fatal("Asset capabilities expose speculative can_publish before issue #164")
+	if _, exists := capabilityProperties["can_publish"]; !exists {
+		t.Fatal("Asset capabilities are missing can_publish")
+	}
+}
+
+func TestTeamPublicationAndInspirationContractSurface(t *testing.T) {
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/creation/inspiration"},
+		{"GET", "/creation/inspiration/assets/00000000-0000-0000-0000-000000000001"},
+		{"GET", "/creation/inspiration/assets/00000000-0000-0000-0000-000000000001/content"},
+		{"GET", "/creation/inspiration/assets/00000000-0000-0000-0000-000000000001/references/00000000-0000-0000-0000-000000000002/preview-url"},
+		{"GET", "/creation/publications/00000000-0000-0000-0000-000000000001"},
+		{"GET", "/creation/publications/00000000-0000-0000-0000-000000000001/content"},
+		{"GET", "/creation/publications/00000000-0000-0000-0000-000000000001/references/00000000-0000-0000-0000-000000000002/preview-url"},
+		{"DELETE", "/creation/publications/00000000-0000-0000-0000-000000000001"},
+		{"POST", "/creation/publications/00000000-0000-0000-0000-000000000001/create-similar"},
+	} {
+		creationOperation(t, route.method, route.path)
 	}
 }
 

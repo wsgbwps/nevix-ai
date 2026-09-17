@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react'
-import type { AssetLibraryPorts, MediaAssetView } from '../api/asset-library-http'
+import type { AssetContentOptions, MediaAssetView } from '../api/asset-library-http'
+import type { CreationApiResult } from '../api/go-creation-http'
+
+export interface AssetContentPort {
+  readonly loadAssetContent: (
+    assetId: string,
+    checksumSha256: string,
+    options?: AssetContentOptions
+  ) => Promise<CreationApiResult<Blob>>
+}
 
 export const WALL_PREVIEW_MAX_BYTES = 8 * 1024 * 1024
 const WALL_PREVIEW_CONCURRENCY = 4
@@ -31,8 +40,8 @@ function queuePreview(job: PreviewJob): void {
 }
 
 export function useAssetContent(
-  ports: AssetLibraryPorts,
-  asset: MediaAssetView,
+  ports: AssetContentPort,
+  asset: Pick<MediaAssetView, 'id' | 'checksumSha256' | 'byteSize'>,
   enabled: boolean,
   queued: boolean
 ): { readonly url: string | null; readonly failed: boolean } {
@@ -49,7 +58,8 @@ export function useAssetContent(
     const load = async (): Promise<void> => {
       const result = await ports.loadAssetContent(asset.id, asset.checksumSha256, {
         signal: controller.signal,
-        purpose: 'preview'
+        purpose: 'preview',
+        expectedByteSize: asset.byteSize
       })
       if (controller.signal.aborted) return
       if (result.outcome !== 'succeeded') {
@@ -66,7 +76,7 @@ export function useAssetContent(
       controller.abort()
       if (url) URL.revokeObjectURL(url)
     }
-  }, [asset.checksumSha256, asset.id, enabled, ports, queued])
+  }, [asset.byteSize, asset.checksumSha256, asset.id, enabled, ports, queued])
 
   return state.assetId === asset.id ? state : { url: null, failed: false }
 }

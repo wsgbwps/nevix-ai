@@ -56,9 +56,7 @@ test(
         await launched.page.setViewportSize({ width: 900, height: 670 })
         await expect(launched.page.locator('aside')).toBeHidden()
 
-        await expect(
-          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-        ).toHaveCount(0)
+        await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toHaveCount(0)
       } finally {
         await launched.electronApp.close()
       }
@@ -99,9 +97,7 @@ test('a User signs in once and enters the authenticated app shell', { tag: '@smo
       await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
 
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
       await expect(launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })).toHaveCount(
         0
       )
@@ -149,9 +145,7 @@ test('sign-out revokes only the Desktop session and reopening stays signed out',
       await launched.page.getByLabel('Email').fill(identity.email)
       await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
 
       const logoutRequest = launched.page.waitForRequest(
         (request) => request.method() === 'POST' && request.url().endsWith('/identity/auth/logout')
@@ -179,9 +173,7 @@ test('sign-out revokes only the Desktop session and reopening stays signed out',
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toHaveCount(0)
     } finally {
       await launched.electronApp.close()
     }

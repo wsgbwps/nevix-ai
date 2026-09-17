@@ -19,11 +19,14 @@ export function AssetDetailDialog({
   status,
   downloadStatus,
   reuseFailed,
+  publicationStatus,
   ports,
   onClose,
   onOpenSibling,
   onDownload,
   onCreateSimilar,
+  onPublish,
+  onWithdraw,
   onDelete
 }: {
   readonly assetId: string | null
@@ -31,11 +34,14 @@ export function AssetDetailDialog({
   readonly status: AssetDetailStatus
   readonly downloadStatus: AssetDownloadStatus
   readonly reuseFailed: boolean
+  readonly publicationStatus: 'idle' | 'running' | 'failed'
   readonly ports: AssetLibraryPorts
   readonly onClose: () => void
   readonly onOpenSibling: (assetId: string) => void
   readonly onDownload: (asset: MediaAssetView) => void
   readonly onCreateSimilar: () => void
+  readonly onPublish: () => void
+  readonly onWithdraw: () => void
   readonly onDelete: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
@@ -117,10 +123,16 @@ export function AssetDetailDialog({
                       {detail.privateOrigin.specification.prompt}
                     </p>
                     <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+                      <dt className="text-muted-foreground">{t('inspiration.schemaVersion')}</dt>
+                      <dd>{detail.privateOrigin.specification.schemaVersion}</dd>
+                      <dt className="text-muted-foreground">{t('assets.details.type')}</dt>
+                      <dd>{t(`assets.media.${detail.privateOrigin.specification.mediaType}`)}</dd>
                       <dt className="text-muted-foreground">{t('gallery.details.mode')}</dt>
                       <dd>{detail.privateOrigin.specification.mode}</dd>
                       <dt className="text-muted-foreground">{t('composer.model.label')}</dt>
                       <dd className="truncate">{detail.privateOrigin.specification.model}</dd>
+                      <dt className="text-muted-foreground">{t('inspiration.manifestVersion')}</dt>
+                      <dd>{detail.privateOrigin.specification.manifestVersion}</dd>
                       <dt className="text-muted-foreground">{t('composer.params.ratio')}</dt>
                       <dd>{detail.privateOrigin.specification.ratio || '—'}</dd>
                       <dt className="text-muted-foreground">{t('composer.params.resolution')}</dt>
@@ -136,6 +148,24 @@ export function AssetDetailDialog({
                             })}
                       </dd>
                     </dl>
+                    <div className="space-y-2 border-t pt-3">
+                      <h4 className="font-medium">{t('inspiration.references')}</h4>
+                      {detail.privateOrigin.references.length === 0 ? (
+                        <p className="text-muted-foreground">{t('inspiration.noReferences')}</p>
+                      ) : (
+                        <ol className="space-y-1">
+                          {detail.privateOrigin.references.map((reference, index) => (
+                            <li key={reference.id} className="truncate">
+                              {index + 1}. {reference.fileName} · {reference.role} ·{' '}
+                              {reference.kind} ·{' '}
+                              {t('inspiration.claimsVersion', {
+                                version: reference.claimsVersion
+                              })}
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -159,9 +189,25 @@ export function AssetDetailDialog({
                   <WandSparklesIcon aria-hidden />
                   {t('assets.createSimilar')}
                 </Button>
-                <Button type="button" variant="outline" disabled>
-                  {t('assets.publish')}
-                </Button>
+                {detail.asset.publication ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={publicationStatus === 'running'}
+                    onClick={onWithdraw}
+                  >
+                    {t('assets.withdraw')}
+                  </Button>
+                ) : detail.asset.capabilities.canPublish ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={publicationStatus === 'running'}
+                    onClick={onPublish}
+                  >
+                    {t(publicationStatus === 'running' ? 'assets.publishing' : 'assets.publish')}
+                  </Button>
+                ) : null}
                 {detail.asset.capabilities.canDelete ? (
                   <Button type="button" variant="destructive" onClick={onDelete}>
                     <Trash2Icon aria-hidden />
@@ -180,6 +226,11 @@ export function AssetDetailDialog({
                 {reuseFailed ? (
                   <p className="text-destructive basis-full text-xs" role="alert">
                     {t('assets.createSimilarUnavailable')}
+                  </p>
+                ) : null}
+                {publicationStatus === 'failed' ? (
+                  <p className="text-destructive basis-full text-xs" role="alert">
+                    {t('assets.publishFailed')}
                   </p>
                 ) : null}
               </DialogFooter>

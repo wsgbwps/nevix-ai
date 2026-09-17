@@ -31,9 +31,12 @@ const asset = {
   height_px: 800,
   duration_ms: null,
   created_at: '2026-09-16T08:00:00Z',
+  restricted: false,
+  publication: null,
   capabilities: {
     can_delete: true,
-    can_create_similar: true
+    can_create_similar: true,
+    can_publish: true
   }
 }
 
@@ -48,7 +51,6 @@ test('asset list sends the accepted keyset filters and decodes public facts', as
     const result = await createAssetLibraryClient(serverUrl).list('token', {
       cursor: 'cursor-one',
       mediaType: 'image',
-      creator: 'Aster',
       createdSince: '2026-09-01T00:00:00Z',
       sort: 'oldest',
       search: 'Aster',
@@ -67,17 +69,50 @@ test('asset list sends the accepted keyset filters and decodes public facts', as
       heightPx: 800,
       durationMs: null,
       createdAt: '2026-09-16T08:00:00Z',
-      capabilities: { canDelete: true, canCreateSimilar: true }
+      restricted: false,
+      publication: null,
+      capabilities: { canDelete: true, canCreateSimilar: true, canPublish: true }
     })
     assert.equal(result.value.nextCursor, 'next-page')
     assert.deepEqual(Object.fromEntries(requested?.searchParams ?? []), {
       cursor: 'cursor-one',
       media_type: 'image',
-      creator: 'Aster',
       created_since: '2026-09-01T00:00:00Z',
       sort: 'oldest',
       search: 'Aster',
       limit: '24'
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('asset list keeps publication and safety restriction as independent facts', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    Response.json({
+      assets: [
+        {
+          ...asset,
+          restricted: true,
+          publication: {
+            id: 'publication-one',
+            published_at: '2026-09-17T08:00:00Z',
+            restricted: true
+          }
+        }
+      ],
+      next_cursor: null
+    })
+  try {
+    const result = await createAssetLibraryClient(serverUrl).list('token', {})
+    assert.equal(result.outcome, 'succeeded')
+    if (result.outcome !== 'succeeded') return
+    assert.equal(result.value.assets[0].restricted, true)
+    assert.deepEqual(result.value.assets[0].publication, {
+      id: 'publication-one',
+      publishedAt: '2026-09-17T08:00:00Z',
+      restricted: true
     })
   } finally {
     globalThis.fetch = originalFetch
@@ -91,6 +126,7 @@ test('asset detail exposes private origin only when the server supplies it', asy
     task_id: 'task-one',
     slot_index: 0,
     specification: {
+      schema_version: 1,
       media_type: 'image',
       prompt: 'A quiet launch scene',
       model: 'doubao-seedream-5.0-pro',
@@ -100,8 +136,24 @@ test('asset detail exposes private origin only when the server supplies it', asy
       resolution: '2K',
       quantity: 1,
       duration_seconds: null,
-      references: []
-    }
+      references: [
+        { material_id: 'material-one', role: 'reference', kind: 'image', claims_version: 1 }
+      ]
+    },
+    references: [
+      {
+        id: 'material-one',
+        role: 'reference',
+        kind: 'image',
+        file_name: 'reference.png',
+        mime_type: 'image/png',
+        byte_size: 512,
+        width_px: 100,
+        height_px: 80,
+        duration_ms: null,
+        claims_version: 1
+      }
+    ]
   }
   globalThis.fetch = async () =>
     Response.json({
@@ -120,6 +172,7 @@ test('asset detail exposes private origin only when the server supplies it', asy
       taskId: 'task-one',
       slotIndex: 0,
       specification: {
+        schemaVersion: 1,
         mediaType: 'image',
         prompt: 'A quiet launch scene',
         model: 'doubao-seedream-5.0-pro',
@@ -128,8 +181,25 @@ test('asset detail exposes private origin only when the server supplies it', asy
         ratio: '3:2',
         resolution: '2K',
         quantity: 1,
-        durationSeconds: null
-      }
+        durationSeconds: null,
+        references: [
+          { materialId: 'material-one', role: 'reference', kind: 'image', claimsVersion: 1 }
+        ]
+      },
+      references: [
+        {
+          id: 'material-one',
+          role: 'reference',
+          kind: 'image',
+          fileName: 'reference.png',
+          mimeType: 'image/png',
+          byteSize: 512,
+          widthPx: 100,
+          heightPx: 80,
+          durationMs: null,
+          claimsVersion: 1
+        }
+      ]
     })
 
     globalThis.fetch = async () => Response.json({ asset, siblings: [] })
@@ -173,6 +243,18 @@ test('asset content verifies the trusted checksum before returning bytes', async
     const rejected = await client.loadContent('token', asset.id, checksum)
     assert.deepEqual(rejected, { outcome: 'request-rejected', code: 'checksum_mismatch' })
     assert.equal(mismatched.bodyUsed, false)
+
+    globalThis.fetch = async () =>
+      new Response(imageBytes, {
+        status: 200,
+        headers: { 'Content-Type': 'image/png', 'X-Content-SHA-256': checksum }
+      })
+    assert.deepEqual(
+      await client.loadContent('token', asset.id, checksum, {
+        expectedByteSize: imageBytes.byteLength + 1
+      }),
+      { outcome: 'request-rejected', code: 'byte_size_mismatch' }
+    )
   } finally {
     globalThis.fetch = originalFetch
   }

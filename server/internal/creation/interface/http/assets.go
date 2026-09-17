@@ -17,8 +17,6 @@ type AssetHandler struct {
 	storage *application.ObjectStorageConnectionService
 }
 
-const maxAssetCreatorLength = 128
-
 func NewAssetHandler(assets *application.AssetService, storage *application.ObjectStorageConnectionService) *AssetHandler {
 	return &AssetHandler{assets: assets, storage: storage}
 }
@@ -98,12 +96,8 @@ func (h *AssetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func parseAssetFilter(w http.ResponseWriter, r *http.Request) (domain.AssetListFilter, bool) {
 	query := r.URL.Query()
 	filter := domain.AssetListFilter{
-		Creator: strings.TrimSpace(query.Get("creator")),
-		Sort:    domain.AssetNewest,
-		Search:  strings.TrimSpace(query.Get("search")),
-	}
-	if utf8.RuneCountInString(filter.Creator) > maxAssetCreatorLength {
-		return invalidAssetFilter(w, "creator must be at most 128 characters.")
+		Sort:   domain.AssetNewest,
+		Search: strings.TrimSpace(query.Get("search")),
 	}
 	if utf8.RuneCountInString(filter.Search) > 200 {
 		return invalidAssetFilter(w, "search must be at most 200 characters.")
@@ -158,7 +152,15 @@ type assetResource struct {
 	HeightPx     *int                      `json:"height_px"`
 	DurationMS   *int                      `json:"duration_ms"`
 	CreatedAt    string                    `json:"created_at"`
+	Restricted   bool                      `json:"restricted"`
+	Publication  *assetPublicationResource `json:"publication"`
 	Capabilities assetCapabilitiesResource `json:"capabilities"`
+}
+
+type assetPublicationResource struct {
+	ID          string `json:"id"`
+	PublishedAt string `json:"published_at"`
+	Restricted  bool   `json:"restricted"`
 }
 
 type assetCreatorResource struct {
@@ -169,6 +171,7 @@ type assetCreatorResource struct {
 type assetCapabilitiesResource struct {
 	CanDelete        bool `json:"can_delete"`
 	CanCreateSimilar bool `json:"can_create_similar"`
+	CanPublish       bool `json:"can_publish"`
 }
 
 func toAssetResource(view application.AssetView) assetResource {
@@ -177,36 +180,35 @@ func toAssetResource(view application.AssetView) assetResource {
 	if len(asset.Checksum) == 32 {
 		checksum = hex.EncodeToString(asset.Checksum)
 	}
+	var publication *assetPublicationResource
+	if asset.ActivePublication != nil {
+		publication = &assetPublicationResource{
+			ID:          asset.ActivePublication.ID.String(),
+			PublishedAt: asset.ActivePublication.PublishedAt.UTC().Format(time.RFC3339Nano),
+			Restricted:  asset.ActivePublication.Restricted,
+		}
+	}
 	return assetResource{
 		ID:        asset.ID.String(),
 		Creator:   assetCreatorResource{ID: asset.OwnerID.String(), DisplayName: asset.CreatorDisplayName},
 		MediaType: string(asset.MediaType), MimeType: asset.Mime, ByteSize: asset.ByteSize,
 		Checksum: checksum, WidthPx: asset.WidthPx, HeightPx: asset.HeightPx,
 		DurationMS: asset.DurationMS, CreatedAt: asset.CreatedAt.UTC().Format(time.RFC3339Nano),
+		Restricted: asset.Restricted, Publication: publication,
 		Capabilities: assetCapabilitiesResource{
 			CanDelete: view.Capabilities.CanDelete, CanCreateSimilar: view.Capabilities.CanCreateSimilar,
+			CanPublish: view.Capabilities.CanPublish,
 		},
 	}
 }
 
 type privateOriginResource struct {
-	SessionID     string              `json:"session_id"`
-	SessionName   *string             `json:"session_name,omitempty"`
-	TaskID        string              `json:"task_id"`
-	SlotIndex     int                 `json:"slot_index"`
-	Specification privateSpecResource `json:"specification"`
-}
-
-type privateSpecResource struct {
-	Prompt          string  `json:"prompt"`
-	MediaType       string  `json:"media_type"`
-	Model           string  `json:"model"`
-	Mode            string  `json:"mode"`
-	ManifestVersion int     `json:"manifest_version"`
-	Ratio           *string `json:"ratio"`
-	Resolution      *string `json:"resolution"`
-	Quantity        int     `json:"quantity"`
-	DurationSeconds *int    `json:"duration_seconds"`
+	SessionID     string                          `json:"session_id"`
+	SessionName   *string                         `json:"session_name,omitempty"`
+	TaskID        string                          `json:"task_id"`
+	SlotIndex     int                             `json:"slot_index"`
+	Specification generationSpecificationResource `json:"specification"`
+	References    []referenceSummaryResource      `json:"references"`
 }
 
 func toPrivateOriginResource(origin *domain.AssetPrivateOrigin) *privateOriginResource {
@@ -216,11 +218,7 @@ func toPrivateOriginResource(origin *domain.AssetPrivateOrigin) *privateOriginRe
 	return &privateOriginResource{
 		SessionID: origin.SessionID.String(), SessionName: origin.SessionName,
 		TaskID: origin.TaskID.String(), SlotIndex: origin.SlotIndex,
-		Specification: privateSpecResource{
-			Prompt: origin.Spec.Prompt, MediaType: string(origin.Spec.MediaType),
-			Model: origin.Spec.Model, Mode: origin.Spec.Mode, ManifestVersion: origin.Spec.ManifestVersion,
-			Ratio: origin.Spec.Ratio, Resolution: origin.Spec.Resolution, Quantity: origin.Spec.Quantity,
-			DurationSeconds: origin.Spec.DurationSeconds,
-		},
+		Specification: toGenerationSpecificationResource(origin.Spec),
+		References:    toMaterialReferenceResources(origin.Spec, origin.References),
 	}
 }

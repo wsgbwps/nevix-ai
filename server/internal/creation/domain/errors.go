@@ -93,6 +93,8 @@ var (
 	// consulted — stale values reach the freeze — so this is always a
 	// request-shape fault, not staleness.
 	ErrInvalidIntent = errors.New("invalid generation intent")
+	// ErrInvalidIdempotencyKey rejects empty or overlong Desktop command keys.
+	ErrInvalidIdempotencyKey = errors.New("invalid idempotency key")
 )
 
 // Task-command errors. The interface layer maps these onto the stable codes
@@ -124,6 +126,10 @@ var (
 // ErrAssetNotFound covers absent, deleted, restricted, and unauthorized
 // Asset targets without exposing which predicate failed.
 var ErrAssetNotFound = errors.New("media asset not found")
+
+// ErrPublicationNotFound covers absent, withdrawn, restricted, source-
+// restricted, and unauthorized Team Publication targets.
+var ErrPublicationNotFound = errors.New("team publication not found")
 
 // MediaUnavailableError reports admission blocked because the target media
 // is not submittable on this instance right now. Reason mirrors the

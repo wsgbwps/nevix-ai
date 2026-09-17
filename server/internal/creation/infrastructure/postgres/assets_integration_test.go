@@ -149,31 +149,31 @@ func TestAssetLibraryVisibilitySearchOriginAndDeleteAuthorization(t *testing.T) 
 	}
 
 	repo := NewMediaAssetRepository(runtime)
-	assets, next, err := repo.ListVisible(ctx, domain.AssetListFilter{
-		MediaType: pointerTo(domain.MediaImage), Sort: domain.AssetNewest, Creator: "aSSeT sEAR",
+	assets, next, err := repo.ListVisible(ctx, creator, domain.AssetListFilter{
+		MediaType: pointerTo(domain.MediaImage), Sort: domain.AssetNewest,
 	}, nil, 1)
 	if err != nil || len(assets) != 1 || next == nil || assets[0].CreatorDisplayName != "Asset Search Creator" {
 		t.Fatalf("visible first page = %+v next=%+v error=%v", assets, next, err)
 	}
-	second, end, err := repo.ListVisible(ctx, domain.AssetListFilter{
-		MediaType: pointerTo(domain.MediaImage), Sort: domain.AssetNewest, Creator: "aSSeT sEAR",
+	second, end, err := repo.ListVisible(ctx, creator, domain.AssetListFilter{
+		MediaType: pointerTo(domain.MediaImage), Sort: domain.AssetNewest,
 	}, next, 1)
 	if err != nil || len(second) != 1 || end != nil || second[0].ID == assets[0].ID {
 		t.Fatalf("visible second page = %+v next=%+v error=%v", second, end, err)
 	}
-	byID, _, err := repo.ListVisible(ctx, domain.AssetListFilter{Sort: domain.AssetNewest, Search: visibleID.String()}, nil, 1)
+	byID, _, err := repo.ListVisible(ctx, creator, domain.AssetListFilter{Sort: domain.AssetNewest, Search: visibleID.String()}, nil, 1)
 	if err != nil || len(byID) != 1 || byID[0].ID != visibleID {
 		t.Fatalf("exact asset search = %+v error=%v", byID, err)
 	}
 	for _, hiddenID := range []domain.UUID{restrictedID, deletedID} {
-		if _, err := repo.GetVisible(ctx, hiddenID); !errors.Is(err, domain.ErrAssetNotFound) {
+		if _, err := repo.GetVisible(ctx, creator, hiddenID); !errors.Is(err, domain.ErrAssetNotFound) {
 			t.Fatalf("hidden asset %s error=%v, want ErrAssetNotFound", hiddenID, err)
 		}
 	}
 	if _, err := owner.Exec(ctx, `UPDATE creation_sessions SET deleted_at = now() WHERE id = $1`, sessionID); err != nil {
 		t.Fatalf("delete source session: %v", err)
 	}
-	asset, err := repo.GetVisible(ctx, visibleID)
+	asset, err := repo.GetVisible(ctx, creator, visibleID)
 	if err != nil {
 		t.Fatalf("asset survives source deletion: %v", err)
 	}
@@ -183,6 +183,15 @@ func TestAssetLibraryVisibilitySearchOriginAndDeleteAuthorization(t *testing.T) 
 	}
 
 	runner := writetx.New(runtime)
+	if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+		return repo.SoftDelete(ctx, sc.Tx(), domain.NewUUID(), restrictedID, true)
+	}); err != nil {
+		t.Fatalf("admin soft delete restricted asset: %v", err)
+	}
+	var restrictedDeleted bool
+	if err := owner.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM creation_media_assets WHERE id = $1`, restrictedID).Scan(&restrictedDeleted); err != nil || !restrictedDeleted {
+		t.Fatalf("restricted admin delete persisted=%v err=%v", restrictedDeleted, err)
+	}
 	err = runner.Run(ctx, func(sc domain.WriteScope) error {
 		return repo.SoftDelete(ctx, sc.Tx(), domain.NewUUID(), visibleID, false)
 	})
@@ -194,7 +203,7 @@ func TestAssetLibraryVisibilitySearchOriginAndDeleteAuthorization(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("admin soft delete: %v", err)
 	}
-	if _, err := repo.GetVisible(ctx, visibleID); !errors.Is(err, domain.ErrAssetNotFound) {
+	if _, err := repo.GetVisible(ctx, creator, visibleID); !errors.Is(err, domain.ErrAssetNotFound) {
 		t.Fatalf("soft-deleted asset error=%v, want ErrAssetNotFound", err)
 	}
 }
@@ -211,6 +220,10 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 	}
 	defer owner.Close()
 	creator := fixtureUser(t, ownerURL)
+	planCreator := "Publication Plan " + domain.NewUUID().String()
+	if _, err := owner.Exec(ctx, `UPDATE users SET display_name = $2 WHERE id = $1`, creator, planCreator); err != nil {
+		t.Fatalf("name plan creator: %v", err)
+	}
 	sessionID := fixtureSession(t, ownerURL, owner, creator)
 	tx, err := owner.Begin(ctx)
 	if err != nil {
@@ -245,8 +258,8 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 	var cursorID domain.UUID
 	if err := tx.QueryRow(ctx, `
 		SELECT created_at, id FROM creation_media_assets
-		WHERE deleted_at IS NULL AND restricted_at IS NULL
-		ORDER BY created_at DESC, id DESC OFFSET 25000 LIMIT 1`).Scan(&cursorTime, &cursorID); err != nil {
+		WHERE owner_user_id = $1 AND deleted_at IS NULL AND restricted_at IS NULL
+		ORDER BY created_at DESC, id DESC OFFSET 25000 LIMIT 1`, creator).Scan(&cursorTime, &cursorID); err != nil {
 		t.Fatalf("load deep cursor fixture: %v", err)
 	}
 	var planJSON []byte
@@ -254,12 +267,10 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 		EXPLAIN (ANALYZE, FORMAT JSON)
 		SELECT a.id, u.display_name FROM creation_media_assets a
 		JOIN users u ON u.id = a.owner_user_id
-		WHERE a.deleted_at IS NULL AND a.restricted_at IS NULL
+		WHERE a.owner_user_id = $3 AND a.deleted_at IS NULL AND a.restricted_at IS NULL
 		  AND a.media_type = 'image'
-		  AND a.owner_user_id IN (
-		    SELECT id FROM users WHERE lower(display_name) LIKE $3 ESCAPE '\')
 		  AND (a.created_at, a.id) < ($1, $2)
-		ORDER BY a.created_at DESC, a.id DESC LIMIT 31`, cursorTime, cursorID, "connection-fixture%").Scan(&planJSON); err != nil {
+		ORDER BY a.created_at DESC, a.id DESC LIMIT 31`, cursorTime, cursorID, creator).Scan(&planJSON); err != nil {
 		t.Fatalf("explain keyset asset page: %v", err)
 	}
 	var plan any
@@ -269,6 +280,77 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 	if hasSequentialAssetScan(plan) {
 		t.Fatalf("50k keyset page used a sequential creation_media_assets scan: %s", planJSON)
 	}
+	if !planUsesIndex(plan, "creation_media_assets_visible_owner_media_created_idx") &&
+		!planUsesIndex(plan, "creation_media_assets_admin_media_created_idx") {
+		t.Fatalf("50k owner page missed production composite index: %s", planJSON)
+	}
+	if err := tx.QueryRow(ctx, `
+		EXPLAIN (ANALYZE, FORMAT JSON)
+		SELECT a.id FROM creation_media_assets a
+		WHERE a.deleted_at IS NULL AND a.media_type = 'image'
+		  AND (a.created_at, a.id) < ($1, $2)
+		ORDER BY a.created_at DESC, a.id DESC LIMIT 31`, cursorTime, cursorID).Scan(&planJSON); err != nil {
+		t.Fatalf("explain admin keyset asset page: %v", err)
+	}
+	if err := json.Unmarshal(planJSON, &plan); err != nil {
+		t.Fatalf("decode admin plan: %v", err)
+	}
+	if hasSequentialRelationScan(plan, "creation_media_assets") {
+		t.Fatalf("50k admin keyset page used a sequential asset scan: %s", planJSON)
+	}
+	if !planUsesIndex(plan, "creation_media_assets_admin_media_created_idx") {
+		t.Fatalf("50k admin page missed production composite index: %s", planJSON)
+	}
+	publicationPrefix := "publication-plan-" + domain.NewUUID().String()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO creation_team_publications (
+			source_asset_id, publisher_user_id, publisher_display_name, idempotency_key,
+			media_type, mime, blob_key, byte_size, checksum, specification, published_at
+		)
+		SELECT asset.id, asset.owner_user_id, $3,
+		       $1 || '-' || row_number() OVER (ORDER BY asset.created_at, asset.id),
+		       asset.media_type, asset.mime, asset.blob_key, asset.byte_size, asset.checksum,
+		       '{}'::jsonb, asset.created_at
+		FROM creation_media_assets asset
+		WHERE asset.owner_user_id = $2 AND asset.deleted_at IS NULL
+		ORDER BY asset.created_at, asset.id LIMIT 10000`, publicationPrefix, creator, planCreator); err != nil {
+		t.Fatalf("seed 10k publications: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ANALYZE creation_team_publications`); err != nil {
+		t.Fatalf("analyze publications: %v", err)
+	}
+	var publicationCursorTime time.Time
+	var publicationCursorID domain.UUID
+	if err := tx.QueryRow(ctx, `
+		SELECT published_at, id FROM creation_team_publications
+		WHERE withdrawn_at IS NULL AND restricted_at IS NULL
+		ORDER BY published_at DESC, id DESC OFFSET 5000 LIMIT 1`).Scan(&publicationCursorTime, &publicationCursorID); err != nil {
+		t.Fatalf("load deep publication cursor: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `
+		EXPLAIN (ANALYZE, FORMAT JSON)
+		SELECT p.id FROM creation_team_publications p
+		JOIN creation_media_assets a ON a.id = p.source_asset_id
+		WHERE p.withdrawn_at IS NULL AND p.restricted_at IS NULL
+		  AND a.restricted_at IS NULL
+		  AND (p.published_at, p.id) < ($1, $2)
+		ORDER BY p.published_at DESC, p.id DESC LIMIT 31`, publicationCursorTime, publicationCursorID).Scan(&planJSON); err != nil {
+		t.Fatalf("explain publication keyset page: %v", err)
+	}
+	if err := json.Unmarshal(planJSON, &plan); err != nil {
+		t.Fatalf("decode publication plan: %v", err)
+	}
+	if hasSequentialRelationScan(plan, "creation_team_publications") {
+		t.Fatalf("10k deep publication page used a sequential scan: %s", planJSON)
+	}
+	if !planUsesIndex(plan, "creation_team_publications_active_created_idx") {
+		t.Fatalf("10k member page missed production active index: %s", planJSON)
+	}
+
+	repo := &TeamPublicationRepository{pool: tx}
+	filter := domain.AssetListFilter{Creator: planCreator, Sort: domain.AssetNewest}
+	assertInspirationPages(t, ctx, repo, false, filter, "publication", 10000)
+	assertInspirationPages(t, ctx, repo, true, filter, "asset", 50000)
 	for _, index := range []string{
 		"creation_media_assets_task_slot_unique",
 		"creation_media_assets_owner_idx",
@@ -276,6 +358,16 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 		"creation_media_assets_visible_media_created_idx",
 		"creation_media_assets_visible_owner_created_idx",
 		"creation_media_assets_visible_owner_media_created_idx",
+		"creation_media_assets_admin_created_idx",
+		"creation_media_assets_admin_media_created_idx",
+		"creation_team_publications_active_created_idx",
+		"creation_team_publications_active_media_created_idx",
+		"creation_team_publications_publisher_fk_idx",
+		"creation_team_publications_asset_fk_idx",
+		"creation_team_publications_active_asset_idx",
+		"creation_team_publication_references_blob_key_idx",
+		"creation_publication_similar_operations_publication_fk_idx",
+		"creation_publication_similar_operations_session_fk_idx",
 	} {
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT to_regclass('public.' || $1) IS NOT NULL`, index).Scan(&exists); err != nil || !exists {
@@ -285,24 +377,90 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 }
 
 func hasSequentialAssetScan(value any) bool {
+	return hasSequentialRelationScan(value, "creation_media_assets")
+}
+
+func hasSequentialRelationScan(value any, relation string) bool {
 	switch node := value.(type) {
 	case []any:
 		for _, child := range node {
-			if hasSequentialAssetScan(child) {
+			if hasSequentialRelationScan(child, relation) {
 				return true
 			}
 		}
 	case map[string]any:
-		if node["Node Type"] == "Seq Scan" && node["Relation Name"] == "creation_media_assets" {
+		if node["Node Type"] == "Seq Scan" && node["Relation Name"] == relation {
 			return true
 		}
 		for _, child := range node {
-			if hasSequentialAssetScan(child) {
+			if hasSequentialRelationScan(child, relation) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func planUsesIndex(value any, index string) bool {
+	switch node := value.(type) {
+	case []any:
+		for _, child := range node {
+			if planUsesIndex(child, index) {
+				return true
+			}
+		}
+	case map[string]any:
+		if node["Index Name"] == index {
+			return true
+		}
+		for _, child := range node {
+			if planUsesIndex(child, index) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func assertInspirationPages(t *testing.T, ctx context.Context, repo *TeamPublicationRepository, admin bool, filter domain.AssetListFilter, itemType string, want int) {
+	t.Helper()
+	seen := make(map[domain.UUID]struct{}, want)
+	var cursor *domain.CompoundCursor
+	for page := 0; ; page++ {
+		items, next, err := repo.ListInspiration(ctx, admin, filter, cursor, 2000)
+		if err != nil {
+			t.Fatalf("list production inspiration page %d: %v", page, err)
+		}
+		for _, item := range items {
+			var id domain.UUID
+			switch itemType {
+			case "asset":
+				if item.Type != itemType || item.Asset == nil || item.Publication != nil {
+					t.Fatalf("admin production item %d has wrong projection: %+v", page, item)
+				}
+				id = item.Asset.ID
+			case "publication":
+				if item.Type != itemType || item.Publication == nil || item.Asset != nil {
+					t.Fatalf("member production item %d has wrong projection: %+v", page, item)
+				}
+				id = item.Publication.ID
+			}
+			if _, duplicate := seen[id]; duplicate {
+				t.Fatalf("production cursor duplicated %s %s", itemType, id)
+			}
+			seen[id] = struct{}{}
+		}
+		if next == nil {
+			break
+		}
+		if len(items) == 0 {
+			t.Fatalf("production cursor returned an empty non-terminal page %d", page)
+		}
+		cursor = next
+	}
+	if len(seen) != want {
+		t.Fatalf("production %s cursor returned %d unique rows, want %d", itemType, len(seen), want)
+	}
 }
 
 func pointerTo[T any](value T) *T { return &value }

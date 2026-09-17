@@ -31,6 +31,7 @@ import type { CreationWorkspacePorts } from './ports'
 import type { CreationReferenceMaterialUploadRecovery } from '../../../../../shared/ipc/creation/types'
 import type { AssetPrivateOrigin } from '../api/asset-library-http'
 import { prepareAssetSimilarDraft, type AssetSimilarDraftResult } from './asset-similar-draft'
+import { writePublicationSimilarDraft } from './publication-similar-draft'
 
 export type WorkbenchActionState =
   | { readonly status: 'idle' }
@@ -67,6 +68,10 @@ export interface WorkbenchActions {
     replaceExisting?: boolean
   ) => AssetSimilarDraftResult
   readonly consumePreparedSimilarDraft: () => boolean
+  readonly preparePublicationSimilar: (
+    publicationId: string
+  ) => Promise<'prepared' | 'failed' | 'unavailable'>
+  readonly consumePreparedSimilarSession: () => CreationSessionView | null
   readonly snapshot: (sessionId: string) => WorkbenchActionState
   readonly subscribe: (listener: (event: CreationRuntimeEvent) => void) => () => void
   readonly stagedMaterials: (sessionId: string) => readonly StagedMaterialFile[]
@@ -211,6 +216,8 @@ export function createCreationRuntime(
   let retired = false
   let recoveryRun: Promise<void> | null = null
   let similarDraftPrepared = false
+  let similarSessionPrepared: CreationSessionView | null = null
+  const publicationSimilarKeys = new Map<string, string>()
 
   const materialKey = (sessionId: string, localId: string): string => `${sessionId}:${localId}`
   const clearRecoveredMaterial = (key: string): void => {
@@ -327,6 +334,9 @@ export function createCreationRuntime(
       persistNotice(sessionId, operationNoticeFor(sessionId, true))
     }
     retired = true
+    similarDraftPrepared = false
+    similarSessionPrepared = null
+    publicationSimilarKeys.clear()
     generation += 1
     chains.clear()
     settledStates.clear()
@@ -386,6 +396,13 @@ export function createCreationRuntime(
     getAsset: guardResult(ports.getAsset),
     loadAssetContent: guardResult(ports.loadAssetContent),
     deleteAsset: guardResult(ports.deleteAsset),
+    listInspiration: guardResult(ports.listInspiration),
+    getInspirationDetail: guardResult(ports.getInspirationDetail),
+    loadInspirationContent: guardResult(ports.loadInspirationContent),
+    loadInspirationReferencePreview: guardResult(ports.loadInspirationReferencePreview),
+    publishAsset: guardResult(ports.publishAsset),
+    withdrawPublication: guardResult(ports.withdrawPublication),
+    createPublicationSimilar: guardResult(ports.createPublicationSimilar),
     listSessions: guardResult(ports.listSessions),
     createSession: guardResult(ports.createSession),
     renameSession: guardResult(ports.renameSession),
@@ -1234,6 +1251,23 @@ export function createCreationRuntime(
       if (retired || !similarDraftPrepared) return false
       similarDraftPrepared = false
       return true
+    },
+    preparePublicationSimilar: async (publicationId) => {
+      if (retired || storage === undefined) return 'unavailable'
+      const idempotencyKey = publicationSimilarKeys.get(publicationId) ?? createId()
+      publicationSimilarKeys.set(publicationId, idempotencyKey)
+      const result = await guardedPorts.createPublicationSimilar(publicationId, idempotencyKey)
+      if (result.outcome !== 'succeeded') return 'failed'
+      if (!writePublicationSimilarDraft(storage, userId, result.value)) return 'unavailable'
+      publicationSimilarKeys.delete(publicationId)
+      similarSessionPrepared = result.value.session
+      return 'prepared'
+    },
+    consumePreparedSimilarSession: () => {
+      if (retired) return null
+      const session = similarSessionPrepared
+      similarSessionPrepared = null
+      return session
     },
     snapshot: (sessionId) =>
       retired

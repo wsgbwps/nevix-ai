@@ -215,3 +215,29 @@ func TestAssetLibraryMigrationOwnsVisibilityAndKeysetIndexes(t *testing.T) {
 		}
 	}
 }
+
+func TestTeamPublicationMigrationOwnsSnapshotsReuseAndObjectRetention(t *testing.T) {
+	sqlBytes, err := migrationFS.ReadFile("migrations/0022_team_publications.sql")
+	if err != nil {
+		t.Fatalf("read team publication migration: %v", err)
+	}
+	sql := string(sqlBytes)
+	for _, required := range []string{
+		"creation_team_publications",
+		"creation_team_publication_references",
+		"creation_publication_similar_operations",
+		"creation_team_publications_active_asset_idx",
+		"creation_team_publications_active_created_idx",
+		"creation_team_publications_active_media_created_idx",
+		"DROP CONSTRAINT creation_reference_materials_blob_key_key",
+		"creation_reference_materials_blob_key_idx",
+		"publisher_display_name",
+		"specification",
+		"GRANT SELECT, INSERT ON public.creation_team_publications TO identity_app",
+		"GRANT UPDATE (withdrawn_at, restricted_at) ON public.creation_team_publications TO identity_app",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("team publication migration missing %q", required)
+		}
+	}
+}

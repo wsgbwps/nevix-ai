@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { testI18n } from './creation-workbench-i18n'
 import {
@@ -24,6 +24,7 @@ import type {
   GenerationTaskView,
   TaskListPageRequest
 } from '../../../src/renderer/src/features/creation/api/generation-task-http'
+import type { PublicationSimilarResult } from '../../../src/renderer/src/features/creation/api/inspiration-http'
 import {
   readLocalDraft,
   removeLocalDraft,
@@ -424,6 +425,7 @@ interface RuntimeOptions {
   /** Scripted outcome for every session creation besides succeeded. */
   readonly createSessionOutcome?: 'network-failure' | 'request-rejected'
   readonly taskScript?: TaskScript
+  readonly publicationSimilar?: PublicationSimilarResult
 }
 
 // Builds the story's runtime: scripted server ports plus the real
@@ -654,6 +656,34 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
 
   const ports = {
     userId: storyUserId,
+    createPublicationSimilar: async () => {
+      const result = options.publicationSimilar
+      if (!result) return { outcome: 'request-rejected' as const, code: 'not_found' }
+      if (!serverSessions.some((session) => session.id === result.session.id)) {
+        serverSessions = [result.session, ...serverSessions]
+      }
+      materials.set(
+        result.session.id,
+        result.materials.map((entry) => ({
+          id: entry.id,
+          kind: entry.kind,
+          fileName: entry.fileName,
+          mimeType: entry.mimeType,
+          byteSize: entry.byteSize,
+          widthPx: entry.widthPx,
+          heightPx: entry.heightPx,
+          pixelCount:
+            entry.kind === 'image' && entry.widthPx !== null && entry.heightPx !== null
+              ? entry.widthPx * entry.heightPx
+              : null,
+          durationMs: entry.durationMs,
+          checksumSha256: entry.checksumSha256,
+          claimsVersion: entry.claimsVersion,
+          createdAt: entry.createdAt
+        }))
+      )
+      return succeeded(result)
+    },
     listSessions: async () => succeeded({ sessions: serverSessions, nextCursor: null }),
     createSession: async (name) => {
       createdSessions.push({ name: name ?? '' })
@@ -983,6 +1013,7 @@ interface StoryOptions {
   readonly createSessionOutcome?: 'network-failure' | 'request-rejected'
   readonly sessions?: readonly CreationSessionView[]
   readonly taskScript?: TaskScript
+  readonly publicationSimilar?: PublicationSimilarResult
 }
 
 function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
@@ -992,6 +1023,7 @@ function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
     manifestDeferred: options.manifestDeferred,
     sessions: options.sessions ?? [sessionA, sessionB],
     taskScript: options.taskScript,
+    publicationSimilar: options.publicationSimilar,
     materialUrlFailures: options.materialUrlFailures,
     materialUrlDeferred: options.materialUrlDeferred,
     materialImageUrl: options.materialImageUrl,
@@ -1032,6 +1064,18 @@ function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
 
 function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): React.JSX.Element {
   const [runtime] = useState(() => installWorkbenchRuntime(resolvedRuntimeOptions(options)))
+  const [ready, setReady] = useState(options.publicationSimilar === undefined)
+  useEffect(() => {
+    if (!options.publicationSimilar) return
+    let active = true
+    void runtime.actions.preparePublicationSimilar('publication-story').then(() => {
+      if (active) setReady(true)
+    })
+    return () => {
+      active = false
+    }
+  }, [options.publicationSimilar, runtime])
+  if (!ready) return <p role="status">Preparing Publication reuse</p>
   return (
     <CreationRuntimeContext.Provider value={runtime}>
       <CreationWorkbenchPage />

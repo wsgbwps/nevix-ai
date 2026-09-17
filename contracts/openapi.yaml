@@ -126,6 +126,24 @@ paths:
     $ref: "./creation.yaml#/paths/~1creation~1assets~1{assetID}"
   /creation/assets/{assetID}/content:
     $ref: "./creation.yaml#/paths/~1creation~1assets~1{assetID}~1content"
+  /creation/assets/{assetID}/publication:
+    $ref: "./creation.yaml#/paths/~1creation~1assets~1{assetID}~1publication"
+  /creation/inspiration:
+    $ref: "./creation.yaml#/paths/~1creation~1inspiration"
+  /creation/inspiration/assets/{assetID}:
+    $ref: "./creation.yaml#/paths/~1creation~1inspiration~1assets~1{assetID}"
+  /creation/inspiration/assets/{assetID}/content:
+    $ref: "./creation.yaml#/paths/~1creation~1inspiration~1assets~1{assetID}~1content"
+  /creation/inspiration/assets/{assetID}/references/{referenceID}/preview-url:
+    $ref: "./creation.yaml#/paths/~1creation~1inspiration~1assets~1{assetID}~1references~1{referenceID}~1preview-url"
+  /creation/publications/{publicationID}:
+    $ref: "./creation.yaml#/paths/~1creation~1publications~1{publicationID}"
+  /creation/publications/{publicationID}/content:
+    $ref: "./creation.yaml#/paths/~1creation~1publications~1{publicationID}~1content"
+  /creation/publications/{publicationID}/references/{referenceID}/preview-url:
+    $ref: "./creation.yaml#/paths/~1creation~1publications~1{publicationID}~1references~1{referenceID}~1preview-url"
+  /creation/publications/{publicationID}/create-similar:
+    $ref: "./creation.yaml#/paths/~1creation~1publications~1{publicationID}~1create-similar"
 components:
   securitySchemes:
     bearerAuth:

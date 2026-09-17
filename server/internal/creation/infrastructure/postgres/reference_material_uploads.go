@@ -177,12 +177,11 @@ func (r *ReferenceMaterialUploadRepository) RecordFinalizedMaterialCleanup(ctx c
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
 		)
-		ON CONFLICT (material_id) DO UPDATE
+		ON CONFLICT (object_key) DO UPDATE
 		SET cleanup_attempt_count = EXCLUDED.cleanup_attempt_count,
 		    cleanup_next_attempt_at = EXCLUDED.cleanup_next_attempt_at,
 		    cleanup_confirmed_at = NULL
-		WHERE creation_reference_material_uploads.owner_user_id = EXCLUDED.owner_user_id
-		  AND creation_reference_material_uploads.status = 'finalized'`,
+		WHERE creation_reference_material_uploads.status = 'finalized'`,
 		cleanup.ID, cleanup.OwnerID, cleanup.SessionID, cleanup.MaterialID,
 		cleanup.ObjectKey, cleanup.FileName, string(cleanup.DeclaredKind),
 		cleanup.DeclaredMIMEType, cleanup.DeclaredByteSize, cleanup.ClaimsVersion,
@@ -233,8 +232,19 @@ func (r *ReferenceMaterialUploadRepository) LockDueCleanups(ctx context.Context,
 		WHERE u.status IN ('terminal', 'finalized') AND u.cleanup_confirmed_at IS NULL
 		  AND u.cleanup_next_attempt_at <= $1
 		  AND NOT EXISTS (
+			SELECT 1 FROM creation_reference_materials material
+			WHERE material.blob_key = u.object_key AND material.removed_at IS NULL
+		  )
+		  AND NOT EXISTS (
 			SELECT 1 FROM creation_generation_task_references retained
-			WHERE retained.material_id = u.material_id
+			JOIN creation_reference_materials material ON material.id = retained.material_id
+			WHERE material.blob_key = u.object_key
+		  )
+		  AND NOT EXISTS (
+			SELECT 1 FROM creation_team_publication_references reference
+			JOIN creation_team_publications publication ON publication.id = reference.publication_id
+			WHERE reference.blob_key = u.object_key
+			  AND publication.withdrawn_at IS NULL AND publication.restricted_at IS NULL
 		  )
 		ORDER BY u.cleanup_next_attempt_at, u.id
 		FOR UPDATE SKIP LOCKED
@@ -283,14 +293,21 @@ func (r *ReferenceMaterialUploadRepository) MarkCleanupConfirmed(ctx context.Con
 			SET cleanup_confirmed_at = $3, cleanup_next_attempt_at = NULL
 			WHERE id = $1 AND status IN ('terminal', 'finalized') AND cleanup_confirmed_at IS NULL
 			  AND cleanup_attempt_count = $2
-			RETURNING material_id
+			RETURNING object_key
 		)
 		DELETE FROM creation_reference_materials material
 		USING confirmed
-		WHERE material.id = confirmed.material_id AND material.removed_at IS NOT NULL
+		WHERE material.blob_key = confirmed.object_key AND material.removed_at IS NOT NULL
 		  AND NOT EXISTS (
 			SELECT 1 FROM creation_generation_task_references retained
-			WHERE retained.material_id = material.id
+			JOIN creation_reference_materials source ON source.id = retained.material_id
+			WHERE source.blob_key = material.blob_key
+		  )
+		  AND NOT EXISTS (
+			SELECT 1 FROM creation_team_publication_references reference
+			JOIN creation_team_publications publication ON publication.id = reference.publication_id
+			WHERE reference.blob_key = material.blob_key
+			  AND publication.withdrawn_at IS NULL AND publication.restricted_at IS NULL
 		  )`, id, attempt, confirmedAt)
 	if err != nil {
 		return fmt.Errorf("creation: confirm reference material cleanup: %w", err)

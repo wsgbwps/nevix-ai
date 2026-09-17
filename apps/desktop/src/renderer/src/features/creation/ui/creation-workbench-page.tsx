@@ -57,7 +57,10 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   const lastNewestTaskIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (context.ports?.actions.consumePreparedSimilarDraft()) context.startNewDraft()
+    if (context.status === 'loading') return
+    const similarSession = context.ports?.actions.consumePreparedSimilarSession()
+    if (similarSession) context.selectSession(similarSession)
+    else if (context.ports?.actions.consumePreparedSimilarDraft()) context.startNewDraft()
   }, [context])
 
   useLayoutEffect(() => {

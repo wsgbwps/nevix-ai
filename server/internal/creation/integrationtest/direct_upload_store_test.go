@@ -84,6 +84,12 @@ func (s *fakeDirectUploadStore) largestGeneratedRead() int {
 	return s.maxGeneratedRead
 }
 
+func (s *fakeDirectUploadStore) objectCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.objects) + len(s.generatedObjects)
+}
+
 func (s *fakeDirectUploadStore) setProvider(provider creation.ObjectStorageProvider) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

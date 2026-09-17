@@ -137,7 +137,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       await launched.page.getByLabel('邮箱').fill(identity.email)
       await launched.page.getByLabel('密码').fill(identity.password)
       await launched.page.getByRole('button', { name: '登录', exact: true }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
       await expectNoLanguageSwitchControl(launched.page)
 
       await openSettingsFromUserMenu(launched.page)
@@ -172,9 +172,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       await expectWindowTitle(launched.electronApp, 'Nevix AI — Desktop')
 
       await launched.page.getByRole('button', { name: 'Back to app' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
 
       await openSettingsFromUserMenu(launched.page)
       await expect(launched.page.getByRole('heading', { name: 'Profile' })).toBeVisible()
@@ -193,7 +191,7 @@ test('Language Mode lives in the Settings Page, applies immediately, and persist
       await expectWindowTitle(launched.electronApp, 'Nevix AI — 桌面端')
 
       await launched.page.getByRole('button', { name: '返回应用' }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
       expect(navigationCount).toBe(0)
 
       await signOutFromUserMenu(launched.page)

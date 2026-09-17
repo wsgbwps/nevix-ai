@@ -17,7 +17,7 @@ import {
 const identityServer = readIdentityServerConfig()
 
 async function expectSignedInHomeWithStartupRetry(page: Page): Promise<void> {
-  const homeHeading = page.getByRole('heading', { name: '使用 Nevix AI 创作' })
+  const homeHeading = page.getByRole('heading', { name: '灵感' })
   const retryButton = page.getByRole('button', { name: '重试', exact: true })
   await expect(homeHeading.or(retryButton)).toBeVisible({ timeout: 15_000 })
   if (await retryButton.isVisible()) await retryButton.click()
@@ -72,7 +72,7 @@ test('signed-in users reach one focused Settings Section and return to its App s
 
       // Section 切换 replace 当前 entry，因此返回不会回放 Profile。
       await launched.page.getByRole('button', { name: '返回应用' }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
       await expect(launched.page.getByRole('heading', { name: '设置' })).toHaveCount(0)
       await expect(
         launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
@@ -104,9 +104,7 @@ test('Profile display-name editing saves through the identity server and reloads
       await launched.page.getByLabel('Email').fill(identity.email)
       await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
 
       await openSettingsFromUserMenu(launched.page)
       const displayName = launched.page.getByLabel('Display name')
@@ -157,7 +155,7 @@ test('the Settings Page Select switches the Interface Language without reloading
       await launched.page.getByLabel('邮箱').fill(identity.email)
       await launched.page.getByLabel('密码').fill(identity.password)
       await launched.page.getByRole('button', { name: '登录', exact: true }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
       await openSettingsFromUserMenu(launched.page)
 
@@ -189,9 +187,7 @@ test('the Settings Page Select switches the Interface Language without reloading
 
       // 返回 App Shell 后首页文案同样即时切换。
       await launched.page.getByRole('button', { name: 'Back to app' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
       expect(navigationCount).toBe(0)
     } finally {
       await launched.electronApp.close()
@@ -220,7 +216,7 @@ test('dirty Profile uses one discard decision for Section changes and ordinary c
       await launched.page.getByLabel('邮箱').fill(identity.email)
       await launched.page.getByLabel('密码').fill(identity.password)
       await launched.page.getByRole('button', { name: '登录', exact: true }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
       await openSettingsFromUserMenu(launched.page)
 
       const displayName = launched.page.getByLabel('显示名')
@@ -341,7 +337,7 @@ test('ordinary close waits for Profile save failure and resumes after a successf
       await launched.page.getByLabel('邮箱').fill(identity.email)
       await launched.page.getByLabel('密码').fill(identity.password)
       await launched.page.getByRole('button', { name: '登录', exact: true }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
       await openSettingsFromUserMenu(launched.page)
 
       const displayName = launched.page.getByLabel('显示名')

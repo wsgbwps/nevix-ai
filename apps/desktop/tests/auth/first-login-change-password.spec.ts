@@ -61,9 +61,7 @@ test(
             'Your administrator set an initial password. Set your own new password before continuing.'
           )
         ).toBeVisible()
-        await expect(
-          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-        ).toHaveCount(0)
+        await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toHaveCount(0)
 
         // A wrong initial password keeps the boundary with its specific error.
         await launched.page
@@ -100,9 +98,7 @@ test(
         await launched.page.getByLabel('New password', { exact: true }).fill(REPLACEMENT_PASSWORD)
         await launched.page.getByLabel('Confirm new password').fill(REPLACEMENT_PASSWORD)
         await launched.page.getByRole('button', { name: 'Update password and continue' }).click()
-        await expect(
-          launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-        ).toBeVisible()
+        await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
         await expect(
           launched.page.getByRole('heading', { name: 'Set a new password' })
         ).toHaveCount(0)
@@ -124,9 +120,7 @@ test(
       })
       try {
         await signIn(relaunched.page, { email: identity.email, password: REPLACEMENT_PASSWORD })
-        await expect(
-          relaunched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-        ).toBeVisible()
+        await expect(relaunched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
         await expect(
           relaunched.page.getByRole('heading', { name: 'Set a new password' })
         ).toHaveCount(0)

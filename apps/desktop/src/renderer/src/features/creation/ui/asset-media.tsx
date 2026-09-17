@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ImageIcon, LoaderCircleIcon, VideoIcon } from 'lucide-react'
 import type { AssetLibraryPorts, MediaAssetView } from '../api/asset-library-http'
-import { useAssetContent, WALL_PREVIEW_MAX_BYTES } from './use-asset-content'
+import { useAssetContent, WALL_PREVIEW_MAX_BYTES, type AssetContentPort } from './use-asset-content'
+
+export type MediaPreviewView = Pick<
+  MediaAssetView,
+  'id' | 'mediaType' | 'mimeType' | 'byteSize' | 'checksumSha256'
+>
 
 function MediaStatus({ failed }: { readonly failed: boolean }): React.JSX.Element {
   const { t } = useTranslation('creation')
@@ -28,8 +33,8 @@ export function AssetMedia({
   ports,
   detail = false
 }: {
-  readonly asset: MediaAssetView
-  readonly ports: AssetLibraryPorts
+  readonly asset: MediaPreviewView
+  readonly ports: AssetContentPort
   readonly detail?: boolean
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
