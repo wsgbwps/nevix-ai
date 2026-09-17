@@ -317,11 +317,12 @@ func TestAssetLibraryPublicationInspirationAndCreateSimilar(t *testing.T) {
 	if status, restrictedList := h.doRequest(t, http.MethodGet, "/creation/inspiration?search="+thirdPublicationID, adminToken, nil); status != http.StatusOK || !bytes.Contains(restrictedList, []byte(thirdPublicationID)) {
 		t.Fatalf("admin inspiration lost restricted deleted-source publication status=%d body=%s", status, restrictedList)
 	}
-	for name, path := range map[string]string{
+	publicationPaths := map[string]string{
 		"detail":    "/creation/publications/" + thirdPublicationID,
 		"content":   "/creation/publications/" + thirdPublicationID + "/content",
 		"reference": "/creation/publications/" + thirdPublicationID + "/references/" + thirdSnapshotReferenceID + "/preview-url",
-	} {
+	}
+	for name, path := range publicationPaths {
 		if status, response := h.doRequest(t, http.MethodGet, path, adminToken, nil); status != http.StatusOK {
 			t.Fatalf("admin restricted deleted-source %s status=%d body=%s", name, status, response)
 		}
@@ -334,11 +335,7 @@ func TestAssetLibraryPublicationInspirationAndCreateSimilar(t *testing.T) {
 	if status, releasedList := h.doRequest(t, http.MethodGet, "/creation/inspiration?search="+thirdPublicationID, adminToken, nil); status != http.StatusOK || bytes.Contains(releasedList, []byte(thirdPublicationID)) {
 		t.Fatalf("released deleted-source publication remained in admin inspiration status=%d body=%s", status, releasedList)
 	}
-	for name, path := range map[string]string{
-		"detail":    "/creation/publications/" + thirdPublicationID,
-		"content":   "/creation/publications/" + thirdPublicationID + "/content",
-		"reference": "/creation/publications/" + thirdPublicationID + "/references/" + thirdSnapshotReferenceID + "/preview-url",
-	} {
+	for name, path := range publicationPaths {
 		for role, token := range map[string]string{"admin": adminToken, "member": otherToken} {
 			if status, _ := h.doRequest(t, http.MethodGet, path, token, nil); status != http.StatusNotFound {
 				t.Fatalf("released deleted-source %s remained visible to %s status=%d", name, role, status)
