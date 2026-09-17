@@ -458,6 +458,56 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 	filter := domain.AssetListFilter{Creator: planCreator, Sort: domain.AssetNewest}
 	assertInspirationPages(t, ctx, repo, false, filter, "publication", 10000)
 	assertInspirationPages(t, ctx, repo, true, filter, "asset", 50000)
+	if _, err := tx.Exec(ctx, `
+		UPDATE creation_media_assets asset
+		SET deleted_at = now()
+		FROM creation_team_publications publication
+		WHERE publication.source_asset_id = asset.id
+		  AND publication.idempotency_key LIKE $1 || '-%'`, publicationPrefix); err != nil {
+		t.Fatalf("delete 10k publication source assets: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE creation_team_publications
+		SET restricted_at = now(), direct_restricted_at = now()
+		WHERE idempotency_key LIKE $1 || '-%'`, publicationPrefix); err != nil {
+		t.Fatalf("restrict 10k deleted-source publications: %v", err)
+	}
+	for _, relation := range []string{"creation_media_assets", "creation_team_publications"} {
+		if _, err := tx.Exec(ctx, `ANALYZE `+relation); err != nil {
+			t.Fatalf("analyze restricted %s: %v", relation, err)
+		}
+	}
+	if err := tx.QueryRow(ctx, `
+		SELECT p.published_at, p.id FROM creation_team_publications p
+		JOIN creation_media_assets a ON a.id = p.source_asset_id
+		WHERE p.withdrawn_at IS NULL AND a.deleted_at IS NOT NULL
+		  AND (p.restricted_at IS NULL OR
+		    (p.direct_restricted_at IS NOT NULL AND p.direct_restriction_released_at IS NULL))
+		ORDER BY p.published_at DESC, p.id DESC OFFSET 5000 LIMIT 1`).Scan(&publicationCursorTime, &publicationCursorID); err != nil {
+		t.Fatalf("load deep restricted admin publication cursor: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `
+		EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+		SELECT p.id FROM creation_team_publications p
+		JOIN creation_media_assets a ON a.id = p.source_asset_id
+		WHERE p.withdrawn_at IS NULL AND a.deleted_at IS NOT NULL
+		  AND (p.restricted_at IS NULL OR
+		    (p.direct_restricted_at IS NOT NULL AND p.direct_restriction_released_at IS NULL))
+		  AND (p.published_at, p.id) < ($1, $2)
+		ORDER BY p.published_at DESC, p.id DESC LIMIT 31`, publicationCursorTime, publicationCursorID).Scan(&planJSON); err != nil {
+		t.Fatalf("explain restricted admin publication keyset page: %v", err)
+	}
+	if err := json.Unmarshal(planJSON, &plan); err != nil {
+		t.Fatalf("decode restricted admin publication plan: %v", err)
+	}
+	for _, relation := range []string{"creation_team_publications", "creation_media_assets"} {
+		if hasSequentialRelationScan(plan, relation) {
+			t.Fatalf("10k restricted admin publication page used sequential %s scan: %s", relation, planJSON)
+		}
+	}
+	if !planUsesIndex(plan, "creation_team_publications_nonwithdrawn_created_idx") {
+		t.Fatalf("10k restricted admin page missed nonwithdrawn index: %s", planJSON)
+	}
 	for _, index := range []string{
 		"creation_media_assets_task_slot_unique",
 		"creation_media_assets_owner_idx",
@@ -472,6 +522,7 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 		"creation_team_publications_publisher_fk_idx",
 		"creation_team_publications_asset_fk_idx",
 		"creation_team_publications_active_asset_idx",
+		"creation_team_publications_nonwithdrawn_created_idx",
 		"creation_team_publication_references_blob_key_idx",
 		"creation_publication_similar_operations_publication_fk_idx",
 		"creation_publication_similar_operations_session_fk_idx",

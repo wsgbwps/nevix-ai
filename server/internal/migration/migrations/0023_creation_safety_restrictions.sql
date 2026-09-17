@@ -51,6 +51,10 @@ CREATE INDEX creation_media_assets_visible_owner_media_created_idx
   WHERE deleted_at IS NULL
     AND (restricted_at IS NULL OR restriction_released_at IS NOT NULL);
 
+CREATE INDEX creation_team_publications_nonwithdrawn_created_idx
+  ON public.creation_team_publications (published_at DESC, id DESC)
+  WHERE withdrawn_at IS NULL;
+
 GRANT UPDATE (restricted_at, restriction_released_at)
   ON public.creation_media_assets TO identity_app;
 GRANT UPDATE (direct_restricted_at, direct_restriction_released_at)

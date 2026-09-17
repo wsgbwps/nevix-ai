@@ -1113,7 +1113,19 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
       }
     ]
   }
-  await mount(<CreationWorkbenchStory taskScript={{ tasks: [failedTask, retryableTask] }} />)
+  const cancelledSlotTask: ScriptedTask = {
+    ...failedTask,
+    id: 'dddddddd-0000-4000-8000-00000000cafe',
+    slots: [
+      { index: 0, status: 'succeeded', failureReason: null, result: null },
+      { index: 1, status: 'cancelled', failureReason: null, result: null }
+    ]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [failedTask, retryableTask, cancelledSlotTask] }}
+    />
+  )
   await selectFirstSession(page)
 
   // States render inside the slots — no separate banner.
@@ -1137,9 +1149,12 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
   await expect(page.getByTestId(`task-retry-${failedTask.id}`)).toHaveCount(0)
   await page.getByTestId(`task-more-${retryableTask.id}`).click()
   await page.getByTestId(`task-retry-${retryableTask.id}`).click()
+  await page.getByTestId(`task-more-${cancelledSlotTask.id}`).click()
+  await page.getByTestId(`task-retry-${cancelledSlotTask.id}`).click()
   const retries = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
-  expect(retries).toHaveLength(1)
+  expect(retries).toHaveLength(2)
   expect(retries[0].taskId).toBe(retryableTask.id)
+  expect(retries[1].taskId).toBe(cancelledSlotTask.id)
 })
 
 test('a task card keeps detail facts paired with the detail change criterion', async ({

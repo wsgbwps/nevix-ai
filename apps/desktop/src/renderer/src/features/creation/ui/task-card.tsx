@@ -115,7 +115,7 @@ export function TaskCard({
     !indeterminate &&
     snapshot.status !== 'succeeded' &&
     snapshot.status !== 'cancelled' &&
-    hasOnlyRetryableIncompleteSlots(detail)
+    hasNoNonRetryableIncompleteSlots(detail)
   // The composer is a fixed surface that owns the live draft; re-editing a
   // task means editing that draft and regenerating.
   const focusComposerPrompt = (): void => {
@@ -596,8 +596,8 @@ function taskResultMediaKey(taskId: string, slot: GenerationSlotView): string {
   return `result:${taskId}:${slot.index}:${slot.result?.checksumSha256 ?? ''}`
 }
 
-function hasOnlyRetryableIncompleteSlots(detail: GenerationTaskDetail | undefined): boolean {
+function hasNoNonRetryableIncompleteSlots(detail: GenerationTaskDetail | undefined): boolean {
   if (!detail) return false
   const incomplete = detail.slots.filter((slot) => slot.status !== 'succeeded')
-  return incomplete.length > 0 && incomplete.every((slot) => slot.retryable === true)
+  return incomplete.length > 0 && incomplete.every((slot) => slot.retryable !== false)
 }

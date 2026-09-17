@@ -755,10 +755,20 @@ export function InspirationPage({
                 ? ports.restrictPublication(targetId)
                 : ports.releasePublication(targetId)
           void pending.then(async (result) => {
-            if (!sameItem(selectedRef.current, actionItem)) return
             if (result.outcome !== 'succeeded') {
+              if (!sameItem(selectedRef.current, actionItem)) return
               setActionStatus('failed')
               setActionMessage(t('inspiration.restriction.failed'))
+              return
+            }
+            list.refresh()
+            if (!sameItem(selectedRef.current, actionItem)) return
+            if (
+              target === 'publication' &&
+              operation === 'release' &&
+              actionItem.type === 'publication'
+            ) {
+              close()
               return
             }
             setDetail((current) => {
@@ -770,7 +780,6 @@ export function InspirationPage({
             })
             setActionStatus('succeeded')
             setActionMessage(t(`inspiration.restriction.${target}.${operation}Succeeded`))
-            list.refresh()
             const refreshed = await ports.getInspirationDetail(actionItem)
             if (refreshed.outcome === 'succeeded' && sameItem(selectedRef.current, actionItem)) {
               setDetail(refreshed.value)

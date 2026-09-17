@@ -91,14 +91,19 @@ test('a completed safety command cannot overwrite a newly opened detail', async 
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
   await expect(dialog).toContainText('A precise editorial launch scene')
+  const listCallsBeforeCompletion =
+    (await page.evaluate(() => window.__inspirationTest?.listCalls().length)) ?? 0
 
   await page.evaluate(() => window.__inspirationTest?.releaseSafety())
 
   await expect(dialog).toContainText('A precise editorial launch scene')
   await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toHaveCount(0)
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.listCalls().length ?? 0))
+    .toBeGreaterThan(listCallsBeforeCompletion)
 })
 
-test('an admin can release and re-restrict a deleted-source publication without losing it', async ({
+test('releasing a deleted-source publication removes its historical detail', async ({
   mount,
   page
 }) => {
@@ -109,13 +114,8 @@ test('an admin can release and re-restrict a deleted-source publication without 
 
   page.once('dialog', (confirmation) => void confirmation.accept())
   await restriction.getByRole('button', { name: 'Release publication restriction' }).click()
-  await expect(restriction).toContainText('Released')
-  await expect(page.getByTestId('inspiration-card')).toHaveCount(1)
-
-  page.once('dialog', (confirmation) => void confirmation.accept())
-  await restriction.getByRole('button', { name: 'Restrict publication' }).click()
-  await expect(restriction).toContainText('Active')
-  await expect(page.getByTestId('inspiration-card')).toHaveCount(1)
+  await expect(dialog).toBeHidden()
+  await expect(page.getByTestId('inspiration-card')).toHaveCount(0)
 })
 
 test('filters use the single projection and distinguish search-no-results', async ({

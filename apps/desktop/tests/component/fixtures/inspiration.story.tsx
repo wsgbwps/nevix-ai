@@ -201,7 +201,11 @@ function createHarness(state: InspirationStoryState): {
       listInspiration: async (request) => {
         listCalls.push(request)
         if (state === 'failed') return { outcome: 'network-failure' }
-        const filtered = request.search === 'none' ? [] : items
+        const filtered =
+          request.search === 'none' ||
+          (state === 'admin-deleted-publication' && publicationReleased)
+            ? []
+            : items
         return { outcome: 'succeeded', value: { items: filtered, nextCursor: null } }
       },
       getInspirationDetail: async (item) =>

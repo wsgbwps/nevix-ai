@@ -256,7 +256,10 @@ func (r *TeamPublicationRepository) listPublications(ctx context.Context, filter
 	args := []any{}
 	conditions := []string{"p.withdrawn_at IS NULL"}
 	if deletedSourceOnly {
-		conditions = append(conditions, "a.deleted_at IS NOT NULL")
+		conditions = append(conditions,
+			"a.deleted_at IS NOT NULL",
+			"(p.restricted_at IS NULL OR (p.direct_restricted_at IS NOT NULL AND p.direct_restriction_released_at IS NULL))",
+		)
 	} else {
 		conditions = append(conditions, "p.restricted_at IS NULL", "(a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)")
 	}
@@ -348,8 +351,10 @@ func (r *TeamPublicationRepository) GetPublication(ctx context.Context, id domai
 		FROM creation_team_publications p
 		JOIN creation_media_assets a ON a.id = p.source_asset_id
 		WHERE p.id = $1 AND p.withdrawn_at IS NULL
-		  AND ($2 OR (p.restricted_at IS NULL
-		    AND (a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)))`, id, admin))
+		  AND (($2 AND p.direct_restricted_at IS NOT NULL
+		          AND p.direct_restriction_released_at IS NULL)
+		    OR (p.restricted_at IS NULL
+		      AND (a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)))`, id, admin))
 	if err != nil {
 		return domain.PublicationDetail{}, err
 	}
@@ -635,8 +640,10 @@ func (r *TeamPublicationRepository) GetPublicationReference(ctx context.Context,
 		JOIN creation_media_assets asset ON asset.id = publication.source_asset_id
 		WHERE publication.id = $1 AND reference.id = $2
 		  AND publication.withdrawn_at IS NULL
-		  AND ($3 OR (publication.restricted_at IS NULL
-		    AND (asset.restricted_at IS NULL OR asset.restriction_released_at IS NOT NULL)))`, publicationID, referenceID, admin))
+		  AND (($3 AND publication.direct_restricted_at IS NOT NULL
+		          AND publication.direct_restriction_released_at IS NULL)
+		    OR (publication.restricted_at IS NULL
+		      AND (asset.restricted_at IS NULL OR asset.restriction_released_at IS NOT NULL)))`, publicationID, referenceID, admin))
 }
 
 func (r *TeamPublicationRepository) GetAdminAssetReference(ctx context.Context, assetID, referenceID domain.UUID) (domain.PublicationReference, error) {
