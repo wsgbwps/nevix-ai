@@ -1134,7 +1134,6 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
   await expect(failedSlot).toContainText('Do not retry unchanged')
   await expect(failedSlot).toContainText('NVX-dddddddd-0000-4000-8000-00000000face-02')
 
-  // A non-retryable provider-route failure must not offer an identical retry.
   await expect(page.getByTestId(`task-retry-${failedTask.id}`)).toHaveCount(0)
   await page.getByTestId(`task-more-${retryableTask.id}`).click()
   await page.getByTestId(`task-retry-${retryableTask.id}`).click()

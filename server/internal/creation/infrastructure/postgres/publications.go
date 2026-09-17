@@ -717,7 +717,7 @@ func (r *TeamPublicationRepository) ReleaseAsset(ctx context.Context, tx domain.
 }
 
 func (r *TeamPublicationRepository) RestrictPublication(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (domain.TeamPublication, bool, error) {
-	_, assetActive, directAt, directReleasedAt, err := r.lockPublicationRestriction(ctx, tx, id)
+	assetActive, directAt, directReleasedAt, err := r.lockPublicationRestriction(ctx, tx, id)
 	if err != nil {
 		return domain.TeamPublication{}, false, err
 	}
@@ -739,7 +739,7 @@ func (r *TeamPublicationRepository) RestrictPublication(ctx context.Context, tx 
 }
 
 func (r *TeamPublicationRepository) ReleasePublication(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (domain.TeamPublication, bool, error) {
-	_, assetActive, directAt, directReleasedAt, err := r.lockPublicationRestriction(ctx, tx, id)
+	assetActive, directAt, directReleasedAt, err := r.lockPublicationRestriction(ctx, tx, id)
 	if err != nil {
 		return domain.TeamPublication{}, false, err
 	}
@@ -756,14 +756,14 @@ func (r *TeamPublicationRepository) ReleasePublication(ctx context.Context, tx d
 	return publication, changed, err
 }
 
-func (r *TeamPublicationRepository) lockPublicationRestriction(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (domain.UUID, bool, *time.Time, *time.Time, error) {
+func (r *TeamPublicationRepository) lockPublicationRestriction(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (bool, *time.Time, *time.Time, error) {
 	var assetID domain.UUID
 	if err := tx.QueryRow(ctx, `
 		SELECT source_asset_id FROM creation_team_publications
 		WHERE id = $1 AND withdrawn_at IS NULL`, id).Scan(&assetID); errors.Is(err, pgx.ErrNoRows) {
-		return domain.UUID{}, false, nil, nil, domain.ErrPublicationNotFound
+		return false, nil, nil, domain.ErrPublicationNotFound
 	} else if err != nil {
-		return domain.UUID{}, false, nil, nil, fmt.Errorf("creation: resolve publication restriction asset: %w", err)
+		return false, nil, nil, fmt.Errorf("creation: resolve publication restriction asset: %w", err)
 	}
 	var assetActive bool
 	if err := tx.QueryRow(ctx, `
@@ -771,7 +771,7 @@ func (r *TeamPublicationRepository) lockPublicationRestriction(ctx context.Conte
 		FROM creation_media_assets
 		WHERE id = $1
 		FOR UPDATE`, assetID).Scan(&assetActive); err != nil {
-		return domain.UUID{}, false, nil, nil, fmt.Errorf("creation: lock publication restriction asset: %w", err)
+		return false, nil, nil, fmt.Errorf("creation: lock publication restriction asset: %w", err)
 	}
 	var directAt, directReleasedAt *time.Time
 	if err := tx.QueryRow(ctx, `
@@ -779,11 +779,11 @@ func (r *TeamPublicationRepository) lockPublicationRestriction(ctx context.Conte
 		FROM creation_team_publications
 		WHERE id = $1 AND withdrawn_at IS NULL
 		FOR UPDATE`, id).Scan(&directAt, &directReleasedAt); errors.Is(err, pgx.ErrNoRows) {
-		return domain.UUID{}, false, nil, nil, domain.ErrPublicationNotFound
+		return false, nil, nil, domain.ErrPublicationNotFound
 	} else if err != nil {
-		return domain.UUID{}, false, nil, nil, fmt.Errorf("creation: lock publication restriction: %w", err)
+		return false, nil, nil, fmt.Errorf("creation: lock publication restriction: %w", err)
 	}
-	return assetID, assetActive, directAt, directReleasedAt, nil
+	return assetActive, directAt, directReleasedAt, nil
 }
 
 func (r *TeamPublicationRepository) getPublicationRestriction(ctx context.Context, tx domain.TxExecutor, id domain.UUID, assetActive bool) (domain.TeamPublication, error) {
