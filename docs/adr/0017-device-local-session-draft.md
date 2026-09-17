@@ -8,6 +8,8 @@
 
 2026-09-07 修订：本地草稿记录的解析对比记录更新的 Generation Parameter 字段宽容读取为未设置（null），已存字段类型不符仍整条拒绝——新增生成参数不再使已存草稿静默失效。字段清单及其派生架构见 [Desktop ADR-0006](../../apps/desktop/docs/adr/0006-generation-parameter-field-inventory.md)。
 
+2026-09-17 修订：Team Publication 的 Create Similar 先由 Server 以幂等命令原子创建新的私有 Creation Session 与 User-owned Reference Material 记录，再由 Desktop 把返回的重映射生成意图写入设备本地 Draft；服务端仍不保存可编辑草稿。
+
 ## 背景
 
 V1 实施中，Draft（可编辑生成意图）承担了两个角色：随写随存（800ms 防抖 PUT `/creation/sessions/{id}/draft` → `creation_sessions.draft_*` 列与 `creation_session_draft_references` 表，迁移 0007）与提交锚点（submitTask 只携带 `idempotency_key + draft_revision`，Server 在准入事务复验 revision 并冻结自己存储的草稿）。#186 让任务卡片改用任务自己的冻结 Generation Specification 后，服务端草稿在 UI 上的消费者清零，剩余存在理由只有「跨设备/重启恢复」与「提交协议」两条。而为这两条付出的成本是 Creation Feature 中最复杂的 seam：自动保存管线与 SaveStatus/retrySave UI、saving/failed 阻塞提交、revision gating、多设备草稿竞态靠单行 UPDATE 串行化。产品对标（即梦网页端）表明输入草稿的持续持久化并非用户预期。
@@ -20,6 +22,7 @@ V1 实施中，Draft（可编辑生成意图）承担了两个角色：随写随
 - **服务端不再保存可编辑草稿**：删除 PUT draft 端点、session detail 响应中的 `draft` 字段、`draft_revision` 请求字段及其专属 409 码（`draft_revision_conflict` / `draft_not_ready` / `draft_capability_stale`）；新迁移删除 0007 建立的草稿列与引用绑定表，与停写同一发布原子完成——on-prem 桌面与服务端同装同发（[ADR-0013](0013-onprem-single-tenant-delivery.md)），无外部契约消费者。
 - **submitTask 请求体改为完整生成意图**（prompt、参数、引用绑定 + `idempotency_key`）：Server 在准入事务内校验能力一致性与 role/kind 兼容（原 SaveDraft 事务校验移入）并冻结为 Generation Specification；幂等仍由 `idempotency_key` 承担。
 - **素材时机维持现状**：已有会话附加即上传（素材是会话资产，选择即落服务端），新创作推迟到会话物化时上传；附件上传失败的展示移入 reference deck 内联提示（不再借保存状态 chip）。
+- **Create Similar 只物化服务端事实**：从有效 Team Publication 做同款时，Server 以 Desktop idempotency key 原子创建 Session 和归当前 User 的素材记录，并返回已重映射素材 identity 的生成意图；Desktop 将意图保存为本地 Draft。若本地保存失败，同 key 重试返回既有结果，不增加服务端 Draft、补偿事务或重复素材。
 
 ## Considered Options
 

@@ -33,6 +33,7 @@ ADR-0008 以多租户 Organization 与 Supabase Auth（anon/authenticated JWT）
 - 初始化后的建号双通道：Admin 建号 + 初始密码，`must_change_password` 强制首登改密；或凭加入码自注册——密码本人自设，故不设 `must_change_password`，落地即 active Member。普通注册永远不会因“恰好是首个请求”隐式升级为 Admin。
 - 加入码（修订）：Admin 签发的注册码，多枚并存（活跃上限 3）、可吊销、可复用；明文存于 `join_codes` 表——能读库者本可直接写 `users`，明文不降低真实安全性；无活跃码即自注册关闭，不设独立注册开关；email 冲突答 409，席位闸门与管理员建号同一语义（ADR-0013：只阻新建号）。
 - 离职 = 停用（disable）：吊销全部 Session、断 SSE；删除仅限「建错且从未登录」的号。
+- 停用不级联撤回该 User 已创建的有效 Team Publication；Publication 保留发布时 display name 快照，后续由 Admin 撤回或限制。
 - 最后一个活跃 admin 不可自降级、不可自停用。
 - 密码策略：仅最小长度；登录与注册失败限速均用进程内计数（单实例、200–300 用户画像内成立）。
 
@@ -69,7 +70,7 @@ ADR-0008 以多租户 Organization 与 Supabase Auth（anon/authenticated JWT）
 
 - 用户目录：所有活跃用户可见全部活跃用户（email + display_name）。
 - Audit Log：admin-only。
-- 创作数据（2026-08-26 修订，取代「全体活跃用户可读」）：Creation Session、Reference Material、Generation Task、Generation Specification、Generation Result 与 Result Slot 对创建者私有，成功 Media Asset 与有效 Team Publication 对全体 active User 可见；Admin 治理不是读取私有内容的旁路。权威模型与聚合级规则见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
+- 创作数据（2026-09-17 修订）：Creation Session、Generation Task、Generation Result 与 Result Slot 只允许创建者直接读取；Media Asset 允许创建者与 Admin 读取，只有有效 Team Publication 对全体 active User 可见。Admin 可经成功 Media Asset 查看或下载成品，并查看该成品冻结的 Generation Specification 与实际使用 Reference Material 的短时预览；不能下载他人素材原文件、浏览整个 Session 或任意 Task，也不能复用他人未发布作品。权威模型与聚合级规则见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。
 - SSE hub 只推订阅者自己的事件。
 
 ### 写事务纪律（延续 ADR-0008）

@@ -18,6 +18,8 @@
 
 2026-09-15 修订：Reference Material 的 Composer 生命周期与冻结 TaskCard 展示生命周期分离。提交准入原子持久化 Generation Task 对素材的保留关系；从 Composer 移除后不再列表或参与新任务，但同一 Creator 的既有任务仍可凭冻结 material id 重新获得短时缩略图 URL。精确对象只在素材已移除且最后一个任务保留关系结束后进入既有持久 cleanup worker。
 
+2026-09-17 修订：Media Asset 改为创建者与 Admin 可读，只有有效 Team Publication 对全体 active User 可读；Admin 通过 Inspiration Page 获得成品级窄读取能力，可查看全体尚未逻辑删除的成功 Media Asset（含受限成品）及每个成品实际使用的 Generation Specification 与 Reference Material，但不能据此浏览整个 Creation Session 或复用未发布作品。Team Publication 与 Create Similar 以不同 User-owned Reference Material 记录共享同一不可变存储对象，撤回只阻止新的复用。
+
 ## 背景
 
 AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 decision tickets 与多份 ADR 中；旧票建立于 Organization、Supabase/RLS、Desktop 直连数据面等前提之上。#93 清空全部决策前沿并取代早期假设，#150 把最终边界收敛为单一规格。若不在架构文档中固化，实施 agent 容易复活已被取代的设计。本 ADR 与 [ADR-0012](0012-unified-ai-creation-owner.md)（owner 统一）、[ADR-0014](0014-go-sole-trusted-data-plane.md)（数据面）、[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)（用户系统与授权）互补，各自保持单一权威说明。
@@ -30,7 +32,7 @@ AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 de
 
 - **Organization、Membership、Owner**：多组织概念已随单租户私有化移除（[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)）；发布词汇使用 Team Publication，角色只有 Admin/Member。
 - **Supabase（Auth/RLS/Data client/Storage Policy）、Supabase Broadcast**：Supabase 整体退场（[ADR-0013](0013-onprem-single-tenant-delivery.md)、[ADR-0014](0014-go-sole-trusted-data-plane.md)），授权在 Go 层，推送是 SSE。
-- **通用 Storage Grant / 无约束预签名直连**：仍然退场。当前只保留三条由 Go 授权的窄能力：Desktop Creator 对一个随机 key 的限时 Reference Material PUT、外部 AI Provider 对一个 Provider Transfer Object 的限时 GET，以及当前 Creator Renderer 对一个 Reference Material 精确 key 的限时缩略图/预览 GET；三者都不暴露 AK/SK、List、任意 key 或跨对象能力（[ADR-0014](0014-go-sole-trusted-data-plane.md)）。
+- **通用 Storage Grant / 无约束预签名直连**：仍然退场。当前只保留三条由 Go 授权的窄能力：Desktop Creator 对一个随机 key 的限时 Reference Material PUT、外部 AI Provider 对一个 Provider Transfer Object 的限时 GET，以及当前已授权 Renderer 对一个 Reference Material 精确 key 的限时缩略图/预览 GET；三者都不暴露 AK/SK、List、任意 key 或跨对象能力（[ADR-0014](0014-go-sole-trusted-data-plane.md)）。
 - **独立 creation 数据库角色**：不存在按域拆分的第二执行角色；Creation 写事务直接以最小权限 `identity_app` LOGIN 角色运行（见下）。
 - **Deployment Administrator**：不存在产品内的部署管理员主体；部署侧责任（认领、证书、备份）由部署方经 Instance Claim 与交付资产承担，治理主体只有 Admin/Member。
 - **外部 Secret Store 前置要求**：Creation 外部连接凭据使用本地 AEAD（见下），不依赖 Vault 等外部服务。
@@ -39,9 +41,25 @@ AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 de
 
 ### 可见性模型（权威）
 
-- **creator-private**：Creation Session、Reference Material、Generation Task、Generation Specification、Generation Result 与 Result Slot 只允许创建者读取；查询层和命令层都执行该规则，Admin 治理命令不返回私有内容——Admin 只能查看治理所需的 ID、创建者、状态、时间、支持编号和限制事实，不能读取 prompt、参考素材、未发布媒体或供应商原始 payload。
-- **team-readable**：成功 Media Asset 与有效 Team Publication 对全体 active User 可见；Asset 创建者或 Admin 可删除 Asset，只有 Asset 创建者可首次发布，Publication 发布者或 Admin 可撤回。
+- **creator-private**：Creation Session、Generation Task、Generation Result 与 Result Slot 只允许创建者直接读取；Reference Material 与 Generation Specification 默认遵循同一规则。Admin 没有 Creation Session 或任意 Task 的浏览旁路，但可通过一个成功 Media Asset 精确读取该成品冻结的 Generation Specification 与其中实际引用的 Reference Material，包括顺序、角色和短时媒体预览；该窄读取不暴露同 Session 的其他素材、任务或供应商原始 payload。
+- **asset-readable**：Media Asset 默认只允许创建者与 Admin 读取。Admin 的 Inspiration 投影列出所有尚未逻辑删除的成功 Asset，包括未发布或处于 active 安全限制的成品；失败 Result Slot 没有 Media Asset，不进入该投影。Creator 可查看、下载、删除、直接复用自己的生成来源或发布；Admin 可查看、下载、删除或安全限制，但读取未发布 Asset 不改变发布状态，也不能据此发布或 Create Similar。
+- **team-readable**：只有有效 Team Publication 对全体 active User 可见。只有来源 Asset 创建者可首次发布；Publication 发布者或 Admin 可撤回，撤回不恢复为有效状态。
 - 所有 Creation route 在 Server 显式挂 `RequireActiveUser` 或 `RequireAdmin`；Desktop 可见性门控不是授权真相。
+
+### Team Publication 与 Create Similar
+
+- 发布不提供第二套内容编辑器或素材挑选器：命令固定保存目标 Media Asset、其冻结 Generation Specification，以及该 Specification 实际使用的全部 Reference Material 顺序、角色和声明版本。素材上传时已有的权利声明继续适用；Desktop 只在提交前展示将向 Team 开放的确认摘要。
+- 每个 Media Asset 最多一个有效 Publication。重复发布以 Desktop idempotency key 返回当前有效 Publication；撤回使其永久失效，再次发布创建新的 identity。Inspiration 只把当前有效者标为“已发布”，撤回历史不形成产品 UI。
+- Publication 固定发布时的 creator identity 与 display name 快照。发布者账号停用只终止其 Session 与新操作能力，不改变仍有效 Publication；Admin 继续拥有撤回和安全限制能力。
+- Create Similar 以一个 Desktop idempotency key 在单个 Creation write transaction 中复验 Publication 仍有效，并为当前 User 原子创建新的私有 Creation Session 与 User-owned Reference Material 记录；新记录引用快照中的同一不可变对象，不复制文件。响应返回已重映射素材 identity 的生成意图，Desktop 再把它写入该设备的本地 Draft；本地保存失败后的同 key 重试返回同一 Session、素材和意图，不重复创建。
+- Publication 保存的模型或参数退出当前 Capability Manifest 时，Create Similar 仍返回原值并明确标记不可提交；User 必须改成当前有效值后才能提交 Generation Task。Server 与 Desktop 都不得静默替换模型、参数或参考素材。
+- 有效 Publication 允许 active User 查看与下载发布成品、查看共享生成信息与素材预览并 Create Similar；Reference Material 原文件仍只允许其记录 owner 下载。Admin 可按同一路径复用有效 Publication，也可撤回或安全限制，但不能从未发布 Asset 复用。
+- 删除来源 Media Asset 只把 Asset 从 Creator 的 Asset Library 与 Admin 的 Asset 投影移除，不撤回或改变仍有效的 Publication；删除确认必须说明这一点。有效 Publication 继续保留媒体对象并提供查看、下载和 Create Similar，直到发布者或 Admin 显式撤回。
+
+### 安全限制
+
+- Admin 对 Media Asset 施加 active 限制时，普通读取与下载、发布、新的 Create Similar 立即停止，全部关联有效 Publication 进入终止状态；Admin 仍可在 Inspiration 中查看受限成品、冻结 Specification 与实际使用素材的预览，以完成判断和解除。
+- released 不恢复任何旧 Publication；Creator 如需再次共享，必须创建新的 Publication identity。限制不追溯撤销此前已由 Create Similar 创建的 User-owned 素材记录、本地 Draft 或已准入 Generation Task，避免建立跨 Session 级联撤销图。
 
 ### 认证与授权注入
 
@@ -63,15 +81,17 @@ Session 认证与 Reauthentication Proof 归 Identity（[ADR-0015](0015-single-t
 - Renderer 只选择 `File` 并展示进度、取消与结果。专用 Preload 桥使用 `webUtils.getPathForFile(file)` 取得真实磁盘路径，经窄类型 IPC 交给 Main 且不回传 Renderer；完整文件不得转成 ArrayBuffer 经 IPC。Main 使用当前 Session 从 Go 取得 Upload 授权和 active-user capability，验证可信顶层 Renderer、常规磁盘文件、HTTPS、Go 返回的精确 provider origin、PUT 与闭集签名请求头后，以 Electron `ClientRequest` 从磁盘流式上传并拒绝重定向。Main 不接受 Renderer 指定的任意路径、URL、方法或额外请求头；V1 不增加 Utility Process、自定义 protocol、multipart 或断点续传。
 - finalize 先以短事务 CAS `pending -> verifying` 并取得 verification lease，再在事务外 HEAD 与完整有界 GET，复用内容 sniff、媒体 probe、实际 kind 限额和 SHA-256；最后在 verified write transaction 中原子创建 Reference Material 并标记 `finalized`。状态仅 `pending|verifying|finalized|terminal`；重复 finalize 返回同一素材，并发验证返回可重试安全码。
 - image/audio/video 上限继续为 10/50/200 MiB。abort、过期、HEAD mismatch 与确定性媒体拒绝进入 terminal 并立即 best-effort DeleteObject；瞬时外部故障在 finalize window 内回到 pending。持久 cleanup worker 只按数据库记录的精确 key、verification lease 与 next-attempt 重试，不 List bucket；对象从一开始位于 `reference-materials/`，不 Copy，customer lifecycle 只作用于 `provider-transfer/`。
-- signed PUT URL 只可在当前 Creator 对应的 Electron Main 上传操作内存中存在，Renderer 不接收；Provider Transfer Object GET URL 只可在 Go 到 AI Provider 的必要调用中存在；2026-09-14 起显示类 GET URL（缩略图与预览大图/媒体）可在当前 Creator 的 Renderer 内存与 `<img>/<video>/<audio>` 加载请求中存在（Go 归属校验后签发、单一精确 key、约 10 分钟、图片带 provider 端缩小，元素 error 后重新授权）。三者均不进入本地持久化、普通日志、Audit Log、错误、剪贴板或遥测。Reference Material 本体下载仍经 Go 授权出口。
+- signed PUT URL 只可在当前 Creator 对应的 Electron Main 上传操作内存中存在，Renderer 不接收；Provider Transfer Object GET URL 只可在 Go 到 AI Provider 的必要调用中存在；显示类 GET URL（缩略图与预览大图/媒体）可在当前已授权 Renderer 内存与 `<img>/<video>/<audio>` 加载请求中存在（Go 按素材 owner、Admin 的精确成品引用或有效 Team Publication 重新授权后签发，单一精确 key、约 10 分钟、图片带 provider 端缩小，元素 error 后重新授权）。三者均不进入本地持久化、普通日志、Audit Log、错误、剪贴板或遥测。Reference Material 本体下载仍经 Go 授权出口。
 
-### Reference Material 与历史任务保留
+### Reference Material、共享对象与历史任务保留
 
 - Generation Task 准入在创建不可变 Generation Specification 的同一短事务内，为其中每个素材 identity 写入权威 task-to-material 保留关系；不在读取时扫描 JSONB 推断对象生命周期，也不复制或持久化 signed URL。
 - 既有任务的 Provider Reference Preparation 按其自身的保留关系读取冻结素材事实，不依赖 Composer 列表或 Session 活跃状态；移除素材不能撤销已准入任务的输入。
-- `DELETE /creation/materials/{materialID}` 的业务语义是从 Composer 移除：会话素材列表与后续任务准入只接受未移除素材。没有任务保留关系时，移除沿用现有精确 key 清理；存在保留关系时，素材事实和 blob 保持 creator-private，不调度或执行物理清理。
-- 现有 material-id thumbnail seam 可授权两类图片：仍在 Composer 的活跃素材，或由同一 Creator 的至少一个 Generation Task 保留的已移除素材。后者只供冻结 TaskCard 展示重新签发约十分钟的 provider-resized URL；Preview 与素材本体下载仍只接受活跃素材，另一 User 与 Admin 均无旁路。
-- 物理清理的权威触发条件是“素材已从 Composer 移除，且任务保留关系为零”。删除最后一个保留任务时必须在同一数据库变更中把既有 finalized-upload cleanup fact 置为 due；cleanup worker 仍独占重试、确认和精确 key 删除。V1 没有 Generation Task 删除命令，因此被历史任务保留的对象与该不可变任务同寿；Creation Session 的逻辑删除不释放仍然存在的任务保留关系。
+- `DELETE /creation/materials/{materialID}` 的业务语义是从该 User 的 Composer 移除一条素材记录：会话素材列表与后续任务准入只接受未移除记录。删除记录不等于删除其不可变存储对象；其他 User-owned 记录、Generation Task 保留关系或有效 Team Publication 仍引用同一对象时，不调度物理清理。
+- material-id 显示 seam 可授权三类精确读取：当前 User 的活跃素材或其历史任务保留素材；Admin 经指定成功 Media Asset 查看该 Generation Specification 实际引用的素材；active User 查看有效 Team Publication 的素材快照。授权只覆盖被证明的记录和用途，不授予同 Session、同任务或同 object key 邻接内容的访问权。
+- 发布在同一事务中为实际使用的每个 Reference Material 固定不可变对象引用、顺序、角色与声明版本；Create Similar 在 Publication 仍有效时为当前 User 新建独立素材记录并引用相同对象，不复制文件。撤回立即阻止新的 Publication 读取和复用，但既有 User-owned 记录与任务保留关系继续授权和保留对象。
+- Reference Material 对象的物理清理条件是“没有任何 User-owned 素材记录、历史任务保留关系或有效 Team Publication 再引用该不可变对象”；Create Similar 已创建的素材记录与普通上传记录使用同一判断。触发变更必须在同一数据库事务中把精确对象 cleanup fact 置为 due，既有 cleanup worker 仍独占重试、确认和精确 key 删除；不建立通用 blob registry、跨业务引用计数服务，也不以单条素材记录的删除推断对象已失去全部引用。
+- Generation Result、Media Asset 与 Team Publication 复用同一个不可覆盖的结果对象，不复制成品文件。不可变 Generation Task Result 或有效 Publication 任一仍引用时都保留对象；逻辑删除 Asset 只删除其读取入口，不直接触发结果对象清理。
 
 ### Creation domain-local 写事务
 

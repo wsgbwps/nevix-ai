@@ -36,7 +36,7 @@ _Avoid_: Generation Domain, Image Generation Domain, Video Generation Domain, Me
 _Avoid_: Session, Generation Session, Workspace
 
 **Reference Material**:
-User 上传或导入、供 Generation Specification 引用的私有媒体记录；创建动作本身即确认上传者拥有必要权利，并固定当时适用的声明版本。
+User 上传或经有效 Team Publication 复用、供 Generation Specification 引用的媒体记录；记录归当前 User，复用不复制底层媒体内容。创建动作确认当前 User 拥有必要权利并固定声明版本；它默认由创建者私有，只能通过 Admin 的精确成品视图或有效 Team Publication 暴露其中明确引用的素材。
 _Avoid_: Upload, Attachment, Reference Asset
 
 **Generation Specification**:
@@ -52,7 +52,7 @@ Generation Task 拥有的结果值或结果视图，表达成功、部分成功�
 _Avoid_: Result Entity, Generated Asset
 
 **Media Asset**:
-每个成功生成输出形成的持久图片或视频；它是对 Deployment Instance 内全体 active User 可见的独立聚合，生命周期独立于 Creation Session 和 Generation Task。
+每个成功生成输出形成的持久图片或视频；它是独立于 Creation Session 和 Generation Task 的聚合，默认只允许创建者与 Admin 读取，其他 active User 只能通过有效 Team Publication 查看。
 _Avoid_: Static Asset, Generation Result, Output File
 
 **AI Provider Connection**:
@@ -79,18 +79,14 @@ _Avoid_: AI Provider Production Readiness, Runtime Readiness Evidence, AI Provid
 Generation Task 内记录的一次外部 AI 供应商执行实体，以所用 AI Provider Connection 和供应商作业标识区分；它由 Generation Task 拥有，不是独立聚合或 Module。
 _Avoid_: Generation Task, Provider Task, Outbox Job, Job
 
-**Official Selection**:
-由 Nevix 策展、在 Inspiration Page 中提供创作灵感和复用入口的官方模板集合；它与 Team Publication 的所有者和生命周期不同，不共享领域实体。
-_Avoid_: Official Feed, Inspiration Item
-
 **Discovery**:
-Inspiration Page 中展示当前 Team Publications、供同事获取灵感的 deployment-scoped feed；它是页面栏目而非实体、聚合或 Domain。
+Inspiration Page 的 deployment-scoped 读取视图：Member 只看到有效 Team Publication；Admin 还看到全体 User 尚未逻辑删除的成功 Media Asset、发布状态与安全限制状态，包括未发布或被限制的成品。有效 Publication 即使来源 Asset 已删除仍在两类视图中。Discovery 是按角色投影的页面内容，不是实体、聚合或 Domain。
 _Avoid_: Team Discovery, Team Works, Discovery Domain, Public Gallery
 
 **Team Publication**:
-User 向 Team 发布一次媒体作品形成的独立聚合，保存发布时媒体与可复用创作信息的不可变快照；来源 Media Asset 只用于追溯，其生命周期不改变仍有效的发布。它是 Discovery 展示的对象，不是 Media Asset 本身。
+User 向 Team 发布一次 Media Asset 形成的独立聚合，保存发布时媒体、发布者显示名、Generation Specification 与实际使用 Reference Material 的不可变可复用快照；来源与发布者账号只用于追溯，其后续生命周期不改变仍有效的发布。它控制普通成员对作品的可见性，不是 Media Asset 本身。
 _Avoid_: Organization Publication, Team Work, Published Asset, Discovery Item, Work
 
 **Create Similar**:
-从 Official Selection 或 Team Publication 取得可复用创作信息并进入新创作上下文的动作；Team Publication 来源只在发布有效时按值复制可编辑生成意图到新的私有 Creation Session，且来源关系仅表示“从这里开始创作”、不授予权限或绑定生命周期。它不是实体。
+从有效 Team Publication 取得 prompt、模型、生成参数和 Reference Material 并进入新创作上下文的动作；它为当前 User 创建私有记录，素材记录复用同一不可变存储对象而不复制文件。Publication 撤回会阻止新的复用，但不使已创建的记录失效；它不是实体。
 _Avoid_: Remix Entity, Clone Work

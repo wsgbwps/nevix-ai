@@ -13,7 +13,7 @@ Server 中 canonical owner 名为 `creation`、与 Desktop AI Creation Domain �
 _Avoid_: Video Generation Module, Image Generation Module, Provider Module, videogen
 
 **Reference Material（参考素材）**:
-Creator 上传并确认权利、经验证后供 Generation Specification 引用的 creator-private 媒体；从 Composer 移除会停止列表与新任务准入，但被既有 Generation Task 保留的素材身份与精确对象继续服务其历史展示，最后一份保留关系结束后才进入清理。其业务事实与 Provider 传输产生的临时副本彼此独立。
+归当前 User 所有、供 Generation Specification 引用的 creator-private 媒体记录；它可由 Creator 上传并确认权利，也可从有效 Team Publication 创建而不复制已验证的不可变媒体对象。从 Composer 移除会停止列表与新任务准入；只有在其他 User 记录、Generation Task 或有效 Team Publication 都不再保留同一对象后才进入清理。它与 Provider 传输产生的临时副本彼此独立。
 _Avoid_: Permanent Object, Provider Asset, Upload
 
 **Reference Material Upload（参考素材上传）**:
@@ -59,11 +59,11 @@ _Avoid_: store, DAO, data layer
 _Avoid_: Account, Member（指角色时）, Profile
 
 **Admin**:
-两级角色中的管理者：建号、停用、重置密码、改登录 email、签发与吊销加入码、读 Audit Log；最后一个活跃 Admin 不可自降级或自停用。
+两级角色中的管理者：除账号治理与 Audit Log 外，可在 AI Creation 的 Inspiration Page 查看全体 User 尚未逻辑删除的成功 Media Asset、发布与安全限制状态，以及每个成品实际使用的 Generation Specification 和 Reference Material；最后一个活跃 Admin 不可自降级或自停用。
 _Avoid_: Owner, Administrator, Manager
 
 **Member**:
-两级角色中的基础使用者；可见全体活跃用户目录，业务数据按所属域的可见性模型受限（AI Creation 下仅成功 Media Asset 与有效 Team Publication 对 Team 可见，创作者私有内容不可见）。
+两级角色中的基础使用者；可见全体活跃用户目录，业务数据按所属域的可见性模型受限（AI Creation 下只读取自己的 Media Asset 与全 Team 的有效 Team Publication，不能查看或复用他人未发布作品）。
 _Avoid_: User, Regular User
 
 **Join Code（加入码）**:

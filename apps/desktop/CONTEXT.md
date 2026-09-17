@@ -68,19 +68,15 @@ _Avoid_: Generation Domain, Image Generation Domain, Video Generation Domain, Me
 _Avoid_: Storage Backend, S3 Connection, Desktop Storage Setting, Custom Endpoint
 
 **Inspiration Page**:
-AI Creation Domain 拥有的灵感浏览与复用页面，组合 Official Selection 与当前部署实例的 Discovery；它不是独立 Domain 或 app-owned 跨 Feature 聚合页。
+AI Creation Domain 拥有的灵感浏览与复用页面；Member 只浏览有效 Team Publication，Admin 还浏览全体 User 尚未逻辑删除的成功 Media Asset，并区分已发布、未发布与安全限制状态；来源 Asset 已删除的有效 Publication 仍展示。它没有 Official/Discovery 频道切换，也不是独立 Domain 或 app-owned 跨 Feature 聚合页。
 _Avoid_: Inspiration Domain, Discovery Domain
-
-**Official Template**:
-由 Nevix 策划、在 Inspiration Page 以真实生成的示例封面呈现的可复用创作起点；V1 包含简体中文名称、说明与提示词骨架，以及具备复用授权的参考素材、媒体类型、推荐模型和生成参数。"做同款"会把参考素材、提示词、推荐模型与参数填入统一的 Creation Workbench，User 可以保留、删除、替换或修改这些内容；供应商连接由部署实例固定，模型只能在该连接内经 Nevix 适配并验证、且支持当前媒体类型的列表中切换。Official Selection 只是这类模板的展示集合，不构成独立作品类型。
-_Avoid_: Official Featured Work, Channel Template, Static Example
 
 **Draft**:
 创作台中 User 正在编辑、仅留存于当前设备的生成意图；它随写随存于本设备，多设备互不相通，可以任意修改，尚未对任何生成结果负责，提交时才冻结为 Generation Specification。
 _Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 服务端草稿
 
 **Reference Material**:
-User 在创作台向当前会话上传、供生成引用的原始媒体（图片/视频/音频）；它属于会话、可从 Composer 独立移除，身份是素材 id。提交时冻结进 Generation Specification 的引用（素材 id、role、kind、claims 版本）拥有独立的历史展示生命周期：移除后不能进入新任务，但已有 TaskCard 仍可凭冻结身份重新授权缩略图，直至最后一个保留它的 Generation Task 生命周期结束。它与 Asset Library 的媒体资产分属两个生命阶段，V1 互不连通。
+User 向当前会话上传或经有效 Team Publication 复用、供生成引用的媒体记录（图片/视频/音频）；记录属于当前 User，做同款产生新的素材 id 但不复制底层媒体内容。它可从 Composer 独立移除；提交时冻结进 Generation Specification 的引用（素材 id、role、kind、claims 版本）拥有独立的历史展示生命周期，移除后不能进入新任务，但已有 TaskCard 仍可重新授权缩略图。它与 Asset Library 的 Media Asset 分属两个生命阶段。
 _Avoid_: 素材库, Attachment, 上传文件
 
 **Reference Material Upload（参考素材上传）**:
@@ -124,7 +120,7 @@ _Avoid_: surface, 视图状态, workspace state
 _Avoid_: scroll restore, 滚动位置记忆
 
 **Asset Library**:
-AI Creation Domain 拥有的媒体资产浏览与复用页面；媒体资产的独立生命周期不使该页面成为独立 Domain，不与 renderer 静态 assets 混同。
+AI Creation Domain 拥有的个人媒体资产浏览与复用页面，只展示当前 User 自己的生成历史与 Media Asset；媒体资产的独立生命周期不使该页面成为独立 Domain，不与 renderer 静态 assets 混同。
 _Avoid_: Media Asset Domain, Asset Workspace
 
 **Authentication Domain**:

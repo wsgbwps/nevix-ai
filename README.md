@@ -49,7 +49,7 @@ AI 创作使用跨 Desktop、Server 与 OpenAPI 的唯一 canonical owner `creat
 
 数据平面收敛为 Go server 唯一可信数据面：桌面端不持有数据库或外部连接凭据，登录、会话、用户、审计、文件授权/元数据/下载与推送都走 Go API，持久层为 PostgreSQL；Desktop 唯一的文件字节直连是 Electron Main 对 Go 授权的 creator-private Reference Material 单对象预签名 PUT，仍由 Go finalize。授权在 Go 层以两个路由 guard（`RequireActiveUser` / `RequireAdmin`）加 owning Module 行级检查落位。完整决策见 [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md)、[ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md) 与 [ADR-0016](docs/adr/0016-ai-creation-v1-trusted-seams.md)。
 
-AI Creation 的可见性基线是 creator-private：Creation Session、Reference Material、Generation Task 与其结果只对创建者可读，Admin 治理不是读取私有内容的旁路；只有成功 Media Asset 与有效 Team Publication 对全体 active User 可见。客户部署只接受 https（显式开发模式才允许 loopback http），官方公网 Compose 只由 Nginx 暴露 443。跨 Module 可信 seam（共享 Audit Append、Creation 写事务、认证注入、Session 吊销后断流、本地 AEAD）见 [ADR-0016](docs/adr/0016-ai-creation-v1-trusted-seams.md)，交付形状见 [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md)。
+AI Creation 的可见性基线是 creator-private：Creation Session、Generation Task 与其结果只对创建者直接可读；Media Asset 对创建者与 Admin 可读，Admin 只经成品获得该次冻结 Generation Specification 和实际使用 Reference Material 的窄视图；只有有效 Team Publication 对全体 active User 可见。客户部署只接受 https（显式开发模式才允许 loopback http），官方公网 Compose 只由 Nginx 暴露 443。跨 Module 可信 seam（共享 Audit Append、Creation 写事务、认证注入、Session 吊销后断流、本地 AEAD）见 [ADR-0016](docs/adr/0016-ai-creation-v1-trusted-seams.md)，交付形状见 [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md)。
 
 领域术语详见 `CONTEXT-MAP.md` → 各子 context 的 `CONTEXT.md`；Codex 的持久开发与评审规则详见 [`AGENTS.md`](AGENTS.md)。
 
