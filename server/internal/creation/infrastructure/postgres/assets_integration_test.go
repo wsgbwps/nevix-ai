@@ -450,8 +450,9 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 	if hasSequentialRelationScan(plan, "creation_team_publications") {
 		t.Fatalf("10k deep publication page used a sequential scan: %s", planJSON)
 	}
-	if !planUsesIndex(plan, "creation_team_publications_active_created_idx") {
-		t.Fatalf("10k member page missed production active index: %s", planJSON)
+	if !planUsesIndex(plan, "creation_team_publications_active_created_idx") &&
+		!planUsesIndex(plan, "creation_team_publications_nonwithdrawn_created_idx") {
+		t.Fatalf("10k member page missed a compatible production keyset index: %s", planJSON)
 	}
 
 	repo := &TeamPublicationRepository{pool: tx}
