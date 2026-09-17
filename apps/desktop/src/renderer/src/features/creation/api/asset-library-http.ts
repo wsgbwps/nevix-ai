@@ -12,6 +12,13 @@ export interface AssetCreatorView {
 export interface AssetCapabilities {
   readonly canDelete: boolean
   readonly canCreateSimilar: boolean
+  readonly canPublish: boolean
+}
+
+export interface AssetPublicationSummary {
+  readonly id: string
+  readonly publishedAt: string
+  readonly restricted: boolean
 }
 
 export interface MediaAssetView {
@@ -25,13 +32,14 @@ export interface MediaAssetView {
   readonly heightPx: number | null
   readonly durationMs: number | null
   readonly createdAt: string
+  readonly restricted: boolean
+  readonly publication: AssetPublicationSummary | null
   readonly capabilities: AssetCapabilities
 }
 
 export interface AssetPageRequest {
   readonly cursor?: string | null
   readonly mediaType?: AssetMediaType
-  readonly creator?: string
   readonly createdSince?: string
   readonly sort?: AssetSort
   readonly search?: string
@@ -44,6 +52,7 @@ export interface AssetPage {
 }
 
 export interface AssetGenerationSpecification {
+  readonly schemaVersion: number
   readonly mediaType: AssetMediaType
   readonly prompt: string
   readonly model: string
@@ -53,6 +62,27 @@ export interface AssetGenerationSpecification {
   readonly resolution: string | null
   readonly quantity: number
   readonly durationSeconds: number | null
+  readonly references: readonly AssetSpecificationReference[]
+}
+
+export interface AssetSpecificationReference {
+  readonly materialId: string
+  readonly role: 'reference' | 'first_frame' | 'last_frame' | 'omni'
+  readonly kind: 'image' | 'video' | 'audio'
+  readonly claimsVersion: number
+}
+
+export interface AssetReferenceSummary {
+  readonly id: string
+  readonly role: AssetSpecificationReference['role']
+  readonly kind: AssetSpecificationReference['kind']
+  readonly fileName: string
+  readonly mimeType: string
+  readonly byteSize: number
+  readonly widthPx: number | null
+  readonly heightPx: number | null
+  readonly durationMs: number | null
+  readonly claimsVersion: number
 }
 
 export interface AssetPrivateOrigin {
@@ -61,6 +91,7 @@ export interface AssetPrivateOrigin {
   readonly taskId: string
   readonly slotIndex: number
   readonly specification: AssetGenerationSpecification
+  readonly references: readonly AssetReferenceSummary[]
 }
 
 export interface AssetDetailView {
@@ -72,6 +103,7 @@ export interface AssetDetailView {
 export interface AssetContentOptions {
   readonly signal?: AbortSignal
   readonly purpose?: 'preview' | 'download'
+  readonly expectedByteSize?: number
 }
 
 export interface AssetLibraryPorts {
@@ -120,12 +152,15 @@ function parseCapabilities(value: unknown): AssetCapabilities | null {
   if (source === null) return null
   const canDelete = source['can_delete']
   const canCreateSimilar = source['can_create_similar']
-  return typeof canDelete === 'boolean' && typeof canCreateSimilar === 'boolean'
-    ? { canDelete, canCreateSimilar }
+  const canPublish = source['can_publish']
+  return typeof canDelete === 'boolean' &&
+    typeof canCreateSimilar === 'boolean' &&
+    typeof canPublish === 'boolean'
+    ? { canDelete, canCreateSimilar, canPublish }
     : null
 }
 
-function parseAsset(value: unknown): MediaAssetView | null {
+export function parseAsset(value: unknown): MediaAssetView | null {
   const id = stringField(value, 'id')
   const creatorValue = record(value)?.['creator']
   const creatorId = stringField(creatorValue, 'id')
@@ -138,6 +173,16 @@ function parseAsset(value: unknown): MediaAssetView | null {
   const heightPx = nullableNumberField(value, 'height_px')
   const durationMs = nullableNumberField(value, 'duration_ms')
   const createdAt = stringField(value, 'created_at')
+  const restricted = record(value)?.['restricted']
+  const publicationValue = record(value)?.['publication']
+  let publication: AssetPublicationSummary | null = null
+  if (publicationValue !== null && publicationValue !== undefined) {
+    const publicationId = stringField(publicationValue, 'id')
+    const publishedAt = stringField(publicationValue, 'published_at')
+    const publicationRestricted = record(publicationValue)?.['restricted']
+    if (!publicationId || !publishedAt || typeof publicationRestricted !== 'boolean') return null
+    publication = { id: publicationId, publishedAt, restricted: publicationRestricted }
+  }
   const capabilities = parseCapabilities(record(value)?.['capabilities'])
   if (
     !id ||
@@ -151,6 +196,7 @@ function parseAsset(value: unknown): MediaAssetView | null {
     heightPx === undefined ||
     durationMs === undefined ||
     !createdAt ||
+    typeof restricted !== 'boolean' ||
     capabilities === null
   ) {
     return null
@@ -166,6 +212,8 @@ function parseAsset(value: unknown): MediaAssetView | null {
     heightPx,
     durationMs,
     createdAt,
+    restricted,
+    publication,
     capabilities
   }
 }
@@ -183,7 +231,9 @@ function parsePage(value: unknown): AssetPage | null {
   return nextCursor === undefined ? null : { assets, nextCursor }
 }
 
-function parseSpecification(value: unknown): AssetGenerationSpecification | null {
+export function parseSpecification(value: unknown): AssetGenerationSpecification | null {
+  const source = record(value)
+  const schemaVersion = numberField(value, 'schema_version')
   const mediaType = stringField(value, 'media_type')
   const prompt = stringField(value, 'prompt')
   const model = stringField(value, 'model')
@@ -193,7 +243,30 @@ function parseSpecification(value: unknown): AssetGenerationSpecification | null
   const resolution = nullableStringField(value, 'resolution')
   const quantity = numberField(value, 'quantity')
   const durationSeconds = nullableNumberField(value, 'duration_seconds')
+  if (source === null || !Array.isArray(source['references'])) return null
+  const references: AssetSpecificationReference[] = []
+  for (const entry of source['references']) {
+    const materialId = stringField(entry, 'material_id')
+    const role = stringField(entry, 'role')
+    const kind = stringField(entry, 'kind')
+    const claimsVersion = numberField(entry, 'claims_version')
+    if (
+      !materialId ||
+      claimsVersion === null ||
+      !['reference', 'first_frame', 'last_frame', 'omni'].includes(role ?? '') ||
+      !['image', 'video', 'audio'].includes(kind ?? '')
+    ) {
+      return null
+    }
+    references.push({
+      materialId,
+      role: role as AssetSpecificationReference['role'],
+      kind: kind as AssetSpecificationReference['kind'],
+      claimsVersion
+    })
+  }
   if (
+    schemaVersion === null ||
     (mediaType !== 'image' && mediaType !== 'video') ||
     prompt === null ||
     model === null ||
@@ -207,6 +280,7 @@ function parseSpecification(value: unknown): AssetGenerationSpecification | null
     return null
   }
   return {
+    schemaVersion,
     mediaType,
     prompt,
     model,
@@ -215,7 +289,47 @@ function parseSpecification(value: unknown): AssetGenerationSpecification | null
     ratio,
     resolution,
     quantity,
-    durationSeconds
+    durationSeconds,
+    references
+  }
+}
+
+export function parseReference(value: unknown): AssetReferenceSummary | null {
+  const id = stringField(value, 'id')
+  const role = stringField(value, 'role')
+  const kind = stringField(value, 'kind')
+  const fileName = stringField(value, 'file_name')
+  const mimeType = stringField(value, 'mime_type')
+  const byteSize = numberField(value, 'byte_size')
+  const widthPx = nullableNumberField(value, 'width_px')
+  const heightPx = nullableNumberField(value, 'height_px')
+  const durationMs = nullableNumberField(value, 'duration_ms')
+  const claimsVersion = numberField(value, 'claims_version')
+  if (
+    !id ||
+    !fileName ||
+    !mimeType ||
+    byteSize === null ||
+    widthPx === undefined ||
+    heightPx === undefined ||
+    durationMs === undefined ||
+    claimsVersion === null ||
+    !['reference', 'first_frame', 'last_frame', 'omni'].includes(role ?? '') ||
+    !['image', 'video', 'audio'].includes(kind ?? '')
+  ) {
+    return null
+  }
+  return {
+    id,
+    role: role as AssetReferenceSummary['role'],
+    kind: kind as AssetReferenceSummary['kind'],
+    fileName,
+    mimeType,
+    byteSize,
+    widthPx,
+    heightPx,
+    durationMs,
+    claimsVersion
   }
 }
 
@@ -227,6 +341,13 @@ function parsePrivateOrigin(value: unknown): AssetPrivateOrigin | null {
   const taskId = stringField(value, 'task_id')
   const slotIndex = numberField(value, 'slot_index')
   const specification = parseSpecification(record(value)?.['specification'])
+  if (!Array.isArray(source['references'])) return null
+  const references: AssetReferenceSummary[] = []
+  for (const entry of source['references']) {
+    const parsed = parseReference(entry)
+    if (parsed === null) return null
+    references.push(parsed)
+  }
   if (
     !sessionId ||
     ('session_name' in source && sessionName === undefined) ||
@@ -236,7 +357,14 @@ function parsePrivateOrigin(value: unknown): AssetPrivateOrigin | null {
   ) {
     return null
   }
-  return { sessionId, sessionName: sessionName ?? null, taskId, slotIndex, specification }
+  return {
+    sessionId,
+    sessionName: sessionName ?? null,
+    taskId,
+    slotIndex,
+    specification,
+    references
+  }
 }
 
 function parseDetail(value: unknown): AssetDetailView | null {
@@ -261,7 +389,6 @@ function query(requestValue: AssetPageRequest): Readonly<Record<string, string>>
   return {
     ...(requestValue.cursor ? { cursor: requestValue.cursor } : {}),
     ...(requestValue.mediaType ? { media_type: requestValue.mediaType } : {}),
-    ...(requestValue.creator ? { creator: requestValue.creator } : {}),
     ...(requestValue.createdSince ? { created_since: requestValue.createdSince } : {}),
     ...(requestValue.sort ? { sort: requestValue.sort } : {}),
     ...(requestValue.search ? { search: requestValue.search } : {}),
@@ -273,6 +400,55 @@ function failure(status: number, payload: unknown): CreationApiFailure {
   if (status === 401) return { outcome: 'unauthorized' }
   if (status === 403) return { outcome: 'forbidden' }
   return { outcome: 'request-rejected', code: readErrorCode(payload) ?? 'internal_error' }
+}
+
+export async function loadVerifiedContent(
+  serverUrl: string,
+  path: string,
+  token: string,
+  checksumSha256: string,
+  options?: AssetContentOptions
+): Promise<CreationApiResult<Blob>> {
+  let response: Response
+  try {
+    response = await fetch(new URL(path, serverUrl), {
+      method: 'GET',
+      redirect: 'error',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: options?.signal
+    })
+  } catch {
+    return options?.signal?.aborted
+      ? { outcome: 'request-rejected', code: 'download_cancelled' }
+      : { outcome: 'network-failure' }
+  }
+  if (!response.ok) {
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch {
+      return { outcome: 'network-failure' }
+    }
+    return failure(response.status, payload)
+  }
+  const streamedChecksum = response.headers.get('X-Content-SHA-256')?.toLowerCase()
+  if (!streamedChecksum) return { outcome: 'request-rejected', code: 'checksum_missing' }
+  if (streamedChecksum !== checksumSha256.toLowerCase()) {
+    return { outcome: 'request-rejected', code: 'checksum_mismatch' }
+  }
+  try {
+    const blob = await response.blob()
+    if (options?.signal?.aborted) {
+      return { outcome: 'request-rejected', code: 'download_cancelled' }
+    }
+    return options?.expectedByteSize !== undefined && blob.size !== options.expectedByteSize
+      ? { outcome: 'request-rejected', code: 'byte_size_mismatch' }
+      : { outcome: 'succeeded', value: blob }
+  } catch {
+    return options?.signal?.aborted
+      ? { outcome: 'request-rejected', code: 'download_cancelled' }
+      : { outcome: 'network-failure' }
+  }
 }
 
 export function createAssetLibraryClient(serverUrl: string): {
@@ -313,47 +489,13 @@ export function createAssetLibraryClient(serverUrl: string): {
         : { outcome: 'succeeded', value: parsed }
     },
     async loadContent(token, assetId, checksumSha256, options) {
-      let response: Response
-      try {
-        response = await fetch(
-          new URL(`/creation/assets/${encodeURIComponent(assetId)}/content`, serverUrl),
-          {
-            method: 'GET',
-            redirect: 'error',
-            headers: { Authorization: `Bearer ${token}` },
-            signal: options?.signal
-          }
-        )
-      } catch {
-        return options?.signal?.aborted
-          ? { outcome: 'request-rejected', code: 'download_cancelled' }
-          : { outcome: 'network-failure' }
-      }
-      if (!response.ok) {
-        let payload: unknown
-        try {
-          payload = await response.json()
-        } catch {
-          return { outcome: 'network-failure' }
-        }
-        return failure(response.status, payload)
-      }
-      const streamedChecksum = response.headers.get('X-Content-SHA-256')?.toLowerCase()
-      if (!streamedChecksum) return { outcome: 'request-rejected', code: 'checksum_missing' }
-      if (streamedChecksum !== checksumSha256.toLowerCase()) {
-        return { outcome: 'request-rejected', code: 'checksum_mismatch' }
-      }
-      try {
-        const blob = await response.blob()
-        if (options?.signal?.aborted) {
-          return { outcome: 'request-rejected', code: 'download_cancelled' }
-        }
-        return { outcome: 'succeeded', value: blob }
-      } catch {
-        return options?.signal?.aborted
-          ? { outcome: 'request-rejected', code: 'download_cancelled' }
-          : { outcome: 'network-failure' }
-      }
+      return loadVerifiedContent(
+        serverUrl,
+        `/creation/assets/${encodeURIComponent(assetId)}/content`,
+        token,
+        checksumSha256,
+        options
+      )
     },
     async delete(token, assetId) {
       const result = await request(serverUrl, {

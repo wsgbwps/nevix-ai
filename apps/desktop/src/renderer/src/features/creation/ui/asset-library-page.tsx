@@ -4,6 +4,7 @@ import { DownloadIcon, SearchIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Input } from '../../../components/ui/input'
 import type { AssetLibraryPorts, AssetSort, MediaAssetView } from '../api/asset-library-http'
+import type { InspirationPorts } from '../api/inspiration-http'
 import { useAssetDetail, type PrepareAssetSimilar } from '../model/use-asset-detail'
 import { useAssetList, type AssetFilters } from '../model/use-asset-list'
 import { useAssetSelectionDownloads } from '../model/use-asset-selection-downloads'
@@ -11,13 +12,12 @@ import { AssetDetailDialog } from './asset-detail-dialog'
 import { AssetCard } from './asset-media'
 
 export interface AssetLibraryPageProps {
-  readonly ports: AssetLibraryPorts
+  readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
   readonly onCreateSimilar: PrepareAssetSimilar
 }
 
 const initialFilters: AssetFilters = {
   mediaType: '',
-  creator: '',
   createdSince: '',
   sort: 'newest',
   search: ''
@@ -54,7 +54,7 @@ export function AssetLibraryPage({
     ports,
     prepareSimilar: onCreateSimilar,
     save: saveBlob,
-    onDeleted: list.refresh
+    onAssetsChanged: list.refresh
   })
 
   const groups = useMemo(() => {
@@ -100,7 +100,7 @@ export function AssetLibraryPage({
         </div>
         <form
           data-testid="asset-filters"
-          className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-[6.5rem_minmax(7rem,1fr)_9rem_7rem_minmax(9rem,1.5fr)_auto]"
+          className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-[6.5rem_9rem_7rem_minmax(9rem,1.5fr)_auto]"
           onSubmit={(event) => {
             event.preventDefault()
             selection.resetPage()
@@ -125,18 +125,6 @@ export function AssetLibraryPage({
               <option value="image">{t('assets.media.image')}</option>
               <option value="video">{t('assets.media.video')}</option>
             </select>
-          </label>
-          <label className="grid gap-1 text-xs">
-            <span className="sr-only">{t('assets.filters.creator')}</span>
-            <Input
-              aria-label={t('assets.filters.creator')}
-              placeholder={t('assets.filters.creatorHint')}
-              value={filters.creator}
-              onChange={(event) => {
-                const creator = event.currentTarget.value
-                setFilters((value) => ({ ...value, creator }))
-              }}
-            />
           </label>
           <label className="grid gap-1 text-xs">
             <span className="sr-only">{t('assets.filters.since')}</span>
@@ -295,6 +283,7 @@ export function AssetLibraryPage({
         status={detail.status}
         downloadStatus={detail.downloadStatus}
         reuseFailed={detail.reuseFailed}
+        publicationStatus={detail.publicationStatus}
         ports={ports}
         onClose={detail.close}
         onOpenSibling={detail.open}
@@ -302,6 +291,10 @@ export function AssetLibraryPage({
         onCreateSimilar={() =>
           void detail.createSimilar(() => window.confirm(t('assets.replaceDraftConfirm')))
         }
+        onPublish={() =>
+          void detail.publish((count) => window.confirm(t('assets.publishConfirm', { count })))
+        }
+        onWithdraw={() => void detail.withdraw(() => window.confirm(t('assets.withdrawConfirm')))}
         onDelete={() => void detail.remove(() => window.confirm(t('assets.deleteConfirm')))}
       />
     </section>

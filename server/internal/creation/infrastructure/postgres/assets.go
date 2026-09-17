@@ -15,7 +15,12 @@ import (
 )
 
 type MediaAssetRepository struct {
-	pool *pgxpool.Pool
+	pool querySource
+}
+
+type querySource interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
 func NewMediaAssetRepository(pool *pgxpool.Pool) *MediaAssetRepository {
@@ -40,25 +45,31 @@ func (r *MediaAssetRepository) InsertMediaAsset(ctx context.Context, tx domain.T
 
 const assetColumns = `a.id, a.owner_user_id, u.display_name, a.task_id, a.slot_index,
 	a.media_type, a.mime, a.blob_key, a.byte_size, a.checksum,
-	a.width_px, a.height_px, a.duration_ms, a.created_at`
+	a.width_px, a.height_px, a.duration_ms, a.created_at,
+	a.restricted_at IS NOT NULL, p.id::text, p.published_at, p.restricted`
 
-func (r *MediaAssetRepository) ListVisible(ctx context.Context, filter domain.AssetListFilter, cursor *domain.CompoundCursor, limit int) ([]domain.MediaAsset, *domain.CompoundCursor, error) {
+const assetFrom = ` FROM creation_media_assets a
+	JOIN users u ON u.id = a.owner_user_id
+	LEFT JOIN LATERAL (
+		SELECT publication.id, publication.published_at,
+			(publication.restricted_at IS NOT NULL OR a.restricted_at IS NOT NULL) AS restricted
+		FROM creation_team_publications publication
+		WHERE publication.source_asset_id = a.id AND publication.withdrawn_at IS NULL
+		ORDER BY (publication.restricted_at IS NULL) DESC,
+			publication.published_at DESC, publication.id DESC
+		LIMIT 1
+	) p ON TRUE`
+
+func (r *MediaAssetRepository) ListVisible(ctx context.Context, owner domain.UUID, filter domain.AssetListFilter, cursor *domain.CompoundCursor, limit int) ([]domain.MediaAsset, *domain.CompoundCursor, error) {
 	args := make([]any, 0, 7)
-	conditions := []string{"a.deleted_at IS NULL", "a.restricted_at IS NULL"}
+	conditions := []string{"a.owner_user_id = $1", "a.deleted_at IS NULL", "a.restricted_at IS NULL"}
+	args = append(args, owner)
 	add := func(value any) string {
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
 	if filter.MediaType != nil {
 		conditions = append(conditions, "a.media_type = "+add(string(*filter.MediaType)))
-	}
-	creatorPrefix := func(value string) {
-		pattern := escapeLike(strings.ToLower(value)) + "%"
-		conditions = append(conditions, `a.owner_user_id IN (
-			SELECT id FROM users WHERE lower(display_name) LIKE `+add(pattern)+` ESCAPE '\')`)
-	}
-	if creator := strings.TrimSpace(filter.Creator); creator != "" {
-		creatorPrefix(creator)
 	}
 	if filter.CreatedSince != nil {
 		conditions = append(conditions, "a.created_at >= "+add(filter.CreatedSince.UTC()))
@@ -67,7 +78,7 @@ func (r *MediaAssetRepository) ListVisible(ctx context.Context, filter domain.As
 		if id, err := domain.ParseUUID(search); err == nil {
 			conditions = append(conditions, "a.id = "+add(id))
 		} else {
-			creatorPrefix(search)
+			conditions = append(conditions, "FALSE")
 		}
 	}
 	direction, comparison := "DESC", "<"
@@ -80,8 +91,7 @@ func (r *MediaAssetRepository) ListVisible(ctx context.Context, filter domain.As
 		conditions = append(conditions, fmt.Sprintf("(a.created_at, a.id) %s (%s, %s)", comparison, at, id))
 	}
 	args = append(args, limit+1)
-	query := `SELECT ` + assetColumns + `
-		FROM creation_media_assets a JOIN users u ON u.id = a.owner_user_id
+	query := `SELECT ` + assetColumns + assetFrom + `
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY a.created_at ` + direction + `, a.id ` + direction + `
 		LIMIT ` + fmt.Sprintf("$%d", len(args))
@@ -107,10 +117,11 @@ func (r *MediaAssetRepository) ListVisible(ctx context.Context, filter domain.As
 	return truncatePage(assets, limit), next, nil
 }
 
-func (r *MediaAssetRepository) GetVisible(ctx context.Context, id domain.UUID) (domain.MediaAsset, error) {
+func (r *MediaAssetRepository) GetVisible(ctx context.Context, owner, id domain.UUID) (domain.MediaAsset, error) {
 	asset, err := scanAsset(r.pool.QueryRow(ctx, `SELECT `+assetColumns+`
-		FROM creation_media_assets a JOIN users u ON u.id = a.owner_user_id
-		WHERE a.id = $1 AND a.deleted_at IS NULL AND a.restricted_at IS NULL`, id))
+		`+assetFrom+`
+		WHERE a.id = $1 AND a.owner_user_id = $2
+		  AND a.deleted_at IS NULL AND a.restricted_at IS NULL`, id, owner))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.MediaAsset{}, domain.ErrAssetNotFound
 	}
@@ -120,11 +131,12 @@ func (r *MediaAssetRepository) GetVisible(ctx context.Context, id domain.UUID) (
 	return asset, nil
 }
 
-func (r *MediaAssetRepository) ListVisibleSiblings(ctx context.Context, taskID domain.UUID) ([]domain.MediaAsset, error) {
+func (r *MediaAssetRepository) ListVisibleSiblings(ctx context.Context, owner, taskID domain.UUID) ([]domain.MediaAsset, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+assetColumns+`
-		FROM creation_media_assets a JOIN users u ON u.id = a.owner_user_id
-		WHERE a.task_id = $1 AND a.deleted_at IS NULL AND a.restricted_at IS NULL
-		ORDER BY a.slot_index`, taskID)
+		`+assetFrom+`
+		WHERE a.task_id = $1 AND a.owner_user_id = $2
+		  AND a.deleted_at IS NULL AND a.restricted_at IS NULL
+		ORDER BY a.slot_index`, taskID, owner)
 	if err != nil {
 		return nil, fmt.Errorf("creation: list visible asset siblings: %w", err)
 	}
@@ -166,18 +178,47 @@ func (r *MediaAssetRepository) GetPrivateOrigin(ctx context.Context, asset domai
 		// A broken private source cannot make the independently formed Asset unreadable.
 		return nil, nil
 	}
+	ids := make([]domain.UUID, 0, len(spec.References))
+	for _, reference := range spec.References {
+		ids = append(ids, reference.MaterialID)
+	}
+	references := make([]domain.ReferenceMaterial, 0, len(ids))
+	if len(ids) > 0 {
+		rows, queryErr := r.pool.Query(ctx, `SELECT `+materialColumns+`
+			FROM creation_reference_materials m WHERE m.id = ANY($1::uuid[])`, ids)
+		if queryErr != nil {
+			return nil, fmt.Errorf("creation: list asset origin references: %w", queryErr)
+		}
+		defer rows.Close()
+		byID := make(map[domain.UUID]domain.ReferenceMaterial, len(ids))
+		for rows.Next() {
+			material, scanErr := scanMaterialRows(rows)
+			if scanErr != nil {
+				return nil, scanErr
+			}
+			byID[material.ID] = material
+		}
+		if rows.Err() != nil {
+			return nil, fmt.Errorf("creation: list asset origin references: %w", rows.Err())
+		}
+		for _, id := range ids {
+			if material, ok := byID[id]; ok {
+				references = append(references, material)
+			}
+		}
+	}
 	return &domain.AssetPrivateOrigin{
 		SessionID: sessionID, SessionName: sessionName, TaskID: asset.TaskID,
-		SlotIndex: asset.SlotIndex, Spec: spec,
+		SlotIndex: asset.SlotIndex, Spec: spec, References: references,
 	}, nil
 }
 
 func (r *MediaAssetRepository) SoftDelete(ctx context.Context, tx domain.TxExecutor, actor, id domain.UUID, admin bool) error {
 	query := `UPDATE creation_media_assets SET deleted_at = now()
-		WHERE id = $1 AND deleted_at IS NULL AND restricted_at IS NULL`
+		WHERE id = $1 AND deleted_at IS NULL`
 	args := []any{id}
 	if !admin {
-		query += " AND owner_user_id = $2"
+		query += " AND owner_user_id = $2 AND restricted_at IS NULL"
 		args = append(args, actor)
 	}
 	count, err := execTx(tx, ctx, query, args...)
@@ -193,15 +234,25 @@ func (r *MediaAssetRepository) SoftDelete(ctx context.Context, tx domain.TxExecu
 func scanAsset(row rowScanner) (domain.MediaAsset, error) {
 	var asset domain.MediaAsset
 	var media string
+	var publicationID *string
+	var publishedAt *time.Time
+	var publicationRestricted *bool
 	err := row.Scan(
 		&asset.ID, &asset.OwnerID, &asset.CreatorDisplayName, &asset.TaskID, &asset.SlotIndex,
 		&media, &asset.Mime, &asset.BlobKey, &asset.ByteSize, &asset.Checksum,
 		&asset.WidthPx, &asset.HeightPx, &asset.DurationMS, &asset.CreatedAt,
+		&asset.Restricted, &publicationID, &publishedAt, &publicationRestricted,
 	)
 	asset.MediaType = domain.MediaType(media)
+	if err == nil && publicationID != nil && publishedAt != nil {
+		id, parseErr := domain.ParseUUID(*publicationID)
+		if parseErr != nil {
+			return domain.MediaAsset{}, parseErr
+		}
+		asset.ActivePublication = &domain.TeamPublication{
+			ID: id, SourceAssetID: asset.ID, PublishedAt: *publishedAt,
+			Restricted: publicationRestricted != nil && *publicationRestricted,
+		}
+	}
 	return asset, err
-}
-
-func escapeLike(value string) string {
-	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }

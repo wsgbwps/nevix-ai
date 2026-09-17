@@ -70,7 +70,11 @@ export function useAssetSelectionDownloads(
         const result = await ports.loadAssetContent(
           chosen[index].id,
           chosen[index].checksumSha256,
-          { signal: controller.signal, purpose: 'download' }
+          {
+            signal: controller.signal,
+            purpose: 'download',
+            expectedByteSize: chosen[index].byteSize
+          }
         )
         if (controllerRef.current !== controller) return
         if (controller.signal.aborted || result.outcome !== 'succeeded') {

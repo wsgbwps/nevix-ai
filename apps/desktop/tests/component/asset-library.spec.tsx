@@ -57,7 +57,6 @@ for (const viewport of [
 test('filters map to the page port and reset keyset position', async ({ mount, page }) => {
   await mount(<AssetLibraryStory />)
   await page.getByLabel('Media type').selectOption('video')
-  await page.getByLabel('Creator').fill('Aster')
   await page.getByLabel('Created since').fill('2026-09-01')
   await page.getByLabel('Sort').selectOption('oldest')
   await page.getByLabel('Search').fill('Aster')
@@ -66,7 +65,6 @@ test('filters map to the page port and reset keyset position', async ({ mount, p
     .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
     .toMatchObject({
       mediaType: 'video',
-      creator: 'Aster',
       sort: 'oldest',
       search: 'Aster'
     })
@@ -102,7 +100,7 @@ test('wall preview loading is capped at four concurrent image bodies', async ({ 
     .toBe(8)
 })
 
-test('detail switches siblings and exposes private reuse without leaking references', async ({
+test('detail switches siblings and exposes the full publish confirmation facts', async ({
   mount,
   page
 }) => {
@@ -110,7 +108,10 @@ test('detail switches siblings and exposes private reuse without leaking referen
   await page.getByRole('button', { name: 'Open asset asset-one' }).click()
   await expect(page.getByRole('dialog')).toContainText('A quiet launch scene')
   await expect(page.getByRole('button', { name: 'Create similar' })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Publish (coming soon)' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Publish to Inspiration' })).toBeEnabled()
+  await expect(page.getByRole('dialog')).toContainText('Specification version1')
+  await expect(page.getByRole('dialog')).toContainText('Capability manifest version4')
+  await expect(page.getByRole('dialog')).toContainText('reference.png · reference · image')
   await page.getByRole('button', { name: 'Result 2' }).click()
   await expect(page.getByRole('dialog')).toContainText('asset-two')
   await expect(page.getByRole('dialog')).toContainText('Output duration3 s')
@@ -119,7 +120,7 @@ test('detail switches siblings and exposes private reuse without leaking referen
   await page.getByRole('button', { name: 'Create similar' }).click()
   const reused = await page.evaluate(() => window.__assetLibraryTest?.reused() ?? [])
   expect(reused).toHaveLength(1)
-  expect(reused[0]).not.toHaveProperty('references')
+  expect(reused[0]?.references).toHaveLength(1)
 })
 
 test('selecting the current sibling keeps its loaded detail visible', async ({ mount, page }) => {
@@ -177,7 +178,38 @@ test('private origin and destructive actions stay gated by server capabilities',
   await expect(dialog).not.toContainText('A quiet launch scene')
   await expect(dialog.getByRole('button', { name: 'Create similar' })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: 'Delete' })).toHaveCount(0)
-  await expect(dialog.getByRole('button', { name: 'Publish (coming soon)' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Publish to Inspiration' })).toHaveCount(0)
+})
+
+test('publishing confirms the frozen facts and exposes withdrawal', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  page.once('dialog', async (confirmation) => {
+    expect(confirmation.message()).toContain('complete generation specification')
+    expect(confirmation.message()).toContain('1 used reference')
+    await confirmation.accept()
+  })
+  await page.getByRole('button', { name: 'Publish to Inspiration' }).click()
+  await expect(page.getByRole('button', { name: 'Withdraw publication' })).toBeVisible()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.publishKeys())).toHaveLength(1)
+
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await page.getByRole('button', { name: 'Withdraw publication' }).click()
+  await expect(page.getByRole('button', { name: 'Publish to Inspiration' })).toBeVisible()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.withdraws())).toEqual([
+    'publication-one'
+  ])
+})
+
+test('deleting an asset states that its Publication survives', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  page.once('dialog', async (confirmation) => {
+    expect(confirmation.message()).toContain('existing publication will not be withdrawn')
+    await confirmation.dismiss()
+  })
+  await page.getByRole('button', { name: 'Delete', exact: true }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
 })
 
 test('batch mode has download as its only operation and downloads sequentially', async ({

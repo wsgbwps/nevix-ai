@@ -132,9 +132,7 @@ test(
       await launched.page.getByLabel('Email').fill(identity.email)
       await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
       await expect.poll(() => pathExists(recordPath)).toBe(true)
 
       await launched.page.waitForTimeout(5500)
@@ -204,9 +202,7 @@ test(
       await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
 
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
       await expect(persistenceNotice).toBeVisible({ timeout: 10_000 })
       await expect(persistenceNotice).toHaveCount(1)
     } finally {
@@ -256,9 +252,7 @@ test(
       await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
 
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
       await expect(persistenceNotice).toBeVisible({ timeout: 10_000 })
       await expect(persistenceNotice).toHaveCount(1)
       await expect
@@ -371,9 +365,7 @@ test(
       await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
 
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
       await expect(persistenceNotice).toHaveCount(0)
       await expect
         .poll(() =>
@@ -527,9 +519,7 @@ test(
       await launched.page.getByLabel('Email').fill(identity.email)
       await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
       await expect(persistenceNotice).toBeVisible()
       await expect(persistenceNotice).toHaveCount(1)
 
@@ -538,9 +528,7 @@ test(
       await launched.page.getByLabel('Password').fill(identity.password)
       await launched.page.getByRole('button', { name: 'Sign in' }).click()
 
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
       await expect(persistenceNotice).toHaveCount(0)
       await expect
         .poll(() =>

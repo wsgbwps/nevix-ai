@@ -21,6 +21,8 @@ type MediaAsset struct {
 	HeightPx           *int
 	DurationMS         *int
 	CreatedAt          time.Time
+	Restricted         bool
+	ActivePublication  *TeamPublication
 }
 
 type MediaAssetFormation struct {
@@ -58,13 +60,14 @@ type AssetPrivateOrigin struct {
 	TaskID      UUID
 	SlotIndex   int
 	Spec        GenerationSpecification
+	References  []ReferenceMaterial
 }
 
 type MediaAssetRepository interface {
 	InsertMediaAsset(ctx context.Context, tx TxExecutor, formation MediaAssetFormation) (bool, error)
-	ListVisible(ctx context.Context, filter AssetListFilter, cursor *CompoundCursor, limit int) ([]MediaAsset, *CompoundCursor, error)
-	GetVisible(ctx context.Context, id UUID) (MediaAsset, error)
-	ListVisibleSiblings(ctx context.Context, taskID UUID) ([]MediaAsset, error)
+	ListVisible(ctx context.Context, owner UUID, filter AssetListFilter, cursor *CompoundCursor, limit int) ([]MediaAsset, *CompoundCursor, error)
+	GetVisible(ctx context.Context, owner, id UUID) (MediaAsset, error)
+	ListVisibleSiblings(ctx context.Context, owner, taskID UUID) ([]MediaAsset, error)
 	GetPrivateOrigin(ctx context.Context, asset MediaAsset) (*AssetPrivateOrigin, error)
 	SoftDelete(ctx context.Context, tx TxExecutor, actor, id UUID, admin bool) error
 }

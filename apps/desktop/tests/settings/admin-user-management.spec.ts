@@ -86,7 +86,7 @@ test('Admin manages the full lifecycle: create, forced first-login change, disab
     })
     try {
       await signIn(adminApp.page, identityServer!.adminEmail, identityServer!.adminPassword)
-      await expect(adminApp.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(adminApp.page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
       // The administration group exists only for the Admin session.
       const adminNav = adminApp.page.getByRole('navigation', { name: '设置' })
@@ -122,9 +122,7 @@ test('Admin manages the full lifecycle: create, forced first-login change, disab
         await memberApp.page.getByLabel('新密码', { exact: true }).fill(chosenPassword)
         await memberApp.page.getByLabel('确认新密码').fill(chosenPassword)
         await memberApp.page.getByRole('button', { name: '更新密码并继续' }).click()
-        await expect(
-          memberApp.page.getByRole('heading', { name: '使用 Nevix AI 创作' })
-        ).toBeVisible()
+        await expect(memberApp.page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
         // Member 角色看不到管理区。
         await openSettingsFromUserMenu(memberApp.page)
@@ -186,7 +184,7 @@ test('Admin completes the remaining governance actions: role, email, reset, dele
     })
     try {
       await signIn(launched.page, identityServer!.adminEmail, identityServer!.adminPassword)
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
       await openUserManagementSection(launched.page)
       await createAccountThroughUi(launched.page, subjectIdentity, subjectDisplayName)
 
@@ -321,7 +319,7 @@ test('the management list pages through the full directory and search narrows it
     })
     try {
       await signIn(launched.page, identityServer!.adminEmail, identityServer!.adminPassword)
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
       await openUserManagementSection(launched.page)
 
       const roster = launched.page.getByRole('list', { name: '用户列表' })
@@ -374,7 +372,7 @@ test('the audit log lists governance events, paginates, and exports a local CSV 
     })
     try {
       await signIn(launched.page, identityServer!.adminEmail, identityServer!.adminPassword)
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
       // A governance action the audit trail must show.
       await openUserManagementSection(launched.page)
@@ -430,7 +428,7 @@ test('an audit export in flight blocks leaving the Settings Page and the ordinar
     })
     try {
       await signIn(launched.page, identityServer!.adminEmail, identityServer!.adminPassword)
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
       await openSettingsFromUserMenu(launched.page)
       await launched.page
         .getByRole('navigation', { name: '设置' })

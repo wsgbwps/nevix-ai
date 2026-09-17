@@ -199,6 +199,7 @@ function DocumentPlugin({
 
 interface MentionQuery {
   readonly nodeKey: NodeKey
+  readonly sourceText: string
   readonly startOffset: number
   readonly endOffset: number
   readonly value: string
@@ -223,6 +224,7 @@ function MentionTypeaheadPlugin({
   const [activeIndex, setActiveIndex] = useState(0)
   const menuId = useId()
   const previousQueryValue = useRef<string | null>(null)
+  const dismissedQuery = useRef<Pick<MentionQuery, 'nodeKey' | 'sourceText'> | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const matches = useMemo(
     () => (query === null ? [] : filterPromptMentionCandidates(query.value, candidates)),
@@ -237,7 +239,13 @@ function MentionTypeaheadPlugin({
         const nextValue = nextQuery?.value ?? null
         if (nextValue !== previousQueryValue.current) setActiveIndex(0)
         previousQueryValue.current = nextValue
-        setQuery(nextQuery)
+        const dismissed = dismissedQuery.current
+        const remainsDismissed =
+          nextQuery !== null &&
+          dismissed?.nodeKey === nextQuery.nodeKey &&
+          dismissed.sourceText === nextQuery.sourceText
+        if (nextQuery !== null && !remainsDismissed) dismissedQuery.current = null
+        setQuery(remainsDismissed ? null : nextQuery)
       }),
     [editor]
   )
@@ -304,6 +312,7 @@ function MentionTypeaheadPlugin({
         (event) => {
           if (query === null || editor.isComposing()) return false
           event.preventDefault()
+          dismissedQuery.current = { nodeKey: query.nodeKey, sourceText: query.sourceText }
           setQuery(null)
           return true
         },
@@ -322,6 +331,7 @@ function MentionTypeaheadPlugin({
       ) {
         return
       }
+      dismissedQuery.current = { nodeKey: query.nodeKey, sourceText: query.sourceText }
       setQuery(null)
     }
     window.document.addEventListener('pointerdown', closeOutside, true)
@@ -580,6 +590,7 @@ function readMentionQuery(editor: LexicalEditor): MentionQuery | null {
   if (domSelection === null || domSelection.rangeCount === 0) return null
   return {
     nodeKey: node.getKey(),
+    sourceText: node.getTextContent(),
     startOffset: endOffset - match[0].length,
     endOffset,
     value: match[1],

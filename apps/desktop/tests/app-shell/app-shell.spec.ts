@@ -12,7 +12,7 @@ import {
 const identityServer = readIdentityServerConfig()
 
 async function expectSignedInHomeWithStartupRetry(page: Page): Promise<void> {
-  const homeHeading = page.getByRole('heading', { name: '使用 Nevix AI 创作' })
+  const homeHeading = page.getByRole('heading', { name: '灵感' })
   const retryButton = page.getByRole('button', { name: '重试', exact: true })
   await expect(homeHeading.or(retryButton)).toBeVisible({ timeout: 15_000 })
   if (await retryButton.isVisible()) await retryButton.click()
@@ -52,7 +52,7 @@ test(
         await expect(launched.page.getByRole('menu')).toHaveCount(0)
 
         const sidebar = launched.page.locator('[data-slot="sidebar"]')
-        const homeEntry = sidebar.getByRole('link', { name: '首页' })
+        const homeEntry = sidebar.getByRole('link', { name: '灵感' })
         await expect(homeEntry).toBeVisible()
 
         // 内容区头部：SidebarTrigger 与反映当前路由位置的 Breadcrumb。
@@ -60,7 +60,7 @@ test(
           launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
         ).toBeVisible()
         await expect(
-          launched.page.getByLabel('breadcrumb').getByText('首页', { exact: true })
+          launched.page.getByLabel('breadcrumb').getByText('灵感', { exact: true })
         ).toBeVisible()
 
         // NavUser 显示登录邮箱与首字母头像。
@@ -98,11 +98,11 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
       await launched.page.getByLabel('邮箱').fill(identity.email)
       await launched.page.getByLabel('密码').fill(identity.password)
       await launched.page.getByRole('button', { name: '登录', exact: true }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
       const toggle = launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
       const sidebar = launched.page.locator('[data-slot="sidebar"]')
-      const homeEntry = sidebar.getByRole('link', { name: '首页' })
+      const homeEntry = sidebar.getByRole('link', { name: '灵感' })
       const brandButton = launched.page.getByRole('button', { name: 'Nevix AI' })
       await expect(homeEntry).toBeVisible()
       await expect(brandButton).toContainText('Nevix AI')
@@ -144,7 +144,7 @@ test('the user menu shows the signed-in email and signs out of this device', asy
       await launched.page.getByLabel('邮箱').fill(identity.email)
       await launched.page.getByLabel('密码').fill(identity.password)
       await launched.page.getByRole('button', { name: '登录', exact: true }).click()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
       // 用户菜单展示登录邮箱与退出当前设备入口。
       await launched.page.getByRole('button', { name: '用户菜单' }).click()
@@ -156,9 +156,7 @@ test('the user menu shows the signed-in email and signs out of this device', asy
       // 从用户菜单退出登录后回到登录界面。
       await signOutFromUserMenu(launched.page)
       await expect(launched.page.getByRole('heading', { name: '登录 Nevix AI' })).toBeVisible()
-      await expect(launched.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toHaveCount(
-        0
-      )
+      await expect(launched.page.getByRole('heading', { name: '灵感' })).toHaveCount(0)
     } finally {
       await launched.electronApp.close()
     }

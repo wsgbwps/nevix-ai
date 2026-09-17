@@ -164,6 +164,7 @@ type Module struct {
 	manifest      *creationhttp.CapabilityManifestHandler
 	tasks         *creationhttp.GenerationTaskHandler
 	assets        *creationhttp.AssetHandler
+	publications  *creationhttp.PublicationHandler
 	governance    *creationhttp.GovernanceHandler
 	hub           *creationhttp.InvalidationHub
 	worker        *application.TaskWorker
@@ -193,6 +194,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	taskRepos := postgres.NewGenerationTaskRepository(pool)
 	governanceRepos := postgres.NewGovernanceRepository(pool)
 	assetRepos := postgres.NewMediaAssetRepository(pool)
+	publicationRepos := postgres.NewTeamPublicationRepository(pool)
 	credentialVault := secrets.NewVault(cfg.SecretsDir)
 	hub := creationhttp.NewInvalidationHub()
 	sessionService := application.NewSessionService(sessionRepos, tx)
@@ -218,6 +220,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, objectStorageService, governanceRepos, manifestService, tx, hub)
 	assetService := application.NewAssetService(assetRepos, tx)
+	publicationService := application.NewPublicationService(publicationRepos, tx, objectStorageService, manifestService)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
 	// The worker resolves the current Object Storage Connection and speaks the
 	// fixed Kapon generation route. The connection service is the call-time
@@ -237,6 +240,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 		manifest:      creationhttp.NewCapabilityManifestHandler(manifestService),
 		tasks:         creationhttp.NewGenerationTaskHandler(taskService, objectStorageService),
 		assets:        creationhttp.NewAssetHandler(assetService, objectStorageService),
+		publications:  creationhttp.NewPublicationHandler(publicationService, objectStorageService),
 		governance:    creationhttp.NewGovernanceHandler(governanceService, connectionService),
 		hub:           hub,
 		worker:        worker,

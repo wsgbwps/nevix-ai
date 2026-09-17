@@ -52,6 +52,16 @@ func (m *Module) routes() []creationhttp.Route {
 		{Method: "GET", Path: "/creation/assets/{assetID}", Handler: m.assets.Get},
 		{Method: "GET", Path: "/creation/assets/{assetID}/content", Handler: m.assets.Download},
 		{Method: "DELETE", Path: "/creation/assets/{assetID}", Handler: m.assets.Delete},
+		{Method: "POST", Path: "/creation/assets/{assetID}/publication", Handler: m.publications.Publish},
+		{Method: "GET", Path: "/creation/inspiration", Handler: m.publications.ListInspiration},
+		{Method: "GET", Path: "/creation/inspiration/assets/{assetID}", Guard: creationhttp.GuardAdmin, Handler: m.publications.GetAdminAsset},
+		{Method: "GET", Path: "/creation/inspiration/assets/{assetID}/content", Guard: creationhttp.GuardAdmin, Handler: m.publications.DownloadAdminAsset},
+		{Method: "GET", Path: "/creation/inspiration/assets/{assetID}/references/{referenceID}/preview-url", Guard: creationhttp.GuardAdmin, Handler: m.publications.AdminAssetReferencePreview},
+		{Method: "GET", Path: "/creation/publications/{publicationID}", Handler: m.publications.GetPublication},
+		{Method: "GET", Path: "/creation/publications/{publicationID}/content", Handler: m.publications.DownloadPublication},
+		{Method: "GET", Path: "/creation/publications/{publicationID}/references/{referenceID}/preview-url", Handler: m.publications.PublicationReferencePreview},
+		{Method: "DELETE", Path: "/creation/publications/{publicationID}", Handler: m.publications.Withdraw},
+		{Method: "POST", Path: "/creation/publications/{publicationID}/create-similar", Handler: m.publications.CreateSimilar},
 		// Creator-scoped SSE invalidation stream.
 		{Method: "GET", Path: "/creation/events", Handler: m.hub.StreamEvents},
 		// Admin generation governance and the persistent credit block.

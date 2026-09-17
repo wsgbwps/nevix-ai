@@ -11,6 +11,7 @@ import type {
   AssetPrivateOrigin,
   MediaAssetView
 } from '../../../src/renderer/src/features/creation/api/asset-library-http'
+import type { InspirationPorts } from '../../../src/renderer/src/features/creation/api/inspiration-http'
 
 const imageBlob = new Blob(
   [
@@ -35,7 +36,9 @@ function asset(
     heightPx: 80,
     durationMs: mediaType === 'video' ? 3000 : null,
     createdAt,
-    capabilities: { canDelete: true, canCreateSimilar: true }
+    restricted: false,
+    publication: null,
+    capabilities: { canDelete: true, canCreateSimilar: true, canPublish: true }
   }
 }
 
@@ -58,6 +61,7 @@ const detail: AssetDetailView = {
     taskId: 'task-one',
     slotIndex: 0,
     specification: {
+      schemaVersion: 1,
       mediaType: 'image',
       prompt: 'A quiet launch scene',
       model: 'seedream',
@@ -66,8 +70,25 @@ const detail: AssetDetailView = {
       ratio: '3:2',
       resolution: '2K',
       quantity: 1,
-      durationSeconds: null
-    }
+      durationSeconds: null,
+      references: [
+        { materialId: 'material-one', role: 'reference', kind: 'image', claimsVersion: 1 }
+      ]
+    },
+    references: [
+      {
+        id: 'material-one',
+        role: 'reference',
+        kind: 'image',
+        fileName: 'reference.png',
+        mimeType: 'image/png',
+        byteSize: 120,
+        widthPx: 120,
+        heightPx: 80,
+        durationMs: null,
+        claimsVersion: 1
+      }
+    ]
   }
 }
 
@@ -87,6 +108,8 @@ interface AssetLibraryTestControls {
   maxActiveDownloads(): number
   releaseDownloads(): void
   releaseNextDownload(): void
+  publishKeys(): readonly string[]
+  withdraws(): readonly string[]
 }
 
 declare global {
@@ -105,7 +128,7 @@ function createHarness(
   deferredPreviews: boolean,
   dense: boolean
 ): {
-  readonly ports: AssetLibraryPorts
+  readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
   readonly controls: AssetLibraryTestControls
 } {
   const listCalls: AssetPageRequest[] = []
@@ -137,6 +160,13 @@ function createHarness(
     releaseDownloads = resolve
   })
   const pendingDownloadReleases: Array<() => void> = []
+  const publishKeys: string[] = []
+  const withdraws: string[] = []
+  let activePublication: {
+    readonly id: string
+    readonly publishedAt: string
+    readonly restricted: boolean
+  } | null = null
   return {
     ports: {
       listAssets: async (request) => {
@@ -163,7 +193,14 @@ function createHarness(
         if (staleOnReuse && detailCalls.length > 1) {
           return { outcome: 'request-rejected' as const, code: 'asset_not_found' }
         }
-        const selected = id === 'asset-two' ? assets[1] : assets[0]
+        const selected = {
+          ...(id === 'asset-two' ? assets[1] : assets[0]),
+          publication: activePublication,
+          capabilities: {
+            ...(id === 'asset-two' ? assets[1] : assets[0]).capabilities,
+            canPublish: activePublication === null
+          }
+        }
         return {
           outcome: 'succeeded',
           value:
@@ -174,7 +211,8 @@ function createHarness(
                     ...selected,
                     capabilities: {
                       canDelete: false,
-                      canCreateSimilar: false
+                      canCreateSimilar: false,
+                      canPublish: false
                     }
                   },
                   privateOrigin: null
@@ -182,7 +220,7 @@ function createHarness(
               : id === 'asset-two'
                 ? {
                     ...detail,
-                    asset: assets[1],
+                    asset: selected,
                     privateOrigin: detail.privateOrigin
                       ? {
                           ...detail.privateOrigin,
@@ -195,7 +233,7 @@ function createHarness(
                         }
                       : null
                   }
-                : detail
+                : { ...detail, asset: selected }
         }
       },
       loadAssetContent: async (id, _checksumSha256, options) => {
@@ -234,6 +272,37 @@ function createHarness(
         activeDownloads -= 1
         return { outcome: 'succeeded', value: imageBlob }
       },
+      publishAsset: async (_assetId, idempotencyKey) => {
+        publishKeys.push(idempotencyKey)
+        activePublication = {
+          id: 'publication-one',
+          publishedAt: '2026-09-17T08:00:00Z',
+          restricted: false
+        }
+        return {
+          outcome: 'succeeded',
+          value: {
+            id: 'publication-one',
+            sourceAssetId: 'asset-one',
+            publisher: { id: 'user-one', displayName: 'Aster' },
+            mediaType: 'image',
+            mimeType: 'image/svg+xml',
+            byteSize: imageBlob.size,
+            checksumSha256: 'aa'.repeat(32),
+            widthPx: 120,
+            heightPx: 80,
+            durationMs: null,
+            publishedAt: '2026-09-17T08:00:00Z',
+            restricted: false,
+            capabilities: { canWithdraw: true, canCreateSimilar: true }
+          }
+        }
+      },
+      withdrawPublication: async (publicationId) => {
+        withdraws.push(publicationId)
+        activePublication = null
+        return { outcome: 'succeeded', value: undefined }
+      },
       deleteAsset: async () => ({ outcome: 'succeeded', value: undefined })
     },
     controls: {
@@ -256,7 +325,9 @@ function createHarness(
       abortedDownloads: () => abortedDownloads,
       maxActiveDownloads: () => maxActiveDownloads,
       releaseDownloads: () => releaseDownloads(),
-      releaseNextDownload: () => pendingDownloadReleases.shift()?.()
+      releaseNextDownload: () => pendingDownloadReleases.shift()?.(),
+      publishKeys: () => publishKeys,
+      withdraws: () => withdraws
     }
   }
 }

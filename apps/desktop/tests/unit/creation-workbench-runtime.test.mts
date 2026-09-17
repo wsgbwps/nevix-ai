@@ -101,6 +101,60 @@ function acceptedTask(sessionId: string, id: string): CreationApiResult<Generati
   }
 }
 
+test('Publication reuse retains its desktop key until the session Draft is persisted', async () => {
+  const storage = fakeStorage()
+  const setItem = storage.setItem.bind(storage)
+  let failWrite = true
+  storage.setItem = (key, value) => {
+    if (failWrite) throw new DOMException('Quota exceeded', 'QuotaExceededError')
+    setItem(key, value)
+  }
+  const keys: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      createPublicationSimilar: async (_publicationId, idempotencyKey) => {
+        keys.push(idempotencyKey)
+        return {
+          outcome: 'succeeded' as const,
+          value: {
+            session: {
+              id: sessionA,
+              name: 'Publication reuse',
+              createdAt: '2026-09-17T08:00:00Z',
+              updatedAt: '2026-09-17T08:00:00Z'
+            },
+            materials: [],
+            specification: {
+              schemaVersion: 1,
+              mediaType: 'image' as const,
+              prompt: 'Preserved intent',
+              model: 'archived-model',
+              mode: 'text-to-image',
+              manifestVersion: 1,
+              ratio: '1:1',
+              resolution: '2K',
+              quantity: 1,
+              durationSeconds: null,
+              references: []
+            },
+            submissionBlocked: true
+          }
+        }
+      }
+    },
+    'user-1',
+    { storage, createId: () => 'stable-desktop-key' }
+  )
+
+  assert.equal(await runtime.actions.preparePublicationSimilar('publication-one'), 'unavailable')
+  assert.equal(runtime.actions.consumePreparedSimilarSession(), null)
+  failWrite = false
+  assert.equal(await runtime.actions.preparePublicationSimilar('publication-one'), 'prepared')
+  assert.deepEqual(keys, ['stable-desktop-key', 'stable-desktop-key'])
+  assert.equal(runtime.actions.consumePreparedSimilarSession()?.id, sessionA)
+  assert.equal(readLocalDraft(storage, 'user-1', sessionA)?.model, 'archived-model')
+})
+
 test('restart recovery checks server state first, remaps the draft, and clears only safe facts', async () => {
   const storage = fakeStorage()
   writeLocalDraft(storage, 'user-1', sessionA, {

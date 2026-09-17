@@ -89,9 +89,7 @@ test('a securely persisted session restores without a fresh login, survives an o
       await expect(
         launched.page.getByRole('heading', { name: 'Your session could not be restored yet' })
       ).toBeVisible({ timeout: 35_000 })
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toHaveCount(0)
       expect(await readFile(sessionPath, 'utf8')).toBe(envelopeBeforeRetry)
 
       await launched.electronApp.evaluate(({ session }) => {
@@ -104,9 +102,7 @@ test('a securely persisted session restores without a fresh login, survives an o
         await route.continue()
       })
       await launched.page.getByRole('button', { name: 'Try again' }).click()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible()
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
       // Restore verifies the opaque token against /me exactly once; the stored envelope is
       // never rewritten because nothing rotates an opaque token.
       expect(meRequests).toBe(1)
@@ -144,9 +140,7 @@ test('a securely persisted session restores without a fresh login, survives an o
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
       await expect(launched.page.getByLabel('Email')).toHaveValue(RESTORE_BOUNDARY_REMEMBERED_EMAIL)
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toHaveCount(0)
     } finally {
       await launched.electronApp.close()
     }
@@ -208,9 +202,7 @@ test('corrupt, unknown, random, and malformed encrypted session envelopes are te
         await expect(
           relaunched.page.getByText('Your session is no longer valid. Sign in again.')
         ).toBeVisible()
-        await expect(
-          relaunched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-        ).toHaveCount(0)
+        await expect(relaunched.page.getByRole('heading', { name: 'Inspiration' })).toHaveCount(0)
         await expectFileMissing(sessionPath)
       } finally {
         await relaunched.electronApp.close()
@@ -336,9 +328,7 @@ test('unavailable secure storage keeps only the runtime session and offline logo
       await expect(
         launched.page.getByRole('heading', { name: 'Sign in to Nevix AI' })
       ).toBeVisible()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toHaveCount(0)
     } finally {
       await launched.electronApp.close()
     }
@@ -385,9 +375,7 @@ test('a secure-storage outage keeps the encrypted session envelope and restore s
       await expect(
         launched.page.getByRole('heading', { name: 'Your session could not be restored yet' })
       ).toBeVisible()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toHaveCount(0)
       expect(await readFile(sessionPath, 'utf8')).toBe(envelopeBeforeOutage)
     } finally {
       await launched.electronApp.close()
@@ -399,9 +387,9 @@ test('a secure-storage outage keeps the encrypted session envelope and restore s
       serverUrl: identityServer!.serverUrl
     })
     try {
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toBeVisible({ timeout: 35_000 })
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toBeVisible({
+        timeout: 35_000
+      })
     } finally {
       await launched.electronApp.close()
     }
@@ -437,9 +425,7 @@ test('a corrupt envelope stays terminal and deleted even while secure storage is
       await expect(
         launched.page.getByText('Your session is no longer valid. Sign in again.')
       ).toBeVisible()
-      await expect(
-        launched.page.getByRole('heading', { name: 'Create with Nevix AI' })
-      ).toHaveCount(0)
+      await expect(launched.page.getByRole('heading', { name: 'Inspiration' })).toHaveCount(0)
       await expectFileMissing(sessionPath)
     } finally {
       await launched.electronApp.close()
@@ -549,7 +535,7 @@ async function signInAndReadGrant(
   await page.getByRole('button', { name: 'Sign in' }).click()
   const response = await responsePromise
   const grant = (await response.json()) as LoginGrant
-  await expect(page.getByRole('heading', { name: 'Create with Nevix AI' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Inspiration' })).toBeVisible()
   return grant
 }
 

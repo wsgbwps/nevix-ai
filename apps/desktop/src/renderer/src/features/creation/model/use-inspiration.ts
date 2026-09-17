@@ -1,43 +1,43 @@
 import { useEffect, useState } from 'react'
 import type {
-  AssetLibraryPorts,
-  AssetMediaType,
-  AssetPageRequest,
-  AssetSort,
-  MediaAssetView
-} from '../api/asset-library-http'
+  InspirationItem,
+  InspirationPageRequest,
+  InspirationPorts
+} from '../api/inspiration-http'
 
 const PAGE_SIZE = 24
 
-export interface AssetFilters {
-  readonly mediaType: '' | AssetMediaType
-  readonly createdSince: string
-  readonly sort: AssetSort
+export interface InspirationFilters {
+  readonly mediaType: '' | 'image' | 'video'
+  readonly creator: string
   readonly search: string
 }
 
-function pageRequest(filters: AssetFilters, cursor: string | null): AssetPageRequest {
+function request(filters: InspirationFilters, cursor: string | null): InspirationPageRequest {
   return {
-    limit: PAGE_SIZE,
     cursor,
     mediaType: filters.mediaType || undefined,
-    createdSince: filters.createdSince
-      ? new Date(`${filters.createdSince}T00:00:00`).toISOString()
-      : undefined,
-    sort: filters.sort,
-    search: filters.search.trim() || undefined
+    creator: filters.creator.trim() || undefined,
+    search: filters.search.trim() || undefined,
+    limit: PAGE_SIZE
   }
 }
 
-export function useAssetList(
-  ports: AssetLibraryPorts,
-  initialFilters: AssetFilters
+export function hasInspirationFilters(filters: InspirationFilters): boolean {
+  return Boolean(filters.mediaType || filters.creator.trim() || filters.search.trim())
+}
+
+export function useInspiration(
+  ports: InspirationPorts,
+  initialFilters: InspirationFilters
 ): {
-  readonly assets: readonly MediaAssetView[]
+  readonly items: readonly InspirationItem[]
   readonly status: 'loading' | 'ready' | 'failed'
+  readonly submittedFilters: InspirationFilters
   readonly canPrevious: boolean
   readonly canNext: boolean
-  readonly submit: (filters: AssetFilters) => void
+  readonly submit: (filters: InspirationFilters) => void
+  readonly clear: () => void
   readonly retry: () => void
   readonly refresh: () => void
   readonly previous: () => void
@@ -46,26 +46,25 @@ export function useAssetList(
   const [submittedFilters, setSubmittedFilters] = useState(initialFilters)
   const [cursor, setCursor] = useState<string | null>(null)
   const [cursorHistory, setCursorHistory] = useState<(string | null)[]>([])
-  const [assets, setAssets] = useState<readonly MediaAssetView[]>([])
+  const [items, setItems] = useState<readonly InspirationItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [reload, setReload] = useState(0)
 
   useEffect(() => {
     let active = true
-    void ports.listAssets(pageRequest(submittedFilters, cursor)).then((result) => {
+    void ports.listInspiration(request(submittedFilters, cursor)).then((result) => {
       if (!active) return
       if (result.outcome !== 'succeeded') {
         setStatus('failed')
         return
       }
-      if (result.value.assets.length === 0 && cursorHistory.length > 0) {
-        setStatus('loading')
+      if (result.value.items.length === 0 && cursorHistory.length > 0) {
         setCursor(cursorHistory.at(-1) ?? null)
         setCursorHistory((history) => history.slice(0, -1))
         return
       }
-      setAssets(result.value.assets)
+      setItems(result.value.items)
       setNextCursor(result.value.nextCursor)
       setStatus('ready')
     })
@@ -78,19 +77,22 @@ export function useAssetList(
     setStatus('loading')
     setReload((value) => value + 1)
   }
+  const submit = (filters: InspirationFilters): void => {
+    setStatus('loading')
+    setCursor(null)
+    setCursorHistory([])
+    setSubmittedFilters(filters)
+    setReload((value) => value + 1)
+  }
 
   return {
-    assets,
+    items,
     status,
+    submittedFilters,
     canPrevious: cursorHistory.length > 0,
     canNext: nextCursor !== null,
-    submit: (filters) => {
-      setStatus('loading')
-      setCursor(null)
-      setCursorHistory([])
-      setSubmittedFilters(filters)
-      setReload((value) => value + 1)
-    },
+    submit,
+    clear: () => submit(initialFilters),
     retry: refresh,
     refresh,
     previous: () => {

@@ -48,7 +48,7 @@ test(
       await app.page.getByLabel('邮箱').fill(identity.email)
       await app.page.getByLabel('密码').fill(identity.password)
       await app.page.getByRole('button', { name: '登录', exact: true }).click()
-      await expect(app.page.getByRole('heading', { name: '使用 Nevix AI 创作' })).toBeVisible()
+      await expect(app.page.getByRole('heading', { name: '灵感' })).toBeVisible()
     }
 
     try {

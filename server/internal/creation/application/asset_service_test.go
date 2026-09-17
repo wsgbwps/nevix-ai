@@ -22,15 +22,18 @@ func (r *assetRepoStub) InsertMediaAsset(context.Context, domain.TxExecutor, dom
 	return false, nil
 }
 
-func (r *assetRepoStub) ListVisible(context.Context, domain.AssetListFilter, *domain.CompoundCursor, int) ([]domain.MediaAsset, *domain.CompoundCursor, error) {
+func (r *assetRepoStub) ListVisible(context.Context, domain.UUID, domain.AssetListFilter, *domain.CompoundCursor, int) ([]domain.MediaAsset, *domain.CompoundCursor, error) {
 	return []domain.MediaAsset{r.asset}, nil, nil
 }
 
-func (r *assetRepoStub) GetVisible(context.Context, domain.UUID) (domain.MediaAsset, error) {
+func (r *assetRepoStub) GetVisible(_ context.Context, owner, _ domain.UUID) (domain.MediaAsset, error) {
+	if owner != r.asset.OwnerID {
+		return domain.MediaAsset{}, domain.ErrAssetNotFound
+	}
 	return r.asset, nil
 }
 
-func (r *assetRepoStub) ListVisibleSiblings(context.Context, domain.UUID) ([]domain.MediaAsset, error) {
+func (r *assetRepoStub) ListVisibleSiblings(context.Context, domain.UUID, domain.UUID) ([]domain.MediaAsset, error) {
 	return []domain.MediaAsset{r.asset}, nil
 }
 
@@ -67,8 +70,8 @@ func TestAssetServiceKeepsPrivateOriginCreatorOnly(t *testing.T) {
 		t.Fatalf("creator detail = %+v, error=%v", creatorDetail, err)
 	}
 	otherDetail, err := service.Get(context.Background(), authz.Principal{UserID: other.String(), Role: "admin"}, asset.ID)
-	if err != nil || otherDetail.PrivateOrigin != nil || otherDetail.Asset.Capabilities.CanCreateSimilar || !otherDetail.Asset.Capabilities.CanDelete {
-		t.Fatalf("admin detail = %+v, error=%v", otherDetail, err)
+	if err != domain.ErrAssetNotFound || otherDetail.PrivateOrigin != nil {
+		t.Fatalf("foreign admin detail = %+v, error=%v", otherDetail, err)
 	}
 	if repo.originReads != 1 {
 		t.Fatalf("private origin reads=%d, want creator-only one read", repo.originReads)

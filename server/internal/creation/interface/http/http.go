@@ -88,7 +88,8 @@ func MapError(err error) *Error {
 		return nil
 	case isError(err, domain.ErrSessionNotFound), isError(err, domain.ErrMaterialNotFound),
 		isError(err, domain.ErrTaskNotFound), isError(err, domain.ErrNoIncompleteSlots),
-		isError(err, domain.ErrReferenceMaterialUploadNotFound), isError(err, domain.ErrAssetNotFound):
+		isError(err, domain.ErrReferenceMaterialUploadNotFound), isError(err, domain.ErrAssetNotFound),
+		isError(err, domain.ErrPublicationNotFound):
 		return &Error{Status: http.StatusNotFound, Code: CodeNotFound, Message: "The requested resource was not found."}
 	case isError(err, domain.ErrInvalidCursor):
 		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidCursor, Message: "The pagination cursor is not valid."}
@@ -104,6 +105,8 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusRequestedRangeNotSatisfiable, Code: CodeRangeNotSatisfiable, Message: "The requested range cannot be satisfied."}
 	case isError(err, domain.ErrInvalidIntent):
 		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The submitted intent violates the structural envelope or references materials outside the session."}
+	case isError(err, domain.ErrInvalidIdempotencyKey):
+		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "A valid idempotency_key is required."}
 	case isError(err, domain.ErrConnectionNotConfigured):
 		return &Error{Status: http.StatusNotFound, Code: CodeNotConfigured, Message: "No AI provider connection is configured."}
 	case isError(err, domain.ErrConnectionExists):

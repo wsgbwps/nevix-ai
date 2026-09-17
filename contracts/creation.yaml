@@ -1318,11 +1318,10 @@ paths:
   /creation/assets:
     get:
       operationId: listAssets
-      summary: 列出 Team 可读的成功 Media Asset
+      summary: 列出当前用户自己的成功 Media Asset
       description: |-
-        只返回已成功形成且未删除、未限制的 Media Asset，不返回 Reference Material、失败槽位、
-        临时结果或 Task 状态。使用 (created_at, id) 复合 keyset cursor；search 仅匹配创建者
-        display_name 前缀或完整 Asset UUID，绝不搜索或暴露私有 prompt。
+        只返回当前用户已成功形成且未删除、未限制的 Media Asset。使用 (created_at, id)
+        复合 keyset cursor；search 只接受完整 Asset UUID，不搜索私有 prompt。
       security:
         - bearerAuth: []
       parameters:
@@ -1333,12 +1332,6 @@ paths:
           schema:
             type: string
             enum: [image, video]
-        - name: creator
-          in: query
-          description: 创建者 display_name 的大小写不敏感前缀。
-          schema:
-            type: string
-            maxLength: 128
         - name: created_since
           in: query
           schema:
@@ -1380,10 +1373,7 @@ paths:
   /creation/assets/{assetID}:
     get:
       operationId: getAsset
-      summary: 读取一个 Team 可见 Media Asset
-      description: |-
-        返回公开 Asset 事实与同 Task 的其余可见 Asset。只有原创建者收到 private_origin；
-        其他 Member 与 Admin 均不会收到来源 Session/Task id、prompt 或 Generation Specification。
+      summary: 读取当前用户自己的 Media Asset
       security:
         - bearerAuth: []
       parameters:
@@ -1405,8 +1395,7 @@ paths:
       operationId: deleteAsset
       summary: 逻辑删除 Media Asset
       description: |-
-        仅创建者或 Admin 可执行；仓储谓词再次执行授权。删除只隐藏 Asset，不删除与私有
-        Task result 共享的已验证 blob。不存在、无权、已删除或已限制统一回答 404。
+        创建者或 Admin 可执行；删除只隐藏 Asset，不撤回有效 Publication，也不删除共享对象。
       security:
         - bearerAuth: []
       parameters:
@@ -1423,7 +1412,7 @@ paths:
   /creation/assets/{assetID}/content:
     get:
       operationId: downloadAssetContent
-      summary: 下载 Team 可见 Asset 的已验证内容
+      summary: 下载当前用户自己的 Asset 内容
       description: |-
         经 Go 有界流式传输，支持标准单区间 Range 与请求取消。完整下载沿流校验 SHA-256；
         Asset 已删除或已限制时统一 404，且不解析其私有来源。
@@ -1486,6 +1475,254 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/assets/{assetID}/publication:
+    post:
+      operationId: publishAsset
+      summary: 把自己的成功 Asset 发布为 Team Publication
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdempotencyInput"
+      responses:
+        "200":
+          $ref: "#/components/responses/PublicationResponse"
+        "201":
+          $ref: "#/components/responses/PublicationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/inspiration:
+    get:
+      operationId: listInspiration
+      summary: 读取按当前角色投影的唯一 Inspiration 信息流
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/pageLimit"
+        - $ref: "#/components/parameters/keysetCursor"
+        - name: media_type
+          in: query
+          schema:
+            type: string
+            enum: [image, video]
+        - name: creator
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+        - name: created_since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [newest, oldest]
+            default: newest
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: Member 只含有效 Publication；Admin 另含未删除成功 Asset。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspirationPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/inspiration/assets/{assetID}:
+    get:
+      operationId: getInspirationAsset
+      summary: Admin 精确查看一个未删除成功 Asset
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      responses:
+        "200":
+          description: 只含该成品的冻结规格与实际引用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAssetDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/inspiration/assets/{assetID}/content:
+    get:
+      operationId: downloadInspirationAsset
+      summary: Admin 下载精确 Asset 内容
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+        - $ref: "#/components/parameters/rangeHeader"
+      responses:
+        "200":
+          $ref: "#/components/responses/BinaryContent"
+        "206":
+          $ref: "#/components/responses/BinaryContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "416":
+          $ref: "#/components/responses/RangeNotSatisfiable"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/inspiration/assets/{assetID}/references/{referenceID}/preview-url:
+    get:
+      operationId: getInspirationAssetReferencePreviewURL
+      summary: Admin 为该 Asset 实际引用签发短时预览 URL
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+        - $ref: "#/components/parameters/referenceID"
+      responses:
+        "200":
+          $ref: "#/components/responses/MaterialURLResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/publications/{publicationID}:
+    get:
+      operationId: getPublication
+      summary: 读取有效 Team Publication
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/publicationID"
+      responses:
+        "200":
+          description: Publication 的冻结详情与实际引用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicationDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: withdrawPublication
+      summary: 发布者或 Admin 永久撤回 Team Publication
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/publicationID"
+      responses:
+        "204":
+          description: 已撤回。
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/publications/{publicationID}/content:
+    get:
+      operationId: downloadPublication
+      summary: 下载有效 Publication 内容
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/publicationID"
+        - $ref: "#/components/parameters/rangeHeader"
+      responses:
+        "200":
+          $ref: "#/components/responses/BinaryContent"
+        "206":
+          $ref: "#/components/responses/BinaryContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "416":
+          $ref: "#/components/responses/RangeNotSatisfiable"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/publications/{publicationID}/references/{referenceID}/preview-url:
+    get:
+      operationId: getPublicationReferencePreviewURL
+      summary: 为有效 Publication 的一个实际引用签发短时预览 URL
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/publicationID"
+        - $ref: "#/components/parameters/referenceID"
+      responses:
+        "200":
+          $ref: "#/components/responses/MaterialURLResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/publications/{publicationID}/create-similar:
+    post:
+      operationId: createSimilarFromPublication
+      summary: 从有效 Publication 原子创建私有 Session 与素材别名
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/publicationID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdempotencyInput"
+      responses:
+        "200":
+          $ref: "#/components/responses/CreateSimilarResponse"
+        "201":
+          $ref: "#/components/responses/CreateSimilarResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /creation/events:
     get:
       operationId: streamCreationEvents
@@ -1673,6 +1910,26 @@ components:
       schema:
         type: string
         format: uuid
+    publicationID:
+      name: publicationID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    referenceID:
+      name: referenceID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    rangeHeader:
+      name: Range
+      in: header
+      required: false
+      schema:
+        type: string
     userID:
       name: userID
       in: path
@@ -1721,6 +1978,54 @@ components:
                   error:
                     enum:
                       - not_found
+    Conflict:
+      description: 幂等键已绑定不同目标或 payload。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum: [idempotency_payload_conflict]
+    PublicationResponse:
+      description: Team Publication 事实。
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [publication]
+            properties:
+              publication:
+                $ref: "#/components/schemas/TeamPublication"
+    CreateSimilarResponse:
+      description: 幂等创建的私有 Session、素材 identity 与本地 Draft 意图。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateSimilarResult"
+    MaterialURLResponse:
+      description: 精确对象的短时显示 URL。
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [url, expires_at]
+            properties:
+              url:
+                type: string
+                format: uri
+              expires_at:
+                type: string
+                format: date-time
+    BinaryContent:
+      description: 支持单区间读取的已验证媒体字节。
+      content:
+        "*/*":
+          schema:
+            type: string
+            format: binary
     ObjectStorageMaintenanceBadRequest:
       description: 请求形状或位置不合法、transport 不可信，或 proof 无效。
       content:
@@ -3087,6 +3392,8 @@ components:
         - byte_size
         - checksum_sha256
         - created_at
+        - restricted
+        - publication
         - capabilities
       properties:
         id:
@@ -3125,18 +3432,25 @@ components:
         created_at:
           type: string
           format: date-time
+        restricted:
+          type: boolean
+        publication:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AssetPublicationSummary"
         capabilities:
           $ref: "#/components/schemas/MediaAssetCapabilities"
     MediaAssetCapabilities:
       type: object
-      required: [can_delete, can_create_similar]
+      required: [can_delete, can_create_similar, can_publish]
       properties:
         can_delete:
           type: boolean
           description: 创建者或 Admin 为 true。
         can_create_similar:
           type: boolean
-          description: 仅原创建者为 true；私有 prompt/spec 不向 Team 传播。
+        can_publish:
+          type: boolean
     MediaAssetDetail:
       type: object
       required: [asset, siblings]
@@ -3155,7 +3469,7 @@ components:
             - $ref: "#/components/schemas/MediaAssetPrivateOrigin"
     MediaAssetPrivateOrigin:
       type: object
-      required: [session_id, task_id, slot_index, specification]
+      required: [session_id, task_id, slot_index, specification, references]
       properties:
         session_id:
           type: string
@@ -3171,32 +3485,185 @@ components:
           minimum: 0
           maximum: 3
         specification:
+          $ref: "#/components/schemas/GenerationSpecification"
+        references:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicationReference"
+    AssetPublicationSummary:
+      type: object
+      required: [id, published_at, restricted]
+      properties:
+        id:
+          type: string
+          format: uuid
+        published_at:
+          type: string
+          format: date-time
+        restricted:
+          type: boolean
+    IdempotencyInput:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+    TeamPublication:
+      type: object
+      required: [id, source_asset_id, publisher, media_type, mime_type, byte_size, checksum_sha256, published_at, restricted, capabilities]
+      properties:
+        id:
+          type: string
+          format: uuid
+        source_asset_id:
+          type: string
+          format: uuid
+        publisher:
           type: object
-          required: [prompt, media_type, model, mode, manifest_version, quantity]
+          required: [id, display_name]
           properties:
-            prompt:
+            id:
               type: string
-            media_type:
+              format: uuid
+            display_name:
               type: string
-              enum: [image, video]
-            model:
-              type: string
-            mode:
-              type: string
-            manifest_version:
-              type: integer
-              minimum: 1
-            ratio:
-              type: string
-              nullable: true
-            resolution:
-              type: string
-              nullable: true
-            quantity:
-              type: integer
-            duration_seconds:
-              type: integer
-              nullable: true
+        media_type:
+          type: string
+          enum: [image, video]
+        mime_type:
+          type: string
+        byte_size:
+          type: integer
+          format: int64
+          minimum: 1
+        checksum_sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        width_px:
+          type: integer
+          nullable: true
+        height_px:
+          type: integer
+          nullable: true
+        duration_ms:
+          type: integer
+          nullable: true
+        published_at:
+          type: string
+          format: date-time
+        restricted:
+          type: boolean
+        capabilities:
+          type: object
+          required: [can_withdraw, can_create_similar]
+          properties:
+            can_withdraw:
+              type: boolean
+            can_create_similar:
+              type: boolean
+    PublicationReference:
+      type: object
+      required: [id, role, kind, file_name, mime_type, byte_size, claims_version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [reference, first_frame, last_frame, omni]
+        kind:
+          type: string
+          enum: [image, video, audio]
+        file_name:
+          type: string
+        mime_type:
+          type: string
+        byte_size:
+          type: integer
+          format: int64
+        width_px:
+          type: integer
+          nullable: true
+        height_px:
+          type: integer
+          nullable: true
+        duration_ms:
+          type: integer
+          nullable: true
+        claims_version:
+          type: integer
+          minimum: 1
+    PublicationDetail:
+      type: object
+      required: [publication, specification, references]
+      properties:
+        publication:
+          $ref: "#/components/schemas/TeamPublication"
+        specification:
+          $ref: "#/components/schemas/GenerationSpecification"
+        references:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicationReference"
+    AdminAssetDetail:
+      type: object
+      required: [asset, specification, references, publication]
+      properties:
+        asset:
+          $ref: "#/components/schemas/MediaAsset"
+        specification:
+          $ref: "#/components/schemas/GenerationSpecification"
+        references:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicationReference"
+        publication:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/TeamPublication"
+    InspirationPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [type]
+            properties:
+              type:
+                type: string
+                enum: [asset, publication]
+              asset:
+                $ref: "#/components/schemas/MediaAsset"
+              publication:
+                $ref: "#/components/schemas/TeamPublication"
+        next_cursor:
+          type: string
+          nullable: true
+    CreateSimilarResult:
+      type: object
+      required: [session, materials, specification, submission_blocked]
+      properties:
+        session:
+          $ref: "#/components/schemas/CreationSession"
+        materials:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/ReferenceMaterial"
+              - type: object
+                required: [session_id]
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+        specification:
+          $ref: "#/components/schemas/GenerationSpecification"
+        submission_blocked:
+          type: boolean
     TaskRetryInput:
       type: object
       required:
