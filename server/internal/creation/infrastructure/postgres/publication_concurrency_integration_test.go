@@ -238,7 +238,7 @@ func TestPublicationProjectionAndFinalRetention(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("delete source asset: %v", err)
 			}
-			detail, err := repo.GetPublication(ctx, publication.ID)
+			detail, err := repo.GetPublication(ctx, publication.ID, false)
 			if err != nil || detail.Publication.BlobKey != fixture.resultBlobKey || len(detail.References) != 1 || detail.References[0].BlobKey != fixture.materialBlobKey {
 				t.Fatalf("publication retention detail=%+v err=%v", detail, err)
 			}

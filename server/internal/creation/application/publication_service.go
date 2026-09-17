@@ -104,7 +104,7 @@ func (s *PublicationService) GetPublication(ctx context.Context, principal authz
 	if err != nil {
 		return PublicationDetail{}, err
 	}
-	detail, err := s.repository.GetPublication(ctx, id)
+	detail, err := s.repository.GetPublication(ctx, id, principal.Role == "admin")
 	if err != nil {
 		return PublicationDetail{}, err
 	}
@@ -140,7 +140,7 @@ func (s *PublicationService) ResolvePublication(ctx context.Context, principal a
 	if _, err := actorID(principal); err != nil {
 		return domain.TeamPublication{}, err
 	}
-	detail, err := s.repository.GetPublication(ctx, id)
+	detail, err := s.repository.GetPublication(ctx, id, principal.Role == "admin")
 	return detail.Publication, err
 }
 
@@ -270,8 +270,11 @@ func (s *PublicationService) CreateSimilar(ctx context.Context, principal authz.
 	return result, created, nil
 }
 
-func (s *PublicationService) AuthorizePublicationPreview(ctx context.Context, publicationID, referenceID domain.UUID) (MaterialURLAuthorization, error) {
-	reference, err := s.repository.GetPublicationReference(ctx, publicationID, referenceID)
+func (s *PublicationService) AuthorizePublicationPreview(ctx context.Context, principal authz.Principal, publicationID, referenceID domain.UUID) (MaterialURLAuthorization, error) {
+	if _, err := actorID(principal); err != nil {
+		return MaterialURLAuthorization{}, err
+	}
+	reference, err := s.repository.GetPublicationReference(ctx, publicationID, referenceID, principal.Role == "admin")
 	return s.authorizeReference(ctx, reference, err)
 }
 

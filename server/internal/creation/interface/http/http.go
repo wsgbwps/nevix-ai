@@ -60,6 +60,9 @@ const (
 	CodeIntentNotReady      = "intent_not_ready"
 	CodeCapabilityStale     = "capability_stale"
 	CodeMediaUnavailable    = "media_unavailable"
+	CodeTaskNotTerminal     = "task_not_terminal"
+	CodeNoIncompleteSlots   = "no_incomplete_slots"
+	CodeTaskRetryNotAllowed = "task_retry_not_allowed"
 
 	CodeNotConfigured                  = "provider_connection_not_configured"
 	CodeConnectionExists               = "provider_connection_exists"
@@ -87,7 +90,7 @@ func MapError(err error) *Error {
 	case err == nil:
 		return nil
 	case isError(err, domain.ErrSessionNotFound), isError(err, domain.ErrMaterialNotFound),
-		isError(err, domain.ErrTaskNotFound), isError(err, domain.ErrNoIncompleteSlots),
+		isError(err, domain.ErrTaskNotFound),
 		isError(err, domain.ErrReferenceMaterialUploadNotFound), isError(err, domain.ErrAssetNotFound),
 		isError(err, domain.ErrPublicationNotFound):
 		return &Error{Status: http.StatusNotFound, Code: CodeNotFound, Message: "The requested resource was not found."}

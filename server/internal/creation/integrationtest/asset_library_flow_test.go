@@ -299,11 +299,40 @@ func TestAssetLibraryPublicationInspirationAndCreateSimilar(t *testing.T) {
 	if status, body := h.doRequest(t, http.MethodDelete, "/creation/assets/"+first.ID, creatorToken, nil); status != http.StatusNoContent {
 		t.Fatalf("delete published source status=%d body=%s", status, body)
 	}
-	if status, _ := h.doRequest(t, http.MethodGet, "/creation/publications/"+thirdPublicationID, otherToken, nil); status != http.StatusOK {
+	status, thirdPublicationDetailBody := h.doRequest(t, http.MethodGet, "/creation/publications/"+thirdPublicationID, otherToken, nil)
+	if status != http.StatusOK {
 		t.Fatalf("publication after source deletion status=%d", status)
 	}
+	var thirdPublicationDetail publicationDetailView
+	mustDecode(t, thirdPublicationDetailBody, &thirdPublicationDetail)
+	if len(thirdPublicationDetail.References) != 1 {
+		t.Fatalf("third publication reference snapshot=%s", thirdPublicationDetailBody)
+	}
+	thirdSnapshotReferenceID := thirdPublicationDetail.References[0].ID
 	if status, deletedSourceInspiration := h.doRequest(t, http.MethodGet, "/creation/inspiration?search="+thirdPublicationID, adminToken, nil); status != http.StatusOK || !bytes.Contains(deletedSourceInspiration, []byte(thirdPublicationID)) {
 		t.Fatalf("admin inspiration lost deleted-source publication status=%d body=%s", status, deletedSourceInspiration)
+	}
+	restrictedDeletedSource := mutateRestriction(t, h, http.MethodPut, "/creation/publications/"+thirdPublicationID+"/restriction", adminToken, "publication")
+	assertRestrictionState(t, restrictedDeletedSource, thirdPublicationID, "active", true, false, true)
+	if status, restrictedList := h.doRequest(t, http.MethodGet, "/creation/inspiration?search="+thirdPublicationID, adminToken, nil); status != http.StatusOK || !bytes.Contains(restrictedList, []byte(thirdPublicationID)) {
+		t.Fatalf("admin inspiration lost restricted deleted-source publication status=%d body=%s", status, restrictedList)
+	}
+	for name, path := range map[string]string{
+		"detail":    "/creation/publications/" + thirdPublicationID,
+		"content":   "/creation/publications/" + thirdPublicationID + "/content",
+		"reference": "/creation/publications/" + thirdPublicationID + "/references/" + thirdSnapshotReferenceID + "/preview-url",
+	} {
+		if status, response := h.doRequest(t, http.MethodGet, path, adminToken, nil); status != http.StatusOK {
+			t.Fatalf("admin restricted deleted-source %s status=%d body=%s", name, status, response)
+		}
+		if status, _ := h.doRequest(t, http.MethodGet, path, otherToken, nil); status != http.StatusNotFound {
+			t.Fatalf("member restricted deleted-source %s status=%d", name, status)
+		}
+	}
+	releasedDeletedSource := mutateRestriction(t, h, http.MethodDelete, "/creation/publications/"+thirdPublicationID+"/restriction", adminToken, "publication")
+	assertRestrictionState(t, releasedDeletedSource, thirdPublicationID, "released", false, true, false)
+	if status, _ := h.doRequest(t, http.MethodGet, "/creation/publications/"+thirdPublicationID, otherToken, nil); status != http.StatusNotFound {
+		t.Fatalf("released deleted-source publication restored member visibility status=%d", status)
 	}
 	if status, _ := h.doRequest(t, http.MethodDelete, "/creation/publications/"+thirdPublicationID, adminToken, nil); status != http.StatusNoContent {
 		t.Fatalf("admin withdraw status=%d", status)

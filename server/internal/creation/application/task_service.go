@@ -309,6 +309,12 @@ func (s *TaskService) RetryUncompleted(ctx context.Context, owner, taskID domain
 	incomplete := 0
 	for _, slot := range slots {
 		if slot.Status == nil || *slot.Status != domain.SlotSucceeded {
+			if slot.Reason != nil {
+				_, retryable := domain.FailureGuidance(*slot.Reason)
+				if !retryable {
+					return SubmissionResult{}, domain.ErrTaskRetryNotAllowed
+				}
+			}
 			incomplete++
 		}
 	}

@@ -116,7 +116,11 @@ export const userManagementTranslations = defineResourceTranslations({
         object_storage_connection_replaced: '替换对象存储连接',
         object_storage_connection_credential_rotated: '轮换对象存储凭据',
         object_storage_connection_deleted: '删除对象存储连接',
-        object_storage_connection_credential_recovered: '恢复对象存储凭据'
+        object_storage_connection_credential_recovered: '恢复对象存储凭据',
+        media_asset_restricted: '限制媒体资产',
+        media_asset_restriction_released: '解除媒体资产限制',
+        team_publication_restricted: '限制团队发布',
+        team_publication_restriction_released: '解除团队发布限制'
       }
     },
     joinCodes: {
@@ -296,7 +300,11 @@ export const userManagementTranslations = defineResourceTranslations({
         object_storage_connection_replaced: 'Object Storage Connection replaced',
         object_storage_connection_credential_rotated: 'Object storage credential rotated',
         object_storage_connection_deleted: 'Object Storage Connection deleted',
-        object_storage_connection_credential_recovered: 'Object storage credential recovered'
+        object_storage_connection_credential_recovered: 'Object storage credential recovered',
+        media_asset_restricted: 'Media asset restricted',
+        media_asset_restriction_released: 'Media asset restriction released',
+        team_publication_restricted: 'Team publication restricted',
+        team_publication_restriction_released: 'Team publication restriction released'
       }
     },
     joinCodes: {

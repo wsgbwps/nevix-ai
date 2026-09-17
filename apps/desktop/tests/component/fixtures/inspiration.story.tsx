@@ -127,6 +127,7 @@ interface InspirationControls {
   withdraws(): readonly string[]
   previewCalls(): readonly string[]
   safetyCalls(): readonly string[]
+  releaseSafety(): void
 }
 
 type InspirationStoryState =
@@ -139,6 +140,8 @@ type InspirationStoryState =
   | 'layout-failed'
   | 'preview-refresh'
   | 'preview-refresh-failed'
+  | 'admin-deleted-publication'
+  | 'admin-safety-delayed'
   | 'admin-safety-failed'
 
 declare global {
@@ -156,6 +159,7 @@ function createHarness(state: InspirationStoryState): {
   const withdraws: string[] = []
   const previewCalls: string[] = []
   const safetyCalls: string[] = []
+  let releaseSafety: (() => void) | null = null
   let assetReleased = false
   let publicationReleased = false
   const items =
@@ -169,11 +173,29 @@ function createHarness(state: InspirationStoryState): {
         )
       : state === 'layout-probe' || state === 'layout-failed'
         ? layoutProbeItems
-        : state === 'admin' || state === 'admin-safety-failed'
-          ? [publicationItem, adminAsset]
-          : state === 'empty'
-            ? []
-            : [publicationItem]
+        : state === 'admin-deleted-publication'
+          ? [
+              {
+                type: 'publication' as const,
+                publication: {
+                  ...publication(1),
+                  id: 'deleted-publication',
+                  restricted: true,
+                  restrictionState: 'active' as const,
+                  capabilities: {
+                    canWithdraw: true,
+                    canCreateSimilar: false,
+                    canRestrict: false,
+                    canRelease: true
+                  }
+                }
+              }
+            ]
+          : state === 'admin' || state === 'admin-safety-delayed' || state === 'admin-safety-failed'
+            ? [publicationItem, adminAsset]
+            : state === 'empty'
+              ? []
+              : [publicationItem]
   return {
     ports: {
       listInspiration: async (request) => {
@@ -188,7 +210,19 @@ function createHarness(state: InspirationStoryState): {
               outcome: 'succeeded',
               value: {
                 type: 'publication',
-                publication: item.publication,
+                publication:
+                  state === 'admin-deleted-publication'
+                    ? {
+                        ...item.publication,
+                        restricted: !publicationReleased,
+                        restrictionState: publicationReleased ? 'released' : 'active',
+                        capabilities: {
+                          ...item.publication.capabilities,
+                          canRestrict: publicationReleased,
+                          canRelease: !publicationReleased
+                        }
+                      }
+                    : item.publication,
                 specification,
                 references: [reference]
               }
@@ -274,6 +308,11 @@ function createHarness(state: InspirationStoryState): {
       },
       releaseAsset: async (assetId) => {
         safetyCalls.push(`release:asset:${assetId}`)
+        if (state === 'admin-safety-delayed') {
+          await new Promise<void>((resolve) => {
+            releaseSafety = resolve
+          })
+        }
         assetReleased = true
         return state === 'admin-safety-failed'
           ? { outcome: 'network-failure' }
@@ -294,7 +333,25 @@ function createHarness(state: InspirationStoryState): {
       restrictPublication: async (publicationId) => {
         safetyCalls.push(`restrict:publication:${publicationId}`)
         publicationReleased = false
-        return { outcome: 'request-rejected', code: 'not_used' }
+        const current = publication(1)
+        return state === 'admin-deleted-publication'
+          ? {
+              outcome: 'succeeded',
+              value: {
+                ...current,
+                id: publicationId,
+                restricted: true,
+                restrictionState: 'active',
+                capabilities: {
+                  ...current.capabilities,
+                  canWithdraw: true,
+                  canCreateSimilar: false,
+                  canRestrict: false,
+                  canRelease: true
+                }
+              }
+            }
+          : { outcome: 'request-rejected', code: 'not_used' }
       },
       releasePublication: async (publicationId) => {
         safetyCalls.push(`release:publication:${publicationId}`)
@@ -329,7 +386,8 @@ function createHarness(state: InspirationStoryState): {
       recordSimilar: (publicationId) => similarCalls.push(publicationId),
       withdraws: () => withdraws,
       previewCalls: () => previewCalls,
-      safetyCalls: () => safetyCalls
+      safetyCalls: () => safetyCalls,
+      releaseSafety: () => releaseSafety?.()
     }
   }
 }

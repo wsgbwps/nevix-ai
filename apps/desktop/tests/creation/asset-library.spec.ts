@@ -12,6 +12,11 @@ import {
 
 const identityServer = readIdentityServerConfig()
 
+function percentile95(samples: readonly number[]): number {
+  const sorted = [...samples].sort((left, right) => left - right)
+  return sorted[Math.ceil(sorted.length * 0.95) - 1] ?? Number.POSITIVE_INFINITY
+}
+
 test(
   'a creator manages generated assets through the team Asset Library',
   { tag: ['@smoke', '@storage'] },
@@ -215,12 +220,16 @@ test(
               await signIn(safetyAdmin, identityServer.adminEmail, identityServer.adminPassword)
             }
 
-            await safetyAdmin.page.getByRole('link', { name: '资产' }).first().click()
-            await expect(safetyAdmin.page.getByRole('heading', { name: '资产' })).toBeVisible()
-            const firstScreenStartedAt = Date.now()
-            await safetyAdmin.page.getByRole('link', { name: '灵感' }).first().click()
-            await expect(adminInspiration).toBeVisible()
-            expect(Date.now() - firstScreenStartedAt).toBeLessThan(2_000)
+            const firstScreenSamples: number[] = []
+            for (let sample = 0; sample < 20; sample += 1) {
+              await safetyAdmin.page.getByRole('link', { name: '资产' }).first().click()
+              await expect(safetyAdmin.page.getByRole('heading', { name: '资产' })).toBeVisible()
+              const startedAt = Date.now()
+              await safetyAdmin.page.getByRole('link', { name: '灵感' }).first().click()
+              await expect(safetyAdmin.page.getByTestId('inspiration-card').first()).toBeVisible()
+              firstScreenSamples.push(Date.now() - startedAt)
+            }
+            expect(percentile95(firstScreenSamples)).toBeLessThan(2_000)
 
             const listRequest = /\/creation\/inspiration(?:\?|$)/
             await safetyAdmin.page.route(
@@ -256,11 +265,23 @@ test(
               publicationRestriction.getByRole('button', { name: '限制发布' })
             ).toBeVisible()
 
+            const restrictionSamples: number[] = []
+            for (let sample = 0; sample < 20; sample += 1) {
+              const restricting = sample % 2 === 0
+              const actionName = restricting ? '限制资产' : '解除资产限制'
+              const settledName = restricting ? '解除资产限制' : '限制资产'
+              safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
+              const startedAt = Date.now()
+              await assetRestriction.getByRole('button', { name: actionName }).click()
+              await expect(
+                assetRestriction.getByRole('button', { name: settledName })
+              ).toBeVisible()
+              restrictionSamples.push(Date.now() - startedAt)
+            }
+            expect(percentile95(restrictionSamples)).toBeLessThan(2_000)
             safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
-            const restrictionStartedAt = Date.now()
             await assetRestriction.getByRole('button', { name: '限制资产' }).click()
             await expect(safetyDetail.getByRole('status')).toContainText('资产限制已生效')
-            expect(Date.now() - restrictionStartedAt).toBeLessThan(2_000)
             await expect(
               assetRestriction.getByRole('button', { name: '解除资产限制' })
             ).toBeVisible()

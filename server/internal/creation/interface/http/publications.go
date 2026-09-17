@@ -244,7 +244,8 @@ func (h *PublicationHandler) PublicationReferencePreview(w http.ResponseWriter, 
 	if !ok {
 		return
 	}
-	authorization, err := h.publications.AuthorizePublicationPreview(r.Context(), publicationID, referenceID)
+	principal, _ := authz.PrincipalFrom(r.Context())
+	authorization, err := h.publications.AuthorizePublicationPreview(r.Context(), principal, publicationID, referenceID)
 	writeMaterialAuthorization(w, r, authorization, err)
 }
 

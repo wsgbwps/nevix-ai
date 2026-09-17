@@ -79,6 +79,45 @@ test('failed safety commands retain state and announce recovery feedback', async
   await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toContainText('Active')
 })
 
+test('a completed safety command cannot overwrite a newly opened detail', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="admin-safety-delayed" />)
+  await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
+  const dialog = page.getByRole('dialog')
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await dialog.getByRole('button', { name: 'Release asset restriction' }).click()
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
+  await expect(dialog).toContainText('A precise editorial launch scene')
+
+  await page.evaluate(() => window.__inspirationTest?.releaseSafety())
+
+  await expect(dialog).toContainText('A precise editorial launch scene')
+  await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toHaveCount(0)
+})
+
+test('an admin can release and re-restrict a deleted-source publication without losing it', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="admin-deleted-publication" />)
+  await page.getByRole('button', { name: 'Open inspiration deleted-publication' }).click()
+  const dialog = page.getByRole('dialog')
+  const restriction = dialog.getByRole('region', { name: 'Publication restriction' })
+
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await restriction.getByRole('button', { name: 'Release publication restriction' }).click()
+  await expect(restriction).toContainText('Released')
+  await expect(page.getByTestId('inspiration-card')).toHaveCount(1)
+
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await restriction.getByRole('button', { name: 'Restrict publication' }).click()
+  await expect(restriction).toContainText('Active')
+  await expect(page.getByTestId('inspiration-card')).toHaveCount(1)
+})
+
 test('filters use the single projection and distinguish search-no-results', async ({
   mount,
   page

@@ -1096,7 +1096,24 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
       }
     ]
   }
-  await mount(<CreationWorkbenchStory taskScript={{ tasks: [failedTask] }} />)
+  const retryableTask: ScriptedTask = {
+    ...failedTask,
+    id: 'dddddddd-0000-4000-8000-00000000beef',
+    status: 'failed',
+    slotCount: 1,
+    slots: [
+      {
+        index: 0,
+        status: 'failed',
+        failureReason: 'temporarily_unavailable',
+        actionSuggestion: 'retry_later',
+        retryable: true,
+        supportNumber: null,
+        result: null
+      }
+    ]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [failedTask, retryableTask] }} />)
   await selectFirstSession(page)
 
   // States render inside the slots — no separate banner.
@@ -1117,13 +1134,13 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
   await expect(failedSlot).toContainText('Do not retry unchanged')
   await expect(failedSlot).toContainText('NVX-dddddddd-0000-4000-8000-00000000face-02')
 
-  // Partial success keeps retrying exactly the uncompleted slots; the redo
-  // affordance lives in the task's overflow menu.
-  await page.getByTestId(`task-more-${failedTask.id}`).click()
-  await page.getByTestId(`task-retry-${failedTask.id}`).click()
+  // A non-retryable provider-route failure must not offer an identical retry.
+  await expect(page.getByTestId(`task-retry-${failedTask.id}`)).toHaveCount(0)
+  await page.getByTestId(`task-more-${retryableTask.id}`).click()
+  await page.getByTestId(`task-retry-${retryableTask.id}`).click()
   const retries = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
   expect(retries).toHaveLength(1)
-  expect(retries[0].taskId).toBe(failedTask.id)
+  expect(retries[0].taskId).toBe(retryableTask.id)
 })
 
 test('a task card keeps detail facts paired with the detail change criterion', async ({

@@ -430,6 +430,12 @@ func failTask(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errorsIs(err, domain.ErrIdempotencyPayloadConflict):
 		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeIdempotencyConflict, Message: "This idempotency key was already used with a different payload."})
+	case errorsIs(err, domain.ErrTaskNotTerminal):
+		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeTaskNotTerminal, Message: "The generation task is not terminal."})
+	case errorsIs(err, domain.ErrNoIncompleteSlots):
+		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeNoIncompleteSlots, Message: "The generation task has no incomplete slots."})
+	case errorsIs(err, domain.ErrTaskRetryNotAllowed):
+		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeTaskRetryNotAllowed, Message: "The incomplete slots cannot be retried without changing the request."})
 	case errorsIs(err, domain.ErrIntentNotReady):
 		WriteError(w, &Error{Status: http.StatusUnprocessableEntity, Code: CodeIntentNotReady, Message: "The submitted intent does not carry a complete generation intent."})
 	case errorsIs(err, domain.ErrCapabilityStale):

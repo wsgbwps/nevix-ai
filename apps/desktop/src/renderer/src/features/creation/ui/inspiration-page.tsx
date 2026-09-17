@@ -49,6 +49,12 @@ function itemId(item: InspirationItem): string {
   return item.type === 'publication' ? item.publication.id : item.asset.id
 }
 
+function sameItem(left: InspirationItem | null, right: InspirationItem | null): boolean {
+  return (
+    left !== null && right !== null && left.type === right.type && itemId(left) === itemId(right)
+  )
+}
+
 function itemCreator(item: InspirationItem): string {
   return item.type === 'publication'
     ? item.publication.publisher.displayName
@@ -63,7 +69,11 @@ function publicationFor(
   item: InspirationItem,
   detail?: InspirationDetailView | null
 ): PublicationView | null {
-  if (item.type === 'publication') return item.publication
+  if (item.type === 'publication') {
+    return detail?.type === 'publication' && detail.publication.id === item.publication.id
+      ? detail.publication
+      : item.publication
+  }
   return detail?.type === 'asset' ? detail.publication : null
 }
 
@@ -488,7 +498,7 @@ function InspirationDetail({
                     {t('inspiration.withdraw')}
                   </Button>
                 ) : null}
-                {asset?.capabilities.canRestrict || asset?.capabilities.canRelease ? (
+                {asset ? (
                   <RestrictionControl
                     kind="asset"
                     state={asset.restrictionState}
@@ -499,7 +509,7 @@ function InspirationDetail({
                     onRelease={() => onRestriction('asset', 'release')}
                   />
                 ) : null}
-                {publication?.capabilities.canRestrict || publication?.capabilities.canRelease ? (
+                {publication ? (
                   <RestrictionControl
                     kind="publication"
                     state={publication.restrictionState}
@@ -539,6 +549,7 @@ export function InspirationPage({
   const [filters, setFilters] = useState(initialFilters)
   const list = useInspiration(ports, initialFilters)
   const [selected, setSelected] = useState<InspirationItem | null>(null)
+  const selectedRef = useRef<InspirationItem | null>(null)
   const [detail, setDetail] = useState<InspirationDetailView | null>(null)
   const [detailStatus, setDetailStatus] = useState<'idle' | 'loading' | 'failed'>('idle')
   const [actionStatus, setActionStatus] = useState<'idle' | 'running' | 'succeeded' | 'failed'>(
@@ -564,6 +575,7 @@ export function InspirationPage({
   }, [ports, selected])
 
   const close = (): void => {
+    selectedRef.current = null
     setSelected(null)
     setDetail(null)
     setDetailStatus('idle')
@@ -571,6 +583,7 @@ export function InspirationPage({
     setActionMessage(null)
   }
   const open = (item: InspirationItem): void => {
+    selectedRef.current = item
     setDetail(null)
     setDetailStatus('loading')
     setActionStatus('idle')
@@ -722,6 +735,7 @@ export function InspirationPage({
         }}
         onRestriction={(target, operation) => {
           if (!selected || !detail) return
+          const actionItem = selected
           const targetId =
             target === 'asset'
               ? detail.type === 'asset'
@@ -741,6 +755,7 @@ export function InspirationPage({
                 ? ports.restrictPublication(targetId)
                 : ports.releasePublication(targetId)
           void pending.then(async (result) => {
+            if (!sameItem(selectedRef.current, actionItem)) return
             if (result.outcome !== 'succeeded') {
               setActionStatus('failed')
               setActionMessage(t('inspiration.restriction.failed'))
@@ -751,15 +766,15 @@ export function InspirationPage({
               if (target === 'asset') {
                 return current.type === 'asset' ? { ...current, asset: result.value } : current
               }
-              return current.type === 'publication'
-                ? { ...current, publication: result.value }
-                : { ...current, publication: result.value }
+              return { ...current, publication: result.value }
             })
             setActionStatus('succeeded')
             setActionMessage(t(`inspiration.restriction.${target}.${operation}Succeeded`))
             list.refresh()
-            const refreshed = await ports.getInspirationDetail(selected)
-            if (refreshed.outcome === 'succeeded') setDetail(refreshed.value)
+            const refreshed = await ports.getInspirationDetail(actionItem)
+            if (refreshed.outcome === 'succeeded' && sameItem(selectedRef.current, actionItem)) {
+              setDetail(refreshed.value)
+            }
           })
         }}
       />

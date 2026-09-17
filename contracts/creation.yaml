@@ -1212,7 +1212,7 @@ paths:
       description: |-
         原 Task 保持不可变。新 Task 复制原冻结规格但 quantity 仅覆盖未完成槽位
         （成功槽位不被重复生成或重复计费），并按与首次提交完全相同的治理准入
-        （新 idempotency_key、月计数、reservation）执行。仅终态且存在未完成槽位的任务可重试。
+        （新 idempotency_key、月计数、reservation）执行。仅终态、存在未完成槽位，且所有未完成槽位均允许原样重试的任务可重试。
       security:
         - bearerAuth: []
       parameters:
@@ -2462,7 +2462,7 @@ components:
                     enum:
                       - idempotency_payload_conflict
     TaskRetryConflict:
-      description: 重试条件不满足 —— 任务未终态，或没有未完成槽位可重试。
+      description: 重试条件不满足 —— 任务未终态、没有未完成槽位，或未完成槽位需先修改请求或由管理员处置。
       content:
         application/json:
           schema:
@@ -2474,6 +2474,7 @@ components:
                     enum:
                       - task_not_terminal
                       - no_incomplete_slots
+                      - task_retry_not_allowed
     TaskIntentRejected:
       description: 意图载荷拒绝 —— 结构不完整/非法的意图、意图值超出当前 manifest，或目标媒体当前不可用；不创建 Task。
       content:
@@ -3907,6 +3908,10 @@ components:
       required:
         - index
         - status
+        - failure_reason
+        - action_suggestion
+        - retryable
+        - support_number
       properties:
         index:
           type: integer
