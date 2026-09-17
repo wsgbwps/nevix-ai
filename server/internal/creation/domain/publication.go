@@ -21,6 +21,8 @@ type TeamPublication struct {
 	Specification        GenerationSpecification
 	PublishedAt          time.Time
 	Restricted           bool
+	RestrictionState     RestrictionState
+	DirectRestriction    RestrictionState
 }
 
 type PublicationReference struct {
@@ -75,4 +77,8 @@ type PublicationRepository interface {
 	CreateSimilar(ctx context.Context, tx TxExecutor, actor, id UUID, idempotencyKey string) (SimilarCreation, bool, error)
 	GetPublicationReference(ctx context.Context, publicationID, referenceID UUID) (PublicationReference, error)
 	GetAdminAssetReference(ctx context.Context, assetID, referenceID UUID) (PublicationReference, error)
+	RestrictAsset(ctx context.Context, tx TxExecutor, id UUID) (MediaAsset, bool, error)
+	ReleaseAsset(ctx context.Context, tx TxExecutor, id UUID) (MediaAsset, bool, error)
+	RestrictPublication(ctx context.Context, tx TxExecutor, id UUID) (TeamPublication, bool, error)
+	ReleasePublication(ctx context.Context, tx TxExecutor, id UUID) (TeamPublication, bool, error)
 }

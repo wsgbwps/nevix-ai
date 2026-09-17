@@ -216,6 +216,14 @@ export function createCreationWorkspacePorts(
       withInspirationToken((client, token) =>
         client.createSimilar(token, publicationId, idempotencyKey)
       ),
+    restrictAsset: (assetId) =>
+      withInspirationToken((client, token) => client.restrictAsset(token, assetId)),
+    releaseAsset: (assetId) =>
+      withInspirationToken((client, token) => client.releaseAsset(token, assetId)),
+    restrictPublication: (publicationId) =>
+      withInspirationToken((client, token) => client.restrictPublication(token, publicationId)),
+    releasePublication: (publicationId) =>
+      withInspirationToken((client, token) => client.releasePublication(token, publicationId)),
     // First calls drain every page behind the keyset cursor; an explicit
     // cursor fetches exactly that page.
     listSessions: (cursor) =>

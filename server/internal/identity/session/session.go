@@ -54,14 +54,21 @@ var ErrInvalid = errors.New("session: invalid session")
 // refresh runs as its own write transaction; issuance and revocation
 // participate in the caller's open transaction through writetx.Scope.
 type Service struct {
-	db     *pgxpool.Pool
-	runner *writetx.Runner
+	db             *pgxpool.Pool
+	runner         *writetx.Runner
+	revocationSink func(string)
 }
 
 // NewService builds the service over the runtime pool and the shared write
 // transaction runner.
 func NewService(db *pgxpool.Pool, runner *writetx.Runner) *Service {
 	return &Service{db: db, runner: runner}
+}
+
+// SetRevocationSink wires the startup-time publisher for committed Session
+// revocations. Register calls it before the HTTP surface serves traffic.
+func (s *Service) SetRevocationSink(sink func(string)) {
+	s.revocationSink = sink
 }
 
 // NewToken returns a fresh opaque bearer token (base64url) and the SHA-256
@@ -274,9 +281,8 @@ func All(userID string) (RevocationTarget, error) {
 }
 
 // Revoke deletes exactly the target's durable sessions inside the caller's
-// open Write Transaction. An absent target is a successful no-op with no
-// post-commit effect; after a change, the exact session IDs are logged only
-// after commit. Audit semantics remain with the calling command.
+// open Write Transaction. An absent target is a no-op; changed Session IDs
+// reach the configured sink only after commit. Audit stays caller-owned.
 func (s *Service) Revoke(ctx context.Context, sc *writetx.Scope, target RevocationTarget) (bool, error) {
 	revoked, err := s.deleteTargeted(ctx, sc, target)
 	if err != nil {
@@ -288,6 +294,11 @@ func (s *Service) Revoke(ctx context.Context, sc *writetx.Scope, target Revocati
 	sort.Strings(revoked)
 	sc.AfterCommit(func() {
 		slog.Info("identity: session revocation committed", "session_ids", revoked)
+		if s.revocationSink != nil {
+			for _, sessionID := range revoked {
+				s.revocationSink(sessionID)
+			}
+		}
 	})
 	return true, nil
 }

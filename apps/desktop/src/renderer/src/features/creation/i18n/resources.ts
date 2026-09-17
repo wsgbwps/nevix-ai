@@ -100,13 +100,41 @@ export const creationTranslations = defineResourceTranslations({
         withdraw: '撤回',
         withdrawConfirm: '撤回后不可恢复；是否继续？',
         actionFailed: '操作失败，请重试。',
+        restriction: {
+          updating: '正在更新安全限制…',
+          failed: '无法更新安全限制，请重试。',
+          state: { none: '未限制', active: '限制中', released: '已解除' },
+          asset: {
+            label: '资产安全限制',
+            restrict: '限制资产',
+            release: '解除资产限制',
+            restrictConfirm: '立即限制这个资产，并终止其所有有效发布？',
+            releaseConfirm: '解除这个资产的安全限制？已终止的发布不会恢复。',
+            restrictSucceeded: '资产限制已生效。',
+            releaseSucceeded: '资产限制已解除。'
+          },
+          publication: {
+            label: '发布安全限制',
+            restrict: '限制发布',
+            release: '解除发布限制',
+            restrictConfirm: '立即限制并永久终止这条发布？',
+            releaseConfirm: '解除这条发布的限制状态？发布仍不会恢复。',
+            restrictSucceeded: '发布限制已生效。',
+            releaseSucceeded: '发布限制已解除。'
+          }
+        },
         filters: {
           media: '媒体类型',
           creator: '发布者',
           search: '搜索',
           searchHint: '发布者名称或内容 ID'
         },
-        status: { published: '已发布', unpublished: '未发布', restricted: '已限制' }
+        status: {
+          published: '已发布',
+          unpublished: '未发布',
+          restricted: '已限制',
+          released: '已解除'
+        }
       },
       sessions: {
         label: '开启创作',
@@ -182,6 +210,20 @@ export const creationTranslations = defineResourceTranslations({
             '模型路由不可用（诊断代码：MODEL_GROUP_ALL_UNAVAILABLE）；请管理员检查渠道绑定、权限、余额、配额或容量',
           processing_indeterminate: '结局未知，重做可能重复计费',
           internal_error: '内部错误'
+        },
+        guidance: {
+          actions: {
+            correct_input: '修正输入后再试',
+            confirm_rights: '确认素材权利后再试',
+            revise_input: '修改输入内容',
+            revise_request: '修改请求内容',
+            contact_admin: '联系管理员',
+            retry_later: '稍后重试',
+            contact_support: '联系支持人员'
+          },
+          retryable: '可按原请求重试',
+          notRetryable: '不要用相同内容重试',
+          supportNumber: '支持编号'
         },
         diagnostic: {
           sources: {
@@ -601,13 +643,43 @@ export const creationTranslations = defineResourceTranslations({
         withdraw: 'Withdraw',
         withdrawConfirm: 'Withdrawal is irreversible. Continue?',
         actionFailed: 'The action failed. Try again.',
+        restriction: {
+          updating: 'Updating the safety restriction…',
+          failed: 'The restriction could not be updated. Try again.',
+          state: { none: 'Not restricted', active: 'Active', released: 'Released' },
+          asset: {
+            label: 'Asset restriction',
+            restrict: 'Restrict asset',
+            release: 'Release asset restriction',
+            restrictConfirm: 'Restrict this asset now and terminate all of its valid publications?',
+            releaseConfirm:
+              'Release this asset restriction? Terminated publications will not be restored.',
+            restrictSucceeded: 'Asset restriction activated.',
+            releaseSucceeded: 'Asset restriction released.'
+          },
+          publication: {
+            label: 'Publication restriction',
+            restrict: 'Restrict publication',
+            release: 'Release publication restriction',
+            restrictConfirm: 'Restrict and permanently terminate this publication now?',
+            releaseConfirm:
+              'Release this publication restriction? The publication will not be restored.',
+            restrictSucceeded: 'Publication restriction activated.',
+            releaseSucceeded: 'Publication restriction released.'
+          }
+        },
         filters: {
           media: 'Media type',
           creator: 'Publisher',
           search: 'Search',
           searchHint: 'Publisher name or content ID'
         },
-        status: { published: 'Published', unpublished: 'Unpublished', restricted: 'Restricted' }
+        status: {
+          published: 'Published',
+          unpublished: 'Unpublished',
+          restricted: 'Restricted',
+          released: 'Released'
+        }
       },
       sessions: {
         label: 'Start creating',
@@ -686,6 +758,20 @@ export const creationTranslations = defineResourceTranslations({
             'Model route unavailable (diagnostic code: MODEL_GROUP_ALL_UNAVAILABLE); ask an admin to check channel binding, permissions, balance, quota, or capacity',
           processing_indeterminate: 'Outcome unknown; a redo may repeat billing',
           internal_error: 'Internal error'
+        },
+        guidance: {
+          actions: {
+            correct_input: 'Correct the input and try again',
+            confirm_rights: 'Confirm material rights and try again',
+            revise_input: 'Revise the input',
+            revise_request: 'Revise the request',
+            contact_admin: 'Contact an administrator',
+            retry_later: 'Try again later',
+            contact_support: 'Contact support'
+          },
+          retryable: 'Retrying the unchanged request is allowed',
+          notRetryable: 'Do not retry unchanged',
+          supportNumber: 'Support number'
         },
         diagnostic: {
           sources: {

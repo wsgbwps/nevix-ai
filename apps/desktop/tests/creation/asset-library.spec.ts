@@ -183,6 +183,153 @@ test(
           await publishedDialog.getByRole('button', { name: '撤回' }).click()
           await expect(publishedDialog).toBeHidden()
           await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(0)
+
+          await relaunched.page.getByRole('link', { name: '资产' }).click()
+          await relaunched.page.getByRole('button', { name: /^打开资产 / }).click()
+          const republishDialog = relaunched.page.getByRole('dialog')
+          relaunched.page.once('dialog', (confirmation) => void confirmation.accept())
+          await republishDialog.getByRole('button', { name: '发布到灵感' }).click()
+          await expect(republishDialog.getByRole('button', { name: '撤回发布' })).toBeVisible()
+          await relaunched.page.keyboard.press('Escape')
+          await relaunched.page.getByRole('link', { name: '灵感' }).click()
+          await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(1)
+          await relaunched.page.getByRole('button', { name: /^打开灵感 / }).click()
+          const memberSafetyDetail = relaunched.page.getByRole('dialog')
+          await expect(memberSafetyDetail.getByRole('region', { name: /安全限制/ })).toHaveCount(0)
+          await relaunched.page.keyboard.press('Escape')
+
+          const safetyAdmin = await launchTestApp({
+            userDataDir: adminUserDataDir,
+            systemLanguages: ['zh-CN'],
+            serverUrl: identityServer.serverUrl
+          })
+          try {
+            await safetyAdmin.page.setViewportSize({ width: 960, height: 600 })
+            const adminLogin = safetyAdmin.page.getByRole('heading', { name: '登录 Nevix AI' })
+            const adminInspiration = safetyAdmin.page.getByRole('heading', { name: '灵感' })
+            await adminLogin
+              .or(adminInspiration)
+              .first()
+              .waitFor({ state: 'visible', timeout: 15_000 })
+            if (await adminLogin.isVisible()) {
+              await signIn(safetyAdmin, identityServer.adminEmail, identityServer.adminPassword)
+            }
+
+            await safetyAdmin.page.getByRole('link', { name: '资产' }).first().click()
+            await expect(safetyAdmin.page.getByRole('heading', { name: '资产' })).toBeVisible()
+            const firstScreenStartedAt = Date.now()
+            await safetyAdmin.page.getByRole('link', { name: '灵感' }).first().click()
+            await expect(adminInspiration).toBeVisible()
+            expect(Date.now() - firstScreenStartedAt).toBeLessThan(2_000)
+
+            const listRequest = /\/creation\/inspiration(?:\?|$)/
+            await safetyAdmin.page.route(
+              listRequest,
+              (route) => route.abort('internetdisconnected'),
+              { times: 1 }
+            )
+            await safetyAdmin.page.getByLabel('发布者').fill('资产库验收用户')
+            await safetyAdmin.page.getByRole('button', { name: '搜索', exact: true }).click()
+            await expect(safetyAdmin.page.getByRole('alert')).toContainText('无法读取灵感')
+            const recoveryStartedAt = Date.now()
+            await safetyAdmin.page.getByRole('button', { name: '重试' }).click()
+            await expect(safetyAdmin.page.getByTestId('inspiration-card')).toHaveCount(1, {
+              timeout: 10_000
+            })
+            expect(Date.now() - recoveryStartedAt).toBeLessThan(10_000)
+            expect(
+              await safetyAdmin.page.evaluate(
+                () => document.documentElement.scrollWidth <= window.innerWidth
+              )
+            ).toBe(true)
+
+            await safetyAdmin.page.getByRole('button', { name: /^打开灵感 / }).click()
+            const safetyDetail = safetyAdmin.page.getByRole('dialog')
+            const assetRestriction = safetyDetail.getByRole('region', {
+              name: '资产安全限制'
+            })
+            const publicationRestriction = safetyDetail.getByRole('region', {
+              name: '发布安全限制'
+            })
+            await expect(assetRestriction.getByRole('button', { name: '限制资产' })).toBeVisible()
+            await expect(
+              publicationRestriction.getByRole('button', { name: '限制发布' })
+            ).toBeVisible()
+
+            safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
+            const restrictionStartedAt = Date.now()
+            await assetRestriction.getByRole('button', { name: '限制资产' }).click()
+            await expect(safetyDetail.getByRole('status')).toContainText('资产限制已生效')
+            expect(Date.now() - restrictionStartedAt).toBeLessThan(2_000)
+            await expect(
+              assetRestriction.getByRole('button', { name: '解除资产限制' })
+            ).toBeVisible()
+            await expect(
+              publicationRestriction.getByRole('button', { name: '限制发布' })
+            ).toBeVisible()
+
+            const convergenceStartedAt = Date.now()
+            await relaunched.page.getByRole('link', { name: '资产' }).first().click()
+            await relaunched.page.getByRole('link', { name: '灵感' }).first().click()
+            await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(0, {
+              timeout: 10_000
+            })
+            expect(Date.now() - convergenceStartedAt).toBeLessThan(10_000)
+
+            safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
+            await assetRestriction.getByRole('button', { name: '解除资产限制' }).click()
+            await expect(safetyDetail.getByRole('status')).toContainText('资产限制已解除')
+
+            const publishRemainingAsset = async (): Promise<string> => {
+              await relaunched.page.getByRole('link', { name: '资产' }).first().click()
+              await relaunched.page.getByRole('button', { name: /^打开资产 / }).click()
+              const remainingAsset = relaunched.page.getByRole('dialog')
+              relaunched.page.once('dialog', (confirmation) => void confirmation.accept())
+              await remainingAsset.getByRole('button', { name: '发布到灵感' }).click()
+              await expect(remainingAsset.getByRole('button', { name: '撤回发布' })).toBeVisible()
+              await relaunched.page.keyboard.press('Escape')
+              await relaunched.page.getByRole('link', { name: '灵感' }).first().click()
+              await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(1)
+              const openPublication = relaunched.page.getByRole('button', { name: /^打开灵感 / })
+              const label = await openPublication.getAttribute('aria-label')
+              expect(label).not.toBeNull()
+              return label ?? ''
+            }
+
+            const publicationAfterAssetRestriction = await publishRemainingAsset()
+            await safetyAdmin.page.keyboard.press('Escape')
+            await safetyAdmin.page.getByRole('button', { name: '搜索', exact: true }).click()
+            await expect(safetyAdmin.page.getByTestId('inspiration-card')).toHaveCount(1)
+            await safetyAdmin.page.getByRole('button', { name: /^打开灵感 / }).click()
+            await expect(
+              publicationRestriction.getByRole('button', { name: '限制发布' })
+            ).toBeVisible()
+
+            safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
+            await publicationRestriction.getByRole('button', { name: '限制发布' }).click()
+            await expect(safetyDetail.getByRole('status')).toContainText('发布限制已生效')
+
+            await relaunched.page.getByRole('link', { name: '资产' }).first().click()
+            await relaunched.page.getByRole('button', { name: /^打开资产 / }).click()
+            const blockedRepublish = relaunched.page.getByRole('dialog')
+            await expect(blockedRepublish.getByRole('button', { name: '发布到灵感' })).toHaveCount(
+              0
+            )
+            await relaunched.page.keyboard.press('Escape')
+            await relaunched.page.getByRole('link', { name: '灵感' }).first().click()
+            await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(0)
+
+            safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
+            await publicationRestriction.getByRole('button', { name: '解除发布限制' }).click()
+            await expect(safetyDetail.getByRole('status')).toContainText('发布限制已解除')
+            await relaunched.page.getByRole('link', { name: '资产' }).first().click()
+            await relaunched.page.getByRole('link', { name: '灵感' }).first().click()
+            await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(0)
+            const publicationAfterDirectRestriction = await publishRemainingAsset()
+            expect(publicationAfterDirectRestriction).not.toBe(publicationAfterAssetRestriction)
+          } finally {
+            await safetyAdmin.electronApp.close()
+          }
         } finally {
           await relaunched.electronApp.close()
         }

@@ -22,6 +22,7 @@ type MediaAsset struct {
 	DurationMS         *int
 	CreatedAt          time.Time
 	Restricted         bool
+	RestrictionState   RestrictionState
 	ActivePublication  *TeamPublication
 }
 
@@ -71,3 +72,10 @@ type MediaAssetRepository interface {
 	GetPrivateOrigin(ctx context.Context, asset MediaAsset) (*AssetPrivateOrigin, error)
 	SoftDelete(ctx context.Context, tx TxExecutor, actor, id UUID, admin bool) error
 }
+
+type RestrictionState string
+
+const (
+	RestrictionActive   RestrictionState = "active"
+	RestrictionReleased RestrictionState = "released"
+)

@@ -51,6 +51,9 @@ function failedTask(diagnostic: unknown): unknown {
         index: 0,
         status: 'failed',
         failure_reason: 'temporarily_unavailable',
+        action_suggestion: 'retry_later',
+        retryable: true,
+        support_number: 'NVX-dddddddd-0000-4000-8000-00000000d1a6-01',
         failure_diagnostic: diagnostic,
         result: null
       }
@@ -83,6 +86,9 @@ test('task detail preserves a bounded concrete failure diagnostic', async () => 
     providerType: null,
     requestId: null
   })
+  assert.equal(result.value.slots[0].actionSuggestion, 'retry_later')
+  assert.equal(result.value.slots[0].retryable, true)
+  assert.equal(result.value.slots[0].supportNumber, 'NVX-dddddddd-0000-4000-8000-00000000d1a6-01')
 })
 
 test('list and detail preserve the exact fractional updated_at criterion', async () => {
@@ -127,6 +133,24 @@ test('malformed failure diagnostics fail closed instead of being displayed', asy
   assert.equal(result.outcome, 'network-failure')
 })
 
+test('malformed failure guidance fails the whole detail closed', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  for (const mutation of [
+    { action_suggestion: 'quick_retry' },
+    { retryable: 'yes' },
+    { support_number: 'provider-request-id' }
+  ]) {
+    const payload = failedTask(null) as { slots: Array<Record<string, unknown>> }
+    Object.assign(payload.slots[0], mutation)
+    assert.deepEqual(
+      await withFetch(payload, () =>
+        client.getTask('token', 'dddddddd-0000-4000-8000-00000000diag')
+      ),
+      { outcome: 'network-failure' }
+    )
+  }
+})
+
 test('diagnostic limits count Unicode code points like Server and PostgreSQL', async () => {
   const client = createGenerationTaskClient(serverUrl)
   const message = '😀'.repeat(2000)
@@ -162,7 +186,17 @@ function specDetail(specification: unknown): unknown {
       updated_at: '2026-09-01T03:00:00Z',
       terminal_at: '2026-09-01T03:00:00Z'
     },
-    slots: [{ index: 0, status: 'succeeded', failure_reason: null, result: null }],
+    slots: [
+      {
+        index: 0,
+        status: 'succeeded',
+        failure_reason: null,
+        action_suggestion: null,
+        retryable: null,
+        support_number: null,
+        result: null
+      }
+    ],
     ...(specification === undefined ? {} : { specification })
   }
 }

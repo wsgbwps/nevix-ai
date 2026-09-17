@@ -1,6 +1,7 @@
 package event_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/nevix-ai/server/internal/event"
@@ -19,5 +20,16 @@ func TestInMemoryBusDeliversToSubscribersOfTheEventType(t *testing.T) {
 	}
 	if len(other) != 0 {
 		t.Fatalf("unrelated subscriber received %v, want nothing", other)
+	}
+}
+
+func TestSessionRevokedCarriesOnlyTheNonSensitiveSessionIdentity(t *testing.T) {
+	payload := event.SessionRevoked{SessionID: "session-1"}
+	shape := reflect.TypeOf(payload)
+	if shape.NumField() != 1 || shape.Field(0).Name != "SessionID" || shape.Field(0).Type.Kind() != reflect.String {
+		t.Fatalf("session revocation payload = %v, want only string SessionID", shape)
+	}
+	if event.SessionRevokedType != "identity.session-revoked" {
+		t.Fatalf("session revocation event type = %q, want stable identity.session-revoked", event.SessionRevokedType)
 	}
 }

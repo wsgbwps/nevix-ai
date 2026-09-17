@@ -126,6 +126,56 @@ func TestPublicationCommandsConvergeUnderConcurrency(t *testing.T) {
 			t.Fatalf("fresh reuse after withdrawal: created=%v err=%v", fresh.created, fresh.err)
 		}
 	})
+
+	t.Run("publication restriction wins before republish", func(t *testing.T) {
+		fixture := newPublicationFixture(t, ownerURL, owner, false)
+		publication := publishFixture(t, ctx, repo, runner, fixture.creator, fixture.assetID, "publish-before-restriction")
+		restrictTx, err := runtime.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin restriction: %v", err)
+		}
+		defer restrictTx.Rollback(ctx)
+		if _, changed, err := repo.RestrictPublication(ctx, restrictTx, publication.ID); err != nil || !changed {
+			t.Fatalf("restrict publication: changed=%v err=%v", changed, err)
+		}
+
+		publishTx, err := runtime.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin republish: %v", err)
+		}
+		defer publishTx.Rollback(ctx)
+		var publishPID int
+		if err := publishTx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&publishPID); err != nil {
+			t.Fatalf("read republish backend: %v", err)
+		}
+		publishDone := make(chan publishCommandResult, 1)
+		go func() {
+			result, created, err := repo.Publish(ctx, publishTx, fixture.creator, fixture.assetID, "publish-during-restriction")
+			publishDone <- publishCommandResult{publication: result, created: created, err: err}
+		}()
+		waitForDatabaseBlock(t, ctx, owner, publishPID)
+		if err := restrictTx.Commit(ctx); err != nil {
+			t.Fatalf("commit restriction: %v", err)
+		}
+		blocked := <-publishDone
+		if !errors.Is(blocked.err, domain.ErrAssetNotFound) || blocked.created {
+			t.Fatalf("republish after restriction: created=%v err=%v", blocked.created, blocked.err)
+		}
+		if err := publishTx.Rollback(ctx); err != nil {
+			t.Fatalf("rollback blocked republish: %v", err)
+		}
+
+		if err := runner.Run(ctx, func(scope domain.WriteScope) error {
+			_, _, err := repo.ReleasePublication(ctx, scope.Tx(), publication.ID)
+			return err
+		}); err != nil {
+			t.Fatalf("release publication restriction: %v", err)
+		}
+		fresh := publishFixture(t, ctx, repo, runner, fixture.creator, fixture.assetID, "publish-after-release")
+		if fresh.ID == publication.ID {
+			t.Fatal("restriction release restored the terminal publication identity")
+		}
+	})
 }
 
 func TestPublicationProjectionAndFinalRetention(t *testing.T) {

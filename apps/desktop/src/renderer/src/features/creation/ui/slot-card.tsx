@@ -10,7 +10,7 @@ import {
   encodeResultDrag,
   endResultDrag
 } from '../model/reference-drop'
-import { diagnosticSourceKey, reasonKey, statusKey } from '../i18n/gallery-keys'
+import { actionKey, diagnosticSourceKey, reasonKey, statusKey } from '../i18n/gallery-keys'
 import { Skeleton } from '../../../components/ui/skeleton'
 import { ImageWithSkeleton, VideoWithSkeleton } from './media-with-skeleton'
 
@@ -217,6 +217,19 @@ export function SlotCard({
             {t(statusKey(slot.status))}
             {slot.failureReason !== null && (
               <span className="block">{t(reasonKey(slot.failureReason))}</span>
+            )}
+            {slot.actionSuggestion != null && (
+              <span className="mt-1 block font-medium">{t(actionKey(slot.actionSuggestion))}</span>
+            )}
+            {slot.retryable != null && (
+              <span className="block">
+                {t(slot.retryable ? 'gallery.guidance.retryable' : 'gallery.guidance.notRetryable')}
+              </span>
+            )}
+            {slot.supportNumber != null && (
+              <span className="block font-mono break-all">
+                {t('gallery.guidance.supportNumber')}: {slot.supportNumber}
+              </span>
             )}
             {slot.failureDiagnostic != null && (
               <span

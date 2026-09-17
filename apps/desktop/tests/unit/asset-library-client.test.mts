@@ -32,11 +32,14 @@ const asset = {
   duration_ms: null,
   created_at: '2026-09-16T08:00:00Z',
   restricted: false,
+  restriction_state: null,
   publication: null,
   capabilities: {
     can_delete: true,
     can_create_similar: true,
-    can_publish: true
+    can_publish: true,
+    can_restrict: true,
+    can_release: false
   }
 }
 
@@ -70,8 +73,15 @@ test('asset list sends the accepted keyset filters and decodes public facts', as
       durationMs: null,
       createdAt: '2026-09-16T08:00:00Z',
       restricted: false,
+      restrictionState: null,
       publication: null,
-      capabilities: { canDelete: true, canCreateSimilar: true, canPublish: true }
+      capabilities: {
+        canDelete: true,
+        canCreateSimilar: true,
+        canPublish: true,
+        canRestrict: true,
+        canRelease: false
+      }
     })
     assert.equal(result.value.nextCursor, 'next-page')
     assert.deepEqual(Object.fromEntries(requested?.searchParams ?? []), {
@@ -95,10 +105,12 @@ test('asset list keeps publication and safety restriction as independent facts',
         {
           ...asset,
           restricted: true,
+          restriction_state: 'active',
           publication: {
             id: 'publication-one',
             published_at: '2026-09-17T08:00:00Z',
-            restricted: true
+            restricted: true,
+            restriction_state: 'active'
           }
         }
       ],
@@ -109,10 +121,12 @@ test('asset list keeps publication and safety restriction as independent facts',
     assert.equal(result.outcome, 'succeeded')
     if (result.outcome !== 'succeeded') return
     assert.equal(result.value.assets[0].restricted, true)
+    assert.equal(result.value.assets[0].restrictionState, 'active')
     assert.deepEqual(result.value.assets[0].publication, {
       id: 'publication-one',
       publishedAt: '2026-09-17T08:00:00Z',
-      restricted: true
+      restricted: true,
+      restrictionState: 'active'
     })
   } finally {
     globalThis.fetch = originalFetch

@@ -17,6 +17,7 @@ import type {
   InspirationPorts,
   PublicationView
 } from '../api/inspiration-http'
+import type { MediaAssetView, RestrictionState } from '../api/asset-library-http'
 import {
   hasInspirationFilters,
   useInspiration,
@@ -110,9 +111,15 @@ function InspirationCard({
                 ? t('inspiration.status.published')
                 : t('inspiration.status.unpublished')}
             </span>
-            {item.asset.restricted || item.asset.publication?.restricted ? (
+            {item.asset.restrictionState === 'active' ||
+            item.asset.publication?.restrictionState === 'active' ? (
               <span className="rounded bg-red-700/90 px-1.5 py-0.5">
                 {t('inspiration.status.restricted')}
+              </span>
+            ) : item.asset.restrictionState === 'released' ||
+              item.asset.publication?.restrictionState === 'released' ? (
+              <span className="rounded bg-slate-700/90 px-1.5 py-0.5">
+                {t('inspiration.status.released')}
               </span>
             ) : null}
           </div>
@@ -135,6 +142,59 @@ function InspirationCard({
     </li>
   )
 }
+
+function RestrictionControl({
+  kind,
+  state,
+  canRestrict,
+  canRelease,
+  running,
+  onRestrict,
+  onRelease
+}: {
+  readonly kind: 'asset' | 'publication'
+  readonly state: RestrictionState
+  readonly canRestrict: boolean
+  readonly canRelease: boolean
+  readonly running: boolean
+  readonly onRestrict: () => void
+  readonly onRelease: () => void
+}): React.JSX.Element | null {
+  const { t } = useTranslation('creation')
+  if (!canRestrict && !canRelease) return null
+  return (
+    <section
+      aria-label={t(`inspiration.restriction.${kind}.label`)}
+      className="min-w-[12rem] rounded-md border p-2 text-xs"
+    >
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 className="font-medium">{t(`inspiration.restriction.${kind}.label`)}</h3>
+        <span className="text-muted-foreground">
+          {t(`inspiration.restriction.state.${state ?? 'none'}`)}
+        </span>
+      </div>
+      {canRestrict ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="destructive"
+          disabled={running}
+          onClick={onRestrict}
+        >
+          {t(`inspiration.restriction.${kind}.restrict`)}
+        </Button>
+      ) : null}
+      {canRelease ? (
+        <Button type="button" size="sm" variant="outline" disabled={running} onClick={onRelease}>
+          {t(`inspiration.restriction.${kind}.release`)}
+        </Button>
+      ) : null}
+    </section>
+  )
+}
+
+type RestrictionTarget = 'asset' | 'publication'
+type RestrictionOperation = 'restrict' | 'release'
 
 function InspirationWall({
   items,
@@ -353,25 +413,31 @@ function InspirationDetail({
   status,
   ports,
   actionStatus,
+  actionMessage,
   onClose,
   onDownload,
   onCreateSimilar,
-  onWithdraw
+  onWithdraw,
+  onRestriction
 }: {
   readonly item: InspirationItem | null
   readonly detail: InspirationDetailView | null
   readonly status: 'idle' | 'loading' | 'failed'
   readonly ports: InspirationPorts
-  readonly actionStatus: 'idle' | 'running' | 'failed'
+  readonly actionStatus: 'idle' | 'running' | 'succeeded' | 'failed'
+  readonly actionMessage: string | null
   readonly onClose: () => void
   readonly onDownload: () => void
   readonly onCreateSimilar: () => void
   readonly onWithdraw: () => void
+  readonly onRestriction: (target: RestrictionTarget, operation: RestrictionOperation) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const media = item ? itemMedia(item) : null
   const contentPort = useMemo(() => (item ? mediaPort(ports, item) : null), [item, ports])
   const publication = item ? publicationFor(item, detail) : null
+  const asset: MediaAssetView | null = detail?.type === 'asset' ? detail.asset : null
+  const running = actionStatus === 'running'
   return (
     <Dialog open={item !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="h-[calc(100svh-2rem)] max-h-[52rem] overflow-hidden p-0 sm:max-w-[min(76rem,calc(100%-2rem))]">
@@ -407,11 +473,7 @@ function InspirationDetail({
                   {t('assets.download')}
                 </Button>
                 {publication?.capabilities.canCreateSimilar ? (
-                  <Button
-                    type="button"
-                    disabled={actionStatus === 'running'}
-                    onClick={onCreateSimilar}
-                  >
+                  <Button type="button" disabled={running} onClick={onCreateSimilar}>
                     <WandSparklesIcon aria-hidden />
                     {t('assets.createSimilar')}
                   </Button>
@@ -420,15 +482,44 @@ function InspirationDetail({
                   <Button
                     type="button"
                     variant="destructive"
-                    disabled={actionStatus === 'running'}
+                    disabled={running}
                     onClick={onWithdraw}
                   >
                     {t('inspiration.withdraw')}
                   </Button>
                 ) : null}
-                {actionStatus === 'failed' ? (
-                  <p className="text-destructive basis-full text-xs" role="alert">
-                    {t('inspiration.actionFailed')}
+                {asset?.capabilities.canRestrict || asset?.capabilities.canRelease ? (
+                  <RestrictionControl
+                    kind="asset"
+                    state={asset.restrictionState}
+                    canRestrict={asset.capabilities.canRestrict}
+                    canRelease={asset.capabilities.canRelease}
+                    running={running}
+                    onRestrict={() => onRestriction('asset', 'restrict')}
+                    onRelease={() => onRestriction('asset', 'release')}
+                  />
+                ) : null}
+                {publication?.capabilities.canRestrict || publication?.capabilities.canRelease ? (
+                  <RestrictionControl
+                    kind="publication"
+                    state={publication.restrictionState}
+                    canRestrict={publication.capabilities.canRestrict}
+                    canRelease={publication.capabilities.canRelease}
+                    running={running}
+                    onRestrict={() => onRestriction('publication', 'restrict')}
+                    onRelease={() => onRestriction('publication', 'release')}
+                  />
+                ) : null}
+                {actionMessage ? (
+                  <p
+                    className={
+                      actionStatus === 'failed'
+                        ? 'text-destructive basis-full text-xs'
+                        : 'text-muted-foreground basis-full text-xs'
+                    }
+                    role={actionStatus === 'failed' ? 'alert' : 'status'}
+                  >
+                    {actionMessage}
                   </p>
                 ) : null}
               </DialogFooter>
@@ -450,7 +541,10 @@ export function InspirationPage({
   const [selected, setSelected] = useState<InspirationItem | null>(null)
   const [detail, setDetail] = useState<InspirationDetailView | null>(null)
   const [detailStatus, setDetailStatus] = useState<'idle' | 'loading' | 'failed'>('idle')
-  const [actionStatus, setActionStatus] = useState<'idle' | 'running' | 'failed'>('idle')
+  const [actionStatus, setActionStatus] = useState<'idle' | 'running' | 'succeeded' | 'failed'>(
+    'idle'
+  )
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (!selected) return
@@ -474,11 +568,13 @@ export function InspirationPage({
     setDetail(null)
     setDetailStatus('idle')
     setActionStatus('idle')
+    setActionMessage(null)
   }
   const open = (item: InspirationItem): void => {
     setDetail(null)
     setDetailStatus('loading')
     setActionStatus('idle')
+    setActionMessage(null)
     setSelected(item)
   }
 
@@ -583,6 +679,7 @@ export function InspirationPage({
         status={detailStatus}
         ports={ports}
         actionStatus={actionStatus}
+        actionMessage={actionMessage}
         onClose={close}
         onDownload={() => {
           if (!selected) return
@@ -600,8 +697,11 @@ export function InspirationPage({
           const publication = publicationFor(selected, detail)
           if (!publication) return
           setActionStatus('running')
+          setActionMessage(null)
           void onCreateSimilar(publication.id).then((outcome) => {
-            if (outcome !== 'prepared') setActionStatus('failed')
+            if (outcome === 'prepared') return
+            setActionStatus('failed')
+            setActionMessage(t('inspiration.actionFailed'))
           })
         }}
         onWithdraw={() => {
@@ -609,13 +709,57 @@ export function InspirationPage({
           const publication = publicationFor(selected, detail)
           if (!publication || !window.confirm(t('inspiration.withdrawConfirm'))) return
           setActionStatus('running')
+          setActionMessage(null)
           void ports.withdrawPublication(publication.id).then((result) => {
             if (result.outcome !== 'succeeded') {
               setActionStatus('failed')
+              setActionMessage(t('inspiration.actionFailed'))
               return
             }
             close()
             list.refresh()
+          })
+        }}
+        onRestriction={(target, operation) => {
+          if (!selected || !detail) return
+          const targetId =
+            target === 'asset'
+              ? detail.type === 'asset'
+                ? detail.asset.id
+                : null
+              : publicationFor(selected, detail)?.id
+          if (!targetId) return
+          if (!window.confirm(t(`inspiration.restriction.${target}.${operation}Confirm`))) return
+          setActionStatus('running')
+          setActionMessage(t('inspiration.restriction.updating'))
+          const pending =
+            target === 'asset'
+              ? operation === 'restrict'
+                ? ports.restrictAsset(targetId)
+                : ports.releaseAsset(targetId)
+              : operation === 'restrict'
+                ? ports.restrictPublication(targetId)
+                : ports.releasePublication(targetId)
+          void pending.then(async (result) => {
+            if (result.outcome !== 'succeeded') {
+              setActionStatus('failed')
+              setActionMessage(t('inspiration.restriction.failed'))
+              return
+            }
+            setDetail((current) => {
+              if (!current) return current
+              if (target === 'asset') {
+                return current.type === 'asset' ? { ...current, asset: result.value } : current
+              }
+              return current.type === 'publication'
+                ? { ...current, publication: result.value }
+                : { ...current, publication: result.value }
+            })
+            setActionStatus('succeeded')
+            setActionMessage(t(`inspiration.restriction.${target}.${operation}Succeeded`))
+            list.refresh()
+            const refreshed = await ports.getInspirationDetail(selected)
+            if (refreshed.outcome === 'succeeded') setDetail(refreshed.value)
           })
         }}
       />

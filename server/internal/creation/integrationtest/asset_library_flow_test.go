@@ -23,6 +23,7 @@ type assetLibraryResource struct {
 	Capabilities struct {
 		CanDelete        bool `json:"can_delete"`
 		CanCreateSimilar bool `json:"can_create_similar"`
+		CanPublish       bool `json:"can_publish"`
 	} `json:"capabilities"`
 }
 
@@ -39,18 +40,23 @@ type publicationDetailView struct {
 
 type adminPublicationStateView struct {
 	Asset struct {
-		Restricted  bool `json:"restricted"`
-		Publication *struct {
-			ID         string `json:"id"`
-			Restricted bool   `json:"restricted"`
+		Restricted       bool    `json:"restricted"`
+		RestrictionState *string `json:"restriction_state"`
+		Publication      *struct {
+			ID               string  `json:"id"`
+			Restricted       bool    `json:"restricted"`
+			RestrictionState *string `json:"restriction_state"`
 		} `json:"publication"`
 	} `json:"asset"`
 	Publication *struct {
-		ID           string `json:"id"`
-		Restricted   bool   `json:"restricted"`
-		Capabilities struct {
+		ID               string  `json:"id"`
+		Restricted       bool    `json:"restricted"`
+		RestrictionState *string `json:"restriction_state"`
+		Capabilities     struct {
 			CanWithdraw      bool `json:"can_withdraw"`
 			CanCreateSimilar bool `json:"can_create_similar"`
+			CanRestrict      bool `json:"can_restrict"`
+			CanRelease       bool `json:"can_release"`
 		} `json:"capabilities"`
 	} `json:"publication"`
 }
@@ -247,7 +253,10 @@ func TestAssetLibraryPublicationInspirationAndCreateSimilar(t *testing.T) {
 		t.Fatalf("second publication reuse status=%d body=%s", status, secondSimilarBody)
 	}
 	secondSimilarSessionID := extractNestedField(t, secondSimilarBody, "session", "id")
-	if _, err := h.ownerPool.Exec(h.ctx, `UPDATE creation_team_publications SET restricted_at = now() WHERE id = $1::uuid`, secondPublicationID); err != nil {
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE creation_team_publications
+		SET restricted_at = now(), direct_restricted_at = now()
+		WHERE id = $1::uuid`, secondPublicationID); err != nil {
 		t.Fatalf("restrict publication fixture: %v", err)
 	}
 	status, restrictedDetailBody := h.doRequest(t, http.MethodGet, "/creation/inspiration/assets/"+first.ID, adminToken, nil)

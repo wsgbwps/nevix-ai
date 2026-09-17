@@ -1,4 +1,8 @@
-import type { SlotFailureDiagnosticSource, SlotFailureReason } from '../api/generation-task-http'
+import type {
+  SlotActionSuggestion,
+  SlotFailureDiagnosticSource,
+  SlotFailureReason
+} from '../api/generation-task-http'
 
 // Dynamic verdict vocabularies resolve through explicit key maps — the same
 // shape the composer uses for wire codes.
@@ -33,6 +37,22 @@ export function statusKey(status: string): (typeof statusKeys)[keyof typeof stat
 
 export function reasonKey(reason: SlotFailureReason): (typeof reasonKeys)[keyof typeof reasonKeys] {
   return reason in reasonKeys ? reasonKeys[reason] : reasonKeys.internal_error
+}
+
+const actionKeys = {
+  correct_input: 'gallery.guidance.actions.correct_input',
+  confirm_rights: 'gallery.guidance.actions.confirm_rights',
+  revise_input: 'gallery.guidance.actions.revise_input',
+  revise_request: 'gallery.guidance.actions.revise_request',
+  contact_admin: 'gallery.guidance.actions.contact_admin',
+  retry_later: 'gallery.guidance.actions.retry_later',
+  contact_support: 'gallery.guidance.actions.contact_support'
+} as const
+
+export function actionKey(
+  action: SlotActionSuggestion
+): (typeof actionKeys)[keyof typeof actionKeys] {
+  return actionKeys[action]
 }
 
 const diagnosticSourceKeys = {

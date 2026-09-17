@@ -92,6 +92,21 @@ func awaitInvalidation(t *testing.T, lines <-chan sseLine, window time.Duration)
 	}
 }
 
+func awaitStreamClose(lines <-chan sseLine, window time.Duration) bool {
+	timer := time.NewTimer(window)
+	defer timer.Stop()
+	for {
+		select {
+		case _, ok := <-lines:
+			if !ok {
+				return true
+			}
+		case <-timer.C:
+			return false
+		}
+	}
+}
+
 // TestSSEInvalidationIsCommitScopedAndCreatorScoped: a submission's
 // invalidation reaches only the owning creator's stream, other creators'
 // streams stay silent, and every payload is empty by contract.
@@ -134,5 +149,36 @@ func TestSSEInvalidationIsCommitScopedAndCreatorScoped(t *testing.T) {
 	}
 	if !awaitInvalidation(t, otherLines, 10*time.Second) {
 		t.Fatal("the other creator's own submission must invalidate their stream")
+	}
+}
+
+func TestSessionRevocationDisconnectsOnlyThatSessionsStream(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	firstToken := h.loginToken(t, creator, harnessPassword)
+	secondToken := h.loginToken(t, creator, harnessPassword)
+
+	firstLines := make(chan sseLine, 32)
+	secondLines := make(chan sseLine, 32)
+	go readStreamLines(h.openEventStream(t, firstToken), firstLines)
+	go readStreamLines(h.openEventStream(t, secondToken), secondLines)
+
+	status, body := h.doRequest(t, http.MethodPost, "/identity/auth/logout", firstToken, map[string]any{})
+	if status != http.StatusOK {
+		t.Fatalf("logout first session: status=%d body=%s", status, body)
+	}
+	if !awaitStreamClose(firstLines, 3*time.Second) {
+		t.Fatal("revoked session stream stayed connected")
+	}
+	if awaitStreamClose(secondLines, 500*time.Millisecond) {
+		t.Fatal("revoking one session disconnected another session for the same user")
+	}
+
+	draft := h.imageTaskIntent(t, secondToken, "仍连接的设备", 1)
+	status, body = h.submitTask(t, secondToken, "sse-session-revocation", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit through surviving session: status=%d body=%s", status, body)
+	}
+	if !awaitInvalidation(t, secondLines, 10*time.Second) {
+		t.Fatal("the surviving session did not receive its creator-scoped invalidation")
 	}
 }

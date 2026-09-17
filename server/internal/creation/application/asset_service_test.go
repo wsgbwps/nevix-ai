@@ -90,6 +90,26 @@ func TestAssetServicePassesDeleteIdentityToRepository(t *testing.T) {
 	}
 }
 
+func TestAssetViewOmitsReleasedPublicationWhenRepublishingIsAllowed(t *testing.T) {
+	owner := domain.NewUUID()
+	asset := domain.MediaAsset{
+		OwnerID: owner,
+		ActivePublication: &domain.TeamPublication{
+			ID:               domain.NewUUID(),
+			RestrictionState: domain.RestrictionReleased,
+		},
+	}
+
+	view := assetView(asset, owner, false)
+
+	if !view.Capabilities.CanPublish {
+		t.Fatal("released publication must allow a fresh publication")
+	}
+	if view.Asset.ActivePublication != nil {
+		t.Fatal("released terminal publication must not be advertised as active")
+	}
+}
+
 func TestAssetServiceRejectsForeignMemberBeforeWrite(t *testing.T) {
 	owner, actor, assetID := domain.NewUUID(), domain.NewUUID(), domain.NewUUID()
 	repo := &assetRepoStub{asset: domain.MediaAsset{ID: assetID, OwnerID: owner}}

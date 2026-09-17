@@ -37,8 +37,15 @@ function asset(
     durationMs: mediaType === 'video' ? 3000 : null,
     createdAt,
     restricted: false,
+    restrictionState: null,
     publication: null,
-    capabilities: { canDelete: true, canCreateSimilar: true, canPublish: true }
+    capabilities: {
+      canDelete: true,
+      canCreateSimilar: true,
+      canPublish: true,
+      canRestrict: false,
+      canRelease: false
+    }
   }
 }
 
@@ -166,6 +173,7 @@ function createHarness(
     readonly id: string
     readonly publishedAt: string
     readonly restricted: boolean
+    readonly restrictionState: null
   } | null = null
   return {
     ports: {
@@ -212,7 +220,9 @@ function createHarness(
                     capabilities: {
                       canDelete: false,
                       canCreateSimilar: false,
-                      canPublish: false
+                      canPublish: false,
+                      canRestrict: false,
+                      canRelease: false
                     }
                   },
                   privateOrigin: null
@@ -277,7 +287,8 @@ function createHarness(
         activePublication = {
           id: 'publication-one',
           publishedAt: '2026-09-17T08:00:00Z',
-          restricted: false
+          restricted: false,
+          restrictionState: null
         }
         return {
           outcome: 'succeeded',
@@ -294,7 +305,13 @@ function createHarness(
             durationMs: null,
             publishedAt: '2026-09-17T08:00:00Z',
             restricted: false,
-            capabilities: { canWithdraw: true, canCreateSimilar: true }
+            restrictionState: null,
+            capabilities: {
+              canWithdraw: true,
+              canCreateSimilar: true,
+              canRestrict: false,
+              canRelease: false
+            }
           }
         }
       },

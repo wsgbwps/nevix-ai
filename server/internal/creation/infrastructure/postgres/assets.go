@@ -46,13 +46,31 @@ func (r *MediaAssetRepository) InsertMediaAsset(ctx context.Context, tx domain.T
 const assetColumns = `a.id, a.owner_user_id, u.display_name, a.task_id, a.slot_index,
 	a.media_type, a.mime, a.blob_key, a.byte_size, a.checksum,
 	a.width_px, a.height_px, a.duration_ms, a.created_at,
-	a.restricted_at IS NOT NULL, p.id::text, p.published_at, p.restricted`
+	a.restricted_at IS NOT NULL AND a.restriction_released_at IS NULL,
+	CASE
+		WHEN a.restricted_at IS NULL THEN ''
+		WHEN a.restriction_released_at IS NULL THEN 'active'
+		ELSE 'released'
+	END,
+	p.id::text, p.published_at, p.restricted, p.restriction_state`
 
 const assetFrom = ` FROM creation_media_assets a
 	JOIN users u ON u.id = a.owner_user_id
 	LEFT JOIN LATERAL (
 		SELECT publication.id, publication.published_at,
-			(publication.restricted_at IS NOT NULL OR a.restricted_at IS NOT NULL) AS restricted
+			CASE
+				WHEN (a.restricted_at IS NOT NULL AND a.restriction_released_at IS NULL)
+				  OR (publication.direct_restricted_at IS NOT NULL AND publication.direct_restriction_released_at IS NULL)
+				THEN true
+				ELSE false
+			END AS restricted,
+			CASE
+				WHEN (a.restricted_at IS NOT NULL AND a.restriction_released_at IS NULL)
+				  OR (publication.direct_restricted_at IS NOT NULL AND publication.direct_restriction_released_at IS NULL)
+				THEN 'active'
+				WHEN publication.restricted_at IS NOT NULL THEN 'released'
+				ELSE ''
+			END AS restriction_state
 		FROM creation_team_publications publication
 		WHERE publication.source_asset_id = a.id AND publication.withdrawn_at IS NULL
 		ORDER BY (publication.restricted_at IS NULL) DESC,
@@ -62,7 +80,7 @@ const assetFrom = ` FROM creation_media_assets a
 
 func (r *MediaAssetRepository) ListVisible(ctx context.Context, owner domain.UUID, filter domain.AssetListFilter, cursor *domain.CompoundCursor, limit int) ([]domain.MediaAsset, *domain.CompoundCursor, error) {
 	args := make([]any, 0, 7)
-	conditions := []string{"a.owner_user_id = $1", "a.deleted_at IS NULL", "a.restricted_at IS NULL"}
+	conditions := []string{"a.owner_user_id = $1", "a.deleted_at IS NULL", "(a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)"}
 	args = append(args, owner)
 	add := func(value any) string {
 		args = append(args, value)
@@ -121,7 +139,8 @@ func (r *MediaAssetRepository) GetVisible(ctx context.Context, owner, id domain.
 	asset, err := scanAsset(r.pool.QueryRow(ctx, `SELECT `+assetColumns+`
 		`+assetFrom+`
 		WHERE a.id = $1 AND a.owner_user_id = $2
-		  AND a.deleted_at IS NULL AND a.restricted_at IS NULL`, id, owner))
+		  AND a.deleted_at IS NULL
+		  AND (a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)`, id, owner))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.MediaAsset{}, domain.ErrAssetNotFound
 	}
@@ -135,7 +154,8 @@ func (r *MediaAssetRepository) ListVisibleSiblings(ctx context.Context, owner, t
 	rows, err := r.pool.Query(ctx, `SELECT `+assetColumns+`
 		`+assetFrom+`
 		WHERE a.task_id = $1 AND a.owner_user_id = $2
-		  AND a.deleted_at IS NULL AND a.restricted_at IS NULL
+		  AND a.deleted_at IS NULL
+		  AND (a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)
 		ORDER BY a.slot_index`, taskID, owner)
 	if err != nil {
 		return nil, fmt.Errorf("creation: list visible asset siblings: %w", err)
@@ -218,7 +238,7 @@ func (r *MediaAssetRepository) SoftDelete(ctx context.Context, tx domain.TxExecu
 		WHERE id = $1 AND deleted_at IS NULL`
 	args := []any{id}
 	if !admin {
-		query += " AND owner_user_id = $2 AND restricted_at IS NULL"
+		query += " AND owner_user_id = $2 AND (restricted_at IS NULL OR restriction_released_at IS NOT NULL)"
 		args = append(args, actor)
 	}
 	count, err := execTx(tx, ctx, query, args...)
@@ -237,12 +257,16 @@ func scanAsset(row rowScanner) (domain.MediaAsset, error) {
 	var publicationID *string
 	var publishedAt *time.Time
 	var publicationRestricted *bool
+	var assetRestrictionState string
+	var publicationRestrictionState *string
 	err := row.Scan(
 		&asset.ID, &asset.OwnerID, &asset.CreatorDisplayName, &asset.TaskID, &asset.SlotIndex,
 		&media, &asset.Mime, &asset.BlobKey, &asset.ByteSize, &asset.Checksum,
 		&asset.WidthPx, &asset.HeightPx, &asset.DurationMS, &asset.CreatedAt,
-		&asset.Restricted, &publicationID, &publishedAt, &publicationRestricted,
+		&asset.Restricted, &assetRestrictionState, &publicationID, &publishedAt,
+		&publicationRestricted, &publicationRestrictionState,
 	)
+	asset.RestrictionState = domain.RestrictionState(assetRestrictionState)
 	asset.MediaType = domain.MediaType(media)
 	if err == nil && publicationID != nil && publishedAt != nil {
 		id, parseErr := domain.ParseUUID(*publicationID)
@@ -252,6 +276,9 @@ func scanAsset(row rowScanner) (domain.MediaAsset, error) {
 		asset.ActivePublication = &domain.TeamPublication{
 			ID: id, SourceAssetID: asset.ID, PublishedAt: *publishedAt,
 			Restricted: publicationRestricted != nil && *publicationRestricted,
+		}
+		if publicationRestrictionState != nil {
+			asset.ActivePublication.RestrictionState = domain.RestrictionState(*publicationRestrictionState)
 		}
 	}
 	return asset, err

@@ -2,6 +2,7 @@ package creationhttp
 
 import (
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -280,6 +281,9 @@ type generationSlotResource struct {
 	Index             int                    `json:"index"`
 	Status            string                 `json:"status"`
 	FailureReason     *string                `json:"failure_reason"`
+	ActionSuggestion  *string                `json:"action_suggestion"`
+	Retryable         *bool                  `json:"retryable"`
+	SupportNumber     *string                `json:"support_number"`
 	FailureDiagnostic *slotFailureDiagnostic `json:"failure_diagnostic"`
 	Result            *slotResultResource    `json:"result"`
 }
@@ -308,6 +312,12 @@ func toSlotResource(task domain.GenerationTask, slot domain.GenerationSlot) gene
 	if slot.Reason != nil {
 		reason := string(*slot.Reason)
 		resource.FailureReason = &reason
+		action, retryable := domain.FailureGuidance(*slot.Reason)
+		actionSuggestion := string(action)
+		supportNumber := fmt.Sprintf("NVX-%s-%02d", task.ID.String(), slot.Index+1)
+		resource.ActionSuggestion = &actionSuggestion
+		resource.Retryable = &retryable
+		resource.SupportNumber = &supportNumber
 	}
 	if slot.Diagnostic != nil {
 		resource.FailureDiagnostic = &slotFailureDiagnostic{

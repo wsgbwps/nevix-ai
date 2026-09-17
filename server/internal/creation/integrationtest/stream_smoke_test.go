@@ -3,6 +3,8 @@ package integrationtest
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"image"
 	"image/png"
@@ -42,11 +44,14 @@ func TestStreamSmokeParallelFileFlows(t *testing.T) {
 	}
 
 	blob := noisyPNGBytes(t, 1024, 1024) // incompressible ⇒ multi-chunk streaming
+	digest := sha256.Sum256(blob)
+	checksum := hex.EncodeToString(digest[:])
 
 	var (
 		mu       sync.Mutex
 		statuses = map[int]int{}
 		cancels  int
+		verified int
 	)
 	record := func(status int) {
 		mu.Lock()
@@ -56,6 +61,11 @@ func TestStreamSmokeParallelFileFlows(t *testing.T) {
 	recordCancel := func() {
 		mu.Lock()
 		cancels++
+		mu.Unlock()
+	}
+	recordVerified := func() {
+		mu.Lock()
+		verified++
 		mu.Unlock()
 	}
 
@@ -103,7 +113,8 @@ func TestStreamSmokeParallelFileFlows(t *testing.T) {
 				target := listing.Materials[(seed+len(listing.Materials))%len(listing.Materials)]
 				req, _ := http.NewRequestWithContext(h.ctx, "GET", h.serverURL+"/creation/materials/"+target.ID, nil)
 				req.Header.Set("Authorization", "Bearer "+token)
-				if target.ByteSize > 8192 && seed%2 == 0 {
+				ranged := target.ByteSize > 8192 && seed%2 == 0
+				if ranged {
 					req.Header.Set("Range", "bytes=4096-8191")
 				}
 				resp, err := smokeClient.Do(req)
@@ -112,9 +123,27 @@ func TestStreamSmokeParallelFileFlows(t *testing.T) {
 					record(-1)
 					continue
 				}
-				io.Copy(io.Discard, resp.Body)
+				downloaded, readErr := io.ReadAll(resp.Body)
 				resp.Body.Close()
 				record(resp.StatusCode)
+				if readErr != nil {
+					t.Errorf("smoke: read download %s: %v", target.ID, readErr)
+					continue
+				}
+				if resp.StatusCode == http.StatusOK {
+					if !bytes.Equal(downloaded, blob) || resp.Header.Get("X-Content-SHA-256") != checksum || target.ChecksumSHA256 != checksum {
+						t.Errorf("smoke: full download %s failed byte/checksum integrity", target.ID)
+						continue
+					}
+					recordVerified()
+				}
+				if resp.StatusCode == http.StatusPartialContent {
+					if !bytes.Equal(downloaded, blob[4096:8192]) || resp.Header.Get("Content-Range") != "bytes 4096-8191/"+strconv.Itoa(len(blob)) {
+						t.Errorf("smoke: Range download %s failed byte/content-range integrity", target.ID)
+						continue
+					}
+					recordVerified()
+				}
 			}
 		}(worker)
 	}
@@ -146,6 +175,9 @@ func TestStreamSmokeParallelFileFlows(t *testing.T) {
 	}
 	if cancels < 1 {
 		t.Fatalf("the cancellation flow never ran: %d abandonments recorded", cancels)
+	}
+	if verified < 4 {
+		t.Fatalf("smoke verified too few full/Range payloads: %d", verified)
 	}
 }
 

@@ -25,7 +25,17 @@ func NewTeamPublicationRepository(pool *pgxpool.Pool) *TeamPublicationRepository
 const publicationColumns = `p.id, p.source_asset_id, p.publisher_user_id,
 	p.publisher_display_name, p.media_type, p.mime, p.blob_key, p.byte_size,
 	p.checksum, p.width_px, p.height_px, p.duration_ms, p.specification, p.published_at,
-	p.restricted_at IS NOT NULL`
+	p.direct_restricted_at IS NOT NULL AND p.direct_restriction_released_at IS NULL,
+	CASE
+		WHEN p.direct_restricted_at IS NOT NULL AND p.direct_restriction_released_at IS NULL THEN 'active'
+		WHEN p.restricted_at IS NOT NULL THEN 'released'
+		ELSE ''
+	END,
+	CASE
+		WHEN p.direct_restricted_at IS NULL THEN ''
+		WHEN p.direct_restriction_released_at IS NULL THEN 'active'
+		ELSE 'released'
+	END`
 
 func (r *TeamPublicationRepository) Publish(ctx context.Context, tx domain.TxExecutor, publisher, assetID domain.UUID, key string) (domain.TeamPublication, bool, error) {
 	var asset domain.MediaAsset
@@ -39,7 +49,8 @@ func (r *TeamPublicationRepository) Publish(ctx context.Context, tx domain.TxExe
 		JOIN users u ON u.id = a.owner_user_id
 		JOIN creation_generation_tasks t ON t.id = a.task_id
 		WHERE a.id = $1 AND a.owner_user_id = $2
-		  AND a.deleted_at IS NULL AND a.restricted_at IS NULL
+		  AND a.deleted_at IS NULL
+		  AND (a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)
 		FOR UPDATE OF a`, assetID, publisher).Scan(
 		&asset.ID, &asset.OwnerID, &asset.CreatorDisplayName, &asset.TaskID, &asset.SlotIndex,
 		&media, &asset.Mime, &asset.BlobKey, &asset.ByteSize, &asset.Checksum,
@@ -59,6 +70,19 @@ func (r *TeamPublicationRepository) Publish(ctx context.Context, tx domain.TxExe
 		return current, false, nil
 	} else if !errors.Is(err, domain.ErrPublicationNotFound) {
 		return domain.TeamPublication{}, false, err
+	}
+	var restrictionActive bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM creation_team_publications
+			WHERE source_asset_id = $1 AND withdrawn_at IS NULL
+			  AND direct_restricted_at IS NOT NULL
+			  AND direct_restriction_released_at IS NULL
+		)`, assetID).Scan(&restrictionActive); err != nil {
+		return domain.TeamPublication{}, false, fmt.Errorf("creation: check publication restriction: %w", err)
+	}
+	if restrictionActive {
+		return domain.TeamPublication{}, false, domain.ErrAssetNotFound
 	}
 
 	var spec domain.GenerationSpecification
@@ -230,7 +254,7 @@ func (r *TeamPublicationRepository) listAdminAssets(ctx context.Context, filter 
 
 func (r *TeamPublicationRepository) listPublications(ctx context.Context, filter domain.AssetListFilter, cursor *domain.CompoundCursor, limit int, deletedSourceOnly bool) ([]domain.TeamPublication, error) {
 	args := []any{}
-	conditions := []string{"p.withdrawn_at IS NULL", "p.restricted_at IS NULL", "a.restricted_at IS NULL"}
+	conditions := []string{"p.withdrawn_at IS NULL", "p.restricted_at IS NULL", "(a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)"}
 	if deletedSourceOnly {
 		conditions = append(conditions, "a.deleted_at IS NOT NULL")
 	}
@@ -322,7 +346,7 @@ func (r *TeamPublicationRepository) GetPublication(ctx context.Context, id domai
 		FROM creation_team_publications p
 		JOIN creation_media_assets a ON a.id = p.source_asset_id
 		WHERE p.id = $1 AND p.withdrawn_at IS NULL AND p.restricted_at IS NULL
-		  AND a.restricted_at IS NULL`, id))
+		  AND (a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)`, id))
 	if err != nil {
 		return domain.PublicationDetail{}, err
 	}
@@ -336,18 +360,37 @@ func (r *TeamPublicationRepository) GetAdminAsset(ctx context.Context, id domain
 	var specJSON []byte
 	var publicationID *string
 	var publicationRestricted *bool
+	var assetRestrictionState string
+	var publicationRestrictionState *string
 	err := r.pool.QueryRow(ctx, `
 		SELECT a.id, a.owner_user_id, u.display_name, a.task_id, a.slot_index,
 		       a.media_type, a.mime, a.blob_key, a.byte_size, a.checksum,
 		       a.width_px, a.height_px, a.duration_ms, a.created_at,
-		       a.restricted_at IS NOT NULL, p.id::text, p.restricted,
+		       a.restricted_at IS NOT NULL AND a.restriction_released_at IS NULL,
+		       CASE
+		         WHEN a.restricted_at IS NULL THEN ''
+		         WHEN a.restriction_released_at IS NULL THEN 'active'
+		         ELSE 'released'
+		       END,
+		       p.id::text, p.restricted, p.restriction_state,
 		       t.specification
 		FROM creation_media_assets a
 		JOIN users u ON u.id = a.owner_user_id
 		JOIN creation_generation_tasks t ON t.id = a.task_id
 		LEFT JOIN LATERAL (
 			SELECT publication.id,
-				(publication.restricted_at IS NOT NULL OR a.restricted_at IS NOT NULL) AS restricted
+				CASE
+				  WHEN (a.restricted_at IS NOT NULL AND a.restriction_released_at IS NULL)
+				    OR (publication.direct_restricted_at IS NOT NULL AND publication.direct_restriction_released_at IS NULL)
+				  THEN true ELSE false
+				END AS restricted,
+				CASE
+				  WHEN (a.restricted_at IS NOT NULL AND a.restriction_released_at IS NULL)
+				    OR (publication.direct_restricted_at IS NOT NULL AND publication.direct_restriction_released_at IS NULL)
+				  THEN 'active'
+				  WHEN publication.restricted_at IS NOT NULL THEN 'released'
+				  ELSE ''
+				END AS restriction_state
 			FROM creation_team_publications publication
 			WHERE publication.source_asset_id = a.id AND publication.withdrawn_at IS NULL
 			ORDER BY (publication.restricted_at IS NULL) DESC,
@@ -359,8 +402,8 @@ func (r *TeamPublicationRepository) GetAdminAsset(ctx context.Context, id domain
 		&detail.Asset.TaskID, &detail.Asset.SlotIndex, &media, &detail.Asset.Mime,
 		&detail.Asset.BlobKey, &detail.Asset.ByteSize, &detail.Asset.Checksum,
 		&detail.Asset.WidthPx, &detail.Asset.HeightPx, &detail.Asset.DurationMS,
-		&detail.Asset.CreatedAt, &detail.Asset.Restricted, &publicationID,
-		&publicationRestricted, &specJSON,
+		&detail.Asset.CreatedAt, &detail.Asset.Restricted, &assetRestrictionState,
+		&publicationID, &publicationRestricted, &publicationRestrictionState, &specJSON,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.AdminAssetDetail{}, domain.ErrAssetNotFound
@@ -369,6 +412,7 @@ func (r *TeamPublicationRepository) GetAdminAsset(ctx context.Context, id domain
 		return domain.AdminAssetDetail{}, fmt.Errorf("creation: get admin inspiration asset: %w", err)
 	}
 	detail.Asset.MediaType = domain.MediaType(media)
+	detail.Asset.RestrictionState = domain.RestrictionState(assetRestrictionState)
 	if err := json.Unmarshal(specJSON, &detail.Specification); err != nil {
 		return domain.AdminAssetDetail{}, fmt.Errorf("creation: decode admin asset specification: %w", err)
 	}
@@ -388,6 +432,9 @@ func (r *TeamPublicationRepository) GetAdminAsset(ctx context.Context, id domain
 		}
 		publication.Restricted = publication.Restricted ||
 			(publicationRestricted != nil && *publicationRestricted)
+		if publicationRestrictionState != nil {
+			publication.RestrictionState = domain.RestrictionState(*publicationRestrictionState)
+		}
 		detail.ActivePublication = &publication
 		detail.Asset.ActivePublication = &publication
 	}
@@ -529,7 +576,8 @@ func (r *TeamPublicationRepository) lockPublication(ctx context.Context, tx doma
 	var locked domain.UUID
 	if err := tx.QueryRow(ctx, `
 		SELECT id FROM creation_media_assets
-		WHERE id = $1 AND restricted_at IS NULL FOR UPDATE`, assetID).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
+		WHERE id = $1 AND (restricted_at IS NULL OR restriction_released_at IS NOT NULL)
+		FOR UPDATE`, assetID).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
 		return domain.PublicationDetail{}, domain.ErrPublicationNotFound
 	} else if err != nil {
 		return domain.PublicationDetail{}, fmt.Errorf("creation: lock publication asset: %w", err)
@@ -584,7 +632,7 @@ func (r *TeamPublicationRepository) GetPublicationReference(ctx context.Context,
 		JOIN creation_media_assets asset ON asset.id = publication.source_asset_id
 		WHERE publication.id = $1 AND reference.id = $2
 		  AND publication.withdrawn_at IS NULL AND publication.restricted_at IS NULL
-		  AND asset.restricted_at IS NULL`, publicationID, referenceID))
+		  AND (asset.restricted_at IS NULL OR asset.restriction_released_at IS NOT NULL)`, publicationID, referenceID))
 }
 
 func (r *TeamPublicationRepository) GetAdminAssetReference(ctx context.Context, assetID, referenceID domain.UUID) (domain.PublicationReference, error) {
@@ -598,6 +646,154 @@ func (r *TeamPublicationRepository) GetAdminAssetReference(ctx context.Context, 
 		}
 	}
 	return domain.PublicationReference{}, domain.ErrAssetNotFound
+}
+
+func (r *TeamPublicationRepository) RestrictAsset(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (domain.MediaAsset, bool, error) {
+	var restrictedAt, releasedAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT restricted_at, restriction_released_at
+		FROM creation_media_assets
+		WHERE id = $1 AND deleted_at IS NULL
+		FOR UPDATE`, id).Scan(&restrictedAt, &releasedAt); errors.Is(err, pgx.ErrNoRows) {
+		return domain.MediaAsset{}, false, domain.ErrAssetNotFound
+	} else if err != nil {
+		return domain.MediaAsset{}, false, fmt.Errorf("creation: lock asset for restriction: %w", err)
+	}
+	changed := restrictedAt == nil || releasedAt != nil
+	if changed {
+		var stamped time.Time
+		if err := tx.QueryRow(ctx, `
+			UPDATE creation_media_assets
+			SET restricted_at = clock_timestamp(), restriction_released_at = NULL
+			WHERE id = $1
+			RETURNING restricted_at`, id).Scan(&stamped); err != nil {
+			return domain.MediaAsset{}, false, fmt.Errorf("creation: restrict asset: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE creation_team_publications
+			SET restricted_at = COALESCE(restricted_at, $2)
+			WHERE source_asset_id = $1 AND withdrawn_at IS NULL AND restricted_at IS NULL`, id, stamped); err != nil {
+			return domain.MediaAsset{}, false, fmt.Errorf("creation: terminate asset publications: %w", err)
+		}
+	}
+	asset, err := scanAsset(tx.QueryRow(ctx, `SELECT `+assetColumns+assetFrom+`
+		WHERE a.id = $1 AND a.deleted_at IS NULL`, id))
+	if err != nil {
+		return domain.MediaAsset{}, false, fmt.Errorf("creation: read restricted asset: %w", err)
+	}
+	return asset, changed, nil
+}
+
+func (r *TeamPublicationRepository) ReleaseAsset(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (domain.MediaAsset, bool, error) {
+	var restrictedAt, releasedAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT restricted_at, restriction_released_at
+		FROM creation_media_assets
+		WHERE id = $1 AND deleted_at IS NULL
+		FOR UPDATE`, id).Scan(&restrictedAt, &releasedAt); errors.Is(err, pgx.ErrNoRows) {
+		return domain.MediaAsset{}, false, domain.ErrAssetNotFound
+	} else if err != nil {
+		return domain.MediaAsset{}, false, fmt.Errorf("creation: lock asset for restriction release: %w", err)
+	}
+	changed := restrictedAt != nil && releasedAt == nil
+	if changed {
+		if _, err := tx.Exec(ctx, `
+			UPDATE creation_media_assets
+			SET restriction_released_at = clock_timestamp()
+			WHERE id = $1`, id); err != nil {
+			return domain.MediaAsset{}, false, fmt.Errorf("creation: release asset restriction: %w", err)
+		}
+	}
+	asset, err := scanAsset(tx.QueryRow(ctx, `SELECT `+assetColumns+assetFrom+`
+		WHERE a.id = $1 AND a.deleted_at IS NULL`, id))
+	if err != nil {
+		return domain.MediaAsset{}, false, fmt.Errorf("creation: read released asset: %w", err)
+	}
+	return asset, changed, nil
+}
+
+func (r *TeamPublicationRepository) RestrictPublication(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (domain.TeamPublication, bool, error) {
+	assetID, assetActive, directAt, directReleasedAt, err := r.lockPublicationRestriction(ctx, tx, id)
+	if err != nil {
+		return domain.TeamPublication{}, false, err
+	}
+	changed := directAt == nil || directReleasedAt != nil
+	if changed {
+		if _, err := tx.Exec(ctx, `
+			WITH stamp AS (SELECT clock_timestamp() AS at)
+			UPDATE creation_team_publications publication
+			SET restricted_at = COALESCE(publication.restricted_at, stamp.at),
+			    direct_restricted_at = stamp.at,
+			    direct_restriction_released_at = NULL
+			FROM stamp
+			WHERE publication.id = $1`, id); err != nil {
+			return domain.TeamPublication{}, false, fmt.Errorf("creation: restrict team publication: %w", err)
+		}
+	}
+	publication, err := r.getPublicationRestriction(ctx, tx, id, assetID, assetActive)
+	return publication, changed, err
+}
+
+func (r *TeamPublicationRepository) ReleasePublication(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (domain.TeamPublication, bool, error) {
+	assetID, assetActive, directAt, directReleasedAt, err := r.lockPublicationRestriction(ctx, tx, id)
+	if err != nil {
+		return domain.TeamPublication{}, false, err
+	}
+	changed := directAt != nil && directReleasedAt == nil
+	if changed {
+		if _, err := tx.Exec(ctx, `
+			UPDATE creation_team_publications
+			SET direct_restriction_released_at = clock_timestamp()
+			WHERE id = $1`, id); err != nil {
+			return domain.TeamPublication{}, false, fmt.Errorf("creation: release team publication restriction: %w", err)
+		}
+	}
+	publication, err := r.getPublicationRestriction(ctx, tx, id, assetID, assetActive)
+	return publication, changed, err
+}
+
+func (r *TeamPublicationRepository) lockPublicationRestriction(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (domain.UUID, bool, *time.Time, *time.Time, error) {
+	var assetID domain.UUID
+	if err := tx.QueryRow(ctx, `
+		SELECT source_asset_id FROM creation_team_publications
+		WHERE id = $1 AND withdrawn_at IS NULL`, id).Scan(&assetID); errors.Is(err, pgx.ErrNoRows) {
+		return domain.UUID{}, false, nil, nil, domain.ErrPublicationNotFound
+	} else if err != nil {
+		return domain.UUID{}, false, nil, nil, fmt.Errorf("creation: resolve publication restriction asset: %w", err)
+	}
+	var assetActive bool
+	if err := tx.QueryRow(ctx, `
+		SELECT restricted_at IS NOT NULL AND restriction_released_at IS NULL
+		FROM creation_media_assets
+		WHERE id = $1
+		FOR UPDATE`, assetID).Scan(&assetActive); err != nil {
+		return domain.UUID{}, false, nil, nil, fmt.Errorf("creation: lock publication restriction asset: %w", err)
+	}
+	var directAt, directReleasedAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT direct_restricted_at, direct_restriction_released_at
+		FROM creation_team_publications
+		WHERE id = $1 AND withdrawn_at IS NULL
+		FOR UPDATE`, id).Scan(&directAt, &directReleasedAt); errors.Is(err, pgx.ErrNoRows) {
+		return domain.UUID{}, false, nil, nil, domain.ErrPublicationNotFound
+	} else if err != nil {
+		return domain.UUID{}, false, nil, nil, fmt.Errorf("creation: lock publication restriction: %w", err)
+	}
+	return assetID, assetActive, directAt, directReleasedAt, nil
+}
+
+func (r *TeamPublicationRepository) getPublicationRestriction(ctx context.Context, tx domain.TxExecutor, id, assetID domain.UUID, assetActive bool) (domain.TeamPublication, error) {
+	publication, err := scanPublication(tx.QueryRow(ctx, `SELECT `+publicationColumns+`
+		FROM creation_team_publications p WHERE p.id = $1`, id))
+	if err != nil {
+		return domain.TeamPublication{}, err
+	}
+	publication.SourceAssetID = assetID
+	if assetActive {
+		publication.Restricted = true
+		publication.RestrictionState = domain.RestrictionActive
+	}
+	return publication, nil
 }
 
 const publicationReferenceColumns = `reference.id, reference.publication_id, reference.position,
@@ -630,10 +826,12 @@ func scanPublication(row rowScanner) (domain.TeamPublication, error) {
 	var publication domain.TeamPublication
 	var media string
 	var specJSON []byte
+	var restrictionState, directRestrictionState string
 	err := row.Scan(&publication.ID, &publication.SourceAssetID, &publication.PublisherID,
 		&publication.PublisherDisplayName, &media, &publication.Mime, &publication.BlobKey,
 		&publication.ByteSize, &publication.Checksum, &publication.WidthPx, &publication.HeightPx,
-		&publication.DurationMS, &specJSON, &publication.PublishedAt, &publication.Restricted)
+		&publication.DurationMS, &specJSON, &publication.PublishedAt, &publication.Restricted,
+		&restrictionState, &directRestrictionState)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.TeamPublication{}, domain.ErrPublicationNotFound
 	}
@@ -641,6 +839,8 @@ func scanPublication(row rowScanner) (domain.TeamPublication, error) {
 		return domain.TeamPublication{}, fmt.Errorf("creation: scan team publication: %w", err)
 	}
 	publication.MediaType = domain.MediaType(media)
+	publication.RestrictionState = domain.RestrictionState(restrictionState)
+	publication.DirectRestriction = domain.RestrictionState(directRestrictionState)
 	if err := json.Unmarshal(specJSON, &publication.Specification); err != nil {
 		return domain.TeamPublication{}, fmt.Errorf("creation: decode team publication specification: %w", err)
 	}

@@ -137,6 +137,7 @@ assert_identity_integration_executed() {
     TestLoginAnswersDisabledAccountWithAccountDisabled
     TestLoginRateLimitsAfterWindowedFailures
     TestLogoutRevokesOnlyTheCallingSession
+    TestLogoutPublishesTheCommittedSessionIdentity
     TestPendingPasswordChangeBlocksBusinessEndpoints
     TestFirstLoginChangePasswordClearsFlagAndActivatesAccount
     TestChangePasswordRevokesAllOtherSessions

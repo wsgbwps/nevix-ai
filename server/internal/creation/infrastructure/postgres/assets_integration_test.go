@@ -230,6 +230,40 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 		t.Fatalf("begin plan fixture: %v", err)
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO creation_sessions (owner_user_id, name, created_at, updated_at)
+		SELECT $1, 'plan-session-' || series,
+		       now() - (series * interval '1 millisecond'), now()
+		FROM generate_series(1, 1000) AS series`, creator); err != nil {
+		t.Fatalf("seed 1k sessions: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ANALYZE creation_sessions`); err != nil {
+		t.Fatalf("analyze sessions: %v", err)
+	}
+	var sessionCursorTime time.Time
+	var sessionCursorID domain.UUID
+	if err := tx.QueryRow(ctx, `
+		SELECT created_at, id FROM creation_sessions
+		WHERE owner_user_id = $1 AND deleted_at IS NULL
+		ORDER BY created_at DESC, id DESC OFFSET 500 LIMIT 1`, creator).Scan(&sessionCursorTime, &sessionCursorID); err != nil {
+		t.Fatalf("load deep session cursor fixture: %v", err)
+	}
+	var planJSON []byte
+	if err := tx.QueryRow(ctx, `
+		EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+		SELECT id FROM creation_sessions
+		WHERE owner_user_id = $1 AND deleted_at IS NULL
+		  AND (created_at, id) < ($2, $3)
+		ORDER BY created_at DESC, id DESC LIMIT 31`, creator, sessionCursorTime, sessionCursorID).Scan(&planJSON); err != nil {
+		t.Fatalf("explain 1k session keyset page: %v", err)
+	}
+	var plan any
+	if err := json.Unmarshal(planJSON, &plan); err != nil {
+		t.Fatalf("decode session plan: %v", err)
+	}
+	if hasSequentialRelationScan(plan, "creation_sessions") || !planUsesIndex(plan, "creation_sessions_active_listing_idx") {
+		t.Fatalf("1k session keyset page missed its partial index: %s", planJSON)
+	}
 	prefix := "asset-plan-" + domain.NewUUID().String()
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO creation_generation_tasks
@@ -254,38 +288,111 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 	if _, err := tx.Exec(ctx, `ANALYZE creation_media_assets`); err != nil {
 		t.Fatalf("analyze assets: %v", err)
 	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO creation_generation_queue (task_id, media_type, run_after)
+		SELECT id, media_type, now() - interval '1 second'
+		FROM creation_generation_tasks
+		WHERE idempotency_key LIKE $1 || '-%'
+		ORDER BY id LIMIT 10000`, prefix); err != nil {
+		t.Fatalf("seed 10k queue rows: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO creation_generation_reservations (task_id, owner_user_id, media_type, released_at)
+		SELECT id, owner_user_id, media_type,
+		       CASE WHEN row_number() OVER (ORDER BY id) <= 9000 THEN now() END
+		FROM creation_generation_tasks
+		WHERE idempotency_key LIKE $1 || '-%'
+		ORDER BY id LIMIT 10000`, prefix); err != nil {
+		t.Fatalf("seed 10k governance reservations: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO creation_generation_attempts (user_id, attempted_at)
+		SELECT $1, CASE WHEN series <= 9900 THEN now() - interval '2 minutes' ELSE now() END
+		FROM generate_series(1, 10000) AS series`, creator); err != nil {
+		t.Fatalf("seed 10k governance attempts: %v", err)
+	}
+	for _, relation := range []string{"creation_generation_queue", "creation_generation_reservations", "creation_generation_attempts", "creation_generation_tasks"} {
+		if _, err := tx.Exec(ctx, `ANALYZE `+relation); err != nil {
+			t.Fatalf("analyze %s: %v", relation, err)
+		}
+	}
+	if err := tx.QueryRow(ctx, `
+		EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+		UPDATE creation_generation_queue SET
+			lease_owner = 'plan-worker', lease_until = now() + interval '30 seconds',
+			attempts = attempts + 1, updated_at = now()
+		WHERE id = (
+			SELECT id FROM creation_generation_queue
+			WHERE run_after <= now() AND attempts < max_attempts
+			  AND (lease_until IS NULL OR lease_until <= now())
+			ORDER BY run_after, id LIMIT 1 FOR UPDATE SKIP LOCKED
+		)
+		RETURNING id`).Scan(&planJSON); err != nil {
+		t.Fatalf("explain 10k queue claim: %v", err)
+	}
+	if err := json.Unmarshal(planJSON, &plan); err != nil {
+		t.Fatalf("decode queue claim plan: %v", err)
+	}
+	if hasSequentialRelationScan(plan, "creation_generation_queue") || !planUsesIndex(plan, "creation_generation_queue_claim_idx") {
+		t.Fatalf("10k queue claim missed its claim index: %s", planJSON)
+	}
+	governancePlans := []struct {
+		name     string
+		relation string
+		indexes  []string
+		query    string
+		args     []any
+	}{
+		{"monthly tasks", "creation_generation_tasks", []string{"creation_generation_tasks_owner_created_idx", "creation_generation_tasks_created_idx"}, `SELECT count(*) FROM creation_generation_tasks WHERE owner_user_id = $1 AND created_at >= now() - interval '2 seconds'`, []any{creator}},
+		{"rolling attempts", "creation_generation_attempts", []string{"creation_generation_attempts_user_time_idx", "creation_generation_attempts_time_idx"}, `SELECT count(*) FROM creation_generation_attempts WHERE user_id = $1 AND attempted_at >= now() - interval '1 minute'`, []any{creator}},
+		{"active reservations", "creation_generation_reservations", []string{"creation_generation_reservations_active_idx"}, `SELECT count(*) FROM creation_generation_reservations WHERE owner_user_id = $1 AND media_type = 'image' AND released_at IS NULL`, []any{creator}},
+	}
+	for _, check := range governancePlans {
+		if err := tx.QueryRow(ctx, `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) `+check.query, check.args...).Scan(&planJSON); err != nil {
+			t.Fatalf("explain %s: %v", check.name, err)
+		}
+		if err := json.Unmarshal(planJSON, &plan); err != nil {
+			t.Fatalf("decode %s plan: %v", check.name, err)
+		}
+		if hasSequentialRelationScan(plan, check.relation) || !planUsesAnyIndex(plan, check.indexes) {
+			t.Fatalf("%s missed %v: %s", check.name, check.indexes, planJSON)
+		}
+	}
 	var cursorTime time.Time
 	var cursorID domain.UUID
 	if err := tx.QueryRow(ctx, `
 		SELECT created_at, id FROM creation_media_assets
-		WHERE owner_user_id = $1 AND deleted_at IS NULL AND restricted_at IS NULL
+		WHERE owner_user_id = $1 AND deleted_at IS NULL
+		  AND (restricted_at IS NULL OR restriction_released_at IS NOT NULL)
 		ORDER BY created_at DESC, id DESC OFFSET 25000 LIMIT 1`, creator).Scan(&cursorTime, &cursorID); err != nil {
 		t.Fatalf("load deep cursor fixture: %v", err)
 	}
-	var planJSON []byte
 	if err := tx.QueryRow(ctx, `
-		EXPLAIN (ANALYZE, FORMAT JSON)
+		EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
 		SELECT a.id, u.display_name FROM creation_media_assets a
 		JOIN users u ON u.id = a.owner_user_id
-		WHERE a.owner_user_id = $3 AND a.deleted_at IS NULL AND a.restricted_at IS NULL
+		WHERE a.owner_user_id = $3 AND a.deleted_at IS NULL
+		  AND (a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)
 		  AND a.media_type = 'image'
 		  AND (a.created_at, a.id) < ($1, $2)
 		ORDER BY a.created_at DESC, a.id DESC LIMIT 31`, cursorTime, cursorID, creator).Scan(&planJSON); err != nil {
 		t.Fatalf("explain keyset asset page: %v", err)
 	}
-	var plan any
 	if err := json.Unmarshal(planJSON, &plan); err != nil {
 		t.Fatalf("decode plan: %v", err)
 	}
 	if hasSequentialAssetScan(plan) {
 		t.Fatalf("50k keyset page used a sequential creation_media_assets scan: %s", planJSON)
 	}
-	if !planUsesIndex(plan, "creation_media_assets_visible_owner_media_created_idx") &&
-		!planUsesIndex(plan, "creation_media_assets_admin_media_created_idx") {
+	if !planUsesAnyIndex(plan, []string{
+		"creation_media_assets_visible_owner_media_created_idx",
+		"creation_media_assets_visible_media_created_idx",
+		"creation_media_assets_admin_media_created_idx",
+	}) {
 		t.Fatalf("50k owner page missed production composite index: %s", planJSON)
 	}
 	if err := tx.QueryRow(ctx, `
-		EXPLAIN (ANALYZE, FORMAT JSON)
+		EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
 		SELECT a.id FROM creation_media_assets a
 		WHERE a.deleted_at IS NULL AND a.media_type = 'image'
 		  AND (a.created_at, a.id) < ($1, $2)
@@ -328,11 +435,11 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 		t.Fatalf("load deep publication cursor: %v", err)
 	}
 	if err := tx.QueryRow(ctx, `
-		EXPLAIN (ANALYZE, FORMAT JSON)
+		EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
 		SELECT p.id FROM creation_team_publications p
 		JOIN creation_media_assets a ON a.id = p.source_asset_id
 		WHERE p.withdrawn_at IS NULL AND p.restricted_at IS NULL
-		  AND a.restricted_at IS NULL
+		  AND (a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)
 		  AND (p.published_at, p.id) < ($1, $2)
 		ORDER BY p.published_at DESC, p.id DESC LIMIT 31`, publicationCursorTime, publicationCursorID).Scan(&planJSON); err != nil {
 		t.Fatalf("explain publication keyset page: %v", err)
@@ -417,6 +524,15 @@ func planUsesIndex(value any, index string) bool {
 			if planUsesIndex(child, index) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func planUsesAnyIndex(value any, indexes []string) bool {
+	for _, index := range indexes {
+		if planUsesIndex(value, index) {
+			return true
 		}
 	}
 	return false

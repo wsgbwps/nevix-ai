@@ -96,39 +96,48 @@ const (
 	GenerationGovernanceUpdated Action = "generation_governance_updated"
 	ProviderCreditBlocked       Action = "provider_credit_blocked"
 	ProviderCreditCleared       Action = "provider_credit_cleared"
+	// Admin safety actions carry only the exact resource identity and state.
+	MediaAssetRestricted               Action = "media_asset_restricted"
+	MediaAssetRestrictionReleased      Action = "media_asset_restriction_released"
+	TeamPublicationRestricted          Action = "team_publication_restricted"
+	TeamPublicationRestrictionReleased Action = "team_publication_restriction_released"
 )
 
 var validActions = map[Action]struct{}{
-	InstanceClaimed:                  {},
-	SessionCreated:                   {},
-	SessionRevoked:                   {},
-	PasswordChanged:                  {},
-	DisplayNameChanged:               {},
-	UserCreated:                      {},
-	UserDisabled:                     {},
-	UserPasswordReset:                {},
-	UserEmailChanged:                 {},
-	UserRoleChanged:                  {},
-	UserDeleted:                      {},
-	JoinCodeCreated:                  {},
-	JoinCodeRevoked:                  {},
-	UserSelfRegistered:               {},
-	ReauthProofIssued:                {},
-	ReauthProofConsumed:              {},
-	ProviderConnectionCreated:        {},
-	GenerationGovernanceUpdated:      {},
-	ProviderCreditBlocked:            {},
-	ProviderCreditCleared:            {},
-	ProviderConnectionReplaced:       {},
-	ProviderConnectionPaused:         {},
-	ProviderConnectionResumed:        {},
-	ProviderConnectionChecked:        {},
-	ProviderConnectionDeleted:        {},
-	ObjectStorageConnectionCreated:   {},
-	ObjectStorageConnectionReplaced:  {},
-	ObjectStorageCredentialRotated:   {},
-	ObjectStorageConnectionDeleted:   {},
-	ObjectStorageCredentialRecovered: {},
+	InstanceClaimed:                    {},
+	SessionCreated:                     {},
+	SessionRevoked:                     {},
+	PasswordChanged:                    {},
+	DisplayNameChanged:                 {},
+	UserCreated:                        {},
+	UserDisabled:                       {},
+	UserPasswordReset:                  {},
+	UserEmailChanged:                   {},
+	UserRoleChanged:                    {},
+	UserDeleted:                        {},
+	JoinCodeCreated:                    {},
+	JoinCodeRevoked:                    {},
+	UserSelfRegistered:                 {},
+	ReauthProofIssued:                  {},
+	ReauthProofConsumed:                {},
+	ProviderConnectionCreated:          {},
+	GenerationGovernanceUpdated:        {},
+	ProviderCreditBlocked:              {},
+	ProviderCreditCleared:              {},
+	ProviderConnectionReplaced:         {},
+	ProviderConnectionPaused:           {},
+	ProviderConnectionResumed:          {},
+	ProviderConnectionChecked:          {},
+	ProviderConnectionDeleted:          {},
+	ObjectStorageConnectionCreated:     {},
+	ObjectStorageConnectionReplaced:    {},
+	ObjectStorageCredentialRotated:     {},
+	ObjectStorageConnectionDeleted:     {},
+	ObjectStorageCredentialRecovered:   {},
+	MediaAssetRestricted:               {},
+	MediaAssetRestrictionReleased:      {},
+	TeamPublicationRestricted:          {},
+	TeamPublicationRestrictionReleased: {},
 }
 
 // Subject is a User identity snapshot stored in an Audit Log entry: user_id

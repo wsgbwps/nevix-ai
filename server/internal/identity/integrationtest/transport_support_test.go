@@ -25,12 +25,17 @@ import (
 // seam as the composition root and mounts its routes.
 func (h *harness) moduleWithConfig(t *testing.T, cfg identity.Config) (*identity.Module, http.Handler) {
 	t.Helper()
+	return h.moduleWithConfigAndBus(t, cfg, event.NewInMemoryBus())
+}
+
+func (h *harness) moduleWithConfigAndBus(t *testing.T, cfg identity.Config, bus event.Bus) (*identity.Module, http.Handler) {
+	t.Helper()
 	m, err := identity.NewModule(context.Background(), h.runtimePool, cfg)
 	if err != nil {
 		t.Fatalf("construct identity module: %v", err)
 	}
 	router := chi.NewRouter()
-	router.Group(func(r chi.Router) { m.Register(r, event.NewInMemoryBus()) })
+	router.Group(func(r chi.Router) { m.Register(r, bus) })
 	return m, router
 }
 

@@ -1089,6 +1089,9 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
         index: 1,
         status: 'failed',
         failureReason: 'provider_route_unavailable',
+        actionSuggestion: 'contact_admin',
+        retryable: false,
+        supportNumber: 'NVX-dddddddd-0000-4000-8000-00000000face-02',
         result: null
       }
     ]
@@ -1110,6 +1113,9 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
   await expect(failedSlot).toContainText(
     'channel binding, permissions, balance, quota, or capacity'
   )
+  await expect(failedSlot).toContainText('Contact an administrator')
+  await expect(failedSlot).toContainText('Do not retry unchanged')
+  await expect(failedSlot).toContainText('NVX-dddddddd-0000-4000-8000-00000000face-02')
 
   // Partial success keeps retrying exactly the uncompleted slots; the redo
   // affordance lives in the task's overflow menu.

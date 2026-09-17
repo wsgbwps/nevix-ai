@@ -1575,6 +1575,60 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /creation/inspiration/assets/{assetID}/restriction:
+    put:
+      operationId: restrictInspirationAsset
+      summary: Admin 对精确 Media Asset 施加安全限制
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      responses:
+        "200":
+          description: 当前 Asset 安全状态与能力。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asset]
+                properties:
+                  asset:
+                    $ref: "#/components/schemas/MediaAsset"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: releaseInspirationAssetRestriction
+      summary: Admin 解除精确 Media Asset 的安全限制
+      description: 解除后不恢复任何已终止 Publication；再次共享必须创建新 identity。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      responses:
+        "200":
+          description: 当前 Asset 安全状态与能力。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asset]
+                properties:
+                  asset:
+                    $ref: "#/components/schemas/MediaAsset"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /creation/inspiration/assets/{assetID}/content:
     get:
       operationId: downloadInspirationAsset
@@ -1650,6 +1704,44 @@ paths:
           description: 已撤回。
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/publications/{publicationID}/restriction:
+    put:
+      operationId: restrictPublication
+      summary: Admin 对精确 Team Publication 施加安全限制
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/publicationID"
+      responses:
+        "200":
+          $ref: "#/components/responses/PublicationResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: releasePublicationRestriction
+      summary: Admin 解除精确 Team Publication 的安全限制
+      description: 解除只更新限制状态，已终止 Publication 不重新生效。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/publicationID"
+      responses:
+        "200":
+          $ref: "#/components/responses/PublicationResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -3393,6 +3485,7 @@ components:
         - checksum_sha256
         - created_at
         - restricted
+        - restriction_state
         - publication
         - capabilities
       properties:
@@ -3434,6 +3527,9 @@ components:
           format: date-time
         restricted:
           type: boolean
+          description: 当前是否处于 active 安全限制。
+        restriction_state:
+          $ref: "#/components/schemas/RestrictionState"
         publication:
           nullable: true
           allOf:
@@ -3442,7 +3538,7 @@ components:
           $ref: "#/components/schemas/MediaAssetCapabilities"
     MediaAssetCapabilities:
       type: object
-      required: [can_delete, can_create_similar, can_publish]
+      required: [can_delete, can_create_similar, can_publish, can_restrict, can_release]
       properties:
         can_delete:
           type: boolean
@@ -3451,6 +3547,12 @@ components:
           type: boolean
         can_publish:
           type: boolean
+        can_restrict:
+          type: boolean
+          description: 仅 Admin 且当前无 active Asset 限制时为 true。
+        can_release:
+          type: boolean
+          description: 仅 Admin 且当前为 active Asset 限制时为 true。
     MediaAssetDetail:
       type: object
       required: [asset, siblings]
@@ -3492,7 +3594,7 @@ components:
             $ref: "#/components/schemas/PublicationReference"
     AssetPublicationSummary:
       type: object
-      required: [id, published_at, restricted]
+      required: [id, published_at, restricted, restriction_state]
       properties:
         id:
           type: string
@@ -3502,6 +3604,9 @@ components:
           format: date-time
         restricted:
           type: boolean
+          description: 当前是否受 Asset 或 Publication 的 active 限制。
+        restriction_state:
+          $ref: "#/components/schemas/RestrictionState"
     IdempotencyInput:
       type: object
       required: [idempotency_key]
@@ -3512,7 +3617,7 @@ components:
           maxLength: 128
     TeamPublication:
       type: object
-      required: [id, source_asset_id, publisher, media_type, mime_type, byte_size, checksum_sha256, published_at, restricted, capabilities]
+      required: [id, source_asset_id, publisher, media_type, mime_type, byte_size, checksum_sha256, published_at, restricted, restriction_state, capabilities]
       properties:
         id:
           type: string
@@ -3555,14 +3660,28 @@ components:
           format: date-time
         restricted:
           type: boolean
+          description: 当前是否受 Asset 或 Publication 的 active 限制。
+        restriction_state:
+          $ref: "#/components/schemas/RestrictionState"
         capabilities:
           type: object
-          required: [can_withdraw, can_create_similar]
+          required: [can_withdraw, can_create_similar, can_restrict, can_release]
           properties:
             can_withdraw:
               type: boolean
             can_create_similar:
               type: boolean
+            can_restrict:
+              type: boolean
+              description: 仅 Admin 可对该 Publication 设置直接限制。
+            can_release:
+              type: boolean
+              description: 仅 Admin 可解除该 Publication 的直接 active 限制。
+    RestrictionState:
+      type: string
+      nullable: true
+      enum: [active, released]
+      description: null 表示从未限制；released 只解除当前限制，不恢复旧 Publication。
     PublicationReference:
       type: object
       required: [id, role, kind, file_name, mime_type, byte_size, claims_version]
@@ -3820,6 +3939,27 @@ components:
             - processing_indeterminate
             - internal_error
           description: 稳定失败 taxonomy；provider_route_unavailable 是 Server 对白名单模型渠道错误的归一化诊断；部分成功逐槽位显示 reason。具体诊断（若可获得）由 failure_diagnostic 携带。
+        action_suggestion:
+          type: string
+          nullable: true
+          enum:
+            - correct_input
+            - confirm_rights
+            - revise_input
+            - revise_request
+            - contact_admin
+            - retry_later
+            - contact_support
+          description: 失败槽位的稳定短行动建议；非失败槽位为 null。
+        retryable:
+          type: boolean
+          nullable: true
+          description: 是否允许不修改意图直接重试；输入或输出策略拒绝固定为 false。
+        support_number:
+          type: string
+          nullable: true
+          pattern: '^NVX-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9]{2}$'
+          description: Nevix 生成的稳定支持编号；不得替换为供应商 request ID。
         failure_diagnostic:
           allOf:
             - $ref: "#/components/schemas/GenerationFailureDiagnostic"

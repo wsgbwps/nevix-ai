@@ -50,6 +50,15 @@ export type SlotFailureReason =
   | 'processing_indeterminate'
   | 'internal_error'
 
+export type SlotActionSuggestion =
+  | 'correct_input'
+  | 'confirm_rights'
+  | 'revise_input'
+  | 'revise_request'
+  | 'contact_admin'
+  | 'retry_later'
+  | 'contact_support'
+
 export type SlotFailureDiagnosticSource = 'provider' | 'output_transfer' | 'storage' | 'media_probe'
 
 /** Concrete creator-private explanation for one stable slot verdict. */
@@ -67,6 +76,9 @@ export interface GenerationSlotView {
   readonly index: number
   readonly status: string
   readonly failureReason: SlotFailureReason | null
+  readonly actionSuggestion?: SlotActionSuggestion | null
+  readonly retryable?: boolean | null
+  readonly supportNumber?: string | null
   readonly failureDiagnostic?: SlotFailureDiagnostic | null
   readonly result: SlotResultView | null
 }
@@ -230,6 +242,19 @@ const SLOT_FAILURE_REASONS: ReadonlySet<string> = new Set([
   'internal_error'
 ])
 
+const SLOT_ACTION_SUGGESTIONS: ReadonlySet<string> = new Set([
+  'correct_input',
+  'confirm_rights',
+  'revise_input',
+  'revise_request',
+  'contact_admin',
+  'retry_later',
+  'contact_support'
+])
+
+const SUPPORT_NUMBER_PATTERN =
+  /^NVX-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9]{2}$/
+
 const SLOT_FAILURE_DIAGNOSTIC_SOURCES: ReadonlySet<string> = new Set([
   'provider',
   'output_transfer',
@@ -291,6 +316,23 @@ function parseSlot(payload: unknown): GenerationSlotView | null {
   if (reasonRaw === undefined) return null
   if (reasonRaw !== null && !SLOT_FAILURE_REASONS.has(reasonRaw)) return null
   const reason = reasonRaw as SlotFailureReason | null
+  const actionRaw = nullableStr(payload, 'action_suggestion')
+  const retryableRaw = isRecord(payload) ? payload['retryable'] : undefined
+  const supportNumber = nullableStr(payload, 'support_number')
+  if (
+    actionRaw === undefined ||
+    retryableRaw === undefined ||
+    supportNumber === undefined ||
+    (reason === null && (actionRaw !== null || retryableRaw !== null || supportNumber !== null)) ||
+    (reason !== null &&
+      (actionRaw === null ||
+        !SLOT_ACTION_SUGGESTIONS.has(actionRaw) ||
+        typeof retryableRaw !== 'boolean' ||
+        supportNumber === null ||
+        !SUPPORT_NUMBER_PATTERN.test(supportNumber)))
+  ) {
+    return null
+  }
   let failureDiagnostic: SlotFailureDiagnostic | null = null
   if (isRecord(payload) && 'failure_diagnostic' in payload) {
     const rawDiagnostic = payload['failure_diagnostic']
@@ -315,7 +357,16 @@ function parseSlot(payload: unknown): GenerationSlotView | null {
       durationMs: nullableNum(rawResult, 'duration_ms') ?? null
     }
   }
-  return { index: indexRaw, status, failureReason: reason, failureDiagnostic, result }
+  return {
+    index: indexRaw,
+    status,
+    failureReason: reason,
+    actionSuggestion: actionRaw as SlotActionSuggestion | null,
+    retryable: retryableRaw as boolean | null,
+    supportNumber,
+    failureDiagnostic,
+    result
+  }
 }
 
 const SPEC_REFERENCE_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'audio'])

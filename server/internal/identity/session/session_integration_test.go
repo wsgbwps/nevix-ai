@@ -482,6 +482,8 @@ func TestRevokeCoversCurrentOthersAndAllDispositions(t *testing.T) {
 	defer cancel()
 	owner, _, store, runner := storeHarness(t, ctx)
 	userID, stamp := seedActiveUser(t, owner, ctx, "revoker@nevix.test")
+	var published []string
+	store.SetRevocationSink(func(sessionID string) { published = append(published, sessionID) })
 
 	laptop, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "laptop", CredentialStamp: stamp})
 	if err != nil {
@@ -562,6 +564,11 @@ func TestRevokeCoversCurrentOthersAndAllDispositions(t *testing.T) {
 			t.Fatalf("others effect saw %d affected rows still present, want 0 (commit precedes effect)", logs.effects[0].visible)
 		}
 	}
+	wantOthers := []string{phoneID, tabletID}
+	slices.Sort(wantOthers)
+	if !slices.Equal(published, wantOthers) {
+		t.Fatalf("published revocations after others = %v, want %v", published, wantOthers)
+	}
 
 	// current: exactly the one named session.
 	if !revoke(Current(laptopID)) {
@@ -577,6 +584,9 @@ func TestRevokeCoversCurrentOthersAndAllDispositions(t *testing.T) {
 		t.Fatalf("effect batches after current = %d, want 2", got)
 	} else if !slices.Equal(batches()[1], []string{laptopID}) {
 		t.Fatalf("current effect batch = %v, want exactly [%s]", batches()[1], laptopID)
+	}
+	if got := published[len(published)-1]; got != laptopID {
+		t.Fatalf("current published revocation = %s, want %s", got, laptopID)
 	}
 
 	// all: every session of the user.
@@ -606,6 +616,12 @@ func TestRevokeCoversCurrentOthersAndAllDispositions(t *testing.T) {
 			t.Fatalf("all effect saw %d affected rows still present, want 0 (commit precedes effect)", logs.effects[2].visible)
 		}
 	}
+	wantAll := []string{desktopID, kioskID}
+	slices.Sort(wantAll)
+	wantPublished := []string{wantOthers[0], wantOthers[1], laptopID, wantAll[0], wantAll[1]}
+	if !slices.Equal(published, wantPublished) {
+		t.Fatalf("published revocations = %v, want %v", published, wantPublished)
+	}
 
 	// Empty targets: every disposition is a successful no-op — no change, no
 	// effect, no audit row.
@@ -620,6 +636,9 @@ func TestRevokeCoversCurrentOthersAndAllDispositions(t *testing.T) {
 	}
 	if got := len(batches()); got != 3 {
 		t.Fatalf("effect batches after no-ops = %d, want still 3", got)
+	}
+	if !slices.Equal(published, wantPublished) {
+		t.Fatalf("no-op revocations published events: got %v, want unchanged %v", published, wantPublished)
 	}
 	if got := countAuditRows(t, owner, ctx); got != 0 {
 		t.Fatalf("audit rows after revocations = %d, want 0 (audit is caller-owned)", got)
@@ -674,6 +693,8 @@ func TestRevokeRollsBackWithTheCallerTransactionAndSkipsTheEffect(t *testing.T) 
 	defer cancel()
 	owner, _, store, runner := storeHarness(t, ctx)
 	userID, stamp := seedActiveUser(t, owner, ctx, "rollback-revoker@nevix.test")
+	var published []string
+	store.SetRevocationSink(func(sessionID string) { published = append(published, sessionID) })
 
 	first, err := issue(t, runner, ctx, store, IssueInput{UserID: userID, DeviceName: "stay-a", CredentialStamp: stamp})
 	if err != nil {
@@ -715,6 +736,9 @@ func TestRevokeRollsBackWithTheCallerTransactionAndSkipsTheEffect(t *testing.T) 
 	if got := len(logs.effects); got != 0 {
 		t.Fatalf("rollback dispatched %d effects, want 0", got)
 	}
+	if len(published) != 0 {
+		t.Fatalf("rollback published revocations %v, want none", published)
+	}
 
 	// The panic path: writetx rolls back best-effort and re-panics; the
 	// effect still never runs.
@@ -732,6 +756,9 @@ func TestRevokeRollsBackWithTheCallerTransactionAndSkipsTheEffect(t *testing.T) 
 	}
 	if got := len(logs.effects); got != 0 {
 		t.Fatalf("panicking run dispatched %d effects, want 0", got)
+	}
+	if len(published) != 0 {
+		t.Fatalf("panicking run published revocations %v, want none", published)
 	}
 	if got := countAuditRows(t, owner, ctx); got != 0 {
 		t.Fatalf("audit rows after rolled-back revocations = %d, want 0", got)

@@ -31,7 +31,13 @@ function publication(index: number): PublicationView {
     durationMs: index % 5 === 0 ? 4000 : null,
     publishedAt: `2026-09-${String(10 + (index % 7)).padStart(2, '0')}T08:00:00Z`,
     restricted: false,
-    capabilities: { canWithdraw: index === 1, canCreateSimilar: true }
+    restrictionState: null,
+    capabilities: {
+      canWithdraw: index === 1,
+      canCreateSimilar: true,
+      canRestrict: false,
+      canRelease: false
+    }
   }
 }
 
@@ -63,12 +69,20 @@ const adminAsset: InspirationItem = {
     durationMs: null,
     createdAt: '2026-09-16T09:00:00Z',
     restricted: true,
+    restrictionState: 'active',
     publication: {
       id: 'admin-publication',
       publishedAt: '2026-09-16T10:00:00Z',
-      restricted: true
+      restricted: true,
+      restrictionState: 'active'
     },
-    capabilities: { canDelete: true, canPublish: false, canCreateSimilar: false }
+    capabilities: {
+      canDelete: true,
+      canPublish: false,
+      canCreateSimilar: false,
+      canRestrict: false,
+      canRelease: true
+    }
   }
 }
 
@@ -112,6 +126,7 @@ interface InspirationControls {
   recordSimilar(publicationId: string): void
   withdraws(): readonly string[]
   previewCalls(): readonly string[]
+  safetyCalls(): readonly string[]
 }
 
 type InspirationStoryState =
@@ -124,6 +139,7 @@ type InspirationStoryState =
   | 'layout-failed'
   | 'preview-refresh'
   | 'preview-refresh-failed'
+  | 'admin-safety-failed'
 
 declare global {
   interface Window {
@@ -139,6 +155,9 @@ function createHarness(state: InspirationStoryState): {
   const similarCalls: string[] = []
   const withdraws: string[] = []
   const previewCalls: string[] = []
+  const safetyCalls: string[] = []
+  let assetReleased = false
+  let publicationReleased = false
   const items =
     state === 'dense'
       ? Array.from(
@@ -150,7 +169,7 @@ function createHarness(state: InspirationStoryState): {
         )
       : state === 'layout-probe' || state === 'layout-failed'
         ? layoutProbeItems
-        : state === 'admin'
+        : state === 'admin' || state === 'admin-safety-failed'
           ? [publicationItem, adminAsset]
           : state === 'empty'
             ? []
@@ -178,7 +197,16 @@ function createHarness(state: InspirationStoryState): {
               outcome: 'succeeded',
               value: {
                 type: 'asset',
-                asset: item.asset,
+                asset: {
+                  ...item.asset,
+                  restricted: !assetReleased,
+                  restrictionState: assetReleased ? 'released' : 'active',
+                  capabilities: {
+                    ...item.asset.capabilities,
+                    canRestrict: assetReleased,
+                    canRelease: !assetReleased
+                  }
+                },
                 specification,
                 references: [reference],
                 publication: {
@@ -187,8 +215,14 @@ function createHarness(state: InspirationStoryState): {
                   sourceAssetId: item.asset.id,
                   publisher: item.asset.creator,
                   publishedAt: '2026-09-16T10:00:00Z',
-                  restricted: true,
-                  capabilities: { canWithdraw: true, canCreateSimilar: false }
+                  restricted: !publicationReleased,
+                  restrictionState: publicationReleased ? 'released' : 'active',
+                  capabilities: {
+                    canWithdraw: true,
+                    canCreateSimilar: false,
+                    canRestrict: publicationReleased,
+                    canRelease: !publicationReleased
+                  }
                 }
               }
             },
@@ -218,14 +252,84 @@ function createHarness(state: InspirationStoryState): {
         withdraws.push(publicationId)
         return { outcome: 'succeeded', value: undefined }
       },
-      createPublicationSimilar: async () => ({ outcome: 'request-rejected', code: 'not_used' })
+      createPublicationSimilar: async () => ({ outcome: 'request-rejected', code: 'not_used' }),
+      restrictAsset: async (assetId) => {
+        safetyCalls.push(`restrict:asset:${assetId}`)
+        assetReleased = false
+        return state === 'admin-safety-failed'
+          ? { outcome: 'network-failure' }
+          : {
+              outcome: 'succeeded',
+              value: {
+                ...adminAsset.asset,
+                restricted: true,
+                restrictionState: 'active',
+                capabilities: {
+                  ...adminAsset.asset.capabilities,
+                  canRestrict: false,
+                  canRelease: true
+                }
+              }
+            }
+      },
+      releaseAsset: async (assetId) => {
+        safetyCalls.push(`release:asset:${assetId}`)
+        assetReleased = true
+        return state === 'admin-safety-failed'
+          ? { outcome: 'network-failure' }
+          : {
+              outcome: 'succeeded',
+              value: {
+                ...adminAsset.asset,
+                restricted: false,
+                restrictionState: 'released',
+                capabilities: {
+                  ...adminAsset.asset.capabilities,
+                  canRestrict: true,
+                  canRelease: false
+                }
+              }
+            }
+      },
+      restrictPublication: async (publicationId) => {
+        safetyCalls.push(`restrict:publication:${publicationId}`)
+        publicationReleased = false
+        return { outcome: 'request-rejected', code: 'not_used' }
+      },
+      releasePublication: async (publicationId) => {
+        safetyCalls.push(`release:publication:${publicationId}`)
+        publicationReleased = true
+        const current = publication(2)
+        return state === 'admin-safety-failed'
+          ? { outcome: 'network-failure' }
+          : {
+              outcome: 'succeeded',
+              value: {
+                ...current,
+                id: publicationId,
+                sourceAssetId: adminAsset.asset.id,
+                publisher: adminAsset.asset.creator,
+                publishedAt: '2026-09-16T10:00:00Z',
+                restricted: false,
+                restrictionState: 'released',
+                capabilities: {
+                  ...current.capabilities,
+                  canWithdraw: false,
+                  canCreateSimilar: false,
+                  canRestrict: true,
+                  canRelease: false
+                }
+              }
+            }
+      }
     },
     controls: {
       listCalls: () => listCalls,
       similarCalls: () => similarCalls,
       recordSimilar: (publicationId) => similarCalls.push(publicationId),
       withdraws: () => withdraws,
-      previewCalls: () => previewCalls
+      previewCalls: () => previewCalls,
+      safetyCalls: () => safetyCalls
     }
   }
 }
