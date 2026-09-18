@@ -202,7 +202,6 @@ function main() {
     [
       "diff",
       "--no-renames",
-      "--diff-filter=d",
       "--name-only",
       "-z",
       `${args.base}...${args.head}`,

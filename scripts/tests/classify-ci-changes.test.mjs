@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { classifyPaths } from "../classify-ci-changes.mjs";
@@ -13,6 +21,70 @@ function selected(paths) {
   return Object.fromEntries(
     Object.entries(result).filter(
       ([key, value]) => key !== "unknownPaths" && value,
+    ),
+  );
+}
+
+function classifyDeletion(t, deletedPath) {
+  const repository = mkdtempSync(join(tmpdir(), "classify-ci-changes-test-"));
+  t.after(() => rmSync(repository, { force: true, recursive: true }));
+
+  execFileSync("git", ["init", "--quiet"], { cwd: repository });
+  const absolutePath = join(repository, deletedPath);
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, "deleted\n");
+  execFileSync("git", ["add", deletedPath], { cwd: repository });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Nevix Test",
+      "-c",
+      "user.email=test@nevix.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "add fixture",
+    ],
+    { cwd: repository },
+  );
+  const base = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repository,
+    encoding: "utf8",
+  }).trim();
+
+  rmSync(absolutePath);
+  execFileSync("git", ["add", "--all"], { cwd: repository });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Nevix Test",
+      "-c",
+      "user.email=test@nevix.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "delete fixture",
+    ],
+    { cwd: repository },
+  );
+  const head = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repository,
+    encoding: "utf8",
+  }).trim();
+
+  return JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        join(REPOSITORY, "scripts/classify-ci-changes.mjs"),
+        "--base",
+        base,
+        "--head",
+        head,
+      ],
+      { cwd: repository, encoding: "utf8" },
     ),
   );
 }
@@ -216,13 +288,34 @@ test("unknown paths fail closed", () => {
   ]);
 });
 
-test("the classifier excludes deleted paths before classification", () => {
-  const main = readFileSync(
-    join(REPOSITORY, "scripts/classify-ci-changes.mjs"),
-    "utf8",
+test("deleted Desktop files still run Desktop CI", (t) => {
+  assert.deepEqual(
+    classifyDeletion(
+      t,
+      "apps/desktop/src/renderer/src/app/deleted-fixture.ts",
+    ),
+    {
+      paths: ["apps/desktop/src/renderer/src/app/deleted-fixture.ts"],
+      desktop: true,
+      server: false,
+      windows_native: true,
+      macos_native: false,
+      harness: false,
+      unknownPaths: [],
+    },
   );
+});
 
-  assert.match(main, /--diff-filter=d/);
+test("deleted Server files still run Server CI", (t) => {
+  assert.deepEqual(classifyDeletion(t, "server/deleted-fixture.go"), {
+    paths: ["server/deleted-fixture.go"],
+    desktop: false,
+    server: true,
+    windows_native: false,
+    macos_native: false,
+    harness: false,
+    unknownPaths: [],
+  });
 });
 
 test("the CI gate runs harness tests inline without a separate job", () => {
