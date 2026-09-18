@@ -290,10 +290,7 @@ test("unknown paths fail closed", () => {
 
 test("deleted Desktop files still run Desktop CI", (t) => {
   assert.deepEqual(
-    classifyDeletion(
-      t,
-      "apps/desktop/src/renderer/src/app/deleted-fixture.ts",
-    ),
+    classifyDeletion(t, "apps/desktop/src/renderer/src/app/deleted-fixture.ts"),
     {
       paths: ["apps/desktop/src/renderer/src/app/deleted-fixture.ts"],
       desktop: true,
@@ -332,66 +329,27 @@ test("the CI gate runs harness tests inline without a separate job", () => {
   assert.doesNotMatch(workflow, /HARNESS_(?:REQUIRED|RESULT)/);
 });
 
-test("main pushes containing only fast-lane paths skip the CI workflow", () => {
-  const workflow = readFileSync(
-    join(REPOSITORY, ".github/workflows/ci-gate.yml"),
-    "utf8",
+test("local and agent hooks block every direct main update", () => {
+  const preCommit = readFileSync(join(REPOSITORY, ".husky/pre-commit"), "utf8");
+  const prePush = readFileSync(join(REPOSITORY, ".husky/pre-push"), "utf8");
+  const codex = JSON.parse(
+    readFileSync(join(REPOSITORY, ".codex/hooks.json"), "utf8"),
   );
+  const zcode = JSON.parse(
+    readFileSync(join(REPOSITORY, ".zcode/config.json"), "utf8"),
+  );
+  const agentCommands = [
+    codex.hooks.PreToolUse[1].hooks[0].command,
+    zcode.hooks.events.PreToolUse[1].hooks[0].command,
+  ];
 
-  assert.match(workflow, /- "\*\*\/\*\.md"/);
-  assert.match(workflow, /- "\*\*\/docs\/\*\*"/);
-  for (const fastLanePath of [
-    ".codegraph/**",
-    ".pi/**",
-    ".github/**",
-    ".husky/**",
-    ".zcode/**",
-    ".mcp.json",
-    "skills-lock.json",
-    "scripts/classify-ci-changes.mjs",
-    "scripts/tests/classify-ci-changes.test.mjs",
-    "scripts/post-merge-dedup.mjs",
-    "scripts/tests/post-merge-dedup.test.mjs",
-  ]) {
-    assert.match(
-      workflow,
-      new RegExp(
-        `- "${fastLanePath.replaceAll(".", "\\.").replaceAll("*", "\\*")}"`,
-      ),
-    );
-  }
-});
-
-test("the pre-push hook allows only documentation and repository tooling", () => {
-  const hook = readFileSync(join(REPOSITORY, ".husky/pre-push"), "utf8");
-  const pattern = hook.match(/grep -qvE '([^']+)'/)?.[1];
-  assert.ok(pattern, "pre-push fast-lane pattern is missing");
-
-  const isFastLanePath = (candidate) => new RegExp(pattern).test(candidate);
-  for (const candidate of [
-    "README.md",
-    "apps/desktop/docs/guide.png",
-    ".pi/extensions/pi-hooks.ts",
-    ".github/workflows/ci-gate.yml",
-    ".husky/pre-push",
-    ".zcode/config.json",
-    ".mcp.json",
-    "skills-lock.json",
-    "scripts/classify-ci-changes.mjs",
-    "scripts/tests/post-merge-dedup.test.mjs",
-  ]) {
-    assert.equal(isFastLanePath(candidate), true, candidate);
-  }
-
-  for (const candidate of [
-    "Makefile",
-    "package.json",
-    "scripts/test-identity-integration.sh",
-    "apps/desktop/src/main/index.ts",
-    "server/cmd/server/main.go",
-    "contracts/openapi.yaml",
-  ]) {
-    assert.equal(isFastLanePath(candidate), false, candidate);
+  assert.match(preCommit, /branch.*main[\s\S]*BLOCKED/);
+  assert.match(prePush, /remote_ref.*refs\/heads\/main[\s\S]*BLOCKED/);
+  assert.doesNotMatch(prePush, /grep -qvE|fast.lane|快道/i);
+  for (const command of agentCommands) {
+    assert.match(command, /branch.*main.*git\[\[:space:\]\]\+commit.*BLOCKED/);
+    assert.match(command, /git\[\[:space:\]\]\+push.*main.*BLOCKED/);
+    assert.doesNotMatch(command, /ALLOW|fast.lane|快道/i);
   }
 });
 

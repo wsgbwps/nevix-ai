@@ -1,21 +1,8 @@
 #!/usr/bin/env sh
 
-repo_root=$(git rev-parse --show-toplevel) || exit 1
-
-# main 只接受两类更新:
-# 1. 文档与非产品仓库工具快道的直推
-# 2. 其他一切改动走 PR squash merge(GitHub 侧执行,不经过本地 pre-push)
 while read -r local_ref local_sha remote_ref remote_sha; do
   if [ "$remote_ref" = "refs/heads/main" ]; then
-    base="$remote_sha"
-    # 远端分支新建时 remote_sha 为全零,回退 HEAD^
-    if [ -z "$base" ] || echo "$base" | grep -qE '^0+$'; then
-      base=$(git rev-parse "$local_sha^") || exit 1
-    fi
-    files=$(git diff --no-renames --name-only "$base..$local_sha") || exit 1
-    if [ -n "$files" ] && echo "$files" | grep -qvE '^(\.(pi|codex|agents|omp|scratch|codegraph|github|husky|zcode)/|(.*/)?docs/|.*\.md$|\.mcp\.json$|skills-lock\.json$|\.gitignore$|scripts/(classify-ci-changes|post-merge-dedup)\.mjs$|scripts/tests/(classify-ci-changes|post-merge-dedup)\.test\.mjs$)'; then
-      echo "BLOCKED: main 更新须走 PR squash merge;仅文档与非产品仓库工具改动可直推" >&2
-      exit 1
-    fi
+    echo "BLOCKED: main 更新须走 PR squash merge,禁止直接 push" >&2
+    exit 1
   fi
 done

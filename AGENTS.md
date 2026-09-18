@@ -31,10 +31,10 @@
 ## Shared areas and delivery
 
 - `apps/desktop/src/renderer/src/components/ui/`, `apps/desktop/src/renderer/src/lib/`, `apps/desktop/src/renderer/src/hooks/`, `server/internal/` shared sub-packages (e.g. `internal/event`), and root `contracts/` are shared areas; call out their changes with impact and tests in the PR description
-- Outside the direct-main fast lanes, one task delivers one cohesive vertical slice for one primary Domain on a short-lived task branch; no unrelated cleanup or generalized refactors
-- Delivery uses PRs except for the direct-main documentation and repository-tooling fast lanes — read [docs/agents/delivery.md](docs/agents/delivery.md) before committing or pushing on `main`, opening a PR, or merging; it owns the path rules and both delivery flows
+- One task delivers one cohesive vertical slice for one primary Domain on a short-lived task branch; every tracked change reaches `main` through a PR, with no unrelated cleanup or generalized refactors
+- Before committing, pushing, opening a PR, merging, deploying, or taking a high-risk external or system action, read [docs/agents/delivery.md](docs/agents/delivery.md); it owns the agent authority and human risk gates, and explicit user instructions override its defaults
 - Changes to responsibilities across contexts or modules, trusted-execution seams, or architectural decisions require an ADR before implementation — update the one whose decision changes, or write a new one when none covers it
-- High-risk changes — authentication or authorization, security boundaries, public contracts such as root `contracts/`, and persistent data or migrations — require a brief written plan under `.scratch/` before implementation
+- High-risk changes — destructive or irreversible persistent-data operations, production deploys/releases, secrets or privilege/authorization/security-boundary changes, paid or recurring external resources, and breaking public contracts — require a brief written plan under `.scratch/` before implementation
 
 ## Subagent delegation
 

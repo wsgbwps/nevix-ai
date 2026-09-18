@@ -1,65 +1,56 @@
-# Delivery: direct-main fast lanes and pull requests
+# Delivery: pull requests and risk gates
 
-Pure documentation and repository-tooling changes may be committed and pushed
-directly to `main` without a pull request or CI. All other work reaches `main`
-through pull requests. The GitHub Free private repository has no server-side
-branch protection, so local hooks enforce this boundary and PR checks are
-watched locally before merging.
+Every tracked change uses a short-lived task branch and reaches `main` through
+a pull request. Local hooks block all commits on `main` and all direct pushes
+to `main`; the GitHub Free private repository has no server-side branch
+protection, so agents also watch the PR checks before merging.
 
-## Direct-main fast lanes
+## Authority
 
-A tracked path is eligible for a direct-main fast lane when it is either:
+Agents may investigate, implement, test, commit locally, push the task branch,
+open or update its PR, address review, wait for CI, and merge low- or
+medium-risk work without another checkpoint. An explicit user instruction
+always narrows this default; for example, “do not push yet” stops the flow
+after the local commit.
 
-- documentation: an `*.md` file at any depth or a file inside any `docs/`
-  directory, including context-scoped ADRs and documentation assets; or
-- repository tooling: a file inside `.pi/`, `.codex/`, `.agents/`, `.omp/`,
-  `.scratch/`, `.zcode/`, `.codegraph/`, `.github/`, or `.husky/`; the root `.mcp.json`,
-  `skills-lock.json`, or `.gitignore`; or one of the delivery-harness files
-  `scripts/classify-ci-changes.mjs`,
-  `scripts/tests/classify-ci-changes.test.mjs`,
-  `scripts/post-merge-dedup.mjs`, and
-  `scripts/tests/post-merge-dedup.test.mjs`.
+Human approval is required immediately before any high-risk external or system
+action, including merging a high-risk PR. High-risk work is limited to:
 
-Fast-lane changes may be committed on `main` and pushed directly; they skip
-the CI gate through `paths-ignore`, and no PR or CI run is required. The
-commit is still the delivery checkpoint: stop after committing, and push only
-when the user explicitly asks. Before pushing, confirm the complete commit
-and push range contains only fast-lane paths; documentation and
-repository-tooling paths may be mixed. A change that includes any other path
-must use the PR flow below.
+- destructive or irreversible persistent-data operations;
+- production deployments and releases;
+- secrets, privileges, authorization, or security-boundary changes;
+- paid or recurring external resources; and
+- breaking public contracts.
 
-## Pull-request flow
+Agents still investigate, implement, test without changing high-risk external
+or system state, review, and prepare the PR before that approval point.
+
+## Flow
 
 1. Work on one short-lived task branch. Keep the slice independently buildable
-   and revertible. The commit on the task branch is the implementation
-   hand-off: stop there and leave the branch unpushed.
-2. Only after the user has verified the committed work and explicitly asks,
-   push the branch and open a PR against `main` (`gh pr create --fill --base
-   main`). Describe shared-area changes with their impact and tests in the PR
-   body.
-3. Wait for the path-aware `CI gate`: `gh pr checks --watch --fail-fast`.
-   Desktop runtime changes run source Native Smoke on Windows; Main, Preload,
-   Shared, native window/storage, packaging, dependency, and Native Smoke
-   changes also run it on macOS. Desktop documentation, `test-results/`, and
-   unit/component tests do not start a Native Smoke job. Authentication,
-   Session, connection/TLS, security-boundary changes, and release candidates
-   also require `make test-e2e` on a local Mac, with the result recorded in the
-   PR or release notes.
-4. Squash-merge and delete the branch: `gh pr merge --squash --delete-branch`.
-   Each task lands as exactly one commit on `main`; the PR page is its
-   acceptance record.
-5. The merge push runs the gate once on `main`. When the squash commit
-   reproduces the merged PR's head tree exactly and that head has a green gate
-   run, tree-SHA dedup (`scripts/post-merge-dedup.mjs`) skips desktop/server as
-   already verified; otherwise they run as classified. Dedup fails open: a
-   moved base, a missing green run, or an API error runs the classified
-   post-merge gate. A failed post-merge run is repaired by a follow-up PR or a
-   revert PR.
+   and revertible, then run the smallest checks that prove it.
+2. Commit, push the branch, and open a PR against `main` (`gh pr create --fill
+   --base main`). Describe shared-area changes with their impact and tests.
+3. Wait for the path-aware `CI gate` (`gh pr checks --watch --fail-fast`) and
+   address failures or review findings. Desktop runtime changes run source
+   Native Smoke on Windows; Main, Preload, Shared, native window/storage,
+   packaging, dependency, and Native Smoke changes also run it on macOS.
+   Authentication, Session, connection/TLS, security-boundary changes, and
+   release candidates also require `make test-e2e` on a local Mac, recorded in
+   the PR or release notes.
+4. Apply the risk gate above. Merge low- and medium-risk work when its checks
+   and review pass; for high-risk work, pause immediately before its first
+   external or system action, including merge.
+5. Squash-merge and delete the branch (`gh pr merge --squash --delete-branch`).
+   Each task lands as one commit on `main`; the PR page is its acceptance
+   record.
+6. A merge push admitted by the current workflow path filters runs the gate on
+   `main`. When the squash commit reproduces the merged PR head tree and that
+   head has a green gate run,
+   `scripts/post-merge-dedup.mjs` skips desktop/server as already verified.
+   Dedup fails open: a moved base, missing green run, or API error runs the
+   classified post-merge gate. Repair a failure with a follow-up or revert PR.
 
-## Notes
-
-- If `main` advances while CI runs, rebase the task branch and push; the gate
-  reruns on the updated head.
-- GitHub Free cannot enforce required checks server-side; the local watch step
-  is the actual gate. Rapid successive merges can cancel an in-flight
-  post-merge run; the superseding run still validates its own merge diff.
+If `main` advances while CI runs, rebase the task branch and push again. Rapid
+successive merges can cancel an in-flight post-merge run; the superseding run
+still validates its own merge diff.
