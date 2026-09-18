@@ -148,6 +148,7 @@ export function classifyPaths(paths) {
         ".github/workflows/ci-gate.yml",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
+        // Remove these two historical paths after their deletion commit lands on main.
         "scripts/post-merge-dedup.mjs",
         "scripts/tests/post-merge-dedup.test.mjs",
       ])

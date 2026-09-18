@@ -329,6 +329,19 @@ test("the CI gate runs harness tests inline without a separate job", () => {
   assert.doesNotMatch(workflow, /HARNESS_(?:REQUIRED|RESULT)/);
 });
 
+test("the CI gate runs only on pull requests", () => {
+  const workflow = readFileSync(
+    join(REPOSITORY, ".github/workflows/ci-gate.yml"),
+    "utf8",
+  );
+
+  assert.match(workflow, /on:\n  pull_request:\n    branches:\n      - main/);
+  assert.match(workflow, /BASE_SHA:.*pull_request\.base\.sha/);
+  assert.match(workflow, /HEAD_SHA:.*pull_request\.head\.sha/);
+  assert.doesNotMatch(workflow, /\n  push:|post-merge|dedup|skip_verified/i);
+  assert.doesNotMatch(workflow, /github\.event\.(?:before|head_commit)/);
+});
+
 test("local and agent hooks block every direct main update", () => {
   const preCommit = readFileSync(join(REPOSITORY, ".husky/pre-commit"), "utf8");
   const prePush = readFileSync(join(REPOSITORY, ".husky/pre-push"), "utf8");

@@ -1,29 +1,6 @@
 name: CI gate
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - ".codegraph/**"
-      - ".pi/**"
-      - ".codex/**"
-      - ".agents/**"
-      - ".omp/**"
-      - ".scratch/**"
-      - ".zcode/**"
-      - ".github/**"
-      - ".husky/**"
-      - ".mcp.json"
-      - "skills-lock.json"
-      - "scripts/classify-ci-changes.mjs"
-      - "scripts/tests/classify-ci-changes.test.mjs"
-      - "scripts/post-merge-dedup.mjs"
-      - "scripts/tests/post-merge-dedup.test.mjs"
-      - "docs/**"
-      - "*.md"
-      - "**/*.md"
-      - "**/docs/**"
   pull_request:
     branches:
       - main
@@ -37,17 +14,11 @@ jobs:
     name: Validate, classify, and test harness
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # dedup 查询 GitHub API:PR head、commit 树、green run 列表。
-    permissions:
-      contents: read
-      pull-requests: read
-      actions: read
     outputs:
       desktop: ${{ steps.classify.outputs.desktop }}
       server: ${{ steps.classify.outputs.server }}
       windows_native: ${{ steps.classify.outputs.windows_native }}
       macos_native: ${{ steps.classify.outputs.macos_native }}
-      skip_verified: ${{ steps.dedup.outputs.skip_verified }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -55,47 +26,13 @@ jobs:
       - id: classify
         shell: bash
         env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base_sha="$PR_BASE_SHA"
-            head_sha="$PR_HEAD_SHA"
-          else
-            base_sha="$PUSH_BEFORE_SHA"
-            if [ -z "$base_sha" ] || echo "$base_sha" | grep -qE '^0+$'; then
-              base_sha="$(git rev-parse HEAD^)"
-            fi
-            head_sha="$(git rev-parse HEAD)"
-          fi
-
           node scripts/classify-ci-changes.mjs \
-            --base "$base_sha" \
-            --head "$head_sha" \
-            --github-output "$GITHUB_OUTPUT"
-      # 合并后 main push 的 tree-SHA 去重:squash 合并在 base 未移动时
-      # 精确复现 PR head 的树;若该 head 已有 green gate run,则 PR 已
-      # 验证过与本次 push 完全相同的内容,main 上重复的产品检查可以跳过。
-      # 任何不确定情形(非 push、无 (#N)、base 已移动、无 green run、
-      # API 失败)都 fail-open 到 false,照常全量跑。
-      - name: Post-merge dedup (tree-SHA)
-        id: dedup
-        if: github.event_name == 'push'
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          HEAD_SHA: ${{ github.sha }}
-          REPOSITORY: ${{ github.repository }}
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          set -euo pipefail
-          node scripts/post-merge-dedup.mjs \
-            --event "$EVENT_NAME" \
-            --head-sha "$HEAD_SHA" \
-            --repo "$REPOSITORY" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
             --github-output "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         if: steps.classify.outputs.harness == 'true'
@@ -108,8 +45,7 @@ jobs:
   desktop:
     name: Desktop CI
     needs: changes
-    # dedup 证明本次 push 的树已由 green PR run 验证过时,跳过重复检查。
-    if: needs.changes.outputs.desktop == 'true' && needs.changes.outputs.skip_verified != 'true'
+    if: needs.changes.outputs.desktop == 'true'
     uses: ./.github/workflows/desktop-ci.yml
     with:
       windows_native: ${{ needs.changes.outputs.windows_native == 'true' }}
@@ -118,7 +54,7 @@ jobs:
   server:
     name: Server CI
     needs: changes
-    if: needs.changes.outputs.server == 'true' && needs.changes.outputs.skip_verified != 'true'
+    if: needs.changes.outputs.server == 'true'
     uses: ./.github/workflows/server-ci.yml
 
   gate:
@@ -133,9 +69,6 @@ jobs:
       DESKTOP_RESULT: ${{ needs.desktop.result }}
       SERVER_REQUIRED: ${{ needs.changes.outputs.server }}
       SERVER_RESULT: ${{ needs.server.result }}
-      # tree-SHA 去重命中时,产品检查被有意跳过（green PR run 已验证同一
-      # 棵树），gate 把这种 skipped 视为已满足。
-      DEDUP_SKIP: ${{ needs.changes.outputs.skip_verified == 'true' }}
     steps:
       - name: Verify required checks
         shell: bash
@@ -155,11 +88,6 @@ jobs:
             result="${!result_var}"
 
             if [ "$required" = "true" ] && [ "$result" != "success" ]; then
-              # Post-merge dedup intentionally skips checks whose tree a
-              # green PR run already verified; treat that skip as satisfied.
-              if [ "$DEDUP_SKIP" = "true" ] && [ "$result" = "skipped" ]; then
-                continue
-              fi
               echo "$check was required but finished as $result"
               failed=true
             fi

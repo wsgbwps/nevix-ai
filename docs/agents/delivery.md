@@ -44,13 +44,6 @@ or system state, review, and prepare the PR before that approval point.
 5. Squash-merge and delete the branch (`gh pr merge --squash --delete-branch`).
    Each task lands as one commit on `main`; the PR page is its acceptance
    record.
-6. A merge push admitted by the current workflow path filters runs the gate on
-   `main`. When the squash commit reproduces the merged PR head tree and that
-   head has a green gate run,
-   `scripts/post-merge-dedup.mjs` skips desktop/server as already verified.
-   Dedup fails open: a moved base, missing green run, or API error runs the
-   classified post-merge gate. Repair a failure with a follow-up or revert PR.
 
-If `main` advances while CI runs, rebase the task branch and push again. Rapid
-successive merges can cancel an in-flight post-merge run; the superseding run
-still validates its own merge diff.
+If `main` advances while CI runs, rebase the task branch and push again so the
+PR-only gate validates the updated head.
