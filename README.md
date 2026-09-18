@@ -250,14 +250,15 @@ contracts/
 
 ```bash
 pnpm dev          # 启动 Electron 开发模式
-pnpm build        # 构建前端
-pnpm lint         # 运行 lint
+pnpm build        # 构建 Desktop
+pnpm lint         # 运行 Desktop lint
 cd server && go run ./cmd/server  # 启动后端
 
 make dev          # 同 pnpm dev
 make server       # 启动 Go 后端 + 可选 Caddy TLS / fake Kapon sidecar（见 scripts/dev/README.md）
-make build        # 构建所有
-make lint         # lint 所有
+make build        # 构建 Desktop 与 Server
+make lint         # Desktop lint + Server go vet
+make check        # PR 前快速检查（格式、lint、架构、类型与单测；无需外部服务）
 
 make postgres     # 幂等启动本地开发 PostgreSQL（数据持久化在 named volume，重装不丢）
 make postgres-down # 停止并移除本地开发 PostgreSQL 容器（数据卷保留）
@@ -296,9 +297,9 @@ Server 集成测试：`./scripts/test-identity-integration.sh` 拉起一次性 p
 
 ## 分支与交付规范
 
-- 非快道改动在短命任务分支完成；保持线性、可独立回滚的历史
-- 任务分支上的提交是本轮实现的停靠点：先交由用户检验，检验通过且明确要求后才推送并开 PR
-- 推送该任务分支并开 PR（`gh pr create --fill --base main`），用 `gh pr checks --watch --fail-fast` 等待路径感知的 `CI gate`：Desktop 运行时改动跑 Windows source Native Smoke，Main/Preload/Shared、原生窗口/存储、打包与依赖改动再加 macOS；文档、`test-results/`、unit/component 不启动 Native Smoke
+- 所有 tracked 改动都在短命任务分支完成并通过 PR 进入 `main`；保持线性、可独立回滚的历史，本地 hooks 禁止在 `main` 提交或直推
+- Agent 默认可完成可逆的实现、测试、本地提交、分支推送、开 PR、评审处理、等待 CI，以及低/中风险合并；用户的明确限制始终优先
+- 推送任务分支并开 PR（`gh pr create --fill --base main`），用 `gh pr checks --watch --fail-fast` 等待路径感知的 `CI gate`：Desktop 运行时改动跑 Windows source Native Smoke，Main/Preload/Shared、原生窗口/存储、打包与依赖改动再加 macOS；文档、`test-results/`、unit/component 不启动 Native Smoke
 - 认证、Session、连接/TLS、安全边界改动和发布前必须在本地 Mac 运行 `make test-e2e`，并在 PR 或发布记录中注明结果
-- 检查通过后 squash merge 并删除分支（`gh pr merge --squash --delete-branch`）；每个任务在 `main` 上一个 commit，PR 页面即验收记录
-- 本地 hooks 拦截对 `main` 的非快道提交与推送；文档与非产品仓库工具的纯快道改动可直提并跳过 CI（推送同样待用户明确要求）；完整路径边界见 [`docs/agents/delivery.md`](docs/agents/delivery.md)
+- 检查通过后，Agent 可 squash merge 低/中风险改动并删除分支；任何高风险外部或系统动作（包括合并高风险 PR）都在执行前请求批准
+- 高风险限定为破坏性或不可逆持久数据操作、生产部署/发布、密钥或权限/授权/安全边界变更、付费或周期性外部资源，以及破坏性公共契约变更；完整规则见 [`docs/agents/delivery.md`](docs/agents/delivery.md)

@@ -128,6 +128,7 @@ export function classifyPaths(paths) {
         ".mcp.json",
         "AGENTS.md",
         "CLAUDE.md",
+        "CODING_STANDARDS.md",
         "CONTEXT-MAP.md",
         "CONTEXT.md",
         "DESIGN.md",
@@ -148,6 +149,7 @@ export function classifyPaths(paths) {
         ".github/workflows/ci-gate.yml",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
+        // Remove these two historical paths after their deletion commit lands on main.
         "scripts/post-merge-dedup.mjs",
         "scripts/tests/post-merge-dedup.test.mjs",
       ])
@@ -202,7 +204,6 @@ function main() {
     [
       "diff",
       "--no-renames",
-      "--diff-filter=d",
       "--name-only",
       "-z",
       `${args.base}...${args.head}`,

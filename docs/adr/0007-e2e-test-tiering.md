@@ -26,10 +26,10 @@ Smoke、本地 Mac Full E2E，以及发布候选的 packaged Native Smoke。本�
 - Native source job 预算 10 分钟，发布打包 job 预算 30 分钟；沿用 Playwright 在 CI
   中的一次 retry。失败截图与 Electron 日志保留 7 天。
 
-`CI gate` 仍是唯一聚合门禁：路径分类器输出 `windows_native` / `macos_native`
-布尔值给现有 Desktop reusable workflow，任一 Native job 失败都会使 Desktop 调用和最终
-gate 失败。并发取消、PR 树复用与合并后 tree-SHA 去重保持不变。不再使用
-`skip-e2e` / `full-e2e` 标签或独立 Desktop E2E workflow。
+`CI gate` 仍是唯一聚合门禁，仅在面向 `main` 的 PR 上运行：路径分类器输出
+`windows_native` / `macos_native` 布尔值给现有 Desktop reusable workflow，任一 Native
+job 失败都会使 Desktop 调用和最终 gate 失败。合并后不再重跑门禁，tree-SHA 去重已
+删除。不再使用 `skip-e2e` / `full-e2e` 标签或独立 Desktop E2E workflow。
 
 ## Considered Options
 

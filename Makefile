@@ -1,13 +1,29 @@
-.PHONY: dev build lint server postgres postgres-down docker-ready test-e2e test-e2e-smoke test-identity-integration test-creation-integration test-creation-oss-smoke test-creation-cos-smoke harness-test setup
+.PHONY: dev build lint check server postgres postgres-down docker-ready test-e2e test-e2e-smoke test-identity-integration test-creation-integration test-creation-oss-smoke test-creation-cos-smoke harness-test setup
 
 dev:
 	pnpm dev
 
 build:
 	pnpm build
+	cd server && go build ./...
 
 lint:
 	pnpm lint
+	cd server && go vet ./...
+
+check:
+	pnpm --filter @nevix/desktop format:check
+	pnpm --filter @nevix/desktop lint
+	pnpm --filter @nevix/desktop verify:architecture
+	pnpm --filter @nevix/desktop typecheck
+	pnpm --filter @nevix/desktop test:unit
+	@unformatted="$$(find server -type f -name '*.go' -exec gofmt -l {} +)"; \
+		if [ -n "$$unformatted" ]; then \
+			printf 'error: gofmt required:\n%s\n' "$$unformatted" >&2; \
+			exit 1; \
+		fi
+	cd server && go vet ./...
+	cd server && go test ./...
 
 # Local server run (scripts/dev/dev-server.sh): sources server/.env.local when
 # present — it must define MIGRATION_DATABASE_URL (DDL credential) and
@@ -86,7 +102,7 @@ test-creation-cos-smoke:
 	./scripts/test-creation-cos-smoke.sh
 
 harness-test:
-	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/post-merge-dedup.test.mjs scripts/tests/deploy-stack.test.mjs .pi/tests/pi-hooks.test.mjs
+	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/deploy-stack.test.mjs .pi/tests/pi-hooks.test.mjs
 
 setup:
 	pnpm install

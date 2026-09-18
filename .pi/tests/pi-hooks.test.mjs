@@ -31,11 +31,22 @@ test("protects lock files and real environment files, not templates", () => {
   }
 });
 
-test("blocks commits on main and pushes to main", () => {
-  assert.match(
-    blockedBashReason("git commit -am 'change'", "main") ?? "",
-    /任务分支/,
-  );
+test("blocks every commit on main and direct push to main", () => {
+  for (const paths of [
+    ["README.md"],
+    [".pi/extensions/pi-hooks.ts"],
+    ["apps/desktop/src/main/index.ts"],
+  ]) {
+    assert.match(
+      blockedBashReason("git commit -am 'change'", "main", paths) ?? "",
+      /任务分支/,
+    );
+    assert.match(
+      blockedBashReason("git push origin main", "main", undefined, paths) ?? "",
+      /直接 push main/,
+    );
+  }
+
   assert.equal(
     blockedBashReason("git commit -am 'change'", "feature/task"),
     undefined,
@@ -48,100 +59,12 @@ test("blocks commits on main and pushes to main", () => {
     blockedBashReason("git push origin :refs/heads/main", "feature/task") ?? "",
     /直接 push main/,
   );
+  assert.match(
+    blockedBashReason("git push origin refs/heads/main", "feature/task") ?? "",
+    /直接 push main/,
+  );
   assert.equal(
     blockedBashReason("git push origin feature/task", "feature/task"),
-    undefined,
-  );
-});
-
-test("repository-tooling paths allow direct main commit and push", () => {
-  // 未提供路径（信息不可得）时 fail-safe 拦截
-  assert.match(blockedBashReason("git commit -m x", "main") ?? "", /任务分支/);
-  assert.match(
-    blockedBashReason("git push origin main", "main") ?? "",
-    /直接 push main/,
-  );
-
-  // 白名单内的已跟踪改动:允许在 main 上提交
-  assert.equal(
-    blockedBashReason("git commit -m 'tweak skill'", "main", [
-      ".agents/skills/implement/SKILL.md",
-      ".pi/extensions/pi-hooks.ts",
-      ".codegraph/.gitignore",
-      ".github/workflows/ci-gate.yml",
-      ".husky/pre-push",
-      ".mcp.json",
-      ".gitignore",
-      "skills-lock.json",
-      "scripts/classify-ci-changes.mjs",
-      "scripts/tests/classify-ci-changes.test.mjs",
-      "scripts/post-merge-dedup.mjs",
-      "scripts/tests/post-merge-dedup.test.mjs",
-      ".scratch/note.md",
-    ]),
-    undefined,
-  );
-
-  // 混入白名单外路径:拦截
-  assert.match(
-    blockedBashReason("git commit -m x", "main", [
-      ".pi/extensions/pi-hooks.ts",
-      "scripts/test-identity-integration.sh",
-    ]) ?? "",
-    /任务分支/,
-  );
-
-  // 待推送 diff 全在白名单:允许直推 main;混入业务代码则拦截
-  assert.equal(
-    blockedBashReason("git push origin main", "main", undefined, [
-      ".omp/agents/researcher.md",
-    ]),
-    undefined,
-  );
-  assert.match(
-    blockedBashReason("git push origin main", "main", undefined, [
-      ".codex/hooks.json",
-      "apps/desktop/src/main/index.ts",
-    ]) ?? "",
-    /直接 push main/,
-  );
-
-  // git 不可用(undefined)时拦截直推
-  assert.match(
-    blockedBashReason("git push origin main", "main", undefined, undefined) ?? "",
-    /直接 push main/,
-  );
-});
-
-test("documentation paths at any depth ride the fast lane", () => {
-  assert.equal(
-    blockedBashReason("git commit -m docs", "main", [
-      "README.md",
-      "AGENTS.md",
-      "docs/adr/0012-x.md",
-      "apps/desktop/AGENTS.md",
-      "apps/desktop/docs/guide.md",
-      "apps/desktop/docs/architecture.png",
-      "server/operations.md",
-    ]),
-    undefined,
-  );
-  assert.match(
-    blockedBashReason("git commit -m x", "main", ["Makefile"]) ?? "",
-    /任务分支/,
-  );
-  assert.match(
-    blockedBashReason("git commit -m x", "main", [
-      "apps/desktop/docs/guide.md",
-      "apps/desktop/src/main/index.ts",
-    ]) ?? "",
-    /任务分支/,
-  );
-  assert.equal(
-    blockedBashReason("git push origin main", "main", undefined, [
-      "docs/agents/delivery.md",
-      ".scratch/plan.md",
-    ]),
     undefined,
   );
 });
@@ -161,10 +84,7 @@ test("registers Pi tool hooks and formats only successful unprotected edits", as
   };
   registerPiHooks(pi);
 
-  assert.deepEqual(
-    [...handlers.keys()],
-    ["tool_call", "tool_result"],
-  );
+  assert.deepEqual([...handlers.keys()], ["tool_call", "tool_result"]);
 
   const ctx = { cwd: process.cwd(), hasUI: false, ui: { notify() {} } };
   const toolCall = handlers.get("tool_call");

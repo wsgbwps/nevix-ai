@@ -1,1 +1,7 @@
+branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+if [ "$branch" = "main" ]; then
+  echo "BLOCKED: 在任务分支提交并通过 PR 更新 main" >&2
+  exit 1
+fi
+
 npx lint-staged
