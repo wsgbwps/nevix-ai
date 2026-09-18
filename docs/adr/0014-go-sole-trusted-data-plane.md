@@ -14,6 +14,8 @@
 
 2026-09-17 修订：显示类 GET 的签发判定从单一 Creator ownership 扩展为 Go 对精确业务来源的授权：素材 owner、Admin 经成功 Media Asset 查看该成品实际使用的素材，或 active User 查看有效 Team Publication。不同 User 的 Reference Material 记录可引用同一个不可变存储对象；共享对象不扩大签名 URL 的 key、时限或调用方范围。
 
+2026-09-18 修订（范围收敛 [#251](https://github.com/wsgbwps/nevix-ai/issues/251)）：AI Creation V1 的唯一 Object Storage provider 为阿里云 OSS。COS 不属于 V1 可信数据面或发布范围；未来重引入 COS 前必须先有独立架构决定、产品实现、迁移/兼容决策和真实 COS smoke。
+
 ## 背景
 
 ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supabase、由 RLS 保护的前提上。私有化后无 Supabase、无 RLS，数据通路只剩一条：要么 Go 吞下全部数据访问，要么客户端直连数据库。前者有把 Go 退化为表驱动浅代理的风险（ADR-0004 当年刻意避免的形状），后者毁掉凭据纪律。本 ADR 定义新 seam。
@@ -28,10 +30,10 @@ ADR-0004 的 seam 建立在 Desktop 经 publishable key + 用户 JWT 直连 Supa
 
 ### 文件授权与传输
 
-- Go 是文件授权和元数据的唯一可信数据面。每个 Deployment Instance 最多一条 OSS 或 COS Object Storage Connection；元数据只在 PostgreSQL，bucket 是纯 blob 仓（交付与配置见 [ADR-0013](0013-onprem-single-tenant-delivery.md)）。
-- Creation Module 独占 Object Storage Connection 配置、凭据加密、provider 选择与 canary、短期 URL 签名、权威 finalize、读取授权和精确 key 清理；Desktop 只承担设置交互、已授权 PUT 与当前已授权 Renderer 的显示 GET，不引入 Storage Domain 或第二条可信数据面。
+- Go 是文件授权和元数据的唯一可信数据面。每个 Deployment Instance 最多一条阿里云 OSS Object Storage Connection；元数据只在 PostgreSQL，bucket 是纯 blob 仓（交付与配置见 [ADR-0013](0013-onprem-single-tenant-delivery.md)）。
+- Creation Module 独占 OSS Object Storage Connection 配置、凭据加密与 canary、短期 URL 签名、权威 finalize、读取授权和精确 key 清理；Desktop 只承担设置交互、已授权 PUT 与当前已授权 Renderer 的显示 GET，不引入 Storage Domain 或第二条可信数据面。
 - 永久 Reference Material 上传采用三步窄 seam：Creator 向 Go 申请 Reference Material Upload；Electron Main 只凭 60 分钟、随机精确 key、固定 PUT 方法、固定请求头且禁止覆盖的预签名 URL 从本地磁盘流式写入当前 bucket；Desktop 再向 Go finalize。Go 校验 authenticated Creator 与 Creation Session ownership，HEAD 后完整有界读取、媒体 probe、实际 kind 限额和 SHA-256 全部通过，才在 verified write transaction 中创建 immutable Reference Material。
-- Renderer 只向专用 Preload 桥传入用户选择的 `File` 并接收进度、取消结果与最终结果；Preload 使用 `webUtils.getPathForFile(file)` 取得磁盘路径，经窄类型 IPC 交给 Main，绝不把完整路径返回 Renderer，也不把完整文件转为 ArrayBuffer 经 IPC 传输。Main 必须验证可信顶层 Renderer、常规磁盘文件、HTTPS、Go 返回的精确 OSS/COS origin、PUT 方法和闭集签名请求头，拒绝重定向、任意路径、任意 URL、任意方法和额外请求头；V1 直接使用 Main，不增加 Utility Process、自定义 protocol、multipart 或断点续传。
+- Renderer 只向专用 Preload 桥传入用户选择的 `File` 并接收进度、取消结果与最终结果；Preload 使用 `webUtils.getPathForFile(file)` 取得磁盘路径，经窄类型 IPC 交给 Main，绝不把完整路径返回 Renderer，也不把完整文件转为 ArrayBuffer 经 IPC 传输。Main 必须验证可信顶层 Renderer、常规磁盘文件、HTTPS、Go 返回的精确 OSS origin、PUT 方法和闭集签名请求头，拒绝重定向、任意路径、任意 URL、任意方法和额外请求头；V1 直接使用 Main，不增加 Utility Process、自定义 protocol、multipart 或断点续传。
 - signed PUT 不授予读、List、Delete、换 key 或第二个对象能力，Desktop 永远拿不到 Access Key/Secret。上传租约 creator-private、持久且单次 finalize；abort、过期或验证失败按精确 key 清理，Admin 无读取或完成他人上传的旁路。
 - Reference Material 原文件下载仍经 Go 授权和有界流式出口，且只允许素材记录 owner；Admin 的精确成品视图和有效 Team Publication 只获得显示类预览，不获得原文件下载。Provider Transfer Object 由 Go 从已授权素材派生并为外部 AI Provider 生成限时 HTTPS GET URL；该 URL 不构成 Desktop Storage 权限。显示类读取走同级的第三条窄例外：Go 只在调用方对精确素材记录、Media Asset 实际引用或有效 Team Publication 快照具有当前读取权时，签发约 10 分钟、单一精确 key 的预签名 GET URL——缩略图带 provider 端缩小（宽 ≤320、WebP），预览大图为图片缩小（宽 ≤2048、WebP）或视频/音频原始字节——Renderer 直接放入 `<img>/<video>/<audio>` 加载（元素 error 后重新授权）；该 URL 只读、不可列举、不暴露 AK/SK，签发时的业务授权是唯一授权点，TTL 过期即失效。
 - signed URL 是短期敏感能力：只允许出现在当前授权调用方的内存和必要出站请求中（Electron Main 的授权 PUT、Go 到 Provider 的 Transfer GET、当前已授权 Renderer 的缩略图/预览显示请求），不持久化，不进入普通日志、Audit Log、错误、剪贴板或遥测。具体状态机与凭据纪律见 [ADR-0016](0016-ai-creation-v1-trusted-seams.md)。

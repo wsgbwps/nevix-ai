@@ -20,6 +20,8 @@
 
 2026-09-17 修订：Media Asset 改为创建者与 Admin 可读，只有有效 Team Publication 对全体 active User 可读；Admin 通过 Inspiration Page 获得成品级窄读取能力，可查看全体尚未逻辑删除的成功 Media Asset（含受限成品）及每个成品实际使用的 Generation Specification 与 Reference Material，但不能据此浏览整个 Creation Session 或复用未发布作品。Team Publication 与 Create Similar 以不同 User-owned Reference Material 记录共享同一不可变存储对象，撤回只阻止新的复用。
 
+2026-09-18 修订（范围收敛 [#251](https://github.com/wsgbwps/nevix-ai/issues/251)）：AI Creation V1 的 Object Storage provider 固定为阿里云 OSS。COS 不属于 V1 配置、契约、运行时或发布证据；未来重引入 COS 前必须先有独立架构决定、产品实现、迁移/兼容决策和真实 COS smoke。
+
 ## 背景
 
 AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 decision tickets 与多份 ADR 中；旧票建立于 Organization、Supabase/RLS、Desktop 直连数据面等前提之上。#93 清空全部决策前沿并取代早期假设，#150 把最终边界收敛为单一规格。若不在架构文档中固化，实施 agent 容易复活已被取代的设计。本 ADR 与 [ADR-0012](0012-unified-ai-creation-owner.md)（owner 统一）、[ADR-0014](0014-go-sole-trusted-data-plane.md)（数据面）、[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)（用户系统与授权）互补，各自保持单一权威说明。
@@ -67,9 +69,9 @@ Session 认证与 Reauthentication Proof 归 Identity（[ADR-0015](0015-single-t
 
 ### Object Storage Connection 管理 seam
 
-- 每个 Deployment Instance 最多一条连接，provider 为 `oss|cos` 二选一；运行时只以简单 switch 构造当前 provider-specific adapter。OSS/COS 生产实现使用对应官方 SDK，共享 Creation 内部窄 BlobStore seam；不建立 adapter registry、plugin system 或通用 S3 runtime。
+- 每个 Deployment Instance 最多一条连接，V1 provider 固定为 `oss`；运行时只构造 OSS adapter。OSS 生产实现使用官方 SDK，共享 Creation 内部窄 BlobStore seam；不建立 adapter registry、plugin system 或通用 S3 runtime。
 - 首位 Admin 在 Instance Claim 后通过 AI Creation Settings 配置。创建、空实例位置替换、凭据轮换、删除和恢复要求 `RequireAdmin`、可信 HTTPS 与各自 exact-action proof；Admin 读取脱敏状态及用已保存凭据 recheck 不消费 proof。Desktop 不保存或回显 AK/SK。
-- 候选配置先在事务外执行 provider-specific canary：随机精确 key 的 Put/Head/Open/Range/Delete、固定方法与固定请求头的预签名 PUT、同 key 第二次写必须 409、匿名 GET 拒绝和精确清理。匿名 GET 仅接受 401、403 或 404，任何 2xx 都失败；canary 不发送 CORS OPTIONS。Nevix 不申请 List、ACL、Versioning 或 Lifecycle 管理权限；全部通过后才在 verified Creation write transaction 中以实例级单调递增 revision/CAS 激活密文并 append Audit，失败不覆盖旧连接，删除后重建也不复用旧 revision。
+- 候选配置先在事务外执行 OSS canary：随机精确 key 的 Put/Head/Open/Range/Delete、固定方法与固定请求头的预签名 PUT、同 key 第二次写必须 409、匿名 GET 拒绝和精确清理。匿名 GET 仅接受 401、403 或 404，任何 2xx 都失败；canary 不发送 CORS OPTIONS。Nevix 不申请 List、ACL、Versioning 或 Lifecycle 管理权限；全部通过后才在 verified Creation write transaction 中以实例级单调递增 revision/CAS 激活密文并 append Audit，失败不覆盖旧连接，删除后重建也不复用旧 revision。
 - 持久状态只有 `unconfigured|ready|credential_unavailable`；瞬时 availability、checked-at 与安全错误码是观察值，不改变配置状态，不做后台探活。Server 在未配置、凭据不可用或连接瞬时故障时仍启动，只有依赖 Storage 的 Creation 命令 fail closed。
 - 没有永久对象、有效 Reference Material Upload、Provider Transfer Object 或 cleanup backlog 时可以替换/删除位置；首个永久对象后 provider、region、bucket 永久冻结，只允许同位置轮换凭据。计划轮换保留旧云 key 至最长 24 小时 Provider Transfer Object URL 失效；紧急撤销可使在途上传/生成失败。
 
@@ -77,7 +79,7 @@ Session 认证与 Reauthentication Proof 归 Identity（[ADR-0015](0015-single-t
 
 - Reference Material Upload 是独立 creator-private 持久授权租约，不给 immutable Reference Material 增加 uploading 状态。申请、状态、finalize 与 abort 均挂 `RequireActiveUser` 并在 Creation 命令/查询层检查 Creator 和 Creation Session ownership；Admin 没有旁路。
 - 申请记录随机最终 object key、filename、declared kind/MIME/size、rights/claims version、Desktop idempotency key、60 分钟 PUT 截止与 90 分钟 finalize 截止。同 key/同 payload 返回原 Upload，不同 payload 409；过期后必须使用新 key。
-- Go 只预签 `Content-Type`、upload ID metadata 与当前 provider 的 [`x-oss-forbid-overwrite:true`](https://www.alibabacloud.com/help/en/oss/developer-reference/putobject) 或 [`x-cos-forbid-overwrite:true`](https://cloud.tencent.com/document/product/436/7749)。bucket 必须关闭版本控制，并由激活 canary 证明第二次写同 key 返回 409；不要求 Desktop MD5，不把 Content-Length 或 ETag 当内容证明。
+- Go 只预签 `Content-Type`、upload ID metadata 与 OSS 的 [`x-oss-forbid-overwrite:true`](https://www.alibabacloud.com/help/en/oss/developer-reference/putobject)。bucket 必须关闭版本控制，并由激活 canary 证明第二次写同 key 返回 409；不要求 Desktop MD5，不把 Content-Length 或 ETag 当内容证明。
 - Renderer 只选择 `File` 并展示进度、取消与结果。专用 Preload 桥使用 `webUtils.getPathForFile(file)` 取得真实磁盘路径，经窄类型 IPC 交给 Main 且不回传 Renderer；完整文件不得转成 ArrayBuffer 经 IPC。Main 使用当前 Session 从 Go 取得 Upload 授权和 active-user capability，验证可信顶层 Renderer、常规磁盘文件、HTTPS、Go 返回的精确 provider origin、PUT 与闭集签名请求头后，以 Electron `ClientRequest` 从磁盘流式上传并拒绝重定向。Main 不接受 Renderer 指定的任意路径、URL、方法或额外请求头；V1 不增加 Utility Process、自定义 protocol、multipart 或断点续传。
 - finalize 先以短事务 CAS `pending -> verifying` 并取得 verification lease，再在事务外 HEAD 与完整有界 GET，复用内容 sniff、媒体 probe、实际 kind 限额和 SHA-256；最后在 verified write transaction 中原子创建 Reference Material 并标记 `finalized`。状态仅 `pending|verifying|finalized|terminal`；重复 finalize 返回同一素材，并发验证返回可重试安全码。
 - image/audio/video 上限继续为 10/50/200 MiB。abort、过期、HEAD mismatch 与确定性媒体拒绝进入 terminal 并立即 best-effort DeleteObject；瞬时外部故障在 finalize window 内回到 pending。持久 cleanup worker 只按数据库记录的精确 key、verification lease 与 next-attempt 重试，不 List bucket；对象从一开始位于 `reference-materials/`，不 Copy，customer lifecycle 只作用于 `provider-transfer/`。
@@ -158,7 +160,7 @@ Go 唯一可信数据面与桌面端连接规则归 [ADR-0014](0014-go-sole-trus
 - 后续切片如需改变本 ADR 记录的 seam，先修订本 ADR 或其指向的权威 ADR，再实施。
 - 仓库目录契约在根 `README.md` 命名 `deploy/` 与 `scripts/` 的交付资产归属；公网交付切片不得临时新建顶层 source owner。
 - 部署不再包含 Production Readiness evidence 文件、环境变量、secrets volume 路径或复制后重启步骤；旧文件即使仍留在主机也不被 Server 读取。
-- Object Storage 与 Reference Material Upload 落地前必须同步修订 OpenAPI、Desktop 原生上传/恢复、真实 OSS/COS smoke 与交付清单；filesystem/通用 S3 产品路径和原 multipart 上传不保留兼容层。
+- Object Storage 与 Reference Material Upload 落地前必须同步修订 OpenAPI、Desktop 原生上传/恢复、真实 OSS smoke 与交付清单；COS、filesystem/通用 S3 产品路径和原 multipart 上传不保留兼容层。
 - [#215](https://github.com/wsgbwps/nevix-ai/issues/215) 的全部实施切片与验收条件完成前，不开始 [#214](https://github.com/wsgbwps/nevix-ai/issues/214) 的 Provider Transfer Object 与两阶段 Provider 提交实现；本次架构 prefactor 本身不解除该阻塞。
 
 ## 非目标

@@ -12,6 +12,8 @@
 
 2026-09-09 修订（[#218](https://github.com/wsgbwps/nevix-ai/issues/218) 真实 OSS 验证）：Reference Material 改由 Electron Main 从本地磁盘原生流式 PUT，不再要求 bucket CORS；连接 canary 继续接受 401、403 或 404 的匿名读取拒绝并拒绝任何 2xx。阿里云 OSS 可使用权限精确覆盖 Nevix 所需 bucket/prefix 的现有 RAM 用户 AK/SK；专用 RAM 用户只是推荐项，阿里云主账号 AK 禁止使用。
 
+2026-09-18 修订（范围收敛 [#251](https://github.com/wsgbwps/nevix-ai/issues/251)）：AI Creation V1 只支持阿里云 OSS。COS 不属于 V1 的配置、契约或发布证据矩阵，也不阻塞 OSS-only 发布；未来重引入 COS 前必须先有独立架构决定、产品实现、迁移/兼容决策和真实 COS smoke。
+
 ## 背景
 
 Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付到客户内网，一套部署对应一个客户。无生产数据，旧表直接删掉重建（旧世界经 `saas-final` tag 存档），不开新仓库。Supabase 整体退场，只留 Postgres，auth 收进 Go server。
@@ -27,7 +29,7 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 
 ### 部署形状
 
-- 单一 docker compose：Go server + 捆绑 postgres 官方镜像（钉 major.minor）+ `pgdata` named volume；对象数据只存入客户预置的 OSS 或 COS，不交付本地 blob volume。
+- 单一 docker compose：Go server + 捆绑 postgres 官方镜像（钉 major.minor）+ `pgdata` named volume；对象数据只存入客户预置的阿里云 OSS，不交付本地 blob volume。
 - 官方公网 Compose（2026-08-26 修订）：面向客户固定公网 IP 的官方交付栈在同一 compose 内加入固定版本/摘要的 Nginx，只暴露 HTTPS 443；Go、PostgreSQL 与管理端口只在 internal network，不直接暴露。客户部署只接受 https Server URL，显式 development mode 才允许 loopback http（桌面侧连接规则见 [ADR-0014](0014-go-sole-trusted-data-plane.md)）；官方公网 Compose 强制 Setup Code，受隔离内网可显式关闭。
 - 自签证书生命周期：初次启动为固定公网 IP 生成含 IP SAN 的五年自签证书，持久化于独立 tls volume（私钥 0600）；重启/升级复用、不自动轮换，输出 SHA-256 指纹与可重复查询命令，到期前 90 天持续告警。Nginx 删除外部 Forwarded headers 后向 private-network Go 写可信 HTTPS 标记；Provider Key 与 Reauthentication endpoint 无法证明 HTTPS 时返回 `secure_transport_required`。
 - V1 只支持捆绑 Postgres；客户强制使用自有数据库平台时再加外部 DSN 支持（届期为兼容矩阵问题）。
@@ -44,11 +46,11 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 
 ### Object Storage Connection
 
-- 每个 Deployment Instance 最多一条 Object Storage Connection，provider 在 `oss|cos` 中二选一；Server 只构造当前选中的 provider-specific adapter。首位 Admin 完成 Instance Claim 后在 AI Creation Settings 配置，Desktop 只提交输入，Go 加密保存凭据；不保留 env 第二来源。
-- 每个实例运行时只检查当前连接的 provider；OSS 与 COS 的真实 smoke 是彼此独立的发布兼容性验证，不会让实例同时构造、连接或比较两家 provider。
+- 每个 Deployment Instance 最多一条 Object Storage Connection，V1 provider 固定为 `oss`；Server 只构造 OSS adapter。首位 Admin 完成 Instance Claim 后在 AI Creation Settings 配置，Desktop 只提交输入，Go 加密保存凭据；不保留 env 第二来源。
+- 每个实例运行时只检查 OSS connection；真实 OSS smoke 是本次发布兼容性验证。COS 不构成运行时路径或本轮发布门禁，未来重引入前须遵循本 ADR 状态记录的独立决定、实现、迁移/兼容和真实 smoke 前置条件。
 - Server 未配置、凭据不可解密或连接瞬时不可用时仍正常启动；Identity、Instance Claim、登录与 Settings 可用，依赖 Storage 的 Creation 操作以稳定 `object_storage_unavailable` fail closed，`/health` 不绑定外部 Storage 可用性。
 - 客户 IT 预置私有 bucket、长期最小权限 AK/SK、关闭版本控制，并只对 `provider-transfer/` 设置 lifecycle。阿里云 OSS 可使用任意现有 RAM 用户，只要其权限精确覆盖 Nevix 所需 bucket/prefix；专用 RAM 用户只作为隔离影响面的推荐项。禁止使用阿里云主账号 AK；共享 AK 的轮换、停用或泄露会同时影响其他应用。Nevix 不创建或修改云资源；Go 在激活候选配置前验证匿名读取以 401、403 或 404 拒绝且绝不返回 2xx、对象读写/Range/Delete、预签名 PUT、禁止覆盖与精确清理。Electron Main 原生上传不要求 bucket CORS，canary 不发送 CORS OPTIONS。
-- 连接只接受 provider、region、bucket 与对应 AK/SK，使用官方公网 virtual-host endpoint；endpoint 由 Server 推导。不支持 STS、内网 endpoint、加速域名、自定义域名、filesystem、NAS、通用 S3、MinIO runtime 或任意 endpoint。
+- 连接只接受 `oss`、region、bucket 与对应 AK/SK，使用官方公网 virtual-host endpoint；endpoint 由 Server 推导。不支持 COS、STS、内网 endpoint、加速域名、自定义域名、filesystem、NAS、通用 S3、MinIO runtime 或任意 endpoint。
 - 没有永久对象、有效 Reference Material Upload、Provider Transfer Object 或待清理对象时可以替换或删除连接；首个永久对象产生后冻结 provider、region 与 bucket，只允许同位置轮换凭据。V1 无 bucket 迁移。
 - 元数据只在 PostgreSQL；Object Storage 是纯 blob 仓。永久 Reference Material 的预签名直传授权、finalize 与下载 seam 见 ADR-0014/0016。
 
@@ -96,12 +98,12 @@ Nevix AI 从云端多租户 SaaS 转型为 B 端私有化部署：Docker 交付�
 - **License V1 实现**：当前无正式产品与用户，提前写校验代码无合同可执行；但年订阅已定，故将执行语义冻结于此 + 硬截止点，防止补做时重新设计。
 - **环境变量直接创建首个 Admin**（2026-08-24）：需要部署方预填、传递并轮换初始凭据，与“安装后由客户自选管理员凭据”的交付体验相悖；可选设置码已经覆盖需要额外保护的部署，故删除。
 - **离线 Admin 恢复或强制双 Admin**（2026-08-24）：前者新增第二条高权限写通道，后者把低概率运维风险变成所有客户的硬门槛；V1 均不采用，以验收建议和客户运维责任承接剩余风险。
-- **继续交付 filesystem/NAS/通用 S3**（2026-09-08）：会保留本地 blob 生命周期、Compose volume、任意 endpoint 安全面与无法真实覆盖的兼容矩阵；V1 客户环境和本地开发均可使用专用 OSS/COS bucket，故删除产品路径。MinIO 仅作为自动化测试设施。
-- **用 env 配置 OSS/COS**（2026-09-08）：会与首位 Admin 的实例级设置形成双权威来源，并要求 Server 在监听前拥有可用 Storage；否决，Object Storage Connection 由 Go 持久化并允许 Storage 独立 fail closed。
+- **继续交付 filesystem/NAS/通用 S3**（2026-09-08）：会保留本地 blob 生命周期、Compose volume、任意 endpoint 安全面与无法真实覆盖的兼容矩阵；V1 客户环境和本地开发均可使用专用 OSS bucket，故删除产品路径。MinIO 仅作为自动化测试设施。
+- **用 env 配置 OSS**（2026-09-08）：会与首位 Admin 的实例级设置形成双权威来源，并要求 Server 在监听前拥有可用 Storage；否决，Object Storage Connection 由 Go 持久化并允许 Storage 独立 fail closed。
 
 ## 后果
 
 - `supabase/` 目录、Supabase 相关 E2E/CI harness 随用户系统迁移拆除。
 - 部署手册（compose 样例、.env 模板、实例认领顺序、双 Admin 建议、备份/恢复、nginx TLS 配置、PG 大版本升级步骤）随交付工作落地，归 `deploy/` 与 `scripts/` 的 canonical owner。
-- Storage 切片删除 `blobs` volume、filesystem/NAS/S3 runtime 配置和旧 blob 备份步骤；部署手册改为客户预置单一 OSS/COS bucket、最小 IAM、版本控制关闭与 `provider-transfer/` lifecycle 的验收清单，并明确 Electron Main 原生上传不要求 bucket CORS。
+- Storage 切片删除 `blobs` volume、filesystem/NAS/S3/COS runtime 配置和旧 blob 备份步骤；部署手册改为客户预置单一 OSS bucket、最小 IAM、版本控制关闭与 `provider-transfer/` lifecycle 的验收清单，并明确 Electron Main 原生上传不要求 bucket CORS。
 - README 中 electron-updater 的不实表述已修正（仓库从未实现 auto-updater）。

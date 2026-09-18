@@ -8,7 +8,7 @@
 
 本栈面向**固定公网 IP** 的单租户部署。Go、PostgreSQL 与管理端口
 只存在于 Docker internal network，宿主机唯一发布端口是 nginx 的 443；对象数据位于
-客户 IT 预置的唯一私有 OSS 或 COS bucket，并通过 Server 推导的官方公网 endpoint
+客户 IT 预置的唯一私有阿里云 OSS bucket，并通过 Server 推导的官方公网 endpoint
 访问，不作为 Compose service 或本地 volume 交付。所有上游镜像按 digest 钉扎。V1
 分发渠道即本仓库检出（镜像由部署机本地构建），正式镜像分发渠道推迟到打包分发
 阶段（ADR-0013）。
@@ -17,7 +17,7 @@
 
 - Linux 主机，可安装 Docker Engine 与 Compose v2（`docker compose version`）。
 - 一个**固定公网 IP**，防火墙/安全组放行 TCP 443 入站，且不放行其他本栈端口。
-- 客户 IT 预置一个私有 OSS 或 COS bucket，关闭版本控制，提供长期、最小权限且权限
+- 客户 IT 预置一个私有阿里云 OSS bucket，关闭版本控制，提供长期、最小权限且权限
   精确覆盖 Nevix 所需 bucket/prefix 的 AK/SK，并只对 `provider-transfer/` 配置
   lifecycle。Electron Main 原生流式上传不要求 bucket CORS。阿里云 OSS 可使用权限
   精确覆盖上述范围的现有 RAM 用户；专用 RAM 用户只作为隔离影响面的推荐项，禁止使用
@@ -61,9 +61,9 @@ docker compose logs server | grep -oE 'setup_code=[0-9A-Z]{4}-[0-9A-Z]{4}'
 
 ### 配置 Object Storage Connection
 
-完成 Instance Claim 后，首位 Admin 在 AI Creation Settings 选择 OSS 或 COS，并提交
-region、bucket 与 AK/SK。该连接是保存在 PostgreSQL 的实例级产品事实；不要把 AK/SK
-写入 `.env`，Server 会按 provider 与 region 推导官方公网 endpoint。未配置、凭据无法
+完成 Instance Claim 后，首位 Admin 在 AI Creation Settings 配置阿里云 OSS 的 region、bucket
+与 AK/SK。该连接是保存在 PostgreSQL 的实例级产品事实；不要把 AK/SK
+写入 `.env`，Server 会按 OSS region 推导官方公网 endpoint。未配置、凭据无法
 解密或 bucket 暂时不可用时，Server 与账号功能仍可启动和使用，依赖对象存储的 Creation
 操作统一以 `object_storage_unavailable` fail closed。
 
@@ -185,9 +185,9 @@ Nevix 开发者在首次正式发布、固定模型变化或供应商合同变�
    不作为部署文件，也不影响已部署 Server 启动。
 
 Object Storage adapter、权限合同、endpoint/CORS/presign 逻辑变化以及正式发布前，
-开发者分别运行真实 OSS 与 COS smoke，并记录权限 canary、预签名 PUT、防覆盖、
-Open/Range/Delete/cancel、无 CORS OPTIONS 依赖和精确 key 清理结果。两条 smoke 只验证
-发布兼容性；每个 Deployment Instance 运行时仍只构造和检查其当前 provider。
+开发者运行真实 OSS smoke，并记录权限 canary、预签名 PUT、防覆盖、Open/Range/Delete/cancel、
+无 CORS OPTIONS 依赖和精确 key 清理结果。COS 不属于 V1 配置或发布证据；未来重引入前必须
+先有独立架构决定、产品实现、迁移/兼容决策和真实 COS smoke。
 
 ## 8. 失败排查
 

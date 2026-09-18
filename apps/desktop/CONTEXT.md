@@ -64,7 +64,7 @@ _Avoid_: module（与 Go 侧混淆）, service
 _Avoid_: Generation Domain, Image Generation Domain, Video Generation Domain, Media Asset Domain, Inspiration Domain
 
 **Object Storage Connection（对象存储连接）**:
-首位 Admin 在 Instance Claim 后为整个 Deployment Instance 选择和配置的唯一 bucket 连接，provider 在 OSS 与 COS 中二选一；Desktop 只呈现 AI Creation 设置并提交输入，它不是 Connection Screen 配置或设备本地设置。
+首位 Admin 在 Instance Claim 后为整个 Deployment Instance 配置的唯一阿里云 OSS bucket 连接；Desktop 只呈现 AI Creation 设置并提交输入，它不是 Connection Screen 配置或设备本地设置。COS 不属于 V1 产品能力。
 _Avoid_: Storage Backend, S3 Connection, Desktop Storage Setting, Custom Endpoint
 
 **Inspiration Page**:

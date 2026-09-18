@@ -25,7 +25,7 @@ _Avoid_: Uploading Reference Material, Storage Grant, Temporary Reference Materi
 _Avoid_: Temporary Asset, Reference Material Copy, Provider Asset
 
 **Object Storage Connection（对象存储连接）**:
-Deployment Instance 与一个由客户 IT 预置的私有 bucket 之间、供 AI Creation 使用的唯一受管连接；每个实例最多一条，provider 在 OSS 与 COS 中二选一，其选择、位置和可用性是实例级事实。
+Deployment Instance 与一个由客户 IT 预置的私有阿里云 OSS bucket 之间、供 AI Creation 使用的唯一受管连接；每个实例最多一条，V1 provider 固定为 OSS，其位置和可用性是实例级事实。COS 不属于 V1 产品能力。
 _Avoid_: Storage Backend, S3 Connection, Storage Account, Custom Endpoint
 
 **Creation Credential Master Key（创作凭据主密钥）**:
