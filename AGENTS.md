@@ -1,57 +1,38 @@
-## Instruction routing
+# Agent routing
 
-- Before planning or changing files under `apps/desktop/`, read `apps/desktop/AGENTS.md`; under `server/`, read `server/AGENTS.md`
-- Before planning or performing development work, read and follow the `/ponytail` skill at `full` intensity throughout the task
-- Before changes involving the trusted data plane seam (Go server API, auth, storage, push), Go trusted operations, or AI providers, read [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md), [ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md), and [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md); changes to their responsibility seams follow the architecture-change rules under **Shared areas and delivery**
+## Context and architecture
 
-## Development guardrails
+- Before work under `apps/desktop/` or `server/`, read that area's `AGENTS.md`.
+- Before development, read and follow the `/ponytail` skill at `full` intensity.
+- Start architecture and domain work with [`CONTEXT-MAP.md`](CONTEXT-MAP.md),
+  the relevant `CONTEXT.md`, [`README.md`](README.md) ownership boundaries, and
+  referenced ADRs.
+- Before changing the Go trusted data plane, auth, storage, push, trusted
+  operations, or AI providers, read [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md),
+  [ADR-0014](docs/adr/0014-go-sole-trusted-data-plane.md), and
+  [ADR-0015](docs/adr/0015-single-tenant-user-system-and-go-authorization.md);
+  AI Creation seams also require
+  [ADR-0016](docs/adr/0016-ai-creation-v1-trusted-seams.md).
+- A responsibility seam or accepted architecture change requires an ADR before
+  implementation.
 
-- **Assumptions and ambiguity** — State assumptions that materially affect scope or behavior. If plausible interpretations would produce meaningfully different results, present them and get direction before implementation; otherwise state the reasonable default and proceed
-- **Surgical scope** — Trace every changed line to the requested outcome; match local style and leave unrelated cleanup, refactors, formatting, and pre-existing dead code in place. Remove only artifacts made unused by the current change
-- **Verifiable success** — Translate the requested outcome into checkable success criteria before implementation; for multi-step work, pair each step with its verification. Establish a failing reproduction for bugs and a passing baseline for refactors, then run the smallest relevant checks until the criteria pass
+## Delivery and review
 
-## Directory architecture gate
+- Before committing, pushing, opening or merging a PR, deploying, or taking a
+  high-risk external/system action, read
+  [`docs/agents/delivery.md`](docs/agents/delivery.md). Its authority and risk
+  gates apply; explicit user instructions override defaults.
+- High-risk work defined there requires a brief `.scratch/` plan before
+  implementation.
+- Implementation agents need not read
+  [`CODING_STANDARDS.md`](CODING_STANDARDS.md); every reviewer must use it
+  after deterministic checks pass.
 
-- The ownership boundaries and layer descriptions in `README.md` are the canonical file-placement contract; read the area's `CONTEXT.md` and ADRs before placing files
-- Before a change, name its primary Domain and the narrowest owning boundary for every new or moved source file; inside that boundary prefer a responsibility-named local directory. Do not introduce synonymous wrappers, new shared layers, or new top-level source directories
-- Composition roots hold wiring only: `apps/desktop/src/main/index.ts`, renderer `app/`, and `server/cmd/server/main.go`
-- If a responsibility has no canonical owner, or its placement would change a documented boundary or ADR, stop implementation and resolve it through a dedicated architecture task first
-- Before completing work, check `git diff --name-status` still matches the declared Domain and canonical directories
+## Delegation and repository operations
 
-## Code comments
-
-- Use comments for non-obvious reasons, constraints, and contracts, especially security, authorization, transactions, concurrency, ordering, and compatibility
-- Express behavior and control flow through names, types, functions, and tests; apply the deletion test to every comment (clean code) — if a reader of the code alone loses nothing when it is removed, delete it
-- A warranted comment earns each line: one line by default, and a multi-paragraph block is a smell to shrink or split before landing it
-- Keep each explanation at its narrowest authoritative location; reference a canonical ADR, `CONTEXT.md`, or issue instead of repeating architecture or history across package, type, function, and test comments
-- Put migration stories and future work in ADRs or tracked issues; write TODOs with an issue reference or a concrete removal condition
-- Keep Go documentation comments for exported identifiers focused on the public contract; let semantic need, including safety guarantees, determine length
-- Before completing a change, verify touched comments still match behavior and that the change did not duplicate an invariant already documented at a stronger owner
-
-## Shared areas and delivery
-
-- `apps/desktop/src/renderer/src/components/ui/`, `apps/desktop/src/renderer/src/lib/`, `apps/desktop/src/renderer/src/hooks/`, `server/internal/` shared sub-packages (e.g. `internal/event`), and root `contracts/` are shared areas; call out their changes with impact and tests in the PR description
-- One task delivers one cohesive vertical slice for one primary Domain on a short-lived task branch; every tracked change reaches `main` through a PR, with no unrelated cleanup or generalized refactors
-- Before committing, pushing, opening a PR, merging, deploying, or taking a high-risk external or system action, read [docs/agents/delivery.md](docs/agents/delivery.md); it owns the agent authority and human risk gates, and explicit user instructions override its defaults
-- Changes to responsibilities across contexts or modules, trusted-execution seams, or architectural decisions require an ADR before implementation — update the one whose decision changes, or write a new one when none covers it
-- High-risk changes — destructive or irreversible persistent-data operations, production deploys/releases, secrets or privilege/authorization/security-boundary changes, paid or recurring external resources, and breaking public contracts — require a brief written plan under `.scratch/` before implementation
-
-## Subagent delegation
-
-- **Parallel-ready** — a workstream is parallel-ready only when it can begin from current context, produce its assigned result without another workstream's output, and have scope, expected result, and completion criterion stated before dispatch
-- **Delegation** — when decomposition yields two or more parallel-ready workstreams, delegate each to the narrowest available specialist; give each write scope a single owner
-- **Context protection** — delegate exploration, research, or survey work to the narrowest read-only specialist whenever its raw output would flood the main context — many-file searches, broad codebase surveys, external research — even as a single workstream; the parent keeps only the compressed findings. Sequential or single-step work whose results fit comfortably stays in the parent
-
-## Agent skills
-
-### Issue tracker
-
-Issues are tracked in this repository's GitHub Issues through `gh`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the default GitHub triage-label vocabulary. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-This is a multi-context repository; start with `CONTEXT-MAP.md`. See `docs/agents/domain.md`.
+- Delegate independent workstreams in parallel to the narrowest worker, with
+  one writer per file or scope; use read-only explorers for broad surveys and
+  a reviewer for completed diffs. Keep coupled sequential work local.
+- GitHub Issues are canonical: use `docs/agents/issue-tracker.md`; use
+  `docs/agents/triage-labels.md` for labels and `docs/agents/domain.md` for
+  domain-document workflows.

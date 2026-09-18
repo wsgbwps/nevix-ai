@@ -128,6 +128,7 @@ export function classifyPaths(paths) {
         ".mcp.json",
         "AGENTS.md",
         "CLAUDE.md",
+        "CODING_STANDARDS.md",
         "CONTEXT-MAP.md",
         "CONTEXT.md",
         "DESIGN.md",

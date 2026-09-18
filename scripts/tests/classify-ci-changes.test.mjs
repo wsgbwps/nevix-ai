@@ -228,6 +228,17 @@ test("agent and delivery documentation requires inline harness validation", () =
   );
 });
 
+test("reviewer coding standards require only inline harness validation", () => {
+  assert.deepEqual(classifyPaths(["CODING_STANDARDS.md"]), {
+    desktop: false,
+    server: false,
+    windows_native: false,
+    macos_native: false,
+    harness: true,
+    unknownPaths: [],
+  });
+});
+
 test("Pi agent definitions, extension code, and tests require inline harness validation", () => {
   assert.deepEqual(
     selected([
