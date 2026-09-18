@@ -78,7 +78,6 @@ test('Admin lookup reads the sanitized connection state with a bearer session', 
     outcome: 'succeeded',
     value: {
       state: 'ready',
-      provider: 'oss',
       region: 'cn-hangzhou',
       bucket: 'nevix-reference-materials',
       revision: 7,
@@ -125,7 +124,6 @@ test('saved-credential recheck needs no proof and returns the safe transient obs
     outcome: 'succeeded',
     value: {
       state: 'ready',
-      provider: 'oss',
       region: 'cn-hangzhou',
       bucket: 'nevix-reference-materials',
       revision: 7,
@@ -199,7 +197,6 @@ test('maintenance commands send exact-action proof and revision to their dedicat
       await client.replace('admin-token', {
         proof: 'replace-proof',
         expectedRevision: 7,
-        provider: 'cos',
         region: 'ap-guangzhou',
         bucket: 'replacement-bucket',
         accessKeyId: 'replacement-id',
@@ -231,7 +228,7 @@ test('maintenance commands send exact-action proof and revision to their dedicat
       body: {
         proof: 'replace-proof',
         expected_revision: 7,
-        provider: 'cos',
+        provider: 'oss',
         region: 'ap-guangzhou',
         bucket: 'replacement-bucket',
         access_key_id: 'replacement-id',
@@ -282,21 +279,53 @@ test('malformed credential payloads fail closed instead of accepting echoed secr
   assert.deepEqual(result, { outcome: 'network-failure' })
 })
 
-test('active-user capability keeps unavailable views origin-free and parses ready origin', async () => {
+test('only OSS storage payloads become usable Desktop views', async () => {
   const client = createObjectStorageConnectionClient(serverUrl)
-  const unavailable = await withFetch(
+
+  const legacy = await withFetch(
     (async () =>
-      jsonResponse({ available: false, provider: 'cos', connection_revision: 9 })) as typeof fetch,
+      jsonResponse({
+        state: 'legacy_incompatible',
+        revision: 9,
+        location_frozen: false
+      })) as typeof fetch,
+    () => client.getAdminConnection('admin-token')
+  )
+  assert.deepEqual(legacy, {
+    outcome: 'succeeded',
+    value: { state: 'legacy_incompatible', revision: 9, locationFrozen: false }
+  })
+
+  const cosConnection = await withFetch(
+    (async () => jsonResponse({ ...readyView, provider: 'cos' })) as typeof fetch,
+    () => client.getAdminConnection('admin-token')
+  )
+  assert.deepEqual(cosConnection, { outcome: 'network-failure' })
+
+  const unavailable = await withFetch(
+    (async () => jsonResponse({ available: false })) as typeof fetch,
     () => client.getCapability('member-token')
   )
-  assert.deepEqual(unavailable, {
-    outcome: 'succeeded',
-    value: { available: false, provider: 'cos', connectionRevision: 9 }
-  })
+  assert.deepEqual(unavailable, { outcome: 'succeeded', value: { available: false } })
   assert.equal(
     'uploadOrigin' in (unavailable.outcome === 'succeeded' ? unavailable.value : {}),
     false
   )
+
+  for (const payload of [
+    { available: false, provider: 'cos', connection_revision: 9 },
+    {
+      available: true,
+      provider: 'cos',
+      upload_origin: 'https://nevix-reference-materials.cos.ap-shanghai.myqcloud.com',
+      connection_revision: 9
+    }
+  ]) {
+    const result = await withFetch((async () => jsonResponse(payload)) as typeof fetch, () =>
+      client.getCapability('member-token')
+    )
+    assert.deepEqual(result, { outcome: 'network-failure' })
+  }
 
   const ready = await withFetch(
     (async () =>
@@ -312,7 +341,6 @@ test('active-user capability keeps unavailable views origin-free and parses read
     outcome: 'succeeded',
     value: {
       available: true,
-      provider: 'oss',
       uploadOrigin: 'https://nevix-reference-materials.oss-cn-hangzhou.aliyuncs.com',
       connectionRevision: 10
     }

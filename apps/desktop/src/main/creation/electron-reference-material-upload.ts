@@ -70,11 +70,16 @@ export const electronReferenceMaterialUploadDependencies: ReferenceMaterialUploa
     if (!isRecord(response.value) || typeof response.value.available !== 'boolean') {
       return { outcome: 'network-failure' }
     }
-    if (!response.value.available) return { outcome: 'succeeded', value: { available: false } }
     const provider = stringField(response.value, 'provider')
     const uploadOrigin = stringField(response.value, 'upload_origin')
     const connectionRevision = positiveIntegerField(response.value, 'connection_revision')
-    return (provider === 'oss' || provider === 'cos') && uploadOrigin && connectionRevision
+    if (!response.value.available) {
+      return (provider === null && connectionRevision === null) ||
+        (provider === 'oss' && connectionRevision !== null)
+        ? { outcome: 'succeeded', value: { available: false } }
+        : { outcome: 'network-failure' }
+    }
+    return provider === 'oss' && uploadOrigin && connectionRevision
       ? {
           outcome: 'succeeded',
           value: { available: true, provider, uploadOrigin, connectionRevision }

@@ -678,23 +678,26 @@ test('a signed request with the wrong origin or an extra header fails closed bef
   }
 })
 
-test('signed headers must match the capability provider', async () => {
-  const { calls, dependencies } = baseDependencies({
-    readCapability: async () => {
-      calls.push('capability')
-      return {
-        outcome: 'succeeded' as const,
-        value: {
-          available: true as const,
-          provider: 'cos' as const,
-          uploadOrigin: 'https://bucket.oss-cn-hangzhou.aliyuncs.com',
-          connectionRevision: 7
-        }
-      }
+test('x-cos signed headers fail closed before PUT', async () => {
+  const cosRequest = {
+    method: 'PUT' as const,
+    url: 'https://bucket.oss-cn-hangzhou.aliyuncs.com/reference-materials/object',
+    headers: {
+      'Content-Type': 'image/png',
+      'x-cos-meta-upload-id': upload.id,
+      'x-cos-forbid-overwrite': 'true'
+    },
+    expiresAt: upload.putExpiresAt
+  }
+  const { calls, dependencies } = baseDependencies()
+  const testDependencies = {
+    ...dependencies,
+    createUpload: async () => {
+      calls.push('create')
+      return { outcome: 'succeeded' as const, value: { upload, uploadRequest: cosRequest } }
     }
-  })
-
-  assert.deepEqual(await runReferenceMaterialUpload(input, dependencies), {
+  }
+  assert.deepEqual(await runReferenceMaterialUpload(input, testDependencies), {
     outcome: 'network-failure'
   })
   assert.deepEqual(calls, ['create', 'capability'])

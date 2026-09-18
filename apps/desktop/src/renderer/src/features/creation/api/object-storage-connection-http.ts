@@ -1,8 +1,5 @@
 import { request, type CreationApiFailure, type CreationApiResult } from './go-creation-http'
 
-export type ObjectStorageProvider = 'oss' | 'cos'
-export type ObjectStorageConnectionState = 'unconfigured' | 'ready' | 'credential_unavailable'
-
 export interface ObjectStorageCredentialView {
   readonly accessKeyIdMasked: string
   readonly secretAccessKeyConfigured: boolean
@@ -13,22 +10,27 @@ export interface ObjectStorageObservationView {
   readonly outcome: 'completed' | 'temporarily_unavailable'
 }
 
+export type ObjectStorageConfiguredConnectionView = {
+  readonly state: 'ready' | 'credential_unavailable'
+  readonly region: string
+  readonly bucket: string
+  readonly revision: number
+  readonly locationFrozen: boolean
+  readonly credential: ObjectStorageCredentialView
+  readonly observation?: ObjectStorageObservationView
+}
+
 export type ObjectStorageConnectionView =
   | { readonly state: 'unconfigured' }
   | {
-      readonly state: 'ready' | 'credential_unavailable'
-      readonly provider: ObjectStorageProvider
-      readonly region: string
-      readonly bucket: string
+      readonly state: 'legacy_incompatible'
       readonly revision: number
       readonly locationFrozen: boolean
-      readonly credential: ObjectStorageCredentialView
-      readonly observation?: ObjectStorageObservationView
     }
+  | ObjectStorageConfiguredConnectionView
 
 export interface ObjectStorageConnectionInput {
   readonly proof: string
-  readonly provider: ObjectStorageProvider
   readonly region: string
   readonly bucket: string
   readonly accessKeyId: string
@@ -52,14 +54,9 @@ export interface ObjectStorageConnectionDeleteInput {
 }
 
 export type ObjectStorageCapabilityView =
-  | {
-      readonly available: false
-      readonly provider?: ObjectStorageProvider
-      readonly connectionRevision?: number
-    }
+  | { readonly available: false }
   | {
       readonly available: true
-      readonly provider: ObjectStorageProvider
       readonly uploadOrigin: string
       readonly connectionRevision: number
     }
@@ -69,18 +66,16 @@ export function createObjectStorageConnectionClient(serverUrl: string): {
   create(
     token: string,
     input: ObjectStorageConnectionInput
-  ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
-  recheck(
-    token: string
-  ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
+  ): Promise<CreationApiResult<ObjectStorageConfiguredConnectionView>>
+  recheck(token: string): Promise<CreationApiResult<ObjectStorageConfiguredConnectionView>>
   replace(
     token: string,
     input: ObjectStorageConnectionReplacementInput
-  ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
+  ): Promise<CreationApiResult<ObjectStorageConfiguredConnectionView>>
   rotate(
     token: string,
     input: ObjectStorageCredentialReplacementInput
-  ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
+  ): Promise<CreationApiResult<ObjectStorageConfiguredConnectionView>>
   deleteConnection(
     token: string,
     input: ObjectStorageConnectionDeleteInput
@@ -88,7 +83,7 @@ export function createObjectStorageConnectionClient(serverUrl: string): {
   recover(
     token: string,
     input: ObjectStorageCredentialReplacementInput
-  ): Promise<CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>>>
+  ): Promise<CreationApiResult<ObjectStorageConfiguredConnectionView>>
   getCapability(token: string): Promise<CreationApiResult<ObjectStorageCapabilityView>>
 } {
   return {
@@ -109,7 +104,7 @@ export function createObjectStorageConnectionClient(serverUrl: string): {
         token,
         body: {
           proof: input.proof,
-          provider: input.provider,
+          provider: 'oss',
           region: input.region,
           bucket: input.bucket,
           access_key_id: input.accessKeyId,
@@ -134,7 +129,7 @@ export function createObjectStorageConnectionClient(serverUrl: string): {
         body: {
           proof: input.proof,
           expected_revision: input.expectedRevision,
-          provider: input.provider,
+          provider: 'oss',
           region: input.region,
           bucket: input.bucket,
           access_key_id: input.accessKeyId,
@@ -196,17 +191,25 @@ function credentialReplacementBody(input: ObjectStorageCredentialReplacementInpu
 
 function parseConnection(payload: unknown): ObjectStorageConnectionView | undefined {
   if (!isRecord(payload)) return undefined
+  if (payload.provider !== undefined && payload.provider !== 'oss') return undefined
   if (payload.state === 'unconfigured') return { state: 'unconfigured' }
+  if (payload.state === 'legacy_incompatible') {
+    const revision = readPositiveInteger(payload.revision)
+    return payload.provider === undefined &&
+      revision !== undefined &&
+      typeof payload.location_frozen === 'boolean'
+      ? { state: 'legacy_incompatible', revision, locationFrozen: payload.location_frozen }
+      : undefined
+  }
   if (payload.state !== 'ready' && payload.state !== 'credential_unavailable') return undefined
 
-  const provider = readProvider(payload.provider)
   const region = readNonEmptyString(payload.region)
   const bucket = readNonEmptyString(payload.bucket)
   const revision = readPositiveInteger(payload.revision)
   const locationFrozen = payload.location_frozen
   const credential = parseCredential(payload.credential)
   if (
-    !provider ||
+    payload.provider !== 'oss' ||
     !region ||
     !bucket ||
     revision === undefined ||
@@ -222,7 +225,6 @@ function parseConnection(payload: unknown): ObjectStorageConnectionView | undefi
 
   return {
     state: payload.state,
-    provider,
     region,
     bucket,
     revision,
@@ -255,7 +257,7 @@ function parseObservation(payload: unknown): ObjectStorageObservationView | unde
 
 function parseConfiguredConnectionResult(
   result: { readonly outcome: 'succeeded'; readonly payload: unknown } | CreationApiFailure
-): CreationApiResult<Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>> {
+): CreationApiResult<ObjectStorageConfiguredConnectionView> {
   if (result.outcome !== 'succeeded') return result
   const view = parseConnection(result.payload)
   return view?.state === 'ready' || view?.state === 'credential_unavailable'
@@ -265,22 +267,21 @@ function parseConfiguredConnectionResult(
 
 function parseCapability(payload: unknown): ObjectStorageCapabilityView | undefined {
   if (!isRecord(payload) || typeof payload.available !== 'boolean') return undefined
+  if (payload.provider !== undefined && payload.provider !== 'oss') return undefined
   if (payload.available) {
-    const provider = readProvider(payload.provider)
     const uploadOrigin = readNonEmptyString(payload.upload_origin)
     const connectionRevision = readPositiveInteger(payload.connection_revision)
-    return provider && uploadOrigin && connectionRevision !== undefined
-      ? { available: true, provider, uploadOrigin, connectionRevision }
+    return payload.provider === 'oss' && uploadOrigin && connectionRevision !== undefined
+      ? { available: true, uploadOrigin, connectionRevision }
       : undefined
   }
 
   if (payload.provider === undefined && payload.connection_revision === undefined) {
     return { available: false }
   }
-  const provider = readProvider(payload.provider)
   const connectionRevision = readPositiveInteger(payload.connection_revision)
-  return provider && connectionRevision !== undefined
-    ? { available: false, provider, connectionRevision }
+  return payload.provider === 'oss' && connectionRevision !== undefined
+    ? { available: false }
     : undefined
 }
 
@@ -294,8 +295,4 @@ function readNonEmptyString(value: unknown): string | undefined {
 
 function readPositiveInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
-}
-
-function readProvider(value: unknown): ObjectStorageProvider | undefined {
-  return value === 'oss' || value === 'cos' ? value : undefined
 }

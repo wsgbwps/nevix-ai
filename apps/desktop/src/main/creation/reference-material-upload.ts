@@ -57,7 +57,7 @@ export interface ReferenceMaterialUploadDependencies {
   ) => Promise<
     Result<{
       readonly available: boolean
-      readonly provider?: 'oss' | 'cos'
+      readonly provider?: 'oss'
       readonly uploadOrigin?: string
       readonly connectionRevision?: number
     }>
@@ -181,12 +181,11 @@ export async function runReferenceMaterialUpload(
   }
   if (
     !capability.value.available ||
-    capability.value.provider === undefined ||
+    capability.value.provider !== 'oss' ||
     capability.value.uploadOrigin === undefined ||
     !validSignedRequest(
       created.value.uploadRequest,
       created.value.upload,
-      capability.value.provider,
       capability.value.uploadOrigin,
       input.declaredMimeType
     )
@@ -395,7 +394,6 @@ async function abortCancelledUpload(
 function validSignedRequest(
   request: SignedUploadRequest,
   upload: ReferenceMaterialUpload,
-  provider: 'oss' | 'cos',
   uploadOrigin: string,
   declaredMimeType: string
 ): boolean {
@@ -432,8 +430,8 @@ function validSignedRequest(
     if (headers.has(normalized)) return false
     headers.set(normalized, value)
   }
-  const metadata = `x-${provider}-meta-upload-id`
-  const forbidOverwrite = `x-${provider}-forbid-overwrite`
+  const metadata = 'x-oss-meta-upload-id'
+  const forbidOverwrite = 'x-oss-forbid-overwrite'
   const expected = new Set(['content-type', metadata, forbidOverwrite])
   if (headers.size !== expected.size || [...headers.keys()].some((name) => !expected.has(name))) {
     return false
