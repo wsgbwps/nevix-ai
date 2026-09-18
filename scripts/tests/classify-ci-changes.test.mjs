@@ -184,20 +184,33 @@ test("API contracts require only Server CI", () => {
   assert.deepEqual(selected(["contracts/identity.yaml"]), { server: true });
 });
 
-test("the server integration harness entry runs Server CI", () => {
+test("the OSS smoke entry point runs Server CI while retired COS is unclassified", () => {
   assert.deepEqual(selected(["scripts/test-identity-integration.sh"]), {
     server: true,
   });
   assert.deepEqual(selected(["scripts/test-creation-integration.sh"]), {
     server: true,
   });
-  assert.deepEqual(
-    selected([
-      "scripts/test-creation-oss-smoke.sh",
-      "scripts/test-creation-cos-smoke.sh",
-    ]),
-    { server: true },
-  );
+  assert.deepEqual(selected(["scripts/test-creation-oss-smoke.sh"]), {
+    server: true,
+  });
+  assert.deepEqual(classifyPaths(["scripts/test-creation-cos-smoke.sh"]), {
+    desktop: false,
+    server: false,
+    windows_native: false,
+    macos_native: false,
+    harness: false,
+    unknownPaths: ["scripts/test-creation-cos-smoke.sh"],
+  });
+});
+
+test("release tooling exposes only the OSS smoke entry point", () => {
+  const makefile = readFileSync(join(REPOSITORY, "Makefile"), "utf8");
+
+  assert.match(makefile, /^test-creation-oss-smoke:/m);
+  assert.doesNotMatch(makefile, /test-creation-cos-smoke/);
+  assert.equal(existsSync(join(REPOSITORY, "scripts/test-creation-oss-smoke.sh")), true);
+  assert.equal(existsSync(join(REPOSITORY, "scripts/test-creation-cos-smoke.sh")), false);
 });
 
 test("ordinary Server CI never requests real cloud credentials or smoke runs", () => {
@@ -324,6 +337,28 @@ test("deleted Server files still run Server CI", (t) => {
     harness: false,
     unknownPaths: [],
   });
+});
+
+test("deleting a retired smoke script runs only the delivery harness", (t) => {
+  assert.deepEqual(
+    classifyDeletion(t, "scripts/test-creation-cos-smoke.sh"),
+    {
+      paths: ["scripts/test-creation-cos-smoke.sh"],
+      desktop: false,
+      server: false,
+      windows_native: false,
+      macos_native: false,
+      harness: true,
+      unknownPaths: [],
+    },
+  );
+});
+
+test("deleting another unclassified path fails closed", (t) => {
+  assert.throws(
+    () => classifyDeletion(t, "scripts/retired-unclassified.sh"),
+    /unclassified changed paths: scripts\/retired-unclassified\.sh/,
+  );
 });
 
 test("the CI gate runs harness tests inline without a separate job", () => {

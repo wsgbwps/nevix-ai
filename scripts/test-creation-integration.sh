@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Supported local and CI entry for the Creation Module integration suite
-# (issue #156). Starts one pinned throwaway PostgreSQL plus test-only MinIO,
-# runs the real Go Creation suites against both (zero skips, representative
-# sentinels), and tears down only the stack it owns.
+# (issue #156). Starts pinned throwaway PostgreSQL and test-only MinIO, runs
+# the real Go Creation suite with zero skips and representative sentinels, and
+# tears down only the stack it owns.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -258,10 +258,10 @@ export NEVIX_CREATION_SMOKE_SECONDS="${NEVIX_CREATION_SMOKE_SECONDS:-60}"
 
 test_log="$(mktemp -t nevix-creation-integration.XXXXXX)"
 set +e
-# One serialized run covers the Module-seam integration suite, storage
-# conformance on both adapters, and the short file-stream smoke. The
-# sequential -race suite legitimately outgrew Go's 10m per-package default
-# (597s on main before the task-retention scenarios), so name the budget.
+# One serialized run covers the Module-seam integration suite, test-only MinIO
+# conformance, and the short file-stream smoke. The sequential -race suite
+# legitimately outgrew Go's 10m per-package default (597s on main before the
+# task-retention scenarios), so name the budget.
 go test -C server -race -count=1 -p 1 -timeout 30m -v ./internal/creation/... ./internal/migration/... | tee "$test_log"
 test_status="${PIPESTATUS[0]}"
 set -e
