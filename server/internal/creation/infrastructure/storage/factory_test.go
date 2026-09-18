@@ -19,12 +19,6 @@ func TestNormalizeLocationDerivesOnlyOfficialPublicOrigins(t *testing.T) {
 			want:       Location{Provider: ProviderOSS, Region: "cn-hangzhou", Bucket: "nevix-media"},
 			wantOrigin: "https://nevix-media.oss-cn-hangzhou.aliyuncs.com",
 		},
-		{
-			name:       "COS",
-			input:      Location{Provider: " COS ", Region: " AP-Shanghai ", Bucket: " Nevix-Media-1250000000 "},
-			want:       Location{Provider: ProviderCOS, Region: "ap-shanghai", Bucket: "nevix-media-1250000000"},
-			wantOrigin: "https://nevix-media-1250000000.cos.ap-shanghai.myqcloud.com",
-		},
 	}
 
 	for _, tt := range tests {
@@ -50,12 +44,10 @@ func TestNormalizeLocationRejectsUnsupportedOrNonCanonicalLocations(t *testing.T
 	tests := []Location{
 		{Provider: "s3", Region: "us-east-1", Bucket: "bucket"},
 		{Provider: "filesystem", Region: "cn-hangzhou", Bucket: "bucket"},
+		{Provider: "cos", Region: "ap-shanghai", Bucket: "bucket-1250000000"},
 		{Provider: ProviderOSS, Region: "oss-cn-hangzhou-internal", Bucket: "bucket"},
 		{Provider: ProviderOSS, Region: "cn-hangzhou", Bucket: "bucket.aliyuncs.com"},
 		{Provider: ProviderOSS, Region: "cn-hangzhou", Bucket: "-bucket"},
-		{Provider: ProviderCOS, Region: "ap-shanghai", Bucket: "missing-appid"},
-		{Provider: ProviderCOS, Region: "ap-shanghai-internal", Bucket: "bucket-1250000000"},
-		{Provider: ProviderCOS, Region: "https://cos.ap-shanghai.myqcloud.com", Bucket: "bucket-1250000000"},
 	}
 
 	for _, input := range tests {
@@ -69,36 +61,18 @@ func TestNormalizeLocationRejectsUnsupportedOrNonCanonicalLocations(t *testing.T
 	}
 }
 
-func TestFactoryConstructsOnlySelectedProviderWithoutConnecting(t *testing.T) {
+func TestFactoryConstructsOSSWithoutConnecting(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []Provider{ProviderOSS, ProviderCOS} {
-		provider := provider
-		t.Run(string(provider), func(t *testing.T) {
-			t.Parallel()
-			location := Location{Provider: provider, Region: "ap-shanghai", Bucket: "bucket-1250000000"}
-			if provider == ProviderOSS {
-				location = Location{Provider: provider, Region: "cn-hangzhou", Bucket: "bucket"}
-			}
-
-			got, err := NewBlobStore(location, Credentials{AccessKeyID: "ak", SecretAccessKey: "sk"})
-			if err != nil {
-				t.Fatalf("NewBlobStore: %v", err)
-			}
-			switch provider {
-			case ProviderOSS:
-				if _, ok := got.(*ossStore); !ok {
-					t.Fatalf("selected OSS, got %T", got)
-				}
-			case ProviderCOS:
-				if _, ok := got.(*cosStore); !ok {
-					t.Fatalf("selected COS, got %T", got)
-				}
-			}
-			_, err = NewReferenceTransport(location, Credentials{AccessKeyID: "ak", SecretAccessKey: "sk"})
-			if err != nil {
-				t.Fatalf("NewReferenceTransport: %v", err)
-			}
-		})
+	location := Location{Provider: ProviderOSS, Region: "cn-hangzhou", Bucket: "bucket"}
+	got, err := NewBlobStore(location, Credentials{AccessKeyID: "ak", SecretAccessKey: "sk"})
+	if err != nil {
+		t.Fatalf("NewBlobStore: %v", err)
+	}
+	if _, ok := got.(*ossStore); !ok {
+		t.Fatalf("selected OSS, got %T", got)
+	}
+	if _, err := NewReferenceTransport(location, Credentials{AccessKeyID: "ak", SecretAccessKey: "sk"}); err != nil {
+		t.Fatalf("NewReferenceTransport: %v", err)
 	}
 }

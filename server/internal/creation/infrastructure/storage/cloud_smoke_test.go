@@ -43,7 +43,7 @@ func runRealCloudSmoke(t *testing.T, location Location, credentials Credentials)
 		if t.Failed() {
 			result = "fail"
 		}
-		t.Logf("object-storage-smoke provider=%s adapter_version=%s date=%s result=%s cleanup=%s", location.Provider, adapterVersion(location.Provider), stamp.Format(time.DateOnly), result, cleanup)
+		t.Logf("object-storage-smoke provider=%s adapter_version=%s date=%s result=%s cleanup=%s", location.Provider, adapterVersion(), stamp.Format(time.DateOnly), result, cleanup)
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -155,14 +155,11 @@ func runRealCloudSmoke(t *testing.T, location Location, credentials Credentials)
 	}
 }
 
-func adapterVersion(provider Provider) string {
+func adapterVersion() string {
 	if version := os.Getenv("NEVIX_OBJECT_STORAGE_ADAPTER_VERSION"); version != "" {
 		return version
 	}
-	modulePath := "github.com/aliyun/alibabacloud-oss-go-sdk-v2"
-	if provider == ProviderCOS {
-		modulePath = "github.com/tencentyun/cos-go-sdk-v5"
-	}
+	const modulePath = "github.com/aliyun/alibabacloud-oss-go-sdk-v2"
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return "unknown"

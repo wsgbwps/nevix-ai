@@ -112,7 +112,7 @@ func TestObjectStorageEnvelopeBindsProviderAndPurposeWithoutChangingKaponAAD(t *
 	if err != nil || string(opened) != string(plaintext) {
 		t.Fatalf("object storage round trip = %q, %v", opened, err)
 	}
-	if _, err := OpenObjectStorage(key, connection, domain.ObjectStorageProviderCOS, envelope); !errors.Is(err, domain.ErrCredentialSealed) {
+	if _, err := OpenObjectStorage(key, connection, domain.ObjectStorageProvider("provider-swap"), envelope); !errors.Is(err, domain.ErrCredentialSealed) {
 		t.Fatalf("provider swap error = %v, want ErrCredentialSealed", err)
 	}
 	if _, err := Open(key, connection, domain.ProviderCredentialEnvelope(envelope)); !errors.Is(err, domain.ErrCredentialSealed) {

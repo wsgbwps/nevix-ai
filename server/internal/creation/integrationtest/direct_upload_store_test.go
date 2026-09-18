@@ -24,7 +24,6 @@ type fakeUploadGrant struct {
 
 type fakeDirectUploadStore struct {
 	mu                  sync.Mutex
-	provider            creation.ObjectStorageProvider
 	objects             map[string][]byte
 	generatedObjects    map[string]generatedObject
 	info                map[string]creation.BlobInfo
@@ -56,7 +55,6 @@ type generatedObject struct {
 func newFakeDirectUploadStore(t *testing.T) *fakeDirectUploadStore {
 	t.Helper()
 	store := &fakeDirectUploadStore{
-		provider:           creation.ObjectStorageProviderOSS,
 		objects:            map[string][]byte{},
 		generatedObjects:   map[string]generatedObject{},
 		info:               map[string]creation.BlobInfo{},
@@ -88,12 +86,6 @@ func (s *fakeDirectUploadStore) objectCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.objects) + len(s.generatedObjects)
-}
-
-func (s *fakeDirectUploadStore) setProvider(provider creation.ObjectStorageProvider) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.provider = provider
 }
 
 func (s *fakeDirectUploadStore) replaceUploadMetadata(rawURL, uploadID string) {
@@ -208,10 +200,7 @@ func (s *fakeDirectUploadStore) serveUpload(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "read failed", http.StatusBadRequest)
 		return
 	}
-	metadataHeader := "X-Oss-Meta-Upload-Id"
-	if _, ok := grant.headers["X-Cos-Meta-Upload-Id"]; ok {
-		metadataHeader = "X-Cos-Meta-Upload-Id"
-	}
+	const metadataHeader = "X-Oss-Meta-Upload-Id"
 	s.mu.Lock()
 	s.objects[grant.request.Key] = append([]byte(nil), body...)
 	s.info[grant.request.Key] = creation.BlobInfo{
@@ -432,16 +421,10 @@ func (s *fakeDirectUploadStore) PresignPut(ctx context.Context, request creation
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	metadataHeader := "X-Oss-Meta-Upload-Id"
-	forbidHeader := "X-Oss-Forbid-Overwrite"
-	if s.provider == creation.ObjectStorageProviderCOS {
-		metadataHeader = "X-Cos-Meta-Upload-Id"
-		forbidHeader = "X-Cos-Forbid-Overwrite"
-	}
 	headers := map[string]string{
-		"Content-Type": request.ContentType,
-		metadataHeader: request.UploadID,
-		forbidHeader:   "true",
+		"Content-Type":           request.ContentType,
+		"X-Oss-Meta-Upload-Id":   request.UploadID,
+		"X-Oss-Forbid-Overwrite": "true",
 	}
 	s.nextGrant++
 	token := strconv.FormatInt(s.nextGrant, 10)
@@ -466,11 +449,7 @@ func (s *fakeDirectUploadStore) PresignThumbnail(ctx context.Context, key string
 	s.nextThumbnailGrant++
 	grant := s.nextThumbnailGrant
 	s.mu.Unlock()
-	process := "x-oss-process=image%2Fresize%2Cm_lfit%2Cw_320%2Fformat%2Cwebp"
-	if s.provider == creation.ObjectStorageProviderCOS {
-		process = "imageMogr2%2Fthumbnail%2F320x%2Fformat%2Fwebp"
-	}
-	return "https://thumb.example/" + key + "?" + process + "&sig=" + strconv.FormatInt(grant, 10), nil
+	return "https://thumb.example/" + key + "?x-oss-process=image%2Fresize%2Cm_lfit%2Cw_320%2Fformat%2Cwebp&sig=" + strconv.FormatInt(grant, 10), nil
 }
 
 func (s *fakeDirectUploadStore) PresignPreview(ctx context.Context, key string, kind creation.Kind, expiresIn time.Duration) (string, error) {

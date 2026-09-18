@@ -274,43 +274,31 @@ func TestReferenceMaterialUploadRejectsEveryDeclaredKindAboveItsLimitBeforeSigni
 }
 
 func TestReferenceMaterialUploadSignsOnlyEachProvidersClosedHeaderSet(t *testing.T) {
-	for _, tc := range []struct {
-		provider       string
-		bucket         string
-		metadataHeader string
-		forbidHeader   string
-	}{
-		{"oss", "nevix-private", "X-Oss-Meta-Upload-Id", "X-Oss-Forbid-Overwrite"},
-		{"cos", "nevix-private-1250000000", "X-Cos-Meta-Upload-Id", "X-Cos-Forbid-Overwrite"},
-	} {
-		t.Run(tc.provider, func(t *testing.T) {
-			h := newHarnessWithOptions(t, harnessOptions{objectStorageVerifier: func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
-				return creation.ObjectStorageLocation{Provider: candidate.Location.Provider, Region: "cn-hangzhou", Bucket: tc.bucket}, nil
-			}})
-			h.ensureAccounts(t)
-			h.resetObjectStorageConnections(t)
-			admin := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
-			proof := h.issueProof(t, admin, "object_storage_connection.create")
-			status, body := h.doSecureRequest(t, http.MethodPost, "/creation/object-storage-connection", admin, map[string]string{
-				"proof": proof, "provider": tc.provider, "region": "cn-hangzhou", "bucket": tc.bucket,
-				"access_key_id": objectStorageAccessKey, "secret_access_key": objectStorageSecretKey,
-			})
-			if status != http.StatusCreated {
-				t.Fatalf("configure %s: status=%d body=%s", tc.provider, status, body)
-			}
-			creator := h.loginToken(t, creatorEmail, harnessPassword)
-			session := h.createSession(t, creator, sessionName("headers-"+tc.provider))
-			status, body, upload := h.createMaterialUpload(t, creator, session.ID, uploadCreateInput(
-				"headers-"+tc.provider, "poster.png", "image", "image/png", 1024,
-			))
-			if status != http.StatusCreated {
-				t.Fatalf("create %s upload: status=%d body=%s", tc.provider, status, body)
-			}
-			headers := upload.UploadRequest.Headers
-			if len(headers) != 3 || headers["Content-Type"] != "image/png" || headers[tc.metadataHeader] != upload.Upload.ID || headers[tc.forbidHeader] != "true" {
-				t.Fatalf("%s signed headers are not the closed set: %#v", tc.provider, headers)
-			}
-		})
+	h := newHarnessWithOptions(t, harnessOptions{objectStorageVerifier: func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
+		return creation.ObjectStorageLocation{Provider: candidate.Location.Provider, Region: "cn-hangzhou", Bucket: "nevix-private"}, nil
+	}})
+	h.ensureAccounts(t)
+	h.resetObjectStorageConnections(t)
+	admin := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
+	proof := h.issueProof(t, admin, "object_storage_connection.create")
+	status, body := h.doSecureRequest(t, http.MethodPost, "/creation/object-storage-connection", admin, map[string]string{
+		"proof": proof, "provider": "oss", "region": "cn-hangzhou", "bucket": "nevix-private",
+		"access_key_id": objectStorageAccessKey, "secret_access_key": objectStorageSecretKey,
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("configure OSS: status=%d body=%s", status, body)
+	}
+	creator := h.loginToken(t, creatorEmail, harnessPassword)
+	session := h.createSession(t, creator, sessionName("headers-oss"))
+	status, body, upload := h.createMaterialUpload(t, creator, session.ID, uploadCreateInput(
+		"headers-oss", "poster.png", "image", "image/png", 1024,
+	))
+	if status != http.StatusCreated {
+		t.Fatalf("create OSS upload: status=%d body=%s", status, body)
+	}
+	headers := upload.UploadRequest.Headers
+	if len(headers) != 3 || headers["Content-Type"] != "image/png" || headers["X-Oss-Meta-Upload-Id"] != upload.Upload.ID || headers["X-Oss-Forbid-Overwrite"] != "true" {
+		t.Fatalf("OSS signed headers are not the closed set: %#v", headers)
 	}
 }
 

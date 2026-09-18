@@ -65,6 +65,163 @@ func (h *harness) createObjectStorageConnection(t *testing.T, admin string) (int
 	})
 }
 
+func TestObjectStorageConnectionRejectsNonOSSProvidersBeforeVerification(t *testing.T) {
+	verifierCalls := 0
+	h := newObjectStorageHarness(t, func(_ context.Context, _ creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
+		verifierCalls++
+		return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-hangzhou", Bucket: "nevix-private"}, nil
+	})
+	h.ensureAccounts(t)
+	admin := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
+
+	for _, provider := range []string{"cos", " COS ", "s3"} {
+		h.resetObjectStorageConnections(t)
+		status, body := h.doSecureRequest(t, http.MethodPost, "/creation/object-storage-connection", admin, map[string]string{
+			"proof":    h.issueProof(t, admin, "object_storage_connection.create"),
+			"provider": provider, "region": "cn-hangzhou", "bucket": "nevix-private",
+			"access_key_id": objectStorageAccessKey, "secret_access_key": objectStorageSecretKey,
+		})
+		if status != http.StatusBadRequest {
+			t.Fatalf("create provider %q: status=%d body=%s", provider, status, body)
+		}
+		assertErrorCode(t, body, "invalid_request")
+	}
+	if verifierCalls != 0 {
+		t.Fatalf("invalid create providers invoked verifier %d times", verifierCalls)
+	}
+
+	if status, body := h.createObjectStorageConnection(t, admin); status != http.StatusCreated {
+		t.Fatalf("create OSS connection: status=%d body=%s", status, body)
+	}
+	verifierCalls = 0
+	current := h.objectStorageSnapshot(t)
+	for _, provider := range []string{"cos", " COS ", "s3"} {
+		status, body := h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{
+			"proof": h.issueProof(t, admin, "object_storage_connection.replace"), "expected_revision": current.revision,
+			"provider": provider, "region": "cn-hangzhou", "bucket": "another-private-bucket",
+			"access_key_id": objectStorageAccessKey, "secret_access_key": objectStorageSecretKey,
+		})
+		if status != http.StatusBadRequest {
+			t.Fatalf("replace provider %q: status=%d body=%s", provider, status, body)
+		}
+		assertErrorCode(t, body, "invalid_request")
+	}
+	if verifierCalls != 0 {
+		t.Fatalf("invalid replace providers invoked verifier %d times", verifierCalls)
+	}
+}
+
+func TestLegacyObjectStorageConnectionFailsClosedUntilExplicitDeletion(t *testing.T) {
+	verifierCalls := 0
+	h := newObjectStorageHarness(t, func(_ context.Context, _ creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
+		verifierCalls++
+		return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-hangzhou", Bucket: "nevix-private"}, nil
+	})
+	h.ensureAccounts(t)
+	h.resetObjectStorageConnections(t)
+	admin := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
+
+	var adminID string
+	if err := h.ownerPool.QueryRow(h.ctx, `SELECT id FROM public.users WHERE email = $1`, harnessAdminEmail).Scan(&adminID); err != nil {
+		t.Fatalf("load admin: %v", err)
+	}
+	var legacyID string
+	var revision int64
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		INSERT INTO public.object_storage_connections (
+			provider, region, bucket, state,
+			envelope_version, credential_key_id, credential_nonce, credential_ciphertext,
+			access_key_id_masked, last_checked_at, last_check_outcome, created_by_user_id
+		) VALUES (
+			'cos', 'ap-shanghai', 'nevix-legacy-1250000000', 'legacy_incompatible',
+			1, 'legacy-key', decode('0102', 'hex'), decode('030405', 'hex'),
+			'****1234', now(), 'completed', $1
+		) RETURNING id, revision`, adminID,
+	).Scan(&legacyID, &revision); err != nil {
+		t.Fatalf("seed legacy object storage connection: %v", err)
+	}
+
+	status, body := h.doRequest(t, http.MethodGet, "/creation/object-storage-connection", admin, nil)
+	wantLegacyView := fmt.Sprintf("{\"state\":\"legacy_incompatible\",\"revision\":%d,\"location_frozen\":false}\n", revision)
+	if status != http.StatusOK || string(body) != wantLegacyView {
+		t.Fatalf("legacy admin view: status=%d body=%s", status, body)
+	}
+	assertContractResponse(t, http.MethodGet, "/creation/object-storage-connection", status, body)
+	status, body = h.doRequest(t, http.MethodGet, "/creation/object-storage-capability", admin, nil)
+	if status != http.StatusOK || string(body) != "{\"available\":false}\n" {
+		t.Fatalf("legacy capability: status=%d body=%s", status, body)
+	}
+	assertContractResponse(t, http.MethodGet, "/creation/object-storage-capability", status, body)
+	status, body = h.doRequest(t, http.MethodPost, "/creation/object-storage-connection/recheck", admin, nil)
+	if status != http.StatusConflict {
+		t.Fatalf("legacy recheck: status=%d body=%s", status, body)
+	}
+	assertErrorCode(t, body, "object_storage_legacy_incompatible")
+	if verifierCalls != 0 {
+		t.Fatalf("legacy paths invoked verifier %d times", verifierCalls)
+	}
+
+	status, body = h.doSecureRequest(t, http.MethodDelete, "/creation/object-storage-connection", admin, map[string]any{
+		"proof": h.issueProof(t, admin, "object_storage_connection.delete"), "expected_revision": revision,
+	})
+	if status != http.StatusOK || string(body) != "{\"state\":\"unconfigured\"}\n" {
+		t.Fatalf("delete legacy connection: status=%d body=%s", status, body)
+	}
+	if status, body := h.createObjectStorageConnection(t, admin); status != http.StatusCreated {
+		t.Fatalf("create OSS after deleting legacy connection: status=%d body=%s", status, body)
+	}
+	if verifierCalls != 1 {
+		t.Fatalf("OSS remediation verifier calls = %d, want 1", verifierCalls)
+	}
+}
+
+func TestFrozenLegacyObjectStorageConnectionCannotBypassTheLocationLatch(t *testing.T) {
+	verifierCalls := 0
+	h := newObjectStorageHarness(t, func(_ context.Context, _ creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
+		verifierCalls++
+		return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-hangzhou", Bucket: "nevix-private"}, nil
+	})
+	h.ensureAccounts(t)
+	h.resetObjectStorageConnections(t)
+	admin := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
+
+	var adminID string
+	var revision int64
+	if err := h.ownerPool.QueryRow(h.ctx, `SELECT id FROM public.users WHERE email = $1`, harnessAdminEmail).Scan(&adminID); err != nil {
+		t.Fatalf("load admin: %v", err)
+	}
+	if err := h.ownerPool.QueryRow(h.ctx, `
+		INSERT INTO public.object_storage_connections (
+			provider, region, bucket, state,
+			envelope_version, credential_key_id, credential_nonce, credential_ciphertext,
+			access_key_id_masked, last_checked_at, last_check_outcome, created_by_user_id, location_frozen_at
+		) VALUES (
+			'cos', 'ap-shanghai', 'nevix-legacy-1250000000', 'legacy_incompatible',
+			1, 'legacy-key', decode('0102', 'hex'), decode('030405', 'hex'),
+			'****1234', now(), 'completed', $1, now()
+		) RETURNING revision`, adminID,
+	).Scan(&revision); err != nil {
+		t.Fatalf("seed frozen legacy object storage connection: %v", err)
+	}
+
+	status, body := h.doRequest(t, http.MethodGet, "/creation/object-storage-connection", admin, nil)
+	wantLegacyView := fmt.Sprintf("{\"state\":\"legacy_incompatible\",\"revision\":%d,\"location_frozen\":true}\n", revision)
+	if status != http.StatusOK || string(body) != wantLegacyView {
+		t.Fatalf("frozen legacy admin view: status=%d body=%s", status, body)
+	}
+
+	status, body = h.doSecureRequest(t, http.MethodDelete, "/creation/object-storage-connection", admin, map[string]any{
+		"proof": h.issueProof(t, admin, "object_storage_connection.delete"), "expected_revision": revision,
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("delete frozen legacy connection: status=%d body=%s", status, body)
+	}
+	assertErrorCode(t, body, "object_storage_location_frozen")
+	if verifierCalls != 0 {
+		t.Fatalf("frozen legacy delete invoked verifier %d times", verifierCalls)
+	}
+}
+
 func TestObjectStorageConnectionPublicContract(t *testing.T) {
 	var h *harness
 	verifier := func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {

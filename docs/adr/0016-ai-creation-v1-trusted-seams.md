@@ -22,6 +22,8 @@
 
 2026-09-18 修订（范围收敛 [#251](https://github.com/wsgbwps/nevix-ai/issues/251)）：AI Creation V1 的 Object Storage provider 固定为阿里云 OSS。COS 不属于 V1 配置、契约、运行时或发布证据；未来重引入 COS 前必须先有独立架构决定、产品实现、迁移/兼容决策和真实 COS smoke。
 
+2026-09-18 修订（[#252](https://github.com/wsgbwps/nevix-ai/issues/252)）：上行升级把既有 COS 连接隔离为 `legacy_incompatible`，而非把 provider 重写成 OSS；这保留其 provider-bound AEAD AAD，且不执行任何 COS 操作。
+
 ## 背景
 
 AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 decision tickets 与多份 ADR 中；旧票建立于 Organization、Supabase/RLS、Desktop 直连数据面等前提之上。#93 清空全部决策前沿并取代早期假设，#150 把最终边界收敛为单一规格。若不在架构文档中固化，实施 agent 容易复活已被取代的设计。本 ADR 与 [ADR-0012](0012-unified-ai-creation-owner.md)（owner 统一）、[ADR-0014](0014-go-sole-trusted-data-plane.md)（数据面）、[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)（用户系统与授权）互补，各自保持单一权威说明。
@@ -72,7 +74,8 @@ Session 认证与 Reauthentication Proof 归 Identity（[ADR-0015](0015-single-t
 - 每个 Deployment Instance 最多一条连接，V1 provider 固定为 `oss`；运行时只构造 OSS adapter。OSS 生产实现使用官方 SDK，共享 Creation 内部窄 BlobStore seam；不建立 adapter registry、plugin system 或通用 S3 runtime。
 - 首位 Admin 在 Instance Claim 后通过 AI Creation Settings 配置。创建、空实例位置替换、凭据轮换、删除和恢复要求 `RequireAdmin`、可信 HTTPS 与各自 exact-action proof；Admin 读取脱敏状态及用已保存凭据 recheck 不消费 proof。Desktop 不保存或回显 AK/SK。
 - 候选配置先在事务外执行 OSS canary：随机精确 key 的 Put/Head/Open/Range/Delete、固定方法与固定请求头的预签名 PUT、同 key 第二次写必须 409、匿名 GET 拒绝和精确清理。匿名 GET 仅接受 401、403 或 404，任何 2xx 都失败；canary 不发送 CORS OPTIONS。Nevix 不申请 List、ACL、Versioning 或 Lifecycle 管理权限；全部通过后才在 verified Creation write transaction 中以实例级单调递增 revision/CAS 激活密文并 append Audit，失败不覆盖旧连接，删除后重建也不复用旧 revision。
-- 持久状态只有 `unconfigured|ready|credential_unavailable`；瞬时 availability、checked-at 与安全错误码是观察值，不改变配置状态，不做后台探活。Server 在未配置、凭据不可用或连接瞬时故障时仍启动，只有依赖 Storage 的 Creation 命令 fail closed。
+- V1 正式连接状态只有 `unconfigured|ready|credential_unavailable`；瞬时 availability、checked-at 与安全错误码是观察值，不改变配置状态，不做后台探活。Server 在未配置、凭据不可用或连接瞬时故障时仍启动，只有依赖 Storage 的 Creation 命令 fail closed。
+- 上行升级可将仅存的历史 COS row 标为 `legacy_incompatible`，它不是 V1 配置：provider、location、revision 与 AEAD envelope 保持原样，且不解密、canary、构造 store、签名或进入 worker。Admin 只看见无 COS 字段的处置状态、revision 与冻结事实；未冻结 row 可经既有 proof + CAS 显式删除后新建 OSS，冻结 row 必须在产品外迁移或恢复。
 - 没有永久对象、有效 Reference Material Upload、Provider Transfer Object 或 cleanup backlog 时可以替换/删除位置；首个永久对象后 provider、region、bucket 永久冻结，只允许同位置轮换凭据。计划轮换保留旧云 key 至最长 24 小时 Provider Transfer Object URL 失效；紧急撤销可使在途上传/生成失败。
 
 ### Reference Material Upload 可信 seam

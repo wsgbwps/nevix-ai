@@ -8,7 +8,7 @@ import (
 )
 
 func TestOSSConformance(t *testing.T) {
-	runCloudConformanceSuite(t, ProviderOSS, func(t *testing.T, transport http.RoundTripper) domain.ObjectStorageBlobStore {
+	runCloudConformanceSuite(t, func(t *testing.T, transport http.RoundTripper) domain.ObjectStorageBlobStore {
 		t.Helper()
 		store, err := newOSSStore(
 			Location{Provider: ProviderOSS, Region: "cn-hangzhou", Bucket: "nevix-test"},
