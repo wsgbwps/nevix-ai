@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Lint and unit test
+    name: Format, lint, and unit test
     runs-on: ubuntu-latest
     # Unbounded external downloads (Playwright CDN) have hung this job for
     # 25+ minutes in practice; cap it so a hang fails fast instead.
@@ -47,6 +47,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: playwright-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nevix/desktop format:check
       - run: pnpm --filter @nevix/desktop lint
       - run: pnpm --filter @nevix/desktop verify:architecture
       - run: pnpm --filter @nevix/desktop test:unit

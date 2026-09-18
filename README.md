@@ -250,14 +250,15 @@ contracts/
 
 ```bash
 pnpm dev          # 启动 Electron 开发模式
-pnpm build        # 构建前端
-pnpm lint         # 运行 lint
+pnpm build        # 构建 Desktop
+pnpm lint         # 运行 Desktop lint
 cd server && go run ./cmd/server  # 启动后端
 
 make dev          # 同 pnpm dev
 make server       # 启动 Go 后端 + 可选 Caddy TLS / fake Kapon sidecar（见 scripts/dev/README.md）
-make build        # 构建所有
-make lint         # lint 所有
+make build        # 构建 Desktop 与 Server
+make lint         # Desktop lint + Server go vet
+make check        # PR 前快速检查（格式、lint、架构、类型与单测；无需外部服务）
 
 make postgres     # 幂等启动本地开发 PostgreSQL（数据持久化在 named volume，重装不丢）
 make postgres-down # 停止并移除本地开发 PostgreSQL 容器（数据卷保留）

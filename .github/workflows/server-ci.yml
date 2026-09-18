@@ -9,7 +9,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Vet, test, and integrate
+    name: Format, vet, test, and integrate
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -18,6 +18,14 @@ jobs:
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
+      - name: Format
+        working-directory: server
+        run: |
+          unformatted="$(find . -type f -name '*.go' -exec gofmt -l {} +)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'error: gofmt required:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
       - name: Vet
         working-directory: server
         run: go vet ./...
