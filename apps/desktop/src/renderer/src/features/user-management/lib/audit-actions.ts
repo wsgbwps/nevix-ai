@@ -33,7 +33,11 @@ export const AUDIT_ACTION_KEYS = [
   'object_storage_connection_replaced',
   'object_storage_connection_credential_rotated',
   'object_storage_connection_deleted',
-  'object_storage_connection_credential_recovered'
+  'object_storage_connection_credential_recovered',
+  'media_asset_restricted',
+  'media_asset_restriction_released',
+  'team_publication_restricted',
+  'team_publication_restriction_released'
 ] as const
 
 // NOTE: user_self_registered (issue #121) is included because the same

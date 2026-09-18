@@ -28,6 +28,10 @@ type publicationResponse struct {
 	Publication publicationResource `json:"publication"`
 }
 
+type assetRestrictionResponse struct {
+	Asset assetResource `json:"asset"`
+}
+
 type publicationDetailResponse struct {
 	Publication   publicationResource             `json:"publication"`
 	Specification generationSpecificationResource `json:"specification"`
@@ -53,24 +57,27 @@ type inspirationItemResource struct {
 }
 
 type publicationResource struct {
-	ID            string                          `json:"id"`
-	SourceAssetID string                          `json:"source_asset_id"`
-	Publisher     assetCreatorResource            `json:"publisher"`
-	MediaType     string                          `json:"media_type"`
-	MimeType      string                          `json:"mime_type"`
-	ByteSize      int64                           `json:"byte_size"`
-	Checksum      string                          `json:"checksum_sha256"`
-	WidthPx       *int                            `json:"width_px"`
-	HeightPx      *int                            `json:"height_px"`
-	DurationMS    *int                            `json:"duration_ms"`
-	PublishedAt   string                          `json:"published_at"`
-	Restricted    bool                            `json:"restricted"`
-	Capabilities  publicationCapabilitiesResource `json:"capabilities"`
+	ID               string                          `json:"id"`
+	SourceAssetID    string                          `json:"source_asset_id"`
+	Publisher        assetCreatorResource            `json:"publisher"`
+	MediaType        string                          `json:"media_type"`
+	MimeType         string                          `json:"mime_type"`
+	ByteSize         int64                           `json:"byte_size"`
+	Checksum         string                          `json:"checksum_sha256"`
+	WidthPx          *int                            `json:"width_px"`
+	HeightPx         *int                            `json:"height_px"`
+	DurationMS       *int                            `json:"duration_ms"`
+	PublishedAt      string                          `json:"published_at"`
+	Restricted       bool                            `json:"restricted"`
+	RestrictionState *string                         `json:"restriction_state"`
+	Capabilities     publicationCapabilitiesResource `json:"capabilities"`
 }
 
 type publicationCapabilitiesResource struct {
 	CanWithdraw      bool `json:"can_withdraw"`
 	CanCreateSimilar bool `json:"can_create_similar"`
+	CanRestrict      bool `json:"can_restrict"`
+	CanRelease       bool `json:"can_release"`
 }
 
 type generationSpecificationResource struct {
@@ -237,7 +244,8 @@ func (h *PublicationHandler) PublicationReferencePreview(w http.ResponseWriter, 
 	if !ok {
 		return
 	}
-	authorization, err := h.publications.AuthorizePublicationPreview(r.Context(), publicationID, referenceID)
+	principal, _ := authz.PrincipalFrom(r.Context())
+	authorization, err := h.publications.AuthorizePublicationPreview(r.Context(), principal, publicationID, referenceID)
 	writeMaterialAuthorization(w, r, authorization, err)
 }
 
@@ -261,6 +269,62 @@ func (h *PublicationHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *PublicationHandler) RestrictAsset(w http.ResponseWriter, r *http.Request) {
+	h.setAssetRestriction(w, r, true)
+}
+
+func (h *PublicationHandler) ReleaseAsset(w http.ResponseWriter, r *http.Request) {
+	h.setAssetRestriction(w, r, false)
+}
+
+func (h *PublicationHandler) setAssetRestriction(w http.ResponseWriter, r *http.Request, active bool) {
+	id, ok := pathUUID(w, r, "assetID")
+	if !ok {
+		return
+	}
+	principal, _ := authz.PrincipalFrom(r.Context())
+	var asset application.AssetView
+	var err error
+	if active {
+		asset, err = h.publications.RestrictAsset(r.Context(), principal, id)
+	} else {
+		asset, err = h.publications.ReleaseAsset(r.Context(), principal, id)
+	}
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, assetRestrictionResponse{Asset: toAssetResource(asset)})
+}
+
+func (h *PublicationHandler) RestrictPublication(w http.ResponseWriter, r *http.Request) {
+	h.setPublicationRestriction(w, r, true)
+}
+
+func (h *PublicationHandler) ReleasePublication(w http.ResponseWriter, r *http.Request) {
+	h.setPublicationRestriction(w, r, false)
+}
+
+func (h *PublicationHandler) setPublicationRestriction(w http.ResponseWriter, r *http.Request, active bool) {
+	id, ok := pathUUID(w, r, "publicationID")
+	if !ok {
+		return
+	}
+	principal, _ := authz.PrincipalFrom(r.Context())
+	var publication application.PublicationView
+	var err error
+	if active {
+		publication, err = h.publications.RestrictPublication(r.Context(), principal, id)
+	} else {
+		publication, err = h.publications.ReleasePublication(r.Context(), principal, id)
+	}
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, publicationResponse{Publication: toPublicationResource(publication)})
 }
 
 type createSimilarResponse struct {
@@ -333,9 +397,10 @@ func toPublicationResource(view application.PublicationView) publicationResource
 		MediaType: string(publication.MediaType), MimeType: publication.Mime, ByteSize: publication.ByteSize,
 		Checksum: checksum, WidthPx: publication.WidthPx, HeightPx: publication.HeightPx,
 		DurationMS: publication.DurationMS, PublishedAt: publication.PublishedAt.UTC().Format(timeRFC3339),
-		Restricted: publication.Restricted,
+		Restricted: publication.Restricted, RestrictionState: restrictionStateResource(publication.RestrictionState),
 		Capabilities: publicationCapabilitiesResource{
 			CanWithdraw: view.Capabilities.CanWithdraw, CanCreateSimilar: view.Capabilities.CanCreateSimilar,
+			CanRestrict: view.Capabilities.CanRestrict, CanRelease: view.Capabilities.CanRelease,
 		},
 	}
 }

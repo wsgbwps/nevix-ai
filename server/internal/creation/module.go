@@ -196,7 +196,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	assetRepos := postgres.NewMediaAssetRepository(pool)
 	publicationRepos := postgres.NewTeamPublicationRepository(pool)
 	credentialVault := secrets.NewVault(cfg.SecretsDir)
-	hub := creationhttp.NewInvalidationHub()
+	hub := creationhttp.NewInvalidationHub(deps.SessionAuthenticator)
 	sessionService := application.NewSessionService(sessionRepos, tx)
 	connectionService := application.NewConnectionService(connectionRepos, objectStorageRepos, taskRepos, connectionRepos, tx, credentialVault, kapon.NewModelsCheckClient(cfg.KaponBaseURL), deps.ReauthVerifier)
 	objectStorageVerifier := deps.ObjectStorageVerifier
@@ -260,7 +260,14 @@ func workerLeaseOwner() string {
 // Module's own CORS gate and OPTIONS twins. The generation invalidation fan
 // out stays intra-module through the SSE hub; the bus remains the seam for
 // the cross-Module revocation stream (ADR-0016 跨 Module 断流).
-func (m *Module) Register(r chi.Router, _ event.Bus) {
+func (m *Module) Register(r chi.Router, bus event.Bus) {
+	if bus != nil {
+		bus.Subscribe(event.SessionRevokedType, func(envelope event.Event) {
+			if revoked, ok := envelope.Payload.(event.SessionRevoked); ok {
+				m.hub.DisconnectSession(revoked.SessionID)
+			}
+		})
+	}
 	routes := m.routes()
 	r.Use(corsMiddleware(m.corsOrigins, creationhttp.MethodsByPath(routes)))
 	creationhttp.Mount(r, routes, httpGuards(m.guard))

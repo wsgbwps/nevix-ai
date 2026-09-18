@@ -241,3 +241,37 @@ func TestTeamPublicationMigrationOwnsSnapshotsReuseAndObjectRetention(t *testing
 		}
 	}
 }
+
+func TestCreationSafetyRestrictionMigrationKeepsNarrowRuntimeGrants(t *testing.T) {
+	sqlBytes, err := migrationFS.ReadFile("migrations/0023_creation_safety_restrictions.sql")
+	if err != nil {
+		t.Fatalf("read safety restriction migration: %v", err)
+	}
+	sql := string(sqlBytes)
+	for _, required := range []string{
+		"restriction_released_at",
+		"direct_restricted_at",
+		"direct_restriction_released_at",
+		"creation_media_assets_restriction_lifecycle_check",
+		"creation_team_publications_direct_restriction_check",
+		"creation_team_publications_direct_release_check",
+		"creation_team_publications_nonwithdrawn_created_idx",
+		"restricted_at IS NULL OR restriction_released_at IS NOT NULL",
+		"GRANT UPDATE (restricted_at, restriction_released_at)",
+		"GRANT UPDATE (direct_restricted_at, direct_restriction_released_at)",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("safety restriction migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"GRANT UPDATE ON public.creation_media_assets",
+		"GRANT UPDATE ON public.creation_team_publications",
+		"GRANT DELETE ON public.creation_media_assets",
+		"GRANT DELETE ON public.creation_team_publications",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("safety restriction migration grants forbidden capability %q", forbidden)
+		}
+	}
+}

@@ -104,6 +104,7 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 // Module is the Identity Module's composition surface.
 type Module struct {
 	auth        *auth.Service
+	sessions    *session.Service
 	users       *users.Service
 	joinCodes   *joincodes.Service
 	reauth      *reauth.Service
@@ -181,6 +182,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 	}
 	return &Module{
 		auth:        service,
+		sessions:    sessions,
 		users:       users.NewService(pool, tx, sessions),
 		joinCodes:   joincodes.NewService(pool, tx),
 		reauth:      reauth.NewService(tx, service),
@@ -190,10 +192,17 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Module, er
 	}, nil
 }
 
-// Register mounts the static route table behind its CORS and authorization
-// declarations. The Module publishes no Domain Events yet; the bus remains
-// part of the Module contract.
-func (m *Module) Register(r chi.Router, _ event.Bus) {
+// Register mounts the static route table and publishes committed Session
+// revocations through the shared bus.
+func (m *Module) Register(r chi.Router, bus event.Bus) {
+	if bus != nil && m.sessions != nil {
+		m.sessions.SetRevocationSink(func(sessionID string) {
+			bus.Publish(event.Event{
+				Type:    event.SessionRevokedType,
+				Payload: event.SessionRevoked{SessionID: sessionID},
+			})
+		})
+	}
 	routes := m.routes()
 	r.Use(corsMiddleware(m.corsOrigins, command.MethodsByPath(routes)))
 	command.Mount(r, routes, command.Guards{

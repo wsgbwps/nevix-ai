@@ -2,6 +2,7 @@ package creationhttp
 
 import (
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -280,6 +281,9 @@ type generationSlotResource struct {
 	Index             int                    `json:"index"`
 	Status            string                 `json:"status"`
 	FailureReason     *string                `json:"failure_reason"`
+	ActionSuggestion  *string                `json:"action_suggestion"`
+	Retryable         *bool                  `json:"retryable"`
+	SupportNumber     *string                `json:"support_number"`
 	FailureDiagnostic *slotFailureDiagnostic `json:"failure_diagnostic"`
 	Result            *slotResultResource    `json:"result"`
 }
@@ -308,6 +312,12 @@ func toSlotResource(task domain.GenerationTask, slot domain.GenerationSlot) gene
 	if slot.Reason != nil {
 		reason := string(*slot.Reason)
 		resource.FailureReason = &reason
+		action, retryable := domain.FailureGuidance(*slot.Reason)
+		actionSuggestion := string(action)
+		supportNumber := fmt.Sprintf("NVX-%s-%02d", task.ID.String(), slot.Index+1)
+		resource.ActionSuggestion = &actionSuggestion
+		resource.Retryable = &retryable
+		resource.SupportNumber = &supportNumber
 	}
 	if slot.Diagnostic != nil {
 		resource.FailureDiagnostic = &slotFailureDiagnostic{
@@ -420,6 +430,12 @@ func failTask(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errorsIs(err, domain.ErrIdempotencyPayloadConflict):
 		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeIdempotencyConflict, Message: "This idempotency key was already used with a different payload."})
+	case errorsIs(err, domain.ErrTaskNotTerminal):
+		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeTaskNotTerminal, Message: "The generation task is not terminal."})
+	case errorsIs(err, domain.ErrNoIncompleteSlots):
+		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeNoIncompleteSlots, Message: "The generation task has no incomplete slots."})
+	case errorsIs(err, domain.ErrTaskRetryNotAllowed):
+		WriteError(w, &Error{Status: http.StatusConflict, Code: CodeTaskRetryNotAllowed, Message: "The incomplete slots cannot be retried without changing the request."})
 	case errorsIs(err, domain.ErrIntentNotReady):
 		WriteError(w, &Error{Status: http.StatusUnprocessableEntity, Code: CodeIntentNotReady, Message: "The submitted intent does not carry a complete generation intent."})
 	case errorsIs(err, domain.ErrCapabilityStale):

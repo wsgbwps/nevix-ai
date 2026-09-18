@@ -194,6 +194,7 @@ assert_creation_integration_executed() {
     TestObjectStorageConnectionSingletonAndMonotonicRevision
     TestConnectionCanaryExercisesRequiredOperationsAndCleansUp
     TestStreamSmokeParallelFileFlows
+    TestAssetLibraryQueryPlanAtFiftyThousandRows
     TestTaskAdmissionAtomicityAndIdempotency
     TestTaskAdmissionRequiresObjectStorageBeforeProviderWork
     TestGenerationTaskDetailUsesOneSnapshot
@@ -201,12 +202,17 @@ assert_creation_integration_executed() {
     TestTaskChangeCriterionIsExactAcrossSubmitListAndDetail
     TestTaskGovernanceMatrix
     TestTaskSubmissionLatencyP95
+    TestNonFileAPILatencyP95
     TestImageTaskLifecycleReachesSucceeded
     TestGenerationResultTransferRecoversAfterPutBeforeVerdictCrash
+    TestWorkerRestartRecoversOneHundredQueuedAndTenProcessingTasks
+    TestLocalCrashNeverFabricatesTimeout
     TestVideoTaskLifecycleRunsAsync
     TestIndeterminateSubmitNeverAutoRetries
     TestProvider402PersistsCreditBlock
     TestSSEInvalidationIsCommitScopedAndCreatorScoped
+    TestSessionRevocationDisconnectsOnlyThatSessionsStream
+    TestAdminSafetyRestrictionsAreAuditedTerminalAndNonRetroactive
     TestMinIOConformanceSuite
     TestApplyIsIdempotentWhenAlreadyCurrent
   )

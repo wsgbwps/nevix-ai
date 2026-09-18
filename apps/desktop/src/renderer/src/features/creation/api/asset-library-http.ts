@@ -3,6 +3,7 @@ import { readErrorCode, request } from './go-creation-http'
 
 export type AssetMediaType = 'image' | 'video'
 export type AssetSort = 'newest' | 'oldest'
+export type RestrictionState = 'active' | 'released' | null
 
 export interface AssetCreatorView {
   readonly id: string
@@ -13,12 +14,15 @@ export interface AssetCapabilities {
   readonly canDelete: boolean
   readonly canCreateSimilar: boolean
   readonly canPublish: boolean
+  readonly canRestrict: boolean
+  readonly canRelease: boolean
 }
 
 export interface AssetPublicationSummary {
   readonly id: string
   readonly publishedAt: string
   readonly restricted: boolean
+  readonly restrictionState: RestrictionState
 }
 
 export interface MediaAssetView {
@@ -33,6 +37,7 @@ export interface MediaAssetView {
   readonly durationMs: number | null
   readonly createdAt: string
   readonly restricted: boolean
+  readonly restrictionState: RestrictionState
   readonly publication: AssetPublicationSummary | null
   readonly capabilities: AssetCapabilities
 }
@@ -147,16 +152,29 @@ function nullableNumberField(value: unknown, field: string): number | null | und
   return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : undefined
 }
 
+function restrictionStateField(value: unknown): RestrictionState | undefined {
+  const source = record(value)
+  if (source === null || !('restriction_state' in source)) return undefined
+  const candidate = source['restriction_state']
+  return candidate === null || candidate === 'active' || candidate === 'released'
+    ? candidate
+    : undefined
+}
+
 function parseCapabilities(value: unknown): AssetCapabilities | null {
   const source = record(value)
   if (source === null) return null
   const canDelete = source['can_delete']
   const canCreateSimilar = source['can_create_similar']
   const canPublish = source['can_publish']
+  const canRestrict = source['can_restrict']
+  const canRelease = source['can_release']
   return typeof canDelete === 'boolean' &&
     typeof canCreateSimilar === 'boolean' &&
-    typeof canPublish === 'boolean'
-    ? { canDelete, canCreateSimilar, canPublish }
+    typeof canPublish === 'boolean' &&
+    typeof canRestrict === 'boolean' &&
+    typeof canRelease === 'boolean'
+    ? { canDelete, canCreateSimilar, canPublish, canRestrict, canRelease }
     : null
 }
 
@@ -174,14 +192,28 @@ export function parseAsset(value: unknown): MediaAssetView | null {
   const durationMs = nullableNumberField(value, 'duration_ms')
   const createdAt = stringField(value, 'created_at')
   const restricted = record(value)?.['restricted']
+  const restrictionState = restrictionStateField(value)
   const publicationValue = record(value)?.['publication']
   let publication: AssetPublicationSummary | null = null
   if (publicationValue !== null && publicationValue !== undefined) {
     const publicationId = stringField(publicationValue, 'id')
     const publishedAt = stringField(publicationValue, 'published_at')
     const publicationRestricted = record(publicationValue)?.['restricted']
-    if (!publicationId || !publishedAt || typeof publicationRestricted !== 'boolean') return null
-    publication = { id: publicationId, publishedAt, restricted: publicationRestricted }
+    const publicationRestrictionState = restrictionStateField(publicationValue)
+    if (
+      !publicationId ||
+      !publishedAt ||
+      typeof publicationRestricted !== 'boolean' ||
+      publicationRestrictionState === undefined
+    ) {
+      return null
+    }
+    publication = {
+      id: publicationId,
+      publishedAt,
+      restricted: publicationRestricted,
+      restrictionState: publicationRestrictionState
+    }
   }
   const capabilities = parseCapabilities(record(value)?.['capabilities'])
   if (
@@ -197,6 +229,7 @@ export function parseAsset(value: unknown): MediaAssetView | null {
     durationMs === undefined ||
     !createdAt ||
     typeof restricted !== 'boolean' ||
+    restrictionState === undefined ||
     capabilities === null
   ) {
     return null
@@ -213,6 +246,7 @@ export function parseAsset(value: unknown): MediaAssetView | null {
     durationMs,
     createdAt,
     restricted,
+    restrictionState,
     publication,
     capabilities
   }

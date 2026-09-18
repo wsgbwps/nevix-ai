@@ -30,7 +30,36 @@ const publication = {
   duration_ms: null,
   published_at: '2026-09-17T08:00:00Z',
   restricted: false,
-  capabilities: { can_withdraw: true, can_create_similar: true }
+  restriction_state: null,
+  capabilities: {
+    can_withdraw: true,
+    can_create_similar: true,
+    can_restrict: true,
+    can_release: false
+  }
+}
+
+const asset = {
+  id: 'asset-one',
+  creator: { id: 'publisher-one', display_name: 'Aster' },
+  media_type: 'image',
+  mime_type: 'image/png',
+  byte_size: 123,
+  checksum_sha256: 'aa'.repeat(32),
+  width_px: 1200,
+  height_px: 800,
+  duration_ms: null,
+  created_at: '2026-09-17T07:00:00Z',
+  restricted: true,
+  restriction_state: 'active',
+  publication: null,
+  capabilities: {
+    can_delete: true,
+    can_create_similar: false,
+    can_publish: false,
+    can_restrict: false,
+    can_release: true
+  }
 }
 
 const specification = {
@@ -82,7 +111,13 @@ test('inspiration list sends one filter set and strictly decodes heterogeneous i
         durationMs: null,
         publishedAt: '2026-09-17T08:00:00Z',
         restricted: false,
-        capabilities: { canWithdraw: true, canCreateSimilar: true }
+        restrictionState: null,
+        capabilities: {
+          canWithdraw: true,
+          canCreateSimilar: true,
+          canRestrict: true,
+          canRelease: false
+        }
       }
     })
     assert.deepEqual(Object.fromEntries(requested?.searchParams ?? []), {
@@ -209,6 +244,88 @@ test('publication mutations use their exact paths and narrow response envelopes'
       { path: '/creation/assets/asset-one/publication', method: 'POST' },
       { path: '/creation/publications/publication-one', method: 'DELETE' }
     ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('admin safety mutations use exact item restriction paths and strictly decode state', async () => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ readonly path: string; readonly method: string }> = []
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input))
+    calls.push({ path: url.pathname, method: init?.method ?? 'GET' })
+    const released = init?.method === 'DELETE'
+    const activePublication = {
+      ...publication,
+      restricted: !released,
+      restriction_state: released ? 'released' : 'active',
+      capabilities: {
+        ...publication.capabilities,
+        can_withdraw: false,
+        can_create_similar: false,
+        can_restrict: released,
+        can_release: !released
+      }
+    }
+    return Response.json(
+      url.pathname.includes('/inspiration/assets/')
+        ? {
+            asset: released
+              ? {
+                  ...asset,
+                  restricted: false,
+                  restriction_state: 'released',
+                  capabilities: {
+                    ...asset.capabilities,
+                    can_restrict: true,
+                    can_release: false
+                  }
+                }
+              : asset
+          }
+        : { publication: activePublication }
+    )
+  }
+  try {
+    const client = createInspirationClient(serverUrl)
+    assert.equal((await client.restrictAsset('token', 'asset one')).outcome, 'succeeded')
+    const releasedAsset = await client.releaseAsset('token', 'asset one')
+    assert.equal(releasedAsset.outcome, 'succeeded')
+    if (releasedAsset.outcome === 'succeeded') {
+      assert.equal(releasedAsset.value.restrictionState, 'released')
+    }
+    const restricted = await client.restrictPublication('token', 'publication one')
+    assert.equal(restricted.outcome, 'succeeded')
+    if (restricted.outcome === 'succeeded') {
+      assert.equal(restricted.value.restrictionState, 'active')
+      assert.deepEqual(restricted.value.capabilities, {
+        canWithdraw: false,
+        canCreateSimilar: false,
+        canRestrict: false,
+        canRelease: true
+      })
+    }
+    const releasedPublication = await client.releasePublication('token', 'publication one')
+    assert.equal(releasedPublication.outcome, 'succeeded')
+    if (releasedPublication.outcome === 'succeeded') {
+      assert.equal(releasedPublication.value.restrictionState, 'released')
+      assert.equal(releasedPublication.value.capabilities.canCreateSimilar, false)
+    }
+    assert.deepEqual(calls, [
+      { path: '/creation/inspiration/assets/asset%20one/restriction', method: 'PUT' },
+      { path: '/creation/inspiration/assets/asset%20one/restriction', method: 'DELETE' },
+      { path: '/creation/publications/publication%20one/restriction', method: 'PUT' },
+      { path: '/creation/publications/publication%20one/restriction', method: 'DELETE' }
+    ])
+
+    globalThis.fetch = async () =>
+      Response.json({
+        publication: { ...publication, restriction_state: 'unknown' }
+      })
+    assert.deepEqual(await client.restrictPublication('token', 'publication-one'), {
+      outcome: 'network-failure'
+    })
   } finally {
     globalThis.fetch = originalFetch
   }

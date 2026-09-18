@@ -1,6 +1,7 @@
 package creationhttp
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -15,14 +16,27 @@ import (
 // that the owner's creation state changed — never prompts, media, or task
 // bodies (spec #150 SSE contract).
 type InvalidationHub struct {
-	mu    sync.Mutex
-	subs  map[string]map[chan struct{}]struct{}
-	clock func() time.Time
+	mu        sync.Mutex
+	sessions  authz.SessionAuthenticator
+	byOwner   map[string]map[*streamSubscription]struct{}
+	bySession map[string]map[*streamSubscription]struct{}
+	clock     func() time.Time
 }
 
-// NewInvalidationHub builds the hub.
-func NewInvalidationHub() *InvalidationHub {
-	return &InvalidationHub{subs: map[string]map[chan struct{}]struct{}{}}
+type streamSubscription struct {
+	owner         string
+	sessionID     string
+	invalidations chan struct{}
+	revoked       chan struct{}
+}
+
+// NewInvalidationHub builds the hub over the Identity-owned revalidation seam.
+func NewInvalidationHub(sessions authz.SessionAuthenticator) *InvalidationHub {
+	return &InvalidationHub{
+		sessions:  sessions,
+		byOwner:   map[string]map[*streamSubscription]struct{}{},
+		bySession: map[string]map[*streamSubscription]struct{}{},
+	}
 }
 
 // NotifyGenerationChanged implements the application InvalidationSink port:
@@ -34,35 +48,58 @@ func (h *InvalidationHub) NotifyGenerationChanged(owner domain.UUID) {
 func (h *InvalidationHub) notify(owner string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for ch := range h.subs[owner] {
+	for subscription := range h.byOwner[owner] {
 		select {
-		case ch <- struct{}{}:
+		case subscription.invalidations <- struct{}{}:
 		default: // one pending invalidation per stream is enough
 		}
 	}
 }
 
-// subscribe registers one stream for the owner; the returned cancel removes
-// it exactly once.
-func (h *InvalidationHub) subscribe(owner string) (<-chan struct{}, func()) {
-	ch := make(chan struct{}, 1)
-	h.mu.Lock()
-	if h.subs[owner] == nil {
-		h.subs[owner] = map[chan struct{}]struct{}{}
+func (h *InvalidationHub) subscribe(owner, sessionID string) (<-chan struct{}, <-chan struct{}, func()) {
+	subscription := &streamSubscription{
+		owner:         owner,
+		sessionID:     sessionID,
+		invalidations: make(chan struct{}, 1),
+		revoked:       make(chan struct{}),
 	}
-	h.subs[owner][ch] = struct{}{}
+	h.mu.Lock()
+	if h.byOwner[owner] == nil {
+		h.byOwner[owner] = map[*streamSubscription]struct{}{}
+	}
+	if h.bySession[sessionID] == nil {
+		h.bySession[sessionID] = map[*streamSubscription]struct{}{}
+	}
+	h.byOwner[owner][subscription] = struct{}{}
+	h.bySession[sessionID][subscription] = struct{}{}
 	h.mu.Unlock()
 	cancel := func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		if streams, ok := h.subs[owner]; ok {
-			delete(streams, ch)
-			if len(streams) == 0 {
-				delete(h.subs, owner)
-			}
-		}
+		h.removeLocked(subscription)
 	}
-	return ch, cancel
+	return subscription.invalidations, subscription.revoked, cancel
+}
+
+func (h *InvalidationHub) removeLocked(subscription *streamSubscription) {
+	delete(h.byOwner[subscription.owner], subscription)
+	if len(h.byOwner[subscription.owner]) == 0 {
+		delete(h.byOwner, subscription.owner)
+	}
+	delete(h.bySession[subscription.sessionID], subscription)
+	if len(h.bySession[subscription.sessionID]) == 0 {
+		delete(h.bySession, subscription.sessionID)
+	}
+}
+
+// DisconnectSession closes only streams authenticated by the revoked Session.
+func (h *InvalidationHub) DisconnectSession(sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for subscription := range h.bySession[sessionID] {
+		h.removeLocked(subscription)
+		close(subscription.revoked)
+	}
 }
 
 // heartbeatInterval is the SSE keepalive cadence (~20s per contract).
@@ -74,7 +111,7 @@ const heartbeatInterval = 20 * time.Second
 // stream carries no Last-Event-ID semantics — clients refetch on loss.
 func (h *InvalidationHub) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	principal, ok := authz.PrincipalFrom(r.Context())
-	if !ok || principal.UserID == "" {
+	if !ok || principal.UserID == "" || principal.SessionID == "" {
 		WriteError(w, &Error{Status: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "Authentication is required."})
 		return
 	}
@@ -83,14 +120,27 @@ func (h *InvalidationHub) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, &Error{Status: http.StatusInternalServerError, Code: CodeInternalError, Message: "Streaming is not supported."})
 		return
 	}
+	events, revoked, cancel := h.subscribe(principal.UserID, principal.SessionID)
+	defer cancel()
+	validated, err := h.sessions.Authenticate(r)
+	if err != nil {
+		if errors.Is(err, authz.ErrNotAuthenticated) {
+			WriteError(w, &Error{Status: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "Authentication is required."})
+		} else {
+			WriteError(w, &Error{Status: http.StatusInternalServerError, Code: CodeInternalError, Message: "The request could not be completed."})
+		}
+		return
+	}
+	if validated.UserID != principal.UserID || validated.SessionID != principal.SessionID {
+		WriteError(w, &Error{Status: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "Authentication is required."})
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-
-	events, cancel := h.subscribe(principal.UserID)
-	defer cancel()
 
 	// Immediate hello so the client can distinguish a live stream from a
 	// dead one before the first heartbeat.
@@ -103,6 +153,8 @@ func (h *InvalidationHub) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-revoked:
 			return
 		case <-events:
 			// The only event type: this creator's creation state changed.

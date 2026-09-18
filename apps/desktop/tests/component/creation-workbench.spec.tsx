@@ -1089,11 +1089,43 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
         index: 1,
         status: 'failed',
         failureReason: 'provider_route_unavailable',
+        actionSuggestion: 'contact_admin',
+        retryable: false,
+        supportNumber: 'NVX-dddddddd-0000-4000-8000-00000000face-02',
         result: null
       }
     ]
   }
-  await mount(<CreationWorkbenchStory taskScript={{ tasks: [failedTask] }} />)
+  const retryableTask: ScriptedTask = {
+    ...failedTask,
+    id: 'dddddddd-0000-4000-8000-00000000beef',
+    status: 'failed',
+    slotCount: 1,
+    slots: [
+      {
+        index: 0,
+        status: 'failed',
+        failureReason: 'temporarily_unavailable',
+        actionSuggestion: 'retry_later',
+        retryable: true,
+        supportNumber: null,
+        result: null
+      }
+    ]
+  }
+  const cancelledSlotTask: ScriptedTask = {
+    ...failedTask,
+    id: 'dddddddd-0000-4000-8000-00000000cafe',
+    slots: [
+      { index: 0, status: 'succeeded', failureReason: null, result: null },
+      { index: 1, status: 'cancelled', failureReason: null, result: null }
+    ]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [failedTask, retryableTask, cancelledSlotTask] }}
+    />
+  )
   await selectFirstSession(page)
 
   // States render inside the slots — no separate banner.
@@ -1110,14 +1142,19 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
   await expect(failedSlot).toContainText(
     'channel binding, permissions, balance, quota, or capacity'
   )
+  await expect(failedSlot).toContainText('Contact an administrator')
+  await expect(failedSlot).toContainText('Do not retry unchanged')
+  await expect(failedSlot).toContainText('NVX-dddddddd-0000-4000-8000-00000000face-02')
 
-  // Partial success keeps retrying exactly the uncompleted slots; the redo
-  // affordance lives in the task's overflow menu.
-  await page.getByTestId(`task-more-${failedTask.id}`).click()
-  await page.getByTestId(`task-retry-${failedTask.id}`).click()
+  await expect(page.getByTestId(`task-retry-${failedTask.id}`)).toHaveCount(0)
+  await page.getByTestId(`task-more-${retryableTask.id}`).click()
+  await page.getByTestId(`task-retry-${retryableTask.id}`).click()
+  await page.getByTestId(`task-more-${cancelledSlotTask.id}`).click()
+  await page.getByTestId(`task-retry-${cancelledSlotTask.id}`).click()
   const retries = await page.evaluate(() => window.__creationDeckTest?.retryCalls() ?? [])
-  expect(retries).toHaveLength(1)
-  expect(retries[0].taskId).toBe(failedTask.id)
+  expect(retries).toHaveLength(2)
+  expect(retries[0].taskId).toBe(retryableTask.id)
+  expect(retries[1].taskId).toBe(cancelledSlotTask.id)
 })
 
 test('a task card keeps detail facts paired with the detail change criterion', async ({

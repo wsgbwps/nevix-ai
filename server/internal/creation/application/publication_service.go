@@ -5,6 +5,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nevix-ai/server/internal/auditlog"
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
@@ -12,6 +13,8 @@ import (
 type PublicationCapabilities struct {
 	CanWithdraw      bool
 	CanCreateSimilar bool
+	CanRestrict      bool
+	CanRelease       bool
 }
 
 type PublicationView struct {
@@ -83,7 +86,8 @@ func (s *PublicationService) ListInspiration(ctx context.Context, principal auth
 			asset := assetView(*item.Asset, actor, true)
 			asset.Capabilities.CanPublish = false
 			asset.Capabilities.CanCreateSimilar = item.Asset.ActivePublication != nil &&
-				!item.Asset.ActivePublication.Restricted && !item.Asset.Restricted
+				item.Asset.ActivePublication.RestrictionState == "" &&
+				item.Asset.RestrictionState != domain.RestrictionActive
 			view.Asset = &asset
 		}
 		if item.Publication != nil {
@@ -100,7 +104,7 @@ func (s *PublicationService) GetPublication(ctx context.Context, principal authz
 	if err != nil {
 		return PublicationDetail{}, err
 	}
-	detail, err := s.repository.GetPublication(ctx, id)
+	detail, err := s.repository.GetPublication(ctx, id, principal.Role == "admin")
 	if err != nil {
 		return PublicationDetail{}, err
 	}
@@ -122,7 +126,8 @@ func (s *PublicationService) GetAdminAsset(ctx context.Context, principal authz.
 	asset := assetView(detail.Asset, actor, true)
 	asset.Capabilities.CanPublish = false
 	asset.Capabilities.CanCreateSimilar = detail.ActivePublication != nil &&
-		!detail.ActivePublication.Restricted && !detail.Asset.Restricted
+		detail.ActivePublication.RestrictionState == "" &&
+		detail.Asset.RestrictionState != domain.RestrictionActive
 	result := AdminAssetDetail{Asset: asset, Specification: detail.Specification, References: detail.References}
 	if detail.ActivePublication != nil {
 		publication := publicationView(*detail.ActivePublication, actor, true)
@@ -135,7 +140,7 @@ func (s *PublicationService) ResolvePublication(ctx context.Context, principal a
 	if _, err := actorID(principal); err != nil {
 		return domain.TeamPublication{}, err
 	}
-	detail, err := s.repository.GetPublication(ctx, id)
+	detail, err := s.repository.GetPublication(ctx, id, principal.Role == "admin")
 	return detail.Publication, err
 }
 
@@ -155,6 +160,88 @@ func (s *PublicationService) Withdraw(ctx context.Context, principal authz.Princ
 	return s.runner.Run(ctx, func(scope domain.WriteScope) error {
 		return s.repository.Withdraw(ctx, scope.Tx(), actor, id, principal.Role == "admin")
 	})
+}
+
+func (s *PublicationService) RestrictAsset(ctx context.Context, principal authz.Principal, id domain.UUID) (AssetView, error) {
+	return s.setAssetRestriction(ctx, principal, id, true)
+}
+
+func (s *PublicationService) ReleaseAsset(ctx context.Context, principal authz.Principal, id domain.UUID) (AssetView, error) {
+	return s.setAssetRestriction(ctx, principal, id, false)
+}
+
+func (s *PublicationService) setAssetRestriction(ctx context.Context, principal authz.Principal, id domain.UUID, active bool) (AssetView, error) {
+	actor, err := actorID(principal)
+	if err != nil || principal.Role != "admin" {
+		return AssetView{}, domain.ErrAssetNotFound
+	}
+	var asset domain.MediaAsset
+	err = s.runner.Run(ctx, func(scope domain.WriteScope) error {
+		var changed bool
+		var commandErr error
+		if active {
+			asset, changed, commandErr = s.repository.RestrictAsset(ctx, scope.Tx(), id)
+		} else {
+			asset, changed, commandErr = s.repository.ReleaseAsset(ctx, scope.Tx(), id)
+		}
+		if commandErr != nil || !changed {
+			return commandErr
+		}
+		action := auditlog.MediaAssetRestrictionReleased
+		state := domain.RestrictionReleased
+		if active {
+			action = auditlog.MediaAssetRestricted
+			state = domain.RestrictionActive
+		}
+		return appendRestrictionAudit(ctx, scope.Tx(), principal, action, "media_asset", id, state)
+	})
+	return assetView(asset, actor, true), err
+}
+
+func (s *PublicationService) RestrictPublication(ctx context.Context, principal authz.Principal, id domain.UUID) (PublicationView, error) {
+	return s.setPublicationRestriction(ctx, principal, id, true)
+}
+
+func (s *PublicationService) ReleasePublication(ctx context.Context, principal authz.Principal, id domain.UUID) (PublicationView, error) {
+	return s.setPublicationRestriction(ctx, principal, id, false)
+}
+
+func (s *PublicationService) setPublicationRestriction(ctx context.Context, principal authz.Principal, id domain.UUID, active bool) (PublicationView, error) {
+	actor, err := actorID(principal)
+	if err != nil || principal.Role != "admin" {
+		return PublicationView{}, domain.ErrPublicationNotFound
+	}
+	var publication domain.TeamPublication
+	err = s.runner.Run(ctx, func(scope domain.WriteScope) error {
+		var changed bool
+		var commandErr error
+		if active {
+			publication, changed, commandErr = s.repository.RestrictPublication(ctx, scope.Tx(), id)
+		} else {
+			publication, changed, commandErr = s.repository.ReleasePublication(ctx, scope.Tx(), id)
+		}
+		if commandErr != nil || !changed {
+			return commandErr
+		}
+		action := auditlog.TeamPublicationRestrictionReleased
+		state := domain.RestrictionReleased
+		if active {
+			action = auditlog.TeamPublicationRestricted
+			state = domain.RestrictionActive
+		}
+		return appendRestrictionAudit(ctx, scope.Tx(), principal, action, "team_publication", id, state)
+	})
+	return publicationView(publication, actor, true), err
+}
+
+func appendRestrictionAudit(ctx context.Context, tx domain.TxExecutor, principal authz.Principal, action auditlog.Action, kind string, id domain.UUID, state domain.RestrictionState) error {
+	actor, err := auditlog.SnapshotSubject(ctx, tx, principal.UserID)
+	if err != nil {
+		return err
+	}
+	return auditlog.Append(ctx, tx, auditlog.Entry{Actor: actor, Action: action, Metadata: map[string]string{
+		"resource_kind": kind, "resource_id": id.String(), "restriction_state": string(state),
+	}})
 }
 
 func (s *PublicationService) CreateSimilar(ctx context.Context, principal authz.Principal, id domain.UUID, key string) (domain.SimilarCreation, bool, error) {
@@ -183,8 +270,11 @@ func (s *PublicationService) CreateSimilar(ctx context.Context, principal authz.
 	return result, created, nil
 }
 
-func (s *PublicationService) AuthorizePublicationPreview(ctx context.Context, publicationID, referenceID domain.UUID) (MaterialURLAuthorization, error) {
-	reference, err := s.repository.GetPublicationReference(ctx, publicationID, referenceID)
+func (s *PublicationService) AuthorizePublicationPreview(ctx context.Context, principal authz.Principal, publicationID, referenceID domain.UUID) (MaterialURLAuthorization, error) {
+	if _, err := actorID(principal); err != nil {
+		return MaterialURLAuthorization{}, err
+	}
+	reference, err := s.repository.GetPublicationReference(ctx, publicationID, referenceID, principal.Role == "admin")
 	return s.authorizeReference(ctx, reference, err)
 }
 
@@ -214,7 +304,9 @@ func publicationView(publication domain.TeamPublication, actor domain.UUID, admi
 		Publication: publication,
 		Capabilities: PublicationCapabilities{
 			CanWithdraw:      publication.PublisherID == actor || admin,
-			CanCreateSimilar: !publication.Restricted,
+			CanCreateSimilar: publication.RestrictionState == "",
+			CanRestrict:      admin && publication.DirectRestriction != domain.RestrictionActive,
+			CanRelease:       admin && publication.DirectRestriction == domain.RestrictionActive,
 		},
 	}
 }

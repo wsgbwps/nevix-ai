@@ -11,6 +11,8 @@ type AssetCapabilities struct {
 	CanDelete        bool
 	CanCreateSimilar bool
 	CanPublish       bool
+	CanRestrict      bool
+	CanRelease       bool
 }
 
 type AssetView struct {
@@ -109,13 +111,19 @@ func assetViews(assets []domain.MediaAsset, actor domain.UUID, admin bool) []Ass
 
 func assetView(asset domain.MediaAsset, actor domain.UUID, admin bool) AssetView {
 	owner := asset.OwnerID == actor
+	canPublish := owner && asset.RestrictionState != domain.RestrictionActive &&
+		(asset.ActivePublication == nil || asset.ActivePublication.RestrictionState == domain.RestrictionReleased)
+	if canPublish && asset.ActivePublication != nil {
+		asset.ActivePublication = nil
+	}
 	return AssetView{
 		Asset: asset,
 		Capabilities: AssetCapabilities{
 			CanDelete:        owner || admin,
-			CanCreateSimilar: owner,
-			CanPublish: owner && !asset.Restricted &&
-				(asset.ActivePublication == nil || asset.ActivePublication.Restricted),
+			CanCreateSimilar: owner && asset.RestrictionState != domain.RestrictionActive,
+			CanPublish:       canPublish,
+			CanRestrict:      admin && asset.RestrictionState != domain.RestrictionActive,
+			CanRelease:       admin && asset.RestrictionState == domain.RestrictionActive,
 		},
 	}
 }

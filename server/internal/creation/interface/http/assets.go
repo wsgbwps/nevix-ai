@@ -142,25 +142,27 @@ type assetDetailResponse struct {
 }
 
 type assetResource struct {
-	ID           string                    `json:"id"`
-	Creator      assetCreatorResource      `json:"creator"`
-	MediaType    string                    `json:"media_type"`
-	MimeType     string                    `json:"mime_type"`
-	ByteSize     int64                     `json:"byte_size"`
-	Checksum     string                    `json:"checksum_sha256"`
-	WidthPx      *int                      `json:"width_px"`
-	HeightPx     *int                      `json:"height_px"`
-	DurationMS   *int                      `json:"duration_ms"`
-	CreatedAt    string                    `json:"created_at"`
-	Restricted   bool                      `json:"restricted"`
-	Publication  *assetPublicationResource `json:"publication"`
-	Capabilities assetCapabilitiesResource `json:"capabilities"`
+	ID               string                    `json:"id"`
+	Creator          assetCreatorResource      `json:"creator"`
+	MediaType        string                    `json:"media_type"`
+	MimeType         string                    `json:"mime_type"`
+	ByteSize         int64                     `json:"byte_size"`
+	Checksum         string                    `json:"checksum_sha256"`
+	WidthPx          *int                      `json:"width_px"`
+	HeightPx         *int                      `json:"height_px"`
+	DurationMS       *int                      `json:"duration_ms"`
+	CreatedAt        string                    `json:"created_at"`
+	Restricted       bool                      `json:"restricted"`
+	RestrictionState *string                   `json:"restriction_state"`
+	Publication      *assetPublicationResource `json:"publication"`
+	Capabilities     assetCapabilitiesResource `json:"capabilities"`
 }
 
 type assetPublicationResource struct {
-	ID          string `json:"id"`
-	PublishedAt string `json:"published_at"`
-	Restricted  bool   `json:"restricted"`
+	ID               string  `json:"id"`
+	PublishedAt      string  `json:"published_at"`
+	Restricted       bool    `json:"restricted"`
+	RestrictionState *string `json:"restriction_state"`
 }
 
 type assetCreatorResource struct {
@@ -172,6 +174,8 @@ type assetCapabilitiesResource struct {
 	CanDelete        bool `json:"can_delete"`
 	CanCreateSimilar bool `json:"can_create_similar"`
 	CanPublish       bool `json:"can_publish"`
+	CanRestrict      bool `json:"can_restrict"`
+	CanRelease       bool `json:"can_release"`
 }
 
 func toAssetResource(view application.AssetView) assetResource {
@@ -183,9 +187,10 @@ func toAssetResource(view application.AssetView) assetResource {
 	var publication *assetPublicationResource
 	if asset.ActivePublication != nil {
 		publication = &assetPublicationResource{
-			ID:          asset.ActivePublication.ID.String(),
-			PublishedAt: asset.ActivePublication.PublishedAt.UTC().Format(time.RFC3339Nano),
-			Restricted:  asset.ActivePublication.Restricted,
+			ID:               asset.ActivePublication.ID.String(),
+			PublishedAt:      asset.ActivePublication.PublishedAt.UTC().Format(time.RFC3339Nano),
+			Restricted:       asset.ActivePublication.Restricted,
+			RestrictionState: restrictionStateResource(asset.ActivePublication.RestrictionState),
 		}
 	}
 	return assetResource{
@@ -194,12 +199,22 @@ func toAssetResource(view application.AssetView) assetResource {
 		MediaType: string(asset.MediaType), MimeType: asset.Mime, ByteSize: asset.ByteSize,
 		Checksum: checksum, WidthPx: asset.WidthPx, HeightPx: asset.HeightPx,
 		DurationMS: asset.DurationMS, CreatedAt: asset.CreatedAt.UTC().Format(time.RFC3339Nano),
-		Restricted: asset.Restricted, Publication: publication,
+		Restricted: asset.Restricted, RestrictionState: restrictionStateResource(asset.RestrictionState),
+		Publication: publication,
 		Capabilities: assetCapabilitiesResource{
 			CanDelete: view.Capabilities.CanDelete, CanCreateSimilar: view.Capabilities.CanCreateSimilar,
-			CanPublish: view.Capabilities.CanPublish,
+			CanPublish: view.Capabilities.CanPublish, CanRestrict: view.Capabilities.CanRestrict,
+			CanRelease: view.Capabilities.CanRelease,
 		},
 	}
+}
+
+func restrictionStateResource(state domain.RestrictionState) *string {
+	if state == "" {
+		return nil
+	}
+	value := string(state)
+	return &value
 }
 
 type privateOriginResource struct {

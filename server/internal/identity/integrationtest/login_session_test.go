@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity"
 )
 
@@ -284,6 +285,49 @@ func TestLogoutRevokesOnlyTheCallingSession(t *testing.T) {
 	// before the command runs, so a dead session can never re-revoke itself.
 	if status, body := doLogout(t, handler, first.Token); status != http.StatusUnauthorized {
 		t.Fatalf("repeat logout: status %d body %s, want 401", status, body)
+	}
+}
+
+func TestLogoutPublishesTheCommittedSessionIdentity(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	h := newHarness(t, ctx)
+	h.resetUserState(t)
+	h.insertUser(t, loginEmail, loginPassword, "admin", "active", false)
+	bus := event.NewInMemoryBus()
+	_, handler := h.moduleWithConfigAndBus(t, h.cfg, bus)
+
+	status, _, login := doLogin(t, handler, loginEmail, loginPassword)
+	if status != http.StatusOK {
+		t.Fatalf("login: status %d", status)
+	}
+	digest := sha256.Sum256([]byte(login.Token))
+	var sessionID string
+	if err := h.fixturePool.QueryRow(ctx, `SELECT id FROM public.sessions WHERE token_hash = $1`, digest[:]).Scan(&sessionID); err != nil {
+		t.Fatalf("read session identity: %v", err)
+	}
+
+	var received []event.SessionRevoked
+	bus.Subscribe(event.SessionRevokedType, func(envelope event.Event) {
+		payload, ok := envelope.Payload.(event.SessionRevoked)
+		if !ok {
+			t.Fatalf("session revocation payload type = %T, want event.SessionRevoked", envelope.Payload)
+		}
+		var stillPresent bool
+		if err := h.fixturePool.QueryRow(ctx, `SELECT EXISTS (SELECT FROM public.sessions WHERE id = $1)`, payload.SessionID).Scan(&stillPresent); err != nil {
+			t.Fatalf("observe committed revocation: %v", err)
+		}
+		if stillPresent {
+			t.Fatal("session revocation event published before commit")
+		}
+		received = append(received, payload)
+	})
+
+	if status, body := doLogout(t, handler, login.Token); status != http.StatusOK {
+		t.Fatalf("logout: status %d body %s", status, body)
+	}
+	if len(received) != 1 || received[0].SessionID != sessionID {
+		t.Fatalf("published revocations = %+v, want exactly session %s", received, sessionID)
 	}
 }
 

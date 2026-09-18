@@ -159,6 +159,32 @@ func TestSlotVerdictForJob(t *testing.T) {
 	}
 }
 
+func TestFailureGuidanceCoversStableReasons(t *testing.T) {
+	tests := []struct {
+		reason    FailureReason
+		action    FailureAction
+		retryable bool
+	}{
+		{ReasonInvalidInput, FailureActionCorrectInput, false},
+		{ReasonRightsConfirmationRequired, FailureActionConfirmRights, false},
+		{ReasonInputPolicyRejected, FailureActionReviseInput, false},
+		{ReasonOutputPolicyRejected, FailureActionReviseRequest, false},
+		{ReasonActionRequired, FailureActionContactAdmin, false},
+		{ReasonTemporarilyUnavailable, FailureActionRetryLater, true},
+		{ReasonProviderRouteUnavailable, FailureActionContactAdmin, false},
+		{ReasonProcessingIndeterminate, FailureActionContactSupport, false},
+		{ReasonInternalError, FailureActionRetryLater, true},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.reason), func(t *testing.T) {
+			action, retryable := FailureGuidance(tt.reason)
+			if action != tt.action || retryable != tt.retryable {
+				t.Fatalf("FailureGuidance(%s) = (%s, %v), want (%s, %v)", tt.reason, action, retryable, tt.action, tt.retryable)
+			}
+		})
+	}
+}
+
 func TestSpecificationCanonicalPayloadIsStable(t *testing.T) {
 	base := GenerationSpecification{
 		SchemaVersion:   SpecificationSchemaVersion,

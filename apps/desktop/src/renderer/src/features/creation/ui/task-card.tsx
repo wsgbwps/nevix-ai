@@ -115,7 +115,7 @@ export function TaskCard({
     !indeterminate &&
     snapshot.status !== 'succeeded' &&
     snapshot.status !== 'cancelled' &&
-    !hasPolicyRejectedSlot(detail)
+    hasNoNonRetryableIncompleteSlots(detail)
   // The composer is a fixed surface that owns the live draft; re-editing a
   // task means editing that draft and regenerating.
   const focusComposerPrompt = (): void => {
@@ -596,16 +596,8 @@ function taskResultMediaKey(taskId: string, slot: GenerationSlotView): string {
   return `result:${taskId}:${slot.index}:${slot.result?.checksumSha256 ?? ''}`
 }
 
-// A policy-rejected slot forbids the quick "retry uncompleted" affordance:
-// the retry re-runs the frozen specification verbatim, so identical input or
-// output content would be rejected again (spec #150 安全拒绝). Editing the
-// draft and regenerating stays available.
-function hasPolicyRejectedSlot(detail: GenerationTaskDetail | undefined): boolean {
-  return (
-    detail?.slots.some(
-      (slot) =>
-        slot.failureReason === 'input_policy_rejected' ||
-        slot.failureReason === 'output_policy_rejected'
-    ) ?? false
-  )
+function hasNoNonRetryableIncompleteSlots(detail: GenerationTaskDetail | undefined): boolean {
+  if (!detail) return false
+  const incomplete = detail.slots.filter((slot) => slot.status !== 'succeeded')
+  return incomplete.length > 0 && incomplete.every((slot) => slot.retryable !== false)
 }

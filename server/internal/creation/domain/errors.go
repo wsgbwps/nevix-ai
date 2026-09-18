@@ -118,6 +118,9 @@ var (
 	// ErrNoIncompleteSlots reports a retry against a task with nothing left
 	// to retry — every slot already succeeded.
 	ErrNoIncompleteSlots = errors.New("no incomplete slots to retry")
+	// ErrTaskRetryNotAllowed reports that at least one incomplete slot requires
+	// changed input or operator action instead of an identical retry.
+	ErrTaskRetryNotAllowed = errors.New("generation task cannot be retried unchanged")
 	// ErrTaskStateConflict reports a lost guarded transition race; workers
 	// treat it as an expected serialization signal, never a 5xx.
 	ErrTaskStateConflict = errors.New("task state transition lost the race")

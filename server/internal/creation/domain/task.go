@@ -93,6 +93,41 @@ const (
 	ReasonInternalError              FailureReason = "internal_error"
 )
 
+// FailureAction is the stable next step shown with a failed result slot.
+type FailureAction string
+
+const (
+	FailureActionCorrectInput   FailureAction = "correct_input"
+	FailureActionConfirmRights  FailureAction = "confirm_rights"
+	FailureActionReviseInput    FailureAction = "revise_input"
+	FailureActionReviseRequest  FailureAction = "revise_request"
+	FailureActionContactAdmin   FailureAction = "contact_admin"
+	FailureActionRetryLater     FailureAction = "retry_later"
+	FailureActionContactSupport FailureAction = "contact_support"
+)
+
+// FailureGuidance maps a stable reason to its action and identical-retry policy.
+func FailureGuidance(reason FailureReason) (FailureAction, bool) {
+	switch reason {
+	case ReasonInvalidInput:
+		return FailureActionCorrectInput, false
+	case ReasonRightsConfirmationRequired:
+		return FailureActionConfirmRights, false
+	case ReasonInputPolicyRejected:
+		return FailureActionReviseInput, false
+	case ReasonOutputPolicyRejected:
+		return FailureActionReviseRequest, false
+	case ReasonActionRequired, ReasonProviderRouteUnavailable:
+		return FailureActionContactAdmin, false
+	case ReasonTemporarilyUnavailable, ReasonInternalError:
+		return FailureActionRetryLater, true
+	case ReasonProcessingIndeterminate:
+		return FailureActionContactSupport, false
+	default:
+		return FailureActionContactSupport, false
+	}
+}
+
 // FailureDiagnosticSource names the authoritative boundary that produced a
 // concrete slot failure. The stable FailureReason still controls retry and
 // governance; this creator-private value only explains that verdict.

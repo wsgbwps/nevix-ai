@@ -63,3 +63,17 @@ test('object storage maintenance audit actions use the server vocabulary in both
     assert.equal(typeof actionsFor('en')[action], 'string')
   }
 })
+
+test('creation safety audit actions use the server vocabulary in both languages', () => {
+  const expected = [
+    'media_asset_restricted',
+    'media_asset_restriction_released',
+    'team_publication_restricted',
+    'team_publication_restriction_released'
+  ]
+  for (const action of expected) {
+    assert.equal(AUDIT_ACTION_KEYS.includes(action as never), true)
+    assert.equal(typeof actionsFor('zh-CN')[action], 'string')
+    assert.equal(typeof actionsFor('en')[action], 'string')
+  }
+})

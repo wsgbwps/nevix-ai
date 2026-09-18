@@ -21,6 +21,8 @@ type TeamPublication struct {
 	Specification        GenerationSpecification
 	PublishedAt          time.Time
 	Restricted           bool
+	RestrictionState     RestrictionState
+	DirectRestriction    RestrictionState
 }
 
 type PublicationReference struct {
@@ -69,10 +71,14 @@ type SimilarCreation struct {
 type PublicationRepository interface {
 	Publish(ctx context.Context, tx TxExecutor, publisher, assetID UUID, idempotencyKey string) (TeamPublication, bool, error)
 	ListInspiration(ctx context.Context, admin bool, filter AssetListFilter, cursor *CompoundCursor, limit int) ([]InspirationItem, *CompoundCursor, error)
-	GetPublication(ctx context.Context, id UUID) (PublicationDetail, error)
+	GetPublication(ctx context.Context, id UUID, admin bool) (PublicationDetail, error)
 	GetAdminAsset(ctx context.Context, id UUID) (AdminAssetDetail, error)
 	Withdraw(ctx context.Context, tx TxExecutor, actor, id UUID, admin bool) error
 	CreateSimilar(ctx context.Context, tx TxExecutor, actor, id UUID, idempotencyKey string) (SimilarCreation, bool, error)
-	GetPublicationReference(ctx context.Context, publicationID, referenceID UUID) (PublicationReference, error)
+	GetPublicationReference(ctx context.Context, publicationID, referenceID UUID, admin bool) (PublicationReference, error)
 	GetAdminAssetReference(ctx context.Context, assetID, referenceID UUID) (PublicationReference, error)
+	RestrictAsset(ctx context.Context, tx TxExecutor, id UUID) (MediaAsset, bool, error)
+	ReleaseAsset(ctx context.Context, tx TxExecutor, id UUID) (MediaAsset, bool, error)
+	RestrictPublication(ctx context.Context, tx TxExecutor, id UUID) (TeamPublication, bool, error)
+	ReleasePublication(ctx context.Context, tx TxExecutor, id UUID) (TeamPublication, bool, error)
 }

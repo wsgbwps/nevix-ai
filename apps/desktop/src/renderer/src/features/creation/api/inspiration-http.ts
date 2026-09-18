@@ -7,13 +7,16 @@ import {
   type AssetGenerationSpecification,
   type AssetMediaType,
   type AssetReferenceSummary,
-  type MediaAssetView
+  type MediaAssetView,
+  type RestrictionState
 } from './asset-library-http'
 import { request, type CreationApiResult, type CreationSessionView } from './go-creation-http'
 
 export interface PublicationCapabilities {
   readonly canWithdraw: boolean
   readonly canCreateSimilar: boolean
+  readonly canRestrict: boolean
+  readonly canRelease: boolean
 }
 
 export interface PublicationView {
@@ -29,6 +32,7 @@ export interface PublicationView {
   readonly durationMs: number | null
   readonly publishedAt: string
   readonly restricted: boolean
+  readonly restrictionState: RestrictionState
   readonly capabilities: PublicationCapabilities
 }
 
@@ -112,6 +116,14 @@ export interface InspirationPorts {
     publicationId: string,
     idempotencyKey: string
   ) => Promise<CreationApiResult<PublicationSimilarResult>>
+  readonly restrictAsset: (assetId: string) => Promise<CreationApiResult<MediaAssetView>>
+  readonly releaseAsset: (assetId: string) => Promise<CreationApiResult<MediaAssetView>>
+  readonly restrictPublication: (
+    publicationId: string
+  ) => Promise<CreationApiResult<PublicationView>>
+  readonly releasePublication: (
+    publicationId: string
+  ) => Promise<CreationApiResult<PublicationView>>
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -135,6 +147,15 @@ function nullableNumberField(value: unknown, field: string): number | null | und
   return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : undefined
 }
 
+function restrictionStateField(value: unknown): RestrictionState | undefined {
+  const source = record(value)
+  if (source === null || !('restriction_state' in source)) return undefined
+  const candidate = source['restriction_state']
+  return candidate === null || candidate === 'active' || candidate === 'released'
+    ? candidate
+    : undefined
+}
+
 function parsePublication(value: unknown): PublicationView | null {
   const source = record(value)
   const id = stringField(value, 'id')
@@ -150,9 +171,12 @@ function parsePublication(value: unknown): PublicationView | null {
   const durationMs = nullableNumberField(value, 'duration_ms')
   const publishedAt = stringField(value, 'published_at')
   const restricted = source?.['restricted']
+  const restrictionState = restrictionStateField(value)
   const capabilities = record(source?.['capabilities'])
   const canWithdraw = capabilities?.['can_withdraw']
   const canCreateSimilar = capabilities?.['can_create_similar']
+  const canRestrict = capabilities?.['can_restrict']
+  const canRelease = capabilities?.['can_release']
   if (
     !id ||
     !sourceAssetId ||
@@ -167,8 +191,11 @@ function parsePublication(value: unknown): PublicationView | null {
     durationMs === undefined ||
     !publishedAt ||
     typeof restricted !== 'boolean' ||
+    restrictionState === undefined ||
     typeof canWithdraw !== 'boolean' ||
-    typeof canCreateSimilar !== 'boolean'
+    typeof canCreateSimilar !== 'boolean' ||
+    typeof canRestrict !== 'boolean' ||
+    typeof canRelease !== 'boolean'
   ) {
     return null
   }
@@ -185,7 +212,8 @@ function parsePublication(value: unknown): PublicationView | null {
     durationMs,
     publishedAt,
     restricted,
-    capabilities: { canWithdraw, canCreateSimilar }
+    restrictionState,
+    capabilities: { canWithdraw, canCreateSimilar, canRestrict, canRelease }
   }
 }
 
@@ -373,7 +401,30 @@ export function createInspirationClient(serverUrl: string): {
     publicationId: string,
     idempotencyKey: string
   ): Promise<CreationApiResult<PublicationSimilarResult>>
+  restrictAsset(token: string, assetId: string): Promise<CreationApiResult<MediaAssetView>>
+  releaseAsset(token: string, assetId: string): Promise<CreationApiResult<MediaAssetView>>
+  restrictPublication(
+    token: string,
+    publicationId: string
+  ): Promise<CreationApiResult<PublicationView>>
+  releasePublication(
+    token: string,
+    publicationId: string
+  ): Promise<CreationApiResult<PublicationView>>
 } {
+  async function mutateRestriction<T>(
+    token: string,
+    method: 'PUT' | 'DELETE',
+    path: string,
+    envelope: 'asset' | 'publication',
+    parse: (value: unknown) => T | null
+  ): Promise<CreationApiResult<T>> {
+    const result = await request(serverUrl, { method, path, token })
+    if (result.outcome !== 'succeeded') return result
+    const parsed = parse(record(result.payload)?.[envelope])
+    return parsed ? { outcome: 'succeeded', value: parsed } : { outcome: 'network-failure' }
+  }
+
   return {
     async list(token, page) {
       const result = await request(serverUrl, {
@@ -455,6 +506,38 @@ export function createInspirationClient(serverUrl: string): {
       if (result.outcome !== 'succeeded') return result
       const parsed = parseSimilar(result.payload)
       return parsed ? { outcome: 'succeeded', value: parsed } : { outcome: 'network-failure' }
-    }
+    },
+    restrictAsset: (token, assetId) =>
+      mutateRestriction(
+        token,
+        'PUT',
+        `/creation/inspiration/assets/${encodeURIComponent(assetId)}/restriction`,
+        'asset',
+        parseAsset
+      ),
+    releaseAsset: (token, assetId) =>
+      mutateRestriction(
+        token,
+        'DELETE',
+        `/creation/inspiration/assets/${encodeURIComponent(assetId)}/restriction`,
+        'asset',
+        parseAsset
+      ),
+    restrictPublication: (token, publicationId) =>
+      mutateRestriction(
+        token,
+        'PUT',
+        `/creation/publications/${encodeURIComponent(publicationId)}/restriction`,
+        'publication',
+        parsePublication
+      ),
+    releasePublication: (token, publicationId) =>
+      mutateRestriction(
+        token,
+        'DELETE',
+        `/creation/publications/${encodeURIComponent(publicationId)}/restriction`,
+        'publication',
+        parsePublication
+      )
   }
 }

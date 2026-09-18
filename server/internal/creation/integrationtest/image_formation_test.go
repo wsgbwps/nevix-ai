@@ -263,6 +263,22 @@ func TestImagePolicyRejectionFormsNoAsset(t *testing.T) {
 	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, view.Task.ID); got != 0 {
 		t.Fatalf("policy rejection must form no asset, got %d", got)
 	}
+	beforeTasks := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks`)
+	beforeJobs := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs`)
+	beforeAttempts := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_attempts`)
+	status, body = h.doRequest(t, http.MethodPost, "/creation/tasks/"+view.Task.ID+"/retry", token, map[string]any{"idempotency_key": "img-policy-retry"})
+	if status != http.StatusConflict || !strings.Contains(string(body), `"error":"task_retry_not_allowed"`) {
+		t.Fatalf("policy retry status=%d body=%s", status, body)
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_tasks`); got != beforeTasks {
+		t.Fatalf("policy retry created task count=%d want=%d", got, beforeTasks)
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs`); got != beforeJobs {
+		t.Fatalf("policy retry created provider job count=%d want=%d", got, beforeJobs)
+	}
+	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_attempts`); got != beforeAttempts {
+		t.Fatalf("policy retry created governance attempt count=%d want=%d", got, beforeAttempts)
+	}
 }
 
 // TestImageIndeterminateFormsNoAsset: an unidentifiable submit converges to

@@ -23,6 +23,101 @@ test('the admin projection keeps published and restricted assets in the same wal
   await expect(page.getByText('Restricted')).toBeVisible()
 })
 
+test('only server-authorized admin detail exposes keyboard-operable safety controls', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="admin" />)
+  await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
+  const dialog = page.getByRole('dialog')
+  const assetRestriction = dialog.getByRole('region', { name: 'Asset restriction' })
+  const publicationRestriction = dialog.getByRole('region', {
+    name: 'Publication restriction'
+  })
+  await expect(assetRestriction).toContainText('Active')
+  await expect(publicationRestriction).toContainText('Active')
+
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  const releaseAsset = assetRestriction.getByRole('button', {
+    name: 'Release asset restriction'
+  })
+  await releaseAsset.focus()
+  await page.keyboard.press('Enter')
+  await expect(assetRestriction).toContainText('Released')
+  await expect(dialog.getByRole('status')).toContainText('Asset restriction released.')
+
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await publicationRestriction
+    .getByRole('button', { name: 'Release publication restriction' })
+    .click()
+  await expect(publicationRestriction).toContainText('Released')
+  await expect(dialog.getByRole('status')).toContainText('Publication restriction released.')
+  expect(await page.evaluate(() => window.__inspirationTest?.safetyCalls())).toEqual([
+    'release:asset:admin-asset',
+    'release:publication:admin-publication'
+  ])
+})
+
+test('member detail has no safety command entry points', async ({ mount, page }) => {
+  await mount(<InspirationStory />)
+  await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('button', { name: /restriction/i })).toHaveCount(0)
+  await expect(dialog.getByRole('region', { name: /restriction/i })).toHaveCount(0)
+})
+
+test('failed safety commands retain state and announce recovery feedback', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="admin-safety-failed" />)
+  await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
+  const dialog = page.getByRole('dialog')
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await dialog.getByRole('button', { name: 'Release asset restriction' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('The restriction could not be updated.')
+  await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toContainText('Active')
+})
+
+test('a completed safety command cannot overwrite a newly opened detail', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="admin-safety-delayed" />)
+  await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
+  const dialog = page.getByRole('dialog')
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await dialog.getByRole('button', { name: 'Release asset restriction' }).click()
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
+  await expect(dialog).toContainText('A precise editorial launch scene')
+  const listCallsBeforeCompletion =
+    (await page.evaluate(() => window.__inspirationTest?.listCalls().length)) ?? 0
+
+  await page.evaluate(() => window.__inspirationTest?.releaseSafety())
+
+  await expect(dialog).toContainText('A precise editorial launch scene')
+  await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toHaveCount(0)
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.listCalls().length ?? 0))
+    .toBeGreaterThan(listCallsBeforeCompletion)
+})
+
+test('releasing a deleted-source publication removes its historical detail', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="admin-deleted-publication" />)
+  await page.getByRole('button', { name: 'Open inspiration deleted-publication' }).click()
+  const dialog = page.getByRole('dialog')
+  const restriction = dialog.getByRole('region', { name: 'Publication restriction' })
+
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await restriction.getByRole('button', { name: 'Release publication restriction' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByTestId('inspiration-card')).toHaveCount(0)
+})
+
 test('filters use the single projection and distinguish search-no-results', async ({
   mount,
   page
