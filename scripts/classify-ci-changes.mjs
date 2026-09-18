@@ -11,6 +11,7 @@ const CLASSIFICATIONS = [
   "macos_native",
   "harness",
 ];
+const RETIRED_DELETED_PATHS = new Set(["scripts/test-creation-cos-smoke.sh"]);
 
 function startsWith(path, prefix) {
   return path === prefix || path.startsWith(`${prefix}/`);
@@ -89,7 +90,6 @@ export function classifyPaths(paths) {
         "scripts/test-identity-integration.sh",
         "scripts/test-creation-integration.sh",
         "scripts/test-creation-oss-smoke.sh",
-        "scripts/test-creation-cos-smoke.sh",
       ])
     ) {
       checks.add("server");
@@ -214,6 +214,34 @@ function main() {
     .split("\0")
     .filter(Boolean);
   const result = classifyPaths(paths);
+  const deletedPaths = new Set(
+    git(
+      [
+        "diff",
+        "--no-renames",
+        "--diff-filter=D",
+        "--name-only",
+        "-z",
+        `${args.base}...${args.head}`,
+      ],
+      null,
+    )
+      .toString("utf8")
+      .split("\0")
+      .filter(Boolean),
+  );
+  const retiredDeletedPaths = new Set(
+    result.unknownPaths.filter(
+      (path) => deletedPaths.has(path) && RETIRED_DELETED_PATHS.has(path),
+    ),
+  );
+
+  if (retiredDeletedPaths.size > 0) {
+    result.harness = true;
+    result.unknownPaths = result.unknownPaths.filter(
+      (path) => !retiredDeletedPaths.has(path),
+    );
+  }
 
   if (result.unknownPaths.length > 0) {
     throw new Error(

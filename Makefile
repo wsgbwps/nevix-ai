@@ -1,4 +1,4 @@
-.PHONY: dev build lint check server postgres postgres-down docker-ready test-e2e test-e2e-smoke test-identity-integration test-creation-integration test-creation-oss-smoke test-creation-cos-smoke harness-test setup
+.PHONY: dev build lint check server postgres postgres-down docker-ready test-e2e test-e2e-smoke test-identity-integration test-creation-integration test-creation-oss-smoke harness-test setup
 
 dev:
 	pnpm dev
@@ -93,13 +93,10 @@ test-identity-integration: docker-ready
 test-creation-integration: docker-ready
 	./scripts/test-creation-integration.sh
 
-# Real provider compatibility checks. Each uses exact keys below an isolated
-# prefix and never requests List or bucket control-plane permissions.
+# Real OSS compatibility check. It uses exact keys below an isolated prefix and
+# never requests List or bucket control-plane permissions.
 test-creation-oss-smoke:
 	./scripts/test-creation-oss-smoke.sh
-
-test-creation-cos-smoke:
-	./scripts/test-creation-cos-smoke.sh
 
 harness-test:
 	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/deploy-stack.test.mjs .pi/tests/pi-hooks.test.mjs
