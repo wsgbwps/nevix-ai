@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"hash/crc64"
 	"io"
 	"net/http"
 	"net/url"
@@ -20,11 +19,11 @@ import (
 
 type newCloudStoreForTest func(t *testing.T, transport http.RoundTripper) domain.ObjectStorageBlobStore
 
-func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloudStoreForTest) {
+func runCloudConformanceSuite(t *testing.T, newStore newCloudStoreForTest) {
 	t.Helper()
 
 	t.Run("BlobStore", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		runConformanceSuite(t, func(t *testing.T) domain.BlobStore {
 			t.Helper()
 			return newStore(t, backend)
@@ -32,11 +31,11 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 	})
 
 	t.Run("ReferenceTransport", func(t *testing.T) {
-		runReferenceTransportConformanceSuite(t, provider, newStore)
+		runReferenceTransportConformanceSuite(t, newStore)
 	})
 
 	t.Run("HeadReportsAuthoritativeFacts", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		store := newStore(t, backend)
 		ctx := context.Background()
 		if _, err := store.Put(ctx, "suite/head", strings.NewReader("hello"), 1024); err != nil {
@@ -52,7 +51,7 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 	})
 
 	t.Run("PutForbidsOverwrite", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		store := newStore(t, backend)
 		ctx := context.Background()
 		if _, err := store.Put(ctx, "suite/no-overwrite", strings.NewReader("first"), 1024); err != nil {
@@ -64,7 +63,7 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 	})
 
 	t.Run("CanceledPutNeverDeletesAnExistingObject", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		store := newStore(t, backend)
 		ctx := context.Background()
 		if _, err := store.Put(ctx, "suite/cancel-existing", strings.NewReader("original"), 1024); err != nil {
@@ -87,7 +86,7 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 	})
 
 	t.Run("PresignedPutSignsOnlyRequiredHeaders", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		store := newStore(t, backend)
 		ctx := context.Background()
 		signed, err := store.PresignPut(ctx, domain.PresignPutRequest{
@@ -152,7 +151,7 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 	})
 
 	t.Run("PresignedThumbnailSignsResizeIntoTheSignature", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		store := newStore(t, backend)
 		ctx := context.Background()
 		if _, err := store.Put(ctx, "suite/thumb", strings.NewReader("image-bytes"), 1024); err != nil {
@@ -163,12 +162,8 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 			t.Fatalf("PresignThumbnail: %v", err)
 		}
 		query := mustParseSignedQuery(t, signedURL, backend.origin())
-		if provider == ProviderOSS {
-			if got := query.Get("x-oss-process"); got != "image/resize,m_lfit,w_320/format,webp" {
-				t.Fatalf("x-oss-process = %q, want the 320px WebP resize chain", got)
-			}
-		} else if _, ok := query["imageMogr2/thumbnail/320x/format/webp"]; !ok {
-			t.Fatalf("signed query lacks the CI process action: %s", signedURL)
+		if got := query.Get("x-oss-process"); got != "image/resize,m_lfit,w_320/format,webp" {
+			t.Fatalf("x-oss-process = %q, want the 320px WebP resize chain", got)
 		}
 		// The bare GET the URL authorizes (no Authorization header) must pass
 		// the provider-side signature check the fake enforces.
@@ -188,7 +183,7 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 	})
 
 	t.Run("PresignedPreviewSignsImageResizeAndRawMedia", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		store := newStore(t, backend)
 		ctx := context.Background()
 		if _, err := store.Put(ctx, "suite/preview", strings.NewReader("media-bytes"), 1024); err != nil {
@@ -199,12 +194,8 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 			t.Fatalf("PresignPreview image: %v", err)
 		}
 		imageQuery := mustParseSignedQuery(t, imageURL, backend.origin())
-		if provider == ProviderOSS {
-			if got := imageQuery.Get("x-oss-process"); got != "image/resize,m_lfit,w_2048/format,webp" {
-				t.Fatalf("x-oss-process = %q, want the 2048px WebP resize chain", got)
-			}
-		} else if _, ok := imageQuery["imageMogr2/thumbnail/2048x/format/webp"]; !ok {
-			t.Fatalf("signed query lacks the CI preview action: %s", imageURL)
+		if got := imageQuery.Get("x-oss-process"); got != "image/resize,m_lfit,w_2048/format,webp" {
+			t.Fatalf("x-oss-process = %q, want the 2048px WebP resize chain", got)
 		}
 		rawURL, err := store.PresignPreview(ctx, "suite/preview", domain.KindVideo, 10*time.Minute)
 		if err != nil {
@@ -213,9 +204,6 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 		rawQuery := mustParseSignedQuery(t, rawURL, backend.origin())
 		if _, ok := rawQuery["x-oss-process"]; ok {
 			t.Fatalf("raw preview GET must not carry a processing chain: %s", rawURL)
-		}
-		if _, ok := rawQuery["imageMogr2/thumbnail/2048x/format/webp"]; ok {
-			t.Fatalf("raw preview GET must not carry the CI preview action: %s", rawURL)
 		}
 		// Both bare GETs must pass the provider-side signature check the fake
 		// enforces, proving the variant query is signed into each URL.
@@ -237,7 +225,7 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 	})
 
 	t.Run("MapsProviderErrorsWithoutLeakingResponses", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		store := newStore(t, backend)
 		_, err := store.Head(context.Background(), fakeProviderErrorKey)
 		if !errors.Is(err, domain.ErrObjectStorageUnavailable) {
@@ -249,7 +237,7 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 	})
 
 	t.Run("DoesNotMisclassifyBucketOrUnrelatedConflictErrors", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		store := newStore(t, backend)
 		for _, key := range []string{fakeMissingBucketKey, fakeUnrelatedConflictKey} {
 			_, err := store.Head(context.Background(), key)
@@ -265,18 +253,6 @@ func runCloudConformanceSuite(t *testing.T, provider Provider, newStore newCloud
 		}
 	})
 
-	if provider == ProviderCOS {
-		t.Run("DisambiguatesCodeLessHeadNotFound", func(t *testing.T) {
-			backend := newFakeCloudTransport(provider)
-			store := newStore(t, backend)
-			if _, err := store.Head(context.Background(), fakeCodeLessMissingKey); !errors.Is(err, domain.ErrBlobNotFound) {
-				t.Fatalf("missing key error = %v, want ErrBlobNotFound", err)
-			}
-			if _, err := store.Head(context.Background(), fakeCodeLessMissingBucket); !errors.Is(err, domain.ErrObjectStorageConfiguration) {
-				t.Fatalf("missing bucket error = %v, want ErrObjectStorageConfiguration", err)
-			}
-		})
-	}
 }
 
 func mustParseSignedQuery(t *testing.T, signedURL, wantOrigin string) url.Values {
@@ -311,8 +287,6 @@ const (
 	fakeProviderErrorKey         = "suite/provider-error"
 	fakeMissingBucketKey         = "suite/missing-bucket"
 	fakeUnrelatedConflictKey     = "suite/unrelated-conflict"
-	fakeCodeLessMissingKey       = "suite/codeless-missing-key"
-	fakeCodeLessMissingBucket    = "suite/codeless-missing-bucket"
 	fakeSensitiveProviderMessage = "credential-secret-from-provider"
 )
 
@@ -323,7 +297,6 @@ type fakeCloudObject struct {
 }
 
 type fakeCloudTransport struct {
-	provider             Provider
 	mu                   sync.Mutex
 	objects              map[string]fakeCloudObject
 	last                 http.Header
@@ -342,8 +315,8 @@ type fakeCloudTransport struct {
 	sawRangeGet          bool
 }
 
-func newFakeCloudTransport(provider Provider) *fakeCloudTransport {
-	return &fakeCloudTransport{provider: provider, objects: make(map[string]fakeCloudObject), methods: make(map[string]int)}
+func newFakeCloudTransport() *fakeCloudTransport {
+	return &fakeCloudTransport{objects: make(map[string]fakeCloudObject), methods: make(map[string]int)}
 }
 
 func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -392,16 +365,6 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return f.errorResponse(req, http.StatusNotFound, "NoSuchBucket", fakeSensitiveProviderMessage), nil
 	case fakeUnrelatedConflictKey:
 		return f.errorResponse(req, http.StatusConflict, f.unrelatedConflictCode(), fakeSensitiveProviderMessage), nil
-	case fakeCodeLessMissingKey:
-		if req.Method == http.MethodHead {
-			return f.response(req, http.StatusNotFound, nil, nil), nil
-		}
-		return f.errorResponse(req, http.StatusNotFound, "NoSuchKey", fakeSensitiveProviderMessage), nil
-	case fakeCodeLessMissingBucket:
-		if req.Method == http.MethodHead {
-			return f.response(req, http.StatusNotFound, nil, nil), nil
-		}
-		return f.errorResponse(req, http.StatusNotFound, "NoSuchBucket", fakeSensitiveProviderMessage), nil
 	}
 
 	f.mu.Lock()
@@ -440,12 +403,7 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 			f.commitThenFailPut = false
 			return nil, errors.New("response lost after committed put")
 		}
-		headers := make(http.Header)
-		if f.provider == ProviderCOS {
-			checksum := crc64.Checksum(body, crc64.MakeTable(crc64.ECMA))
-			headers.Set("x-cos-hash-crc64ecma", strconv.FormatUint(checksum, 10))
-		}
-		return f.response(req, http.StatusOK, headers, nil), nil
+		return f.response(req, http.StatusOK, nil, nil), nil
 	case http.MethodHead:
 		object, exists := f.objects[key]
 		if !exists {
@@ -465,7 +423,7 @@ func (f *fakeCloudTransport) RoundTrip(req *http.Request) (*http.Response, error
 		}
 		return f.response(req, http.StatusOK, headers, nil), nil
 	case http.MethodGet:
-		if req.Header.Get("Authorization") == "" && req.URL.Query().Get("x-oss-signature") == "" && req.URL.Query().Get("q-signature") == "" {
+		if req.Header.Get("Authorization") == "" && req.URL.Query().Get("x-oss-signature") == "" {
 			f.sawAnonymousGet = true
 			return f.errorResponse(req, http.StatusForbidden, "AccessDenied", "private"), nil
 		}
@@ -494,24 +452,15 @@ func (f *fakeCloudTransport) sawMethod(method string) bool {
 }
 
 func (f *fakeCloudTransport) unrelatedConflictCode() string {
-	if f.provider == ProviderOSS {
-		return "FileImmutable"
-	}
-	return "ObjectLocked"
+	return "FileImmutable"
 }
 
 func (f *fakeCloudTransport) origin() string {
-	if f.provider == ProviderOSS {
-		return "https://nevix-test.oss-cn-hangzhou.aliyuncs.com"
-	}
-	return "https://nevix-test-1250000000.cos.ap-shanghai.myqcloud.com"
+	return "https://nevix-test.oss-cn-hangzhou.aliyuncs.com"
 }
 
 func (f *fakeCloudTransport) forbidOverwriteHeader() string {
-	if f.provider == ProviderOSS {
-		return "x-oss-forbid-overwrite"
-	}
-	return "x-cos-forbid-overwrite"
+	return "x-oss-forbid-overwrite"
 }
 
 func (f *fakeCloudTransport) metadataHeaderName() string {
@@ -519,10 +468,7 @@ func (f *fakeCloudTransport) metadataHeaderName() string {
 }
 
 func (f *fakeCloudTransport) metadataHeaderPrefix() string {
-	if f.provider == ProviderOSS {
-		return "x-oss-meta-"
-	}
-	return "x-cos-meta-"
+	return "x-oss-meta-"
 }
 
 func (f *fakeCloudTransport) response(req *http.Request, status int, headers http.Header, body []byte) *http.Response {

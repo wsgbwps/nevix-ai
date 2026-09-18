@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,6 +74,9 @@ func (s *ObjectStorageConnectionService) Capability(ctx context.Context) (Object
 	}
 	if err != nil {
 		return ObjectStorageCapability{}, err
+	}
+	if requiresLegacyObjectStorageRemediation(connection) {
+		return ObjectStorageCapability{}, nil
 	}
 	capability := ObjectStorageCapability{
 		Available:          connection.State == domain.ObjectStorageStateReady,
@@ -145,7 +149,7 @@ func (s *ObjectStorageConnectionService) resolveStoredCandidate(ctx context.Cont
 		}
 		return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, err
 	}
-	if connection.State != domain.ObjectStorageStateReady {
+	if connection.State != domain.ObjectStorageStateReady || connection.Provider != domain.ObjectStorageProviderOSS {
 		return domain.ObjectStorageConnection{}, domain.ObjectStorageCandidate{}, nil, domain.ErrObjectStorageConfiguration
 	}
 	candidate, plaintext, err := s.storedCandidate(connection)
@@ -262,6 +266,9 @@ func (s *ObjectStorageConnectionService) Recheck(ctx context.Context) (domain.Ob
 	if err != nil {
 		return domain.ObjectStorageConnection{}, err
 	}
+	if requiresLegacyObjectStorageRemediation(connection) {
+		return domain.ObjectStorageConnection{}, domain.ErrObjectStorageLegacyIncompatible
+	}
 	if connection.State != domain.ObjectStorageStateReady {
 		return domain.ObjectStorageConnection{}, domain.ErrObjectStorageRecoveryRequired
 	}
@@ -377,6 +384,9 @@ func (s *ObjectStorageConnectionService) Recover(ctx context.Context, principal 
 	if current.Revision != expectedRevision {
 		return domain.ObjectStorageConnection{}, domain.ErrObjectStorageRevisionConflict
 	}
+	if requiresLegacyObjectStorageRemediation(current) {
+		return domain.ObjectStorageConnection{}, domain.ErrObjectStorageLegacyIncompatible
+	}
 	if current.State != domain.ObjectStorageStateCredentialUnavailable {
 		return domain.ObjectStorageConnection{}, domain.ErrObjectStorageRecoveryNotRequired
 	}
@@ -451,6 +461,9 @@ func (s *ObjectStorageConnectionService) requireMaintenanceState(ctx context.Con
 	if connection.Revision != expectedRevision {
 		return domain.ObjectStorageConnection{}, domain.ErrObjectStorageRevisionConflict
 	}
+	if requiresLegacyObjectStorageRemediation(connection) {
+		return domain.ObjectStorageConnection{}, domain.ErrObjectStorageLegacyIncompatible
+	}
 	if connection.State != domain.ObjectStorageStateReady {
 		return domain.ObjectStorageConnection{}, domain.ErrObjectStorageRecoveryRequired
 	}
@@ -458,8 +471,14 @@ func (s *ObjectStorageConnectionService) requireMaintenanceState(ctx context.Con
 }
 
 func (s *ObjectStorageConnectionService) verifyCandidate(ctx context.Context, candidate domain.ObjectStorageCandidate) (domain.ObjectStorageLocation, error) {
+	if !strings.EqualFold(strings.TrimSpace(string(candidate.Location.Provider)), string(domain.ObjectStorageProviderOSS)) {
+		return domain.ObjectStorageLocation{}, domain.ErrInvalidObjectStorageCandidate
+	}
 	location, err := s.verifier.Verify(ctx, candidate)
 	if err == nil {
+		if location.Provider != domain.ObjectStorageProviderOSS {
+			return domain.ObjectStorageLocation{}, domain.ErrInvalidObjectStorageCandidate
+		}
 		return location, nil
 	}
 	if errors.Is(err, domain.ErrInvalidObjectStorageCandidate) {
@@ -522,8 +541,15 @@ func (s *ObjectStorageConnectionService) credentialKeyForFirstConnection(ctx con
 
 func (s *ObjectStorageConnectionService) activeConnection(ctx context.Context) (domain.ObjectStorageConnection, error) {
 	connection, err := s.connections.GetActive(ctx)
-	if err != nil || connection.State == domain.ObjectStorageStateCredentialUnavailable {
+	if err != nil {
 		return connection, err
+	}
+	if requiresLegacyObjectStorageRemediation(connection) {
+		connection.State = domain.ObjectStorageStateLegacyIncompatible
+		return connection, nil
+	}
+	if connection.State != domain.ObjectStorageStateReady {
+		return connection, nil
 	}
 	_, plaintext, err := s.storedCandidate(connection)
 	if err != nil {
@@ -531,6 +557,10 @@ func (s *ObjectStorageConnectionService) activeConnection(ctx context.Context) (
 	}
 	wipe(plaintext)
 	return connection, nil
+}
+
+func requiresLegacyObjectStorageRemediation(connection domain.ObjectStorageConnection) bool {
+	return connection.State == domain.ObjectStorageStateLegacyIncompatible || connection.Provider != domain.ObjectStorageProviderOSS
 }
 
 func (s *ObjectStorageConnectionService) markCredentialUnavailable(ctx context.Context, connection domain.ObjectStorageConnection) (domain.ObjectStorageConnection, error) {
@@ -554,15 +584,18 @@ func appendObjectStorageAudit(ctx context.Context, tx domain.TxExecutor, princip
 	if err != nil {
 		return err
 	}
+	metadata := map[string]string{
+		"connection_id": connection.ID.String(),
+		"revision":      strconv.FormatInt(connection.Revision, 10),
+	}
+	if connection.Provider == domain.ObjectStorageProviderOSS {
+		metadata["provider"] = string(connection.Provider)
+		metadata["region"] = connection.Region
+		metadata["bucket"] = connection.Bucket
+	}
 	return auditlog.Append(ctx, tx, auditlog.Entry{
-		Actor:  actor,
-		Action: action,
-		Metadata: map[string]string{
-			"connection_id": connection.ID.String(),
-			"provider":      string(connection.Provider),
-			"region":        connection.Region,
-			"bucket":        connection.Bucket,
-			"revision":      strconv.FormatInt(connection.Revision, 10),
-		},
+		Actor:    actor,
+		Action:   action,
+		Metadata: metadata,
 	})
 }

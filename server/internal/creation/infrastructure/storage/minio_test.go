@@ -17,8 +17,6 @@ import (
 // keeping our own pump buffers at streamBufferLen-sized granularity.
 const minioChunkSize uint64 = 64 << 20
 
-// minIOStore is the test-only adapter used by the automated conformance
-// harness. Production construction is closed to OSS and COS in factory.go.
 type minIOStore struct {
 	client *minio.Client
 	bucket string

@@ -7,6 +7,7 @@
 package migration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -693,6 +694,102 @@ func TestUpgradeRequiresImageRecheckForSeedreamPro(t *testing.T) {
 	}
 	if checkedAt != nil || outcome != nil {
 		t.Fatalf("old Lite catalog verdict survived Pro upgrade: checked_at=%v outcome=%v", checkedAt, outcome)
+	}
+}
+
+func TestUpgradeQuarantinesLegacyCOSObjectStorageConnection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	scratchURL := scratchDatabase(t, ctx, requireOwnerURL(t), "nevix_migration_oss_only_compatibility")
+	if _, err := applyFS(ctx, scratchURL, embeddedMigrationsBefore(t, 24)); err != nil {
+		t.Fatalf("apply migrations through v23: %v", err)
+	}
+
+	db := openDB(t, ctx, scratchURL)
+	var userID, connectionID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.users (email, password_hash, display_name, role, status, must_change_password)
+		VALUES ('oss-only-upgrade@nevix.test', 'seed-hash', 'oss-only-upgrade', 'admin', 'active', false)
+		RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.object_storage_connections (
+			provider, region, bucket, state,
+			envelope_version, credential_key_id, credential_nonce, credential_ciphertext,
+			access_key_id_masked, last_checked_at, last_check_outcome, created_by_user_id
+		) VALUES (
+			'cos', 'ap-shanghai', 'nevix-legacy-1250000000', 'ready',
+			1, 'legacy-key', decode('0102', 'hex'), decode('030405', 'hex'),
+			'****1234', now(), 'completed', $1
+		) RETURNING id`, userID,
+	).Scan(&connectionID); err != nil {
+		t.Fatalf("seed legacy COS connection: %v", err)
+	}
+
+	var beforeProvider, beforeKeyID string
+	var beforeRevision int64
+	var beforeNonce, beforeCiphertext []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT provider, revision, credential_key_id, credential_nonce, credential_ciphertext
+		FROM public.object_storage_connections WHERE id = $1`, connectionID,
+	).Scan(&beforeProvider, &beforeRevision, &beforeKeyID, &beforeNonce, &beforeCiphertext); err != nil {
+		t.Fatalf("read legacy connection before upgrade: %v", err)
+	}
+
+	applied, err := Apply(ctx, scratchURL)
+	if err != nil {
+		t.Fatalf("upgrade through OSS-only compatibility migration: %v", err)
+	}
+	foundCompatibilityMigration := false
+	for _, result := range applied {
+		foundCompatibilityMigration = foundCompatibilityMigration || result.Source.Version == 24
+	}
+	if !foundCompatibilityMigration {
+		t.Fatalf("upgrade did not apply migration 24: %+v", applied)
+	}
+
+	var provider, state, keyID string
+	var revision int64
+	var nonce, ciphertext []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT provider, state, revision, credential_key_id, credential_nonce, credential_ciphertext
+		FROM public.object_storage_connections WHERE id = $1`, connectionID,
+	).Scan(&provider, &state, &revision, &keyID, &nonce, &ciphertext); err != nil {
+		t.Fatalf("read quarantined legacy connection: %v", err)
+	}
+	if provider != "cos" || state != "legacy_incompatible" || revision != beforeRevision || keyID != beforeKeyID || !bytes.Equal(nonce, beforeNonce) || !bytes.Equal(ciphertext, beforeCiphertext) {
+		t.Fatalf("quarantined legacy connection = provider %q state %q revision %d key %q nonce %x ciphertext %x", provider, state, revision, keyID, nonce, ciphertext)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE public.object_storage_connections
+		SET terminated_at = now(), envelope_version = NULL, credential_key_id = NULL,
+		    credential_nonce = NULL, credential_ciphertext = NULL
+		WHERE id = $1`, connectionID,
+	); err != nil {
+		t.Fatalf("terminate legacy connection for constraint probe: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO public.object_storage_connections (
+			provider, region, bucket, state,
+			envelope_version, credential_key_id, credential_nonce, credential_ciphertext,
+			access_key_id_masked, last_checked_at, last_check_outcome, created_by_user_id
+		) VALUES (
+			'cos', 'ap-shanghai', 'nevix-new-1250000000', 'ready',
+			1, 'new-key', decode('06', 'hex'), decode('07', 'hex'),
+			'****5678', now(), 'completed', $1
+		)`, userID,
+	); err == nil {
+		t.Fatal("new active COS connection bypassed the OSS-only compatibility constraint")
+	}
+
+	reapplied, err := Apply(ctx, scratchURL)
+	if err != nil {
+		t.Fatalf("reapply OSS-only compatibility migration: %v", err)
+	}
+	if len(reapplied) != 0 {
+		t.Fatalf("reapply ran %d migrations, want 0", len(reapplied))
 	}
 }
 

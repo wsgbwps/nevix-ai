@@ -11,7 +11,6 @@ type ObjectStorageProvider string
 
 const (
 	ObjectStorageProviderOSS ObjectStorageProvider = "oss"
-	ObjectStorageProviderCOS ObjectStorageProvider = "cos"
 )
 
 type ObjectStorageState string
@@ -20,6 +19,7 @@ const (
 	ObjectStorageStateUnconfigured          ObjectStorageState = "unconfigured"
 	ObjectStorageStateReady                 ObjectStorageState = "ready"
 	ObjectStorageStateCredentialUnavailable ObjectStorageState = "credential_unavailable"
+	ObjectStorageStateLegacyIncompatible    ObjectStorageState = "legacy_incompatible"
 )
 
 type ObjectStorageCredentialEnvelope ProviderCredentialEnvelope
@@ -30,16 +30,19 @@ type ObjectStorageLocation struct {
 	Bucket   string
 }
 
-// Origin returns the allowlisted virtual-host origin for this canonical location.
+// Origin returns an OSS virtual-host origin for a normalized OSS location; unsupported providers return empty.
 func (l ObjectStorageLocation) Origin() string {
-	return "https://" + l.Host()
+	if host := l.Host(); host != "" {
+		return "https://" + host
+	}
+	return ""
 }
 
 func (l ObjectStorageLocation) Host() string {
-	if l.Provider == ObjectStorageProviderOSS {
-		return l.Bucket + ".oss-" + l.Region + ".aliyuncs.com"
+	if l.Provider != ObjectStorageProviderOSS {
+		return ""
 	}
-	return l.Bucket + ".cos." + l.Region + ".myqcloud.com"
+	return l.Bucket + ".oss-" + l.Region + ".aliyuncs.com"
 }
 
 type ObjectStorageCredentials struct {
@@ -97,6 +100,7 @@ var (
 	ErrObjectStorageLocationFrozen          = errors.New("object storage location is frozen")
 	ErrObjectStorageRecoveryRequired        = errors.New("object storage credential recovery required")
 	ErrObjectStorageRecoveryNotRequired     = errors.New("object storage credential recovery is not required")
+	ErrObjectStorageLegacyIncompatible      = errors.New("legacy object storage connection is incompatible")
 	ErrInvalidObjectStorageCandidate        = errors.New("invalid object storage candidate")
 )
 

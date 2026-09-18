@@ -64,23 +64,24 @@ const (
 	CodeNoIncompleteSlots   = "no_incomplete_slots"
 	CodeTaskRetryNotAllowed = "task_retry_not_allowed"
 
-	CodeNotConfigured                  = "provider_connection_not_configured"
-	CodeConnectionExists               = "provider_connection_exists"
-	CodeActiveGenerationTasks          = "active_generation_tasks_exist"
-	CodeCredentialInvalid              = "provider_credential_invalid"
-	CodeCheckTemporarilyUnavailable    = "provider_check_temporarily_unavailable"
-	CodeSecureTransportRequired        = "secure_transport_required"
-	CodeReauthProofInvalid             = "reauth_proof_invalid"
-	CodeReauthProofExpired             = "reauth_proof_expired"
-	CodeReauthProofActionMismatch      = "reauth_proof_action_mismatch"
-	CodeReauthProofAlreadyConsumed     = "reauth_proof_already_consumed"
-	CodeObjectStorageConnectionExists  = "object_storage_connection_exists"
-	CodeObjectStorageNotConfigured     = "object_storage_connection_not_configured"
-	CodeObjectStorageRevisionConflict  = "object_storage_connection_revision_conflict"
-	CodeObjectStorageLocationFrozen    = "object_storage_location_frozen"
-	CodeObjectStorageRecoveryRequired  = "object_storage_recovery_required"
-	CodeObjectStorageRecoveryNotNeeded = "object_storage_recovery_not_required"
-	CodeObjectStorageUnavailable       = "object_storage_unavailable"
+	CodeNotConfigured                   = "provider_connection_not_configured"
+	CodeConnectionExists                = "provider_connection_exists"
+	CodeActiveGenerationTasks           = "active_generation_tasks_exist"
+	CodeCredentialInvalid               = "provider_credential_invalid"
+	CodeCheckTemporarilyUnavailable     = "provider_check_temporarily_unavailable"
+	CodeSecureTransportRequired         = "secure_transport_required"
+	CodeReauthProofInvalid              = "reauth_proof_invalid"
+	CodeReauthProofExpired              = "reauth_proof_expired"
+	CodeReauthProofActionMismatch       = "reauth_proof_action_mismatch"
+	CodeReauthProofAlreadyConsumed      = "reauth_proof_already_consumed"
+	CodeObjectStorageConnectionExists   = "object_storage_connection_exists"
+	CodeObjectStorageNotConfigured      = "object_storage_connection_not_configured"
+	CodeObjectStorageRevisionConflict   = "object_storage_connection_revision_conflict"
+	CodeObjectStorageLocationFrozen     = "object_storage_location_frozen"
+	CodeObjectStorageRecoveryRequired   = "object_storage_recovery_required"
+	CodeObjectStorageRecoveryNotNeeded  = "object_storage_recovery_not_required"
+	CodeObjectStorageLegacyIncompatible = "object_storage_legacy_incompatible"
+	CodeObjectStorageUnavailable        = "object_storage_unavailable"
 )
 
 // MapError translates domain outcomes onto the stable codes; nil collapses
@@ -122,6 +123,8 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageRevisionConflict, Message: "The Object Storage Connection changed; reload and try again."}
 	case isError(err, domain.ErrObjectStorageLocationFrozen):
 		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageLocationFrozen, Message: "The Object Storage location is permanently frozen."}
+	case isError(err, domain.ErrObjectStorageLegacyIncompatible):
+		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageLegacyIncompatible, Message: "The legacy Object Storage Connection requires explicit remediation."}
 	case isError(err, domain.ErrObjectStorageRecoveryRequired):
 		return &Error{Status: http.StatusConflict, Code: CodeObjectStorageRecoveryRequired, Message: "The shared credential key is unavailable; explicit recovery is required."}
 	case isError(err, domain.ErrObjectStorageRecoveryNotRequired):

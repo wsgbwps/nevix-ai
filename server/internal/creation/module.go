@@ -132,7 +132,6 @@ type ReadSeekCloser = domain.ReadSeekCloser
 
 const (
 	ObjectStorageProviderOSS = domain.ObjectStorageProviderOSS
-	ObjectStorageProviderCOS = domain.ObjectStorageProviderCOS
 	UploadIDMetadataKey      = domain.UploadIDMetadataKey
 	ProviderTransferLifetime = domain.ProviderTransferLifetime
 )

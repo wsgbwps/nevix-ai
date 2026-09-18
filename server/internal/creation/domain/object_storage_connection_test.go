@@ -18,11 +18,9 @@ func TestObjectStorageLocationAndMaskedCredentialProjection(t *testing.T) {
 		t.Fatalf("masked access key = %q", connection.AccessKeyIDMasked)
 	}
 
-	connection.Provider = ObjectStorageProviderCOS
-	connection.Region = "ap-shanghai"
-	connection.Bucket = "nevix-private-1250000000"
-	if got := connection.Origin(); got != "https://nevix-private-1250000000.cos.ap-shanghai.myqcloud.com" {
-		t.Fatalf("COS upload origin = %q", got)
+	connection.Provider = "legacy"
+	if got := connection.Origin(); got != "" {
+		t.Fatalf("non-OSS upload origin = %q", got)
 	}
 	if got := MaskObjectStorageAccessKeyID("abc"); got != "****abc" {
 		t.Fatalf("short masked access key = %q", got)

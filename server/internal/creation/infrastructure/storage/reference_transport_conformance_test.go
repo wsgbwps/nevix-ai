@@ -17,11 +17,11 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newStore newCloudStoreForTest) {
+func runReferenceTransportConformanceSuite(t *testing.T, newStore newCloudStoreForTest) {
 	t.Helper()
 
 	t.Run("StreamsSourceToDeterministicVerifiedObject", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		data := payload(t, smallPayloadLen)
 		digest := sha256.Sum256(data)
 		opens, closes, largestRead := 0, 0, 0
@@ -70,7 +70,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("ReturnsPlainHTTPSGetWithFixedLifetime", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		data := []byte("provider readable reference")
 		prepared, err := transport.Prepare(context.Background(), domain.NewUUID(), 0, referenceSource(data))
 		if err != nil {
@@ -89,11 +89,11 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 		if readErr != nil || response.StatusCode != http.StatusOK || !bytes.Equal(got, data) {
 			t.Fatalf("signed GET status=%d bytes=%d error=%v", response.StatusCode, len(got), readErr)
 		}
-		assertSignedLifetime(t, provider, prepared.URL, domain.ProviderTransferLifetime)
+		assertSignedLifetime(t, prepared.URL, domain.ProviderTransferLifetime)
 	})
 
 	t.Run("RepeatedPrepareRevalidatesWithoutDuplicatingObject", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		data := []byte("immutable reference")
 		opens, closes := 0, 0
 		source := referenceSource(data)
@@ -120,7 +120,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("ReleaseDeletesExactObjectIdempotently", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		jobID := domain.NewUUID()
 		if _, err := transport.Prepare(context.Background(), jobID, 2, referenceSource([]byte("release me"))); err != nil {
 			t.Fatalf("Prepare: %v", err)
@@ -144,7 +144,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("RejectsMutatedSourceOnConflictRetry", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		original := []byte("original")
 		mutated := []byte("mutated!")
 		opens := 0
@@ -173,7 +173,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("RejectsInvalidSourceBeforeOpening", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		data := []byte("source")
 		digest := sha256.Sum256(data)
 		valid := domain.ReferenceSource{
@@ -239,7 +239,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				transport, backend := newReferenceTransportForTest(t, provider, newStore)
+				transport, backend := newReferenceTransportForTest(t, newStore)
 				digest := sha256.Sum256(tc.declared)
 				closes := 0
 				source := domain.ReferenceSource{
@@ -270,7 +270,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("SanitizesSourceOpenFailureWithoutWriting", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		source := domain.ReferenceSource{
 			Role: domain.RoleReference, Kind: domain.KindImage, MIMEType: "image/png", ByteSize: 1,
 			SHA256Sum: sha256.Sum256([]byte{0}),
@@ -302,7 +302,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				transport, backend := newReferenceTransportForTest(t, provider, newStore)
+				transport, backend := newReferenceTransportForTest(t, newStore)
 				tc.mutate(backend)
 				data := []byte("verified bytes")
 				digest := sha256.Sum256(data)
@@ -340,7 +340,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				transport, backend := newReferenceTransportForTest(t, provider, newStore)
+				transport, backend := newReferenceTransportForTest(t, newStore)
 				backend.failMethod = http.MethodPut
 				backend.failStatus = tc.status
 				backend.failCode = tc.code
@@ -353,7 +353,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("RecoversUnknownWriteFromTheSameVerifiedObject", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		backend.commitThenFailPut = true
 		jobID := domain.NewUUID()
 		source := referenceSource([]byte("committed before response loss"))
@@ -374,7 +374,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("RewritesCorruptObjectAfterUnknownWrite", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		backend.commitThenFailPut = true
 		backend.corruptCommittedBody = true
 		jobID := domain.NewUUID()
@@ -396,7 +396,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("CancellationStopsTransferAndClosesSource", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		ctx, cancel := context.WithCancel(context.Background())
 		closes := 0
 		source := domain.ReferenceSource{
@@ -433,7 +433,7 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("CancellationDuringVerificationReturnsPromptly", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		ctx, cancel := context.WithCancel(context.Background())
 		deleteGate := make(chan struct{})
 		deleteGateClosed := false
@@ -477,19 +477,19 @@ func runReferenceTransportConformanceSuite(t *testing.T, provider Provider, newS
 	})
 
 	t.Run("RetryWaitsForCanceledPrepareCleanup", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		assertRetryWaitsForCanceledPrepareCleanup(t, transport, transport, backend)
 	})
 
 	t.Run("RetryAcrossTransportInstancesWaitsForCanceledPrepareCleanup", func(t *testing.T) {
-		backend := newFakeCloudTransport(provider)
+		backend := newFakeCloudTransport()
 		first := newReferenceTransport(newStore(t, backend).(referenceObjectStore))
 		retry := newReferenceTransport(newStore(t, backend).(referenceObjectStore))
 		assertRetryWaitsForCanceledPrepareCleanup(t, first, retry, backend)
 	})
 
 	t.Run("SanitizesProviderFailures", func(t *testing.T) {
-		transport, backend := newReferenceTransportForTest(t, provider, newStore)
+		transport, backend := newReferenceTransportForTest(t, newStore)
 		backend.failMethod = http.MethodPut
 		data := []byte("private source bytes")
 		digest := sha256.Sum256(data)
@@ -524,9 +524,9 @@ func (s *observedSource) Read(p []byte) (int, error) {
 	return s.reader.Read(p)
 }
 
-func newReferenceTransportForTest(t *testing.T, provider Provider, newStore newCloudStoreForTest) (domain.ReferenceTransport, *fakeCloudTransport) {
+func newReferenceTransportForTest(t *testing.T, newStore newCloudStoreForTest) (domain.ReferenceTransport, *fakeCloudTransport) {
 	t.Helper()
-	backend := newFakeCloudTransport(provider)
+	backend := newFakeCloudTransport()
 	store := newStore(t, backend)
 	return newReferenceTransport(store.(referenceObjectStore)), backend
 }
@@ -586,27 +586,13 @@ func assertRetryWaitsForCanceledPrepareCleanup(t *testing.T, first, retry domain
 	}
 }
 
-func assertSignedLifetime(t *testing.T, provider Provider, rawURL string, want time.Duration) {
+func assertSignedLifetime(t *testing.T, rawURL string, want time.Duration) {
 	t.Helper()
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		t.Fatal("prepared URL is not a plain public HTTPS authority")
 	}
-	var seconds int64
-	if provider == ProviderOSS {
-		seconds, err = strconv.ParseInt(parsed.Query().Get("x-oss-expires"), 10, 64)
-	} else {
-		parts := strings.Split(parsed.Query().Get("q-sign-time"), ";")
-		if len(parts) != 2 {
-			t.Fatal("COS signed URL lacks a bounded sign window")
-		}
-		start, startErr := strconv.ParseInt(parts[0], 10, 64)
-		end, endErr := strconv.ParseInt(parts[1], 10, 64)
-		if startErr != nil || endErr != nil {
-			t.Fatal("COS signed URL has an invalid sign window")
-		}
-		seconds = end - start
-	}
+	seconds, err := strconv.ParseInt(parsed.Query().Get("x-oss-expires"), 10, 64)
 	if err != nil || time.Duration(seconds)*time.Second != want {
 		t.Fatalf("signed lifetime = %s, want %s", time.Duration(seconds)*time.Second, want)
 	}

@@ -44,12 +44,15 @@ func objectStorageAdminView(connection domain.ObjectStorageConnection) objectSto
 	if connection.State == domain.ObjectStorageStateUnconfigured {
 		return view
 	}
-	view.Provider = string(connection.Provider)
-	view.Region = connection.Region
-	view.Bucket = connection.Bucket
 	view.Revision = &connection.Revision
 	locationFrozen := connection.LocationFrozenAt != nil
 	view.LocationFrozen = &locationFrozen
+	if connection.State == domain.ObjectStorageStateLegacyIncompatible || connection.Provider != domain.ObjectStorageProviderOSS {
+		return view
+	}
+	view.Provider = string(connection.Provider)
+	view.Region = connection.Region
+	view.Bucket = connection.Bucket
 	view.Credential = &objectStorageCredentialView{
 		AccessKeyIDMasked: connection.AccessKeyIDMasked, SecretAccessKeyConfigured: true,
 	}
@@ -124,7 +127,7 @@ func validObjectStorageInput(input objectStorageConnectionInput) bool {
 			return false
 		}
 	}
-	return true
+	return strings.EqualFold(strings.TrimSpace(*input.Provider), string(domain.ObjectStorageProviderOSS))
 }
 
 func validObjectStorageMaintenanceInput(input objectStorageConnectionInput) bool {

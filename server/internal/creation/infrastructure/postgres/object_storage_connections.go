@@ -218,7 +218,7 @@ func (r *ObjectStorageConnectionRepository) MarkCredentialUnavailable(ctx contex
 	tag, err := tx.Exec(ctx, `
 		UPDATE object_storage_connections
 		SET state = 'credential_unavailable', updated_at = now()
-		WHERE id = $1 AND revision = $2 AND state <> 'credential_unavailable' AND terminated_at IS NULL`, id, expectedRevision)
+		WHERE id = $1 AND revision = $2 AND state = 'ready' AND terminated_at IS NULL`, id, expectedRevision)
 	if err != nil {
 		return false, fmt.Errorf("creation: mark object storage credential unavailable: %w", err)
 	}

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -220,8 +219,8 @@ func TestObjectStorageConcurrentRotationHasOneCASWinner(t *testing.T) {
 
 func TestObjectStorageLocationFreezeIsPermanentButAllowsRotation(t *testing.T) {
 	h := newObjectStorageHarness(t, func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
-		if candidate.Credentials.AccessKeyID == "cos-replacement-key" || candidate.Location.Provider == "cos" {
-			return creation.ObjectStorageLocation{Provider: "cos", Region: "ap-shanghai", Bucket: "nevix-private-cos"}, nil
+		if candidate.Credentials.AccessKeyID == "oss-replacement-key" {
+			return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-beijing", Bucket: "nevix-private-replaced"}, nil
 		}
 		return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-hangzhou", Bucket: "nevix-private"}, nil
 	})
@@ -235,15 +234,15 @@ func TestObjectStorageLocationFreezeIsPermanentButAllowsRotation(t *testing.T) {
 	initial := h.objectStorageSnapshot(t)
 	status, body := h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{
 		"proof": h.issueProof(t, admin, "object_storage_connection.replace"), "expected_revision": initial.revision,
-		"provider": "cos", "region": "ap-shanghai", "bucket": "nevix-private-cos",
-		"access_key_id": "cos-replacement-key", "secret_access_key": "cos-replacement-secret",
+		"provider": "oss", "region": "cn-beijing", "bucket": "nevix-private-replaced",
+		"access_key_id": "oss-replacement-key", "secret_access_key": "oss-replacement-secret",
 	})
 	if status != http.StatusOK {
 		t.Fatalf("replace empty location: status=%d body=%s", status, body)
 	}
 	assertContractResponse(t, http.MethodPut, "/creation/object-storage-connection", status, body)
 	replaced := h.objectStorageSnapshot(t)
-	if replaced.provider != "cos" || replaced.revision <= initial.revision || replaced.frozen {
+	if replaced.provider != "oss" || replaced.revision <= initial.revision || replaced.frozen {
 		t.Fatalf("replacement snapshot = %+v", replaced)
 	}
 
@@ -277,7 +276,7 @@ func TestObjectStorageLocationFreezeIsPermanentButAllowsRotation(t *testing.T) {
 
 	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection/credential", admin, map[string]any{
 		"proof": h.issueProof(t, admin, "object_storage_connection.rotate"), "expected_revision": replaced.revision,
-		"access_key_id": "cos-replacement-key", "secret_access_key": "cos-rotated-secret",
+		"access_key_id": "oss-replacement-key", "secret_access_key": "oss-rotated-secret",
 	})
 	if status != http.StatusOK {
 		t.Fatalf("rotate frozen location: status=%d body=%s", status, body)
@@ -310,8 +309,8 @@ func TestObjectStorageEmptyConnectionCanBeDeleted(t *testing.T) {
 
 func TestObjectStorageLocationMutationWaitsForActiveGeneration(t *testing.T) {
 	verifier := func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
-		if strings.EqualFold(strings.TrimSpace(string(candidate.Location.Provider)), "cos") {
-			return creation.ObjectStorageLocation{Provider: "cos", Region: "ap-shanghai", Bucket: "nevix-private-1250000000"}, nil
+		if candidate.Credentials.AccessKeyID == "oss-active-task-key" {
+			return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-beijing", Bucket: "nevix-private-active"}, nil
 		}
 		return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-hangzhou", Bucket: "nevix-private"}, nil
 	}
@@ -328,8 +327,8 @@ func TestObjectStorageLocationMutationWaitsForActiveGeneration(t *testing.T) {
 
 	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{
 		"proof": h.issueProof(t, admin, "object_storage_connection.replace"), "expected_revision": current.revision,
-		"provider": "cos", "region": "ap-shanghai", "bucket": "nevix-private-1250000000",
-		"access_key_id": "cos-active-task-key", "secret_access_key": "cos-active-task-secret",
+		"provider": "oss", "region": "cn-beijing", "bucket": "nevix-private-active",
+		"access_key_id": "oss-active-task-key", "secret_access_key": "oss-active-task-secret",
 	})
 	if status != http.StatusOK {
 		t.Fatalf("queued task must not freeze an unused location: status=%d body=%s", status, body)
@@ -368,8 +367,8 @@ func TestObjectStorageLocationMutationWaitsForActiveGeneration(t *testing.T) {
 
 func TestObjectStoragePendingUploadBlocksLocationMutationButAllowsRotation(t *testing.T) {
 	h := newObjectStorageHarness(t, func(_ context.Context, candidate creation.ObjectStorageCandidate) (creation.ObjectStorageLocation, error) {
-		if candidate.Location.Provider == "cos" {
-			return creation.ObjectStorageLocation{Provider: "cos", Region: "ap-shanghai", Bucket: "nevix-private-cos"}, nil
+		if candidate.Credentials.AccessKeyID == "oss-replacement-key" {
+			return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-beijing", Bucket: "nevix-private-replaced"}, nil
 		}
 		return creation.ObjectStorageLocation{Provider: "oss", Region: "cn-hangzhou", Bucket: "nevix-private"}, nil
 	})
@@ -392,8 +391,8 @@ func TestObjectStoragePendingUploadBlocksLocationMutationButAllowsRotation(t *te
 
 	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{
 		"proof": h.issueProof(t, admin, "object_storage_connection.replace"), "expected_revision": initial.revision,
-		"provider": "cos", "region": "ap-shanghai", "bucket": "nevix-private-cos",
-		"access_key_id": "cos-replacement-key", "secret_access_key": "cos-replacement-secret",
+		"provider": "oss", "region": "cn-beijing", "bucket": "nevix-private-replaced",
+		"access_key_id": "oss-replacement-key", "secret_access_key": "oss-replacement-secret",
 	})
 	if status != http.StatusConflict {
 		t.Fatalf("replace with pending upload: status=%d body=%s", status, body)
@@ -418,8 +417,8 @@ func TestObjectStoragePendingUploadBlocksLocationMutationButAllowsRotation(t *te
 	rotated := h.objectStorageSnapshot(t)
 	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{
 		"proof": h.issueProof(t, admin, "object_storage_connection.replace"), "expected_revision": rotated.revision,
-		"provider": "cos", "region": "ap-shanghai", "bucket": "nevix-private-cos",
-		"access_key_id": "cos-replacement-key", "secret_access_key": "cos-replacement-secret",
+		"provider": "oss", "region": "cn-beijing", "bucket": "nevix-private-replaced",
+		"access_key_id": "oss-replacement-key", "secret_access_key": "oss-replacement-secret",
 	})
 	if status != http.StatusConflict {
 		t.Fatalf("replace after rotation with old-revision upload: status=%d body=%s", status, body)
