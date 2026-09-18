@@ -464,16 +464,16 @@ export const creationTranslations = defineResourceTranslations({
       },
       objectStorage: {
         title: '对象存储',
-        description:
-          '为 AI 创作配置实例唯一的阿里云 OSS 或腾讯云 COS 私有 bucket。凭据只由服务器加密保存。',
+        description: '为 AI 创作配置实例唯一的阿里云 OSS 私有 bucket。凭据只由服务器加密保存。',
         empty: '尚未配置对象存储。',
         memberUnavailable: '对象存储不可用，请联系管理员。',
-        providers: { oss: '阿里云 OSS', cos: '腾讯云 COS' },
+        provider: '阿里云 OSS',
         state: {
           loading: '正在读取对象存储状态…',
           loadFailed: '无法读取对象存储状态。',
           ready: '已就绪',
-          credentialUnavailable: '凭据不可用'
+          credentialUnavailable: '凭据不可用',
+          legacyIncompatible: '旧连接不兼容'
         },
         form: {
           provider: 'Provider',
@@ -488,7 +488,10 @@ export const creationTranslations = defineResourceTranslations({
           revision: 'Revision',
           configured: '已配置',
           notConfigured: '未配置',
-          lastCheck: '最近验证'
+          lastCheck: '最近验证',
+          locationFrozen: '位置已冻结',
+          yes: '是',
+          no: '否'
         },
         revision: 'Revision {{revision}}',
         observation: { completed: '验证完成', temporarily_unavailable: '暂时不可用' },
@@ -501,6 +504,10 @@ export const creationTranslations = defineResourceTranslations({
         },
         recovery: {
           required: '需要显式恢复：重新输入凭据以恢复对象存储连接。'
+        },
+        legacy: {
+          description: '旧对象存储连接与仅支持 OSS 的版本不兼容，无法使用。',
+          frozen: '对象存储位置已冻结；请在 Nevix 外部处置旧连接后再配置 OSS。'
         },
         locationFrozen: '对象存储位置已冻结；你仍可重新检查或轮换凭据。',
         dialog: {
@@ -533,6 +540,7 @@ export const creationTranslations = defineResourceTranslations({
           exists: '对象存储连接已存在。',
           notConfigured: '尚未配置对象存储连接。',
           revisionConflict: '对象存储连接已发生变化，请刷新后重试。',
+          legacyIncompatible: '旧对象存储连接不兼容，无法执行此操作。',
           locationFrozen: '首个永久对象创建后，对象存储位置已冻结。',
           recoveryRequired: '凭据需要先显式恢复。',
           recoveryNotRequired: '当前凭据不需要恢复。',
@@ -1027,15 +1035,16 @@ export const creationTranslations = defineResourceTranslations({
       objectStorage: {
         title: 'Object storage',
         description:
-          "Configure the instance's single private Alibaba Cloud OSS or Tencent Cloud COS bucket for AI Creation. Credentials are encrypted only by the server.",
+          "Configure the instance's single private Alibaba Cloud OSS bucket for AI Creation. Credentials are encrypted only by the server.",
         empty: 'Object storage is not configured yet.',
         memberUnavailable: 'Object storage is unavailable. Contact an administrator.',
-        providers: { oss: 'Alibaba Cloud OSS', cos: 'Tencent Cloud COS' },
+        provider: 'Alibaba Cloud OSS',
         state: {
           loading: 'Loading object storage status…',
           loadFailed: 'Object storage status could not be loaded.',
           ready: 'Ready',
-          credentialUnavailable: 'Credential unavailable'
+          credentialUnavailable: 'Credential unavailable',
+          legacyIncompatible: 'Legacy storage connection'
         },
         form: {
           provider: 'Provider',
@@ -1050,7 +1059,10 @@ export const creationTranslations = defineResourceTranslations({
           revision: 'Revision',
           configured: 'Configured',
           notConfigured: 'Not configured',
-          lastCheck: 'Last verification'
+          lastCheck: 'Last verification',
+          locationFrozen: 'Location frozen',
+          yes: 'Yes',
+          no: 'No'
         },
         revision: 'Revision {{revision}}',
         observation: { completed: 'Completed', temporarily_unavailable: 'Temporarily unavailable' },
@@ -1064,6 +1076,12 @@ export const creationTranslations = defineResourceTranslations({
         recovery: {
           required:
             'Recovery is required. Re-enter the credential to restore the Object Storage Connection.'
+        },
+        legacy: {
+          description:
+            'This legacy connection is incompatible with the OSS-only version and cannot be used.',
+          frozen:
+            'The storage location is frozen. Resolve the legacy connection outside Nevix before configuring OSS.'
         },
         locationFrozen:
           'The storage location is frozen. You can still recheck or rotate its credential.',
@@ -1100,6 +1118,8 @@ export const creationTranslations = defineResourceTranslations({
           exists: 'An Object Storage Connection already exists.',
           notConfigured: 'No Object Storage Connection is configured.',
           revisionConflict: 'The Object Storage Connection changed. Refresh and retry.',
+          legacyIncompatible:
+            'The legacy Object Storage Connection is incompatible with this command.',
           locationFrozen: 'The object storage location is frozen after the first permanent object.',
           recoveryRequired: 'The credential must be explicitly recovered first.',
           recoveryNotRequired: 'The current credential does not require recovery.',

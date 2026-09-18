@@ -18,8 +18,8 @@ import { Input } from '../../../components/ui/input'
 import type { CreationApiFailure } from '../api/go-creation-http'
 import {
   createObjectStorageConnectionClient,
-  type ObjectStorageConnectionView,
-  type ObjectStorageProvider
+  type ObjectStorageConfiguredConnectionView,
+  type ObjectStorageConnectionView
 } from '../api/object-storage-connection-http'
 
 type GetSession = () => Promise<{ readonly token: string } | undefined>
@@ -52,7 +52,6 @@ export interface ObjectStorageConnectionSettingsProps {
 }
 
 interface ConnectionDraft {
-  readonly provider: ObjectStorageProvider
   readonly region: string
   readonly bucket: string
   readonly accessKeyId: string
@@ -62,7 +61,6 @@ interface ConnectionDraft {
 type MaintenanceMode = 'replace' | 'rotate' | 'recover'
 
 const EMPTY_DRAFT: ConnectionDraft = {
-  provider: 'oss',
   region: '',
   bucket: '',
   accessKeyId: '',
@@ -89,6 +87,7 @@ const ERROR_CODE_KEYS = {
   object_storage_connection_exists: 'objectStorage.errors.exists',
   object_storage_connection_not_configured: 'objectStorage.errors.notConfigured',
   object_storage_connection_revision_conflict: 'objectStorage.errors.revisionConflict',
+  object_storage_legacy_incompatible: 'objectStorage.errors.legacyIncompatible',
   object_storage_location_frozen: 'objectStorage.errors.locationFrozen',
   object_storage_recovery_required: 'objectStorage.errors.recoveryRequired',
   object_storage_recovery_not_required: 'objectStorage.errors.recoveryNotRequired',
@@ -130,7 +129,6 @@ export function ObjectStorageConnectionSettings({
     setError(undefined)
   }, [])
   const draftDirty =
-    draft.provider !== EMPTY_DRAFT.provider ||
     draft.region !== '' ||
     draft.bucket !== '' ||
     draft.accessKeyId !== '' ||
@@ -209,7 +207,6 @@ export function ObjectStorageConnectionSettings({
         if (!proof) return
         const result = await client.create(session.token, {
           proof: proof.proof,
-          provider: draft.provider,
           region: draft.region.trim(),
           bucket: draft.bucket.trim(),
           accessKeyId: draft.accessKeyId,
@@ -266,7 +263,13 @@ export function ObjectStorageConnectionSettings({
 
   const submitMaintenance = useCallback(
     async (candidate: ConnectionDraft): Promise<boolean> => {
-      if (!maintenance || !heldProof || !connection || connection.state === 'unconfigured') {
+      if (
+        !maintenance ||
+        !heldProof ||
+        !connection ||
+        connection.state === 'unconfigured' ||
+        connection.state === 'legacy_incompatible'
+      ) {
         return false
       }
       const session = await getSession()
@@ -287,7 +290,6 @@ export function ObjectStorageConnectionSettings({
         maintenance === 'replace'
           ? await client.replace(session.token, {
               ...credential,
-              provider: candidate.provider,
               region: candidate.region.trim(),
               bucket: candidate.bucket.trim()
             })
@@ -343,6 +345,8 @@ export function ObjectStorageConnectionSettings({
           <Badge>{t('objectStorage.state.ready')}</Badge>
         ) : isAdmin && connection?.state === 'credential_unavailable' ? (
           <Badge variant="secondary">{t('objectStorage.state.credentialUnavailable')}</Badge>
+        ) : isAdmin && connection?.state === 'legacy_incompatible' ? (
+          <Badge variant="secondary">{t('objectStorage.state.legacyIncompatible')}</Badge>
         ) : null}
       </header>
       {isAdmin ? (
@@ -364,6 +368,16 @@ export function ObjectStorageConnectionSettings({
           error={error}
           onChange={updateDraft}
           onSubmit={createConnection}
+        />
+      ) : connection?.state === 'legacy_incompatible' ? (
+        <LegacyConnection
+          connection={connection}
+          busy={commandInFlight || proofPending}
+          error={error}
+          deleteDialogOpen={deleteDialogOpen}
+          onOpenDelete={() => setDeleteDialogOpen(true)}
+          onCloseDelete={() => setDeleteDialogOpen(false)}
+          onDelete={() => void deleteConnection()}
         />
       ) : connection ? (
         <AdminConnection
@@ -444,7 +458,7 @@ function AdminConnection({
   onCloseDelete,
   onDelete
 }: {
-  readonly connection: Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>
+  readonly connection: ObjectStorageConfiguredConnectionView
   readonly busy: boolean
   readonly error: string | undefined
   readonly maintenance: MaintenanceMode | undefined
@@ -537,6 +551,72 @@ function AdminConnection({
   )
 }
 
+function LegacyConnection({
+  connection,
+  busy,
+  error,
+  deleteDialogOpen,
+  onOpenDelete,
+  onCloseDelete,
+  onDelete
+}: {
+  readonly connection: Extract<
+    ObjectStorageConnectionView,
+    { readonly state: 'legacy_incompatible' }
+  >
+  readonly busy: boolean
+  readonly error: string | undefined
+  readonly deleteDialogOpen: boolean
+  readonly onOpenDelete: () => void
+  readonly onCloseDelete: () => void
+  readonly onDelete: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation('creation')
+  return (
+    <div className="grid gap-4">
+      <p role="alert" className="text-destructive text-sm font-medium">
+        {t('objectStorage.legacy.description')}
+      </p>
+      <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+        <StatusField
+          label={t('objectStorage.fields.revision')}
+          value={t('objectStorage.revision', { revision: connection.revision })}
+        />
+        <StatusField
+          label={t('objectStorage.fields.locationFrozen')}
+          value={
+            connection.locationFrozen ? t('objectStorage.fields.yes') : t('objectStorage.fields.no')
+          }
+        />
+      </dl>
+      {connection.locationFrozen ? (
+        <p className="text-muted-foreground text-sm">{t('objectStorage.legacy.frozen')}</p>
+      ) : (
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          disabled={busy}
+          onClick={onOpenDelete}
+        >
+          {t('objectStorage.actions.delete')}
+        </Button>
+      )}
+      {error ? (
+        <p role="alert" className="text-destructive text-sm">
+          {error}
+        </p>
+      ) : null}
+      <DeleteConfirmDialog
+        open={deleteDialogOpen}
+        commandInFlight={busy}
+        onClose={onCloseDelete}
+        onConfirm={onDelete}
+      />
+    </div>
+  )
+}
+
 const MAINTENANCE_TITLE_KEYS = {
   replace: 'objectStorage.dialog.replaceTitle',
   rotate: 'objectStorage.dialog.rotateTitle',
@@ -557,14 +637,13 @@ function MaintenanceDialog({
   onSubmit
 }: {
   readonly mode: MaintenanceMode
-  readonly connection: Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>
+  readonly connection: ObjectStorageConfiguredConnectionView
   readonly commandInFlight: boolean
   readonly onClose: () => void
   readonly onSubmit: (candidate: ConnectionDraft) => Promise<boolean>
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const [draft, setDraft] = useState<ConnectionDraft>({
-    provider: connection.provider,
     region: connection.region,
     bucket: connection.bucket,
     accessKeyId: '',
@@ -690,21 +769,6 @@ function LocationFields({
   return (
     <>
       <Field>
-        <FieldLabel htmlFor="object-storage-provider">
-          {t('objectStorage.form.provider')}
-        </FieldLabel>
-        <select
-          id="object-storage-provider"
-          className="border-input dark:bg-input h-9 rounded-md border bg-transparent px-2.5 text-sm"
-          value={draft.provider}
-          disabled={disabled}
-          onChange={(event) => onChange('provider', event.target.value as ObjectStorageProvider)}
-        >
-          <option value="oss">{t('objectStorage.providers.oss')}</option>
-          <option value="cos">{t('objectStorage.providers.cos')}</option>
-        </select>
-      </Field>
-      <Field>
         <FieldLabel htmlFor="object-storage-region">{t('objectStorage.form.region')}</FieldLabel>
         <Input
           id="object-storage-region"
@@ -780,15 +844,12 @@ function CredentialFields({
 function MaskedConnection({
   connection
 }: {
-  readonly connection: Exclude<ObjectStorageConnectionView, { state: 'unconfigured' }>
+  readonly connection: ObjectStorageConfiguredConnectionView
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   return (
     <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-      <StatusField
-        label={t('objectStorage.form.provider')}
-        value={t(`objectStorage.providers.${connection.provider}`)}
-      />
+      <StatusField label={t('objectStorage.form.provider')} value={t('objectStorage.provider')} />
       <StatusField label={t('objectStorage.form.region')} value={connection.region} />
       <StatusField label={t('objectStorage.form.bucket')} value={connection.bucket} />
       <StatusField

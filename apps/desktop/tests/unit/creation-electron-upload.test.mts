@@ -47,6 +47,12 @@ registerHooks({
 
 class FakeResponse extends EventEmitter {
   statusCode = 200
+  readonly body: Buffer | undefined
+
+  constructor(body?: Buffer) {
+    super()
+    this.body = body
+  }
 }
 
 class FakeRequest extends EventEmitter {
@@ -60,10 +66,12 @@ class FakeRequest extends EventEmitter {
   maximumOutstanding = 0
   uploadProgressActive = true
   private readonly responds: boolean
+  private readonly responseBody: unknown
 
-  constructor(responds = true) {
+  constructor(responds = true, responseBody?: unknown) {
     super()
     this.responds = responds
+    this.responseBody = responseBody
   }
 
   setHeader(name: string, value: string): void {
@@ -84,9 +92,14 @@ class FakeRequest extends EventEmitter {
   end(): void {
     this.ended = true
     if (!this.responds) return
-    const response = new FakeResponse()
+    const response = new FakeResponse(
+      this.responseBody === undefined ? undefined : Buffer.from(JSON.stringify(this.responseBody))
+    )
     this.emit('response', response)
-    queueMicrotask(() => response.emit('end'))
+    queueMicrotask(() => {
+      if (response.body !== undefined) response.emit('data', response.body)
+      response.emit('end')
+    })
   }
 
   abort(): void {
@@ -257,6 +270,27 @@ test('AbortSignal also cancels a stalled Server control-plane request', async ()
     code: 'upload_cancelled'
   })
   assert.equal(request?.aborted, true)
+})
+
+test('raw COS capabilities fail closed before becoming native upload capabilities', async () => {
+  const serverUrl = 'https://server.example'
+  const token = 'session-token'
+  for (const payload of [
+    { available: false, provider: 'cos', connection_revision: 7 },
+    {
+      available: true,
+      provider: 'cos',
+      upload_origin: 'https://bucket.cos.ap-shanghai.myqcloud.com',
+      connection_revision: 7
+    }
+  ]) {
+    ;(globalThis as typeof globalThis & ElectronRequestGlobal).__nevixElectronRequest = () =>
+      new FakeRequest(true, payload)
+    assert.deepEqual(
+      await electronReferenceMaterialUploadDependencies.readCapability(serverUrl, token),
+      { outcome: 'network-failure' }
+    )
+  }
 })
 
 test('a growing file is bounded and rejected before request completion', async () => {

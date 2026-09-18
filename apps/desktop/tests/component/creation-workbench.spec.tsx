@@ -1029,7 +1029,9 @@ test('adding a reference flips the image draft to reference-image and back', asy
   // Removing the only card flips the derived mode back: an empty
   // reference-image draft could never satisfy its own minimum.
   const deck = page.getByTestId('reference-deck')
-  await deck.getByRole('button', { name: 'ref.png', exact: true }).click()
+  const onlyCard = deck.getByRole('button', { name: 'ref.png', exact: true })
+  await onlyCard.focus()
+  await expect(onlyCard).toBeFocused()
   await page.keyboard.press('Delete')
   await expect
     .poll(async () => (await draftRecord(page, scriptedSessionId))?.mode, { timeout: 5_000 })

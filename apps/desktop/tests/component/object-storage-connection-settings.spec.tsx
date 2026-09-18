@@ -4,6 +4,8 @@ import {
   ObjectStorageConnectionAdminFrozenStory,
   ObjectStorageConnectionAdminReadyStory,
   ObjectStorageConnectionCredentialUnavailableStory,
+  ObjectStorageConnectionFrozenLegacyStory,
+  ObjectStorageConnectionLegacyStory,
   ObjectStorageConnectionMemberStory
 } from './fixtures/object-storage-connection-settings.story'
 
@@ -13,8 +15,9 @@ test('Admin configures an unconfigured connection through the exact proof and se
 }) => {
   const component = await mount(<ObjectStorageConnectionAdminEmptyStory />)
   await expect(component.getByText('Object storage is not configured yet.')).toBeVisible()
+  await expect(component.getByLabel('Provider')).toHaveCount(0)
+  await expect(component.getByText('Tencent Cloud COS')).toHaveCount(0)
 
-  await component.getByLabel('Provider').selectOption('oss')
   await component.getByLabel('Region').fill('cn-hangzhou')
   await component.getByLabel('Bucket').fill('nevix-reference-materials')
   await component.getByLabel('Access Key ID').fill('LTAI1234567890')
@@ -161,6 +164,41 @@ test('credential-unavailable state prominently offers proof-protected recovery',
   expect(await page.evaluate(() => window.__objectStorageConnectionTest?.proofCalls())).toEqual([
     'recover'
   ])
+})
+
+test('legacy storage is quarantined without provider details and can only be deleted', async ({
+  mount,
+  page
+}) => {
+  const component = await mount(<ObjectStorageConnectionLegacyStory />)
+
+  await expect(component.getByText('Legacy storage connection')).toBeVisible()
+  await expect(
+    component.getByText(
+      'This legacy connection is incompatible with the OSS-only version and cannot be used.'
+    )
+  ).toBeVisible()
+  await expect(component.getByText('Tencent Cloud COS')).toHaveCount(0)
+  await expect(component.getByRole('button', { name: 'Recheck saved credential' })).toHaveCount(0)
+  await expect(component.getByRole('button', { name: 'Replace location' })).toHaveCount(0)
+  await expect(component.getByRole('button', { name: 'Rotate credential' })).toHaveCount(0)
+  await expect(component.getByRole('button', { name: 'Delete connection' })).toBeEnabled()
+
+  await component.getByRole('button', { name: 'Delete connection' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete object storage connection?' })
+  await dialog.getByRole('button', { name: 'Delete connection' }).click()
+  await expect(component.getByText('Object storage is not configured yet.')).toBeVisible()
+})
+
+test('a frozen legacy connection exposes no in-product deletion path', async ({ mount }) => {
+  const component = await mount(<ObjectStorageConnectionFrozenLegacyStory />)
+
+  await expect(
+    component.getByText(
+      'The storage location is frozen. Resolve the legacy connection outside Nevix before configuring OSS.'
+    )
+  ).toBeVisible()
+  await expect(component.getByRole('button', { name: 'Delete connection' })).toHaveCount(0)
 })
 
 test('a frozen location disables replace and delete while leaving recheck and rotation available', async ({

@@ -19,7 +19,14 @@ await testI18n.init(
   })
 )
 
-type Scenario = 'unconfigured' | 'ready' | 'frozen' | 'credential-unavailable' | 'member'
+type Scenario =
+  | 'unconfigured'
+  | 'ready'
+  | 'frozen'
+  | 'credential-unavailable'
+  | 'legacy'
+  | 'legacy-frozen'
+  | 'member'
 
 interface ObjectStorageConnectionTestControls {
   proofCalls(): ReadonlyArray<ObjectStorageConnectionProofAction>
@@ -88,6 +95,13 @@ globalThis.fetch = async (input, init) => {
 
   if (path === '/creation/object-storage-connection' && request.method === 'GET') {
     if (scenario === 'unconfigured') return respond(200, { state: 'unconfigured' })
+    if (scenario === 'legacy' || scenario === 'legacy-frozen') {
+      return respond(200, {
+        state: 'legacy_incompatible',
+        revision: 7,
+        location_frozen: scenario === 'legacy-frozen'
+      })
+    }
     if (scenario === 'credential-unavailable') {
       return respond(200, { ...readyView, state: 'credential_unavailable' })
     }
@@ -196,6 +210,14 @@ export function ObjectStorageConnectionAdminFrozenStory(): React.JSX.Element {
 
 export function ObjectStorageConnectionCredentialUnavailableStory(): React.JSX.Element {
   return <StoryShell scenario="credential-unavailable" isAdmin />
+}
+
+export function ObjectStorageConnectionLegacyStory(): React.JSX.Element {
+  return <StoryShell scenario="legacy" isAdmin />
+}
+
+export function ObjectStorageConnectionFrozenLegacyStory(): React.JSX.Element {
+  return <StoryShell scenario="legacy-frozen" isAdmin />
 }
 
 export function ObjectStorageConnectionMemberStory(): React.JSX.Element {
