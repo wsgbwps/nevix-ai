@@ -2,7 +2,7 @@ import { useMemo, type ReactNode } from 'react'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
 import { AuthenticationProvider, useCurrentSession } from '../features/authentication'
 import { useServerConnection } from '../features/connection'
-import { CreationRuntimeProvider } from '../features/creation'
+import { CreationRuntimeProvider, CreationSessionNavigationProvider } from '../features/creation'
 import { ServerConnectionStateContext } from './connection-state'
 import { OrdinaryCloseProvider } from './ordinary-close'
 import { routeTree } from './routeTree.gen'
@@ -48,7 +48,7 @@ function CreationRuntimeComposition({
 
   return (
     <CreationRuntimeProvider acquireSession={acquireSession} serverUrl={serverUrl} userId={userId}>
-      {children}
+      <CreationSessionNavigationProvider>{children}</CreationSessionNavigationProvider>
     </CreationRuntimeProvider>
   )
 }

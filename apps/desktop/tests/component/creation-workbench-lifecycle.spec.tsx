@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/experimental-ct-react'
 import {
+  CreationWorkbenchRestartStory,
   CreationWorkbenchNavigationStory,
   CreationWorkbenchStory
 } from './fixtures/creation-workbench.story'
@@ -44,8 +45,38 @@ test('an existing-session submission continues while Settings unmounts the workb
 
   await page.evaluate(() => window.__creationDeckTest?.releaseSubmissions())
   await page.getByRole('button', { name: 'Back to creation' }).click()
-  await selectSession(page, 'Spring campaign')
+  await expect(page.getByTestId('composer')).toBeVisible()
   await expect(page.getByTestId(`task-${acceptedTaskId}`)).toBeVisible()
+})
+
+test('the global session navigation opens the selected session from Settings', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchNavigationStory />)
+  await page.getByRole('button', { name: 'Open settings' }).click()
+
+  await expect(page.getByTestId('creation-session-navigation')).toBeVisible()
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+
+  await expect(page.getByTestId('settings-surface')).toHaveCount(0)
+  await expect(page.getByTestId('composer')).toBeVisible()
+})
+
+test('a recreated navigation provider starts with no selected Workbench Context', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchRestartStory />)
+  await selectSession(page, 'Spring campaign')
+  await expect(page.getByTestId('composer')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Restart app' }).click()
+
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByLabel('Workspace')).toContainText(
+    'Pick or create a session to start your work'
+  )
 })
 
 test('an accepted response loss resumes the exact frozen submission', async ({ mount, page }) => {
@@ -153,7 +184,7 @@ test('an existing-session upload continues across navigation and returns as a Go
   await page.getByRole('button', { name: 'Open settings' }).click()
   await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
   await page.getByRole('button', { name: 'Back to creation' }).click()
-  await selectSession(page, 'Spring campaign')
+  await expect(page.getByTestId('composer')).toBeVisible()
   await expect(page.getByRole('button', { name: 'navigation.png', exact: true })).toBeVisible()
 })
 
@@ -273,7 +304,7 @@ test('an existing-session replacement finishes its original context while Settin
     .toEqual([firstMaterialId])
 
   await page.getByRole('button', { name: 'Back to creation' }).click()
-  await selectSession(page, 'Spring campaign')
+  await expect(page.getByTestId('composer')).toBeVisible()
   await expect(page.getByRole('button', { name: 'replacement.png', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'poster.png', exact: true })).toHaveCount(0)
 })

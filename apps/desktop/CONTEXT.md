@@ -71,6 +71,14 @@ _Avoid_: Storage Backend, S3 Connection, Desktop Storage Setting, Custom Endpoin
 AI Creation Domain 拥有的灵感浏览与复用页面；Member 只浏览有效 Team Publication，Admin 还浏览全体 User 尚未逻辑删除的成功 Media Asset，并区分已发布、未发布与安全限制状态；来源 Asset 已删除的有效 Publication 仍展示。它没有 Official/Discovery 频道切换，也不是独立 Domain 或 app-owned 跨 Feature 聚合页。
 _Avoid_: Inspiration Domain, Discovery Domain
 
+**Creation Session（创作会话）**:
+User 私有的一段连续创作上下文，聚合该上下文中的 Reference Material 与 Generation Task；可编辑 Draft 只留在当前设备，不属于 Creation Session。
+_Avoid_: Conversation, Chat, Workspace
+
+**Creation Session Navigation（创作会话导航）**:
+App Shell 中全局呈现 Creation Session、临时提交项与新建入口的导航面；它允许 User 进入和管理创作上下文，但不拥有 Creation Workbench 的任务展示或媒体资源生命周期。
+_Avoid_: Conversation List, Chat History, Workspace Sidebar
+
 **Draft**:
 创作台中 User 正在编辑、仅留存于当前设备的生成意图；它随写随存于本设备，多设备互不相通，可以任意修改，尚未对任何生成结果负责，提交时才冻结为 Generation Specification。
 _Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 服务端草稿

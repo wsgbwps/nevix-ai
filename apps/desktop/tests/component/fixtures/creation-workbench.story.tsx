@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { testI18n } from './creation-workbench-i18n'
 import {
+  CreationSessionNavigationProvider,
+  CreationSessionNavigationSidebar,
   CreationRuntimeContext,
   CreationWorkbenchPage,
   createCreationRuntime,
   type CreationRuntime
 } from '../../../src/renderer/src/features/creation'
+import { SidebarProvider } from '../../../src/renderer/src/components/ui/sidebar'
+import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
 import type {
   CreationApiResult,
   CreationSessionView,
@@ -1062,7 +1066,13 @@ function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
   }
 }
 
-function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): React.JSX.Element {
+export function RuntimeWorkbenchScope({
+  options,
+  children
+}: {
+  readonly options: StoryOptions
+  readonly children: React.ReactNode
+}): React.JSX.Element {
   const [runtime] = useState(() => installWorkbenchRuntime(resolvedRuntimeOptions(options)))
   const [ready, setReady] = useState(options.publicationSimilar === undefined)
   useEffect(() => {
@@ -1078,8 +1088,39 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
   if (!ready) return <p role="status">Preparing Publication reuse</p>
   return (
     <CreationRuntimeContext.Provider value={runtime}>
-      <CreationWorkbenchPage />
+      <CreationSessionNavigationProvider>{children}</CreationSessionNavigationProvider>
     </CreationRuntimeContext.Provider>
+  )
+}
+
+function StorySidebar({
+  onOpenCreation = () => undefined
+}: {
+  readonly onOpenCreation?: () => void
+}): React.JSX.Element {
+  return (
+    <aside className="flex w-52 shrink-0 flex-col">
+      <CreationSessionNavigationSidebar onOpenCreation={onOpenCreation} />
+    </aside>
+  )
+}
+
+function WorkbenchWithNavigation(): React.JSX.Element {
+  return (
+    <TooltipProvider delayDuration={0}>
+      <SidebarProvider className="min-h-0 flex-1">
+        <StorySidebar />
+        <CreationWorkbenchPage />
+      </SidebarProvider>
+    </TooltipProvider>
+  )
+}
+
+function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): React.JSX.Element {
+  return (
+    <RuntimeWorkbenchScope options={options}>
+      <CreationWorkbenchPage />
+    </RuntimeWorkbenchScope>
   )
 }
 
@@ -1087,7 +1128,9 @@ function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): 
 export function CreationWorkbenchStory(options: StoryOptions = {}): React.JSX.Element {
   return (
     <Frame height={options.height}>
-      <RuntimeWorkbenchPage options={options} />
+      <RuntimeWorkbenchScope options={options}>
+        <WorkbenchWithNavigation />
+      </RuntimeWorkbenchScope>
     </Frame>
   )
 }
@@ -1095,12 +1138,22 @@ export function CreationWorkbenchStory(options: StoryOptions = {}): React.JSX.El
 /** Route-unmount story: the runtime remains above the switched surface just
  * like App.tsx, while the Workbench hook and all display owners are destroyed. */
 export function CreationWorkbenchNavigationStory(options: StoryOptions = {}): React.JSX.Element {
-  const [runtime] = useState(() => installWorkbenchRuntime(resolvedRuntimeOptions(options)))
-  const [creationVisible, setCreationVisible] = useState(true)
   return (
     <I18nextProvider i18n={testI18n}>
-      <CreationRuntimeContext.Provider value={runtime}>
-        <div style={{ height: 600 }} className="flex w-full flex-col">
+      <RuntimeWorkbenchScope options={options}>
+        <NavigationStorySurface />
+      </RuntimeWorkbenchScope>
+    </I18nextProvider>
+  )
+}
+
+function NavigationStorySurface(): React.JSX.Element {
+  const [creationVisible, setCreationVisible] = useState(true)
+  return (
+    <TooltipProvider delayDuration={0}>
+      <SidebarProvider className="min-h-0 flex-1">
+        <StorySidebar onOpenCreation={() => setCreationVisible(true)} />
+        <div style={{ height: 600 }} className="flex min-w-0 flex-1 flex-col">
           <nav className="flex shrink-0 gap-2 border-b p-2">
             <button type="button" onClick={() => setCreationVisible(false)}>
               Open settings
@@ -1117,7 +1170,22 @@ export function CreationWorkbenchNavigationStory(options: StoryOptions = {}): Re
             )}
           </div>
         </div>
-      </CreationRuntimeContext.Provider>
+      </SidebarProvider>
+    </TooltipProvider>
+  )
+}
+
+/** Recreates the route-above provider, matching an application restart. */
+export function CreationWorkbenchRestartStory(options: StoryOptions = {}): React.JSX.Element {
+  const [run, setRun] = useState(0)
+  return (
+    <I18nextProvider i18n={testI18n}>
+      <button type="button" onClick={() => setRun((current) => current + 1)}>
+        Restart app
+      </button>
+      <RuntimeWorkbenchScope key={run} options={options}>
+        <NavigationStorySurface />
+      </RuntimeWorkbenchScope>
     </I18nextProvider>
   )
 }
@@ -1133,9 +1201,16 @@ export function CreationWorkbenchShellStory(options: StoryOptions = {}): React.J
   return (
     <I18nextProvider i18n={testI18n}>
       <div style={{ height: 600 }} className="flex w-full flex-col">
-        <div className="flex flex-1 flex-col overflow-auto" data-testid="shell-content">
-          <RuntimeWorkbenchPage options={options} />
-        </div>
+        <RuntimeWorkbenchScope options={options}>
+          <TooltipProvider delayDuration={0}>
+            <SidebarProvider className="min-h-0 flex-1">
+              <StorySidebar />
+              <div className="flex flex-1 flex-col overflow-auto" data-testid="shell-content">
+                <CreationWorkbenchPage />
+              </div>
+            </SidebarProvider>
+          </TooltipProvider>
+        </RuntimeWorkbenchScope>
       </div>
     </I18nextProvider>
   )

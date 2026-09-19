@@ -137,10 +137,10 @@ export const creationTranslations = defineResourceTranslations({
         }
       },
       sessions: {
-        label: '开启创作',
+        label: '创作会话',
         empty: '还没有创作会话，从一个空白草稿开始',
         unnamed: '未命名创作',
-        newAction: '新对话',
+        newAction: '新建创作',
         rename: { label: '重命名会话' },
         menu: { open: '会话操作', rename: '重命名', delete: '删除' },
         pendingStatus: {
@@ -148,7 +148,7 @@ export const creationTranslations = defineResourceTranslations({
           unconfirmed: '结果未确认',
           failed: '提交失败'
         },
-        private: 'Creation Session 由创建者私有'
+        private: '创作会话仅创建者可见'
       },
       workspace: {
         label: '工作区',
@@ -690,10 +690,10 @@ export const creationTranslations = defineResourceTranslations({
         }
       },
       sessions: {
-        label: 'Start creating',
+        label: 'Creation sessions',
         empty: 'No creation sessions yet; start from a blank draft',
         unnamed: 'Untitled creation',
-        newAction: 'New conversation',
+        newAction: 'New creation',
         rename: { label: 'Rename session' },
         menu: { open: 'Session actions', rename: 'Rename', delete: 'Delete' },
         pendingStatus: {

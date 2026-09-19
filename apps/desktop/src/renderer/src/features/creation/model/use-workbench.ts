@@ -30,11 +30,7 @@ import {
   type DraftMediaType,
   type DraftStaleField
 } from './capability'
-import {
-  PENDING_DRAFT_KEY_PREFIX,
-  readLocalDraft,
-  type LocalDraftOperationNotice
-} from './draft-store'
+import { PENDING_DRAFT_KEY_PREFIX, type LocalDraftOperationNotice } from './draft-store'
 import {
   countPromptMentions,
   expandPromptDocument,
@@ -52,30 +48,22 @@ import { useWorkbenchContext } from './use-workbench-context'
 import {
   emptyComposerDraft,
   type ComposerDraft,
-  type WorkbenchContextDeps,
-  type WorkbenchStatus
+  type WorkbenchContextDeps
 } from './workbench-context-controller'
 import type { WorkbenchActionState } from './workbench-runtime'
+import { useCreationSessionNavigation } from './creation-session-navigation-context'
 import type {
   MaterialPreviewSource,
   MaterialThumbnailState,
   WorkbenchDisplayDeps
 } from './workbench-display-controller'
 
-export type { ComposerDraft, WorkbenchStatus } from './workbench-context-controller'
+export type { ComposerDraft } from './workbench-context-controller'
 export { emptyComposerDraft } from './workbench-context-controller'
 
 export type ManifestStatus = 'loading' | 'ready' | 'unavailable'
 
 export type { MaterialThumbnailState } from './workbench-display-controller'
-
-/** One sidebar temporary entry: a draft whose submission started before any
- * session identity existed (`pending:<uuid>` ownership, ADR-0017). */
-export interface PendingDraftEntry {
-  readonly key: string
-  readonly title: string
-  readonly status: WorkbenchActionState['status']
-}
 
 interface StagedMaterial {
   readonly id: string
@@ -89,13 +77,9 @@ interface StagedMaterial {
  * verdicts come from the manifest.
  */
 
-/** The presented Workbench Context: identity, entry actions, the session
- * list, and the action-lifecycle notices. */
+/** The presented Workbench Context and action-lifecycle notices. */
 export interface WorkbenchContextHandle {
   ports: CreationRuntime
-  status: WorkbenchStatus
-  reload: () => void
-  sessions: readonly CreationSessionView[]
   selected: CreationSessionView | null
   selectedId: string | null
   /** True while the creator drafts against a session that does not exist yet. */
@@ -104,13 +88,6 @@ export interface WorkbenchContextHandle {
    * unmaterialized draft is the active context. */
   pendingKey: string | null
   contextKey: string
-  /** Temporary session-list entries for drafts without a session identity. */
-  pendingDrafts: readonly PendingDraftEntry[]
-  openPendingDraft: (key: string) => void
-  selectSession: (session: CreationSessionView) => void
-  startNewDraft: () => void
-  deleteSession: (sessionId: string) => void
-  renameSession: (sessionId: string, name: string) => void
   actionState: WorkbenchActionState
   operationNotice: LocalDraftOperationNotice | null
   resumeSubmission: () => void
@@ -214,6 +191,8 @@ export function useCreationWorkbench(): {
   readonly gallery: WorkbenchGalleryHandle
 } {
   const ports = useCreationRuntime()
+  const navigation = useCreationSessionNavigation()
+  const navigationTarget = navigation?.target
   const { t } = useTranslation('creation')
   const mentionKindLabels = useMemo<PromptMentionKindLabels>(
     () => ({
@@ -227,10 +206,6 @@ export function useCreationWorkbench(): {
   const [manifest, setManifest] = useState<CapabilityManifest | null>(null)
   const [manifestStatus, setManifestStatus] = useState<ManifestStatus>('loading')
   const [indeterminateTaskId, setIndeterminateTaskId] = useState<string | null>(null)
-  // Bumped on every runtime event: sidebar entries recompute even for
-  // contexts the display is not showing.
-  const [entriesRevision, setEntriesRevision] = useState(0)
-
   // The Generation Task refresh module (ADR-0005); business actions only ask
   // it to reconcile after they complete.
   const taskRefresh = useTaskRefreshModule(ports)
@@ -262,8 +237,6 @@ export function useCreationWorkbench(): {
     if (ports === null) return null
     return {
       userId: ports.userId,
-      listSessions: (cursor) => ports.listSessions(cursor),
-      renameSession: (sessionId, name) => ports.renameSession(sessionId, name),
       getSessionDetail: (sessionId) => ports.getSessionDetail(sessionId),
       listMaterials: (sessionId, cursor) => ports.listMaterials(sessionId, cursor),
       actions: {
@@ -275,7 +248,6 @@ export function useCreationWorkbench(): {
           ports.actions.observeMaterials(key, materialIds, observation),
         resolvedMaterialId: (sessionId, localId) =>
           ports.actions.resolvedMaterialId(sessionId, localId),
-        deleteSession: (sessionId) => ports.actions.deleteSession(sessionId),
         acknowledgeFailure: (key) => ports.actions.acknowledgeFailure(key)
       },
       display: {
@@ -297,6 +269,23 @@ export function useCreationWorkbench(): {
   }, [ports])
   const context = useWorkbenchContext(contextDeps)
   const { snapshot: ctx, controller: contextController } = context
+
+  // Navigation stays above the router; the Workbench only consumes its
+  // target while this route is mounted, keeping task and display lifetimes
+  // page-local (ADR-0007).
+  useEffect(() => {
+    if (contextController === undefined || navigationTarget === undefined) return
+    if (navigationTarget.kind !== 'session') {
+      const targetKey =
+        navigationTarget.kind === 'pending'
+          ? navigationTarget.key
+          : navigationTarget.kind === 'new'
+            ? 'new'
+            : 'inactive'
+      if (contextController.getSnapshot().contextKey === targetKey) return
+    }
+    contextController.enterContext(navigationTarget)
+  }, [contextController, navigationTarget])
 
   // Render cannot write refs; mirror the committed values after commit so
   // callbacks (submit, unmount cleanup) always read the latest bindings
@@ -342,9 +331,8 @@ export function useCreationWorkbench(): {
     }
   }, [contextController, ports])
 
-  // The thin event route: one subscription translates runtime action events
-  // into context-controller semantic calls; sidebar entries recompute on
-  // every event.
+  // The Workbench handles only route-local display and context events.
+  // Creation Session Navigation owns list reconciliation above the router.
   useEffect(() => {
     if (!ports || contextController === undefined) return
     return ports.actions.subscribe((event) => {
@@ -352,18 +340,9 @@ export function useCreationWorkbench(): {
         displayRef.current.updateUploadProgress(event.localId, event.sentBytes, event.totalBytes)
         return
       }
-      if (event.type === 'sessions-reconcile') {
-        contextController.reload()
-        setEntriesRevision((revision) => revision + 1)
-        return
+      if (event.type === 'changed' || event.type === 'reconcile') {
+        contextController.noteRuntimeEvent(event)
       }
-      if (event.type === 'materialized') {
-        contextController.noteSessionMaterialized(event.session, event.pendingKey)
-        setEntriesRevision((revision) => revision + 1)
-        return
-      }
-      setEntriesRevision((revision) => revision + 1)
-      contextController.noteRuntimeEvent(event)
     })
   }, [contextController, ports])
 
@@ -649,7 +628,8 @@ export function useCreationWorkbench(): {
     // so the re-entry below re-registers them from the runtime's hold.
     void ports.actions.submitNewDraft(key, intent, files)
     contextController.enterContext({ kind: 'pending', key })
-  }, [contextController, ports])
+    navigation?.openPendingDraft(key)
+  }, [contextController, navigation, ports])
 
   // The composer's submit affordance: a void adapter so the JSX handler can
   // stay a plain reference.
@@ -1061,51 +1041,17 @@ export function useCreationWorkbench(): {
     ]
   )
 
-  /** Sidebar entries titled by their persisted prompt. */
-  const pendingDrafts = useMemo<readonly PendingDraftEntry[]>(() => {
-    void entriesRevision
-    if (ports === null) return []
-    const storage = globalThis.localStorage
-    return ports.actions.pendingDrafts().map((key) => {
-      const stored = storage === undefined ? null : readLocalDraft(storage, ports.userId, key)
-      return {
-        key,
-        title: (stored?.prompt ?? '').trim().split('\n')[0],
-        status: ports.actions.snapshot(key).status
-      }
-    })
-  }, [entriesRevision, ports])
-
   // The composer's submit circle and the gallery's regenerate gate on one verdict.
   const submitDisabled = submitBlocked !== null || actionBlocksSubmission
 
   return {
     context: {
       ports,
-      status: ctx.status,
-      reload: (): void => contextController?.reload(),
-      sessions: ctx.sessions,
       selected: ctx.selected,
       selectedId: ctx.selectedId,
       composingNew: ctx.composingNew,
       pendingKey: ctx.pendingKey,
       contextKey: ctx.contextKey,
-      pendingDrafts,
-      openPendingDraft: (key: string) => {
-        contextController?.enterContext({ kind: 'pending', key })
-      },
-      selectSession: (session: CreationSessionView) => {
-        contextController?.enterContext({ kind: 'session', session })
-      },
-      startNewDraft: () => {
-        contextController?.enterContext({ kind: 'new' })
-      },
-      deleteSession: (sessionId: string) => {
-        contextController?.deleteSession(sessionId)
-      },
-      renameSession: (sessionId: string, name: string) => {
-        contextController?.renameSession(sessionId, name)
-      },
       actionState: ctx.actionState,
       operationNotice: ctx.operationNotice,
       resumeSubmission: () => {

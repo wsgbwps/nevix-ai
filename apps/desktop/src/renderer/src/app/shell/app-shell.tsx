@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { Link, useLocation } from '@tanstack/react-router'
+import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
   ChevronsUpDownIcon,
   HomeIcon,
@@ -11,15 +11,10 @@ import {
   SunIcon
 } from 'lucide-react'
 import { useCurrentSession } from '../../features/authentication'
+import { CreationSessionNavigationSidebar } from '../../features/creation'
 import { type Theme, useTheme } from '../../hooks/use-theme'
 import { createSettingsEntry } from '../settings'
 import { Avatar, AvatarFallback } from '../../components/ui/avatar'
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage
-} from '../../components/ui/breadcrumb'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +28,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '../../components/ui/dropdown-menu'
-import { Separator } from '../../components/ui/separator'
 import {
   Sidebar,
   SidebarContent,
@@ -78,6 +72,7 @@ export function AppShell({
   const { t: authenticationT } = useTranslation('authentication')
   const session = useCurrentSession()
   const location = useLocation()
+  const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
 
   if (session.status !== 'available') {
@@ -87,15 +82,6 @@ export function AppShell({
   }
 
   const userInitial = initialOf(session.user.email)
-  const breadcrumbLabel =
-    location.pathname === '/'
-      ? t('shell.home')
-      : location.pathname.startsWith('/creation')
-        ? t('shell.creation')
-        : location.pathname.startsWith('/assets')
-          ? t('shell.assets')
-          : undefined
-
   return (
     <TooltipProvider delayDuration={0}>
       {/* h-svh makes the shell's height definite: the wrapper's own min-h-svh
@@ -106,24 +92,15 @@ export function AppShell({
       <SidebarProvider className="h-svh">
         <Sidebar collapsible="icon">
           <SidebarHeader>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  size="lg"
-                  disabled
-                  aria-label={t('shell.brand')}
-                  className="disabled:opacity-100"
-                >
-                  <BrandMark />
-                  <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate font-medium">Nevix AI</span>
-                  </div>
-                  <ChevronsUpDownIcon className="ml-auto size-4" />
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
+            <div className="flex h-8 items-center gap-2 px-2">
+              <BrandMark className="size-7 rounded-md text-xs" />
+              <span className="min-w-0 flex-1 truncate text-sm font-medium group-data-[collapsible=icon]:hidden">
+                Nevix AI
+              </span>
+              <SidebarTrigger aria-label={t('shell.toggleSidebar')} />
+            </div>
           </SidebarHeader>
-          <SidebarContent>
+          <SidebarContent className="overflow-hidden">
             <SidebarGroup>
               <SidebarGroupContent>
                 <SidebarMenu>
@@ -172,6 +149,11 @@ export function AppShell({
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
+            <CreationSessionNavigationSidebar
+              onOpenCreation={() => {
+                void navigate({ to: '/creation' })
+              }}
+            />
           </SidebarContent>
           <SidebarFooter>
             <SidebarMenu>
@@ -259,24 +241,6 @@ export function AppShell({
           <SidebarRail aria-label={t('shell.toggleSidebar')} title={t('shell.toggleSidebar')} />
         </Sidebar>
         <SidebarInset>
-          <header className="flex h-16 shrink-0 items-center gap-2 px-4">
-            <SidebarTrigger aria-label={t('shell.toggleSidebar')} className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-horizontal:hidden data-vertical:h-4 data-vertical:self-auto"
-            />
-            {breadcrumbLabel ? (
-              <Breadcrumb>
-                <BreadcrumbList>
-                  <BreadcrumbItem>
-                    <BreadcrumbPage className="text-muted-foreground">
-                      {breadcrumbLabel}
-                    </BreadcrumbPage>
-                  </BreadcrumbItem>
-                </BreadcrumbList>
-              </Breadcrumb>
-            ) : null}
-          </header>
           <div className="flex flex-1 flex-col overflow-auto">{children}</div>
         </SidebarInset>
       </SidebarProvider>

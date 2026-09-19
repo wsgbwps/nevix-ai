@@ -113,7 +113,7 @@ test('an empty library shows every explicit state: list, empty note, workspace e
 
   const workbench = page.getByTestId('creation-workbench')
   await expect(workbench).toBeVisible()
-  await expect(workbench.getByRole('complementary')).toContainText(
+  await expect(page.getByTestId('creation-session-navigation')).toContainText(
     'No creation sessions yet; start from a blank draft'
   )
   await expect(workbench.getByText('Pick or create a session to start your work')).toBeVisible()
@@ -791,6 +791,7 @@ test('Publication reuse adopts the server Session with remapped references and s
   await expect(page.getByTestId('composer-prompt')).toHaveText('Preserved Publication intent', {
     timeout: 5_000
   })
+  await expect(page.getByTestId(`session-${sessionId}`)).toHaveAttribute('data-active', 'true')
   await expect(page.getByTestId('composer-model')).toContainText('removed-legacy-model')
   await expect(page.locator(`[data-material-id="${materialId}"]`)).toBeVisible()
   await expect(page.getByTestId('composer-submit')).toBeDisabled()

@@ -338,7 +338,7 @@ test('workspace and session-list scrolling stay independent in the shell', async
       createdAt: '2026-08-20T10:00:00Z',
       updatedAt: '2026-08-21T10:00:00Z'
     },
-    ...Array.from({ length: 14 }, (_, i) => ({
+    ...Array.from({ length: 30 }, (_, i) => ({
       id: `bbbbbbbb-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
       name: `List row ${i + 1}`,
       createdAt: '2026-08-22T10:00:00Z',
@@ -351,7 +351,6 @@ test('workspace and session-list scrolling stay independent in the shell', async
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
   await expect(page.getByTestId('composer')).toBeVisible()
 
-  const workbench = page.getByTestId('creation-workbench')
   // Before the coupled-scroll fix the scroller trivially had no overflow; the
   // settle poll proves it really reaches the bottom once its height is bound.
   const scroller = await settledScroller(page)
@@ -393,20 +392,20 @@ test('workspace and session-list scrolling stay independent in the shell', async
     .toBe(0)
   const heading = page.getByRole('heading', { name: 'Spring campaign', exact: true })
   const headingTopBefore = (await heading.boundingBox())!
-  const asideBox = (await workbench.getByRole('complementary').boundingBox())!
-  await page.mouse.move(asideBox.x + asideBox.width / 2, asideBox.y + 200)
+  const listBox = (await list.boundingBox())!
+  await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + listBox.height / 2)
   await page.mouse.wheel(0, 300)
   await expect
     .poll(
       async () =>
-        (await list.evaluate((ul) => (ul.parentElement as HTMLElement).scrollTop)) > 0 ||
+        (await list.evaluate((element) => element.scrollTop)) > 0 ||
         (await heading.boundingBox())!.y !== headingTopBefore.y,
       { timeout: 2_000 }
     )
     .toBe(true)
   const headingTopAfter = (await heading.boundingBox())!
   expect(headingTopAfter.y).toBeCloseTo(headingTopBefore.y, 0)
-  const listScrollTop = await list.evaluate((ul) => (ul.parentElement as HTMLElement).scrollTop)
+  const listScrollTop = await list.evaluate((element) => element.scrollTop)
   expect(listScrollTop).toBeGreaterThan(0)
 })
 
@@ -467,6 +466,7 @@ test('a large task history mounts and loads media only around the visible window
       page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)
     )
     .toBeGreaterThan(bottomThumbnailLoads)
+  await page.waitForTimeout(300)
   const afterTopThumbnailLoads = await page.evaluate(
     () => window.__creationDeckTest?.materialUrlCalls().length ?? 0
   )

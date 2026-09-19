@@ -1,28 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  FileImageIcon,
-  ImageIcon,
-  MoreHorizontalIcon,
-  PencilLineIcon,
-  SparklesIcon,
-  Trash2Icon,
-  VideoIcon
-} from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '../../../components/ui/dropdown-menu'
-import type { CreationSessionView } from '../api/go-creation-http'
-import {
-  useCreationWorkbench,
-  type PendingDraftEntry,
-  type WorkbenchContextHandle
-} from '../model/use-workbench'
+import { ImageIcon, SparklesIcon, VideoIcon } from 'lucide-react'
+import { useCreationWorkbench, type WorkbenchContextHandle } from '../model/use-workbench'
+import { useCreationSessionNavigation } from '../model/creation-session-navigation-context'
 import type { TaskHistoryStatus } from '../model/task-refresh/task-refresh-controller'
 import { textPromptDocument } from '../model/prompt-document'
-import { ComposerMenuContent } from './composer-menu-content'
 import { CreationComposer, EXPANDED_MAX_WIDTH } from './composer'
 import { ResultGallery } from './result-gallery'
 import { isScrolledToBottom } from './use-composer-presence'
@@ -39,6 +21,7 @@ const HISTORY_TRIGGER_PX = 240
  */
 export function CreationWorkbenchPage(): React.JSX.Element | null {
   const { context, composer, gallery } = useCreationWorkbench()
+  const navigation = useCreationSessionNavigation()
   const { t } = useTranslation('creation')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [showBackToBottom, setShowBackToBottom] = useState(false)
@@ -57,11 +40,11 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   const lastNewestTaskIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (context.status === 'loading') return
+    if (navigation === null || navigation.status === 'loading') return
     const similarSession = context.ports?.actions.consumePreparedSimilarSession()
-    if (similarSession) context.selectSession(similarSession)
-    else if (context.ports?.actions.consumePreparedSimilarDraft()) context.startNewDraft()
-  }, [context])
+    if (similarSession) navigation.adoptSession(similarSession)
+    else if (context.ports?.actions.consumePreparedSimilarDraft()) navigation.startNewDraft()
+  }, [context.ports, navigation])
 
   useLayoutEffect(() => {
     const releaseScrollbar = (): void => {
@@ -127,7 +110,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   const workspaceActive =
     context.selected !== null || context.composingNew || context.pendingKey !== null
   const pendingWorkspaceTitle =
-    context.pendingDrafts.find((entry) => entry.key === context.pendingKey)?.title ?? ''
+    navigation?.pendingDrafts.find((entry) => entry.key === context.pendingKey)?.title ?? ''
 
   // Virtual rows and result media can establish their real height after the
   // task-id effect's first scroll. Continue following those measurements only
@@ -201,80 +184,6 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
 
   return (
     <section className="flex min-h-0 flex-1 overflow-hidden" data-testid="creation-workbench">
-      <aside
-        aria-label={t('sessions.label')}
-        className="bg-sidebar flex w-[210px] shrink-0 flex-col border-r"
-      >
-        <div className="flex h-12 shrink-0 items-center px-4">
-          <h2 className="text-foreground text-sm font-semibold">{t('sessions.label')}</h2>
-        </div>
-        <div className="px-2 pb-1">
-          <button
-            type="button"
-            data-testid="session-new"
-            onClick={context.startNewDraft}
-            className="hover:bg-foreground/[0.04] flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
-          >
-            <span className="bg-foreground/[0.06] text-foreground grid size-7 shrink-0 place-items-center rounded-md border">
-              <PencilLineIcon className="size-3.5" aria-hidden />
-            </span>
-            <span className="text-foreground truncate text-xs font-medium">
-              {t('sessions.newAction')}
-            </span>
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1">
-          {context.sessions.length === 0 &&
-          context.pendingDrafts.length === 0 &&
-          context.status === 'ready' ? (
-            <p className="text-muted-foreground px-1 py-2 text-xs" role="status">
-              {t('sessions.empty')}
-            </p>
-          ) : (
-            <ul className="grid gap-0.5" data-testid="session-list">
-              {context.pendingDrafts.map((entry) => (
-                <PendingSessionRow
-                  key={entry.key}
-                  entry={entry}
-                  selected={context.pendingKey === entry.key}
-                  onSelect={() => context.openPendingDraft(entry.key)}
-                />
-              ))}
-              {context.sessions.map((session, index) => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  index={index}
-                  selected={context.selectedId === session.id}
-                  onSelect={() => context.selectSession(session)}
-                  onDelete={() => context.deleteSession(session.id)}
-                  onRename={(name) => context.renameSession(session.id, name)}
-                />
-              ))}
-            </ul>
-          )}
-          {context.status === 'loading' && (
-            <p role="status" className="text-muted-foreground px-1 py-2 text-xs">
-              {t('state.loading')}
-            </p>
-          )}
-          {context.status === 'error' && (
-            <div role="alert" className="grid gap-1 px-1 py-2">
-              <p className="text-xs">{t('state.loadFailed')}</p>
-              <button
-                type="button"
-                className="hover:bg-accent rounded border px-2 py-1 text-xs"
-                onClick={context.reload}
-              >
-                {t('state.retry')}
-              </button>
-            </div>
-          )}
-        </div>
-        <p className="text-muted-foreground border-t px-3 py-3 text-[9px]">
-          {t('sessions.private')}
-        </p>
-      </aside>
       <main aria-label={t('workspace.label')} className="relative min-w-0 flex-1 overflow-hidden">
         {workspaceActive ? (
           <>
@@ -642,196 +551,6 @@ function WorkbenchActionNotice({
         )}
       </div>
     </div>
-  )
-}
-
-/** The list rows' tile is purely decorative — the list endpoint carries no
- * cover or media state. */
-const rowGradients = [
-  'from-cyan-950 to-slate-800',
-  'from-sky-950 to-zinc-800',
-  'from-indigo-950 to-slate-800',
-  'from-neutral-900 to-cyan-950'
-] as const
-
-function SessionRow({
-  session,
-  index,
-  selected,
-  onSelect,
-  onDelete,
-  onRename
-}: {
-  readonly session: CreationSessionView
-  readonly index: number
-  readonly selected: boolean
-  readonly onSelect: () => void
-  readonly onDelete: () => void
-  readonly onRename: (name: string) => void
-}): React.JSX.Element {
-  const { t } = useTranslation('creation')
-  const name = session.name.length > 0 ? session.name : t('sessions.unnamed')
-  const [renaming, setRenaming] = useState(false)
-  const [draftName, setDraftName] = useState('')
-  const [menuOpen, setMenuOpen] = useState(false)
-  // Escape must not double-fire the blur-driven commit when the input unmounts.
-  const renameCancelledRef = useRef(false)
-
-  const beginRename = (): void => {
-    renameCancelledRef.current = false
-    setDraftName(session.name)
-    setRenaming(true)
-  }
-  const endRename = (): void => {
-    setRenaming(false)
-    if (renameCancelledRef.current) return
-    const next = draftName.trim()
-    if (next !== session.name) onRename(next)
-  }
-
-  return (
-    // The row container owns the background so the primary button and the
-    // actions trigger sit on one continuous surface (the trigger cannot nest
-    // inside the button — interactive elements do not nest); the controlled
-    // menu keeps the row lit while its portal is open.
-    <li
-      className={
-        'group relative flex items-center gap-1 rounded-md ' +
-        (renaming ? '' : selected || menuOpen ? 'bg-accent' : 'hover:bg-foreground/[0.04]')
-      }
-    >
-      {renaming ? (
-        <form
-          className="bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5"
-          onSubmit={(event) => {
-            event.preventDefault()
-            endRename()
-          }}
-        >
-          <SessionTile index={index} />
-          <input
-            autoFocus
-            value={draftName}
-            onChange={(event) => setDraftName(event.target.value)}
-            onBlur={endRename}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                renameCancelledRef.current = true
-                setRenaming(false)
-              }
-            }}
-            aria-label={t('sessions.rename.label')}
-            maxLength={128}
-            data-testid="session-rename-input"
-            className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-xs font-medium outline-none"
-          />
-        </form>
-      ) : (
-        <>
-          <button
-            type="button"
-            onClick={onSelect}
-            aria-current={selected ? 'true' : undefined}
-            aria-label={name}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
-          >
-            <SessionTile index={index} />
-            <span className="text-foreground block truncate text-xs font-medium">{name}</span>
-          </button>
-          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-            <DropdownMenuTrigger
-              aria-label={t('sessions.menu.open')}
-              data-testid={`session-menu-${session.id}`}
-              className="text-muted-foreground hover:text-foreground mr-1.5 rounded p-1 opacity-0 outline-none group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sky-400/50 data-[state=open]:opacity-100"
-            >
-              <MoreHorizontalIcon className="size-5" aria-hidden />
-            </DropdownMenuTrigger>
-            <ComposerMenuContent side="bottom" align="start" sideOffset={4}>
-              <DropdownMenuItem
-                onSelect={beginRename}
-                data-testid={`session-rename-${session.id}`}
-                className="text-xs"
-              >
-                <PencilLineIcon className="size-3.5" aria-hidden />
-                {t('sessions.menu.rename')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={onDelete}
-                data-testid={`session-delete-${session.id}`}
-                className="text-xs"
-              >
-                <Trash2Icon className="size-3.5" aria-hidden />
-                {t('sessions.menu.delete')}
-              </DropdownMenuItem>
-            </ComposerMenuContent>
-          </DropdownMenu>
-        </>
-      )}
-    </li>
-  )
-}
-
-/** A draft with no Creation Session identity; no menu — nothing on the
- * server owns it. */
-function PendingSessionRow({
-  entry,
-  selected,
-  onSelect
-}: {
-  readonly entry: PendingDraftEntry
-  readonly selected: boolean
-  readonly onSelect: () => void
-}): React.JSX.Element {
-  const { t } = useTranslation('creation')
-  const name = entry.title.length > 0 ? entry.title : t('sessions.unnamed')
-  const statusKey =
-    entry.status === 'preparing' || entry.status === 'submitting'
-      ? 'running'
-      : entry.status === 'session-unconfirmed' ||
-          entry.status === 'submission-unconfirmed' ||
-          entry.status === 'material-unconfirmed'
-        ? 'unconfirmed'
-        : entry.status === 'failed'
-          ? 'failed'
-          : null
-  return (
-    <li
-      className={
-        'relative flex items-center gap-1 rounded-md ' +
-        (selected ? 'bg-accent' : 'hover:bg-foreground/[0.04]')
-      }
-    >
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-current={selected ? 'true' : undefined}
-        aria-label={name}
-        data-testid={`session-pending-${entry.key}`}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50"
-      >
-        <span className="bg-foreground/[0.06] text-foreground grid size-7 shrink-0 place-items-center rounded-md border">
-          <PencilLineIcon className="size-3.5" aria-hidden />
-        </span>
-        <span className="grid min-w-0">
-          <span className="text-foreground block truncate text-xs font-medium">{name}</span>
-          {statusKey !== null && (
-            <span className="text-muted-foreground block truncate text-[9px]">
-              {t(`sessions.pendingStatus.${statusKey}`)}
-            </span>
-          )}
-        </span>
-      </button>
-    </li>
-  )
-}
-
-function SessionTile({ index }: { readonly index: number }): React.JSX.Element {
-  return (
-    <span
-      className={`grid size-7 shrink-0 place-items-center rounded bg-gradient-to-br ${rowGradients[index % rowGradients.length]}`}
-    >
-      <FileImageIcon className="size-3.5 text-white/75" aria-hidden />
-    </span>
   )
 }
 
