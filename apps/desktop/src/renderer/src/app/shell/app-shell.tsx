@@ -41,6 +41,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
+  SidebarSeparator,
   SidebarTrigger
 } from '../../components/ui/sidebar'
 import { TooltipProvider } from '../../components/ui/tooltip'
@@ -149,6 +150,7 @@ export function AppShell({
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
+            <SidebarSeparator />
             <CreationSessionNavigationSidebar
               onOpenCreation={() => {
                 void navigate({ to: '/creation' })
