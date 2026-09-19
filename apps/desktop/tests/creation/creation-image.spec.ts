@@ -45,11 +45,9 @@ test(
         await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
         const workbench = launched.page.getByTestId('creation-workbench')
-        await launched.page.getByRole('link', { name: 'AI 创作' }).click()
-        await expect(workbench).toBeVisible()
-
         // 「新对话」只进入未落库的 composing 态；会话随首次提交物化。
         await launched.page.getByTestId('session-new').click()
+        await expect(workbench).toBeVisible()
         await expect(workbench.getByTestId('composer')).toBeVisible()
         await workbench.getByTestId('composer-prompt').fill('秋季上新主图，冷调布光')
 

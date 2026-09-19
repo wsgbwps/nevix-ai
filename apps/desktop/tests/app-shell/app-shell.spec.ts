@@ -50,8 +50,29 @@ test(
         await expect(sidebar.locator('[data-slot="sidebar-trigger"]')).toBeVisible()
         const homeEntry = sidebar.getByRole('link', { name: '灵感' })
         await expect(homeEntry).toBeVisible()
+        await expect(sidebar.getByRole('link', { name: 'AI 创作' })).toHaveCount(0)
         await expect(sidebar.getByTestId('creation-session-navigation')).toBeVisible()
         await expect(sidebar.getByTestId('session-new')).toBeVisible()
+
+        // 主导航与会话列表之间有一条淡淡的分割线。
+        const divider = sidebar.locator('[data-slot="sidebar-separator"]')
+        await expect(divider).toBeVisible()
+        await expect
+          .poll(async () => {
+            const [assetsBox, dividerBox, sessionsBox] = await Promise.all([
+              sidebar.getByRole('link', { name: '资产' }).boundingBox(),
+              divider.boundingBox(),
+              sidebar.getByTestId('creation-session-navigation').boundingBox()
+            ])
+            if (assetsBox === null || dividerBox === null || sessionsBox === null)
+              return 'measuring'
+            if (assetsBox.y + assetsBox.height > dividerBox.y)
+              return 'divider crosses the navigation'
+            if (dividerBox.y + dividerBox.height > sessionsBox.y)
+              return 'divider crosses the sessions'
+            return 'ok'
+          })
+          .toBe('ok')
 
         // 内容区不再重复侧栏开关或路由 Breadcrumb。
         await expect(
@@ -109,6 +130,28 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
       await expect(homeEntry).toHaveCount(0)
       await expect(brand).toBeHidden()
       await expect(sidebar.getByTestId('session-new')).toBeVisible()
+
+      // 图标栏落定后，品牌标记居中，开关覆盖它的位置且默认隐藏。
+      const rail = sidebar.locator('[data-slot="sidebar-container"]')
+      await expect
+        .poll(async () => {
+          const box = await rail.boundingBox()
+          return box === null ? null : Math.round(box.width)
+        })
+        .toBe(48)
+      await expect(sidebar.getByTestId('sidebar-brand')).toBeVisible()
+      await expect(toggle).toHaveCSS('opacity', '0')
+      await toggle.hover()
+      await expect(toggle).toHaveCSS('opacity', '1')
+
+      // 会话创建按钮在自己的行里，不再压住会话列表。
+      const createBox = await sidebar.getByTestId('session-new').boundingBox()
+      const listBox = await sidebar.getByTestId('session-list').boundingBox()
+      expect(createBox).not.toBeNull()
+      expect(listBox).not.toBeNull()
+      if (createBox !== null && listBox !== null) {
+        expect(createBox.y + createBox.height).toBeLessThanOrEqual(listBox.y)
+      }
 
       // 路由各自重建 AppShell；设备侧边栏状态仍由已有 cookie 恢复。
       await sidebar.locator('[href="/assets"]').click()

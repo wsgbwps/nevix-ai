@@ -51,8 +51,7 @@ test(
         await signIn(launched, identity.email, identity.password)
 
         const workbench = launched.page.getByTestId('creation-workbench')
-        await launched.page.getByRole('link', { name: 'AI 创作' }).click()
-        await workbench.getByTestId('session-new').click()
+        await launched.page.getByTestId('session-new').click()
         await workbench.getByTestId('composer-prompt').fill(prompt)
         await workbench.getByTestId('composer-params').click()
         await launched.page
@@ -161,12 +160,13 @@ test(
         const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
         try {
           const login = relaunched.page.getByRole('heading', { name: '登录 Nevix AI' })
-          const toCreation = relaunched.page.getByRole('link', { name: 'AI 创作' })
-          await login.or(toCreation).first().waitFor({ state: 'visible', timeout: 15_000 })
+          const restoredSession = relaunched.page
+            .getByRole('button', { name: '未命名创作', exact: true })
+            .first()
+          await login.or(restoredSession).first().waitFor({ state: 'visible', timeout: 15_000 })
           if (await login.isVisible()) await signIn(relaunched, identity.email, identity.password)
-          await toCreation.click()
+          await restoredSession.click()
           const restored = relaunched.page.getByTestId('creation-workbench')
-          await restored.getByRole('button', { name: '未命名创作', exact: true }).first().click()
           await expect(restored.getByTestId('composer-prompt')).toHaveText(prompt)
 
           await relaunched.page.getByRole('link', { name: '资产' }).click()

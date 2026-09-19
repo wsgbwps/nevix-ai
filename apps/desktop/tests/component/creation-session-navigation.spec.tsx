@@ -1,8 +1,108 @@
 import { expect, test } from '@playwright/experimental-ct-react'
 import { CreationWorkbenchRealShellStory } from './fixtures/creation-workbench-real-shell.story'
+import { collapseSidebarRail, tabUntilFocused } from './fixtures/sidebar-rail-helpers'
 import type { CreationSessionView } from '../src/renderer/src/features/creation/api/go-creation-http'
 
 const springSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'
+
+test('the session group collapses without hiding the new draft action', async ({ mount, page }) => {
+  await page.evaluate(() => {
+    document.cookie = 'sidebar_state=; path=/; max-age=0'
+  })
+  await mount(<CreationWorkbenchRealShellStory />)
+
+  const toggle = page.getByRole('button', { name: 'Creation sessions', exact: true })
+  const spring = page.getByTestId(`session-${springSessionId}`)
+  const newDraft = page.getByTestId('session-new')
+
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await toggle.click()
+  await expect(spring).toBeHidden()
+  await expect(newDraft).toBeVisible()
+})
+
+test('an empty session list still offers the new draft entry', async ({ mount, page }) => {
+  await page.evaluate(() => {
+    document.cookie = 'sidebar_state=; path=/; max-age=0'
+  })
+  await mount(<CreationWorkbenchRealShellStory sessions={[]} />)
+
+  await expect(page.getByTestId('session-list')).toHaveText(
+    'No creation sessions yet; start from a blank draft'
+  )
+  await expect(page.getByTestId('session-new')).toBeVisible()
+})
+
+test('the icon rail keeps the sessions after the group was collapsed', async ({ mount, page }) => {
+  await page.evaluate(() => {
+    document.cookie = 'sidebar_state=; path=/; max-age=0'
+  })
+  await mount(<CreationWorkbenchRealShellStory />)
+
+  await page.getByRole('button', { name: 'Creation sessions', exact: true }).click()
+  await expect(page.getByTestId(`session-${springSessionId}`)).toBeHidden()
+
+  await collapseSidebarRail(page)
+  await expect(page.getByTestId('session-new')).toBeVisible()
+  await expect(page.getByTestId(`session-${springSessionId}`)).toBeVisible()
+  await expect(page.getByTestId(`session-identity-${springSessionId}`)).toBeVisible()
+})
+
+test('collapsed session controls stay aligned without a visible scrollbar', async ({
+  mount,
+  page
+}) => {
+  await page.evaluate(() => {
+    document.cookie = 'sidebar_state=; path=/; max-age=0'
+  })
+  const sessions = Array.from(
+    { length: 40 },
+    (_, index): CreationSessionView => ({
+      id: `session-${index}`,
+      name: `Session ${index}`,
+      createdAt: '2026-09-19T00:00:00.000Z',
+      updatedAt: '2026-09-19T00:00:00.000Z'
+    })
+  )
+  await mount(<CreationWorkbenchRealShellStory sessions={sessions} />)
+
+  const newDraft = page.getByTestId('session-new')
+  await collapseSidebarRail(page)
+  await tabUntilFocused(page, newDraft)
+  await expect(newDraft).toBeFocused()
+  await expect
+    .poll(async () => {
+      const [newDraftIconBox, sessionIdentityBox] = await Promise.all([
+        newDraft.locator('svg').boundingBox(),
+        page.getByTestId('session-identity-session-0').boundingBox()
+      ])
+      if (newDraftIconBox === null || sessionIdentityBox === null) return null
+      return (
+        newDraftIconBox.x +
+        newDraftIconBox.width / 2 -
+        (sessionIdentityBox.x + sessionIdentityBox.width / 2)
+      )
+    })
+    .toBe(0)
+  await expect
+    .poll(async () => {
+      const [newDraftBox, firstSessionBox] = await Promise.all([
+        newDraft.boundingBox(),
+        page.getByTestId('session-session-0').boundingBox()
+      ])
+      if (newDraftBox === null || firstSessionBox === null) return false
+      return newDraftBox.y + newDraftBox.height <= firstSessionBox.y
+    })
+    .toBe(true)
+
+  const listGeometry = await page.getByTestId('session-list').evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    scrollbarWidth: getComputedStyle(element).scrollbarWidth
+  }))
+  expect(listGeometry.scrollHeight).toBeGreaterThan(listGeometry.clientHeight)
+  expect.soft(listGeometry.scrollbarWidth).toBe('none')
+})
 
 test('the global session navigation keeps its compact controls and sidebar state', async ({
   mount,

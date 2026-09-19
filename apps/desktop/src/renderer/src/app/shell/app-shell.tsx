@@ -7,13 +7,13 @@ import {
   LogOutIcon,
   MoonIcon,
   SettingsIcon,
-  SparklesIcon,
   SunIcon
 } from 'lucide-react'
 import { useCurrentSession } from '../../features/authentication'
 import { CreationSessionNavigationSidebar } from '../../features/creation'
 import { type Theme, useTheme } from '../../hooks/use-theme'
 import { createSettingsEntry } from '../settings'
+import { SidebarBrand } from './sidebar-brand'
 import { Avatar, AvatarFallback } from '../../components/ui/avatar'
 import {
   DropdownMenu,
@@ -34,31 +34,15 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
-  SidebarSeparator,
-  SidebarTrigger
+  SidebarSeparator
 } from '../../components/ui/sidebar'
 import { TooltipProvider } from '../../components/ui/tooltip'
-
-function BrandMark({
-  className = 'size-8 rounded-lg text-sm'
-}: {
-  className?: string
-}): React.JSX.Element {
-  return (
-    <div
-      className={`bg-primary text-primary-foreground grid shrink-0 place-items-center font-bold ${className}`}
-    >
-      N
-    </div>
-  )
-}
 
 function initialOf(email: string | undefined): string {
   return email?.charAt(0).toUpperCase() ?? ''
@@ -92,15 +76,7 @@ export function AppShell({
           scrolling the whole shell (header, nav, and page) as one block. */}
       <SidebarProvider className="h-svh">
         <Sidebar collapsible="icon">
-          <SidebarHeader>
-            <div className="flex h-8 items-center gap-2 px-2">
-              <BrandMark className="size-7 rounded-md text-xs" />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium group-data-[collapsible=icon]:hidden">
-                Nevix AI
-              </span>
-              <SidebarTrigger aria-label={t('shell.toggleSidebar')} />
-            </div>
-          </SidebarHeader>
+          <SidebarBrand />
           <SidebarContent className="overflow-hidden">
             <SidebarGroup>
               <SidebarGroupContent>
@@ -129,20 +105,6 @@ export function AppShell({
                         <ImagesIcon />
                         <span className="group-data-[collapsible=icon]:hidden">
                           {t('shell.assets')}
-                        </span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location.pathname === '/creation'}
-                      tooltip={t('shell.creation')}
-                    >
-                      <Link to="/creation">
-                        <SparklesIcon />
-                        <span className="group-data-[collapsible=icon]:hidden">
-                          {t('shell.creation')}
                         </span>
                       </Link>
                     </SidebarMenuButton>

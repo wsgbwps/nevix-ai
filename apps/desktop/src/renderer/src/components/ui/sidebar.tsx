@@ -402,11 +402,16 @@ function SidebarGroupLabel({
 function SidebarGroupAction({
   className,
   asChild = false,
+  tooltip,
   ...props
-}: React.ComponentProps<'button'> & { asChild?: boolean }) {
+}: React.ComponentProps<'button'> & {
+  asChild?: boolean
+  tooltip?: string | React.ComponentProps<typeof TooltipContent>
+}) {
   const Comp = asChild ? Slot.Root : 'button'
+  const { isMobile, state } = useSidebar()
 
-  return (
+  const action = (
     <Comp
       data-slot="sidebar-group-action"
       data-sidebar="group-action"
@@ -416,6 +421,28 @@ function SidebarGroupAction({
       )}
       {...props}
     />
+  )
+
+  if (!tooltip) {
+    return action
+  }
+
+  if (typeof tooltip === 'string') {
+    tooltip = {
+      children: tooltip
+    }
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{action}</TooltipTrigger>
+      <TooltipContent
+        side="right"
+        align="center"
+        hidden={state !== 'collapsed' || isMobile}
+        {...tooltip}
+      />
+    </Tooltip>
   )
 }
 
