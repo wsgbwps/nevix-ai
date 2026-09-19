@@ -60,14 +60,10 @@ test(
       try {
         await signIn(launched)
 
-        // 侧栏进入 AI 创作；空库呈现显式空态，而不是缓存假象。
-        await launched.page.getByRole('link', { name: 'AI 创作' }).click()
+        // 侧栏新建入口进入未落库的 composing 态。
+        await launched.page.getByTestId('session-new').click()
         const workbench = launched.page.getByTestId('creation-workbench')
         await expect(workbench).toBeVisible()
-        await expect(workbench.getByText('还没有创作会话，从一个空白草稿开始')).toBeVisible()
-
-        // 「新对话」只进入未落库的 composing 态，提示词可以先编辑。
-        await workbench.getByTestId('session-new').click()
         await expect(workbench.getByTestId('composer')).toBeVisible()
         await workbench.getByTestId('composer-prompt').fill('秋季上新主图，冷调布光')
 
@@ -99,15 +95,16 @@ test(
         const relaunched = await launchTestApp({ userDataDir, systemLanguages: ['zh-CN'] })
         try {
           const login = relaunched.page.getByRole('heading', { name: '登录 Nevix AI' })
-          const toCreation = relaunched.page.getByRole('link', { name: 'AI 创作' })
+          const restoredSession = relaunched.page.getByRole('button', {
+            name: '未命名创作',
+            exact: true
+          })
           // The renderer mounts its restored surface asynchronously; an instant
           // isVisible() raced the boot and skipped a needed re-sign-in.
-          await login.or(toCreation).first().waitFor({ state: 'visible', timeout: 15_000 })
+          await login.or(restoredSession).first().waitFor({ state: 'visible', timeout: 15_000 })
           if (await login.isVisible()) await signIn(relaunched)
-          await toCreation.click()
+          await restoredSession.click()
           const restored = relaunched.page.getByTestId('creation-workbench')
-          // 首次提交物化的会话未命名，列表以「未命名创作」呈现。
-          await restored.getByRole('button', { name: '未命名创作', exact: true }).click()
           await expect(restored.getByTestId('composer')).toBeVisible()
           // Lexical 编辑器是 contenteditable combobox，断言走文本内容而非 value。
           await expect(restored.getByTestId('composer-prompt')).toHaveText(

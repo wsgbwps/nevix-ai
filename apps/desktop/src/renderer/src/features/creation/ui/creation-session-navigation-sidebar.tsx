@@ -1,6 +1,17 @@
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { FileImageIcon, MoreHorizontalIcon, PencilLineIcon } from 'lucide-react'
+import {
+  ChevronRightIcon,
+  FileImageIcon,
+  MoreHorizontalIcon,
+  PencilLineIcon,
+  SquarePenIcon
+} from 'lucide-react'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger
+} from '../../../components/ui/collapsible'
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -8,12 +19,14 @@ import {
 } from '../../../components/ui/dropdown-menu'
 import {
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuAction,
   SidebarMenuButton,
-  SidebarMenuItem
+  SidebarMenuItem,
+  useSidebar
 } from '../../../components/ui/sidebar'
 import type { CreationSessionView } from '../api/go-creation-http'
 import type { PendingDraftEntry } from '../model/creation-session-navigation-controller'
@@ -57,7 +70,7 @@ function SessionIdentity({
     <span
       aria-hidden
       data-testid={`session-identity-${session.id}`}
-      className={`grid size-7 shrink-0 place-items-center rounded-md text-xs font-semibold ${sessionIdentityColor(session.id)}`}
+      className={`grid size-7 shrink-0 place-items-center rounded-md text-xs font-semibold group-data-[collapsible=icon]:size-4 group-data-[collapsible=icon]:rounded-sm group-data-[collapsible=icon]:text-[9px] ${sessionIdentityColor(session.id)}`}
     >
       {monogram ?? <FileImageIcon className="size-3.5" />}
     </span>
@@ -102,7 +115,7 @@ function PendingSessionRow({
         tooltip={tooltip}
         data-testid={`session-pending-${entry.key}`}
       >
-        <span className="bg-foreground/[0.06] text-foreground relative grid size-7 shrink-0 place-items-center rounded-md border">
+        <span className="bg-foreground/[0.06] text-foreground relative grid size-7 shrink-0 place-items-center rounded-md border group-data-[collapsible=icon]:size-4 group-data-[collapsible=icon]:rounded-sm">
           <PencilLineIcon className="size-3.5" aria-hidden />
           <span
             aria-hidden
@@ -237,6 +250,9 @@ export function CreationSessionNavigationSidebar({
 }): React.JSX.Element | null {
   const navigation = useCreationSessionNavigation()
   const { t } = useTranslation('creation')
+  const { state, isMobile } = useSidebar()
+  const [groupOpen, setGroupOpen] = useState(true)
+  const railKeepsSessions = state === 'collapsed' && !isMobile
   if (navigation === null) return null
 
   const openNewDraft = (): void => {
@@ -253,84 +269,95 @@ export function CreationSessionNavigationSidebar({
   }
 
   return (
-    <SidebarGroup
-      aria-label={t('sessions.label')}
-      className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden py-0"
-      data-testid="creation-session-navigation"
+    <Collapsible
+      open={groupOpen || railKeepsSessions}
+      onOpenChange={setGroupOpen}
+      className="group/session-navigation flex min-h-0 flex-1 flex-col"
     >
-      <SidebarGroupLabel>{t('sessions.label')}</SidebarGroupLabel>
-      <SidebarGroupContent className="flex min-h-0 flex-1 flex-col">
-        <SidebarMenu className="shrink-0">
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={navigation.target.kind === 'new'}
-              onClick={openNewDraft}
-              tooltip={String(t('sessions.newAction'))}
-              data-testid="session-new"
+      <SidebarGroup
+        aria-label={t('sessions.label')}
+        className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden py-0"
+        data-testid="creation-session-navigation"
+      >
+        <SidebarGroupLabel asChild>
+          <CollapsibleTrigger className="group-data-[collapsible=icon]:hidden">
+            <ChevronRightIcon className="transition-transform group-data-[state=open]/session-navigation:rotate-90" />
+            <span>{t('sessions.label')}</span>
+          </CollapsibleTrigger>
+        </SidebarGroupLabel>
+        <SidebarGroupAction
+          onClick={openNewDraft}
+          aria-label={t('sessions.newAction')}
+          tooltip={String(t('sessions.newAction'))}
+          data-active={navigation.target.kind === 'new'}
+          className="data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground top-1.5 group-data-[collapsible=icon]:static group-data-[collapsible=icon]:mb-1 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:w-8"
+          data-testid="session-new"
+        >
+          <SquarePenIcon />
+        </SidebarGroupAction>
+        <CollapsibleContent className="min-h-0 flex-1 overflow-hidden">
+          <SidebarGroupContent className="flex h-full min-h-0 flex-col">
+            <div
+              className="min-h-0 flex-1 scrollbar-none overflow-y-auto py-1 [&::-webkit-scrollbar]:hidden"
+              data-testid="session-list"
             >
-              <PencilLineIcon />
-              <span className="group-data-[collapsible=icon]:hidden">
-                {t('sessions.newAction')}
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-        <div className="min-h-0 flex-1 overflow-y-auto px-0.5 py-1" data-testid="session-list">
-          {navigation.sessions.length === 0 &&
-          navigation.pendingDrafts.length === 0 &&
-          navigation.status === 'ready' ? (
-            <p className="text-muted-foreground px-2 py-2 text-xs" role="status">
-              {t('sessions.empty')}
-            </p>
-          ) : (
-            <SidebarMenu>
-              {navigation.pendingDrafts.map((entry) => (
-                <PendingSessionRow
-                  key={entry.key}
-                  entry={entry}
-                  selected={
-                    navigation.target.kind === 'pending' && navigation.target.key === entry.key
-                  }
-                  onSelect={() => openPendingDraft(entry.key)}
-                />
-              ))}
-              {navigation.sessions.map((session) => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  selected={
-                    navigation.target.kind === 'session' &&
-                    navigation.target.session.id === session.id
-                  }
-                  onSelect={() => openSession(session)}
-                  onDelete={() => navigation.deleteSession(session.id)}
-                  onRename={(name) => navigation.renameSession(session.id, name)}
-                />
-              ))}
-            </SidebarMenu>
-          )}
-          {navigation.status === 'loading' && (
-            <p role="status" className="text-muted-foreground px-2 py-2 text-xs">
-              {t('state.loading')}
-            </p>
-          )}
-          {navigation.status === 'error' && (
-            <div role="alert" className="grid gap-1 px-2 py-2">
-              <p className="text-xs">{t('state.loadFailed')}</p>
-              <button
-                type="button"
-                className="hover:bg-accent rounded border px-2 py-1 text-xs"
-                onClick={navigation.reload}
-              >
-                {t('state.retry')}
-              </button>
+              {navigation.sessions.length === 0 &&
+              navigation.pendingDrafts.length === 0 &&
+              navigation.status === 'ready' ? (
+                <p className="text-muted-foreground px-2 py-2 text-xs" role="status">
+                  {t('sessions.empty')}
+                </p>
+              ) : (
+                <SidebarMenu>
+                  {navigation.pendingDrafts.map((entry) => (
+                    <PendingSessionRow
+                      key={entry.key}
+                      entry={entry}
+                      selected={
+                        navigation.target.kind === 'pending' && navigation.target.key === entry.key
+                      }
+                      onSelect={() => openPendingDraft(entry.key)}
+                    />
+                  ))}
+                  {navigation.sessions.map((session) => (
+                    <SessionRow
+                      key={session.id}
+                      session={session}
+                      selected={
+                        navigation.target.kind === 'session' &&
+                        navigation.target.session.id === session.id
+                      }
+                      onSelect={() => openSession(session)}
+                      onDelete={() => navigation.deleteSession(session.id)}
+                      onRename={(name) => navigation.renameSession(session.id, name)}
+                    />
+                  ))}
+                </SidebarMenu>
+              )}
+              {navigation.status === 'loading' && (
+                <p role="status" className="text-muted-foreground px-2 py-2 text-xs">
+                  {t('state.loading')}
+                </p>
+              )}
+              {navigation.status === 'error' && (
+                <div role="alert" className="grid gap-1 px-2 py-2">
+                  <p className="text-xs">{t('state.loadFailed')}</p>
+                  <button
+                    type="button"
+                    className="hover:bg-accent rounded border px-2 py-1 text-xs"
+                    onClick={navigation.reload}
+                  >
+                    {t('state.retry')}
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <p className="text-muted-foreground shrink-0 border-t px-2 py-2 text-[9px] group-data-[collapsible=icon]:hidden">
-          {t('sessions.private')}
-        </p>
-      </SidebarGroupContent>
-    </SidebarGroup>
+            <p className="text-muted-foreground shrink-0 border-t px-2 py-2 text-[9px] group-data-[collapsible=icon]:hidden">
+              {t('sessions.private')}
+            </p>
+          </SidebarGroupContent>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </Collapsible>
   )
 }
