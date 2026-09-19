@@ -263,6 +263,12 @@ test("Pi agent definitions, extension code, and tests require inline harness val
   );
 });
 
+test("Claude skill links require inline harness validation", () => {
+  assert.deepEqual(selected([".claude/skills/code-review"]), {
+    harness: true,
+  });
+});
+
 test("ZCode workspace configuration requires inline harness validation", () => {
   assert.deepEqual(selected([".zcode/config.json"]), { harness: true });
 });
