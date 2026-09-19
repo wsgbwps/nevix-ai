@@ -49,8 +49,8 @@ export interface MaterialUploadOptions {
  * ports, so component tests drive deterministic fakes while production wires
  * the real trusted-data-plane client.
  *
- * List ports are cursor-drained in production: every page behind the keyset
- * cursor is followed so the caller always receives the complete collection.
+ * Material lists are cursor-drained in production. Creation Session Navigation
+ * deliberately consumes only the newest server page (50 sessions, ADR-0007).
  */
 
 /** A server page projected onto the drain helper's shape. */
@@ -224,16 +224,7 @@ export function createCreationWorkspacePorts(
       withInspirationToken((client, token) => client.restrictPublication(token, publicationId)),
     releasePublication: (publicationId) =>
       withInspirationToken((client, token) => client.releasePublication(token, publicationId)),
-    // First calls drain every page behind the keyset cursor; an explicit
-    // cursor fetches exactly that page.
-    listSessions: (cursor) =>
-      withToken(async (client, token) => {
-        if (cursor) return client.listSessions(token, cursor)
-        const drained = await drainPages((pageCursor) =>
-          client.listSessions(token, pageCursor).then(mapSessionPage)
-        )
-        return unmapSessionPage(drained)
-      }),
+    listSessions: (cursor) => withToken((client, token) => client.listSessions(token, cursor)),
     createSession: (name) => withToken((client, token) => client.createSession(token, name)),
     renameSession: (sessionId, name) =>
       withToken((client, token) => client.renameSession(token, sessionId, name)),
@@ -338,23 +329,6 @@ export function createCreationWorkspacePorts(
         handlers
       )
   }
-}
-
-function mapSessionPage(
-  page: CreationApiResult<SessionPage>
-): CreationApiResult<PageOf<CreationSessionView>> {
-  if (page.outcome !== 'succeeded') return page
-  return {
-    outcome: 'succeeded',
-    value: { items: page.value.sessions, nextCursor: page.value.nextCursor }
-  }
-}
-
-function unmapSessionPage(
-  drained: CreationApiResult<PageOf<CreationSessionView>>
-): CreationApiResult<SessionPage> {
-  if (drained.outcome !== 'succeeded') return drained
-  return { outcome: 'succeeded', value: { sessions: drained.value.items, nextCursor: null } }
 }
 
 function mapMaterialPage(

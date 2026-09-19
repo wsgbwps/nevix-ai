@@ -44,24 +44,20 @@ test(
         await launched.page.getByRole('button', { name: '登录', exact: true }).click()
         await expectSignedInHomeWithStartupRetry(launched.page)
 
-        // 品牌槽位：产品标识占位、不可切换，且不出现下拉死入口。
-        const brandButton = launched.page.getByRole('button', { name: 'Nevix AI' })
-        await expect(brandButton).toBeVisible()
-        await expect(brandButton).toContainText('Nevix AI')
-        await expect(brandButton).toBeDisabled()
-        await expect(launched.page.getByRole('menu')).toHaveCount(0)
-
         const sidebar = launched.page.locator('[data-slot="sidebar"]')
+        // 品牌槽位固定，侧边栏开关与创作会话导航都属于侧栏本身。
+        await expect(sidebar.getByText('Nevix AI', { exact: true })).toBeVisible()
+        await expect(sidebar.locator('[data-slot="sidebar-trigger"]')).toBeVisible()
         const homeEntry = sidebar.getByRole('link', { name: '灵感' })
         await expect(homeEntry).toBeVisible()
+        await expect(sidebar.getByTestId('creation-session-navigation')).toBeVisible()
+        await expect(sidebar.getByTestId('session-new')).toBeVisible()
 
-        // 内容区头部：SidebarTrigger 与反映当前路由位置的 Breadcrumb。
+        // 内容区不再重复侧栏开关或路由 Breadcrumb。
         await expect(
           launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
-        ).toBeVisible()
-        await expect(
-          launched.page.getByLabel('breadcrumb').getByText('灵感', { exact: true })
-        ).toBeVisible()
+        ).toHaveCount(0)
+        await expect(launched.page.getByLabel('breadcrumb')).toHaveCount(0)
 
         // NavUser 显示登录邮箱与首字母头像。
         const userMenu = launched.page.getByRole('button', { name: '用户菜单' })
@@ -100,22 +96,29 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
       await launched.page.getByRole('button', { name: '登录', exact: true }).click()
       await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
 
-      const toggle = launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
       const sidebar = launched.page.locator('[data-slot="sidebar"]')
+      const toggle = sidebar.locator('[data-slot="sidebar-trigger"]')
       const homeEntry = sidebar.getByRole('link', { name: '灵感' })
-      const brandButton = launched.page.getByRole('button', { name: 'Nevix AI' })
+      const brand = sidebar.getByText('Nevix AI', { exact: true })
       await expect(homeEntry).toBeVisible()
-      await expect(brandButton).toContainText('Nevix AI')
+      await expect(brand).toBeVisible()
+      await expect(sidebar.getByTestId('session-new')).toBeVisible()
 
       // 折叠为图标形态：文本入口隐藏，仅图标保留。
       await toggle.click()
       await expect(homeEntry).toHaveCount(0)
-      await expect(brandButton.getByText('Nevix AI', { exact: true })).toBeHidden()
+      await expect(brand).toBeHidden()
+      await expect(sidebar.getByTestId('session-new')).toBeVisible()
+
+      // 路由各自重建 AppShell；设备侧边栏状态仍由已有 cookie 恢复。
+      await sidebar.locator('[href="/assets"]').click()
+      await expect(launched.page.getByRole('heading', { name: '资产' })).toBeVisible()
+      await expect(sidebar).toHaveAttribute('data-state', 'collapsed')
 
       // 再次展开后全部恢复。
       await toggle.click()
       await expect(homeEntry).toBeVisible()
-      await expect(brandButton).toContainText('Nevix AI')
+      await expect(brand).toBeVisible()
     } finally {
       await launched.electronApp.close()
     }

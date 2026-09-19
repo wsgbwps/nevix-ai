@@ -14,6 +14,8 @@ export {
 export { CreationRuntimeContext, useCreationRuntime } from './model/runtime-context'
 export type { CreationRuntime } from './model/runtime-context'
 export { CreationRuntimeProvider } from './model/runtime-provider'
+export { CreationSessionNavigationProvider } from './model/creation-session-navigation-provider'
+export { CreationSessionNavigationSidebar } from './ui/creation-session-navigation-sidebar'
 export { createCreationWorkspacePorts, type CreationWorkspacePorts } from './model/ports'
 export { createCreationRuntime } from './model/workbench-runtime'
 export type {
@@ -22,7 +24,6 @@ export type {
   WorkbenchActionResult,
   WorkbenchActionState
 } from './model/workbench-runtime'
-export type { PendingDraftEntry } from './model/use-workbench'
 export type { ReferenceMaterialView } from './api/go-creation-http'
 export type {
   AssetDetailView,

@@ -49,7 +49,7 @@ test(
         await expect(workbench).toBeVisible()
 
         // 「新对话」只进入未落库的 composing 态；会话随首次提交物化。
-        await workbench.getByTestId('session-new').click()
+        await launched.page.getByTestId('session-new').click()
         await expect(workbench.getByTestId('composer')).toBeVisible()
         await workbench.getByTestId('composer-prompt').fill('秋季上新主图，冷调布光')
 

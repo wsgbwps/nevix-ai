@@ -26,8 +26,7 @@ import type {
   CreationApiResult,
   CreationSessionView,
   MaterialPage,
-  ReferenceMaterialView,
-  SessionPage
+  ReferenceMaterialView
 } from '../../src/renderer/src/features/creation/api/go-creation-http.ts'
 import type {
   StagedMaterialFile,
@@ -201,8 +200,6 @@ class Harness {
   readonly display = new FakeDisplay()
   readonly tasks = new FakeTasks()
   readonly script = {
-    listCalls: 0,
-    pages: [{ sessions: [sessionView('s1')], nextCursor: null }] as SessionPage[],
     detail: new Map<string, ReadEntry<CreationApiResult<CreationSessionView>>>(),
     materials: new Map<string, ReadEntry<CreationApiResult<MaterialPage>>>()
   }
@@ -212,8 +209,6 @@ class Harness {
     recovering: new Map<string, readonly ReferenceMaterialView[]>(),
     resolved: new Map<string, string>(),
     acknowledged: [] as string[],
-    deleted: [] as string[],
-    deleteResult: { outcome: 'succeeded' } as CreationApiResult<void>,
     snapshot: (key: string): WorkbenchActionState =>
       this.actions.states.get(key) ?? { status: 'idle' },
     stagedMaterials: (key: string): readonly StagedMaterialFile[] =>
@@ -229,10 +224,6 @@ class Harness {
     },
     resolvedMaterialId: (sessionId: string, localId: string): string | null =>
       this.actions.resolved.get(`${sessionId}:${localId}`) ?? null,
-    deleteSession: (sessionId: string): Promise<CreationApiResult<void>> => {
-      this.actions.deleted.push(sessionId)
-      return Promise.resolve(this.actions.deleteResult)
-    },
     acknowledgeFailure: (key: string): void => {
       this.actions.acknowledged.push(key)
       this.actions.states.delete(key)
@@ -243,13 +234,6 @@ class Harness {
   constructor() {
     const deps: WorkbenchContextDeps = {
       userId: 'user-1',
-      listSessions: () => {
-        this.script.listCalls += 1
-        const page =
-          this.script.pages[Math.min(this.script.listCalls - 1, this.script.pages.length - 1)]
-        return Promise.resolve(ok(page))
-      },
-      renameSession: (sessionId) => Promise.resolve(ok(sessionView(sessionId))),
       getSessionDetail: (sessionId) =>
         readEntry(this.script.detail.get(sessionId), () => ok(sessionView(sessionId))),
       listMaterials: (sessionId) =>
@@ -287,7 +271,6 @@ test('the session row: optimistic reset, async merge, staged reconcile, record r
     notifications += 1
   })
   await flush()
-  assert.equal(controller.getSnapshot().status, 'ready')
 
   controller.enterContext({ kind: 'session', session: sessionView('s1') })
 
@@ -390,7 +373,6 @@ test('the session row: an enter failure surfaces the outage and tears down', asy
   await flush()
 
   const snapshot = controller.getSnapshot()
-  assert.equal(snapshot.status, 'error')
   assert.equal(snapshot.selectedId, null)
   assert.deepEqual(tasks.entered, ['s1'])
   assert.equal(tasks.leaveCount, 1)
@@ -421,7 +403,6 @@ test('the pending row: full staged re-registration and record restore, no server
   assert.deepEqual(display.registered, ['p2', 'p1'])
   assert.equal(display.resetCount, 1)
   assert.equal(tasks.leaveCount, 1)
-  assert.equal(script.listCalls, 1)
   assert.equal(controller.getSnapshot().pendingKey, 'pending:k')
   // Bindings whose files the runtime no longer holds drop out; the
   // surviving order follows the record, not the registration order.
@@ -500,27 +481,6 @@ test('the context key is the one spelling every transition updates', async () =>
   assert.equal(controller.getSnapshot().actionKey, null)
 })
 
-test('deleting the viewed session interrupts its in-flight restore', async () => {
-  const { controller, display, script } = harness()
-  const slowDetail = deferred<CreationApiResult<CreationSessionView>>()
-  script.detail.set('s1', slowDetail)
-  await flush()
-
-  controller.enterContext({ kind: 'session', session: sessionView('s1') })
-  controller.deleteSession('s1')
-  await flush()
-
-  // The teardown has landed; the blank state must survive the stale read.
-  assert.equal(controller.getSnapshot().selectedId, null)
-  slowDetail.resolve(ok({ ...sessionView('s1'), name: 'stale' }))
-  script.materials.set('s1', ok({ materials: [materialView('m1')], nextCursor: null }))
-  await flush()
-
-  assert.equal(display.replaced.length, 0)
-  assert.deepEqual(controller.getSnapshot().sessions, [])
-  assert.equal(controller.getSnapshot().selectedId, null)
-})
-
 test('a stale read never closes a newer restore still in flight', async () => {
   const { controller, storage, script } = harness()
   const slowA = deferred<CreationApiResult<CreationSessionView>>()
@@ -562,51 +522,6 @@ test('an enter-failure teardown leaves no live action state behind', async () =>
   assert.equal(snapshot.submitError, null)
 })
 
-test('a suspended lifecycle never adopts its first mount list read (StrictMode)', async () => {
-  const first = deferred<CreationApiResult<SessionPage>>()
-  const second = deferred<CreationApiResult<SessionPage>>()
-  const deferreds = [first, second]
-  let listCalls = 0
-  const deps: WorkbenchContextDeps = {
-    userId: 'user-1',
-    listSessions: () => {
-      const entry = deferreds[Math.min(listCalls, deferreds.length - 1)]
-      listCalls += 1
-      return entry.promise
-    },
-    renameSession: (sessionId) => Promise.resolve(ok(sessionView(sessionId))),
-    getSessionDetail: (sessionId) => Promise.resolve(ok(sessionView(sessionId))),
-    listMaterials: () => Promise.resolve(ok({ materials: [], nextCursor: null })),
-    actions: {
-      snapshot: (): WorkbenchActionState => ({ status: 'idle' }),
-      stagedMaterials: (): readonly StagedMaterialFile[] => [],
-      resolvedMaterialId: (): string | null => null,
-      deleteSession: (): Promise<CreationApiResult<void>> =>
-        Promise.resolve({ outcome: 'succeeded' }),
-      acknowledgeFailure: (): void => undefined
-    },
-    display: new FakeDisplay(),
-    tasks: new FakeTasks()
-  }
-  const controller = new WorkbenchContextController(deps, { storage: memoryStorage() })
-  controller.activate()
-  controller.suspend()
-  controller.activate()
-
-  first.resolve(ok({ sessions: [sessionView('first-mount')], nextCursor: null }))
-  await flush()
-  assert.equal(controller.getSnapshot().status, 'loading')
-  assert.deepEqual(controller.getSnapshot().sessions, [])
-
-  second.resolve(ok({ sessions: [sessionView('second-mount')], nextCursor: null }))
-  await flush()
-  assert.equal(controller.getSnapshot().status, 'ready')
-  assert.deepEqual(
-    controller.getSnapshot().sessions.map((session) => session.id),
-    ['second-mount']
-  )
-})
-
 test('a stale first read cannot overwrite a later selection', async () => {
   const { controller, storage, script } = harness()
   const slowA = deferred<CreationApiResult<CreationSessionView>>()
@@ -626,27 +541,6 @@ test('a stale first read cannot overwrite a later selection', async () => {
   assert.equal(controller.getSnapshot().draft.model, 'b-model')
 })
 
-test('a list replacement without the current session tears the context down', async () => {
-  const { controller, storage, display, tasks, script } = harness()
-  writeLocalDraft(storage, 'user-1', 's1', draftRecord())
-  script.materials.set('s1', ok({ materials: [materialView('m1')], nextCursor: null }))
-  await flush()
-  controller.enterContext({ kind: 'session', session: sessionView('s1') })
-  await flush()
-  const resetsBefore = display.resetCount
-
-  // The server-side list no longer contains the viewed session.
-  script.pages.push({ sessions: [], nextCursor: null })
-  controller.reload()
-  await flush()
-
-  const snapshot = controller.getSnapshot()
-  assert.equal(snapshot.selectedId, null)
-  assert.deepEqual(snapshot.draft.references, [])
-  assert.equal(display.resetCount, resetsBefore + 1)
-  assert.equal(tasks.leaveCount, 1)
-})
-
 test('manifest adoption invariant: an unentered workbench never adopts defaults', async () => {
   const { controller } = harness()
   await flush()
@@ -654,8 +548,6 @@ test('manifest adoption invariant: an unentered workbench never adopts defaults'
   controller.noteManifest(seedManifest)
   assert.deepEqual(controller.getSnapshot().draft.references, [])
   assert.equal(controller.getSnapshot().draft.model, null)
-  assert.equal(controller.getSnapshot().status, 'ready')
-
   // Entering the composing start afterwards seeds from the known manifest.
   controller.enterContext({ kind: 'new' })
   assert.equal(controller.getSnapshot().draft.model, 'm-1')
@@ -679,6 +571,23 @@ test('a manifest landing mid-restore never clobbers the record about to restore'
 
   assert.equal(controller.getSnapshot().draft.model, 'stored-model')
   assert.equal(controller.manifestVersionForIntent(), 5)
+})
+
+test('a label update during session restore never overwrites the device draft', async () => {
+  const { controller, storage, script } = harness()
+  writeLocalDraft(storage, 'user-1', 's1', draftRecord())
+  const slowDetail = deferred<CreationApiResult<CreationSessionView>>()
+  script.detail.set('s1', slowDetail)
+  await flush()
+
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+  controller.setMentionLabels({ image: 'Image', video: 'Video', audio: 'Audio' })
+
+  assert.equal(readLocalDraft(storage, 'user-1', 's1')?.prompt, 'hello')
+
+  slowDetail.resolve(ok(sessionView('s1')))
+  await flush()
+  assert.equal(controller.getSnapshot().draft.model, 'stored-model')
 })
 
 test('submitError derives from the current context action snapshot alone', async () => {
@@ -717,40 +626,6 @@ test('submitError derives from the current context action snapshot alone', async
   assert.equal(controller.getSnapshot().submitError, null)
 })
 
-test('materialization follows only the context still watching the pending draft', async () => {
-  const { controller, actions } = harness()
-  actions.staged.set('pending:k', [])
-  await flush()
-
-  controller.enterContext({ kind: 'pending', key: 'pending:k' })
-  controller.noteSessionMaterialized(sessionView('real-1'), 'pending:k')
-  await flush()
-
-  const snapshot = controller.getSnapshot()
-  assert.equal(snapshot.pendingKey, null)
-  assert.equal(snapshot.selectedId, 'real-1')
-  assert.equal(snapshot.selected?.id, 'real-1')
-  assert.ok(snapshot.sessions.some((session) => session.id === 'real-1'))
-})
-
-test('materialization never steals a different context', async () => {
-  const { controller, storage, script, tasks } = harness()
-  writeLocalDraft(storage, 'user-1', 's1', draftRecord())
-  script.materials.set('s1', ok({ materials: [materialView('m1')], nextCursor: null }))
-  await flush()
-  controller.enterContext({ kind: 'session', session: sessionView('s1') })
-  await flush()
-  assert.equal(controller.getSnapshot().selectedId, 's1')
-
-  controller.noteSessionMaterialized(sessionView('real-1'), 'pending:other')
-  await flush()
-
-  const snapshot = controller.getSnapshot()
-  assert.equal(snapshot.selectedId, 's1')
-  assert.deepEqual(tasks.entered, ['s1'])
-  assert.ok(snapshot.sessions.some((session) => session.id === 'real-1'))
-})
-
 test('reconcileCurrentContext keeps the display when its read fails', async () => {
   const { controller, storage, script, tasks } = harness()
   writeLocalDraft(storage, 'user-1', 's1', draftRecord())
@@ -765,21 +640,9 @@ test('reconcileCurrentContext keeps the display when its read fails', async () =
   await flush()
 
   const snapshot = controller.getSnapshot()
-  assert.equal(snapshot.status, 'ready')
   assert.equal(snapshot.selectedId, 's1')
   assert.equal(snapshot.draft.model, draftBefore.model)
   assert.equal(tasks.reconcileCount, 1)
-})
-
-test('a pending context reconciles by reloading the session list', () => {
-  const { controller, script } = harness()
-  controller.enterContext({ kind: 'pending', key: 'pending:k' })
-  const callsBefore = script.listCalls
-
-  controller.reconcileCurrentContext()
-
-  assert.equal(script.listCalls, callsBefore + 1)
-  assert.equal(script.detail.size, 0)
 })
 
 test('editDraft writes through under the composing surface key', async () => {
@@ -815,23 +678,4 @@ test('claimPendingDraft moves the record off the composing key synchronously', a
   const snapshot = controller.getSnapshot()
   assert.equal(snapshot.composingNew, false)
   assert.equal(snapshot.pendingKey, 'pending:k')
-})
-
-test('deleting another session updates the list without disturbing the context', async () => {
-  const { controller, storage, script } = harness()
-  script.pages.push({ sessions: [sessionView('s1'), sessionView('s2')], nextCursor: null })
-  writeLocalDraft(storage, 'user-1', 's1', draftRecord())
-  await flush()
-  controller.enterContext({ kind: 'session', session: sessionView('s1') })
-  await flush()
-
-  controller.deleteSession('s2')
-  await flush()
-
-  const snapshot = controller.getSnapshot()
-  assert.equal(snapshot.selectedId, 's1')
-  assert.deepEqual(
-    snapshot.sessions.map((session) => session.id),
-    ['s1']
-  )
 })

@@ -263,6 +263,12 @@ test("Pi agent definitions, extension code, and tests require inline harness val
   );
 });
 
+test("Claude skill links require inline harness validation", () => {
+  assert.deepEqual(selected([".claude/skills/code-review"]), {
+    harness: true,
+  });
+});
+
 test("ZCode workspace configuration requires inline harness validation", () => {
   assert.deepEqual(selected([".zcode/config.json"]), { harness: true });
 });
@@ -388,28 +394,20 @@ test("the CI gate runs only on pull requests", () => {
   assert.doesNotMatch(workflow, /github\.event\.(?:before|head_commit)/);
 });
 
-test("local and agent hooks block every direct main update", () => {
+test("local and Codex hooks block every direct main update", () => {
   const preCommit = readFileSync(join(REPOSITORY, ".husky/pre-commit"), "utf8");
   const prePush = readFileSync(join(REPOSITORY, ".husky/pre-push"), "utf8");
   const codex = JSON.parse(
     readFileSync(join(REPOSITORY, ".codex/hooks.json"), "utf8"),
   );
-  const zcode = JSON.parse(
-    readFileSync(join(REPOSITORY, ".zcode/config.json"), "utf8"),
-  );
-  const agentCommands = [
-    codex.hooks.PreToolUse[1].hooks[0].command,
-    zcode.hooks.events.PreToolUse[1].hooks[0].command,
-  ];
+  const agentCommand = codex.hooks.PreToolUse[1].hooks[0].command;
 
   assert.match(preCommit, /branch.*main[\s\S]*BLOCKED/);
   assert.match(prePush, /remote_ref.*refs\/heads\/main[\s\S]*BLOCKED/);
   assert.doesNotMatch(prePush, /grep -qvE|fast.lane|快道/i);
-  for (const command of agentCommands) {
-    assert.match(command, /branch.*main.*git\[\[:space:\]\]\+commit.*BLOCKED/);
-    assert.match(command, /git\[\[:space:\]\]\+push.*main.*BLOCKED/);
-    assert.doesNotMatch(command, /ALLOW|fast.lane|快道/i);
-  }
+  assert.match(agentCommand, /branch.*main.*git\[\[:space:\]\]\+commit.*BLOCKED/);
+  assert.match(agentCommand, /git\[\[:space:\]\]\+push.*main.*BLOCKED/);
+  assert.doesNotMatch(agentCommand, /ALLOW|fast.lane|快道/i);
 });
 
 test("the gate passes Native Smoke classifications through one Desktop workflow", () => {

@@ -2,16 +2,16 @@
  * The Workbench Context controller (issue #206): the single owner of the
  * context the Creation Workbench is presenting — an existing Creation
  * Session, a device-local pending draft, a fresh composing start, or the
- * blank inactive state — together with the session list and the one
- * switching ritual every entry goes through (display reset, task-refresh
+ * blank inactive state — together with the one switching ritual every
+ * navigation target goes through (display reset, task-refresh
  * leave/enter, draft restore, staged file re-registration). Ritual variants
  * derive from the target context kind; callers never pass mode flags.
  *
  * Framework-free so the concurrency invariants are testable by driving the
  * public interface against scripted deps: the generation token that
  * invalidates every in-flight read, the explicit manifest adoption
- * invariant, disappearance diffing on list replacement, and submitError
- * derived from the current context's action snapshot.
+ * invariant and submitError derived from the current context's action
+ * snapshot. Creation Session Navigation owns the list and target handoff.
  */
 import type { CapabilityManifest } from '../api/capability-manifest-http'
 import {
@@ -25,8 +25,7 @@ import type {
   DraftReferenceView,
   MaterialPage,
   ReferenceMaterialView,
-  SessionDetailView,
-  SessionPage
+  SessionDetailView
 } from '../api/go-creation-http'
 import { mediaCapability, type DraftMediaType } from './capability'
 import {
@@ -50,16 +49,7 @@ import type {
   WorkbenchActionState
 } from './workbench-runtime'
 import type { PendingMaterialFile } from './workbench-display-controller'
-
-export type WorkbenchStatus = 'loading' | 'ready' | 'error'
-
-/** The context the Workbench presents; `inactive` is the blank state no
- * session, pending draft, or composition is bound to. */
-export type WorkbenchContextKey =
-  | { readonly kind: 'session'; readonly session: CreationSessionView }
-  | { readonly kind: 'pending'; readonly key: string }
-  | { readonly kind: 'new' }
-  | { readonly kind: 'inactive' }
+import type { CreationSessionNavigationTarget } from './creation-session-navigation-controller'
 
 /**
  * The composer's editable mirror of the session draft. Field values are
@@ -105,7 +95,6 @@ export interface WorkbenchContextActionsSeam {
   beginMaterialsObservation?(key: string): number
   observeMaterials?(key: string, materialIds: readonly string[], observation: number): void
   resolvedMaterialId(sessionId: string, localId: string): string | null
-  deleteSession(sessionId: string): Promise<CreationApiResult<void>>
   acknowledgeFailure(key: string): void
 }
 
@@ -113,11 +102,6 @@ export interface WorkbenchContextActionsSeam {
  * cancel, or retry crosses them. */
 export interface WorkbenchContextDeps {
   readonly userId: string
-  readonly listSessions: (cursor?: string | null) => Promise<CreationApiResult<SessionPage>>
-  readonly renameSession: (
-    sessionId: string,
-    name: string
-  ) => Promise<CreationApiResult<CreationSessionView>>
   readonly getSessionDetail: (sessionId: string) => Promise<CreationApiResult<SessionDetailView>>
   readonly listMaterials: (
     sessionId: string,
@@ -129,8 +113,6 @@ export interface WorkbenchContextDeps {
 }
 
 export interface WorkbenchContextSnapshot {
-  readonly status: WorkbenchStatus
-  readonly sessions: readonly CreationSessionView[]
   readonly selected: CreationSessionView | null
   readonly selectedId: string | null
   readonly composingNew: boolean
@@ -156,8 +138,6 @@ export interface WorkbenchContextSnapshot {
 }
 
 export const emptyWorkbenchContextSnapshot: WorkbenchContextSnapshot = {
-  status: 'loading',
-  sessions: [],
   selected: null,
   selectedId: null,
   composingNew: false,
@@ -226,9 +206,7 @@ export class WorkbenchContextController {
   // Open from a context switch's optimistic reset until its record (or the
   // fallback) lands; #adoptManifestDefaults owns why adoption must wait.
   #restoreWindow = false
-  #status: WorkbenchStatus = 'loading'
-  #sessions: readonly CreationSessionView[] = []
-  #selectedId: string | null = null
+  #selected: CreationSessionView | null = null
   #composingNew = false
   #pendingKey: string | null = null
   #draft: ComposerDraft = emptyComposerDraft()
@@ -252,12 +230,10 @@ export class WorkbenchContextController {
       (typeof globalThis.localStorage === 'undefined' ? undefined : globalThis.localStorage)
   }
 
-  /** Re-asserts liveness and loads the session list; StrictMode's effect
-   * replay re-runs this on the same instance after suspend retired the
-   * first lifecycle's reads. */
+  /** Re-asserts liveness; StrictMode's effect replay re-runs this on the
+   * same instance after suspend retired the first lifecycle's reads. */
   activate(): void {
     this.#active = true
-    void this.#loadSessions()
   }
 
   suspend(): void {
@@ -282,15 +258,20 @@ export class WorkbenchContextController {
    * reconciles staged files; `pending` and `new` restore synchronously from
    * the device-local record (or seed defaults); `inactive` keeps nothing.
    */
-  enterContext(key: WorkbenchContextKey): void {
+  enterContext(key: CreationSessionNavigationTarget): void {
     if (key.kind === 'new' && this.#composingNew) return
+    if (key.kind === 'session' && this.#selected?.id === key.session.id) {
+      this.#selected = key.session
+      this.#changed()
+      return
+    }
     const epoch = ++this.#epoch
     this.#referenceRecoveryShown = false
     this.#pendingMaterialRemoval = null
     this.#deps.display.reset()
     this.#composingNew = key.kind === 'new'
     this.#pendingKey = key.kind === 'pending' ? key.key : null
-    this.#selectedId = key.kind === 'session' ? key.session.id : null
+    this.#selected = key.kind === 'session' ? key.session : null
     switch (key.kind) {
       case 'session': {
         // A real display switch must not expose facts or editable state
@@ -335,59 +316,17 @@ export class WorkbenchContextController {
     this.#changed()
   }
 
-  /** Absorbs the former `preserveTransient` semantics: keeps the interface
-   * transient state and the refresh lifecycle identity while the current
-   * session's facts re-read and merge. A pending context reconciles by
-   * reloading the list (a session may have appeared); its failure never
-   * tears the display down. */
+  /** Keeps the interface transient state and refresh identity while the
+   * current session's facts re-read and merge. */
   reconcileCurrentContext(): void {
-    if (this.#pendingKey !== null) {
-      void this.#loadSessions()
-      return
-    }
-    if (this.#selectedId === null) return
-    const session = this.#sessions.find((candidate) => candidate.id === this.#selectedId)
-    if (session === undefined) return
+    const session = this.#selected
+    if (session === null) return
     this.#deriveActionState()
     void this.#restoreSession(++this.#epoch, session, 'reconcile')
     this.#changed()
   }
 
-  /** Deletes a session: the list drops it, and the current context falls
-   * back to the blank state when it was the one being viewed. */
-  deleteSession(sessionId: string): void {
-    void (async () => {
-      const result = await this.#deps.actions.deleteSession(sessionId)
-      if (result.outcome !== 'succeeded' || !this.#active) return
-      if (this.#selectedId === sessionId) this.enterContext({ kind: 'inactive' })
-      this.#setSessions(this.#sessions.filter((session) => session.id !== sessionId))
-      this.#changed()
-    })()
-  }
-
-  /** `selected` derives from this list, so the workspace title follows.
-   * Optimistic like deleteSession: a failed PATCH surfaces on the next
-   * reload instead of rolling the visible name back. */
-  renameSession(sessionId: string, name: string): void {
-    this.#setSessions(
-      this.#sessions.map((session) => (session.id === sessionId ? { ...session, name } : session))
-    )
-    void this.#deps.renameSession(sessionId, name).catch(() => undefined)
-    this.#changed()
-  }
-
-  /** A pending draft's session materialized: the list adopts the real
-   * session; only the context still watching that pending draft follows
-   * the conversion, every other display keeps its own context. */
-  noteSessionMaterialized(session: CreationSessionView, pendingKey: string): void {
-    this.#setSessions([session, ...this.#sessions.filter((entry) => entry.id !== session.id)])
-    if (this.#pendingKey === pendingKey) this.enterContext({ kind: 'session', session })
-    this.#changed()
-  }
-
-  /** The thin event route for runtime action events affecting the current
-   * context; `sessions-reconcile` and `materialized` are translated by the
-   * workbench hook into reload and noteSessionMaterialized calls. */
+  /** The thin event route for runtime action events affecting the current context. */
   noteRuntimeEvent(event: ContextActionEvent): void {
     const key = this.#actionKey()
     if (key === null) return
@@ -400,16 +339,9 @@ export class WorkbenchContextController {
       return
     }
     if (event.type !== 'reconcile') return
-    if (this.#pendingKey !== null) {
-      void this.#loadSessions()
-      return
+    if (this.#selected !== null) {
+      void this.#restoreSession(++this.#epoch, this.#selected, 'reconcile')
     }
-    const session = this.#sessions.find((candidate) => candidate.id === key)
-    if (session !== undefined) void this.#restoreSession(++this.#epoch, session, 'reconcile')
-  }
-
-  reload(): void {
-    void this.#loadSessions()
   }
 
   /** Records the loaded manifest and lets it seed an untouched context
@@ -452,6 +384,7 @@ export class WorkbenchContextController {
   setMentionLabels(labels: PromptMentionKindLabels): void {
     if (labels === this.#mentionLabels) return
     this.#mentionLabels = labels
+    if (this.#restoreWindow) return
     const key = this.#draftKey()
     if (key !== null) this.#writeThrough(key, this.#draft)
   }
@@ -482,19 +415,6 @@ export class WorkbenchContextController {
 
   dismissReferenceRecovery(): void {
     this.#referenceRecoveryShown = false
-    this.#changed()
-  }
-
-  async #loadSessions(): Promise<void> {
-    const epoch = this.#epoch
-    const result = await this.#deps.listSessions().catch(() => null)
-    if (!this.#active || epoch !== this.#epoch) return
-    if (result !== null && result.outcome === 'succeeded') {
-      this.#status = 'ready'
-      this.#setSessions(result.value.sessions)
-    } else {
-      this.#status = 'error'
-    }
     this.#changed()
   }
 
@@ -530,8 +450,7 @@ export class WorkbenchContextController {
         // context down to the blank state. A background reconcile is
         // best-effort: its outage must not erase the current editable
         // Draft or replace still-useful Go facts.
-        this.#status = 'error'
-        this.#selectedId = null
+        this.#selected = null
         this.#deriveActionState()
         this.#deps.tasks.leave()
         this.#changed()
@@ -666,7 +585,7 @@ export class WorkbenchContextController {
   }
 
   #contextEntered(): boolean {
-    return this.#selectedId !== null || this.#composingNew || this.#pendingKey !== null
+    return this.#selected !== null || this.#composingNew || this.#pendingKey !== null
   }
 
   #applyDraft(
@@ -718,31 +637,17 @@ export class WorkbenchContextController {
     this.#operationNotice = stored?.operationNotice ?? null
   }
 
-  #setSessions(sessions: readonly CreationSessionView[]): void {
-    this.#sessions = sessions
-    // Disappearance detection: every list replacement diffs the current
-    // context, so a server-side deletion tears the workbench down to the
-    // blank state instead of pointing at a session that no longer exists.
-    if (
-      this.#status === 'ready' &&
-      this.#selectedId !== null &&
-      !sessions.some((session) => session.id === this.#selectedId)
-    ) {
-      this.enterContext({ kind: 'inactive' })
-    }
-  }
-
   /** A restore continues only when its epoch is still current, the
    * controller is live, and the session it read for is still the one being
    * presented. */
   #isCurrent(epoch: number, sessionId: string): boolean {
-    return this.#active && epoch === this.#epoch && this.#selectedId === sessionId
+    return this.#active && epoch === this.#epoch && this.#selected?.id === sessionId
   }
 
   /** The action-state key: the pending ownership, else the session; a
    * fresh composition has no runtime action of its own. */
   #actionKey(): string | null {
-    return this.#pendingKey ?? this.#selectedId
+    return this.#pendingKey ?? this.#selected?.id ?? null
   }
 
   /** The draft-store key; the blank state persists nothing (ADR-0017). */
@@ -756,18 +661,13 @@ export class WorkbenchContextController {
   #contextKeyValue(): string {
     if (this.#pendingKey !== null) return this.#pendingKey
     if (this.#composingNew) return 'new'
-    return this.#selectedId ?? 'inactive'
+    return this.#selected?.id ?? 'inactive'
   }
 
   #changed(): void {
     this.#snapshot = {
-      status: this.#status,
-      sessions: this.#sessions,
-      selected:
-        this.#selectedId === null
-          ? null
-          : (this.#sessions.find((session) => session.id === this.#selectedId) ?? null),
-      selectedId: this.#selectedId,
+      selected: this.#selected,
+      selectedId: this.#selected?.id ?? null,
       composingNew: this.#composingNew,
       pendingKey: this.#pendingKey,
       contextKey: this.#contextKeyValue(),

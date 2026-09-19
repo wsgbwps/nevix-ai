@@ -114,6 +114,7 @@ export function classifyPaths(paths) {
     if (path === ".github/workflows/desktop-ci.yml") checks.add("desktop");
     if (path === ".github/workflows/server-ci.yml") checks.add("server");
     if (
+      startsWith(path, ".claude") ||
       startsWith(path, ".codegraph") ||
       startsWith(path, ".agents") ||
       startsWith(path, ".codex") ||
