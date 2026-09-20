@@ -312,7 +312,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                 }
                 setShowBackToBottom(away)
               }}
-              className="h-full overflow-y-auto px-6 [overflow-anchor:none]"
+              className="px-page h-full overflow-y-auto [overflow-anchor:none]"
             >
               {/* The greeting hero is the empty-session state: clearing the
                   prompt must never hide a session that already holds tasks. */}

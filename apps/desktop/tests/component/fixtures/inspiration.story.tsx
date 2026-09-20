@@ -42,13 +42,16 @@ function publication(index: number): PublicationView {
 }
 
 const publicationItem: InspirationItem = { type: 'publication', publication: publication(1) }
+/* Probe for the tie rule: cards 3 and 6 differ by less than
+   columnHeightTolerance but not by zero, both clear of the 112px floor that
+   would freeze the shorter one, with the gap scaling off the column width. */
 const layoutProbeItems: readonly InspirationItem[] = [
   [100, 200],
   [100, 200],
-  [172, 100],
+  [120, 100],
   [100, 200],
   [100, 200],
-  [200, 100],
+  [125, 100],
   [100, 100],
   [100, 100]
 ].map(([widthPx, heightPx], index) => ({

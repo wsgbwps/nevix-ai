@@ -8,7 +8,6 @@ export const creationTranslations = defineResourceTranslations({
     creation: {
       assets: {
         title: '资产',
-        description: '浏览你已成功生成的图片和视频',
         loading: '正在读取资产…',
         loadFailed: '无法读取资产。',
         empty: '没有符合条件的资产。',
@@ -82,7 +81,6 @@ export const creationTranslations = defineResourceTranslations({
       },
       inspiration: {
         title: '灵感',
-        description: '浏览团队发布的创作；管理员还可查看成功资产的发布与限制状态',
         loading: '正在读取灵感…',
         loadFailed: '无法读取灵感。',
         empty: '还没有可浏览的灵感。',
@@ -559,7 +557,6 @@ export const creationTranslations = defineResourceTranslations({
     creation: {
       assets: {
         title: 'Assets',
-        description: 'Browse images and videos you successfully created',
         loading: 'Loading assets…',
         loadFailed: 'Assets could not be loaded.',
         empty: 'No assets match these filters.',
@@ -637,8 +634,6 @@ export const creationTranslations = defineResourceTranslations({
       },
       inspiration: {
         title: 'Inspiration',
-        description:
-          'Browse team publications; administrators also see successful assets with publication and restriction state',
         loading: 'Loading Inspiration…',
         loadFailed: 'Inspiration could not be loaded.',
         empty: 'There is no Inspiration to browse yet.',

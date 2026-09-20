@@ -382,8 +382,10 @@ export function SettingsPage(): React.JSX.Element | null {
             ) : null}
           </nav>
         </aside>
-        <main className="max-h-svh flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-8 py-10">
+        <main className="px-page max-h-svh flex-1 overflow-y-auto">
+          {/* Gutter on the surface, not the column: inside the capped measure it
+              would eat into the column instead of framing it. */}
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 py-10">
             {sectionRenderers[section]()}
           </div>
         </main>

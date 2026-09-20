@@ -87,29 +87,23 @@ export function AssetLibraryPage({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="asset-library">
-      <div className="border-b px-4 py-3 sm:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">{t('assets.title')}</h1>
-            <p className="text-muted-foreground text-sm">{t('assets.description')}</p>
-          </div>
-          <Button
-            type="button"
-            variant={selection.selecting ? 'secondary' : 'outline'}
-            onClick={() => (selection.selecting ? selection.exit() : selection.begin())}
-          >
-            {selection.selecting ? t('assets.selection.exit') : t('assets.selection.enter')}
-          </Button>
-        </div>
-        <div className="mt-3">
-          <AssetLibraryFilters filters={filters} onChange={apply} />
-        </div>
+      <div className="px-page flex flex-wrap items-center justify-between gap-3 border-b py-3">
+        {/* The surface is its own title; the heading carries the a11y landmark. */}
+        <h1 className="sr-only">{t('assets.title')}</h1>
+        <AssetLibraryFilters filters={filters} onChange={apply} />
+        <Button
+          type="button"
+          variant={selection.selecting ? 'secondary' : 'outline'}
+          onClick={() => (selection.selecting ? selection.exit() : selection.begin())}
+        >
+          {selection.selecting ? t('assets.selection.exit') : t('assets.selection.enter')}
+        </Button>
       </div>
 
       {selection.selecting ? (
         <div
           data-testid="batch-toolbar"
-          className="bg-muted/50 flex flex-wrap items-center gap-2 border-b px-4 py-2 sm:px-6"
+          className="bg-muted/50 px-page flex flex-wrap items-center gap-2 border-b py-2"
         >
           <Button
             type="button"
@@ -137,7 +131,7 @@ export function AssetLibraryPage({
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-6">
+      <div className="px-page min-h-0 flex-1 overflow-auto py-5">
         {list.status === 'loading' ? (
           <p className="text-muted-foreground" role="status">
             {t('assets.loading')}

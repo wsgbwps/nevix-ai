@@ -593,11 +593,11 @@ export function InspirationPage({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="inspiration-page">
-      <header className="border-b px-4 py-3 sm:px-6">
-        <h1 className="text-xl font-semibold tracking-tight">{t('inspiration.title')}</h1>
-        <p className="text-muted-foreground text-sm">{t('inspiration.description')}</p>
+      <header className="px-page border-b py-3">
+        {/* The surface is its own title; the heading carries the a11y landmark. */}
+        <h1 className="sr-only">{t('inspiration.title')}</h1>
         <form
-          className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,2fr)_auto]"
+          className="grid grid-cols-2 gap-2 sm:grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,2fr)_auto]"
           onSubmit={(event) => {
             event.preventDefault()
             list.submit(filters)
@@ -641,7 +641,7 @@ export function InspirationPage({
           </Button>
         </form>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto p-0.5">
+      <div className="px-page min-h-0 flex-1 overflow-auto py-0.5">
         {list.status === 'loading' ? (
           <p className="text-muted-foreground p-5" role="status">
             {t('inspiration.loading')}

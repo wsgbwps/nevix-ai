@@ -11,6 +11,13 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* One side measure for every page surface: the ceiling holds at a maximized
+   window, the floor arrives a fifth of the width narrower, and 5/16 is the
+   slope those two ends describe. Flat on either side of that range. */
+@utility px-page {
+  padding-inline: clamp(3.5rem, calc(13.5rem + (100vw - 2560px) * 5 / 16), 13.5rem);
+}
+
 @keyframes skeleton-shimmer {
   to {
     transform: translateX(100%);
