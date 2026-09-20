@@ -593,7 +593,7 @@ export function InspirationPage({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="inspiration-page">
-      <header className="px-page border-b py-3">
+      <header className="px-page pt-6 pb-3">
         {/* The surface is its own title; the heading carries the a11y landmark. */}
         <h1 className="sr-only">{t('inspiration.title')}</h1>
         <form

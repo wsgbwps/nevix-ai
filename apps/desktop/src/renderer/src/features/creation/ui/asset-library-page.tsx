@@ -87,8 +87,7 @@ export function AssetLibraryPage({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="asset-library">
-      <div className="px-page flex flex-wrap items-center justify-between gap-3 border-b py-3">
-        {/* The surface is its own title; the heading carries the a11y landmark. */}
+      <div className="px-page flex flex-wrap items-center justify-between gap-3 pt-6 pb-3">
         <h1 className="sr-only">{t('assets.title')}</h1>
         <AssetLibraryFilters filters={filters} onChange={apply} />
         <Button

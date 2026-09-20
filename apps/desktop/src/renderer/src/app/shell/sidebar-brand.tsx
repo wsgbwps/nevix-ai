@@ -24,16 +24,18 @@ function BrandMark({
  */
 export function SidebarBrand(): React.JSX.Element {
   const { t } = useTranslation('app')
+  // pt-6 + h-9 mirror the page header bar: the brand mark lands on the same
+  // centre line as the header's control row.
   return (
-    <SidebarHeader>
-      <div className="group/brand relative flex h-8 items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+    <SidebarHeader className="pt-6 pb-2">
+      <div className="group/brand relative flex h-9 items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
         <BrandMark className="size-7 rounded-md text-xs transition-opacity group-data-[collapsible=icon]:group-hover/brand:opacity-0" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium group-data-[collapsible=icon]:hidden">
           Nevix AI
         </span>
         <SidebarTrigger
           aria-label={t('shell.toggleSidebar')}
-          className="group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:inset-y-0 group-data-[collapsible=icon]:left-1/2 group-data-[collapsible=icon]:-translate-x-1/2 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:transition-opacity group-data-[collapsible=icon]:duration-200 group-data-[collapsible=icon]:group-hover/brand:opacity-100 group-data-[collapsible=icon]:focus-visible:opacity-100"
+          className="group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:inset-y-0 group-data-[collapsible=icon]:left-1/2 group-data-[collapsible=icon]:my-auto group-data-[collapsible=icon]:-translate-x-1/2 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:transition-opacity group-data-[collapsible=icon]:duration-200 group-data-[collapsible=icon]:group-hover/brand:opacity-100 group-data-[collapsible=icon]:focus-visible:opacity-100"
         />
       </div>
     </SidebarHeader>
