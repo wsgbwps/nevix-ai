@@ -46,6 +46,8 @@ export interface AssetPageRequest {
   readonly cursor?: string | null
   readonly mediaType?: AssetMediaType
   readonly createdSince?: string
+  /** Exclusive upper bound; send the instant after the inclusive end date. */
+  readonly createdUntil?: string
   readonly sort?: AssetSort
   readonly search?: string
   readonly limit?: number
@@ -424,6 +426,7 @@ function query(requestValue: AssetPageRequest): Readonly<Record<string, string>>
     ...(requestValue.cursor ? { cursor: requestValue.cursor } : {}),
     ...(requestValue.mediaType ? { media_type: requestValue.mediaType } : {}),
     ...(requestValue.createdSince ? { created_since: requestValue.createdSince } : {}),
+    ...(requestValue.createdUntil ? { created_until: requestValue.createdUntil } : {}),
     ...(requestValue.sort ? { sort: requestValue.sort } : {}),
     ...(requestValue.search ? { search: requestValue.search } : {}),
     limit: String(requestValue.limit ?? 24)

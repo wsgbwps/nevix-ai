@@ -128,20 +128,6 @@ export function AssetCard({
             className="focus-visible:ring-ring absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-inset"
           />
         )}
-        <span className="bg-background/90 text-foreground absolute right-2 bottom-2 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] shadow-sm">
-          {asset.mediaType === 'image' ? (
-            <ImageIcon className="size-3" aria-hidden />
-          ) : (
-            <VideoIcon className="size-3" aria-hidden />
-          )}
-          {t(`assets.media.${asset.mediaType}`)}
-        </span>
-      </div>
-      <div className="mt-2 flex min-w-0 items-center justify-between gap-2 px-0.5 text-xs">
-        <span className="truncate font-medium">{asset.creator.displayName}</span>
-        <time className="text-muted-foreground shrink-0" dateTime={asset.createdAt}>
-          {new Date(asset.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </time>
       </div>
     </li>
   )

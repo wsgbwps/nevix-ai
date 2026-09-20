@@ -55,6 +55,7 @@ test('asset list sends the accepted keyset filters and decodes public facts', as
       cursor: 'cursor-one',
       mediaType: 'image',
       createdSince: '2026-09-01T00:00:00Z',
+      createdUntil: '2026-09-11T00:00:00Z',
       sort: 'oldest',
       search: 'Aster',
       limit: 24
@@ -88,6 +89,7 @@ test('asset list sends the accepted keyset filters and decodes public facts', as
       cursor: 'cursor-one',
       media_type: 'image',
       created_since: '2026-09-01T00:00:00Z',
+      created_until: '2026-09-11T00:00:00Z',
       sort: 'oldest',
       search: 'Aster',
       limit: '24'

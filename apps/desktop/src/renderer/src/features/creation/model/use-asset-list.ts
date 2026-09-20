@@ -10,20 +10,37 @@ import type {
 const PAGE_SIZE = 24
 
 export interface AssetFilters {
-  readonly mediaType: '' | AssetMediaType
+  readonly mediaType: AssetMediaType
+  /** Inclusive local start day (`YYYY-MM-DD`) or empty. */
   readonly createdSince: string
+  /** Inclusive local end day (`YYYY-MM-DD`) or empty. */
+  readonly createdUntil: string
   readonly sort: AssetSort
   readonly search: string
+}
+
+/** Local calendar day (`YYYY-MM-DD`) of an instant — the day an Asset is filed under. */
+export function isoDay(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+/** Instant of a local day boundary; `offsetDays` shifts by whole days. */
+function dayBoundary(day: string, offsetDays: number): string | undefined {
+  if (!day) return undefined
+  const [year, month, date] = day.split('-').map(Number)
+  if (!year || !month || !date) return undefined
+  return new Date(year, month - 1, date + offsetDays).toISOString()
 }
 
 function pageRequest(filters: AssetFilters, cursor: string | null): AssetPageRequest {
   return {
     limit: PAGE_SIZE,
     cursor,
-    mediaType: filters.mediaType || undefined,
-    createdSince: filters.createdSince
-      ? new Date(`${filters.createdSince}T00:00:00`).toISOString()
-      : undefined,
+    mediaType: filters.mediaType,
+    createdSince: dayBoundary(filters.createdSince, 0),
+    createdUntil: dayBoundary(filters.createdUntil, 1),
     sort: filters.sort,
     search: filters.search.trim() || undefined
   }

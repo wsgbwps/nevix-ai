@@ -19,7 +19,7 @@ for (const viewport of [
 }
 
 for (const viewport of [
-  { width: 960, height: 600, columns: 5, filterRows: 2 },
+  { width: 960, height: 600, columns: 5, filterRows: 1 },
   { width: 1280, height: 800, columns: 8, filterRows: 1 }
 ]) {
   test(`dense wall uses ${viewport.columns} compact columns at ${viewport.width}x${viewport.height}`, async ({
@@ -45,8 +45,11 @@ for (const viewport of [
     expect(layout.maxWidth).toBeLessThan(190)
     expect(layout.maxRight).toBeLessThanOrEqual(viewport.width)
 
-    const filterRows = await page.getByTestId('asset-filters').evaluate((form) => {
-      const tops = [...form.children].map((child) => Math.round(child.getBoundingClientRect().top))
+    const filterRows = await page.getByTestId('asset-filters').evaluate((filters) => {
+      // Controls only: the divider between them is shorter than a row.
+      const tops = [...filters.querySelectorAll('button')].map((control) =>
+        Math.round(control.getBoundingClientRect().top)
+      )
       return new Set(tops).size
     })
     expect(filterRows).toBe(viewport.filterRows)
@@ -56,15 +59,28 @@ for (const viewport of [
 
 test('filters map to the page port and reset keyset position', async ({ mount, page }) => {
   await mount(<AssetLibraryStory />)
-  await page.getByLabel('Media type').selectOption('video')
-  await page.getByLabel('Created since').fill('2026-09-01')
-  await page.getByLabel('Sort').selectOption('oldest')
+  await page
+    .getByRole('group', { name: 'Media type' })
+    .getByRole('button', { name: 'Video' })
+    .click()
+  await page.getByRole('button', { name: 'Time' }).click()
+  await page.getByLabel('Start date').fill('2026-09-01')
+  await page.getByLabel('End date').fill('2026-09-10')
+  await page.getByRole('button', { name: 'Time' }).click()
+  await page.getByRole('button', { name: 'Sort' }).click()
+  await page.getByRole('menuitemradio', { name: 'Oldest first' }).click()
+  await page.getByRole('button', { name: 'Filter' }).click()
   await page.getByLabel('Search').fill('Aster')
   await page.getByRole('button', { name: 'Search', exact: true }).click()
+  // Day boundaries are local, and the end date is sent as the next day's instant.
+  const createdSince = new Date(2026, 8, 1).toISOString()
+  const createdUntil = new Date(2026, 8, 11).toISOString()
   await expect
     .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
     .toMatchObject({
       mediaType: 'video',
+      createdSince,
+      createdUntil,
       sort: 'oldest',
       search: 'Aster'
     })
@@ -72,10 +88,23 @@ test('filters map to the page port and reset keyset position', async ({ mount, p
   const callsBeforeResubmit = await page.evaluate(
     () => window.__assetLibraryTest?.listCalls().length ?? 0
   )
-  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await page
+    .getByRole('group', { name: 'Media type' })
+    .getByRole('button', { name: 'Image' })
+    .click()
   await expect
     .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().length ?? 0))
     .toBe(callsBeforeResubmit + 1)
+})
+
+test('the wall opens on images with only the type buttons offered', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  const types = page.getByRole('group', { name: 'Media type' }).getByRole('button')
+  await expect(types).toHaveText(['Image', 'Video'])
+  await expect(types.first()).toHaveAttribute('aria-pressed', 'true')
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(0)))
+    .toMatchObject({ mediaType: 'image' })
 })
 
 test('wall previews only bounded image candidates and never fetches video originals', async ({
