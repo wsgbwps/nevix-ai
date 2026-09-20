@@ -46,8 +46,7 @@ export const creationTranslations = defineResourceTranslations({
           complete: '下载完成 · {{done}} / {{total}}'
         },
         pagination: '资产分页',
-        previous: '上一页',
-        next: '下一页',
+        loadMore: '加载更多',
         detailTitle: '资产 {{id}}',
         detailDescription: '资产媒体与生成详情',
         loadingDetail: '正在读取资产详情…',
@@ -597,8 +596,7 @@ export const creationTranslations = defineResourceTranslations({
           complete: 'Download complete · {{done}} / {{total}}'
         },
         pagination: 'Asset pages',
-        previous: 'Previous',
-        next: 'Next',
+        loadMore: 'Load more',
         detailTitle: 'Asset {{id}}',
         detailDescription: 'Asset media and generation details',
         loadingDetail: 'Loading asset details…',

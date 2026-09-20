@@ -24,6 +24,7 @@ import {
   type InspirationFilters
 } from '../model/use-inspiration'
 import { AssetMedia, type MediaPreviewView } from './asset-media'
+import { LoadMoreSentinel } from './load-more-sentinel'
 import type { AssetContentPort } from './use-asset-content'
 
 const initialFilters: InspirationFilters = { mediaType: '', creator: '', search: '' }
@@ -548,6 +549,7 @@ export function InspirationPage({
   const { t } = useTranslation('creation')
   const [filters, setFilters] = useState(initialFilters)
   const list = useInspiration(ports, initialFilters)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
   const [selected, setSelected] = useState<InspirationItem | null>(null)
   const selectedRef = useRef<InspirationItem | null>(null)
   const [detail, setDetail] = useState<InspirationDetailView | null>(null)
@@ -600,6 +602,8 @@ export function InspirationPage({
           className="grid grid-cols-2 gap-2 sm:grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,2fr)_auto]"
           onSubmit={(event) => {
             event.preventDefault()
+            // A narrower result would leave the sentinel in reach and append unasked.
+            scrollRef.current?.scrollTo({ top: 0 })
             list.submit(filters)
           }}
         >
@@ -641,7 +645,7 @@ export function InspirationPage({
           </Button>
         </form>
       </header>
-      <div className="px-page min-h-0 flex-1 overflow-auto py-0.5">
+      <div ref={scrollRef} className="px-page min-h-0 flex-1 overflow-auto py-0.5">
         {list.status === 'loading' ? (
           <p className="text-muted-foreground p-5" role="status">
             {t('inspiration.loading')}
@@ -653,36 +657,40 @@ export function InspirationPage({
               {t('state.retry')}
             </Button>
           </div>
-        ) : list.items.length === 0 ? (
-          <div className="space-y-2 p-5" role="status">
-            <p>
-              {hasInspirationFilters(list.submittedFilters)
-                ? t('inspiration.noResults')
-                : t('inspiration.empty')}
-            </p>
-            {hasInspirationFilters(list.submittedFilters) ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setFilters(initialFilters)
-                  list.clear()
-                }}
-              >
-                {t('inspiration.clearFilters')}
-              </Button>
-            ) : null}
-          </div>
         ) : (
           <>
-            <InspirationWall items={list.items} ports={ports} onOpen={open} />
-            <nav className="flex justify-end gap-2 p-4" aria-label={t('inspiration.pagination')}>
-              <Button variant="outline" disabled={!list.canPrevious} onClick={list.previous}>
-                {t('assets.previous')}
-              </Button>
-              <Button variant="outline" disabled={!list.canNext} onClick={list.next}>
-                {t('assets.next')}
-              </Button>
-            </nav>
+            {list.items.length === 0 ? (
+              <div className="space-y-2 p-5" role="status">
+                <p>
+                  {hasInspirationFilters(list.submittedFilters)
+                    ? t('inspiration.noResults')
+                    : t('inspiration.empty')}
+                </p>
+                {hasInspirationFilters(list.submittedFilters) ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setFilters(initialFilters)
+                      scrollRef.current?.scrollTo({ top: 0 })
+                      list.clear()
+                    }}
+                  >
+                    {t('inspiration.clearFilters')}
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <InspirationWall items={list.items} ports={ports} onOpen={open} />
+            )}
+            {list.hasMore ? (
+              <LoadMoreSentinel
+                more={list.more}
+                label={t('inspiration.pagination')}
+                onLoadMore={list.loadMore}
+                root={scrollRef}
+                className="p-4"
+              />
+            ) : null}
           </>
         )}
       </div>

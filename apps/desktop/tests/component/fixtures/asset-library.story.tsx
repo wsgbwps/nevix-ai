@@ -59,6 +59,12 @@ const denseAssets = Array.from({ length: 24 }, (_, index) =>
   asset(`dense-${index + 1}`, new Date(2026, 8, 16, 12, index).toISOString())
 )
 
+/** The page behind the first cursor, so appending has something distinct to show. */
+const nextPage = [
+  asset('asset-four', new Date(2026, 8, 14, 9).toISOString()),
+  asset('asset-five', new Date(2026, 8, 14, 10).toISOString())
+]
+
 const detail: AssetDetailView = {
   asset: assets[0],
   siblings: assets.slice(0, 2),
@@ -131,7 +137,8 @@ function createHarness(
   staleOnReuse: boolean,
   replacementRequired: boolean,
   storageFailure: boolean,
-  emptyNextPage: boolean,
+  paginated: boolean,
+  append: 'succeed' | 'fail-once' | 'echo',
   deferredPreviews: boolean,
   dense: boolean
 ): {
@@ -139,6 +146,7 @@ function createHarness(
   readonly controls: AssetLibraryTestControls
 } {
   const listCalls: AssetPageRequest[] = []
+  let appendAttempts = 0
   const reused: AssetPrivateOrigin[] = []
   const replacements: boolean[] = []
   const local = {
@@ -179,6 +187,11 @@ function createHarness(
     ports: {
       listAssets: async (request) => {
         listCalls.push(request)
+        const afterFirst = request.cursor === 'next'
+        if (afterFirst) appendAttempts += 1
+        if (paginated && afterFirst && append === 'fail-once' && appendAttempts === 1) {
+          return { outcome: 'request-rejected' as const, code: 'internal_error' }
+        }
         const facets =
           request.mediaType === 'video'
             ? {
@@ -191,20 +204,22 @@ function createHarness(
                 ratios: ['16:9', '1:1'],
                 resolutions: ['1K', '2K']
               }
-        if (emptyNextPage && request.cursor === 'next') {
-          return { outcome: 'succeeded', value: { assets: [], nextCursor: null, facets } }
-        }
         return {
           outcome: 'succeeded',
           value: {
-            assets: dense
-              ? denseAssets
-              : deferredPreviews
-                ? Array.from({ length: 8 }, (_, index) =>
-                    asset(`preview-${index + 1}`, new Date(2026, 8, 16, 8, index).toISOString())
-                  )
-                : assets,
-            nextCursor: 'next',
+            assets: afterFirst
+              ? nextPage
+              : dense
+                ? denseAssets
+                : deferredPreviews
+                  ? Array.from({ length: 8 }, (_, index) =>
+                      asset(`preview-${index + 1}`, new Date(2026, 8, 16, 8, index).toISOString())
+                    )
+                  : assets,
+            // Only `paginated` reads past the first page, and only `echo` claims
+            // a further one: a terminal cursor everywhere else keeps the
+            // auto-loading sentinel quiet for the tests asserting an exact count.
+            nextCursor: paginated && (!afterFirst || append === 'echo') ? 'next' : null,
             facets
           }
         }
@@ -368,7 +383,8 @@ export function AssetLibraryStory({
   staleOnReuse = false,
   replacementRequired = false,
   storageFailure = false,
-  emptyNextPage = false,
+  paginated = false,
+  append = 'succeed',
   deferredPreviews = false,
   dense = false
 }: {
@@ -377,7 +393,8 @@ export function AssetLibraryStory({
   readonly staleOnReuse?: boolean
   readonly replacementRequired?: boolean
   readonly storageFailure?: boolean
-  readonly emptyNextPage?: boolean
+  readonly paginated?: boolean
+  readonly append?: 'succeed' | 'fail-once' | 'echo'
   readonly deferredPreviews?: boolean
   readonly dense?: boolean
 }): React.JSX.Element {
@@ -389,15 +406,17 @@ export function AssetLibraryStory({
         staleOnReuse,
         replacementRequired,
         storageFailure,
-        emptyNextPage,
+        paginated,
+        append,
         deferredPreviews,
         dense
       ),
     [
+      append,
       dense,
       deferredPreviews,
       downloadMode,
-      emptyNextPage,
+      paginated,
       replacementRequired,
       staleOnReuse,
       storageFailure,

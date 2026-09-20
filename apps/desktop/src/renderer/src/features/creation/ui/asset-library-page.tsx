@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DownloadIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
@@ -10,6 +10,7 @@ import { useAssetSelectionDownloads } from '../model/use-asset-selection-downloa
 import { AssetDetailDialog } from './asset-detail-dialog'
 import { AssetLibraryFilters } from './asset-library-filters'
 import { AssetCard } from './asset-media'
+import { LoadMoreSentinel } from './load-more-sentinel'
 
 export interface AssetLibraryPageProps {
   readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
@@ -48,6 +49,7 @@ export function AssetLibraryPage({
   const { t, i18n } = useTranslation('creation')
   const [filters, setFilters] = useState(initialFilters)
   const list = useAssetList(ports, initialFilters)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
   const selection = useAssetSelectionDownloads(ports, list.assets, saveBlob)
   const detail = useAssetDetail({
     ports,
@@ -84,6 +86,8 @@ export function AssetLibraryPage({
   const apply = (next: AssetFilters): void => {
     setFilters(next)
     selection.resetPage()
+    // A narrower result would leave the sentinel in reach and append unasked.
+    scrollRef.current?.scrollTo({ top: 0 })
     list.submit(next)
   }
 
@@ -132,7 +136,7 @@ export function AssetLibraryPage({
         </div>
       ) : null}
 
-      <div className="px-page min-h-0 flex-1 overflow-auto py-5">
+      <div ref={scrollRef} className="px-page min-h-0 flex-1 overflow-auto py-5">
         {list.status === 'loading' ? (
           <p className="text-muted-foreground" role="status">
             {t('assets.loading')}
@@ -144,61 +148,46 @@ export function AssetLibraryPage({
               {t('state.retry')}
             </Button>
           </div>
-        ) : list.assets.length === 0 ? (
-          <p className="text-muted-foreground" role="status">
-            {t('assets.empty')}
-          </p>
         ) : (
           <div className="space-y-7">
-            {groups.map(([date, group]) => (
-              <section key={date} data-testid="asset-group" aria-labelledby={`assets-${date}`}>
-                <h2 id={`assets-${date}`} className="mb-3 text-sm font-semibold">
-                  {new Intl.DateTimeFormat(i18n.language, { month: 'long', day: 'numeric' }).format(
-                    new Date(`${date}T00:00:00`)
-                  )}
-                </h2>
-                <ul className="grid grid-cols-2 gap-x-2 gap-y-4 sm:grid-cols-5 xl:grid-cols-8">
-                  {group.map((asset) => (
-                    <AssetCard
-                      key={asset.id}
-                      asset={asset}
-                      ports={ports}
-                      selecting={selection.selecting}
-                      selected={selection.selection.has(asset.id)}
-                      onSelect={() => selection.toggle(asset.id)}
-                      onOpen={() => detail.open(asset.id)}
-                    />
-                  ))}
-                </ul>
-              </section>
-            ))}
-            <nav
-              className="flex items-center justify-end gap-2"
-              aria-label={t('assets.pagination')}
-            >
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!list.canPrevious}
-                onClick={() => {
-                  selection.resetPage()
-                  list.previous()
-                }}
-              >
-                {t('assets.previous')}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!list.canNext}
-                onClick={() => {
-                  selection.resetPage()
-                  list.next()
-                }}
-              >
-                {t('assets.next')}
-              </Button>
-            </nav>
+            {list.assets.length === 0 ? (
+              <p className="text-muted-foreground" role="status">
+                {t('assets.empty')}
+              </p>
+            ) : (
+              groups.map(([date, group]) => (
+                <section key={date} data-testid="asset-group" aria-labelledby={`assets-${date}`}>
+                  <h2 id={`assets-${date}`} className="mb-3 text-sm font-semibold">
+                    {new Intl.DateTimeFormat(i18n.language, {
+                      month: 'long',
+                      day: 'numeric'
+                    }).format(new Date(`${date}T00:00:00`))}
+                  </h2>
+                  <ul className="grid grid-cols-2 gap-x-2 gap-y-4 sm:grid-cols-5 xl:grid-cols-8">
+                    {group.map((asset) => (
+                      <AssetCard
+                        key={asset.id}
+                        asset={asset}
+                        ports={ports}
+                        selecting={selection.selecting}
+                        selected={selection.selection.has(asset.id)}
+                        onSelect={() => selection.toggle(asset.id)}
+                        onOpen={() => detail.open(asset.id)}
+                      />
+                    ))}
+                  </ul>
+                </section>
+              ))
+            )}
+            {list.hasMore ? (
+              <LoadMoreSentinel
+                more={list.more}
+                label={t('assets.pagination')}
+                onLoadMore={list.loadMore}
+                root={scrollRef}
+                className="pt-1"
+              />
+            ) : null}
           </div>
         )}
       </div>

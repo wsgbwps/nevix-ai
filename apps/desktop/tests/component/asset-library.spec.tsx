@@ -292,18 +292,26 @@ test('batch download can be cancelled with an accessible stable status', async (
   await expect(page.getByRole('status').filter({ hasText: 'Download cancelled' })).toBeVisible()
 })
 
-test('a detached batch cannot overwrite or detach the next page batch', async ({ mount, page }) => {
-  await mount(<AssetLibraryStory downloadMode="sequenced" />)
+test('a batch detached by leaving selection cannot overwrite the batch that replaced it', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory downloadMode="sequenced" paginated />)
   await page.getByRole('button', { name: 'Select assets' }).click()
   await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
   await page.getByRole('button', { name: 'Download 1 asset' }).click()
   await expect(page.getByRole('status').filter({ hasText: '1 / 1' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('checkbox', { name: 'Select asset asset-two' }).check()
+  // Leaving selection detaches the running batch and drops its selection with
+  // it; the second page a short wall appends is still there to pick from.
+  await page.getByRole('button', { name: 'Exit selection' }).click()
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  await page.getByRole('button', { name: 'Select assets' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-four' }).check()
   await page.getByRole('button', { name: 'Download 1 asset' }).click()
-  await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
 
+  // Releasing the detached batch's handle must not disturb the live one.
+  await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
   await expect(page.getByRole('status').filter({ hasText: 'Downloading 1 / 1' })).toBeVisible()
   await page.getByRole('button', { name: 'Cancel download' }).click()
   await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
@@ -330,13 +338,62 @@ test('single download is aborted when its detail dialog closes', async ({ mount,
     .toBe(1)
 })
 
-test('an empty later keyset page retreats to the previous page', async ({ mount, page }) => {
-  await mount(<AssetLibraryStory emptyNextPage />)
-  await page.getByRole('button', { name: 'Next' }).click()
-  await expect(page.getByTestId('asset-card')).toHaveCount(3)
+test('a wall shorter than the scroller appends the next keyset page unasked', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory paginated />)
+
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  // The second page is the last one, so the sentinel retires with it.
+  await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0)
   await expect
     .poll(() =>
       page.evaluate(() => window.__assetLibraryTest?.listCalls().map((call) => call.cursor))
     )
-    .toEqual([null, 'next', null])
+    .toEqual([null, 'next'])
+})
+
+test('a failed append keeps the wall and turns the sentinel into its retry', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory paginated append="fail-once" />)
+
+  await expect(page.getByTestId('asset-card')).toHaveCount(3)
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await page.getByRole('button', { name: 'Retry' }).click()
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0)
+})
+
+test('a server echoing the cursor it was handed stops the wall', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory paginated append="echo" />)
+
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__assetLibraryTest?.listCalls().map((call) => call.cursor))
+    )
+    .toEqual([null, 'next'])
+})
+
+test('a refresh after a mutation re-reads every loaded page, not just the first', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory paginated />)
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await page.getByRole('button', { name: 'Publish to Inspiration' }).click()
+  await expect(page.getByRole('button', { name: 'Withdraw publication' })).toBeVisible()
+
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__assetLibraryTest?.listCalls().map((call) => call.cursor))
+    )
+    .toEqual([null, 'next', null, 'next'])
 })

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useCursorPages, type MoreStatus, type PageStatus } from '../../../hooks/use-cursor-pages'
 import type {
   InspirationItem,
   InspirationPageRequest,
@@ -32,79 +33,39 @@ export function useInspiration(
   initialFilters: InspirationFilters
 ): {
   readonly items: readonly InspirationItem[]
-  readonly status: 'loading' | 'ready' | 'failed'
+  readonly status: PageStatus
+  readonly more: MoreStatus
+  readonly hasMore: boolean
   readonly submittedFilters: InspirationFilters
-  readonly canPrevious: boolean
-  readonly canNext: boolean
+  readonly loadMore: () => void
   readonly submit: (filters: InspirationFilters) => void
   readonly clear: () => void
   readonly retry: () => void
   readonly refresh: () => void
-  readonly previous: () => void
-  readonly next: () => void
 } {
   const [submittedFilters, setSubmittedFilters] = useState(initialFilters)
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [cursorHistory, setCursorHistory] = useState<(string | null)[]>([])
-  const [items, setItems] = useState<readonly InspirationItem[]>([])
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
-  const [reload, setReload] = useState(0)
 
-  useEffect(() => {
-    let active = true
-    void ports.listInspiration(request(submittedFilters, cursor)).then((result) => {
-      if (!active) return
-      if (result.outcome !== 'succeeded') {
-        setStatus('failed')
-        return
-      }
-      if (result.value.items.length === 0 && cursorHistory.length > 0) {
-        setCursor(cursorHistory.at(-1) ?? null)
-        setCursorHistory((history) => history.slice(0, -1))
-        return
-      }
-      setItems(result.value.items)
-      setNextCursor(result.value.nextCursor)
-      setStatus('ready')
-    })
-    return () => {
-      active = false
-    }
-  }, [cursor, cursorHistory, ports, reload, submittedFilters])
+  const pages = useCursorPages<InspirationItem>(async (cursor) => {
+    const result = await ports.listInspiration(request(submittedFilters, cursor))
+    if (result.outcome !== 'succeeded') return null
+    return { items: result.value.items, nextCursor: result.value.nextCursor }
+  })
 
-  const refresh = (): void => {
-    setStatus('loading')
-    setReload((value) => value + 1)
-  }
   const submit = (filters: InspirationFilters): void => {
-    setStatus('loading')
-    setCursor(null)
-    setCursorHistory([])
     setSubmittedFilters(filters)
-    setReload((value) => value + 1)
+    pages.reset()
   }
 
   return {
-    items,
-    status,
+    items: pages.items,
+    status: pages.status,
+    more: pages.more,
+    hasMore: pages.hasMore,
     submittedFilters,
-    canPrevious: cursorHistory.length > 0,
-    canNext: nextCursor !== null,
+    loadMore: pages.loadMore,
     submit,
     clear: () => submit(initialFilters),
-    retry: refresh,
-    refresh,
-    previous: () => {
-      setStatus('loading')
-      setCursor(cursorHistory.at(-1) ?? null)
-      setCursorHistory((history) => history.slice(0, -1))
-    },
-    next: () => {
-      if (nextCursor === null) return
-      setStatus('loading')
-      setCursorHistory((history) => [...history, cursor])
-      setCursor(nextCursor)
-    }
+    retry: pages.reset,
+    refresh: pages.refresh
   }
 }
