@@ -9,10 +9,9 @@ export function isScrolledToBottom(scroller: HTMLElement): boolean {
 }
 
 /**
- * Presence machine for the dual-state Composer (完整态/紧凑态): expanded
- * while the workspace scroller sits at the bottom, compact once it scrolls
- * away. Pointer or focus intent inside the composer pins the expanded form
- * until the next scroll away — blur alone deliberately does not collapse.
+ * Presence machine for the dual-state Composer (完整态/紧凑态): expanded while the scroller sits at the
+ * bottom, compact once it scrolls away. Pointer or focus intent pins the expanded form until the
+ * next scroll away — blur alone deliberately does not collapse.
  */
 export function useComposerPresence({
   scrollerRef,

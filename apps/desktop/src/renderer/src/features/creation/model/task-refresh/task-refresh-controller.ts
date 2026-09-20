@@ -1,14 +1,9 @@
 /**
- * The Generation Task refresh module's engine (ADR-0005): it owns task
- * list/detail reading, refresh scheduling, trigger coalescing, stale-result
- * invalidation, and per-task consistent display state for the currently
- * displayed Creation Session. It never issues business commands — business
- * actions only ask it to reconcile (re-read server facts).
- *
- * The controller is framework-free so its scheduling invariants — one
- * in-flight read round per display lifecycle, coalesced triggers, entry
- * epochs, and the fallback poll gate — are testable against scripted ports
- * and an injected clock.
+ * The Generation Task refresh module's engine (ADR-0005): task list/detail reading, refresh
+ * scheduling, trigger coalescing, stale-result invalidation, and consistent display state for the
+ * displayed Creation Session. It never issues business commands — business actions only ask it to
+ * reconcile. Framework-free, so its scheduling invariants (one in-flight read round per display
+ * lifecycle, entry epochs, the fallback poll gate) are testable with scripted ports and a clock.
  */
 import { isTerminalTaskStatus } from '../../api/generation-task-http'
 import type {
@@ -80,12 +75,11 @@ export interface TaskRefreshOptions {
 // and the displayed session holds in-progress tasks, reconcile every 5 seconds.
 const DEFAULT_POLL_INTERVAL_MS = 5_000
 
-// A local recovery bound for a wedged read round, not a per-request timeout:
-// it must outlast a healthy round (one windowed list read plus its parallel
-// detail reads) while guaranteeing that a hung response can never permanently
-// block the next reconciliation. It is deliberately not 5s — the ~10s recovery
-// target covers discovering a dropped stream or a reconnect, which the poll
-// cadence and immediate reconnect reconcile already satisfy.
+// A local recovery bound for a wedged read round, not a per-request timeout: it
+// must outlast a healthy round (one windowed list read plus its parallel detail
+// reads) while guaranteeing a hung response can never permanently block the next
+// reconciliation. Deliberately not 5s — the ~10s recovery target covers a dropped
+// stream or reconnect, which the poll cadence already satisfies.
 const DEFAULT_ROUND_DEADLINE_MS = 30_000
 
 // The initial and per-batch history page size (ADR-0005): the latest 20 tasks
@@ -129,9 +123,8 @@ export class TaskRefreshController {
   private readonly listeners = new Set<() => void>()
 
   // Display eligibility is round identity: entering or leaving retires the
-  // active round, and every read compares against the current active round
-  // before writing back — the second A in A → B → A never accepts the first
-  // A's reads (ADR-0005).
+  // active round, and every read compares against it before writing back — the
+  // second A in A → B → A never accepts the first A's reads (ADR-0005).
   private enteredSessionId: string | null = null
   private streamLive = false
   private activeRound: ActiveRound | null = null
@@ -340,10 +333,9 @@ export class TaskRefreshController {
       ? this.mergeHistoryPage(page)
       : this.mergeWindow(page)
     this.commit()
-    // Incremental detail reads: only tasks a successful page just delivered
-    // with a fresh criterion are re-read (new, changed per ADR-0016's
-    // `updatedAt` contract, or previously failed). Each read commits on its
-    // own — one task's failure never blocks the others.
+    // Incremental detail reads: only tasks the page just delivered with a fresh
+    // criterion are re-read (new, changed per ADR-0016's `updatedAt`, or
+    // previously failed). Each read commits on its own, never blocking others.
     const reads: Promise<void>[] = []
     for (const summary of fresh) {
       if (!this.needsDetailRead(summary)) continue

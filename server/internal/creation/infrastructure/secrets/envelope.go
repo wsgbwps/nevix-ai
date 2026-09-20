@@ -13,10 +13,9 @@ import (
 // future format bumps it and carries its own open path.
 const envelopeVersion = 1
 
-// Seal encrypts one Provider Key under AES-256-GCM with a fresh random
-// nonce. The AAD binds the version, the connection identity, the fixed
-// provider, and the credential purpose — so a ciphertext moved to another
-// connection (or another use) fails to open (ADR-0016).
+// Seal encrypts one Provider Key under AES-256-GCM with a fresh random nonce. The AAD binds
+// the version, connection identity, fixed provider, and credential purpose, so a ciphertext
+// moved to another connection (or another use) fails to open (ADR-0016).
 func Seal(key domain.CredentialKey, connectionID domain.UUID, plaintext []byte) (domain.ProviderCredentialEnvelope, error) {
 	return seal(key, plaintext, additionalData(connectionID))
 }
@@ -39,10 +38,9 @@ func seal(key domain.CredentialKey, plaintext, aad []byte) (domain.ProviderCrede
 	}, nil
 }
 
-// Open decrypts an envelope, verifying the AAD binding. Any failure — wrong
-// key, tampered nonce/ciphertext, or a swapped AAD context — is the single
-// ErrCredentialSealed; the caller maps it to credential_unavailable without
-// distinguishing causes.
+// Open decrypts an envelope, verifying the AAD binding. Any failure — wrong key, tampered
+// nonce/ciphertext, or a swapped AAD context — is the single ErrCredentialSealed, mapped by
+// the caller to credential_unavailable without distinguishing causes.
 func Open(key domain.CredentialKey, connectionID domain.UUID, envelope domain.ProviderCredentialEnvelope) ([]byte, error) {
 	return open(key, envelope, additionalData(connectionID))
 }

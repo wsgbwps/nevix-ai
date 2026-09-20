@@ -1,12 +1,10 @@
 import type { MaterialKind } from '../api/go-creation-http'
 
 /**
- * Payload classification and admission rules for dropping reference
- * materials onto the deck (issue #177 follow-up): which dropped files the
- * current mode's policy may accept, and how a dragged task result is
- * identified. The deck renders the verdicts; the rules are unit-testable
- * without a DOM. The server remains the authority — client-side filtering
- * only shapes what is even attempted.
+ * Payload classification and admission rules for dropping reference materials onto the deck (issue
+ * #177 follow-up): which dropped files the mode's policy may accept, and how a dragged task
+ * result is identified. The server remains the authority — client filtering only shapes what is
+ * attempted; the rules stay unit-testable without a DOM.
  */
 
 /** The internal drag type marking a succeeded slot result dragged from the
@@ -38,10 +36,9 @@ export function decodeResultDrag(data: string | null): ResultDragPayload | null 
   return { taskId, slotIndex, mediaType }
 }
 
-// A same-document drag's payload cannot be read from dataTransfer during
-// dragover (protected mode), yet the deck needs the media type up front to
-// show its invite/deny verdict. The gallery records the live drag here on
-// dragstart and clears it on dragend; external OS drags never touch it.
+// A same-document drag's payload is unreadable from dataTransfer during
+// dragover (protected mode), yet the deck needs the media type up front for
+// its invite/deny verdict: the gallery records the live drag here instead.
 let activeResultDrag: ResultDragPayload | null = null
 
 export function beginResultDrag(payload: ResultDragPayload): void {
@@ -73,8 +70,8 @@ export interface FileDropPlan<T> {
 
 /**
  * Admits dropped files in drop order until the deck's remaining capacity is
- * spent; files of a kind the mode does not allow are rejected outright.
- * Order matters: a valid file behind an invalid one still takes a slot.
+ * spent; a disallowed kind is rejected outright. Order matters: a valid file
+ * behind an invalid one still takes a slot.
  */
 export function planFileDrop<T extends { readonly type: string }>(
   files: readonly T[],

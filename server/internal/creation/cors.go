@@ -1,9 +1,6 @@
-// CORS enforcement mirrors the Identity Module's behavior on its own group:
-// browser Desktop calls carry an Origin that must match the per-environment
-// whitelist exactly; non-browser traffic passes untouched, and preflights
-// derive Allow-Methods from the route table rather than any hardcoded list.
-// The duplicate is deliberate — business Modules never import each other
-// (AGENTS.md) and the envelope/wording are shared wire contracts.
+// CORS enforcement on the Module's own group: an Origin must match the per-environment whitelist
+// exactly, non-browser traffic passes untouched, and preflights derive Allow-Methods from the route
+// table. Mirroring Identity's gate is deliberate (AGENTS.md).
 package creation
 
 import (

@@ -1,8 +1,6 @@
-// Package creation is the AI Creation Module's composition contract
-// (ADR-0012): external callers use only LoadConfig, NewModule, Register, and
-// RunWorkers. Its domain, application, infrastructure, and interface layers
-// stay internal — aggregates, SQL, Storage adapters, and HTTP mechanics are
-// implementation, never public surface.
+// Package creation is the AI Creation Module's composition contract (ADR-0012): external
+// callers use only LoadConfig, NewModule, Register, and RunWorkers — its domain,
+// application, infrastructure, and interface layers stay internal.
 package creation
 
 import (
@@ -94,11 +92,10 @@ func loadCORSAllowedOrigins(raw string) ([]string, error) {
 	return origins, nil
 }
 
-// Deps carries what the composition root injects (ADR-0016 认证注入): the
-// Identity-owned session authenticator proves every caller's principal, and
-// the Identity-owned proof verifier consumes the exact-action
-// Reauthentication Proofs the high-risk connection commands require. Both
-// are deliberately narrow — Creation never touches credential verification.
+// Deps carries what the composition root injects (ADR-0016 认证注入): the Identity-owned session
+// authenticator proves every caller's principal, and the Identity-owned proof verifier consumes
+// the exact-action Reauthentication Proofs the high-risk connection commands require. Both are
+// deliberately narrow — Creation never touches credential verification.
 type Deps struct {
 	SessionAuthenticator          authz.SessionAuthenticator
 	ReauthVerifier                authz.ReauthProofVerifier
@@ -221,11 +218,9 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	assetService := application.NewAssetService(assetRepos, tx)
 	publicationService := application.NewPublicationService(publicationRepos, tx, objectStorageService, manifestService)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
-	// The worker resolves the current Object Storage Connection and speaks the
-	// fixed Kapon generation route. The connection service is the call-time
-	// credential source: the decrypted
-	// Provider Key exists only between its resolve and the adapter's
-	// Authorization header.
+	// The worker resolves the current Object Storage Connection and speaks the fixed Kapon
+	// generation route. The connection service is the call-time credential source: the decrypted
+	// Provider Key exists only between its resolve and the adapter's Authorization header.
 	gateway := kapon.NewGenerationsClient(cfg.KaponBaseURL, objectStorageService, kapon.ReferencePreparationTiming{
 		Now: now, Wait: deps.ReferencePreparationWait, Jitter: deps.ReferencePreparationJitter,
 	})
@@ -255,10 +250,9 @@ func workerLeaseOwner() string {
 	return "creation-worker-" + domain.NewUUID().String()[:8]
 }
 
-// Register mounts the static route table inside one chi group with this
-// Module's own CORS gate and OPTIONS twins. The generation invalidation fan
-// out stays intra-module through the SSE hub; the bus remains the seam for
-// the cross-Module revocation stream (ADR-0016 跨 Module 断流).
+// Register mounts the static route table inside one chi group with this Module's own CORS gate and
+// OPTIONS twins. The generation invalidation fan-out stays intra-module through the SSE hub; the bus
+// remains the seam for the cross-Module revocation stream (ADR-0016 跨 Module 断流).
 func (m *Module) Register(r chi.Router, bus event.Bus) {
 	if bus != nil {
 		bus.Subscribe(event.SessionRevokedType, func(envelope event.Event) {

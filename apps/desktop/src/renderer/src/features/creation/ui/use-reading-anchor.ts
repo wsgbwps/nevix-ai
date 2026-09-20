@@ -3,10 +3,9 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ReactVirtualizer } from '@tanstack/react-virtual'
 
 /**
- * The gallery's Reading Anchor engine (CONTEXT.md, "Reading Anchor").
- * Contract: the caller renders one row per task id inside the element it
- * assigns galleryRef, each row carrying data-task-id — the engine locates
- * rows through that attribute.
+ * The gallery's Reading Anchor engine (CONTEXT.md, "Reading Anchor"). Contract: the caller renders
+ * one row per task id inside the element assigned to galleryRef, each row carrying data-task-id —
+ * the engine locates rows through that attribute.
  */
 export function useReadingAnchor({
   scrollerRef,
@@ -66,10 +65,9 @@ export function useReadingAnchor({
     }
   }, [virtualizer])
 
-  // Width changes can invalidate every measured card at once. Keep the
-  // first intersecting task and its viewport offset until the new responsive
-  // measurements settle; this is the user-facing reading anchor, independent
-  // of which estimates the virtualizer replaces underneath it.
+  // Width changes can invalidate every measured card at once: keep the first
+  // intersecting task and its viewport offset until the new responsive
+  // measurements settle, independent of what the virtualizer re-estimates.
   useLayoutEffect(() => {
     const gallery = galleryRef.current
     const scroller = scrollerRef.current
@@ -222,11 +220,10 @@ export function useReadingAnchor({
         gallery.getBoundingClientRect().top -
         scroller.getBoundingClientRect().top +
         scroller.scrollTop
-      // Content above the gallery (the history note) moving shifts every
-      // card; scroll the same delta before paint to hold the reading
-      // position. First establishment and a bottom-pinned reader (the bottom
-      // follow owns those) do not bump; `established` survives effect
-      // re-runs so a re-run re-establishes instead of double-bumping.
+      // Content above the gallery (the history note) moving shifts every card;
+      // scroll the same delta before paint to hold the reading position. First
+      // establishment and a bottom-pinned reader do not bump; `established`
+      // survives re-runs, so a re-run re-establishes instead of double-bumping.
       const established = establishedMarginRef.current
       if (established !== null && Math.abs(next - established) >= 0.5) {
         const distanceFromBottom =

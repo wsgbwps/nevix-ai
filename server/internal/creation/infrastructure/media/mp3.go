@@ -23,14 +23,11 @@ type mp3FrameInfo struct {
 	protected   bool // CRC-16 word follows the header when set
 }
 
-// identifyMP3 establishes duration by counting frames when a Xing/Info tag
-// declares them, else falling back to the CBR estimate from file length.
-// The scanner stays bounded: it walks headers through a small window at the
-// start rather than streaming the whole body. Authoritative readability
-// requires frame continuity — one plausible header followed by arbitrary
-// bytes is not an MP3 — so the first header must chain into consecutive
-// frames at their computed stride (AC #156): a Xing/Info frame count plus
-// one chained frame, or three consecutive CBR frames.
+// identifyMP3 establishes duration by counting frames when a Xing/Info tag declares them,
+// else falling back to the CBR estimate from file length; the scan stays bounded — headers
+// through a small window at the start, never the whole body. Readability requires frame
+// continuity, because one plausible header followed by arbitrary bytes is not an MP3: the
+// first header must chain into consecutive frames at their computed stride (AC #156).
 func identifyMP3(seek io.ReadSeeker) (domain.Identified, error) {
 	head := make([]byte, mp3MaxHeaderProbe)
 	n, err := readAtOffset(seek, head, 0)
@@ -201,10 +198,9 @@ func parseMP3Header(b []byte, avail int) (mp3FrameInfo, bool) {
 	return info, true
 }
 
-// xingDuration reads an Xing/Info frame-count when present near the first
-// frame's payload and returns the exact duration in milliseconds. VBRI tags
-// are deliberately unsupported: they are rare and the CBR fallback covers
-// them within ingest tolerance.
+// xingDuration reads an Xing/Info frame-count near the first frame's payload and returns the
+// exact duration in milliseconds. VBRI tags are deliberately unsupported: rare, and the CBR
+// fallback covers them within ingest tolerance.
 func xingDuration(buf []byte, frameBodyFrom int, info mp3FrameInfo) int {
 	limit := frameBodyFrom + 256
 	if limit > len(buf) {

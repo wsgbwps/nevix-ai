@@ -10,15 +10,11 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// verdictApplier is the single verdict application routine (ADR-0019): the
-// only code path that calls the repository's guarded transition writes. It
-// receives write-set data only — every CAS from-set is built from state
-// re-read inside the caller's verified transaction. Convergence write order:
-// job edge → settle slots → aggregate → release → retire → notify.
-// Lost-race semantics: a non-terminal advancement losing its CAS is
-// tolerated (the next pass re-reads and re-routes); a terminal convergence
-// losing its CAS is an error the next process() pass self-heals through the
-// terminal-park branch.
+// verdictApplier is the single verdict application routine (ADR-0019) and the only caller of the
+// repository's guarded transition writes. Write-set data only: every CAS from-set is built from state
+// re-read inside the caller's verified transaction. Convergence order: job edge → settle slots →
+// aggregate → release → retire → notify. A non-terminal CAS loss is tolerated (the next pass re-reads
+// and re-routes); a terminal one is an error process() self-heals through the terminal-park branch.
 type verdictApplier struct {
 	tasks       domain.GenerationTaskRepository
 	connections domain.ConnectionSignals
@@ -27,11 +23,9 @@ type verdictApplier struct {
 	gateway     domain.ProviderGateway // worker-only: terminal commits release prepared references
 }
 
-// apply runs one verdict's write-set inside the caller's verified
-// transaction. It reports the durable submit-attempt count licensed by a
-// VerdictSubmitMarker and whether the marker won (false means a cancel
-// converged first: nothing external may run, and the caller must stand
-// down); every other verdict always reports true.
+// apply runs one verdict's write-set inside the caller's verified transaction. Reports the durable
+// submit-attempt count its marker licensed and whether the marker won (false means a cancel converged
+// first: nothing external may run and the caller must stand down); else true.
 func (a verdictApplier) apply(ctx context.Context, sc domain.WriteScope, owner, queueID, taskID domain.UUID, verdict domain.KernelVerdict) (int, bool, error) {
 	switch verdict.Kind {
 	case domain.VerdictSubmitMarker:
@@ -216,12 +210,10 @@ func (a verdictApplier) applyTransferred(ctx context.Context, sc domain.WriteSco
 	return nil
 }
 
-// applyTerminal lands one terminal job verdict with the unified convergence
-// write order. The optional TaskGuard/TaskTo pair serves the creator's
-// immediate cancel: the
-// convergence only proceeds while the claimed task status still holds, and
-// losing that claim aborts silently — the worker reconciles from the intent
-// marker.
+// applyTerminal lands one terminal job verdict with the unified convergence order. The optional
+// TaskGuard/TaskTo pair serves the creator's immediate cancel: convergence proceeds only while the
+// claimed task status still holds, and losing that claim aborts silently — the worker reconciles from
+// the intent marker.
 func (a verdictApplier) applyTerminal(ctx context.Context, sc domain.WriteScope, owner, queueID, taskID domain.UUID, verdict domain.KernelVerdict) error {
 	if verdict.CreditBlocked {
 		if err := a.connections.MarkCreditBlocked(ctx, sc.Tx()); err != nil {

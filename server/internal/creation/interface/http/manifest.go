@@ -6,10 +6,9 @@ import (
 	"github.com/nevix-ai/server/internal/creation/application"
 )
 
-// CapabilityManifestHandler serves the versioned Capability Manifest read
-// contract. It is a pure projection: no command, no audit row, and the same
-// payload for admins and members — capability values are product surface,
-// while endpoint, credential, and diagnostics never appear here.
+// CapabilityManifestHandler serves the versioned Capability Manifest read contract. A pure
+// projection: no command, no audit row, the same payload for admins and members — capability
+// values are product surface, while endpoint, credential, and diagnostics never appear here.
 type CapabilityManifestHandler struct {
 	service *application.ManifestService
 }

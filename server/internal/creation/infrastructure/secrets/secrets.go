@@ -1,10 +1,6 @@
-// Package secrets owns the Provider Credential master key (ADR-0016 本地
-// AEAD): one 32-byte CSPRNG key in an out-of-database secrets volume with
-// directory 0700, file 0600, and atomic creation. Loading validates
-// permissions and size; a missing, unreadable, too-open, or corrupt key is a
-// typed failure the connection maps to credential_unavailable — with
-// ciphertext present the key file is never silently regenerated, so the
-// recovery clue (re-entering the key as the admin) stays authoritative.
+// Package secrets owns the Provider Credential master key (ADR-0016 本地 AEAD): one 32-byte
+// CSPRNG key in an out-of-database secrets volume, directory 0700, file 0600. A missing, too-open,
+// or corrupt key fails typed as credential_unavailable and is never silently regenerated.
 package secrets
 
 import (
@@ -87,14 +83,11 @@ func (s *KeyStore) Load() (domain.CredentialKey, error) {
 	return newCredentialKey(material), nil
 }
 
-// Ensure returns a usable master key, establishing the key file atomically
-// only when none exists. Callers invoke it exclusively on the explicit
-// reauthenticated paths where writing a new ciphertext follows: first-time
-// configuration (no ciphertext can exist) and credential replacement (the
-// sanctioned recovery that re-establishes the key before sealing the new
-// envelope). An existing readable key is returned as-is; an existing but
-// corrupt or too-open key is replaced only by that explicit recovery — never
-// silently.
+// Ensure returns a usable master key, establishing the key file atomically only when none
+// exists. Callers invoke it exclusively on the explicit reauthenticated paths where a new
+// ciphertext follows — first-time configuration (no ciphertext can exist) and credential
+// replacement, the sanctioned recovery that re-establishes the key. A readable key returns
+// as-is; a corrupt or too-open one is replaced only by that recovery, never silently.
 func (s *KeyStore) Ensure() (domain.CredentialKey, error) {
 	key, err := s.Load()
 	if err == nil {
@@ -163,10 +156,9 @@ func (s *KeyStore) requirePrivateDir() error {
 	return nil
 }
 
-// writeAtomically installs the key file: write to a private temporary file
-// in the same directory, fsync, rename over the target, then fsync the
-// directory so a crash never leaves a partially written or extra-permissive
-// key behind.
+// writeAtomically installs the key file: write a private temporary file in the same
+// directory, fsync, rename over the target, then fsync the directory, so a crash never
+// leaves a partially written or extra-permissive key behind.
 func (s *KeyStore) writeAtomically(material []byte) error {
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return fmt.Errorf("secrets: create key directory: %w", err)

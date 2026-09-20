@@ -20,12 +20,11 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// Slice-10 image adapter conformance (issue #160): the pinned vendor wire
-// contract — Authorization on every generation call, the explicit
-// (model, ratio, resolution) → pixel size mapping over the accepted manifest
-// cross product, ordered reference payloads, and the classified error
-// mapping. These tests stand in for the release gate's real-invocation
-// acceptance until real Kapon evidence exists (spec #150 切片交付).
+// Slice-10 image adapter conformance (issue #160): the pinned vendor wire contract —
+// Authorization on every generation call, the explicit (model, ratio, resolution) → pixel
+// size mapping over the accepted manifest cross product, ordered reference payloads, and the
+// classified error mapping. These stand in for the release gate's real-invocation acceptance
+// until real Kapon evidence exists (spec #150 切片交付).
 
 func newGenerationsClient(t *testing.T, handler http.HandlerFunc) *GenerationsClient {
 	t.Helper()
@@ -45,10 +44,9 @@ type imageSizeCase struct {
 	resolution string
 }
 
-// acceptedCrossProduct derives the manifest's accepted image values from the
-// domain itself, so a model, ratio, or tier added there makes this
-// conformance test demand a mapping entry (the adapter table cannot drift
-// silently).
+// acceptedCrossProduct derives the manifest's accepted image values from the domain itself,
+// so a model, ratio, or tier added there makes this conformance test demand a mapping entry
+// (the adapter table cannot drift silently).
 var acceptedCrossProduct = buildAcceptedCrossProduct()
 
 func buildAcceptedCrossProduct() []imageSizeCase {
@@ -63,11 +61,9 @@ func buildAcceptedCrossProduct() []imageSizeCase {
 	return cases
 }
 
-// TestImageSizeTableCoversAcceptedCrossProduct: Kapon requires the pixel
-// size ("宽x高"), and the tables are per model — the overlapping tier labels
-// resolve to different pixels (2K at 16:9 is 2816x1584 on pro but 2848x1600
-// on n). Every manifest-validated triple stays accepted; unknown triples
-// fail closed.
+// TestImageSizeTableCoversAcceptedCrossProduct: Kapon requires the pixel size ("宽x高"), and
+// the tables are per model — overlapping tier labels resolve to different pixels (2K at 16:9
+// is 2816x1584 on pro but 2848x1600 on n). Unknown triples fail closed.
 func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 	for _, combo := range acceptedCrossProduct {
 		model, ratio, resolution := combo.model, combo.ratio, combo.resolution
@@ -115,10 +111,9 @@ func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 	}
 }
 
-// TestImageWireModelsPinsFieldReportedRequestIds: the wire mappings are pure
-// field-report data — drop one and the vendor starts answering 400s for a
-// model the manifest still publishes. They stay pinned here until Kapon's
-// alias routing is fixed and the mapping can be removed.
+// TestImageWireModelsPinsFieldReportedRequestIds: the wire mappings are pure field-report
+// data — drop one and the vendor answers 400s for a model the manifest still publishes. They
+// stay pinned until Kapon's alias routing is fixed and the mapping can be removed.
 func TestImageWireModelsPinsFieldReportedRequestIds(t *testing.T) {
 	if got := imageWireModel(domain.ImageModelID); got != "doubao-seedream-5-0-pro-260628" {
 		t.Fatalf("pro must travel as its versioned backend id (flaky alias), got %q", got)
@@ -136,12 +131,11 @@ var documentedImageRequestKeys = map[string]bool{
 	"image": true, "stream": true, "watermark": true,
 }
 
-// specFaithfulImageVendor stands in for the vendor endpoint with its
-// documented contract enforced: any body key outside the schema — such as
-// the "n" field the adapter once sent, which caused the provider's
-// invalid_request_error 400 — or a size outside the model's x-size-map enum
-// is rejected exactly like the real route rejects it. Each accepted model
-// answers under its manifest alias AND its mapped versioned backend id.
+// specFaithfulImageVendor stands in for the vendor endpoint with its documented contract
+// enforced: a body key outside the schema (such as the undocumented batch field, which the
+// provider answers with invalid_request_error), or a size outside the model's x-size-map
+// enum, is rejected exactly like the real route. Each accepted model answers under its
+// manifest alias AND its mapped versioned backend id.
 func specFaithfulImageVendor(t *testing.T, onRequest func(seq int, auth string, body map[string]any)) *GenerationsClient {
 	specSizes := map[string]map[string]bool{}
 	for _, model := range domain.AcceptedImageModels() {
@@ -192,10 +186,9 @@ func specFaithfulImageVendor(t *testing.T, onRequest func(seq int, auth string, 
 	})
 }
 
-// TestImageSubmitWireContract: the generation call authenticates with the
-// provided key, transmits only vendor-documented parameters (frozen values
-// verbatim, references in order), fans the quantity out into ordered
-// single-image requests, and never sends the undocumented batch field.
+// TestImageSubmitWireContract: the generation call authenticates with the provided key,
+// transmits only vendor-documented parameters (frozen values verbatim, references in order),
+// fans quantity out into ordered single-image requests, and never sends the batch field.
 func TestImageSubmitWireContract(t *testing.T) {
 	var mu sync.Mutex
 	var bodies []map[string]any
@@ -700,10 +693,9 @@ func TestPollPreservesTerminalDiagnostics(t *testing.T) {
 	}
 }
 
-// TestImageSubmitFanOutFailureSemantics: the submit stays all-or-nothing —
-// one rejected sub-request fails the whole submit with its classified error,
-// and one lost sub-request dominates as indeterminate because the requests
-// may have executed.
+// TestImageSubmitFanOutFailureSemantics: the submit stays all-or-nothing — one rejected
+// sub-request fails the whole submit with its classified error, and one lost sub-request
+// dominates as indeterminate because the requests may have executed.
 func TestImageSubmitFanOutFailureSemantics(t *testing.T) {
 	ratio, resolution := "1:1", "2K"
 	req := domain.PreparedSubmitRequest{
@@ -762,10 +754,9 @@ func TestImageSubmitFanOutFailureSemantics(t *testing.T) {
 	})
 }
 
-// TestImageSubmitRejectionCarriesRedactedRequestShape: a provider rejection
-// is diagnosable from the redacted request shape — in the server log and in
-// the creator-facing diagnostic message — without the prompt or references
-// ever leaving the adapter (ADR-0016).
+// TestImageSubmitRejectionCarriesRedactedRequestShape: a provider rejection is diagnosable
+// from the redacted request shape — in the server log and the creator-facing diagnostic —
+// without the prompt or references ever leaving the adapter (ADR-0016).
 func TestImageSubmitRejectionCarriesRedactedRequestShape(t *testing.T) {
 	const prompt = "sensitive product prompt"
 	var logs bytes.Buffer

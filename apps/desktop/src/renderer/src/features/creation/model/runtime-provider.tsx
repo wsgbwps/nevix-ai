@@ -4,8 +4,8 @@ import { CreationRuntimeContext, type CreationRuntime } from './runtime-context'
 import { createCreationRuntime } from './workbench-runtime'
 
 /**
- * Owns one Creation runtime for the current authenticated server use period.
- * Route changes cannot retire it; changing or losing that identity does.
+ * One Creation runtime per authenticated server use period: route changes
+ * cannot retire it, changing or losing that identity can.
  */
 export function CreationRuntimeProvider({
   acquireSession,

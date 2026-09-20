@@ -1,12 +1,9 @@
 /**
- * The device-local Draft store (ADR-0017): the editable draft lives only on
- * the current device, keyed per account and per session (`new` for a
- * composition that has not materialized a session yet, `pending:<uuid>` for
- * one whose submission started before a session identity existed). Writes are
- * synchronous and write-through — a renderer reload or app restart loses
- * nothing — and reads fail closed: a corrupted or foreign payload is dropped,
- * never guessed at. Multi-device drafts never sync; the server sees the
- * intent only at submission.
+ * The device-local Draft store (ADR-0017): drafts are keyed per account and per session (`new`
+ * before a session exists, `pending:<uuid>` for a submission that started before one did). Writes
+ * are synchronous and write-through, so a reload or restart loses nothing; reads fail closed on a
+ * corrupted or foreign payload, and drafts never sync across devices — the server sees the intent
+ * only at submission.
  */
 
 import type { DraftReferenceRole, DraftReferenceView } from '../api/go-creation-http'

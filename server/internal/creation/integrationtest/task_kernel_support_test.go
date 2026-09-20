@@ -7,17 +7,15 @@ import (
 	"sync"
 )
 
-// Generation-side scripting for the fake Kapon route (issue #159): the
-// models catalog stays in fake_kapon_test.go; this file adds the image
-// generation call, the async video task family, and the provider output
-// fixtures. All bytes are locally synthesized fixtures — no production
-// token, request id, or payload is ever involved.
+// Generation-side scripting for the fake Kapon route (issue #159): this file adds the image
+// generation call, the async video task family, and the provider output fixtures (the models
+// catalog stays in fake_kapon_test.go). All bytes are locally synthesized — no production
+// token, request id, or payload is involved.
 
-// imageScript is one scripted synchronous image generation answer. Requests
-// arrive one per requested image (the vendor contract has no batch
-// parameter, so the adapter fans quantity out); `outputs` URLs ride every
-// normal answer. `outputStatusOn` (1-based download ordinal) fails one known
-// output transfer while leaving the other results available.
+// imageScript is one scripted synchronous image generation answer. Requests arrive one per
+// requested image (the vendor contract has no batch parameter, so the adapter fans quantity
+// out), and `outputs` URLs ride every normal answer. `outputStatusOn` (1-based download
+// ordinal) fails one known output transfer while leaving the other results available.
 type imageScript struct {
 	status            int    // forced HTTP status (0 = answer normally)
 	outputs           int    // number of output URLs returned when status == 0

@@ -164,10 +164,10 @@ func findBox(seek io.ReadSeeker, from, to int64, want string) (boxRef, bool, err
 
 var errStopWalk = fmt.Errorf("stop box walk")
 
-// walkBoxes iterates direct children in [contentFrom,contentTo), invoking fn
-// with an unbounded reader positioned at each child's content. It trusts
-// declared sizes structurally but refuses zero-progress steps and runaway
-// chains, which keeps hostile containers bounded.
+// walkBoxes iterates direct children in [contentFrom,contentTo), invoking fn with an
+// unbounded reader positioned at each child's content. Declared sizes are trusted
+// structurally, but zero-progress steps and runaway chains are refused, which keeps hostile
+// containers bounded.
 func walkBoxes(seek io.ReadSeeker, contentFrom, contentTo int64, fn func(boxRef, io.Reader) error) error {
 	pos := contentFrom
 	const maxBoxes = 4096

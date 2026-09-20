@@ -43,9 +43,9 @@ export interface CreationSessionNavigationDeps {
 }
 
 /**
- * The route-above Creation Session Navigation owner (ADR-0007). It owns
- * the latest session page and the one target handed to the route-local
- * Workbench; it deliberately has no task, material, or display dependency.
+ * The route-above Creation Session Navigation owner (ADR-0007): the latest
+ * session page and the one target handed to the route-local Workbench. It
+ * deliberately has no task, material, or display dependency.
  */
 export class CreationSessionNavigationController {
   readonly #deps: CreationSessionNavigationDeps

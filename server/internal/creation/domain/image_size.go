@@ -15,14 +15,11 @@ type imageSizeKey struct {
 	resolution string
 }
 
-// imageSizes pins the Kapon wire pixel size for every declared
-// (model, ratio, resolution) pair, transcribed from the vendor 豆包生图
-// OpenAPI x-size-map. The table is per model — pro publishes 1K/1.5K/2K,
-// the base model publishes 2K/3K/4K, and the overlapping tier labels resolve
-// to different pixels (2K at 16:9 is 2816x1584 on pro but 2848x1600 on
-// base) — so the key never drops the model. The manifest publishes the same
-// table as display sizes and the Kapon adapter resolves the wire size from
-// it: one source, never a duplicated constant.
+// imageSizes pins the Kapon wire pixel size for every (model, ratio, resolution) pair,
+// transcribed from the vendor 豆包生图 OpenAPI x-size-map. The table is per model — pro
+// publishes 1K/1.5K/2K and base 2K/3K/4K, and an overlapping tier label resolves to
+// different pixels (2K at 16:9 is 2816x1584 on pro but 2848x1600 on base) — so the key
+// never drops the model. The manifest publishes the same table as display sizes.
 var imageSizes = map[imageSizeKey]ImageSize{
 	// doubao-seedream-5.0-pro
 	{ImageModelID, "1:1", "1K"}:    {1024, 1024},
@@ -77,10 +74,9 @@ var imageSizes = map[imageSizeKey]ImageSize{
 	{ImageModelBaseID, "21:9", "4K"}: {6240, 2656},
 }
 
-// ImageSizeFor resolves one accepted (model, ratio, resolution) triple onto
-// the vendor pixel size. A missing combination is an internal contract
-// violation at the call sites, never a silent downgrade — the completeness
-// invariant is pinned by the domain tests.
+// ImageSizeFor resolves one accepted (model, ratio, resolution) triple onto the vendor
+// pixel size. A missing combination is an internal contract violation at the call sites,
+// never a silent downgrade — the completeness invariant is pinned by the domain tests.
 func ImageSizeFor(model, ratio, resolution string) (ImageSize, bool) {
 	size, ok := imageSizes[imageSizeKey{model: model, ratio: ratio, resolution: resolution}]
 	return size, ok

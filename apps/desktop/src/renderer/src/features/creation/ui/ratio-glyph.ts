@@ -7,10 +7,9 @@ function parseRatio(ratio: string): { width: number; height: number } | null {
 }
 
 /**
- * Glyph box for one published ratio ("w:h"): the longest edge scaled to
- * `maxDimension` px so a ratio cell previews the real proportions instead of
- * one uniform rectangle. `null` when the manifest value is not a positive
- * "w:h" pair.
+ * Glyph box for one published ratio ("w:h"), longest edge scaled to
+ * `maxDimension` px so a cell previews real proportions. `null` when the
+ * manifest value is not a positive "w:h" pair.
  */
 export function ratioGlyphSize(
   ratio: string,
@@ -24,9 +23,8 @@ export function ratioGlyphSize(
 
 /**
  * Glyph box for one published ratio ("w:h") scaled by constant diagonal, so
- * every ratio previews at the same perceived size (the reference design's
- * square reads ~12px while 21:9 reads ~15x7). `null` for a non-positive
- * "w:h" pair.
+ * every ratio previews at the same perceived size (square ~12px, 21:9 ~15x7).
+ * `null` for a non-positive "w:h" pair.
  */
 export function ratioGlyphDiagonalSize(
   ratio: string,

@@ -7,10 +7,9 @@ import (
 	"time"
 )
 
-// The compound keyset cursor's wire codec lives with its value object: both
-// the HTTP interface (query parameter) and the PostgreSQL repositories (page
-// positions) serialize the same domain token, so neither layer depends on
-// the other.
+// The compound keyset cursor's wire codec lives with its value object: the HTTP
+// interface and the PostgreSQL repositories serialize the same domain token, so
+// neither layer depends on the other.
 
 // encodedCursor is the on-the-wire cursor envelope: both sort keys travel in
 // every token so paging never depends on server-side sessions.

@@ -1,9 +1,7 @@
-// Real-PostgreSQL evidence for the Goose-backed migration path (issue #108):
-// first apply on an empty database creates the single-tenant baseline and the
-// goose_db_version ledger (never public.schema_migrations), re-apply is a
-// no-op, a failed migration rolls back its transaction and stays unrecorded,
-// and concurrent startups serialize on Goose's session lock so the baseline
-// is applied exactly once. Harness helpers live in harness_test.go.
+// Real-PostgreSQL evidence for the Goose-backed migration path (issue #108): first apply creates
+// the single-tenant baseline and the goose_db_version ledger (never
+// public.schema_migrations), re-apply is a no-op, a failed migration rolls back unrecorded, and
+// concurrent startups serialize on Goose's session lock so the baseline is applied exactly once.
 package migration
 
 import (
@@ -317,10 +315,9 @@ func TestConcurrentApplyRunsTheEmbeddedSetExactlyOnce(t *testing.T) {
 	}
 }
 
-// A baseline-v1 deployment upgrading to the 0002 world keeps the
-// never-logged-in invariant: accounts with live sessions or session_created
-// audit evidence are backfilled as logged-in; an account with no evidence
-// stays NULL (issue #102 review).
+// A baseline-v1 deployment upgrading to the 0002 world keeps the never-logged-in invariant:
+// accounts with live sessions or session_created audit evidence are backfilled as logged-in, and
+// one with no evidence stays NULL (issue #102 review).
 func TestUpgradeFromBaselineBackfillsLastLogin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -368,10 +365,10 @@ func TestUpgradeFromBaselineBackfillsLastLogin(t *testing.T) {
 		t.Fatalf("seed carol audit row: %v", err)
 	}
 
-	// The production startup path now applies everything after the baseline
-	// (v1 is already recorded); later migrations ride along without touching
-	// the backfill under test. Expectations derive from the embedded set so
-	// appending future up-only migrations keeps this sentinel true.
+	// The production startup path applies everything after the baseline (v1 is already
+	// recorded); later migrations ride along without touching the backfill under test.
+	// Expectations derive from the embedded set, so appending future up-only migrations keeps
+	// this sentinel true.
 	applied, err := Apply(ctx, scratchURL)
 	if err != nil {
 		t.Fatalf("upgrade past baseline: %v", err)

@@ -2,10 +2,9 @@ package domain
 
 import "errors"
 
-// Domain error taxonomy. The interface layer maps these sentinels onto the
-// stable machine codes documented in contracts/creation.yaml; they are the
-// only outcomes an application use-case may hand to the transport besides
-// plain infrastructure failures (which collapse to 500 internal_error).
+// Domain error taxonomy. The interface layer maps these sentinels onto the stable
+// machine codes in contracts/creation.yaml; they are the only outcomes a use-case may
+// hand to the transport besides plain infrastructure failures (500 internal_error).
 var (
 	// ErrSessionNotFound reports that a session does not exist, does not
 	// belong to the acting creator, or is logically deleted. The three are
@@ -78,20 +77,17 @@ var (
 	// decoding: dimensions, pixel count, duration, or sample structure could
 	// not be established.
 	ErrUnreadableMedia = errors.New("unreadable media")
-	// ErrReferenceOutsideEnvelope reports decodable media whose probed facts
-	// fall outside the reference envelope the manifest publishes (image:
-	// 256–6000 px per side, ≤36 MP, aspect 1:3..3:1). The material is never
-	// persisted.
+	// ErrReferenceOutsideEnvelope reports decodable media whose probed facts fall outside
+	// the reference envelope the manifest publishes (image: 256–6000 px per side, ≤36 MP,
+	// aspect 1:3..3:1). The material is never persisted.
 	ErrReferenceOutsideEnvelope = errors.New("reference media outside the published envelope")
 	// ErrRangeNotSatisfiable reports a Range header that is syntactically
 	// invalid, spans multiple ranges, or starts past the end of the blob.
 	ErrRangeNotSatisfiable = errors.New("range not satisfiable")
-	// ErrInvalidIntent reports a submission payload that violates the
-	// structural envelope: a bound overflow, an unknown media type or role, or
-	// a reference binding to a material outside the session (or of an
-	// incompatible kind). The capability manifest is deliberately not
-	// consulted — stale values reach the freeze — so this is always a
-	// request-shape fault, not staleness.
+	// ErrInvalidIntent reports a payload violating the structural envelope: a bound
+	// overflow, an unknown media type or role, or a reference to a material outside the
+	// session (or of an incompatible kind). The capability manifest is deliberately not
+	// consulted — stale values reach the freeze — so this is always a request-shape fault.
 	ErrInvalidIntent = errors.New("invalid generation intent")
 	// ErrInvalidIdempotencyKey rejects empty or overlong Desktop command keys.
 	ErrInvalidIdempotencyKey = errors.New("invalid idempotency key")

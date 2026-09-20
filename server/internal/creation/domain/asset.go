@@ -66,22 +66,18 @@ type AssetListFilter struct {
 	Resolutions []string
 }
 
-// AssetFacetVocabulary is one media's filter vocabulary: the values a frozen
-// Generation Specification can carry for that media. It is derived from the
-// same source-controlled contract the capability manifest publishes, so the
-// library's facets and the composer's pickers can never disagree about what
-// exists.
+// AssetFacetVocabulary is one media's filter vocabulary: the values a frozen Generation
+// Specification can carry, derived from the same source-controlled contract the manifest
+// publishes, so the library's facets and the composer's pickers can never disagree.
 type AssetFacetVocabulary struct {
 	Modes       []string
 	Ratios      []string
 	Resolutions []string
 }
 
-// AssetFacets returns one media's filter vocabulary. Resolution tiers are
-// model-scoped on the wire, so the union is published in first-seen tier
-// order. Ratio options are the expressible ratios only: the video sentinel
-// "adaptive" is not a row, because those Assets are matched by their pixel
-// shape instead.
+// AssetFacets returns one media's filter vocabulary. Resolution tiers are model-scoped on the wire,
+// so the union is published in first-seen tier order; "adaptive" is not a ratio row because those
+// Assets are matched by their pixel shape instead.
 func AssetFacets(media MediaType) AssetFacetVocabulary {
 	models, modes, ratios := imageModels, imageModes, imageRatios
 	if media == MediaVideo {
@@ -115,10 +111,9 @@ func AssetFacets(media MediaType) AssetFacetVocabulary {
 	}
 }
 
-// AcceptedAssetFacets is the union across both medias: what the list filter
-// admits when it has no media to scope by. A value legal for one media is
-// always legal to ask for, and a combination that matches nothing returns an
-// empty page rather than a rejection.
+// AcceptedAssetFacets is the union across both medias: what the filter admits with no
+// media to scope by. A value legal for one media is always legal to ask for, and a
+// combination matching nothing returns an empty page rather than a rejection.
 func AcceptedAssetFacets() AssetFacetVocabulary {
 	image, video := AssetFacets(MediaImage), AssetFacets(MediaVideo)
 	return AssetFacetVocabulary{
@@ -138,12 +133,11 @@ func unionValues(first, second []string) []string {
 	return merged
 }
 
-// RatioShapeTolerance is the relative margin on either side of a canonical
-// ratio: a shape is that ratio while it stays within ±3% of it. It is
-// calibrated from the published size table: the largest gap between a label
-// and its pixels is 1.84% (base 4K 16:9 is 5504x3040, i.e. 172:95), and the
-// closest adjacent pair in the vocabulary is 4:3 -> 3:2 at 12.5%, so 3% clears
-// the deviation with room to spare and can never sort one shape into two rows.
+// RatioShapeTolerance is the relative margin on either side of a canonical ratio: a
+// shape is that ratio while it stays within ±3% of it. Calibrated from the published
+// size table: the largest gap between a label and its pixels is 1.84% (base 4K 16:9 is
+// 5504x3040, i.e. 172:95) and the closest adjacent pair is 4:3 -> 3:2 at 12.5%, so 3%
+// clears the deviation with room to spare and can never sort one shape into two rows.
 const RatioShapeTolerance = 0.03
 
 // RatioBounds returns the pixel-shape interval (width/height) that counts as

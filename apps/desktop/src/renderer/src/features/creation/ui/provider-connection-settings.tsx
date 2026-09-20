@@ -53,11 +53,9 @@ export interface ProviderConnectionSettingsProps {
   readonly isAdmin: boolean
   readonly getSession: GetSession
   readonly serverUrl: string
-  /**
-   * Acquires one exact-action Reauthentication Proof through the
+  /** Acquires one exact-action Reauthentication Proof through the
    * Authentication-owned confirmation surface (composed in app/settings);
-   * resolves undefined when the admin abandons the confirmation.
-   */
+   * undefined when the admin abandons the confirmation. */
   readonly acquireProof: (
     action: ProviderConnectionProofAction
   ) => Promise<{ readonly proof: string } | undefined>
@@ -98,11 +96,9 @@ function failureMessage(failure: CreationApiFailure, t: TFunction<'creation'>): 
 }
 
 /**
- * The AI Creation Settings card (issue #157): Admins configure, replace,
- * recheck, pause/resume, and delete the instance's single Kapon connection
- * behind exact-action reauthentication; Members see only per-media status
- * and stable advice. The Provider Key exists in component state only for
- * the duration of one submit and never persists.
+ * The AI Creation Settings card (issue #157): Admin commands act on the instance's single Kapon
+ * connection behind exact-action reauthentication; Members see only per-media status and stable
+ * advice. The Provider Key lives in component state for one submit only and never persists.
  */
 export function ProviderConnectionSettings({
   isAdmin,
@@ -221,10 +217,9 @@ export function ProviderConnectionSettings({
     [client, connection, getSession, heldProof, t]
   )
 
-  // The exact-action proof is acquired before the credential dialog opens:
-  // the confirmation dialog and the key dialog are never open together
-  // (stacked modal focus traps froze the packaged Electron renderer when
-  // they fought, and one-modal-at-a-time matches the command's real
+  // The exact-action proof is acquired before the credential dialog opens: the
+  // two are never open together (stacked modal focus traps froze the packaged
+  // Electron renderer, and one-modal-at-a-time matches the command's real
   // dependency order — identity first, then the secret).
   const openCredentialDialog = useCallback(async (): Promise<void> => {
     const action: ProviderConnectionProofAction = connection === null ? 'create' : 'replace'

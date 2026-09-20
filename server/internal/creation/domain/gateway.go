@@ -6,19 +6,16 @@ import (
 	"time"
 )
 
-// The provider gateway port: the task kernel's single seam to external
-// generation. Adapters speak the domain's classified outcomes and may attach
-// the bounded standard provider error fields allowed by ADR-0016; arbitrary
-// raw bodies, keys, prompts, headers, and output URLs never travel past this
-// boundary. Every classification below remains deliberately recoverable by
-// the kernel's retry discipline (spec #150 Retry/超时/取消纪律).
+// The provider gateway port: the task kernel's single seam to external generation.
+// Adapters speak the domain's classified outcomes and may attach the bounded standard
+// provider error fields allowed by ADR-0016; raw bodies, keys, prompts, headers, and
+// output URLs never travel past this boundary (spec #150 Retry/超时/取消纪律).
 
 // Gateway classified errors.
 var (
-	// ErrSubmitIndeterminate reports a submit whose outcome could not be
-	// safely identified (response lost before the external identity was
-	// persisted). The kernel must never guess a new external request; the
-	// job ends indeterminate and only a creator's explicit redo proceeds.
+	// ErrSubmitIndeterminate reports a submit whose outcome could not be safely identified
+	// (response lost before the external identity was persisted). The kernel must never
+	// guess a new request: the job ends indeterminate and only an explicit redo proceeds.
 	ErrSubmitIndeterminate = errors.New("provider submit outcome is indeterminate")
 	// ErrProviderUnavailable reports transient pressure on idempotent provider
 	// calls. Submit adapters must tighten this classification because status
@@ -53,10 +50,9 @@ type GatewayOutput struct {
 	URL string
 }
 
-// RateLimitedError reports an explicit 429 with the provider's Retry-After
-// when one was sent. It lives on the domain so the worker and the adapter
-// share one error shape without leaking transport detail. The Is method
-// makes errors.Is match the ErrProviderRateLimited sentinel.
+// RateLimitedError reports an explicit 429 with the provider's Retry-After when one was
+// sent, on the domain so worker and adapter share one error shape without leaking
+// transport detail; Is makes errors.Is match the ErrProviderRateLimited sentinel.
 type RateLimitedError struct {
 	RetryAfter *time.Duration
 }
@@ -175,10 +171,9 @@ type SubmitRequest struct {
 	References []ReferenceSource
 }
 
-// PreparedSubmitRequest is the small, in-memory-only request returned by a
-// ProviderGateway after every reference has become a provider fetch URL. The
-// application passes this value through unchanged and never persists or logs
-// it.
+// PreparedSubmitRequest is the in-memory-only request a ProviderGateway returns once every
+// reference has become a provider fetch URL. The application passes it through unchanged
+// and never persists or logs it.
 type PreparedSubmitRequest struct {
 	Media      MediaType
 	Model      string
@@ -191,22 +186,19 @@ type PreparedSubmitRequest struct {
 	References []GatewayReference
 }
 
-// CallCredentialSource resolves the active connection's decrypted Provider
-// Key for exactly one provider call. The plaintext exists only between the
-// resolve and the adapter's Authorization header (spec #150 敏感信息纪律) —
-// never in rows, logs, errors, or responses.
+// CallCredentialSource resolves the active connection's decrypted Provider Key for one
+// provider call: the plaintext exists only between the resolve and the adapter's
+// Authorization header (spec #150 敏感信息纪律) — never in rows, logs, or responses.
 type CallCredentialSource interface {
-	// ActiveCallCredential returns the active connection's plaintext key,
-	// or an error when no usable credential exists (not configured, not
-	// valid, or the envelope/master key is unavailable) — the caller must
-	// fail closed and hold without fabricating an external outcome.
+	// ActiveCallCredential returns the active connection's plaintext key or an error when
+	// no usable credential exists (not configured, not valid, or the envelope/master key
+	// is unavailable) — the caller must fail closed and hold without fabricating an outcome.
 	ActiveCallCredential(ctx context.Context) (string, error)
 }
 
-// OutputMimeAccepted reports whether a probed provider output can form an
-// asset for the requested media type. Image providers may return either JPEG
-// or PNG. Other media retain their existing unrestricted contract until their
-// format-specific verification slice lands.
+// OutputMimeAccepted reports whether a probed provider output can form an asset for the
+// requested media type. Image providers may return JPEG or PNG; other media keep their
+// unrestricted contract until their format-specific verification slice lands.
 func OutputMimeAccepted(media MediaType, mime string) bool {
 	if media == MediaImage {
 		return mime == "image/jpeg" || mime == "image/png"

@@ -15,15 +15,11 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// TaskWorker drains the PostgreSQL generation queue: claim with FOR UPDATE
-// SKIP LOCKED under a short lease, perform external Provider/Storage work
-// strictly outside transactions, then persist every state migration through
-// the single verdict application routine (ADR-0019) — the worker itself only
-// routes via domain.NextAction and adjudicates external outcomes via
-// domain.VerdictFor. Local timeouts, lease expiries, and worker crashes never
-// fabricate business outcomes: an unidentified submit outcome converges to
-// indeterminate, and only the provider's authoritative verdict may end work
-// as timed_out (spec #150).
+// TaskWorker drains the PostgreSQL generation queue: claim under a short lease, do external
+// Provider/Storage work strictly outside transactions, then persist every state migration through the
+// single verdict routine (ADR-0019). Local timeouts, lease expiries, and crashes never fabricate
+// outcomes: an unidentified submit converges to indeterminate, and only a provider verdict may end
+// work as timed_out (spec #150).
 type TaskWorker struct {
 	tasks       domain.GenerationTaskRepository
 	materials   domain.MaterialRepository
@@ -245,10 +241,9 @@ func (w *TaskWorker) driveSubmit(ctx context.Context, queueID domain.UUID, task 
 		}
 		w.prepared[job.ID] = prepared
 	}
-	// Resolve the decrypted Provider Key only after every reference is ready.
-	// A resolution failure means nothing external executed, so the item holds
-	// without spending the submit budget. The plaintext exists only until the
-	// call returns.
+	// Resolve the decrypted Provider Key only after every reference is ready: a resolution
+	// failure means nothing external executed, so the item holds without spending the submit
+	// budget.
 	credential, err := w.credentials.ActiveCallCredential(ctx)
 	if err != nil {
 		if job.SubmitAttempts == 0 {
@@ -491,10 +486,9 @@ func (w *TaskWorker) convergeFromTerminalJob(ctx context.Context, queueID domain
 		// crash can retry the transfer without a new external generation.
 		credential, credErr := w.credentials.ActiveCallCredential(ctx)
 		if credErr != nil {
-			// A credential failure is transient for convergence (the same
-			// policy drivePoll applies): settling the slots terminal here
-			// would discard a completed job's transferable outputs as a
-			// nil-reason failure outside the stable taxonomy.
+			// A credential failure is transient for convergence (the same policy drivePoll
+			// applies): settling slots terminal here would discard a completed job's
+			// transferable outputs as a nil-reason failure outside the stable taxonomy.
 			return w.reschedule(ctx, queueID, time.Now().Add(w.pollEvery), false)
 		}
 		if outcome, err := w.gateway.Poll(ctx, credential, *job.ExternalRef); err == nil &&
@@ -564,11 +558,10 @@ func (w *TaskWorker) resolveAndBindTransferStore(ctx context.Context, taskID dom
 	return nil, domain.ObjectStorageConnection{}, domain.ErrObjectStorageUnavailable
 }
 
-// transferOutputs streams every provider output into the module's storage,
-// verifies each blob through the authoritative probe, and produces slot
-// writes. Outputs already exceeding the slot count are ignored (provider
-// over-supply never forms results); slot shortfall marks the missing slots
-// failed as temporarily unavailable so the creator can retry them.
+// transferOutputs streams every provider output into the module's storage, verifies each blob through
+// the authoritative probe, and produces slot writes. Outputs beyond the slot count are ignored
+// (provider over-supply never forms results); a shortfall marks the missing slots failed as
+// temporarily unavailable so the creator can retry them.
 func (w *TaskWorker) transferOutputs(ctx context.Context, store domain.BlobStore, task domain.GenerationTask, slots []domain.GenerationSlot, outputs []domain.GatewayOutput) ([]domain.SlotVerdictWrite, error) {
 	writes := make([]domain.SlotVerdictWrite, 0, len(slots))
 	claimed := map[int]bool{}
@@ -617,10 +610,9 @@ func (w *TaskWorker) transferOutputs(ctx context.Context, store domain.BlobStore
 	return writes, nil
 }
 
-// transferOne streams one output into storage and probes it. A conflicting
-// exact key is accepted only when both the current provider output and stored
-// object have identical bounded size and SHA-256 facts. That recovers a lost
-// Put response without importing an unrelated customer-owned bucket object.
+// transferOne streams one output into storage and probes it. A conflicting exact key is accepted only
+// when the current provider output and the stored object have identical bounded size and SHA-256
+// facts — recovering a lost Put without importing an unrelated customer-owned object.
 func (w *TaskWorker) transferOne(ctx context.Context, store domain.BlobStore, media domain.MediaType, taskID domain.UUID, index int, output domain.GatewayOutput) (*domain.SlotResult, error) {
 	blobKey := domain.GenerationResultBlobKey(taskID, index)
 	// The download stream is bounded by the defensive per-output ceiling;
@@ -898,11 +890,10 @@ func (p *providerPressure) recordUnavailable(key string) (time.Time, bool) {
 	return until, alert
 }
 
-// openProviderOutput streams one provider temporary URL for transfer. The
-// reader is consumed under the defensive per-output ceiling by the blob
-// store's bounded copy loop; the URL never reaches logs or responses. The
-// transport error is deliberately unwrapped: *url.Error embeds the URL, so
-// only its class survives to the worker's failure log.
+// openProviderOutput streams one provider temporary URL for transfer; the reader is consumed under the
+// defensive per-output ceiling by the blob store's bounded copy loop, and the URL never reaches logs
+// or responses. The transport error is deliberately unwrapped: *url.Error embeds the URL, so only its
+// class survives to the failure log.
 func (w *TaskWorker) openProviderOutput(ctx context.Context, url string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

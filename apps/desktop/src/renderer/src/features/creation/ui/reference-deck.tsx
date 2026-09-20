@@ -19,14 +19,11 @@ import {
 import { ImageWithSkeleton } from './media-with-skeleton'
 
 /**
- * The Composer's inline reference deck (issue #177): 48x64 photo cards
- * collapsed into a stacked pile that fans out on hover or keyboard focus.
- * One persistent tree animates between the two poses via transforms, so the
- * expansion never reflows the prompt beside it. ArrowLeft/ArrowRight move
- * focus; Delete removes the focused card.
- *
- * The deck is also the drop surface for reference materials: file and
- * slot-result drops append, or swap a card in place (ADR-0018).
+ * The Composer's inline reference deck (issue #177): 48x64 photo cards in a stacked pile that fans
+ * out on hover or keyboard focus. One persistent tree animates between the poses, so expansion
+ * never reflows the prompt beside it; ArrowLeft/ArrowRight move focus, Delete removes the focused
+ * card. It is also the drop surface for reference materials — drops append or swap a card in place
+ * (ADR-0018).
  */
 
 /** Decorative pose tables: the fan indexes by deck position (leftmost card

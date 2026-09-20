@@ -1,13 +1,6 @@
-// Package media performs the Server-authoritative verification that decides
-// whether an uploaded reference material may exist at all: content sniffing,
-// structural identification, real decoding, and derivation of dimensions,
-// pixel counts, and durations. Client-side checks are convenience only;
-// these probes are the enforcement point (issue #156).
-//
-// All parsers are hand-written and bounded on purpose: they read box/frame
-// headers instead of buffering media bodies, keep the dependency surface
-// minimal (only golang.org/x/image for WebP decoding), and return the
-// domain taxonomy rather than transport-shaped errors.
+// Package media is the Server-authoritative verification deciding whether an uploaded
+// reference material may exist at all — client-side checks are convenience only (issue
+// #156). Parsers are hand-written and bounded, reading box/frame headers, not bodies.
 package media
 
 import (

@@ -72,8 +72,8 @@ interface StagedMaterial {
 }
 
 /**
- * The Workbench composition point (issues #177, #206, #208). Provider
- * availability never gates editing — only the candidate menus and stale
+ * The Workbench composition point (issues #177, #206, #208): provider
+ * availability never gates editing, only the candidate menus and stale
  * verdicts come from the manifest.
  */
 
@@ -407,9 +407,8 @@ export function useCreationWorkbench(): {
   )
 
   // A creator-initiated model switch keeps the selected resolution only when
-  // the new model publishes that tier; otherwise it adopts the new model's
-  // default. (The never-rewrite rule guards manifest removals of a stored
-  // draft, not the creator's own selection change.)
+  // the new model publishes that tier, else it adopts the new model's default.
+  // (The never-rewrite rule guards manifest removals, not this selection.)
   const setModel = useCallback(
     (model: string) => {
       const draft = currentDraft()
@@ -428,11 +427,10 @@ export function useCreationWorkbench(): {
     [currentDraft, manifest, patchDraft]
   )
 
-  // Re-derives binding roles for one published mode; a binding whose
-  // material kind cannot structurally fill the new role (the server twin is
-  // roleAcceptsKind) keeps its previous role, so the draft stays submittable
-  // and the stale reference note — never a silent rewrite — explains the
-  // mismatch.
+  // Re-derives binding roles for one published mode; a binding whose material
+  // kind cannot structurally fill the new role (server twin: roleAcceptsKind)
+  // keeps its previous role, so the draft stays submittable and the stale
+  // reference note — never a silent rewrite — explains the mismatch.
   const bindingsForMode = useCallback(
     (media: DraftMediaType, mode: string, references: DraftReferenceView[]) => {
       if (roleForPosition(media, mode, 0) === null) return references
@@ -533,10 +531,9 @@ export function useCreationWorkbench(): {
       displayRef.current.forget(materialId)
       displayRef.current.dropPending(materialId)
       const sessionId = currentSelectedId()
-      // A locally-held new-session file never reached the server; only its
-      // local records die with the removal. Existing-session files may still
-      // be uploading, so the runtime resolves their real identity before it
-      // retires the server material.
+      // A locally-held new-session file never reached the server, so only its
+      // local records die. Existing-session files may still be uploading, so the
+      // runtime resolves their real identity before retiring the material.
       if (sessionId !== null) await ports.actions.deleteMaterial(sessionId, materialId)
     },
     [bindingsForMode, contextController, currentDraft, currentSelectedId, patchDraft, ports]
@@ -578,10 +575,9 @@ export function useCreationWorkbench(): {
     return unsubscribe
   }, [ports])
 
-  /** Freezes every user-visible field at the click boundary. A draft without
-   * session identity claims independent ownership out of the `new` slot
-   * BEFORE the materialization request leaves; resubmitting a pending entry
-   * reuses its key as a new action (ADR-0017). */
+  /** Freezes user-visible fields at the click boundary; a draft without session
+   * identity claims independent ownership out of `new` BEFORE materialization
+   * leaves, and a resubmit reuses its key (ADR-0017). */
   const submit = useCallback(() => {
     if (!ports || contextController === undefined) return
     const frozenDraft = contextController.getSnapshot().draft
@@ -790,13 +786,10 @@ export function useCreationWorkbench(): {
     [addMaterial, allowedKinds, contextController, currentDraft, deckCap, manifest, ports]
   )
 
-  /**
-   * Swaps one bound card for a new file at the same deck position. The new
-   * upload happens before the old material retires, so a failed upload
-   * leaves the deck untouched. A material the prompt still mentions is never
-   * replaced (that removal path needs the mention-confirm dialog) — such a
-   * drop falls back to a plain append.
-   */
+  /** Swaps one bound card for a new file at the same deck position. The new
+   * upload happens before the old material retires, so a failed upload leaves
+   * the deck untouched. A material the prompt still mentions is never replaced
+   * (that needs the mention-confirm dialog) — such a drop appends instead. */
   const replaceMaterial = useCallback(
     (materialId: string, file: File): void => {
       if (!ports) return

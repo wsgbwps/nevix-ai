@@ -1,11 +1,9 @@
 package domain
 
-// The versioned AI Provider Capability Manifest (spec #150): the server's
-// authoritative declaration of supported generation capabilities. Content is
-// code-versioned — it changes only with an accepted capability decision, which
-// bumps ManifestVersion. The derivation below combines that static contract
-// with the instance's Provider Connection facts; it is a pure function and
-// never rewrites the connection.
+// The versioned AI Provider Capability Manifest (spec #150): the server's authoritative
+// declaration of supported generation capabilities. Content is code-versioned — only an
+// accepted capability decision changes it, which bumps ManifestVersion — and the
+// derivation combines it with the Provider Connection facts, never rewriting them.
 
 // ManifestSchemaVersion is the wire payload's shape version
 // (contracts/creation.yaml CapabilityManifest.schema_version).
@@ -39,18 +37,16 @@ const (
 	ModeOmniReference  = "omni-reference"
 )
 
-// Manifest content is the source-controlled capability contract. Order here
-// is the wire order — fixed, so one manifest version always serializes the
-// same sequence. Image resolution tiers are model-scoped because the vendor
-// size table differs per model.
+// Manifest content is the source-controlled capability contract. Order here is the wire
+// order — fixed, so one manifest version always serializes the same sequence. Image
+// resolution tiers are model-scoped because the vendor size table differs per model.
 var (
 	imageModes  = []string{ModeTextToImage, ModeReferenceImage}
 	imageRatios = []string{"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"}
-	// imageModels declares the accepted image models and their resolution
-	// tiers (Kapon size contract, apifox 2026-09): pro covers 1K/1.5K/2K,
-	// the base model covers 2K/3K/4K; the tier labels overlap but the pixel
-	// sizes differ. MaxReferenceImages is the vendor's per-model reference
-	// ceiling (user-confirmed 2026-09-01): pro 10, base 14.
+	// imageModels declares the accepted image models and their resolution tiers (Kapon
+	// size contract, apifox 2026-09): pro covers 1K/1.5K/2K, base covers 2K/3K/4K, and the
+	// tier labels overlap but the pixel sizes differ. MaxReferenceImages is the vendor's
+	// per-model reference ceiling (user-confirmed 2026-09-01): pro 10, base 14.
 	imageModels = []CapabilityModelView{
 		{Model: ImageModelID, Resolutions: []string{"1K", "1.5K", "2K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(10)},
 		{Model: ImageModelBaseID, Resolutions: []string{"2K", "3K", "4K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(14)},
@@ -65,10 +61,9 @@ var (
 	videoRatios    = []string{"adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
 )
 
-// AcceptedImageRatios and AcceptedImageModels expose the accepted value sets
-// the manifest publishes, so downstream contracts (e.g. the adapter's wire
-// mapping conformance) can derive their coverage from the same source
-// instead of hand-copying the lists.
+// AcceptedImageRatios and AcceptedImageModels expose the accepted value sets the manifest
+// publishes, so downstream contracts (e.g. the adapter's wire mapping conformance) derive
+// their coverage from the same source instead of hand-copying the lists.
 func AcceptedImageRatios() []string { return imageRatios }
 
 // AcceptedImageModels returns the declared image models with their
@@ -109,11 +104,9 @@ type (
 		Prompt            *PromptEnvelopeView      `json:"prompt,omitempty"`
 		ReferenceMaterial *ReferenceMaterialPolicy `json:"reference_material,omitempty"`
 	}
-	// CapabilityModelView is one allowlisted model and the resolution tiers
-	// it publishes. Image media carries two models with disjoint tier sets
-	// plus the pixel size of every published (tier, ratio) combination and
-	// the model's reference-image ceiling; video carries one model and no
-	// pixel sizes or ceiling.
+	// CapabilityModelView is one allowlisted model and the resolution tiers it publishes: image
+	// media carries two models with disjoint tier sets plus the pixel size of every published
+	// (tier, ratio) and the model's reference-image ceiling; video carries one model and neither.
 	CapabilityModelView struct {
 		Model              string               `json:"model"`
 		Resolutions        []string             `json:"resolutions"`
@@ -121,10 +114,9 @@ type (
 		MaxReferenceImages *int                 `json:"max_reference_images,omitempty"`
 		Sizes              []CapabilitySizeView `json:"sizes,omitempty"`
 	}
-	// CapabilitySizeView is the vendor pixel resolution of one published
-	// (resolution tier, ratio) combination — display metadata resolved from
-	// the same table the adapter submits, so the Workbench can show the
-	// exact output size without the desktop ever holding vendor knowledge.
+	// CapabilitySizeView is the vendor pixel resolution of one published (resolution tier,
+	// ratio) combination: display metadata resolved from the same table the adapter
+	// submits, so the Workbench never needs vendor knowledge.
 	CapabilitySizeView struct {
 		Resolution string `json:"resolution"`
 		Ratio      string `json:"ratio"`
@@ -219,13 +211,11 @@ const (
 	ImageRefMaxAspect = 3.0
 )
 
-// CheckImageReferenceEnvelope applies the published image reference
-// dimension envelope to probed facts: each side within
-// [ImageRefMinPx, ImageRefMaxPx], total pixels within [ImageRefMaxPixels],
-// and aspect (width/height) within [ImageRefMinAspect, ImageRefMaxAspect].
-// Byte caps and per-mode counts are gated separately (kind ceiling on
-// upload, per-mode policy at admission). Facts that failed probing never
-// reach this gate — callers reject them as unreadable.
+// CheckImageReferenceEnvelope applies the published image reference dimension envelope to
+// probed facts: each side within [ImageRefMinPx, ImageRefMaxPx], total pixels within
+// [ImageRefMaxPixels], and aspect within [ImageRefMinAspect, ImageRefMaxAspect]. Byte caps
+// and per-mode counts are gated separately (kind ceiling on upload, per-mode policy at
+// admission); facts that failed probing never reach this gate.
 func CheckImageReferenceEnvelope(facts MediaFacts) error {
 	if facts.WidthPx == nil || facts.HeightPx == nil {
 		return ErrReferenceOutsideEnvelope
@@ -281,10 +271,9 @@ func audioReferencePolicy(min, max int) AudioReferencePolicy {
 
 func ptr[P any](p P) *P { return &p }
 
-// modeReferencePolicy states one mode's own reference requirement. The
-// composer keeps V1 video input to first/last frames and omni references
-// only (spec Workbench 交互); modes are the normalized submission shapes
-// (story 28).
+// modeReferencePolicy states one mode's own reference requirement. The composer keeps V1
+// video input to first/last frames and omni references only (spec Workbench 交互); modes
+// are the normalized submission shapes (story 28).
 func modeReferencePolicy(media, mode string) ReferenceMaterialPolicy {
 	switch {
 	case media == string(MediaImage) && mode == ModeTextToImage:

@@ -1,8 +1,7 @@
 /**
- * The Capability Manifest client (contracts/creation.yaml, issue #158): the
- * Workbench's only source of submittable values. An unavailable media carries
- * the server's stable reason and action verbatim — the caller keeps any stale
- * draft values and blocks submission instead of guessing provider state.
+ * The Capability Manifest client (contracts/creation.yaml, issue #158): the Workbench's only source
+ * of submittable values. An unavailable media carries the server's reason and action verbatim, so
+ * the caller keeps stale draft values and blocks submission rather than guessing.
  */
 
 import { request, type CreationApiFailure, type CreationApiResult } from './go-creation-http'
@@ -83,9 +82,9 @@ export interface CapabilitySize {
 }
 
 /**
- * One allowlisted model with its own resolution tiers. Image models also
- * publish the vendor's per-model reference-image ceiling; the mode's total
- * stays the widest cross-model bound and the ceiling is the binding one.
+ * One allowlisted model with its own resolution tiers. The per-model
+ * reference-image ceiling is the binding bound; the mode's total is the widest
+ * cross-model one.
  */
 export interface CapabilityModel {
   readonly model: string
@@ -111,7 +110,7 @@ export interface PromptEnvelope {
 /**
  * One media's submittable capability set, or the structured unavailability
  * (reason/action) with every value field absent. Resolution tiers are
- * model-scoped: each published model carries its own tiers.
+ * model-scoped: each published model carries its own.
  */
 export interface CapabilityMedia {
   readonly available: boolean
@@ -191,8 +190,8 @@ function readEnum<T extends string>(
 }
 
 /**
- * Parses the manifest payload, failing closed: any unknown reason, action,
- * mode, or missing field yields null so an unknown wire shape can never fake
+ * Parses the manifest payload, failing closed: an unknown reason, action, or
+ * mode, or a missing field, yields null so an unknown wire shape can never fake
  * an availability verdict.
  */
 export function parseCapabilityManifest(payload: unknown): CapabilityManifest | null {
@@ -334,10 +333,9 @@ function parseModels(
   return models
 }
 
-// parseSizes reads one model's published pixel sizes — display metadata for
-// the exact size the server submits. Every entry must sit inside the model's
-// own tiers and the media's published ratios, so a malformed or out-of-set
-// size can never impersonate a capability.
+// parseSizes reads one model's published pixel sizes — display metadata for the
+// exact size the server submits. Every entry must sit inside the model's tiers
+// and the media's ratios, so an out-of-set size cannot impersonate a capability.
 function parseSizes(
   item: unknown,
   resolutions: readonly string[],
@@ -506,9 +504,8 @@ function parseDefaults(entry: unknown): CapabilityDefaults | null {
 }
 
 /**
- * Creates the typed manifest client over one configured server URL. The path
- * mirrors contracts/creation.yaml; parsing fails closed rather than guessing
- * shapes.
+ * The typed manifest client over one configured server URL. The path mirrors
+ * contracts/creation.yaml; parsing fails closed rather than guessing shapes.
  */
 export function createCapabilityManifestClient(serverUrl: string): {
   lookup(token: string): Promise<CreationApiResult<CapabilityManifest>>

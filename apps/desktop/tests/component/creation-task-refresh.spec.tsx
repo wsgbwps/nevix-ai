@@ -3,10 +3,8 @@ import { CreationWorkbenchStory, type ScriptedTask } from './fixtures/creation-w
 
 /**
  * Refresh-module component coverage (issue #191, ADR-0005): the production
- * Workbench page driven through its scripted ports. Scheduling invariants
- * with a controlled clock live in tests/unit/creation-task-refresh.test.mts;
- * these tests pin the user-visible behavior — merged rounds, stale markers,
- * per-entry eligibility, and the fallback poll — through the real page.
+ * Workbench page driven through its scripted ports. Scheduling invariants with
+ * a controlled clock live in tests/unit/creation-task-refresh.test.mts.
  */
 
 // The scripted session id the fixture mounts by default.

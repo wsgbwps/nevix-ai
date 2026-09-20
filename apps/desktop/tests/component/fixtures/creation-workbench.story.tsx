@@ -36,11 +36,9 @@ import {
 } from '../../../src/renderer/src/features/creation/model/draft-store'
 
 /**
- * Black-box composition for the Creation Workbench public surface (issues
- * #156 / #177): the exported page mounted with scripted in-memory ports —
- * including the session draft store and the Capability Manifest. Tests drive
- * visible UI and observe caller-visible port calls; no internal store or hook
- * is exposed beyond a narrow assertion handle.
+ * Black-box composition for the Creation Workbench public surface (issues #156 /
+ * #177): the exported page mounted with scripted in-memory ports. Tests drive visible
+ * UI and observe caller-visible port calls — no internal store or hook is exposed.
  */
 
 const sessionA: CreationSessionView = {
@@ -118,9 +116,8 @@ function imageEnvelope(min: number, max: number): ImageReferenceEnvelope {
 const noReferences = { total: { min: 0, max: 0 } }
 
 /**
- * Real vendor pixel sizes (豆包生图 OpenAPI x-size-map) for the ratios the
- * tests exercise, so the composer's size row reads exactly what the server
- * publishes for the same selection.
+ * Real vendor pixel sizes (豆包生图 OpenAPI x-size-map), so the composer's size row
+ * reads exactly what the server publishes for the same selection.
  */
 function imageModelSizes(
   tiers: readonly string[],
@@ -344,9 +341,8 @@ const scriptedSilentWavUrl = (() => {
 })()
 
 // The scripted task list pages like the real endpoint (contracts
-// listSessionGenerationTasks): (created_at DESC, id DESC) keyset order with a
-// compound continuation cursor, so pagination behavior cannot pass against a
-// fixture that dumps every task in one cursorless response (issue #195).
+// listSessionGenerationTasks): (created_at DESC, id DESC) keyset order with a compound
+// cursor, so pagination cannot pass against a fixture that dumps every task at once (#195).
 const taskCursorOf = (task: GenerationTaskView): string => `${task.createdAt}|${task.id}`
 
 function tasksNewestFirst(a: GenerationTaskView, b: GenerationTaskView): number {
@@ -948,10 +944,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       taskState.tasks = [retried, ...taskState.tasks]
       return succeeded(detailOf(retried))
     },
-    // A real blob: URL, never a data: stand-in — a fake would hide any
-    // path that fetches the object URL (which the renderer CSP forbids).
-    // Transfers are counted so tests can assert how often the data plane
-    // actually moved a slot's bytes.
+    // A real blob: URL, never a data: stand-in — a fake would hide any path that
+    // fetches the object URL (which the renderer CSP forbids). Transfers are counted
+    // so tests can assert how often the data plane moved a slot's bytes.
     loadResultBlob: async (taskId, slotIndex) => {
       resultBlobTransfers.push({ taskId, slotIndex })
       if (options.taskScript?.resultBlobDeferred) {
@@ -1191,11 +1186,9 @@ export function CreationWorkbenchRestartStory(options: StoryOptions = {}): React
 }
 
 /**
- * Layout-contract story: the real page mounted exactly as the App Shell
- * composes it — a direct child of the shell's flex-col content container
- * (see app/pages/creation-page.tsx). Used to pin that the workbench fills
- * the shell area; it cannot mount the real CreationPage composition because
- * the authentication/connection providers are not CT-mountable.
+ * Layout-contract story: the real page mounted as the App Shell composes it — direct
+ * child of the shell's flex-col content container — to pin that the workbench fills the
+ * shell area. The real CreationPage is not CT-mountable (auth/connection providers).
  */
 export function CreationWorkbenchShellStory(options: StoryOptions = {}): React.JSX.Element {
   return (

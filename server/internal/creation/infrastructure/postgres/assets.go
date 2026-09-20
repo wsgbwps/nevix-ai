@@ -105,10 +105,9 @@ func (r *MediaAssetRepository) ListVisible(ctx context.Context, owner domain.UUI
 	}
 	from := assetFrom
 	if len(filter.Modes)+len(filter.Ratios)+len(filter.Resolutions) > 0 {
-		// ponytail: the frozen Specification lives on the Generation Task, so
-		// the facets filter through a join on its primary key, paid for only
-		// when a facet is selected. Move the facet columns onto
-		// creation_media_assets if this ever shows up in a slow query log.
+		// ponytail: facet filters join the Generation Task holding the frozen Specification,
+		// paid for only when a facet is selected; move the facet columns onto
+		// creation_media_assets if this shows up in a slow query log.
 		from += `
 		JOIN creation_generation_tasks t ON t.id = a.task_id`
 	}

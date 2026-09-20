@@ -19,14 +19,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Response-level OpenAPI conformance for the Creation surface. The helper in
-// the Identity suite is prior art, but the Creation contract promises more
-// than required-fields checks: this validator enforces required fields,
-// enums, JSON types, uuid/date-time formats on observed values, minimum and
-// maximum bounds where documented, allOf composition, component responses
-// ($ref'd statuses), external Error-envelope references into the master
-// document, and rejects undocumented statuses outright. Requests are shaped
-// by hand in these tests; responses are checked here on every observation.
+// Response-level OpenAPI conformance for the Creation surface: required fields, enums, JSON
+// types, uuid/date-time formats on observed values, documented min/max bounds, allOf
+// composition, component responses ($ref'd statuses), external Error-envelope references, and
+// undocumented statuses rejected outright (the Identity suite's helper is prior art but checks
+// only required fields). Requests are shaped by hand in these tests; responses are checked
+// here on every observation.
 
 var (
 	conformanceOnce sync.Once
@@ -149,10 +147,9 @@ func TestAssetLibraryContractSurface(t *testing.T) {
 	}
 }
 
-// The facet vocabulary the server validates against is observed here the way
-// a client sees it — one page per media, unioned in the order the parser
-// admits values — rather than read from the catalog the server serves it from.
-// A contract that documents a filter the server rejects fails right here.
+// The facet vocabulary is observed here the way a client sees it — one page per media, unioned
+// in the order the parser admits values — rather than read from the catalog the server serves
+// it from. A contract that documents a filter the server rejects fails right here.
 func TestAssetLibraryFacetEnumMatchesServedVocabulary(t *testing.T) {
 	parameters, _ := creationOperation(t, "GET", "/creation/assets")["parameters"].([]any)
 
@@ -624,10 +621,9 @@ func resolveSchemaRef(t *testing.T, ref string) map[string]any {
 	return resolvePointer(t, spec, pointer)
 }
 
-// ensureAllDocumentedErrorsConform asserts every error path returns exactly
-// the envelope shape with an enum-valid machine code — run once per test
-// binary through a synthetic observation list so conformance exercises the
-// negative space too.
+// TestContractErrorEnvelopeShapeOnEveryCreationErrorPath asserts every error path returns exactly the
+// envelope shape with an enum-valid machine code, run once per test binary through a synthetic
+// observation list so conformance exercises the negative space too.
 func TestContractErrorEnvelopeShapeOnEveryCreationErrorPath(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)

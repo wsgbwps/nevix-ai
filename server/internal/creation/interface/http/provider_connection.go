@@ -9,11 +9,10 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// ProviderConnectionHandler adapts the AI Provider Connection commands and
-// views onto the wire contract. Admin routes are guarded by the route
-// table; every key-bearing command additionally requires proven HTTPS
-// transport before its proof is consumed, and no response ever carries key
-// material, endpoints, model ids, or provider diagnostics.
+// ProviderConnectionHandler adapts the AI Provider Connection commands and views onto the wire
+// contract. Admin routes are guarded by the route table; every key-bearing command additionally
+// requires proven HTTPS transport before its proof is consumed, and no response ever carries
+// key material, endpoints, model ids, or provider diagnostics.
 type ProviderConnectionHandler struct {
 	service *application.ConnectionService
 }

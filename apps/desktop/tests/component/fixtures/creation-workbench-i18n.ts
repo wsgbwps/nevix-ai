@@ -4,14 +4,9 @@ import { appResources } from '../../../src/renderer/src/app/i18n'
 import { creationResources } from '../../../src/renderer/src/features/creation'
 
 /**
- * The shared component-test i18n instance for the Creation Workbench stories
- * (plain module, not a component file, so stories stay react-refresh clean).
- * Carries top-level await: importers wait for the same initialized instance.
- * Composes the two namespaces these stories mount — the App Shell brand slot
- * (`app`) and the Creation surfaces (`creation`) — per language, the same way
- * `renderer-i18n.ts` composes its set. The test environment's options turn
- * every missing key into a thrown error, so a namespace the chrome needs has
- * to be listed here.
+ * Shared CT i18n for the Creation Workbench stories — a plain module (react-refresh
+ * clean) whose top-level await makes importers wait on one instance. The test
+ * environment throws on every missing key, so every namespace the chrome needs is listed.
  */
 const storyResources = {
   'zh-CN': { ...appResources['zh-CN'], ...creationResources['zh-CN'] },

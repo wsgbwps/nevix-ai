@@ -1,11 +1,7 @@
-// Package migration embeds the database migrations and applies them at
-// server startup. It is a narrow adapter over Goose in library mode: Goose
-// owns version resolution, execution order, per-migration transactions, and
-// the goose_db_version ledger; this package owns only the embedded SQL set
-// and the startup entry point. Migrations run with the DDL credential
-// (MIGRATION_DATABASE_URL) before any application pool, Module, or listener
-// exists (ADR-0013/0014); the application's identity_app credential never
-// receives DDL.
+// Package migration embeds the database migrations and applies them at server startup, a narrow
+// adapter over Goose in library mode: Goose owns version resolution, execution order, and the
+// goose_db_version ledger. Migrations run with the DDL credential (MIGRATION_DATABASE_URL) before
+// any application pool, Module, or listener exists (ADR-0013/0014); identity_app never receives DDL.
 package migration
 
 import (
@@ -25,19 +21,16 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-// Apply connects to databaseURL with the migration credential and brings the
-// cluster up to the newest embedded version, returning the migrations Goose
-// applied on this call (nil when already current). A failing migration is
-// rolled back by Goose and left unrecorded, so the caller must not start the
-// HTTP listener on error.
+// Apply connects with the migration credential, brings the cluster up to the newest embedded version,
+// and returns the migrations applied on this call (nil when already current). A failing migration is
+// rolled back by Goose and left unrecorded, so the caller must not start the HTTP listener on error.
 func Apply(ctx context.Context, databaseURL string) ([]*goose.MigrationResult, error) {
 	return applyFS(ctx, databaseURL, migrationFS)
 }
 
-// applyFS runs the same production startup path against an arbitrary
-// migration filesystem whose SQL files live under migrations/, exactly like
-// the embedded set; it exists so package tests can prove first-apply,
-// no-op, rollback, and concurrency behavior with controlled migration sets.
+// applyFS runs the same production startup path against an arbitrary migration filesystem whose
+// SQL files live under migrations/, exactly like the embedded set; it exists so tests can prove
+// first-apply, no-op, rollback, and concurrency behavior with controlled migration sets.
 func applyFS(ctx context.Context, databaseURL string, source fs.FS) ([]*goose.MigrationResult, error) {
 	// Goose discovers migrations at the root of the filesystem it is given,
 	// so hand it the migrations subdirectory rather than the package root.

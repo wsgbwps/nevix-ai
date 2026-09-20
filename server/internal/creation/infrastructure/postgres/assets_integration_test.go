@@ -16,11 +16,10 @@ import (
 	"github.com/nevix-ai/server/internal/migration"
 )
 
-// Package-local real-database coverage for the media-asset formation SQL
-// (spec #150 Asset 唯一性, issue #160): the (task_id, slot_index) unique
-// constraint is the durable backstop behind the idempotent insert, a
-// repeated formation never duplicates the aggregate, and identity_app holds
-// no UPDATE grant for the immutable formation facts. Runs only under the
+// Package-local real-database coverage for the media-asset formation SQL (spec #150 Asset
+// 唯一性, issue #160): the (task_id, slot_index) unique constraint is the durable backstop
+// behind the idempotent insert, a repeated formation never duplicates the aggregate, and
+// identity_app holds no UPDATE grant for the immutable formation facts. Runs only under the
 // dedicated Creation integration harness; requested runs must not skip.
 func TestMediaAssetFormationIsUniquePerTaskSlot(t *testing.T) {
 	ownerURL, runtimeURL := requireIntegrationEnv(t)
@@ -395,18 +394,16 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 	}) {
 		t.Fatalf("50k owner page missed production composite index: %s", planJSON)
 	}
-	// A facet filter reaches the frozen Specification through the Generation
-	// Task join, plus the shape fallback production emits for "adaptive"
-	// Assets (spec #150). The 50k Asset table may never be scanned: every
-	// Asset read stays on an index, whether the page is ordered by the owner
-	// keyset or driven from the matching Tasks.
+	// A facet filter reaches the frozen Specification through the Generation Task join, plus
+	// the shape fallback production emits for "adaptive" Assets (spec #150). The 50k Asset
+	// table may never be scanned: every Asset read stays on an index, whether the page is
+	// ordered by the owner keyset or driven from the matching Tasks.
 	//
-	// ponytail: the plan asserts index reach, not the index-ordered page. With
-	// a facet selected the planner reads creation_generation_tasks first and
-	// sorts the matches (22ms, 12.5k matching Assets of 50k here), because
-	// `= ANY($n)` is estimated blind to the parameter's contents. Cost tracks
-	// the number of matches, not the page size; materialize the facet columns
-	// onto creation_media_assets if that ever shows up in a slow query log.
+	// ponytail: the plan asserts index reach, not the index-ordered page — with a facet
+	// selected the planner reads creation_generation_tasks first and sorts the matches
+	// (22ms, 12.5k matching Assets of 50k here), because `= ANY($n)` is estimated blind to
+	// the parameter's contents. Materialize the facet columns onto creation_media_assets if
+	// this ever shows up in a slow query log.
 	ratioLower, ratioUpper, ok := domain.RatioBounds("16:9")
 	if !ok {
 		t.Fatal("16:9 is not an expressible ratio")
@@ -589,10 +586,9 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 	}
 }
 
-// The facet predicates read a frozen Specification through a join the rest of
-// the list query does not need, and select "adaptive" Assets by the shape of
-// their pixels (spec #150 Asset 库筛选). Both are SQL the unit tests cannot
-// reach.
+// The facet predicates read a frozen Specification through a join the rest of the list query
+// does not need, and select "adaptive" Assets by their pixel shape (spec #150 Asset 库筛选).
+// Both are SQL the unit tests cannot reach.
 func TestAssetLibrarySpecificationFacets(t *testing.T) {
 	ownerURL, runtimeURL := requireIntegrationEnv(t)
 	ctx := context.Background()

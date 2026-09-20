@@ -7,10 +7,9 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// identifyWAV walks the RIFF chunk list for fmt and data. PCM (1) and IEEE
-// float (3) encodings are accepted; byte-rate division yields the duration
-// with the data chunk clamped to the blob so an inconsistent header cannot
-// invent length.
+// identifyWAV walks the RIFF chunk list for fmt and data. PCM (1) and IEEE float (3)
+// encodings are accepted; byte-rate division yields the duration, with the data chunk
+// clamped to the blob so an inconsistent header cannot invent length.
 func identifyWAV(seek io.ReadSeeker) (domain.Identified, error) {
 	total, err := seek.Seek(0, io.SeekEnd)
 	if err != nil || total < 44 {

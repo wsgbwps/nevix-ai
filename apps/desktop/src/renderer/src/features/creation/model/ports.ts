@@ -45,12 +45,10 @@ export interface MaterialUploadOptions {
 }
 
 /**
- * The Workbench's business seam: the page and its components see only these
- * ports, so component tests drive deterministic fakes while production wires
- * the real trusted-data-plane client.
- *
- * Material lists are cursor-drained in production. Creation Session Navigation
- * deliberately consumes only the newest server page (50 sessions, ADR-0007).
+ * The Workbench's business seam: components see only these ports, so tests drive deterministic
+ * fakes while production wires the real trusted-data-plane client. Material lists are
+ * cursor-drained in production; Creation Session Navigation deliberately consumes only the newest
+ * server page (50 sessions, ADR-0007).
  */
 
 /** A server page projected onto the drain helper's shape. */
@@ -138,11 +136,9 @@ export interface CreationWorkspacePorts extends AssetLibraryPorts, InspirationPo
   /** Streams one succeeded slot's verified output as bytes; display URLs are
    * derived Feature-locally by the result cache, never over this seam. */
   readonly loadResultBlob: (taskId: string, slotIndex: number) => Promise<CreationApiResult<Blob>>
-  /**
-   * Opens the creator-scoped SSE invalidation stream; returns unsubscribe.
+  /** Opens the creator-scoped SSE invalidation stream; returns unsubscribe.
    * onStateChange mirrors liveness so the caller can poll while it is down;
-   * onUnauthorized reports a confirmed credential rejection.
-   */
+   * onUnauthorized reports a confirmed credential rejection. */
   readonly subscribeEvents: (handlers: {
     onInvalidation: () => void
     onStateChange: (live: boolean) => void
@@ -151,8 +147,8 @@ export interface CreationWorkspacePorts extends AssetLibraryPorts, InspirationPo
 }
 
 /**
- * Builds the production ports for one connected creator. The token is
- * acquired fresh for each call and dropped afterwards; it never enters URLs.
+ * Production ports for one connected creator: the token is acquired fresh per
+ * call, dropped afterwards, and never enters URLs.
  */
 export function createCreationWorkspacePorts(
   serverUrl: string,

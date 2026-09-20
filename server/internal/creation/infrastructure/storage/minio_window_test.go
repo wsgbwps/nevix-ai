@@ -10,10 +10,9 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// minIOWindow is one seekable [start,stop) window over a MinIO test object.
-// Streams are opened lazily at the current position so probing and Range downloads
-// only transfer the bytes they actually touch; context death closes the
-// active stream promptly instead of waiting for connection teardown.
+// minIOWindow is one seekable [start,stop) window over a MinIO test object. Streams open
+// lazily at the current position so probing and Range downloads transfer only the bytes they
+// touch; context death closes the active stream promptly instead of waiting for teardown.
 type minIOWindow struct {
 	store        *minIOStore
 	key          string

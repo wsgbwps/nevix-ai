@@ -19,11 +19,10 @@ import (
 	"time"
 )
 
-// TestStreamSmokeParallelFileFlows is the short file-stream smoke every
-// file-path PR runs: parallel mixed uploads, full downloads, Range reads,
-// and client-cancellation flows against real storage, asserting zero
-// unexpected statuses (nothing outside the contract's documented set, and
-// no 5xx) plus prompt return after cancellation. The window is ~100 seconds;
+// TestStreamSmokeParallelFileFlows is the short file-stream smoke every file-path PR runs:
+// parallel mixed uploads, full downloads, Range reads, and client-cancellation flows against
+// real storage, asserting zero unexpected statuses (nothing outside the contract's documented
+// set, and no 5xx) plus prompt return after cancellation. The window is ~100 seconds;
 // NEVIX_CREATION_SMOKE_SECONDS overrides it for local iteration.
 func TestStreamSmokeParallelFileFlows(t *testing.T) {
 	h := newHarness(t)
@@ -33,10 +32,9 @@ func TestStreamSmokeParallelFileFlows(t *testing.T) {
 		h.loginToken(t, creatorEmail, harnessPassword),
 		h.loginToken(t, otherCreatorEmail, harnessPassword),
 	}
-	// Each creator drives its own private session: creator-scoped probes make
-	// a foreign session's material routes answer not_found, so sharing one
-	// session across both tokens would only measure the authorization matrix,
-	// not the file streams under parallel load.
+	// Each creator drives its own private session: creator-scoped probes make a foreign
+	// session's material routes answer not_found, so sharing one session across both tokens
+	// would only measure the authorization matrix, not the file streams under parallel load.
 	materialsPaths := make([]string, len(tokens))
 	for i, token := range tokens {
 		session := h.createSession(t, token, sessionName("smoke-"+strconv.Itoa(i)))

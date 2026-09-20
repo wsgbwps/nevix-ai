@@ -18,10 +18,9 @@ const (
 	KindAudio Kind = "audio"
 )
 
-// ClaimsVersion marks which rights-confirmation wording the uploading action
-// recorded. The upgrade rule is forward-only: raising the constant affects
-// materials uploaded afterwards and never re-adjudicates existing rows, so
-// older material never becomes retroactively blocked.
+// ClaimsVersion marks which rights-confirmation wording the uploading action recorded. It
+// is forward-only: raising the constant affects materials uploaded afterwards, never
+// re-adjudicating existing rows, so older material never becomes retroactively blocked.
 const ClaimsVersion = 1
 
 // SessionNameMaxChars bounds a session name; the same bound lives in
@@ -144,10 +143,9 @@ type ReadSeekCloser interface {
 	io.Seeker
 }
 
-// BlobStore is the storage port every reference-material blob passes through.
-// Implementations stream with bounded buffers, honor context cancellation,
-// and return ErrTooLarge when a Put exceeds maxBytes. Metadata lives only in
-// PostgreSQL; blob backends never become business concepts (ADR-0016).
+// BlobStore is the storage port every reference-material blob passes through: bounded
+// streaming, context cancellation, and ErrTooLarge when a Put exceeds maxBytes. Metadata
+// lives only in PostgreSQL; blob backends never become business concepts (ADR-0016).
 type BlobStore interface {
 	// Put streams src into key with a bounded copy loop. Partial or failed
 	// puts leave no usable object: implementations clean their own staging.
@@ -202,10 +200,9 @@ type MediaProber interface {
 	Identify(seek ReadSeekCloser) (Identified, error)
 }
 
-// ReferenceBlobKey derives the stable blob-store object key for one new
-// material identity — the single place where a material id becomes a
-// Storage address. Both blob adapters and the ingest use-case share it so
-// key shape can never drift between placement and retrieval.
+// ReferenceBlobKey derives the stable blob-store object key for one new material identity —
+// the single place a material id becomes a Storage address. Blob adapters and the ingest
+// use-case share it so key shape can never drift between placement and retrieval.
 func ReferenceBlobKey(id UUID) string {
 	hexed := id.String()
 	return "reference-materials/" + hexed[0:2] + "/" + hexed[2:4] + "/" + hexed

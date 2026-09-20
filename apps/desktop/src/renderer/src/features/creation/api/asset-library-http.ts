@@ -58,8 +58,8 @@ export interface AssetPageRequest {
 
 /**
  * The values a facet can take for the requested media, published by the list
- * endpoint straight from the capability contract. It is not read off the page
- * of results, and it does not depend on the provider connection being usable.
+ * endpoint straight from the capability contract: not read off the page of
+ * results, and independent of the provider connection being usable.
  */
 export interface AssetFacetVocabulary {
   readonly modes: readonly string[]

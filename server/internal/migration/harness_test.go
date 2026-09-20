@@ -1,7 +1,6 @@
-// Integration-harness support for the migration package (mirrors identity's
-// harness_test.go placement rule): environment gating on the harness DSN,
-// private scratch-database provisioning, and assertion connections. Scenario
-// tests live in migration_integration_test.go.
+// Integration-harness support for the migration package (mirrors identity's harness_test.go
+// placement rule): environment gating on the harness DSN, private scratch-database provisioning,
+// and assertion connections. Scenario tests live in migration_integration_test.go.
 package migration
 
 import (
@@ -12,10 +11,9 @@ import (
 	"testing"
 )
 
-// requireOwnerURL gates the suite on the harness environment: plain
-// `go test ./...` skips so it stays green with no stack running, while
-// NEVIX_IDENTITY_INTEGRATION_REQUESTED=1 (set by the dedicated harness entry)
-// makes a missing value fatal.
+// requireOwnerURL gates the suite on the harness environment: plain `go test ./...` skips so it
+// stays green with no stack running, while NEVIX_IDENTITY_INTEGRATION_REQUESTED=1 (set by the
+// dedicated harness entry) makes a missing value fatal.
 func requireOwnerURL(t *testing.T) string {
 	t.Helper()
 	value := os.Getenv("NEVIX_DATABASE_URL")

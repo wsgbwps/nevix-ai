@@ -11,10 +11,9 @@ const baseClass =
   'bg-popover text-popover-foreground ring-foreground/10 z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-xl p-1.5 shadow-md ring-1 duration-150 data-[state=closed]:overflow-hidden data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95'
 
 /**
- * The composer's menu surface. GSAP owns the entrance (so the pop reads as
- * one smooth motion instead of the shared dropdown's CSS zoom) while the exit
- * must stay a CSS animation — Radix delays unmount on animationend, so a GSAP
- * exit would either block closing or be cut off.
+ * The composer's menu surface. GSAP owns the entrance (one smooth pop instead of the shared
+ * dropdown's CSS zoom) while the exit must stay a CSS animation: Radix delays unmount on
+ * animationend, so a GSAP exit would block closing or be cut off.
  */
 export function ComposerMenuContent({
   className,

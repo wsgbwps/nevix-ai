@@ -13,10 +13,9 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// GenerationTaskRepository implements the task-kernel port over PostgreSQL.
-// Every guarded transition is a single conditional UPDATE whose WHERE clause
-// is the durable twin of the domain one-way state machine: a lost race
-// updates zero rows and reports false instead of fabricating state.
+// GenerationTaskRepository implements the task-kernel port over PostgreSQL. Every guarded
+// transition is a single conditional UPDATE whose WHERE clause is the durable twin of the
+// domain one-way state machine: a lost race updates zero rows and reports false.
 type GenerationTaskRepository struct {
 	pool *pgxpool.Pool
 }

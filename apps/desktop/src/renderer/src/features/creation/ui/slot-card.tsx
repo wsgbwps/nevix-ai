@@ -104,11 +104,9 @@ export function SlotCard({
   }
 
   // A succeeded slot is the drag source for reference reuse (ADR-0018): the
-  // custom type identifies the slot at drop time, while the module record
-  // carries the payload through dragover's protected mode. The native ghost
-  // would be the whole gallery cell, far larger than the deck cards it
-  // hovers — a 48x64 offscreen twin (the deck card's size) keeps the drop
-  // target visible while dragging.
+  // custom type identifies the slot at drop time, and the module record carries
+  // the payload through dragover's protected mode. The native ghost would be the
+  // whole gallery cell, so a 48x64 offscreen twin keeps the drop target visible.
   const ghostRef = useRef<HTMLDivElement | null>(null)
   const dragStart = (event: React.DragEvent<HTMLDivElement>): void => {
     const payload = { taskId, slotIndex: slot.index, mediaType }

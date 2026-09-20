@@ -184,10 +184,9 @@ type listAssetsResponse struct {
 	Facets     *assetFacetsResource `json:"facets"`
 }
 
-// assetFacetsResource publishes the filter vocabulary for the requested
-// media, straight from the capability contract rather than from the current
-// provider connection: a paused provider must not take away a user's ability
-// to filter the Assets they already own.
+// assetFacetsResource publishes the filter vocabulary for the requested media, straight from
+// the capability contract rather than the current provider connection: a paused provider must
+// not take away a user's ability to filter the Assets they already own.
 type assetFacetsResource struct {
 	Modes       []string `json:"modes"`
 	Ratios      []string `json:"ratios"`

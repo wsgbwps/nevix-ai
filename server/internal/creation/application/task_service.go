@@ -10,18 +10,16 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// InvalidationSink receives one post-commit generation-change notification
-// per owner; the transport layer implements it with the creator-scoped SSE
-// hub. Persistence commits first — the sink is only invoked on the committed
-// path — and payloads never carry private content.
+// InvalidationSink receives one post-commit generation-change notification per owner; the transport
+// layer implements it with the creator-scoped SSE hub. Called only on the committed path, and
+// payloads never carry private content.
 type InvalidationSink interface {
 	NotifyGenerationChanged(owner domain.UUID)
 }
 
-// TaskService orchestrates the generation task kernel's creator commands:
-// idempotent admission with governance, best-effort cancel, retry of
-// uncompleted slots, and creator-scoped task queries. Every write runs
-// inside the domain-local verified transaction runner.
+// TaskService orchestrates the generation task kernel's creator commands: idempotent admission with
+// governance, best-effort cancel, retry of uncompleted slots, and creator-scoped task queries. Every
+// write runs inside the verified transaction runner.
 type TaskService struct {
 	tasks       domain.GenerationTaskRepository
 	materials   domain.MaterialRepository
@@ -68,13 +66,9 @@ type SubmissionResult struct {
 	Replayed bool
 }
 
-// Submit admits one generation task. The frozen specification is always
-// derived from the request's generation intent — validated structurally,
-// checked against the live capability manifest, and completed with verified
-// material facts — inside the admission transaction, and the whole admission
-// (attempt fact, governance evaluation, specification, task, slots, job,
-// queue item, reservation) commits or rolls back as one. Governance
-// rejections commit only the attempt fact. Replays (same key, same payload)
+// Submit admits one generation task. The frozen specification is always derived from the request's
+// generation intent inside the admission transaction, and the whole admission commits or rolls back
+// as one; governance rejections commit only the attempt fact. Replays (same key, same payload)
 // return the prior task without counting anything a second time.
 func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (SubmissionResult, error) {
 	key := domain.NormalizeIdempotencyKey(cmd.IdempotencyKey)
@@ -169,10 +163,9 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 	return result, nil
 }
 
-// admitSpecification runs the shared admission tail for fresh submissions
-// and retries: manifest-vs-connection availability, the fixed-order
-// governance evaluation, the attempt fact, and the atomic creation of
-// specification, task, slots, job, queue item, and reservation.
+// admitSpecification runs the shared admission tail for fresh submissions and retries: availability,
+// fixed-order governance, the attempt fact, then the atomic creation of specification, task, slots,
+// job, queue item, and reservation.
 func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteScope, owner, sessionID domain.UUID, spec *domain.GenerationSpecification, idempotencyKey string) (*domain.GenerationTask, error) {
 	// Reference identity/role/kind facts are re-verified inside the
 	// transaction: a material deleted between draft save and admission
@@ -290,9 +283,8 @@ func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteSco
 	return task, nil
 }
 
-// RetryUncompleted creates a new task from an original task's frozen
-// specification, covering only that task's unfinished slots. The original
-// task stays immutable; the new task passes the same governance admission
+// RetryUncompleted creates a new task from an original task's frozen specification, covering only its
+// unfinished slots. The original stays immutable; the new task passes the same governance admission
 // with its own key, attempt, month count, and reservation.
 func (s *TaskService) RetryUncompleted(ctx context.Context, owner, taskID domain.UUID, idempotencyKey string) (SubmissionResult, error) {
 	key := domain.NormalizeIdempotencyKey(idempotencyKey)
@@ -428,10 +420,9 @@ func (s *TaskService) Get(ctx context.Context, owner, taskID domain.UUID) (domai
 	return s.tasks.GetForOwner(ctx, owner, taskID)
 }
 
-// freezeSpecification derives the immutable generation intent from the
-// submitted intent against the current manifest. Every mismatch blocks
-// admission: missing intent is not ready, values outside the manifest are
-// stale, and the manifest version must be current.
+// freezeSpecification derives the immutable generation intent against the current manifest. Every
+// mismatch blocks admission: a missing intent is not ready, values outside the manifest are stale,
+// and the manifest version must be current.
 func freezeSpecification(intent *domain.GenerationIntent, manifest domain.CapabilityManifestView) (*domain.GenerationSpecification, error) {
 	if intent == nil {
 		return nil, domain.ErrIntentNotReady
@@ -574,10 +565,9 @@ func validateSpecificationReferences(spec *domain.GenerationSpecification, byID 
 	return nil
 }
 
-// referenceWithinEnvelope checks one material's recorded facts against the
-// media's published reference envelope. The envelope numbers come from the
-// manifest constants, not the request, so a stale composer cannot smuggle an
-// out-of-envelope material past admission.
+// referenceWithinEnvelope checks one material's recorded facts against the media's published
+// reference envelope. The numbers come from the manifest constants, not the request, so a stale
+// composer cannot smuggle an out-of-envelope material past admission.
 func referenceWithinEnvelope(spec *domain.GenerationSpecification, reference *domain.SpecificationReference, material domain.ReferenceMaterial, count int) error {
 	envelope := domain.MediaReferenceEnvelope(spec.MediaType)
 	if envelope.PerMedia == nil {

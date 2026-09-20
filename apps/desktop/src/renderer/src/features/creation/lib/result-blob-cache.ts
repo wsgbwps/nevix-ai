@@ -21,10 +21,9 @@ interface ResultBlobCacheOptions {
 }
 
 /**
- * Owns verified result bytes and display URLs for succeeded slots
- * (ADR-0018). Idle entries are retained under a byte-measured LRU budget;
- * active URL leases may temporarily exceed it because revoking a URL still
- * displayed by a card would corrupt the visible result.
+ * Owns verified result bytes and display URLs for succeeded slots (ADR-0018). Idle entries are
+ * retained under a byte-measured LRU budget; active URL leases may temporarily exceed it, because
+ * revoking a URL a card still displays would corrupt the visible result.
  */
 export class ResultBlobCache {
   readonly #entries = new Map<string, CacheEntry>()

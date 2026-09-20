@@ -1,11 +1,10 @@
 import type { SlotResultView } from '../api/generation-task-http'
 
 /**
- * The single naming convention for a task slot's verified output — the name
- * the download button writes to disk and the name a dragged result carries
- * when promoted to reference material (ADR-0018), so the same output keeps
- * the same name in both places. The extension follows the actual MIME type
- * (the vendor commonly returns JPEG), never a fixed png.
+ * The single naming convention for a task slot's verified output: the name a download writes to
+ * disk and the name a result dragged into reference material carries (ADR-0018), so both places
+ * agree. The extension follows the actual MIME type — the vendor commonly returns JPEG — never a
+ * fixed png.
  */
 const resultExtensions: Record<string, string> = {
   'image/jpeg': 'jpg',

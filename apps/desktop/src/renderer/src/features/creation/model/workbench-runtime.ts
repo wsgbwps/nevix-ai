@@ -97,10 +97,9 @@ export interface WorkbenchActions {
     role: DraftReferenceRole
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly submit: (sessionId: string, intent: GenerationIntent) => Promise<WorkbenchActionResult>
-  /** No-identity chain: materialize a session under `key`'s pending
-   * ownership, upload `files` in the given order, submit the frozen intent;
-   * rekeys onto the created session. The synchronous prefix (guard, chain,
-   * held files) completes before the first await. */
+  /** No-identity chain: materialize a session under `key`'s pending ownership,
+   * upload `files` in the given order, submit the frozen intent, rekey onto the
+   * created session. The synchronous prefix completes before the first await. */
   readonly submitNewDraft: (
     key: string,
     intent: GenerationIntent,
@@ -970,8 +969,7 @@ export function createCreationRuntime(
 
   /** Rekeys chain, draft record, list entry, and deferred deletions onto the
    * session identity in one synchronous step — no write can land under the
-   * pending key afterwards. Queued deletions still carry local ids, mapped to
-   * Go identities at flush time. */
+   * pending key afterwards. Queued deletions keep local ids until flush. */
   const materializeChain = (pendingKey: string, session: CreationSessionView): void => {
     const chain = chains.get(pendingKey)
     if (chain === undefined) return

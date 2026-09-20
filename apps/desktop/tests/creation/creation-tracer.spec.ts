@@ -11,22 +11,19 @@ import {
 
 const identityServer = readIdentityServerConfig()
 
-// A real, decodable 256x256 PNG: the Go server fully decodes every upload
-// before accepting it (issue #156) and enforces the manifest's reference
-// dimension envelope (issue #160), so fabricated or undersized bytes would
-// be rejected on arrival.
+// A real, decodable 256x256 PNG: the Go server decodes every upload (issue #156) and
+// enforces the manifest's reference dimension envelope (issue #160), so fabricated or
+// undersized bytes would be rejected on arrival.
 const REAL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAACYUlEQVR42u3UMQEAAAQAQfHEFFEDCmjghivww0dWD/BTiAAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAYABiAAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAYABiAAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAYABCAEGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAYABAAYAGABgAIABAAYAGABgAIABAAYAGABgAIABAAYAGABgAIABAAYAGABgAIABAAYAGABgAIABAAYAGABgAIABAAYAGABgAIABAAYAGABgAIABgAEABgAYAGAAgAEABgAYAGAAgAEABgAYAGAAgAEABgAYAGAAgAEABgAYAGAAgAEABgAYAGAAgAEABgAYAGAAgAEABgAYAGAAgAEABgAYAGAAgAGAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQAGABgAYACAAQCXBbq7Kpo57ns0AAAAAElFTkSuQmCC',
   'base64'
 )
 
-// The shortest Creation tracer (issues #156 / #177, ADR-0017): sign in, open
-// AI Creation from the App Shell, draft in a composing session that does not
-// exist yet (the 「新对话」 row creates nothing server-side), then submit — the
-// first submission materializes the private session and carries the full
-// generation intent in the submit request. The editable draft itself is
-// device-local state: a restart recovers the prompt from this device's store,
-// never the server.
+// The shortest Creation tracer (issues #156 / #177, ADR-0017): sign in, draft in a
+// composing session that does not exist yet (the 「新对话」 row creates nothing
+// server-side), then submit — the first submission materializes the private session and
+// carries the full generation intent. The editable draft is device-local state: a restart
+// recovers the prompt from this device's store, never the server.
 test(
   'a creator drafts in the Workbench and the draft survives an app restart',
   { tag: ['@smoke', '@storage'] },

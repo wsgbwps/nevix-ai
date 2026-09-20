@@ -1,7 +1,6 @@
-// Package application orchestrates Creation use-cases over the domain
-// ports: every write runs inside the domain-local verified transaction
-// runner, every read stays creator-scoped, and no transport vocabulary
-// leaks into these functions.
+// Package application orchestrates Creation use-cases over the domain ports: every write
+// runs inside the domain-local verified transaction runner and every read stays
+// creator-scoped.
 package application
 
 import (

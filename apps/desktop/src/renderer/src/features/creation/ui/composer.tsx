@@ -73,12 +73,10 @@ const menuClass = 'w-52 shadow-2xl'
 const menuLabelClass = 'text-muted-foreground px-2.5 pb-1.5 pt-1 text-[11px]'
 const menuItemClass = 'h-9 cursor-pointer rounded-lg px-2.5 text-[13px]'
 
-// Dual-state geometry (px). These constants mirror the Tailwind classes on
-// the same elements (h-28, min-h-20, py-1 + leading-5, bottom-4) and drift
-// silently if changed apart. The deck keeps the compact row a constant 40px
-// with or without references; the submit circle centers on the h-8 control
-// row when expanded (the padding edge itself) and on the main row when
-// compact.
+// Dual-state geometry (px). These constants mirror the Tailwind classes on the same elements (h-28,
+// min-h-20, py-1 + leading-5, bottom-4) and drift silently if changed apart. The deck keeps the
+// compact row a constant 40px with or without references; the submit circle centers on the h-8
+// control row when expanded, and on the main row when compact.
 /** Expanded column width (px); the workbench page's gallery container aligns to it. */
 export const EXPANDED_MAX_WIDTH = 992
 const COMPACT_MAX_WIDTH = 622
@@ -90,11 +88,9 @@ const SUBMIT_BOTTOM = 16
 const SUBMIT_SIZE = 32
 
 /**
- * The fixed bottom Composer (issue #177). Every candidate comes from the
- * Capability Manifest; draft values the manifest removed stay displayed with
- * a stable stale marker and are never rewritten. The surface is dual-state
- * (完整态/紧凑态, see apps/desktop/CONTEXT.md): `useComposerPresence` owns
- * presence, this component tweens the geometry.
+ * The fixed bottom Composer (issue #177), dual-state (完整态/紧凑态, apps/desktop/CONTEXT.md):
+ * `useComposerPresence` owns presence, this component tweens geometry. Every candidate comes from
+ * the Capability Manifest; draft values the manifest removed stay displayed stale, never rewritten.
  */
 export function CreationComposer({
   composer,
@@ -929,9 +925,8 @@ function OptionStrip<T extends string | number>({
 }
 
 // The ratio cell icon: a border box at the published ratio's real proportions
-// (21:9 reads as a wide strip, 9:16 as a tall one). The params strip passes
-// `diagonal` so every ratio previews at the same perceived size; without it
-// the longest edge scales to `max` (the inline trigger).
+// (21:9 reads wide, 9:16 tall). The params strip passes `diagonal` so every
+// ratio previews at one perceived size; the inline trigger scales longest to `max`.
 function RatioGlyph({
   ratio,
   max = 20,

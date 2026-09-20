@@ -1,8 +1,7 @@
 /**
- * The AI Provider Connection settings client (contracts/creation.yaml,
- * issue #157). Every call rides the current session's opaque Bearer token;
- * the Provider Key only travels upward inside a configure/replace command
- * and is never persisted, echoed, or logged by this client.
+ * The AI Provider Connection settings client (contracts/creation.yaml, issue #157). Every call
+ * rides the session's opaque Bearer token; the Provider Key only travels upward inside a
+ * configure/replace command and is never persisted, echoed, or logged by this client.
  */
 
 import { request, type CreationApiFailure, type CreationApiResult } from './go-creation-http'
@@ -139,9 +138,8 @@ function parseCapabilityStatus(entry: unknown): MediaCapabilityStatus | null {
 }
 
 /**
- * Creates the typed connection client over one configured server URL.
- * Paths mirror contracts/creation.yaml; parsing fails closed rather than
- * guessing shapes.
+ * The typed connection client over one configured server URL. Paths mirror
+ * contracts/creation.yaml; parsing fails closed rather than guessing shapes.
  */
 export function createProviderConnectionClient(serverUrl: string): {
   lookup(token: string): Promise<ProviderConnectionLookup>
