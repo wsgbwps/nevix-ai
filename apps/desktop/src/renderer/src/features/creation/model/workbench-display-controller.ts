@@ -1,16 +1,11 @@
 /**
- * The Workbench display-resource module: it owns the displayed context's
- * Reference Material views, their short-lived presigned thumbnail URLs (or,
- * for staged files, local preview object URLs), the device-local pending
- * material files, and the verified result blob leases
- * (ADR-0018). A single `reset()` retires one display generation — the one
- * context-switch ritual every surface change goes through, keeping the
- * `pending:<uuid>` / `new` / session ownership semantics of ADR-0017.
- *
- * Framework-free (the task-refresh module's pattern, ADR-0005) so the switch
- * invariants — leases die with their generation, in-flight loads cannot land
- * after reset, getSnapshot stays fresh within the same tick — are testable
- * against scripted deps.
+ * The Workbench display-resource module: displayed Reference Material views and their short-lived
+ * presigned URLs (local preview object URLs for staged files), device-local pending files, and the
+ * verified result blob leases (ADR-0018). A single `reset()` retires one display generation — the
+ * ritual every surface change goes through — keeping ADR-0017's `pending:<uuid>` / `new` / session
+ * ownership semantics. Framework-free (ADR-0005), so the switch invariants (leases die with their
+ * generation, in-flight loads cannot land after reset, getSnapshot stays fresh within a tick) are
+ * testable against scripted deps.
  */
 import type {
   CreationApiResult,
@@ -167,10 +162,9 @@ export class WorkbenchDisplayController {
     }
   }
 
-  /** Adds one device-local file as a pending material with an immediate
-   * image preview URL; its real upload is the caller's business action.
-   * A re-registering still-live pending keeps its painted preview URL —
-   * rebuilding it would flash the card through a reload. */
+  /** Adds one device-local file as a pending material with an immediate image
+   * preview URL; its upload is the caller's business action. A re-registering
+   * live pending keeps its painted URL — rebuilding it would flash the card. */
   registerPending(id: string, file: File): ReferenceMaterialView {
     this.#pendingFiles.set(id, { file })
     const live = this.#materials.find((material) => material.id === id)
@@ -223,10 +217,9 @@ export class WorkbenchDisplayController {
   }
 
   /** Moves one resolved pending material's records onto its server identity:
-   * the preview URL re-keys instead of revoking, and the card keeps the
-   * staged local id as its React key — so the swap neither regresses the
-   * card to the kind glyph nor remounts it (a remount replays the entrance
-   * animation from invisible: a visible blink). */
+   * the preview URL re-keys instead of revoking, and the card keeps the staged
+   * local id as its React key — so the swap neither regresses to the kind glyph
+   * nor remounts it, which would replay the entrance animation as a blink. */
   transferPending(localId: string, resolvedId: string): void {
     if (!this.#pendingFiles.has(localId) || localId === resolvedId) return
     this.#pendingFiles.delete(localId)

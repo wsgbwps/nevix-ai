@@ -27,11 +27,9 @@ func NewGenerationTaskHandler(tasks *application.TaskService, storage *applicati
 // frequency window is 60s so the header stays honest for rate rejections.
 const rateAdviceSeconds = 60
 
-// taskSubmitRequest is the submit wire shape (contracts TaskSubmitInput):
-// the idempotency key plus the complete generation intent. The intent fields
-// decode straight into domain.GenerationIntent semantics — references and
-// idempotency_key are required per contract; a missing field is rejected
-// exactly like any other envelope violation.
+// taskSubmitRequest is the submit wire shape (contracts TaskSubmitInput): the idempotency key plus
+// the complete generation intent, decoded straight into domain.GenerationIntent semantics. References
+// and idempotency_key are required per contract; a missing field is any other envelope violation.
 type taskSubmitRequest struct {
 	IdempotencyKey  *string                   `json:"idempotency_key"`
 	Prompt          *string                   `json:"prompt"`
@@ -420,10 +418,9 @@ func toTaskDetail(task domain.GenerationTask, slots []domain.GenerationSlot) gen
 	return detail
 }
 
-// failTask maps task-command errors onto the contract's stable statuses:
-// 403 for the persistent governance blocks, 429 (+Retry-After) for the
-// retryable ones, 409 for idempotency conflicts, 422 for intent and
-// capability rejections.
+// failTask maps task-command errors onto the contract's stable statuses: 403 for the persistent
+// governance blocks, 429 (+Retry-After) for the retryable ones, 409 for idempotency conflicts,
+// 422 for intent and capability rejections.
 func failTask(w http.ResponseWriter, r *http.Request, err error) {
 	var governanceBlocked *domain.GovernanceBlockedError
 	var mediaUnavailable *domain.MediaUnavailableError

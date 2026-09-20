@@ -1,17 +1,10 @@
 /**
- * The Workbench Context controller (issue #206): the single owner of the
- * context the Creation Workbench is presenting — an existing Creation
- * Session, a device-local pending draft, a fresh composing start, or the
- * blank inactive state — together with the one switching ritual every
- * navigation target goes through (display reset, task-refresh
- * leave/enter, draft restore, staged file re-registration). Ritual variants
- * derive from the target context kind; callers never pass mode flags.
- *
- * Framework-free so the concurrency invariants are testable by driving the
- * public interface against scripted deps: the generation token that
- * invalidates every in-flight read, the explicit manifest adoption
- * invariant and submitError derived from the current context's action
- * snapshot. Creation Session Navigation owns the list and target handoff.
+ * The Workbench Context controller (issue #206): owner of the context the Creation Workbench
+ * presents and of the single switching ritual every navigation target goes through (display reset,
+ * task-refresh leave/enter, draft restore, staged file re-registration). Variants derive from the
+ * target kind, never from caller-passed mode flags. Framework-free, so its concurrency invariants
+ * (the generation token that invalidates in-flight reads, the manifest adoption invariant) stay
+ * testable against scripted deps.
  */
 import type { CapabilityManifest } from '../api/capability-manifest-http'
 import {
@@ -52,9 +45,9 @@ import type { PendingMaterialFile } from './workbench-display-controller'
 import type { CreationSessionNavigationTarget } from './creation-session-navigation-controller'
 
 /**
- * The composer's editable mirror of the session draft. Field values are
- * exactly what the creator sees; the manifest only adds candidate menus and
- * stale verdicts, it never rewrites these values.
+ * The composer's editable mirror of the session draft: field values are exactly
+ * what the creator sees, and the manifest only adds candidate menus and stale
+ * verdicts, never rewriting them.
  */
 export interface ComposerDraft extends GenerationParameterValues {
   promptDocument: PromptDocument
@@ -199,9 +192,8 @@ export class WorkbenchContextController {
   readonly #listeners = new Set<() => void>()
   #active = false
   // The generation token — the only in-flight read invalidation mechanism.
-  // Every context transition and every lifecycle suspend bumps it; restore
-  // reads and list loads carry the epoch they started under and are
-  // discarded when it no longer matches.
+  // Every context transition and lifecycle suspend bumps it; reads carry the
+  // epoch they started under and are discarded when it no longer matches.
   #epoch = 0
   // Open from a context switch's optimistic reset until its record (or the
   // fallback) lands; #adoptManifestDefaults owns why adoption must wait.
@@ -252,12 +244,10 @@ export class WorkbenchContextController {
     return this.#snapshot
   }
 
-  /**
-   * The one switching ritual. The transition table derives from the target
-   * kind: `session` restores asynchronously then merges server facts and
-   * reconciles staged files; `pending` and `new` restore synchronously from
-   * the device-local record (or seed defaults); `inactive` keeps nothing.
-   */
+  /** The one switching ritual, its transition derived from the target kind:
+   * `session` restores asynchronously, merges server facts, and reconciles
+   * staged files; `pending`/`new` restore from the local record or seed
+   * defaults; `inactive` keeps nothing. */
   enterContext(key: CreationSessionNavigationTarget): void {
     if (key.kind === 'new' && this.#composingNew) return
     if (key.kind === 'session' && this.#selected?.id === key.session.id) {
@@ -432,10 +422,9 @@ export class WorkbenchContextController {
       this.#deps.listMaterials(session.id).catch(() => null)
     ])
     if (!this.#isCurrent(epoch, session.id)) {
-      // A stale read retires itself only: the window belongs to whatever
-      // ritual currently owns the epoch, and closing it here would let a
-      // manifest landing now seed the optimistic empty of a restore still
-      // in flight.
+      // A stale read retires itself only: the window belongs to whatever ritual
+      // owns the epoch, and closing it here would let a manifest landing now
+      // seed the optimistic empty of a restore still in flight.
       return
     }
     this.#restoreWindow = false
@@ -448,8 +437,7 @@ export class WorkbenchContextController {
       if (mode === 'enter') {
         // Entering failed: surface the outage and tear the half-initialized
         // context down to the blank state. A background reconcile is
-        // best-effort: its outage must not erase the current editable
-        // Draft or replace still-useful Go facts.
+        // best-effort: its outage must not erase the editable Draft or Go facts.
         this.#selected = null
         this.#deriveActionState()
         this.#deps.tasks.leave()
@@ -574,9 +562,8 @@ export class WorkbenchContextController {
   }
 
   /** Manifest adoption invariant: the manifest seeds defaults only into an
-   * entered context's untouched empty draft — never into an unentered
-   * workbench, and never into the optimistic empty a context switch shows
-   * while its record restores. */
+   * entered context's untouched empty draft — never an unentered workbench, nor
+   * the optimistic empty a context switch shows while its record restores. */
   #adoptManifestDefaults(): void {
     if (!this.#contextEntered() || this.#restoreWindow) return
     if (JSON.stringify(this.#draft) !== JSON.stringify(emptyComposerDraft())) return

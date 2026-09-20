@@ -10,13 +10,9 @@ import type { CapabilityManifest } from '../src/renderer/src/features/creation/a
 import type { ReferenceMaterialView } from '../src/renderer/src/features/creation/api/go-creation-http'
 
 /**
- * Public-surface component tests for the production Creation Workbench
- * (issue #177): recoverable draft, manifest-driven candidates with stale
- * value preservation, the composer reference deck's keyboard equivalence, and
- * the absence of any fake submit success. Only visible UI and the
- * window.__creationDeckTest port-call handle are asserted. Fixture data lives
- * inline — the CT transform only supports importing components from the
- * story module, so data fixtures cannot be shared from there.
+ * Public-surface component tests for the production Creation Workbench (issue
+ * #177). Only visible UI and the window.__creationDeckTest port-call handle are
+ * asserted; fixture data stays inline — CT only imports components from stories.
  */
 
 /** Both media unavailable: drafting keeps working, action advice shows. */
@@ -1995,14 +1991,11 @@ test('a task whose detail carries no specification shows task-view facts only', 
 })
 
 test('the workbench fills the shell content area it is mounted in', async ({ mount, page }) => {
-  // Regression for the desktop fill bug: the page used to sit behind a plain
-  // block wrapper in app/pages/creation-page.tsx, which made the section's
-  // flex-1 inert and left dead space under the composer. The story mounts the
-  // real page exactly as the App Shell does — direct child of the shell's
-  // flex-col content container inside a definite-height inset. Seam note: the
-  // real CreationPage composition (auth + connection providers) is not
-  // CT-mountable, so this pins the shell↔page fill contract, not that file's
-  // own JSX; keep creation-page.tsx wrapper-free.
+  // Regression (desktop fill): a plain block wrapper in app/pages/creation-page.tsx
+  // made the section's flex-1 inert and left dead space under the composer — keep that
+  // file wrapper-free. The real CreationPage composition (auth + connection providers)
+  // is not CT-mountable, so the story mounts the page as the App Shell does and pins
+  // the shell↔page fill contract, not that file's own JSX.
   await mount(<CreationWorkbenchShellStory />)
   await selectFirstSession(page)
 

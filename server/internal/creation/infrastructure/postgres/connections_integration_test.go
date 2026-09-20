@@ -14,12 +14,11 @@ import (
 	"github.com/nevix-ai/server/internal/migration"
 )
 
-// Package-local real-database coverage for the provider connection SQL
-// responsibilities (spec #150): the partial unique singleton index is the
-// durable backstop for concurrent creates, and active/terminated envelope
-// presence follows the CHECK. Runs only under the dedicated Creation
-// integration harness (scripts/test-creation-integration.sh); ordinary runs
-// skip, requested runs fail loudly on a missing environment.
+// Package-local real-database coverage for the provider connection SQL (spec #150): the
+// partial unique singleton index is the durable backstop for concurrent creates, and
+// active/terminated envelope presence follows the CHECK. Runs only under the dedicated
+// Creation integration harness (scripts/test-creation-integration.sh): ordinary runs skip,
+// requested runs fail loudly.
 
 func requireIntegrationEnv(t *testing.T) (ownerURL, runtimeURL string) {
 	t.Helper()
@@ -140,10 +139,10 @@ func fixtureUser(t *testing.T, ownerURL string) domain.UUID {
 	if err != nil {
 		t.Fatalf("insert fixture user: %v", err)
 	}
-	// The integrationtest package's Instance Claim requires an empty users
-	// table; package binaries run serialized, so removing the fixture here
-	// restores that precondition for every later suite. Cleanups run after
-	// the test's deferred pool closes, so this owns its fresh connection.
+	// The integrationtest package's Instance Claim requires an empty users table; package
+	// binaries run serialized, so removing the fixture here restores that precondition for
+	// later suites. Cleanups run after the test's deferred pool closes, so this owns a fresh
+	// connection.
 	t.Cleanup(func() {
 		cleanupPool, err := pgxpool.New(context.Background(), ownerURL)
 		if err != nil {

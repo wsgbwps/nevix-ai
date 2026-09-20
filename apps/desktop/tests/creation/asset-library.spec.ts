@@ -72,9 +72,12 @@ test(
         await expect(launched.page.getByText('媒体加载失败')).toHaveCount(0)
         await expect(launched.page.getByTestId('asset-card').locator('img')).toHaveCount(2)
 
-        await launched.page.getByLabel('媒体类型').selectOption('image')
-        await launched.page.getByLabel('排序').selectOption('oldest')
-        await launched.page.getByRole('button', { name: '搜索', exact: true }).click()
+        await launched.page
+          .getByRole('group', { name: '媒体类型' })
+          .getByRole('button', { name: '图片' })
+          .click()
+        await launched.page.getByRole('button', { name: '排序' }).click()
+        await launched.page.getByRole('menuitemradio', { name: '远-近' }).click()
         await expect(launched.page.getByTestId('asset-card')).toHaveCount(2)
 
         const openButtons = launched.page.getByRole('button', { name: /^打开资产 / })

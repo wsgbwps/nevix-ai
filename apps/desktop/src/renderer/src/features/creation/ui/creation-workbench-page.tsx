@@ -15,9 +15,8 @@ import { isScrolledToBottom } from './use-composer-presence'
 const HISTORY_TRIGGER_PX = 240
 
 /**
- * The production Creation Workbench (issue #177). Loading/empty/error stay
- * explicit so cached data can never masquerade as authoritative server
- * facts.
+ * The production Creation Workbench (issue #177): loading/empty/error stay
+ * explicit, so cached data can never masquerade as authoritative server facts.
  */
 export function CreationWorkbenchPage(): React.JSX.Element | null {
   const { context, composer, gallery } = useCreationWorkbench()
@@ -149,12 +148,10 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
     }
   }, [newestTaskId, workspaceActive, workspaceKey])
 
-  // The bottom reserve keeps gallery content clear of the floating
-  // composer: the wrapper's measured height plus its bottom inset and a
-  // clearance gap. Grow-only (high-water): shrinking with the compact form
-  // would pull a scrolled-away view back inside the at-bottom slack and
-  // oscillate. While bottom-pinned, growth bumps scrollTop by the same
-  // delta so it never reads as scrolled-away.
+  // The bottom reserve keeps gallery content clear of the floating composer:
+  // its measured height plus bottom inset and a clearance gap. Grow-only
+  // (high-water): shrinking with the compact form would pull a scrolled-away
+  // view into the at-bottom slack and oscillate; growth bumps scrollTop too.
   const composerWrapRef = useRef<HTMLDivElement | null>(null)
   const reserveRef = useRef(0)
   useLayoutEffect(() => {
@@ -312,7 +309,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                 }
                 setShowBackToBottom(away)
               }}
-              className="h-full overflow-y-auto px-6 [overflow-anchor:none]"
+              className="px-page h-full overflow-y-auto [overflow-anchor:none]"
             >
               {/* The greeting hero is the empty-session state: clearing the
                   prompt must never hide a session that already holds tasks. */}
@@ -373,10 +370,9 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
 }
 
 /**
- * The upward-history pagination note above the oldest loaded card: loading,
- * a retryable failure, or the end of the session's history. The caller gates
- * it on a landed page — "no more" must never read as a claim about history
- * that has not been read even once.
+ * The upward-history note above the oldest loaded card: loading, a retryable
+ * failure, or the end of history. The caller gates it on a landed page — "no
+ * more" must never read as a claim about history not yet read even once.
  */
 function TaskHistoryNote({
   history,

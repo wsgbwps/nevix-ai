@@ -1,8 +1,6 @@
-// Package postgres implements the Creation repositories over PostgreSQL.
-// Every query carries creator-scoped predicates itself — ownership and
-// logical deletion are decided by SQL, not by hoping callers remember them —
-// and every cursor stays a compound keyset so deep pages never decay the way
-// OFFSET does.
+// Package postgres implements the Creation repositories over PostgreSQL. Every query carries
+// creator-scoped predicates itself — ownership and logical deletion are decided by SQL, not
+// by hoping callers remember them — and every cursor stays a compound keyset, never OFFSET.
 package postgres
 
 import (

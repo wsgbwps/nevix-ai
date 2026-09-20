@@ -1,8 +1,7 @@
 /**
- * The creation half of the trusted data plane (contracts/creation.yaml).
- * JSON commands ride the current session's opaque Bearer token, which never
- * enters a URL. Local file bytes move through Main's native upload seam; the
- * Renderer receives only streamed display bytes and JSON views (ADR-0014),
+ * The creation half of the trusted data plane (contracts/creation.yaml). JSON commands ride the
+ * session's opaque Bearer token, which never enters a URL; local file bytes move through Main's
+ * native upload seam. The Renderer receives only streamed display bytes and JSON views (ADR-0014) —
  * never Storage credentials, direct-upload grants, or raw local paths.
  */
 
@@ -72,7 +71,7 @@ const materialDeleteTimeoutMs = 30_000
 
 /**
  * Every trusted-command failure the Workbench can observe. Clients branch on
- * the contract's `error` code only; unmapped answers stay generic so an
+ * the contract's `error` code only; an unmapped answer stays generic so an
  * unknown code can never fake a specific verdict.
  */
 export type CreationApiFailure =
@@ -88,16 +87,16 @@ export type CreationApiResult<T> =
 interface RequestInput {
   readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   readonly path: string
-  readonly query?: Readonly<Record<string, string>>
+  /** A list value repeats the parameter (`?mode=a&mode=b`). */
+  readonly query?: Readonly<Record<string, string | readonly string[]>>
   readonly body?: unknown
   readonly token: string
 }
 
 /**
  * One trusted-command round trip shared by every Creation api client in this
- * segment: bearer header, no-redirect, JSON-only failure mapping. Exported
- * for the sibling provider-connection client so the contract-failure
- * semantics cannot drift between copies.
+ * segment: bearer header, no-redirect, JSON-only failure mapping. Exported so
+ * the provider-connection client's contract-failure semantics cannot drift.
  */
 export async function request(
   serverUrl: string,
@@ -105,7 +104,11 @@ export async function request(
 ): Promise<{ readonly outcome: 'succeeded'; readonly payload: unknown } | CreationApiFailure> {
   const url = new URL(input.path, serverUrl)
   for (const [name, value] of Object.entries(input.query ?? {})) {
-    url.searchParams.set(name, value)
+    if (typeof value === 'string') {
+      url.searchParams.set(name, value)
+      continue
+    }
+    for (const entry of value) url.searchParams.append(name, entry)
   }
 
   let response: Response
@@ -176,9 +179,9 @@ function parseSessionDetail(payload: unknown): SessionDetailView | null {
 }
 
 /**
- * Creates a typed client over one configured server URL. Paths mirror
- * contracts/creation.yaml exactly; response parsing fails closed into
- * network-failure rather than guessing shapes.
+ * A typed client over one configured server URL. Paths mirror
+ * contracts/creation.yaml exactly; parsing fails closed into network-failure
+ * rather than guessing shapes.
  */
 export function createCreationClient(serverUrl: string): {
   listSessions(token: string, cursor?: string | null): Promise<CreationApiResult<SessionPage>>

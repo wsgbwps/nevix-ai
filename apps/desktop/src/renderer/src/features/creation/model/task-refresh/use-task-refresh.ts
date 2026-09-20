@@ -4,10 +4,9 @@ import { emptyTaskRefreshSnapshot } from './task-refresh-controller'
 import { TaskRefreshController } from './task-refresh-controller'
 import type { TaskRefreshSnapshot } from './task-refresh-controller'
 
-/** The Workbench's handle on the Generation Task refresh module (ADR-0005):
- * the current display snapshot plus the entry, stream, invalidation,
- * business-completion, and upward-history inputs. Business actions reconcile
- * through requestReconcile; they never hand the module task facts to display. */
+/** The Workbench's handle on the Generation Task refresh module (ADR-0005),
+ * its entry and reconcile inputs included. Business actions reconcile through
+ * requestReconcile; they never hand the module task facts to display. */
 export interface TaskRefreshBinding {
   readonly snapshot: TaskRefreshSnapshot
   readonly enter: (sessionId: string) => void
@@ -31,10 +30,9 @@ const idleBinding: TaskRefreshBinding = {
 
 const noopSubscribe = (): (() => void) => () => undefined
 
-/** One controller per connected runtime; a runtime identity change (new
- * server URL or login) replaces the instance, and the previous lifecycle's
- * timers stop in the effect cleanup. The constructor is passive, so the
- * memoized creation has no render side effects. */
+/** One controller per connected runtime: a new server URL or login replaces
+ * the instance and the previous lifecycle's timers stop in the effect cleanup.
+ * The constructor is passive, so memoized creation has no render effects. */
 export function useTaskRefreshModule(runtime: CreationRuntime): TaskRefreshBinding {
   const controller = useMemo(
     () => (runtime === null ? null : new TaskRefreshController(runtime)),

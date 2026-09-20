@@ -6,10 +6,9 @@ import (
 	"errors"
 )
 
-// UUID is a domain identity value: a raw RFC 4122 v4 identifier exchanged
-// with PostgreSQL's uuid columns and rendered externally in canonical
-// lowercase form. It is deliberately the smallest self-contained shape so
-// no external dependency enters the Module for ids.
+// UUID is a domain identity value: a raw RFC 4122 v4 identifier exchanged with
+// PostgreSQL's uuid columns and rendered externally in canonical lowercase form —
+// deliberately the smallest self-contained shape, so no dependency enters for ids.
 type UUID [16]byte
 
 var ErrInvalidUUID = errors.New("invalid uuid")

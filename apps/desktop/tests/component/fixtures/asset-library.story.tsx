@@ -3,6 +3,7 @@ import { useEffect, useMemo } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { testI18n } from './creation-workbench-i18n'
 import { AssetLibraryPage } from '../../../src/renderer/src/features/creation'
+import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
 import { prepareAssetSimilarDraft } from '../../../src/renderer/src/features/creation/model/asset-similar-draft'
 import type {
   AssetDetailView,
@@ -58,6 +59,15 @@ const assets = [
 const denseAssets = Array.from({ length: 24 }, (_, index) =>
   asset(`dense-${index + 1}`, new Date(2026, 8, 16, 12, index).toISOString())
 )
+
+/** Shared default: a fresh `[]` per render would rebuild the harness every time. */
+const NO_IDS: readonly string[] = []
+
+/** The page behind the first cursor, so appending has something distinct to show. */
+const nextPage = [
+  asset('asset-four', new Date(2026, 8, 14, 9).toISOString()),
+  asset('asset-five', new Date(2026, 8, 14, 10).toISOString())
+]
 
 const detail: AssetDetailView = {
   asset: assets[0],
@@ -117,6 +127,7 @@ interface AssetLibraryTestControls {
   releaseNextDownload(): void
   publishKeys(): readonly string[]
   withdraws(): readonly string[]
+  deletes(): readonly string[]
 }
 
 declare global {
@@ -131,14 +142,17 @@ function createHarness(
   staleOnReuse: boolean,
   replacementRequired: boolean,
   storageFailure: boolean,
-  emptyNextPage: boolean,
+  paginated: boolean,
+  append: 'succeed' | 'fail-once' | 'echo',
   deferredPreviews: boolean,
-  dense: boolean
+  dense: boolean,
+  unpublishableIds: readonly string[]
 ): {
   readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
   readonly controls: AssetLibraryTestControls
 } {
   const listCalls: AssetPageRequest[] = []
+  let appendAttempts = 0
   const reused: AssetPrivateOrigin[] = []
   const replacements: boolean[] = []
   const local = {
@@ -169,6 +183,7 @@ function createHarness(
   const pendingDownloadReleases: Array<() => void> = []
   const publishKeys: string[] = []
   const withdraws: string[] = []
+  const deletes: string[] = []
   let activePublication: {
     readonly id: string
     readonly publishedAt: string
@@ -179,20 +194,49 @@ function createHarness(
     ports: {
       listAssets: async (request) => {
         listCalls.push(request)
-        if (emptyNextPage && request.cursor === 'next') {
-          return { outcome: 'succeeded', value: { assets: [], nextCursor: null } }
+        const afterFirst = request.cursor === 'next'
+        if (afterFirst) appendAttempts += 1
+        if (paginated && afterFirst && append === 'fail-once' && appendAttempts === 1) {
+          return { outcome: 'request-rejected' as const, code: 'internal_error' }
         }
+        const facets =
+          request.mediaType === 'video'
+            ? {
+                modes: ['text-to-video', 'first-frame', 'first-last-frame', 'omni-reference'],
+                ratios: ['16:9', '1:1'],
+                resolutions: ['480p', '720p', '1080p']
+              }
+            : {
+                modes: ['text-to-image', 'reference-image'],
+                ratios: ['16:9', '1:1'],
+                resolutions: ['1K', '2K']
+              }
+        const listed = afterFirst
+          ? nextPage
+          : dense
+            ? denseAssets
+            : deferredPreviews
+              ? Array.from({ length: 8 }, (_, index) =>
+                  asset(`preview-${index + 1}`, new Date(2026, 8, 16, 8, index).toISOString())
+                )
+              : assets
         return {
           outcome: 'succeeded',
           value: {
-            assets: dense
-              ? denseAssets
-              : deferredPreviews
-                ? Array.from({ length: 8 }, (_, index) =>
-                    asset(`preview-${index + 1}`, new Date(2026, 8, 16, 8, index).toISOString())
-                  )
-                : assets,
-            nextCursor: 'next'
+            // A delete is a real delete: the re-read the page asks for must not
+            // hand back the asset it just acted on.
+            assets: listed
+              .filter((item) => !deletes.includes(item.id))
+              .map((item) =>
+                unpublishableIds.includes(item.id)
+                  ? { ...item, capabilities: { ...item.capabilities, canPublish: false } }
+                  : item
+              ),
+            // Only `paginated` reads past the first page, and only `echo` claims
+            // a further one: a terminal cursor everywhere else keeps the
+            // auto-loading sentinel quiet for the tests asserting an exact count.
+            nextCursor: paginated && (!afterFirst || append === 'echo') ? 'next' : null,
+            facets
           }
         }
       },
@@ -320,7 +364,10 @@ function createHarness(
         activePublication = null
         return { outcome: 'succeeded', value: undefined }
       },
-      deleteAsset: async () => ({ outcome: 'succeeded', value: undefined })
+      deleteAsset: async (assetId) => {
+        deletes.push(assetId)
+        return { outcome: 'succeeded', value: undefined }
+      }
     },
     controls: {
       listCalls: () => listCalls,
@@ -344,7 +391,8 @@ function createHarness(
       releaseDownloads: () => releaseDownloads(),
       releaseNextDownload: () => pendingDownloadReleases.shift()?.(),
       publishKeys: () => publishKeys,
-      withdraws: () => withdraws
+      withdraws: () => withdraws,
+      deletes: () => deletes
     }
   }
 }
@@ -355,18 +403,22 @@ export function AssetLibraryStory({
   staleOnReuse = false,
   replacementRequired = false,
   storageFailure = false,
-  emptyNextPage = false,
+  paginated = false,
+  append = 'succeed',
   deferredPreviews = false,
-  dense = false
+  dense = false,
+  unpublishableIds = NO_IDS
 }: {
   readonly downloadMode?: 'immediate' | 'deferred' | 'sequenced' | 'cancelled' | 'failed'
   readonly visibility?: 'private' | 'public'
   readonly staleOnReuse?: boolean
   readonly replacementRequired?: boolean
   readonly storageFailure?: boolean
-  readonly emptyNextPage?: boolean
+  readonly paginated?: boolean
+  readonly append?: 'succeed' | 'fail-once' | 'echo'
   readonly deferredPreviews?: boolean
   readonly dense?: boolean
+  readonly unpublishableIds?: readonly string[]
 }): React.JSX.Element {
   const harness = useMemo(
     () =>
@@ -376,16 +428,20 @@ export function AssetLibraryStory({
         staleOnReuse,
         replacementRequired,
         storageFailure,
-        emptyNextPage,
+        paginated,
+        append,
         deferredPreviews,
-        dense
+        dense,
+        unpublishableIds
       ),
     [
+      append,
       dense,
       deferredPreviews,
       downloadMode,
-      emptyNextPage,
+      paginated,
       replacementRequired,
+      unpublishableIds,
       staleOnReuse,
       storageFailure,
       visibility
@@ -399,9 +455,12 @@ export function AssetLibraryStory({
   }, [harness])
   return (
     <I18nextProvider i18n={testI18n}>
-      <div className="bg-background text-foreground flex h-screen min-h-0">
-        <AssetLibraryPage ports={harness.ports} onCreateSimilar={harness.controls.recordReuse} />
-      </div>
+      {/* The wall's tooltips need the provider the app shell mounts. */}
+      <TooltipProvider delayDuration={0}>
+        <div className="bg-background text-foreground flex h-screen min-h-0">
+          <AssetLibraryPage ports={harness.ports} onCreateSimilar={harness.controls.recordReuse} />
+        </div>
+      </TooltipProvider>
     </I18nextProvider>
   )
 }

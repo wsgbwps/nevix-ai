@@ -15,11 +15,10 @@ import (
 	_ "time/tzdata"
 )
 
-// Generation Task kernel (spec #150): an immutable Generation Specification
-// frozen at admission, one task progressing through one-way states, N stable
-// ordered slots, and one AI Provider Job per external execution. Terminal
-// states never reopen, internal retry never returns to queued, and an
-// indeterminate provider outcome is never auto-retried.
+// Generation Task kernel (spec #150): an immutable Generation Specification frozen at
+// admission, one task progressing through one-way states, N stable ordered slots, and one
+// AI Provider Job per external execution. Terminal states never reopen, internal retry
+// never returns to queued, and an indeterminate outcome is never auto-retried.
 
 // MediaType is the generation target media of a task.
 type MediaType string
@@ -147,11 +146,10 @@ const (
 	failureDiagnosticRequestIDMax = 256
 )
 
-// FailureDiagnostic is the bounded, creator-private explanation attached to
-// one terminal slot. Provider fields preserve Kapon's standard error envelope;
-// Server-owned stages use the same shape with a stable code and safe message.
-// Arbitrary response bodies, credentials, prompts, headers, and output URLs
-// never enter this value.
+// FailureDiagnostic is the bounded, creator-private explanation attached to one terminal
+// slot. Provider fields preserve Kapon's standard error envelope; Server-owned stages use
+// the same shape with a stable code and safe message. Arbitrary response bodies,
+// credentials, prompts, headers, and output URLs never enter this value.
 type FailureDiagnostic struct {
 	Source       FailureDiagnosticSource
 	Code         string
@@ -266,10 +264,9 @@ var (
 	}
 )
 
-// taskTransitions is the migration contract from #150 (提交合同): keyed by
-// source, listing the reachable statuses. A "zero-success terminal" edge is
-// expanded to failed/cancelled/timed_out — succeeded shapes are impossible
-// before persisting has run.
+// taskTransitions is the migration contract from #150 (提交合同): keyed by source, listing
+// the reachable statuses. A "zero-success terminal" edge expands to failed/cancelled/
+// timed_out — succeeded shapes are impossible before persisting has run.
 var taskTransitions = map[TaskStatus][]TaskStatus{
 	TaskQueued:     {TaskSubmitting, TaskCancelling, TaskCancelled},
 	TaskSubmitting: {TaskProcessing, TaskPersisting, TaskCancelling, TaskFailed, TaskCancelled, TaskTimedOut},
@@ -336,11 +333,10 @@ type TerminalCause string
 // before redoing; the system never retries them automatically.
 const TerminalCauseProviderIndeterminate TerminalCause = "provider_outcome_indeterminate"
 
-// GenerationSpecification is the task-owned immutable generation intent
-// frozen at admission: prompt, ordered references with roles, media mode,
-// model, the governing manifest version, and the chosen parameters. It is a
-// value, never a second aggregate; the JSON shape is stable because the
-// canonical hash below feeds idempotency.
+// GenerationSpecification is the task-owned immutable generation intent frozen at
+// admission: prompt, ordered references with roles, media mode, model, the governing
+// manifest version, and the chosen parameters. It is a value, never a second aggregate;
+// its JSON shape is stable because the canonical hash below feeds idempotency.
 type GenerationSpecification struct {
 	SchemaVersion   int                      `json:"schema_version"`
 	MediaType       MediaType                `json:"media_type"`
@@ -367,11 +363,10 @@ type SpecificationReference struct {
 	ClaimsVersion int       `json:"claims_version"`
 }
 
-// CanonicalPayload renders the specification as a deterministic string for
-// the idempotency hash: struct field order is fixed by the struct definition,
-// reference order is the generation order, and there are no timestamps. Two
-// submissions with the same intent must hash equally; any value difference
-// must hash differently.
+// CanonicalPayload renders the specification as a deterministic string for the idempotency
+// hash: field order is fixed by the struct definition, reference order is the generation
+// order, and there are no timestamps. Two submissions with the same intent must hash
+// equally; any value difference must hash differently.
 func (s *GenerationSpecification) CanonicalPayload() string {
 	encoded, err := json.Marshal(s)
 	if err != nil {
@@ -387,10 +382,9 @@ func (s *GenerationSpecification) PayloadHash() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// GenerationTask is the creator-private generation aggregate root. The
-// specification is frozen at admission and never mutated; the only progress
-// is the one-way status machine, the cancel intent, and the per-slot
-// verdicts.
+// GenerationTask is the creator-private generation aggregate root. The specification is
+// frozen at admission and never mutated; the only progress is the one-way status machine,
+// the cancel intent, and the per-slot verdicts.
 type GenerationTask struct {
 	ID             UUID
 	SessionID      UUID
@@ -431,10 +425,10 @@ type GenerationSlot struct {
 	ResultDurationMS *int
 }
 
-// JobOutcomeTransientRejected marks a submit proven not to have started
-// external work: either confirmed unsent or rejected by an allowlisted
-// provider code. A nil/empty outcome on a ref-less submitting job remains
-// unidentified and converges indeterminate, never to a guessed re-submit.
+// JobOutcomeTransientRejected marks a submit proven not to have started external work:
+// either confirmed unsent or rejected by an allowlisted provider code. A nil/empty outcome
+// on a ref-less submitting job stays unidentified and converges indeterminate, never to a
+// guessed re-submit.
 const JobOutcomeTransientRejected = "transient_rejected"
 
 // ProviderJob is one external execution attempt owned by a task.
@@ -459,13 +453,11 @@ type SlotOutcome struct {
 	Status SlotStatus
 }
 
-// AggregateTaskStatus computes the task terminal verdict from the slot
-// verdicts (spec #150 Task 终态聚合): all succeeded → succeeded; any success
-// with a non-success → partially_succeeded; zero success all cancelled →
-// cancelled; zero success all provider-authoritative timed_out → timed_out;
-// any other zero-success shape → failed, marking the indeterminate cause
-// when any slot ended indeterminate. The verdicts slice must be complete
-// (one outcome per slot, indices 0..n-1).
+// AggregateTaskStatus computes the task terminal verdict from a complete slot-verdict slice (one
+// outcome per slot, indices 0..n-1) (spec #150 Task 终态聚合): all succeeded → succeeded; any
+// success with a non-success → partially_succeeded; zero success all cancelled → cancelled; zero
+// success all provider-authoritative timed_out → timed_out; any other zero-success shape → failed,
+// marking the indeterminate cause when any slot ended indeterminate.
 func AggregateTaskStatus(slotCount int, outcomes []SlotOutcome) (TaskStatus, *TerminalCause, bool) {
 	if len(outcomes) != slotCount {
 		return "", nil, false
@@ -511,12 +503,11 @@ func AggregateTaskStatus(slotCount int, outcomes []SlotOutcome) (TaskStatus, *Te
 	}
 }
 
-// SlotVerdictForJob projects a job-level terminal outcome onto the slots
-// that did not produce output. Provider-authoritative timeouts end slots
-// timed_out (never a locally fabricated timeout); a lost submit outcome ends
-// them indeterminate; cancel convergence ends them cancelled; an explicit
-// job failure carries its classified reason, defaulting to
-// temporarily_unavailable when no detail survived.
+// SlotVerdictForJob projects a job-level terminal outcome onto the slots that did not
+// produce output: provider-authoritative timeouts end them timed_out (never a locally
+// fabricated timeout), a lost submit outcome ends them indeterminate, cancel convergence
+// ends them cancelled, and an explicit job failure carries its classified reason,
+// defaulting to temporarily_unavailable when no detail survived.
 func SlotVerdictForJob(job JobStatus, reason *FailureReason) (SlotStatus, *FailureReason) {
 	switch job {
 	case JobTimedOut:
@@ -604,12 +595,11 @@ func governanceLimit(user, instance *int) *int {
 	return instance
 }
 
-// EvaluateGovernance applies the fixed rejection order and returns the first
-// blocking reason, or nil when the submission is admitted. Order: provider
-// credit, instance monthly, member monthly, instance rate, member rate,
-// member media concurrency. Monthly limits compare admitted tasks (the
-// current task would be count+1); rate limits compare structurally-valid
-// attempts including the current one.
+// EvaluateGovernance applies the fixed rejection order and returns the first blocking
+// reason, or nil when the submission is admitted. Order: provider credit, instance monthly,
+// member monthly, instance rate, member rate, member media concurrency. Monthly limits
+// compare admitted tasks (the current task would be count+1); rate limits compare
+// structurally-valid attempts including the current one.
 func EvaluateGovernance(snapshot *GovernanceSnapshot, media MediaType) *GovernanceReason {
 	if snapshot.CreditBlocked {
 		blocked := ReasonProviderCreditBlocked
@@ -706,10 +696,9 @@ func shanghaiLocation() *time.Location {
 	return location
 }
 
-// SlotProjection is the wire projection of a slot while it has no stored
-// terminal verdict: a derived view of the task's own state (reserved/
-// queued/generating/persisting collapse into these stable names). Stored
-// terminal verdicts always win.
+// SlotProjection is the wire projection of a slot while it has no stored terminal verdict:
+// a derived view of the task's own state (reserved/queued/generating/persisting collapse
+// into these stable names). Stored terminal verdicts always win.
 func SlotProjection(taskStatus TaskStatus, slotStatus *SlotStatus) string {
 	if slotStatus != nil {
 		return string(*slotStatus)

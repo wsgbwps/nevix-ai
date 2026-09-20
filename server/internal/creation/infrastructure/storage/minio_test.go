@@ -40,11 +40,10 @@ func newMinIOStore(ctx context.Context, endpoint, accessKeyID, secretAccessKey, 
 	return &minIOStore{client: client, bucket: bucket}, nil
 }
 
-// Put pumps bounded chunks into the provider with exactly one buffer of
-// buffering between source and upload stream; the SHA-256 accumulates on
-// this side so no extra round trip is spent learning facts about stored
-// bytes. Oversize or cancellation seals the pipe with an error, which makes
-// minio-go abort its multipart transfer instead of completing silently.
+// Put pumps bounded chunks into the provider with exactly one buffer between source and
+// upload stream; the SHA-256 accumulates on this side, so no extra round trip is spent
+// learning facts about stored bytes. Oversize or cancellation seals the pipe with an error,
+// making minio-go abort its multipart transfer instead of completing silently.
 func (s *minIOStore) Put(ctx context.Context, key string, src io.Reader, maxBytes int64) (domain.PutResult, error) {
 	pipeReader, pipeWriter := io.Pipe()
 	hasher := sha256.New()

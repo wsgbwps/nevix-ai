@@ -4,10 +4,9 @@ import (
 	creationhttp "github.com/nevix-ai/server/internal/creation/interface/http"
 )
 
-// routes is the Module's static route table. Session and material routes
-// are creator-private (RequireActiveUser); the Provider Connection routes
-// declare their admin guard here, and the member capability route stays
-// active-user wide (spec #150 / ADR-0016).
+// routes is the Module's static route table. Session and material routes are creator-private
+// (RequireActiveUser); the Provider Connection routes declare their admin guard here, and the
+// member capability route stays active-user wide (spec #150 / ADR-0016).
 func (m *Module) routes() []creationhttp.Route {
 	return []creationhttp.Route{
 		{Method: "POST", Path: "/creation/sessions", Handler: m.sessions.CreateSession},

@@ -236,12 +236,10 @@ func (h *MaterialHandler) CreateReferenceMaterialFromResult(w http.ResponseWrite
 	encodeJSON(w, http.StatusCreated, toMaterialResource(material))
 }
 
-// DownloadMaterial answers GET /creation/materials/{materialID}, serving the
-// whole blob or one byte range. The storage window always opens whole and
-// Range serving seeks inside it, so neither adapter needs an extra round trip
-// per request shape. Hashing rides the stream: served bytes that stop
-// matching the recorded digest sever the connection instead of completing a
-// corrupt transfer.
+// DownloadMaterial answers GET /creation/materials/{materialID}, serving the whole blob or one
+// byte range. The storage window always opens whole and Range serving seeks inside it, so no
+// adapter needs an extra round trip; hashing rides the stream, and served bytes that stop
+// matching the recorded digest sever the connection instead of completing a corrupt transfer.
 func (h *MaterialHandler) DownloadMaterial(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathUUID(w, r, "materialID")
 	if !ok {
@@ -256,10 +254,9 @@ func (h *MaterialHandler) DownloadMaterial(w http.ResponseWriter, r *http.Reques
 	}
 	defer reader.Close()
 
-	// The contract documents 416 for multi-range, syntactically invalid, and
-	// unsatisfiable specs alike (contracts/creation.yaml RangeNotSatisfiable):
-	// present-but-invalid is rejected explicitly instead of silently serving
-	// the whole blob to a client that asked for a slice.
+	// The contract documents 416 for multi-range, syntactically invalid, and unsatisfiable
+	// specs alike (contracts/creation.yaml RangeNotSatisfiable): present-but-invalid is rejected
+	// explicitly instead of silently serving the whole blob to a client that asked for a slice.
 	servePartial, start, stop, satisfiable := resolveRange(intent, size)
 	if intent.present && (!intent.valid || !satisfiable) {
 		WriteError(w, &Error{

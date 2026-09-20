@@ -7,11 +7,10 @@ import (
 	"testing"
 )
 
-// fakeKapon stands in for the reviewed Kapon route in automated tests: it
-// answers GET /v1/models for accepted bearer keys and can be scripted per
-// scenario (token rejection, partial model visibility, temporary upstream
-// pressure). No production token ever appears — only locally minted
-// fixtures (spec #150: automation never uses production credentials).
+// fakeKapon stands in for the reviewed Kapon route in automated tests: it answers GET
+// /v1/models for accepted bearer keys and can be scripted per scenario (token rejection,
+// partial model visibility, temporary upstream pressure). No production token ever appears —
+// only locally minted fixtures (spec #150: automation never uses production credentials).
 type fakeKapon struct {
 	server *httptest.Server
 

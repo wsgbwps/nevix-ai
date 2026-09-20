@@ -23,19 +23,12 @@ import { testI18n } from './creation-workbench-i18n'
 import { RuntimeWorkbenchScope, type StoryOptions } from './creation-workbench.story'
 
 /**
- * Scroll-contract story: the page under the real App Shell geometry and the
- * REAL stylesheet. Unlike the other stories, this module imports
- * app/globals.css so Tailwind utilities actually apply — the default CT
- * environment ships no CSS at all, which would make every layout assertion
- * here meaningless. Keep this file out of specs that must stay CSS-less.
- *
- * The sidebar chrome below mirrors app/shell/app-shell.tsx: the real
- * SidebarBrand slot, the primary navigation group, and the Creation session
- * navigation. The real AppShell itself is not CT-mountable because of its
- * authentication providers, so anyone changing that shell's sidebar structure
- * has to change this mirror too. The shell's footer and rail stay out: the
- * footer needs the authentication session, and a second `Toggle sidebar`
- * control would make the story's own toggle ambiguous by role and name.
+ * Scroll-contract story: the page under the real App Shell geometry and the real
+ * stylesheet — it imports app/globals.css so Tailwind applies, so keep it out of specs
+ * that must stay CSS-less (CT ships no CSS). The sidebar chrome below mirrors
+ * app/shell/app-shell.tsx and must change with it (the AppShell is not CT-mountable: auth
+ * providers). Footer and rail stay out — the footer needs the auth session, and a second
+ * `Toggle sidebar` control would make the story's own toggle ambiguous by role and name.
  */
 export function CreationWorkbenchRealShellStory(options: StoryOptions = {}): React.JSX.Element {
   return (

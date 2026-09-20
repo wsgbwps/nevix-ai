@@ -92,12 +92,48 @@ func (r *MediaAssetRepository) ListVisible(ctx context.Context, owner domain.UUI
 	if filter.CreatedSince != nil {
 		conditions = append(conditions, "a.created_at >= "+add(filter.CreatedSince.UTC()))
 	}
+	if filter.CreatedUntil != nil {
+		// Exclusive bound: callers pass the instant after their inclusive end date.
+		conditions = append(conditions, "a.created_at < "+add(filter.CreatedUntil.UTC()))
+	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		if id, err := domain.ParseUUID(search); err == nil {
 			conditions = append(conditions, "a.id = "+add(id))
 		} else {
 			conditions = append(conditions, "FALSE")
 		}
+	}
+	from := assetFrom
+	if len(filter.Modes)+len(filter.Ratios)+len(filter.Resolutions) > 0 {
+		// ponytail: facet filters join the Generation Task holding the frozen Specification,
+		// paid for only when a facet is selected; move the facet columns onto
+		// creation_media_assets if this shows up in a slow query log.
+		from += `
+		JOIN creation_generation_tasks t ON t.id = a.task_id`
+	}
+	if len(filter.Modes) > 0 {
+		conditions = append(conditions, "t.specification->>'mode' = ANY("+add(filter.Modes)+")")
+	}
+	if len(filter.Resolutions) > 0 {
+		conditions = append(conditions, "t.specification->>'resolution' = ANY("+add(filter.Resolutions)+")")
+	}
+	if len(filter.Ratios) > 0 {
+		lower, upper := make([]float64, 0, len(filter.Ratios)), make([]float64, 0, len(filter.Ratios))
+		for _, ratio := range filter.Ratios {
+			lo, hi, ok := domain.RatioBounds(ratio)
+			if !ok {
+				continue
+			}
+			lower, upper = append(lower, lo), append(upper, hi)
+		}
+		// An Asset whose Specification says "adaptive" was sized by the
+		// provider, so no label describes its shape: it is selected by the
+		// shape its pixels actually have.
+		conditions = append(conditions, `(t.specification->>'ratio' = ANY(`+add(filter.Ratios)+`)
+			OR (t.specification->>'ratio' = 'adaptive' AND EXISTS (
+				SELECT 1 FROM unnest(`+add(lower)+`::float8[], `+add(upper)+`::float8[]) AS bounds(lo, hi)
+				WHERE a.height_px > 0
+				  AND a.width_px::float8 / a.height_px BETWEEN bounds.lo AND bounds.hi)))`)
 	}
 	direction, comparison := "DESC", "<"
 	if filter.Sort == domain.AssetOldest {
@@ -109,7 +145,7 @@ func (r *MediaAssetRepository) ListVisible(ctx context.Context, owner domain.UUI
 		conditions = append(conditions, fmt.Sprintf("(a.created_at, a.id) %s (%s, %s)", comparison, at, id))
 	}
 	args = append(args, limit+1)
-	query := `SELECT ` + assetColumns + assetFrom + `
+	query := `SELECT ` + assetColumns + from + `
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY a.created_at ` + direction + `, a.id ` + direction + `
 		LIMIT ` + fmt.Sprintf("$%d", len(args))

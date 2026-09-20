@@ -10,6 +10,7 @@ import {
   DialogTitle
 } from '../../../components/ui/dialog'
 import type { AssetDetailView, AssetLibraryPorts, MediaAssetView } from '../api/asset-library-http'
+import { modeLabelKey } from '../i18n/mode-keys'
 import type { AssetDetailStatus, AssetDownloadStatus } from '../model/use-asset-detail'
 import { AssetMedia } from './asset-media'
 
@@ -128,7 +129,7 @@ export function AssetDetailDialog({
                       <dt className="text-muted-foreground">{t('assets.details.type')}</dt>
                       <dd>{t(`assets.media.${detail.privateOrigin.specification.mediaType}`)}</dd>
                       <dt className="text-muted-foreground">{t('gallery.details.mode')}</dt>
-                      <dd>{detail.privateOrigin.specification.mode}</dd>
+                      <dd>{t(modeLabelKey(detail.privateOrigin.specification.mode))}</dd>
                       <dt className="text-muted-foreground">{t('composer.model.label')}</dt>
                       <dd className="truncate">{detail.privateOrigin.specification.model}</dd>
                       <dt className="text-muted-foreground">{t('inspiration.manifestVersion')}</dt>

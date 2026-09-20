@@ -12,12 +12,10 @@ import {
 
 const identityServer = readIdentityServerConfig()
 
-// The shortest image-generation tracer (issue #160): a member signs in,
-// submits a text-to-image task through the composer, the worker generates
-// against the fake Kapon route, and the verified PNG slot offers a working
-// download. Everything upstream of the fake — admission, queue, worker,
-// credential decryption, transfer, probe, slot verdict, Media Asset — is the
-// real production stack built by the E2E command.
+// The shortest image-generation tracer (issue #160): a member signs in and submits a
+// text-to-image task through the composer against the fake Kapon route. Everything
+// upstream of the fake — admission, queue, worker, credential decryption, transfer,
+// probe, slot verdict, Media Asset — is the real production stack built by the E2E command.
 test(
   'a creator generates one image and downloads the verified result',
   { tag: '@image' },

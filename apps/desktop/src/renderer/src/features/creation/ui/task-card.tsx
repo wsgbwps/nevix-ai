@@ -26,7 +26,7 @@ import type {
 } from '../api/generation-task-http'
 import type { ReferenceMaterialView } from '../api/go-creation-http'
 import type { MaterialThumbnailState, WorkbenchGalleryHandle } from '../model/use-workbench'
-import { modeKeys } from '../i18n/mode-keys'
+import { modeLabelKey } from '../i18n/mode-keys'
 import { statusKey } from '../i18n/gallery-keys'
 import { ImageWithSkeleton } from './media-with-skeleton'
 import { SlotCard } from './slot-card'
@@ -76,9 +76,8 @@ function slotAspectRatio(slot: GenerationSlotView, fallbackRatio: string | null)
 
 /**
  * Each card reads the prompt and parameters from the task's own frozen
- * Generation Specification — the detail's copy once it arrives, otherwise the
- * list summary's task snapshot — never the session draft, which may have
- * moved on.
+ * Generation Specification — the detail's copy once it arrives, else the list
+ * summary's snapshot — never the session draft, which may have moved on.
  */
 export function TaskCard({
   gallery,
@@ -343,9 +342,8 @@ function MetaSeparator(): React.JSX.Element {
 }
 
 // The card's reference pile replicates the deck's fan in a static, read-only
-// form (Reference Material, CONTEXT.md, covers the frozen-identity boundary).
-// The pitch compresses so any frozen reference count stays inside the header
-// row.
+// form (Reference Material, CONTEXT.md, covers the frozen-identity boundary);
+// the pitch compresses so any frozen count stays inside the header row.
 const fanRotations = [-5, 3, -3, 4, -4, 2.5]
 const pileShifts = [0, -1.5, 1.5]
 const pileCardWidth = 34
@@ -532,14 +530,7 @@ function TaskDetailsMenu({
                 <span className="line-clamp-6 whitespace-pre-wrap">{spec.prompt}</span>
               </DetailRow>
             )}
-            <DetailRow
-              label={t('gallery.details.mode')}
-              value={
-                spec.mode in modeKeys
-                  ? String(t(modeKeys[spec.mode as keyof typeof modeKeys]))
-                  : spec.mode
-              }
-            />
+            <DetailRow label={t('gallery.details.mode')} value={t(modeLabelKey(spec.mode))} />
             <DetailRow label={t('gallery.details.quantity')} value={String(spec.quantity)} />
             {spec.durationSeconds !== null && (
               <DetailRow

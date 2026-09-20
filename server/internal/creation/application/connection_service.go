@@ -20,12 +20,11 @@ const (
 	proofActionDelete  = "provider_connection.delete"
 )
 
-// ConnectionService orchestrates the instance's single AI Provider
-// Connection. High-risk commands (configure/replace/delete) consume an
-// exact-action proof first — consumption commits on its own, so any later
-// failure leaves the proof spent and the admin re-verifies. Provider calls
-// never run inside a write transaction; every persisted transition carries
-// its sanitized audit row in the same transaction (ADR-0016).
+// ConnectionService orchestrates the instance's single AI Provider Connection. High-risk commands
+// (configure/replace/delete) consume an exact-action proof first, and consumption commits on its
+// own: any later failure leaves the proof spent and the admin re-verifies. Provider calls never run
+// inside a write transaction; every persisted transition carries its sanitized audit row in the same
+// one (ADR-0016).
 type ConnectionService struct {
 	connections domain.ProviderConnectionRepository
 	storage     domain.ObjectStorageConnectionRepository
@@ -55,12 +54,10 @@ func (s *ConnectionService) GetActive(ctx context.Context) (domain.ProviderConne
 	return s.connections.GetActive(ctx)
 }
 
-// ActiveCallCredential implements the task worker's domain.CallCredentialSource:
-// it opens the active connection's sealed envelope for exactly one provider
-// call. It deliberately does not gate on admin state or credential verdict —
-// paused connections and rejected verdicts must not stop accepted jobs from
-// converging (poll/transfer); any failure here makes the caller fail closed
-// and hold. The plaintext lives only until the call returns.
+// ActiveCallCredential implements the task worker's domain.CallCredentialSource: it opens the active
+// connection's sealed envelope for exactly one provider call, deliberately ungated on admin state or
+// credential verdict — paused connections and rejected verdicts must not stop accepted jobs from
+// converging (poll/transfer) — and any failure here makes the caller fail closed and hold.
 func (s *ConnectionService) ActiveCallCredential(ctx context.Context) (string, error) {
 	connection, err := s.connections.GetActive(ctx)
 	if err != nil {
@@ -93,12 +90,9 @@ func (s *ConnectionService) MemberCapabilities(ctx context.Context) (domain.Medi
 	return domain.DeriveMediaCapabilities(&connection), nil
 }
 
-// Configure establishes the first connection: consume the create proof,
-// refuse a second active connection, establish the master key (no
-// ciphertext can exist yet), check the candidate against the fixed provider
-// route, then persist the sealed envelope with the check's states in one
-// audited transaction. A rejected candidate persists nothing — the proof
-// stays consumed.
+// Configure establishes the first connection: consume the create proof, refuse a second active
+// connection, then persist the sealed envelope with the check's states in one audited transaction.
+// A rejected candidate persists nothing — the proof stays consumed.
 func (s *ConnectionService) Configure(ctx context.Context, principal authz.Principal, proof, candidateKey string) (domain.ProviderConnection, error) {
 	if err := s.proofs.VerifyProof(ctx, principal, proofActionCreate, proof); err != nil {
 		return domain.ProviderConnection{}, err
@@ -164,12 +158,11 @@ func (s *ConnectionService) credentialKeyForFirstConnection(ctx context.Context)
 	return s.vault.EnsureKey()
 }
 
-// Replace switches the Provider Key through a candidate: consume the replace
-// proof, check the candidate while the stored envelope stays untouched, then
-// atomically swap envelope and states in one audited transaction. A failed
-// candidate leaves the previous credential and capabilities byte-identical.
-// It recovers a missing shared key only when no Object Storage ciphertext
-// exists; otherwise that connection's explicit recovery owns key creation.
+// Replace switches the Provider Key through a candidate: check it while the stored envelope stays
+// untouched, then atomically replace envelope and states in one audited transaction; a failed
+// candidate leaves the previous credential byte-identical. A missing shared key is recovered only
+// when no Object Storage ciphertext exists — otherwise that connection's explicit recovery owns key
+// creation.
 func (s *ConnectionService) Replace(ctx context.Context, principal authz.Principal, proof, candidateKey string) (domain.ProviderConnection, error) {
 	if err := s.proofs.VerifyProof(ctx, principal, proofActionReplace, proof); err != nil {
 		return domain.ProviderConnection{}, err
@@ -234,10 +227,9 @@ func (s *ConnectionService) credentialKeyForReplacement(ctx context.Context) (do
 	return key, nil
 }
 
-// Delete terminates the connection: consume the delete proof, then clear the
-// encrypted credential and stamp termination in one audited transaction. The
-// non-sensitive identity row stays for traceability; the singleton slot is
-// released for a future configure with a fresh identity.
+// Delete terminates the connection: consume the delete proof, then clear the encrypted credential
+// and stamp termination in one audited transaction. The identity row stays for traceability; the
+// singleton slot is released for a fresh configure.
 func (s *ConnectionService) Delete(ctx context.Context, principal authz.Principal, proof string) (domain.ProviderConnection, error) {
 	if err := s.proofs.VerifyProof(ctx, principal, proofActionDelete, proof); err != nil {
 		return domain.ProviderConnection{}, err
@@ -271,10 +263,8 @@ func (s *ConnectionService) Delete(ctx context.Context, principal authz.Principa
 	return terminated, nil
 }
 
-// ClearCreditBlock lifts the persistent provider 402 credit block after an
-// admin has resolved the balance with Kapon. The next explicit submission
-// probes the provider; a renewed 402 re-blocks. Audited like every other
-// connection lifecycle command.
+// ClearCreditBlock lifts the persistent provider 402 credit block after an admin resolved the balance
+// with Kapon. The next explicit submission probes the provider; a renewed 402 re-blocks.
 func (s *ConnectionService) ClearCreditBlock(ctx context.Context, principal authz.Principal) error {
 	err := s.runner.Run(ctx, func(sc domain.WriteScope) error {
 		if err := s.signals.ClearCreditBlocked(ctx, sc.Tx()); err != nil {
@@ -319,11 +309,10 @@ func (s *ConnectionService) SetAdminState(ctx context.Context, principal authz.P
 	return updated, nil
 }
 
-// Recheck decrypts the stored credential and repeats the connection check.
-// A master-key or envelope failure fails the connection closed
-// (credential_unavailable, both media unavailable) without ever writing a
-// key file; a transient provider condition rewrites nothing but the outcome
-// marker. Only a definitive verdict updates states.
+// Recheck decrypts the stored credential and repeats the connection check: a master-key or envelope
+// failure fails closed (credential_unavailable, both media unavailable) without ever writing a key
+// file; a transient provider condition rewrites nothing but the outcome marker, and only a definitive
+// verdict updates states.
 func (s *ConnectionService) Recheck(ctx context.Context, principal authz.Principal) (domain.ProviderConnection, error) {
 	connection, err := s.connections.GetActive(ctx)
 	if err != nil {

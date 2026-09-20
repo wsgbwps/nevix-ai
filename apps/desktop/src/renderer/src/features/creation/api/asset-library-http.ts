@@ -46,14 +46,31 @@ export interface AssetPageRequest {
   readonly cursor?: string | null
   readonly mediaType?: AssetMediaType
   readonly createdSince?: string
+  /** Exclusive upper bound; send the instant after the inclusive end date. */
+  readonly createdUntil?: string
   readonly sort?: AssetSort
-  readonly search?: string
+  /** Frozen Generation Specification facets; each repeats its own parameter. */
+  readonly modes?: readonly string[]
+  readonly ratios?: readonly string[]
+  readonly resolutions?: readonly string[]
   readonly limit?: number
+}
+
+/**
+ * The values a facet can take for the requested media, published by the list
+ * endpoint straight from the capability contract: not read off the page of
+ * results, and independent of the provider connection being usable.
+ */
+export interface AssetFacetVocabulary {
+  readonly modes: readonly string[]
+  readonly ratios: readonly string[]
+  readonly resolutions: readonly string[]
 }
 
 export interface AssetPage {
   readonly assets: readonly MediaAssetView[]
   readonly nextCursor: string | null
+  readonly facets: AssetFacetVocabulary | null
 }
 
 export interface AssetGenerationSpecification {
@@ -262,7 +279,31 @@ function parsePage(value: unknown): AssetPage | null {
     assets.push(parsed)
   }
   const nextCursor = nullableStringField(value, 'next_cursor')
-  return nextCursor === undefined ? null : { assets, nextCursor }
+  if (nextCursor === undefined) return null
+  const facets = source['facets'] === null ? null : parseFacets(source['facets'])
+  if (facets === undefined) return null
+  return { assets, nextCursor, facets }
+}
+
+function parseFacets(value: unknown): AssetFacetVocabulary | undefined {
+  const source = record(value)
+  if (source === null) return undefined
+  const modes = stringListField(source, 'modes')
+  const ratios = stringListField(source, 'ratios')
+  const resolutions = stringListField(source, 'resolutions')
+  if (modes === null || ratios === null || resolutions === null) return undefined
+  return { modes, ratios, resolutions }
+}
+
+function stringListField(source: Record<string, unknown>, field: string): readonly string[] | null {
+  const raw = source[field]
+  if (!Array.isArray(raw)) return null
+  const values: string[] = []
+  for (const entry of raw) {
+    if (typeof entry !== 'string') return null
+    values.push(entry)
+  }
+  return values
 }
 
 export function parseSpecification(value: unknown): AssetGenerationSpecification | null {
@@ -419,13 +460,18 @@ function parseDetail(value: unknown): AssetDetailView | null {
   return privateOrigin === null ? null : { asset, siblings, privateOrigin }
 }
 
-function query(requestValue: AssetPageRequest): Readonly<Record<string, string>> {
+function query(
+  requestValue: AssetPageRequest
+): Readonly<Record<string, string | readonly string[]>> {
   return {
     ...(requestValue.cursor ? { cursor: requestValue.cursor } : {}),
     ...(requestValue.mediaType ? { media_type: requestValue.mediaType } : {}),
     ...(requestValue.createdSince ? { created_since: requestValue.createdSince } : {}),
+    ...(requestValue.createdUntil ? { created_until: requestValue.createdUntil } : {}),
     ...(requestValue.sort ? { sort: requestValue.sort } : {}),
-    ...(requestValue.search ? { search: requestValue.search } : {}),
+    ...(requestValue.modes?.length ? { mode: requestValue.modes } : {}),
+    ...(requestValue.ratios?.length ? { ratio: requestValue.ratios } : {}),
+    ...(requestValue.resolutions?.length ? { resolution: requestValue.resolutions } : {}),
     limit: String(requestValue.limit ?? 24)
   }
 }

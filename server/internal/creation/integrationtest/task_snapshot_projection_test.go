@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// Issue #186: every task projection carries the creation intent frozen at
-// submit. The list summary's snapshot and the detail's specification must be
-// the same persisted row, so the gallery never needs the (device-local)
-// draft to render a task's header.
+// Issue #186: every task projection carries the creation intent frozen at submit. The list
+// summary's snapshot and the detail's specification must be the same persisted row, so the
+// gallery never needs the (device-local) draft to render a task's header.
 func TestTaskListAndDetailCarryFrozenIntentSnapshot(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{})
 	token := h.loginToken(t, creator, harnessPassword)

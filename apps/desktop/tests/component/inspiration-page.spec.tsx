@@ -207,7 +207,10 @@ test('waterfall chooses the shortest column and treats near-equal heights as a l
   mount,
   page
 }) => {
-  await page.setViewportSize({ width: 1280, height: 800 })
+  // Wide enough that the wall still lays out six columns once the page gutter
+  // has taken its share: the probe's first six cards each need their own
+  // column for the seventh to have a shortest-vs-leftmost choice to make.
+  await page.setViewportSize({ width: 1920, height: 1080 })
   await mount(<InspirationStory state="layout-probe" />)
 
   const card = (id: number): ReturnType<typeof page.getByTestId> =>
@@ -224,8 +227,10 @@ test('waterfall chooses the shortest column and treats near-equal heights as a l
 
   const thirdBottom = third.y + third.height
   const sixthBottom = sixth.y + sixth.height
-  expect(thirdBottom - sixthBottom).toBeGreaterThanOrEqual(8)
-  expect(thirdBottom - sixthBottom).toBeLessThanOrEqual(16)
+  // Shorter than third, but inside columnHeightTolerance (12) — the branch the
+  // left-biased pick below comes from.
+  expect(thirdBottom - sixthBottom).toBeGreaterThan(0)
+  expect(thirdBottom - sixthBottom).toBeLessThanOrEqual(12)
   expect(seventh.x).toBeCloseTo(third.x, 0)
   expect(seventh.y).toBeCloseTo(thirdBottom + 2, 0)
   expect(eighth.x).toBeCloseTo(sixth.x, 0)
@@ -258,7 +263,8 @@ test('waterfall recalculates its responsive column count', async ({ mount, page 
 })
 
 test('failed media keeps the same precomputed shortest-column layout', async ({ mount, page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 })
+  // The same six-column width the tie probe pins down.
+  await page.setViewportSize({ width: 1920, height: 1080 })
   await mount(<InspirationStory state="layout-failed" />)
   await expect(page.getByText('Media failed to load').first()).toBeVisible()
 

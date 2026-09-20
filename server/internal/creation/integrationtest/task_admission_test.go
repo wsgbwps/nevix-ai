@@ -12,10 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Task admission (issue #159) through the Module's public HTTP seam: atomic
-// creation of specification/task/slots/job/queue/reservation, creator-scoped
-// idempotency, draft revision and capability revalidation, and the
-// fixed-order governance matrix.
+// Task admission (issue #159) through the Module's public HTTP seam: atomic creation of
+// specification/task/slots/job/queue/reservation, creator-scoped idempotency, draft-revision
+// and capability revalidation, and the fixed-order governance matrix.
 
 // countRows is an assertion helper over the owner DDL credential.
 func countRows(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int {
@@ -161,10 +160,9 @@ func TestTaskAdmissionRequiresObjectStorageBeforeProviderWork(t *testing.T) {
 	}
 }
 
-// TestTaskAdmissionRejectsIntentPayloads covers the intent-payload
-// rejections: incomplete intent, foreign manifest version, values outside the
-// current manifest, and references that violate the structural envelope or the
-// session's material facts. Nothing is created on any rejection.
+// TestTaskAdmissionRejectsIntentPayloads covers the intent-payload rejections: incomplete intent,
+// foreign manifest version, values outside the current manifest, and references violating the
+// structural envelope or the session's material facts. Nothing is created on any rejection.
 func TestTaskAdmissionRejectsIntentPayloads(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{})
 	token := h.loginToken(t, creator, harnessPassword)
@@ -258,11 +256,10 @@ func TestTaskAdmissionRejectsIntentPayloads(t *testing.T) {
 	}
 }
 
-// TestTaskAdmissionEnforcesPerModelReferenceCeiling: the reference-image
-// count envelope is per model (pro 10, base 14, user-confirmed 2026-09-01).
-// The same eleven-reference draft is stale on the pro model and admits on
-// the base model; the base model admits exactly fourteen, and the draft's
-// structural envelope refuses anything beyond the widest vendor bound.
+// TestTaskAdmissionEnforcesPerModelReferenceCeiling: the reference-image count envelope is per
+// model (pro 10, base 14, user-confirmed 2026-09-01). The same eleven-reference draft is stale
+// on pro and admits on base; base admits exactly fourteen, and the structural envelope refuses
+// anything beyond the widest vendor bound.
 func TestTaskAdmissionEnforcesPerModelReferenceCeiling(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{})
 	token := h.loginToken(t, creator, harnessPassword)

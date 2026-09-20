@@ -8,12 +8,9 @@ import type {
 import type { ScriptedTask } from './fixtures/creation-workbench.story'
 import type { LocalDraftRecord } from '../src/renderer/src/features/creation/model/draft-store'
 
-// Scroll-contract tests for the Creation Workbench inside the App Shell.
-// This spec deliberately lives apart from creation-workbench.spec.tsx: its
-// story imports the real stylesheet, and Playwright CT loads a spec module's
-// whole import graph for every test in the file — keeping the CSS import in
-// a dedicated story file is what leaves the other specs' CSS-less geometry
-// untouched.
+// Scroll-contract tests for the Creation Workbench in the App Shell. Kept apart
+// from creation-workbench.spec.tsx: its story imports the real stylesheet, and CT
+// loads a spec's whole import graph per test, so the other specs stay CSS-less.
 
 const scriptedSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'
 
@@ -321,13 +318,11 @@ test('workspace and session-list scrolling stay independent in the shell', async
   mount,
   page
 }) => {
-  // Regression for the coupled-scrolling report: with tall gallery content,
-  // wheel-scrolling the workspace also scrolled the session list (and vice
-  // versa) — the shell's min-h-svh-only wrapper gave the layout no definite
-  // viewport height, so both `overflow-y-auto` regions rendered at content
-  // height and the wheel chained to the document, scrolling the whole shell
-  // as one block. The gallery must scroll inside the workspace scroller and
-  // the session list inside its own, with neither moving the other.
+  // Regression (coupled scrolling): the shell's min-h-svh-only wrapper gave the
+  // layout no definite viewport height, so both `overflow-y-auto` regions sat at
+  // content height and the wheel chained to the document. The gallery must scroll
+  // inside the workspace scroller and the session list inside its own, neither
+  // moving the other.
   const tallTasks = tallImageTasks('scroll')
   // Enough rows for the session list to overflow its own column too; the
   // first row keeps the scripted draft/tasks session for the selection below.
@@ -375,11 +370,10 @@ test('workspace and session-list scrolling stay independent in the shell', async
   const listTopAfter = (await list.boundingBox())!
   expect(listTopAfter.y).toBeCloseTo(listTopBefore.y, 0)
 
-  // Wheel inside the session list: the list must scroll in its own column and
-  // the workspace must stay exactly where it is. The workspace wheel above
-  // lands at the bottom, where the expanding composer's bottom-reserve keeps
-  // bumping scrollTop while its spring settles — that tracking is intended,
-  // so wait for it to go still before the exact-position comparison.
+  // Wheel inside the session list: it must scroll there and the workspace stay
+  // put. The workspace wheel above lands at the bottom, where the expanding
+  // composer's bottom-reserve keeps bumping scrollTop while its spring settles —
+  // intended, so wait for stillness before the exact-position comparison.
   await expect
     .poll(
       async () => {
@@ -662,11 +656,9 @@ test('the composer collapses away from the bottom and re-expands at the bottom o
   mount,
   page
 }) => {
-  // Presence contract (完整态/紧凑态): the composer is expanded while the
-  // workspace scroller sits at the bottom, collapses to the compact form on
-  // scrolling away, and clicking the prompt area pins the expanded form until
-  // the next scroll — blur alone must not collapse it. The pill anchors to
-  // the composer container's top-right corner in both states.
+  // Presence contract (完整态/紧凑态): clicking the prompt area pins the expanded
+  // form until the next scroll — blur alone must not collapse it — and the pill
+  // anchors to the composer container's top-right corner in both states.
   await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks: tallImageTasks('fold') }} />)
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
   await expect(page.getByTestId('composer')).toBeVisible()
@@ -685,10 +677,7 @@ test('the composer collapses away from the bottom and re-expands at the bottom o
   const reservePx = await scroller.evaluate((el) => parseFloat(getComputedStyle(el).paddingBottom))
   expect(reservePx).toBeGreaterThanOrEqual(expandedBox.height + 20)
 
-  // Scrolling away collapses the form overall — narrower centered bar, lower
-  // height — with capability controls hidden, the submit circle reachable,
-  // and the pill above the composer's top-right corner. A bound pile scales
-  // down proportionally instead of holding the row tall.
+  // A bound pile scales down proportionally instead of holding the row tall.
   await userScrollTo(scroller, 'top')
   await expect(params).toBeHidden()
   const compactBox = (await composer.boundingBox())!
@@ -747,10 +736,8 @@ test('the composer collapses away from the bottom and re-expands at the bottom o
   await userScrollTo(scroller, 'bottom')
   await expect(params).toBeVisible()
 
-  // From the compact form, the deck's add entry still opens the material
-  // picker — and expands the composer with it. The press releases well after
-  // the pin's spring moved the entry, so the picker must be anchored at
-  // pointerdown, not at the release-time click.
+  // The press releases well after the pin's spring moved the entry, so the
+  // picker must be anchored at pointerdown, not at the release-time click.
   await userScrollTo(scroller, 'top')
   await expect(params).toBeHidden()
   const addEntry = page.getByRole('button', { name: 'Add reference material', exact: true })
@@ -791,11 +778,10 @@ test('the compact form also shrinks the empty deck add tile', async ({ mount, pa
   expect(compactTileHeight).toBeLessThan(expandedTileHeight - 12)
 })
 
-// The wheel-flick regression (issue #195 follow-up): a small upward wheel
-// gesture near the top loads exactly one older page, and from the moment the
-// gesture ends the reading anchor must hold pixel-stable on every frame —
-// not merely settle eventually — with no auto-chained page loads. Anchor
-// corrections that reverse the reader's own scroll read as a bounce.
+// The wheel-flick regression (issue #195 follow-up): a small upward wheel gesture
+// near the top loads exactly one older page and never auto-chains; from the moment it
+// ends the reading anchor must hold pixel-stable on every frame — not merely settle.
+// Corrections that reverse the reader's own scroll read as a bounce.
 test('a small upward wheel gesture holds the reading anchor while one older page lands', async ({
   mount,
   page

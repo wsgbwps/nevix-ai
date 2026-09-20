@@ -10,6 +10,7 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 > 2026-09-02：Draft 确定为设备本地状态：仅留存于当前设备、多设备互不相通，提交请求携带完整生成意图，服务端不再保存可编辑草稿。
 > 2026-09-06：Workbench Context 入册，命名创作台「正对着哪个创作内容」及其切换语义，取代散落的 surface / 视图状态说法。
 > 2026-09-07：Generation Parameter 入册，命名生成意图的参数字段族及其单一权威清单，取代散落的「任务参数」说法。
+> 2026-09-20：结果移除入册，命名「删除 Media Asset 在来源 TaskCard 上的呈现」，与「删除任务结果」这一会被读成改写终态的说法区分（[ADR-0021](../../docs/adr/0021-asset-deletion-hides-task-results.md)，[#262](https://github.com/wsgbwps/nevix-ai/issues/262)）。
 
 **User**:
 使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
@@ -130,6 +131,10 @@ _Avoid_: scroll restore, 滚动位置记忆
 **Asset Library**:
 AI Creation Domain 拥有的个人媒体资产浏览与复用页面，只展示当前 User 自己的生成历史与 Media Asset；媒体资产的独立生命周期不使该页面成为独立 Domain，不与 renderer 静态 assets 混同。
 _Avoid_: Media Asset Domain, Asset Workspace
+
+**结果移除**:
+逻辑删除 Media Asset 后在来源 TaskCard 上的呈现：该槽位不再展示结果，任务的 `succeeded` 终态、成功计数与用量事实一律不变，字节仍与已删除 Asset 共享；当任务曾形成的全部 Media Asset 都被逻辑删除时，整个任务不再出现在 Creation Workbench。它是一次可见性操作，不回收字节、不改写终态。
+_Avoid_: 删除任务结果（会被读成改写终态）, 槽位回退, 结果隐藏
 
 **Authentication Domain**:
 以凭据验证和当前设备 Session 生命周期为范围的 Desktop Domain，不包含 User 或账号管理。

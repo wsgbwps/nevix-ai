@@ -341,10 +341,9 @@ func TestCancelConvergesBestEffort(t *testing.T) {
 	}
 }
 
-// TestCancelOfReflessSubmitConverges: a cancel requested while the job is
-// held submitting without an external identity (transient-rejection backoff)
-// converges cancelled — the cancelling path never touches a missing
-// external ref.
+// TestCancelOfReflessSubmitConverges: a cancel requested while the job is held submitting
+// without an external identity (transient-rejection backoff) converges cancelled — the
+// cancelling path never touches a missing external ref.
 func TestCancelOfReflessSubmitConverges(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
@@ -735,10 +734,9 @@ func TestLocalCrashNeverFabricatesTimeout(t *testing.T) {
 	_ = context.Background()
 }
 
-// TestCompletedJobSurvivesCredentialUnavailability: a job that already
-// settled provider-side (persist-phase crash recovery) holds as transient
-// while the call credential is unresolvable, and its outputs still form
-// assets once the credential returns — the completed job's outputs are never
+// TestCompletedJobSurvivesCredentialUnavailability: a job already settled provider-side
+// (persist-phase crash recovery) holds as transient while the call credential is unresolvable,
+// and its outputs still form assets once it returns — a completed job's outputs are never
 // discarded as a nil-reason terminal failure (issue #160 review).
 func TestCompletedJobSurvivesCredentialUnavailability(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
@@ -813,11 +811,10 @@ func TestCompletedJobSurvivesCredentialUnavailability(t *testing.T) {
 	}
 }
 
-// TestTransientRejectionAttemptLimitConverges: the provider's four-step
-// transient-submit ladder is also the durable call budget. Once spent, the
-// task exposes a retryable terminal verdict instead of silently waiting on
-// the queue-wide 240-attempt allowance (issue #160 field report:
-// last_outcome=transient_rejected, no error).
+// TestTransientRejectionAttemptLimitConverges: the provider's four-step transient-submit ladder
+// is also the durable call budget. Once spent, the task exposes a retryable terminal verdict
+// instead of silently waiting on the queue-wide 240-attempt allowance (issue #160 field
+// report: last_outcome=transient_rejected, no error).
 func TestTransientRejectionAttemptLimitConverges(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)

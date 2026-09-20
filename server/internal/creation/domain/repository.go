@@ -7,11 +7,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// SessionRepository is the persistence port for the session aggregate. Every
-// method is creator-scoped: ownership and logical deletion are enforced by
-// the queries themselves, so a repository caller can never observe another
-// member's session even by guessing ids (ADR-0016 visibility model). Write
-// methods receive the caller's verified transaction; reads run off the pool.
+// SessionRepository is the persistence port for the session aggregate. Every method is
+// creator-scoped: ownership and logical deletion are enforced by the queries themselves,
+// so a caller can never observe another member's session even by guessing ids (ADR-0016
+// visibility model). Writes take the caller's verified transaction; reads run off the pool.
 type SessionRepository interface {
 	Create(ctx context.Context, tx TxExecutor, owner UUID, name string) (Session, error)
 	// Get resolves one active (non-deleted) session owned by the acting user.
@@ -82,10 +81,9 @@ type CompoundCursor struct {
 	ID        UUID
 }
 
-// ProviderConnectionRepository is the persistence port for the instance's
-// single AI Provider Connection aggregate. Every method addresses the active
-// (non-terminated) row; the singleton partial unique index is the durable
-// backstop for concurrent creates.
+// ProviderConnectionRepository is the persistence port for the instance's single AI
+// Provider Connection aggregate. Every method addresses the active (non-terminated) row;
+// the singleton partial unique index is the durable backstop for concurrent creates.
 type ProviderConnectionRepository interface {
 	// Insert persists the first active connection inside the caller's write
 	// transaction; a concurrent winner surfaces ErrConnectionExists.
@@ -110,10 +108,9 @@ type ProviderConnectionRepository interface {
 	Terminate(ctx context.Context, tx TxExecutor, id UUID) error
 }
 
-// WriteScope is the domain view of one in-flight verified write
-// transaction: statement execution plus after-commit effect registration.
-// Application callbacks see only this; begin/commit/rollback discipline
-// stays inside the Module's write-transaction implementation.
+// WriteScope is the domain view of one in-flight verified write transaction: statement
+// execution plus after-commit effect registration. Application callbacks see only this;
+// begin/commit/rollback discipline stays inside the write-transaction implementation.
 type WriteScope interface {
 	Tx() TxExecutor
 	AfterCommit(effect func())
@@ -133,12 +130,10 @@ type (
 	TxExecutor = pgx.Tx
 )
 
-// GenerationTaskRepository is the persistence port for the generation task
-// kernel. Admission methods run inside the caller's verified write
-// transaction so specification, task, slots, job, queue item, and
-// reservation commit or roll back together; queries are creator-scoped by
-// the SQL predicates themselves; guarded transitions return false when the
-// one-way migration loses a race so callers can never fabricate state.
+// GenerationTaskRepository is the persistence port for the generation task kernel.
+// Admission methods run inside the caller's verified write transaction so the whole
+// admission commits or rolls back together; queries are creator-scoped by their own SQL;
+// a guarded transition losing a race returns false, so callers can never fabricate state.
 type GenerationTaskRepository interface {
 	// LoadSessionForAdmission resolves the active owned session inside the
 	// admission transaction, so liveness and ownership share the freeze's
@@ -161,10 +156,9 @@ type GenerationTaskRepository interface {
 	// CountActiveReservations counts the creator's unreleased concurrency
 	// reservations for one media pool.
 	CountActiveReservations(ctx context.Context, tx TxExecutor, owner UUID, media MediaType) (int, error)
-	// InsertAdmittedTask persists task, all slots, the first pending job,
-	// the queue item, and the reservation atomically in the caller's
-	// transaction, and fills the task's database-generated timestamps.
-	// Any failure rolls the whole admission back.
+	// InsertAdmittedTask persists task, all slots, the first pending job, the queue item,
+	// and the reservation atomically in the caller's transaction, and fills the task's
+	// database-generated timestamps. Any failure rolls the whole admission back.
 	InsertAdmittedTask(ctx context.Context, tx TxExecutor, admitted *AdmittedTask) error
 	// BindObjectStorageConnection records that output transfer has begun
 	// against the singleton storage connection. The binding is internal and
@@ -214,10 +208,9 @@ type GenerationTaskRepository interface {
 	// LoadSlotOutcomes reads every slot's current verdict (nil for pending).
 	LoadSlotOutcomes(ctx context.Context, tx TxExecutor, taskID UUID) ([]SlotOutcome, error)
 
-	// ClaimNextQueueItem atomically claims the next runnable queue item with
-	// FOR UPDATE SKIP LOCKED outside any long transaction; ok is false when
-	// nothing is runnable. The lease bounds the claim; worker crashes
-	// release it by expiry.
+	// ClaimNextQueueItem atomically claims the next runnable queue item with FOR UPDATE SKIP
+	// LOCKED outside any long transaction; ok is false when nothing is runnable. The lease
+	// bounds the claim, and worker crashes release it by expiry.
 	ClaimNextQueueItem(ctx context.Context, leaseOwner string, lease time.Duration) (ClaimedQueueItem, bool, error)
 	// ReleaseQueueItem makes a claimed item runnable again at runAfter and
 	// drops the lease, inside the caller's transaction.
@@ -247,10 +240,9 @@ type GovernanceRepository interface {
 	ListPolicies(ctx context.Context) (*GovernancePolicy, []GovernancePolicy, error)
 }
 
-// ConnectionSignals is the narrow port the task kernel uses to persist
-// provider signals on the connection aggregate: the persistent 402 credit
-// block. Pause/resume stays on the connection commands; this port only
-// records and clears the block inside the caller's transaction.
+// ConnectionSignals is the narrow port the task kernel uses to persist the persistent 402
+// credit block on the connection aggregate. Pause/resume stays on the connection
+// commands; this port only records and clears the block inside the caller's transaction.
 type ConnectionSignals interface {
 	// MarkCreditBlocked stamps credit_blocked_at on the active connection;
 	// idempotent when already blocked.

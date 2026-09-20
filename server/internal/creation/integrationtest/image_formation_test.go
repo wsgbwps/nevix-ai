@@ -9,10 +9,9 @@ import (
 	"time"
 )
 
-// Slice-10 image-formation scenarios (issue #160): the generation call
-// carries the decrypted Provider Key and the pinned (ratio, resolution)
-// payload, and every verified output forms exactly one immutable image Media
-// Asset while rejections and unverifiable outputs form none.
+// Slice-10 image-formation scenarios (issue #160): the generation call carries the decrypted
+// Provider Key and the pinned (ratio, resolution) payload, and every verified output forms
+// exactly one immutable image Media Asset while rejections and unverifiable outputs form none.
 
 // TestImageSubmitCarriesCredentialAndPinnedSize: the worker's generation
 // call authenticates with the configured connection key and transmits the
@@ -368,10 +367,9 @@ func TestImageOutputHTTPFailureKeepsConcreteDiagnostic(t *testing.T) {
 	}
 }
 
-// TestImageSubmitAcceptsFullLengthUnicodePrompt: the prompt envelope counts
-// Unicode characters (spec 图片合同), not bytes — a legal 2000-rune CJK
-// prompt (6000 bytes) must submit instead of failing as an over-length
-// draft.
+// TestImageSubmitAcceptsFullLengthUnicodePrompt: the prompt envelope counts Unicode characters
+// (spec 图片合同), not bytes — a legal 2000-rune CJK prompt (6000 bytes) must submit instead
+// of failing as an over-length draft.
 func TestImageSubmitAcceptsFullLengthUnicodePrompt(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)

@@ -1,11 +1,7 @@
-// Package integrationtest drives the Creation Module through its only public
-// seams — LoadConfig/NewModule/Register/RunWorkers plus the mounted HTTP
-// surface — against real PostgreSQL, the real Identity Module (mounted like
-// the composition root does, so principals come from actual logins), and an
-// explicitly injected test-only Object Storage fake. Without
-// NEVIX_CREATION_INTEGRATION_REQUESTED every test skips when its environment
-// is missing; with it set, a missing environment is fatal and the run must
-// finish with zero skips.
+// Package integrationtest drives the Creation Module through its only public seams against real
+// PostgreSQL, the real Identity Module (mounted like the composition root, so principals come from
+// actual logins), and an injected test-only Object Storage fake. Without
+// NEVIX_CREATION_INTEGRATION_REQUESTED a missing environment skips every test; with it set, fatal.
 package integrationtest
 
 import (

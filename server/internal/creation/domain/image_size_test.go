@@ -2,11 +2,10 @@ package domain
 
 import "testing"
 
-// The pixel size table is the vendor 豆包生图 contract (OpenAPI x-size-map)
-// shared by three consumers: the manifest's published sizes, the Kapon
-// adapter's wire size, and the Workbench display. These tests pin the table's
-// completeness against the accepted capability cross product, so a model,
-// tier, or ratio added to the manifest immediately demands its size entry.
+// The pixel size table is the vendor 豆包生图 contract (OpenAPI x-size-map) shared by the
+// manifest's sizes, the Kapon adapter's wire size, and the Workbench display. These tests
+// pin its completeness against the accepted cross product, so a new model, tier, or
+// ratio immediately demands its size entry.
 func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 	for _, model := range AcceptedImageModels() {
 		for _, ratio := range AcceptedImageRatios() {

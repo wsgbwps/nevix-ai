@@ -1,9 +1,6 @@
-// Package creationhttp is the Creation Module's transport seam: the static
-// route table with its guards and OPTIONS twins, the single error envelope,
-// and the JSON command adapters. The wire mechanics deliberately mirror the
-// Identity Module's command skeleton byte-for-byte — the {"error","message"}
-// envelope is a cross-runtime contract — without importing another Module's
-// internals (AGENTS.md: business Modules never import each other).
+// Package creationhttp is the Creation Module's transport seam: the static route table with its
+// guards and OPTIONS twins, the single error envelope, and the JSON command adapters. The wire
+// mirrors Identity's {"error","message"} envelope, a cross-runtime contract (AGENTS.md).
 package creationhttp
 
 import (
@@ -219,10 +216,9 @@ type Guards struct {
 	Admin      func(http.Handler) http.Handler
 }
 
-// Mount registers the route table: each handler runs behind its declared
-// guard plus the must-change-password gate, and every path receives an
-// automatic OPTIONS twin so browser preflights stay answerable inside a chi
-// Group.
+// Mount registers the route table: each handler runs behind its declared guard plus the
+// must-change-password gate, and every path gets an automatic OPTIONS twin so browser
+// preflights stay answerable inside a chi Group.
 func Mount(r chi.Router, routes []Route, guards Guards) {
 	if guards.ActiveUser == nil {
 		panic("creationhttp: Mount requires the ActiveUser guard")
@@ -251,10 +247,9 @@ func requireSecureTransport(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// rejectPendingPasswordChange answers 403 password_change_required while the
-// caller's account still owes the forced first-login change. The gate sits
-// inside the guard so the principal is already resolved; clearing the flag
-// takes effect on the very next request.
+// rejectPendingPasswordChange answers 403 password_change_required while the caller's account
+// still owes the forced first-login change. The gate sits inside the guard so the principal is
+// already resolved; clearing the flag takes effect on the very next request.
 func rejectPendingPasswordChange(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if principal, ok := authz.PrincipalFrom(r.Context()); ok && principal.MustChangePassword {

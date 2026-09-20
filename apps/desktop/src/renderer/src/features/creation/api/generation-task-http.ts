@@ -1,9 +1,8 @@
 /**
- * Generation Task half of the trusted data plane (contracts/creation.yaml,
- * issue #159). Shares the request helper and failure mapping with the
- * session/material client so a rejection can never be read as a success; the
- * SSE stream is a fetch-stream with the bearer in the header (never the URL)
- * and no Last-Event-ID semantics — a lost stream is answered by a refetch.
+ * Generation Task half of the trusted data plane (contracts/creation.yaml, issue #159). Shares the
+ * request helper and failure mapping with the session/material client, so a rejection can never
+ * read as a success; the SSE stream is a fetch-stream with the bearer in the header (never the URL)
+ * and no Last-Event-ID — a lost stream is answered by a refetch.
  */
 import type { CreationApiResult, DraftReferenceView, MaterialKind } from './go-creation-http'
 import { request } from './go-creation-http'
@@ -371,10 +370,9 @@ function parseSlot(payload: unknown): GenerationSlotView | null {
 
 const SPEC_REFERENCE_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'audio'])
 
-// Parses one present specification; null on any malformation so the caller
-// fails the whole detail closed — a guessed prompt must never render as the
-// task's frozen intent (the same strictness as a malformed failure
-// diagnostic).
+// Parses one present specification; null on any malformation so the caller fails
+// the whole detail closed — a guessed prompt must never render as the task's
+// frozen intent.
 function parseSpecification(raw: unknown): GenerationSpecificationView | null {
   if (!isRecord(raw)) return null
   const wireKeys = GENERATION_PARAMETER_WIRE_KEYS
@@ -457,8 +455,8 @@ export interface TaskListPageRequest {
 }
 
 /**
- * Creates the generation-task client over one configured server URL. Paths
- * mirror contracts/creation.yaml exactly; parsing fails closed.
+ * The generation-task client over one configured server URL. Paths mirror
+ * contracts/creation.yaml exactly; parsing fails closed.
  */
 export function createGenerationTaskClient(serverUrl: string): {
   submitTask(
@@ -571,12 +569,11 @@ export function createGenerationTaskClient(serverUrl: string): {
 }
 
 /**
- * Opens the creator-scoped SSE invalidation stream. The bearer rides the
- * Authorization header; there is no Last-Event-ID — the hook answers a lost
- * stream with a refetch and polling convergence. `onInvalidation` fires on
- * each invalidation block; `onStateChange` mirrors liveness so the caller can
- * fall back to polling while the stream is down. A confirmed 401 is reported
- * through `onUnauthorized` and ends the stream instead of retrying.
+ * Opens the creator-scoped SSE invalidation stream. The bearer rides the Authorization header;
+ * there is no Last-Event-ID — a lost stream is answered by a refetch and polling convergence.
+ * `onInvalidation` fires per invalidation block; `onStateChange` mirrors liveness so the caller
+ * can fall back to polling. A confirmed 401 goes through `onUnauthorized` and ends the stream
+ * instead of retrying.
  */
 export function openCreationEventStream(
   serverUrl: string,

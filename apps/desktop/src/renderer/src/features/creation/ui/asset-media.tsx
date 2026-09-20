@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ImageIcon, LoaderCircleIcon, VideoIcon } from 'lucide-react'
+import { CheckIcon, ImageIcon, LoaderCircleIcon, VideoIcon } from 'lucide-react'
 import type { AssetLibraryPorts, MediaAssetView } from '../api/asset-library-http'
 import { useAssetContent, WALL_PREVIEW_MAX_BYTES, type AssetContentPort } from './use-asset-content'
 
@@ -111,14 +111,26 @@ export function AssetCard({
       <div className="bg-muted relative aspect-[4/3] overflow-hidden rounded-xl border">
         <AssetMedia asset={asset} ports={ports} />
         {selecting ? (
-          <label className="bg-background/90 absolute top-2 left-2 grid size-8 place-items-center rounded-md shadow-sm">
+          // The whole card toggles: a 16px box is a poor hit target, and the
+          // focus ring belongs on the card the way it is on the open button.
+          <label className="has-[:focus-visible]:ring-ring absolute inset-0 cursor-pointer rounded-xl outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset">
             <input
               type="checkbox"
               checked={selected}
               onChange={onSelect}
               aria-label={t('assets.selectOne', { id: asset.id })}
-              className="size-4"
+              // Not `sr-only`: its clip-path would empty the hit region, and
+              // this input is the card's click target rather than decoration.
+              className="size-full cursor-pointer opacity-0"
             />
+            <span
+              aria-hidden
+              className={`pointer-events-none absolute top-2 left-2 grid size-4 place-items-center rounded-[4px] border ${
+                selected ? 'border-primary bg-primary text-primary-foreground' : 'bg-background/80'
+              }`}
+            >
+              {selected ? <CheckIcon className="size-3" aria-hidden /> : null}
+            </span>
           </label>
         ) : (
           <button
@@ -128,20 +140,6 @@ export function AssetCard({
             className="focus-visible:ring-ring absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-inset"
           />
         )}
-        <span className="bg-background/90 text-foreground absolute right-2 bottom-2 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] shadow-sm">
-          {asset.mediaType === 'image' ? (
-            <ImageIcon className="size-3" aria-hidden />
-          ) : (
-            <VideoIcon className="size-3" aria-hidden />
-          )}
-          {t(`assets.media.${asset.mediaType}`)}
-        </span>
-      </div>
-      <div className="mt-2 flex min-w-0 items-center justify-between gap-2 px-0.5 text-xs">
-        <span className="truncate font-medium">{asset.creator.displayName}</span>
-        <time className="text-muted-foreground shrink-0" dateTime={asset.createdAt}>
-          {new Date(asset.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </time>
       </div>
     </li>
   )

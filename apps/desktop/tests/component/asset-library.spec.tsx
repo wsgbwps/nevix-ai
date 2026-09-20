@@ -19,7 +19,7 @@ for (const viewport of [
 }
 
 for (const viewport of [
-  { width: 960, height: 600, columns: 5, filterRows: 2 },
+  { width: 960, height: 600, columns: 5, filterRows: 1 },
   { width: 1280, height: 800, columns: 8, filterRows: 1 }
 ]) {
   test(`dense wall uses ${viewport.columns} compact columns at ${viewport.width}x${viewport.height}`, async ({
@@ -45,8 +45,11 @@ for (const viewport of [
     expect(layout.maxWidth).toBeLessThan(190)
     expect(layout.maxRight).toBeLessThanOrEqual(viewport.width)
 
-    const filterRows = await page.getByTestId('asset-filters').evaluate((form) => {
-      const tops = [...form.children].map((child) => Math.round(child.getBoundingClientRect().top))
+    const filterRows = await page.getByTestId('asset-filters').evaluate((filters) => {
+      // Controls only: the divider between them is shorter than a row.
+      const tops = [...filters.querySelectorAll('button')].map((control) =>
+        Math.round(control.getBoundingClientRect().top)
+      )
       return new Set(tops).size
     })
     expect(filterRows).toBe(viewport.filterRows)
@@ -56,26 +59,74 @@ for (const viewport of [
 
 test('filters map to the page port and reset keyset position', async ({ mount, page }) => {
   await mount(<AssetLibraryStory />)
-  await page.getByLabel('Media type').selectOption('video')
-  await page.getByLabel('Created since').fill('2026-09-01')
-  await page.getByLabel('Sort').selectOption('oldest')
-  await page.getByLabel('Search').fill('Aster')
-  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await page
+    .getByRole('group', { name: 'Media type' })
+    .getByRole('button', { name: 'Video' })
+    .click()
+  await page.getByRole('button', { name: 'Time' }).click()
+  await page.getByLabel('Start date').fill('2026-09-01')
+  await page.getByLabel('End date').fill('2026-09-10')
+  await page.getByRole('button', { name: 'Time' }).click()
+  await page.getByRole('button', { name: 'Sort' }).click()
+  await page.getByRole('menuitemradio', { name: 'Oldest first' }).click()
+  await page.getByRole('button', { name: 'Filter' }).click()
+  await page.getByText('Text to video').click()
+  await page.getByText('First frame').click()
+  await page.getByText('16:9').click()
+  await page.getByText('720p').click()
+  // Day boundaries are local, and the end date is sent as the next day's instant.
+  const createdSince = new Date(2026, 8, 1).toISOString()
+  const createdUntil = new Date(2026, 8, 11).toISOString()
   await expect
     .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
     .toMatchObject({
       mediaType: 'video',
+      createdSince,
+      createdUntil,
       sort: 'oldest',
-      search: 'Aster'
+      modes: ['text-to-video', 'first-frame'],
+      ratios: ['16:9'],
+      resolutions: ['720p']
     })
 
   const callsBeforeResubmit = await page.evaluate(
     () => window.__assetLibraryTest?.listCalls().length ?? 0
   )
-  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await page
+    .getByRole('group', { name: 'Media type' })
+    .getByRole('button', { name: 'Image' })
+    .click()
   await expect
-    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().length ?? 0))
-    .toBe(callsBeforeResubmit + 1)
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
+    .toMatchObject({ mediaType: 'image', modes: [], ratios: [], resolutions: [] })
+  expect(await page.evaluate(() => window.__assetLibraryTest?.listCalls().length ?? 0)).toBe(
+    callsBeforeResubmit + 1
+  )
+})
+
+test('a facet selection is dropped by the clear row', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Filter' }).click()
+  await page.getByText('Text to image').click()
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
+    .toMatchObject({ modes: ['text-to-image'] })
+
+  await page.getByRole('button', { name: 'Clear filters' }).click()
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
+    .toMatchObject({ modes: [], ratios: [], resolutions: [] })
+  await expect(page.getByRole('button', { name: 'Clear filters' })).toBeHidden()
+})
+
+test('the wall opens on images with only the type buttons offered', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  const types = page.getByRole('group', { name: 'Media type' }).getByRole('button')
+  await expect(types).toHaveText(['Image', 'Video'])
+  await expect(types.first()).toHaveAttribute('aria-pressed', 'true')
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(0)))
+    .toMatchObject({ mediaType: 'image' })
 })
 
 test('wall previews only bounded image candidates and never fetches video originals', async ({
@@ -212,17 +263,28 @@ test('deleting an asset states that its Publication survives', async ({ mount, p
   await expect(page.getByRole('dialog')).toBeVisible()
 })
 
-test('batch mode has download as its only operation and downloads sequentially', async ({
+test('batch mode offers three actions over the row and downloads sequentially', async ({
   mount,
   page
 }) => {
   await mount(<AssetLibraryStory downloadMode="deferred" />)
-  await page.getByRole('button', { name: 'Select assets' }).click()
+  await page.getByRole('button', { name: 'Batch actions' }).click()
+  const actions = page.getByRole('button', { name: 'Delete' })
+  const download = page.getByRole('button', { name: 'Download', exact: true })
+  const publish = page.getByRole('button', { name: 'Publish', exact: true })
+  await expect(actions).toBeDisabled()
+  await expect(download).toBeDisabled()
+  await expect(publish).toBeDisabled()
+  await expect(page.getByRole('status').filter({ hasText: '0 items selected' })).toBeVisible()
+  await expect(page.getByTestId('batch-toolbar').getByRole('button')).toHaveCount(4)
+
   await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
   await page.getByRole('checkbox', { name: 'Select asset asset-two' }).check()
-  await expect(page.getByTestId('batch-toolbar').getByRole('button')).toHaveCount(2)
-  await page.getByRole('button', { name: 'Download 2 assets' }).click()
-  await expect(page.getByRole('status').filter({ hasText: '1 / 2' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: '2 items selected' })).toBeVisible()
+  await download.click()
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Download in progress 1 / 2' })
+  ).toBeVisible()
   expect(await page.evaluate(() => window.__assetLibraryTest?.maxActiveDownloads())).toBe(1)
   await page.evaluate(() => window.__assetLibraryTest?.releaseDownloads())
   await expect(page.getByRole('status').filter({ hasText: '2 / 2' })).toBeVisible()
@@ -234,27 +296,100 @@ test('batch download can be cancelled with an accessible stable status', async (
   page
 }) => {
   await mount(<AssetLibraryStory downloadMode="cancelled" />)
-  await page.getByRole('button', { name: 'Select assets' }).click()
+  await page.getByRole('button', { name: 'Batch actions' }).click()
   await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
-  await page.getByRole('button', { name: 'Download 1 asset' }).click()
-  await page.getByRole('button', { name: 'Cancel download' }).click()
+  await page.getByRole('button', { name: 'Download', exact: true }).click()
+  await page.getByRole('button', { name: 'Cancel Download' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Download cancelled' })).toBeVisible()
 })
 
-test('a detached batch cannot overwrite or detach the next page batch', async ({ mount, page }) => {
-  await mount(<AssetLibraryStory downloadMode="sequenced" />)
-  await page.getByRole('button', { name: 'Select assets' }).click()
+test('batch delete runs per asset and re-reads the wall it changed', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Batch actions' }).click()
   await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
-  await page.getByRole('button', { name: 'Download 1 asset' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-three' }).check()
+  page.once('dialog', async (confirmation) => {
+    expect(confirmation.message()).toContain('Delete 2 selected assets?')
+    await confirmation.accept()
+  })
+  await page.getByRole('button', { name: 'Delete' }).click()
+
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Delete complete · 2 / 2' })
+  ).toBeVisible()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.deletes())).toEqual([
+    'asset-one',
+    'asset-three'
+  ])
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().length ?? 0))
+    .toBe(2)
+
+  // The refresh dropped the deleted cards, so the selection must drop with
+  // them: a count for cards that are gone would leave actions that confirm and
+  // then silently do nothing.
+  await expect(page.getByTestId('asset-card')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Delete' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeDisabled()
+})
+
+test('batch publish skips what the server would refuse and reports the skip', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory unpublishableIds={['asset-two']} />)
+  await page.getByRole('button', { name: 'Batch actions' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+  await page.getByRole('checkbox', { name: 'Select asset asset-two' }).check()
+  page.once('dialog', async (confirmation) => {
+    expect(confirmation.message()).toContain('Publish 2 selected assets?')
+    await confirmation.accept()
+  })
+  await page.getByRole('button', { name: 'Publish', exact: true }).click()
+
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Published · 1 / 2 (1 not publishable, skipped)' })
+  ).toBeVisible()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.publishKeys())).toHaveLength(1)
+})
+
+test('a selection with nothing publishable leaves publish unavailable', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory unpublishableIds={['asset-one']} />)
+  await page.getByRole('button', { name: 'Batch actions' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Delete' })).toBeEnabled()
+})
+
+test('a batch detached by a reset page cannot overwrite the batch that replaced it', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory downloadMode="sequenced" paginated />)
+  await page.getByRole('button', { name: 'Batch actions' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+  await page.getByRole('button', { name: 'Download', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: '1 / 1' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('checkbox', { name: 'Select asset asset-two' }).check()
-  await page.getByRole('button', { name: 'Download 1 asset' }).click()
-  await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
+  // Re-reading the wall under a new filter resets the page, which detaches the
+  // running batch and drops its selection with it; the second page a short wall
+  // appends is still there to pick from. A run in flight leaves no way out of
+  // selection but cancelling it, so a filter is the detach the user can reach.
+  await page
+    .getByRole('group', { name: 'Media type' })
+    .getByRole('button', { name: 'Video' })
+    .click()
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  await page.getByRole('checkbox', { name: 'Select asset asset-four' }).check()
+  await page.getByRole('button', { name: 'Download', exact: true }).click()
 
-  await expect(page.getByRole('status').filter({ hasText: 'Downloading 1 / 1' })).toBeVisible()
-  await page.getByRole('button', { name: 'Cancel download' }).click()
+  // Releasing the detached batch's handle must not disturb the live one.
+  await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Download in progress 1 / 1' })
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel Download' }).click()
   await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
   await expect(page.getByRole('status').filter({ hasText: 'Download cancelled' })).toBeVisible()
 })
@@ -279,13 +414,62 @@ test('single download is aborted when its detail dialog closes', async ({ mount,
     .toBe(1)
 })
 
-test('an empty later keyset page retreats to the previous page', async ({ mount, page }) => {
-  await mount(<AssetLibraryStory emptyNextPage />)
-  await page.getByRole('button', { name: 'Next' }).click()
-  await expect(page.getByTestId('asset-card')).toHaveCount(3)
+test('a wall shorter than the scroller appends the next keyset page unasked', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory paginated />)
+
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  // The second page is the last one, so the sentinel retires with it.
+  await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0)
   await expect
     .poll(() =>
       page.evaluate(() => window.__assetLibraryTest?.listCalls().map((call) => call.cursor))
     )
-    .toEqual([null, 'next', null])
+    .toEqual([null, 'next'])
+})
+
+test('a failed append keeps the wall and turns the sentinel into its retry', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory paginated append="fail-once" />)
+
+  await expect(page.getByTestId('asset-card')).toHaveCount(3)
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await page.getByRole('button', { name: 'Retry' }).click()
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0)
+})
+
+test('a server echoing the cursor it was handed stops the wall', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory paginated append="echo" />)
+
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__assetLibraryTest?.listCalls().map((call) => call.cursor))
+    )
+    .toEqual([null, 'next'])
+})
+
+test('a refresh after a mutation re-reads every loaded page, not just the first', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory paginated />)
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await page.getByRole('button', { name: 'Publish to Inspiration' }).click()
+  await expect(page.getByRole('button', { name: 'Withdraw publication' })).toBeVisible()
+
+  await expect(page.getByTestId('asset-card')).toHaveCount(5)
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__assetLibraryTest?.listCalls().map((call) => call.cursor))
+    )
+    .toEqual([null, 'next', null, 'next'])
 })

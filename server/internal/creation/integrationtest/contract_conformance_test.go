@@ -3,8 +3,10 @@ package integrationtest
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -17,14 +19,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Response-level OpenAPI conformance for the Creation surface. The helper in
-// the Identity suite is prior art, but the Creation contract promises more
-// than required-fields checks: this validator enforces required fields,
-// enums, JSON types, uuid/date-time formats on observed values, minimum and
-// maximum bounds where documented, allOf composition, component responses
-// ($ref'd statuses), external Error-envelope references into the master
-// document, and rejects undocumented statuses outright. Requests are shaped
-// by hand in these tests; responses are checked here on every observation.
+// Response-level OpenAPI conformance for the Creation surface: required fields, enums, JSON
+// types, uuid/date-time formats on observed values, documented min/max bounds, allOf
+// composition, component responses ($ref'd statuses), external Error-envelope references, and
+// undocumented statuses rejected outright (the Identity suite's helper is prior art but checks
+// only required fields). Requests are shaped by hand in these tests; responses are checked
+// here on every observation.
 
 var (
 	conformanceOnce sync.Once
@@ -64,6 +64,32 @@ func TestReferenceMaterialUploadContractSurface(t *testing.T) {
 	}
 }
 
+// parameterEnum reads one inline query parameter's item enum from a resolved
+// operation's parameter list.
+func parameterEnum(t *testing.T, parameters []any, name string) []string {
+	t.Helper()
+	for _, raw := range parameters {
+		parameter, _ := raw.(map[string]any)
+		if parameter["name"] != name {
+			continue
+		}
+		schema, _ := parameter["schema"].(map[string]any)
+		items, _ := schema["items"].(map[string]any)
+		entries, _ := items["enum"].([]any)
+		values := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			value, ok := entry.(string)
+			if !ok {
+				t.Fatalf("%s enum entry %v is not a string", name, entry)
+			}
+			values = append(values, value)
+		}
+		return values
+	}
+	t.Fatalf("contract has no %s parameter", name)
+	return nil
+}
+
 func TestAssetLibraryContractSurface(t *testing.T) {
 	var listOperation map[string]any
 	for _, route := range []struct {
@@ -93,6 +119,20 @@ func TestAssetLibraryContractSurface(t *testing.T) {
 		}
 	}
 
+	responseFacets := resolvePointer(t, moduleFile(t, "creation.yaml"),
+		"/paths/~1creation~1assets/get/responses/200/content/application~1json/schema/properties/facets")
+	if responseFacets["nullable"] != true {
+		t.Fatal("the facet vocabulary is absent for an unpinned media, so it must be nullable")
+	}
+	// Required but nullable: the client fails closed on a missing key, so an
+	// optional field would only describe a response it has to reject.
+	responseSchema := resolvePointer(t, moduleFile(t, "creation.yaml"),
+		"/paths/~1creation~1assets/get/responses/200/content/application~1json/schema")
+	required, _ := responseSchema["required"].([]any)
+	if !slices.Contains(required, any("facets")) {
+		t.Fatal("the list response must require facets, holding null when no media is pinned")
+	}
+
 	asset := resolvePointer(t, moduleFile(t, "creation.yaml"), "/components/schemas/MediaAsset")
 	properties, _ := asset["properties"].(map[string]any)
 	for _, private := range []string{"task_id", "session_id", "slot_index", "prompt", "specification", "blob_key"} {
@@ -104,6 +144,56 @@ func TestAssetLibraryContractSurface(t *testing.T) {
 	capabilityProperties, _ := capabilities["properties"].(map[string]any)
 	if _, exists := capabilityProperties["can_publish"]; !exists {
 		t.Fatal("Asset capabilities are missing can_publish")
+	}
+}
+
+// The facet vocabulary is observed here the way a client sees it — one page per media, unioned
+// in the order the parser admits values — rather than read from the catalog the server serves
+// it from. A contract that documents a filter the server rejects fails right here.
+func TestAssetLibraryFacetEnumMatchesServedVocabulary(t *testing.T) {
+	parameters, _ := creationOperation(t, "GET", "/creation/assets")["parameters"].([]any)
+
+	h := newHarness(t)
+	h.ensureAccounts(t)
+	token := h.loginToken(t, creatorEmail, harnessPassword)
+
+	served := map[string][]string{}
+	for _, media := range []string{"image", "video"} {
+		var page struct {
+			Facets *struct {
+				Modes       []string `json:"modes"`
+				Ratios      []string `json:"ratios"`
+				Resolutions []string `json:"resolutions"`
+			} `json:"facets"`
+		}
+		status, body := h.doRequest(t, http.MethodGet, "/creation/assets?limit=1&media_type="+media, token, nil)
+		if status != http.StatusOK {
+			t.Fatalf("asset page %s: status=%d body=%s", media, status, body)
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Fatalf("decode %s asset page: %v", media, err)
+		}
+		if page.Facets == nil {
+			t.Fatalf("the %s page serves no facet vocabulary", media)
+		}
+		for param, values := range map[string][]string{
+			"mode":       page.Facets.Modes,
+			"ratio":      page.Facets.Ratios,
+			"resolution": page.Facets.Resolutions,
+		} {
+			for _, value := range values {
+				if !slices.Contains(served[param], value) {
+					served[param] = append(served[param], value)
+				}
+			}
+		}
+	}
+	for _, param := range []string{"mode", "ratio", "resolution"} {
+		documented := parameterEnum(t, parameters, param)
+		if !slices.Equal(documented, served[param]) {
+			t.Fatalf("contract %s enum %v does not match the served vocabulary %v",
+				param, documented, served[param])
+		}
 	}
 }
 
@@ -531,10 +621,9 @@ func resolveSchemaRef(t *testing.T, ref string) map[string]any {
 	return resolvePointer(t, spec, pointer)
 }
 
-// ensureAllDocumentedErrorsConform asserts every error path returns exactly
-// the envelope shape with an enum-valid machine code — run once per test
-// binary through a synthetic observation list so conformance exercises the
-// negative space too.
+// TestContractErrorEnvelopeShapeOnEveryCreationErrorPath asserts every error path returns exactly the
+// envelope shape with an enum-valid machine code, run once per test binary through a synthetic
+// observation list so conformance exercises the negative space too.
 func TestContractErrorEnvelopeShapeOnEveryCreationErrorPath(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)

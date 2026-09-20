@@ -3,12 +3,9 @@ import { CreationWorkbenchRealShellStory } from './fixtures/creation-workbench-r
 import type { ScriptedTask } from './fixtures/creation-workbench.story'
 
 /**
- * Upward history pagination coverage (issue #195, ADR-0005): the production
- * Workbench page against the fixture's real keyset-cursor task endpoint —
- * newest 20 at entry, 20 more per near-top trigger past the old 50-task cap,
- * retryable failures, and refresh/history interleaving. Reading-anchor and
- * media-budget behavior over a fully paged-in history lives in
- * creation-workbench-scroll.spec.tsx.
+ * Upward history pagination (issue #195, ADR-0005): the production Workbench
+ * page against the fixture's keyset-cursor endpoint, 20 at entry and 20 per
+ * near-top trigger; reading-anchor/media-budget: creation-workbench-scroll.
  */
 
 const scriptedSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'

@@ -13,10 +13,9 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// identifyImage decodes the whole image body. Images are capped far below
-// memory-unsafe sizes at ingestion, so a full decode is both affordable and
-// the honest readability test: truncated or corrupt files fail here instead
-// of surfacing as broken content later.
+// identifyImage decodes the whole image body. Images are capped far below memory-unsafe
+// sizes at ingestion, so a full decode is affordable and is the honest readability test:
+// truncated or corrupt files fail here instead of surfacing as broken content later.
 func identifyImage(family Family, seek io.ReadSeeker) (domain.Identified, error) {
 	if _, err := seek.Seek(0, io.SeekStart); err != nil {
 		return domain.Identified{}, domain.ErrUnreadableMedia

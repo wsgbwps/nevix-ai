@@ -11,10 +11,9 @@ import {
 } from './workbench-display-controller'
 
 /** The Workbench's handle on the display-resource module: the rendered
- * snapshot plus the resource operations and the one context-switch reset.
- * `getSnapshot` is the same-tick-fresh read for orchestration callbacks.
- * Method identities are stable per runtime: consumer lease effects key on
- * them and must not re-run per render. */
+ * snapshot, the resource operations, and the one context-switch reset.
+ * `getSnapshot` is same-tick-fresh for callbacks; method identities are stable
+ * per runtime, so consumer lease effects key on them without re-running. */
 export interface WorkbenchDisplayBinding {
   readonly snapshot: WorkbenchDisplaySnapshot
   readonly getSnapshot: () => WorkbenchDisplaySnapshot
@@ -57,10 +56,9 @@ const idleDisplayMethods = {
   pendingFiles: (): ReadonlyMap<string, PendingMaterialFile> => new Map()
 }
 
-/** One controller per connected runtime; a runtime identity change replaces
- * the instance and the previous lifecycle's generation is retired in the
- * effect cleanup. The constructor is passive, so the memoized creation has
- * no render side effects. */
+/** One controller per connected runtime: an identity change replaces the
+ * instance and the previous lifecycle's generation retires in the effect
+ * cleanup. The constructor is passive, so memoized creation has no effects. */
 export function useWorkbenchDisplay(deps: WorkbenchDisplayDeps | null): WorkbenchDisplayBinding {
   const controller = useMemo(
     () => (deps === null ? null : new WorkbenchDisplayController(deps)),

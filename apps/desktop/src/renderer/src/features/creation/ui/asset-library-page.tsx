@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { DownloadIcon, SearchIcon } from 'lucide-react'
+import { ListChecksIcon, XIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
-import { Input } from '../../../components/ui/input'
-import type { AssetLibraryPorts, AssetSort, MediaAssetView } from '../api/asset-library-http'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui/tooltip'
+import type { AssetLibraryPorts, MediaAssetView } from '../api/asset-library-http'
 import type { InspirationPorts } from '../api/inspiration-http'
 import { useAssetDetail, type PrepareAssetSimilar } from '../model/use-asset-detail'
-import { useAssetList, type AssetFilters } from '../model/use-asset-list'
-import { useAssetSelectionDownloads } from '../model/use-asset-selection-downloads'
+import { isoDay, useAssetList, type AssetFilters } from '../model/use-asset-list'
+import { useAssetSelectionActions } from '../model/use-asset-selection-actions'
 import { AssetDetailDialog } from './asset-detail-dialog'
+import { AssetLibraryFilters } from './asset-library-filters'
 import { AssetCard } from './asset-media'
+import { LoadMoreSentinel } from './load-more-sentinel'
 
 export interface AssetLibraryPageProps {
   readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
@@ -17,10 +19,13 @@ export interface AssetLibraryPageProps {
 }
 
 const initialFilters: AssetFilters = {
-  mediaType: '',
+  mediaType: 'image',
   createdSince: '',
+  createdUntil: '',
   sort: 'newest',
-  search: ''
+  modes: [],
+  ratios: [],
+  resolutions: []
 }
 
 function saveBlob(asset: MediaAssetView, blob: Blob): void {
@@ -35,11 +40,7 @@ function saveBlob(asset: MediaAssetView, blob: Blob): void {
 
 function dayKey(value: string): string {
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return Number.isNaN(date.getTime()) ? value : isoDay(date)
 }
 
 export function AssetLibraryPage({
@@ -49,7 +50,8 @@ export function AssetLibraryPage({
   const { t, i18n } = useTranslation('creation')
   const [filters, setFilters] = useState(initialFilters)
   const list = useAssetList(ports, initialFilters)
-  const selection = useAssetSelectionDownloads(ports, list.assets, saveBlob)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const selection = useAssetSelectionActions(ports, list.assets, saveBlob, list.refresh)
   const detail = useAssetDetail({
     ports,
     prepareSimilar: onCreateSimilar,
@@ -68,145 +70,113 @@ export function AssetLibraryPage({
     return [...grouped]
   }, [list.assets])
 
-  const batchRunning = selection.status.kind === 'running'
+  const status = selection.status
+  const running = status.kind === 'running' ? status : null
+  const action = status.kind === 'idle' ? null : t(`assets.batch.${status.action}`)
   const batchProgress =
-    selection.status.kind === 'idle'
+    status.kind === 'idle' || action === null
       ? null
-      : selection.status.kind === 'complete'
-        ? t('assets.batch.complete', {
-            done: selection.status.total,
-            total: selection.status.total
+      : status.kind === 'complete'
+        ? status.skipped === undefined
+          ? t('assets.batch.complete', { action, done: status.total, total: status.total })
+          : t('assets.batch.publishComplete', {
+              done: status.total - status.skipped,
+              total: status.total,
+              skipped: status.skipped
+            })
+        : t(`assets.batch.${status.kind}`, {
+            action,
+            done: status.current,
+            total: status.total
           })
-        : t(`assets.batch.${selection.status.kind}`, {
-            done: selection.status.current,
-            total: selection.status.total
-          })
+  const selectionSize = selection.selection.size
+
+  const apply = (next: AssetFilters): void => {
+    setFilters(next)
+    selection.resetPage()
+    // A narrower result would leave the sentinel in reach and append unasked.
+    scrollRef.current?.scrollTo({ top: 0 })
+    list.submit(next)
+  }
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="asset-library">
-      <div className="border-b px-4 py-3 sm:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">{t('assets.title')}</h1>
-            <p className="text-muted-foreground text-sm">{t('assets.description')}</p>
+      <div className="px-page flex flex-wrap items-center justify-between gap-3 pt-6 pb-3">
+        <h1 className="sr-only">{t('assets.title')}</h1>
+        <AssetLibraryFilters filters={filters} facets={list.facets} onChange={apply} />
+        {selection.selecting ? (
+          <div data-testid="batch-toolbar" className="flex flex-wrap items-center gap-2">
+            <p className="text-muted-foreground text-sm" role="status" aria-live="polite">
+              {batchProgress ?? t('assets.selection.count', { count: selectionSize })}
+            </p>
+            <div className="border-border flex items-center rounded-lg border p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={selectionSize === 0 || running !== null}
+                onClick={() => {
+                  if (window.confirm(t('assets.batch.removeConfirm', { count: selectionSize })))
+                    void selection.remove()
+                }}
+              >
+                {t('assets.batch.remove')}
+              </Button>
+              <span className="bg-border mx-0.5 h-4 w-px" aria-hidden />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={selectionSize === 0 || running !== null}
+                onClick={() => void selection.download()}
+              >
+                {t('assets.batch.download')}
+              </Button>
+              <span className="bg-border mx-0.5 h-4 w-px" aria-hidden />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={!selection.publishable || running !== null}
+                onClick={() => {
+                  if (window.confirm(t('assets.batch.publishConfirm', { count: selectionSize })))
+                    void selection.publish()
+                }}
+              >
+                {t('assets.batch.publish')}
+              </Button>
+            </div>
+            {running === null ? (
+              <Button type="button" size="sm" variant="ghost" onClick={selection.exit}>
+                <XIcon aria-hidden />
+                {t('assets.selection.exit')}
+              </Button>
+            ) : (
+              <Button type="button" size="sm" variant="ghost" onClick={selection.cancel}>
+                <XIcon aria-hidden />
+                {t('assets.batch.cancel', { action })}
+              </Button>
+            )}
           </div>
-          <Button
-            type="button"
-            variant={selection.selecting ? 'secondary' : 'outline'}
-            onClick={() => (selection.selecting ? selection.exit() : selection.begin())}
-          >
-            {selection.selecting ? t('assets.selection.exit') : t('assets.selection.enter')}
-          </Button>
-        </div>
-        <form
-          data-testid="asset-filters"
-          className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-[6.5rem_9rem_7rem_minmax(9rem,1.5fr)_auto]"
-          onSubmit={(event) => {
-            event.preventDefault()
-            selection.resetPage()
-            list.submit(filters)
-          }}
-        >
-          <label className="grid gap-1 text-xs">
-            <span className="sr-only">{t('assets.filters.media')}</span>
-            <select
-              aria-label={t('assets.filters.media')}
-              value={filters.mediaType}
-              onChange={(event) => {
-                const mediaType = event.currentTarget.value as AssetFilters['mediaType']
-                setFilters((value) => ({
-                  ...value,
-                  mediaType
-                }))
-              }}
-              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-            >
-              <option value="">{t('assets.filters.all')}</option>
-              <option value="image">{t('assets.media.image')}</option>
-              <option value="video">{t('assets.media.video')}</option>
-            </select>
-          </label>
-          <label className="grid gap-1 text-xs">
-            <span className="sr-only">{t('assets.filters.since')}</span>
-            <Input
-              type="date"
-              aria-label={t('assets.filters.since')}
-              value={filters.createdSince}
-              onChange={(event) => {
-                const createdSince = event.currentTarget.value
-                setFilters((value) => ({ ...value, createdSince }))
-              }}
-            />
-          </label>
-          <label className="grid gap-1 text-xs">
-            <span className="sr-only">{t('assets.filters.sort')}</span>
-            <select
-              aria-label={t('assets.filters.sort')}
-              value={filters.sort}
-              onChange={(event) => {
-                const sort = event.currentTarget.value as AssetSort
-                setFilters((value) => ({
-                  ...value,
-                  sort
-                }))
-              }}
-              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-            >
-              <option value="newest">{t('assets.filters.newest')}</option>
-              <option value="oldest">{t('assets.filters.oldest')}</option>
-            </select>
-          </label>
-          <label className="col-span-2 grid gap-1 text-xs sm:col-span-1">
-            <span className="sr-only">{t('assets.filters.search')}</span>
-            <Input
-              aria-label={t('assets.filters.search')}
-              placeholder={t('assets.filters.searchHint')}
-              value={filters.search}
-              onChange={(event) => {
-                const search = event.currentTarget.value
-                setFilters((value) => ({ ...value, search }))
-              }}
-            />
-          </label>
-          <Button type="submit" className="self-end">
-            <SearchIcon aria-hidden />
-            {t('assets.filters.submit')}
-          </Button>
-        </form>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={t('assets.selection.enter')}
+                onClick={selection.begin}
+              >
+                <ListChecksIcon aria-hidden />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('assets.selection.enter')}</TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
-      {selection.selecting ? (
-        <div
-          data-testid="batch-toolbar"
-          className="bg-muted/50 flex flex-wrap items-center gap-2 border-b px-4 py-2 sm:px-6"
-        >
-          <Button
-            type="button"
-            size="sm"
-            disabled={selection.selection.size === 0 || batchRunning}
-            onClick={() => void selection.download()}
-          >
-            <DownloadIcon aria-hidden />
-            {t('assets.batch.download', { count: selection.selection.size })}
-          </Button>
-          {batchRunning ? (
-            <Button type="button" size="sm" variant="outline" onClick={selection.cancel}>
-              {t('assets.batch.cancel')}
-            </Button>
-          ) : (
-            <Button type="button" size="sm" variant="outline" onClick={selection.exit}>
-              {t('assets.selection.exit')}
-            </Button>
-          )}
-          {batchProgress ? (
-            <p className="text-muted-foreground ml-auto text-sm" role="status" aria-live="polite">
-              {batchProgress}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-6">
+      <div ref={scrollRef} className="px-page min-h-0 flex-1 overflow-auto py-5">
         {list.status === 'loading' ? (
           <p className="text-muted-foreground" role="status">
             {t('assets.loading')}
@@ -218,61 +188,46 @@ export function AssetLibraryPage({
               {t('state.retry')}
             </Button>
           </div>
-        ) : list.assets.length === 0 ? (
-          <p className="text-muted-foreground" role="status">
-            {t('assets.empty')}
-          </p>
         ) : (
-          <div className="space-y-4">
-            {groups.map(([date, group]) => (
-              <section key={date} data-testid="asset-group" aria-labelledby={`assets-${date}`}>
-                <h2 id={`assets-${date}`} className="mb-2 text-sm font-semibold">
-                  {new Intl.DateTimeFormat(i18n.language, { dateStyle: 'long' }).format(
-                    new Date(`${date}T00:00:00`)
-                  )}
-                </h2>
-                <ul className="grid grid-cols-2 gap-x-2 gap-y-3 sm:grid-cols-5 xl:grid-cols-8">
-                  {group.map((asset) => (
-                    <AssetCard
-                      key={asset.id}
-                      asset={asset}
-                      ports={ports}
-                      selecting={selection.selecting}
-                      selected={selection.selection.has(asset.id)}
-                      onSelect={() => selection.toggle(asset.id)}
-                      onOpen={() => detail.open(asset.id)}
-                    />
-                  ))}
-                </ul>
-              </section>
-            ))}
-            <nav
-              className="flex items-center justify-end gap-2"
-              aria-label={t('assets.pagination')}
-            >
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!list.canPrevious}
-                onClick={() => {
-                  selection.resetPage()
-                  list.previous()
-                }}
-              >
-                {t('assets.previous')}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!list.canNext}
-                onClick={() => {
-                  selection.resetPage()
-                  list.next()
-                }}
-              >
-                {t('assets.next')}
-              </Button>
-            </nav>
+          <div className="space-y-7">
+            {list.assets.length === 0 ? (
+              <p className="text-muted-foreground" role="status">
+                {t('assets.empty')}
+              </p>
+            ) : (
+              groups.map(([date, group]) => (
+                <section key={date} data-testid="asset-group" aria-labelledby={`assets-${date}`}>
+                  <h2 id={`assets-${date}`} className="mb-3 text-sm font-semibold">
+                    {new Intl.DateTimeFormat(i18n.language, {
+                      month: 'long',
+                      day: 'numeric'
+                    }).format(new Date(`${date}T00:00:00`))}
+                  </h2>
+                  <ul className="grid grid-cols-2 gap-x-2 gap-y-4 sm:grid-cols-5 xl:grid-cols-8">
+                    {group.map((asset) => (
+                      <AssetCard
+                        key={asset.id}
+                        asset={asset}
+                        ports={ports}
+                        selecting={selection.selecting}
+                        selected={selection.selection.has(asset.id)}
+                        onSelect={() => selection.toggle(asset.id)}
+                        onOpen={() => detail.open(asset.id)}
+                      />
+                    ))}
+                  </ul>
+                </section>
+              ))
+            )}
+            {list.hasMore ? (
+              <LoadMoreSentinel
+                more={list.more}
+                label={t('assets.pagination')}
+                onLoadMore={list.loadMore}
+                root={scrollRef}
+                className="pt-1"
+              />
+            ) : null}
           </div>
         )}
       </div>

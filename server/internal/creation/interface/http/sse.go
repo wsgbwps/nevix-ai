@@ -11,10 +11,9 @@ import (
 	"github.com/nevix-ai/server/internal/creation/domain"
 )
 
-// InvalidationHub fans the module's post-commit generation invalidations out
-// to the creator's open SSE streams. Events carry no payload beyond the fact
-// that the owner's creation state changed — never prompts, media, or task
-// bodies (spec #150 SSE contract).
+// InvalidationHub fans the module's post-commit generation invalidations out to the creator's
+// open SSE streams. Events carry no payload beyond the fact that the owner's creation state
+// changed — never prompts, media, or task bodies (spec #150 SSE contract).
 type InvalidationHub struct {
 	mu        sync.Mutex
 	sessions  authz.SessionAuthenticator
@@ -105,10 +104,10 @@ func (h *InvalidationHub) DisconnectSession(sessionID string) {
 // heartbeatInterval is the SSE keepalive cadence (~20s per contract).
 const heartbeatInterval = 20 * time.Second
 
-// StreamEvents answers GET /creation/events with the creator-scoped
-// text/event-stream. Every write is flushed immediately so the desktop
-// fetch-stream parser sees invalidations and heartbeats as they happen; the
-// stream carries no Last-Event-ID semantics — clients refetch on loss.
+// StreamEvents answers GET /creation/events with the creator-scoped text/event-stream. Every
+// write is flushed immediately so the desktop fetch-stream parser sees invalidations and
+// heartbeats as they happen; the stream carries no Last-Event-ID semantics — clients refetch
+// on loss.
 func (h *InvalidationHub) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	principal, ok := authz.PrincipalFrom(r.Context())
 	if !ok || principal.UserID == "" || principal.SessionID == "" {

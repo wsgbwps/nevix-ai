@@ -55,6 +55,14 @@ _Avoid_: Result Entity, Generated Asset
 每个成功生成输出形成的持久图片或视频；它是独立于 Creation Session 和 Generation Task 的聚合，默认只允许创建者与 Admin 读取，其他 active User 只能通过有效 Team Publication 查看。
 _Avoid_: Static Asset, Generation Result, Output File
 
+**Asset Facet**:
+按生成模式、比例或分辨率缩小 Asset Library 中本人 Media Asset 范围的维度，取值来自该 Asset 的 Generation Task 所冻结的 Generation Specification；词表按媒体类型确定，随版本化的能力契约发布，不随当前 AI Provider Connection 的可用性变化，某个取值当下没有资产也是正常结果。
+_Avoid_: Filter, Tag, Category, 分类
+
+**Adaptive Ratio**:
+比例参数中由 AI 供应商自行决定输出画幅的取值；没有比例标签能描述其结果的实际形状，因此携带该值的 Media Asset 只在比例维度上按其像素的实际形状归类。
+_Avoid_: Auto, 自动比例, 自由比例
+
 **AI Provider Connection**:
 Deployment Instance 为 AI Creation 配置并启用的已审核 AI 供应商接入聚合，指向固定 Endpoint、可用能力与模型以及仅 Server 可解密的凭据；V1 每个 Deployment Instance 最多一个，同时服务图片与视频，不建立按媒体选择的默认连接。其管理状态为启用或暂停，凭据状态为检查中、有效、无效或不可解密；删除是终止事件，“需要处理”是派生提示，都不是可恢复状态。它不是密钥本身或 infrastructure adapter。
 _Avoid_: Provider, Provider Adapter, Provider Credential, Default Provider Connection, Integration Domain

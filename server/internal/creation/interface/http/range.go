@@ -16,10 +16,9 @@ type rangeIntent struct {
 	n       int64 // suffix length when suffix
 }
 
-// parseRangeIntent inspects the header. Grammar-level failures (unit
-// mismatch, multi-range, malformed specs) keep present=true but valid=false;
-// the contract answers those with 416 just like out-of-bounds specs — a
-// client that asked for a slice never silently receives the whole blob.
+// parseRangeIntent inspects the header: grammar-level failures (unit mismatch, multi-range, malformed
+// specs) keep present=true but valid=false; the contract answers those with 416 just like
+// out-of-bounds specs — a client that asked for a slice never silently receives the whole blob.
 func parseRangeIntent(header string) rangeIntent {
 	intent := rangeIntent{}
 	if header == "" {
@@ -57,10 +56,9 @@ func parseRangeIntent(header string) rangeIntent {
 	return intent
 }
 
-// resolveRange maps one intent onto concrete served bounds for this blob:
-// [start,stop) plus whether to answer 206. satisfiable is only meaningful
-// for valid intents; out-of-bounds specs report false so the caller answers
-// 416 rather than silently serving nothing.
+// resolveRange maps one intent onto concrete served bounds for this blob: [start,stop) plus
+// whether to answer 206. satisfiable is only meaningful for valid intents; out-of-bounds specs
+// report false so the caller answers 416 rather than silently serving nothing.
 func resolveRange(intent rangeIntent, size int64) (servePartial bool, start, stop int64, satisfiable bool) {
 	stop = size
 	satisfiable = true

@@ -5,10 +5,9 @@ import (
 	"unicode/utf8"
 )
 
-// Session is a creator-private Creation Session aggregate root. Its only
-// state transitions are creation, rename, and the logical delete that hides
-// it immediately and blocks every future generation entry; nothing about its
-// lifecycle reopens or mutates history after deletion (ADR-0016).
+// Session is a creator-private Creation Session aggregate root whose only transitions are creation,
+// rename, and the logical delete that hides it immediately and blocks every future generation entry;
+// nothing reopens or mutates history after deletion (ADR-0016).
 type Session struct {
 	ID        UUID
 	OwnerID   UUID
@@ -26,10 +25,9 @@ const (
 	DraftMediaVideo DraftMediaType = "video"
 )
 
-// DraftRole is the part one reference material plays in the draft intent.
-// Image references and the video frame slots only take images; omni
-// references accept every material kind. The database CHECK mirrors the
-// closed set.
+// DraftRole is the part one reference material plays in the draft intent. Image
+// references and the video frame slots only take images; omni references accept every
+// material kind, and the database CHECK mirrors the closed set.
 type DraftRole string
 
 const (
@@ -51,11 +49,9 @@ func (r DraftRole) AcceptsKind(k Kind) bool {
 	}
 }
 
-// Structural intent envelope (contracts/creation.yaml TaskSubmitInput). The
-// bounds here are deliberately wider than any single manifest version: a
-// device-local draft may carry stale values between sessions, so structural
-// acceptance stays permissive while manifest conformance belongs to the
-// admission freeze.
+// Structural intent envelope (contracts/creation.yaml TaskSubmitInput). The bounds are wider than
+// any single manifest version on purpose: a device-local draft may carry stale values, so
+// structural acceptance stays permissive and manifest conformance belongs to the admission freeze.
 const (
 	DraftPromptMaxChars = 2000
 	DraftModelMaxChars  = 128
@@ -74,14 +70,11 @@ type DraftReference struct {
 	Role       DraftRole
 }
 
-// GenerationIntent is the complete generation intent a submission carries
-// (ADR-0017): the device-local draft's values at submit time — prompt, target
-// media, the manifest version the composer rendered, the model/mode/parameters
-// as chosen, and the ordered reference bindings. The server never stores it
-// editable: admission validates the envelope, freezes the intent against the
-// live manifest into a GenerationSpecification, and the intent dies with the
-// request. Nil pointers mean the field is unset, not empty — an unset value
-// and a submitted zero are different intent facts.
+// GenerationIntent is the complete generation intent a submission carries (ADR-0017):
+// the device-local draft's values at submit time — prompt, target media, the manifest
+// version the composer rendered, the chosen model/mode/parameters, and the ordered
+// reference bindings. Never stored editable; it dies with the request. Nil pointers mean
+// unset, not empty — an unset value and a submitted zero are different intent facts.
 type GenerationIntent struct {
 	Prompt          string
 	MediaType       *DraftMediaType
@@ -158,10 +151,9 @@ type ReferenceMaterial struct {
 	CreatedAt      time.Time
 }
 
-// HasMediaFacts guards the kind-determined fact set before persistence:
-// images carry dimensions plus pixel count and never a duration, audio
-// carries only a duration, video carries dimensions plus duration. The
-// database CHECK is the durable twin of this rule.
+// HasMediaFacts guards the kind-determined fact set before persistence: images carry dimensions plus
+// pixel count and never a duration, audio carries only a duration, video carries dimensions plus
+// duration. The database CHECK is the durable twin of this rule.
 func (m *ReferenceMaterial) HasMediaFacts() bool {
 	switch m.Kind {
 	case KindImage:

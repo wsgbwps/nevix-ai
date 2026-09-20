@@ -14,11 +14,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Provider Connection flows (issue #157) through the Module's public HTTP
-// seams: the permission matrix, the proof-gated lifecycle, candidate
-// replacement, master-key fail-closed behavior, and the sanitized member
-// surface. Every key is a locally minted fixture; the fake Kapon route is
-// the only provider the server ever contacts here.
+// Provider Connection flows (issue #157) through the Module's public HTTP seams: the permission
+// matrix, the proof-gated lifecycle, candidate replacement, master-key fail-closed behavior,
+// and the sanitized member surface. Every key is a locally minted fixture; the fake Kapon route
+// is the only provider contacted here.
 
 const (
 	providerKeyOne  = "kapon-e2e-key-one-0000000000000001"

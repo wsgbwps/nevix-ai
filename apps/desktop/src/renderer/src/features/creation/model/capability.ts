@@ -1,10 +1,8 @@
 /**
- * Pure Capability-Manifest derivations for the Composer (issue #177): the
- * manifest is the only source of submittable candidates, and a draft value
- * the current manifest has removed is reported as stale while the value
- * itself is preserved verbatim — the composer never rewrites the creator's
- * intent. These functions stay framework-free so component tests can drive
- * them through the rendered UI only.
+ * Pure Capability-Manifest derivations for the Composer (issue #177): the manifest is the only
+ * source of submittable candidates, and a draft value it removed is reported stale while the value
+ * stays verbatim — the composer never rewrites the creator's intent. Framework-free for component
+ * tests.
  */
 
 import type {
@@ -101,8 +99,8 @@ export function materialFitsReferenceEnvelope(
 
 /**
  * The material kinds a draft role structurally accepts — the client twin of
- * the server's role/kind rule, used to gate the deck's add entry and to keep
- * re-roling kind-compatible bindings only.
+ * the server's role/kind rule. It gates the deck's add entry and keeps
+ * re-roling to kind-compatible bindings.
  */
 export function roleAcceptsKind(role: DraftReferenceRole, kind: MaterialKind): boolean {
   switch (role) {
@@ -146,9 +144,8 @@ interface DraftCapabilityState extends GenerationParameterValues {
 }
 
 /**
- * The composer's view of one media capability: `null` when the manifest is
- * entirely absent (never loaded / failed closed), otherwise the media entry
- * with its `available` verdict.
+ * `null` when the manifest is entirely absent (never loaded / failed closed),
+ * otherwise the media entry with its `available` verdict.
  */
 export function mediaCapability(
   manifest: CapabilityManifest | null,
@@ -180,9 +177,8 @@ export function publishedModel(
 }
 
 /**
- * Resolution tiers of the selected model; empty while no (published) model
- * is selected — the tiers are model-scoped, so a stale model legitimately
- * publishes none.
+ * Resolution tiers of the selected model; empty while no published model is
+ * selected — tiers are model-scoped, so a stale model legitimately has none.
  */
 export function resolutionCandidates(
   manifest: CapabilityManifest | null,
@@ -194,11 +190,9 @@ export function resolutionCandidates(
 }
 
 /**
- * The vendor pixel size the server submits for this exact (model, ratio,
- * resolution) selection — the manifest publishes the same table the adapter
- * resolves, so the composer can show the exact output size. `null` while any
- * dimension is stale or the combination is unpublished (display only: it
- * never gates submission).
+ * The vendor pixel size the server submits for this exact (model, ratio, resolution) selection —
+ * the manifest publishes the table the adapter resolves. `null` while any dimension is stale or
+ * unpublished (display only: it never gates submission).
  */
 export function publishedSize(
   manifest: CapabilityManifest | null,
@@ -237,11 +231,9 @@ export function modeReferenceBounds(
 }
 
 /**
- * The deck cap for one (model, mode) selection. Image modes derive from the
- * deck, so the cap is the selected model's own reference ceiling — the mode
- * total only backs it up when the model is absent or stale (and the zero of
- * a not-yet-derived text-to-image never caps the deck). Video takes the
- * published mode's max.
+ * The deck cap for one (model, mode) selection. Image modes derive from the deck, so the cap is the
+ * selected model's reference ceiling; the mode total only backs it up when the model is absent or
+ * stale, whose zero must not cap the deck. Video takes the published mode's max.
  */
 export function referenceCap(
   manifest: CapabilityManifest | null,
@@ -263,9 +255,9 @@ export function referenceCap(
 }
 
 /**
- * The role a material binding carries at a deck position for one known mode.
- * Unknown (stale) modes return null so existing bindings keep their roles —
- * a stale draft is never silently re-roled.
+ * The role a binding carries at a deck position for one known mode. Unknown
+ * (stale) modes return null so bindings keep their roles — a stale draft is
+ * never silently re-roled.
  */
 export function roleForPosition(
   media: DraftMediaType,
@@ -289,11 +281,9 @@ export function roleForPosition(
 }
 
 /**
- * Validates one draft against the current manifest and reports the
- * stale fields. Values stay untouched; the caller surfaces each stale field
- * with its stable reason and keeps submission blocked. A missing manifest
- * reports nothing stale — without a verdict there is no claim to preserve or
- * reject, only the offline editing state.
+ * Reports a draft's stale fields against the current manifest. Values stay untouched; the caller
+ * surfaces each stale field with its stable reason and keeps submission blocked. A missing manifest
+ * reports nothing stale — without a verdict there is no claim to reject, only the offline state.
  */
 export function staleDraftFields(
   manifest: CapabilityManifest | null,

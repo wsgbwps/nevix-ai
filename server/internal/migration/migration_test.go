@@ -1,7 +1,6 @@
-// Unit tests for the embedded migration set: files are discoverable, follow
-// the <version>_<name>.sql naming discipline, and are up-only Goose SQL (an
-// Up section, never a Down section — ADR-0013). The apply path is proven
-// against PostgreSQL by migration_integration_test.go.
+// Unit tests for the embedded migration set: files are discoverable, follow the <version>_<name>.sql
+// naming discipline, and are up-only Goose SQL (an Up section, never a Down section — ADR-0013).
+// The apply path is proven against PostgreSQL by the integration suite.
 package migration
 
 import (

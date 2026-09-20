@@ -114,9 +114,8 @@ export function ReferenceMaterialPreview({
   }, [attempt, loadPreviewSource, openMaterialAvailable, openMaterialId])
 
   // A media element erroring on an expired presigned URL gets one automatic
-  // re-authorization per material per open; a successful load or closing the
-  // dialog resets that budget, and persistent failures fall through to the
-  // manual retry state.
+  // re-authorization per material per open, reset by a successful load or a
+  // close; persistent failures fall through to the manual retry state.
   const autoRetryRef = useRef<string | null>(null)
   useEffect(() => {
     if (openMaterialId === null) autoRetryRef.current = null

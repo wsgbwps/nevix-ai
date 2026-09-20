@@ -27,11 +27,10 @@ func (s KernelState) transientRejected() bool {
 	return s.JobOutcome != nil && *s.JobOutcome == JobOutcomeTransientRejected
 }
 
-// SubmitAttemptLimit matches the four-step safe-submit pressure
-// ladders. The queue-wide allowance remains larger for accepted async jobs
-// that need many safe polls; an unaccepted submit must surface its terminal
-// verdict after this much provider pressure instead of waiting for that
-// unrelated polling budget. Waiting between attempts stays application's;
+// SubmitAttemptLimit matches the four-step safe-submit pressure ladders. The queue-wide
+// allowance is larger for accepted async jobs that need many safe polls; an unaccepted
+// submit must surface its terminal verdict after this much provider pressure instead of
+// waiting on that unrelated polling budget. Waiting between attempts is application's;
 // spending this budget is the state machine's.
 const SubmitAttemptLimit = 4
 
@@ -50,12 +49,10 @@ const (
 	ActionPark              KernelAction = "park"               // nothing owed: retire the queue row
 )
 
-// NextAction routes one claimed item. A terminal task never owes external
-// work:
-// terminal+terminal parks the converged pair, and a terminal task whose job
-// is somehow still moving is a should-never-commit shape (every
-// task-terminal write lands the job terminal in the same transaction), so it
-// parks fail-safe rather than resurrecting external calls.
+// NextAction routes one claimed item. A terminal task never owes external work:
+// terminal+terminal parks the converged pair, and a terminal task whose job is somehow
+// still moving is a should-never-commit shape (every task-terminal write lands the job
+// terminal in the same transaction), so it parks fail-safe rather than resurrecting calls.
 func NextAction(state KernelState) (KernelAction, error) {
 	if !kernelTaskStatusKnown(state.TaskStatus) {
 		return "", fmt.Errorf("creation: unknown kernel task status %q", state.TaskStatus)
@@ -210,10 +207,9 @@ type KernelVerdict struct {
 	RunAfter      time.Time
 }
 
-// VerdictFor turns one external outcome into the write-set data for the
-// state the worker read. The transient-rejection event is where the durable
-// submit budget is spent: exhausted attempts produce the JobFailed terminal
-// verdict here rather than a silent hold.
+// VerdictFor turns one external outcome into write-set data for the state the worker read.
+// The transient-rejection event is where the durable submit budget is spent: exhausted
+// attempts produce the JobFailed terminal verdict here, not a silent hold.
 func VerdictFor(state KernelState, event KernelEvent) (KernelVerdict, error) {
 	switch event.Kind {
 	case EventSubmitAccepted:

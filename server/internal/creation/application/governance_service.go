@@ -21,10 +21,9 @@ type GovernanceUserEntry struct {
 	Policy domain.GovernancePolicy
 }
 
-// GovernanceService manages the instance and per-user generation limits.
-// Changes take effect for new submissions immediately; accepted tasks and
-// accumulated counters are never touched. Every change appends its
-// sanitized audit row inside the same transaction.
+// GovernanceService manages the instance and per-user generation limits. Changes take effect for new
+// submissions immediately; accepted tasks and accumulated counters are never touched. Every change
+// appends its sanitized audit row inside the same transaction.
 type GovernanceService struct {
 	governance domain.GovernanceRepository
 	runner     domain.WriteRunner

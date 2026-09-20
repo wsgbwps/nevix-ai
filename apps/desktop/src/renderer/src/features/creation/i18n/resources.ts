@@ -8,7 +8,6 @@ export const creationTranslations = defineResourceTranslations({
     creation: {
       assets: {
         title: '资产',
-        description: '浏览你已成功生成的图片和视频',
         loading: '正在读取资产…',
         loadFailed: '无法读取资产。',
         empty: '没有符合条件的资产。',
@@ -18,30 +17,48 @@ export const creationTranslations = defineResourceTranslations({
         media: { image: '图片', video: '视频' },
         filters: {
           media: '媒体类型',
-          since: '创建时间',
+          filter: '筛选',
+          time: '时间',
+          order: '顺序',
+          start: '开始日期',
+          end: '结束日期',
+          presets: { week: '最近一周', month: '最近一个月', quarter: '最近三个月' },
           sort: '排序',
-          search: '搜索',
-          searchHint: '资产 ID',
+          mode: '模式',
+          ratio: '比例',
+          resolution: '分辨率',
+          clear: '清除筛选',
           all: '全部',
-          newest: '最新优先',
-          oldest: '最早优先',
+          newest: '近-远',
+          oldest: '远-近',
           submit: '搜索'
         },
-        selection: { enter: '选择资产', exit: '退出选择' },
+        selection: {
+          enter: '批量操作',
+          exit: '取消选择',
+          // zh only ever resolves `_other`; `_one` exists for the key contract.
+          count_one: '已选择 {{count}} 项内容',
+          count_other: '已选择 {{count}} 项内容'
+        },
         selectOne: '选择资产 {{id}}',
         open: '打开资产 {{id}}',
         batch: {
-          download_one: '下载 1 个资产',
-          download_other: '下载 {{count}} 个资产',
-          cancel: '取消下载',
-          running: '正在下载 {{done}} / {{total}}',
-          cancelled: '下载已取消 · {{done}} / {{total}}',
-          failed: '下载失败 · {{done}} / {{total}}',
-          complete: '下载完成 · {{done}} / {{total}}'
+          // Action nouns: they label the buttons and fill {{action}} below.
+          download: '下载',
+          remove: '删除',
+          publish: '发布',
+          cancel: '取消{{action}}',
+          running: '{{action}}进行中 {{done}} / {{total}}',
+          cancelled: '{{action}}已取消 · {{done}} / {{total}}',
+          failed: '{{action}}失败 · {{done}} / {{total}}',
+          complete: '{{action}}完成 · {{done}} / {{total}}',
+          publishComplete: '发布完成 · {{done}} / {{total}}（跳过 {{skipped}} 个不可发布）',
+          removeConfirm:
+            '删除选中的 {{count}} 个资产？任务记录仍会保留；已发布的内容不会因此撤回。',
+          publishConfirm: '发布选中的 {{count}} 个资产？发布后冻结、需先撤回才能修改。'
         },
         pagination: '资产分页',
-        previous: '上一页',
-        next: '下一页',
+        loadMore: '加载更多',
         detailTitle: '资产 {{id}}',
         detailDescription: '资产媒体与生成详情',
         loadingDetail: '正在读取资产详情…',
@@ -77,7 +94,6 @@ export const creationTranslations = defineResourceTranslations({
       },
       inspiration: {
         title: '灵感',
-        description: '浏览团队发布的创作；管理员还可查看成功资产的发布与限制状态',
         loading: '正在读取灵感…',
         loadFailed: '无法读取灵感。',
         empty: '还没有可浏览的灵感。',
@@ -554,7 +570,6 @@ export const creationTranslations = defineResourceTranslations({
     creation: {
       assets: {
         title: 'Assets',
-        description: 'Browse images and videos you successfully created',
         loading: 'Loading assets…',
         loadFailed: 'Assets could not be loaded.',
         empty: 'No assets match these filters.',
@@ -564,30 +579,49 @@ export const creationTranslations = defineResourceTranslations({
         media: { image: 'Image', video: 'Video' },
         filters: {
           media: 'Media type',
-          since: 'Created since',
+          filter: 'Filter',
+          time: 'Time',
+          order: 'Order',
+          start: 'Start date',
+          end: 'End date',
+          presets: { week: 'Last 7 days', month: 'Last 30 days', quarter: 'Last 90 days' },
           sort: 'Sort',
-          search: 'Search',
-          searchHint: 'Asset ID',
+          mode: 'Mode',
+          ratio: 'Ratio',
+          resolution: 'Resolution',
+          clear: 'Clear filters',
           all: 'All',
           newest: 'Newest first',
           oldest: 'Oldest first',
           submit: 'Search'
         },
-        selection: { enter: 'Select assets', exit: 'Exit selection' },
+        selection: {
+          enter: 'Batch actions',
+          exit: 'Cancel selection',
+          count_one: '{{count}} item selected',
+          count_other: '{{count}} items selected'
+        },
         selectOne: 'Select asset {{id}}',
         open: 'Open asset {{id}}',
         batch: {
-          download_one: 'Download 1 asset',
-          download_other: 'Download {{count}} assets',
-          cancel: 'Cancel download',
-          running: 'Downloading {{done}} / {{total}}',
-          cancelled: 'Download cancelled · {{done}} / {{total}}',
-          failed: 'Download failed · {{done}} / {{total}}',
-          complete: 'Download complete · {{done}} / {{total}}'
+          // Action nouns: they label the buttons and fill {{action}} below.
+          download: 'Download',
+          remove: 'Delete',
+          publish: 'Publish',
+          cancel: 'Cancel {{action}}',
+          running: '{{action}} in progress {{done}} / {{total}}',
+          cancelled: '{{action}} cancelled · {{done}} / {{total}}',
+          failed: '{{action}} failed · {{done}} / {{total}}',
+          complete: '{{action}} complete · {{done}} / {{total}}',
+          publishComplete:
+            'Published · {{done}} / {{total}} ({{skipped}} not publishable, skipped)',
+          removeConfirm:
+            'Delete {{count}} selected assets? Their task records remain, and existing publications will not be withdrawn.',
+          publishConfirm:
+            'Publish {{count}} selected assets? Publishing freezes them until the publication is withdrawn.'
         },
         pagination: 'Asset pages',
-        previous: 'Previous',
-        next: 'Next',
+        loadMore: 'Load more',
         detailTitle: 'Asset {{id}}',
         detailDescription: 'Asset media and generation details',
         loadingDetail: 'Loading asset details…',
@@ -627,8 +661,6 @@ export const creationTranslations = defineResourceTranslations({
       },
       inspiration: {
         title: 'Inspiration',
-        description:
-          'Browse team publications; administrators also see successful assets with publication and restriction state',
         loading: 'Loading Inspiration…',
         loadFailed: 'Inspiration could not be loaded.',
         empty: 'There is no Inspiration to browse yet.',

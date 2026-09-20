@@ -6,8 +6,8 @@ import { TaskCard } from './task-card'
 
 /**
  * The borderless result gallery: tasks read old→new so the newest card sits
- * nearest the composer at the bottom — the server pages tasks newest-first,
- * and the reversal is display-only.
+ * nearest the composer at the bottom. The server pages newest-first; the
+ * reversal is display-only.
  */
 export function ResultGallery({
   gallery,
@@ -29,11 +29,10 @@ export function ResultGallery({
     scrollerRef,
     taskIds: orderedTasks.map((task) => task.id)
   })
-  // The history note's mount/unmount changes the layout above the gallery;
+  // The history note's mount/unmount changes the layout above the gallery, so
   // measure in that same commit (a ResizeObserver fires one observable frame
-  // too late); a same-commit count change composes — the anchor hook's
-  // margin effect re-measures on its own count dep, and a repeat measure
-  // no-ops.
+  // too late). A same-commit count change composes: the anchor hook's margin
+  // effect re-measures on its own count dep, and a repeat measure no-ops.
   const taskHistory = gallery.taskHistory
   useLayoutEffect(() => {
     remeasure()

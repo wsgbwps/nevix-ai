@@ -53,10 +53,9 @@ var (
 	shapeSettledJob     = shapeOf(JobCompleted, true, nil)
 )
 
-// classify normalizes one enumerated combination onto its routing class.
-// Precedence mirrors the routing contract's factor order: an accepted ref or
-// an identified transient marker dominates the submitting class, and any
-// terminal job converges the same way.
+// classify normalizes one enumerated combination onto its routing class. Precedence
+// mirrors the routing contract's factor order: an accepted ref or an identified transient
+// marker dominates the submitting class, and any terminal job converges the same way.
 func classify(job JobStatus, ref bool, outcome *string) jobShape {
 	transient := outcome != nil && *outcome == JobOutcomeTransientRejected
 	switch {

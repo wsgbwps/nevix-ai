@@ -160,10 +160,9 @@ func (s *ObjectStorageConnectionService) resolveStoredCandidate(ctx context.Cont
 	return connection, candidate, plaintext, nil
 }
 
-// ReferenceSource captures only immutable Reference Material facts. Each Open
-// resolves the current credential and returns a fresh sequential reader for
-// the same frozen object without exposing its key or the BlobStore to the
-// worker or Provider gateway.
+// ReferenceSource captures only immutable Reference Material facts. Each Open resolves the current
+// credential and returns a fresh sequential reader for the same frozen object, without exposing its
+// key or the BlobStore to the worker or Provider gateway.
 func (s *ObjectStorageConnectionService) ReferenceSource(material domain.ReferenceMaterial, role domain.DraftRole) (domain.ReferenceSource, error) {
 	if len(material.ChecksumSHA256) != 32 || material.BlobKey == "" || material.ByteSize <= 0 || !role.AcceptsKind(material.Kind) {
 		return domain.ReferenceSource{}, domain.ErrInvalidReferenceSource

@@ -1,13 +1,8 @@
-// Package writetx is the Creation Module's domain-local write transaction
-// implementation (ADR-0016): the sole production entry point for every
-// Creation-owned database write. It mirrors the Identity Write Transaction
-// Module's discipline without importing it — begin, prove session_user and
-// current_user are both exactly identity_app before any business work, then
-// own commit and rollback under the callback contract: nil commits, anything
-// else (including cancellation and panic) rolls back once and never replays
-// the callback. AfterCommit effects run exactly once, in registration order,
-// only on the committed path; external Storage I/O must be scheduled there,
-// never inside a locked transaction.
+// Package writetx is the Creation Module's domain-local write transaction implementation
+// (ADR-0016): the sole production entry point for every Creation-owned database write. It
+// proves session_user and current_user are identity_app before any business work, and
+// external Storage I/O must be scheduled in an AfterCommit effect, never inside a locked
+// transaction.
 package writetx
 
 import (
@@ -55,10 +50,9 @@ func (r *Runner) VerifyStartupIdentity(ctx context.Context) error {
 // compile-time proof that the runner satisfies the domain port.
 var _ domain.WriteRunner = (*Runner)(nil)
 
-// Scope is the narrow view of one in-flight write transaction that Run's
-// callback works through: the active transaction plus after-commit effect
-// registration. Begin, verification, commit, rollback, cancellation, and
-// panic handling stay in the Runner.
+// Scope is the narrow view of one in-flight write transaction that Run's callback works
+// through: the active transaction plus after-commit effect registration. Begin, verification,
+// commit, rollback, cancellation, and panic handling stay in the Runner.
 type Scope struct {
 	tx      pgx.Tx
 	effects []func()
@@ -74,11 +68,10 @@ func (s *Scope) runEffects() {
 	}
 }
 
-// AfterCommit registers one effect to run after the transaction commits
-// successfully. Effects run exactly once each, in registration order, on the
-// caller's goroutine; an effect needing a context captures its own because
-// the request context may already be gone. Effects never run on any failure
-// or rollback path.
+// AfterCommit registers one effect to run after the transaction commits successfully. Effects
+// run exactly once each, in registration order, on the caller's goroutine, and never on any
+// failure or rollback path; an effect needing a context captures its own, because the
+// request context may already be gone.
 func (s *Scope) AfterCommit(effect func()) {
 	s.effects = append(s.effects, effect)
 }

@@ -43,20 +43,29 @@ const asset = {
   }
 }
 
+const facets = {
+  modes: ['text-to-image', 'reference-image'],
+  ratios: ['16:9', '1:1'],
+  resolutions: ['1K', '2K']
+}
+
 test('asset list sends the accepted keyset filters and decodes public facts', async () => {
   const originalFetch = globalThis.fetch
   let requested: URL | undefined
   globalThis.fetch = async (input) => {
     requested = new URL(String(input))
-    return Response.json({ assets: [asset], next_cursor: 'next-page' })
+    return Response.json({ assets: [asset], next_cursor: 'next-page', facets })
   }
   try {
     const result = await createAssetLibraryClient(serverUrl).list('token', {
       cursor: 'cursor-one',
       mediaType: 'image',
       createdSince: '2026-09-01T00:00:00Z',
+      createdUntil: '2026-09-11T00:00:00Z',
       sort: 'oldest',
-      search: 'Aster',
+      modes: ['text-to-image', 'reference-image'],
+      ratios: ['16:9'],
+      resolutions: ['2K', '1K'],
       limit: 24
     })
     assert.equal(result.outcome, 'succeeded')
@@ -84,14 +93,24 @@ test('asset list sends the accepted keyset filters and decodes public facts', as
       }
     })
     assert.equal(result.value.nextCursor, 'next-page')
+    assert.deepEqual(result.value.facets, facets)
     assert.deepEqual(Object.fromEntries(requested?.searchParams ?? []), {
       cursor: 'cursor-one',
       media_type: 'image',
       created_since: '2026-09-01T00:00:00Z',
+      created_until: '2026-09-11T00:00:00Z',
       sort: 'oldest',
-      search: 'Aster',
-      limit: '24'
+      limit: '24',
+      // Repeated parameters collapse to their last value here; `getAll` below
+      // checks the repetition itself.
+      mode: 'reference-image',
+      ratio: '16:9',
+      resolution: '1K'
     })
+    // Each facet repeats its own parameter, in the order the caller chose.
+    assert.deepEqual(requested?.searchParams.getAll('mode'), ['text-to-image', 'reference-image'])
+    assert.deepEqual(requested?.searchParams.getAll('ratio'), ['16:9'])
+    assert.deepEqual(requested?.searchParams.getAll('resolution'), ['2K', '1K'])
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -114,12 +133,15 @@ test('asset list keeps publication and safety restriction as independent facts',
           }
         }
       ],
-      next_cursor: null
+      next_cursor: null,
+      facets: null
     })
   try {
     const result = await createAssetLibraryClient(serverUrl).list('token', {})
     assert.equal(result.outcome, 'succeeded')
     if (result.outcome !== 'succeeded') return
+    // An unpinned media has no vocabulary to offer, and that is not a failure.
+    assert.equal(result.value.facets, null)
     assert.equal(result.value.assets[0].restricted, true)
     assert.equal(result.value.assets[0].restrictionState, 'active')
     assert.deepEqual(result.value.assets[0].publication, {

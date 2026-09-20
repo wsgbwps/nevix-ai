@@ -1,7 +1,6 @@
-// The shared conformance suite every BlobStore adapter must satisfy covers
-// bounded streaming, whole and windowed reads, seek, deletion, and cancel.
-// It remains package-local test support; each adapter supplies an isolated
-// store factory.
+// The shared conformance suite every BlobStore adapter must satisfy: bounded streaming, whole
+// and windowed reads, seek, deletion, cancel. Package-local test support; each adapter
+// supplies an isolated store factory.
 package storage
 
 import (
