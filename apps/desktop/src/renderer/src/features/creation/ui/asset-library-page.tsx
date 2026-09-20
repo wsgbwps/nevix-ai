@@ -21,7 +21,9 @@ const initialFilters: AssetFilters = {
   createdSince: '',
   createdUntil: '',
   sort: 'newest',
-  search: ''
+  modes: [],
+  ratios: [],
+  resolutions: []
 }
 
 function saveBlob(asset: MediaAssetView, blob: Blob): void {
@@ -89,7 +91,7 @@ export function AssetLibraryPage({
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="asset-library">
       <div className="px-page flex flex-wrap items-center justify-between gap-3 pt-6 pb-3">
         <h1 className="sr-only">{t('assets.title')}</h1>
-        <AssetLibraryFilters filters={filters} onChange={apply} />
+        <AssetLibraryFilters filters={filters} facets={list.facets} onChange={apply} />
         <Button
           type="button"
           variant={selection.selecting ? 'secondary' : 'outline'}

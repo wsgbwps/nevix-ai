@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -270,7 +271,10 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 			(id, session_id, owner_user_id, idempotency_key, payload_hash, media_type,
 			 specification, manifest_version, slot_count, created_at, updated_at)
 		SELECT gen_random_uuid(), $1, $2, $3 || '-' || series, 'plan-hash', 'image',
-		       '{}'::jsonb, 1, 4, now() - (series * interval '1 millisecond'), now()
+		       CASE WHEN series % 2 = 0
+		            THEN '{"mode":"text-to-image","ratio":"16:9","resolution":"2K"}'::jsonb
+		            ELSE '{}'::jsonb END,
+		       1, 4, now() - (series * interval '1 millisecond'), now()
 		FROM generate_series(1, 12500) AS series`, sessionID, creator, prefix); err != nil {
 		t.Fatalf("seed plan tasks: %v", err)
 	}
@@ -390,6 +394,54 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 		"creation_media_assets_admin_media_created_idx",
 	}) {
 		t.Fatalf("50k owner page missed production composite index: %s", planJSON)
+	}
+	// A facet filter reaches the frozen Specification through the Generation
+	// Task join, plus the shape fallback production emits for "adaptive"
+	// Assets (spec #150). The 50k Asset table may never be scanned: every
+	// Asset read stays on an index, whether the page is ordered by the owner
+	// keyset or driven from the matching Tasks.
+	//
+	// ponytail: the plan asserts index reach, not the index-ordered page. With
+	// a facet selected the planner reads creation_generation_tasks first and
+	// sorts the matches (22ms, 12.5k matching Assets of 50k here), because
+	// `= ANY($n)` is estimated blind to the parameter's contents. Cost tracks
+	// the number of matches, not the page size; materialize the facet columns
+	// onto creation_media_assets if that ever shows up in a slow query log.
+	ratioLower, ratioUpper, ok := domain.RatioBounds("16:9")
+	if !ok {
+		t.Fatal("16:9 is not an expressible ratio")
+	}
+	if err := tx.QueryRow(ctx, `
+		EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+		SELECT a.id, u.display_name FROM creation_media_assets a
+		JOIN users u ON u.id = a.owner_user_id
+		JOIN creation_generation_tasks t ON t.id = a.task_id
+		WHERE a.owner_user_id = $3 AND a.deleted_at IS NULL
+		  AND (a.restricted_at IS NULL OR a.restriction_released_at IS NOT NULL)
+		  AND a.media_type = 'image'
+		  AND (a.created_at, a.id) < ($1, $2)
+		  AND t.specification->>'mode' = ANY($4)
+		  AND (t.specification->>'ratio' = ANY($5)
+		    OR (t.specification->>'ratio' = 'adaptive' AND a.height_px > 0
+		      AND a.width_px::float8 / a.height_px BETWEEN $6 AND $7))
+		ORDER BY a.created_at DESC, a.id DESC LIMIT 31`,
+		cursorTime, cursorID, creator,
+		[]string{"text-to-image"}, []string{"16:9"}, ratioLower, ratioUpper).Scan(&planJSON); err != nil {
+		t.Fatalf("explain 50k facet keyset page: %v", err)
+	}
+	if err := json.Unmarshal(planJSON, &plan); err != nil {
+		t.Fatalf("decode facet plan: %v", err)
+	}
+	if hasSequentialAssetScan(plan) {
+		t.Fatalf("50k deep facet page used a sequential creation_media_assets scan: %s", planJSON)
+	}
+	if !planUsesAnyIndex(plan, []string{
+		"creation_media_assets_task_slot_unique",
+		"creation_media_assets_visible_owner_media_created_idx",
+		"creation_media_assets_visible_media_created_idx",
+		"creation_media_assets_admin_media_created_idx",
+	}) {
+		t.Fatalf("50k facet page reached its Assets without an index: %s", planJSON)
 	}
 	if err := tx.QueryRow(ctx, `
 		EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
@@ -533,6 +585,128 @@ func TestAssetLibraryQueryPlanAtFiftyThousandRows(t *testing.T) {
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT to_regclass('public.' || $1) IS NOT NULL`, index).Scan(&exists); err != nil || !exists {
 			t.Fatalf("required Asset/FK query index %s exists=%v error=%v", index, exists, err)
+		}
+	}
+}
+
+// The facet predicates read a frozen Specification through a join the rest of
+// the list query does not need, and select "adaptive" Assets by the shape of
+// their pixels (spec #150 Asset 库筛选). Both are SQL the unit tests cannot
+// reach.
+func TestAssetLibrarySpecificationFacets(t *testing.T) {
+	ownerURL, runtimeURL := requireIntegrationEnv(t)
+	ctx := context.Background()
+	if _, err := migration.Apply(ctx, ownerURL); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	runtime, err := pgxpool.New(ctx, runtimeURL)
+	if err != nil {
+		t.Fatalf("connect identity_app pool: %v", err)
+	}
+	defer runtime.Close()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect owner pool: %v", err)
+	}
+	defer owner.Close()
+
+	creator := fixtureUser(t, ownerURL)
+	sessionID := fixtureSession(t, ownerURL, owner, creator)
+	checksum := []byte("0123456789abcdef0123456789abcdef")
+	type specimen struct {
+		label         string
+		spec          string
+		media         domain.MediaType
+		width, height int
+	}
+	// "adaptive" is only ever a video Specification, and it leaves the pixels
+	// as the provider chose them: 5504x3040 is the published 16:9 shape, not a
+	// literal 16:9. The fourth Asset states no ratio at all.
+	specimens := []specimen{
+		{"text-to-image|2K", `{"mode":"text-to-image","ratio":"16:9","resolution":"2K"}`, domain.MediaImage, 2848, 1600},
+		{"text-to-video|720p", `{"mode":"text-to-video","ratio":"adaptive","resolution":"720p"}`, domain.MediaVideo, 5504, 3040},
+		{"text-to-video|1080p", `{"mode":"text-to-video","ratio":"adaptive","resolution":"1080p"}`, domain.MediaVideo, 1024, 1024},
+		{"reference-image|4K", `{"mode":"reference-image","resolution":"4K"}`, domain.MediaImage, 4096, 4096},
+	}
+	ids := make(map[domain.UUID]specimen, len(specimens))
+	for slot, item := range specimens {
+		taskID := domain.NewUUID()
+		assetID := domain.NewUUID()
+		if _, err := owner.Exec(ctx, `
+			INSERT INTO creation_generation_tasks
+				(id, session_id, owner_user_id, idempotency_key, payload_hash, media_type,
+				 specification, manifest_version, slot_count)
+			VALUES ($1, $2, $3, $4, 'facet-hash', $5, $6::jsonb, 1, 1)`,
+			taskID, sessionID, creator, "facet-"+taskID.String(), item.media, item.spec); err != nil {
+			t.Fatalf("seed facet task: %v", err)
+		}
+		if _, err := owner.Exec(ctx, `
+			INSERT INTO creation_media_assets
+				(id, owner_user_id, task_id, slot_index, media_type, mime, blob_key, byte_size,
+				 checksum, width_px, height_px, created_at)
+			VALUES ($1, $2, $3, 0, $4, 'image/png', $5, 128, $6, $7, $8,
+			        now() + ($9 * interval '1 second'))`,
+			assetID, creator, taskID, item.media, "generation-results/facets/"+assetID.String(),
+			checksum, item.width, item.height, slot); err != nil {
+			t.Fatalf("seed facet asset: %v", err)
+		}
+		ids[assetID] = item
+	}
+	t.Cleanup(func() {
+		cleanup, err := pgxpool.New(context.Background(), ownerURL)
+		if err != nil {
+			t.Logf("open facet cleanup pool: %v", err)
+			return
+		}
+		defer cleanup.Close()
+		if _, err := cleanup.Exec(context.Background(), `
+			DELETE FROM creation_media_assets WHERE task_id IN (
+				SELECT id FROM creation_generation_tasks WHERE idempotency_key LIKE 'facet-%')`); err != nil {
+			t.Logf("cleanup facet assets: %v", err)
+		}
+		if _, err := cleanup.Exec(context.Background(),
+			`DELETE FROM creation_generation_tasks WHERE idempotency_key LIKE 'facet-%'`); err != nil {
+			t.Logf("cleanup facet tasks: %v", err)
+		}
+	})
+
+	repo := NewMediaAssetRepository(runtime)
+	for _, check := range []struct {
+		name   string
+		filter domain.AssetListFilter
+		want   []string
+	}{
+		{"unconstrained", domain.AssetListFilter{}, []string{
+			"text-to-image|2K", "text-to-video|720p", "text-to-video|1080p", "reference-image|4K"}},
+		{"one mode", domain.AssetListFilter{Modes: []string{"text-to-image"}}, []string{"text-to-image|2K"}},
+		{"modes are alternatives", domain.AssetListFilter{
+			Modes: []string{"text-to-image", "reference-image"}}, []string{"text-to-image|2K", "reference-image|4K"}},
+		{"a stated ratio", domain.AssetListFilter{Ratios: []string{"16:9"}}, []string{"text-to-image|2K", "text-to-video|720p"}},
+		{"a stated ratio excludes other shapes", domain.AssetListFilter{Ratios: []string{"1:1"}}, []string{"text-to-video|1080p"}},
+		{"one resolution", domain.AssetListFilter{Resolutions: []string{"2K"}}, []string{"text-to-image|2K"}},
+		{"resolutions are alternatives", domain.AssetListFilter{
+			Resolutions: []string{"720p", "1080p"}}, []string{"text-to-video|720p", "text-to-video|1080p"}},
+		{"facets intersect across sections", domain.AssetListFilter{
+			Modes: []string{"text-to-video"}, Ratios: []string{"1:1"}}, []string{"text-to-video|1080p"}},
+		{"a ratio nothing carries", domain.AssetListFilter{Ratios: []string{"21:9"}}, nil},
+	} {
+		assets, _, err := repo.ListVisible(ctx, creator, check.filter, nil, 50)
+		if err != nil {
+			t.Fatalf("%s: %v", check.name, err)
+		}
+		got := make([]string, 0, len(assets))
+		for _, asset := range assets {
+			item, ok := ids[asset.ID]
+			if !ok {
+				t.Fatalf("%s: foreign asset %s", check.name, asset.ID)
+			}
+			got = append(got, item.label)
+		}
+		want := append([]string(nil), check.want...)
+		slices.Sort(got)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Fatalf("%s: got %v, want %v", check.name, got, want)
 		}
 	}
 }

@@ -179,8 +179,20 @@ function createHarness(
     ports: {
       listAssets: async (request) => {
         listCalls.push(request)
+        const facets =
+          request.mediaType === 'video'
+            ? {
+                modes: ['text-to-video', 'first-frame', 'first-last-frame', 'omni-reference'],
+                ratios: ['16:9', '1:1'],
+                resolutions: ['480p', '720p', '1080p']
+              }
+            : {
+                modes: ['text-to-image', 'reference-image'],
+                ratios: ['16:9', '1:1'],
+                resolutions: ['1K', '2K']
+              }
         if (emptyNextPage && request.cursor === 'next') {
-          return { outcome: 'succeeded', value: { assets: [], nextCursor: null } }
+          return { outcome: 'succeeded', value: { assets: [], nextCursor: null, facets } }
         }
         return {
           outcome: 'succeeded',
@@ -192,7 +204,8 @@ function createHarness(
                     asset(`preview-${index + 1}`, new Date(2026, 8, 16, 8, index).toISOString())
                   )
                 : assets,
-            nextCursor: 'next'
+            nextCursor: 'next',
+            facets
           }
         }
       },

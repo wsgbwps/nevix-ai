@@ -1323,6 +1323,8 @@ paths:
       description: |-
         只返回当前用户已成功形成且未删除、未限制的 Media Asset。使用 (created_at, id)
         复合 keyset cursor；search 只接受完整 Asset UUID，不搜索私有 prompt。
+        mode / ratio / resolution 按冻结在 Generation Task 上的 Generation Specification
+        过滤，可重复；同一参数内为 OR，参数之间为 AND。取值超出词表返回 400，而不是空页。
       security:
         - bearerAuth: []
       parameters:
@@ -1355,14 +1357,49 @@ paths:
           schema:
             type: string
             maxLength: 200
+        - name: mode
+          in: query
+          description: 生成模式；可重复。
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                [text-to-image, reference-image, text-to-video, first-frame,
+                 first-last-frame, omni-reference]
+          style: form
+          explode: true
+        - name: ratio
+          in: query
+          description: |-
+            画面比例；可重复，按宽到窄排列。只接受可表达的比例：Specification 记为
+            adaptive 的 Asset 没有比例标签，按其像素形状落在哪个比例的 ±3% 带内归类，
+            带外则不参与任何比例筛选。
+          schema:
+            type: array
+            items:
+              type: string
+              enum: ["21:9", "16:9", "3:2", "4:3", "1:1", "3:4", "2:3", "9:16"]
+          style: form
+          explode: true
+        - name: resolution
+          in: query
+          description: 分辨率档位；可重复。档位由模型定义，这里接受两种媒体的并集。
+          schema:
+            type: array
+            items:
+              type: string
+              enum: ["1K", "1.5K", "2K", "3K", "4K", "480p", "720p", "1080p"]
+          style: form
+          explode: true
       responses:
         "200":
-          description: 当前 Asset 页与下一页 cursor。
+          description: 当前 Asset 页、下一页 cursor，以及该媒体的筛选词表。
           content:
             application/json:
               schema:
                 type: object
-                required: [assets, next_cursor]
+                required: [assets, next_cursor, facets]
                 properties:
                   assets:
                     type: array
@@ -1371,6 +1408,26 @@ paths:
                   next_cursor:
                     type: string
                     nullable: true
+                  facets:
+                    description: |-
+                      请求指定 media_type 时给出该媒体的筛选词表。来自版本化的能力契约，
+                      不随 provider 连接的可用性变化——连接暂停不影响筛选自己已有的 Asset。
+                    type: object
+                    nullable: true
+                    required: [modes, ratios, resolutions]
+                    properties:
+                      modes:
+                        type: array
+                        items:
+                          type: string
+                      ratios:
+                        type: array
+                        items:
+                          type: string
+                      resolutions:
+                        type: array
+                        items:
+                          type: string
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

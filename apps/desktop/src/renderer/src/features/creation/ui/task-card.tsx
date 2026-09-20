@@ -26,7 +26,7 @@ import type {
 } from '../api/generation-task-http'
 import type { ReferenceMaterialView } from '../api/go-creation-http'
 import type { MaterialThumbnailState, WorkbenchGalleryHandle } from '../model/use-workbench'
-import { modeKeys } from '../i18n/mode-keys'
+import { modeLabelKey } from '../i18n/mode-keys'
 import { statusKey } from '../i18n/gallery-keys'
 import { ImageWithSkeleton } from './media-with-skeleton'
 import { SlotCard } from './slot-card'
@@ -532,14 +532,7 @@ function TaskDetailsMenu({
                 <span className="line-clamp-6 whitespace-pre-wrap">{spec.prompt}</span>
               </DetailRow>
             )}
-            <DetailRow
-              label={t('gallery.details.mode')}
-              value={
-                spec.mode in modeKeys
-                  ? String(t(modeKeys[spec.mode as keyof typeof modeKeys]))
-                  : spec.mode
-              }
-            />
+            <DetailRow label={t('gallery.details.mode')} value={t(modeLabelKey(spec.mode))} />
             <DetailRow label={t('gallery.details.quantity')} value={String(spec.quantity)} />
             {spec.durationSeconds !== null && (
               <DetailRow

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type {
+  AssetFacetVocabulary,
   AssetLibraryPorts,
   AssetMediaType,
   AssetPageRequest,
@@ -16,7 +17,15 @@ export interface AssetFilters {
   /** Inclusive local end day (`YYYY-MM-DD`) or empty. */
   readonly createdUntil: string
   readonly sort: AssetSort
-  readonly search: string
+  /** Frozen Generation Specification facets; empty means unconstrained. */
+  readonly modes: readonly string[]
+  readonly ratios: readonly string[]
+  readonly resolutions: readonly string[]
+}
+
+/** True when any facet is selected, i.e. the panel is narrowing the wall. */
+export function hasFacets(filters: AssetFilters): boolean {
+  return filters.modes.length > 0 || filters.ratios.length > 0 || filters.resolutions.length > 0
 }
 
 /** Local calendar day (`YYYY-MM-DD`) of an instant — the day an Asset is filed under. */
@@ -42,7 +51,9 @@ function pageRequest(filters: AssetFilters, cursor: string | null): AssetPageReq
     createdSince: dayBoundary(filters.createdSince, 0),
     createdUntil: dayBoundary(filters.createdUntil, 1),
     sort: filters.sort,
-    search: filters.search.trim() || undefined
+    modes: filters.modes,
+    ratios: filters.ratios,
+    resolutions: filters.resolutions
   }
 }
 
@@ -51,6 +62,7 @@ export function useAssetList(
   initialFilters: AssetFilters
 ): {
   readonly assets: readonly MediaAssetView[]
+  readonly facets: AssetFacetVocabulary | null
   readonly status: 'loading' | 'ready' | 'failed'
   readonly canPrevious: boolean
   readonly canNext: boolean
@@ -64,6 +76,12 @@ export function useAssetList(
   const [cursor, setCursor] = useState<string | null>(null)
   const [cursorHistory, setCursorHistory] = useState<(string | null)[]>([])
   const [assets, setAssets] = useState<readonly MediaAssetView[]>([])
+  // The vocabulary is per media: keep the media it was issued for, so a
+  // switched tab never offers the previous media's values.
+  const [facetSet, setFacetSet] = useState<{
+    readonly mediaType: AssetMediaType
+    readonly vocabulary: AssetFacetVocabulary
+  } | null>(null)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [reload, setReload] = useState(0)
@@ -83,6 +101,12 @@ export function useAssetList(
         return
       }
       setAssets(result.value.assets)
+      if (result.value.facets !== null) {
+        setFacetSet({
+          mediaType: submittedFilters.mediaType,
+          vocabulary: result.value.facets
+        })
+      }
       setNextCursor(result.value.nextCursor)
       setStatus('ready')
     })
@@ -98,6 +122,7 @@ export function useAssetList(
 
   return {
     assets,
+    facets: facetSet?.mediaType === submittedFilters.mediaType ? facetSet.vocabulary : null,
     status,
     canPrevious: cursorHistory.length > 0,
     canNext: nextCursor !== null,

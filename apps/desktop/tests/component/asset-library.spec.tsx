@@ -70,8 +70,10 @@ test('filters map to the page port and reset keyset position', async ({ mount, p
   await page.getByRole('button', { name: 'Sort' }).click()
   await page.getByRole('menuitemradio', { name: 'Oldest first' }).click()
   await page.getByRole('button', { name: 'Filter' }).click()
-  await page.getByLabel('Search').fill('Aster')
-  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await page.getByText('Text to video').click()
+  await page.getByText('First frame').click()
+  await page.getByText('16:9').click()
+  await page.getByText('720p').click()
   // Day boundaries are local, and the end date is sent as the next day's instant.
   const createdSince = new Date(2026, 8, 1).toISOString()
   const createdUntil = new Date(2026, 8, 11).toISOString()
@@ -82,7 +84,9 @@ test('filters map to the page port and reset keyset position', async ({ mount, p
       createdSince,
       createdUntil,
       sort: 'oldest',
-      search: 'Aster'
+      modes: ['text-to-video', 'first-frame'],
+      ratios: ['16:9'],
+      resolutions: ['720p']
     })
 
   const callsBeforeResubmit = await page.evaluate(
@@ -93,8 +97,26 @@ test('filters map to the page port and reset keyset position', async ({ mount, p
     .getByRole('button', { name: 'Image' })
     .click()
   await expect
-    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().length ?? 0))
-    .toBe(callsBeforeResubmit + 1)
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
+    .toMatchObject({ mediaType: 'image', modes: [], ratios: [], resolutions: [] })
+  expect(await page.evaluate(() => window.__assetLibraryTest?.listCalls().length ?? 0)).toBe(
+    callsBeforeResubmit + 1
+  )
+})
+
+test('a facet selection is dropped by the clear row', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Filter' }).click()
+  await page.getByText('Text to image').click()
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
+    .toMatchObject({ modes: ['text-to-image'] })
+
+  await page.getByRole('button', { name: 'Clear filters' }).click()
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().at(-1)))
+    .toMatchObject({ modes: [], ratios: [], resolutions: [] })
+  await expect(page.getByRole('button', { name: 'Clear filters' })).toBeHidden()
 })
 
 test('the wall opens on images with only the type buttons offered', async ({ mount, page }) => {

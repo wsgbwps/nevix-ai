@@ -53,3 +53,44 @@ func TestParseAssetFilterReadsExactSearch(t *testing.T) {
 		t.Fatalf("search=%q ok=%v", filter.Search, ok)
 	}
 }
+
+func TestParseAssetFilterReadsRepeatedFacets(t *testing.T) {
+	req := httptest.NewRequest("GET",
+		"/creation/assets?mode=text-to-image&mode=reference-image&ratio=16%3A9&resolution=2K&resolution=1K", nil)
+	recorder := httptest.NewRecorder()
+
+	filter, ok := parseAssetFilter(recorder, req)
+	if !ok {
+		t.Fatalf("status=%d", recorder.Code)
+	}
+	if len(filter.Modes) != 2 || filter.Modes[0] != "text-to-image" || filter.Modes[1] != "reference-image" {
+		t.Fatalf("modes=%v", filter.Modes)
+	}
+	if len(filter.Ratios) != 1 || filter.Ratios[0] != "16:9" {
+		t.Fatalf("ratios=%v", filter.Ratios)
+	}
+	if len(filter.Resolutions) != 2 || filter.Resolutions[0] != "2K" {
+		t.Fatalf("resolutions=%v", filter.Resolutions)
+	}
+}
+
+func TestParseAssetFilterRejectsUnknownFacetValues(t *testing.T) {
+	for _, query := range []string{
+		"ratio=banana",
+		"resolution=8K",
+		"mode=text-to-audio",
+		"ratio=adaptive", // the sentinel: adaptive Assets are matched by shape, never asked for
+		"mode=",          // present but empty is still not a contract value
+		"ratio=%20",
+		"mode=text-to-image&mode=",
+	} {
+		req := httptest.NewRequest("GET", "/creation/assets?"+query, nil)
+		recorder := httptest.NewRecorder()
+		if _, ok := parseAssetFilter(recorder, req); ok {
+			t.Fatalf("%q was admitted", query)
+		}
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("%q status=%d", query, recorder.Code)
+		}
+	}
+}

@@ -88,7 +88,8 @@ export type CreationApiResult<T> =
 interface RequestInput {
   readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   readonly path: string
-  readonly query?: Readonly<Record<string, string>>
+  /** A list value repeats the parameter (`?mode=a&mode=b`). */
+  readonly query?: Readonly<Record<string, string | readonly string[]>>
   readonly body?: unknown
   readonly token: string
 }
@@ -105,7 +106,11 @@ export async function request(
 ): Promise<{ readonly outcome: 'succeeded'; readonly payload: unknown } | CreationApiFailure> {
   const url = new URL(input.path, serverUrl)
   for (const [name, value] of Object.entries(input.query ?? {})) {
-    url.searchParams.set(name, value)
+    if (typeof value === 'string') {
+      url.searchParams.set(name, value)
+      continue
+    }
+    for (const entry of value) url.searchParams.append(name, entry)
   }
 
   let response: Response

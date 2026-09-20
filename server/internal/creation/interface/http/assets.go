@@ -3,6 +3,7 @@ package creationhttp
 import (
 	"encoding/hex"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -40,7 +41,9 @@ func (h *AssetHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, asset := range assets {
 		items = append(items, toAssetResource(asset))
 	}
-	encodeJSON(w, http.StatusOK, listAssetsResponse{Assets: items, NextCursor: cursorToken(next)})
+	encodeJSON(w, http.StatusOK, listAssetsResponse{
+		Assets: items, NextCursor: cursorToken(next), Facets: toAssetFacetsResource(filter.MediaType),
+	})
 }
 
 func (h *AssetHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +132,45 @@ func parseAssetFilter(w http.ResponseWriter, r *http.Request) (domain.AssetListF
 			return invalidAssetFilter(w, "sort must be newest or oldest.")
 		}
 	}
+	// Facets repeat (`?mode=a&mode=b`). A value outside the contract is a
+	// client bug, not an empty page: answering with an empty list would hide
+	// it behind a result set that looks legitimately empty.
+	accepted := domain.AcceptedAssetFacets()
+	for _, facet := range []struct {
+		param    string
+		accepted []string
+		into     *[]string
+	}{
+		{"mode", accepted.Modes, &filter.Modes},
+		{"ratio", accepted.Ratios, &filter.Ratios},
+		{"resolution", accepted.Resolutions, &filter.Resolutions},
+	} {
+		values, ok := parseFacetValues(w, facet.param, query[facet.param], facet.accepted)
+		if !ok {
+			return domain.AssetListFilter{}, false
+		}
+		*facet.into = values
+	}
 	return filter, true
+}
+
+// parseFacetValues reads one repeated facet parameter. A value outside the
+// contract is a client bug whether it is unknown or empty, so `?mode=` is
+// rejected alongside `?mode=banana` rather than treated as unconstrained.
+func parseFacetValues(w http.ResponseWriter, param string, raw, accepted []string) ([]string, bool) {
+	var values []string
+	for _, value := range raw {
+		value = strings.TrimSpace(value)
+		if !slices.Contains(accepted, value) {
+			WriteError(w, &Error{
+				Status: http.StatusBadRequest, Code: CodeInvalidRequest,
+				Message: param + " must be one of: " + strings.Join(accepted, ", ") + ".",
+			})
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	return values, true
 }
 
 func invalidAssetFilter(w http.ResponseWriter, message string) (domain.AssetListFilter, bool) {
@@ -138,8 +179,29 @@ func invalidAssetFilter(w http.ResponseWriter, message string) (domain.AssetList
 }
 
 type listAssetsResponse struct {
-	Assets     []assetResource `json:"assets"`
-	NextCursor *string         `json:"next_cursor"`
+	Assets     []assetResource      `json:"assets"`
+	NextCursor *string              `json:"next_cursor"`
+	Facets     *assetFacetsResource `json:"facets"`
+}
+
+// assetFacetsResource publishes the filter vocabulary for the requested
+// media, straight from the capability contract rather than from the current
+// provider connection: a paused provider must not take away a user's ability
+// to filter the Assets they already own.
+type assetFacetsResource struct {
+	Modes       []string `json:"modes"`
+	Ratios      []string `json:"ratios"`
+	Resolutions []string `json:"resolutions"`
+}
+
+func toAssetFacetsResource(media *domain.MediaType) *assetFacetsResource {
+	if media == nil {
+		return nil
+	}
+	facets := domain.AssetFacets(*media)
+	return &assetFacetsResource{
+		Modes: facets.Modes, Ratios: facets.Ratios, Resolutions: facets.Resolutions,
+	}
 }
 
 type assetDetailResponse struct {

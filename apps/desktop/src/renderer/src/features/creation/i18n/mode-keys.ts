@@ -8,3 +8,15 @@ export const modeKeys = {
   'first-last-frame': 'composer.mode.first-last-frame',
   'omni-reference': 'composer.mode.omni-reference'
 } as const
+
+type ModeKey = (typeof modeKeys)[keyof typeof modeKeys]
+
+/**
+ * The display key for a mode read off the wire. A value this build does not
+ * publish is handed back as its own key — i18next renders an unknown key
+ * verbatim, so a mode a newer server offers still reaches the UI, and the cast
+ * is the one place that admits the key set is not closed.
+ */
+export function modeLabelKey(mode: string): ModeKey {
+  return (modeKeys as Record<string, ModeKey | undefined>)[mode] ?? (mode as ModeKey)
+}

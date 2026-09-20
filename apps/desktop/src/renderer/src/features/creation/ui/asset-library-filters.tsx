@@ -10,10 +10,10 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger
 } from '../../../components/ui/dropdown-menu'
-import { Input } from '../../../components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '../../../components/ui/popover'
-import type { AssetMediaType, AssetSort } from '../api/asset-library-http'
-import { isoDay, type AssetFilters } from '../model/use-asset-list'
+import type { AssetFacetVocabulary, AssetMediaType, AssetSort } from '../api/asset-library-http'
+import { modeLabelKey } from '../i18n/mode-keys'
+import { hasFacets, isoDay, type AssetFilters } from '../model/use-asset-list'
 
 const MEDIA_TYPES: readonly AssetMediaType[] = ['image', 'video']
 
@@ -34,13 +34,18 @@ function presetDay(days: number): string {
 
 const triggerClass =
   'group text-muted-foreground font-normal data-[state=open]:text-foreground data-[state=open]:bg-muted'
+const activeTriggerClass = 'group font-medium data-[state=open]:bg-muted'
 const chevronClass = 'size-3.5 opacity-70 transition-transform group-data-[state=open]:rotate-180'
+
+const EMPTY_FACETS = { modes: [], ratios: [], resolutions: [] } as const
 
 export function AssetLibraryFilters({
   filters,
+  facets,
   onChange
 }: {
   readonly filters: AssetFilters
+  readonly facets: AssetFacetVocabulary | null
   readonly onChange: (filters: AssetFilters) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
@@ -57,7 +62,9 @@ export function AssetLibraryFilters({
               variant={active ? 'secondary' : 'ghost'}
               aria-pressed={active}
               className={active ? '' : 'text-muted-foreground font-normal'}
-              onClick={() => onChange({ ...filters, mediaType })}
+              // The vocabulary differs per media, so a selection made under
+              // the old one would be a value the new media cannot carry.
+              onClick={() => onChange({ ...filters, mediaType, ...EMPTY_FACETS })}
             >
               {t(`assets.media.${mediaType}`)}
             </Button>
@@ -65,48 +72,108 @@ export function AssetLibraryFilters({
         })}
       </div>
       <span className="bg-border mx-1 h-4 w-px" aria-hidden />
-      <SearchFilter filters={filters} onChange={onChange} />
+      <FacetFilter filters={filters} facets={facets} onChange={onChange} />
       <TimeFilter filters={filters} onChange={onChange} />
       <SortFilter filters={filters} onChange={onChange} />
     </div>
   )
 }
 
-function SearchFilter({
+function FacetFilter({
   filters,
+  facets,
   onChange
 }: {
   readonly filters: AssetFilters
+  readonly facets: AssetFacetVocabulary | null
   readonly onChange: (filters: AssetFilters) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState(filters.search)
-  const apply = (): void => {
-    setOpen(false)
-    onChange({ ...filters, search: draft })
+  const active = hasFacets(filters)
+  const sections = [
+    {
+      field: 'modes' as const,
+      title: t('assets.filters.mode'),
+      values: facets?.modes ?? [],
+      label: (value: string): string => t(modeLabelKey(value))
+    },
+    {
+      field: 'ratios' as const,
+      title: t('assets.filters.ratio'),
+      values: facets?.ratios ?? [],
+      label: (value: string): string => value
+    },
+    {
+      field: 'resolutions' as const,
+      title: t('assets.filters.resolution'),
+      values: facets?.resolutions ?? [],
+      label: (value: string): string => value
+    }
+  ]
+  const toggle = (field: 'modes' | 'ratios' | 'resolutions', value: string): void => {
+    const selected = filters[field]
+    onChange({
+      ...filters,
+      [field]: selected.includes(value)
+        ? selected.filter((entry) => entry !== value)
+        : [...selected, value]
+    })
   }
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover>
       <PopoverTrigger asChild>
-        <Button type="button" size="sm" variant="ghost" className={triggerClass}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className={active ? activeTriggerClass : triggerClass}
+        >
           {t('assets.filters.filter')}
           <ChevronDownIcon className={chevronClass} aria-hidden />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 space-y-2 rounded-xl p-3">
-        <Input
-          aria-label={t('assets.filters.search')}
-          placeholder={t('assets.filters.searchHint')}
-          value={draft}
-          onChange={(event) => setDraft(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') apply()
-          }}
-        />
-        <Button type="button" size="sm" className="w-full" onClick={apply}>
-          {t('assets.filters.submit')}
-        </Button>
+      <PopoverContent align="start" className="w-56 rounded-xl p-3">
+        {active ? (
+          <div className="mb-1 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground font-normal"
+              onClick={() => onChange({ ...filters, ...EMPTY_FACETS })}
+            >
+              {t('assets.filters.clear')}
+            </Button>
+          </div>
+        ) : null}
+        {sections
+          .filter((section) => section.values.length > 0)
+          .map((section) => (
+            <fieldset key={section.field} className="space-y-0.5">
+              <legend className="text-muted-foreground px-2 py-1 text-xs font-medium">
+                {section.title}
+              </legend>
+              {section.values.map((value) => (
+                <label
+                  key={value}
+                  className="hover:bg-muted has-[:focus-visible]:ring-ring/50 flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 text-sm has-[:focus-visible]:ring-2"
+                >
+                  <span>
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={filters[section.field].includes(value)}
+                      onChange={() => toggle(section.field, value)}
+                    />
+                    {section.label(value)}
+                  </span>
+                  {filters[section.field].includes(value) ? (
+                    <CheckIcon className="size-4" aria-hidden />
+                  ) : null}
+                </label>
+              ))}
+            </fieldset>
+          ))}
       </PopoverContent>
     </Popover>
   )
