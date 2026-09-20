@@ -116,6 +116,13 @@ func parseAssetFilter(w http.ResponseWriter, r *http.Request) (domain.AssetListF
 		}
 		filter.CreatedSince = &createdSince
 	}
+	if raw := query.Get("created_until"); raw != "" {
+		createdUntil, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return invalidAssetFilter(w, "created_until must be an RFC3339 timestamp.")
+		}
+		filter.CreatedUntil = &createdUntil
+	}
 	if raw := query.Get("sort"); raw != "" {
 		filter.Sort = domain.AssetSort(raw)
 		if filter.Sort != domain.AssetNewest && filter.Sort != domain.AssetOldest {

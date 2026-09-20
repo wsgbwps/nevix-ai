@@ -101,6 +101,11 @@ func TestAssetLibraryPublicationInspirationAndCreateSimilar(t *testing.T) {
 	if len(creatorPage.Assets) != 1 || creatorPage.NextCursor == nil {
 		t.Fatalf("creator first page=%+v", creatorPage)
 	}
+	beforeCreation := url.QueryEscape(time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano))
+	excluded := readAssetPage(t, h, creatorToken, "/creation/assets?created_until="+beforeCreation)
+	if len(excluded.Assets) != 0 {
+		t.Fatalf("created_until admitted newer assets=%+v", excluded.Assets)
+	}
 	first := creatorPage.Assets[0]
 	if !first.Capabilities.CanDelete || !first.Capabilities.CanCreateSimilar {
 		t.Fatalf("creator capabilities=%+v", first.Capabilities)

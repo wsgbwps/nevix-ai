@@ -51,6 +51,7 @@ type AssetListFilter struct {
 	MediaType    *MediaType
 	Creator      string
 	CreatedSince *time.Time
+	CreatedUntil *time.Time
 	Sort         AssetSort
 	Search       string
 }

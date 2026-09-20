@@ -92,6 +92,10 @@ func (r *MediaAssetRepository) ListVisible(ctx context.Context, owner domain.UUI
 	if filter.CreatedSince != nil {
 		conditions = append(conditions, "a.created_at >= "+add(filter.CreatedSince.UTC()))
 	}
+	if filter.CreatedUntil != nil {
+		// Exclusive bound: callers pass the instant after their inclusive end date.
+		conditions = append(conditions, "a.created_at < "+add(filter.CreatedUntil.UTC()))
+	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		if id, err := domain.ParseUUID(search); err == nil {
 			conditions = append(conditions, "a.id = "+add(id))

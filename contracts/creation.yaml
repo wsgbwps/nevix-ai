@@ -1338,6 +1338,12 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: created_until
+          in: query
+          description: 排他上界；结束日期为当天时传次日 00:00。
+          schema:
+            type: string
+            format: date-time
         - name: sort
           in: query
           schema:
