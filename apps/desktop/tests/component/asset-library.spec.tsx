@@ -263,17 +263,28 @@ test('deleting an asset states that its Publication survives', async ({ mount, p
   await expect(page.getByRole('dialog')).toBeVisible()
 })
 
-test('batch mode has download as its only operation and downloads sequentially', async ({
+test('batch mode offers three actions over the row and downloads sequentially', async ({
   mount,
   page
 }) => {
   await mount(<AssetLibraryStory downloadMode="deferred" />)
-  await page.getByRole('button', { name: 'Select assets' }).click()
+  await page.getByRole('button', { name: 'Batch actions' }).click()
+  const actions = page.getByRole('button', { name: 'Delete' })
+  const download = page.getByRole('button', { name: 'Download', exact: true })
+  const publish = page.getByRole('button', { name: 'Publish', exact: true })
+  await expect(actions).toBeDisabled()
+  await expect(download).toBeDisabled()
+  await expect(publish).toBeDisabled()
+  await expect(page.getByRole('status').filter({ hasText: '0 items selected' })).toBeVisible()
+  await expect(page.getByTestId('batch-toolbar').getByRole('button')).toHaveCount(4)
+
   await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
   await page.getByRole('checkbox', { name: 'Select asset asset-two' }).check()
-  await expect(page.getByTestId('batch-toolbar').getByRole('button')).toHaveCount(2)
-  await page.getByRole('button', { name: 'Download 2 assets' }).click()
-  await expect(page.getByRole('status').filter({ hasText: '1 / 2' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: '2 items selected' })).toBeVisible()
+  await download.click()
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Download in progress 1 / 2' })
+  ).toBeVisible()
   expect(await page.evaluate(() => window.__assetLibraryTest?.maxActiveDownloads())).toBe(1)
   await page.evaluate(() => window.__assetLibraryTest?.releaseDownloads())
   await expect(page.getByRole('status').filter({ hasText: '2 / 2' })).toBeVisible()
@@ -285,35 +296,100 @@ test('batch download can be cancelled with an accessible stable status', async (
   page
 }) => {
   await mount(<AssetLibraryStory downloadMode="cancelled" />)
-  await page.getByRole('button', { name: 'Select assets' }).click()
+  await page.getByRole('button', { name: 'Batch actions' }).click()
   await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
-  await page.getByRole('button', { name: 'Download 1 asset' }).click()
-  await page.getByRole('button', { name: 'Cancel download' }).click()
+  await page.getByRole('button', { name: 'Download', exact: true }).click()
+  await page.getByRole('button', { name: 'Cancel Download' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Download cancelled' })).toBeVisible()
 })
 
-test('a batch detached by leaving selection cannot overwrite the batch that replaced it', async ({
+test('batch delete runs per asset and re-reads the wall it changed', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Batch actions' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+  await page.getByRole('checkbox', { name: 'Select asset asset-three' }).check()
+  page.once('dialog', async (confirmation) => {
+    expect(confirmation.message()).toContain('Delete 2 selected assets?')
+    await confirmation.accept()
+  })
+  await page.getByRole('button', { name: 'Delete' }).click()
+
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Delete complete · 2 / 2' })
+  ).toBeVisible()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.deletes())).toEqual([
+    'asset-one',
+    'asset-three'
+  ])
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.listCalls().length ?? 0))
+    .toBe(2)
+
+  // The refresh dropped the deleted cards, so the selection must drop with
+  // them: a count for cards that are gone would leave actions that confirm and
+  // then silently do nothing.
+  await expect(page.getByTestId('asset-card')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Delete' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeDisabled()
+})
+
+test('batch publish skips what the server would refuse and reports the skip', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory unpublishableIds={['asset-two']} />)
+  await page.getByRole('button', { name: 'Batch actions' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+  await page.getByRole('checkbox', { name: 'Select asset asset-two' }).check()
+  page.once('dialog', async (confirmation) => {
+    expect(confirmation.message()).toContain('Publish 2 selected assets?')
+    await confirmation.accept()
+  })
+  await page.getByRole('button', { name: 'Publish', exact: true }).click()
+
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Published · 1 / 2 (1 not publishable, skipped)' })
+  ).toBeVisible()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.publishKeys())).toHaveLength(1)
+})
+
+test('a selection with nothing publishable leaves publish unavailable', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory unpublishableIds={['asset-one']} />)
+  await page.getByRole('button', { name: 'Batch actions' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Delete' })).toBeEnabled()
+})
+
+test('a batch detached by a reset page cannot overwrite the batch that replaced it', async ({
   mount,
   page
 }) => {
   await mount(<AssetLibraryStory downloadMode="sequenced" paginated />)
-  await page.getByRole('button', { name: 'Select assets' }).click()
+  await page.getByRole('button', { name: 'Batch actions' }).click()
   await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
-  await page.getByRole('button', { name: 'Download 1 asset' }).click()
+  await page.getByRole('button', { name: 'Download', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: '1 / 1' })).toBeVisible()
 
-  // Leaving selection detaches the running batch and drops its selection with
-  // it; the second page a short wall appends is still there to pick from.
-  await page.getByRole('button', { name: 'Exit selection' }).click()
+  // Re-reading the wall under a new filter resets the page, which detaches the
+  // running batch and drops its selection with it; the second page a short wall
+  // appends is still there to pick from. A run in flight leaves no way out of
+  // selection but cancelling it, so a filter is the detach the user can reach.
+  await page
+    .getByRole('group', { name: 'Media type' })
+    .getByRole('button', { name: 'Video' })
+    .click()
   await expect(page.getByTestId('asset-card')).toHaveCount(5)
-  await page.getByRole('button', { name: 'Select assets' }).click()
   await page.getByRole('checkbox', { name: 'Select asset asset-four' }).check()
-  await page.getByRole('button', { name: 'Download 1 asset' }).click()
+  await page.getByRole('button', { name: 'Download', exact: true }).click()
 
   // Releasing the detached batch's handle must not disturb the live one.
   await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
-  await expect(page.getByRole('status').filter({ hasText: 'Downloading 1 / 1' })).toBeVisible()
-  await page.getByRole('button', { name: 'Cancel download' }).click()
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Download in progress 1 / 1' })
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel Download' }).click()
   await page.evaluate(() => window.__assetLibraryTest?.releaseNextDownload())
   await expect(page.getByRole('status').filter({ hasText: 'Download cancelled' })).toBeVisible()
 })

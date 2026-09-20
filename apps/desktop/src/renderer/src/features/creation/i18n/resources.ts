@@ -33,17 +33,29 @@ export const creationTranslations = defineResourceTranslations({
           oldest: '远-近',
           submit: '搜索'
         },
-        selection: { enter: '选择资产', exit: '退出选择' },
+        selection: {
+          enter: '批量操作',
+          exit: '取消选择',
+          // zh only ever resolves `_other`; `_one` exists for the key contract.
+          count_one: '已选择 {{count}} 项内容',
+          count_other: '已选择 {{count}} 项内容'
+        },
         selectOne: '选择资产 {{id}}',
         open: '打开资产 {{id}}',
         batch: {
-          download_one: '下载 1 个资产',
-          download_other: '下载 {{count}} 个资产',
-          cancel: '取消下载',
-          running: '正在下载 {{done}} / {{total}}',
-          cancelled: '下载已取消 · {{done}} / {{total}}',
-          failed: '下载失败 · {{done}} / {{total}}',
-          complete: '下载完成 · {{done}} / {{total}}'
+          // Action nouns: they label the buttons and fill {{action}} below.
+          download: '下载',
+          remove: '删除',
+          publish: '发布',
+          cancel: '取消{{action}}',
+          running: '{{action}}进行中 {{done}} / {{total}}',
+          cancelled: '{{action}}已取消 · {{done}} / {{total}}',
+          failed: '{{action}}失败 · {{done}} / {{total}}',
+          complete: '{{action}}完成 · {{done}} / {{total}}',
+          publishComplete: '发布完成 · {{done}} / {{total}}（跳过 {{skipped}} 个不可发布）',
+          removeConfirm:
+            '删除选中的 {{count}} 个资产？任务记录仍会保留；已发布的内容不会因此撤回。',
+          publishConfirm: '发布选中的 {{count}} 个资产？发布后冻结、需先撤回才能修改。'
         },
         pagination: '资产分页',
         loadMore: '加载更多',
@@ -583,17 +595,30 @@ export const creationTranslations = defineResourceTranslations({
           oldest: 'Oldest first',
           submit: 'Search'
         },
-        selection: { enter: 'Select assets', exit: 'Exit selection' },
+        selection: {
+          enter: 'Batch actions',
+          exit: 'Cancel selection',
+          count_one: '{{count}} item selected',
+          count_other: '{{count}} items selected'
+        },
         selectOne: 'Select asset {{id}}',
         open: 'Open asset {{id}}',
         batch: {
-          download_one: 'Download 1 asset',
-          download_other: 'Download {{count}} assets',
-          cancel: 'Cancel download',
-          running: 'Downloading {{done}} / {{total}}',
-          cancelled: 'Download cancelled · {{done}} / {{total}}',
-          failed: 'Download failed · {{done}} / {{total}}',
-          complete: 'Download complete · {{done}} / {{total}}'
+          // Action nouns: they label the buttons and fill {{action}} below.
+          download: 'Download',
+          remove: 'Delete',
+          publish: 'Publish',
+          cancel: 'Cancel {{action}}',
+          running: '{{action}} in progress {{done}} / {{total}}',
+          cancelled: '{{action}} cancelled · {{done}} / {{total}}',
+          failed: '{{action}} failed · {{done}} / {{total}}',
+          complete: '{{action}} complete · {{done}} / {{total}}',
+          publishComplete:
+            'Published · {{done}} / {{total}} ({{skipped}} not publishable, skipped)',
+          removeConfirm:
+            'Delete {{count}} selected assets? Their task records remain, and existing publications will not be withdrawn.',
+          publishConfirm:
+            'Publish {{count}} selected assets? Publishing freezes them until the publication is withdrawn.'
         },
         pagination: 'Asset pages',
         loadMore: 'Load more',

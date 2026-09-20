@@ -1,12 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { DownloadIcon } from 'lucide-react'
+import { ListChecksIcon, XIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui/tooltip'
 import type { AssetLibraryPorts, MediaAssetView } from '../api/asset-library-http'
 import type { InspirationPorts } from '../api/inspiration-http'
 import { useAssetDetail, type PrepareAssetSimilar } from '../model/use-asset-detail'
 import { isoDay, useAssetList, type AssetFilters } from '../model/use-asset-list'
-import { useAssetSelectionDownloads } from '../model/use-asset-selection-downloads'
+import { useAssetSelectionActions } from '../model/use-asset-selection-actions'
 import { AssetDetailDialog } from './asset-detail-dialog'
 import { AssetLibraryFilters } from './asset-library-filters'
 import { AssetCard } from './asset-media'
@@ -50,7 +51,7 @@ export function AssetLibraryPage({
   const [filters, setFilters] = useState(initialFilters)
   const list = useAssetList(ports, initialFilters)
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const selection = useAssetSelectionDownloads(ports, list.assets, saveBlob)
+  const selection = useAssetSelectionActions(ports, list.assets, saveBlob, list.refresh)
   const detail = useAssetDetail({
     ports,
     prepareSimilar: onCreateSimilar,
@@ -69,19 +70,26 @@ export function AssetLibraryPage({
     return [...grouped]
   }, [list.assets])
 
-  const batchRunning = selection.status.kind === 'running'
+  const status = selection.status
+  const running = status.kind === 'running' ? status : null
+  const action = status.kind === 'idle' ? null : t(`assets.batch.${status.action}`)
   const batchProgress =
-    selection.status.kind === 'idle'
+    status.kind === 'idle' || action === null
       ? null
-      : selection.status.kind === 'complete'
-        ? t('assets.batch.complete', {
-            done: selection.status.total,
-            total: selection.status.total
+      : status.kind === 'complete'
+        ? status.skipped === undefined
+          ? t('assets.batch.complete', { action, done: status.total, total: status.total })
+          : t('assets.batch.publishComplete', {
+              done: status.total - status.skipped,
+              total: status.total,
+              skipped: status.skipped
+            })
+        : t(`assets.batch.${status.kind}`, {
+            action,
+            done: status.current,
+            total: status.total
           })
-        : t(`assets.batch.${selection.status.kind}`, {
-            done: selection.status.current,
-            total: selection.status.total
-          })
+  const selectionSize = selection.selection.size
 
   const apply = (next: AssetFilters): void => {
     setFilters(next)
@@ -96,45 +104,77 @@ export function AssetLibraryPage({
       <div className="px-page flex flex-wrap items-center justify-between gap-3 pt-6 pb-3">
         <h1 className="sr-only">{t('assets.title')}</h1>
         <AssetLibraryFilters filters={filters} facets={list.facets} onChange={apply} />
-        <Button
-          type="button"
-          variant={selection.selecting ? 'secondary' : 'outline'}
-          onClick={() => (selection.selecting ? selection.exit() : selection.begin())}
-        >
-          {selection.selecting ? t('assets.selection.exit') : t('assets.selection.enter')}
-        </Button>
-      </div>
-
-      {selection.selecting ? (
-        <div
-          data-testid="batch-toolbar"
-          className="bg-muted/50 px-page flex flex-wrap items-center gap-2 border-b py-2"
-        >
-          <Button
-            type="button"
-            size="sm"
-            disabled={selection.selection.size === 0 || batchRunning}
-            onClick={() => void selection.download()}
-          >
-            <DownloadIcon aria-hidden />
-            {t('assets.batch.download', { count: selection.selection.size })}
-          </Button>
-          {batchRunning ? (
-            <Button type="button" size="sm" variant="outline" onClick={selection.cancel}>
-              {t('assets.batch.cancel')}
-            </Button>
-          ) : (
-            <Button type="button" size="sm" variant="outline" onClick={selection.exit}>
-              {t('assets.selection.exit')}
-            </Button>
-          )}
-          {batchProgress ? (
-            <p className="text-muted-foreground ml-auto text-sm" role="status" aria-live="polite">
-              {batchProgress}
+        {selection.selecting ? (
+          <div data-testid="batch-toolbar" className="flex flex-wrap items-center gap-2">
+            <p className="text-muted-foreground text-sm" role="status" aria-live="polite">
+              {batchProgress ?? t('assets.selection.count', { count: selectionSize })}
             </p>
-          ) : null}
-        </div>
-      ) : null}
+            <div className="border-border flex items-center rounded-lg border p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={selectionSize === 0 || running !== null}
+                onClick={() => {
+                  if (window.confirm(t('assets.batch.removeConfirm', { count: selectionSize })))
+                    void selection.remove()
+                }}
+              >
+                {t('assets.batch.remove')}
+              </Button>
+              <span className="bg-border mx-0.5 h-4 w-px" aria-hidden />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={selectionSize === 0 || running !== null}
+                onClick={() => void selection.download()}
+              >
+                {t('assets.batch.download')}
+              </Button>
+              <span className="bg-border mx-0.5 h-4 w-px" aria-hidden />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={!selection.publishable || running !== null}
+                onClick={() => {
+                  if (window.confirm(t('assets.batch.publishConfirm', { count: selectionSize })))
+                    void selection.publish()
+                }}
+              >
+                {t('assets.batch.publish')}
+              </Button>
+            </div>
+            {running === null ? (
+              <Button type="button" size="sm" variant="ghost" onClick={selection.exit}>
+                <XIcon aria-hidden />
+                {t('assets.selection.exit')}
+              </Button>
+            ) : (
+              <Button type="button" size="sm" variant="ghost" onClick={selection.cancel}>
+                <XIcon aria-hidden />
+                {t('assets.batch.cancel', { action })}
+              </Button>
+            )}
+          </div>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={t('assets.selection.enter')}
+                onClick={selection.begin}
+              >
+                <ListChecksIcon aria-hidden />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('assets.selection.enter')}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
 
       <div ref={scrollRef} className="px-page min-h-0 flex-1 overflow-auto py-5">
         {list.status === 'loading' ? (
