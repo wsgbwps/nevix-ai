@@ -87,7 +87,7 @@ export interface WorkbenchContextHandle {
   /** The `pending:<uuid>` ownership being viewed, when a submitted-but-
    * unmaterialized draft is the active context. */
   pendingKey: string | null
-  /** True while a selected session's facts are still on their way. */
+  /** True while the selected session's restore is in flight. */
   restoring: boolean
   contextKey: string
   actionState: WorkbenchActionState
@@ -165,8 +165,7 @@ export interface WorkbenchGalleryHandle {
   taskDetails: Readonly<Record<string, GenerationTaskDetail>>
   taskDetailStaleIds: ReadonlySet<string>
   taskListStale: boolean
-  /** True until the displayed session's first task window settles, either
-   * way; an empty list is not yet a verdict about the session. */
+  /** True until the displayed session's first task window settles. */
   taskListLoading: boolean
   taskHistory: TaskHistoryStatus
   loadOlderTasks: () => void

@@ -598,10 +598,8 @@ test('a held file survives display switches and re-mounts its card on return', a
   expect(await page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? [])).toEqual([])
 })
 
-// A session's tasks arrive over the wire. The frame painted while the entered
-// session's first window is still in flight is what the creator actually sees
-// on arrival, so an empty-looking one must not be presented as the
-// empty-session state — it is a read, and it says so.
+// The frame painted while an entry's first window is in flight is what the
+// creator sees on arrival: a wait, never an empty session.
 test('a returning entry reads as loading, never as the empty-session hero', async ({
   mount,
   page
@@ -620,7 +618,7 @@ test('a returning entry reads as loading, never as the empty-session hero', asyn
     terminalAt: '2026-09-01T09:00:00Z',
     slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }]
   }
-  // No stored draft: the prompt cannot stand in for the task read either.
+  // An empty draft, so the held task read is the only fact that could land.
   await mount(<CreationWorkbenchNavigationStory drafts={{}} taskScript={{ tasks: [task] }} />)
   await selectSession(page, 'Spring campaign')
   await expect(page.getByTestId(`task-${task.id}`)).toBeVisible()
@@ -633,7 +631,9 @@ test('a returning entry reads as loading, never as the empty-session hero', asyn
     .poll(async () => page.evaluate(() => window.__creationDeckTest?.listTasksCalls() ?? 0))
     .toBeGreaterThan(callsBefore)
 
-  await expect(page.getByTestId('workspace-loading')).toBeVisible()
+  const loading = page.getByTestId('workspace-loading')
+  await expect(loading).toBeVisible()
+  expect(await loading.locator('[data-slot="skeleton"]').count()).toBeGreaterThan(0)
   await expect(page.getByTestId('workspace-hero')).toHaveCount(0)
 
   await page.evaluate(() => window.__creationDeckTest?.releaseHeldListResponses())

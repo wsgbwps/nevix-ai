@@ -1019,8 +1019,6 @@ test('listLoading spans a display lifecycle before its first window only', async
   const release = h.holdNextList()
 
   h.controller.enter('A')
-  // The entry's own read is still out: an empty list is not yet a verdict
-  // about the session it was entered for.
   assert.equal(h.snapshot().listLoading, true)
   assert.equal(h.snapshot().listFailed, false)
 
@@ -1031,8 +1029,7 @@ test('listLoading spans a display lifecycle before its first window only', async
   await settle()
   assert.equal(h.snapshot().listLoading, false)
 
-  // A refresh round re-reads the same session but never re-opens the entry's
-  // "not yet read" state.
+  // A refresh round re-reads the same session but never re-opens it.
   h.controller.notifyInvalidation()
   h.flush()
   assert.equal(h.snapshot().listLoading, false)
@@ -1046,8 +1043,7 @@ test('a failed first window still settles the entry', async () => {
   h.flush()
   await settle()
 
-  // The read landed as a failure: the entry is settled and the failure reads
-  // as one, rather than leaving the workspace loading forever.
+  // A failed read is a settled entry, not an eternal wait.
   assert.equal(h.snapshot().listLoading, false)
   assert.equal(h.snapshot().listFailed, true)
 })

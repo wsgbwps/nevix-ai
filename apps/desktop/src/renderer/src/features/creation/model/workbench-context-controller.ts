@@ -110,10 +110,7 @@ export interface WorkbenchContextSnapshot {
   readonly selectedId: string | null
   readonly composingNew: boolean
   readonly pendingKey: string | null
-  /** True from entering a session until that entry's own facts land (either
-   * way). A presented session whose Draft, materials, and tasks have not
-   * arrived is not yet an empty one, and a later background reconcile never
-   * re-opens this — a workspace must not blink back to loading mid-read. */
+  /** True while the entered session's restore is in flight. */
   readonly restoring: boolean
   /** The authoritative context key; every consumer-side key derives from it. */
   readonly contextKey: string
@@ -204,8 +201,7 @@ export class WorkbenchContextController {
   // Open from a context switch's optimistic reset until its record (or the
   // fallback) lands; #adoptManifestDefaults owns why adoption must wait.
   #restoreWindow = false
-  // Narrower than #restoreWindow: only a session entry opens it, and only that
-  // entry's own landing closes it. Reconciles and local rows never touch it.
+  // Narrower than #restoreWindow: a reconcile opens that one alone.
   #restoring = false
   #selected: CreationSessionView | null = null
   #composingNew = false
@@ -259,9 +255,8 @@ export class WorkbenchContextController {
    * defaults; `inactive` keeps nothing. */
   enterContext(key: CreationSessionNavigationTarget): void {
     if (key.kind === 'new' && this.#composingNew) return
-    // Re-entering the presented session only refreshes its object — unless its
-    // restore never landed (an entry React StrictMode replayed, or any other
-    // suspend that retired it), because only the ritual can re-establish it.
+    // Re-entering only refreshes the object, unless the restore never landed —
+    // a replayed (StrictMode) entry leaves nothing for a refresh to present.
     if (key.kind === 'session' && this.#selected?.id === key.session.id && !this.#restoreWindow) {
       this.#selected = key.session
       this.#changed()

@@ -51,7 +51,8 @@ const roleKeys = {
   omni: 'gallery.role.omni'
 } as const
 
-const galleryGridClass = 'grid grid-cols-2 gap-2 md:grid-cols-4'
+/** A card's slot grid; the workspace's loading placeholders mirror it. */
+export const galleryGridClass = 'grid grid-cols-2 gap-2 md:grid-cols-4'
 
 // Task action chips carry a persistent subtle fill so consecutive task cards
 // read as separate groups.
