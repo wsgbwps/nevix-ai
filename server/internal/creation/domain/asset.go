@@ -179,7 +179,9 @@ type MediaAssetRepository interface {
 	GetVisible(ctx context.Context, owner, id UUID) (MediaAsset, error)
 	ListVisibleSiblings(ctx context.Context, owner, taskID UUID) ([]MediaAsset, error)
 	GetPrivateOrigin(ctx context.Context, asset MediaAsset) (*AssetPrivateOrigin, error)
-	SoftDelete(ctx context.Context, tx TxExecutor, actor, id UUID, admin bool) error
+	// SoftDelete reports the deleted row's owner so an admin's delete invalidates
+	// the creator's workbench, not the admin's.
+	SoftDelete(ctx context.Context, tx TxExecutor, actor, id UUID, admin bool) (UUID, error)
 }
 
 type RestrictionState string

@@ -99,7 +99,7 @@ func (a verdictApplier) applyRefBound(ctx context.Context, sc domain.WriteScope,
 	if err := a.tasks.ReleaseQueueItem(ctx, sc.Tx(), queueID, verdict.RunAfter); err != nil {
 		return err
 	}
-	a.notifyOwner(sc, freshTask.OwnerID)
+	notifyOwner(sc, a.notify, freshTask.OwnerID)
 	return nil
 }
 
@@ -126,7 +126,7 @@ func (a verdictApplier) applyAdvance(ctx context.Context, sc domain.WriteScope, 
 	if err := a.tasks.ReleaseQueueItem(ctx, sc.Tx(), queueID, verdict.RunAfter); err != nil {
 		return err
 	}
-	a.notifyOwner(sc, freshTask.OwnerID)
+	notifyOwner(sc, a.notify, freshTask.OwnerID)
 	return nil
 }
 
@@ -203,7 +203,7 @@ func (a verdictApplier) applyTransferred(ctx context.Context, sc domain.WriteSco
 	if err := a.tasks.RetireQueueItem(ctx, sc.Tx(), queueID); err != nil {
 		return err
 	}
-	a.notifyOwner(sc, freshTask.OwnerID)
+	notifyOwner(sc, a.notify, freshTask.OwnerID)
 	if landed {
 		a.releaseProviderTransfersAfterCommit(sc, freshJob.ID, verdict.JobTo, len(freshTask.Spec.References))
 	}
@@ -254,7 +254,7 @@ func (a verdictApplier) applyTerminal(ctx context.Context, sc domain.WriteScope,
 	if err := a.tasks.RetireQueueItem(ctx, sc.Tx(), queueID); err != nil {
 		return err
 	}
-	a.notifyOwner(sc, freshTask.OwnerID)
+	notifyOwner(sc, a.notify, freshTask.OwnerID)
 	if landed {
 		a.releaseProviderTransfersAfterCommit(sc, freshJob.ID, verdict.JobTo, len(freshTask.Spec.References))
 	}
@@ -315,13 +315,6 @@ func (a verdictApplier) aggregateAndFinalize(ctx context.Context, tx domain.TxEx
 	_, err = a.tasks.TransitionTask(ctx, tx, task.ID,
 		[]domain.TaskStatus{task.Status}, status, cause)
 	return err
-}
-
-func (a verdictApplier) notifyOwner(sc domain.WriteScope, owner domain.UUID) {
-	if a.notify == nil {
-		return
-	}
-	sc.AfterCommit(func() { a.notify.NotifyGenerationChanged(owner) })
 }
 
 func (a verdictApplier) releaseProviderTransfersAfterCommit(sc domain.WriteScope, jobID domain.UUID, status domain.JobStatus, referenceCount int) {

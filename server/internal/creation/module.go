@@ -215,7 +215,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	materialService := application.NewMaterialService(materialRepos, sessionRepos, uploadRepos, taskRepos, objectStorageService, media.Prober{}, tx, now)
 	manifestService := application.NewManifestService(connectionRepos)
 	taskService := application.NewTaskService(taskRepos, materialRepos, connectionRepos, objectStorageService, governanceRepos, manifestService, tx, hub)
-	assetService := application.NewAssetService(assetRepos, tx)
+	assetService := application.NewAssetService(assetRepos, tx, hub)
 	publicationService := application.NewPublicationService(publicationRepos, tx, objectStorageService, manifestService)
 	governanceService := application.NewGovernanceService(governanceRepos, tx)
 	// The worker resolves the current Object Storage Connection and speaks the fixed Kapon

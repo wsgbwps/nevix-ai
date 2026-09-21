@@ -233,9 +233,7 @@ func TestPublicationProjectionAndFinalRetention(t *testing.T) {
 				t.Fatalf("release task material retention: %v", err)
 			}
 			assertCleanupDue(t, ctx, owner, cleanupID, false)
-			if err := runner.Run(ctx, func(scope domain.WriteScope) error {
-				return NewMediaAssetRepository(runtime).SoftDelete(ctx, scope.Tx(), fixture.creator, fixture.assetID, false)
-			}); err != nil {
+			if _, err := softDelete(ctx, runner, NewMediaAssetRepository(runtime), fixture.creator, fixture.assetID, false); err != nil {
 				t.Fatalf("delete source asset: %v", err)
 			}
 			detail, err := repo.GetPublication(ctx, publication.ID, false)

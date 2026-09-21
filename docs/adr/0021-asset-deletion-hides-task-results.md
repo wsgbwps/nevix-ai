@@ -43,6 +43,7 @@
 - **槽位级**：任务详情的槽位携带 `result: null` 加显式 `result_deleted`。零新增字段的方案（靠 `status = succeeded` 且 `result = null` 这个今天不可能的组合当判据）被否决——投影一旦因别的 bug 置空 result，界面就会谎报"已删除"，而这是 [ADR-0016](0016-ai-creation-v1-trusted-seams.md) 下的可信 seam。
 - **任务级**：`/creation/sessions/{sessionID}/tasks` 列表直接不返回上述任务。判据是两条 EXISTS：`EXISTS(该任务有 Asset 行)` 且 `NOT EXISTS(该任务有 deleted_at IS NULL 的 Asset 行)`。客户端不自行 `.every()` 过滤——那会让卡片先渲染成骨架再消失，并让 `gallery.tasks` 在详情落地后缩水，正撞 [Desktop ADR-0005](../apps/desktop/docs/adr/0005-creation-operation-and-task-refresh-lifetimes.md) 保护的阅读锚点。
 - **失效**：`AssetService.Delete` 写事务成功后发布一次 creation 失效事件，复用现有 hub。今天该路径不发任何事件（对比 task/publication service 都发），只靠 `onAssetsChanged()` 重读资产墙；没有这一步，投影改了也不会到达已渲染的 Workbench。
+- **判据推进**：删除改变任务详情的可见内容，所以同一次写事务一并推进来源任务的 `updated_at`（[ADR-0016](0016-ai-creation-v1-trusted-seams.md) 的判据合同：每次可见详情变化都必须改变它）。只发事件不够——Desktop 按判据决定是否重读详情，判据不动时槽位级投影永远到不了已渲染的 Workbench；而按 ADR-0016，判据该由服务端推进，不是客户端绕过。
 - 任务**详情**不 404：整张任务只是从列表浏览面消失，直接取详情仍返回事实。
 
 ### 保留的不对称

@@ -16,6 +16,16 @@ import (
 	"github.com/nevix-ai/server/internal/migration"
 )
 
+func softDelete(ctx context.Context, runner domain.WriteRunner, repo *MediaAssetRepository, actor, id domain.UUID, admin bool) (domain.UUID, error) {
+	var owner domain.UUID
+	err := runner.Run(ctx, func(sc domain.WriteScope) error {
+		var err error
+		owner, err = repo.SoftDelete(ctx, sc.Tx(), actor, id, admin)
+		return err
+	})
+	return owner, err
+}
+
 // Package-local real-database coverage for the media-asset formation SQL (spec #150 Asset
 // 唯一性, issue #160): the (task_id, slot_index) unique constraint is the durable backstop
 // behind the idempotent insert, a repeated formation never duplicates the aggregate, and
@@ -183,24 +193,20 @@ func TestAssetLibraryVisibilitySearchOriginAndDeleteAuthorization(t *testing.T) 
 	}
 
 	runner := writetx.New(runtime)
-	if err := runner.Run(ctx, func(sc domain.WriteScope) error {
-		return repo.SoftDelete(ctx, sc.Tx(), domain.NewUUID(), restrictedID, true)
-	}); err != nil {
+	if deletedOwner, err := softDelete(ctx, runner, repo, domain.NewUUID(), restrictedID, true); err != nil {
 		t.Fatalf("admin soft delete restricted asset: %v", err)
+	} else if deletedOwner != creator {
+		t.Fatalf("admin soft delete reported owner=%s, want %s", deletedOwner, creator)
 	}
 	var restrictedDeleted bool
 	if err := owner.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM creation_media_assets WHERE id = $1`, restrictedID).Scan(&restrictedDeleted); err != nil || !restrictedDeleted {
 		t.Fatalf("restricted admin delete persisted=%v err=%v", restrictedDeleted, err)
 	}
-	err = runner.Run(ctx, func(sc domain.WriteScope) error {
-		return repo.SoftDelete(ctx, sc.Tx(), domain.NewUUID(), visibleID, false)
-	})
+	_, err = softDelete(ctx, runner, repo, domain.NewUUID(), visibleID, false)
 	if !errors.Is(err, domain.ErrAssetNotFound) {
 		t.Fatalf("foreign member delete error=%v, want ErrAssetNotFound", err)
 	}
-	if err := runner.Run(ctx, func(sc domain.WriteScope) error {
-		return repo.SoftDelete(ctx, sc.Tx(), domain.NewUUID(), visibleID, true)
-	}); err != nil {
+	if _, err := softDelete(ctx, runner, repo, domain.NewUUID(), visibleID, true); err != nil {
 		t.Fatalf("admin soft delete: %v", err)
 	}
 	if _, err := repo.GetVisible(ctx, creator, visibleID); !errors.Is(err, domain.ErrAssetNotFound) {
