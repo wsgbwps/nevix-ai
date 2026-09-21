@@ -476,7 +476,7 @@ func TestSuccessfulGenerationResultBecomesIndependentReferenceMaterialInsideServ
 	}
 	if _, err := h.ownerPool.Exec(h.ctx, `
 		UPDATE creation_reference_material_uploads
-		SET cleanup_next_attempt_at = now()
+		SET cleanup_next_attempt_at = now() - interval '1 minute'
 		WHERE id = $1::uuid`, cleanupID); err != nil {
 		t.Fatalf("make converted material cleanup due: %v", err)
 	}

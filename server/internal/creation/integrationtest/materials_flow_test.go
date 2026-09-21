@@ -423,7 +423,7 @@ func TestDeleteMaterialRemovesRowAndBlobCleanupSchedules(t *testing.T) {
 		SET created_at = now() - interval '91 minutes',
 		    put_deadline = now() - interval '31 minutes',
 		    finalize_deadline = now() - interval '1 minute',
-		    cleanup_next_attempt_at = now()
+		    cleanup_next_attempt_at = now() - interval '1 minute'
 		WHERE id = $1::uuid`, uploadID); err != nil {
 		t.Fatalf("make finalized cleanup due: %v", err)
 	}
