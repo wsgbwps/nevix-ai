@@ -1409,6 +1409,41 @@ test('indeterminate outcomes require an explicit risk confirmation before redo',
   expect(after[0].taskId).toBe(unknownTask.id)
 })
 
+test('deleting an unknown-outcome task warns that its redo entry goes with it', async ({
+  mount,
+  page
+}) => {
+  // The indeterminate redo entry leaves with the card like any other retry
+  // entry, so the confirmation must carry the variant that says so (ADR-0022).
+  // Dismiss the dialog to inspect the copy without deleting anything.
+  const unknownTask: ScriptedTask = {
+    ...dismissibleTask('dddddddd-0000-4000-8000-00000000unk2'),
+    status: 'failed',
+    terminalCause: 'provider_outcome_indeterminate',
+    slots: [
+      {
+        index: 0,
+        status: 'indeterminate',
+        failureReason: 'processing_indeterminate',
+        result: null
+      }
+    ]
+  }
+  let warning = ''
+  page.on('dialog', (dialog) => {
+    warning = dialog.message()
+    void dialog.dismiss()
+  })
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [unknownTask] }} />)
+  await selectFirstSession(page)
+
+  await page.getByTestId(`task-more-${unknownTask.id}`).click()
+  await page.getByTestId(`task-delete-${unknownTask.id}`).click()
+
+  expect(warning).toContain('retry entry disappears with the card')
+  expect(await page.evaluate(() => window.__creationDeckTest?.dismissedIds() ?? [])).toEqual([])
+})
+
 test('an SSE invalidation refetches the task list', async ({ mount, page }) => {
   await mount(<CreationWorkbenchStory />)
   await selectFirstSession(page)

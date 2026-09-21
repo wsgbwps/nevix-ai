@@ -432,9 +432,8 @@ type DismissalSkip struct {
 }
 
 // Dismiss hides one terminal owned task and removes its results in one
-// transaction: 任务隐藏 plus 结果移除, mirroring deleteSession one level down. A
-// result the non-admin restriction guard refuses is reported, never fatal — a
-// restricted result must not block hiding the task.
+// transaction: 任务隐藏 plus 结果移除, mirroring deleteSession one level down. What a
+// restriction refuses is reported in the result, never fatal.
 func (s *TaskService) Dismiss(ctx context.Context, owner, taskID domain.UUID) (DismissalResult, error) {
 	var result DismissalResult
 	err := s.runner.Run(ctx, func(sc domain.WriteScope) error {

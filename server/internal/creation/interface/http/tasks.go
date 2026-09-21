@@ -169,9 +169,7 @@ func (h *GenerationTaskHandler) CancelTask(w http.ResponseWriter, r *http.Reques
 }
 
 // DismissTask answers DELETE /creation/tasks/{taskID}: 任务隐藏 plus 结果移除 in
-// one command, reporting what left and what a restriction kept behind. A
-// non-terminal target and a repeat DELETE take the same 404 as any other
-// vanished task, so no 409 splits them.
+// one command, reporting what left and what a restriction kept behind.
 func (h *GenerationTaskHandler) DismissTask(w http.ResponseWriter, r *http.Request) {
 	taskID, ok := pathUUID(w, r, "taskID")
 	if !ok {

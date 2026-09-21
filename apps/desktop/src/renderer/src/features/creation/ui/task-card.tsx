@@ -304,9 +304,12 @@ export function TaskCard({
                   data-testid={`task-delete-${snapshot.id}`}
                   className="cursor-pointer text-xs"
                   onSelect={() => {
-                    const confirmKey = retryUncompleted
-                      ? 'gallery.deleteConfirmRetry'
-                      : 'gallery.deleteConfirm'
+                    // The warning belongs to any card whose retry entry leaves
+                    // with it — the indeterminate redo is one of those.
+                    const confirmKey =
+                      retryUncompleted || indeterminate
+                        ? 'gallery.deleteConfirmRetry'
+                        : 'gallery.deleteConfirm'
                     if (window.confirm(String(t(confirmKey)))) {
                       gallery.dismissTask(snapshot.id)
                     }

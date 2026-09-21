@@ -149,8 +149,7 @@ export interface TaskDeletionSkip {
 
 /** The task-deletion report: what left, and what stayed behind (ADR-0022). */
 export interface TaskDeletionResult {
-  /** Carried per the contract; the workbench reports skips only, and a removed
-   * slot leaves no surface to name. */
+  /** Carried per the contract; the workbench reports skips only. */
   readonly removedSlotIndexes: readonly number[]
   readonly skipped: readonly TaskDeletionSkip[]
 }

@@ -702,8 +702,6 @@ export function useCreationWorkbench(): {
     [retryTaskById]
   )
 
-  /** How many results the last deletion left behind, while it is still this
-   * context's own report. */
   const dismissalSkipped =
     dismissalSkippedIn !== null && dismissalSkippedIn.contextKey === ctx.contextKey
       ? dismissalSkippedIn.skipped
