@@ -55,7 +55,8 @@ function failedTask(diagnostic: unknown): unknown {
         retryable: true,
         support_number: 'NVX-dddddddd-0000-4000-8000-00000000d1a6-01',
         failure_diagnostic: diagnostic,
-        result: null
+        result: null,
+        result_deleted: false
       }
     ],
     specification: null
@@ -151,6 +152,42 @@ test('malformed failure guidance fails the whole detail closed', async () => {
   }
 })
 
+test('the removal marker decides, never the shape of the result', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  // Both cases are a succeeded slot with no result — the combination a
+  // judgement call would have read as "removed". Only the marker may decide.
+  for (const [marker, expected] of [
+    [true, true],
+    [false, false]
+  ] as const) {
+    const payload = specDetail(undefined) as { slots: Array<Record<string, unknown>> }
+    Object.assign(payload.slots[0], { result_deleted: marker })
+    const result = await withFetch(payload, () =>
+      client.getTask('token', 'dddddddd-0000-4000-8000-000000000004')
+    )
+
+    assert.equal(result.outcome, 'succeeded')
+    if (result.outcome !== 'succeeded') return
+    assert.equal(result.value.slots[0].resultDeleted, expected)
+    // The verdict rides along untouched, whichever way the marker reads.
+    assert.equal(result.value.slots[0].status, 'succeeded')
+  }
+})
+
+test('a missing or non-boolean removal marker fails the whole detail closed', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  for (const removalMarker of [undefined, 'yes']) {
+    const payload = specDetail(undefined) as { slots: Array<Record<string, unknown>> }
+    payload.slots[0]['result_deleted'] = removalMarker
+    assert.deepEqual(
+      await withFetch(payload, () =>
+        client.getTask('token', 'dddddddd-0000-4000-8000-000000000004')
+      ),
+      { outcome: 'network-failure' }
+    )
+  }
+})
+
 test('diagnostic limits count Unicode code points like Server and PostgreSQL', async () => {
   const client = createGenerationTaskClient(serverUrl)
   const message = '😀'.repeat(2000)
@@ -194,7 +231,8 @@ function specDetail(specification: unknown): unknown {
         action_suggestion: null,
         retryable: null,
         support_number: null,
-        result: null
+        result: null,
+        result_deleted: false
       }
     ],
     ...(specification === undefined ? {} : { specification })

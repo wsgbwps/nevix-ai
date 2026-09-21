@@ -252,11 +252,16 @@ test('publishing confirms the frozen facts and exposes withdrawal', async ({ mou
   ])
 })
 
-test('deleting an asset states that its Publication survives', async ({ mount, page }) => {
+test('deleting an asset states the result removal and the surviving Publication', async ({
+  mount,
+  page
+}) => {
   await mount(<AssetLibraryStory />)
   await page.getByRole('button', { name: 'Open asset asset-one' }).click()
   page.once('dialog', async (confirmation) => {
-    expect(confirmation.message()).toContain('existing publication will not be withdrawn')
+    expect(confirmation.message()).toContain('result leaves the source task card')
+    expect(confirmation.message()).toContain('removes that card')
+    expect(confirmation.message()).toContain('publication will not be withdrawn')
     await confirmation.dismiss()
   })
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
@@ -310,6 +315,9 @@ test('batch delete runs per asset and re-reads the wall it changed', async ({ mo
   await page.getByRole('checkbox', { name: 'Select asset asset-three' }).check()
   page.once('dialog', async (confirmation) => {
     expect(confirmation.message()).toContain('Delete 2 selected assets?')
+    expect(confirmation.message()).toContain('results leave their source task cards')
+    expect(confirmation.message()).toContain('removes that card')
+    expect(confirmation.message()).toContain('publications will not be withdrawn')
     await confirmation.accept()
   })
   await page.getByRole('button', { name: 'Delete' }).click()

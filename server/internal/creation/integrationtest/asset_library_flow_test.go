@@ -355,6 +355,91 @@ func TestAssetLibraryPublicationInspirationAndCreateSimilar(t *testing.T) {
 	}
 }
 
+// TestDeletedAssetRemovesItsSlotResultFromTheSourceTask: deleting a Media
+// Asset leaves the slot's verdict, its siblings, the task's facts and its
+// usage record intact, and the detail read reports the removal through the
+// explicit marker rather than a silently empty result.
+func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	// One output transfer fails, so slot 1 settles failed and the task stays
+	// partially_succeeded — the shape whose retry entry the removed result
+	// must not enlarge.
+	h.kapon.generation.setImage(imageScript{outputs: 1, outputStatus: http.StatusBadGateway, outputStatusOn: 2})
+
+	intent := h.imageTaskIntent(t, token, "结果移除的槽位投影", 4)
+	status, body := h.submitTask(t, token, "asset-deletion-slot-projection", intent)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	view := h.awaitTaskTerminal(t, token, decodeTaskView(t, body).Task.ID)
+	taskID := view.Task.ID
+	if view.Task.Status != "partially_succeeded" || len(view.Slots) != 4 {
+		t.Fatalf("four slots with one failed transfer expected, got %s %s", view.Task.Status, slotVerdicts(view))
+	}
+	for _, slot := range view.Slots {
+		if slot.ResultDeleted {
+			t.Fatalf("no result is removed yet: %s", slotVerdicts(view))
+		}
+		if slot.Status == "succeeded" && slot.Result == nil {
+			t.Fatalf("succeeded slot #%d must carry its result before deletion", slot.Index)
+		}
+	}
+	usageBefore := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_generation_reservations WHERE task_id = $1::uuid AND released_at IS NOT NULL`, taskID)
+	if usageBefore != 1 {
+		t.Fatalf("a terminal task must own exactly one released usage reservation, got %d", usageBefore)
+	}
+
+	var removedAssetID string
+	if err := h.ownerPool.QueryRow(h.ctx,
+		`SELECT id::text FROM creation_media_assets WHERE task_id = $1::uuid AND slot_index = 0`, taskID).
+		Scan(&removedAssetID); err != nil {
+		t.Fatalf("resolve the asset formed from slot #0: %v", err)
+	}
+	if status, body := h.doRequest(t, http.MethodDelete, "/creation/assets/"+removedAssetID, token, nil); status != http.StatusNoContent {
+		t.Fatalf("delete candidate status=%d body=%s", status, body)
+	}
+
+	_, _, after := h.getTask(t, token, taskID)
+	if after.Task.Status != view.Task.Status {
+		t.Fatalf("a removed result changed the task status: %s -> %s", view.Task.Status, after.Task.Status)
+	}
+	if len(after.Slots) != len(view.Slots) {
+		t.Fatalf("slot count changed: %d -> %d", len(view.Slots), len(after.Slots))
+	}
+	for _, slot := range after.Slots {
+		switch slot.Index {
+		case 0:
+			if slot.Status != "succeeded" || !slot.ResultDeleted || slot.Result != nil {
+				t.Fatalf("removed slot #%d = %+v, want succeeded with a null result and result_deleted", slot.Index, slot)
+			}
+		default:
+			before := view.Slots[slot.Index]
+			if slot.Status != before.Status || slot.ResultDeleted {
+				t.Fatalf("slot #%d changed with an unrelated deletion: %+v", slot.Index, slot)
+			}
+			if before.Result != nil && (slot.Result == nil || slot.Result.Checksum != before.Result.Checksum) {
+				t.Fatalf("slot #%d no longer returns the verified result its asset still backs: %+v", slot.Index, slot.Result)
+			}
+		}
+	}
+	if usageAfter := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_generation_reservations WHERE task_id = $1::uuid AND released_at IS NOT NULL`, taskID); usageAfter != usageBefore {
+		t.Fatalf("a visibility change rewrote usage facts: %d -> %d", usageBefore, usageAfter)
+	}
+
+	// The removed slot is still succeeded, so retrying the task must cover only
+	// the one genuinely incomplete slot — never a slot the creator deleted.
+	status, retryBody := h.doRequest(t, http.MethodPost, "/creation/tasks/"+taskID+"/retry", token, map[string]any{"idempotency_key": "asset-deletion-retry"})
+	if status != http.StatusCreated {
+		t.Fatalf("retry after result removal status=%d body=%s", status, retryBody)
+	}
+	if retried := decodeTaskView(t, retryBody); retried.Specification == nil || retried.Specification.Quantity != 1 {
+		t.Fatalf("retry must cover exactly the incomplete slot, got %+v", retried.Specification)
+	}
+}
+
 func extractNestedField(t *testing.T, body []byte, parent, field string) string {
 	t.Helper()
 	var payload map[string]json.RawMessage

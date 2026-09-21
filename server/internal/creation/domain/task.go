@@ -423,6 +423,9 @@ type GenerationSlot struct {
 	ResultWidthPx    *int
 	ResultHeightPx   *int
 	ResultDurationMS *int
+	// ResultDeleted is a read projection, not a stored verdict: the slot's
+	// source Media Asset was deleted, so the result no longer reaches a reader.
+	ResultDeleted bool
 }
 
 // JobOutcomeTransientRejected marks a submit proven not to have started external work:

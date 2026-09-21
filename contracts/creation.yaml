@@ -3979,6 +3979,7 @@ components:
         - action_suggestion
         - retryable
         - support_number
+        - result_deleted
       properties:
         index:
           type: integer
@@ -4059,6 +4060,9 @@ components:
               type: integer
             duration_ms:
               type: integer
+        result_deleted:
+          type: boolean
+          description: 结果不可用：其来源 Media Asset 已被删除（ADR-0021）。此时 result 为 null，槽位自身的终态不变。
     GenerationTaskDetail:
       type: object
       required:

@@ -174,6 +174,7 @@ type taskView struct {
 			HeightPx   *int   `json:"height_px"`
 			DurationMS *int   `json:"duration_ms"`
 		} `json:"result"`
+		ResultDeleted bool `json:"result_deleted"`
 	} `json:"slots"`
 }
 

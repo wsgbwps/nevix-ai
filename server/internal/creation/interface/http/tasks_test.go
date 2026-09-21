@@ -29,6 +29,30 @@ func TestFailedSlotResourceIncludesStableGuidanceAndNevixSupportNumber(t *testin
 	}
 }
 
+func TestRemovedSlotResultIsNotProjected(t *testing.T) {
+	status := domain.SlotSucceeded
+	mime := "image/jpeg"
+	size := int64(2048)
+	blobKey := "creation/generation-results/task/slot-0"
+	resource := toSlotResource(
+		domain.GenerationTask{Status: domain.TaskSucceeded},
+		domain.GenerationSlot{
+			Index: 0, Status: &status, ResultMime: &mime, ResultByteSize: &size,
+			ResultChecksum: make([]byte, 32), ResultBlobKey: &blobKey, ResultDeleted: true,
+		},
+	)
+
+	if !resource.ResultDeleted {
+		t.Fatal("result_deleted must carry the removal to the client")
+	}
+	if resource.Status != "succeeded" {
+		t.Fatalf("status = %q, want the slot's own verdict", resource.Status)
+	}
+	if resource.Result != nil {
+		t.Fatalf("result leaked for a removed slot: %+v", resource.Result)
+	}
+}
+
 func TestUnsettledSlotResourceOmitsFailureGuidance(t *testing.T) {
 	resource := toSlotResource(domain.GenerationTask{Status: domain.TaskProcessing}, domain.GenerationSlot{Index: 0})
 	if resource.ActionSuggestion != nil || resource.Retryable != nil || resource.SupportNumber != nil {
