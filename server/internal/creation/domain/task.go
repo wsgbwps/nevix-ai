@@ -428,6 +428,14 @@ type GenerationSlot struct {
 	ResultDeleted bool
 }
 
+// ResultReadable reports whether the slot's verified output may reach a
+// reader. Deleting the source Media Asset removes the result without
+// rewriting the slot's write-once verdict (ADR-0021), so display, download
+// and reuse must all take their answer from here.
+func (s GenerationSlot) ResultReadable() bool {
+	return s.Status != nil && *s.Status == SlotSucceeded && s.ResultBlobKey != nil && !s.ResultDeleted
+}
+
 // JobOutcomeTransientRejected marks a submit proven not to have started external work:
 // either confirmed unsent or rejected by an allowlisted provider code. A nil/empty outcome
 // on a ref-less submitting job stays unidentified and converges indeterminate, never to a

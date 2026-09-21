@@ -397,6 +397,23 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 		Scan(&removedAssetID); err != nil {
 		t.Fatalf("resolve the asset formed from slot #0: %v", err)
 	}
+	// One live sibling carries the other half of the claim: the two channels
+	// close for the removed slot and stay exactly as they were for the rest.
+	liveSibling := -1
+	for _, slot := range view.Slots {
+		if slot.Index != 0 && slot.Status == "succeeded" && slot.Result != nil {
+			liveSibling = slot.Index
+			break
+		}
+	}
+	if liveSibling < 0 {
+		t.Fatalf("the scenario needs one live succeeded sibling: %s", slotVerdicts(view))
+	}
+	siblingPath := fmt.Sprintf("/creation/tasks/%s/slots/%d/result", taskID, liveSibling)
+	siblingStatus, siblingBytes := h.doRequest(t, http.MethodGet, siblingPath, token, nil)
+	if siblingStatus != http.StatusOK || len(siblingBytes) == 0 {
+		t.Fatalf("sibling result download before deletion status=%d len=%d", siblingStatus, len(siblingBytes))
+	}
 	if status, body := h.doRequest(t, http.MethodDelete, "/creation/assets/"+removedAssetID, token, nil); status != http.StatusNoContent {
 		t.Fatalf("delete candidate status=%d body=%s", status, body)
 	}
@@ -427,6 +444,26 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 	if usageAfter := countRows(t, h.ownerPool,
 		`SELECT count(*) FROM creation_generation_reservations WHERE task_id = $1::uuid AND released_at IS NOT NULL`, taskID); usageAfter != usageBefore {
 		t.Fatalf("a visibility change rewrote usage facts: %d -> %d", usageBefore, usageAfter)
+	}
+
+	// 展示之外的另外两条通路：留着入口等于没删。
+	removedStatus, removedBody := h.doRequest(t, http.MethodGet, "/creation/tasks/"+taskID+"/slots/0/result", token, nil)
+	if removedStatus != http.StatusNotFound {
+		t.Fatalf("a removed result must not download: status=%d bytes=%d", removedStatus, len(removedBody))
+	}
+	assertErrorCode(t, removedBody, "not_found")
+	fromResultPath := "/creation/sessions/" + intent.SessionID + "/materials/from-result"
+	if status, body := h.doRequest(t, http.MethodPost, fromResultPath,
+		token, map[string]any{"task_id": taskID, "slot_index": 0, "file_name": "removed.png"}); status != http.StatusNotFound {
+		t.Fatalf("a removed result must not become a reference material: status=%d body=%s", status, body)
+	}
+	// 同一任务未删的槽位，两条通路完全不受影响。
+	if status, body := h.doRequest(t, http.MethodGet, siblingPath, token, nil); status != http.StatusOK || !bytes.Equal(body, siblingBytes) {
+		t.Fatalf("a sibling result download changed with an unrelated deletion: status=%d len=%d", status, len(body))
+	}
+	if status, body := h.doRequest(t, http.MethodPost, fromResultPath,
+		token, map[string]any{"task_id": taskID, "slot_index": liveSibling, "file_name": "sibling.png"}); status != http.StatusCreated {
+		t.Fatalf("a sibling result must stay reusable: status=%d body=%s", status, body)
 	}
 
 	// The removed slot is still succeeded, so retrying the task must cover only

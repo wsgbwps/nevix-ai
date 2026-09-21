@@ -319,6 +319,28 @@ func TestMonthWindowUTCFollowsAsiaShanghai(t *testing.T) {
 	}
 }
 
+// TestResultReadableIsTheOneAnswerAllThreeChannelsShare pins the predicate
+// display, download and reuse take their verdict from: a removed result is
+// unreachable everywhere, while a live one stays reachable (ADR-0021).
+func TestResultReadableIsTheOneAnswerAllThreeChannelsShare(t *testing.T) {
+	key := "generation-results/ab/cd/task-slot-0"
+	for _, tc := range []struct {
+		name string
+		slot GenerationSlot
+		want bool
+	}{
+		{"succeeded with a live asset", GenerationSlot{Status: ptr(SlotSucceeded), ResultBlobKey: &key}, true},
+		{"removed by its asset deletion", GenerationSlot{Status: ptr(SlotSucceeded), ResultBlobKey: &key, ResultDeleted: true}, false},
+		{"still a derived projection", GenerationSlot{Status: nil, ResultBlobKey: &key}, false},
+		{"failed", GenerationSlot{Status: ptr(SlotFailed), ResultBlobKey: &key}, false},
+		{"succeeded without a stored object", GenerationSlot{Status: ptr(SlotSucceeded)}, false},
+	} {
+		if got := tc.slot.ResultReadable(); got != tc.want {
+			t.Errorf("%s: ResultReadable() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestStableSlotOrder(t *testing.T) {
 	order := StableSlotOrder(4)
 	for i, v := range order {
