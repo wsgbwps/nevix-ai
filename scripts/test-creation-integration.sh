@@ -170,6 +170,7 @@ assert_creation_integration_executed() {
     TestReferenceMaterialUploadFinalEligibilityFailureTerminalizesAndCleans
     TestReferenceMaterialCleanupClaimSkipsLockedRowsAndCapsBatchAtOneHundred
     TestReferenceMaterialCleanupFailureDoesNotBlockAnotherClaim
+    TestReferenceMaterialCleanupClaimsADueSeedWhileTheDatabaseClockLeads
     TestReferenceMaterialUploadAbortExpiryAndDurableCleanupConverge
     TestSuccessfulGenerationResultBecomesIndependentReferenceMaterialInsideServer
     TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage

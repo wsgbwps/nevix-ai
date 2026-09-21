@@ -312,12 +312,15 @@ func TestReferenceMaterialCleanupClaimSkipsLockedRowsAndCapsBatchAtOneHundred(t 
 	if status != http.StatusCreated {
 		t.Fatalf("create cleanup base: status=%d body=%s", status, body)
 	}
+	// The worker judges "due" against the host clock, so a deadline seeded from
+	// now() is not yet due while the container clock leads (issue #271).
 	if _, err := h.ownerPool.Exec(h.ctx, `
 		UPDATE creation_reference_material_uploads
 		SET status = 'terminal', terminal_at = now(),
 		    created_at = now() - interval '91 minutes',
 		    put_deadline = now() - interval '31 minutes',
-		    finalize_deadline = now() - interval '1 minute', cleanup_next_attempt_at = now()
+		    finalize_deadline = now() - interval '1 minute',
+		    cleanup_next_attempt_at = now() - interval '1 minute'
 		WHERE id = $1::uuid`, upload.Upload.ID); err != nil {
 		t.Fatalf("terminalize cleanup base: %v", err)
 	}
@@ -332,7 +335,8 @@ func TestReferenceMaterialCleanupClaimSkipsLockedRowsAndCapsBatchAtOneHundred(t 
 		       'reference-materials/test/' || gen_random_uuid()::text, file_name,
 		       declared_kind, declared_mime_type, declared_byte_size, claims_version,
 		       'cleanup-batch-' || n::text, payload_hash, connection_revision,
-		       put_deadline, finalize_deadline, 'terminal', created_at, now(), now()
+		       put_deadline, finalize_deadline, 'terminal', created_at, now(),
+		       now() - interval '1 minute'
 		FROM creation_reference_material_uploads, generate_series(1, 100) AS n
 		WHERE id = $1::uuid`, upload.Upload.ID); err != nil {
 		t.Fatalf("seed cleanup batch: %v", err)
@@ -404,7 +408,8 @@ func TestReferenceMaterialCleanupFailureDoesNotBlockAnotherClaim(t *testing.T) {
 		SET status = 'terminal', terminal_at = now(),
 		    created_at = now() - interval '91 minutes',
 		    put_deadline = now() - interval '31 minutes',
-		    finalize_deadline = now() - interval '1 minute', cleanup_next_attempt_at = now()
+		    finalize_deadline = now() - interval '1 minute',
+		    cleanup_next_attempt_at = now() - interval '1 minute'
 		WHERE id = ANY($1::uuid[])`, ids); err != nil {
 		t.Fatalf("terminalize cleanup fixtures: %v", err)
 	}
@@ -443,6 +448,58 @@ func TestReferenceMaterialCleanupFailureDoesNotBlockAnotherClaim(t *testing.T) {
 	}
 	if failedAttempts != 1 || retryDelay < 59 || retryDelay > 61 {
 		t.Fatalf("failed cleanup attempt=%d delay=%.3fs, want attempt 1 and 60s", failedAttempts, retryDelay)
+	}
+}
+
+// The seed the cleanup fixtures use is only due while the database clock has
+// not outrun the worker's, so this runs the worker 50ms behind -- the lead a
+// containerised PostgreSQL shows under load (issue #271) -- and requires the
+// first pass to claim the row rather than sleep out its one-minute poll.
+func TestReferenceMaterialCleanupClaimsADueSeedWhileTheDatabaseClockLeads(t *testing.T) {
+	const containerClockLead = 50 * time.Millisecond
+	h := newHarnessWithOptions(t, harnessOptions{
+		now: func() time.Time { return time.Now().Add(-containerClockLead) },
+	})
+	h.ensureAccounts(t)
+	h.ensureObjectStorage(t)
+	creator := h.loginToken(t, creatorEmail, harnessPassword)
+	session := h.createSession(t, creator, sessionName("cleanup-clock-lead"))
+	status, body, upload := h.createMaterialUpload(t, creator, session.ID,
+		uploadCreateInput(sessionName("cleanup-clock-lead"), "clock-lead.png", "image", "image/png", 3))
+	if status != http.StatusCreated {
+		t.Fatalf("create clock-lead upload: status=%d body=%s", status, body)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `
+		UPDATE creation_reference_material_uploads
+		SET status = 'terminal', terminal_at = now(),
+		    created_at = now() - interval '91 minutes',
+		    put_deadline = now() - interval '31 minutes',
+		    finalize_deadline = now() - interval '1 minute',
+		    cleanup_next_attempt_at = now() - interval '1 minute'
+		WHERE id = $1::uuid`, upload.Upload.ID); err != nil {
+		t.Fatalf("seed clock-lead cleanup: %v", err)
+	}
+
+	workerCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.creation.RunWorkers(workerCtx) }()
+	confirmed := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := h.ownerPool.QueryRow(h.ctx, `
+			SELECT cleanup_confirmed_at IS NOT NULL
+			FROM creation_reference_material_uploads WHERE id = $1::uuid`,
+			upload.Upload.ID).Scan(&confirmed); err == nil && confirmed {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("stop clock-lead cleanup worker: %v", err)
+	}
+	if !confirmed {
+		t.Fatalf("due cleanup went unclaimed while the database clock led the worker clock by %v", containerClockLead)
 	}
 }
 
@@ -486,7 +543,8 @@ func TestReferenceMaterialUploadAbortExpiryAndDurableCleanupConverge(t *testing.
 		UPDATE creation_reference_material_uploads
 		SET created_at = now() - interval '91 minutes',
 		    put_deadline = now() - interval '31 minutes',
-		    finalize_deadline = now() - interval '1 minute', cleanup_next_attempt_at = now()
+		    finalize_deadline = now() - interval '1 minute',
+		    cleanup_next_attempt_at = now() - interval '1 minute'
 		WHERE id = $1::uuid`, aborted.Upload.ID); err != nil {
 		t.Fatalf("make failed cleanup retry due: %v", err)
 	}
