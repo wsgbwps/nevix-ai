@@ -169,6 +169,8 @@ test('the removal marker decides, never the shape of the result', async () => {
     assert.equal(result.outcome, 'succeeded')
     if (result.outcome !== 'succeeded') return
     assert.equal(result.value.slots[0].resultDeleted, expected)
+    // The verdict rides along untouched, whichever way the marker reads.
+    assert.equal(result.value.slots[0].status, 'succeeded')
   }
 })
 

@@ -387,6 +387,9 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 	}
 	usageBefore := countRows(t, h.ownerPool,
 		`SELECT count(*) FROM creation_generation_reservations WHERE task_id = $1::uuid AND released_at IS NOT NULL`, taskID)
+	if usageBefore != 1 {
+		t.Fatalf("a terminal task must own exactly one released usage reservation, got %d", usageBefore)
+	}
 
 	var removedAssetID string
 	if err := h.ownerPool.QueryRow(h.ctx,
@@ -416,8 +419,8 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 			if slot.Status != before.Status || slot.ResultDeleted {
 				t.Fatalf("slot #%d changed with an unrelated deletion: %+v", slot.Index, slot)
 			}
-			if before.Result != nil && slot.Result == nil {
-				t.Fatalf("slot #%d lost a result its asset still backs", slot.Index)
+			if before.Result != nil && (slot.Result == nil || slot.Result.Checksum != before.Result.Checksum) {
+				t.Fatalf("slot #%d no longer returns the verified result its asset still backs: %+v", slot.Index, slot.Result)
 			}
 		}
 	}

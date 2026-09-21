@@ -213,6 +213,7 @@ assert_creation_integration_executed() {
     TestSSEInvalidationIsCommitScopedAndCreatorScoped
     TestSessionRevocationDisconnectsOnlyThatSessionsStream
     TestAdminSafetyRestrictionsAreAuditedTerminalAndNonRetroactive
+    TestDeletedAssetRemovesItsSlotResultFromTheSourceTask
     TestMinIOConformanceSuite
     TestApplyIsIdempotentWhenAlreadyCurrent
   )
