@@ -43,9 +43,7 @@ export interface TaskRefreshSnapshot {
   readonly staleTaskIds: ReadonlySet<string>
   /** True when the latest list read failed; kept tasks stay and nothing masquerades as fresh. */
   readonly listFailed: boolean
-  /** True from entering a session until that entry's first window settles,
-   * either way: an empty task list is not yet a verdict about the session, and
-   * a later refresh round never re-opens this. */
+  /** True until this display lifecycle's first window settles. */
   readonly listLoading: boolean
   readonly history: TaskHistoryStatus
 }
@@ -148,9 +146,8 @@ export class TaskRefreshController {
   private readonly details = new Map<string, CachedDetail>()
   private readonly failedDetailIds = new Set<string>()
   private listFailedFlag = false
-  // Whether this display lifecycle's first window has settled. Only enter()
-  // clears it again, so a refresh round cannot put a presented session back
-  // into "not yet read".
+  // Cleared by enter() alone, so a refresh round cannot put the presented
+  // session back into "not yet read".
   private windowSettled = false
 
   // Upward history pagination: the continuation token behind the oldest
@@ -323,7 +320,6 @@ export class TaskRefreshController {
     }
     if (this.activeRound !== round) return
     round.listSettled = true
-    // A window that answered — even with nothing — is the session's verdict.
     if (!history) this.windowSettled = true
     if (page === null) {
       if (history) {
@@ -453,7 +449,7 @@ export class TaskRefreshController {
         this.historyFailedFlag = true
       } else {
         this.listFailedFlag = true
-        // The abandoned round's response is discarded, so it never lands.
+        // This round is retired; its late response can never land.
         this.windowSettled = true
       }
       changed = true

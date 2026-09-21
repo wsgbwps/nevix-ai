@@ -1,12 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ImageIcon, SparklesIcon, VideoIcon } from 'lucide-react'
+import { Skeleton } from '../../../components/ui/skeleton'
 import { useCreationWorkbench, type WorkbenchContextHandle } from '../model/use-workbench'
 import { useCreationSessionNavigation } from '../model/creation-session-navigation-context'
 import type { TaskHistoryStatus } from '../model/task-refresh/task-refresh-controller'
 import { textPromptDocument } from '../model/prompt-document'
 import { CreationComposer, EXPANDED_MAX_WIDTH } from './composer'
 import { ResultGallery } from './result-gallery'
+import { galleryGridClass } from './task-card'
 import { isScrolledToBottom } from './use-composer-presence'
 
 // Scrolling within this distance of the workspace top asks the refresh module
@@ -251,7 +253,10 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                 const scroller = scrollRef.current
                 if (scroller === null) return
                 const { taskHistory, loadOlderTasks } = gallery
+                // Only the reader pulls older history; a mounting gallery
+                // reports a transient near-top offset of its own.
                 if (
+                  readingHistoryRef.current &&
                   taskHistory.hasMore &&
                   !taskHistory.loading &&
                   !taskHistory.failed &&
@@ -312,21 +317,9 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
               className="px-page h-full overflow-y-auto [overflow-anchor:none]"
             >
               {/* The greeting hero is the empty-session state: clearing the
-                  prompt must never hide a session that already holds tasks.
-                  Facts still on their way are neither — an empty-looking
-                  session must not be presented as an empty one, nor may a
-                  returning creator see a workspace blink to "loading" on
-                  every background reconcile. */}
+                  prompt must never hide a session that already holds tasks. */}
               {context.restoring || gallery.taskListLoading ? (
-                <div className="grid min-h-full place-items-center">
-                  <p
-                    role="status"
-                    data-testid="workspace-loading"
-                    className="text-muted-foreground text-xs"
-                  >
-                    {t('state.loading')}
-                  </p>
-                </div>
+                <WorkspaceLoading />
               ) : composer.expandedPrompt.length === 0 && gallery.tasks.length === 0 ? (
                 <div className="mx-auto flex min-h-full max-w-[720px] flex-col items-center justify-center pb-10">
                   <EmptyDraftHero
@@ -618,6 +611,43 @@ function EmptyDraftHero({
               </p>
             </div>
           </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** The workspace's own geometry, waiting for an entered session's facts. */
+function WorkspaceLoading(): React.JSX.Element {
+  const { t } = useTranslation('creation')
+  return (
+    <div
+      className="mx-auto pt-16"
+      style={{ maxWidth: EXPANDED_MAX_WIDTH }}
+      data-testid="workspace-loading"
+    >
+      <span role="status" className="sr-only">
+        {t('state.loading')}
+      </span>
+      <div className="mb-3 flex flex-col gap-1.5">
+        <Skeleton aria-hidden className="h-5 w-40" />
+        <Skeleton aria-hidden className="h-3 w-16" />
+      </div>
+      <div className="flex flex-col gap-5">
+        {[0, 1].map((card) => (
+          <div key={card} className="flex flex-col gap-2.5">
+            <Skeleton aria-hidden className="h-5 w-52 shrink-0" />
+            <div className={galleryGridClass}>
+              {[0, 1].map((slot) => (
+                <Skeleton
+                  key={slot}
+                  aria-hidden
+                  className="w-full rounded-lg"
+                  style={{ aspectRatio: '4 / 3' }}
+                />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
     </div>
