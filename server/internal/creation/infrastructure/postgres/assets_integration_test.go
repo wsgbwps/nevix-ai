@@ -809,6 +809,118 @@ func assertInspirationPages(t *testing.T, ctx context.Context, repo *TeamPublica
 	}
 }
 
+// ListTaskAssets is the task-deletion command's read: every non-deleted Asset of
+// one owned task in slot order with its restriction fact, so the command can
+// report what the non-admin guard refuses instead of silently skipping it.
+func TestListTaskAssetsReportsRestrictedRowsAndIgnoresRemovedOnes(t *testing.T) {
+	ownerURL, runtimeURL := requireIntegrationEnv(t)
+	ctx := context.Background()
+	if _, err := migration.Apply(ctx, ownerURL); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	runtime, err := pgxpool.New(ctx, runtimeURL)
+	if err != nil {
+		t.Fatalf("connect identity_app pool: %v", err)
+	}
+	defer runtime.Close()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect owner pool: %v", err)
+	}
+	defer owner.Close()
+
+	creator := fixtureUser(t, ownerURL)
+	stranger := fixtureUser(t, ownerURL)
+	sessionID := fixtureSession(t, ownerURL, owner, creator)
+	taskID := fixtureGenerationTask(t, ownerURL, owner, creator, sessionID)
+
+	repo := NewMediaAssetRepository(runtime)
+	runner := writetx.New(runtime)
+	form := func(slot int) domain.UUID {
+		t.Helper()
+		if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+			created, err := repo.InsertMediaAsset(ctx, sc.Tx(), domain.MediaAssetFormation{
+				OwnerID: creator, TaskID: taskID, SlotIndex: slot, MediaType: domain.MediaImage,
+				Mime: "image/png", BlobKey: "generation-results/fixture/task-asset", ByteSize: 128,
+				Checksum: []byte("0123456789abcdef0123456789abcdef"),
+			})
+			if err == nil && !created {
+				return errors.New("asset formation was unexpectedly rejected")
+			}
+			return err
+		}); err != nil {
+			t.Fatalf("form asset for slot %d: %v", slot, err)
+		}
+		var id domain.UUID
+		if err := owner.QueryRow(ctx,
+			`SELECT id FROM creation_media_assets WHERE task_id = $1 AND slot_index = $2`, taskID, slot).Scan(&id); err != nil {
+			t.Fatalf("read formed asset for slot %d: %v", slot, err)
+		}
+		return id
+	}
+	list := func(actor domain.UUID) []domain.TaskAsset {
+		t.Helper()
+		var assets []domain.TaskAsset
+		if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+			var err error
+			assets, err = repo.ListTaskAssets(ctx, sc.Tx(), actor, taskID)
+			return err
+		}); err != nil {
+			t.Fatalf("list task assets: %v", err)
+		}
+		return assets
+	}
+
+	removedID, restrictedID := form(0), form(1)
+	liveID := form(2)
+	if _, err := softDelete(ctx, runner, repo, creator, removedID, false); err != nil {
+		t.Fatalf("remove the first asset: %v", err)
+	}
+	if _, err := owner.Exec(ctx,
+		`UPDATE creation_media_assets SET restricted_at = now() WHERE id = $1`, restrictedID); err != nil {
+		t.Fatalf("restrict the second asset: %v", err)
+	}
+
+	// A removed row drops out; a restricted one stays and carries the fact.
+	if assets := list(creator); !slices.Equal(assets, []domain.TaskAsset{
+		{ID: restrictedID, SlotIndex: 1, Restricted: true},
+		{ID: liveID, SlotIndex: 2},
+	}) {
+		t.Fatalf("task assets = %+v", assets)
+	}
+	if assets := list(stranger); len(assets) != 0 {
+		t.Fatalf("a foreign owner read %+v", assets)
+	}
+	// The active restriction is the guard's own predicate, so the creator's
+	// delete is refused and the row stays listed.
+	if _, err := softDelete(ctx, runner, repo, creator, restrictedID, false); !errors.Is(err, domain.ErrAssetNotFound) {
+		t.Fatalf("restricted asset delete error=%v, want ErrAssetNotFound", err)
+	}
+	if assets := list(creator); len(assets) != 2 || !assets[0].Restricted {
+		t.Fatalf("a refused delete changed the report: %+v", assets)
+	}
+	// Releasing it makes the same row removable, and the report follows.
+	if _, err := owner.Exec(ctx,
+		`UPDATE creation_media_assets SET restriction_released_at = now() WHERE id = $1`, restrictedID); err != nil {
+		t.Fatalf("release the restriction: %v", err)
+	}
+	if assets := list(creator); !slices.Equal(assets, []domain.TaskAsset{
+		{ID: restrictedID, SlotIndex: 1},
+		{ID: liveID, SlotIndex: 2},
+	}) {
+		t.Fatalf("released task assets = %+v", assets)
+	}
+	if _, err := softDelete(ctx, runner, repo, creator, restrictedID, false); err != nil {
+		t.Fatalf("delete the released asset: %v", err)
+	}
+	if _, err := softDelete(ctx, runner, repo, creator, liveID, false); err != nil {
+		t.Fatalf("remove the last asset: %v", err)
+	}
+	if assets := list(creator); !slices.Equal(assets, []domain.TaskAsset{}) {
+		t.Fatalf("a task with every result removed reported %+v", assets)
+	}
+}
+
 func pointerTo[T any](value T) *T { return &value }
 
 func countAssets(t *testing.T, pool *pgxpool.Pool, taskID domain.UUID) int {

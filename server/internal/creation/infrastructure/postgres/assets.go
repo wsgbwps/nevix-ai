@@ -298,6 +298,33 @@ func (r *MediaAssetRepository) SoftDelete(ctx context.Context, tx domain.TxExecu
 	return owner, nil
 }
 
+// ListTaskAssets drains its rows before returning: pgx hands one connection per
+// transaction, so a statement issued while these rows are open would wait on itself.
+func (r *MediaAssetRepository) ListTaskAssets(ctx context.Context, tx domain.TxExecutor, owner, taskID domain.UUID) ([]domain.TaskAsset, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id, slot_index,
+		       restricted_at IS NOT NULL AND restriction_released_at IS NULL
+		FROM creation_media_assets
+		WHERE task_id = $1 AND owner_user_id = $2 AND deleted_at IS NULL
+		ORDER BY slot_index`, taskID, owner)
+	if err != nil {
+		return nil, fmt.Errorf("creation: list task assets: %w", err)
+	}
+	defer rows.Close()
+	assets := make([]domain.TaskAsset, 0, 4)
+	for rows.Next() {
+		var asset domain.TaskAsset
+		if err := rows.Scan(&asset.ID, &asset.SlotIndex, &asset.Restricted); err != nil {
+			return nil, fmt.Errorf("creation: scan task asset: %w", err)
+		}
+		assets = append(assets, asset)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("creation: list task assets rows: %w", err)
+	}
+	return assets, nil
+}
+
 func scanAsset(row rowScanner) (domain.MediaAsset, error) {
 	var asset domain.MediaAsset
 	var media string

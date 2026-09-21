@@ -215,6 +215,33 @@ func TestAssetLibraryMigrationOwnsVisibilityAndKeysetIndexes(t *testing.T) {
 	}
 }
 
+func TestTaskDismissalMigrationOwnsOneColumnAndNoDeleteGrant(t *testing.T) {
+	sqlBytes, err := migrationFS.ReadFile("migrations/0025_task_dismissal.sql")
+	if err != nil {
+		t.Fatalf("read task dismissal migration: %v", err)
+	}
+	sql := string(sqlBytes)
+	for _, required := range []string{
+		"ADD COLUMN dismissed_at timestamp with time zone",
+		"GRANT UPDATE (dismissed_at) ON public.creation_generation_tasks TO identity_app",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("task dismissal migration missing %q", required)
+		}
+	}
+	// Dismissal is a pure visibility fact: nothing is deleted, no new index is
+	// needed at session scale, and the generation side keeps its least privilege.
+	for _, forbidden := range []string{
+		"GRANT DELETE ON public.creation_generation_tasks",
+		"GRANT UPDATE ON public.creation_generation_tasks",
+		"CREATE INDEX",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("task dismissal migration grants forbidden capability %q", forbidden)
+		}
+	}
+}
+
 func TestTeamPublicationMigrationOwnsSnapshotsReuseAndObjectRetention(t *testing.T) {
 	sqlBytes, err := migrationFS.ReadFile("migrations/0022_team_publications.sql")
 	if err != nil {

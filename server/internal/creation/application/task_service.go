@@ -30,6 +30,7 @@ func notifyOwner(sc domain.WriteScope, sink InvalidationSink, owner domain.UUID)
 type TaskService struct {
 	tasks       domain.GenerationTaskRepository
 	materials   domain.MaterialRepository
+	assets      domain.MediaAssetRepository
 	connections domain.ConnectionSignals
 	storage     *ObjectStorageConnectionService
 	governance  domain.GovernanceRepository
@@ -42,6 +43,7 @@ type TaskService struct {
 func NewTaskService(
 	tasks domain.GenerationTaskRepository,
 	materials domain.MaterialRepository,
+	assets domain.MediaAssetRepository,
 	connections domain.ConnectionSignals,
 	storage *ObjectStorageConnectionService,
 	governance domain.GovernanceRepository,
@@ -50,7 +52,7 @@ func NewTaskService(
 	notify InvalidationSink,
 ) *TaskService {
 	return &TaskService{
-		tasks: tasks, materials: materials, connections: connections, storage: storage,
+		tasks: tasks, materials: materials, assets: assets, connections: connections, storage: storage,
 		governance: governance, manifest: manifest, runner: runner, notify: notify,
 		applier: verdictApplier{tasks: tasks, connections: connections, notify: notify},
 	}
@@ -415,6 +417,67 @@ func (s *TaskService) Cancel(ctx context.Context, owner, taskID domain.UUID) err
 		_, _, err = s.applier.apply(ctx, sc, owner, queueID, taskID, verdict)
 		return err
 	})
+}
+
+// DismissalResult reports one task deletion: the results that left with the
+// task, and the ones a safety restriction kept behind.
+type DismissalResult struct {
+	RemovedSlotIndexes []int
+	Skipped            []DismissalSkip
+}
+
+type DismissalSkip struct {
+	SlotIndex int
+	Reason    domain.DismissalSkipReason
+}
+
+// Dismiss hides one terminal owned task and removes its results in one
+// transaction: 任务隐藏 plus 结果移除, mirroring deleteSession one level down. A
+// result the non-admin restriction guard refuses is reported, never fatal — a
+// restricted result must not block hiding the task.
+func (s *TaskService) Dismiss(ctx context.Context, owner, taskID domain.UUID) (DismissalResult, error) {
+	var result DismissalResult
+	err := s.runner.Run(ctx, func(sc domain.WriteScope) error {
+		// The task row is locked before its asset rows: every creation writer
+		// keeps the parent-before-child order.
+		ok, err := s.tasks.Dismiss(ctx, sc.Tx(), owner, taskID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return domain.ErrTaskNotFound
+		}
+		assets, err := s.assets.ListTaskAssets(ctx, sc.Tx(), owner, taskID)
+		if err != nil {
+			return err
+		}
+		result = DismissalResult{
+			RemovedSlotIndexes: make([]int, 0, len(assets)),
+			Skipped:            make([]DismissalSkip, 0),
+		}
+		for _, asset := range assets {
+			// admin is always false: this command carries no admin guard, and
+			// the restricted skip is the intended outcome (ADR-0022).
+			if _, err := s.assets.SoftDelete(ctx, sc.Tx(), owner, asset.ID, false); err != nil {
+				if !errors.Is(err, domain.ErrAssetNotFound) {
+					return err
+				}
+				reason := domain.DismissalAlreadyRemoved
+				if asset.Restricted {
+					reason = domain.DismissalRestricted
+				}
+				result.Skipped = append(result.Skipped, DismissalSkip{SlotIndex: asset.SlotIndex, Reason: reason})
+				continue
+			}
+			result.RemovedSlotIndexes = append(result.RemovedSlotIndexes, asset.SlotIndex)
+		}
+		notifyOwner(sc, s.notify, owner)
+		return nil
+	})
+	if err != nil {
+		return DismissalResult{}, err
+	}
+	return result, nil
 }
 
 // List pages one session's tasks for their creator.

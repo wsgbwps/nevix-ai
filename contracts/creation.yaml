@@ -1185,6 +1185,31 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteGenerationTask
+      summary: 删除 Generation Task —— 任务隐藏并移除其结果
+      description: |-
+        一条命令、一次事务：任务被隐藏（不再出现在任务列表），其尚未删除的全部 Media Asset 被逻辑删除
+        （从资产库隐藏）。不改写任何终态、不回收字节、不删除生成侧记录。
+        受限（restricted）结果无法移除时跳过并在 skipped 中报告，整个操作仍成功。
+        有效 Publication 不因此撤回；任务详情仍可读取。重复 DELETE 视为目标已消失，回答 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/taskID"
+      responses:
+        "200":
+          description: 被移除结果与未能移除结果的一次报告。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDeletionResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /creation/tasks/{taskID}/cancel:
     post:
       operationId: cancelGenerationTask
@@ -4154,6 +4179,25 @@ components:
         next_cursor:
           type: string
           nullable: true
+    TaskDeletionResult:
+      type: object
+      required: [removed_slot_indexes, skipped]
+      properties:
+        removed_slot_indexes:
+          type: array
+          items:
+            type: integer
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [slot_index, reason]
+            properties:
+              slot_index:
+                type: integer
+              reason:
+                type: string
+                enum: [restricted, already_removed]
     GovernanceLimits:
       type: object
       description: 四个可选上限；null/缺省 = 未设置（不限），显式 0 = 禁止相应范围新 Task。

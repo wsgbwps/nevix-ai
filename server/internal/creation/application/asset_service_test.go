@@ -49,6 +49,10 @@ func (r *assetRepoStub) SoftDelete(_ context.Context, _ domain.TxExecutor, actor
 	return r.asset.OwnerID, nil
 }
 
+func (r *assetRepoStub) ListTaskAssets(context.Context, domain.TxExecutor, domain.UUID, domain.UUID) ([]domain.TaskAsset, error) {
+	return nil, nil
+}
+
 type assetRunnerStub struct{ commitErr error }
 
 func (r assetRunnerStub) Run(ctx context.Context, fn func(domain.WriteScope) error) error {
