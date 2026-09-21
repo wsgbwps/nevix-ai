@@ -430,8 +430,8 @@ type GenerationSlot struct {
 
 // ResultReadable reports whether the slot's verified output may reach a
 // reader. Deleting the source Media Asset removes the result without
-// rewriting the slot's write-once verdict (ADR-0021), so display, download
-// and reuse must all take their answer from here.
+// rewriting the slot's write-once verdict (ADR-0021); display, download and
+// reuse share this one answer.
 func (s GenerationSlot) ResultReadable() bool {
 	return s.Status != nil && *s.Status == SlotSucceeded && s.ResultBlobKey != nil && !s.ResultDeleted
 }

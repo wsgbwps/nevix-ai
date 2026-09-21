@@ -358,7 +358,9 @@ func TestAssetLibraryPublicationInspirationAndCreateSimilar(t *testing.T) {
 // TestDeletedAssetRemovesItsSlotResultFromTheSourceTask: deleting a Media
 // Asset leaves the slot's verdict, its siblings, the task's facts and its
 // usage record intact, and the detail read reports the removal through the
-// explicit marker rather than a silently empty result.
+// explicit marker rather than a silently empty result. Both result channels
+// close for that slot alone — download and reuse refuse it, and the same
+// task's live siblings answer exactly as they did before the deletion.
 func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
@@ -397,8 +399,7 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 		Scan(&removedAssetID); err != nil {
 		t.Fatalf("resolve the asset formed from slot #0: %v", err)
 	}
-	// One live sibling carries the other half of the claim: the two channels
-	// close for the removed slot and stay exactly as they were for the rest.
+	// The removal must not touch a sibling's channels.
 	liveSibling := -1
 	for _, slot := range view.Slots {
 		if slot.Index != 0 && slot.Status == "succeeded" && slot.Result != nil {
@@ -446,18 +447,20 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 		t.Fatalf("a visibility change rewrote usage facts: %d -> %d", usageBefore, usageAfter)
 	}
 
-	// 展示之外的另外两条通路：留着入口等于没删。
+	// Download and reuse must close for the removed slot.
 	removedStatus, removedBody := h.doRequest(t, http.MethodGet, "/creation/tasks/"+taskID+"/slots/0/result", token, nil)
 	if removedStatus != http.StatusNotFound {
 		t.Fatalf("a removed result must not download: status=%d bytes=%d", removedStatus, len(removedBody))
 	}
 	assertErrorCode(t, removedBody, "not_found")
 	fromResultPath := "/creation/sessions/" + intent.SessionID + "/materials/from-result"
-	if status, body := h.doRequest(t, http.MethodPost, fromResultPath,
-		token, map[string]any{"task_id": taskID, "slot_index": 0, "file_name": "removed.png"}); status != http.StatusNotFound {
-		t.Fatalf("a removed result must not become a reference material: status=%d body=%s", status, body)
+	reuseStatus, reuseBody := h.doRequest(t, http.MethodPost, fromResultPath,
+		token, map[string]any{"task_id": taskID, "slot_index": 0, "file_name": "removed.png"})
+	if reuseStatus != http.StatusNotFound {
+		t.Fatalf("a removed result must not become a reference material: status=%d body=%s", reuseStatus, reuseBody)
 	}
-	// 同一任务未删的槽位，两条通路完全不受影响。
+	assertErrorCode(t, reuseBody, "not_found")
+	// Siblings keep both channels.
 	if status, body := h.doRequest(t, http.MethodGet, siblingPath, token, nil); status != http.StatusOK || !bytes.Equal(body, siblingBytes) {
 		t.Fatalf("a sibling result download changed with an unrelated deletion: status=%d len=%d", status, len(body))
 	}

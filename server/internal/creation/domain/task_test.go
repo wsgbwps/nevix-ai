@@ -319,11 +319,11 @@ func TestMonthWindowUTCFollowsAsiaShanghai(t *testing.T) {
 	}
 }
 
-// TestResultReadableIsTheOneAnswerAllThreeChannelsShare pins the predicate
-// display, download and reuse take their verdict from: a removed result is
-// unreachable everywhere, while a live one stays reachable (ADR-0021).
-func TestResultReadableIsTheOneAnswerAllThreeChannelsShare(t *testing.T) {
-	key := "generation-results/ab/cd/task-slot-0"
+// TestResultReadable pins the one predicate display, download and reuse
+// answer from: a removed result stays unreachable however the slot's
+// write-once facts read.
+func TestResultReadable(t *testing.T) {
+	key := "slot-result-key"
 	for _, tc := range []struct {
 		name string
 		slot GenerationSlot
