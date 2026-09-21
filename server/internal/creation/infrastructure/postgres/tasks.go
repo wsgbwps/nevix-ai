@@ -248,11 +248,10 @@ func scanTaskFull(row pgx.Row) (domain.GenerationTask, error) {
 	return t, nil
 }
 
-// ListBySession pages one session's tasks newest-first, creator-scoped. A task
-// whose every formed Media Asset is logically deleted leaves this browsing list
-// (ADR-0021); one that never formed an Asset — every slot failed — has nothing
-// removed and stays. The verdicts themselves are untouched: detail still reads
-// the facts.
+// ListBySession pages one session's tasks newest-first, creator-scoped. One
+// that never formed a Media Asset — every slot failed — has nothing removed
+// and keeps its place in this browsing list; the verdicts themselves are
+// untouched, and detail still reads the facts.
 func (r *GenerationTaskRepository) ListBySession(ctx context.Context, owner, sessionID domain.UUID, cursor *domain.CompoundCursor, limit int) ([]domain.GenerationTask, *domain.CompoundCursor, error) {
 	args := []any{owner, sessionID, cursorTime(cursor), cursorID(cursor), limit + 1}
 	rows, err := r.pool.Query(ctx, `

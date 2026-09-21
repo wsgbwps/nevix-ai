@@ -486,10 +486,8 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 
 // TestDeletingEveryFormedAssetRemovesTheTaskFromTheSessionList: once every
 // Media Asset a task formed is logically deleted, the browsing list stops
-// offering that task — on the first page and on the way up through older pages
-// alike — while a task that never formed one (every slot failed) is no removal
-// and stays. Only the list read is projected: the task's own detail still
-// reads its facts, and nothing was deleted.
+// offering that task — first page and older pages alike — while a task that
+// never formed one stays.
 func TestDeletingEveryFormedAssetRemovesTheTaskFromTheSessionList(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)

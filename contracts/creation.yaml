@@ -1139,6 +1139,7 @@ paths:
       description: |-
         只返回当前创建者自己的该 Session 任务，按 (created_at DESC, id DESC) 复合 keyset 序分页。
         每次 quantity=N 的提交永远稳定呈现 N 个有序 slot；部分失败不重排结果。
+        next_cursor 为 null 表示没有下一页；此时返回的是该 Session 剩余的全部任务。
         该任务曾形成过 Media Asset 且形成的 Asset 全部已逻辑删除时，本列表不返回它（结果移除，ADR-0021）；
         从未形成过 Media Asset 的任务（全部 slot 失败）不受影响，仍返回。任务详情读取不受此投影影响。
       security:

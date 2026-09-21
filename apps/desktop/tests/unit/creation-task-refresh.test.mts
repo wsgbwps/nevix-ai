@@ -606,8 +606,8 @@ test('tasks falling outside the latest window stay displayed with their details'
   await settle()
   assert.equal(h.snapshot().tasks.length, 25)
 
-  // Three newer tasks push the oldest three behind the window: they fell out
-  // of it, not out of the server's list, so they stay displayed.
+  // Three newer tasks push t06–t08 behind the window: they fell out of it, not
+  // out of the server's list, so they stay displayed.
   const pushed = [26, 27, 28].map((n) => {
     const at = new Date(Date.UTC(2026, 8, 1, 10, n)).toISOString()
     return taskView(`t${n}`, 'A', at, 'succeeded', at)

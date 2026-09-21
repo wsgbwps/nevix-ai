@@ -93,15 +93,6 @@ const defaultTimers: TaskRefreshTimers = {
   clearOneShot: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
 }
 
-/** The server's list order, (created_at DESC, id DESC): the wire `created_at`
- * carries no sub-second part, so the strings compare in time order as written.
- * ponytail: two tasks created within the same second can only tie on id here
- * while the server orders them by its finer column; the worst case is one card
- * held back for one round, and it returns on the next window read. */
-function newerThan(task: GenerationTaskView, other: GenerationTaskView): boolean {
-  return task.createdAt === other.createdAt ? task.id > other.id : task.createdAt > other.createdAt
-}
-
 /** One cached detail paired with the change criterion of the exact response it
  * came from (ADR-0016: `updatedAt` read as the full wire string), so a list
  * summary can never vouch for a detail it did not arrive with. */
@@ -356,26 +347,29 @@ export class TaskRefreshController {
     this.finishRound(round)
   }
 
-  /** Merges the newest window: window tasks replace their loaded copies and
-   * every previously loaded task outside the window stays displayed. */
+  /** Merges the newest window: window tasks replace their loaded copies, and
+   * every previously loaded task outside the window stays displayed — except
+   * the ones the projection removed (ADR-0021, below). */
   private mergeWindow(page: TaskPage): readonly GenerationTaskView[] {
-    // The latest window is not the session's whole task set: tasks it no
-    // longer lists stay displayed (and keep their cached details) instead of
-    // being inferred deleted. Their position stays behind the window.
     const windowIds = new Set(page.tasks.map((task) => task.id))
+    // A loaded task the page stopped returning was removed by the projection
+    // (ADR-0021) — not scrolled behind the window: the scan is newest-first, so
+    // everything newer than the page's last row is in it, and a page with no
+    // continuation cursor is the whole remaining set. Only a strictly newer
+    // `created_at` drops a card; a same-second tie cannot be ordered off the wire.
+    // ponytail: one removed behind the window's last row waits for the next
+    // session entry — dropping it would risk a card the creator still has.
     const tail = page.tasks[page.tasks.length - 1]
-    // Except the ones the projection removed (ADR-0021): the page scans
-    // newest-first, so every task newer than its last row is in it, and a page
-    // with no continuation cursor is the whole remaining set.
-    const removed = (task: GenerationTaskView): boolean =>
-      page.nextCursor === null || (tail !== undefined && newerThan(task, tail))
-    const kept = this.summaries.filter((task) => {
-      if (windowIds.has(task.id)) return false
-      if (!removed(task)) return true
+    const kept: GenerationTaskView[] = []
+    for (const task of this.summaries) {
+      if (windowIds.has(task.id)) continue
+      if (page.nextCursor !== null && tail !== undefined && task.createdAt <= tail.createdAt) {
+        kept.push(task)
+        continue
+      }
       this.details.delete(task.id)
       this.failedDetailIds.delete(task.id)
-      return false
-    })
+    }
     this.summaries = [...page.tasks, ...kept]
     this.listFailedFlag = false
     // The window's own cursor continues history only while nothing older has
