@@ -411,9 +411,14 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 		t.Fatalf("the scenario needs one live succeeded sibling: %s", slotVerdicts(view))
 	}
 	siblingPath := fmt.Sprintf("/creation/tasks/%s/slots/%d/result", taskID, liveSibling)
+	fromResultPath := "/creation/sessions/" + intent.SessionID + "/materials/from-result"
 	siblingStatus, siblingBytes := h.doRequest(t, http.MethodGet, siblingPath, token, nil)
 	if siblingStatus != http.StatusOK || len(siblingBytes) == 0 {
 		t.Fatalf("sibling result download before deletion status=%d len=%d", siblingStatus, len(siblingBytes))
+	}
+	if status, body := h.doRequest(t, http.MethodPost, fromResultPath,
+		token, map[string]any{"task_id": taskID, "slot_index": liveSibling, "file_name": "sibling-before.png"}); status != http.StatusCreated {
+		t.Fatalf("sibling result reuse before deletion status=%d body=%s", status, body)
 	}
 	if status, body := h.doRequest(t, http.MethodDelete, "/creation/assets/"+removedAssetID, token, nil); status != http.StatusNoContent {
 		t.Fatalf("delete candidate status=%d body=%s", status, body)
@@ -453,7 +458,6 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 		t.Fatalf("a removed result must not download: status=%d bytes=%d", removedStatus, len(removedBody))
 	}
 	assertErrorCode(t, removedBody, "not_found")
-	fromResultPath := "/creation/sessions/" + intent.SessionID + "/materials/from-result"
 	reuseStatus, reuseBody := h.doRequest(t, http.MethodPost, fromResultPath,
 		token, map[string]any{"task_id": taskID, "slot_index": 0, "file_name": "removed.png"})
 	if reuseStatus != http.StatusNotFound {

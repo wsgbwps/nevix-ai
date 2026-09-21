@@ -335,9 +335,10 @@ paths:
       operationId: createReferenceMaterialFromResult
       summary: 将当前创建者的成功生成结果转换为永久素材
       description: |-
-        Server 在可信边界内读取当前创建者的成功 Task slot，并把结果流式写入当前 Object Storage，
-        再执行与 Upload finalize 相同的完整 probe/hash 与最终 Session ownership 复核。结果 bytes、
-        blob key、签名 URL/headers 均不进入 Renderer；新素材拥有独立 identity、object 与权利声明。
+        Server 在可信边界内读取当前创建者的成功 Task slot（且结果未被移除，即 `result_deleted`
+        为 false），并把结果流式写入当前 Object Storage，再执行与 Upload finalize 相同的完整
+        probe/hash 与最终 Session ownership 复核。结果 bytes、blob key、签名 URL/headers 均不
+        进入 Renderer；新素材拥有独立 identity、object 与权利声明。
       security:
         - bearerAuth: []
       parameters:
