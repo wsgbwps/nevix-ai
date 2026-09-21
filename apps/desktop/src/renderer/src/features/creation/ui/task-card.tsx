@@ -90,7 +90,11 @@ export function TaskCard({
   const detail = gallery.taskDetails[task.id]
   const snapshot = detail?.task ?? task
   const spec = detail?.specification ?? task.snapshot ?? null
-  const slots = detail?.slots ?? placeholderSlots(snapshot.slotCount)
+  // A removed result leaves no cell: a placeholder tile would invent a state
+  // to interpret, and its media would never settle (ADR-0021).
+  const slots =
+    detail?.slots.filter((slot) => slot.resultDeleted !== true) ??
+    placeholderSlots(snapshot.slotCount)
   const [settledMediaKeys, setSettledMediaKeys] = useState<ReadonlySet<string>>(() => new Set())
   const markMediaSettled = useCallback((key: string): void => {
     setSettledMediaKeys((current) => {
@@ -100,10 +104,9 @@ export function TaskCard({
       return next
     })
   }, [])
-  const resultMediaKeys =
-    detail?.slots.flatMap((slot) =>
-      slot.status === 'succeeded' ? [taskResultMediaKey(snapshot.id, slot)] : []
-    ) ?? []
+  const resultMediaKeys = slots.flatMap((slot) =>
+    slot.status === 'succeeded' ? [taskResultMediaKey(snapshot.id, slot)] : []
+  )
   const cardSettled =
     (detail !== undefined || gallery.taskDetailStaleIds.has(task.id)) &&
     resultMediaKeys.every((key) => settledMediaKeys.has(key))

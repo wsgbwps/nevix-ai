@@ -336,12 +336,19 @@ func readTaskWithSlotsAndJob(ctx context.Context, exec taskReadExec, owner, task
 		return domain.GenerationTask{}, nil, domain.ProviderJob{}, fmt.Errorf("creation: get generation task: %w", err)
 	}
 
+	// A soft-deleted Asset row for the slot marks its result as removed; the
+	// slot's own facts stay as written.
 	slotRows, err := exec.Query(ctx, `
 		SELECT slot_index, status, failure_reason,
 		       failure_diagnostic_source, failure_diagnostic_code, failure_diagnostic_message,
 		       failure_diagnostic_http_status, failure_diagnostic_provider_type, failure_diagnostic_request_id,
 		       result_mime, result_byte_size, result_checksum,
-		       result_blob_key, result_width_px, result_height_px, result_duration_ms
+		       result_blob_key, result_width_px, result_height_px, result_duration_ms,
+		       EXISTS (
+		         SELECT 1 FROM creation_media_assets
+		         WHERE task_id = $1 AND slot_index = creation_generation_slots.slot_index
+		           AND deleted_at IS NOT NULL
+		       )
 		FROM creation_generation_slots WHERE task_id = $1 ORDER BY slot_index ASC`, taskID)
 	if err != nil {
 		return domain.GenerationTask{}, nil, domain.ProviderJob{}, fmt.Errorf("creation: list slots: %w", err)
@@ -387,7 +394,8 @@ func scanSlot(row pgx.Row) (domain.GenerationSlot, error) {
 		&diagnosticSource, &diagnosticCode, &diagnosticMessage,
 		&diagnosticHTTPStatus, &diagnosticProviderType, &diagnosticRequestID,
 		&s.ResultMime, &s.ResultByteSize,
-		&s.ResultChecksum, &s.ResultBlobKey, &s.ResultWidthPx, &s.ResultHeightPx, &s.ResultDurationMS); err != nil {
+		&s.ResultChecksum, &s.ResultBlobKey, &s.ResultWidthPx, &s.ResultHeightPx, &s.ResultDurationMS,
+		&s.ResultDeleted); err != nil {
 		return domain.GenerationSlot{}, fmt.Errorf("creation: scan slot: %w", err)
 	}
 	if status != nil {

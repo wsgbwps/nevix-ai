@@ -54,7 +54,7 @@ export const creationTranslations = defineResourceTranslations({
           complete: '{{action}}完成 · {{done}} / {{total}}',
           publishComplete: '发布完成 · {{done}} / {{total}}（跳过 {{skipped}} 个不可发布）',
           removeConfirm:
-            '删除选中的 {{count}} 个资产？任务记录仍会保留；已发布的内容不会因此撤回。',
+            '删除选中的 {{count}} 个资产？它们的结果会从来源任务卡片上移除，某次生成的全部结果都被删掉时那张卡片会消失。已发布的内容不会因此撤回。',
           publishConfirm: '发布选中的 {{count}} 个资产？发布后冻结、需先撤回才能修改。'
         },
         pagination: '资产分页',
@@ -90,7 +90,8 @@ export const creationTranslations = defineResourceTranslations({
         withdrawConfirm: '撤回后不可恢复；之后可重新发布为一条新内容。是否继续？',
         publishFailed: '发布状态更新失败，请重试。',
         delete: '删除',
-        deleteConfirm: '删除这个资产？任务记录仍会保留；已发布的内容不会因此撤回。'
+        deleteConfirm:
+          '删除这个资产？它的结果会从来源任务卡片上移除，删掉该任务的最后一张结果时整张卡片会消失。已发布的内容不会因此撤回。'
       },
       inspiration: {
         title: '灵感',
@@ -616,7 +617,7 @@ export const creationTranslations = defineResourceTranslations({
           publishComplete:
             'Published · {{done}} / {{total}} ({{skipped}} not publishable, skipped)',
           removeConfirm:
-            'Delete {{count}} selected assets? Their task records remain, and existing publications will not be withdrawn.',
+            'Delete {{count}} selected assets? Their results leave their source task cards, and deleting every result of a generation removes that card. Existing publications will not be withdrawn.',
           publishConfirm:
             'Publish {{count}} selected assets? Publishing freezes them until the publication is withdrawn.'
         },
@@ -657,7 +658,7 @@ export const creationTranslations = defineResourceTranslations({
         publishFailed: 'The publication state could not be updated. Try again.',
         delete: 'Delete',
         deleteConfirm:
-          'Delete this asset? Its task record remains, and an existing publication will not be withdrawn.'
+          'Delete this asset? Its result leaves the source task card, and deleting the last result of a task removes that card. An existing publication will not be withdrawn.'
       },
       inspiration: {
         title: 'Inspiration',

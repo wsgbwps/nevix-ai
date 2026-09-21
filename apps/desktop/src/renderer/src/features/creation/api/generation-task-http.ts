@@ -80,6 +80,9 @@ export interface GenerationSlotView {
   readonly supportNumber?: string | null
   readonly failureDiagnostic?: SlotFailureDiagnostic | null
   readonly result: SlotResultView | null
+  /** The wire always carries this; true means the slot's source Media Asset
+   * was deleted, so the result is unreachable while the slot stays succeeded. */
+  readonly resultDeleted?: boolean
 }
 
 export interface SlotResultView {
@@ -311,6 +314,8 @@ function parseSlot(payload: unknown): GenerationSlotView | null {
   const indexRaw = nullableNum(payload, 'index')
   const status = str(payload, 'status')
   if (indexRaw === null || indexRaw === undefined || status === null) return null
+  const resultDeleted = isRecord(payload) ? payload['result_deleted'] : undefined
+  if (typeof resultDeleted !== 'boolean') return null
   const reasonRaw = nullableStr(payload, 'failure_reason')
   if (reasonRaw === undefined) return null
   if (reasonRaw !== null && !SLOT_FAILURE_REASONS.has(reasonRaw)) return null
@@ -364,7 +369,8 @@ function parseSlot(payload: unknown): GenerationSlotView | null {
     retryable: retryableRaw as boolean | null,
     supportNumber,
     failureDiagnostic,
-    result
+    result,
+    resultDeleted
   }
 }
 

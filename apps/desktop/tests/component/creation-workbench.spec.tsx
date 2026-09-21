@@ -2121,6 +2121,66 @@ test('switching sessions retires a late result-media read before a fresh display
   await expect(refreshedSlot.locator('img')).toBeVisible()
 })
 
+test('a deleted result leaves no card cell, no media, and no placeholder', async ({
+  mount,
+  page
+}) => {
+  const resultFacts = (): NonNullable<ScriptedTask['slots'][number]['result']> => ({
+    mimeType: 'image/jpeg',
+    byteSize: 2048,
+    checksumSha256: 'ab'.repeat(32),
+    widthPx: 1568,
+    heightPx: 672,
+    durationMs: null
+  })
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000dele',
+    sessionId: scriptedSessionId,
+    status: 'partially_succeeded',
+    mediaType: 'image',
+    slotCount: 4,
+    snapshot: null,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [
+      { index: 0, status: 'succeeded', failureReason: null, result: resultFacts() },
+      // Its Media Asset was deleted in the Asset Library: the verdict stays
+      // succeeded, only the result became unreachable (ADR-0021).
+      { index: 1, status: 'succeeded', failureReason: null, result: null, resultDeleted: true },
+      { index: 2, status: 'succeeded', failureReason: null, result: resultFacts() },
+      {
+        index: 3,
+        status: 'failed',
+        failureReason: 'temporarily_unavailable',
+        actionSuggestion: 'retry_later',
+        retryable: true,
+        supportNumber: 'NVX-dddddddd-0000-4000-8000-00000000de4e-04',
+        result: null
+      }
+    ]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [task] }} />)
+  await selectFirstSession(page)
+
+  // The surviving results keep their own cells and states; the removed one has
+  // no tile, so nothing invites the creator to read a state that is gone.
+  await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute('data-media-state', 'ready')
+  await expect(page.getByTestId(`slot-${task.id}-2`)).toHaveAttribute('data-media-state', 'ready')
+  await expect(page.getByTestId(`slot-${task.id}-3`)).toHaveAttribute('data-slot-status', 'failed')
+  await expect(page.getByTestId(`slot-${task.id}-1`)).toHaveCount(0)
+  expect(
+    await page.evaluate(
+      () =>
+        window.__creationDeckTest
+          ?.resultBlobTransfers()
+          .filter((transfer) => transfer.slotIndex === 1) ?? []
+    )
+  ).toEqual([])
+})
+
 test('a succeeded image slot offers a keyboard-reachable download', async ({ mount, page }) => {
   const doneTask: ScriptedTask = {
     id: 'dddddddd-0000-4000-8000-00000000dl00',

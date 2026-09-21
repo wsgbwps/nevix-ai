@@ -55,7 +55,8 @@ function failedTask(diagnostic: unknown): unknown {
         retryable: true,
         support_number: 'NVX-dddddddd-0000-4000-8000-00000000d1a6-01',
         failure_diagnostic: diagnostic,
-        result: null
+        result: null,
+        result_deleted: false
       }
     ],
     specification: null
@@ -151,6 +152,36 @@ test('malformed failure guidance fails the whole detail closed', async () => {
   }
 })
 
+test('a removed result arrives as a marker, never as a silent empty result', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  const payload = specDetail(undefined) as { slots: Array<Record<string, unknown>> }
+  Object.assign(payload.slots[0], { result_deleted: true })
+  const result = await withFetch(payload, () =>
+    client.getTask('token', 'dddddddd-0000-4000-8000-000000000004')
+  )
+
+  assert.equal(result.outcome, 'succeeded')
+  if (result.outcome !== 'succeeded') return
+  assert.equal(result.value.slots[0].resultDeleted, true)
+  assert.equal(result.value.slots[0].result, null)
+  // The verdict itself is untouched: only the result became unreachable.
+  assert.equal(result.value.slots[0].status, 'succeeded')
+})
+
+test('a missing or non-boolean removal marker fails the whole detail closed', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  for (const removalMarker of [undefined, 'yes']) {
+    const payload = specDetail(undefined) as { slots: Array<Record<string, unknown>> }
+    payload.slots[0]['result_deleted'] = removalMarker
+    assert.deepEqual(
+      await withFetch(payload, () =>
+        client.getTask('token', 'dddddddd-0000-4000-8000-000000000004')
+      ),
+      { outcome: 'network-failure' }
+    )
+  }
+})
+
 test('diagnostic limits count Unicode code points like Server and PostgreSQL', async () => {
   const client = createGenerationTaskClient(serverUrl)
   const message = '😀'.repeat(2000)
@@ -194,7 +225,8 @@ function specDetail(specification: unknown): unknown {
         action_suggestion: null,
         retryable: null,
         support_number: null,
-        result: null
+        result: null,
+        result_deleted: false
       }
     ],
     ...(specification === undefined ? {} : { specification })

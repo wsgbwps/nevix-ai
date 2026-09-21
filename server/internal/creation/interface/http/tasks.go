@@ -284,6 +284,7 @@ type generationSlotResource struct {
 	SupportNumber     *string                `json:"support_number"`
 	FailureDiagnostic *slotFailureDiagnostic `json:"failure_diagnostic"`
 	Result            *slotResultResource    `json:"result"`
+	ResultDeleted     bool                   `json:"result_deleted"`
 }
 
 type slotFailureDiagnostic struct {
@@ -306,7 +307,9 @@ type slotResultResource struct {
 
 func toSlotResource(task domain.GenerationTask, slot domain.GenerationSlot) generationSlotResource {
 	status := domain.SlotProjection(task.Status, slot.Status)
-	resource := generationSlotResource{Index: slot.Index, Status: status}
+	resource := generationSlotResource{
+		Index: slot.Index, Status: status, ResultDeleted: slot.ResultDeleted,
+	}
 	if slot.Reason != nil {
 		reason := string(*slot.Reason)
 		resource.FailureReason = &reason
@@ -327,7 +330,7 @@ func toSlotResource(task domain.GenerationTask, slot domain.GenerationSlot) gene
 			RequestID:    slot.Diagnostic.RequestID,
 		}
 	}
-	if slot.Status != nil && *slot.Status == domain.SlotSucceeded && slot.ResultBlobKey != nil {
+	if slot.Status != nil && *slot.Status == domain.SlotSucceeded && slot.ResultBlobKey != nil && !slot.ResultDeleted {
 		checksum := ""
 		if len(slot.ResultChecksum) == 32 {
 			checksum = hex.EncodeToString(slot.ResultChecksum)
