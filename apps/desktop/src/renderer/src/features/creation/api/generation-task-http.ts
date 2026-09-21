@@ -141,6 +141,20 @@ export interface TaskPage {
   readonly nextCursor: string | null
 }
 
+/** One result a task deletion could not remove (contracts TaskDeletionResult). */
+export interface TaskDeletionSkip {
+  readonly slotIndex: number
+  readonly reason: 'restricted' | 'already_removed'
+}
+
+/** The task-deletion report: what left, and what stayed behind (ADR-0022). */
+export interface TaskDeletionResult {
+  /** Carried per the contract; the workbench reports skips only, and a removed
+   * slot leaves no surface to name. */
+  readonly removedSlotIndexes: readonly number[]
+  readonly skipped: readonly TaskDeletionSkip[]
+}
+
 /** TaskSubmitInput on the wire: the idempotency key plus the complete
  * generation intent carried by the submission (ADR-0017 — the server stores
  * no editable draft to point at). */
@@ -454,6 +468,29 @@ function parseTaskPage(payload: unknown): TaskPage | null {
   return { tasks, nextCursor: typeof nextCursor === 'string' ? nextCursor : null }
 }
 
+const DELETION_SKIP_REASONS: ReadonlySet<string> = new Set(['restricted', 'already_removed'])
+
+function parseTaskDeletion(payload: unknown): TaskDeletionResult | null {
+  if (!isRecord(payload)) return null
+  const rawRemoved = payload['removed_slot_indexes']
+  const rawSkipped = payload['skipped']
+  if (!Array.isArray(rawRemoved) || !Array.isArray(rawSkipped)) return null
+  const removedSlotIndexes: number[] = []
+  for (const index of rawRemoved) {
+    if (typeof index !== 'number' || !Number.isInteger(index)) return null
+    removedSlotIndexes.push(index)
+  }
+  const skipped: TaskDeletionSkip[] = []
+  for (const entry of rawSkipped) {
+    const slotIndex = nullableNum(entry, 'slot_index')
+    const reason = str(entry, 'reason')
+    if (slotIndex === null || slotIndex === undefined || !Number.isInteger(slotIndex)) return null
+    if (reason === null || !DELETION_SKIP_REASONS.has(reason)) return null
+    skipped.push({ slotIndex, reason: reason as TaskDeletionSkip['reason'] })
+  }
+  return { removedSlotIndexes, skipped }
+}
+
 /** One keyset page of the session's tasks (contracts listSessionGenerationTasks). */
 export interface TaskListPageRequest {
   readonly limit: number
@@ -478,6 +515,7 @@ export function createGenerationTaskClient(serverUrl: string): {
   ): Promise<CreationApiResult<TaskPage>>
   getTask(token: string, taskId: string): Promise<CreationApiResult<GenerationTaskDetail>>
   cancelTask(token: string, taskId: string): Promise<CreationApiResult<GenerationTaskDetail>>
+  dismissTask(token: string, taskId: string): Promise<CreationApiResult<TaskDeletionResult>>
   retryTask(
     token: string,
     taskId: string,
@@ -562,6 +600,16 @@ export function createGenerationTaskClient(serverUrl: string): {
           token
         })
       ),
+    dismissTask: async (token, taskId) => {
+      const result = await request(serverUrl, {
+        method: 'DELETE',
+        path: `/creation/tasks/${taskId}`,
+        token
+      })
+      if (result.outcome !== 'succeeded') return result
+      const deletion = parseTaskDeletion(result.payload)
+      return deletion ? { outcome: 'succeeded', value: deletion } : { outcome: 'network-failure' }
+    },
     retryTask: async (token, taskId, idempotencyKey) =>
       detailOf(
         await request(serverUrl, {

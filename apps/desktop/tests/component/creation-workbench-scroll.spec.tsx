@@ -631,6 +631,41 @@ test('a task the projection removed keeps the reading anchor', async ({ mount, p
   await expect.poll(() => taskOffsetFromScroller(anchorCard, scroller)).toBeCloseTo(anchor.top, 0)
 })
 
+test('deleting a task through its own card keeps the reading anchor', async ({ mount, page }) => {
+  // Playwright CT auto-rejects dialogs, so the confirmation the delete entry
+  // gates on must be accepted for the command to run at all (ADR-0022).
+  page.on('dialog', (dialog) => void dialog.accept())
+  const tasks = manyMixedTasks(40, 'dismissed-row')
+  await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks }} />)
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const scroller = await settledScroller(page)
+  await loadFullHistory(page, scroller, tasks.length)
+  await userScrollTo(scroller, { fraction: 2 / 3 })
+  await page.waitForTimeout(200)
+  const anchor = await visibleTaskAnchor(page)
+  const anchorCard = page.getByTestId(anchor.testId)
+
+  // The same mid-window removal as above, now driven by the card's own delete
+  // entry: the command hides the task and the next reconcile drops the row. The
+  // removed card sits below the one being read — a card above it cannot be
+  // opened without scrolling it into view, which would move the reading
+  // position the assertion is about.
+  const anchorIndex = tasks.findIndex((task) => `task-${task.id}` === anchor.testId)
+  const doomed = tasks[anchorIndex + 1]
+  await page.getByTestId(`task-more-${doomed.id}`).click()
+  await page.getByTestId(`task-delete-${doomed.id}`).click()
+
+  await expect(page.getByTestId(`task-${doomed.id}`)).toHaveCount(0)
+  await expect(page.getByTestId('result-gallery')).toHaveAttribute(
+    'data-total-count',
+    String(tasks.length - 1)
+  )
+  await expect.poll(() => taskOffsetFromScroller(anchorCard, scroller)).toBeCloseTo(anchor.top, 0)
+  expect(await page.evaluate(() => window.__creationDeckTest?.dismissedIds() ?? [])).toEqual([
+    doomed.id
+  ])
+})
+
 test('detail and responsive height changes keep the visible task anchor stable', async ({
   mount,
   page

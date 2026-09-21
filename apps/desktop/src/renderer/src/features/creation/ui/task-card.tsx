@@ -7,6 +7,7 @@ import {
   PencilLineIcon,
   RefreshCwIcon,
   RepeatIcon,
+  Trash2Icon,
   TriangleAlertIcon
 } from 'lucide-react'
 import {
@@ -268,7 +269,7 @@ export function TaskCard({
               {t('gallery.actions.regenerate')}
             </button>
           )}
-          {(retryUncompleted || indeterminate) && (
+          {terminal && (
             <DropdownMenu>
               <DropdownMenuTrigger
                 data-testid={`task-more-${snapshot.id}`}
@@ -298,6 +299,22 @@ export function TaskCard({
                     {t('gallery.actions.retryUncompleted')}
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuItem
+                  variant="destructive"
+                  data-testid={`task-delete-${snapshot.id}`}
+                  className="cursor-pointer text-xs"
+                  onSelect={() => {
+                    const confirmKey = retryUncompleted
+                      ? 'gallery.deleteConfirmRetry'
+                      : 'gallery.deleteConfirm'
+                    if (window.confirm(String(t(confirmKey)))) {
+                      gallery.dismissTask(snapshot.id)
+                    }
+                  }}
+                >
+                  <Trash2Icon className="size-3.5" aria-hidden />
+                  {t('gallery.actions.delete')}
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}

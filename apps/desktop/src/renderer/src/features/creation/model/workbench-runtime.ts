@@ -418,6 +418,7 @@ export function createCreationRuntime(
     listTasks: guardResult(ports.listTasks),
     getTask: guardResult(ports.getTask),
     cancelTask: guardResult(ports.cancelTask),
+    dismissTask: guardResult(ports.dismissTask),
     retryTask: guardResult(ports.retryTask),
     loadThumbnailUrl: guardResult(ports.loadThumbnailUrl),
     loadPreviewUrl: guardResult(ports.loadPreviewUrl),

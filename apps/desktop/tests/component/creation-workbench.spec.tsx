@@ -1145,7 +1145,12 @@ test('slot states, failure reasons, and task actions render inline', async ({ mo
   await expect(failedSlot).toContainText('Do not retry unchanged')
   await expect(failedSlot).toContainText('NVX-dddddddd-0000-4000-8000-00000000face-02')
 
+  // Every terminal card carries the actions menu (ADR-0022), but a slot that
+  // forbids an identical retry keeps its card's retry entry away — the menu
+  // must be open for that to mean anything, since its items mount on open.
+  await page.getByTestId(`task-more-${failedTask.id}`).click()
   await expect(page.getByTestId(`task-retry-${failedTask.id}`)).toHaveCount(0)
+  await page.keyboard.press('Escape')
   await page.getByTestId(`task-more-${retryableTask.id}`).click()
   await page.getByTestId(`task-retry-${retryableTask.id}`).click()
   await page.getByTestId(`task-more-${cancelledSlotTask.id}`).click()
@@ -1257,9 +1262,110 @@ test('cancel requests best-effort convergence on a running task', async ({ mount
   await mount(<CreationWorkbenchStory taskScript={{ tasks: [runningTask] }} />)
   await selectFirstSession(page)
 
+  // Only terminal cards carry the actions menu (ADR-0022).
+  await expect(page.getByTestId(`task-more-${runningTask.id}`)).toHaveCount(0)
   await page.getByTestId(`task-cancel-${runningTask.id}`).click()
   const cancelled = await page.evaluate(() => window.__creationDeckTest?.cancelledIds() ?? [])
   expect(cancelled).toEqual([runningTask.id])
+})
+
+/** One terminal card whose slots hold no media bytes; only the card's own
+ * affordances matter to the deletion specs. */
+function dismissibleTask(id: string, slots = 1): ScriptedTask {
+  return {
+    id,
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: slots,
+    snapshot: null,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: Array.from({ length: slots }, (_, index) => ({
+      index,
+      status: 'succeeded' as const,
+      failureReason: null,
+      result: null
+    }))
+  }
+}
+
+test('deleting a task hides its card and reports the results left behind', async ({
+  mount,
+  page
+}) => {
+  // Playwright CT auto-dismisses dialogs, so the confirmation must be accepted
+  // before the delete entry can ever fire (ADR-0022's window.confirm gate).
+  page.on('dialog', (dialog) => void dialog.accept())
+  const doomed = dismissibleTask('dddddddd-0000-4000-8000-00000000kill', 2)
+  const runningTask: ScriptedTask = {
+    ...dismissibleTask('dddddddd-0000-4000-8000-00000000run2'),
+    status: 'processing',
+    terminalAt: null,
+    slots: [{ index: 0, status: 'generating', failureReason: null, result: null }]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{
+        tasks: [doomed, runningTask],
+        dismissSkips: { [doomed.id]: 2 }
+      }}
+    />
+  )
+  await selectFirstSession(page)
+
+  await page.getByTestId(`task-more-${doomed.id}`).click()
+  await expect(page.getByTestId(`task-delete-${doomed.id}`)).toBeVisible()
+  await page.getByTestId(`task-delete-${doomed.id}`).click()
+
+  await expect(page.getByTestId(`task-${doomed.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`task-${runningTask.id}`)).toBeVisible()
+  expect(await page.evaluate(() => window.__creationDeckTest?.dismissedIds() ?? [])).toEqual([
+    doomed.id
+  ])
+  // The card is gone, so what the deletion could not remove is reported on the
+  // workspace-wide status line instead.
+  await expect(page.getByTestId('task-dismissal-skipped')).toContainText(
+    '2 result(s) were not removed because of a safety restriction'
+  )
+
+  // The next task operation retires the report.
+  await page.getByTestId('composer-submit').click()
+  await expect(page.getByTestId('task-dismissal-skipped')).toHaveCount(0)
+})
+
+test('a deletion that removed everything leaves no notice', async ({ mount, page }) => {
+  page.on('dialog', (dialog) => void dialog.accept())
+  const doomed = dismissibleTask('dddddddd-0000-4000-8000-00000000cln1')
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [doomed] }} />)
+  await selectFirstSession(page)
+
+  await page.getByTestId(`task-more-${doomed.id}`).click()
+  await page.getByTestId(`task-delete-${doomed.id}`).click()
+
+  await expect(page.getByTestId(`task-${doomed.id}`)).toHaveCount(0)
+  await expect(page.getByTestId('result-gallery')).toHaveCount(0)
+  await expect(page.getByTestId('task-dismissal-skipped')).toHaveCount(0)
+})
+
+test('the skip notice still reports on an emptied gallery', async ({ mount, page }) => {
+  page.on('dialog', (dialog) => void dialog.accept())
+  const doomed = dismissibleTask('dddddddd-0000-4000-8000-00000000emp1')
+  await mount(
+    <CreationWorkbenchStory taskScript={{ tasks: [doomed], dismissSkips: { [doomed.id]: 1 } }} />
+  )
+  await selectFirstSession(page)
+
+  await page.getByTestId(`task-more-${doomed.id}`).click()
+  await page.getByTestId(`task-delete-${doomed.id}`).click()
+
+  await expect(page.getByTestId('result-gallery')).toHaveCount(0)
+  await expect(page.getByTestId('task-dismissal-skipped')).toContainText(
+    '1 result(s) were not removed because of a safety restriction'
+  )
 })
 
 test('indeterminate outcomes require an explicit risk confirmation before redo', async ({
@@ -2256,15 +2362,34 @@ test('a policy-rejected task keeps editing paths but no identical quick retry', 
     updatedAt: '2026-08-29T09:01:00Z',
     terminalAt: '2026-08-29T09:01:00Z',
     slots: [
-      { index: 0, status: 'failed', failureReason: 'input_policy_rejected', result: null },
-      { index: 1, status: 'failed', failureReason: 'input_policy_rejected', result: null }
+      {
+        index: 0,
+        status: 'failed',
+        failureReason: 'input_policy_rejected',
+        actionSuggestion: 'revise_input',
+        retryable: false,
+        result: null
+      },
+      {
+        index: 1,
+        status: 'failed',
+        failureReason: 'input_policy_rejected',
+        actionSuggestion: 'revise_input',
+        retryable: false,
+        result: null
+      }
     ]
   }
   await mount(<CreationWorkbenchStory taskScript={{ tasks: [rejectedTask] }} />)
   await selectFirstSession(page)
 
   // The identical-content retry is forbidden; editing and regenerating stays.
+  // The terminal card now always carries the actions menu (ADR-0022), so the
+  // absence is asserted with that menu open — its items mount on open.
+  await page.getByTestId(`task-more-${rejectedTask.id}`).click()
   await expect(page.getByTestId(`task-retry-${rejectedTask.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`task-delete-${rejectedTask.id}`)).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect(page.getByTestId(`task-regenerate-${rejectedTask.id}`)).toBeVisible()
   await expect(page.getByTestId(`slot-${rejectedTask.id}-0`)).toContainText(
     'Input rejected by safety review'
