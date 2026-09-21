@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/experimental-ct-react'
 import {
   CreationWorkbenchRestartStory,
   CreationWorkbenchNavigationStory,
-  CreationWorkbenchStory
+  CreationWorkbenchStory,
+  type ScriptedTask
 } from './fixtures/creation-workbench.story'
 import type { LocalDraftRecord } from '../src/renderer/src/features/creation/model/draft-store'
 
@@ -595,4 +596,47 @@ test('a held file survives display switches and re-mounts its card on return', a
     page.getByTestId('reference-deck').getByRole('button', { name: 'held.png', exact: true })
   ).toBeVisible()
   expect(await page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? [])).toEqual([])
+})
+
+// A session's tasks arrive over the wire. The frame painted while the entered
+// session's first window is still in flight is what the creator actually sees
+// on arrival, so an empty-looking one must not be presented as the
+// empty-session state — it is a read, and it says so.
+test('a returning entry reads as loading, never as the empty-session hero', async ({
+  mount,
+  page
+}) => {
+  const task: ScriptedTask = {
+    id: 'ffffffff-1111-4000-8000-00000000d001',
+    sessionId: 'aaaaaaaa-0000-4000-8000-000000000001',
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: null,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-01T09:00:00Z',
+    updatedAt: '2026-09-01T09:00:00Z',
+    terminalAt: '2026-09-01T09:00:00Z',
+    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }]
+  }
+  // No stored draft: the prompt cannot stand in for the task read either.
+  await mount(<CreationWorkbenchNavigationStory drafts={{}} taskScript={{ tasks: [task] }} />)
+  await selectSession(page, 'Spring campaign')
+  await expect(page.getByTestId(`task-${task.id}`)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Open settings' }).click()
+  const callsBefore = await page.evaluate(() => window.__creationDeckTest?.listTasksCalls() ?? 0)
+  await page.evaluate(() => window.__creationDeckTest?.holdNextListResponse())
+  await page.getByRole('button', { name: 'Back to creation' }).click()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.listTasksCalls() ?? 0))
+    .toBeGreaterThan(callsBefore)
+
+  await expect(page.getByTestId('workspace-loading')).toBeVisible()
+  await expect(page.getByTestId('workspace-hero')).toHaveCount(0)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseHeldListResponses())
+  await expect(page.getByTestId(`task-${task.id}`)).toBeVisible()
+  await expect(page.getByTestId('workspace-loading')).toHaveCount(0)
 })

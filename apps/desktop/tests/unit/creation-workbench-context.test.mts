@@ -717,3 +717,33 @@ test('claimPendingDraft moves the record off the composing key synchronously', a
   assert.equal(snapshot.composingNew, false)
   assert.equal(snapshot.pendingKey, 'pending:k')
 })
+
+test('restoring spans one session entry, never a background reconcile', async () => {
+  const { controller, script } = harness()
+  const detail = deferred<CreationApiResult<CreationSessionView>>()
+  script.detail.set('s1', detail)
+  await flush()
+  assert.equal(controller.getSnapshot().restoring, false)
+
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+  // The presented session's facts are still on their way, so an empty Draft is
+  // not yet a verdict about the session.
+  assert.equal(controller.getSnapshot().restoring, true)
+
+  detail.resolve(ok(sessionView('s1')))
+  await flush()
+  assert.equal(controller.getSnapshot().restoring, false)
+
+  // A reconcile re-reads the same facts in the background; a presented
+  // workspace must not blink back to "loading" for it.
+  controller.reconcileCurrentContext()
+  assert.equal(controller.getSnapshot().restoring, false)
+  await flush()
+
+  // A fresh draft restores from the device-local record synchronously, so it
+  // never waits behind a session's read — including when it interrupts one.
+  controller.enterContext({ kind: 'session', session: sessionView('s2') })
+  assert.equal(controller.getSnapshot().restoring, true)
+  controller.enterContext({ kind: 'new' })
+  assert.equal(controller.getSnapshot().restoring, false)
+})

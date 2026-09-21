@@ -1013,3 +1013,41 @@ test('a change to a history-loaded task outside the window never re-reads or reo
     Array.from({ length: 45 }, (_, i) => `t${String(45 - i).padStart(2, '0')}`)
   )
 })
+
+test('listLoading spans a display lifecycle before its first window only', async () => {
+  const h = await harness({ A: [taskView('t1', 'A', '2026-09-01T09:00:01Z', 'succeeded')] })
+  const release = h.holdNextList()
+
+  h.controller.enter('A')
+  // The entry's own read is still out: an empty list is not yet a verdict
+  // about the session it was entered for.
+  assert.equal(h.snapshot().listLoading, true)
+  assert.equal(h.snapshot().listFailed, false)
+
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().listLoading, true)
+  release()
+  await settle()
+  assert.equal(h.snapshot().listLoading, false)
+
+  // A refresh round re-reads the same session but never re-opens the entry's
+  // "not yet read" state.
+  h.controller.notifyInvalidation()
+  h.flush()
+  assert.equal(h.snapshot().listLoading, false)
+})
+
+test('a failed first window still settles the entry', async () => {
+  const h = await harness()
+  h.failListNext(1)
+
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+
+  // The read landed as a failure: the entry is settled and the failure reads
+  // as one, rather than leaving the workspace loading forever.
+  assert.equal(h.snapshot().listLoading, false)
+  assert.equal(h.snapshot().listFailed, true)
+})

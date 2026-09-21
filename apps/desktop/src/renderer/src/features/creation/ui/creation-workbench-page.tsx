@@ -312,8 +312,22 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
               className="px-page h-full overflow-y-auto [overflow-anchor:none]"
             >
               {/* The greeting hero is the empty-session state: clearing the
-                  prompt must never hide a session that already holds tasks. */}
-              {composer.expandedPrompt.length === 0 && gallery.tasks.length === 0 ? (
+                  prompt must never hide a session that already holds tasks.
+                  Facts still on their way are neither — an empty-looking
+                  session must not be presented as an empty one, nor may a
+                  returning creator see a workspace blink to "loading" on
+                  every background reconcile. */}
+              {context.restoring || gallery.taskListLoading ? (
+                <div className="grid min-h-full place-items-center">
+                  <p
+                    role="status"
+                    data-testid="workspace-loading"
+                    className="text-muted-foreground text-xs"
+                  >
+                    {t('state.loading')}
+                  </p>
+                </div>
+              ) : composer.expandedPrompt.length === 0 && gallery.tasks.length === 0 ? (
                 <div className="mx-auto flex min-h-full max-w-[720px] flex-col items-center justify-center pb-10">
                   <EmptyDraftHero
                     onUseTemplate={(prompt) =>

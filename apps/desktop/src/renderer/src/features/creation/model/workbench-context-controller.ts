@@ -110,6 +110,11 @@ export interface WorkbenchContextSnapshot {
   readonly selectedId: string | null
   readonly composingNew: boolean
   readonly pendingKey: string | null
+  /** True from entering a session until that entry's own facts land (either
+   * way). A presented session whose Draft, materials, and tasks have not
+   * arrived is not yet an empty one, and a later background reconcile never
+   * re-opens this — a workspace must not blink back to loading mid-read. */
+  readonly restoring: boolean
   /** The authoritative context key; every consumer-side key derives from it. */
   readonly contextKey: string
   /** The current context's runtime action key; `new` and `inactive` own no
@@ -135,6 +140,7 @@ export const emptyWorkbenchContextSnapshot: WorkbenchContextSnapshot = {
   selectedId: null,
   composingNew: false,
   pendingKey: null,
+  restoring: false,
   contextKey: 'inactive',
   actionKey: null,
   draft: emptyComposerDraft(),
@@ -198,6 +204,9 @@ export class WorkbenchContextController {
   // Open from a context switch's optimistic reset until its record (or the
   // fallback) lands; #adoptManifestDefaults owns why adoption must wait.
   #restoreWindow = false
+  // Narrower than #restoreWindow: only a session entry opens it, and only that
+  // entry's own landing closes it. Reconciles and local rows never touch it.
+  #restoring = false
   #selected: CreationSessionView | null = null
   #composingNew = false
   #pendingKey: string | null = null
@@ -271,6 +280,7 @@ export class WorkbenchContextController {
         // from the prior context while this session restores.
         this.#applyDraft(null, null, null, true)
         this.#deriveActionState()
+        this.#restoring = true
         void this.#restoreSession(epoch, key.session, 'enter')
         break
       }
@@ -431,6 +441,7 @@ export class WorkbenchContextController {
       return
     }
     this.#restoreWindow = false
+    this.#restoring = false
     if (
       detail === null ||
       detail.outcome !== 'succeeded' ||
@@ -523,6 +534,7 @@ export class WorkbenchContextController {
       }
     }
     this.#restoreWindow = false
+    this.#restoring = false
   }
 
   /** Unknown-material bindings drop out; their last expanded prompt
@@ -660,6 +672,7 @@ export class WorkbenchContextController {
       selectedId: this.#selected?.id ?? null,
       composingNew: this.#composingNew,
       pendingKey: this.#pendingKey,
+      restoring: this.#restoring,
       contextKey: this.#contextKeyValue(),
       actionKey: this.#actionKey(),
       draft: this.#draft,
