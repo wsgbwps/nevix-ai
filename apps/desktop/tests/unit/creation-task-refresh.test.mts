@@ -663,6 +663,34 @@ test('a task the projection removed leaves the display and its cached detail', a
   assert.equal(h.snapshot().taskDetails['t20'], undefined)
 })
 
+test('a task tying with the window tail on the wire second stays', async () => {
+  // The server breaks a same-second tie on a column finer than the wire
+  // carries, so the client cannot reproduce its answer from the page. A tie
+  // must keep the card: only a strictly newer `created_at` drops one.
+  const tied = historyTasks(25).map((task) =>
+    task.id === 't05' ? { ...task, createdAt: historyTasks(25)[5].createdAt } : task
+  )
+  const h = await harness({ A: tied })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 25)
+
+  // t05 ties with t06, which is the newest page's last row, and sorts behind it
+  // by id — so it is absent from the page while still being the creator's.
+  h.controller.notifyInvalidation()
+  h.flush()
+  await settle()
+
+  assert.deepEqual(
+    h.snapshot().tasks.map((task) => task.id),
+    tied.map((task) => task.id).reverse()
+  )
+})
+
 test('a task the projection removed behind a short page also leaves', async () => {
   const h = await harness({ A: historyTasks(25) })
   h.controller.enter('A')
