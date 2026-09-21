@@ -43,6 +43,10 @@ export interface TaskRefreshSnapshot {
   readonly staleTaskIds: ReadonlySet<string>
   /** True when the latest list read failed; kept tasks stay and nothing masquerades as fresh. */
   readonly listFailed: boolean
+  /** True from entering a session until that entry's first window settles,
+   * either way: an empty task list is not yet a verdict about the session, and
+   * a later refresh round never re-opens this. */
+  readonly listLoading: boolean
   readonly history: TaskHistoryStatus
 }
 
@@ -52,6 +56,7 @@ export const emptyTaskRefreshSnapshot: TaskRefreshSnapshot = {
   taskDetails: {},
   staleTaskIds: new Set<string>(),
   listFailed: false,
+  listLoading: false,
   history: { hasMore: false, loading: false, failed: false }
 }
 
@@ -143,6 +148,10 @@ export class TaskRefreshController {
   private readonly details = new Map<string, CachedDetail>()
   private readonly failedDetailIds = new Set<string>()
   private listFailedFlag = false
+  // Whether this display lifecycle's first window has settled. Only enter()
+  // clears it again, so a refresh round cannot put a presented session back
+  // into "not yet read".
+  private windowSettled = false
 
   // Upward history pagination: the continuation token behind the oldest
   // loaded task. Null before the first window lands and after the last page.
@@ -314,6 +323,8 @@ export class TaskRefreshController {
     }
     if (this.activeRound !== round) return
     round.listSettled = true
+    // A window that answered — even with nothing — is the session's verdict.
+    if (!history) this.windowSettled = true
     if (page === null) {
       if (history) {
         // The older-page read failed: loaded pages, details, and the reading
@@ -438,8 +449,13 @@ export class TaskRefreshController {
     // later trigger) starts fresh.
     let changed = round.kind === 'history'
     if (!round.listSettled) {
-      if (round.kind === 'history') this.historyFailedFlag = true
-      else this.listFailedFlag = true
+      if (round.kind === 'history') {
+        this.historyFailedFlag = true
+      } else {
+        this.listFailedFlag = true
+        // The abandoned round's response is discarded, so it never lands.
+        this.windowSettled = true
+      }
       changed = true
     }
     for (const taskId of round.pendingDetails) {
@@ -463,6 +479,7 @@ export class TaskRefreshController {
     this.details.clear()
     this.failedDetailIds.clear()
     this.listFailedFlag = false
+    this.windowSettled = false
     this.olderCursor = null
     this.historyFailedFlag = false
   }
@@ -497,6 +514,7 @@ export class TaskRefreshController {
       taskDetails,
       staleTaskIds: new Set(this.failedDetailIds),
       listFailed: this.listFailedFlag,
+      listLoading: this.enteredSessionId !== null && !this.windowSettled,
       history: {
         hasMore: this.olderCursor !== null,
         loading: this.activeRound?.kind === 'history',

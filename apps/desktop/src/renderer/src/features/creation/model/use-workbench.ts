@@ -87,6 +87,8 @@ export interface WorkbenchContextHandle {
   /** The `pending:<uuid>` ownership being viewed, when a submitted-but-
    * unmaterialized draft is the active context. */
   pendingKey: string | null
+  /** True while a selected session's facts are still on their way. */
+  restoring: boolean
   contextKey: string
   actionState: WorkbenchActionState
   operationNotice: LocalDraftOperationNotice | null
@@ -163,6 +165,9 @@ export interface WorkbenchGalleryHandle {
   taskDetails: Readonly<Record<string, GenerationTaskDetail>>
   taskDetailStaleIds: ReadonlySet<string>
   taskListStale: boolean
+  /** True until the displayed session's first task window settles, either
+   * way; an empty list is not yet a verdict about the session. */
+  taskListLoading: boolean
   taskHistory: TaskHistoryStatus
   loadOlderTasks: () => void
   /** Leases one succeeded slot's verified display URL until its card releases it. */
@@ -1044,6 +1049,7 @@ export function useCreationWorkbench(): {
       selectedId: ctx.selectedId,
       composingNew: ctx.composingNew,
       pendingKey: ctx.pendingKey,
+      restoring: ctx.restoring,
       contextKey: ctx.contextKey,
       actionState: ctx.actionState,
       operationNotice: ctx.operationNotice,
@@ -1119,6 +1125,7 @@ export function useCreationWorkbench(): {
       taskDetails,
       taskDetailStaleIds: taskRefresh.snapshot.staleTaskIds,
       taskListStale: taskRefresh.snapshot.listFailed,
+      taskListLoading: taskRefresh.snapshot.listLoading,
       taskHistory: taskRefresh.snapshot.history,
       loadOlderTasks: taskRefresh.requestOlderTasks,
       acquireResultBlobUrl: display.acquireResultBlobUrl,
