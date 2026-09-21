@@ -336,8 +336,7 @@ func readTaskWithSlotsAndJob(ctx context.Context, exec taskReadExec, owner, task
 		return domain.GenerationTask{}, nil, domain.ProviderJob{}, fmt.Errorf("creation: get generation task: %w", err)
 	}
 
-	// A soft-deleted Asset row for the slot marks its result as removed; the
-	// slot's own facts stay as written.
+	// A soft-deleted Asset row for the slot is its removed result (ADR-0021).
 	slotRows, err := exec.Query(ctx, `
 		SELECT slot_index, status, failure_reason,
 		       failure_diagnostic_source, failure_diagnostic_code, failure_diagnostic_message,

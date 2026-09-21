@@ -259,9 +259,6 @@ test('deleting an asset states the result removal and the surviving Publication'
   await mount(<AssetLibraryStory />)
   await page.getByRole('button', { name: 'Open asset asset-one' }).click()
   page.once('dialog', async (confirmation) => {
-    // All three consequences land in the confirmation (ADR-0021): the result
-    // leaves the source task card, the last removal takes the card with it,
-    // and the Publication stays.
     expect(confirmation.message()).toContain('result leaves the source task card')
     expect(confirmation.message()).toContain('removes that card')
     expect(confirmation.message()).toContain('publication will not be withdrawn')

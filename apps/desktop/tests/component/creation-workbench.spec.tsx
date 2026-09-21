@@ -2165,8 +2165,6 @@ test('a deleted result leaves no card cell, no media, and no placeholder', async
   await mount(<CreationWorkbenchStory taskScript={{ tasks: [task] }} />)
   await selectFirstSession(page)
 
-  // The surviving results keep their own cells and states; the removed one has
-  // no tile, so nothing invites the creator to read a state that is gone.
   await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute('data-media-state', 'ready')
   await expect(page.getByTestId(`slot-${task.id}-2`)).toHaveAttribute('data-media-state', 'ready')
   await expect(page.getByTestId(`slot-${task.id}-3`)).toHaveAttribute('data-slot-status', 'failed')

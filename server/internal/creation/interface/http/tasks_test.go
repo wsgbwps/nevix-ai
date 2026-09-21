@@ -29,9 +29,6 @@ func TestFailedSlotResourceIncludesStableGuidanceAndNevixSupportNumber(t *testin
 	}
 }
 
-// A slot whose result was removed keeps its succeeded verdict but never
-// projects the result itself (ADR-0021): the marker is the only thing that
-// reaches the client.
 func TestRemovedSlotResultIsNotProjected(t *testing.T) {
 	status := domain.SlotSucceeded
 	mime := "image/jpeg"

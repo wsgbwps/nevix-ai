@@ -152,20 +152,24 @@ test('malformed failure guidance fails the whole detail closed', async () => {
   }
 })
 
-test('a removed result arrives as a marker, never as a silent empty result', async () => {
+test('the removal marker decides, never the shape of the result', async () => {
   const client = createGenerationTaskClient(serverUrl)
-  const payload = specDetail(undefined) as { slots: Array<Record<string, unknown>> }
-  Object.assign(payload.slots[0], { result_deleted: true })
-  const result = await withFetch(payload, () =>
-    client.getTask('token', 'dddddddd-0000-4000-8000-000000000004')
-  )
+  // Both cases are a succeeded slot with no result — the combination a
+  // judgement call would have read as "removed". Only the marker may decide.
+  for (const [marker, expected] of [
+    [true, true],
+    [false, false]
+  ] as const) {
+    const payload = specDetail(undefined) as { slots: Array<Record<string, unknown>> }
+    Object.assign(payload.slots[0], { result_deleted: marker })
+    const result = await withFetch(payload, () =>
+      client.getTask('token', 'dddddddd-0000-4000-8000-000000000004')
+    )
 
-  assert.equal(result.outcome, 'succeeded')
-  if (result.outcome !== 'succeeded') return
-  assert.equal(result.value.slots[0].resultDeleted, true)
-  assert.equal(result.value.slots[0].result, null)
-  // The verdict itself is untouched: only the result became unreachable.
-  assert.equal(result.value.slots[0].status, 'succeeded')
+    assert.equal(result.outcome, 'succeeded')
+    if (result.outcome !== 'succeeded') return
+    assert.equal(result.value.slots[0].resultDeleted, expected)
+  }
 })
 
 test('a missing or non-boolean removal marker fails the whole detail closed', async () => {

@@ -424,8 +424,7 @@ type GenerationSlot struct {
 	ResultHeightPx   *int
 	ResultDurationMS *int
 	// ResultDeleted is a read projection, not a stored verdict: the slot's
-	// source Media Asset was deleted (ADR-0021), so the result no longer
-	// reaches any reader while the facts above stay intact.
+	// source Media Asset was deleted, so the result no longer reaches a reader.
 	ResultDeleted bool
 }
 

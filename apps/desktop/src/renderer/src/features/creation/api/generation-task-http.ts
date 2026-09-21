@@ -80,8 +80,9 @@ export interface GenerationSlotView {
   readonly supportNumber?: string | null
   readonly failureDiagnostic?: SlotFailureDiagnostic | null
   readonly result: SlotResultView | null
-  /** The wire always carries this; true means the slot's source Media Asset
-   * was deleted, so the result is unreachable while the slot stays succeeded. */
+  /** Authoritative on every slot the wire carries (the parser above rejects a
+   * detail without it); optional only because placeholder slots and test
+   * fixtures are built without one. */
   readonly resultDeleted?: boolean
 }
 

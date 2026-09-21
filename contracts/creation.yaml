@@ -4062,9 +4062,7 @@ components:
               type: integer
         result_deleted:
           type: boolean
-          description: |-
-            结果不可用：其来源 Media Asset 已被删除（ADR-0021）。此时 result 为 null，
-            槽位终态、任务成功计数与用量事实一律不变；槽位也不进入「重试未完成项」集合。
+          description: 结果不可用：其来源 Media Asset 已被删除（ADR-0021）。此时 result 为 null，槽位自身的终态不变。
     GenerationTaskDetail:
       type: object
       required:
