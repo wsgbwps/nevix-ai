@@ -220,7 +220,7 @@ func (h *GenerationTaskHandler) DownloadSlotResult(w http.ResponseWriter, r *htt
 		return
 	}
 	slot := slots[index]
-	if slot.Status == nil || *slot.Status != domain.SlotSucceeded || slot.ResultBlobKey == nil {
+	if !slot.ResultReadable() {
 		WriteError(w, &Error{Status: http.StatusNotFound, Code: CodeNotFound, Message: "The requested resource was not found."})
 		return
 	}
@@ -330,7 +330,7 @@ func toSlotResource(task domain.GenerationTask, slot domain.GenerationSlot) gene
 			RequestID:    slot.Diagnostic.RequestID,
 		}
 	}
-	if slot.Status != nil && *slot.Status == domain.SlotSucceeded && slot.ResultBlobKey != nil && !slot.ResultDeleted {
+	if slot.ResultReadable() {
 		checksum := ""
 		if len(slot.ResultChecksum) == 32 {
 			checksum = hex.EncodeToString(slot.ResultChecksum)

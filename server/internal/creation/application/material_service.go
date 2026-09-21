@@ -556,7 +556,7 @@ func (s *MaterialService) CreateFromResult(ctx context.Context, owner, sessionID
 			break
 		}
 	}
-	if slot == nil || slot.Status == nil || *slot.Status != domain.SlotSucceeded || slot.ResultBlobKey == nil || slot.ResultByteSize == nil {
+	if slot == nil || !slot.ResultReadable() || slot.ResultByteSize == nil {
 		return domain.ReferenceMaterial{}, domain.ErrTaskNotFound
 	}
 	if *slot.ResultByteSize < 1 || *slot.ResultByteSize > domain.VideoMaxBytes {

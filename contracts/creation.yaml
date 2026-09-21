@@ -335,9 +335,10 @@ paths:
       operationId: createReferenceMaterialFromResult
       summary: 将当前创建者的成功生成结果转换为永久素材
       description: |-
-        Server 在可信边界内读取当前创建者的成功 Task slot，并把结果流式写入当前 Object Storage，
-        再执行与 Upload finalize 相同的完整 probe/hash 与最终 Session ownership 复核。结果 bytes、
-        blob key、签名 URL/headers 均不进入 Renderer；新素材拥有独立 identity、object 与权利声明。
+        Server 在可信边界内读取当前创建者的成功 Task slot（且结果未被移除，即 `result_deleted`
+        为 false），并把结果流式写入当前 Object Storage，再执行与 Upload finalize 相同的完整
+        probe/hash 与最终 Session ownership 复核。结果 bytes、blob key、签名 URL/headers 均不
+        进入 Renderer；新素材拥有独立 identity、object 与权利声明。
       security:
         - bearerAuth: []
       parameters:
@@ -1250,9 +1251,10 @@ paths:
       operationId: downloadGenerationSlotResult
       summary: 下载成功槽位的已验证输出（creator-private 有界流）
       description: |-
-        只对创建者开放；流式经 Go 有界传输，不暴露 Storage 凭据。仅成功槽位携带输出；
-        其他槽位与外来任务一律 404。支持标准单区间 Range（206），非法、多区间或
-        不可满足的区间返回 416；完整下载沿流校验 SHA-256，读取或校验失败中断响应。
+        只对创建者开放；流式经 Go 有界传输，不暴露 Storage 凭据。仅成功且结果未被移除
+        （`result_deleted` 为 false）的槽位携带输出；其他槽位与外来任务一律 404。支持标准
+        单区间 Range（206），非法、多区间或不可满足的区间返回 416；完整下载沿流校验
+        SHA-256，读取或校验失败中断响应。
       security:
         - bearerAuth: []
       parameters:

@@ -358,7 +358,9 @@ func TestAssetLibraryPublicationInspirationAndCreateSimilar(t *testing.T) {
 // TestDeletedAssetRemovesItsSlotResultFromTheSourceTask: deleting a Media
 // Asset leaves the slot's verdict, its siblings, the task's facts and its
 // usage record intact, and the detail read reports the removal through the
-// explicit marker rather than a silently empty result.
+// explicit marker rather than a silently empty result. Both result channels
+// close for that slot alone — download and reuse refuse it, and the same
+// task's live siblings answer exactly as they did before the deletion.
 func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
@@ -397,6 +399,27 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 		Scan(&removedAssetID); err != nil {
 		t.Fatalf("resolve the asset formed from slot #0: %v", err)
 	}
+	// The removal must not touch a sibling's channels.
+	liveSibling := -1
+	for _, slot := range view.Slots {
+		if slot.Index != 0 && slot.Status == "succeeded" && slot.Result != nil {
+			liveSibling = slot.Index
+			break
+		}
+	}
+	if liveSibling < 0 {
+		t.Fatalf("the scenario needs one live succeeded sibling: %s", slotVerdicts(view))
+	}
+	siblingPath := fmt.Sprintf("/creation/tasks/%s/slots/%d/result", taskID, liveSibling)
+	fromResultPath := "/creation/sessions/" + intent.SessionID + "/materials/from-result"
+	siblingStatus, siblingBytes := h.doRequest(t, http.MethodGet, siblingPath, token, nil)
+	if siblingStatus != http.StatusOK || len(siblingBytes) == 0 {
+		t.Fatalf("sibling result download before deletion status=%d len=%d", siblingStatus, len(siblingBytes))
+	}
+	if status, body := h.doRequest(t, http.MethodPost, fromResultPath,
+		token, map[string]any{"task_id": taskID, "slot_index": liveSibling, "file_name": "sibling-before.png"}); status != http.StatusCreated {
+		t.Fatalf("sibling result reuse before deletion status=%d body=%s", status, body)
+	}
 	if status, body := h.doRequest(t, http.MethodDelete, "/creation/assets/"+removedAssetID, token, nil); status != http.StatusNoContent {
 		t.Fatalf("delete candidate status=%d body=%s", status, body)
 	}
@@ -427,6 +450,27 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 	if usageAfter := countRows(t, h.ownerPool,
 		`SELECT count(*) FROM creation_generation_reservations WHERE task_id = $1::uuid AND released_at IS NOT NULL`, taskID); usageAfter != usageBefore {
 		t.Fatalf("a visibility change rewrote usage facts: %d -> %d", usageBefore, usageAfter)
+	}
+
+	// Download and reuse must close for the removed slot.
+	removedStatus, removedBody := h.doRequest(t, http.MethodGet, "/creation/tasks/"+taskID+"/slots/0/result", token, nil)
+	if removedStatus != http.StatusNotFound {
+		t.Fatalf("a removed result must not download: status=%d bytes=%d", removedStatus, len(removedBody))
+	}
+	assertErrorCode(t, removedBody, "not_found")
+	reuseStatus, reuseBody := h.doRequest(t, http.MethodPost, fromResultPath,
+		token, map[string]any{"task_id": taskID, "slot_index": 0, "file_name": "removed.png"})
+	if reuseStatus != http.StatusNotFound {
+		t.Fatalf("a removed result must not become a reference material: status=%d body=%s", reuseStatus, reuseBody)
+	}
+	assertErrorCode(t, reuseBody, "not_found")
+	// Siblings keep both channels.
+	if status, body := h.doRequest(t, http.MethodGet, siblingPath, token, nil); status != http.StatusOK || !bytes.Equal(body, siblingBytes) {
+		t.Fatalf("a sibling result download changed with an unrelated deletion: status=%d len=%d", status, len(body))
+	}
+	if status, body := h.doRequest(t, http.MethodPost, fromResultPath,
+		token, map[string]any{"task_id": taskID, "slot_index": liveSibling, "file_name": "sibling.png"}); status != http.StatusCreated {
+		t.Fatalf("a sibling result must stay reusable: status=%d body=%s", status, body)
 	}
 
 	// The removed slot is still succeeded, so retrying the task must cover only
