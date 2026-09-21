@@ -248,13 +248,26 @@ func scanTaskFull(row pgx.Row) (domain.GenerationTask, error) {
 	return t, nil
 }
 
-// ListBySession pages one session's tasks newest-first, creator-scoped.
+// ListBySession pages one session's tasks newest-first, creator-scoped. One
+// that never formed a Media Asset — every slot failed — has nothing removed
+// and keeps its place in this browsing list; the verdicts themselves are
+// untouched, and detail still reads the facts.
 func (r *GenerationTaskRepository) ListBySession(ctx context.Context, owner, sessionID domain.UUID, cursor *domain.CompoundCursor, limit int) ([]domain.GenerationTask, *domain.CompoundCursor, error) {
 	args := []any{owner, sessionID, cursorTime(cursor), cursorID(cursor), limit + 1}
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+taskSummaryColumns+` FROM creation_generation_tasks
 		WHERE owner_user_id = $1 AND session_id = $2
 		  AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::uuid))
+		  AND NOT (
+		    EXISTS (
+		      SELECT 1 FROM creation_media_assets
+		      WHERE task_id = creation_generation_tasks.id
+		    )
+		    AND NOT EXISTS (
+		      SELECT 1 FROM creation_media_assets
+		      WHERE task_id = creation_generation_tasks.id AND deleted_at IS NULL
+		    )
+		  )
 		ORDER BY created_at DESC, id DESC
 		LIMIT $5`, args...)
 	if err != nil {

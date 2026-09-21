@@ -347,14 +347,29 @@ export class TaskRefreshController {
     this.finishRound(round)
   }
 
-  /** Merges the newest window: window tasks replace their loaded copies and
-   * every previously loaded task outside the window stays displayed. */
+  /** Merges the newest window: window tasks replace their loaded copies, and
+   * every previously loaded task outside the window stays displayed — except
+   * the ones the projection removed (ADR-0021, below). */
   private mergeWindow(page: TaskPage): readonly GenerationTaskView[] {
-    // The latest window is not the session's whole task set: tasks it no
-    // longer lists stay displayed (and keep their cached details) instead of
-    // being inferred deleted. Their position stays behind the window.
     const windowIds = new Set(page.tasks.map((task) => task.id))
-    const kept = this.summaries.filter((task) => !windowIds.has(task.id))
+    // A loaded task the page stopped returning was removed by the projection
+    // (ADR-0021) — not scrolled behind the window: the scan is newest-first, so
+    // everything newer than the page's last row is in it, and a page with no
+    // continuation cursor is the whole remaining set. Only a strictly newer
+    // `created_at` drops a card; a same-second tie cannot be ordered off the wire.
+    // ponytail: one removed behind the window's last row waits for the next
+    // session entry — dropping it would risk a card the creator still has.
+    const tail = page.tasks[page.tasks.length - 1]
+    const kept: GenerationTaskView[] = []
+    for (const task of this.summaries) {
+      if (windowIds.has(task.id)) continue
+      if (page.nextCursor !== null && tail !== undefined && task.createdAt <= tail.createdAt) {
+        kept.push(task)
+        continue
+      }
+      this.details.delete(task.id)
+      this.failedDetailIds.delete(task.id)
+    }
     this.summaries = [...page.tasks, ...kept]
     this.listFailedFlag = false
     // The window's own cursor continues history only while nothing older has

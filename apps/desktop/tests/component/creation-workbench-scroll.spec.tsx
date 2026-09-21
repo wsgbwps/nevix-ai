@@ -603,6 +603,34 @@ test('action notice changes preserve a long-history reading anchor', async ({ mo
   await expectAnchorStable()
 })
 
+test('a task the projection removed keeps the reading anchor', async ({ mount, page }) => {
+  const tasks = manyMixedTasks(40, 'removed-row')
+  await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks }} />)
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const scroller = await settledScroller(page)
+  await loadFullHistory(page, scroller, tasks.length)
+  await userScrollTo(scroller, { fraction: 2 / 3 })
+  await page.waitForTimeout(200)
+  const anchor = await visibleTaskAnchor(page)
+  const anchorCard = page.getByTestId(anchor.testId)
+
+  // A card behind the 20-newest window stays loaded either way, so only a
+  // removal inside the window proves anything. The gallery reads oldest-first,
+  // so an earlier fixture entry sits above the anchor: its removal collapses
+  // everything above it, and the virtualizer's end anchor holds the card being
+  // read at its own viewport offset (ADR-0021, Desktop ADR-0005).
+  const anchorIndex = tasks.findIndex((task) => `task-${task.id}` === anchor.testId)
+  const doomed = tasks[Math.max(tasks.length - 20, anchorIndex - 3)]
+  await page.evaluate((taskId) => window.__creationDeckTest?.removeTask(taskId), doomed.id)
+
+  await expect(page.getByTestId(`task-${doomed.id}`)).toHaveCount(0)
+  await expect(page.getByTestId('result-gallery')).toHaveAttribute(
+    'data-total-count',
+    String(tasks.length - 1)
+  )
+  await expect.poll(() => taskOffsetFromScroller(anchorCard, scroller)).toBeCloseTo(anchor.top, 0)
+})
+
 test('detail and responsive height changes keep the visible task anchor stable', async ({
   mount,
   page

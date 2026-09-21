@@ -484,6 +484,102 @@ func TestDeletedAssetRemovesItsSlotResultFromTheSourceTask(t *testing.T) {
 	}
 }
 
+// TestDeletingEveryFormedAssetRemovesTheTaskFromTheSessionList: once every
+// Media Asset a task formed is logically deleted, the browsing list stops
+// offering that task — first page and older pages alike — while a task that
+// never formed one stays.
+func TestDeletingEveryFormedAssetRemovesTheTaskFromTheSessionList(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+
+	// One session, three tasks in creation order: an oldest that forms no
+	// Media Asset, a middle whose only Asset is then deleted, a newest that
+	// keeps its own.
+	sessionID := h.imageTaskIntent(t, token, "列表投影", 1).SessionID
+	submit := func(key, prompt string) string {
+		t.Helper()
+		built := h.buildTaskIntent(t, token, sessionID, taskIntent{
+			SessionID: sessionID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
+			Mode: "text-to-image", Ratio: "1:1", Resolution: "2K", Quantity: 1, Prompt: prompt,
+		})
+		status, body := h.submitTask(t, token, key, built)
+		if status != http.StatusCreated {
+			t.Fatalf("submit %s: status=%d body=%s", key, status, body)
+		}
+		return h.awaitTaskTerminal(t, token, decodeTaskView(t, body).Task.ID).Task.ID
+	}
+
+	// Every output transfer fails, so this task never forms a Media Asset.
+	h.kapon.generation.setImage(imageScript{outputs: 1, outputStatus: http.StatusBadGateway})
+	neverFormedID := submit("list-projection-never-formed", "从未形成 Media Asset")
+	if count := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, neverFormedID); count != 0 {
+		t.Fatalf("a failed output transfer must form no Media Asset, got %d", count)
+	}
+
+	h.kapon.generation.setImage(imageScript{outputs: 1})
+	removedID := submit("list-projection-removed", "结果被删光")
+	assetID := ""
+	if err := h.ownerPool.QueryRow(h.ctx,
+		`SELECT id::text FROM creation_media_assets WHERE task_id = $1::uuid`, removedID).Scan(&assetID); err != nil {
+		t.Fatalf("resolve the asset formed from the removed task: %v", err)
+	}
+	if status, body := h.doRequest(t, http.MethodDelete, "/creation/assets/"+assetID, token, nil); status != http.StatusNoContent {
+		t.Fatalf("delete the only asset status=%d body=%s", status, body)
+	}
+
+	liveID := submit("list-projection-live", "结果仍在")
+	if count := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid AND deleted_at IS NULL`, liveID); count != 1 {
+		t.Fatalf("the newest task must keep its own live Media Asset, got %d", count)
+	}
+
+	// Walk the newest-first keyset one task at a time: the removed middle task
+	// must not surface on any page, first or older.
+	seen := []string{}
+	cursor := ""
+	for page := range 4 {
+		path := "/creation/sessions/" + sessionID + "/tasks?limit=1"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		status, body := h.doRequest(t, http.MethodGet, path, token, nil)
+		if status != http.StatusOK {
+			t.Fatalf("task list page %d status=%d body=%s", page, status, body)
+		}
+		var listed sessionTaskPage
+		mustDecode(t, body, &listed)
+		for _, task := range listed.Tasks {
+			seen = append(seen, task.ID)
+		}
+		if listed.NextCursor == nil {
+			break
+		}
+		cursor = *listed.NextCursor
+	}
+	if len(seen) != 2 || seen[0] != liveID || seen[1] != neverFormedID {
+		t.Fatalf("the list projection must offer exactly the newest task then the never-formed one, got %v", seen)
+	}
+
+	// The projection is a browsing one: the task's own detail still reads the
+	// removal through the explicit marker, and its Asset row survives.
+	if _, _, removed := h.getTask(t, token, removedID); removed.Task.Status != "succeeded" ||
+		len(removed.Slots) != 1 || !removed.Slots[0].ResultDeleted || removed.Slots[0].Result != nil {
+		t.Fatalf("a listed-away task must keep its readable detail: %+v %+v", removed.Task, removed.Slots)
+	}
+	if count := countRows(t, h.ownerPool,
+		`SELECT count(*) FROM creation_media_assets WHERE task_id = $1::uuid`, removedID); count != 1 {
+		t.Fatalf("a visibility removal must not delete the Asset row, got %d", count)
+	}
+}
+
+type sessionTaskPage struct {
+	Tasks []struct {
+		ID string `json:"id"`
+	} `json:"tasks"`
+	NextCursor *string `json:"next_cursor"`
+}
+
 func extractNestedField(t *testing.T, body []byte, parent, field string) string {
 	t.Helper()
 	var payload map[string]json.RawMessage

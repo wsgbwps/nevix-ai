@@ -214,6 +214,7 @@ assert_creation_integration_executed() {
     TestSessionRevocationDisconnectsOnlyThatSessionsStream
     TestAdminSafetyRestrictionsAreAuditedTerminalAndNonRetroactive
     TestDeletedAssetRemovesItsSlotResultFromTheSourceTask
+    TestDeletingEveryFormedAssetRemovesTheTaskFromTheSessionList
     TestMinIOConformanceSuite
     TestApplyIsIdempotentWhenAlreadyCurrent
   )
