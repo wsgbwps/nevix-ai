@@ -29,10 +29,11 @@ type AssetDetail struct {
 type AssetService struct {
 	assets domain.MediaAssetRepository
 	runner domain.WriteRunner
+	notify InvalidationSink
 }
 
-func NewAssetService(assets domain.MediaAssetRepository, runner domain.WriteRunner) *AssetService {
-	return &AssetService{assets: assets, runner: runner}
+func NewAssetService(assets domain.MediaAssetRepository, runner domain.WriteRunner, notify InvalidationSink) *AssetService {
+	return &AssetService{assets: assets, runner: runner, notify: notify}
 }
 
 func (s *AssetService) List(ctx context.Context, principal authz.Principal, filter domain.AssetListFilter, cursor *domain.CompoundCursor, limit int) ([]AssetView, *domain.CompoundCursor, error) {
@@ -97,7 +98,12 @@ func (s *AssetService) Delete(ctx context.Context, principal authz.Principal, id
 		}
 	}
 	return s.runner.Run(ctx, func(sc domain.WriteScope) error {
-		return s.assets.SoftDelete(ctx, sc.Tx(), actor, id, admin)
+		owner, err := s.assets.SoftDelete(ctx, sc.Tx(), actor, id, admin)
+		if err != nil {
+			return err
+		}
+		notifyOwner(sc, s.notify, owner)
+		return nil
 	})
 }
 

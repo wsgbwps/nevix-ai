@@ -309,4 +309,55 @@ func TestGenerationTaskUpdatedAtTracksEveryVisibleDetailChange(t *testing.T) {
 	if slots[2].Status == nil || *slots[2].Status != domain.SlotTimedOut {
 		t.Fatalf("concurrent slot verdict was not visible: %+v", slots[2])
 	}
+
+	// Deleting the slot's Media Asset removes its result from the detail
+	// (ADR-0021) without touching the slot row, so the criterion must move with
+	// the projection rather than with a task write.
+	assets := NewMediaAssetRepository(runtime)
+	if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+		_, err := assets.InsertMediaAsset(ctx, sc.Tx(), domain.MediaAssetFormation{
+			OwnerID: creator, TaskID: taskID, SlotIndex: 1, MediaType: domain.MediaImage,
+			Mime: "image/png", BlobKey: result.BlobKey, ByteSize: result.ByteSize, Checksum: result.Checksum,
+		})
+		return err
+	}); err != nil {
+		t.Fatalf("form the succeeded slot's asset: %v", err)
+	}
+	var assetID domain.UUID
+	if err := owner.QueryRow(ctx,
+		`SELECT id FROM creation_media_assets WHERE task_id = $1 AND slot_index = 1`, taskID).Scan(&assetID); err != nil {
+		t.Fatalf("read formed asset: %v", err)
+	}
+	if _, err := softDelete(ctx, runner, assets, creator, assetID, false); err != nil {
+		t.Fatalf("delete the slot's asset: %v", err)
+	}
+	// This task's only formed asset is the one just removed, so the task-level
+	// projection stops listing it while the detail still reads its facts —
+	// the criterion assertion below is the one assertAdvanced cannot make here.
+	removed, removedSlots, err := repo.GetForOwner(ctx, creator, taskID)
+	if err != nil {
+		t.Fatalf("read detail after asset removal: %v", err)
+	}
+	if !removed.UpdatedAt.After(marker) {
+		t.Fatalf("asset removal: updated_at did not advance: before=%s after=%s", marker, removed.UpdatedAt)
+	}
+	if !removedSlots[1].ResultDeleted || removedSlots[1].ResultReadable() {
+		t.Fatalf("removed slot result was not projected: %+v", removedSlots[1])
+	}
+	if listed, _, err := repo.ListBySession(ctx, creator, sessionID, nil, 10); err != nil {
+		t.Fatalf("list tasks after asset removal: %v", err)
+	} else if len(listed) != 0 {
+		t.Fatalf("task whose every formed asset is removed stayed listed: %+v", listed)
+	}
+	marker = removed.UpdatedAt
+	if _, err := softDelete(ctx, runner, assets, creator, assetID, false); !errors.Is(err, domain.ErrAssetNotFound) {
+		t.Fatalf("repeat asset delete error=%v, want ErrAssetNotFound", err)
+	}
+	afterRepeatDelete, _, err := repo.GetForOwner(ctx, creator, taskID)
+	if err != nil {
+		t.Fatalf("read repeated asset delete: %v", err)
+	}
+	if !afterRepeatDelete.UpdatedAt.Equal(marker) {
+		t.Fatalf("repeated asset delete changed the detail criterion: before=%s after=%s", marker, afterRepeatDelete.UpdatedAt)
+	}
 }

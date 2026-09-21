@@ -269,22 +269,33 @@ func (r *MediaAssetRepository) GetPrivateOrigin(ctx context.Context, asset domai
 	}, nil
 }
 
-func (r *MediaAssetRepository) SoftDelete(ctx context.Context, tx domain.TxExecutor, actor, id domain.UUID, admin bool) error {
-	query := `UPDATE creation_media_assets SET deleted_at = now()
-		WHERE id = $1 AND deleted_at IS NULL`
+func (r *MediaAssetRepository) SoftDelete(ctx context.Context, tx domain.TxExecutor, actor, id domain.UUID, admin bool) (domain.UUID, error) {
+	guard := "id = $1 AND deleted_at IS NULL"
 	args := []any{id}
 	if !admin {
-		query += " AND owner_user_id = $2 AND (restricted_at IS NULL OR restriction_released_at IS NOT NULL)"
+		guard += " AND owner_user_id = $2 AND (restricted_at IS NULL OR restriction_released_at IS NOT NULL)"
 		args = append(args, actor)
 	}
-	count, err := execTx(tx, ctx, query, args...)
+	// The removal changes what the task detail shows, so the parent task's
+	// criterion advances with it in the same transaction (ADR-0016). It is
+	// advanced first and only for a row this call removes: the task is locked
+	// before the asset, the parent-before-child order every creation writer
+	// keeps, and an already-removed asset leaves the criterion alone.
+	if _, err := execTx(tx, ctx, `UPDATE creation_generation_tasks
+		SET updated_at = GREATEST(updated_at + interval '1 microsecond', clock_timestamp())
+		WHERE id = (SELECT task_id FROM creation_media_assets WHERE `+guard+`)`, args...); err != nil {
+		return domain.UUID{}, fmt.Errorf("creation: advance removed asset task criterion: %w", err)
+	}
+	var owner domain.UUID
+	err := tx.QueryRow(ctx, `UPDATE creation_media_assets SET deleted_at = now()
+		WHERE `+guard+` RETURNING owner_user_id`, args...).Scan(&owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.UUID{}, domain.ErrAssetNotFound
+	}
 	if err != nil {
-		return fmt.Errorf("creation: soft delete asset: %w", err)
+		return domain.UUID{}, fmt.Errorf("creation: soft delete asset: %w", err)
 	}
-	if count != 1 {
-		return domain.ErrAssetNotFound
-	}
-	return nil
+	return owner, nil
 }
 
 func scanAsset(row rowScanner) (domain.MediaAsset, error) {

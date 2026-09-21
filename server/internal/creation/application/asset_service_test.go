@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/nevix-ai/server/internal/authz"
@@ -42,28 +43,48 @@ func (r *assetRepoStub) GetPrivateOrigin(context.Context, domain.MediaAsset) (*d
 	return r.origin, nil
 }
 
-func (r *assetRepoStub) SoftDelete(_ context.Context, _ domain.TxExecutor, actor, id domain.UUID, admin bool) error {
+func (r *assetRepoStub) SoftDelete(_ context.Context, _ domain.TxExecutor, actor, id domain.UUID, admin bool) (domain.UUID, error) {
 	r.deleteCalls++
 	r.deleteActor, r.deleteID, r.deleteAdmin = actor, id, admin
+	return r.asset.OwnerID, nil
+}
+
+type assetRunnerStub struct{ commitErr error }
+
+func (r assetRunnerStub) Run(ctx context.Context, fn func(domain.WriteScope) error) error {
+	scope := &assetWriteScopeStub{}
+	if err := fn(scope); err != nil {
+		return err
+	}
+	if r.commitErr != nil {
+		return r.commitErr
+	}
+	scope.runEffects()
 	return nil
 }
 
-type assetRunnerStub struct{}
+type assetWriteScopeStub struct{ effects []func() }
 
-func (assetRunnerStub) Run(ctx context.Context, fn func(domain.WriteScope) error) error {
-	return fn(assetWriteScopeStub{})
+func (s *assetWriteScopeStub) Tx() domain.TxExecutor     { return nil }
+func (s *assetWriteScopeStub) AfterCommit(effect func()) { s.effects = append(s.effects, effect) }
+
+func (s *assetWriteScopeStub) runEffects() {
+	for _, effect := range s.effects {
+		effect()
+	}
 }
 
-type assetWriteScopeStub struct{}
+type recordingSink struct{ owners []domain.UUID }
 
-func (assetWriteScopeStub) Tx() domain.TxExecutor { return nil }
-func (assetWriteScopeStub) AfterCommit(func())    {}
+func (s *recordingSink) NotifyGenerationChanged(owner domain.UUID) {
+	s.owners = append(s.owners, owner)
+}
 
 func TestAssetServiceKeepsPrivateOriginCreatorOnly(t *testing.T) {
 	creator, other := domain.NewUUID(), domain.NewUUID()
 	asset := domain.MediaAsset{ID: domain.NewUUID(), OwnerID: creator, TaskID: domain.NewUUID()}
 	repo := &assetRepoStub{asset: asset, origin: &domain.AssetPrivateOrigin{TaskID: asset.TaskID}}
-	service := NewAssetService(repo, assetRunnerStub{})
+	service := NewAssetService(repo, assetRunnerStub{}, nil)
 
 	creatorDetail, err := service.Get(context.Background(), authz.Principal{UserID: creator.String(), Role: "member"}, asset.ID)
 	if err != nil || creatorDetail.PrivateOrigin == nil || !creatorDetail.Asset.Capabilities.CanCreateSimilar {
@@ -79,14 +100,31 @@ func TestAssetServiceKeepsPrivateOriginCreatorOnly(t *testing.T) {
 }
 
 func TestAssetServicePassesDeleteIdentityToRepository(t *testing.T) {
-	actor, assetID := domain.NewUUID(), domain.NewUUID()
-	repo := &assetRepoStub{}
-	service := NewAssetService(repo, assetRunnerStub{})
+	actor, owner, assetID := domain.NewUUID(), domain.NewUUID(), domain.NewUUID()
+	repo := &assetRepoStub{asset: domain.MediaAsset{ID: assetID, OwnerID: owner}}
+	sink := &recordingSink{}
+	service := NewAssetService(repo, assetRunnerStub{}, sink)
 	if err := service.Delete(context.Background(), authz.Principal{UserID: actor.String(), Role: "admin"}, assetID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	if repo.deleteActor != actor || repo.deleteID != assetID || !repo.deleteAdmin {
 		t.Fatalf("delete authorization not preserved: actor=%s id=%s admin=%v", repo.deleteActor, repo.deleteID, repo.deleteAdmin)
+	}
+	if len(sink.owners) != 1 || sink.owners[0] != owner {
+		t.Fatalf("delete published %v, want exactly the asset owner %s", sink.owners, owner)
+	}
+}
+
+func TestAssetServiceSkipsInvalidationWhenTheWriteTransactionFails(t *testing.T) {
+	owner, assetID := domain.NewUUID(), domain.NewUUID()
+	repo := &assetRepoStub{asset: domain.MediaAsset{ID: assetID, OwnerID: owner}}
+	sink := &recordingSink{}
+	service := NewAssetService(repo, assetRunnerStub{commitErr: errors.New("commit failed")}, sink)
+	if err := service.Delete(context.Background(), authz.Principal{UserID: owner.String(), Role: "member"}, assetID); err == nil {
+		t.Fatal("delete: want the failed transaction reported")
+	}
+	if len(sink.owners) != 0 {
+		t.Fatalf("failed delete published %v, want nothing", sink.owners)
 	}
 }
 
@@ -113,7 +151,7 @@ func TestAssetViewOmitsReleasedPublicationWhenRepublishingIsAllowed(t *testing.T
 func TestAssetServiceRejectsForeignMemberBeforeWrite(t *testing.T) {
 	owner, actor, assetID := domain.NewUUID(), domain.NewUUID(), domain.NewUUID()
 	repo := &assetRepoStub{asset: domain.MediaAsset{ID: assetID, OwnerID: owner}}
-	service := NewAssetService(repo, assetRunnerStub{})
+	service := NewAssetService(repo, assetRunnerStub{}, nil)
 	if err := service.Delete(context.Background(), authz.Principal{UserID: actor.String(), Role: "member"}, assetID); err != domain.ErrAssetNotFound {
 		t.Fatalf("foreign member delete error=%v, want ErrAssetNotFound", err)
 	}

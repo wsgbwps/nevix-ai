@@ -17,6 +17,13 @@ type InvalidationSink interface {
 	NotifyGenerationChanged(owner domain.UUID)
 }
 
+func notifyOwner(sc domain.WriteScope, sink InvalidationSink, owner domain.UUID) {
+	if sink == nil {
+		return
+	}
+	sc.AfterCommit(func() { sink.NotifyGenerationChanged(owner) })
+}
+
 // TaskService orchestrates the generation task kernel's creator commands: idempotent admission with
 // governance, best-effort cancel, retry of uncompleted slots, and creator-scoped task queries. Every
 // write runs inside the verified transaction runner.
