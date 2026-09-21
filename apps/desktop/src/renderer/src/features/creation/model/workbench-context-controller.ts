@@ -250,7 +250,10 @@ export class WorkbenchContextController {
    * defaults; `inactive` keeps nothing. */
   enterContext(key: CreationSessionNavigationTarget): void {
     if (key.kind === 'new' && this.#composingNew) return
-    if (key.kind === 'session' && this.#selected?.id === key.session.id) {
+    // Re-entering the presented session only refreshes its object — unless its
+    // restore never landed (an entry React StrictMode replayed, or any other
+    // suspend that retired it), because only the ritual can re-establish it.
+    if (key.kind === 'session' && this.#selected?.id === key.session.id && !this.#restoreWindow) {
       this.#selected = key.session
       this.#changed()
       return

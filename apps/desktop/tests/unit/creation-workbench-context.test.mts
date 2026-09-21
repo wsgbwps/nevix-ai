@@ -541,6 +541,44 @@ test('a stale first read cannot overwrite a later selection', async () => {
   assert.equal(controller.getSnapshot().draft.model, 'b-model')
 })
 
+test('a replayed entry re-runs the session ritual instead of short-circuiting', async () => {
+  const { controller, storage, display, tasks, script } = harness()
+  writeLocalDraft(storage, 'user-1', 's1', draftRecord({ model: 'stored-model' }))
+  script.materials.set('s1', ok({ materials: [materialView('m1')], nextCursor: null }))
+  await flush()
+
+  // React StrictMode replays a just-mounted effect — setup, cleanup, setup — and
+  // the suspend retires the first entry's restore. The presented context keeps
+  // its session, so a short-circuit here would leave it with no draft, no
+  // materials and no task display: only the ritual can re-establish it.
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+  controller.suspend()
+  controller.activate()
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+  await flush()
+
+  assert.deepEqual(tasks.entered, ['s1', 's1'])
+  assert.deepEqual(
+    display.replaced.at(-1)?.map((material) => material.id),
+    ['m1']
+  )
+  assert.equal(controller.getSnapshot().draft.model, 'stored-model')
+})
+
+test('re-entering the presented session after its restore stays a no-op', async () => {
+  const { controller, display, script } = harness()
+  script.materials.set('s1', ok({ materials: [materialView('m1')], nextCursor: null }))
+  await flush()
+
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+  await flush()
+  const resetsAfterEntry = display.resetCount
+
+  controller.enterContext({ kind: 'session', session: sessionView('s1') })
+
+  assert.equal(display.resetCount, resetsAfterEntry)
+})
+
 test('manifest adoption invariant: an unentered workbench never adopts defaults', async () => {
   const { controller } = harness()
   await flush()
