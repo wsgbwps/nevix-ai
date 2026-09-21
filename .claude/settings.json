@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *.env.example) ;; *pnpm-lock.yaml|*.env|*.env.*) echo 'BLOCKED: do not edit lock files or .env files directly' >&2; exit 2;; esac"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // .tool_input.cmd // empty'); branch=$(git symbolic-ref --short HEAD 2>/dev/null); if [ \"$branch\" = \"main\" ] && echo \"$cmd\" | grep -qE 'git[[:space:]]+commit'; then echo 'BLOCKED: 在任务分支完成修改并开 PR,不要直接在 main 上提交' >&2; exit 2; fi; if echo \"$cmd\" | grep -qE 'git[[:space:]]+push([^;&|]*)([[:space:]](refs/heads/)?main([[:space:]]|$)|:refs/heads/main|:main([[:space:]]|$))'; then echo 'BLOCKED: main 通过 PR squash merge 更新,不要直接 push main' >&2; exit 2; fi"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *.ts|*.tsx|*.js|*.jsx|*.json|*.css|*.yaml) \"$CLAUDE_PROJECT_DIR/node_modules/.bin/prettier\" --write --ignore-path \"$CLAUDE_PROJECT_DIR/apps/desktop/.prettierignore\" \"$fp\" 2>/dev/null || true;; esac"
+          },
+          {
+            "type": "command",
+            "command": "fp=$(jq -r '.tool_input.file_path // empty'); case \"$fp\" in *.go) \"$(go env GOPATH)/bin/goimports\" -w \"$fp\" 2>/dev/null || true;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}
