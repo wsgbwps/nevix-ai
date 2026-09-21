@@ -597,32 +597,96 @@ test('a failed list read keeps loaded tasks and marks the list unrefreshed', asy
 })
 
 test('tasks falling outside the latest window stay displayed with their details', async () => {
-  const t1 = taskView('t1', 'A', 'u1')
-  const t2 = taskView('t2', 'A', 'u2')
-  const h = await harness({ A: [t1, t2] })
+  const h = await harness({ A: historyTasks(25) })
   h.controller.enter('A')
   h.flush()
   await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 25)
 
-  // Only t2 remains inside the window; t1 fell behind it, not deleted.
-  h.setSession('A', [t2])
+  // Three newer tasks push the oldest three behind the window: they fell out
+  // of it, not out of the server's list, so they stay displayed.
+  const pushed = [26, 27, 28].map((n) => {
+    const at = new Date(Date.UTC(2026, 8, 1, 10, n)).toISOString()
+    return taskView(`t${n}`, 'A', at, 'succeeded', at)
+  })
+  h.setSession('A', [...historyTasks(25), ...pushed])
   h.controller.notifyInvalidation()
   h.flush()
   await settle()
 
   assert.deepEqual(
     h.snapshot().tasks.map((task) => task.id),
-    ['t2', 't1']
+    [
+      ...[...pushed].reverse().map((task) => task.id),
+      ...historyTasks(25)
+        .map((task) => task.id)
+        .reverse()
+    ]
   )
-  assert.equal(h.snapshot().taskDetails['t1'] !== undefined, true)
-  const readsBefore = h.getTaskCalls.filter((id) => id === 't1').length
-  assert.equal(readsBefore, 1)
+  assert.equal(h.snapshot().taskDetails['t08'] !== undefined, true)
 
   // A further round does not re-read the out-of-window task.
+  assert.equal(h.getTaskCalls.filter((id) => id === 't08').length, 1)
   h.controller.notifyInvalidation()
   h.flush()
   await settle()
-  assert.equal(h.getTaskCalls.filter((id) => id === 't1').length, 1)
+  assert.equal(h.getTaskCalls.filter((id) => id === 't08').length, 1)
+})
+
+test('a task the projection removed leaves the display and its cached detail', async () => {
+  const h = await harness({ A: historyTasks(25) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 25)
+  assert.notEqual(h.snapshot().taskDetails['t20'], undefined)
+
+  // t20 sits inside the newest window and disappears from the server's list:
+  // its every formed Media Asset was deleted, so the projection removed it
+  // rather than scrolling it behind the window (ADR-0021).
+  const remaining = historyTasks(25).filter((task) => task.id !== 't20')
+  h.setSession('A', remaining)
+  h.controller.notifyInvalidation()
+  h.flush()
+  await settle()
+
+  assert.deepEqual(
+    h.snapshot().tasks.map((task) => task.id),
+    remaining.map((task) => task.id).reverse()
+  )
+  assert.equal(h.snapshot().taskDetails['t20'], undefined)
+})
+
+test('a task the projection removed behind a short page also leaves', async () => {
+  const h = await harness({ A: historyTasks(25) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().tasks.length, 25)
+
+  // The whole oldest loaded page is removed at once: the server's page is now
+  // short (its whole remaining set), so absence from it proves a removal even
+  // though the dropped tasks sort behind its last row.
+  const oldest = ['t01', 't02', 't03', 't04', 't05']
+  const remaining = historyTasks(25).filter((task) => !oldest.includes(task.id))
+  h.setSession('A', remaining)
+  h.controller.notifyInvalidation()
+  h.flush()
+  await settle()
+
+  assert.deepEqual(
+    h.snapshot().tasks.map((task) => task.id),
+    remaining.map((task) => task.id).reverse()
+  )
 })
 
 // --- upward history pagination (issue #195) ----------------------------------

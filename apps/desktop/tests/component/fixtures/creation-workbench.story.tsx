@@ -281,6 +281,9 @@ export interface DeckTestControls {
   pushTask(task: ScriptedTask): void
   /** Replaces one task by id in the scripted store and fires invalidation. */
   updateTask(task: ScriptedTask): void
+  /** Drops one task from the scripted store and fires invalidation, like the
+   * list projection no longer returning it (ADR-0021). */
+  removeTask(taskId: string): void
   /** How many task-list reads crossed the data plane. */
   listTasksCalls(): number
   /** Every task-list read's page request, in call order. */
@@ -619,6 +622,10 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     },
     updateTask: (task) => {
       taskState.tasks = taskState.tasks.map((entry) => (entry.id === task.id ? task : entry))
+      taskState.eventHandlers?.onInvalidation()
+    },
+    removeTask: (taskId) => {
+      taskState.tasks = taskState.tasks.filter((entry) => entry.id !== taskId)
       taskState.eventHandlers?.onInvalidation()
     },
     listTasksCalls: () => taskState.listCalls,

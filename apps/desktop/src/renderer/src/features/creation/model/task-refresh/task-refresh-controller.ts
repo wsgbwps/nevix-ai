@@ -93,6 +93,15 @@ const defaultTimers: TaskRefreshTimers = {
   clearOneShot: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
 }
 
+/** The server's list order, (created_at DESC, id DESC): the wire `created_at`
+ * carries no sub-second part, so the strings compare in time order as written.
+ * ponytail: two tasks created within the same second can only tie on id here
+ * while the server orders them by its finer column; the worst case is one card
+ * held back for one round, and it returns on the next window read. */
+function newerThan(task: GenerationTaskView, other: GenerationTaskView): boolean {
+  return task.createdAt === other.createdAt ? task.id > other.id : task.createdAt > other.createdAt
+}
+
 /** One cached detail paired with the change criterion of the exact response it
  * came from (ADR-0016: `updatedAt` read as the full wire string), so a list
  * summary can never vouch for a detail it did not arrive with. */
@@ -354,7 +363,19 @@ export class TaskRefreshController {
     // longer lists stay displayed (and keep their cached details) instead of
     // being inferred deleted. Their position stays behind the window.
     const windowIds = new Set(page.tasks.map((task) => task.id))
-    const kept = this.summaries.filter((task) => !windowIds.has(task.id))
+    const tail = page.tasks[page.tasks.length - 1]
+    // Except the ones the projection removed (ADR-0021): the page scans
+    // newest-first, so every task newer than its last row is in it, and a page
+    // with no continuation cursor is the whole remaining set.
+    const removed = (task: GenerationTaskView): boolean =>
+      page.nextCursor === null || (tail !== undefined && newerThan(task, tail))
+    const kept = this.summaries.filter((task) => {
+      if (windowIds.has(task.id)) return false
+      if (!removed(task)) return true
+      this.details.delete(task.id)
+      this.failedDetailIds.delete(task.id)
+      return false
+    })
     this.summaries = [...page.tasks, ...kept]
     this.listFailedFlag = false
     // The window's own cursor continues history only while nothing older has
