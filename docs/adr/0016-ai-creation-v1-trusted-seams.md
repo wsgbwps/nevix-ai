@@ -24,6 +24,8 @@
 
 2026-09-18 修订（[#252](https://github.com/wsgbwps/nevix-ai/issues/252)）：上行升级把既有 COS 连接隔离为 `legacy_incompatible`，而非把 provider 重写成 OSS；这保留其 provider-bound AEAD AAD，且不执行任何 COS 操作。
 
+2026-09-22 修订：Media Asset 与 Team Publication 成品可在 Go 复验精确业务读取权后获得约 10 分钟、单一结果对象的显示 GET。图片墙使用宽 ≤320 的 WebP、详情使用宽 ≤2048 的 WebP，视频使用支持 Range 的原始字节；下载仍经 Go 返回原件。V1 不持久化 thumbnail、poster 或 preview clip，既有显示 URL 的有效期窗口是限制、撤回或删除后的明确残留能力。
+
 ## 背景
 
 AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 decision tickets 与多份 ADR 中；旧票建立于 Organization、Supabase/RLS、Desktop 直连数据面等前提之上。#93 清空全部决策前沿并取代早期假设，#150 把最终边界收敛为单一规格。若不在架构文档中固化，实施 agent 容易复活已被取代的设计。本 ADR 与 [ADR-0012](0012-unified-ai-creation-owner.md)（owner 统一）、[ADR-0014](0014-go-sole-trusted-data-plane.md)（数据面）、[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)（用户系统与授权）互补，各自保持单一权威说明。
@@ -36,7 +38,7 @@ AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 de
 
 - **Organization、Membership、Owner**：多组织概念已随单租户私有化移除（[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)）；发布词汇使用 Team Publication，角色只有 Admin/Member。
 - **Supabase（Auth/RLS/Data client/Storage Policy）、Supabase Broadcast**：Supabase 整体退场（[ADR-0013](0013-onprem-single-tenant-delivery.md)、[ADR-0014](0014-go-sole-trusted-data-plane.md)），授权在 Go 层，推送是 SSE。
-- **通用 Storage Grant / 无约束预签名直连**：仍然退场。当前只保留三条由 Go 授权的窄能力：Desktop Creator 对一个随机 key 的限时 Reference Material PUT、外部 AI Provider 对一个 Provider Transfer Object 的限时 GET，以及当前已授权 Renderer 对一个 Reference Material 精确 key 的限时缩略图/预览 GET；三者都不暴露 AK/SK、List、任意 key 或跨对象能力（[ADR-0014](0014-go-sole-trusted-data-plane.md)）。
+- **通用 Storage Grant / 无约束预签名直连**：仍然退场。当前只保留三类由 Go 授权的窄能力：Desktop Creator 对一个随机 key 的限时 Reference Material PUT、外部 AI Provider 对一个 Provider Transfer Object 的限时 GET，以及当前已授权 Renderer 对一个 Reference Material 或成品结果精确 key 的限时缩略图/预览 GET；三者都不暴露 AK/SK、List、任意 key 或跨对象能力（[ADR-0014](0014-go-sole-trusted-data-plane.md)）。
 - **独立 creation 数据库角色**：不存在按域拆分的第二执行角色；Creation 写事务直接以最小权限 `identity_app` LOGIN 角色运行（见下）。
 - **Deployment Administrator**：不存在产品内的部署管理员主体；部署侧责任（认领、证书、备份）由部署方经 Instance Claim 与交付资产承担，治理主体只有 Admin/Member。
 - **外部 Secret Store 前置要求**：Creation 外部连接凭据使用本地 AEAD（见下），不依赖 Vault 等外部服务。
@@ -50,6 +52,13 @@ AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 de
 - **team-readable**：只有有效 Team Publication 对全体 active User 可见。只有来源 Asset 创建者可首次发布；Publication 发布者或 Admin 可撤回，撤回不恢复为有效状态。
 - 所有 Creation route 在 Server 显式挂 `RequireActiveUser` 或 `RequireAdmin`；Desktop 可见性门控不是授权真相。
 
+### 媒体成品显示授权
+
+- 成品显示 URL 按业务资源签发而不是按 object key 邻接授权：Creator Asset、Admin Inspiration Asset 与 Team Publication 各自复用既有可见性查询，复验成功后才可为该记录指向的单一不可覆盖结果对象签名；任一路径都不授予同一 Task、Session、Publication 或存储前缀中的其他对象。
+- 图片墙固定取得 OSS 侧宽 ≤320 的 WebP，图片详情固定取得宽 ≤2048 的 WebP；视频墙与详情取得原始视频字节，由浏览器使用未参与签名的 Range。成品原件下载仍经 Go 授权出口并保留原始文件与格式。
+- V1 不创建持久 thumbnail、poster、preview clip、sprite、HLS 或 DASH 派生物；图片尺寸是 OSS 的响应期转换，视频显示不复制对象。只有原始视频的首帧或悬停播放实测不能达到体验目标时，才另行决定派生物、转码、保留与清理责任。
+- 显示 URL 约 10 分钟、只读且不可主动召回。限制、撤回、逻辑删除或 Session 失效立即阻止新的显示 URL 与 Go 下载授权，但既有 URL 最多继续有效至 TTL，Renderer 已加载的像素或字节不能收回；该残留窗口不改变数据库中的当前可见性事实。
+
 ### Team Publication 与 Create Similar
 
 - 发布不提供第二套内容编辑器或素材挑选器：命令固定保存目标 Media Asset、其冻结 Generation Specification，以及该 Specification 实际使用的全部 Reference Material 顺序、角色和声明版本。素材上传时已有的权利声明继续适用；Desktop 只在提交前展示将向 Team 开放的确认摘要。
@@ -62,7 +71,7 @@ AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 de
 
 ### 安全限制
 
-- Admin 对 Media Asset 施加 active 限制时，普通读取与下载、发布、新的 Create Similar 立即停止，全部关联有效 Publication 进入终止状态；Admin 仍可在 Inspiration 中查看受限成品、冻结 Specification 与实际使用素材的预览，以完成判断和解除。
+- Admin 对 Media Asset 施加 active 限制时，新的普通读取授权与 Go 下载、发布、新的 Create Similar 立即停止，全部关联有效 Publication 进入终止状态；已经签发的显示 URL 服从「媒体成品显示授权」所述 TTL 残留窗口。Admin 仍可在 Inspiration 中查看受限成品、冻结 Specification 与实际使用素材的预览，以完成判断和解除。
 - released 不恢复任何旧 Publication；Creator 如需再次共享，必须创建新的 Publication identity。限制不追溯撤销此前已由 Create Similar 创建的 User-owned 素材记录、本地 Draft 或已准入 Generation Task，避免建立跨 Session 级联撤销图。
 
 ### 认证与授权注入
@@ -86,7 +95,7 @@ Session 认证与 Reauthentication Proof 归 Identity（[ADR-0015](0015-single-t
 - Renderer 只选择 `File` 并展示进度、取消与结果。专用 Preload 桥使用 `webUtils.getPathForFile(file)` 取得真实磁盘路径，经窄类型 IPC 交给 Main 且不回传 Renderer；完整文件不得转成 ArrayBuffer 经 IPC。Main 使用当前 Session 从 Go 取得 Upload 授权和 active-user capability，验证可信顶层 Renderer、常规磁盘文件、HTTPS、Go 返回的精确 provider origin、PUT 与闭集签名请求头后，以 Electron `ClientRequest` 从磁盘流式上传并拒绝重定向。Main 不接受 Renderer 指定的任意路径、URL、方法或额外请求头；V1 不增加 Utility Process、自定义 protocol、multipart 或断点续传。
 - finalize 先以短事务 CAS `pending -> verifying` 并取得 verification lease，再在事务外 HEAD 与完整有界 GET，复用内容 sniff、媒体 probe、实际 kind 限额和 SHA-256；最后在 verified write transaction 中原子创建 Reference Material 并标记 `finalized`。状态仅 `pending|verifying|finalized|terminal`；重复 finalize 返回同一素材，并发验证返回可重试安全码。
 - image/audio/video 上限继续为 10/50/200 MiB。abort、过期、HEAD mismatch 与确定性媒体拒绝进入 terminal 并立即 best-effort DeleteObject；瞬时外部故障在 finalize window 内回到 pending。持久 cleanup worker 只按数据库记录的精确 key、verification lease 与 next-attempt 重试，不 List bucket；对象从一开始位于 `reference-materials/`，不 Copy，customer lifecycle 只作用于 `provider-transfer/`。
-- signed PUT URL 只可在当前 Creator 对应的 Electron Main 上传操作内存中存在，Renderer 不接收；Provider Transfer Object GET URL 只可在 Go 到 AI Provider 的必要调用中存在；显示类 GET URL（缩略图与预览大图/媒体）可在当前已授权 Renderer 内存与 `<img>/<video>/<audio>` 加载请求中存在（Go 按素材 owner、Admin 的精确成品引用或有效 Team Publication 重新授权后签发，单一精确 key、约 10 分钟、图片带 provider 端缩小，元素 error 后重新授权）。三者均不进入本地持久化、普通日志、Audit Log、错误、剪贴板或遥测。Reference Material 本体下载仍经 Go 授权出口。
+- signed PUT URL 只可在当前 Creator 对应的 Electron Main 上传操作内存中存在，Renderer 不接收；Provider Transfer Object GET URL 只可在 Go 到 AI Provider 的必要调用中存在；显示类 GET URL（Reference Material 或成品结果的缩略图与预览大图/媒体）可在当前已授权 Renderer 内存与 `<img>/<video>/<audio>` 加载请求中存在（Go 按精确素材、Creator Asset、Admin Inspiration Asset 或有效 Team Publication 的当前读取权重新授权后签发，单一精确 key、约 10 分钟、图片带 provider 端缩小，元素 error 后最多重新授权一次）。三者均不进入本地持久化、普通日志、Audit Log、错误、剪贴板或遥测。Reference Material 本体和成品原件下载仍经 Go 授权出口。
 
 ### Reference Material、共享对象与历史任务保留
 

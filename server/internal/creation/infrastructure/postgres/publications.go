@@ -449,6 +449,18 @@ func (r *TeamPublicationRepository) GetAdminAsset(ctx context.Context, id domain
 	return detail, nil
 }
 
+func (r *TeamPublicationRepository) GetAdminAssetMedia(ctx context.Context, id domain.UUID) (domain.MediaAsset, error) {
+	asset, err := scanAsset(r.pool.QueryRow(ctx, `SELECT `+assetColumns+assetFrom+`
+		WHERE a.id = $1 AND a.deleted_at IS NULL`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.MediaAsset{}, domain.ErrAssetNotFound
+	}
+	if err != nil {
+		return domain.MediaAsset{}, fmt.Errorf("creation: get admin inspiration asset media: %w", err)
+	}
+	return asset, nil
+}
+
 func (r *TeamPublicationRepository) listAdminAssetReferences(ctx context.Context, taskID domain.UUID, spec domain.GenerationSpecification) ([]domain.PublicationReference, error) {
 	references := make([]domain.PublicationReference, 0, len(spec.References))
 	for position, frozen := range spec.References {
