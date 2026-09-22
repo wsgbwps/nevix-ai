@@ -109,6 +109,56 @@ func TestDismissingATerminalTaskHidesItAndRemovesItsResults(t *testing.T) {
 	}
 }
 
+// The card this ticket exists for: a failed task that never formed a result has
+// nothing to remove, and hiding it must still work, stick across a list re-read,
+// keep its detail readable, and answer a repeat DELETE the same 404.
+func TestDismissingAFailedTaskThatNeverFormedAResult(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	h.kapon.generation.setImage(imageScript{status: http.StatusBadRequest, code: "input_content_policy"})
+
+	intent := h.imageTaskIntent(t, token, "失败卡的任务删除", 2)
+	status, body := h.submitTask(t, token, "task-dismissal-failed", intent)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	view := h.awaitTaskTerminal(t, token, decodeTaskView(t, body).Task.ID)
+	taskID := view.Task.ID
+	if view.Task.Status != "failed" {
+		t.Fatalf("a failed task expected, got %s", view.Task.Status)
+	}
+	if ids := assetIDsOfTask(t, h, taskID); len(ids) != 0 {
+		t.Fatalf("a failed task formed %v", ids)
+	}
+	if listed := listSessionTasks(t, h, token, intent.SessionID); len(listed) != 1 {
+		t.Fatalf("failed task not listed before dismissal: %v", listed)
+	}
+
+	status, deletionBody := h.dismissTask(t, token, taskID)
+	if status != http.StatusOK {
+		t.Fatalf("dismiss failed task: status=%d body=%s", status, deletionBody)
+	}
+	var deletion taskDeletionView
+	mustDecode(t, deletionBody, &deletion)
+	if len(deletion.RemovedSlotIndexes) != 0 || len(deletion.Skipped) != 0 {
+		t.Fatalf("a zero-result dismissal reported %+v", deletion)
+	}
+	assertContractResponse(t, http.MethodDelete, "/creation/tasks/"+taskID, status, deletionBody)
+
+	// It leaves the browsing list and does not come back on a re-read, while its
+	// detail still reads the failed facts.
+	if listed := listSessionTasks(t, h, token, intent.SessionID); len(listed) != 0 {
+		t.Fatalf("a dismissed failed task stayed listed: %v", listed)
+	}
+	detailStatus, detailBody, detail := h.getTask(t, token, taskID)
+	if detailStatus != http.StatusOK || detail.Task.Status != "failed" {
+		t.Fatalf("dismissed failed task detail: status=%d body=%s", detailStatus, detailBody)
+	}
+	if repeatStatus, _ := h.dismissTask(t, token, taskID); repeatStatus != http.StatusNotFound {
+		t.Fatalf("repeat dismissal status=%d", repeatStatus)
+	}
+}
+
 // A result the non-admin restriction guard refuses is reported, never fatal — a
 // safety restriction must not block deleting the card — and it stays in the
 // Asset Library, which the restriction itself hides until an admin releases it.
