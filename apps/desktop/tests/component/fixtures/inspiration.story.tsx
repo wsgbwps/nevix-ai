@@ -1,6 +1,7 @@
 import '../../../src/renderer/src/app/globals.css'
 import { useEffect, useMemo } from 'react'
 import { I18nextProvider } from 'react-i18next'
+import videoUrl from '../../../../../scripts/dev/fixtures/video-with-audio.mp4?url'
 import { InspirationPage } from '../../../src/renderer/src/features/creation'
 import type {
   InspirationItem,
@@ -16,6 +17,7 @@ const imageBlob = new Blob(
   ],
   { type: 'image/svg+xml' }
 )
+const videoBlob = new Blob([await (await fetch(videoUrl)).arrayBuffer()], { type: 'video/mp4' })
 
 function publication(index: number): PublicationView {
   return {
@@ -267,10 +269,16 @@ function createHarness(state: InspirationStoryState): {
                 }
               }
             },
-      loadInspirationContent: async () =>
+      loadInspirationContent: async (item) =>
         state === 'layout-failed'
           ? { outcome: 'network-failure' }
-          : { outcome: 'succeeded', value: imageBlob },
+          : {
+              outcome: 'succeeded',
+              value:
+                (item.type === 'publication' ? item.publication : item.asset).mediaType === 'video'
+                  ? videoBlob
+                  : imageBlob
+            },
       loadInspirationReferencePreview: async (_item, referenceId) => {
         previewCalls.push(referenceId)
         if (state === 'preview-refresh-failed' && previewCalls.length === 2) {

@@ -145,6 +145,24 @@ test('filters by media type with the asset-library buttons', async ({ mount, pag
   )
 })
 
+test('video publications render previews and open with playable controls', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="dense" />)
+  const video = page.getByLabel('Asset publication-5')
+  await expect(video).toBeVisible()
+  await expect(video).not.toHaveAttribute('controls')
+  await expect
+    .poll(() => video.evaluate((element: HTMLVideoElement) => element.readyState))
+    .toBeGreaterThanOrEqual(2)
+
+  await page.getByRole('button', { name: 'Open inspiration publication-5' }).click()
+  await expect(page.getByRole('dialog').getByLabel('Asset publication-5')).toHaveAttribute(
+    'controls'
+  )
+})
+
 test('loading errors expose one retry surface', async ({ mount, page }) => {
   await mount(<InspirationStory state="failed" />)
   await expect(page.getByRole('alert')).toContainText('Inspiration could not be loaded.')

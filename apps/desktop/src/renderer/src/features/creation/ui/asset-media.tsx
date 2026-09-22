@@ -40,7 +40,7 @@ export function AssetMedia({
   const { t } = useTranslation('creation')
   const [visible, setVisible] = useState(detail)
   const hostRef = useRef<HTMLDivElement | null>(null)
-  const wallPreviewAllowed = asset.mediaType === 'image' && asset.byteSize <= WALL_PREVIEW_MAX_BYTES
+  const wallPreviewAllowed = asset.byteSize <= WALL_PREVIEW_MAX_BYTES
 
   useEffect(() => {
     if (detail || !wallPreviewAllowed || visible) return
@@ -83,7 +83,7 @@ export function AssetMedia({
     <video
       src={content.url}
       aria-label={t('assets.mediaAlt', { id: asset.id })}
-      controls
+      controls={detail}
       playsInline
       className="size-full object-contain"
     />

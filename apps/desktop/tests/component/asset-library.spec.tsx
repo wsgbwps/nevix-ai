@@ -175,14 +175,11 @@ test('the wall opens on images with only the type buttons offered', async ({ mou
     .toMatchObject({ mediaType: 'image' })
 })
 
-test('wall previews only bounded image candidates and never fetches video originals', async ({
-  mount,
-  page
-}) => {
+test('wall previews bounded image and video candidates', async ({ mount, page }) => {
   await mount(<AssetLibraryStory />)
   await expect
     .poll(() => page.evaluate(() => window.__assetLibraryTest?.previewCalls()))
-    .toEqual(['asset-one', 'asset-three'])
+    .toEqual(['asset-one', 'asset-two', 'asset-three'])
 })
 
 test('wall preview loading is capped at four concurrent image bodies', async ({ mount, page }) => {
