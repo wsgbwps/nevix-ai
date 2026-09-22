@@ -462,8 +462,8 @@ export function AssetLibraryStory({
     ]
   )
   useEffect(() => {
-    // A spec cannot reach `testI18n` itself (its top-level await), so the switch
-    // has to come through here.
+    // A spec cannot import `testI18n` itself — it awaits at module scope — so the
+    // switch has to come through here.
     window.__assetLibraryTest = {
       ...harness.controls,
       setLanguage: async (language) => {
@@ -478,10 +478,9 @@ export function AssetLibraryStory({
     <I18nextProvider i18n={testI18n}>
       {/* The wall's tooltips need the provider the app shell mounts. */}
       <TooltipProvider delayDuration={0}>
-        {/* The real App Shell around the page — the 16rem sidebar and its inset
-            are what the header row actually has to fit in, so a story without
-            them measures a row 256px wider than the one users see. Mirrors
-            app/shell/app-shell.tsx; keep the two in step. */}
+        {/* The real App Shell around the page: the header row's box is measured
+            against the sidebar, so a story without it measures 256px too wide.
+            Same mirror as creation-workbench-real-shell.story.tsx. */}
         <SidebarProvider className="h-svh">
           <Sidebar collapsible="icon">
             <SidebarBrand />

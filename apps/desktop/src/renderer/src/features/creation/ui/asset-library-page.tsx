@@ -25,29 +25,35 @@ interface ActionFit {
 }
 
 /**
- * What an action needs of the toolbar's own box to sit on the filters' row
- * beside the exit control — 289px in English, 214px in Chinese, measured from
- * the rendered row. Narrower, the labels go visually hidden (still the
- * accessible name) and the icon takes their place. The icon is only ever shown
- * there: a labelled toolbar is the row it has always been, in every locale, so
- * the icons cost it nothing. A longer label moves its number, which the geometry
- * tests in asset-library.spec.tsx pin — see them before changing this.
+ * What the three actions need of the toolbar's own box to sit on the filters'
+ * row beside the exit control, measured from the rendered row: 289px in English.
+ * Below it the labels hide for the icons — the label keeps the accessible name,
+ * which is what `sr-only` buys over `display: none` — and a labelled toolbar is
+ * therefore the row it has always been, in every locale. A longer label moves
+ * this number, which the geometry tests in asset-library.spec.tsx pin.
  */
 const WIDE_ACTION_FIT: ActionFit = {
-  label: '@max-[288px]:sr-only',
-  icon: 'hidden @max-[288px]:block'
-}
-
-const SHORT_ACTION_FIT: ActionFit = {
-  label: '@max-[213px]:sr-only',
-  icon: 'hidden @max-[213px]:block'
+  label: '@max-[289px]:sr-only',
+  icon: 'hidden @max-[289px]:block'
 }
 
 /**
- * Chinese's labels are shorter and the toolbar has the same 289px to give it.
- * A locale we have not measured takes English's, the wider number: a label that
- * hides a little early costs an icon-only toolbar, one that hides too late
- * costs a covered filter, and only the second is a defect.
+ * Chinese's labels are shorter: 214px, where English's need 289. Load-bearing
+ * even though no window this app allows reaches its threshold — without it
+ * Chinese would fall back to English's and lose its labels at the minimum
+ * window, where they fit.
+ */
+const SHORT_ACTION_FIT: ActionFit = {
+  label: '@max-[214px]:sr-only',
+  icon: 'hidden @max-[214px]:block'
+}
+
+/**
+ * A locale that is not listed yet takes English's threshold, the wider of the
+ * two measured: hiding a label a little early costs an icon-only toolbar, hiding
+ * it too late costs a covered filter, and only the second is a defect. It is
+ * only right for a locale whose labels are no wider than English's, so a longer
+ * one has to be measured as it is added.
  */
 function actionFit(language: string): ActionFit {
   return language === 'zh-CN' ? SHORT_ACTION_FIT : WIDE_ACTION_FIT
@@ -313,9 +319,11 @@ export function AssetLibraryPage({
 }
 
 /**
- * One batch action in its two widths. The tooltip stays in both of them: the
- * toolbar's width is a container query, and a tooltip is portaled out of the
- * container it would have to measure to stand down with the label.
+ * The tooltip names the action in both of its widths, which is the only name the
+ * icon-only one has. Two things keep it there: the label is hidden, not
+ * removed, so it stays the accessible name; and the trigger is a wrapper rather
+ * than the button, because a disabled `Button` is `pointer-events-none` and
+ * could not see the hover — and batch mode opens with all three disabled.
  */
 function BatchAction({
   fit,
@@ -333,10 +341,12 @@ function BatchAction({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={onClick}>
-          <Icon aria-hidden className={fit.icon} />
-          <span className={fit.label}>{label}</span>
-        </Button>
+        <span>
+          <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={onClick}>
+            <Icon aria-hidden className={fit.icon} />
+            <span className={fit.label}>{label}</span>
+          </Button>
+        </span>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>

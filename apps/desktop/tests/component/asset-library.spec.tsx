@@ -23,11 +23,28 @@ async function actionOverlap(page: Page): Promise<number> {
   })
 }
 
-/** Each action's label span: 1px wide while visually hidden, text-wide while shown. */
-async function actionLabelWidths(page: Page): Promise<readonly number[]> {
-  return actionGroup(page)
+/**
+ * `sr-only` is a 1px box whatever font draws the text, so any wider label is one
+ * that is drawn — a width, rather than a guess at a glyph's advance, which would
+ * make the Chinese cases depend on the runner having a CJK font.
+ */
+const LABEL_HIDDEN_AT_OR_BELOW_PX = 2
+
+/** Each action's label: 'shown' where it is drawn, 'icon-only' where it is not. */
+async function actionLabelStates(page: Page): Promise<readonly string[]> {
+  const widths = await actionGroup(page)
     .locator('button > span')
     .evaluateAll((spans) => spans.map((span) => Math.round(span.getBoundingClientRect().width)))
+  return widths.map((width) => (width <= LABEL_HIDDEN_AT_OR_BELOW_PX ? 'icon-only' : 'shown'))
+}
+
+/** Each action's icon: 'drawn' where it stands in for the label, else 'hidden'. */
+async function actionIconStates(page: Page): Promise<readonly string[]> {
+  return actionGroup(page)
+    .locator('button > svg')
+    .evaluateAll((icons) =>
+      icons.map((icon) => (icon.getBoundingClientRect().width > 0 ? 'drawn' : 'hidden'))
+    )
 }
 
 for (const viewport of [
@@ -548,16 +565,18 @@ for (const viewport of [
   })
 }
 
-// The batch toolbar shares the filter strip's row, and its content is wider than
-// the box the strip leaves it: 289px of labelled actions against 214px at the
-// minimum window, so the group used to hang 55px out over the filters — the
-// toolbar is `justify-end`, which paints the overflow on the filters' side.
-// Nothing about a toolbar may cover a filter, so the group's left edge is the
-// assertion, not the toolbar's.
+// The batch toolbar shares the filter strip's row, and its labelled content is
+// wider than the box the strip leaves it: English's filter strip is 366px wide,
+// so the toolbar's box is the window minus 256 sidebar, 112 `px-page`, that 366
+// and the 12px gap. At the 960px minimum window that is 214px against the 289px
+// the labels need, and the toolbar is `justify-end`, so 55px of the action group
+// painted over the filters. Nothing about a toolbar may cover a filter, so the
+// group's left edge is the assertion, not the toolbar's — and the box is exactly
+// 288px at 1034 and 289px at 1035, which is the pixel the labels switch at.
 for (const viewport of [
   { width: 960, height: 600, labels: false },
   { width: 1000, height: 700, labels: false },
-  // 1035 is where the box reaches the 289px the labels need, to the pixel.
+  { width: 1034, height: 700, labels: false },
   { width: 1035, height: 700, labels: true },
   { width: 1280, height: 800, labels: true }
 ]) {
@@ -568,17 +587,26 @@ for (const viewport of [
     await expect(page.getByTestId('batch-toolbar')).toBeVisible()
 
     expect(await actionOverlap(page)).toBeLessThanOrEqual(0)
-    // No room for them: the labels stand down rather than push the row over.
+    // No room for them: the labels stand down rather than push the row over,
+    // and the icon is what is left — a label-less, icon-less toolbar would fit
+    // just as well, so the two states are asserted together.
     const labels = viewport.labels ? 'shown' : 'icon-only'
-    expect(
-      (await actionLabelWidths(page)).map((width) => (width > 20 ? 'shown' : 'icon-only'))
-    ).toEqual([labels, labels, labels])
+    const icons = viewport.labels ? 'hidden' : 'drawn'
+    expect(await actionLabelStates(page)).toEqual([labels, labels, labels])
+    expect(await actionIconStates(page)).toEqual([icons, icons, icons])
+    if (!viewport.labels) {
+      // The name is the hidden label, not something the icon replaced: a
+      // `display: none` stand-down would leave the action unnamed.
+      await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible()
+    }
   })
 }
 
-// Chinese needs 214px of that box and the minimum window leaves it 247, so the
-// compact state is per locale — a single threshold wide enough for English
-// would take the labels away here, where they fit.
+// Chinese's labels need 214px of the toolbar's box and are left 247px — its
+// filter strip is 33px narrower than English's, which is why the same window
+// gives the two languages different boxes. So the compact state is per locale:
+// a single threshold wide enough for English would take the labels away here,
+// where they fit.
 test('the batch actions keep their labels in Chinese at the minimum window', async ({
   mount,
   page
@@ -590,7 +618,28 @@ test('the batch actions keep their labels in Chinese at the minimum window', asy
   await expect(page.getByTestId('batch-toolbar')).toBeVisible()
 
   expect(await actionOverlap(page)).toBeLessThanOrEqual(0)
-  expect(
-    (await actionLabelWidths(page)).map((width) => (width > 20 ? 'shown' : 'icon-only'))
-  ).toEqual(['shown', 'shown', 'shown'])
+  expect(await actionLabelStates(page)).toEqual(['shown', 'shown', 'shown'])
+})
+
+// The tooltip is the only name an icon-only action has, and the state batch mode
+// opens in is three disabled actions with nothing selected. A disabled `Button`
+// carries `pointer-events-none`, so a trigger that is the button itself cannot
+// see the hover that would open it. Playwright's own hover would jump the same
+// gate, hence the raw pointer move.
+test('an icon-only action still names itself on hover while it is unavailable', async ({
+  mount,
+  page
+}) => {
+  await page.setViewportSize({ width: 960, height: 600 })
+  await mount(<AssetLibraryStory />)
+  await batchModeControl(page).click()
+  const action = page.getByRole('button', { name: 'Delete', exact: true })
+  await expect(action).toBeDisabled()
+
+  const box = await action.boundingBox()
+  await page.mouse.move(
+    (box?.x ?? 0) + (box?.width ?? 0) / 2,
+    (box?.y ?? 0) + (box?.height ?? 0) / 2
+  )
+  await expect(page.getByRole('tooltip')).toHaveText('Delete')
 })
