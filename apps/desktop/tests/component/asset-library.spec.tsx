@@ -1,6 +1,34 @@
 import { expect, test } from '@playwright/experimental-ct-react'
-import type { Locator } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { AssetLibraryStory } from './fixtures/asset-library.story'
+
+/** The header's mode control: the last button on the filters' row in either state. */
+function batchModeControl(page: Page): Locator {
+  return page.locator('[data-testid="asset-library"] > div').first().getByRole('button').last()
+}
+
+/** The border-and-padding group holding the three batch actions. */
+function actionGroup(page: Page): Locator {
+  return page.getByTestId('batch-toolbar').locator('div').first()
+}
+
+/** How far the action group paints past the filter strip's right edge. */
+async function actionOverlap(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const filters = document.querySelector('[data-testid="asset-filters"]')!.getBoundingClientRect()
+    const group = document
+      .querySelector('[data-testid="batch-toolbar"] div')!
+      .getBoundingClientRect()
+    return Math.round(filters.right - group.left)
+  })
+}
+
+/** Each action's label span: 1px wide while visually hidden, text-wide while shown. */
+async function actionLabelWidths(page: Page): Promise<readonly number[]> {
+  return actionGroup(page)
+    .locator('button > span')
+    .evaluateAll((spans) => spans.map((span) => Math.round(span.getBoundingClientRect().width)))
+}
 
 for (const viewport of [
   { width: 960, height: 600 },
@@ -484,21 +512,24 @@ test('a refresh after a mutation re-reads every loaded page, not just the first'
 })
 
 // Entering the mode swaps a lone 32px icon button for a batch toolbar whose
-// row is 38px (32px buttons in a 1px border and 2px padding), and at the
-// minimum window the row is also 848px wide against a 366px filter bar plus a
-// 519px toolbar — so the header has both a height and a width it must not
-// grow past here. The wall below is `flex-1` in that column, which is what
-// turns either growth into a 6px or 44px jump under the pointer.
+// row is 38px (32px buttons in a 1px border and 2px padding) — so the header
+// has a height it must not grow past here, in either of its two widths (labels
+// shown, or icons standing in for them). The wall below is `flex-1` in that
+// column, which is what turns that growth into a 6px jump under the pointer.
+// The row's width is the other half of the contract: see the overlap tests at
+// the end of this file.
 for (const viewport of [
-  { width: 960, height: 600 },
-  { width: 1280, height: 800 }
-]) {
-  test(`entering batch mode leaves the wall where it was at ${viewport.width}`, async ({
+  { width: 960, height: 600, language: 'en' },
+  { width: 960, height: 600, language: 'zh-CN' },
+  { width: 1280, height: 800, language: 'en' }
+] as const) {
+  test(`entering batch mode leaves the wall where it was at ${viewport.width} in ${viewport.language}`, async ({
     mount,
     page
   }) => {
     await page.setViewportSize(viewport)
     await mount(<AssetLibraryStory />)
+    await page.evaluate((next) => window.__assetLibraryTest?.setLanguage(next), viewport.language)
     const wall = page.getByTestId('asset-library').locator('> div').nth(1)
     const card = page.getByTestId('asset-card').first()
     await expect(card).toBeVisible()
@@ -507,7 +538,7 @@ for (const viewport of [
       (await locator.boundingBox())?.y ?? Number.NaN
     const before = { wall: await top(wall), card: await top(card) }
 
-    await page.getByRole('button', { name: 'Batch actions' }).click()
+    await batchModeControl(page).click()
     await expect(page.getByTestId('batch-toolbar')).toBeVisible()
 
     expect({
@@ -516,3 +547,50 @@ for (const viewport of [
     }).toEqual({ wall: 0, card: 0 })
   })
 }
+
+// The batch toolbar shares the filter strip's row, and its content is wider than
+// the box the strip leaves it: 289px of labelled actions against 214px at the
+// minimum window, so the group used to hang 55px out over the filters — the
+// toolbar is `justify-end`, which paints the overflow on the filters' side.
+// Nothing about a toolbar may cover a filter, so the group's left edge is the
+// assertion, not the toolbar's.
+for (const viewport of [
+  { width: 960, height: 600, labels: false },
+  { width: 1000, height: 700, labels: false },
+  // 1035 is where the box reaches the 289px the labels need, to the pixel.
+  { width: 1035, height: 700, labels: true },
+  { width: 1280, height: 800, labels: true }
+]) {
+  test(`the batch actions clear the filter strip at ${viewport.width}`, async ({ mount, page }) => {
+    await page.setViewportSize(viewport)
+    await mount(<AssetLibraryStory />)
+    await batchModeControl(page).click()
+    await expect(page.getByTestId('batch-toolbar')).toBeVisible()
+
+    expect(await actionOverlap(page)).toBeLessThanOrEqual(0)
+    // No room for them: the labels stand down rather than push the row over.
+    const labels = viewport.labels ? 'shown' : 'icon-only'
+    expect(
+      (await actionLabelWidths(page)).map((width) => (width > 20 ? 'shown' : 'icon-only'))
+    ).toEqual([labels, labels, labels])
+  })
+}
+
+// Chinese needs 214px of that box and the minimum window leaves it 247, so the
+// compact state is per locale — a single threshold wide enough for English
+// would take the labels away here, where they fit.
+test('the batch actions keep their labels in Chinese at the minimum window', async ({
+  mount,
+  page
+}) => {
+  await page.setViewportSize({ width: 960, height: 600 })
+  await mount(<AssetLibraryStory />)
+  await page.evaluate(() => window.__assetLibraryTest?.setLanguage('zh-CN'))
+  await batchModeControl(page).click()
+  await expect(page.getByTestId('batch-toolbar')).toBeVisible()
+
+  expect(await actionOverlap(page)).toBeLessThanOrEqual(0)
+  expect(
+    (await actionLabelWidths(page)).map((width) => (width > 20 ? 'shown' : 'icon-only'))
+  ).toEqual(['shown', 'shown', 'shown'])
+})

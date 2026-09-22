@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ListChecksIcon, XIcon } from 'lucide-react'
+import { DownloadIcon, ListChecksIcon, Trash2Icon, UploadIcon, XIcon } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui/tooltip'
 import type { AssetLibraryPorts, MediaAssetView } from '../api/asset-library-http'
@@ -16,6 +17,40 @@ import { LoadMoreSentinel } from './load-more-sentinel'
 export interface AssetLibraryPageProps {
   readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
   readonly onCreateSimilar: PrepareAssetSimilar
+}
+
+interface ActionFit {
+  readonly label: string
+  readonly icon: string
+}
+
+/**
+ * What an action needs of the toolbar's own box to sit on the filters' row
+ * beside the exit control — 289px in English, 214px in Chinese, measured from
+ * the rendered row. Narrower, the labels go visually hidden (still the
+ * accessible name) and the icon takes their place. The icon is only ever shown
+ * there: a labelled toolbar is the row it has always been, in every locale, so
+ * the icons cost it nothing. A longer label moves its number, which the geometry
+ * tests in asset-library.spec.tsx pin — see them before changing this.
+ */
+const WIDE_ACTION_FIT: ActionFit = {
+  label: '@max-[288px]:sr-only',
+  icon: 'hidden @max-[288px]:block'
+}
+
+const SHORT_ACTION_FIT: ActionFit = {
+  label: '@max-[213px]:sr-only',
+  icon: 'hidden @max-[213px]:block'
+}
+
+/**
+ * Chinese's labels are shorter and the toolbar has the same 289px to give it.
+ * A locale we have not measured takes English's, the wider number: a label that
+ * hides a little early costs an icon-only toolbar, one that hides too late
+ * costs a covered filter, and only the second is a defect.
+ */
+function actionFit(language: string): ActionFit {
+  return language === 'zh-CN' ? SHORT_ACTION_FIT : WIDE_ACTION_FIT
 }
 
 const initialFilters: AssetFilters = {
@@ -94,6 +129,7 @@ export function AssetLibraryPage({
   // One control either way: leaving the mode, or ending the run that holds it.
   const modeExit =
     running === null ? t('assets.selection.exit') : t('assets.batch.cancel', { action })
+  const fit = actionFit(i18n.language)
 
   const apply = (next: AssetFilters): void => {
     setFilters(next)
@@ -112,10 +148,11 @@ export function AssetLibraryPage({
           // Sits on the filters' row at every width the window allows (a zero
           // basis never wraps): the filters keep their size, the actions keep
           // theirs, and the status is what gives — a second row here would push
-          // the wall down the moment the mode is entered.
+          // the wall down the moment the mode is entered. This box is also the
+          // container the actions' labels measure themselves against.
           <div
             data-testid="batch-toolbar"
-            className="flex min-w-0 flex-1 items-center justify-end gap-2"
+            className="@container flex min-w-0 flex-1 items-center justify-end gap-2"
           >
             <p
               className="text-muted-foreground min-w-0 truncate text-sm"
@@ -126,41 +163,35 @@ export function AssetLibraryPage({
               {selectionStatus}
             </p>
             <div className="border-border flex items-center rounded-lg border p-0.5">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
+              <BatchAction
+                fit={fit}
+                Icon={Trash2Icon}
+                label={t('assets.batch.remove')}
                 disabled={selectionSize === 0 || running !== null}
                 onClick={() => {
                   if (window.confirm(t('assets.batch.removeConfirm', { count: selectionSize })))
                     void selection.remove()
                 }}
-              >
-                {t('assets.batch.remove')}
-              </Button>
+              />
               <span className="bg-border mx-0.5 h-4 w-px" aria-hidden />
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
+              <BatchAction
+                fit={fit}
+                Icon={DownloadIcon}
+                label={t('assets.batch.download')}
                 disabled={selectionSize === 0 || running !== null}
                 onClick={() => void selection.download()}
-              >
-                {t('assets.batch.download')}
-              </Button>
+              />
               <span className="bg-border mx-0.5 h-4 w-px" aria-hidden />
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
+              <BatchAction
+                fit={fit}
+                Icon={UploadIcon}
+                label={t('assets.batch.publish')}
                 disabled={!selection.publishable || running !== null}
                 onClick={() => {
                   if (window.confirm(t('assets.batch.publishConfirm', { count: selectionSize })))
                     void selection.publish()
                 }}
-              >
-                {t('assets.batch.publish')}
-              </Button>
+              />
             </div>
             {/* Icon-only to leave room for the status on one row, and the
                 mirror of the icon-only control that enters the mode. */}
@@ -278,5 +309,36 @@ export function AssetLibraryPage({
         onDelete={() => void detail.remove(() => window.confirm(t('assets.deleteConfirm')))}
       />
     </section>
+  )
+}
+
+/**
+ * One batch action in its two widths. The tooltip stays in both of them: the
+ * toolbar's width is a container query, and a tooltip is portaled out of the
+ * container it would have to measure to stand down with the label.
+ */
+function BatchAction({
+  fit,
+  Icon,
+  label,
+  disabled,
+  onClick
+}: {
+  readonly fit: ActionFit
+  readonly Icon: LucideIcon
+  readonly label: string
+  readonly disabled: boolean
+  readonly onClick: () => void
+}): React.JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={onClick}>
+          <Icon aria-hidden className={fit.icon} />
+          <span className={fit.label}>{label}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   )
 }

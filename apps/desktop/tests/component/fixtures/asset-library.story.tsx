@@ -1,8 +1,21 @@
 import '../../../src/renderer/src/app/globals.css'
 import { useEffect, useMemo } from 'react'
 import { I18nextProvider } from 'react-i18next'
+import { ImagesIcon } from 'lucide-react'
 import { testI18n } from './creation-workbench-i18n'
 import { AssetLibraryPage } from '../../../src/renderer/src/features/creation'
+import { SidebarBrand } from '../../../src/renderer/src/app/shell/sidebar-brand'
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider
+} from '../../../src/renderer/src/components/ui/sidebar'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
 import { prepareAssetSimilarDraft } from '../../../src/renderer/src/features/creation/model/asset-similar-draft'
 import type {
@@ -110,6 +123,7 @@ const detail: AssetDetailView = {
 }
 
 interface AssetLibraryTestControls {
+  setLanguage(language: 'en' | 'zh-CN'): Promise<void>
   listCalls(): readonly AssetPageRequest[]
   reused(): readonly AssetPrivateOrigin[]
   recordReuse(
@@ -448,7 +462,14 @@ export function AssetLibraryStory({
     ]
   )
   useEffect(() => {
-    window.__assetLibraryTest = harness.controls
+    // A spec cannot reach `testI18n` itself (its top-level await), so the switch
+    // has to come through here.
+    window.__assetLibraryTest = {
+      ...harness.controls,
+      setLanguage: async (language) => {
+        await testI18n.changeLanguage(language)
+      }
+    }
     return () => {
       delete window.__assetLibraryTest
     }
@@ -457,9 +478,37 @@ export function AssetLibraryStory({
     <I18nextProvider i18n={testI18n}>
       {/* The wall's tooltips need the provider the app shell mounts. */}
       <TooltipProvider delayDuration={0}>
-        <div className="bg-background text-foreground flex h-screen min-h-0">
-          <AssetLibraryPage ports={harness.ports} onCreateSimilar={harness.controls.recordReuse} />
-        </div>
+        {/* The real App Shell around the page — the 16rem sidebar and its inset
+            are what the header row actually has to fit in, so a story without
+            them measures a row 256px wider than the one users see. Mirrors
+            app/shell/app-shell.tsx; keep the two in step. */}
+        <SidebarProvider className="h-svh">
+          <Sidebar collapsible="icon">
+            <SidebarBrand />
+            <SidebarContent className="overflow-hidden">
+              <SidebarGroup>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton aria-label="Assets" tooltip="Assets">
+                        <ImagesIcon />
+                        <span className="group-data-[collapsible=icon]:hidden">Assets</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            </SidebarContent>
+          </Sidebar>
+          <SidebarInset>
+            <div className="flex flex-1 flex-col overflow-auto">
+              <AssetLibraryPage
+                ports={harness.ports}
+                onCreateSimilar={harness.controls.recordReuse}
+              />
+            </div>
+          </SidebarInset>
+        </SidebarProvider>
       </TooltipProvider>
     </I18nextProvider>
   )
