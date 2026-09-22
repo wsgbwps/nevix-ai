@@ -266,6 +266,8 @@ export interface DeckTestControls {
   }>
   retryCalls(): ReadonlyArray<{ taskId: string; idempotencyKey: string }>
   cancelledIds(): string[]
+  /** Task ids the workbench asked the data plane to dismiss (ADR-0022). */
+  dismissedIds(): string[]
   createSessionCalls(): ReadonlyArray<{ name: string }>
   /** Holds session creations until releaseSessionCreations runs. */
   releaseSessionCreations(): void
@@ -392,6 +394,8 @@ export interface TaskScript {
   readonly failDetailReads?: Readonly<Record<string, number>>
   readonly submitDeferred?: boolean
   readonly submitOutcomes?: readonly ('succeeded' | 'network-failure' | 'accepted-response-lost')[]
+  /** Restricted results each dismissed task reports as skipped (ADR-0022). */
+  readonly dismissSkips?: Readonly<Record<string, number>>
 }
 
 /** The account id scoping the device-local draft store in this story. */
@@ -492,6 +496,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     }>
     retryCalls: Array<{ taskId: string; idempotencyKey: string }>
     cancelledIds: string[]
+    dismissedIds: string[]
     listCalls: number
     listPageRequests: Array<{ sessionId: string; limit: number; cursor: string | null }>
     getTaskCalls: string[]
@@ -510,6 +515,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     submitCalls: [],
     retryCalls: [],
     cancelledIds: [],
+    dismissedIds: [],
     listCalls: 0,
     listPageRequests: [],
     getTaskCalls: [],
@@ -567,6 +573,13 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     })
   }
 
+  // Drops one task from the scripted store and notifies like the list
+  // projection no longer returning it (ADR-0021 / ADR-0022).
+  const dropTask = (taskId: string): void => {
+    taskState.tasks = taskState.tasks.filter((entry) => entry.id !== taskId)
+    taskState.eventHandlers?.onInvalidation()
+  }
+
   window.__creationDeckTest = {
     draftRecord: (key) => readLocalDraft(localStorage, storyUserId, key),
     deleteMaterialCalls: () => deletedIds,
@@ -591,6 +604,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     taskCalls: () => taskState.submitCalls,
     retryCalls: () => taskState.retryCalls,
     cancelledIds: () => taskState.cancelledIds,
+    dismissedIds: () => taskState.dismissedIds,
     createSessionCalls: () => createdSessions,
     releaseSessionCreations: () => releaseAll(sessionCreateReleases),
     renameCalls: () => renameCalls,
@@ -624,10 +638,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       taskState.tasks = taskState.tasks.map((entry) => (entry.id === task.id ? task : entry))
       taskState.eventHandlers?.onInvalidation()
     },
-    removeTask: (taskId) => {
-      taskState.tasks = taskState.tasks.filter((entry) => entry.id !== taskId)
-      taskState.eventHandlers?.onInvalidation()
-    },
+    removeTask: (taskId) => dropTask(taskId),
     listTasksCalls: () => taskState.listCalls,
     listTaskPages: () => taskState.listPageRequests,
     getTaskCalls: () => taskState.getTaskCalls,
@@ -930,6 +941,23 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
       return succeeded(detailOf(task))
+    },
+    // One command, one transaction: the task leaves the projection and its
+    // results leave the Asset Library, so the row drops here too.
+    dismissTask: async (taskId) => {
+      taskState.dismissedIds.push(taskId)
+      const task = taskState.tasks.find((entry) => entry.id === taskId)
+      if (!task) return { outcome: 'request-rejected', code: 'not_found' }
+      const slotIndexes = task.slots.map((slot) => slot.index)
+      const restricted = options.taskScript?.dismissSkips?.[taskId] ?? 0
+      dropTask(taskId)
+      return succeeded({
+        removedSlotIndexes: slotIndexes.slice(restricted),
+        skipped: slotIndexes.slice(0, restricted).map((slotIndex) => ({
+          slotIndex,
+          reason: 'restricted' as const
+        }))
+      })
     },
     retryTask: async (taskId, idempotencyKey) => {
       taskState.retryCalls.push({ taskId, idempotencyKey })

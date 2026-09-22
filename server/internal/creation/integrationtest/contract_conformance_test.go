@@ -216,6 +216,40 @@ func TestTeamPublicationAndInspirationContractSurface(t *testing.T) {
 	}
 }
 
+// TestGenerationTaskDeletionContractSurface pins the deletion operation's shape:
+// a 200 carrying the removal report — never a 204, whose body a client cannot
+// read — with both report arrays required so neither can arrive as null, and no
+// 409, because a non-terminal target and a repeat DELETE share one 404.
+func TestGenerationTaskDeletionContractSurface(t *testing.T) {
+	operation := creationOperation(t, "DELETE", "/creation/tasks/00000000-0000-0000-0000-000000000001")
+	if operation["operationId"] != "deleteGenerationTask" {
+		t.Fatalf("task deletion operationId=%v", operation["operationId"])
+	}
+	responses, _ := operation["responses"].(map[string]any)
+	if _, documented := responses["204"]; documented {
+		t.Fatal("task deletion must answer 200 with the removal report, not 204")
+	}
+	if _, documented := responses["409"]; documented {
+		t.Fatal("a non-terminal target and a repeat DELETE share one 404; a 409 would split them")
+	}
+	if _, documented := responses["200"]; !documented {
+		t.Fatalf("task deletion responses=%v", responses)
+	}
+
+	result := resolvePointer(t, moduleFile(t, "creation.yaml"), "/components/schemas/TaskDeletionResult")
+	required, _ := result["required"].([]any)
+	for _, field := range []string{"removed_slot_indexes", "skipped"} {
+		if !slices.Contains(required, any(field)) {
+			t.Fatalf("TaskDeletionResult must require %s: %v", field, required)
+		}
+	}
+	properties, _ := result["properties"].(map[string]any)
+	skipped, _ := properties["skipped"].(map[string]any)
+	if skipped["nullable"] == true {
+		t.Fatal("skipped is required and never null; a nullable declaration would invite the null back")
+	}
+}
+
 func loadContracts(t *testing.T) (map[string]any, map[string]map[string]any) {
 	t.Helper()
 	conformanceOnce.Do(func() {

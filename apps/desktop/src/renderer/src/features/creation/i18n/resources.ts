@@ -257,8 +257,14 @@ export const creationTranslations = defineResourceTranslations({
           retryUncompleted: '只重试未完成项',
           download: '下载',
           reedit: '重新编辑',
-          more: '更多操作'
+          more: '更多操作',
+          delete: '删除任务'
         },
+        deleteConfirm:
+          '删除这个任务？它从此不再出现在创作台，其结果也从资产库移除。已发布的内容不会被撤回；任务记录与用量事实仍会保留以便追溯。',
+        deleteConfirmRetry:
+          '删除这个任务？它从此不再出现在创作台，其结果也从资产库移除。已发布的内容不会被撤回；未完成槽位的重试入口会随卡片一起消失。任务记录与用量事实仍会保留以便追溯。',
+        deleteSkipped: '已删除任务；{{count}} 张结果因安全限制未移除。',
         details: {
           label: '详细信息',
           prompt: '提示词',
@@ -829,8 +835,15 @@ export const creationTranslations = defineResourceTranslations({
           retryUncompleted: 'Retry uncompleted',
           download: 'Download',
           reedit: 'Re-edit',
-          more: 'More actions'
+          more: 'More actions',
+          delete: 'Delete task'
         },
+        deleteConfirm:
+          'Delete this task? It no longer appears in the workbench and its results leave the Asset Library. An existing publication will not be withdrawn; the task record and usage facts are retained for traceability.',
+        deleteConfirmRetry:
+          'Delete this task? It no longer appears in the workbench and its results leave the Asset Library. An existing publication will not be withdrawn, and the uncompleted-slot retry entry disappears with the card. The task record and usage facts are retained for traceability.',
+        deleteSkipped:
+          'Task deleted; {{count}} result(s) were not removed because of a safety restriction.',
         details: {
           label: 'Details',
           prompt: 'Prompt',

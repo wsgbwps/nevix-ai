@@ -11,6 +11,7 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 > 2026-09-06：Workbench Context 入册，命名创作台「正对着哪个创作内容」及其切换语义，取代散落的 surface / 视图状态说法。
 > 2026-09-07：Generation Parameter 入册，命名生成意图的参数字段族及其单一权威清单，取代散落的「任务参数」说法。
 > 2026-09-20：结果移除入册，命名「删除 Media Asset 在来源 TaskCard 上的呈现」，与「删除任务结果」这一会被读成改写终态的说法区分（[ADR-0021](../../docs/adr/0021-asset-deletion-hides-task-results.md)，[#262](https://github.com/wsgbwps/nevix-ai/issues/262)）。
+> 2026-09-21：任务删除 / 任务隐藏入册，命名「隐藏一张终态 Generation Task 并移除其结果」这一条命令，与「结果移除」区分（[ADR-0022](../../docs/adr/0022-task-deletion-hides-the-task-and-removes-its-results.md)，[#280](https://github.com/wsgbwps/nevix-ai/issues/280)）。
 
 **User**:
 使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
@@ -133,8 +134,12 @@ AI Creation Domain 拥有的个人媒体资产浏览与复用页面，只展示�
 _Avoid_: Media Asset Domain, Asset Workspace
 
 **结果移除**:
-逻辑删除 Media Asset 后在来源 TaskCard 上的呈现：该槽位不再展示结果，任务的 `succeeded` 终态、成功计数与用量事实一律不变，字节仍与已删除 Asset 共享；当任务曾形成的全部 Media Asset 都被逻辑删除时，整个任务不再出现在 Creation Workbench。它是一次可见性操作，不回收字节、不改写终态。
+逻辑删除 Media Asset 后在来源 TaskCard 上的呈现：该槽位不再展示结果，任务的 `succeeded` 终态、成功计数与用量事实一律不变，字节仍与已删除 Asset 共享；当任务曾形成的全部 Media Asset 都被逻辑删除时，整个任务不再出现在 Creation Workbench。它是一次可见性操作，不回收字节、不改写终态。它与「任务删除」是两回事：它由资产库的删除动作触发，「任务删除」则是隐藏任务并移除其结果的那条命令。
 _Avoid_: 删除任务结果（会被读成改写终态）, 槽位回退, 结果隐藏
+
+**任务删除 / 任务隐藏**:
+User 删除一张终态 Generation Task（成功 / 失败 / 取消 / 未知结局）的单一命令：任务记下隐藏事实而不再出现在 Creation Workbench 的任务列表，同时把该任务尚未删除的全部 Media Asset 逻辑删除、离开 Asset Library。隐藏是粘性的——部分成功或结局未知的任务日后落地结果也不会让卡片回来；任务详情仍可读，有效 Publication 不撤回，字节不回收。受限（restricted）结果删不掉时跳过并在响应中报告，不阻断任务隐藏。
+_Avoid_: 删除任务结果, 归档, 会话删除（`deleteSession` 是另一条命令）
 
 **Authentication Domain**:
 以凭据验证和当前设备 Session 生命周期为范围的 Desktop Domain，不包含 User 或账号管理。

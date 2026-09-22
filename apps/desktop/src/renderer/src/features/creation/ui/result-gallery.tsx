@@ -17,7 +17,7 @@ export function ResultGallery({
   readonly scrollerRef: React.RefObject<HTMLDivElement | null>
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const { tasks } = gallery
+  const { tasks, dismissalSkipped } = gallery
   const orderedTasks = useMemo(() => [...tasks].reverse(), [tasks])
   // A failed list read keeps every loaded task and only adds the note.
   const staleNote = gallery.taskListStale ? (
@@ -25,26 +25,41 @@ export function ResultGallery({
       {t('gallery.listStale')}
     </p>
   ) : null
+  // A deleted task's card is gone, so the results the deletion could not remove
+  // are reported here instead (ADR-0022).
+  const skippedNote =
+    dismissalSkipped > 0 ? (
+      <p
+        className="text-muted-foreground text-xs"
+        role="status"
+        data-testid="task-dismissal-skipped"
+      >
+        {t('gallery.deleteSkipped', { count: dismissalSkipped })}
+      </p>
+    ) : null
   const { galleryRef, virtualizer, scrollMargin, remeasure } = useReadingAnchor({
     scrollerRef,
     taskIds: orderedTasks.map((task) => task.id)
   })
-  // The history note's mount/unmount changes the layout above the gallery, so
+  // The note's mount/unmount above the gallery changes every card's margin, so
   // measure in that same commit (a ResizeObserver fires one observable frame
   // too late). A same-commit count change composes: the anchor hook's margin
   // effect re-measures on its own count dep, and a repeat measure no-ops.
   const taskHistory = gallery.taskHistory
   useLayoutEffect(() => {
     remeasure()
-  }, [remeasure, taskHistory.failed, taskHistory.hasMore, taskHistory.loading])
+  }, [dismissalSkipped, remeasure, taskHistory.failed, taskHistory.hasMore, taskHistory.loading])
 
   if (tasks.length === 0) {
     return (
-      staleNote ?? (
-        <p className="text-muted-foreground text-xs" role="status">
-          {t('workspace.generationPending')}
-        </p>
-      )
+      <>
+        {skippedNote}
+        {staleNote ?? (
+          <p className="text-muted-foreground text-xs" role="status">
+            {t('workspace.generationPending')}
+          </p>
+        )}
+      </>
     )
   }
   const virtualItems = virtualizer.getVirtualItems()
@@ -57,6 +72,7 @@ export function ResultGallery({
       style={{ height: virtualizer.getTotalSize() }}
     >
       {staleNote}
+      {skippedNote}
       {virtualItems.map((virtualItem) => {
         const task = orderedTasks[virtualItem.index]
         return (

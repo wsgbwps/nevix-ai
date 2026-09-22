@@ -192,6 +192,11 @@ type GenerationTaskRepository interface {
 	// and returns its current status; ok is false when the task is not the
 	// caller's at all.
 	RequestCancel(ctx context.Context, tx TxExecutor, owner, taskID UUID) (TaskStatus, bool, error)
+	// Dismiss marks one owned terminal task hidden (任务隐藏) and advances its
+	// updated_at criterion. ok is false when the task is not the caller's, is
+	// already dismissed, or still owes work — the durable twin of the domain's
+	// terminal rule.
+	Dismiss(ctx context.Context, tx TxExecutor, owner, taskID UUID) (bool, error)
 	// TransitionJob performs one guarded job migration, optionally binding
 	// the external reference on first submission.
 	TransitionJob(ctx context.Context, tx TxExecutor, jobID UUID, from []JobStatus, to JobStatus, externalRef *string) (bool, error)

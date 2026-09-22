@@ -44,6 +44,7 @@ func (m *Module) routes() []creationhttp.Route {
 		{Method: "POST", Path: "/creation/sessions/{sessionID}/tasks", Handler: m.tasks.SubmitTask},
 		{Method: "GET", Path: "/creation/sessions/{sessionID}/tasks", Handler: m.tasks.ListSessionTasks},
 		{Method: "GET", Path: "/creation/tasks/{taskID}", Handler: m.tasks.GetTask},
+		{Method: "DELETE", Path: "/creation/tasks/{taskID}", Handler: m.tasks.DismissTask},
 		{Method: "POST", Path: "/creation/tasks/{taskID}/cancel", Handler: m.tasks.CancelTask},
 		{Method: "POST", Path: "/creation/tasks/{taskID}/retry", Handler: m.tasks.RetryUncompleted},
 		{Method: "GET", Path: "/creation/tasks/{taskID}/slots/{slotIndex}/result", Handler: m.tasks.DownloadSlotResult},

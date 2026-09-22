@@ -17,6 +17,7 @@ import {
   createGenerationTaskClient,
   openCreationEventStream,
   type GenerationTaskDetail,
+  type TaskDeletionResult,
   type TaskListPageRequest,
   type TaskPage,
   type TaskSubmitInput
@@ -129,6 +130,8 @@ export interface CreationWorkspacePorts extends AssetLibraryPorts, InspirationPo
   ) => Promise<CreationApiResult<TaskPage>>
   readonly getTask: (taskId: string) => Promise<CreationApiResult<GenerationTaskDetail>>
   readonly cancelTask: (taskId: string) => Promise<CreationApiResult<GenerationTaskDetail>>
+  /** Hides one terminal task and removes its results in one command (ADR-0022). */
+  readonly dismissTask: (taskId: string) => Promise<CreationApiResult<TaskDeletionResult>>
   readonly retryTask: (
     taskId: string,
     idempotencyKey: string
@@ -311,6 +314,7 @@ export function createCreationWorkspacePorts(
       withTaskToken((client, token) => client.listTasks(token, sessionId, page)),
     getTask: (taskId) => withTaskToken((client, token) => client.getTask(token, taskId)),
     cancelTask: (taskId) => withTaskToken((client, token) => client.cancelTask(token, taskId)),
+    dismissTask: (taskId) => withTaskToken((client, token) => client.dismissTask(token, taskId)),
     retryTask: (taskId, idempotencyKey) =>
       withTaskToken((client, token) => client.retryTask(token, taskId, idempotencyKey)),
     loadResultBlob: (taskId, slotIndex) =>

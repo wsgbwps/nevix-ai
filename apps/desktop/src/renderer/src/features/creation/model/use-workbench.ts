@@ -172,6 +172,12 @@ export interface WorkbenchGalleryHandle {
   /** Leases one succeeded slot's verified display URL until its card releases it. */
   acquireResultBlobUrl: (taskId: string, slotIndex: number) => Promise<ResultBlobUrlLease | null>
   cancelTask: (taskId: string) => void
+  /** Hides one terminal task and removes its results (ADR-0022). */
+  dismissTask: (taskId: string) => void
+  /** How many results the last deletion left behind (a restricted result stays
+   * in the Asset Library); 0 while nothing was skipped, and the next task
+   * operation or context switch clears it. */
+  dismissalSkipped: number
   retryTask: (taskId: string) => void
   /** Retry of indeterminate work requires the creator's explicit risk confirm. */
   requestIndeterminateRedo: (taskId: string) => void
@@ -210,6 +216,12 @@ export function useCreationWorkbench(): {
   const [manifest, setManifest] = useState<CapabilityManifest | null>(null)
   const [manifestStatus, setManifestStatus] = useState<ManifestStatus>('loading')
   const [indeterminateTaskId, setIndeterminateTaskId] = useState<string | null>(null)
+  // Keyed by the context it was reported in: the note belongs to one context's
+  // deletion, so entering another context drops it without a state reset.
+  const [dismissalSkippedIn, setDismissalSkippedIn] = useState<{
+    readonly contextKey: string
+    readonly skipped: number
+  } | null>(null)
   // The Generation Task refresh module (ADR-0005); business actions only ask
   // it to reconcile after they complete.
   const taskRefresh = useTaskRefreshModule(ports)
@@ -584,6 +596,7 @@ export function useCreationWorkbench(): {
    * leaves, and a resubmit reuses its key (ADR-0017). */
   const submit = useCallback(() => {
     if (!ports || contextController === undefined) return
+    setDismissalSkippedIn(null)
     const frozenDraft = contextController.getSnapshot().draft
     const candidates = promptMentionCandidates(
       frozenDraft.references,
@@ -639,6 +652,7 @@ export function useCreationWorkbench(): {
 
   const cancelTaskById = useCallback(
     (taskId: string) => {
+      setDismissalSkippedIn(null)
       void ports
         ?.cancelTask(taskId)
         .then(() => taskRefreshRef.current.requestReconcile())
@@ -647,8 +661,29 @@ export function useCreationWorkbench(): {
     [ports]
   )
 
+  const dismissTaskById = useCallback(
+    (taskId: string) => {
+      const contextKey = contextController?.getSnapshot().contextKey ?? null
+      setDismissalSkippedIn(null)
+      setIndeterminateTaskId(null)
+      void ports
+        ?.dismissTask(taskId)
+        .then((result) => {
+          if (result.outcome !== 'succeeded' || contextKey === null) return
+          setDismissalSkippedIn({
+            contextKey,
+            skipped: result.value.skipped.filter((skip) => skip.reason === 'restricted').length
+          })
+          taskRefreshRef.current.requestReconcile()
+        })
+        .catch(() => undefined)
+    },
+    [contextController, ports]
+  )
+
   const retryTaskById = useCallback(
     (taskId: string) => {
+      setDismissalSkippedIn(null)
       void ports
         ?.retryTask(taskId, crypto.randomUUID())
         .then((result) => {
@@ -666,6 +701,11 @@ export function useCreationWorkbench(): {
     (taskId: string) => retryTaskById(taskId),
     [retryTaskById]
   )
+
+  const dismissalSkipped =
+    dismissalSkippedIn !== null && dismissalSkippedIn.contextKey === ctx.contextKey
+      ? dismissalSkippedIn.skipped
+      : 0
 
   const staleFields: ReadonlySet<DraftStaleField> = useMemo(
     () => staleDraftFields(manifest, ctx.draft, materials),
@@ -1129,6 +1169,8 @@ export function useCreationWorkbench(): {
       loadOlderTasks: taskRefresh.requestOlderTasks,
       acquireResultBlobUrl: display.acquireResultBlobUrl,
       cancelTask: cancelTaskById,
+      dismissTask: dismissTaskById,
+      dismissalSkipped,
       retryTask: retryTaskById,
       requestIndeterminateRedo: (taskId: string) => setIndeterminateTaskId(taskId),
       confirmIndeterminateRedo,

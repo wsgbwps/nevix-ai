@@ -248,15 +248,18 @@ func scanTaskFull(row pgx.Row) (domain.GenerationTask, error) {
 	return t, nil
 }
 
-// ListBySession pages one session's tasks newest-first, creator-scoped. One
-// that never formed a Media Asset — every slot failed — has nothing removed
-// and keeps its place in this browsing list; the verdicts themselves are
-// untouched, and detail still reads the facts.
+// ListBySession pages one session's tasks newest-first, creator-scoped, and
+// hides two shapes: a dismissed task (the creator deleted the card, ADR-0022)
+// and one whose every formed Media Asset is logically deleted (ADR-0021). A
+// task that never formed a Media Asset — every slot failed — keeps its place in
+// this browsing list; the verdicts themselves are untouched, and detail still
+// reads the facts.
 func (r *GenerationTaskRepository) ListBySession(ctx context.Context, owner, sessionID domain.UUID, cursor *domain.CompoundCursor, limit int) ([]domain.GenerationTask, *domain.CompoundCursor, error) {
 	args := []any{owner, sessionID, cursorTime(cursor), cursorID(cursor), limit + 1}
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+taskSummaryColumns+` FROM creation_generation_tasks
 		WHERE owner_user_id = $1 AND session_id = $2
+		  AND dismissed_at IS NULL
 		  AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::uuid))
 		  AND NOT (
 		    EXISTS (
@@ -524,6 +527,21 @@ func (r *GenerationTaskRepository) RequestCancel(ctx context.Context, tx domain.
 		return "", false, fmt.Errorf("creation: request cancel: %w", err)
 	}
 	return domain.TaskStatus(status), true, nil
+}
+
+// Dismiss stamps the sticky 任务隐藏 fact on one owned terminal task. The WHERE
+// guard is the SQL twin of domain.TaskIsTerminal, so a non-terminal target and a
+// repeated DELETE both update zero rows and take the caller's one 404 path.
+func (r *GenerationTaskRepository) Dismiss(ctx context.Context, tx domain.TxExecutor, owner, taskID domain.UUID) (bool, error) {
+	tag, err := execTx(tx, ctx, `UPDATE creation_generation_tasks
+		SET dismissed_at = now(),
+			updated_at = GREATEST(updated_at + interval '1 microsecond', clock_timestamp())
+		WHERE id = $1 AND owner_user_id = $2 AND dismissed_at IS NULL
+		  AND NOT (status = ANY($3::text[]))`, taskID, owner, nonTerminalTaskStatuses)
+	if err != nil {
+		return false, fmt.Errorf("creation: dismiss task: %w", err)
+	}
+	return tag == 1, nil
 }
 
 // TransitionJob performs one guarded job migration, binding the external

@@ -173,6 +173,23 @@ type AssetPrivateOrigin struct {
 	References  []ReferenceMaterial
 }
 
+// TaskAsset is one non-deleted Media Asset of one task, carrying the
+// restriction fact the task-delete skip report needs.
+type TaskAsset struct {
+	ID         UUID
+	SlotIndex  int
+	Restricted bool
+}
+
+// DismissalSkipReason is the closed vocabulary of results a task deletion
+// could not remove.
+type DismissalSkipReason string
+
+const (
+	DismissalRestricted     DismissalSkipReason = "restricted"
+	DismissalAlreadyRemoved DismissalSkipReason = "already_removed"
+)
+
 type MediaAssetRepository interface {
 	InsertMediaAsset(ctx context.Context, tx TxExecutor, formation MediaAssetFormation) (bool, error)
 	ListVisible(ctx context.Context, owner UUID, filter AssetListFilter, cursor *CompoundCursor, limit int) ([]MediaAsset, *CompoundCursor, error)
@@ -182,6 +199,11 @@ type MediaAssetRepository interface {
 	// SoftDelete reports the deleted row's owner so an admin's delete invalidates
 	// the creator's workbench, not the admin's.
 	SoftDelete(ctx context.Context, tx TxExecutor, actor, id UUID, admin bool) (UUID, error)
+	// ListTaskAssets returns every non-deleted Media Asset of one task in slot
+	// order, restricted rows included: the task-delete command must report what
+	// it cannot remove instead of silently skipping it. SoftDelete stays the one
+	// place that decides whether a row may go.
+	ListTaskAssets(ctx context.Context, tx TxExecutor, owner, taskID UUID) ([]TaskAsset, error)
 }
 
 type RestrictionState string

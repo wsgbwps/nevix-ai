@@ -168,6 +168,21 @@ func (h *GenerationTaskHandler) CancelTask(w http.ResponseWriter, r *http.Reques
 	encodeJSON(w, http.StatusOK, toTaskDetail(task, slots))
 }
 
+// DismissTask answers DELETE /creation/tasks/{taskID}: 任务隐藏 plus 结果移除 in
+// one command, reporting what left and what a restriction kept behind.
+func (h *GenerationTaskHandler) DismissTask(w http.ResponseWriter, r *http.Request) {
+	taskID, ok := pathUUID(w, r, "taskID")
+	if !ok {
+		return
+	}
+	result, err := h.tasks.Dismiss(r.Context(), creatorID(w, r), taskID)
+	if err != nil {
+		failTask(w, r, err)
+		return
+	}
+	encodeJSON(w, http.StatusOK, toTaskDeletionResource(result))
+}
+
 type taskRetryRequest struct {
 	IdempotencyKey *string `json:"idempotency_key"`
 }
@@ -353,6 +368,29 @@ func toSlotResource(task domain.GenerationTask, slot domain.GenerationSlot) gene
 		}
 	}
 	return resource
+}
+
+type taskDeletionResource struct {
+	RemovedSlotIndexes []int                      `json:"removed_slot_indexes"`
+	Skipped            []taskDeletionSkipResource `json:"skipped"`
+}
+
+type taskDeletionSkipResource struct {
+	SlotIndex int    `json:"slot_index"`
+	Reason    string `json:"reason"`
+}
+
+// toTaskDeletionResource builds both lists non-nil: the contract's arrays are
+// required, and a null would make every client branch on a shape the server
+// never means to send.
+func toTaskDeletionResource(result application.DismissalResult) taskDeletionResource {
+	removed := make([]int, 0, len(result.RemovedSlotIndexes))
+	removed = append(removed, result.RemovedSlotIndexes...)
+	skipped := make([]taskDeletionSkipResource, 0, len(result.Skipped))
+	for _, skip := range result.Skipped {
+		skipped = append(skipped, taskDeletionSkipResource{SlotIndex: skip.SlotIndex, Reason: string(skip.Reason)})
+	}
+	return taskDeletionResource{RemovedSlotIndexes: removed, Skipped: skipped}
 }
 
 type generationTaskDetailResource struct {

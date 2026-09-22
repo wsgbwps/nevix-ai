@@ -137,6 +137,111 @@ func TestGenerationTaskDetailUsesOneSnapshot(t *testing.T) {
 	}
 }
 
+// The dismissal guard is the SQL twin of domain.TaskIsTerminal: only an owned,
+// still-visible terminal task may be hidden, a repeat is the same false, and
+// the hidden task keeps its readable detail.
+func TestGenerationTaskDismissHidesOnlyOwnedTerminalTasks(t *testing.T) {
+	ownerURL, runtimeURL := requireIntegrationEnv(t)
+	ctx := context.Background()
+	if _, err := migration.Apply(ctx, ownerURL); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect owner pool: %v", err)
+	}
+	defer owner.Close()
+	runtime, err := pgxpool.New(ctx, runtimeURL)
+	if err != nil {
+		t.Fatalf("connect identity_app pool: %v", err)
+	}
+	defer runtime.Close()
+
+	creator := fixtureUser(t, ownerURL)
+	stranger := fixtureUser(t, ownerURL)
+	sessionID := fixtureSession(t, ownerURL, owner, creator)
+	taskID := fixtureGenerationTask(t, ownerURL, owner, creator, sessionID)
+
+	repo := NewGenerationTaskRepository(runtime)
+	runner := writetx.New(runtime)
+	dismiss := func(actor domain.UUID) bool {
+		t.Helper()
+		dismissed := false
+		if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+			var err error
+			dismissed, err = repo.Dismiss(ctx, sc.Tx(), actor, taskID)
+			return err
+		}); err != nil {
+			t.Fatalf("dismiss task: %v", err)
+		}
+		return dismissed
+	}
+	dismissedAt := func() *time.Time {
+		t.Helper()
+		var stamped *time.Time
+		if err := owner.QueryRow(ctx,
+			`SELECT dismissed_at FROM creation_generation_tasks WHERE id = $1`, taskID).Scan(&stamped); err != nil {
+			t.Fatalf("read dismissed_at: %v", err)
+		}
+		return stamped
+	}
+
+	// A task that still owes work is not dismissable.
+	if dismiss(creator) {
+		t.Fatal("a queued task was dismissed")
+	}
+	if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+		changed, err := repo.TransitionTask(ctx, sc.Tx(), taskID, []domain.TaskStatus{domain.TaskQueued}, domain.TaskCancelled, nil)
+		if err == nil && !changed {
+			return errors.New("task transition was unexpectedly rejected")
+		}
+		return err
+	}); err != nil {
+		t.Fatalf("converge the task to a terminal state: %v", err)
+	}
+	// Neither is another member's terminal task.
+	if dismiss(stranger) {
+		t.Fatal("a foreign member dismissed the task")
+	}
+	before, _, err := repo.GetForOwner(ctx, creator, taskID)
+	if err != nil {
+		t.Fatalf("read task before dismissal: %v", err)
+	}
+
+	if !dismiss(creator) {
+		t.Fatal("a terminal owned task was not dismissed")
+	}
+	firstStamp := dismissedAt()
+	if firstStamp == nil {
+		t.Fatal("dismissal did not stamp dismissed_at")
+	}
+	after, _, err := repo.GetForOwner(ctx, creator, taskID)
+	if err != nil {
+		t.Fatalf("read dismissed task detail: %v", err)
+	}
+	if !after.UpdatedAt.After(before.UpdatedAt) {
+		t.Fatalf("dismissal did not advance updated_at: before=%s after=%s", before.UpdatedAt, after.UpdatedAt)
+	}
+	if after.Status != domain.TaskCancelled {
+		t.Fatalf("dismissal rewrote the terminal status: %s", after.Status)
+	}
+	if listed, _, err := repo.ListBySession(ctx, creator, sessionID, nil, 10); err != nil {
+		t.Fatalf("list tasks after dismissal: %v", err)
+	} else if len(listed) != 0 {
+		t.Fatalf("a dismissed task stayed in the browsing list: %+v", listed)
+	}
+
+	// A repeat DELETE is the same vanished target, and the sticky fact never
+	// moves — a later result cannot bring the card back.
+	if dismiss(creator) {
+		t.Fatal("a repeat dismissal reported success")
+	}
+	if againStamp := dismissedAt(); !againStamp.Equal(*firstStamp) {
+		t.Fatalf("repeat dismissal rewrote the sticky fact: %s -> %s", firstStamp, againStamp)
+	}
+}
+
 func TestGenerationTaskUpdatedAtTracksEveryVisibleDetailChange(t *testing.T) {
 	ownerURL, runtimeURL := requireIntegrationEnv(t)
 	ctx := context.Background()
@@ -359,5 +464,51 @@ func TestGenerationTaskUpdatedAtTracksEveryVisibleDetailChange(t *testing.T) {
 	}
 	if !afterRepeatDelete.UpdatedAt.Equal(marker) {
 		t.Fatalf("repeated asset delete changed the detail criterion: before=%s after=%s", marker, afterRepeatDelete.UpdatedAt)
+	}
+
+	// Dismissing the task (ADR-0022) lands on a task with no live result left,
+	// so the criterion must move with the dismissal itself — a dismissal whose
+	// updated_at did not advance would silently defeat every reader's
+	// check-for-changes. Only a terminal task is dismissable.
+	if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+		changed, err := repo.TransitionTask(ctx, sc.Tx(), taskID, []domain.TaskStatus{domain.TaskSubmitting}, domain.TaskFailed, nil)
+		if err == nil && !changed {
+			return errors.New("terminal transition was unexpectedly rejected")
+		}
+		return err
+	}); err != nil {
+		t.Fatalf("converge the task to a terminal state: %v", err)
+	}
+	dismissed, _, err := repo.GetForOwner(ctx, creator, taskID)
+	if err != nil {
+		t.Fatalf("read detail after terminal transition: %v", err)
+	}
+	if !dismissed.UpdatedAt.After(marker) {
+		t.Fatalf("terminal transition: updated_at did not advance: before=%s after=%s", marker, dismissed.UpdatedAt)
+	}
+	marker = dismissed.UpdatedAt
+	if err := runner.Run(ctx, func(sc domain.WriteScope) error {
+		changed, err := repo.Dismiss(ctx, sc.Tx(), creator, taskID)
+		if err == nil && !changed {
+			return errors.New("dismissal of a terminal owned task was unexpectedly rejected")
+		}
+		return err
+	}); err != nil {
+		t.Fatalf("dismiss task: %v", err)
+	}
+	afterDismiss, _, err := repo.GetForOwner(ctx, creator, taskID)
+	if err != nil {
+		t.Fatalf("read detail after dismissal: %v", err)
+	}
+	if !afterDismiss.UpdatedAt.After(marker) {
+		t.Fatalf("dismissal: updated_at did not advance: before=%s after=%s", marker, afterDismiss.UpdatedAt)
+	}
+	var dismissedAt *time.Time
+	if err := owner.QueryRow(ctx,
+		`SELECT dismissed_at FROM creation_generation_tasks WHERE id = $1`, taskID).Scan(&dismissedAt); err != nil {
+		t.Fatalf("read dismissed_at: %v", err)
+	}
+	if dismissedAt == nil {
+		t.Fatal("dismissal did not stamp dismissed_at")
 	}
 }
