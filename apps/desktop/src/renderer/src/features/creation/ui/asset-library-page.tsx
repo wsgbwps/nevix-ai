@@ -159,20 +159,24 @@ export function AssetLibraryPage({
             )}
           </div>
         ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={t('assets.selection.enter')}
-                onClick={selection.begin}
-              >
-                <ListChecksIcon aria-hidden />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t('assets.selection.enter')}</TooltipContent>
-          </Tooltip>
+          // Holds the batch toolbar's row — h-8 buttons in a 1px border and 2px
+          // padding. The two drift apart silently: keep them equal.
+          <div className="flex min-h-9.5 items-center">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={t('assets.selection.enter')}
+                  onClick={selection.begin}
+                >
+                  <ListChecksIcon aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('assets.selection.enter')}</TooltipContent>
+            </Tooltip>
+          </div>
         )}
       </div>
 
