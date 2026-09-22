@@ -571,13 +571,16 @@ for (const viewport of [
 // and the 12px gap. At the 960px minimum window that is 214px against the 289px
 // the labels need, and the toolbar is `justify-end`, so 55px of the action group
 // painted over the filters. Nothing about a toolbar may cover a filter, so the
-// group's left edge is the assertion, not the toolbar's — and the box is exactly
-// 288px at 1034 and 289px at 1035, which is the pixel the labels switch at.
+// group's left edge is the assertion, not the toolbar's.
+//
+// Only the ends are pinned. Where the labels switch over is a few pixels of
+// filter-strip width away from here, and that width is whatever font the runner
+// resolves — a narrower strip leaves the toolbar a wider box, and the labels are
+// right to stay up in it. So these widths are chosen clear of the switch, and
+// the classes' own numbers (289 and 214) come from measuring the shipped stack.
 for (const viewport of [
   { width: 960, height: 600, labels: false },
   { width: 1000, height: 700, labels: false },
-  { width: 1034, height: 700, labels: false },
-  { width: 1035, height: 700, labels: true },
   { width: 1280, height: 800, labels: true }
 ]) {
   test(`the batch actions clear the filter strip at ${viewport.width}`, async ({ mount, page }) => {
