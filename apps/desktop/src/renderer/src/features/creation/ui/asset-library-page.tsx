@@ -159,20 +159,22 @@ export function AssetLibraryPage({
             )}
           </div>
         ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={t('assets.selection.enter')}
-                onClick={selection.begin}
-              >
-                <ListChecksIcon aria-hidden />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t('assets.selection.enter')}</TooltipContent>
-          </Tooltip>
+          <div className="flex min-h-9.5 items-center">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={t('assets.selection.enter')}
+                  onClick={selection.begin}
+                >
+                  <ListChecksIcon aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('assets.selection.enter')}</TooltipContent>
+            </Tooltip>
+          </div>
         )}
       </div>
 
