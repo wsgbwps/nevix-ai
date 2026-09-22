@@ -9,23 +9,15 @@ import type {
 const PAGE_SIZE = 24
 
 export interface InspirationFilters {
-  readonly mediaType: '' | 'image' | 'video'
-  readonly creator: string
-  readonly search: string
+  readonly mediaType: 'image' | 'video'
 }
 
 function request(filters: InspirationFilters, cursor: string | null): InspirationPageRequest {
   return {
     cursor,
-    mediaType: filters.mediaType || undefined,
-    creator: filters.creator.trim() || undefined,
-    search: filters.search.trim() || undefined,
+    mediaType: filters.mediaType,
     limit: PAGE_SIZE
   }
-}
-
-export function hasInspirationFilters(filters: InspirationFilters): boolean {
-  return Boolean(filters.mediaType || filters.creator.trim() || filters.search.trim())
 }
 
 export function useInspiration(
@@ -39,7 +31,6 @@ export function useInspiration(
   readonly submittedFilters: InspirationFilters
   readonly loadMore: () => void
   readonly submit: (filters: InspirationFilters) => void
-  readonly clear: () => void
   readonly retry: () => void
   readonly refresh: () => void
 } {
@@ -64,7 +55,6 @@ export function useInspiration(
     submittedFilters,
     loadMore: pages.loadMore,
     submit,
-    clear: () => submit(initialFilters),
     retry: pages.reset,
     refresh: pages.refresh
   }

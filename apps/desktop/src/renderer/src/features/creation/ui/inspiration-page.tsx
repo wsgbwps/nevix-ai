@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { DownloadIcon, SearchIcon, WandSparklesIcon } from 'lucide-react'
+import { DownloadIcon, WandSparklesIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import {
   Dialog,
@@ -10,7 +10,6 @@ import {
   DialogHeader,
   DialogTitle
 } from '../../../components/ui/dialog'
-import { Input } from '../../../components/ui/input'
 import type {
   InspirationDetailView,
   InspirationItem,
@@ -18,16 +17,13 @@ import type {
   PublicationView
 } from '../api/inspiration-http'
 import type { MediaAssetView, RestrictionState } from '../api/asset-library-http'
-import {
-  hasInspirationFilters,
-  useInspiration,
-  type InspirationFilters
-} from '../model/use-inspiration'
+import { useInspiration, type InspirationFilters } from '../model/use-inspiration'
 import { AssetMedia, type MediaPreviewView } from './asset-media'
 import { LoadMoreSentinel } from './load-more-sentinel'
 import type { AssetContentPort } from './use-asset-content'
 
-const initialFilters: InspirationFilters = { mediaType: '', creator: '', search: '' }
+const mediaTypes = ['image', 'video'] as const
+const initialFilters: InspirationFilters = { mediaType: 'image' }
 const gap = 2
 const minimumColumnWidth = 170
 const columnHeightTolerance = 12
@@ -547,7 +543,6 @@ export function InspirationPage({
   onCreateSimilar
 }: InspirationPageProps): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const [filters, setFilters] = useState(initialFilters)
   const list = useInspiration(ports, initialFilters)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [selected, setSelected] = useState<InspirationItem | null>(null)
@@ -598,52 +593,27 @@ export function InspirationPage({
       <header className="px-page pt-6 pb-3">
         {/* The surface is its own title; the heading carries the a11y landmark. */}
         <h1 className="sr-only">{t('inspiration.title')}</h1>
-        <form
-          className="grid grid-cols-2 gap-2 sm:grid-cols-[7rem_minmax(8rem,1fr)_minmax(10rem,2fr)_auto]"
-          onSubmit={(event) => {
-            event.preventDefault()
-            // A narrower result would leave the sentinel in reach and append unasked.
-            scrollRef.current?.scrollTo({ top: 0 })
-            list.submit(filters)
-          }}
-        >
-          <select
-            aria-label={t('inspiration.filters.media')}
-            value={filters.mediaType}
-            onChange={(event) => {
-              const mediaType = event.currentTarget.value as InspirationFilters['mediaType']
-              setFilters((value) => ({ ...value, mediaType }))
-            }}
-            className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-          >
-            <option value="">{t('assets.filters.all')}</option>
-            <option value="image">{t('assets.media.image')}</option>
-            <option value="video">{t('assets.media.video')}</option>
-          </select>
-          <Input
-            aria-label={t('inspiration.filters.creator')}
-            placeholder={t('inspiration.filters.creator')}
-            value={filters.creator}
-            onChange={(event) => {
-              const creator = event.currentTarget.value
-              setFilters((value) => ({ ...value, creator }))
-            }}
-          />
-          <Input
-            data-testid="inspiration-search"
-            aria-label={t('inspiration.filters.search')}
-            placeholder={t('inspiration.filters.searchHint')}
-            value={filters.search}
-            onChange={(event) => {
-              const search = event.currentTarget.value
-              setFilters((value) => ({ ...value, search }))
-            }}
-          />
-          <Button type="submit">
-            <SearchIcon aria-hidden />
-            {t('assets.filters.submit')}
-          </Button>
-        </form>
+        <div role="group" aria-label={t('inspiration.filters.media')} className="flex gap-1">
+          {mediaTypes.map((mediaType) => {
+            const active = list.submittedFilters.mediaType === mediaType
+            return (
+              <Button
+                key={mediaType}
+                type="button"
+                size="sm"
+                variant={active ? 'secondary' : 'ghost'}
+                aria-pressed={active}
+                className={active ? '' : 'text-muted-foreground font-normal'}
+                onClick={() => {
+                  scrollRef.current?.scrollTo({ top: 0 })
+                  list.submit({ mediaType })
+                }}
+              >
+                {t(`assets.media.${mediaType}`)}
+              </Button>
+            )
+          })}
+        </div>
       </header>
       <div ref={scrollRef} className="px-page min-h-0 flex-1 overflow-auto py-0.5">
         {list.status === 'loading' ? (
@@ -661,23 +631,7 @@ export function InspirationPage({
           <>
             {list.items.length === 0 ? (
               <div className="space-y-2 p-5" role="status">
-                <p>
-                  {hasInspirationFilters(list.submittedFilters)
-                    ? t('inspiration.noResults')
-                    : t('inspiration.empty')}
-                </p>
-                {hasInspirationFilters(list.submittedFilters) ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setFilters(initialFilters)
-                      scrollRef.current?.scrollTo({ top: 0 })
-                      list.clear()
-                    }}
-                  >
-                    {t('inspiration.clearFilters')}
-                  </Button>
-                ) : null}
+                <p>{t('inspiration.noResults')}</p>
               </div>
             ) : (
               <InspirationWall items={list.items} ports={ports} onOpen={open} />
