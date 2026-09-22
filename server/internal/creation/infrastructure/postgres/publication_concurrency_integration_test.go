@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nevix-ai/server/internal/authz"
+	"github.com/nevix-ai/server/internal/creation/application"
 	"github.com/nevix-ai/server/internal/creation/domain"
 	"github.com/nevix-ai/server/internal/creation/infrastructure/writetx"
 	"github.com/nevix-ai/server/internal/migration"
@@ -263,6 +265,32 @@ func TestPublicationProjectionAndFinalRetention(t *testing.T) {
 				t.Fatalf("terminal cleanup attempts=%d err=%v", attempts, err)
 			}
 		})
+	}
+}
+
+func TestAdminAssetMediaResolutionDoesNotDependOnHistoricalReferences(t *testing.T) {
+	ownerURL, runtimeURL := requireIntegrationEnv(t)
+	ctx := context.Background()
+	if _, err := migration.Apply(ctx, ownerURL); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	owner := openPublicationPool(t, ctx, ownerURL)
+	defer owner.Close()
+	runtime := openPublicationPool(t, ctx, runtimeURL)
+	defer runtime.Close()
+	fixture := newPublicationFixture(t, ownerURL, owner, true)
+	if _, err := owner.Exec(ctx, `DELETE FROM creation_generation_task_references WHERE task_id = $1`, fixture.taskID); err != nil {
+		t.Fatalf("remove historical retention row: %v", err)
+	}
+
+	repo := NewTeamPublicationRepository(runtime)
+	if _, err := repo.GetAdminAsset(ctx, fixture.assetID); !errors.Is(err, domain.ErrAssetNotFound) {
+		t.Fatalf("fixture must reproduce broken detail history: %v", err)
+	}
+	service := application.NewPublicationService(repo, nil, nil, nil)
+	asset, err := service.ResolveAdminAsset(ctx, authz.Principal{UserID: fixture.creator.String(), Role: "admin"}, fixture.assetID)
+	if err != nil || asset.ID != fixture.assetID || asset.BlobKey != fixture.resultBlobKey {
+		t.Fatalf("resolve independent asset media: asset=%+v err=%v", asset, err)
 	}
 }
 

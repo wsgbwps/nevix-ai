@@ -148,8 +148,7 @@ func (s *PublicationService) ResolveAdminAsset(ctx context.Context, principal au
 	if principal.Role != "admin" {
 		return domain.MediaAsset{}, domain.ErrAssetNotFound
 	}
-	detail, err := s.repository.GetAdminAsset(ctx, id)
-	return detail.Asset, err
+	return s.repository.GetAdminAssetMedia(ctx, id)
 }
 
 func (s *PublicationService) Withdraw(ctx context.Context, principal authz.Principal, id domain.UUID) error {

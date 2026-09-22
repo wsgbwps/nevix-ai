@@ -73,6 +73,7 @@ type PublicationRepository interface {
 	ListInspiration(ctx context.Context, admin bool, filter AssetListFilter, cursor *CompoundCursor, limit int) ([]InspirationItem, *CompoundCursor, error)
 	GetPublication(ctx context.Context, id UUID, admin bool) (PublicationDetail, error)
 	GetAdminAsset(ctx context.Context, id UUID) (AdminAssetDetail, error)
+	GetAdminAssetMedia(ctx context.Context, id UUID) (MediaAsset, error)
 	Withdraw(ctx context.Context, tx TxExecutor, actor, id UUID, admin bool) error
 	CreateSimilar(ctx context.Context, tx TxExecutor, actor, id UUID, idempotencyKey string) (SimilarCreation, bool, error)
 	GetPublicationReference(ctx context.Context, publicationID, referenceID UUID, admin bool) (PublicationReference, error)
