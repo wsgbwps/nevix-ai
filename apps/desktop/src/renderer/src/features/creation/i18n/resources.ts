@@ -97,9 +97,7 @@ export const creationTranslations = defineResourceTranslations({
         title: '灵感',
         loading: '正在读取灵感…',
         loadFailed: '无法读取灵感。',
-        empty: '还没有可浏览的灵感。',
         noResults: '没有符合当前筛选的内容。',
-        clearFilters: '清除筛选',
         pagination: '灵感分页',
         open: '打开灵感 {{id}}',
         detailTitle: '灵感详情',
@@ -141,10 +139,7 @@ export const creationTranslations = defineResourceTranslations({
           }
         },
         filters: {
-          media: '媒体类型',
-          creator: '发布者',
-          search: '搜索',
-          searchHint: '发布者名称或内容 ID'
+          media: '媒体类型'
         },
         status: {
           published: '已发布',
@@ -670,9 +665,7 @@ export const creationTranslations = defineResourceTranslations({
         title: 'Inspiration',
         loading: 'Loading Inspiration…',
         loadFailed: 'Inspiration could not be loaded.',
-        empty: 'There is no Inspiration to browse yet.',
         noResults: 'No content matches these filters.',
-        clearFilters: 'Clear filters',
         pagination: 'Inspiration pages',
         open: 'Open inspiration {{id}}',
         detailTitle: 'Inspiration details',
@@ -716,10 +709,7 @@ export const creationTranslations = defineResourceTranslations({
           }
         },
         filters: {
-          media: 'Media type',
-          creator: 'Publisher',
-          search: 'Search',
-          searchHint: 'Publisher name or content ID'
+          media: 'Media type'
         },
         status: {
           published: 'Published',

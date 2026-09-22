@@ -118,23 +118,31 @@ test('releasing a deleted-source publication removes its historical detail', asy
   await expect(page.getByTestId('inspiration-card')).toHaveCount(0)
 })
 
-test('filters use the single projection and distinguish search-no-results', async ({
-  mount,
-  page
-}) => {
-  await mount(<InspirationStory />)
-  await page.getByLabel('Media type').selectOption('image')
-  await page.getByLabel('Publisher').fill('Aster')
-  const search = page.getByTestId('inspiration-search')
-  await expect(search).toHaveAccessibleName('Search')
-  await search.fill('none')
-  await page.getByRole('button', { name: 'Search', exact: true }).click()
+test('filters by media type with the asset-library buttons', async ({ mount, page }) => {
+  await mount(<InspirationStory state="empty" />)
+  const group = page.getByRole('group', { name: 'Media type' })
+  const image = group.getByRole('button', { name: 'Image' })
+  const video = group.getByRole('button', { name: 'Video' })
+  await expect(group.getByRole('button')).toHaveCount(2)
+  await expect(image).toHaveAttribute('aria-pressed', 'true')
+  await expect(video).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByText('No content matches these filters.')).toBeVisible()
   await expect
     .poll(() => page.evaluate(() => window.__inspirationTest?.listCalls().at(-1)))
-    .toMatchObject({ mediaType: 'image', creator: 'Aster', search: 'none' })
-  await page.getByRole('button', { name: 'Clear filters' }).click()
-  await expect(page.getByTestId('inspiration-card')).toHaveCount(1)
+    .toEqual({ cursor: null, mediaType: 'image', limit: 24 })
+
+  const callsBeforeSwitch = await page.evaluate(
+    () => window.__inspirationTest?.listCalls().length ?? 0
+  )
+  await video.click()
+  await expect(video).toHaveAttribute('aria-pressed', 'true')
+  await expect(image).toHaveAttribute('aria-pressed', 'false')
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.listCalls().at(-1)))
+    .toEqual({ cursor: null, mediaType: 'video', limit: 24 })
+  expect(await page.evaluate(() => window.__inspirationTest?.listCalls().length ?? 0)).toBe(
+    callsBeforeSwitch + 1
+  )
 })
 
 test('loading errors expose one retry surface', async ({ mount, page }) => {
