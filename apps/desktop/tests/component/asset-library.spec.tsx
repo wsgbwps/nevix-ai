@@ -483,28 +483,36 @@ test('a refresh after a mutation re-reads every loaded page, not just the first'
     .toEqual([null, 'next', null, 'next'])
 })
 
-// Entering the mode swaps a lone 32px icon button for the batch toolbar's 38px
-// row (32px buttons in a 1px border + 2px padding), so the idle side reserves
-// that row: the wall would otherwise jump 6px the moment the mode is entered.
-// Only one row is covered here — at 960 the toolbar is too wide to share a row
-// with the filters, and the header wraps to a second row, which is a reflow of
-// the whole header rather than this mismatch.
-test('entering batch mode leaves the wall where it was', async ({ mount, page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 })
-  await mount(<AssetLibraryStory />)
-  const wall = page.getByTestId('asset-library').locator('> div').nth(1)
-  const card = page.getByTestId('asset-card').first()
-  await expect(card).toBeVisible()
+// Entering the mode swaps a lone 32px icon button for a batch toolbar whose
+// row is 38px (32px buttons in a 1px border and 2px padding), and at the
+// minimum window the row is also 848px wide against a 366px filter bar plus a
+// 519px toolbar — so the header has both a height and a width it must not
+// grow past here. The wall below is `flex-1` in that column, which is what
+// turns either growth into a 6px or 44px jump under the pointer.
+for (const viewport of [
+  { width: 960, height: 600 },
+  { width: 1280, height: 800 }
+]) {
+  test(`entering batch mode leaves the wall where it was at ${viewport.width}`, async ({
+    mount,
+    page
+  }) => {
+    await page.setViewportSize(viewport)
+    await mount(<AssetLibraryStory />)
+    const wall = page.getByTestId('asset-library').locator('> div').nth(1)
+    const card = page.getByTestId('asset-card').first()
+    await expect(card).toBeVisible()
 
-  const top = async (locator: Locator): Promise<number> =>
-    (await locator.boundingBox())?.y ?? Number.NaN
-  const before = { wall: await top(wall), card: await top(card) }
+    const top = async (locator: Locator): Promise<number> =>
+      (await locator.boundingBox())?.y ?? Number.NaN
+    const before = { wall: await top(wall), card: await top(card) }
 
-  await page.getByRole('button', { name: 'Batch actions' }).click()
-  await expect(page.getByTestId('batch-toolbar')).toBeVisible()
+    await page.getByRole('button', { name: 'Batch actions' }).click()
+    await expect(page.getByTestId('batch-toolbar')).toBeVisible()
 
-  expect({
-    wall: (await top(wall)) - before.wall,
-    card: (await top(card)) - before.card
-  }).toEqual({ wall: 0, card: 0 })
-})
+    expect({
+      wall: (await top(wall)) - before.wall,
+      card: (await top(card)) - before.card
+    }).toEqual({ wall: 0, card: 0 })
+  })
+}

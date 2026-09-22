@@ -90,6 +90,10 @@ export function AssetLibraryPage({
             total: status.total
           })
   const selectionSize = selection.selection.size
+  const selectionStatus = batchProgress ?? t('assets.selection.count', { count: selectionSize })
+  // One control either way: leaving the mode, or ending the run that holds it.
+  const modeExit =
+    running === null ? t('assets.selection.exit') : t('assets.batch.cancel', { action })
 
   const apply = (next: AssetFilters): void => {
     setFilters(next)
@@ -105,9 +109,21 @@ export function AssetLibraryPage({
         <h1 className="sr-only">{t('assets.title')}</h1>
         <AssetLibraryFilters filters={filters} facets={list.facets} onChange={apply} />
         {selection.selecting ? (
-          <div data-testid="batch-toolbar" className="flex flex-wrap items-center gap-2">
-            <p className="text-muted-foreground text-sm" role="status" aria-live="polite">
-              {batchProgress ?? t('assets.selection.count', { count: selectionSize })}
+          // Sits on the filters' row at every width the window allows (a zero
+          // basis never wraps): the filters keep their size, the actions keep
+          // theirs, and the status is what gives — a second row here would push
+          // the wall down the moment the mode is entered.
+          <div
+            data-testid="batch-toolbar"
+            className="flex min-w-0 flex-1 items-center justify-end gap-2"
+          >
+            <p
+              className="text-muted-foreground min-w-0 truncate text-sm"
+              role="status"
+              aria-live="polite"
+              title={selectionStatus}
+            >
+              {selectionStatus}
             </p>
             <div className="border-border flex items-center rounded-lg border p-0.5">
               <Button
@@ -146,17 +162,22 @@ export function AssetLibraryPage({
                 {t('assets.batch.publish')}
               </Button>
             </div>
-            {running === null ? (
-              <Button type="button" size="sm" variant="ghost" onClick={selection.exit}>
-                <XIcon aria-hidden />
-                {t('assets.selection.exit')}
-              </Button>
-            ) : (
-              <Button type="button" size="sm" variant="ghost" onClick={selection.cancel}>
-                <XIcon aria-hidden />
-                {t('assets.batch.cancel', { action })}
-              </Button>
-            )}
+            {/* Icon-only to leave room for the status on one row, and the
+                mirror of the icon-only control that enters the mode. */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={modeExit}
+                  onClick={running === null ? selection.exit : selection.cancel}
+                >
+                  <XIcon aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{modeExit}</TooltipContent>
+            </Tooltip>
           </div>
         ) : (
           // Holds the batch toolbar's row — h-8 buttons in a 1px border and 2px
