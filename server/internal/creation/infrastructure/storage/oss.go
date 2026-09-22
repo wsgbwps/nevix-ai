@@ -118,7 +118,7 @@ func (s *ossStore) Head(ctx context.Context, key string) (domain.BlobInfo, error
 	result, err := s.client.HeadObject(ctx, &oss.HeadObjectRequest{
 		Bucket: oss.Ptr(s.location.Bucket),
 		Key:    oss.Ptr(key),
-	})
+	}, withReadRetries)
 	if err != nil {
 		return domain.BlobInfo{}, safeOSSError("head", err)
 	}
@@ -145,13 +145,17 @@ func (s *ossStore) Open(ctx context.Context, key string, rng domain.BlobRange) (
 			Key:           oss.Ptr(key),
 			Range:         oss.Ptr(rawRange),
 			RangeBehavior: oss.Ptr("standard"),
-		})
+		}, withReadRetries)
 		if getErr != nil {
 			return nil, safeOSSError("open", getErr)
 		}
 		return result.Body, nil
 	})
 	return window, info.ByteSize, nil
+}
+
+func withReadRetries(options *oss.Options) {
+	options.RetryMaxAttempts = oss.Ptr(4)
 }
 
 func (s *ossStore) Delete(ctx context.Context, key string) error {
