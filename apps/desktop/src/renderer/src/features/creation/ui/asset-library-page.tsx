@@ -159,6 +159,8 @@ export function AssetLibraryPage({
             )}
           </div>
         ) : (
+          // Holds the batch toolbar's row — h-8 buttons in a 1px border and 2px
+          // padding. The two drift apart silently: keep them equal.
           <div className="flex min-h-9.5 items-center">
             <Tooltip>
               <TooltipTrigger asChild>
