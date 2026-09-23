@@ -74,9 +74,7 @@ test('signed-in users reach one focused Settings Section and return to its App s
       await launched.page.getByRole('button', { name: '返回应用' }).click()
       await expect(launched.page.getByRole('heading', { name: '灵感' })).toBeVisible()
       await expect(launched.page.getByRole('heading', { name: '设置' })).toHaveCount(0)
-      await expect(
-        launched.page.getByRole('main').getByRole('button', { name: '切换侧边栏' })
-      ).toBeVisible()
+      await expect(launched.page.locator('[data-slot="sidebar-trigger"]')).toBeVisible()
     } finally {
       await launched.electronApp.close()
     }

@@ -130,6 +130,9 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
       await expect(homeEntry).toHaveCount(0)
       await expect(brand).toBeHidden()
       await expect(sidebar.getByTestId('session-new')).toBeVisible()
+      await expect
+        .poll(() => launched.page.evaluate(() => localStorage.getItem('sidebar_state')))
+        .toBe('false')
 
       // 图标栏落定后，品牌标记居中，开关覆盖它的位置且默认隐藏。
       const rail = sidebar.locator('[data-slot="sidebar-container"]')
@@ -153,7 +156,7 @@ test('the sidebar collapses to an icon rail and expands again', async () => {
         expect(createBox.y + createBox.height).toBeLessThanOrEqual(listBox.y)
       }
 
-      // 路由各自重建 AppShell；设备侧边栏状态仍由已有 cookie 恢复。
+      // 路由各自重建 AppShell；设备侧边栏状态仍由本地存储恢复。
       await sidebar.locator('[href="/assets"]').click()
       await expect(launched.page.getByRole('heading', { name: '资产' })).toBeVisible()
       await expect(sidebar).toHaveAttribute('data-state', 'collapsed')

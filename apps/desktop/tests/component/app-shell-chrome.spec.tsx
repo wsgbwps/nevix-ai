@@ -15,7 +15,7 @@ async function mountShell(
   page: Page
 ): Promise<void> {
   await page.evaluate(() => {
-    document.cookie = 'sidebar_state=; path=/; max-age=0'
+    localStorage.removeItem('sidebar_state')
   })
   await mount(<CreationWorkbenchRealShellStory sessions={sessions} />)
 }
