@@ -71,6 +71,9 @@ func TestAssetDisplayURLsAuthorizeTheOwningCreatorOnly(t *testing.T) {
 					t.Fatalf("wall grant is not the fixed 320px WebP variant: %s", grant.URL)
 				}
 			case "preview-url":
+				// The fake store encodes the kind rather than the resize chain,
+				// so this pins the purpose routing only; the 2048px chain itself
+				// is asserted against the real adapter in the OSS conformance suite.
 				if !strings.Contains(grant.URL, "kind=image") {
 					t.Fatalf("detail grant is not the image preview variant: %s", grant.URL)
 				}
