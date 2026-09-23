@@ -7,24 +7,35 @@
 
 ## 结论
 
-60 次路由进入（30 cold + 30 warm）× 2 个阶段 = 120 次测量，全部达标，样本中
-零媒体加载失败。
+60 次路由进入（30 cold + 30 warm）× 2 个阶段 = 120 次测量，四个目标全部达标，
+样本中零媒体加载失败。
+
+**先读这句再读表格：表中的数字是在非代表性图片资产上测到的，而 `unavailable` 与
+320px 可辨认性两项没有拿到。** 具体地——图片是假 Kapon 的渐变测试图（每条 300 字节），
+真实产物的网络分量会明显更大（见「已知边界 1」），所以这四个"达标"说明的是**链路机制
+与量级余量**，不是真实资产下的最终余量。另有 criterion 3、8、11 三项为 PARTIAL，理由
+各自记在下面与「已知边界」。
 
 | 阶段 | 目标 | n | p75 | p95 | 结论 |
 | --- | --- | --- | --- | --- | --- |
-| 页面框架/卡片 | p75 ≤ 500ms | 60 | 47ms | 48ms | PASS |
-| 首个首屏预览 | p75 ≤ 1.0s, p95 ≤ 1.5s | 60 | 77ms | 80ms | PASS |
-| 全部首屏预览 | p75 ≤ 1.5s, p95 ≤ 2.5s | 60 | 87ms | 92ms | PASS |
+| 页面框架/卡片 | p75 ≤ 500ms | 60 | 46ms | 49ms | PASS |
+| 首个首屏预览 | p75 ≤ 1.0s, p95 ≤ 1.5s | 60 | 77ms | 79ms | PASS |
+| 全部首屏预览 | p75 ≤ 1.5s, p95 ≤ 2.5s | 60 | 87ms | 94ms | PASS |
 | 悬停到画面运动 | p75 ≤ 1.0s, p95 ≤ 2.5s | 60 | 1ms | 2ms | PASS |
 
-视频观测（无目标值）：`loadedmetadata` p75 84ms / p95 87ms，`loadeddata`
-p75 84ms / p95 87ms。两者几乎同时，说明这段视频的索引与首帧在同一次取回里就绪。
+视频观测（无目标值）：`loadedmetadata` p75 83ms / p95 85ms，`loadeddata`
+p75 83ms / p95 86ms。两者几乎同时，说明这段视频的索引与首帧在同一次取回里就绪。
 
 **悬停到运动只有 1ms 不是测量失效，而是设计意图的直接结果。** 视频墙的卡片在
-`loadeddata` 到达时已经把首帧解码好（上面 84ms），用户悬停时元素 `readyState`
+`loadeddata` 到达时已经把首帧解码好（上面 83ms），用户悬停时元素 `readyState`
 已 ≥ 2，`play()` 在已缓冲的数据上立即兑现 `playing`。两端都是页面自身的时间戳
 （卡片 `pointerenter`、元素 `playing`），中间没有 Playwright 往返。这个数字说明的
 是"墙稳定后悬停"，见「已知边界」。
+
+这个测量不是空转的，报告本身可证：60 个视频阶段全部产生了悬停样本（没有一张视频卡
+从未被悬停），**60 个 delta 全部为正**（没有一次 `playing` 先于 `pointerenter`，
+即墙面视频没有在悬停前自行播放），实测区间 0.80–1.70ms；并且 60/60 张卡的
+`loadeddata` 都严格早于 `hoverEnteredAt`，也就是上面解释的机制在数据里成立。
 
 ## 被测链路
 
@@ -84,10 +95,10 @@ URL 在那条路径上根本不存在，所以 E2E 套件里不可能测量这�
 
 | 资源类型 | 响应数 | 状态 | 总字节 | 每条均字节 |
 | --- | --- | --- | --- | --- |
-| `media`（视频墙） | 26 | 206 | 1036594 | 39869 |
+| `media`（视频墙） | 25 | 206 | 996725 | 39869 |
 | `image`（320px 图片墙） | 208 | 200 | 62400 | 300 |
 
-- 26 条视频响应全部带 `Range: bytes=0-`，全部回 206，`Content-Range` 只有一种取值：
+- 25 条视频响应全部带 `Range: bytes=0-`，全部回 206，`Content-Range` 只有一种取值：
   `bytes 0-39868/39869`。即 Chromium 每次取回的是整段原始 MP4 的**一次**分段
   GET，没有多段、没有先取头部再回头补尾部。
 - 每条视频响应恰好 39869 字节，与 `scripts/dev/fixtures/video-with-audio.mp4`
@@ -95,12 +106,16 @@ URL 在那条路径上根本不存在，所以 E2E 套件里不可能测量这�
 - 208 条图片响应全部是 200（不是 206），每条 300 字节，全部来自
   `nevix-dev.oss-cn-guangzhou.aliyuncs.com`，即图片墙走的是 OSS 响应期转换出的
   320px WebP，而不是原件。
-- 60 个视频阶段只产生 26 条网络响应：warm 阶段命中 Chromium 缓存，cold 阶段的
-  一部分也没有产生新的网络响应。**这里只报告观测计数，不解释成因**；26 条 206
-  已经是真实网络取回的证据。
+- 60 个视频阶段只产生 25 条网络响应，60 个图片阶段产生 208 条。**这些计数没有按阶段
+  标注**（抓包是一个扁平列表），所以下面是算术而不是观测：若 warm 阶段都命中缓存，则
+  25 条意味着 30 个 cold 视频阶段里有约 5 个没有产生新响应，208 条意味着 cold 图片入口
+  平均约 6.9 张（首屏约 8 张）。也就是说 cold/warm 的区分在图片上看起来是干净的，在视频
+  上不是完全的——`clearCache()` 清的是 HTTP 缓存，Chromium 的媒体缓存在其之外，这一点
+  没有被消除。因此"每个 cold 视频阶段都必定重新取回原始视频"**不能**由本样本断言；能
+  断言的是 25 次 206 真实发生过。
 
 这同时证明 **Range 没有参与预签名的签名**：若签名把 `Range` 固定进签名头，浏览器
-自行加上 `Range: bytes=0-` 的请求会因签名不匹配被 OSS 拒签，而 26 条全部被正常
+自行加上 `Range: bytes=0-` 的请求会因签名不匹配被 OSS 拒签，而 25 条全部被正常
 应答 206。这与 `server/internal/creation/infrastructure/storage/oss.go` 对任何已
 签名头 fail-closed 的立场互为印证。
 
@@ -118,14 +133,16 @@ URL 在那条路径上根本不存在，所以 E2E 套件里不可能测量这�
 | 品牌 | `isom` |
 | 采样描述 | `avc1`（H.264）+ `mp4a`（AAC） |
 
-因此本基准测到的 `loadedmetadata` p75 84ms **不能归因于尾部 `moov`**：索引就在文件开头，
+因此本基准测到的 `loadedmetadata` p75 83ms **不能归因于尾部 `moov`**：索引就在文件开头，
 浏览器不需要额外的尾部读取。criterion 10 要求的归因在这里的结论是"不适用"——而这是
 一个被检验过的"不适用"，不是没查。
 
-检查器本身非空转：把同一个文件重排为 `ftyp free mdat moov`（并按位移量 -3633 重写 49 个
-`stco` 项）后，`inspect-mp4.mjs` 报 `moovPlacement: "trailing"`、`moovOffset: 36236`，
-采样描述仍是 `avc1`/`mp4a`——它读的是真实 box 布局，不是文件名或扩展名。该变体只用于
-验证检查器，不是基准资产，因此没有提交。
+检查器本身非空转，而且这一步可以复跑：`derive-trailing-moov.mjs` 把同一个文件重排为
+`ftyp free mdat moov`（`mdat` 从 3673 移到 40，按位移量 -3633 重写 49 个 `stco` 项，
+文件长度不变），再跑检查器得到 `moovPlacement: "trailing"`、`moovOffset: 36236`、
+采样描述仍是 `avc1`/`mp4a`。也就是说它读的是真实 box 布局，不是文件名或扩展名——如果它
+对任何输入都报"前置"，criterion 10 的检查就没有意义。该变体只用于验证检查器，不是基准
+资产，因此派生物本身不提交，派生工具提交。
 
 ## 高 DPR 目视检查（criterion 11）
 
@@ -156,31 +173,37 @@ criterion 11 的升级路径很小：把种子换成真实生成的图片产物�
 然后重新进入墙面。结果是：
 
 - 卡片进入显式的 `媒体加载失败` 状态并出现 `重试` 按钮；
-- 每个资产的授权尝试次数有界（≤ 4），不是无限循环；
+- 每个资产的授权尝试次数落在 2–4 之间：**下界 2** 就是自动重新授权确实发生了，
+  上界说明它不是重试循环；
 - 移除拦截后点击 `重试`，重试确实发起了新的授权，卡片渲染出真实的 OSS 授权图片。
 
-"恰好一次自动重新授权"这一计数没有在这里断言：renderer 会重放 effect，单张卡每次
-尝试可能发两次请求，精确计数不稳定。该预算由
-`apps/desktop/tests/component/asset-library.spec.tsx` 确定性地覆盖。
+"恰好一次"这个精确计数没有在这里断言：renderer 会重放 effect，单张卡每次尝试可能发
+两次请求，精确计数不稳定——断言一个会随框架行为漂移的数字，比断言区间更容易假装通过。
+该预算由 `apps/desktop/tests/component/asset-library.spec.tsx` 确定性地覆盖。
 
-**通用不可用状态：** 没有在 E2E 墙面上注入，原因是**注入不出来**。我实测过：对
-`/creation/assets/{id}/thumbnail-url` 永久回 403，卡片观测序列是
-`正在加载媒体… → 媒体加载失败重试`，`媒体不可用` 从未渲染，同时伴随大量客户端
-`net::ERR_ABORTED`（Playwright 侧看到 `<- 0`，且全程没有 OPTIONS，即不存在 CORS 预检）。
-机制是产品自身的行为：`unavailable` 会触发列表重读，重读后的列表**仍然列出该资产**
-（合成 403 没有改变 Server 事实），于是卡片重新授权、再次被拒——墙面无法收敛，每次
-重挂载都取消上一个在途请求。
+**通用不可用状态：本次没有在真实链路上取得证据，这里如实记录失败的努力。**
 
-换句话说，"显示 URL 永远拒绝、但列表永远返回该资产"不是一个可达的 Server 状态。
-产品规格假定的收敛前提（被拒即意味着资产已不可见，重读后不再出现）在这里被人为破坏。
+尝试过的做法是对 `/creation/assets/{id}/thumbnail-url` 的 GET 用 `route.fulfill`
+注入 403。**这次尝试没有成功，而且不能说明产品的行为**：注入的响应没有以 403 到达页面
+——Playwright 侧看到的是 `<- GET 0` 与成片的 `net::ERR_ABORTED`，即请求在拿到可读响应
+之前就被客户端取消了（全程没有 OPTIONS，所以不是 CORS 预检的问题）。卡片最终停在
+`媒体加载失败`（retryable），而按代码 `go-creation-http.ts:205` 的映射，一个**真正被读到**
+的 403 应当走 `forbidden → unavailable`（`use-asset-display.ts:124-131`）。
 
-因此该状态由确定性测试覆盖：`apps/desktop/tests/component/asset-library.spec.tsx:418`
+所以准确的说法是：**"永久 403 在墙面上会怎样"这次没有被测到**，abort 与网络失败才是
+观测到的东西。先前把结论写成"产品在永久拒绝下无法收敛"是把推断当成了观测，已删除。
+重试该实验需要一种能让页面真正读到 403 的注入方式（而不是被取消的那种）。
+
+因此 `unavailable` 的渲染目前只有确定性证据：
+`apps/desktop/tests/component/asset-library.spec.tsx:418`
 `'a gone asset shows the generic unavailable state and refreshes the list'`
 （fixture `displayMode="gone"` → `request-rejected, not_found`）断言 `Media unavailable`
-可见、**没有**重试按钮、且列表被重读。这条测试在 `test:component` 中运行，本分支未改动它。
+可见、**没有**重试按钮、且列表被重读。该测试在 `test:component` 中运行（本分支未改动它），
+已单独复跑通过。它证明的是**组件层**在该 outcome 下渲染正确，不是真实链路会走到那里。
 
-结论：criterion 8 的两个状态都有证据，但它们的证据面不同——`retryable` 在真实链路上
-端到端验证，`unavailable` 由组件层确定性验证。这一点如实记录，不当作两个都在 E2E 里验过。
+结论：criterion 8 只完成了一半多一点——`retryable` 与手工重试恢复在真实链路上端到端
+验证；`unavailable` 只有组件层证据，**真实链路上的可达性未验证**。因此该 criterion 在
+验收里标为 PARTIAL，而不是通过。
 
 ## 复现步骤
 
@@ -196,17 +219,26 @@ node scripts/media-wall-benchmark/inspect-mp4.mjs ../../scripts/dev/fixtures/vid
 `aggregate.mjs` 在任一目标未达标、样本不足 30+30、出现媒体加载失败、或网络证据
 里没有出现 OSS 源时以非零退出，所以绿灯不是靠没人看而通过的。
 
+这四条失败路径不是承诺，是实测过的：把本报告的副本分别构造成「图片阶段慢到 90s」
+「只留 8 条测量」「删掉整个视频阶段」「把所有网络来源改成 127.0.0.1」，四次运行各
+自 exit 1，并分别打印出失败的阶段名、`sample size: cold 4/30`、
+`hoverToPlaying no samples`、`no Aliyun OSS origin observed`。
+
 报告写在 `apps/desktop/test-results/media-wall-benchmark/report.json`。该目录属于
 Playwright 的 `outputDir`，**下一次 Playwright 运行会清空它**；本文件是持久记录。
 
-样本量可用 `NEVIX_BENCHMARK_COLD=2 NEVIX_BENCHMARK_WARM=2` 缩小以便快速验证管线。
+样本量可用 `NEVIX_BENCHMARK_COLD=2 NEVIX_BENCHMARK_WARM=2` 缩小以便快速验证管线。注意
+缩小的运行**应当**被 `aggregate.mjs` 判为失败（`sample size: cold 2/30`）：30+30 是
+criterion 3 的下限，不随运行配置下调，缩小跑是用来确认管线通不通的，不是用来通过验收的。
 
 ## 本分支验证过的门禁
 
 | 检查 | 结果 |
 | --- | --- |
 | `bash apps/desktop/scripts/run-e2e.sh benchmark` | 2 passed（性能样本 + 失败注入），exit 0 |
-| `node …/aggregate.mjs <report>` | 目标全 PASS，样本 30+30，exit 0 |
+| `node …/aggregate.mjs <report>` | 目标全 PASS，样本 30+30，0 失败、0 未决卡片，exit 0 |
+| 同一脚本喂四份构造坏的报告 | 慢阶段 / 样本截断 / 缺视频阶段 / 无 OSS 源，四次都 exit 1 并指出原因 |
+| `derive-trailing-moov.mjs` + `inspect-mp4.mjs` | 派生物报 `trailing`@36236，原文件报 `front-loaded`@32 |
 | `make test-e2e:smoke` | exit 0 — 本分支改动了共享的 `run-e2e.sh`，这是它的回归检查 |
 | `make check` | exit 0（format / lint / verify:architecture / typecheck / test:unit 439 / gofmt / go vet / go test） |
 | `make harness-test` | 53 tests，exit 0 |
@@ -227,7 +259,7 @@ Playwright 的 `outputDir`，**下一次 Playwright 运行会清空它**；本�
    很大（目标 p75 1.0s / p95 1.5s），但**这个余量是推算的，不是测得的**。
    升级路径：用真实产物替换假 Kapon 的测试图后重跑同一基准。
 
-2. **悬停到运动测的是"墙稳定后悬停"。** 卡片在 `loadeddata`（p75 84ms）时已有
+2. **悬停到运动测的是"墙稳定后悬停"。** 卡片在 `loadeddata`（p75 83ms）时已有
    首帧，因此悬停几乎立即出画（p75 1ms）。一个与首次取回**竞速**的悬停——元素
    尚无数据时指针就进入——没有被这个样本覆盖。这是刻意的：产品在近可见时就预取
    元数据，真实用户先看到墙再悬停，这个测量对应的是后者。视频换成数 MB 的真实
@@ -246,3 +278,10 @@ Playwright 的 `outputDir`，**下一次 Playwright 运行会清空它**；本�
 
 6. **报告 JSON 会被下一次 Playwright 运行清空。** 它写在 Playwright 的
    `outputDir` 下；本文件是持久记录，JSON 是当次运行的过程产物。
+
+7. **基准会向真实 bucket 留下对象，而且不做清理。** 每次运行通过真实生成链路创建
+   约 10 个 Media Asset，对象键是产品自己的键（不是 `nevix-smoke/...` 那样的隔离
+   前缀），运行结束后**不会删除**。这偏离了仓库对 `NEVIX_OSS_SMOKE_*` 这组凭据的既有
+   纪律（`Makefile:96-97`：隔离前缀 + 精确 key 清理）。删对象属于 delivery.md 的
+   「破坏性持久数据操作」，需要人工批准，所以基准不自行删除——**每次运行都会留下
+   残留，运维方需要自行清理**。频繁重跑前请先确认这一点。

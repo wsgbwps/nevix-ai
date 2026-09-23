@@ -15,7 +15,11 @@ import { readFileSync } from 'node:fs'
 
 const CONTAINERS = new Set(['moov', 'trak', 'mdia', 'minf', 'stbl', 'edts', 'mvex', 'moof', 'traf'])
 
-/** Walks sibling boxes in [start, end) and returns { type, start, size } records. */
+/**
+ * Walks sibling boxes in [start, end). Each record carries `header` (8, or 16 for
+ * a 64-bit size) because every caller needs the payload offset, which is
+ * `start + header` and not `start + 8`.
+ */
 function boxes(buffer, start, end) {
   const found = []
   let offset = start

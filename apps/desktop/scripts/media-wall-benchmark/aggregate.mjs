@@ -11,16 +11,22 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 import { readFileSync } from 'node:fs'
 
+// `MIN_SAMPLES` is the floor a verdict needs to mean anything. Without it a target
+// could print PASS from a single sample, which is exactly the shape a broken run
+// takes: a card that never resolves leaves its entry's sample silently instead of
+// counting against it.
+const MIN_SAMPLES = 30
+
 /** The SLO table from issue #292 criteria 4-7. */
 const TARGETS = {
   // Page framework/cards: p75 no more than 500ms (criterion 4).
-  cardsReady: { phase: 'image', p75: 500 },
+  cardsReady: { p75: 500 },
   // First initially visible preview: p75 <= 1.0s, p95 <= 1.5s (criterion 5).
-  firstVisibleDecoded: { phase: 'image', p75: 1_000, p95: 1_500 },
+  firstVisibleDecoded: { p75: 1_000, p95: 1_500 },
   // All initially visible previews: p75 <= 1.5s, p95 <= 2.5s (criterion 6).
-  allVisibleDecoded: { phase: 'image', p75: 1_500, p95: 2_500 },
+  allVisibleDecoded: { p75: 1_500, p95: 2_500 },
   // Pointer-enter to video motion: p75 <= 1.0s, p95 <= 2.5s (criterion 7).
-  hoverToPlaying: { phase: 'video', p75: 1_000, p95: 2_500 }
+  hoverToPlaying: { p75: 1_000, p95: 2_500 }
 }
 
 function percentile(samples, fraction) {
@@ -50,8 +56,10 @@ const samples = {
   hoverToPlaying: []
 }
 const failures = []
+const unresolved = []
 const videoMetadata = []
 const videoData = []
+let hoverOutOfOrder = 0
 
 // Every phase is a delta from its own arm, so cold and warm entries and both
 // routes pool into one distribution per phase.
@@ -59,6 +67,18 @@ for (const entry of phaseEntries('image')) {
   const t0 = entry.t0
   const cards = entry.cards ?? []
   const visible = cards.filter((card) => card.initiallyVisible)
+  // An above-the-fold card that neither decoded nor reached a verdict is a wall
+  // that never settled, and it is the one outcome that must not pass quietly:
+  // `allVisibleDecoded` is recorded only when every visible card decoded, so a
+  // stuck card would silently shrink the sample instead of showing up as a
+  // failure, and the summary would still read "0 failures". Only initially
+  // visible cards are checked — a card below the fold is never authorized, so
+  // never resolving is correct for it.
+  for (const card of visible) {
+    if (card.decodedAt === null && card.failed === null) {
+      unresolved.push({ mode: entry.mode, route: entry.route, index: card.index })
+    }
+  }
   if (cards.length > 0) {
     samples.cardsReady.push(Math.max(...cards.map((card) => card.appearedAt)) - t0)
   }
@@ -86,7 +106,12 @@ for (const entry of phaseEntries('video')) {
     if (card.loadedMetadataAt !== null) videoMetadata.push(card.loadedMetadataAt - entry.t0)
     if (card.decodedAt !== null) videoData.push(card.decodedAt - entry.t0)
     if (card.hoverEnteredAt !== null && card.playingAt !== null) {
-      samples.hoverToPlaying.push(card.playingAt - card.hoverEnteredAt)
+      // The metric is pointer-enter to motion, so a `playing` that predates the
+      // pointer entering is not a sample of it. Counting the out-of-order pairs
+      // keeps a stale or unrelated `playing` from masquerading as a fast hover.
+      const delta = card.playingAt - card.hoverEnteredAt
+      if (delta < 0) hoverOutOfOrder += 1
+      else samples.hoverToPlaying.push(delta)
     }
   }
 }
@@ -116,10 +141,8 @@ console.log(`devicePixelRatio observed: ${dprs.join(', ') || 'n/a'}`)
 console.log('')
 
 // Criterion 9: what the transport actually did, read off the wire, not inferred
-// from the markup. Byte volumes come from Content-Length because
-// PerformanceResourceTiming.transferSize is structurally 0 for these requests:
-// the renderer is a file:// document, so every fetch is cross-origin and Aliyun
-// OSS sends no Timing-Allow-Origin.
+// from the markup. The byte volumes are the ones the spec captured from
+// Content-Length; why not transferSize is recorded where the capture happens.
 const network = report.network ?? []
 const media = network.filter((row) => row.resourceType === 'media')
 const images = network.filter((row) => row.resourceType === 'image')
@@ -169,10 +192,10 @@ if (ossOrigins.length === 0) {
 console.log('')
 
 console.log('SLO verdicts')
-for (const [phase, target] of Object.entries(TARGETS)) {
-  const values = samples[phase]
-  if (values.length === 0) {
-    console.log(`  FAIL  ${phase.padEnd(20)} no samples`)
+for (const [metric, target] of Object.entries(TARGETS)) {
+  const values = samples[metric]
+  if (values.length < MIN_SAMPLES) {
+    console.log(`  FAIL  ${metric.padEnd(20)} only ${values.length} samples (need ${MIN_SAMPLES})`)
     failed = true
     continue
   }
@@ -188,7 +211,7 @@ for (const [phase, target] of Object.entries(TARGETS)) {
     .filter(Boolean)
     .join(', ')
   console.log(
-    `  ${ok75 && ok95 ? 'PASS' : 'FAIL'}  ${phase.padEnd(20)} n=${String(values.length).padEnd(4)} p75 ${ms(p75).padStart(7)}  p95 ${ms(p95).padStart(7)}   (${budget})`
+    `  ${ok75 && ok95 ? 'PASS' : 'FAIL'}  ${metric.padEnd(20)} n=${String(values.length).padEnd(4)} p75 ${ms(p75).padStart(7)}  p95 ${ms(p95).padStart(7)}   (${budget})`
   )
 }
 
@@ -202,8 +225,21 @@ if (failures.length > 0) {
 } else {
   console.log('media-load failures: 0')
 }
+if (unresolved.length > 0) {
+  failed = true
+  console.log(`unexplained: ${unresolved.length} above-the-fold cards neither decoded nor failed`)
+  for (const row of unresolved.slice(0, 20)) {
+    console.log(`  ${row.mode} ${row.route} card #${row.index}`)
+  }
+}
+if (hoverOutOfOrder > 0) {
+  console.log(`note: dropped ${hoverOutOfOrder} hover pairs whose playing preceded pointerenter`)
+}
 
-// Criterion 3: the sample has to be large enough to mean anything.
+// Criterion 3: the sample has to be large enough to mean anything. This floor is
+// the criterion's own 30+30 and is deliberately not configurable — a run shrunk
+// with NEVIX_BENCHMARK_COLD/WARM to check the pipeline reports how short it is
+// rather than passing a floor it lowered for itself.
 if (coldCount < 30 || warmCount < 30) {
   console.log(`FAIL  sample size: cold ${coldCount}/30, warm ${warmCount}/30`)
   failed = true

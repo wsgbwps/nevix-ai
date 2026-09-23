@@ -129,11 +129,6 @@ function installRecorder(): void {
           media.addEventListener('load', () => (record.decodedAt = performance.now()), {
             once: true
           })
-          media.addEventListener(
-            'error',
-            () => (record.failed ??= classify(record.element.textContent ?? '')),
-            { once: true }
-          )
           return
         }
         // A video's visible frame is `loadeddata`, matching the app's own gate.
@@ -156,11 +151,6 @@ function installRecorder(): void {
         media.addEventListener('playing', () => (record.playingAt ??= performance.now()), {
           once: true
         })
-        media.addEventListener(
-          'error',
-          () => (record.failed ??= classify(record.element.textContent ?? '')),
-          { once: true }
-        )
       }
 
       const adopt = (element: Element): void => {
@@ -168,14 +158,14 @@ function installRecorder(): void {
         const record: Rec = {
           index: nextIndex,
           element,
-          mediaKind: element.querySelector('video') !== null ? 'video' : 'image',
+          mediaKind: 'image',
           initiallyVisible: false,
           appearedAt: performance.now(),
           decodedAt: null,
           loadedMetadataAt: null,
           hoverEnteredAt: null,
           playingAt: null,
-          failed: classify(element.textContent ?? '')
+          failed: null
         }
         nextIndex += 1
         element.setAttribute('data-bench-card', String(record.index))
@@ -187,19 +177,27 @@ function installRecorder(): void {
           () => (record.hoverEnteredAt ??= performance.now())
         )
 
-        const attach = (): boolean => {
+        let watching = false
+        // Re-read the card on every commit rather than inside the media element's
+        // `error` event: the verdict is React's *next* commit, so a handler that
+        // runs before that commit reads the pre-verdict DOM and records no failure
+        // at all. That would make "no failures" unfalsifiable, which is the one
+        // thing this benchmark must not be.
+        const sync = (): void => {
           const media = element.querySelector('img, video')
-          if (media === null) return false
-          record.mediaKind = media instanceof HTMLVideoElement ? 'video' : 'image'
-          watchMedia(record, media as HTMLMediaElement)
-          return true
+          if (media !== null && !watching) {
+            watching = true
+            record.mediaKind = media instanceof HTMLVideoElement ? 'video' : 'image'
+            watchMedia(record, media as HTMLMediaElement)
+          }
+          record.failed = classify(element.textContent ?? '')
         }
-        if (!attach()) {
-          const observer = new MutationObserver(() => {
-            if (attach()) observer.disconnect()
-          })
-          observer.observe(element, { childList: true, subtree: true })
-        }
+        new MutationObserver(sync).observe(element, {
+          childList: true,
+          subtree: true,
+          characterData: true
+        })
+        sync()
       }
 
       // Zero rootMargin is what makes "intersecting the initial viewport at
@@ -293,7 +291,6 @@ async function readReport(page: Page): Promise<{
   return page.evaluate(() => (window as unknown as BenchGlobal).__nevixBench.report())
 }
 
-/** Selects one media type on the wall currently mounted. */
 async function selectMedia(page: Page, route: RouteKind, label: string): Promise<void> {
   await page
     .getByTestId(ROUTES[route].filterBar)
@@ -534,17 +531,17 @@ test(
 )
 
 /**
- * The second half of criterion 8. A clean 60-entry sample can only report that
- * *no* failure happened; it cannot show that a failure would have been legible.
- * This injects a transport failure and is kept out of the performance sample
- * because route interception changes the timing it would be measuring.
+ * The second half of criterion 8, in the half this tier can prove. A clean
+ * 60-entry sample can only report that *no* failure happened; it cannot show that
+ * a failure would have been legible. This injects a transport failure and is kept
+ * out of the performance sample because route interception changes the timing it
+ * would be measuring.
  *
- * The generic unavailable verdict is deliberately not injected here; see the
- * note at its route below for why that is not a reachable server state, and
- * which test covers it instead.
+ * The generic unavailable verdict is not injected here — see the note at its
+ * route below for what the attempt showed and which test covers that verdict.
  */
 test(
-  'injected media failures surface the explicit unavailable and retry states',
+  'an injected media failure surfaces the explicit retry state and recovers',
   { tag: '@benchmark' },
   async () => {
     test.setTimeout(900_000)
@@ -603,17 +600,18 @@ test(
         await expect(card).toBeVisible({ timeout: 30_000 })
       }
 
-      // A transport failure is the half this tier has to prove: the ladder runs
-      // against the real Go server and the real bucket, so "exactly one automatic
-      // re-authorization, then the manual retry the user can act on" is not a
-      // fixture's opinion.
+      // A transport failure is the half this tier can prove: the card concedes to
+      // the manual retry, and the retry recovers through a real OSS grant. The
+      // exact one-automatic-retry budget is *not* asserted here (the renderer
+      // replays effects, so the count is not stable) — see the note below.
       //
-      // The generic unavailable verdict is deliberately not injected here. A
-      // synthetic refusal that never stops refusing is not a reachable server
-      // state: the wall re-reads its list on `unavailable`, the refreshed list
-      // still lists the Asset, so the card re-authorizes, is refused again and
-      // the wall never converges. `asset-library.spec.tsx:418` covers that
-      // verdict deterministically, against the port rather than the transport.
+      // The generic unavailable verdict is not injected here, and an attempt to
+      // do it by fulfilling a 403 on this route did not work: the injected
+      // response never reached the page as a 403 (the requests ended
+      // `net::ERR_ABORTED` with status 0), so that experiment showed nothing about
+      // how the wall handles a refusal and is recorded as such rather than as a
+      // finding. What the verdict rendering looks like is covered deterministically
+      // by `asset-library.spec.tsx:418`, against the port rather than the wire.
       // Reset first, so the counts below describe the injected phase alone.
       attemptsByAsset.clear()
       await page.route(authorization, async (route) => {
@@ -626,13 +624,16 @@ test(
       await reenterWall()
       await expect(card.getByText('媒体加载失败')).toBeVisible({ timeout: 30_000 })
       await expect(retry).toBeVisible({ timeout: 30_000 })
-      // The exact count is not asserted: the renderer replays effects, so one
-      // card may ask twice per attempt. What matters here is that a transport
-      // failure stays bounded instead of becoming a retry loop, and that the
-      // manual retry below is what resumes asking. The one-automatic-retry budget
-      // itself is counted deterministically in
-      // `apps/desktop/tests/component/asset-library.spec.tsx`.
+      // The exact count is not asserted, because the renderer replays effects and
+      // one card may ask twice per attempt. The lower bound is the meaningful one:
+      // at least two attempts per Asset is the automatic re-authorization actually
+      // happening, and it also keeps the upper bound from passing on `-Infinity`
+      // had the map somehow stayed empty. What this proves is that a transport
+      // failure is bounded rather than a retry loop, and that the manual retry
+      // below is what resumes asking. The one-automatic-retry budget itself is
+      // counted deterministically in `apps/desktop/tests/component/asset-library.spec.tsx`.
       const afterFailure = Math.max(...attemptsByAsset.values())
+      expect(afterFailure).toBeGreaterThanOrEqual(2)
       expect(afterFailure).toBeLessThanOrEqual(4)
       await page.unroute(authorization)
 

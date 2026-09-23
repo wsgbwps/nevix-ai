@@ -16,13 +16,11 @@ set -euo pipefail
 # configures the provider connection: the creation tracers submit real
 # generation tasks (ADR-0017 first-submission materialization), which the
 # capability gate refuses while no provider is available.
-# Server binaries use the e2e build tag; its in-memory Object Storage
-# dependencies are not compiled into production builds — nor can it presign, so
-# the benchmark mode below is the one that links the real adapter instead.
+# Every other mode boots the server as `go test -c -tags=e2e`, whose in-memory
+# Object Storage refuses to presign, so a display URL cannot exist on that path.
+# The benchmark is the one mode that needs the production build, whose Object
+# Storage is the real OSS adapter the display path actually uses.
 mode="${1:-full}"
-# `go test -c -tags=e2e` yields the runnable test binary every other mode boots;
-# the benchmark needs the production build, whose Object Storage is the real OSS
-# adapter the display path actually uses.
 if [[ "$mode" == "benchmark" ]]; then
   server_build=(go build -o)
 else
@@ -511,35 +509,51 @@ start_fake_kapon() {
 }
 
 configure_provider_connection() {
-  local tls_url="https://$tls_host:$tls_port"
-  local token proof
-  token="$(curl -fsk -X POST "$tls_url/identity/auth/login" \
-    -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}" \
-    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).token)')"
-  proof="$(curl -fsk -X POST "$tls_url/identity/admin/reauth/proofs" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"action\":\"provider_connection.create\",\"password\":\"$admin_initial_password\"}" \
-    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).proof)')"
-  curl -fsk -X POST "$tls_url/creation/provider-connection" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"proof\":\"$proof\",\"provider_key\":\"test-key\"}" >/dev/null
+  admin_token_and_proof provider_connection.create
+  curl -fsk -X POST "https://$tls_host:$tls_port/creation/provider-connection" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"proof\":\"$ADMIN_PROOF\",\"provider_key\":\"test-key\"}" >/dev/null
 }
 
-configure_object_storage_connection() {
+# Signs in as the suite admin and mints a reauthentication proof for one action.
+# Every connection command below is otherwise the same three-line POST, and the
+# proof-bearing endpoints demand the trusted HTTPS transport marker, so the pair
+# is taken over the TLS terminator rather than the plain listener.
+admin_token_and_proof() {
   local tls_url="https://$tls_host:$tls_port"
-  local token proof
-  token="$(curl -fsk -X POST "$tls_url/identity/auth/login" \
+  ADMIN_TOKEN="$(curl -fsk -X POST "$tls_url/identity/auth/login" \
     -H 'Content-Type: application/json' \
     -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}" \
     | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).token)')"
-  proof="$(curl -fsk -X POST "$tls_url/identity/admin/reauth/proofs" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"action\":\"object_storage_connection.create\",\"password\":\"$admin_initial_password\"}" \
+  ADMIN_PROOF="$(curl -fsk -X POST "$tls_url/identity/admin/reauth/proofs" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"action\":\"$1\",\"password\":\"$admin_initial_password\"}" \
     | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).proof)')"
-  curl -fsk -X POST "$tls_url/creation/object-storage-connection" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"proof\":\"$proof\",\"provider\":\"oss\",\"region\":\"cn-hangzhou\",\"bucket\":\"nevix-e2e-private\",\"access_key_id\":\"nevix-e2e-access\",\"secret_access_key\":\"nevix-e2e-secret\"}" >/dev/null
+}
+
+# Registers the instance's single Object Storage Connection. The benchmark passes a
+# real Aliyun OSS bucket, so its display URLs are genuine presigned bucket URLs and
+# the production verifier's canary fails the run on a bad credential rather than
+# quietly degrading into a measurement of an error page.
+configure_object_storage_connection() {
+  local region="$1" bucket="$2" access_key_id="$3" secret_access_key="$4"
+  admin_token_and_proof object_storage_connection.create
+  # Not `-f`: the rejection body names which check failed — a bad credential, a
+  # bucket the canary cannot write, or a transport that did not prove HTTPS — and
+  # without it this step only reports curl's exit code.
+  local response status body
+  response="$(curl -sk -w $'\n%{http_code}' -X POST "https://$tls_host:$tls_port/creation/object-storage-connection" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"proof\":\"$ADMIN_PROOF\",\"provider\":\"oss\",\"region\":\"$region\",\"bucket\":\"$bucket\",\"access_key_id\":\"$access_key_id\",\"secret_access_key\":\"$secret_access_key\"}")" || {
+    echo "error: the object storage connection request could not reach https://$tls_host:$tls_port" >&2
+    return 1
+  }
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [[ "$status" != "200" && "$status" != "201" ]]; then
+    echo "error: Object Storage Connection rejected (HTTP $status): $body" >&2
+    return 1
+  fi
 }
 
 # Reads one key out of server/.env.local without sourcing it: sourcing would also
@@ -552,13 +566,9 @@ read_local_env_value() {
   printf '%s' "$value"
 }
 
-# The benchmark's Object Storage Connection is a real Aliyun OSS bucket, so its
-# display URLs are genuine presigned bucket URLs. The production verifier runs a
-# real canary here, which is what makes a wrong credential fail loudly rather
-# than silently degrade the benchmark into a measurement of an error page.
-configure_real_object_storage_connection() {
-  local tls_url="https://$tls_host:$tls_port"
-  local token proof
+# The benchmark registers the real bucket named in server/.env.local, so the wall's
+# display URLs are genuine presigned OSS URLs rather than a fake's.
+configure_benchmark_object_storage_connection() {
   local region bucket access_key_id secret_access_key
   region="$(read_local_env_value NEVIX_OSS_SMOKE_REGION)"
   bucket="$(read_local_env_value NEVIX_OSS_SMOKE_BUCKET)"
@@ -569,30 +579,7 @@ configure_real_object_storage_connection() {
     return 1
   fi
   echo "==> Registering the real Object Storage Connection (region $region, bucket $bucket)"
-  token="$(curl -fsk -X POST "$tls_url/identity/auth/login" \
-    -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}" \
-    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).token)')"
-  proof="$(curl -fsk -X POST "$tls_url/identity/admin/reauth/proofs" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"action\":\"object_storage_connection.create\",\"password\":\"$admin_initial_password\"}" \
-    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).proof)')"
-  # Not `-f`: the rejection body names which check failed — a bad credential, a
-  # bucket the canary cannot write, or a transport that did not prove HTTPS — and
-  # without it this step only reports curl's exit code.
-  local response status body
-  response="$(curl -sk -w $'\n%{http_code}' -X POST "$tls_url/creation/object-storage-connection" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"proof\":\"$proof\",\"provider\":\"oss\",\"region\":\"$region\",\"bucket\":\"$bucket\",\"access_key_id\":\"$access_key_id\",\"secret_access_key\":\"$secret_access_key\"}")" || {
-    echo "error: the object storage connection request could not reach $tls_url" >&2
-    return 1
-  }
-  status="${response##*$'\n'}"
-  body="${response%$'\n'*}"
-  if [[ "$status" != "200" && "$status" != "201" ]]; then
-    echo "error: real Object Storage Connection rejected (HTTP $status): $body" >&2
-    return 1
-  fi
+  configure_object_storage_connection "$region" "$bucket" "$access_key_id" "$secret_access_key"
   echo "==> Real Object Storage Connection registered (canary passed)"
 }
 
@@ -750,11 +737,11 @@ if [[ "$mode" != "settings" ]]; then
   echo "==> Fake Kapon generation route ready on $KAPON_E2E_BASE_URL (provider connection configured)"
 fi
 if [[ "$mode" == "image" || "$mode" == "video" || "$mode" == "smoke" ]]; then
-  configure_object_storage_connection
+  configure_object_storage_connection cn-hangzhou nevix-e2e-private nevix-e2e-access nevix-e2e-secret
   echo "==> Test-only Object Storage Connection configured"
 fi
 if [[ "$mode" == "benchmark" ]]; then
-  configure_real_object_storage_connection
+  configure_benchmark_object_storage_connection
 fi
 
 pnpm exec electron-vite build --mode test
@@ -798,7 +785,7 @@ fi
 run_playwright "${playwright_args[@]}"
 
 if [[ "$mode" == "full" && -z "$failure_injection" ]]; then
-  configure_object_storage_connection
+  configure_object_storage_connection cn-hangzhou nevix-e2e-private nevix-e2e-access nevix-e2e-secret
   echo "==> Test-only Object Storage Connection configured"
   run_playwright tests/creation/asset-library.spec.ts tests/creation/creation-tracer.spec.ts tests/creation/creation-image.spec.ts tests/creation/creation-video.spec.ts --workers=1
 fi
