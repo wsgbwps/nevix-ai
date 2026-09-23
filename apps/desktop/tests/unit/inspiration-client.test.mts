@@ -249,7 +249,7 @@ test('publication mutations use their exact paths and narrow response envelopes'
   }
 })
 
-test('a display grant follows the item\'s own identity, not one shared path', async () => {
+test("a display grant follows the item's own identity, not one shared path", async () => {
   const originalFetch = globalThis.fetch
   const calls: string[] = []
   const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString()
