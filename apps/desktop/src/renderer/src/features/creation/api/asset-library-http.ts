@@ -135,13 +135,14 @@ export interface AssetContentOptions {
 export type AssetDisplayPurpose = 'thumbnail' | 'preview'
 
 /**
- * What a media element paints from. Go's short-lived display grant is the
- * normal case; a Blob is the Inspiration Page's remaining pre-#290 path and
- * retires with it.
+ * What a media element paints from: Go's short-lived display grant, handed to
+ * the element directly. Nothing on the wall or in a detail streams a complete
+ * original through Go first.
  */
-export type AssetDisplaySource =
-  | { readonly kind: 'grant'; readonly url: string; readonly expiresAt: string }
-  | { readonly kind: 'blob'; readonly blob: Blob }
+export interface DisplayGrant {
+  readonly url: string
+  readonly expiresAt: string
+}
 
 export interface AssetDisplayOptions {
   /** Aborting must stop the read, not just ignore its answer. */
@@ -156,7 +157,7 @@ export interface AssetLibraryPorts {
     assetId: string,
     purpose: AssetDisplayPurpose,
     options?: AssetDisplayOptions
-  ) => Promise<CreationApiResult<AssetDisplaySource>>
+  ) => Promise<CreationApiResult<DisplayGrant>>
   /** Streams the original bytes through Go; display never uses this path. */
   readonly downloadAssetContent: (
     assetId: string,
@@ -566,7 +567,7 @@ export function createAssetLibraryClient(serverUrl: string): {
     assetId: string,
     purpose: AssetDisplayPurpose,
     options?: AssetDisplayOptions
-  ): Promise<CreationApiResult<AssetDisplaySource>>
+  ): Promise<CreationApiResult<DisplayGrant>>
   downloadContent(
     token: string,
     assetId: string,
@@ -608,9 +609,7 @@ export function createAssetLibraryClient(serverUrl: string): {
         `/creation/assets/${encodeURIComponent(assetId)}/${purpose}-url`,
         options?.signal
       )
-      return result.outcome === 'succeeded'
-        ? { outcome: 'succeeded', value: { kind: 'grant', ...result.value } }
-        : result
+      return result.outcome === 'succeeded' ? { outcome: 'succeeded', value: result.value } : result
     },
     async downloadContent(token, assetId, checksumSha256, options) {
       return loadVerifiedContent(

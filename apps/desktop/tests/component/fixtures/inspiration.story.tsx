@@ -19,6 +19,14 @@ const imageBlob = new Blob(
 )
 const videoBlob = new Blob([await (await fetch(videoUrl)).arrayBuffer()], { type: 'video/mp4' })
 
+/**
+ * The display grant's URL: a URL a real browser can load, since a signed bucket
+ * URL is neither reachable from the test page nor valid. Which variant was
+ * asked for is asserted through `displayCalls`, never through the URL.
+ */
+const grantedUrl = URL.createObjectURL(imageBlob)
+const grantedExpiry = new Date(Date.now() + 10 * 60_000).toISOString()
+
 function publication(index: number): PublicationView {
   return {
     id: `publication-${index}`,
@@ -125,8 +133,16 @@ const reference = {
   claimsVersion: 1
 }
 
+/** How the display grant answers: the wall's own failure modes, as in the Asset Library. */
+type DisplayMode = 'immediate' | 'deferred' | 'always-fail' | 'fail-once' | 'gone'
+
 interface InspirationControls {
   listCalls(): readonly InspirationPageRequest[]
+  displayCalls(): readonly { readonly id: string; readonly purpose: string }[]
+  contentCalls(): readonly string[]
+  maxActiveDisplays(): number
+  releaseDisplays(): void
+  resetDisplayAttempts(): void
   similarCalls(): readonly string[]
   recordSimilar(publicationId: string): void
   withdraws(): readonly string[]
@@ -142,12 +158,15 @@ type InspirationStoryState =
   | 'failed'
   | 'dense'
   | 'layout-probe'
-  | 'layout-failed'
   | 'preview-refresh'
   | 'preview-refresh-failed'
   | 'admin-deleted-publication'
   | 'admin-safety-delayed'
   | 'admin-safety-failed'
+
+function isVideo(item: InspirationItem): boolean {
+  return (item.type === 'publication' ? item.publication : item.asset).mediaType === 'video'
+}
 
 declare global {
   interface Window {
@@ -155,7 +174,10 @@ declare global {
   }
 }
 
-function createHarness(state: InspirationStoryState): {
+function createHarness(
+  state: InspirationStoryState,
+  displayMode: DisplayMode
+): {
   readonly ports: InspirationPorts
   readonly controls: InspirationControls
 } {
@@ -164,6 +186,15 @@ function createHarness(state: InspirationStoryState): {
   const withdraws: string[] = []
   const previewCalls: string[] = []
   const safetyCalls: string[] = []
+  const displayCalls: { id: string; purpose: string }[] = []
+  const contentCalls: string[] = []
+  const displayAttempts = new Map<string, number>()
+  let activeDisplays = 0
+  let maxActiveDisplays = 0
+  let releaseDisplays = (): void => undefined
+  const displayGate = new Promise<void>((resolve) => {
+    releaseDisplays = resolve
+  })
   let releaseSafety: (() => void) | null = null
   let assetReleased = false
   let publicationReleased = false
@@ -176,7 +207,7 @@ function createHarness(state: InspirationStoryState): {
             publication: publication(index + 1)
           })
         )
-      : state === 'layout-probe' || state === 'layout-failed'
+      : state === 'layout-probe'
         ? layoutProbeItems
         : state === 'admin-deleted-publication'
           ? [
@@ -269,16 +300,27 @@ function createHarness(state: InspirationStoryState): {
                 }
               }
             },
-      loadInspirationContent: async (item) =>
-        state === 'layout-failed'
-          ? { outcome: 'network-failure' }
-          : {
-              outcome: 'succeeded',
-              value:
-                (item.type === 'publication' ? item.publication : item.asset).mediaType === 'video'
-                  ? videoBlob
-                  : imageBlob
-            },
+      loadInspirationDisplay: async (item, purpose) => {
+        const id = item.type === 'publication' ? item.publication.id : item.asset.id
+        displayCalls.push({ id, purpose })
+        activeDisplays += 1
+        maxActiveDisplays = Math.max(maxActiveDisplays, activeDisplays)
+        if (displayMode === 'deferred') await displayGate
+        activeDisplays -= 1
+        const attempts = (displayAttempts.get(id) ?? 0) + 1
+        displayAttempts.set(id, attempts)
+        if (displayMode === 'always-fail') return { outcome: 'network-failure' }
+        if (displayMode === 'fail-once' && attempts === 1) return { outcome: 'network-failure' }
+        if (displayMode === 'gone') return { outcome: 'request-rejected', code: 'not_found' }
+        return {
+          outcome: 'succeeded',
+          value: { url: isVideo(item) ? videoUrl : grantedUrl, expiresAt: grantedExpiry }
+        }
+      },
+      loadInspirationContent: async (item) => {
+        contentCalls.push(item.type === 'publication' ? item.publication.id : item.asset.id)
+        return { outcome: 'succeeded', value: isVideo(item) ? videoBlob : imageBlob }
+      },
       loadInspirationReferencePreview: async (_item, referenceId) => {
         previewCalls.push(referenceId)
         if (state === 'preview-refresh-failed' && previewCalls.length === 2) {
@@ -397,6 +439,11 @@ function createHarness(state: InspirationStoryState): {
     },
     controls: {
       listCalls: () => listCalls,
+      displayCalls: () => displayCalls,
+      contentCalls: () => contentCalls,
+      maxActiveDisplays: () => maxActiveDisplays,
+      releaseDisplays: () => releaseDisplays(),
+      resetDisplayAttempts: () => displayAttempts.clear(),
       similarCalls: () => similarCalls,
       recordSimilar: (publicationId) => similarCalls.push(publicationId),
       withdraws: () => withdraws,
@@ -408,11 +455,13 @@ function createHarness(state: InspirationStoryState): {
 }
 
 export function InspirationStory({
-  state = 'member'
+  state = 'member',
+  displayMode = 'immediate'
 }: {
   readonly state?: InspirationStoryState
+  readonly displayMode?: DisplayMode
 }): React.JSX.Element {
-  const harness = useMemo(() => createHarness(state), [state])
+  const harness = useMemo(() => createHarness(state, displayMode), [state, displayMode])
   useEffect(() => {
     window.__inspirationTest = harness.controls
     return () => {

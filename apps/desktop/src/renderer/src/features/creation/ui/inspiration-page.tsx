@@ -76,18 +76,15 @@ function publicationFor(
   return detail?.type === 'asset' ? detail.publication : null
 }
 
+/**
+ * The wall and the detail paint from a short-lived display grant, exactly as
+ * the Asset Library does: the item's own identity decides which authorization
+ * path Go re-checks, so nothing here picks a visibility rule.
+ */
 function mediaPort(ports: InspirationPorts, item: InspirationItem): AssetDisplayPort {
-  const expectedByteSize = itemMedia(item).byteSize
   return {
-    loadAssetDisplay: async (_id, _purpose, options) => {
-      const result = await ports.loadInspirationContent(item, {
-        expectedByteSize,
-        signal: options?.signal
-      })
-      return result.outcome === 'succeeded'
-        ? { outcome: 'succeeded', value: { kind: 'blob', blob: result.value } }
-        : result
-    }
+    loadAssetDisplay: (_id, purpose, options) =>
+      ports.loadInspirationDisplay(item, purpose, options)
   }
 }
 
@@ -106,12 +103,14 @@ function InspirationCard({
   item,
   ports,
   style,
-  onOpen
+  onOpen,
+  onUnavailable
 }: {
   readonly item: InspirationItem
   readonly ports: InspirationPorts
   readonly style: React.CSSProperties
   readonly onOpen: () => void
+  readonly onUnavailable: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const media = itemMedia(item)
@@ -119,7 +118,7 @@ function InspirationCard({
   return (
     <li data-testid="inspiration-card" className="group absolute overflow-hidden" style={style}>
       <div className="bg-muted relative size-full overflow-hidden">
-        <AssetMedia asset={media} ports={contentPort} />
+        <AssetMedia asset={media} ports={contentPort} onUnavailable={onUnavailable} />
         {item.type === 'asset' ? (
           <div className="pointer-events-none absolute top-2 right-2 z-20 flex gap-1 text-[10px] font-semibold text-white">
             <span className="rounded bg-black/70 px-1.5 py-0.5">
@@ -215,11 +214,13 @@ type RestrictionOperation = 'restrict' | 'release'
 function InspirationWall({
   items,
   ports,
-  onOpen
+  onOpen,
+  onUnavailable
 }: {
   readonly items: readonly InspirationItem[]
   readonly ports: InspirationPorts
   readonly onOpen: (item: InspirationItem) => void
+  readonly onUnavailable: () => void
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
@@ -270,6 +271,7 @@ function InspirationWall({
             ports={ports}
             style={layout.cards[index] ?? {}}
             onOpen={() => onOpen(item)}
+            onUnavailable={onUnavailable}
           />
         ))}
       </ul>
@@ -434,7 +436,8 @@ function InspirationDetail({
   onDownload,
   onCreateSimilar,
   onWithdraw,
-  onRestriction
+  onRestriction,
+  onUnavailable
 }: {
   readonly item: InspirationItem | null
   readonly detail: InspirationDetailView | null
@@ -447,6 +450,8 @@ function InspirationDetail({
   readonly onCreateSimilar: () => void
   readonly onWithdraw: () => void
   readonly onRestriction: (target: RestrictionTarget, operation: RestrictionOperation) => void
+  /** The resource answered gone or forbidden: this page's facts are stale. */
+  readonly onUnavailable: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const media = item ? itemMedia(item) : null
@@ -472,7 +477,7 @@ function InspirationDetail({
         ) : (
           <div className="grid size-full min-h-0 min-[800px]:grid-cols-[minmax(0,1fr)_22.5rem]">
             <div className="bg-muted grid min-h-56 min-w-0 place-items-center overflow-hidden p-4">
-              <AssetMedia asset={media} ports={contentPort} detail />
+              <AssetMedia asset={media} ports={contentPort} detail onUnavailable={onUnavailable} />
             </div>
             <div className="flex min-h-0 min-w-0 flex-col border-t min-[800px]:border-t-0 min-[800px]:border-l">
               <div className="min-h-0 flex-1 overflow-y-auto p-5">
@@ -643,7 +648,12 @@ export function InspirationPage({
                 <p>{t('inspiration.noResults')}</p>
               </div>
             ) : (
-              <InspirationWall items={list.items} ports={ports} onOpen={open} />
+              <InspirationWall
+                items={list.items}
+                ports={ports}
+                onOpen={open}
+                onUnavailable={list.refresh}
+              />
             )}
             {list.hasMore ? (
               <LoadMoreSentinel
@@ -703,6 +713,7 @@ export function InspirationPage({
             list.refresh()
           })
         }}
+        onUnavailable={list.refresh}
         onRestriction={(target, operation) => {
           if (!selected || !detail) return
           const actionItem = selected

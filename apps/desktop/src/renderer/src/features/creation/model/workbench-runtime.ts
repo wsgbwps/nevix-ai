@@ -398,6 +398,7 @@ export function createCreationRuntime(
     deleteAsset: guardResult(ports.deleteAsset),
     listInspiration: guardResult(ports.listInspiration),
     getInspirationDetail: guardResult(ports.getInspirationDetail),
+    loadInspirationDisplay: guardResult(ports.loadInspirationDisplay),
     loadInspirationContent: guardResult(ports.loadInspirationContent),
     loadInspirationReferencePreview: guardResult(ports.loadInspirationReferencePreview),
     publishAsset: guardResult(ports.publishAsset),

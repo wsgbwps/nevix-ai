@@ -344,7 +344,7 @@ test('a display read asks the fixed variant endpoint per purpose and returns one
     const preview = await client.loadDisplay('token', asset.id, 'preview')
     assert.deepEqual(thumbnail, {
       outcome: 'succeeded',
-      value: { kind: 'grant', url: 'https://bucket.example/signed?x-oss-process=w_320', expiresAt }
+      value: { url: 'https://bucket.example/signed?x-oss-process=w_320', expiresAt }
     })
     assert.equal(preview.outcome, 'succeeded')
   } finally {

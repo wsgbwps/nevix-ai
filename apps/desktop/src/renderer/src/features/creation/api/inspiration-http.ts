@@ -4,13 +4,21 @@ import {
   parseReference,
   parseSpecification,
   type AssetContentOptions,
+  type AssetDisplayOptions,
+  type AssetDisplayPurpose,
   type AssetGenerationSpecification,
   type AssetMediaType,
   type AssetReferenceSummary,
+  type DisplayGrant,
   type MediaAssetView,
   type RestrictionState
 } from './asset-library-http'
-import { request, type CreationApiResult, type CreationSessionView } from './go-creation-http'
+import {
+  fetchDisplayUrl,
+  request,
+  type CreationApiResult,
+  type CreationSessionView
+} from './go-creation-http'
 
 export interface PublicationCapabilities {
   readonly canWithdraw: boolean
@@ -99,6 +107,17 @@ export interface InspirationPorts {
   readonly getInspirationDetail: (
     item: InspirationItem
   ) => Promise<CreationApiResult<InspirationDetailView>>
+  /**
+   * Fetches the short-lived display grant for one Inspiration item under one
+   * fixed variant (ADR-0016). The item's own identity decides the path, so an
+   * Admin governance view and an effective Publication are never authorized
+   * by the same request.
+   */
+  readonly loadInspirationDisplay: (
+    item: InspirationItem,
+    purpose: AssetDisplayPurpose,
+    options?: AssetDisplayOptions
+  ) => Promise<CreationApiResult<DisplayGrant>>
   readonly loadInspirationContent: (
     item: InspirationItem,
     options?: AssetContentOptions
@@ -380,6 +399,12 @@ function itemPath(item: InspirationItem): string {
 export function createInspirationClient(serverUrl: string): {
   list(token: string, page: InspirationPageRequest): Promise<CreationApiResult<InspirationPage>>
   get(token: string, item: InspirationItem): Promise<CreationApiResult<InspirationDetailView>>
+  loadDisplay(
+    token: string,
+    item: InspirationItem,
+    purpose: AssetDisplayPurpose,
+    options?: AssetDisplayOptions
+  ): Promise<CreationApiResult<DisplayGrant>>
   loadContent(
     token: string,
     item: InspirationItem,
@@ -451,6 +476,15 @@ export function createInspirationClient(serverUrl: string): {
           ? parsePublicationDetail(result.payload)
           : parseAssetDetail(result.payload)
       return parsed ? { outcome: 'succeeded', value: parsed } : { outcome: 'network-failure' }
+    },
+    async loadDisplay(token, item, purpose, options) {
+      const result = await fetchDisplayUrl(
+        serverUrl,
+        token,
+        `${itemPath(item)}/${purpose}-url`,
+        options?.signal
+      )
+      return result.outcome === 'succeeded' ? { outcome: 'succeeded', value: result.value } : result
     },
     loadContent(token, item, options) {
       const media = item.type === 'publication' ? item.publication : item.asset
