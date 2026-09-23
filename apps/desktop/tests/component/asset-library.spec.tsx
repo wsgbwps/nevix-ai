@@ -291,6 +291,35 @@ test('a persistent authorization failure stops at a manual retry', async ({ moun
     .toBeGreaterThan(spent)
 })
 
+test('an expired video grant reauthorizes once, then offers manual retry', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Open asset asset-two' }).click()
+  const dialog = page.getByRole('dialog')
+  const video = dialog.locator('video')
+  await expect(video).toBeVisible()
+  const displayCount = async (): Promise<number> =>
+    (await page.evaluate(
+      () =>
+        window.__assetLibraryTest?.displayCalls().filter((call) => call.id === 'asset-two').length
+    )) ?? 0
+  const initial = await displayCount()
+
+  await video.dispatchEvent('error')
+  await expect.poll(displayCount).toBe(initial + 1)
+  await expect(video).toBeVisible()
+
+  await video.dispatchEvent('error')
+  await expect(dialog.getByRole('button', { name: 'Retry' })).toBeVisible()
+  expect(await displayCount()).toBe(initial + 1)
+
+  await dialog.getByRole('button', { name: 'Retry' }).click()
+  await expect.poll(displayCount).toBe(initial + 2)
+  await expect(video).toBeVisible()
+})
+
 test('a gone asset shows the generic unavailable state and refreshes the list', async ({
   mount,
   page

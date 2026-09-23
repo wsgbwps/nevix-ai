@@ -17,6 +17,7 @@ import {
   SidebarProvider
 } from '../../../src/renderer/src/components/ui/sidebar'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
+import videoUrl from '../../../../../scripts/dev/fixtures/video-with-audio.mp4?url'
 import { prepareAssetSimilarDraft } from '../../../src/renderer/src/features/creation/model/asset-similar-draft'
 import type {
   AssetDetailView,
@@ -337,7 +338,11 @@ function createHarness(
         if (displayMode === 'gone') return { outcome: 'request-rejected', code: 'not_found' }
         return {
           outcome: 'succeeded',
-          value: { kind: 'grant', url: grantedUrl, expiresAt: grantedExpiry }
+          value: {
+            kind: 'grant',
+            url: id === 'asset-two' ? videoUrl : grantedUrl,
+            expiresAt: grantedExpiry
+          }
         }
       },
       downloadAssetContent: async (_id, _checksumSha256, options) => {

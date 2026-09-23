@@ -75,8 +75,8 @@ export function AssetMedia({
   const { t } = useTranslation('creation')
   const [visible, setVisible] = useState(detail)
   // Metadata readiness is not visible content: an image keeps its placeholder
-  // until the bytes have decoded. Video frame and failure handling arrives
-  // with the hover work (#291), so a video paints as it always has.
+  // until the bytes have decoded. Video frame readiness arrives with the hover
+  // work (#291), so a video paints as it always has.
   const [decoded, setDecoded] = useState(false)
   const isImage = asset.mediaType === 'image'
   const pending = isImage && !decoded
@@ -144,6 +144,7 @@ export function AssetMedia({
           controls={detail}
           playsInline
           className={`size-full ${objectFit}`}
+          onError={display.reportElementError}
         />
       )}
     </div>
