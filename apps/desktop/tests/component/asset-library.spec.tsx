@@ -180,6 +180,8 @@ test('the wall asks for the fixed thumbnail variant, and a video for the origina
   page
 }) => {
   await mount(<AssetLibraryStory />)
+  // `asset-two` declares a 900 MiB original and is still asked for a preview:
+  // no size gate stands between a large video and the wall (#291).
   await expect
     .poll(() => page.evaluate(() => window.__assetLibraryTest?.displayCalls()))
     .toEqual([
@@ -187,6 +189,99 @@ test('the wall asks for the fixed thumbnail variant, and a video for the origina
       { id: 'asset-two', purpose: 'preview' },
       { id: 'asset-three', purpose: 'thumbnail' }
     ])
+})
+
+test('a wall video plays on hover, resets on leave, and opens its detail on click', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory />)
+  // Exact: the card's own open button is labelled "Open asset asset-two".
+  const video = page.getByLabel('Asset asset-two', { exact: true })
+  const open = page.getByRole('button', { name: 'Open asset asset-two' })
+  await expect(video).toBeVisible()
+
+  await open.hover()
+  await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false)
+  // The wall's own media attributes: a muted, looping, control-free hint of
+  // what the detail will play.
+  expect(
+    await video.evaluate((el: HTMLVideoElement) => ({
+      muted: el.muted,
+      loop: el.loop,
+      controls: el.controls,
+      playsInline: el.playsInline,
+      preload: el.preload
+    }))
+  ).toEqual({ muted: true, loop: true, controls: false, playsInline: true, preload: 'metadata' })
+  await expect
+    .poll(() => video.evaluate((el: HTMLVideoElement) => el.currentTime))
+    .toBeGreaterThan(0)
+
+  // The pointer leaves the card: the element keeps its source and stops at the
+  // beginning, so the next preview starts where a viewer expects it to.
+  await page.mouse.move(0, 0)
+  await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(true)
+  await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.currentTime)).toBe(0)
+
+  // The source survives the leave: the element keeps its `currentSrc` and the
+  // data it had decoded, so a re-hover does not have to decode it again.
+  const source = await video.evaluate((el: HTMLVideoElement) => el.currentSrc)
+  expect(source).not.toBe('')
+  expect(await video.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(2)
+
+  // A re-hover resumes the grant the card already holds: the same URL, and no
+  // second authorization from Go.
+  const authorized = await page.evaluate(() => window.__assetLibraryTest?.displayCalls().length)
+  await open.hover()
+  await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false)
+  expect(await video.evaluate((el: HTMLVideoElement) => el.currentSrc)).toBe(source)
+  expect(await page.evaluate(() => window.__assetLibraryTest?.displayCalls().length)).toBe(
+    authorized
+  )
+
+  await page.mouse.move(0, 0)
+  await open.click()
+  await expect(page.getByRole('dialog').getByLabel('Asset asset-two')).toHaveAttribute('controls')
+})
+
+test('a wall video keeps its placeholder until a frame exists', async ({ mount, page }) => {
+  // The original never arrives: `preload` is a bandwidth hint, not a promise of
+  // a first frame, so an element can be there with nothing to show.
+  await page.route('**/*.mp4', () => new Promise(() => undefined))
+  await mount(<AssetLibraryStory />)
+  const video = page.getByLabel('Asset asset-two', { exact: true })
+  await expect(video).toBeAttached()
+  expect(await video.evaluate((el: HTMLVideoElement) => el.readyState)).toBe(0)
+
+  // Metadata readiness is not visible content: the card paints its own
+  // placeholder while the element behind it has no frame to paint.
+  await expect(video).toBeHidden()
+  await expect(video.locator('..').getByTestId('media-placeholder')).toBeVisible()
+})
+
+test('a wall video restores its placeholder while a replacement URL has no frame', async ({
+  mount,
+  page
+}) => {
+  await page.route('**/*retry=1*', () => new Promise(() => undefined))
+  await mount(<AssetLibraryStory displayMode="video-retry-pending" />)
+  const video = page.getByLabel('Asset asset-two', { exact: true })
+  await expect(video).toBeVisible()
+
+  await video.dispatchEvent('error')
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__assetLibraryTest?.displayCalls().filter((call) => call.id === 'asset-two').length
+      )
+    )
+    .toBe(2)
+  await expect(video).toBeAttached()
+  expect(await video.evaluate((el: HTMLVideoElement) => el.readyState)).toBe(0)
+  await expect(video).toBeHidden()
+  await expect(video.locator('..').getByTestId('media-placeholder')).toBeVisible()
 })
 
 test('wall display loading is capped at four concurrent authorizations', async ({

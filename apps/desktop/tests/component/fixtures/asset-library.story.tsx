@@ -53,7 +53,9 @@ function asset(
     creator: { id: 'user-one', displayName: 'Aster' },
     mediaType,
     mimeType: mediaType === 'image' ? 'image/svg+xml' : 'video/mp4',
-    byteSize: imageBlob.size,
+    // Large enough that a size-based wall gate would refuse it: display is
+    // authorized by variant, never by the weight of the file.
+    byteSize: mediaType === 'video' ? 900 * 1024 * 1024 : imageBlob.size,
     checksumSha256: 'aa'.repeat(32),
     widthPx: 120,
     heightPx: 80,
@@ -168,7 +170,13 @@ declare global {
  * card's single automatic re-authorization; `always-fail` reaches the manual
  * retry; `gone` is the generic unavailable state.
  */
-type DisplayMode = 'immediate' | 'deferred' | 'fail-once' | 'always-fail' | 'gone'
+type DisplayMode =
+  | 'immediate'
+  | 'deferred'
+  | 'fail-once'
+  | 'always-fail'
+  | 'gone'
+  | 'video-retry-pending'
 
 function createHarness(
   downloadMode: 'immediate' | 'deferred' | 'sequenced' | 'cancelled' | 'failed',
@@ -336,10 +344,17 @@ function createHarness(
         if (displayMode === 'always-fail') return { outcome: 'network-failure' }
         if (displayMode === 'fail-once' && attempts === 1) return { outcome: 'network-failure' }
         if (displayMode === 'gone') return { outcome: 'request-rejected', code: 'not_found' }
+        const retryVideoUrl = new URL(videoUrl, window.location.href)
+        retryVideoUrl.searchParams.set('retry', '1')
         return {
           outcome: 'succeeded',
           value: {
-            url: id === 'asset-two' ? videoUrl : grantedUrl,
+            url:
+              id === 'asset-two'
+                ? displayMode === 'video-retry-pending' && attempts > 1
+                  ? retryVideoUrl.href
+                  : videoUrl
+                : grantedUrl,
             expiresAt: grantedExpiry
           }
         }

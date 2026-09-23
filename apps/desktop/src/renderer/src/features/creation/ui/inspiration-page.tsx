@@ -38,6 +38,7 @@ export interface InspirationPageProps {
 function itemMedia(item: InspirationItem): MediaPreviewView & {
   /** The download's own metadata: display never reads it. */
   readonly mimeType: string
+  readonly byteSize: number
   readonly widthPx: number | null
   readonly heightPx: number | null
 } {
@@ -110,10 +111,22 @@ function InspirationCard({
   const { t } = useTranslation('creation')
   const media = itemMedia(item)
   const contentPort = useMemo(() => mediaPort(ports, item), [item, ports])
+  // As in `AssetCard`: the open button covers the media, so hover is tracked on
+  // the card rather than on the element.
+  const [hovered, setHovered] = useState(false)
   return (
     <li data-testid="inspiration-card" className="group absolute overflow-hidden" style={style}>
-      <div className="bg-muted relative size-full overflow-hidden">
-        <AssetMedia asset={media} ports={contentPort} onUnavailable={onUnavailable} />
+      <div
+        className="bg-muted relative size-full overflow-hidden"
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+      >
+        <AssetMedia
+          asset={media}
+          ports={contentPort}
+          hovered={hovered}
+          onUnavailable={onUnavailable}
+        />
         {item.type === 'asset' ? (
           <div className="pointer-events-none absolute top-2 right-2 z-20 flex gap-1 text-[10px] font-semibold text-white">
             <span className="rounded bg-black/70 px-1.5 py-0.5">

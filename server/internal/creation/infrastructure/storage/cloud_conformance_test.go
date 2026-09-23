@@ -207,6 +207,23 @@ func runCloudConformanceSuite(t *testing.T, newStore newCloudStoreForTest) {
 		if _, ok := rawQuery["x-oss-process"]; ok {
 			t.Fatalf("raw preview GET must not carry a processing chain: %s", rawURL)
 		}
+		// Range is not part of the signature either: the same URL authorizes a
+		// ranged GET, which is how Chromium pulls the byte ranges it wants.
+		// `presignGetProcess` already fails closed on any signed header.
+		rangedReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			t.Fatalf("build ranged preview GET: %v", err)
+		}
+		rangedReq.Header.Set("Range", "bytes=0-4")
+		rangedResp, err := (&http.Client{Transport: backend}).Do(rangedReq)
+		if err != nil {
+			t.Fatalf("ranged preview GET: %v", err)
+		}
+		rangedBody, _ := io.ReadAll(rangedResp.Body)
+		rangedResp.Body.Close()
+		if rangedResp.StatusCode != http.StatusPartialContent || string(rangedBody) != "media" {
+			t.Fatalf("ranged preview GET = %d %q, want the requested slice", rangedResp.StatusCode, rangedBody)
+		}
 		// Both bare GETs are answered on their signature alone. That they
 		// differ per kind, and that each still authorizes, is what ties the
 		// variant query to the URL rather than to a shared bare key.
