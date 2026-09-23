@@ -214,6 +214,10 @@ cd apps/desktop
 bash scripts/run-e2e.sh benchmark
 node scripts/media-wall-benchmark/aggregate.mjs test-results/media-wall-benchmark/report.json
 node scripts/media-wall-benchmark/inspect-mp4.mjs ../../scripts/dev/fixtures/video-with-audio.mp4
+# 复现 criterion 10 的非空转性：派生一个 moov 尾置的同源变体再检查一次
+node scripts/media-wall-benchmark/derive-trailing-moov.mjs \
+  ../../scripts/dev/fixtures/video-with-audio.mp4 /tmp/trailing-moov.mp4
+node scripts/media-wall-benchmark/inspect-mp4.mjs /tmp/trailing-moov.mp4
 ```
 
 `aggregate.mjs` 在任一目标未达标、样本不足 30+30、出现媒体加载失败、或网络证据
