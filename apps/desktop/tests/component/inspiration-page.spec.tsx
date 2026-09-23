@@ -149,6 +149,152 @@ test('filters by media type with the asset-library buttons', async ({ mount, pag
   )
 })
 
+test('the wall asks each item for its own fixed variant, and the detail for the preview', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="admin" />)
+  // Both wall cards want the lightweight variant, each under its own identity:
+  // an effective Publication for one, the Admin governance Asset for the other.
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.displayCalls()))
+    .toEqual([
+      { id: 'publication-1', purpose: 'thumbnail' },
+      { id: 'admin-asset', purpose: 'thumbnail' }
+    ])
+  await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
+  // The detail asks for the full preview of the same Asset, through the Admin
+  // governance path — the wall keeps its own grant.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__inspirationTest
+            ?.displayCalls()
+            .filter((call) => call.id === 'admin-asset' && call.purpose === 'preview').length ?? 0
+      )
+    )
+    .toBe(1)
+})
+
+test('wall display loading is capped at four concurrent authorizations', async ({
+  mount,
+  page
+}) => {
+  // Short enough that the wall genuinely overflows its 200px near-visible reach.
+  await page.setViewportSize({ width: 960, height: 360 })
+  await mount(<InspirationStory state="dense" displayMode="deferred" />)
+  await expect(page.getByTestId('inspiration-card')).toHaveCount(24)
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.maxActiveDisplays()))
+    .toBe(4)
+  const held = await page.evaluate(() => window.__inspirationTest?.displayCalls().length ?? 0)
+  expect(held).toBe(4)
+  await page.evaluate(() => window.__inspirationTest?.releaseDisplays())
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.displayCalls().length ?? 0))
+    .toBeGreaterThan(held)
+})
+
+test('a card below the fold authorizes nothing until it comes into range', async ({
+  mount,
+  page
+}) => {
+  await page.setViewportSize({ width: 960, height: 360 })
+  await mount(<InspirationStory state="dense" />)
+  await expect(page.getByTestId('inspiration-card')).toHaveCount(24)
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.displayCalls().length ?? 0))
+    .toBeGreaterThan(0)
+  const before = await page.evaluate(() => window.__inspirationTest?.displayCalls().length ?? 0)
+  // Near-visible and no further: the wall never authorizes the whole page.
+  expect(before).toBeLessThan(24)
+  await page.getByTestId('inspiration-card').last().scrollIntoViewIfNeeded()
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.displayCalls().length ?? 0))
+    .toBeGreaterThan(before)
+})
+
+test('an opened detail asks for the preview variant and bypasses a saturated wall', async ({
+  mount,
+  page
+}) => {
+  await page.setViewportSize({ width: 960, height: 360 })
+  await mount(<InspirationStory state="dense" displayMode="deferred" />)
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.maxActiveDisplays()))
+    .toBe(4)
+  await page.getByRole('button', { name: 'Open inspiration publication-1', exact: true }).click()
+  // It landed without waiting for one of the four held wall slots to free up.
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.maxActiveDisplays()))
+    .toBe(5)
+})
+
+test('one failed authorization is retried automatically and then stops', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory displayMode="fail-once" />)
+  // Two asks for the one card: the first failure spends the automatic retry.
+  await expect(page.getByRole('img', { name: 'Asset publication-1' })).toBeVisible()
+  expect(await page.evaluate(() => window.__inspirationTest?.displayCalls())).toEqual([
+    { id: 'publication-1', purpose: 'thumbnail' },
+    { id: 'publication-1', purpose: 'thumbnail' }
+  ])
+  expect(await page.getByRole('button', { name: 'Retry' }).count()).toBe(0)
+})
+
+test('a persistent authorization failure stops at a manual retry', async ({ mount, page }) => {
+  await mount(<InspirationStory displayMode="always-fail" />)
+  const retry = page.getByRole('button', { name: 'Retry' })
+  await expect(retry).toBeVisible()
+  const spent = await page.evaluate(() => window.__inspirationTest?.displayCalls().length ?? 0)
+  // One automatic retry, and then nothing: the card gave up rather than looping.
+  expect(spent).toBe(2)
+
+  await retry.click()
+  // The viewer's own retry buys one fresh attempt and its single automatic
+  // companion, and that is where it stops — the loop stays bounded.
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.displayCalls().length ?? 0))
+    .toBe(spent + 2)
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
+})
+
+test('a gone Publication shows the generic unavailable state and refreshes the list', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory displayMode="gone" />)
+  await expect(page.getByText('Media unavailable')).toBeVisible()
+  // Nothing to retry: the server already answered, so the list re-reads instead.
+  expect(await page.getByRole('button', { name: 'Retry' }).count()).toBe(0)
+  await expect
+    .poll(
+      async () => (await page.evaluate(() => window.__inspirationTest?.listCalls().length)) ?? 0
+    )
+    .toBeGreaterThan(1)
+})
+
+test('download still streams the original through Go, never a display grant', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory />)
+  await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'Download' }).click()
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.contentCalls()))
+    .toEqual(['publication-1'])
+  // The original's own bytes came from the content path; display was untouched.
+  expect(await page.evaluate(() => window.__inspirationTest?.displayCalls())).toEqual([
+    { id: 'publication-1', purpose: 'thumbnail' },
+    { id: 'publication-1', purpose: 'preview' }
+  ])
+})
+
 test('video publications render previews and open with playable controls', async ({
   mount,
   page
@@ -295,7 +441,7 @@ test('waterfall recalculates its responsive column count', async ({ mount, page 
 test('failed media keeps the same precomputed shortest-column layout', async ({ mount, page }) => {
   // The same six-column width the tie probe pins down.
   await page.setViewportSize({ width: 1920, height: 1080 })
-  await mount(<InspirationStory state="layout-failed" />)
+  await mount(<InspirationStory state="layout-probe" displayMode="always-fail" />)
   await expect(page.getByText('Media failed to load').first()).toBeVisible()
 
   const cards = page.getByTestId('inspiration-card')

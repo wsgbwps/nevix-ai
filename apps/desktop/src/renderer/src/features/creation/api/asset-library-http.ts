@@ -1,4 +1,4 @@
-import type { CreationApiFailure, CreationApiResult } from './go-creation-http'
+import type { CreationApiFailure, CreationApiResult, DisplayUrlView } from './go-creation-http'
 import { fetchDisplayUrl, readErrorCode, request } from './go-creation-http'
 
 export type AssetMediaType = 'image' | 'video'
@@ -134,15 +134,6 @@ export interface AssetContentOptions {
  */
 export type AssetDisplayPurpose = 'thumbnail' | 'preview'
 
-/**
- * What a media element paints from. Go's short-lived display grant is the
- * normal case; a Blob is the Inspiration Page's remaining pre-#290 path and
- * retires with it.
- */
-export type AssetDisplaySource =
-  | { readonly kind: 'grant'; readonly url: string; readonly expiresAt: string }
-  | { readonly kind: 'blob'; readonly blob: Blob }
-
 export interface AssetDisplayOptions {
   /** Aborting must stop the read, not just ignore its answer. */
   readonly signal?: AbortSignal
@@ -156,7 +147,7 @@ export interface AssetLibraryPorts {
     assetId: string,
     purpose: AssetDisplayPurpose,
     options?: AssetDisplayOptions
-  ) => Promise<CreationApiResult<AssetDisplaySource>>
+  ) => Promise<CreationApiResult<DisplayUrlView>>
   /** Streams the original bytes through Go; display never uses this path. */
   readonly downloadAssetContent: (
     assetId: string,
@@ -566,7 +557,7 @@ export function createAssetLibraryClient(serverUrl: string): {
     assetId: string,
     purpose: AssetDisplayPurpose,
     options?: AssetDisplayOptions
-  ): Promise<CreationApiResult<AssetDisplaySource>>
+  ): Promise<CreationApiResult<DisplayUrlView>>
   downloadContent(
     token: string,
     assetId: string,
@@ -601,16 +592,13 @@ export function createAssetLibraryClient(serverUrl: string): {
         ? { outcome: 'network-failure' }
         : { outcome: 'succeeded', value: parsed }
     },
-    async loadDisplay(token, assetId, purpose, options) {
-      const result = await fetchDisplayUrl(
+    loadDisplay(token, assetId, purpose, options) {
+      return fetchDisplayUrl(
         serverUrl,
         token,
         `/creation/assets/${encodeURIComponent(assetId)}/${purpose}-url`,
         options?.signal
       )
-      return result.outcome === 'succeeded'
-        ? { outcome: 'succeeded', value: { kind: 'grant', ...result.value } }
-        : result
     },
     async downloadContent(token, assetId, checksumSha256, options) {
       return loadVerifiedContent(

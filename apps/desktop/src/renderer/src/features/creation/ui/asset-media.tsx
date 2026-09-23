@@ -35,15 +35,25 @@ function MediaStatus({
   const { t } = useTranslation('creation')
   if (failure !== null) {
     return (
+      // A card's own open overlay covers the whole card, so the verdict has to
+      // outrank it or Retry could never be clicked. Only the button takes
+      // pointer events: the rest of a failed card still opens its detail, and
+      // stays selectable in the Asset Library's batch mode.
       <div
-        className="text-muted-foreground grid h-full min-h-28 place-items-center gap-2 p-2 text-center text-xs"
+        className="text-muted-foreground pointer-events-none relative z-20 grid h-full min-h-28 place-items-center gap-2 p-2 text-center text-xs"
         role="status"
       >
         {/* One generic verdict for every refusal: why it is gone is the
             server's business, not something a card explains. */}
         <span>{t(failure === 'retryable' ? 'assets.mediaFailed' : 'assets.mediaUnavailable')}</span>
         {failure === 'retryable' ? (
-          <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="pointer-events-auto"
+            onClick={onRetry}
+          >
             {t('state.retry')}
           </Button>
         ) : null}

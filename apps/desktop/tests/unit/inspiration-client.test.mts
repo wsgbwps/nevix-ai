@@ -249,6 +249,42 @@ test('publication mutations use their exact paths and narrow response envelopes'
   }
 })
 
+test("a display grant follows the item's own identity, not one shared path", async () => {
+  const originalFetch = globalThis.fetch
+  const calls: string[] = []
+  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString()
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input))
+    calls.push(url.pathname)
+    return Response.json({ url: 'https://bucket.example/signed', expires_at: expiresAt })
+  }
+  try {
+    const client = createInspirationClient(serverUrl)
+    const thumbnail = await client.loadDisplay(
+      'token',
+      { type: 'publication', publication: { ...publication, id: 'publication one' } },
+      'thumbnail'
+    )
+    assert.deepEqual(thumbnail, {
+      outcome: 'succeeded',
+      value: { url: 'https://bucket.example/signed', expiresAt }
+    })
+    await client.loadDisplay(
+      'token',
+      { type: 'asset', asset: { ...asset, id: 'asset one' } },
+      'preview'
+    )
+    // A Publication and an Admin-governed Asset are different identities: one
+    // shared path would authorize the wrong record.
+    assert.deepEqual(calls, [
+      '/creation/publications/publication%20one/thumbnail-url',
+      '/creation/inspiration/assets/asset%20one/preview-url'
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('admin safety mutations use exact item restriction paths and strictly decode state', async () => {
   const originalFetch = globalThis.fetch
   const calls: Array<{ readonly path: string; readonly method: string }> = []

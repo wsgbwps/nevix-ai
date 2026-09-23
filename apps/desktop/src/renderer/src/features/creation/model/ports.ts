@@ -203,6 +203,8 @@ export function createCreationWorkspacePorts(
     listInspiration: (page) => withInspirationToken((client, token) => client.list(token, page)),
     getInspirationDetail: (item) =>
       withInspirationToken((client, token) => client.get(token, item)),
+    loadInspirationDisplay: (item, purpose, options) =>
+      withInspirationToken((client, token) => client.loadDisplay(token, item, purpose, options)),
     loadInspirationContent: (item, options) =>
       withInspirationToken((client, token) => client.loadContent(token, item, options)),
     loadInspirationReferencePreview: (item, referenceId) =>

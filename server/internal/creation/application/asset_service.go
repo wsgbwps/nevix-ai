@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"time"
 
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/creation/domain"
@@ -99,15 +98,7 @@ func (s *AssetService) AuthorizeThumbnail(ctx context.Context, principal authz.P
 	if asset.MediaType != domain.MediaImage {
 		return DisplayURLAuthorization{}, domain.ErrAssetNotFound
 	}
-	store, _, err := s.storage.ResolveStore(ctx)
-	if err != nil {
-		return DisplayURLAuthorization{}, err
-	}
-	signedURL, err := store.PresignThumbnail(ctx, asset.BlobKey, displayURLLifetime)
-	if err != nil {
-		return DisplayURLAuthorization{}, domain.ErrObjectStorageUnavailable
-	}
-	return DisplayURLAuthorization{URL: signedURL, ExpiresAt: time.Now().UTC().Add(displayURLLifetime)}, nil
+	return authorizeDisplay(ctx, s.storage, asset.BlobKey, domain.KindImage, displayThumbnail)
 }
 
 // AuthorizePreview issues the signed GET of one visible Asset's detail
@@ -118,15 +109,7 @@ func (s *AssetService) AuthorizePreview(ctx context.Context, principal authz.Pri
 	if err != nil {
 		return DisplayURLAuthorization{}, err
 	}
-	store, _, err := s.storage.ResolveStore(ctx)
-	if err != nil {
-		return DisplayURLAuthorization{}, err
-	}
-	signedURL, err := store.PresignPreview(ctx, asset.BlobKey, asset.MediaType.Kind(), displayURLLifetime)
-	if err != nil {
-		return DisplayURLAuthorization{}, domain.ErrObjectStorageUnavailable
-	}
-	return DisplayURLAuthorization{URL: signedURL, ExpiresAt: time.Now().UTC().Add(displayURLLifetime)}, nil
+	return authorizeDisplay(ctx, s.storage, asset.BlobKey, asset.MediaType.Kind(), displayPreview)
 }
 
 func (s *AssetService) Delete(ctx context.Context, principal authz.Principal, id domain.UUID) error {

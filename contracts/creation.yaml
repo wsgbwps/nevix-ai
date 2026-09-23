@@ -1798,6 +1798,55 @@ paths:
           $ref: "#/components/responses/RangeNotSatisfiable"
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/inspiration/assets/{assetID}/thumbnail-url:
+    get:
+      operationId: getInspirationAssetThumbnailUrl
+      summary: 签发 Admin 治理视图下 Media Asset 缩略图的限时直连 GET
+      description: |-
+        经 GuardAdmin 与「精确 Asset 存在且未删除」复验后签发墙缩略图。Admin 治理视图与
+        Creator 自有视图是两条独立授权路径：active 限制中的 Asset 仍可显示，因为判断与解除
+        限制需要看到被限制的内容。非 Admin 一律 403，非 image、已删除或不存在一律 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      responses:
+        "200":
+          $ref: "#/components/responses/DisplayURLResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/inspiration/assets/{assetID}/preview-url:
+    get:
+      operationId: getInspirationAssetPreviewUrl
+      summary: 签发 Admin 治理视图下 Media Asset 预览的限时直连 GET
+      description: |-
+        与 thumbnail-url 同一条 GuardAdmin 复验，但签发详情大图：image 经 provider 端缩小，
+        video 为支持 Range 的原始字节。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      responses:
+        "200":
+          $ref: "#/components/responses/DisplayURLResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
   /creation/inspiration/assets/{assetID}/references/{referenceID}/preview-url:
     get:
       operationId: getInspirationAssetReferencePreviewURL
@@ -1911,6 +1960,51 @@ paths:
           $ref: "#/components/responses/NotFound"
         "416":
           $ref: "#/components/responses/RangeNotSatisfiable"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/publications/{publicationID}/thumbnail-url:
+    get:
+      operationId: getPublicationThumbnailUrl
+      summary: 为有效 Team Publication 签发缩略图的限时直连 GET
+      description: |-
+        经既有的有效 Publication 复验后签发墙缩略图：普通读取要求未撤回、未被直接限制、来源
+        Asset 未处于 active 限制，且来源 Asset 的逻辑删除不终止 Publication；Admin 对直接受限的
+        Publication 保留治理可见（与 /content 同一条查询）。非 image、无效或不存在一律 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/publicationID"
+      responses:
+        "200":
+          $ref: "#/components/responses/DisplayURLResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/publications/{publicationID}/preview-url:
+    get:
+      operationId: getPublicationPreviewUrl
+      summary: 为有效 Team Publication 签发预览的限时直连 GET
+      description: |-
+        与 thumbnail-url 同一条有效 Publication 复验，但签发详情大图：image 经 provider 端
+        缩小，video 为支持 Range 的原始字节。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/publicationID"
+      responses:
+        "200":
+          $ref: "#/components/responses/DisplayURLResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ObjectStorageUnavailable"
   /creation/publications/{publicationID}/references/{referenceID}/preview-url:

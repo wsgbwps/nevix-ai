@@ -258,6 +258,52 @@ func (h *PublicationHandler) AdminAssetReferencePreview(w http.ResponseWriter, r
 	writeDisplayAuthorization(w, r, authorization, err)
 }
 
+// GetAdminAssetThumbnailURL and GetAdminAssetPreviewURL answer the Inspiration
+// Page's wall and detail variants for the exact Asset an Admin selected. The
+// Admin path admits an actively restricted Asset: governing a restriction
+// requires seeing what is restricted.
+func (h *PublicationHandler) GetAdminAssetThumbnailURL(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "assetID")
+	if !ok {
+		return
+	}
+	principal, _ := authz.PrincipalFrom(r.Context())
+	authorization, err := h.publications.AuthorizeAdminAssetThumbnail(r.Context(), principal, id)
+	writeDisplayAuthorization(w, r, authorization, err)
+}
+
+func (h *PublicationHandler) GetAdminAssetPreviewURL(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "assetID")
+	if !ok {
+		return
+	}
+	principal, _ := authz.PrincipalFrom(r.Context())
+	authorization, err := h.publications.AuthorizeAdminAssetMediaPreview(r.Context(), principal, id)
+	writeDisplayAuthorization(w, r, authorization, err)
+}
+
+// The same two variants for an effective Team Publication, which any active
+// User may see.
+func (h *PublicationHandler) GetPublicationThumbnailURL(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "publicationID")
+	if !ok {
+		return
+	}
+	principal, _ := authz.PrincipalFrom(r.Context())
+	authorization, err := h.publications.AuthorizePublicationThumbnail(r.Context(), principal, id)
+	writeDisplayAuthorization(w, r, authorization, err)
+}
+
+func (h *PublicationHandler) GetPublicationPreviewURL(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "publicationID")
+	if !ok {
+		return
+	}
+	principal, _ := authz.PrincipalFrom(r.Context())
+	authorization, err := h.publications.AuthorizePublicationMediaPreview(r.Context(), principal, id)
+	writeDisplayAuthorization(w, r, authorization, err)
+}
+
 func (h *PublicationHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathUUID(w, r, "publicationID")
 	if !ok {

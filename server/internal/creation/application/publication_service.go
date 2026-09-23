@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"time"
 	"unicode/utf8"
 
 	"github.com/nevix-ai/server/internal/auditlog"
@@ -282,20 +281,49 @@ func (s *PublicationService) AuthorizeAdminAssetPreview(ctx context.Context, ass
 	return s.authorizeReference(ctx, reference, err)
 }
 
+func (s *PublicationService) AuthorizeAdminAssetThumbnail(ctx context.Context, principal authz.Principal, id domain.UUID) (DisplayURLAuthorization, error) {
+	asset, err := s.ResolveAdminAsset(ctx, principal, id)
+	if err != nil {
+		return DisplayURLAuthorization{}, err
+	}
+	if asset.MediaType != domain.MediaImage {
+		return DisplayURLAuthorization{}, domain.ErrAssetNotFound
+	}
+	return authorizeDisplay(ctx, s.storage, asset.BlobKey, domain.KindImage, displayThumbnail)
+}
+
+func (s *PublicationService) AuthorizeAdminAssetMediaPreview(ctx context.Context, principal authz.Principal, id domain.UUID) (DisplayURLAuthorization, error) {
+	asset, err := s.ResolveAdminAsset(ctx, principal, id)
+	if err != nil {
+		return DisplayURLAuthorization{}, err
+	}
+	return authorizeDisplay(ctx, s.storage, asset.BlobKey, asset.MediaType.Kind(), displayPreview)
+}
+
+func (s *PublicationService) AuthorizePublicationThumbnail(ctx context.Context, principal authz.Principal, id domain.UUID) (DisplayURLAuthorization, error) {
+	publication, err := s.ResolvePublication(ctx, principal, id)
+	if err != nil {
+		return DisplayURLAuthorization{}, err
+	}
+	if publication.MediaType != domain.MediaImage {
+		return DisplayURLAuthorization{}, domain.ErrPublicationNotFound
+	}
+	return authorizeDisplay(ctx, s.storage, publication.BlobKey, domain.KindImage, displayThumbnail)
+}
+
+func (s *PublicationService) AuthorizePublicationMediaPreview(ctx context.Context, principal authz.Principal, id domain.UUID) (DisplayURLAuthorization, error) {
+	publication, err := s.ResolvePublication(ctx, principal, id)
+	if err != nil {
+		return DisplayURLAuthorization{}, err
+	}
+	return authorizeDisplay(ctx, s.storage, publication.BlobKey, publication.MediaType.Kind(), displayPreview)
+}
+
 func (s *PublicationService) authorizeReference(ctx context.Context, reference domain.PublicationReference, err error) (DisplayURLAuthorization, error) {
 	if err != nil {
 		return DisplayURLAuthorization{}, err
 	}
-	store, _, err := s.storage.ResolveStore(ctx)
-	if err != nil {
-		return DisplayURLAuthorization{}, err
-	}
-	url, err := store.PresignPreview(ctx, reference.BlobKey, reference.Kind, displayURLLifetime)
-	if err != nil {
-		return DisplayURLAuthorization{}, domain.ErrObjectStorageUnavailable
-	}
-	now := time.Now().UTC()
-	return DisplayURLAuthorization{URL: url, ExpiresAt: now.Add(displayURLLifetime)}, nil
+	return authorizeDisplay(ctx, s.storage, reference.BlobKey, reference.Kind, displayPreview)
 }
 
 func publicationView(publication domain.TeamPublication, actor domain.UUID, admin bool) PublicationView {

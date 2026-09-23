@@ -339,7 +339,6 @@ function createHarness(
         return {
           outcome: 'succeeded',
           value: {
-            kind: 'grant',
             url: id === 'asset-two' ? videoUrl : grantedUrl,
             expiresAt: grantedExpiry
           }

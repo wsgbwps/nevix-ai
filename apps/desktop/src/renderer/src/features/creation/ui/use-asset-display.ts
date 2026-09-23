@@ -107,7 +107,6 @@ export function useAssetDisplay(
   useEffect(() => {
     if (!enabled) return
     const controller = new AbortController()
-    let objectUrl: string | null = null
     const settle = (failure: AssetDisplayFailure | null, url: string | null): void => {
       if (controller.signal.aborted) return
       setState({ assetId: asset.id, url, failure })
@@ -138,20 +137,12 @@ export function useAssetDisplay(
         settle('retryable', null)
         return
       }
-      if (result.value.kind === 'blob') {
-        objectUrl = URL.createObjectURL(result.value.blob)
-        settle(null, objectUrl)
-        return
-      }
       settle(null, result.value.url)
     }
 
     if (queued) queueAuthorization({ signal: controller.signal, run: load })
     else void load()
-    return () => {
-      controller.abort()
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
+    return () => controller.abort()
   }, [asset.id, beginReload, enabled, ports, purpose, queued, generation])
 
   // The element rejected a grant the server considered live: the bytes are the

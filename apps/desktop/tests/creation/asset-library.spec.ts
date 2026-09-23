@@ -281,7 +281,9 @@ test(
             expect(percentile95(restrictionSamples)).toBeLessThan(2_000)
             safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
             await assetRestriction.getByRole('button', { name: '限制资产' }).click()
-            await expect(safetyDetail.getByRole('status')).toContainText('资产限制已生效')
+            await expect(
+              safetyDetail.getByRole('status').filter({ hasText: '资产限制已生效' })
+            ).toBeVisible()
             await expect(
               assetRestriction.getByRole('button', { name: '解除资产限制' })
             ).toBeVisible()
@@ -299,7 +301,9 @@ test(
 
             safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
             await assetRestriction.getByRole('button', { name: '解除资产限制' }).click()
-            await expect(safetyDetail.getByRole('status')).toContainText('资产限制已解除')
+            await expect(
+              safetyDetail.getByRole('status').filter({ hasText: '资产限制已解除' })
+            ).toBeVisible()
 
             const publishRemainingAsset = async (): Promise<string> => {
               await relaunched.page.getByRole('link', { name: '资产' }).first().click()
@@ -329,7 +333,9 @@ test(
 
             safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
             await publicationRestriction.getByRole('button', { name: '限制发布' }).click()
-            await expect(safetyDetail.getByRole('status')).toContainText('发布限制已生效')
+            await expect(
+              safetyDetail.getByRole('status').filter({ hasText: '发布限制已生效' })
+            ).toBeVisible()
 
             await relaunched.page.getByRole('link', { name: '资产' }).first().click()
             await relaunched.page.getByRole('button', { name: /^打开资产 / }).click()
@@ -343,7 +349,9 @@ test(
 
             safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
             await publicationRestriction.getByRole('button', { name: '解除发布限制' }).click()
-            await expect(safetyDetail.getByRole('status')).toContainText('发布限制已解除')
+            await expect(
+              safetyDetail.getByRole('status').filter({ hasText: '发布限制已解除' })
+            ).toBeVisible()
             await relaunched.page.getByRole('link', { name: '资产' }).first().click()
             await relaunched.page.getByRole('link', { name: '灵感' }).first().click()
             await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(0)
