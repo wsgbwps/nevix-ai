@@ -260,6 +260,30 @@ test('a wall video keeps its placeholder until a frame exists', async ({ mount, 
   await expect(video.locator('..').getByTestId('media-placeholder')).toBeVisible()
 })
 
+test('a wall video restores its placeholder while a replacement URL has no frame', async ({
+  mount,
+  page
+}) => {
+  await page.route('**/*retry=1*', () => new Promise(() => undefined))
+  await mount(<AssetLibraryStory displayMode="video-retry-pending" />)
+  const video = page.getByLabel('Asset asset-two', { exact: true })
+  await expect(video).toBeVisible()
+
+  await video.dispatchEvent('error')
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__assetLibraryTest?.displayCalls().filter((call) => call.id === 'asset-two').length
+      )
+    )
+    .toBe(2)
+  await expect(video).toBeAttached()
+  expect(await video.evaluate((el: HTMLVideoElement) => el.readyState)).toBe(0)
+  await expect(video).toBeHidden()
+  await expect(video.locator('..').getByTestId('media-placeholder')).toBeVisible()
+})
+
 test('wall display loading is capped at four concurrent authorizations', async ({
   mount,
   page

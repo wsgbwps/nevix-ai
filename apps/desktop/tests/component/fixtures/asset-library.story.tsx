@@ -170,7 +170,13 @@ declare global {
  * card's single automatic re-authorization; `always-fail` reaches the manual
  * retry; `gone` is the generic unavailable state.
  */
-type DisplayMode = 'immediate' | 'deferred' | 'fail-once' | 'always-fail' | 'gone'
+type DisplayMode =
+  | 'immediate'
+  | 'deferred'
+  | 'fail-once'
+  | 'always-fail'
+  | 'gone'
+  | 'video-retry-pending'
 
 function createHarness(
   downloadMode: 'immediate' | 'deferred' | 'sequenced' | 'cancelled' | 'failed',
@@ -338,10 +344,17 @@ function createHarness(
         if (displayMode === 'always-fail') return { outcome: 'network-failure' }
         if (displayMode === 'fail-once' && attempts === 1) return { outcome: 'network-failure' }
         if (displayMode === 'gone') return { outcome: 'request-rejected', code: 'not_found' }
+        const retryVideoUrl = new URL(videoUrl, window.location.href)
+        retryVideoUrl.searchParams.set('retry', '1')
         return {
           outcome: 'succeeded',
           value: {
-            url: id === 'asset-two' ? videoUrl : grantedUrl,
+            url:
+              id === 'asset-two'
+                ? displayMode === 'video-retry-pending' && attempts > 1
+                  ? retryVideoUrl.href
+                  : videoUrl
+                : grantedUrl,
             expiresAt: grantedExpiry
           }
         }

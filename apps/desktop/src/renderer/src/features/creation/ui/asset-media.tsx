@@ -109,9 +109,8 @@ export function AssetMedia({
   // Visible content, not metadata: a card paints its placeholder until an image
   // decodes or a video has a frame. A detail is deliberate — it paints the
   // element at once, so an opened video's controls are usable immediately.
-  const [decoded, setDecoded] = useState(false)
+  const [decoded, setDecoded] = useState<{ assetId: string; url: string } | null>(null)
   const isImage = asset.mediaType === 'image'
-  const pending = !decoded && (isImage || !detail)
   // Subscribed, not read once: a preference that turns on mid-hover stops the
   // card where it stands.
   const [reducedMotion, setReducedMotion] = useState(prefersReducedMotion)
@@ -153,6 +152,12 @@ export function AssetMedia({
     purpose,
     onUnavailable
   })
+  const pending =
+    (decoded?.assetId !== asset.id || decoded?.url !== display.url) && (isImage || !detail)
+  const reportElementError = (): void => {
+    setDecoded(null)
+    display.reportElementError()
+  }
 
   // Playback belongs to the pointer, and the source is left alone so a brief
   // re-hover reuses the browser's own buffer. Pausing in the cleanup is what
@@ -192,10 +197,10 @@ export function AssetMedia({
             src={url}
             alt={mediaLabel}
             className={`size-full ${objectFit} ${pending ? 'invisible' : ''}`}
-            onLoad={() => setDecoded(true)}
+            onLoad={() => setDecoded({ assetId: asset.id, url })}
             // A grant the element will not paint is worth exactly one fresh
             // authorization before the card concedes.
-            onError={display.reportElementError}
+            onError={reportElementError}
           />
         ) : (
           <video
@@ -209,8 +214,8 @@ export function AssetMedia({
             preload={detail ? 'auto' : 'metadata'}
             playsInline
             className={`size-full ${objectFit} ${pending ? 'invisible' : ''}`}
-            onLoadedData={() => setDecoded(true)}
-            onError={display.reportElementError}
+            onLoadedData={() => setDecoded({ assetId: asset.id, url })}
+            onError={reportElementError}
           />
         )}
       </>
