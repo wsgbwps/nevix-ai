@@ -67,6 +67,30 @@ func (h *AssetHandler) Get(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetThumbnailURL authorizes one creator's wall thumbnail and answers the
+// exact, expiring signed GET the renderer's <img> loads.
+func (h *AssetHandler) GetThumbnailURL(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "assetID")
+	if !ok {
+		return
+	}
+	principal, _ := authz.PrincipalFrom(r.Context())
+	authorization, err := h.assets.AuthorizeThumbnail(r.Context(), principal, id)
+	writeDisplayAuthorization(w, r, authorization, err)
+}
+
+// GetPreviewURL authorizes one creator's detail preview and answers the exact,
+// expiring signed GET the renderer's media element loads.
+func (h *AssetHandler) GetPreviewURL(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(w, r, "assetID")
+	if !ok {
+		return
+	}
+	principal, _ := authz.PrincipalFrom(r.Context())
+	authorization, err := h.assets.AuthorizePreview(r.Context(), principal, id)
+	writeDisplayAuthorization(w, r, authorization, err)
+}
+
 func (h *AssetHandler) Download(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathUUID(w, r, "assetID")
 	if !ok {

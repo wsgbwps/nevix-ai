@@ -8,7 +8,7 @@ import {
   type CreationSessionView,
   type CreateMaterialFromResultInput,
   type MaterialPage,
-  type MaterialUrlView,
+  type DisplayUrlView,
   type ReferenceMaterialView,
   type SessionDetailView,
   type SessionPage
@@ -112,10 +112,10 @@ export interface CreationWorkspacePorts extends AssetLibraryPorts, InspirationPo
   readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
   /** Fetches one owned image material's short-lived presigned thumbnail URL
    * (ADR-0014 renderer display grant). */
-  readonly loadThumbnailUrl: (materialId: string) => Promise<CreationApiResult<MaterialUrlView>>
+  readonly loadThumbnailUrl: (materialId: string) => Promise<CreationApiResult<DisplayUrlView>>
   /** Fetches one owned material's short-lived presigned preview URL
    * (ADR-0014 renderer display grant). */
-  readonly loadPreviewUrl: (materialId: string) => Promise<CreationApiResult<MaterialUrlView>>
+  readonly loadPreviewUrl: (materialId: string) => Promise<CreationApiResult<DisplayUrlView>>
   readonly loadCapabilityManifest: () => Promise<CreationApiResult<CapabilityManifest>>
   /** Submits one idempotent generation task carrying the full local intent. */
   readonly submitTask: (
@@ -193,9 +193,11 @@ export function createCreationWorkspacePorts(
   return {
     listAssets: (page) => withAssetToken((client, token) => client.list(token, page)),
     getAsset: (assetId) => withAssetToken((client, token) => client.get(token, assetId)),
-    loadAssetContent: (assetId, checksumSha256, options) =>
+    loadAssetDisplay: (assetId, purpose, options) =>
+      withAssetToken((client, token) => client.loadDisplay(token, assetId, purpose, options)),
+    downloadAssetContent: (assetId, checksumSha256, options) =>
       withAssetToken((client, token) =>
-        client.loadContent(token, assetId, checksumSha256, options)
+        client.downloadContent(token, assetId, checksumSha256, options)
       ),
     deleteAsset: (assetId) => withAssetToken((client, token) => client.delete(token, assetId)),
     listInspiration: (page) => withInspirationToken((client, token) => client.list(token, page)),

@@ -275,6 +275,9 @@ export function AssetLibraryPage({
                         selected={selection.selection.has(asset.id)}
                         onSelect={() => selection.toggle(asset.id)}
                         onOpen={() => detail.open(asset.id)}
+                        // A gone or forbidden Asset means this page's facts are
+                        // stale in a way only the server can settle.
+                        onUnavailable={list.refresh}
                       />
                     ))}
                   </ul>
@@ -313,6 +316,7 @@ export function AssetLibraryPage({
         }
         onWithdraw={() => void detail.withdraw(() => window.confirm(t('assets.withdrawConfirm')))}
         onDelete={() => void detail.remove(() => window.confirm(t('assets.deleteConfirm')))}
+        onAssetUnavailable={list.refresh}
       />
     </section>
   )

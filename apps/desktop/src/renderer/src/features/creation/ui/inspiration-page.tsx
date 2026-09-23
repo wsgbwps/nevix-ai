@@ -20,7 +20,7 @@ import type { MediaAssetView, RestrictionState } from '../api/asset-library-http
 import { useInspiration, type InspirationFilters } from '../model/use-inspiration'
 import { AssetMedia, type MediaPreviewView } from './asset-media'
 import { LoadMoreSentinel } from './load-more-sentinel'
-import type { AssetContentPort } from './use-asset-content'
+import type { AssetDisplayPort } from './use-asset-display'
 
 const mediaTypes = ['image', 'video'] as const
 const initialFilters: InspirationFilters = { mediaType: 'image' }
@@ -36,6 +36,8 @@ export interface InspirationPageProps {
 }
 
 function itemMedia(item: InspirationItem): MediaPreviewView & {
+  /** The download's own metadata: display never reads it. */
+  readonly mimeType: string
   readonly widthPx: number | null
   readonly heightPx: number | null
 } {
@@ -74,11 +76,18 @@ function publicationFor(
   return detail?.type === 'asset' ? detail.publication : null
 }
 
-function mediaPort(ports: InspirationPorts, item: InspirationItem): AssetContentPort {
+function mediaPort(ports: InspirationPorts, item: InspirationItem): AssetDisplayPort {
   const expectedByteSize = itemMedia(item).byteSize
   return {
-    loadAssetContent: (_id, _checksum, options) =>
-      ports.loadInspirationContent(item, { ...options, expectedByteSize })
+    loadAssetDisplay: async (_id, _purpose, options) => {
+      const result = await ports.loadInspirationContent(item, {
+        expectedByteSize,
+        signal: options?.signal
+      })
+      return result.outcome === 'succeeded'
+        ? { outcome: 'succeeded', value: { kind: 'blob', blob: result.value } }
+        : result
+    }
   }
 }
 
@@ -660,7 +669,6 @@ export function InspirationPage({
           if (!selected) return
           void ports
             .loadInspirationContent(selected, {
-              purpose: 'download',
               expectedByteSize: itemMedia(selected).byteSize
             })
             .then((result) => {

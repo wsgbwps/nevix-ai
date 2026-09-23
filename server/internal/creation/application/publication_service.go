@@ -269,33 +269,33 @@ func (s *PublicationService) CreateSimilar(ctx context.Context, principal authz.
 	return result, created, nil
 }
 
-func (s *PublicationService) AuthorizePublicationPreview(ctx context.Context, principal authz.Principal, publicationID, referenceID domain.UUID) (MaterialURLAuthorization, error) {
+func (s *PublicationService) AuthorizePublicationPreview(ctx context.Context, principal authz.Principal, publicationID, referenceID domain.UUID) (DisplayURLAuthorization, error) {
 	if _, err := actorID(principal); err != nil {
-		return MaterialURLAuthorization{}, err
+		return DisplayURLAuthorization{}, err
 	}
 	reference, err := s.repository.GetPublicationReference(ctx, publicationID, referenceID, principal.Role == "admin")
 	return s.authorizeReference(ctx, reference, err)
 }
 
-func (s *PublicationService) AuthorizeAdminAssetPreview(ctx context.Context, assetID, referenceID domain.UUID) (MaterialURLAuthorization, error) {
+func (s *PublicationService) AuthorizeAdminAssetPreview(ctx context.Context, assetID, referenceID domain.UUID) (DisplayURLAuthorization, error) {
 	reference, err := s.repository.GetAdminAssetReference(ctx, assetID, referenceID)
 	return s.authorizeReference(ctx, reference, err)
 }
 
-func (s *PublicationService) authorizeReference(ctx context.Context, reference domain.PublicationReference, err error) (MaterialURLAuthorization, error) {
+func (s *PublicationService) authorizeReference(ctx context.Context, reference domain.PublicationReference, err error) (DisplayURLAuthorization, error) {
 	if err != nil {
-		return MaterialURLAuthorization{}, err
+		return DisplayURLAuthorization{}, err
 	}
 	store, _, err := s.storage.ResolveStore(ctx)
 	if err != nil {
-		return MaterialURLAuthorization{}, err
+		return DisplayURLAuthorization{}, err
 	}
-	url, err := store.PresignPreview(ctx, reference.BlobKey, reference.Kind, materialURLLifetime)
+	url, err := store.PresignPreview(ctx, reference.BlobKey, reference.Kind, displayURLLifetime)
 	if err != nil {
-		return MaterialURLAuthorization{}, domain.ErrObjectStorageUnavailable
+		return DisplayURLAuthorization{}, domain.ErrObjectStorageUnavailable
 	}
 	now := time.Now().UTC()
-	return MaterialURLAuthorization{URL: url, ExpiresAt: now.Add(materialURLLifetime)}, nil
+	return DisplayURLAuthorization{URL: url, ExpiresAt: now.Add(displayURLLifetime)}, nil
 }
 
 func publicationView(publication domain.TeamPublication, actor domain.UUID, admin bool) PublicationView {

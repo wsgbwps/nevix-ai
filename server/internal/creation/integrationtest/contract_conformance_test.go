@@ -1,6 +1,7 @@
 package integrationtest
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -98,6 +99,8 @@ func TestAssetLibraryContractSurface(t *testing.T) {
 	}{
 		{"GET", "/creation/assets"},
 		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001"},
+		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001/thumbnail-url"},
+		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001/preview-url"},
 		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001/content"},
 		{"DELETE", "/creation/assets/00000000-0000-0000-0000-000000000001"},
 		{"POST", "/creation/assets/00000000-0000-0000-0000-000000000001/publication"},
@@ -709,4 +712,26 @@ func uuidShape(text string) bool {
 		}
 	}
 	return true
+}
+
+// The contract's own Asset schemas are the durability guarantee that the wall
+// never ships signed URLs: a field the schema forbids cannot be added silently.
+func TestAssetListSchemaForbidsEmbeddedDisplayGrants(t *testing.T) {
+	spec := moduleFile(t, "creation.yaml")
+	for _, name := range []string{"MediaAsset", "MediaAssetDetail", "MediaAssetPrivateOrigin"} {
+		schema := resolvePointer(t, spec, "/components/schemas/"+name)
+		properties, _ := schema["properties"].(map[string]any)
+		if properties == nil {
+			t.Fatalf("%s schema exposes no properties", name)
+		}
+		raw, err := json.Marshal(schema)
+		if err != nil {
+			t.Fatalf("marshal %s schema: %v", name, err)
+		}
+		for _, forbidden := range []string{"blob_key", "signed_url", "thumbnail_url", "preview_url", "x-oss-process"} {
+			if bytes.Contains(raw, []byte(forbidden)) {
+				t.Fatalf("%s schema exposes %q", name, forbidden)
+			}
+		}
+	}
 }

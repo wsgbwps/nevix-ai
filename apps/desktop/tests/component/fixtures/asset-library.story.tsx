@@ -17,6 +17,7 @@ import {
   SidebarProvider
 } from '../../../src/renderer/src/components/ui/sidebar'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
+import videoUrl from '../../../../../scripts/dev/fixtures/video-with-audio.mp4?url'
 import { prepareAssetSimilarDraft } from '../../../src/renderer/src/features/creation/model/asset-similar-draft'
 import type {
   AssetDetailView,
@@ -33,6 +34,14 @@ const imageBlob = new Blob(
   ],
   { type: 'image/svg+xml' }
 )
+
+/**
+ * The display grant's URL, and a URL a real browser can actually load — a
+ * signed bucket URL is neither reachable from the test page nor valid. The
+ * variant is asserted through `displayCalls`, not through the URL.
+ */
+const grantedUrl = URL.createObjectURL(imageBlob)
+const grantedExpiry = new Date(Date.now() + 10 * 60_000).toISOString()
 
 function asset(
   id: string,
@@ -132,9 +141,12 @@ interface AssetLibraryTestControls {
   ): 'prepared' | 'replacement-required' | 'unavailable'
   replacements(): readonly boolean[]
   detailCalls(): readonly string[]
-  previewCalls(): readonly string[]
-  maxActivePreviews(): number
-  releasePreviews(): void
+  /** Every display authorization the page asked for, with its fixed variant. */
+  displayCalls(): readonly { readonly id: string; readonly purpose: string }[]
+  maxActiveDisplays(): number
+  releaseDisplays(): void
+  /** Clears the injected failures so a manual retry can succeed. */
+  resetDisplayAttempts(): void
   abortedDownloads(): number
   maxActiveDownloads(): number
   releaseDownloads(): void
@@ -150,6 +162,14 @@ declare global {
   }
 }
 
+/**
+ * How the display authorization answers. `deferred` holds every card at the
+ * gate so the wall's concurrency ceiling is observable; `fail-once` spends the
+ * card's single automatic re-authorization; `always-fail` reaches the manual
+ * retry; `gone` is the generic unavailable state.
+ */
+type DisplayMode = 'immediate' | 'deferred' | 'fail-once' | 'always-fail' | 'gone'
+
 function createHarness(
   downloadMode: 'immediate' | 'deferred' | 'sequenced' | 'cancelled' | 'failed',
   visibility: 'private' | 'public',
@@ -158,7 +178,7 @@ function createHarness(
   storageFailure: boolean,
   paginated: boolean,
   append: 'succeed' | 'fail-once' | 'echo',
-  deferredPreviews: boolean,
+  displayMode: DisplayMode,
   dense: boolean,
   unpublishableIds: readonly string[]
 ): {
@@ -180,13 +200,14 @@ function createHarness(
     }
   } satisfies Storage
   const detailCalls: string[] = []
-  const previewCalls: string[] = []
+  const displayCalls: { id: string; purpose: string }[] = []
+  const displayAttempts = new Map<string, number>()
   let abortedDownloads = 0
-  let activePreviews = 0
-  let maxActivePreviews = 0
-  let releasePreviews = (): void => undefined
-  const previewGate = new Promise<void>((resolve) => {
-    releasePreviews = resolve
+  let activeDisplays = 0
+  let maxActiveDisplays = 0
+  let releaseDisplays = (): void => undefined
+  const displayGate = new Promise<void>((resolve) => {
+    releaseDisplays = resolve
   })
   let activeDownloads = 0
   let maxActiveDownloads = 0
@@ -229,7 +250,7 @@ function createHarness(
           ? nextPage
           : dense
             ? denseAssets
-            : deferredPreviews
+            : displayMode === 'deferred'
               ? Array.from({ length: 8 }, (_, index) =>
                   asset(`preview-${index + 1}`, new Date(2026, 8, 16, 8, index).toISOString())
                 )
@@ -304,15 +325,27 @@ function createHarness(
                 : { ...detail, asset: selected }
         }
       },
-      loadAssetContent: async (id, _checksumSha256, options) => {
-        if (options?.purpose !== 'download') {
-          previewCalls.push(id)
-          activePreviews += 1
-          maxActivePreviews = Math.max(maxActivePreviews, activePreviews)
-          if (deferredPreviews) await previewGate
-          activePreviews -= 1
-          return { outcome: 'succeeded', value: imageBlob }
+      loadAssetDisplay: async (id, purpose) => {
+        displayCalls.push({ id, purpose })
+        activeDisplays += 1
+        maxActiveDisplays = Math.max(maxActiveDisplays, activeDisplays)
+        if (displayMode === 'deferred') await displayGate
+        activeDisplays -= 1
+        const attempts = (displayAttempts.get(id) ?? 0) + 1
+        displayAttempts.set(id, attempts)
+        if (displayMode === 'always-fail') return { outcome: 'network-failure' }
+        if (displayMode === 'fail-once' && attempts === 1) return { outcome: 'network-failure' }
+        if (displayMode === 'gone') return { outcome: 'request-rejected', code: 'not_found' }
+        return {
+          outcome: 'succeeded',
+          value: {
+            kind: 'grant',
+            url: id === 'asset-two' ? videoUrl : grantedUrl,
+            expiresAt: grantedExpiry
+          }
         }
+      },
+      downloadAssetContent: async (_id, _checksumSha256, options) => {
         activeDownloads += 1
         maxActiveDownloads = Math.max(maxActiveDownloads, activeDownloads)
         if (downloadMode === 'deferred') await gate
@@ -397,9 +430,10 @@ function createHarness(
       },
       replacements: () => replacements,
       detailCalls: () => detailCalls,
-      previewCalls: () => previewCalls,
-      maxActivePreviews: () => maxActivePreviews,
-      releasePreviews: () => releasePreviews(),
+      displayCalls: () => displayCalls,
+      maxActiveDisplays: () => maxActiveDisplays,
+      releaseDisplays: () => releaseDisplays(),
+      resetDisplayAttempts: () => displayAttempts.clear(),
       abortedDownloads: () => abortedDownloads,
       maxActiveDownloads: () => maxActiveDownloads,
       releaseDownloads: () => releaseDownloads(),
@@ -419,7 +453,7 @@ export function AssetLibraryStory({
   storageFailure = false,
   paginated = false,
   append = 'succeed',
-  deferredPreviews = false,
+  displayMode = 'immediate',
   dense = false,
   unpublishableIds = NO_IDS
 }: {
@@ -430,7 +464,7 @@ export function AssetLibraryStory({
   readonly storageFailure?: boolean
   readonly paginated?: boolean
   readonly append?: 'succeed' | 'fail-once' | 'echo'
-  readonly deferredPreviews?: boolean
+  readonly displayMode?: DisplayMode
   readonly dense?: boolean
   readonly unpublishableIds?: readonly string[]
 }): React.JSX.Element {
@@ -444,14 +478,14 @@ export function AssetLibraryStory({
         storageFailure,
         paginated,
         append,
-        deferredPreviews,
+        displayMode,
         dense,
         unpublishableIds
       ),
     [
       append,
       dense,
-      deferredPreviews,
+      displayMode,
       downloadMode,
       paginated,
       replacementRequired,

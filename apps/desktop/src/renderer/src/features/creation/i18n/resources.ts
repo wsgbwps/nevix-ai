@@ -13,6 +13,7 @@ export const creationTranslations = defineResourceTranslations({
         empty: '没有符合条件的资产。',
         mediaLoading: '正在加载媒体…',
         mediaFailed: '媒体加载失败',
+        mediaUnavailable: '媒体不可用',
         mediaAlt: '资产 {{id}}',
         media: { image: '图片', video: '视频' },
         filters: {
@@ -577,6 +578,7 @@ export const creationTranslations = defineResourceTranslations({
         empty: 'No assets match these filters.',
         mediaLoading: 'Loading media…',
         mediaFailed: 'Media failed to load',
+        mediaUnavailable: 'Media unavailable',
         mediaAlt: 'Asset {{id}}',
         media: { image: 'Image', video: 'Video' },
         filters: {

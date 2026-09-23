@@ -165,8 +165,10 @@ func runCloudConformanceSuite(t *testing.T, newStore newCloudStoreForTest) {
 		if got := query.Get("x-oss-process"); got != "image/resize,m_lfit,w_320/format,webp" {
 			t.Fatalf("x-oss-process = %q, want the 320px WebP resize chain", got)
 		}
-		// The bare GET the URL authorizes (no Authorization header) must pass
-		// the provider-side signature check the fake enforces.
+		// The bare GET the URL authorizes carries no Authorization header; the
+		// fake admits it on the presence of a signature alone, so what this
+		// shows is that the URL is self-authorizing, not that the chain above
+		// is the one the provider hashed.
 		signedReq, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL, nil)
 		if err != nil {
 			t.Fatalf("build signed GET: %v", err)
@@ -205,8 +207,9 @@ func runCloudConformanceSuite(t *testing.T, newStore newCloudStoreForTest) {
 		if _, ok := rawQuery["x-oss-process"]; ok {
 			t.Fatalf("raw preview GET must not carry a processing chain: %s", rawURL)
 		}
-		// Both bare GETs must pass the provider-side signature check the fake
-		// enforces, proving the variant query is signed into each URL.
+		// Both bare GETs are answered on their signature alone. That they
+		// differ per kind, and that each still authorizes, is what ties the
+		// variant query to the URL rather than to a shared bare key.
 		for name, signedURL := range map[string]string{"image": imageURL, "raw": rawURL} {
 			signedReq, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL, nil)
 			if err != nil {

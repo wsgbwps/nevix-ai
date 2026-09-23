@@ -1,5 +1,5 @@
 import type { CreationApiFailure, CreationApiResult } from './go-creation-http'
-import { readErrorCode, request } from './go-creation-http'
+import { fetchDisplayUrl, readErrorCode, request } from './go-creation-http'
 
 export type AssetMediaType = 'image' | 'video'
 export type AssetSort = 'newest' | 'oldest'
@@ -124,14 +124,41 @@ export interface AssetDetailView {
 
 export interface AssetContentOptions {
   readonly signal?: AbortSignal
-  readonly purpose?: 'preview' | 'download'
   readonly expectedByteSize?: number
+}
+
+/**
+ * Which fixed variant a card asks for: the wall's lightweight thumbnail, or
+ * the detail's full preview. The renderer never composes the size — Go signs
+ * one exact object at one fixed transformation.
+ */
+export type AssetDisplayPurpose = 'thumbnail' | 'preview'
+
+/**
+ * What a media element paints from. Go's short-lived display grant is the
+ * normal case; a Blob is the Inspiration Page's remaining pre-#290 path and
+ * retires with it.
+ */
+export type AssetDisplaySource =
+  | { readonly kind: 'grant'; readonly url: string; readonly expiresAt: string }
+  | { readonly kind: 'blob'; readonly blob: Blob }
+
+export interface AssetDisplayOptions {
+  /** Aborting must stop the read, not just ignore its answer. */
+  readonly signal?: AbortSignal
 }
 
 export interface AssetLibraryPorts {
   readonly listAssets: (request: AssetPageRequest) => Promise<CreationApiResult<AssetPage>>
   readonly getAsset: (assetId: string) => Promise<CreationApiResult<AssetDetailView>>
-  readonly loadAssetContent: (
+  /** Fetches one visible Asset's short-lived display grant (ADR-0014). */
+  readonly loadAssetDisplay: (
+    assetId: string,
+    purpose: AssetDisplayPurpose,
+    options?: AssetDisplayOptions
+  ) => Promise<CreationApiResult<AssetDisplaySource>>
+  /** Streams the original bytes through Go; display never uses this path. */
+  readonly downloadAssetContent: (
     assetId: string,
     checksumSha256: string,
     options?: AssetContentOptions
@@ -534,7 +561,13 @@ export async function loadVerifiedContent(
 export function createAssetLibraryClient(serverUrl: string): {
   list(token: string, page: AssetPageRequest): Promise<CreationApiResult<AssetPage>>
   get(token: string, assetId: string): Promise<CreationApiResult<AssetDetailView>>
-  loadContent(
+  loadDisplay(
+    token: string,
+    assetId: string,
+    purpose: AssetDisplayPurpose,
+    options?: AssetDisplayOptions
+  ): Promise<CreationApiResult<AssetDisplaySource>>
+  downloadContent(
     token: string,
     assetId: string,
     checksumSha256: string,
@@ -568,7 +601,18 @@ export function createAssetLibraryClient(serverUrl: string): {
         ? { outcome: 'network-failure' }
         : { outcome: 'succeeded', value: parsed }
     },
-    async loadContent(token, assetId, checksumSha256, options) {
+    async loadDisplay(token, assetId, purpose, options) {
+      const result = await fetchDisplayUrl(
+        serverUrl,
+        token,
+        `/creation/assets/${encodeURIComponent(assetId)}/${purpose}-url`,
+        options?.signal
+      )
+      return result.outcome === 'succeeded'
+        ? { outcome: 'succeeded', value: { kind: 'grant', ...result.value } }
+        : result
+    },
+    async downloadContent(token, assetId, checksumSha256, options) {
       return loadVerifiedContent(
         serverUrl,
         `/creation/assets/${encodeURIComponent(assetId)}/content`,

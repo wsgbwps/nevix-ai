@@ -50,6 +50,8 @@ func (m *Module) routes() []creationhttp.Route {
 		{Method: "GET", Path: "/creation/tasks/{taskID}/slots/{slotIndex}/result", Handler: m.tasks.DownloadSlotResult},
 		{Method: "GET", Path: "/creation/assets", Handler: m.assets.List},
 		{Method: "GET", Path: "/creation/assets/{assetID}", Handler: m.assets.Get},
+		{Method: "GET", Path: "/creation/assets/{assetID}/thumbnail-url", Handler: m.assets.GetThumbnailURL},
+		{Method: "GET", Path: "/creation/assets/{assetID}/preview-url", Handler: m.assets.GetPreviewURL},
 		{Method: "GET", Path: "/creation/assets/{assetID}/content", Handler: m.assets.Download},
 		{Method: "DELETE", Path: "/creation/assets/{assetID}", Handler: m.assets.Delete},
 		{Method: "POST", Path: "/creation/assets/{assetID}/publication", Handler: m.publications.Publish},

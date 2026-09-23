@@ -62,7 +62,7 @@ export interface CreateMaterialFromResultInput {
 }
 
 /** One creator's ephemeral display grant (ADR-0014). */
-export interface MaterialUrlView {
+export interface DisplayUrlView {
   readonly url: string
   readonly expiresAt: string
 }
@@ -179,10 +179,53 @@ function parseSessionDetail(payload: unknown): SessionDetailView | null {
 }
 
 /**
- * A typed client over one configured server URL. Paths mirror
- * contracts/creation.yaml exactly; parsing fails closed into network-failure
- * rather than guessing shapes.
+ * Fetches one resource's short-lived display grant (ADR-0014). The signed URL
+ * lives only in this call's returned value: it is never persisted, logged, or
+ * placed in a URL the session token rides. A grant that is not an absolute
+ * HTTPS URL, or that is already expired on arrival, is a failed read rather
+ * than something the renderer should hand to a media element.
  */
+export async function fetchDisplayUrl(
+  serverUrl: string,
+  token: string,
+  path: string,
+  signal?: AbortSignal
+): Promise<CreationApiResult<DisplayUrlView>> {
+  let response: Response
+  try {
+    response = await fetch(new URL(path, serverUrl), {
+      redirect: 'error',
+      headers: { Authorization: `Bearer ${token}` },
+      signal
+    })
+  } catch {
+    return { outcome: 'network-failure' }
+  }
+  if (response.status === 401) return { outcome: 'unauthorized' }
+  if (response.status === 403) return { outcome: 'forbidden' }
+  if (response.status === 404) return { outcome: 'request-rejected', code: 'not_found' }
+  if (!response.ok) return { outcome: 'network-failure' }
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch {
+    return { outcome: 'network-failure' }
+  }
+  const signedUrl = readStringField(payload, 'url')
+  const expiresAt = readStringField(payload, 'expires_at')
+  if (!signedUrl || !expiresAt) return { outcome: 'network-failure' }
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(signedUrl)
+  } catch {
+    return { outcome: 'network-failure' }
+  }
+  const expiresAtMs = Date.parse(expiresAt)
+  return parsedUrl.protocol === 'https:' && Number.isFinite(expiresAtMs) && expiresAtMs > Date.now()
+    ? { outcome: 'succeeded', value: { url: signedUrl, expiresAt } }
+    : { outcome: 'network-failure' }
+}
+
 export function createCreationClient(serverUrl: string): {
   listSessions(token: string, cursor?: string | null): Promise<CreationApiResult<SessionPage>>
   createSession(token: string, name?: string): Promise<CreationApiResult<CreationSessionView>>
@@ -209,12 +252,12 @@ export function createCreationClient(serverUrl: string): {
   loadMaterialThumbnailUrl(
     token: string,
     materialId: string
-  ): Promise<CreationApiResult<MaterialUrlView>>
+  ): Promise<CreationApiResult<DisplayUrlView>>
   /** Fetches one owned material's short-lived presigned preview URL. */
   loadMaterialPreviewUrl(
     token: string,
     materialId: string
-  ): Promise<CreationApiResult<MaterialUrlView>>
+  ): Promise<CreationApiResult<DisplayUrlView>>
 } {
   async function listPage<T>(
     parse: (payload: unknown) => T | null,
@@ -304,40 +347,6 @@ export function createCreationClient(serverUrl: string): {
       checksumSha256: checksum,
       claimsVersion: claimsVersionRaw,
       createdAt
-    }
-  }
-
-  async function fetchMaterialUrl(
-    token: string,
-    path: string
-  ): Promise<CreationApiResult<MaterialUrlView>> {
-    const url = new URL(path, serverUrl)
-    let response: Response
-    try {
-      response = await fetch(url, {
-        redirect: 'error',
-        headers: { Authorization: `Bearer ${token}` }
-      })
-    } catch {
-      return { outcome: 'network-failure' }
-    }
-    if (response.status === 401) return { outcome: 'unauthorized' }
-    if (response.status === 404) return { outcome: 'request-rejected', code: 'not_found' }
-    if (!response.ok) return { outcome: 'network-failure' }
-    try {
-      const payload: unknown = await response.json()
-      const signedUrl = readStringField(payload, 'url')
-      const expiresAt = readStringField(payload, 'expires_at')
-      if (!signedUrl || !expiresAt) return { outcome: 'network-failure' }
-      const parsedUrl = new URL(signedUrl)
-      const expiresAtMs = Date.parse(expiresAt)
-      return parsedUrl.protocol === 'https:' &&
-        Number.isFinite(expiresAtMs) &&
-        expiresAtMs > Date.now()
-        ? { outcome: 'succeeded', value: { url: signedUrl, expiresAt } }
-        : { outcome: 'network-failure' }
-    } catch {
-      return { outcome: 'network-failure' }
     }
   }
 
@@ -450,8 +459,8 @@ export function createCreationClient(serverUrl: string): {
       return { outcome: 'network-failure' }
     },
     loadMaterialThumbnailUrl: (token, materialId) =>
-      fetchMaterialUrl(token, `/creation/materials/${materialId}/thumbnail-url`),
+      fetchDisplayUrl(serverUrl, token, `/creation/materials/${materialId}/thumbnail-url`),
     loadMaterialPreviewUrl: (token, materialId) =>
-      fetchMaterialUrl(token, `/creation/materials/${materialId}/preview-url`)
+      fetchDisplayUrl(serverUrl, token, `/creation/materials/${materialId}/preview-url`)
   }
 }

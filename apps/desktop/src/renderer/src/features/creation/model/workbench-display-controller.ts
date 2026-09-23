@@ -9,7 +9,7 @@
  */
 import type {
   CreationApiResult,
-  MaterialUrlView,
+  DisplayUrlView,
   ReferenceMaterialView
 } from '../api/go-creation-http'
 import { loadImageDimensions } from '../lib/image-dimensions'
@@ -20,12 +20,12 @@ export type MaterialThumbnailState = 'loading' | 'failed' | 'ready'
 
 /** What one material's full preview paints from: the staged local File (its
  * object URL) or Go's short-lived presigned URL (ADR-0014). */
-export type MaterialPreviewSource = File | MaterialUrlView
+export type MaterialPreviewSource = File | DisplayUrlView
 
 /** The read seam this module consumes; no business commands cross it. */
 export interface WorkbenchDisplayDeps {
-  readonly loadPreviewUrl: (materialId: string) => Promise<CreationApiResult<MaterialUrlView>>
-  readonly loadThumbnailUrl: (materialId: string) => Promise<CreationApiResult<MaterialUrlView>>
+  readonly loadPreviewUrl: (materialId: string) => Promise<CreationApiResult<DisplayUrlView>>
+  readonly loadThumbnailUrl: (materialId: string) => Promise<CreationApiResult<DisplayUrlView>>
   readonly loadResultBlob: (taskId: string, slotIndex: number) => Promise<CreationApiResult<Blob>>
   readonly urls?: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>
 }
@@ -291,7 +291,7 @@ export class WorkbenchDisplayController {
     const isCurrentConsumer = (): boolean =>
       isCurrentGeneration() && (this.#thumbnailConsumers.get(materialId) ?? 0) > 0
     const pendingFile = this.#pendingFiles.get(materialId)?.file
-    const resolution: Promise<File | MaterialUrlView | null> =
+    const resolution: Promise<File | DisplayUrlView | null> =
       pendingFile !== undefined
         ? Promise.resolve(pendingFile)
         : this.#deps

@@ -175,23 +175,164 @@ test('the wall opens on images with only the type buttons offered', async ({ mou
     .toMatchObject({ mediaType: 'image' })
 })
 
-test('wall previews bounded image and video candidates', async ({ mount, page }) => {
+test('the wall asks for the fixed thumbnail variant, and a video for the original', async ({
+  mount,
+  page
+}) => {
   await mount(<AssetLibraryStory />)
   await expect
-    .poll(() => page.evaluate(() => window.__assetLibraryTest?.previewCalls()))
-    .toEqual(['asset-one', 'asset-two', 'asset-three'])
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.displayCalls()))
+    .toEqual([
+      { id: 'asset-one', purpose: 'thumbnail' },
+      { id: 'asset-two', purpose: 'preview' },
+      { id: 'asset-three', purpose: 'thumbnail' }
+    ])
 })
 
-test('wall preview loading is capped at four concurrent image bodies', async ({ mount, page }) => {
-  await mount(<AssetLibraryStory deferredPreviews />)
+test('wall display loading is capped at four concurrent authorizations', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory displayMode="deferred" />)
   await expect
-    .poll(() => page.evaluate(() => window.__assetLibraryTest?.maxActivePreviews()))
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.maxActiveDisplays()))
     .toBe(4)
-  expect(await page.evaluate(() => window.__assetLibraryTest?.previewCalls().length)).toBe(4)
-  await page.evaluate(() => window.__assetLibraryTest?.releasePreviews())
+  expect(await page.evaluate(() => window.__assetLibraryTest?.displayCalls().length)).toBe(4)
+  await page.evaluate(() => window.__assetLibraryTest?.releaseDisplays())
   await expect
-    .poll(() => page.evaluate(() => window.__assetLibraryTest?.previewCalls().length))
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.displayCalls().length))
     .toBe(8)
+})
+
+test('a card below the fold authorizes nothing until it comes into range', async ({
+  mount,
+  page
+}) => {
+  // Short enough that the wall genuinely overflows its 200px near-visible reach.
+  await page.setViewportSize({ width: 960, height: 360 })
+  await mount(<AssetLibraryStory dense />)
+  await expect(page.getByTestId('asset-card')).toHaveCount(24)
+  // Near-visible and no further: the wall never authorizes the whole page.
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.displayCalls().length ?? 0))
+    .toBeGreaterThan(0)
+  const before = await page.evaluate(() => window.__assetLibraryTest?.displayCalls().length ?? 0)
+  expect(before).toBeLessThan(24)
+  await page.getByTestId('asset-card').last().scrollIntoViewIfNeeded()
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.displayCalls().length))
+    .toBeGreaterThan(before)
+})
+
+test('a card paints the granted URL directly, without any content download', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory />)
+  await expect(page.getByRole('img', { name: 'Asset asset-one' })).toBeVisible()
+  // Display never streams the original, so nothing was downloaded to paint it.
+  expect(await page.evaluate(() => window.__assetLibraryTest?.maxActiveDownloads())).toBe(0)
+})
+
+test('an opened detail asks for the preview variant and bypasses a saturated wall', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory displayMode="deferred" />)
+  // Every wall slot is held at the gate, and every wall card here is an image,
+  // so a preview ask can only be the detail's own.
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.maxActiveDisplays()))
+    .toBe(4)
+  await page.getByRole('button', { name: 'Open asset preview-1' }).click()
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__assetLibraryTest?.displayCalls().filter((call) => call.purpose === 'preview')
+            .length ?? 0
+      )
+    )
+    .toBeGreaterThan(0)
+  // It landed without waiting for one of the four held wall slots to free up.
+  expect(await page.evaluate(() => window.__assetLibraryTest?.maxActiveDisplays())).toBe(5)
+})
+
+test('one failed authorization is retried automatically and then stops', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory displayMode="fail-once" />)
+  // Two asks for the same card: the first failure spends the automatic retry.
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.displayCalls().length))
+    .toBeGreaterThanOrEqual(6)
+  await expect(page.getByRole('img', { name: 'Asset asset-one' })).toBeVisible()
+  expect(await page.getByRole('button', { name: 'Retry' }).count()).toBe(0)
+})
+
+test('a persistent authorization failure stops at a manual retry', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory displayMode="always-fail" />)
+  const retry = page.getByRole('button', { name: 'Retry' })
+  await expect(retry.first()).toBeVisible()
+  const spent = await page.evaluate(() => window.__assetLibraryTest?.displayCalls().length)
+  // Three cards, one automatic retry each, and then nothing: the wall gave up
+  // rather than looping.
+  expect(spent).toBe(6)
+  const assetOne = await page.evaluate(
+    () => window.__assetLibraryTest?.displayCalls().filter((call) => call.id === 'asset-one').length
+  )
+  expect(assetOne).toBe(2)
+
+  await page.evaluate(() => window.__assetLibraryTest?.resetDisplayAttempts())
+  await retry.first().click()
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.displayCalls().length))
+    .toBeGreaterThan(spent)
+})
+
+test('an expired video grant reauthorizes once, then offers manual retry', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Open asset asset-two' }).click()
+  const dialog = page.getByRole('dialog')
+  const video = dialog.locator('video')
+  await expect(video).toBeVisible()
+  const displayCount = async (): Promise<number> =>
+    (await page.evaluate(
+      () =>
+        window.__assetLibraryTest?.displayCalls().filter((call) => call.id === 'asset-two').length
+    )) ?? 0
+  const initial = await displayCount()
+
+  await video.dispatchEvent('error')
+  await expect.poll(displayCount).toBe(initial + 1)
+  await expect(video).toBeVisible()
+
+  await video.dispatchEvent('error')
+  await expect(dialog.getByRole('button', { name: 'Retry' })).toBeVisible()
+  expect(await displayCount()).toBe(initial + 1)
+
+  await dialog.getByRole('button', { name: 'Retry' }).click()
+  await expect.poll(displayCount).toBe(initial + 2)
+  await expect(video).toBeVisible()
+})
+
+test('a gone asset shows the generic unavailable state and refreshes the list', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory displayMode="gone" />)
+  await expect(page.getByText('Media unavailable').first()).toBeVisible()
+  // Nothing to retry: the server already answered, so the list re-reads instead.
+  expect(await page.getByRole('button', { name: 'Retry' }).count()).toBe(0)
+  await expect
+    .poll(
+      async () => (await page.evaluate(() => window.__assetLibraryTest?.listCalls().length)) ?? 0
+    )
+    .toBeGreaterThan(1)
 })
 
 test('detail switches siblings and exposes the full publish confirmation facts', async ({

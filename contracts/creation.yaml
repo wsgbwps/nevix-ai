@@ -1503,6 +1503,57 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /creation/assets/{assetID}/thumbnail-url:
+    get:
+      operationId: getAssetThumbnailUrl
+      summary: 签发 Media Asset 缩略图的限时直连 GET
+      description: |-
+        经 Go 归属校验后，为 image Asset 签发约 10 分钟、单一精确 key、provider 端缩小
+        （宽 ≤320、WebP）的预签名 HTTPS GET URL；Renderer 直接放入 <img> 加载，不再先经
+        Go 代理完整原件并等待 Blob。签发时的归属校验是唯一授权点：非创建者、已删除、已限制、
+        非 image 或不存在 id 一律 404（猜测无信息泄漏）。列表响应不含任何签名 URL；
+        TTL 过期之后重新授权即可，已签发的 URL 在到期前仍可用（ADR-0016）。
+        原件下载仍走 GET /creation/assets/{assetID}/content。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      responses:
+        "200":
+          $ref: "#/components/responses/DisplayURLResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
+  /creation/assets/{assetID}/preview-url:
+    get:
+      operationId: getAssetPreviewUrl
+      summary: 签发 Media Asset 预览的限时直连 GET
+      description: |-
+        经 Go 归属校验后，为任意 media_type 的 Asset 签发约 10 分钟、单一精确 key 的预签名
+        HTTPS GET URL：image 经 provider 端缩小（宽 ≤2048、WebP），video 为原始字节
+        （Range 不参与 GET 签名，seek 与渐进播放可用）；Renderer 直接放入 <img>/<video> 加载。
+        非创建者、已删除或已限制或不存在 id 一律 404（猜测无信息泄漏）；列表响应不含任何签名
+        URL；原件下载仍走 GET /creation/assets/{assetID}/content。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/assetID"
+      responses:
+        "200":
+          $ref: "#/components/responses/DisplayURLResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ObjectStorageUnavailable"
   /creation/assets/{assetID}/content:
     get:
       operationId: downloadAssetContent
@@ -1758,7 +1809,7 @@ paths:
         - $ref: "#/components/parameters/referenceID"
       responses:
         "200":
-          $ref: "#/components/responses/MaterialURLResponse"
+          $ref: "#/components/responses/DisplayURLResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1873,7 +1924,7 @@ paths:
         - $ref: "#/components/parameters/referenceID"
       responses:
         "200":
-          $ref: "#/components/responses/MaterialURLResponse"
+          $ref: "#/components/responses/DisplayURLResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -2191,7 +2242,7 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/CreateSimilarResult"
-    MaterialURLResponse:
+    DisplayURLResponse:
       description: 精确对象的短时显示 URL。
       content:
         application/json:

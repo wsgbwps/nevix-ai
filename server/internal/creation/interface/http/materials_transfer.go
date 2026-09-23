@@ -76,7 +76,7 @@ type referenceMaterialUploadStatusResponse struct {
 	Material *materialResource               `json:"material,omitempty"`
 }
 
-type materialURLResponse struct {
+type displayURLResponse struct {
 	URL       string `json:"url"`
 	ExpiresAt string `json:"expires_at"`
 }
@@ -93,7 +93,7 @@ func (h *MaterialHandler) GetMaterialThumbnailURL(w http.ResponseWriter, r *http
 		fail(w, r, err)
 		return
 	}
-	encodeJSON(w, http.StatusOK, materialURLResponse{
+	encodeJSON(w, http.StatusOK, displayURLResponse{
 		URL:       authorization.URL,
 		ExpiresAt: authorization.ExpiresAt.Format(timeRFC3339),
 	})
@@ -111,7 +111,7 @@ func (h *MaterialHandler) GetMaterialPreviewURL(w http.ResponseWriter, r *http.R
 		fail(w, r, err)
 		return
 	}
-	encodeJSON(w, http.StatusOK, materialURLResponse{
+	encodeJSON(w, http.StatusOK, displayURLResponse{
 		URL:       authorization.URL,
 		ExpiresAt: authorization.ExpiresAt.Format(timeRFC3339),
 	})
