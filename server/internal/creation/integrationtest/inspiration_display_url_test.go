@@ -159,6 +159,26 @@ func TestInspirationDisplayURLsFollowEachViewsOwnVisibility(t *testing.T) {
 	assertDisplayGrant(t, h, "/creation/publications/"+orphanPublication+"/preview-url", memberToken, publicationBlobKey(t, h, orphanPublication), "kind=image")
 	assertDisplayStatus(t, h, "/creation/inspiration/assets/"+orphanedSource+"/thumbnail-url", adminToken, http.StatusNotFound)
 	assertDisplayStatus(t, h, "/creation/inspiration/assets/"+orphanedSource+"/preview-url", adminToken, http.StatusNotFound)
+
+	// Disabling a User retires their live Session, so neither new path becomes
+	// a second authentication policy: the Publisher loses their own
+	// Publication's grant, and the Admin path answers 401 rather than the 403 a
+	// merely non-Admin caller gets.
+	var creatorID string
+	if err := h.ownerPool.QueryRow(h.ctx, `SELECT id::text FROM users WHERE email = $1`, creatorEmailAddress).Scan(&creatorID); err != nil {
+		t.Fatalf("resolve creator id: %v", err)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `UPDATE users SET status = 'disabled' WHERE id = $1::uuid`, creatorID); err != nil {
+		t.Fatalf("disable creator: %v", err)
+	}
+	// One shared database: a fixture left disabled poisons every later test.
+	t.Cleanup(func() {
+		if _, err := h.ownerPool.Exec(h.ctx, `UPDATE users SET status = 'active' WHERE id = $1::uuid`, creatorID); err != nil {
+			t.Fatalf("restore creator fixture: %v", err)
+		}
+	})
+	assertDisplayStatus(t, h, "/creation/publications/"+orphanPublication+"/thumbnail-url", creatorToken, http.StatusUnauthorized)
+	assertDisplayStatus(t, h, "/creation/inspiration/assets/"+orphanedSource+"/thumbnail-url", creatorToken, http.StatusUnauthorized)
 }
 
 // A video Publication has no wall variant and previews its untouched original,

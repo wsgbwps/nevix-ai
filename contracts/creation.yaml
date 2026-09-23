@@ -1967,9 +1967,9 @@ paths:
       operationId: getPublicationThumbnailUrl
       summary: 为有效 Team Publication 签发缩略图的限时直连 GET
       description: |-
-        经既有的有效 Publication 复验（未撤回、未被直接限制、来源 Asset 未处于 active 限制；
-        来源 Asset 的逻辑删除不终止 Publication）后签发墙缩略图。非 image、无效或不存在一律
-        404。
+        经既有的有效 Publication 复验后签发墙缩略图：普通读取要求未撤回、未被直接限制、来源
+        Asset 未处于 active 限制，且来源 Asset 的逻辑删除不终止 Publication；Admin 对直接受限的
+        Publication 保留治理可见（与 /content 同一条查询）。非 image、无效或不存在一律 404。
       security:
         - bearerAuth: []
       parameters:
