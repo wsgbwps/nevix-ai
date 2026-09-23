@@ -281,13 +281,6 @@ func (s *PublicationService) AuthorizeAdminAssetPreview(ctx context.Context, ass
 	return s.authorizeReference(ctx, reference, err)
 }
 
-// The Inspiration wall's own display paths (#290). Each one resolves the exact
-// record through the visibility query its detail and download routes already
-// use — the Admin governance view of an Asset, and an effective Publication —
-// and then signs only that record's key. A wall variant exists for images
-// alone, so every other media answers the identity's own not_found and a
-// guessed id learns nothing.
-
 func (s *PublicationService) AuthorizeAdminAssetThumbnail(ctx context.Context, principal authz.Principal, id domain.UUID) (DisplayURLAuthorization, error) {
 	asset, err := s.ResolveAdminAsset(ctx, principal, id)
 	if err != nil {

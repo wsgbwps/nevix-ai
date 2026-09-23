@@ -9,7 +9,6 @@ import {
   type AssetGenerationSpecification,
   type AssetMediaType,
   type AssetReferenceSummary,
-  type DisplayGrant,
   type MediaAssetView,
   type RestrictionState
 } from './asset-library-http'
@@ -17,7 +16,8 @@ import {
   fetchDisplayUrl,
   request,
   type CreationApiResult,
-  type CreationSessionView
+  type CreationSessionView,
+  type DisplayUrlView
 } from './go-creation-http'
 
 export interface PublicationCapabilities {
@@ -117,7 +117,7 @@ export interface InspirationPorts {
     item: InspirationItem,
     purpose: AssetDisplayPurpose,
     options?: AssetDisplayOptions
-  ) => Promise<CreationApiResult<DisplayGrant>>
+  ) => Promise<CreationApiResult<DisplayUrlView>>
   readonly loadInspirationContent: (
     item: InspirationItem,
     options?: AssetContentOptions
@@ -404,7 +404,7 @@ export function createInspirationClient(serverUrl: string): {
     item: InspirationItem,
     purpose: AssetDisplayPurpose,
     options?: AssetDisplayOptions
-  ): Promise<CreationApiResult<DisplayGrant>>
+  ): Promise<CreationApiResult<DisplayUrlView>>
   loadContent(
     token: string,
     item: InspirationItem,
@@ -477,14 +477,8 @@ export function createInspirationClient(serverUrl: string): {
           : parseAssetDetail(result.payload)
       return parsed ? { outcome: 'succeeded', value: parsed } : { outcome: 'network-failure' }
     },
-    async loadDisplay(token, item, purpose, options) {
-      const result = await fetchDisplayUrl(
-        serverUrl,
-        token,
-        `${itemPath(item)}/${purpose}-url`,
-        options?.signal
-      )
-      return result.outcome === 'succeeded' ? { outcome: 'succeeded', value: result.value } : result
+    loadDisplay(token, item, purpose, options) {
+      return fetchDisplayUrl(serverUrl, token, `${itemPath(item)}/${purpose}-url`, options?.signal)
     },
     loadContent(token, item, options) {
       const media = item.type === 'publication' ? item.publication : item.asset

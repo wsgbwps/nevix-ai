@@ -1395,14 +1395,8 @@ paths:
             items:
               type: string
               enum:
-                [
-                  text-to-image,
-                  reference-image,
-                  text-to-video,
-                  first-frame,
-                  first-last-frame,
-                  omni-reference,
-                ]
+                [text-to-image, reference-image, text-to-video, first-frame,
+                 first-last-frame, omni-reference]
           style: form
           explode: true
         - name: ratio
@@ -1809,12 +1803,9 @@ paths:
       operationId: getInspirationAssetThumbnailUrl
       summary: 签发 Admin 治理视图下 Media Asset 缩略图的限时直连 GET
       description: |-
-        经 GuardAdmin 与「精确 Asset 存在且未删除」复验后，为 image Asset 签发约 10 分钟、
-        单一精确 key、provider 端缩小（宽 ≤320、WebP）的预签名 GET URL；Renderer 直接放入
-        <img>。Admin 治理视图与 Creator 自有视图是两条独立授权路径：active 限制中的 Asset
-        仍可显示，因为判断与解除限制需要看到被限制的内容。非 Admin 一律 403，已删除或不存在的
-        id 一律 404；列表与详情响应不含任何签名 URL；原件下载仍走
-        GET /creation/inspiration/assets/{assetID}/content。
+        经 GuardAdmin 与「精确 Asset 存在且未删除」复验后签发墙缩略图。Admin 治理视图与
+        Creator 自有视图是两条独立授权路径：active 限制中的 Asset 仍可显示，因为判断与解除
+        限制需要看到被限制的内容。非 Admin 一律 403，非 image、已删除或不存在一律 404。
       security:
         - bearerAuth: []
       parameters:
@@ -1837,10 +1828,8 @@ paths:
       operationId: getInspirationAssetPreviewUrl
       summary: 签发 Admin 治理视图下 Media Asset 预览的限时直连 GET
       description: |-
-        与 thumbnail-url 同一条 GuardAdmin 归属校验，但签发详情变体：image 经 provider 端
-        缩小（宽 ≤2048、WebP），video 为原始字节（Range 不参与 GET 签名）；Renderer 直接放入
-        <img>/<video>。active 限制中的 Asset 仍可显示；非 Admin 一律 403，已删除或不存在的 id
-        一律 404；原件下载仍走 GET /creation/inspiration/assets/{assetID}/content。
+        与 thumbnail-url 同一条 GuardAdmin 复验，但签发详情大图：image 经 provider 端缩小，
+        video 为支持 Range 的原始字节。
       security:
         - bearerAuth: []
       parameters:
@@ -1978,11 +1967,9 @@ paths:
       operationId: getPublicationThumbnailUrl
       summary: 为有效 Team Publication 签发缩略图的限时直连 GET
       description: |-
-        经 active User 守卫与既有的有效 Publication 复验（未撤回、未被直接限制、来源 Asset
-        未处于 active 限制；来源 Asset 的逻辑删除不终止 Publication）后，为 image Publication
-        签发约 10 分钟、单一精确 key、provider 端缩小（宽 ≤320、WebP）的预签名 GET URL。
-        非 image、已撤回、被限制或不存在的 id 一律 404；列表与详情响应不含任何签名 URL；
-        原件下载仍走 GET /creation/publications/{publicationID}/content。
+        经既有的有效 Publication 复验（未撤回、未被直接限制、来源 Asset 未处于 active 限制；
+        来源 Asset 的逻辑删除不终止 Publication）后签发墙缩略图。非 image、无效或不存在一律
+        404。
       security:
         - bearerAuth: []
       parameters:
@@ -2003,8 +1990,8 @@ paths:
       operationId: getPublicationPreviewUrl
       summary: 为有效 Team Publication 签发预览的限时直连 GET
       description: |-
-        与 thumbnail-url 同一条有效 Publication 复验，但签发详情变体：image 经 provider 端
-        缩小（宽 ≤2048、WebP），video 为原始字节（Range 不参与 GET 签名）；下载仍走 Go 原件出口。
+        与 thumbnail-url 同一条有效 Publication 复验，但签发详情大图：image 经 provider 端
+        缩小，video 为支持 Range 的原始字节。
       security:
         - bearerAuth: []
       parameters:
@@ -3224,8 +3211,7 @@ components:
       properties:
         state:
           type: string
-          enum:
-            [unconfigured, ready, credential_unavailable, legacy_incompatible]
+          enum: [unconfigured, ready, credential_unavailable, legacy_incompatible]
           description: legacy_incompatible 只表示隔离的历史连接；仅返回 revision 和 location_frozen 以支持显式处置，不返回位置或凭据投影。
         provider:
           type: string
@@ -3795,8 +3781,7 @@ components:
           $ref: "#/components/schemas/MediaAssetCapabilities"
     MediaAssetCapabilities:
       type: object
-      required:
-        [can_delete, can_create_similar, can_publish, can_restrict, can_release]
+      required: [can_delete, can_create_similar, can_publish, can_restrict, can_release]
       properties:
         can_delete:
           type: boolean
@@ -3875,20 +3860,7 @@ components:
           maxLength: 128
     TeamPublication:
       type: object
-      required:
-        [
-          id,
-          source_asset_id,
-          publisher,
-          media_type,
-          mime_type,
-          byte_size,
-          checksum_sha256,
-          published_at,
-          restricted,
-          restriction_state,
-          capabilities,
-        ]
+      required: [id, source_asset_id, publisher, media_type, mime_type, byte_size, checksum_sha256, published_at, restricted, restriction_state, capabilities]
       properties:
         id:
           type: string
@@ -3936,8 +3908,7 @@ components:
           $ref: "#/components/schemas/RestrictionState"
         capabilities:
           type: object
-          required:
-            [can_withdraw, can_create_similar, can_restrict, can_release]
+          required: [can_withdraw, can_create_similar, can_restrict, can_release]
           properties:
             can_withdraw:
               type: boolean
@@ -3956,8 +3927,7 @@ components:
       description: null 表示从未限制；released 只解除当前限制，不恢复旧 Publication。
     PublicationReference:
       type: object
-      required:
-        [id, role, kind, file_name, mime_type, byte_size, claims_version]
+      required: [id, role, kind, file_name, mime_type, byte_size, claims_version]
       properties:
         id:
           type: string
@@ -4236,7 +4206,7 @@ components:
         support_number:
           type: string
           nullable: true
-          pattern: "^NVX-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9]{2}$"
+          pattern: '^NVX-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9]{2}$'
           description: Nevix 生成的稳定支持编号；不得替换为供应商 request ID。
         failure_diagnostic:
           allOf:

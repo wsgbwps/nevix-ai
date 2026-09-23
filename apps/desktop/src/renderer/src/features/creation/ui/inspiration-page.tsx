@@ -76,11 +76,6 @@ function publicationFor(
   return detail?.type === 'asset' ? detail.publication : null
 }
 
-/**
- * The wall and the detail paint from a short-lived display grant, exactly as
- * the Asset Library does: the item's own identity decides which authorization
- * path Go re-checks, so nothing here picks a visibility rule.
- */
 function mediaPort(ports: InspirationPorts, item: InspirationItem): AssetDisplayPort {
   return {
     loadAssetDisplay: (_id, purpose, options) =>

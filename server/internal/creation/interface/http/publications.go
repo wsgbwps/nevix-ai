@@ -282,8 +282,8 @@ func (h *PublicationHandler) GetAdminAssetPreviewURL(w http.ResponseWriter, r *h
 	writeDisplayAuthorization(w, r, authorization, err)
 }
 
-// GetPublicationThumbnailURL and GetPublicationPreviewURL answer the same two
-// variants for an effective Team Publication, which any active User may see.
+// The same two variants for an effective Team Publication, which any active
+// User may see.
 func (h *PublicationHandler) GetPublicationThumbnailURL(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathUUID(w, r, "publicationID")
 	if !ok {
