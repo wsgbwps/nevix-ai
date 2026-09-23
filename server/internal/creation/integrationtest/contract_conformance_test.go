@@ -98,6 +98,8 @@ func TestAssetLibraryContractSurface(t *testing.T) {
 	}{
 		{"GET", "/creation/assets"},
 		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001"},
+		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001/thumbnail-url"},
+		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001/preview-url"},
 		{"GET", "/creation/assets/00000000-0000-0000-0000-000000000001/content"},
 		{"DELETE", "/creation/assets/00000000-0000-0000-0000-000000000001"},
 		{"POST", "/creation/assets/00000000-0000-0000-0000-000000000001/publication"},

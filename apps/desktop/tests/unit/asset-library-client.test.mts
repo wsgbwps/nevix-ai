@@ -268,7 +268,7 @@ test('asset content verifies the trusted checksum before returning bytes', async
     })
   try {
     const client = createAssetLibraryClient(serverUrl)
-    const verified = await client.loadContent('token', asset.id, checksum)
+    const verified = await client.downloadContent('token', asset.id, checksum)
     assert.equal(verified.outcome, 'succeeded')
 
     const mismatched = new Response(imageBytes, {
@@ -276,7 +276,7 @@ test('asset content verifies the trusted checksum before returning bytes', async
       headers: { 'Content-Type': 'image/png', 'X-Content-SHA-256': '00'.repeat(32) }
     })
     globalThis.fetch = async () => mismatched
-    const rejected = await client.loadContent('token', asset.id, checksum)
+    const rejected = await client.downloadContent('token', asset.id, checksum)
     assert.deepEqual(rejected, { outcome: 'request-rejected', code: 'checksum_mismatch' })
     assert.equal(mismatched.bodyUsed, false)
 
@@ -286,7 +286,7 @@ test('asset content verifies the trusted checksum before returning bytes', async
         headers: { 'Content-Type': 'image/png', 'X-Content-SHA-256': checksum }
       })
     assert.deepEqual(
-      await client.loadContent('token', asset.id, checksum, {
+      await client.downloadContent('token', asset.id, checksum, {
         expectedByteSize: imageBytes.byteLength + 1
       }),
       { outcome: 'request-rejected', code: 'byte_size_mismatch' }
@@ -308,11 +308,86 @@ test('asset content maps aborts to the stable download cancellation code', async
   }
   try {
     const controller = new AbortController()
-    const pending = createAssetLibraryClient(serverUrl).loadContent('token', asset.id, checksum, {
-      signal: controller.signal
-    })
+    const pending = createAssetLibraryClient(serverUrl).downloadContent(
+      'token',
+      asset.id,
+      checksum,
+      {
+        signal: controller.signal
+      }
+    )
     controller.abort()
     assert.deepEqual(await pending, { outcome: 'request-rejected', code: 'download_cancelled' })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('a display read asks the fixed variant endpoint per purpose and returns one exact grant', async () => {
+  const originalFetch = globalThis.fetch
+  const requested: string[] = []
+  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString()
+  globalThis.fetch = async (input) => {
+    const url = input instanceof URL ? input : new URL(String(input))
+    requested.push(`${url.pathname}${url.search}`)
+    return new Response(
+      JSON.stringify({
+        url: 'https://bucket.example/signed?x-oss-process=w_320',
+        expires_at: expiresAt
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+  try {
+    const client = createAssetLibraryClient(serverUrl)
+    const thumbnail = await client.loadDisplay('token', asset.id, 'thumbnail')
+    const preview = await client.loadDisplay('token', asset.id, 'preview')
+    assert.deepEqual(thumbnail, {
+      outcome: 'succeeded',
+      value: { kind: 'grant', url: 'https://bucket.example/signed?x-oss-process=w_320', expiresAt }
+    })
+    assert.equal(preview.outcome, 'succeeded')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(requested, [
+    `/creation/assets/${asset.id}/thumbnail-url`,
+    `/creation/assets/${asset.id}/preview-url`
+  ])
+})
+
+test('a display read maps a gone asset, a refusal, and a dead grant apart', async () => {
+  const originalFetch = globalThis.fetch
+  const client = createAssetLibraryClient(serverUrl)
+  const answer = async (status: number, payload?: unknown): Promise<unknown> => {
+    globalThis.fetch = async (): Promise<Response> =>
+      new Response(payload === undefined ? null : JSON.stringify(payload), { status })
+    return client.loadDisplay('token', asset.id, 'preview')
+  }
+  try {
+    assert.deepEqual(await answer(404, { error: 'not_found' }), {
+      outcome: 'request-rejected',
+      code: 'not_found'
+    })
+    assert.deepEqual(await answer(403, { error: 'forbidden' }), { outcome: 'forbidden' })
+    assert.deepEqual(await answer(401, { error: 'unauthorized' }), { outcome: 'unauthorized' })
+    assert.deepEqual(await answer(500), { outcome: 'network-failure' })
+    // A grant that is already dead, or not an absolute HTTPS URL, is a failed
+    // read: the renderer must not hand it to a media element.
+    assert.deepEqual(
+      await answer(200, { url: 'https://bucket.example/x', expires_at: '2020-01-01T00:00:00Z' }),
+      { outcome: 'network-failure' }
+    )
+    assert.deepEqual(
+      await answer(200, {
+        url: 'http://bucket.example/x',
+        expires_at: new Date(Date.now() + 60_000).toISOString()
+      }),
+      { outcome: 'network-failure' }
+    )
+    assert.deepEqual(await answer(200, { url: 'https://bucket.example/x' }), {
+      outcome: 'network-failure'
+    })
   } finally {
     globalThis.fetch = originalFetch
   }

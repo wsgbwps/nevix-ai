@@ -126,9 +126,8 @@ export function useAssetDetail({
       const controller = new AbortController()
       downloadController.current = controller
       setDownloadStatus('running')
-      const result = await ports.loadAssetContent(asset.id, asset.checksumSha256, {
+      const result = await ports.downloadAssetContent(asset.id, asset.checksumSha256, {
         signal: controller.signal,
-        purpose: 'download',
         expectedByteSize: asset.byteSize
       })
       if (controller.signal.aborted || assetIdRef.current !== asset.id) return

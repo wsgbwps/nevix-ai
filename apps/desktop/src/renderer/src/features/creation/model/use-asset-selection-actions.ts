@@ -157,9 +157,8 @@ export function useAssetSelectionActions(
         targets: live,
         total: live.length,
         step: async (asset, signal) => {
-          const result = await ports.loadAssetContent(asset.id, asset.checksumSha256, {
+          const result = await ports.downloadAssetContent(asset.id, asset.checksumSha256, {
             signal,
-            purpose: 'download',
             expectedByteSize: asset.byteSize
           })
           if (result.outcome === 'succeeded') save(asset, result.value)

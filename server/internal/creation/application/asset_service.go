@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"time"
 
 	"github.com/nevix-ai/server/internal/authz"
 	"github.com/nevix-ai/server/internal/creation/domain"
@@ -27,13 +28,14 @@ type AssetDetail struct {
 }
 
 type AssetService struct {
-	assets domain.MediaAssetRepository
-	runner domain.WriteRunner
-	notify InvalidationSink
+	assets  domain.MediaAssetRepository
+	storage *ObjectStorageConnectionService
+	runner  domain.WriteRunner
+	notify  InvalidationSink
 }
 
-func NewAssetService(assets domain.MediaAssetRepository, runner domain.WriteRunner, notify InvalidationSink) *AssetService {
-	return &AssetService{assets: assets, runner: runner, notify: notify}
+func NewAssetService(assets domain.MediaAssetRepository, storage *ObjectStorageConnectionService, runner domain.WriteRunner, notify InvalidationSink) *AssetService {
+	return &AssetService{assets: assets, storage: storage, runner: runner, notify: notify}
 }
 
 func (s *AssetService) List(ctx context.Context, principal authz.Principal, filter domain.AssetListFilter, cursor *domain.CompoundCursor, limit int) ([]AssetView, *domain.CompoundCursor, error) {
@@ -84,6 +86,47 @@ func (s *AssetService) Resolve(ctx context.Context, principal authz.Principal, i
 		return domain.MediaAsset{}, err
 	}
 	return asset, nil
+}
+
+// AuthorizeThumbnail issues the signed GET of one visible Asset's fixed wall
+// variant. Video ids collapse into not_found, so a guessed id learns nothing
+// about whether it exists.
+func (s *AssetService) AuthorizeThumbnail(ctx context.Context, principal authz.Principal, id domain.UUID) (DisplayURLAuthorization, error) {
+	asset, err := s.Resolve(ctx, principal, id)
+	if err != nil {
+		return DisplayURLAuthorization{}, err
+	}
+	if asset.MediaType != domain.MediaImage {
+		return DisplayURLAuthorization{}, domain.ErrAssetNotFound
+	}
+	store, _, err := s.storage.ResolveStore(ctx)
+	if err != nil {
+		return DisplayURLAuthorization{}, err
+	}
+	signedURL, err := store.PresignThumbnail(ctx, asset.BlobKey, displayURLLifetime)
+	if err != nil {
+		return DisplayURLAuthorization{}, domain.ErrObjectStorageUnavailable
+	}
+	return DisplayURLAuthorization{URL: signedURL, ExpiresAt: time.Now().UTC().Add(displayURLLifetime)}, nil
+}
+
+// AuthorizePreview issues the signed GET of one visible Asset's detail
+// variant: images provider-resized, video as its untouched original so
+// Chromium keeps Range and seek.
+func (s *AssetService) AuthorizePreview(ctx context.Context, principal authz.Principal, id domain.UUID) (DisplayURLAuthorization, error) {
+	asset, err := s.Resolve(ctx, principal, id)
+	if err != nil {
+		return DisplayURLAuthorization{}, err
+	}
+	store, _, err := s.storage.ResolveStore(ctx)
+	if err != nil {
+		return DisplayURLAuthorization{}, err
+	}
+	signedURL, err := store.PresignPreview(ctx, asset.BlobKey, domain.Kind(asset.MediaType), displayURLLifetime)
+	if err != nil {
+		return DisplayURLAuthorization{}, domain.ErrObjectStorageUnavailable
+	}
+	return DisplayURLAuthorization{URL: signedURL, ExpiresAt: time.Now().UTC().Add(displayURLLifetime)}, nil
 }
 
 func (s *AssetService) Delete(ctx context.Context, principal authz.Principal, id domain.UUID) error {

@@ -88,7 +88,7 @@ func TestAssetServiceKeepsPrivateOriginCreatorOnly(t *testing.T) {
 	creator, other := domain.NewUUID(), domain.NewUUID()
 	asset := domain.MediaAsset{ID: domain.NewUUID(), OwnerID: creator, TaskID: domain.NewUUID()}
 	repo := &assetRepoStub{asset: asset, origin: &domain.AssetPrivateOrigin{TaskID: asset.TaskID}}
-	service := NewAssetService(repo, assetRunnerStub{}, nil)
+	service := NewAssetService(repo, nil, assetRunnerStub{}, nil)
 
 	creatorDetail, err := service.Get(context.Background(), authz.Principal{UserID: creator.String(), Role: "member"}, asset.ID)
 	if err != nil || creatorDetail.PrivateOrigin == nil || !creatorDetail.Asset.Capabilities.CanCreateSimilar {
@@ -107,7 +107,7 @@ func TestAssetServicePassesDeleteIdentityToRepository(t *testing.T) {
 	actor, owner, assetID := domain.NewUUID(), domain.NewUUID(), domain.NewUUID()
 	repo := &assetRepoStub{asset: domain.MediaAsset{ID: assetID, OwnerID: owner}}
 	sink := &recordingSink{}
-	service := NewAssetService(repo, assetRunnerStub{}, sink)
+	service := NewAssetService(repo, nil, assetRunnerStub{}, sink)
 	if err := service.Delete(context.Background(), authz.Principal{UserID: actor.String(), Role: "admin"}, assetID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestAssetServiceSkipsInvalidationWhenTheWriteTransactionFails(t *testing.T)
 	owner, assetID := domain.NewUUID(), domain.NewUUID()
 	repo := &assetRepoStub{asset: domain.MediaAsset{ID: assetID, OwnerID: owner}}
 	sink := &recordingSink{}
-	service := NewAssetService(repo, assetRunnerStub{commitErr: errors.New("commit failed")}, sink)
+	service := NewAssetService(repo, nil, assetRunnerStub{commitErr: errors.New("commit failed")}, sink)
 	if err := service.Delete(context.Background(), authz.Principal{UserID: owner.String(), Role: "member"}, assetID); err == nil {
 		t.Fatal("delete: want the failed transaction reported")
 	}
@@ -155,7 +155,7 @@ func TestAssetViewOmitsReleasedPublicationWhenRepublishingIsAllowed(t *testing.T
 func TestAssetServiceRejectsForeignMemberBeforeWrite(t *testing.T) {
 	owner, actor, assetID := domain.NewUUID(), domain.NewUUID(), domain.NewUUID()
 	repo := &assetRepoStub{asset: domain.MediaAsset{ID: assetID, OwnerID: owner}}
-	service := NewAssetService(repo, assetRunnerStub{}, nil)
+	service := NewAssetService(repo, nil, assetRunnerStub{}, nil)
 	if err := service.Delete(context.Background(), authz.Principal{UserID: actor.String(), Role: "member"}, assetID); err != domain.ErrAssetNotFound {
 		t.Fatalf("foreign member delete error=%v, want ErrAssetNotFound", err)
 	}

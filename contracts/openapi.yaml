@@ -124,6 +124,10 @@ paths:
     $ref: "./creation.yaml#/paths/~1creation~1assets"
   /creation/assets/{assetID}:
     $ref: "./creation.yaml#/paths/~1creation~1assets~1{assetID}"
+  /creation/assets/{assetID}/thumbnail-url:
+    $ref: "./creation.yaml#/paths/~1creation~1assets~1{assetID}~1thumbnail-url"
+  /creation/assets/{assetID}/preview-url:
+    $ref: "./creation.yaml#/paths/~1creation~1assets~1{assetID}~1preview-url"
   /creation/assets/{assetID}/content:
     $ref: "./creation.yaml#/paths/~1creation~1assets~1{assetID}~1content"
   /creation/assets/{assetID}/publication:

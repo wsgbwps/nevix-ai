@@ -246,7 +246,7 @@ func (h *PublicationHandler) PublicationReferencePreview(w http.ResponseWriter, 
 	}
 	principal, _ := authz.PrincipalFrom(r.Context())
 	authorization, err := h.publications.AuthorizePublicationPreview(r.Context(), principal, publicationID, referenceID)
-	writeMaterialAuthorization(w, r, authorization, err)
+	writeDisplayAuthorization(w, r, authorization, err)
 }
 
 func (h *PublicationHandler) AdminAssetReferencePreview(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +255,7 @@ func (h *PublicationHandler) AdminAssetReferencePreview(w http.ResponseWriter, r
 		return
 	}
 	authorization, err := h.publications.AuthorizeAdminAssetPreview(r.Context(), assetID, referenceID)
-	writeMaterialAuthorization(w, r, authorization, err)
+	writeDisplayAuthorization(w, r, authorization, err)
 }
 
 func (h *PublicationHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
@@ -464,12 +464,12 @@ func referencePathIDs(w http.ResponseWriter, r *http.Request, parent string) (do
 	return parentID, referenceID, ok
 }
 
-func writeMaterialAuthorization(w http.ResponseWriter, r *http.Request, authorization application.MaterialURLAuthorization, err error) {
+func writeDisplayAuthorization(w http.ResponseWriter, r *http.Request, authorization application.DisplayURLAuthorization, err error) {
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	encodeJSON(w, http.StatusOK, materialURLResponse{URL: authorization.URL, ExpiresAt: authorization.ExpiresAt.Format(timeRFC3339)})
+	encodeJSON(w, http.StatusOK, displayURLResponse{URL: authorization.URL, ExpiresAt: authorization.ExpiresAt.Format(timeRFC3339)})
 }
 
 func invalidPublicationInput(w http.ResponseWriter) {

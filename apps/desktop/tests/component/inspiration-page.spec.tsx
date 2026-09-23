@@ -44,14 +44,18 @@ test('only server-authorized admin detail exposes keyboard-operable safety contr
   await releaseAsset.focus()
   await page.keyboard.press('Enter')
   await expect(assetRestriction).toContainText('Released')
-  await expect(dialog.getByRole('status')).toContainText('Asset restriction released.')
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Asset restriction released.' })
+  ).toBeVisible()
 
   page.once('dialog', (confirmation) => void confirmation.accept())
   await publicationRestriction
     .getByRole('button', { name: 'Release publication restriction' })
     .click()
   await expect(publicationRestriction).toContainText('Released')
-  await expect(dialog.getByRole('status')).toContainText('Publication restriction released.')
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Publication restriction released.' })
+  ).toBeVisible()
   expect(await page.evaluate(() => window.__inspirationTest?.safetyCalls())).toEqual([
     'release:asset:admin-asset',
     'release:publication:admin-publication'

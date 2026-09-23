@@ -18,7 +18,7 @@ const { WorkbenchDisplayController } =
 import type { WorkbenchDisplayDeps } from '../../src/renderer/src/features/creation/model/workbench-display-controller.ts'
 import type {
   CreationApiResult,
-  MaterialUrlView,
+  DisplayUrlView,
   ReferenceMaterialView
 } from '../../src/renderer/src/features/creation/api/go-creation-http.ts'
 
@@ -68,12 +68,12 @@ function imageFile(name: string): File {
 }
 
 const networkFailure = (): CreationApiResult<Blob> => ({ outcome: 'network-failure' })
-const thumbnailUrlFailure = (): CreationApiResult<MaterialUrlView> => ({
+const thumbnailUrlFailure = (): CreationApiResult<DisplayUrlView> => ({
   outcome: 'network-failure'
 })
 
 /** A grant far enough ahead to stay live for the test's lifetime. */
-const liveGrant = (url: string): MaterialUrlView => ({
+const liveGrant = (url: string): DisplayUrlView => ({
   url,
   expiresAt: new Date(Date.now() + 30 * 60_000).toISOString()
 })
@@ -166,7 +166,7 @@ test('dropping a pending upload clears progress in the same tick without a thumb
 
 test('an in-flight thumbnail load cannot land after reset()', async () => {
   const urls = fakeUrls()
-  const load = deferred<CreationApiResult<MaterialUrlView>>()
+  const load = deferred<CreationApiResult<DisplayUrlView>>()
   const controller = createController(urls, () => load.promise)
   controller.replaceMaterials([materialView('m1')])
   const release = controller.retain('m1')
@@ -224,7 +224,7 @@ test('thumbnail leases refcount: releases keep a remote URL entry painting', asy
 
 test('an in-flight remote thumbnail remains cached after its card unmounts', async () => {
   const urls = fakeUrls()
-  const load = deferred<CreationApiResult<MaterialUrlView>>()
+  const load = deferred<CreationApiResult<DisplayUrlView>>()
   const controller = createController(urls, () => load.promise)
   controller.replaceMaterials([materialView('m1')])
   const release = controller.retain('m1')
@@ -270,11 +270,11 @@ test('the last release still retires a local preview object URL', () => {
 
 test('an expired remote thumbnail re-authorizes on the next request', async () => {
   const urls = fakeUrls()
-  const stale: MaterialUrlView = {
+  const stale: DisplayUrlView = {
     url: 'https://thumb.example/m1?sig=stale',
     expiresAt: new Date(Date.now() - 60_000).toISOString()
   }
-  const fresh = deferred<CreationApiResult<MaterialUrlView>>()
+  const fresh = deferred<CreationApiResult<DisplayUrlView>>()
   const loads: string[] = []
   const controller = createController(urls, (materialId) => {
     loads.push(materialId)
