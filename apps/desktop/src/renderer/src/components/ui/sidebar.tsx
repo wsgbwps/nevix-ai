@@ -18,8 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PanelLeftIcon } from 'lucide-react'
 
-const SIDEBAR_COOKIE_NAME = 'sidebar_state'
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
+const SIDEBAR_STORAGE_KEY = 'sidebar_state'
 const SIDEBAR_WIDTH = '16rem'
 const SIDEBAR_WIDTH_MOBILE = '18rem'
 const SIDEBAR_WIDTH_ICON = '3rem'
@@ -38,12 +37,12 @@ type SidebarContextProps = {
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
 
 function savedSidebarOpen(defaultOpen: boolean): boolean {
-  if (typeof document === 'undefined') return defaultOpen
-  const value = document.cookie
-    .split('; ')
-    .find((entry) => entry.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
-    ?.slice(SIDEBAR_COOKIE_NAME.length + 1)
-  return value === 'true' ? true : value === 'false' ? false : defaultOpen
+  try {
+    const value = localStorage.getItem(SIDEBAR_STORAGE_KEY)
+    return value === 'true' ? true : value === 'false' ? false : defaultOpen
+  } catch {
+    return defaultOpen
+  }
 }
 
 function useSidebar() {
@@ -84,8 +83,11 @@ function SidebarProvider({
         _setOpen(openState)
       }
 
-      // This sets the cookie to keep the sidebar state.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+      try {
+        localStorage.setItem(SIDEBAR_STORAGE_KEY, String(openState))
+      } catch {
+        // Keep the in-memory state when storage is unavailable.
+      }
     },
     [setOpenProp, open]
   )

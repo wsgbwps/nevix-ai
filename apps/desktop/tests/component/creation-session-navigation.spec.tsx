@@ -7,7 +7,7 @@ const springSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'
 
 test('the session group collapses without hiding the new draft action', async ({ mount, page }) => {
   await page.evaluate(() => {
-    document.cookie = 'sidebar_state=; path=/; max-age=0'
+    localStorage.removeItem('sidebar_state')
   })
   await mount(<CreationWorkbenchRealShellStory />)
 
@@ -23,7 +23,7 @@ test('the session group collapses without hiding the new draft action', async ({
 
 test('an empty session list still offers the new draft entry', async ({ mount, page }) => {
   await page.evaluate(() => {
-    document.cookie = 'sidebar_state=; path=/; max-age=0'
+    localStorage.removeItem('sidebar_state')
   })
   await mount(<CreationWorkbenchRealShellStory sessions={[]} />)
 
@@ -35,7 +35,7 @@ test('an empty session list still offers the new draft entry', async ({ mount, p
 
 test('the icon rail keeps the sessions after the group was collapsed', async ({ mount, page }) => {
   await page.evaluate(() => {
-    document.cookie = 'sidebar_state=; path=/; max-age=0'
+    localStorage.removeItem('sidebar_state')
   })
   await mount(<CreationWorkbenchRealShellStory />)
 
@@ -53,7 +53,7 @@ test('collapsed session controls stay aligned without a visible scrollbar', asyn
   page
 }) => {
   await page.evaluate(() => {
-    document.cookie = 'sidebar_state=; path=/; max-age=0'
+    localStorage.removeItem('sidebar_state')
   })
   const sessions = Array.from(
     { length: 40 },
@@ -109,7 +109,7 @@ test('the global session navigation keeps its compact controls and sidebar state
   page
 }) => {
   await page.evaluate(() => {
-    document.cookie = 'sidebar_state=; path=/; max-age=0'
+    localStorage.removeItem('sidebar_state')
   })
   const component = await mount(<CreationWorkbenchRealShellStory createSessionDeferred />)
   const sidebar = page.locator('[data-slot="sidebar"]')
@@ -153,7 +153,7 @@ test('a session identity keeps its grapheme and color when list order changes', 
   page
 }) => {
   await page.evaluate(() => {
-    document.cookie = 'sidebar_state=; path=/; max-age=0'
+    localStorage.removeItem('sidebar_state')
   })
   const named: CreationSessionView = {
     id: 'session-with-stable-identity',
