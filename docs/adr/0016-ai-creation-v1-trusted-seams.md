@@ -26,6 +26,8 @@
 
 2026-09-22 修订：Media Asset 与 Team Publication 成品可在 Go 复验精确业务读取权后获得约 10 分钟、单一结果对象的显示 GET。图片墙使用宽 ≤320 的 WebP、详情使用宽 ≤2048 的 WebP，视频使用支持 Range 的原始字节；下载仍经 Go 返回原件。V1 不持久化 thumbnail、poster 或 preview clip，既有显示 URL 的有效期窗口是限制、撤回或删除后的明确残留能力。
 
+2026-09-23 修订（[#288](https://github.com/wsgbwps/nevix-ai/issues/288)）：补记成品显示选择所拒斥的替代方案——除不创建持久派生物外，V1 也不引入 Video.js、hls.js、ReactPlayer、Plyr 等播放器库；理由、比选与一手来源见「媒体成品显示授权」。
+
 ## 背景
 
 AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 decision tickets 与多份 ADR 中；旧票建立于 Organization、Supabase/RLS、Desktop 直连数据面等前提之上。#93 清空全部决策前沿并取代早期假设，#150 把最终边界收敛为单一规格。若不在架构文档中固化，实施 agent 容易复活已被取代的设计。本 ADR 与 [ADR-0012](0012-unified-ai-creation-owner.md)（owner 统一）、[ADR-0014](0014-go-sole-trusted-data-plane.md)（数据面）、[ADR-0015](0015-single-tenant-user-system-and-go-authorization.md)（用户系统与授权）互补，各自保持单一权威说明。
@@ -56,7 +58,7 @@ AI Creation V1 的产品决策分散在 Wayfinder map #77 的 19 张已关闭 de
 
 - 成品显示 URL 按业务资源签发而不是按 object key 邻接授权：Creator Asset、Admin Inspiration Asset 与 Team Publication 各自复用既有可见性查询，复验成功后才可为该记录指向的单一不可覆盖结果对象签名；任一路径都不授予同一 Task、Session、Publication 或存储前缀中的其他对象。
 - 图片墙固定取得 OSS 侧宽 ≤320 的 WebP，图片详情固定取得宽 ≤2048 的 WebP；视频墙与详情取得原始视频字节，由浏览器使用未参与签名的 Range。成品原件下载仍经 Go 授权出口并保留原始文件与格式。
-- V1 不创建持久 thumbnail、poster、preview clip、sprite、HLS 或 DASH 派生物；图片尺寸是 OSS 的响应期转换，视频显示不复制对象。只有原始视频的首帧或悬停播放实测不能达到体验目标时，才另行决定派生物、转码、保留与清理责任。
+- V1 不创建持久 thumbnail、poster、preview clip、sprite、HLS 或 DASH 派生物，也不引入 Video.js、hls.js、ReactPlayer、Plyr 等播放器库。图片尺寸是 OSS 的响应期转换，视频显示不复制对象；普通 MP4 的原生 `<video>` 已负责 progressive download、Range、解码与播放，而播放器库只加控件与来源适配，不改变这条媒体路径。只有原始视频的首帧或悬停播放实测不能达到体验目标时，才按证据另行决定升级，并承担随之而来的派生物、转码、保留与清理责任；完整比选与一手来源见[媒体墙视频卡片悬停预览：方案调研](../research/media-wall-hover-video-preview-options-2026-09-22.md)。
 - 显示 URL 约 10 分钟、只读且不可主动召回。限制、撤回、逻辑删除或 Session 失效立即阻止新的显示 URL 与 Go 下载授权，但既有 URL 最多继续有效至 TTL，Renderer 已加载的像素或字节不能收回；该残留窗口不改变数据库中的当前可见性事实。
 
 ### Team Publication 与 Create Similar
