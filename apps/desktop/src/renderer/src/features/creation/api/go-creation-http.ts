@@ -179,11 +179,6 @@ function parseSessionDetail(payload: unknown): SessionDetailView | null {
 }
 
 /**
- * A typed client over one configured server URL. Paths mirror
- * contracts/creation.yaml exactly; parsing fails closed into network-failure
- * rather than guessing shapes.
- */
-/**
  * Fetches one resource's short-lived display grant (ADR-0014). The signed URL
  * lives only in this call's returned value: it is never persisted, logged, or
  * placed in a URL the session token rides. A grant that is not an absolute
@@ -193,13 +188,15 @@ function parseSessionDetail(payload: unknown): SessionDetailView | null {
 export async function fetchDisplayUrl(
   serverUrl: string,
   token: string,
-  path: string
+  path: string,
+  signal?: AbortSignal
 ): Promise<CreationApiResult<DisplayUrlView>> {
   let response: Response
   try {
     response = await fetch(new URL(path, serverUrl), {
       redirect: 'error',
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
+      signal
     })
   } catch {
     return { outcome: 'network-failure' }
@@ -353,11 +350,6 @@ export function createCreationClient(serverUrl: string): {
     }
   }
 
-  const fetchMaterialUrl = (
-    token: string,
-    path: string
-  ): Promise<CreationApiResult<DisplayUrlView>> => fetchDisplayUrl(serverUrl, token, path)
-
   return {
     listSessions: (token, cursor) =>
       listPage(parseSessionPage, '/creation/sessions', token, cursor),
@@ -467,8 +459,8 @@ export function createCreationClient(serverUrl: string): {
       return { outcome: 'network-failure' }
     },
     loadMaterialThumbnailUrl: (token, materialId) =>
-      fetchMaterialUrl(token, `/creation/materials/${materialId}/thumbnail-url`),
+      fetchDisplayUrl(serverUrl, token, `/creation/materials/${materialId}/thumbnail-url`),
     loadMaterialPreviewUrl: (token, materialId) =>
-      fetchMaterialUrl(token, `/creation/materials/${materialId}/preview-url`)
+      fetchDisplayUrl(serverUrl, token, `/creation/materials/${materialId}/preview-url`)
   }
 }

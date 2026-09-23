@@ -28,6 +28,22 @@ const (
 	MediaVideo MediaType = "video"
 )
 
+// Kind translates the generation media vocabulary into the storage one that
+// selects a display transform. They read alike but are not the same set —
+// Reference Material also carries audio — so the mapping is stated here rather
+// than assumed by a conversion. An unrecognised media signs as no kind at all,
+// which the storage layer treats as raw bytes instead of guessing a resize.
+func (m MediaType) Kind() Kind {
+	switch m {
+	case MediaImage:
+		return KindImage
+	case MediaVideo:
+		return KindVideo
+	default:
+		return ""
+	}
+}
+
 // TaskStatus is the task state machine. Non-terminal: queued, submitting,
 // processing, persisting, cancelling. Terminal: succeeded,
 // partially_succeeded, failed, cancelled, timed_out.

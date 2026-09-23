@@ -143,13 +143,19 @@ export type AssetDisplaySource =
   | { readonly kind: 'grant'; readonly url: string; readonly expiresAt: string }
   | { readonly kind: 'blob'; readonly blob: Blob }
 
+export interface AssetDisplayOptions {
+  /** Aborting must stop the read, not just ignore its answer. */
+  readonly signal?: AbortSignal
+}
+
 export interface AssetLibraryPorts {
   readonly listAssets: (request: AssetPageRequest) => Promise<CreationApiResult<AssetPage>>
   readonly getAsset: (assetId: string) => Promise<CreationApiResult<AssetDetailView>>
   /** Fetches one visible Asset's short-lived display grant (ADR-0014). */
   readonly loadAssetDisplay: (
     assetId: string,
-    purpose: AssetDisplayPurpose
+    purpose: AssetDisplayPurpose,
+    options?: AssetDisplayOptions
   ) => Promise<CreationApiResult<AssetDisplaySource>>
   /** Streams the original bytes through Go; display never uses this path. */
   readonly downloadAssetContent: (
@@ -558,7 +564,8 @@ export function createAssetLibraryClient(serverUrl: string): {
   loadDisplay(
     token: string,
     assetId: string,
-    purpose: AssetDisplayPurpose
+    purpose: AssetDisplayPurpose,
+    options?: AssetDisplayOptions
   ): Promise<CreationApiResult<AssetDisplaySource>>
   downloadContent(
     token: string,
@@ -594,11 +601,12 @@ export function createAssetLibraryClient(serverUrl: string): {
         ? { outcome: 'network-failure' }
         : { outcome: 'succeeded', value: parsed }
     },
-    async loadDisplay(token, assetId, purpose) {
+    async loadDisplay(token, assetId, purpose, options) {
       const result = await fetchDisplayUrl(
         serverUrl,
         token,
-        `/creation/assets/${encodeURIComponent(assetId)}/${purpose}-url`
+        `/creation/assets/${encodeURIComponent(assetId)}/${purpose}-url`,
+        options?.signal
       )
       return result.outcome === 'succeeded'
         ? { outcome: 'succeeded', value: { kind: 'grant', ...result.value } }

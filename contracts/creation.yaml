@@ -1395,14 +1395,8 @@ paths:
             items:
               type: string
               enum:
-                [
-                  text-to-image,
-                  reference-image,
-                  text-to-video,
-                  first-frame,
-                  first-last-frame,
-                  omni-reference,
-                ]
+                [text-to-image, reference-image, text-to-video, first-frame,
+                 first-last-frame, omni-reference]
           style: form
           explode: true
         - name: ratio
@@ -3123,8 +3117,7 @@ components:
       properties:
         state:
           type: string
-          enum:
-            [unconfigured, ready, credential_unavailable, legacy_incompatible]
+          enum: [unconfigured, ready, credential_unavailable, legacy_incompatible]
           description: legacy_incompatible 只表示隔离的历史连接；仅返回 revision 和 location_frozen 以支持显式处置，不返回位置或凭据投影。
         provider:
           type: string
@@ -3694,8 +3687,7 @@ components:
           $ref: "#/components/schemas/MediaAssetCapabilities"
     MediaAssetCapabilities:
       type: object
-      required:
-        [can_delete, can_create_similar, can_publish, can_restrict, can_release]
+      required: [can_delete, can_create_similar, can_publish, can_restrict, can_release]
       properties:
         can_delete:
           type: boolean
@@ -3774,20 +3766,7 @@ components:
           maxLength: 128
     TeamPublication:
       type: object
-      required:
-        [
-          id,
-          source_asset_id,
-          publisher,
-          media_type,
-          mime_type,
-          byte_size,
-          checksum_sha256,
-          published_at,
-          restricted,
-          restriction_state,
-          capabilities,
-        ]
+      required: [id, source_asset_id, publisher, media_type, mime_type, byte_size, checksum_sha256, published_at, restricted, restriction_state, capabilities]
       properties:
         id:
           type: string
@@ -3835,8 +3814,7 @@ components:
           $ref: "#/components/schemas/RestrictionState"
         capabilities:
           type: object
-          required:
-            [can_withdraw, can_create_similar, can_restrict, can_release]
+          required: [can_withdraw, can_create_similar, can_restrict, can_release]
           properties:
             can_withdraw:
               type: boolean
@@ -3855,8 +3833,7 @@ components:
       description: null 表示从未限制；released 只解除当前限制，不恢复旧 Publication。
     PublicationReference:
       type: object
-      required:
-        [id, role, kind, file_name, mime_type, byte_size, claims_version]
+      required: [id, role, kind, file_name, mime_type, byte_size, claims_version]
       properties:
         id:
           type: string
@@ -4135,7 +4112,7 @@ components:
         support_number:
           type: string
           nullable: true
-          pattern: "^NVX-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9]{2}$"
+          pattern: '^NVX-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9]{2}$'
           description: Nevix 生成的稳定支持编号；不得替换为供应商 request ID。
         failure_diagnostic:
           allOf:

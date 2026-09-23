@@ -28,7 +28,8 @@ export function AssetDetailDialog({
   onCreateSimilar,
   onPublish,
   onWithdraw,
-  onDelete
+  onDelete,
+  onAssetUnavailable
 }: {
   readonly assetId: string | null
   readonly detail: AssetDetailView | null
@@ -44,6 +45,8 @@ export function AssetDetailDialog({
   readonly onPublish: () => void
   readonly onWithdraw: () => void
   readonly onDelete: () => void
+  /** The opened media answered gone or forbidden: the wall's facts are stale. */
+  readonly onAssetUnavailable: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   return (
@@ -64,7 +67,12 @@ export function AssetDetailDialog({
         ) : (
           <div className="grid size-full min-h-0 min-[800px]:grid-cols-[minmax(0,1fr)_22.5rem]">
             <div className="bg-muted grid min-h-56 min-w-0 place-items-center overflow-hidden p-4">
-              <AssetMedia asset={detail.asset} ports={ports} detail />
+              <AssetMedia
+                asset={detail.asset}
+                ports={ports}
+                detail
+                onUnavailable={onAssetUnavailable}
+              />
             </div>
             <div className="flex min-h-0 min-w-0 flex-col border-t min-[800px]:border-t-0 min-[800px]:border-l">
               <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">

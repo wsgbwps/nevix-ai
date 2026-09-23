@@ -316,6 +316,7 @@ export function AssetLibraryPage({
         }
         onWithdraw={() => void detail.withdraw(() => window.confirm(t('assets.withdrawConfirm')))}
         onDelete={() => void detail.remove(() => window.confirm(t('assets.deleteConfirm')))}
+        onAssetUnavailable={list.refresh}
       />
     </section>
   )

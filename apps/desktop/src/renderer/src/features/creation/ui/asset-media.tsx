@@ -3,9 +3,16 @@ import { useTranslation } from 'react-i18next'
 import { CheckIcon, ImageIcon, LoaderCircleIcon, VideoIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import type { AssetDisplayPurpose, MediaAssetView } from '../api/asset-library-http'
-import { useAssetDisplay, type AssetDisplayPort } from './use-asset-display'
+import {
+  useAssetDisplay,
+  type AssetDisplayFailure,
+  type AssetDisplayPort
+} from './use-asset-display'
 
 export type MediaPreviewView = Pick<MediaAssetView, 'id' | 'mediaType' | 'byteSize'>
+
+/** Above this the wall shows a video's icon rather than streaming it whole. */
+const WALL_VIDEO_MAX_BYTES = 8 * 1024 * 1024
 
 /**
  * A video has no lightweight variant yet (#291), so its wall card still
@@ -18,14 +25,11 @@ function wallPurpose(asset: MediaPreviewView): AssetDisplayPurpose | null {
   return asset.byteSize <= WALL_VIDEO_MAX_BYTES ? 'preview' : null
 }
 
-/** Above this the wall shows a video's icon rather than streaming it whole. */
-const WALL_VIDEO_MAX_BYTES = 8 * 1024 * 1024
-
 function MediaStatus({
   failure,
   onRetry
 }: {
-  readonly failure: 'unavailable' | 'retryable' | null
+  readonly failure: AssetDisplayFailure | null
   readonly onRetry: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')

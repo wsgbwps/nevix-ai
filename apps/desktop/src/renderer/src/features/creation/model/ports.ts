@@ -193,8 +193,8 @@ export function createCreationWorkspacePorts(
   return {
     listAssets: (page) => withAssetToken((client, token) => client.list(token, page)),
     getAsset: (assetId) => withAssetToken((client, token) => client.get(token, assetId)),
-    loadAssetDisplay: (assetId, purpose) =>
-      withAssetToken((client, token) => client.loadDisplay(token, assetId, purpose)),
+    loadAssetDisplay: (assetId, purpose, options) =>
+      withAssetToken((client, token) => client.loadDisplay(token, assetId, purpose, options)),
     downloadAssetContent: (assetId, checksumSha256, options) =>
       withAssetToken((client, token) =>
         client.downloadContent(token, assetId, checksumSha256, options)

@@ -204,6 +204,26 @@ test('wall display loading is capped at four concurrent authorizations', async (
     .toBe(8)
 })
 
+test('a card below the fold authorizes nothing until it comes into range', async ({
+  mount,
+  page
+}) => {
+  // Short enough that the wall genuinely overflows its 200px near-visible reach.
+  await page.setViewportSize({ width: 960, height: 360 })
+  await mount(<AssetLibraryStory dense />)
+  await expect(page.getByTestId('asset-card')).toHaveCount(24)
+  // Near-visible and no further: the wall never authorizes the whole page.
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.displayCalls().length ?? 0))
+    .toBeGreaterThan(0)
+  const before = await page.evaluate(() => window.__assetLibraryTest?.displayCalls().length ?? 0)
+  expect(before).toBeLessThan(24)
+  await page.getByTestId('asset-card').last().scrollIntoViewIfNeeded()
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.displayCalls().length))
+    .toBeGreaterThan(before)
+})
+
 test('a card paints the granted URL directly, without any content download', async ({
   mount,
   page
@@ -212,6 +232,30 @@ test('a card paints the granted URL directly, without any content download', asy
   await expect(page.getByRole('img', { name: 'Asset asset-one' })).toBeVisible()
   // Display never streams the original, so nothing was downloaded to paint it.
   expect(await page.evaluate(() => window.__assetLibraryTest?.maxActiveDownloads())).toBe(0)
+})
+
+test('an opened detail asks for the preview variant and bypasses a saturated wall', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory displayMode="deferred" />)
+  // Every wall slot is held at the gate, and every wall card here is an image,
+  // so a preview ask can only be the detail's own.
+  await expect
+    .poll(() => page.evaluate(() => window.__assetLibraryTest?.maxActiveDisplays()))
+    .toBe(4)
+  await page.getByRole('button', { name: 'Open asset preview-1' }).click()
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__assetLibraryTest?.displayCalls().filter((call) => call.purpose === 'preview')
+            .length ?? 0
+      )
+    )
+    .toBeGreaterThan(0)
+  // It landed without waiting for one of the four held wall slots to free up.
+  expect(await page.evaluate(() => window.__assetLibraryTest?.maxActiveDisplays())).toBe(5)
 })
 
 test('one failed authorization is retried automatically and then stops', async ({

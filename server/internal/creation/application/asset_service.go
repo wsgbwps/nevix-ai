@@ -122,7 +122,7 @@ func (s *AssetService) AuthorizePreview(ctx context.Context, principal authz.Pri
 	if err != nil {
 		return DisplayURLAuthorization{}, err
 	}
-	signedURL, err := store.PresignPreview(ctx, asset.BlobKey, domain.Kind(asset.MediaType), displayURLLifetime)
+	signedURL, err := store.PresignPreview(ctx, asset.BlobKey, asset.MediaType.Kind(), displayURLLifetime)
 	if err != nil {
 		return DisplayURLAuthorization{}, domain.ErrObjectStorageUnavailable
 	}

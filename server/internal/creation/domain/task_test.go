@@ -349,3 +349,22 @@ func TestStableSlotOrder(t *testing.T) {
 		}
 	}
 }
+
+// The two vocabularies read alike but are not the same set, so the mapping has
+// to be stated rather than assumed: an unrecognised media signs as no kind, and
+// the storage layer then serves raw bytes instead of guessing a resize.
+func TestMediaTypeKindMapping(t *testing.T) {
+	for _, tc := range []struct {
+		media MediaType
+		want  Kind
+	}{
+		{MediaImage, KindImage},
+		{MediaVideo, KindVideo},
+		{"audio", ""},
+		{"", ""},
+	} {
+		if got := tc.media.Kind(); got != tc.want {
+			t.Errorf("MediaType(%q).Kind() = %q, want %q", tc.media, got, tc.want)
+		}
+	}
+}

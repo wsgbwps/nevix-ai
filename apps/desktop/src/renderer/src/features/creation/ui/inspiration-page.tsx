@@ -76,13 +76,14 @@ function publicationFor(
   return detail?.type === 'asset' ? detail.publication : null
 }
 
-// Inspiration still streams complete blobs: it has no display-url action yet
-// (#290), so this stands in for the grant the Asset Library already gets.
 function mediaPort(ports: InspirationPorts, item: InspirationItem): AssetDisplayPort {
   const expectedByteSize = itemMedia(item).byteSize
   return {
-    loadAssetDisplay: async () => {
-      const result = await ports.loadInspirationContent(item, { expectedByteSize })
+    loadAssetDisplay: async (_id, _purpose, options) => {
+      const result = await ports.loadInspirationContent(item, {
+        expectedByteSize,
+        signal: options?.signal
+      })
       return result.outcome === 'succeeded'
         ? { outcome: 'succeeded', value: { kind: 'blob', blob: result.value } }
         : result

@@ -114,7 +114,9 @@ export function useAssetDisplay(
     }
 
     const load = async (): Promise<void> => {
-      const result = await ports.loadAssetDisplay(asset.id, purpose)
+      const result = await ports.loadAssetDisplay(asset.id, purpose, {
+        signal: controller.signal
+      })
       if (controller.signal.aborted) return
       if (result.outcome !== 'succeeded') {
         // A 401 already retired the session in the ports layer; a gone or
