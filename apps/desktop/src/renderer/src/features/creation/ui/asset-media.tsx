@@ -9,20 +9,33 @@ import {
   type AssetDisplayPort
 } from './use-asset-display'
 
-export type MediaPreviewView = Pick<MediaAssetView, 'id' | 'mediaType' | 'byteSize'>
-
-/** Above this the wall shows a video's icon rather than streaming it whole. */
-const WALL_VIDEO_MAX_BYTES = 8 * 1024 * 1024
+export type MediaPreviewView = Pick<MediaAssetView, 'id' | 'mediaType'>
 
 /**
- * A video has no lightweight variant yet (#291), so its wall card still
- * streams the original and an oversized one keeps the placeholder instead.
- * An image card costs the same whatever the original weighs, because the wall
- * paints the fixed 320px variant rather than the file.
+ * The wall's fixed variant per kind: the lightweight image variant, or the
+ * untouched original that Chromium then ranges over (#291).
  */
-function wallPurpose(asset: MediaPreviewView): AssetDisplayPurpose | null {
-  if (asset.mediaType === 'image') return 'thumbnail'
-  return asset.byteSize <= WALL_VIDEO_MAX_BYTES ? 'preview' : null
+function wallPurpose(asset: MediaPreviewView): AssetDisplayPurpose {
+  return asset.mediaType === 'image' ? 'thumbnail' : 'preview'
+}
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function MediaPlaceholder({ asset }: { readonly asset: MediaPreviewView }): React.JSX.Element {
+  return (
+    <div
+      data-testid="media-placeholder"
+      className="text-muted-foreground grid size-full place-items-center"
+    >
+      {asset.mediaType === 'video' ? (
+        <VideoIcon className="size-7" aria-hidden />
+      ) : (
+        <ImageIcon className="size-7" aria-hidden />
+      )}
+    </div>
+  )
 }
 
 function MediaStatus({
@@ -75,88 +88,141 @@ export function AssetMedia({
   asset,
   ports,
   detail = false,
+  hovered = false,
   onUnavailable
 }: {
   readonly asset: MediaPreviewView
   readonly ports: AssetDisplayPort
   readonly detail?: boolean
+  /** The wall card's pointer rests on this card; a detail never hovers. */
+  readonly hovered?: boolean
   readonly onUnavailable?: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
+  // Entering the near-visible range authorizes the card once and is never
+  // undone, so scrolling cannot re-authorize a wall.
   const [visible, setVisible] = useState(detail)
-  // Metadata readiness is not visible content: an image keeps its placeholder
-  // until the bytes have decoded. Video frame readiness arrives with the hover
-  // work (#291), so a video paints as it always has.
+  // The same range, tracked both ways, so playback is bounded by where the card
+  // is rather than by hover bookkeeping. Chromium ends the hover itself when a
+  // card scrolls out from under the cursor; this covers the same exit.
+  const [nearVisible, setNearVisible] = useState(detail)
+  // Visible content, not metadata: a card paints its placeholder until an image
+  // decodes or a video has a frame. A detail is deliberate — it paints the
+  // element at once, so an opened video's controls are usable immediately.
   const [decoded, setDecoded] = useState(false)
   const isImage = asset.mediaType === 'image'
-  const pending = isImage && !decoded
+  const pending = !decoded && (isImage || !detail)
+  // Subscribed, not read once: a preference that turns on mid-hover stops the
+  // card where it stands.
+  const [reducedMotion, setReducedMotion] = useState(prefersReducedMotion)
   const hostRef = useRef<HTMLDivElement | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const purpose = detail ? 'preview' : wallPurpose(asset)
 
   useEffect(() => {
-    if (detail || purpose === null || visible) return
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = (): void => setReducedMotion(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    if (detail) return
     const host = hostRef.current
     if (!host || typeof IntersectionObserver === 'undefined') {
       setVisible(true)
+      setNearVisible(true)
       return
     }
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) setVisible(true)
+        const intersecting = entries.some((entry) => entry.isIntersecting)
+        setNearVisible(intersecting)
+        if (intersecting) setVisible(true)
       },
       { rootMargin: '200px' }
     )
     observer.observe(host)
     return () => observer.disconnect()
-  }, [detail, purpose, visible])
+  }, [detail])
 
-  const shouldLoad = purpose !== null && (detail || visible)
+  const shouldLoad = detail || visible
   const display = useAssetDisplay(ports, asset, {
     enabled: shouldLoad,
     queued: !detail,
-    purpose: purpose ?? 'preview',
+    purpose,
     onUnavailable
   })
 
-  if (!shouldLoad) {
+  // Playback belongs to the pointer, and the source is left alone so a brief
+  // re-hover reuses the browser's own buffer. Pausing in the cleanup is what
+  // stops the card on leave, on scrolling away, and on unmount.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !hovered || !nearVisible || reducedMotion) return
+    // A rejected play is not a media failure — the element's own `error` event
+    // is that signal — and pausing mid-request rejects with an AbortError.
+    void video.play().catch(() => undefined)
+    return () => {
+      video.pause()
+      // A source that never produced a frame has no position to rewind.
+      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) video.currentTime = 0
+    }
+  }, [hovered, nearVisible, reducedMotion, display.url])
+
+  const renderContent = (): React.JSX.Element => {
+    if (!shouldLoad) return <MediaPlaceholder asset={asset} />
+    if (display.failure !== null || display.url === null) {
+      return <MediaStatus failure={display.failure} onRetry={display.retry} />
+    }
+    const url = display.url
+    const mediaLabel = t('assets.mediaAlt', { id: asset.id })
+    const objectFit = detail ? 'object-contain' : 'object-cover'
     return (
-      <div ref={hostRef} className="text-muted-foreground grid size-full place-items-center">
-        {asset.mediaType === 'video' ? (
-          <VideoIcon className="size-7" aria-hidden />
+      <>
+        {pending ? (
+          isImage ? (
+            <MediaStatus failure={null} onRetry={display.retry} />
+          ) : (
+            <MediaPlaceholder asset={asset} />
+          )
+        ) : null}
+        {isImage ? (
+          <img
+            src={url}
+            alt={mediaLabel}
+            className={`size-full ${objectFit} ${pending ? 'invisible' : ''}`}
+            onLoad={() => setDecoded(true)}
+            // A grant the element will not paint is worth exactly one fresh
+            // authorization before the card concedes.
+            onError={display.reportElementError}
+          />
         ) : (
-          <ImageIcon className="size-7" aria-hidden />
+          <video
+            ref={videoRef}
+            src={url}
+            aria-label={mediaLabel}
+            controls={detail}
+            // The wall previews; the detail is where playback is deliberate.
+            muted={!detail}
+            loop={!detail}
+            preload={detail ? 'auto' : 'metadata'}
+            playsInline
+            className={`size-full ${objectFit} ${pending ? 'invisible' : ''}`}
+            onLoadedData={() => setDecoded(true)}
+            onError={display.reportElementError}
+          />
         )}
-      </div>
+      </>
     )
   }
-  if (display.failure !== null || display.url === null) {
-    return <MediaStatus failure={display.failure} onRetry={display.retry} />
-  }
-  const mediaLabel = t('assets.mediaAlt', { id: asset.id })
-  const objectFit = detail ? 'object-contain' : 'object-cover'
+
+  // One element for the card's whole life, whatever it paints inside it: the
+  // near-visible observer watches it, and an element React replaced on a branch
+  // change would leave that observer reporting a detached node forever.
   return (
-    <div ref={hostRef} className="relative size-full">
-      {pending ? <MediaStatus failure={null} onRetry={display.retry} /> : null}
-      {isImage ? (
-        <img
-          src={display.url}
-          alt={mediaLabel}
-          className={`size-full ${objectFit} ${pending ? 'invisible' : ''}`}
-          onLoad={() => setDecoded(true)}
-          // A grant the element will not paint is worth exactly one fresh
-          // authorization before the card concedes.
-          onError={display.reportElementError}
-        />
-      ) : (
-        <video
-          src={display.url}
-          aria-label={mediaLabel}
-          controls={detail}
-          playsInline
-          className={`size-full ${objectFit}`}
-          onError={display.reportElementError}
-        />
-      )}
+    <div ref={hostRef} className={shouldLoad ? 'relative size-full' : 'size-full'}>
+      {renderContent()}
     </div>
   )
 }
@@ -179,10 +245,17 @@ export function AssetCard({
   readonly onUnavailable?: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
+  // Hover is tracked on the card, not on the media: the open button covers the
+  // card, so the element itself never receives the pointer.
+  const [hovered, setHovered] = useState(false)
   return (
     <li data-testid="asset-card" className="group min-w-0">
-      <div className="bg-muted relative aspect-[4/3] overflow-hidden rounded-xl border">
-        <AssetMedia asset={asset} ports={ports} onUnavailable={onUnavailable} />
+      <div
+        className="bg-muted relative aspect-[4/3] overflow-hidden rounded-xl border"
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+      >
+        <AssetMedia asset={asset} ports={ports} hovered={hovered} onUnavailable={onUnavailable} />
         {selecting ? (
           // The whole card toggles: a 16px box is a poor hit target, and the
           // focus ring belongs on the card the way it is on the open button.

@@ -53,7 +53,9 @@ function asset(
     creator: { id: 'user-one', displayName: 'Aster' },
     mediaType,
     mimeType: mediaType === 'image' ? 'image/svg+xml' : 'video/mp4',
-    byteSize: imageBlob.size,
+    // Large enough that a size-based wall gate would refuse it: display is
+    // authorized by variant, never by the weight of the file.
+    byteSize: mediaType === 'video' ? 900 * 1024 * 1024 : imageBlob.size,
     checksumSha256: 'aa'.repeat(32),
     widthPx: 120,
     heightPx: 80,

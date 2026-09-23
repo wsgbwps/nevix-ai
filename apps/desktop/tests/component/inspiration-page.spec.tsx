@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/experimental-ct-react'
+import type { Locator } from '@playwright/test'
 import { InspirationStory } from './fixtures/inspiration.story'
+
+declare global {
+  interface Window {
+    /** Records a refused `play()` and anything it leaked as a rejection. */
+    __playProbe: { plays: number; rejections: unknown[] }
+  }
+}
 
 test('one member projection renders publication cards without legacy channel controls', async ({
   mount,
@@ -308,6 +316,121 @@ test('video publications render previews and open with playable controls', async
     .toBeGreaterThanOrEqual(2)
 
   await page.getByRole('button', { name: 'Open inspiration publication-5' }).click()
+  await expect(page.getByRole('dialog').getByLabel('Asset publication-5')).toHaveAttribute(
+    'controls'
+  )
+})
+
+/** Whether the element is playing. Reading `paused` beats spying on `play()`. */
+async function playing(video: Locator): Promise<boolean> {
+  return video.evaluate((element: HTMLVideoElement) => !element.paused)
+}
+
+test('only the hovered wall video plays', async ({ mount, page }) => {
+  await mount(<InspirationStory state="dense" />)
+  const first = page.getByLabel('Asset publication-5')
+  const second = page.getByLabel('Asset publication-10')
+
+  await page.getByRole('button', { name: 'Open inspiration publication-5' }).hover()
+  await expect.poll(() => playing(first)).toBe(true)
+
+  await page.getByRole('button', { name: 'Open inspiration publication-10' }).hover()
+  await expect.poll(() => playing(second)).toBe(true)
+  // Two cards never compete for the wall's attention.
+  expect(await playing(first)).toBe(false)
+})
+
+test('a wall video stops when it scrolls out of the near-visible range', async ({
+  mount,
+  page
+}) => {
+  // Short enough that the dense wall genuinely extends past the 200px reach.
+  await page.setViewportSize({ width: 960, height: 360 })
+  await mount(<InspirationStory state="dense" />)
+  const video = page.getByLabel('Asset publication-5')
+  await page.getByRole('button', { name: 'Open inspiration publication-5' }).hover()
+  await expect.poll(() => playing(video)).toBe(true)
+
+  // The pointer stays where it is; only the wall moves under it. Chromium ends
+  // the hover by itself once the card has left the cursor, and the card's own
+  // near-visible bound covers that same exit, so this asserts the outcome both
+  // mechanisms owe: a card the wall has scrolled away is not still playing.
+  await page.getByTestId('inspiration-card').last().scrollIntoViewIfNeeded()
+  await expect(video).not.toBeInViewport()
+  await expect.poll(() => playing(video)).toBe(false)
+})
+
+test('unmounting the wall stops the video that was playing', async ({ mount, page }) => {
+  const story = await mount(<InspirationStory state="dense" />)
+  const video = page.getByLabel('Asset publication-5')
+  await page.getByRole('button', { name: 'Open inspiration publication-5' }).hover()
+  await expect
+    .poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime))
+    .toBeGreaterThan(0)
+  const playingVideo = await video.elementHandle()
+
+  // The wall goes away under the pointer: the card unmounts while it plays.
+  await story.unmount()
+  await expect(page.getByTestId('inspiration-card')).toHaveCount(0)
+  // The element is out of the document, and it is stopped and rewound.
+  expect(await playingVideo!.evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true)
+  expect(await playingVideo!.evaluate((element) => (element as HTMLVideoElement).currentTime)).toBe(
+    0
+  )
+})
+
+test('reduced motion keeps wall videos still and still opens the detail', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="dense" />)
+  const video = page.getByLabel('Asset publication-5')
+  const open = page.getByRole('button', { name: 'Open inspiration publication-5' })
+  await expect(video).toBeVisible()
+
+  await open.hover()
+  await expect.poll(() => playing(video)).toBe(true)
+
+  // The preference arrives while the pointer is still on the card: the wall
+  // stops where it stands rather than playing on until the next leave.
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => playing(video)).toBe(false)
+
+  // And under the preference, the identical hover does not start it again.
+  await page.mouse.move(0, 0)
+  await open.hover()
+  await page.waitForTimeout(200)
+  expect(await playing(video)).toBe(false)
+
+  // The card's own route to the detail is what a reduced-motion viewer uses.
+  await open.click()
+  await expect(page.getByRole('dialog').getByLabel('Asset publication-5')).toHaveAttribute(
+    'controls'
+  )
+})
+
+test('a rejected play promise is swallowed and leaves the card usable', async ({ mount, page }) => {
+  await mount(<InspirationStory state="dense" />)
+  const video = page.getByLabel('Asset publication-5')
+  const open = page.getByRole('button', { name: 'Open inspiration publication-5' })
+  // A source the browser refuses to play: the promise rejects, the element
+  // never errors, and nothing may escape as an unhandled rejection.
+  await video.evaluate(() => {
+    const probe = { plays: 0, rejections: [] as unknown[] }
+    window.__playProbe = probe
+    window.addEventListener('unhandledrejection', (event) => probe.rejections.push(event.reason))
+    HTMLMediaElement.prototype.play = function (): Promise<void> {
+      probe.plays += 1
+      return Promise.reject(new DOMException('blocked', 'NotAllowedError'))
+    }
+  })
+
+  await open.hover()
+  await expect.poll(() => video.evaluate(() => window.__playProbe.plays)).toBeGreaterThan(0)
+  await page.waitForTimeout(100)
+  expect(await video.evaluate(() => window.__playProbe.rejections)).toEqual([])
+
+  await open.click()
   await expect(page.getByRole('dialog').getByLabel('Asset publication-5')).toHaveAttribute(
     'controls'
   )
