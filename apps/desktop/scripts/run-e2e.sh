@@ -7,18 +7,29 @@ set -euo pipefail
 # settings — Settings Information Architecture: one test-mode build, then the Settings spec.
 # image — Slice-10 image generation: the shortest image spec.
 # video — Video generation, playback and download.
+# benchmark — Issue #292 media-display SLO benchmark: the one mode that builds the
+#   production server and registers a real Aliyun OSS connection, so the wall's
+#   display URLs are genuine presigned bucket URLs. Needs the NEVIX_OSS_SMOKE_*
+#   values in server/.env.local, and writes to that bucket.
 #
 # Every mode except settings boots the fake Kapon generation route and
 # configures the provider connection: the creation tracers submit real
 # generation tasks (ADR-0017 first-submission materialization), which the
 # capability gate refuses while no provider is available.
-# Server binaries use the e2e build tag; its in-memory Object Storage
-# dependencies are not compiled into production builds.
+# Every other mode boots the server as `go test -c -tags=e2e`, whose in-memory
+# Object Storage refuses to presign, so a display URL cannot exist on that path.
+# The benchmark is the one mode that needs the production build, whose Object
+# Storage is the real OSS adapter the display path actually uses.
 mode="${1:-full}"
+if [[ "$mode" == "benchmark" ]]; then
+  server_build=(go build -o)
+else
+  server_build=(go test -c -tags=e2e -o)
+fi
 case "$mode" in
-  full | smoke | settings | image | video) ;;
+  full | smoke | settings | image | video | benchmark) ;;
   *)
-    echo "usage: $0 [full|smoke|settings|image|video]" >&2
+    echo "usage: $0 [full|smoke|settings|image|video|benchmark]" >&2
     exit 2
     ;;
 esac
@@ -443,7 +454,7 @@ start_identity_server() {
   identity_server_binary="$identity_server_binary_dir/server"
   (
     cd "$repo_root/server"
-    go test -c -tags=e2e -o "$identity_server_binary" ./cmd/server
+    "${server_build[@]}" "$identity_server_binary" ./cmd/server
   )
 
   identity_server_log="$(mktemp -t nevix-identity-e2e.XXXXXX.log)"
@@ -498,35 +509,78 @@ start_fake_kapon() {
 }
 
 configure_provider_connection() {
-  local tls_url="https://$tls_host:$tls_port"
-  local token proof
-  token="$(curl -fsk -X POST "$tls_url/identity/auth/login" \
-    -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}" \
-    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).token)')"
-  proof="$(curl -fsk -X POST "$tls_url/identity/admin/reauth/proofs" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"action\":\"provider_connection.create\",\"password\":\"$admin_initial_password\"}" \
-    | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).proof)')"
-  curl -fsk -X POST "$tls_url/creation/provider-connection" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"proof\":\"$proof\",\"provider_key\":\"test-key\"}" >/dev/null
+  admin_token_and_proof provider_connection.create
+  curl -fsk -X POST "https://$tls_host:$tls_port/creation/provider-connection" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"proof\":\"$ADMIN_PROOF\",\"provider_key\":\"test-key\"}" >/dev/null
 }
 
-configure_object_storage_connection() {
+# Signs in as the suite admin and mints a reauthentication proof for one action.
+# Every connection command below is otherwise the same three-line POST, and the
+# proof-bearing endpoints demand the trusted HTTPS transport marker, so the pair
+# is taken over the TLS terminator rather than the plain listener.
+admin_token_and_proof() {
   local tls_url="https://$tls_host:$tls_port"
-  local token proof
-  token="$(curl -fsk -X POST "$tls_url/identity/auth/login" \
+  ADMIN_TOKEN="$(curl -fsk -X POST "$tls_url/identity/auth/login" \
     -H 'Content-Type: application/json' \
     -d "{\"email\":\"$admin_email\",\"password\":\"$admin_initial_password\"}" \
     | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).token)')"
-  proof="$(curl -fsk -X POST "$tls_url/identity/admin/reauth/proofs" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"action\":\"object_storage_connection.create\",\"password\":\"$admin_initial_password\"}" \
+  ADMIN_PROOF="$(curl -fsk -X POST "$tls_url/identity/admin/reauth/proofs" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"action\":\"$1\",\"password\":\"$admin_initial_password\"}" \
     | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0, "utf8")).proof)')"
-  curl -fsk -X POST "$tls_url/creation/object-storage-connection" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"proof\":\"$proof\",\"provider\":\"oss\",\"region\":\"cn-hangzhou\",\"bucket\":\"nevix-e2e-private\",\"access_key_id\":\"nevix-e2e-access\",\"secret_access_key\":\"nevix-e2e-secret\"}" >/dev/null
+}
+
+# Registers the instance's single Object Storage Connection. The benchmark passes a
+# real Aliyun OSS bucket, so its display URLs are genuine presigned bucket URLs and
+# the production verifier's canary fails the run on a bad credential rather than
+# quietly degrading into a measurement of an error page.
+configure_object_storage_connection() {
+  local region="$1" bucket="$2" access_key_id="$3" secret_access_key="$4"
+  admin_token_and_proof object_storage_connection.create
+  # Not `-f`: the rejection body names which check failed — a bad credential, a
+  # bucket the canary cannot write, or a transport that did not prove HTTPS — and
+  # without it this step only reports curl's exit code.
+  local response status body
+  response="$(curl -sk -w $'\n%{http_code}' -X POST "https://$tls_host:$tls_port/creation/object-storage-connection" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"proof\":\"$ADMIN_PROOF\",\"provider\":\"oss\",\"region\":\"$region\",\"bucket\":\"$bucket\",\"access_key_id\":\"$access_key_id\",\"secret_access_key\":\"$secret_access_key\"}")" || {
+    echo "error: the object storage connection request could not reach https://$tls_host:$tls_port" >&2
+    return 1
+  }
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [[ "$status" != "200" && "$status" != "201" ]]; then
+    echo "error: Object Storage Connection rejected (HTTP $status): $body" >&2
+    return 1
+  fi
+}
+
+# Reads one key out of server/.env.local without sourcing it: sourcing would also
+# export that file's DATABASE_URL and displace this harness's throwaway database.
+read_local_env_value() {
+  local value
+  value="$(sed -n "s/^$1=//p" "$repo_root/server/.env.local" 2>/dev/null | tail -1)"
+  value="${value%\"}"
+  value="${value#\"}"
+  printf '%s' "$value"
+}
+
+# The benchmark registers the real bucket named in server/.env.local, so the wall's
+# display URLs are genuine presigned OSS URLs rather than a fake's.
+configure_benchmark_object_storage_connection() {
+  local region bucket access_key_id secret_access_key
+  region="$(read_local_env_value NEVIX_OSS_SMOKE_REGION)"
+  bucket="$(read_local_env_value NEVIX_OSS_SMOKE_BUCKET)"
+  access_key_id="$(read_local_env_value NEVIX_OSS_SMOKE_ACCESS_KEY_ID)"
+  secret_access_key="$(read_local_env_value NEVIX_OSS_SMOKE_SECRET_ACCESS_KEY)"
+  if [[ -z "$region" || -z "$bucket" || -z "$access_key_id" || -z "$secret_access_key" ]]; then
+    echo "error: benchmark mode needs NEVIX_OSS_SMOKE_{REGION,BUCKET,ACCESS_KEY_ID,SECRET_ACCESS_KEY} in server/.env.local" >&2
+    return 1
+  fi
+  echo "==> Registering the real Object Storage Connection (region $region, bucket $bucket)"
+  configure_object_storage_connection "$region" "$bucket" "$access_key_id" "$secret_access_key"
+  echo "==> Real Object Storage Connection registered (canary passed)"
 }
 
 # The TLS terminator fronts the identity server with a self-signed certificate
@@ -638,6 +692,7 @@ run_playwright() {
     NEVIX_TEST_TLS_FINGERPRINT_C="$(tls_fingerprint c)" \
     NEVIX_TEST_TLS_CA_CERT="$tls_ca_dir/ca-cert.pem" \
     NEVIX_E2E_RUN_ID="$e2e_run_id" \
+    NEVIX_BENCHMARK="${benchmark_flag:-}" \
     pnpm exec playwright test "$@"
 }
 
@@ -682,8 +737,11 @@ if [[ "$mode" != "settings" ]]; then
   echo "==> Fake Kapon generation route ready on $KAPON_E2E_BASE_URL (provider connection configured)"
 fi
 if [[ "$mode" == "image" || "$mode" == "video" || "$mode" == "smoke" ]]; then
-  configure_object_storage_connection
+  configure_object_storage_connection cn-hangzhou nevix-e2e-private nevix-e2e-access nevix-e2e-secret
   echo "==> Test-only Object Storage Connection configured"
+fi
+if [[ "$mode" == "benchmark" ]]; then
+  configure_benchmark_object_storage_connection
 fi
 
 pnpm exec electron-vite build --mode test
@@ -696,7 +754,7 @@ e2e_run_id="$(date +%s)-$$"
 # global-state assertion deterministic.
 playwright_args=(--workers=1)
 if [[ "$mode" == "full" ]]; then
-  playwright_args+=(--grep-invert '@image|@video|@storage')
+  playwright_args+=(--grep-invert '@image|@video|@storage|@benchmark')
 elif [[ "$mode" == "smoke" ]]; then
   playwright_args+=(--grep '@smoke')
 elif [[ "$mode" == "settings" ]]; then
@@ -709,6 +767,11 @@ elif [[ "$mode" == "image" ]]; then
   )
 elif [[ "$mode" == "video" ]]; then
   playwright_args+=(tests/creation/creation-video.spec.ts)
+elif [[ "$mode" == "benchmark" ]]; then
+  # The benchmark drives its own 60 route entries inside one spec, so it is the
+  # whole run rather than a grep over the suite.
+  benchmark_flag=1
+  playwright_args+=(tests/perf/media-wall-slo.spec.ts)
 fi
 if [[ "$failure_injection" == "after-renderer-launch" ]]; then
   echo "==> Arming a controlled identity server failure after renderer launch"
@@ -722,7 +785,7 @@ fi
 run_playwright "${playwright_args[@]}"
 
 if [[ "$mode" == "full" && -z "$failure_injection" ]]; then
-  configure_object_storage_connection
+  configure_object_storage_connection cn-hangzhou nevix-e2e-private nevix-e2e-access nevix-e2e-secret
   echo "==> Test-only Object Storage Connection configured"
   run_playwright tests/creation/asset-library.spec.ts tests/creation/creation-tracer.spec.ts tests/creation/creation-image.spec.ts tests/creation/creation-video.spec.ts --workers=1
 fi
