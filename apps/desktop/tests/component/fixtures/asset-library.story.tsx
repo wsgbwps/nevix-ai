@@ -188,7 +188,8 @@ function createHarness(
   append: 'succeed' | 'fail-once' | 'echo',
   displayMode: DisplayMode,
   dense: boolean,
-  unpublishableIds: readonly string[]
+  unpublishableIds: readonly string[],
+  referenceState: 'complete' | 'partial' | 'none'
 ): {
   readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
   readonly controls: AssetLibraryTestControls
@@ -296,6 +297,33 @@ function createHarness(
             canPublish: activePublication === null
           }
         }
+        const origin = detail.privateOrigin && {
+          ...detail.privateOrigin,
+          specification: {
+            ...detail.privateOrigin.specification,
+            references:
+              referenceState === 'none'
+                ? []
+                : referenceState === 'partial'
+                  ? [
+                      detail.privateOrigin.specification.references[0],
+                      {
+                        materialId: 'missing-material',
+                        role: 'first_frame' as const,
+                        kind: 'video' as const,
+                        claimsVersion: 2
+                      },
+                      detail.privateOrigin.specification.references[0]
+                    ]
+                  : detail.privateOrigin.specification.references
+          },
+          references:
+            referenceState === 'none'
+              ? []
+              : referenceState === 'partial'
+                ? [detail.privateOrigin.references[0], detail.privateOrigin.references[0]]
+                : detail.privateOrigin.references
+        }
         return {
           outcome: 'succeeded',
           value:
@@ -318,11 +346,11 @@ function createHarness(
                 ? {
                     ...detail,
                     asset: selected,
-                    privateOrigin: detail.privateOrigin
+                    privateOrigin: origin
                       ? {
-                          ...detail.privateOrigin,
+                          ...origin,
                           specification: {
-                            ...detail.privateOrigin.specification,
+                            ...origin.specification,
                             mediaType: 'video',
                             quantity: 2,
                             durationSeconds: 5
@@ -330,7 +358,7 @@ function createHarness(
                         }
                       : null
                   }
-                : { ...detail, asset: selected }
+                : { ...detail, asset: selected, privateOrigin: origin }
         }
       },
       loadAssetDisplay: async (id, purpose) => {
@@ -469,7 +497,8 @@ export function AssetLibraryStory({
   append = 'succeed',
   displayMode = 'immediate',
   dense = false,
-  unpublishableIds = NO_IDS
+  unpublishableIds = NO_IDS,
+  referenceState = 'complete'
 }: {
   readonly downloadMode?: 'immediate' | 'deferred' | 'sequenced' | 'cancelled' | 'failed'
   readonly visibility?: 'private' | 'public'
@@ -481,6 +510,7 @@ export function AssetLibraryStory({
   readonly displayMode?: DisplayMode
   readonly dense?: boolean
   readonly unpublishableIds?: readonly string[]
+  readonly referenceState?: 'complete' | 'partial' | 'none'
 }): React.JSX.Element {
   const harness = useMemo(
     () =>
@@ -494,7 +524,8 @@ export function AssetLibraryStory({
         append,
         displayMode,
         dense,
-        unpublishableIds
+        unpublishableIds,
+        referenceState
       ),
     [
       append,
@@ -503,6 +534,7 @@ export function AssetLibraryStory({
       downloadMode,
       paginated,
       replacementRequired,
+      referenceState,
       unpublishableIds,
       staleOnReuse,
       storageFailure,

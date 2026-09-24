@@ -441,7 +441,7 @@ test('detail switches siblings and exposes the full publish confirmation facts',
   await expect(page.getByRole('button', { name: 'Publish to Inspiration' })).toBeEnabled()
   await expect(page.getByRole('dialog')).toContainText('Specification version1')
   await expect(page.getByRole('dialog')).toContainText('Capability manifest version4')
-  await expect(page.getByRole('dialog')).toContainText('reference.png · reference · image')
+  await expect(page.getByRole('dialog')).toContainText('reference.png · Reference · Image')
   await page.getByRole('button', { name: 'Result 2' }).click()
   await expect(page.getByRole('dialog')).toContainText('asset-two')
   await expect(page.getByRole('dialog')).toContainText('Output duration3 s')
@@ -451,6 +451,36 @@ test('detail switches siblings and exposes the full publish confirmation facts',
   const reused = await page.evaluate(() => window.__assetLibraryTest?.reused() ?? [])
   expect(reused).toHaveLength(1)
   expect(reused[0]?.references).toHaveLength(1)
+})
+
+test('Asset Library keeps duplicate frozen positions around an unavailable historical reference', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory referenceState="partial" />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  const dialog = page.getByRole('dialog')
+  const references = dialog.getByRole('listitem')
+  await expect(dialog).toContainText('Used reference materials (3)')
+  await expect(references).toHaveCount(3)
+  await expect(references.nth(0)).toContainText('1. reference.png')
+  await expect(references.nth(1)).toContainText('2. Historical reference material unavailable')
+  await expect(references.nth(1)).toContainText('First frame')
+  await expect(references.nth(1)).toContainText('Video')
+  await expect(references.nth(1)).not.toContainText('missing-material')
+  await expect(references.nth(2)).toContainText('3. reference.png')
+  await page.evaluate(() => window.__assetLibraryTest?.setLanguage('zh-CN'))
+  await expect(references.nth(1)).toContainText('历史参考素材不可用')
+  await page.evaluate(() => window.__assetLibraryTest?.setLanguage('en'))
+})
+
+test('Asset Library reserves the no-references copy for an empty frozen specification', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory referenceState="none" />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await expect(page.getByRole('dialog')).toContainText('No reference materials were used')
 })
 
 test('selecting the current sibling keeps its loaded detail visible', async ({ mount, page }) => {

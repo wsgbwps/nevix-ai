@@ -112,7 +112,7 @@ const specification = {
   durationSeconds: null,
   references: [
     {
-      materialId: 'clone-material',
+      materialId: 'reference-one',
       role: 'reference' as const,
       kind: 'image' as const,
       claimsVersion: 1
@@ -137,6 +137,7 @@ const reference = {
 type DisplayMode = 'immediate' | 'deferred' | 'always-fail' | 'fail-once' | 'gone'
 
 interface InspirationControls {
+  setLanguage(language: 'en' | 'zh-CN'): Promise<void>
   listCalls(): readonly InspirationPageRequest[]
   displayCalls(): readonly { readonly id: string; readonly purpose: string }[]
   contentCalls(): readonly string[]
@@ -154,6 +155,8 @@ interface InspirationControls {
 type InspirationStoryState =
   | 'member'
   | 'admin'
+  | 'admin-partial'
+  | 'admin-no-references'
   | 'empty'
   | 'failed'
   | 'dense'
@@ -227,7 +230,11 @@ function createHarness(
                 }
               }
             ]
-          : state === 'admin' || state === 'admin-safety-delayed' || state === 'admin-safety-failed'
+          : state === 'admin' ||
+              state === 'admin-partial' ||
+              state === 'admin-no-references' ||
+              state === 'admin-safety-delayed' ||
+              state === 'admin-safety-failed'
             ? [publicationItem, adminAsset]
             : state === 'empty'
               ? []
@@ -281,8 +288,45 @@ function createHarness(
                     canRelease: !assetReleased
                   }
                 },
-                specification,
-                references: [reference],
+                specification:
+                  state === 'admin-no-references'
+                    ? { ...specification, references: [] }
+                    : state === 'admin-partial'
+                      ? {
+                          ...specification,
+                          references: [
+                            specification.references[0],
+                            {
+                              materialId: 'missing-reference',
+                              role: 'first_frame',
+                              kind: 'video',
+                              claimsVersion: 2
+                            },
+                            {
+                              materialId: 'reference-three',
+                              role: 'last_frame',
+                              kind: 'image',
+                              claimsVersion: 1
+                            },
+                            specification.references[0]
+                          ]
+                        }
+                      : specification,
+                references:
+                  state === 'admin-no-references'
+                    ? []
+                    : state === 'admin-partial'
+                      ? [
+                          reference,
+                          {
+                            ...reference,
+                            id: 'reference-three',
+                            fileName: 'third-reference.png',
+                            role: 'last_frame' as const
+                          },
+                          reference
+                        ]
+                      : [reference],
                 publication: {
                   ...publication(2),
                   id: 'admin-publication',
@@ -446,6 +490,7 @@ function createHarness(
       resetDisplayAttempts: () => displayAttempts.clear(),
       similarCalls: () => similarCalls,
       recordSimilar: (publicationId) => similarCalls.push(publicationId),
+      setLanguage: (language) => testI18n.changeLanguage(language),
       withdraws: () => withdraws,
       previewCalls: () => previewCalls,
       safetyCalls: () => safetyCalls,

@@ -107,6 +107,20 @@ export interface AssetReferenceSummary {
   readonly claimsVersion: number
 }
 
+/** Match the confirmed subsequence to frozen positions without collapsing repeated IDs. */
+export function alignAssetReferences(
+  specification: AssetGenerationSpecification,
+  confirmed: readonly AssetReferenceSummary[]
+): readonly (AssetReferenceSummary | null)[] {
+  let next = 0
+  return specification.references.map((frozen) => {
+    const reference = confirmed[next]
+    if (reference?.id !== frozen.materialId) return null
+    next += 1
+    return reference
+  })
+}
+
 export interface AssetPrivateOrigin {
   readonly sessionId: string
   readonly sessionName: string | null
