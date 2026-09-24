@@ -4346,10 +4346,23 @@ components:
         tasks:
           type: array
           items:
-            $ref: "#/components/schemas/GenerationTask"
+            $ref: "#/components/schemas/GenerationTaskListItem"
         next_cursor:
           type: string
           nullable: true
+    GenerationTaskListItem:
+      allOf:
+        - $ref: "#/components/schemas/GenerationTask"
+        - type: object
+          required: [reference_availability]
+          properties:
+            reference_availability:
+              type: array
+              description: |
+                按冻结 snapshot.references 的位置逐项对应；只有素材记录与该任务的历史保留关系都存在时为 true。
+                空引用返回空数组。此投影不证明对象字节可读，不属于冻结规格或任务详情，重读列表时可独立于 updated_at 变化。
+              items:
+                type: boolean
     TaskDeletionResult:
       type: object
       required: [removed_slot_indexes, skipped]

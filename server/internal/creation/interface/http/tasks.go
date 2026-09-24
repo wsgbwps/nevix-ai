@@ -123,16 +123,21 @@ func (h *GenerationTaskHandler) ListSessionTasks(w http.ResponseWriter, r *http.
 		fail(w, r, err)
 		return
 	}
-	items := make([]generationTaskResource, 0, len(page))
+	items := make([]generationTaskListResource, 0, len(page))
 	for _, task := range page {
-		items = append(items, toTaskResource(task))
+		items = append(items, generationTaskListResource{generationTaskResource: toTaskResource(task), ReferenceAvailability: task.ReferenceAvailability})
 	}
 	encodeJSON(w, http.StatusOK, listTasksResponse{Tasks: items, NextCursor: cursorToken(next)})
 }
 
 type listTasksResponse struct {
-	Tasks      []generationTaskResource `json:"tasks"`
-	NextCursor *string                  `json:"next_cursor"`
+	Tasks      []generationTaskListResource `json:"tasks"`
+	NextCursor *string                      `json:"next_cursor"`
+}
+
+type generationTaskListResource struct {
+	generationTaskResource
+	ReferenceAvailability []bool `json:"reference_availability"`
 }
 
 // GetTask answers GET /creation/tasks/{taskID}.

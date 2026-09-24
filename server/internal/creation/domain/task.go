@@ -410,15 +410,18 @@ type GenerationTask struct {
 	// Media mirrors the row's media_type so summary projections (which do
 	// not decode the frozen specification) still carry it; Spec.MediaType is
 	// the authoritative freeze.
-	Media           MediaType
-	Spec            GenerationSpecification
-	Status          TaskStatus
-	SlotCount       int
-	TerminalCause   *TerminalCause
-	CancelRequested bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	TerminalAt      *time.Time
+	Media MediaType
+	Spec  GenerationSpecification
+	// ReferenceAvailability is a list-only read projection, ordered by Spec.References.
+	// It is not part of the frozen specification or task detail.
+	ReferenceAvailability []bool
+	Status                TaskStatus
+	SlotCount             int
+	TerminalCause         *TerminalCause
+	CancelRequested       bool
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	TerminalAt            *time.Time
 }
 
 // GenerationSlot is one stable, ordered, non-reusable result position. The

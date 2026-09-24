@@ -107,6 +107,8 @@ export interface GenerationTaskView {
   readonly updatedAt: string
   readonly terminalAt: string | null
   readonly snapshot: GenerationSpecificationView | null
+  /** List-only historical integrity, aligned with frozen reference positions. */
+  readonly referenceAvailability?: readonly boolean[]
 }
 
 /** One reference inside the task's frozen specification: the material's
@@ -461,7 +463,14 @@ function parseTaskPage(payload: unknown): TaskPage | null {
   for (const entry of payload['tasks']) {
     const task = parseTask(entry)
     if (task === null) return null
-    tasks.push(task)
+    const availability = isRecord(entry) ? entry['reference_availability'] : undefined
+    if (
+      !Array.isArray(availability) ||
+      !availability.every((value) => typeof value === 'boolean') ||
+      (task.snapshot !== null && availability.length !== task.snapshot.references.length)
+    )
+      return null
+    tasks.push({ ...task, referenceAvailability: availability })
   }
   const nextCursor = payload['next_cursor']
   return { tasks, nextCursor: typeof nextCursor === 'string' ? nextCursor : null }

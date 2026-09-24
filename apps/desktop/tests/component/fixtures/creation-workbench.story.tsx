@@ -904,6 +904,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
             mediaType: task.mediaType,
             slotCount: task.slotCount,
             snapshot: task.snapshot ?? null,
+            referenceAvailability: task.referenceAvailability,
             cancelRequested: task.cancelRequested,
             terminalCause: task.terminalCause,
             createdAt: task.createdAt,
