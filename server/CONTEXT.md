@@ -16,6 +16,10 @@ _Avoid_: Video Generation Module, Image Generation Module, Provider Module, vide
 归当前 User 所有、供 Generation Specification 引用的 creator-private 媒体记录；它可由 Creator 上传并确认权利，也可从有效 Team Publication 创建而不复制已验证的不可变媒体对象。从 Composer 移除会停止列表与新任务准入；只有在其他 User 记录、Generation Task 或有效 Team Publication 都不再保留同一对象后才进入清理。它与 Provider 传输产生的临时副本彼此独立。
 _Avoid_: Permanent Object, Provider Asset, Upload
 
+**Unavailable Historical Reference（历史参考素材不可用）**:
+Generation Specification 的某项冻结引用仍在，但对应 Reference Material 记录或 Generation Task 的历史保留关系无法确认时，该引用在历史视图中的状态；它不改变冻结意图，也不限制 User 凭独立权限读取仍有效的素材。
+_Avoid_: 未使用参考素材, 已删除参考素材
+
 **Reference Material Upload（参考素材上传）**:
 Creator 为一个 Creation Session 发起、在到期前绑定单一对象身份与权利声明的短期上传授权；只有成功 finalize 才产生 Reference Material，未完成的上传不是业务素材。
 _Avoid_: Uploading Reference Material, Storage Grant, Temporary Reference Material
