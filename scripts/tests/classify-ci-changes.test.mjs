@@ -110,17 +110,51 @@ test("native-sensitive Desktop paths add macOS Native Smoke", () => {
   );
 });
 
-test("Desktop documentation and local artifacts stay out of Native Smoke", () => {
+test("Desktop and Server documentation skip product CI", () => {
   assert.deepEqual(
     selected([
       "apps/desktop/README.md",
       "apps/desktop/CONTEXT.md",
       "apps/desktop/AGENTS.md",
       "apps/desktop/docs/adr/0004-renderer-routing-topology.md",
-      "apps/desktop/test-results/.last-run.json",
+      "server/CONTEXT.md",
+      "server/AGENTS.md",
+      "server/docs/adr/example.md",
     ]),
-    { desktop: true },
+    {},
   );
+});
+
+test("mixed documentation changes run only checks required by code paths", () => {
+  assert.deepEqual(
+    selected([
+      "apps/desktop/CONTEXT.md",
+      "server/CONTEXT.md",
+      "docs/adr/0023-unavailable-historical-creation-references.md",
+    ]),
+    { harness: true },
+  );
+  assert.deepEqual(
+    selected([
+      "apps/desktop/README.md",
+      "server/CONTEXT.md",
+      "server/internal/event/bus.go",
+    ]),
+    { server: true },
+  );
+  assert.deepEqual(
+    selected([
+      "apps/desktop/CONTEXT.md",
+      "apps/desktop/src/renderer/src/app/pages/settings.tsx",
+    ]),
+    { desktop: true, windows_native: true },
+  );
+});
+
+test("Desktop local artifacts stay out of Native Smoke", () => {
+  assert.deepEqual(selected(["apps/desktop/test-results/.last-run.json"]), {
+    desktop: true,
+  });
 });
 
 test("Desktop unit and component tests run only inside Desktop CI", () => {

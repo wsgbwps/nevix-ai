@@ -64,6 +64,15 @@ export function classifyPaths(paths) {
   const unknownPaths = [];
 
   for (const path of [...new Set(paths)].sort()) {
+    if (
+      path.endsWith(".md") &&
+      (/^(apps\/desktop|server)\/[^/]+$/.test(path) ||
+        startsWith(path, "apps/desktop/docs") ||
+        startsWith(path, "server/docs"))
+    ) {
+      continue;
+    }
+
     const checks = new Set();
 
     if (startsWith(path, "apps/desktop")) {
