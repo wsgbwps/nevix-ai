@@ -41,7 +41,7 @@ export function AssetDetailDialog({
   readonly status: AssetDetailStatus
   readonly downloadStatus: AssetDownloadStatus
   readonly reuseFailed: boolean
-  readonly publicationStatus: 'idle' | 'running' | 'failed'
+  readonly publicationStatus: 'idle' | 'running' | 'failed' | 'reference-unavailable'
   readonly ports: AssetLibraryPorts
   readonly onClose: () => void
   readonly onOpenSibling: (assetId: string) => void
@@ -57,6 +57,7 @@ export function AssetDetailDialog({
   const alignedReferences = detail?.privateOrigin
     ? alignAssetReferences(detail.privateOrigin.specification, detail.privateOrigin.references)
     : []
+  const hasUnavailableReferences = alignedReferences.some((reference) => reference === null)
   return (
     <Dialog open={assetId !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="h-[calc(100svh-2rem)] max-h-[52rem] overflow-hidden p-0 sm:max-w-[min(76rem,calc(100%-2rem))]">
@@ -235,7 +236,7 @@ export function AssetDetailDialog({
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={publicationStatus === 'running'}
+                    disabled={publicationStatus === 'running' || hasUnavailableReferences}
                     onClick={onPublish}
                   >
                     {t(publicationStatus === 'running' ? 'assets.publishing' : 'assets.publish')}
@@ -264,6 +265,15 @@ export function AssetDetailDialog({
                 {publicationStatus === 'failed' ? (
                   <p className="text-destructive basis-full text-xs" role="alert">
                     {t('assets.publishFailed')}
+                  </p>
+                ) : null}
+                {detail.asset.capabilities.canPublish && hasUnavailableReferences ? (
+                  <p className="text-destructive basis-full text-xs" role="alert">
+                    {t('assets.publishUnavailableReferences')}
+                  </p>
+                ) : publicationStatus === 'reference-unavailable' ? (
+                  <p className="text-destructive basis-full text-xs" role="alert">
+                    {t('assets.publishReferenceUnavailable')}
                   </p>
                 ) : null}
               </DialogFooter>

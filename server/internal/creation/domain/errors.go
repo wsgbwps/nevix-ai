@@ -126,6 +126,10 @@ var (
 // Asset targets without exposing which predicate failed.
 var ErrAssetNotFound = errors.New("media asset not found")
 
+// ErrAssetReferenceUnavailable blocks first publication when a frozen task
+// reference no longer has both its material record and task retention.
+var ErrAssetReferenceUnavailable = errors.New("asset historical reference unavailable")
+
 // ErrPublicationNotFound covers absent, withdrawn, restricted, source-
 // restricted, and unauthorized Team Publication targets.
 var ErrPublicationNotFound = errors.New("team publication not found")

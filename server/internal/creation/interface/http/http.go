@@ -53,13 +53,14 @@ const (
 	CodeUploadSizeMismatch  = "material_upload_size_mismatch"
 	CodeUploadMetaMismatch  = "material_upload_metadata_mismatch"
 
-	CodeIdempotencyConflict = "idempotency_payload_conflict"
-	CodeIntentNotReady      = "intent_not_ready"
-	CodeCapabilityStale     = "capability_stale"
-	CodeMediaUnavailable    = "media_unavailable"
-	CodeTaskNotTerminal     = "task_not_terminal"
-	CodeNoIncompleteSlots   = "no_incomplete_slots"
-	CodeTaskRetryNotAllowed = "task_retry_not_allowed"
+	CodeIdempotencyConflict       = "idempotency_payload_conflict"
+	CodeAssetReferenceUnavailable = "asset_reference_unavailable"
+	CodeIntentNotReady            = "intent_not_ready"
+	CodeCapabilityStale           = "capability_stale"
+	CodeMediaUnavailable          = "media_unavailable"
+	CodeTaskNotTerminal           = "task_not_terminal"
+	CodeNoIncompleteSlots         = "no_incomplete_slots"
+	CodeTaskRetryNotAllowed       = "task_retry_not_allowed"
 
 	CodeNotConfigured                   = "provider_connection_not_configured"
 	CodeConnectionExists                = "provider_connection_exists"
@@ -134,6 +135,8 @@ func MapError(err error) *Error {
 		return &Error{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Message: "The reference material upload request is invalid."}
 	case isError(err, domain.ErrIdempotencyPayloadConflict):
 		return &Error{Status: http.StatusConflict, Code: CodeIdempotencyConflict, Message: "This idempotency key was already used with a different payload."}
+	case isError(err, domain.ErrAssetReferenceUnavailable):
+		return &Error{Status: http.StatusConflict, Code: CodeAssetReferenceUnavailable, Message: "The asset's historical reference material is incomplete and cannot be published."}
 	case isError(err, domain.ErrReferenceMaterialUploadExpired):
 		return &Error{Status: http.StatusConflict, Code: CodeUploadExpired, Message: "The reference material upload has expired; create a new upload with a new idempotency key."}
 	case isError(err, domain.ErrReferenceMaterialUploadVerifying):

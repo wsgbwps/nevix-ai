@@ -108,7 +108,7 @@ func (r *TeamPublicationRepository) Publish(ctx context.Context, tx domain.TxExe
 			&material.CreatedAt,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.TeamPublication{}, false, domain.ErrAssetNotFound
+			return domain.TeamPublication{}, false, domain.ErrAssetReferenceUnavailable
 		}
 		if err != nil {
 			return domain.TeamPublication{}, false, fmt.Errorf("creation: load publication reference: %w", err)

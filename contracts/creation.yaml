@@ -1628,6 +1628,7 @@ paths:
     post:
       operationId: publishAsset
       summary: 把自己的成功 Asset 发布为 Team Publication
+      description: 首次发布须在写事务中确认全部冻结引用的素材记录与该任务保留关系；缺项不创建 Publication 或部分快照。
       security:
         - bearerAuth: []
       parameters:
@@ -1650,7 +1651,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          $ref: "#/components/responses/PublicationConflict"
         "500":
           $ref: "#/components/responses/InternalError"
   /creation/inspiration:
@@ -2328,6 +2329,17 @@ components:
                 properties:
                   error:
                     enum: [idempotency_payload_conflict]
+    PublicationConflict:
+      description: 幂等键冲突，或已授权且存在的 Asset 有不可用的历史参考素材，无法形成完整发布快照。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum: [idempotency_payload_conflict, asset_reference_unavailable]
     PublicationResponse:
       description: Team Publication 事实。
       content:

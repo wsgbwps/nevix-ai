@@ -130,6 +130,12 @@ export function AssetLibraryPage({
             done: status.current,
             total: status.total
           })
+  const batchFailureReason =
+    status.kind === 'failed' &&
+    status.action === 'publish' &&
+    status.code === 'asset_reference_unavailable'
+      ? t('assets.publishReferenceUnavailable')
+      : null
   const selectionSize = selection.selection.size
   const selectionStatus = batchProgress ?? t('assets.selection.count', { count: selectionSize })
   // One control either way: leaving the mode, or ending the run that holds it.
@@ -237,6 +243,12 @@ export function AssetLibraryPage({
           </div>
         )}
       </div>
+
+      {batchFailureReason ? (
+        <p className="text-destructive px-page text-sm" role="alert">
+          {batchFailureReason}
+        </p>
+      ) : null}
 
       <div ref={scrollRef} className="px-page min-h-0 flex-1 overflow-auto py-5">
         {list.status === 'loading' ? (
