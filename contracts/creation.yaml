@@ -1468,6 +1468,10 @@ paths:
     get:
       operationId: getAsset
       summary: 读取当前用户自己的 Media Asset
+      description: |-
+        已授权且未删除的成品保留完整冻结 Generation Specification。
+        private_origin.references 只包含同时存在素材记录与该 Task 保留关系的实际引用，
+        按冻结位置形成有序子序列；同一素材 ID 可在多个位置重复出现。
       security:
         - bearerAuth: []
       parameters:
@@ -1701,6 +1705,10 @@ paths:
     get:
       operationId: getInspirationAsset
       summary: Admin 精确查看一个未删除成功 Asset
+      description: |-
+        Admin 治理读取包含受限成品。缺失素材记录或该 Task 保留关系只省略对应实际引用；
+        specification 保留完整冻结顺序，references 为经双重确认的有序子序列，
+        同一素材 ID 可重复出现。缺失项不返回文件元数据或预览授权。
       security:
         - bearerAuth: []
       parameters:
@@ -3833,6 +3841,9 @@ components:
           $ref: "#/components/schemas/GenerationSpecification"
         references:
           type: array
+          description: |-
+            按冻结 specification.references 顺序返回经素材记录与 Task 保留关系双重确认的引用；
+            缺失位置仅留在 specification 中，同一素材 ID 可重复出现。
           items:
             $ref: "#/components/schemas/PublicationReference"
     AssetPublicationSummary:
@@ -3979,6 +3990,9 @@ components:
           $ref: "#/components/schemas/GenerationSpecification"
         references:
           type: array
+          description: |-
+            按冻结 specification.references 顺序返回经素材记录与 Task 保留关系双重确认的引用；
+            缺失位置仅留在 specification 中，同一素材 ID 可重复出现。
           items:
             $ref: "#/components/schemas/PublicationReference"
         publication:

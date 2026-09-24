@@ -268,7 +268,7 @@ func TestPublicationProjectionAndFinalRetention(t *testing.T) {
 	}
 }
 
-func TestAdminAssetMediaResolutionDoesNotDependOnHistoricalReferences(t *testing.T) {
+func TestAdminAssetDetailAndMediaResolutionDoNotDependOnHistoricalReferences(t *testing.T) {
 	ownerURL, runtimeURL := requireIntegrationEnv(t)
 	ctx := context.Background()
 	if _, err := migration.Apply(ctx, ownerURL); err != nil {
@@ -284,8 +284,9 @@ func TestAdminAssetMediaResolutionDoesNotDependOnHistoricalReferences(t *testing
 	}
 
 	repo := NewTeamPublicationRepository(runtime)
-	if _, err := repo.GetAdminAsset(ctx, fixture.assetID); !errors.Is(err, domain.ErrAssetNotFound) {
-		t.Fatalf("fixture must reproduce broken detail history: %v", err)
+	detail, err := repo.GetAdminAsset(ctx, fixture.assetID)
+	if err != nil || detail.Asset.ID != fixture.assetID || len(detail.Specification.References) != 1 || len(detail.References) != 0 {
+		t.Fatalf("historical gap must preserve asset and specification: detail=%+v err=%v", detail, err)
 	}
 	service := application.NewPublicationService(repo, nil, nil, nil)
 	asset, err := service.ResolveAdminAsset(ctx, authz.Principal{UserID: fixture.creator.String(), Role: "admin"}, fixture.assetID)

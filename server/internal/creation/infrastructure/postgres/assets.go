@@ -241,7 +241,9 @@ func (r *MediaAssetRepository) GetPrivateOrigin(ctx context.Context, asset domai
 	references := make([]domain.ReferenceMaterial, 0, len(ids))
 	if len(ids) > 0 {
 		rows, queryErr := r.pool.Query(ctx, `SELECT `+materialColumns+`
-			FROM creation_reference_materials m WHERE m.id = ANY($1::uuid[])`, ids)
+			FROM creation_reference_materials m
+			JOIN creation_generation_task_references retained ON retained.material_id = m.id
+			WHERE retained.task_id = $1 AND m.id = ANY($2::uuid[])`, asset.TaskID, ids)
 		if queryErr != nil {
 			return nil, fmt.Errorf("creation: list asset origin references: %w", queryErr)
 		}

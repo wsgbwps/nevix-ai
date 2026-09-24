@@ -468,6 +468,43 @@ test('immersive detail shows full intent and uses a Publication for create simil
   ])
 })
 
+test('admin detail preserves frozen positions and isolates an unavailable historical reference', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="admin-partial" />)
+  await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
+  const dialog = page.getByRole('dialog')
+  const references = dialog.getByRole('listitem')
+  await expect(dialog).toContainText('Used reference materials (4)')
+  await expect(references).toHaveCount(4)
+  await expect(references.nth(0)).toContainText('1. product-reference.png')
+  await expect(references.nth(1)).toContainText('2. Historical reference material unavailable')
+  await expect(references.nth(1)).toContainText('First frame')
+  await expect(references.nth(1)).toContainText('Video')
+  await expect(references.nth(1).getByRole('button', { name: 'Preview' })).toHaveCount(0)
+  await expect(references.nth(2)).toContainText('3. third-reference.png')
+  await expect(references.nth(3)).toContainText('4. product-reference.png')
+  await references.nth(2).getByRole('button', { name: 'Preview' }).click()
+  await expect(references.nth(2).getByRole('img', { name: 'third-reference.png' })).toBeVisible()
+  expect(await page.evaluate(() => window.__inspirationTest?.previewCalls())).toEqual([
+    'reference-three'
+  ])
+  await page.evaluate(() => window.__inspirationTest?.setLanguage('zh-CN'))
+  await expect(references.nth(1)).toContainText('历史参考素材不可用')
+  await expect(references.nth(1)).not.toContainText('missing-reference')
+  await page.evaluate(() => window.__inspirationTest?.setLanguage('en'))
+})
+
+test('admin detail says no references only for an empty frozen specification', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="admin-no-references" />)
+  await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
+  await expect(page.getByRole('dialog')).toContainText('No reference materials were used')
+})
+
 test('an expired signed reference preview is authorized once more on element error', async ({
   mount,
   page

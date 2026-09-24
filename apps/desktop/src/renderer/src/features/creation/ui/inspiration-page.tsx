@@ -16,7 +16,11 @@ import type {
   InspirationPorts,
   PublicationView
 } from '../api/inspiration-http'
-import type { MediaAssetView, RestrictionState } from '../api/asset-library-http'
+import {
+  alignAssetReferences,
+  type MediaAssetView,
+  type RestrictionState
+} from '../api/asset-library-http'
 import { useInspiration, type InspirationFilters } from '../model/use-inspiration'
 import { AssetMedia, type MediaPreviewView } from './asset-media'
 import { LoadMoreSentinel } from './load-more-sentinel'
@@ -298,6 +302,7 @@ function DetailFacts({
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const specification = detail.specification
+  const alignedReferences = alignAssetReferences(specification, detail.references)
   const [previews, setPreviews] = useState<ReadonlyMap<string, string>>(new Map())
   const refreshedPreviews = useRef(new Set<string>())
   const [previewFailed, setPreviewFailed] = useState<string | null>(null)
@@ -360,72 +365,83 @@ function DetailFacts({
         </dl>
       </section>
       <section className="space-y-2 border-t pt-4">
-        <h3 className="font-medium">{t('inspiration.references')}</h3>
-        {detail.references.length === 0 ? (
+        <h3 className="font-medium">
+          {t('inspiration.references')} ({specification.references.length})
+        </h3>
+        {specification.references.length === 0 ? (
           <p className="text-muted-foreground">{t('inspiration.noReferences')}</p>
         ) : (
           <ol className="space-y-2">
-            {detail.references.map((reference, index) => (
-              <li key={reference.id} className="rounded-md border p-2">
-                <p className="truncate font-medium">
-                  {index + 1}. {reference.fileName}
-                </p>
-                <p className="text-muted-foreground">
-                  {t(
-                    `gallery.role.${reference.role === 'first_frame' ? 'firstFrame' : reference.role === 'last_frame' ? 'lastFrame' : reference.role}`
-                  )}
-                  {' · '}
-                  {reference.kind} ·{' '}
-                  {t('inspiration.claimsVersion', { version: reference.claimsVersion })}
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="mt-1"
-                  onClick={() => {
-                    refreshedPreviews.current.delete(reference.id)
-                    authorizePreview(reference.id)
-                  }}
-                >
-                  {t('inspiration.previewReference')}
-                </Button>
-                {previews.get(reference.id) ? (
-                  reference.kind === 'image' ? (
-                    <img
-                      src={previews.get(reference.id)}
-                      alt={reference.fileName}
-                      className="mt-2 max-h-40 w-full rounded object-contain"
-                      onError={() => refreshPreview(reference.id)}
-                      onLoad={() => refreshedPreviews.current.delete(reference.id)}
-                    />
-                  ) : reference.kind === 'video' ? (
-                    <video
-                      src={previews.get(reference.id)}
-                      aria-label={reference.fileName}
-                      controls
-                      className="mt-2 max-h-40 w-full"
-                      onError={() => refreshPreview(reference.id)}
-                      onLoadedData={() => refreshedPreviews.current.delete(reference.id)}
-                    />
-                  ) : (
-                    <audio
-                      src={previews.get(reference.id)}
-                      aria-label={reference.fileName}
-                      controls
-                      className="mt-2 w-full"
-                      onError={() => refreshPreview(reference.id)}
-                      onLoadedData={() => refreshedPreviews.current.delete(reference.id)}
-                    />
-                  )
-                ) : null}
-                {previewFailed === reference.id ? (
-                  <p className="text-destructive mt-1" role="alert">
-                    {t('inspiration.previewFailed')}
+            {specification.references.map((frozen, index) => {
+              const reference = alignedReferences[index]
+              return (
+                <li key={`${index}:${frozen.materialId}`} className="rounded-md border p-2">
+                  <p className="truncate font-medium">
+                    {index + 1}. {reference?.fileName ?? t('inspiration.unavailableReference')}
                   </p>
-                ) : null}
-              </li>
-            ))}
+                  <p className="text-muted-foreground">
+                    {t(
+                      `gallery.role.${frozen.role === 'first_frame' ? 'firstFrame' : frozen.role === 'last_frame' ? 'lastFrame' : frozen.role}`
+                    )}
+                    {' · '}
+                    {t(`composer.mention.kind.${frozen.kind}`)}
+                    {reference ? (
+                      <> · {t('inspiration.claimsVersion', { version: frozen.claimsVersion })}</>
+                    ) : null}
+                  </p>
+                  {reference ? (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="mt-1"
+                        onClick={() => {
+                          refreshedPreviews.current.delete(reference.id)
+                          authorizePreview(reference.id)
+                        }}
+                      >
+                        {t('inspiration.previewReference')}
+                      </Button>
+                      {previews.get(reference.id) ? (
+                        reference.kind === 'image' ? (
+                          <img
+                            src={previews.get(reference.id)}
+                            alt={reference.fileName}
+                            className="mt-2 max-h-40 w-full rounded object-contain"
+                            onError={() => refreshPreview(reference.id)}
+                            onLoad={() => refreshedPreviews.current.delete(reference.id)}
+                          />
+                        ) : reference.kind === 'video' ? (
+                          <video
+                            src={previews.get(reference.id)}
+                            aria-label={reference.fileName}
+                            controls
+                            className="mt-2 max-h-40 w-full"
+                            onError={() => refreshPreview(reference.id)}
+                            onLoadedData={() => refreshedPreviews.current.delete(reference.id)}
+                          />
+                        ) : (
+                          <audio
+                            src={previews.get(reference.id)}
+                            aria-label={reference.fileName}
+                            controls
+                            className="mt-2 w-full"
+                            onError={() => refreshPreview(reference.id)}
+                            onLoadedData={() => refreshedPreviews.current.delete(reference.id)}
+                          />
+                        )
+                      ) : null}
+                      {previewFailed === reference.id ? (
+                        <p className="text-destructive mt-1" role="alert">
+                          {t('inspiration.previewFailed')}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : null}
+                </li>
+              )
+            })}
           </ol>
         )}
       </section>

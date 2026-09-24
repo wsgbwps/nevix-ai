@@ -477,7 +477,7 @@ func (r *TeamPublicationRepository) listAdminAssetReferences(ctx context.Context
 			&reference.PixelCount, &reference.DurationMS, &reference.ClaimsVersion,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, domain.ErrAssetNotFound
+			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("creation: load admin asset reference: %w", err)

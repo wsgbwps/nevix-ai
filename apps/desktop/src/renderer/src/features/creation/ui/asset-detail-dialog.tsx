@@ -9,7 +9,12 @@ import {
   DialogHeader,
   DialogTitle
 } from '../../../components/ui/dialog'
-import type { AssetDetailView, AssetLibraryPorts, MediaAssetView } from '../api/asset-library-http'
+import {
+  alignAssetReferences,
+  type AssetDetailView,
+  type AssetLibraryPorts,
+  type MediaAssetView
+} from '../api/asset-library-http'
 import { modeLabelKey } from '../i18n/mode-keys'
 import type { AssetDetailStatus, AssetDownloadStatus } from '../model/use-asset-detail'
 import { AssetMedia } from './asset-media'
@@ -49,6 +54,9 @@ export function AssetDetailDialog({
   readonly onAssetUnavailable: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
+  const alignedReferences = detail?.privateOrigin
+    ? alignAssetReferences(detail.privateOrigin.specification, detail.privateOrigin.references)
+    : []
   return (
     <Dialog open={assetId !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="h-[calc(100svh-2rem)] max-h-[52rem] overflow-hidden p-0 sm:max-w-[min(76rem,calc(100%-2rem))]">
@@ -158,20 +166,36 @@ export function AssetDetailDialog({
                       </dd>
                     </dl>
                     <div className="space-y-2 border-t pt-3">
-                      <h4 className="font-medium">{t('inspiration.references')}</h4>
-                      {detail.privateOrigin.references.length === 0 ? (
+                      <h4 className="font-medium">
+                        {t('inspiration.references')} (
+                        {detail.privateOrigin.specification.references.length})
+                      </h4>
+                      {detail.privateOrigin.specification.references.length === 0 ? (
                         <p className="text-muted-foreground">{t('inspiration.noReferences')}</p>
                       ) : (
                         <ol className="space-y-1">
-                          {detail.privateOrigin.references.map((reference, index) => (
-                            <li key={reference.id} className="truncate">
-                              {index + 1}. {reference.fileName} · {reference.role} ·{' '}
-                              {reference.kind} ·{' '}
-                              {t('inspiration.claimsVersion', {
-                                version: reference.claimsVersion
-                              })}
-                            </li>
-                          ))}
+                          {detail.privateOrigin.specification.references.map((frozen, index) => {
+                            const reference = alignedReferences[index]
+                            return (
+                              <li key={`${index}:${frozen.materialId}`} className="truncate">
+                                {index + 1}.{' '}
+                                {reference?.fileName ?? t('inspiration.unavailableReference')} ·{' '}
+                                {t(
+                                  `gallery.role.${frozen.role === 'first_frame' ? 'firstFrame' : frozen.role === 'last_frame' ? 'lastFrame' : frozen.role}`
+                                )}{' '}
+                                · {t(`composer.mention.kind.${frozen.kind}`)}
+                                {reference ? (
+                                  <>
+                                    {' '}
+                                    ·{' '}
+                                    {t('inspiration.claimsVersion', {
+                                      version: frozen.claimsVersion
+                                    })}
+                                  </>
+                                ) : null}
+                              </li>
+                            )
+                          })}
                         </ol>
                       )}
                     </div>
