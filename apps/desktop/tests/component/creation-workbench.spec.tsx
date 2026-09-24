@@ -1862,6 +1862,133 @@ test('a task card fans its frozen reference materials', async ({ mount, page }) 
   await expect(pile.locator('img')).toHaveCount(2)
 })
 
+test('a missing historical task reference keeps its frozen card without requesting a thumbnail', async ({
+  mount,
+  page
+}) => {
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000hist',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: {
+      prompt: 'historical reference',
+      model: 'doubao-seedream-5.0-pro',
+      mode: 'reference-image',
+      ratio: '1:1',
+      resolution: null,
+      quantity: 1,
+      durationSeconds: null,
+      references: [{ materialId: firstMaterialId, role: 'first_frame', kind: 'image' }]
+    },
+    referenceAvailability: [false],
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-24T09:00:00Z',
+    updatedAt: '2026-09-24T09:00:01Z',
+    terminalAt: '2026-09-24T09:00:01Z',
+    slots: [{ index: 0, status: 'failed', failureReason: 'temporarily_unavailable', result: null }]
+  }
+  await mount(
+    <CreationWorkbenchStory taskScript={{ tasks: [task] }} drafts={{ [scriptedSessionId]: null }} />
+  )
+  await selectFirstSession(page)
+
+  const pile = page.getByTestId(`task-references-${task.id}`)
+  await expect(pile).toHaveAttribute('aria-label', '1 reference materials')
+  await expect(
+    pile.locator('p').filter({ hasText: 'Historical reference unavailable' })
+  ).toBeVisible()
+  await expect(pile).toContainText('First frame')
+  await expect(pile).toContainText('IMG')
+  await pile.hover()
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls() ?? [])).toEqual([])
+  await expect(pile.locator('img')).toHaveCount(0)
+
+  await page.evaluate(() => window.__creationDeckTest?.changeLanguage('zh-CN'))
+  await expect(pile.locator('p').filter({ hasText: '历史参考素材不可用' })).toBeVisible()
+  await page.evaluate(() => window.__creationDeckTest?.changeLanguage('en'))
+
+  const detailReads = await page.evaluate(() => window.__creationDeckTest?.getTaskCalls() ?? [])
+  await page.evaluate(
+    (updated) => {
+      window.__creationDeckTest?.updateTask(updated as never)
+    },
+    { ...task, referenceAvailability: [true] } as never
+  )
+  await expect
+    .poll(() => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0))
+    .toBe(1)
+  await expect(
+    pile.locator('p').filter({ hasText: 'Historical reference unavailable' })
+  ).toHaveCount(0)
+  expect(await page.evaluate(() => window.__creationDeckTest?.getTaskCalls() ?? [])).toEqual(
+    detailReads
+  )
+})
+
+test('duplicate frozen IDs keep independent availability while a readable thumbnail remains retryable', async ({
+  mount,
+  page
+}) => {
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000dup1',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: {
+      prompt: 'duplicate historical reference',
+      model: 'doubao-seedream-5.0-pro',
+      mode: 'reference-image',
+      ratio: '1:1',
+      resolution: null,
+      quantity: 1,
+      durationSeconds: null,
+      references: [
+        { materialId: firstMaterialId, role: 'reference', kind: 'image' },
+        { materialId: firstMaterialId, role: 'last_frame', kind: 'image' }
+      ]
+    },
+    referenceAvailability: [false, true],
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-24T10:00:00Z',
+    updatedAt: '2026-09-24T10:00:01Z',
+    terminalAt: '2026-09-24T10:00:01Z',
+    slots: [{ index: 0, status: 'failed', failureReason: 'temporarily_unavailable', result: null }]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [task] }}
+      drafts={{ [scriptedSessionId]: null }}
+      materialUrlFailures={1}
+    />
+  )
+  await selectFirstSession(page)
+
+  const pile = page.getByTestId(`task-references-${task.id}`)
+  const frozenCards = pile.locator('[data-reference-position]')
+  await expect(frozenCards).toHaveCount(2)
+  await expect(frozenCards.nth(0)).toContainText('Historical reference unavailable')
+  await expect(frozenCards.nth(0)).toContainText('Reference')
+  await expect(
+    pile.locator('p').filter({ hasText: 'Historical reference unavailable' })
+  ).toContainText('1 · IMG · Reference')
+  await expect(frozenCards.nth(1)).toHaveAttribute('data-thumbnail-state', 'failed')
+  await expect(frozenCards.nth(1)).toContainText('Load failed')
+  await expect(frozenCards.nth(0).locator('button, img')).toHaveCount(0)
+  await pile.getByRole('button', { name: 'Retry thumbnail for poster.png' }).focus()
+  await page.keyboard.press('Enter')
+  await expect(frozenCards.nth(1)).toHaveAttribute('data-thumbnail-state', 'ready')
+  await expect(frozenCards.nth(1).locator('img')).toBeVisible()
+  await expect(frozenCards.nth(0).locator('img')).toHaveCount(0)
+  expect(await page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0)).toBe(
+    2
+  )
+})
+
 test('a task reference reauthorizes by frozen ID after Composer deletion and Workbench remount', async ({
   mount,
   page

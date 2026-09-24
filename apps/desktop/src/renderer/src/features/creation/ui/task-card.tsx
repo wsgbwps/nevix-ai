@@ -165,6 +165,7 @@ export function TaskCard({
             <TaskReferencePile
               taskId={snapshot.id}
               references={spec.references}
+              availability={task.referenceAvailability}
               materials={gallery.materials}
               thumbnails={gallery.thumbnails}
               thumbnailStates={gallery.thumbnailStates}
@@ -377,6 +378,7 @@ const pileMaxWidth = 104
 function TaskReferencePile({
   taskId,
   references,
+  availability,
   materials,
   thumbnails,
   thumbnailStates,
@@ -386,6 +388,7 @@ function TaskReferencePile({
 }: {
   readonly taskId: string
   readonly references: readonly GenerationSpecificationReferenceView[]
+  readonly availability?: readonly boolean[]
   readonly materials: readonly ReferenceMaterialView[]
   readonly thumbnails: Readonly<Record<string, string>>
   readonly thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
@@ -401,8 +404,10 @@ function TaskReferencePile({
   const thumbnailMaterialIdsKey = JSON.stringify(
     [
       ...new Set(
-        references.flatMap((reference) => {
-          return reference.kind === 'image' ? [reference.materialId] : []
+        references.flatMap((reference, position) => {
+          return availability?.[position] !== false && reference.kind === 'image'
+            ? [reference.materialId]
+            : []
         })
       )
     ].sort()
@@ -423,6 +428,9 @@ function TaskReferencePile({
     references.length > 1
       ? Math.min(16, (pileMaxWidth - pileCardWidth) / (references.length - 1))
       : 0
+  const unavailablePositions = references.flatMap((_, position) =>
+    availability?.[position] === false ? [position] : []
+  )
   return (
     <div
       role="group"
@@ -430,34 +438,47 @@ function TaskReferencePile({
       data-testid={`task-references-${taskId}`}
       className="relative shrink-0 self-start"
       onMouseEnter={() => {
-        for (const reference of references) {
-          if (reference.kind === 'image' && thumbnails[reference.materialId] === undefined) {
+        for (const [position, reference] of references.entries()) {
+          if (
+            availability?.[position] !== false &&
+            reference.kind === 'image' &&
+            thumbnails[reference.materialId] === undefined
+          ) {
             onRequestThumbnail(reference.materialId)
           }
         }
       }}
       style={{
-        width: pileCardWidth + pitch * (references.length - 1),
-        height: pileCardHeight
+        width:
+          unavailablePositions.length > 0 ? 230 : pileCardWidth + pitch * (references.length - 1)
       }}
     >
+      <div aria-hidden style={{ height: pileCardHeight }} />
       {references.map((reference, position) => {
-        const material = byId.get(reference.materialId)
+        const unavailable = availability?.[position] === false
+        const material = unavailable ? undefined : byId.get(reference.materialId)
         // Unknown frozen roles fall back to their raw wire value, like the
         // details menu's modes do.
         const role =
           reference.role in roleKeys
             ? String(t(roleKeys[reference.role as keyof typeof roleKeys]))
             : reference.role
-        const title = material === undefined ? role : `${material.fileName} · ${role}`
+        const kind = String(t(referenceKindKeys[reference.kind]))
+        const unavailableLabel = String(t('gallery.references.historicalUnavailable'))
+        const title = unavailable
+          ? `${position + 1} · ${kind} · ${role} · ${unavailableLabel}`
+          : material === undefined
+            ? role
+            : `${material.fileName} · ${role}`
         const thumbnailSource =
-          reference.kind === 'image' ? thumbnails[reference.materialId] : undefined
+          !unavailable && reference.kind === 'image' ? thumbnails[reference.materialId] : undefined
         return (
           <div
             key={position}
             title={title}
+            data-reference-position={position}
             data-thumbnail-state={
-              reference.kind === 'image'
+              !unavailable && reference.kind === 'image'
                 ? (thumbnailStates[reference.materialId] ?? 'unloaded')
                 : undefined
             }
@@ -470,7 +491,16 @@ function TaskReferencePile({
               transform: `translateY(${pileShifts[position % pileShifts.length]}px) rotate(${fanRotations[position % fanRotations.length]}deg)`
             }}
           >
-            {thumbnailSource !== undefined && thumbnailStates[reference.materialId] !== 'failed' ? (
+            {unavailable ? (
+              <span className="text-muted-foreground grid size-full place-content-center justify-items-center gap-0.5 text-[9px]">
+                <TriangleAlertIcon className="size-3" aria-hidden />
+                <span>{kind}</span>
+                <span className="sr-only">
+                  {role} · {unavailableLabel}
+                </span>
+              </span>
+            ) : thumbnailSource !== undefined &&
+              thumbnailStates[reference.materialId] !== 'failed' ? (
               <ImageWithSkeleton
                 src={thumbnailSource}
                 alt=""
@@ -495,25 +525,27 @@ function TaskReferencePile({
                   )}
               </span>
             )}
-            {reference.kind === 'image' && thumbnailStates[reference.materialId] === 'failed' && (
-              <button
-                type="button"
-                aria-label={String(
-                  t('composer.deck.thumbnailRetry', { name: material?.fileName ?? role })
-                )}
-                onClick={() => onRequestThumbnail(reference.materialId)}
-                className="bg-card/90 text-muted-foreground hover:text-foreground absolute right-0 bottom-0 z-10 grid size-4 place-items-center rounded-tl-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
-              >
-                <RefreshCwIcon className="size-2.5" aria-hidden />
-              </button>
-            )}
+            {!unavailable &&
+              reference.kind === 'image' &&
+              thumbnailStates[reference.materialId] === 'failed' && (
+                <button
+                  type="button"
+                  aria-label={String(
+                    t('composer.deck.thumbnailRetry', { name: material?.fileName ?? role })
+                  )}
+                  onClick={() => onRequestThumbnail(reference.materialId)}
+                  className="bg-card/90 text-muted-foreground hover:text-foreground absolute right-0 bottom-0 z-10 grid size-4 place-items-center rounded-tl-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
+                >
+                  <RefreshCwIcon className="size-2.5" aria-hidden />
+                </button>
+              )}
           </div>
         )
       })}
       {/* The quote badge marks the pile as task references; the glyph is an
           inline solid quote because lucide's stroked quote has a different
           silhouette than the design's serif opening quotes. */}
-      <div className="absolute -bottom-1 -left-1 z-10 grid size-5 place-items-center rounded-full border border-[#30333c] bg-[#22252b] text-[#41484f]">
+      <div className="absolute top-7 -left-1 z-10 grid size-5 place-items-center rounded-full border border-[#30333c] bg-[#22252b] text-[#41484f]">
         <svg viewBox="0 0 24 24" fill="currentColor" className="size-2.5" aria-hidden>
           <path d="M8 4.2C7.3 6.9 6.9 8.6 7.2 10.2A4.9 4.9 0 1 1 2.6 11.9C4.1 9.2 6.3 6.3 8 4.2Z" />
           <path
@@ -522,6 +554,19 @@ function TaskReferencePile({
           />
         </svg>
       </div>
+      {unavailablePositions.map((position) => {
+        const reference = references[position]
+        const role =
+          reference.role in roleKeys
+            ? String(t(roleKeys[reference.role as keyof typeof roleKeys]))
+            : reference.role
+        return (
+          <p key={position} className="text-muted-foreground mt-1 text-[10px] leading-3">
+            {position + 1} · {t(referenceKindKeys[reference.kind])} · {role} ·{' '}
+            {t('gallery.references.historicalUnavailable')}
+          </p>
+        )
+      })}
     </div>
   )
 }

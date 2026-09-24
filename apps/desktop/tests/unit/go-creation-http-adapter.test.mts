@@ -352,7 +352,8 @@ function taskSummaryWire(id: string): Record<string, unknown> {
     terminal_cause: null,
     created_at: '2026-09-01T09:00:00Z',
     updated_at: '2026-09-01T09:01:00Z',
-    terminal_at: null
+    terminal_at: null,
+    reference_availability: []
   }
 }
 
@@ -389,7 +390,45 @@ test('listTasks sends the page limit and the continuation cursor, failing closed
   )
 
   assert.equal(first.outcome, 'succeeded')
+  if (first.outcome === 'succeeded') {
+    assert.deepEqual(first.value.tasks[0].referenceAvailability, [])
+  }
   assert.equal(older.outcome, 'succeeded')
   assert.equal(defaulted.outcome, 'succeeded')
   assert.deepEqual(malformed, { outcome: 'network-failure' })
+
+  const missingAvailability = await withFetch(
+    async () =>
+      jsonResponse({
+        tasks: [{ ...taskSummaryWire('task-b'), reference_availability: null }],
+        next_cursor: null
+      }),
+    () => client.listTasks('tok', 'session-1')
+  )
+  assert.deepEqual(missingAvailability, { outcome: 'network-failure' })
+
+  const misalignedAvailability = await withFetch(
+    async () =>
+      jsonResponse({
+        tasks: [
+          {
+            ...taskSummaryWire('task-c'),
+            reference_availability: [true],
+            snapshot: {
+              prompt: 'frozen',
+              model: 'model',
+              mode: 'text-to-image',
+              media_type: 'image',
+              schema_version: 1,
+              manifest_version: 1,
+              quantity: 1,
+              references: []
+            }
+          }
+        ],
+        next_cursor: null
+      }),
+    () => client.listTasks('tok', 'session-1')
+  )
+  assert.deepEqual(misalignedAvailability, { outcome: 'network-failure' })
 })

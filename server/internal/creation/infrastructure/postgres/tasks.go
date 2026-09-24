@@ -255,8 +255,13 @@ func scanTaskFull(row pgx.Row) (domain.GenerationTask, error) {
 // this browsing list; the verdicts themselves are untouched, and detail still
 // reads the facts.
 func (r *GenerationTaskRepository) ListBySession(ctx context.Context, owner, sessionID domain.UUID, cursor *domain.CompoundCursor, limit int) ([]domain.GenerationTask, *domain.CompoundCursor, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, nil, fmt.Errorf("creation: begin task list read: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	args := []any{owner, sessionID, cursorTime(cursor), cursorID(cursor), limit + 1}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := tx.Query(ctx, `
 		SELECT `+taskSummaryColumns+` FROM creation_generation_tasks
 		WHERE owner_user_id = $1 AND session_id = $2
 		  AND dismissed_at IS NULL
@@ -292,6 +297,44 @@ func (r *GenerationTaskRepository) ListBySession(ctx context.Context, owner, ses
 		return tasks[i].CreatedAt, tasks[i].ID
 	})
 	tasks = truncatePage(tasks, limit)
+	rows.Close()
+	ids := make([]domain.UUID, 0, len(tasks))
+	for i := range tasks {
+		tasks[i].ReferenceAvailability = make([]bool, len(tasks[i].Spec.References))
+		if len(tasks[i].Spec.References) > 0 {
+			ids = append(ids, tasks[i].ID)
+		}
+	}
+	if len(ids) == 0 {
+		return tasks, next, nil
+	}
+	confirmedRows, err := tx.Query(ctx, `
+		SELECT retained.task_id, retained.material_id
+		FROM creation_generation_task_references retained
+		JOIN creation_reference_materials material ON material.id = retained.material_id
+		WHERE retained.task_id = ANY($1::uuid[])`, ids)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creation: list task reference availability: %w", err)
+	}
+	confirmed := make(map[[2]domain.UUID]bool)
+	for confirmedRows.Next() {
+		var taskID, materialID domain.UUID
+		if err := confirmedRows.Scan(&taskID, &materialID); err != nil {
+			confirmedRows.Close()
+			return nil, nil, fmt.Errorf("creation: scan task reference availability: %w", err)
+		}
+		confirmed[[2]domain.UUID{taskID, materialID}] = true
+	}
+	if err := confirmedRows.Err(); err != nil {
+		confirmedRows.Close()
+		return nil, nil, fmt.Errorf("creation: list task reference availability rows: %w", err)
+	}
+	confirmedRows.Close()
+	for i := range tasks {
+		for position, reference := range tasks[i].Spec.References {
+			tasks[i].ReferenceAvailability[position] = confirmed[[2]domain.UUID{tasks[i].ID, reference.MaterialID}]
+		}
+	}
 	return tasks, next, nil
 }
 

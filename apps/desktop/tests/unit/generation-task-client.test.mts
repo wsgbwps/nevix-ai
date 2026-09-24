@@ -109,8 +109,9 @@ test('list and detail preserve the exact fractional updated_at criterion', async
   if (detail.outcome !== 'succeeded') return
   assert.equal(detail.value.task.updatedAt, criterion)
 
-  const list = await withFetch({ tasks: [payload.task], next_cursor: null }, () =>
-    client.listTasks('token', 'aaaaaaaa-0000-4000-8000-000000000001')
+  const list = await withFetch(
+    { tasks: [{ ...payload.task, reference_availability: [] }], next_cursor: null },
+    () => client.listTasks('token', 'aaaaaaaa-0000-4000-8000-000000000001')
   )
   assert.equal(list.outcome, 'succeeded')
   if (list.outcome !== 'succeeded') return
@@ -330,6 +331,7 @@ function taskSummaryWith(snapshot: unknown): unknown {
     created_at: '2026-09-01T02:59:32Z',
     updated_at: '2026-09-01T03:00:00Z',
     terminal_at: null,
+    reference_availability: snapshot == null ? [] : [true],
     ...(snapshot === undefined ? {} : { snapshot })
   }
 }
@@ -343,6 +345,7 @@ test('the frozen snapshot rides list summaries into the gallery view', async () 
 
   assert.equal(result.outcome, 'succeeded')
   if (result.outcome !== 'succeeded') return
+  assert.deepEqual(result.value.tasks[0].referenceAvailability, [true])
   assert.deepEqual(result.value.tasks[0].snapshot, {
     prompt: '夏季跑鞋主图，暖光背景',
     model: 'doubao-seedream-5.0-pro',
@@ -365,6 +368,7 @@ test('a list summary without a snapshot keeps parsing with a null fallback', asy
     )
     assert.equal(result.outcome, 'succeeded')
     if (result.outcome !== 'succeeded') return
+    assert.deepEqual(result.value.tasks[0].referenceAvailability, [])
     assert.equal(result.value.tasks[0].snapshot, null)
   }
 })

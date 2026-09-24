@@ -275,7 +275,8 @@ export const creationTranslations = defineResourceTranslations({
           createdAt: '创建时间'
         },
         references: {
-          pile: '参考素材 {{n}} 个'
+          pile: '参考素材 {{n}} 个',
+          historicalUnavailable: '历史参考素材不可用'
         },
         role: {
           reference: '参考',
@@ -855,7 +856,8 @@ export const creationTranslations = defineResourceTranslations({
           createdAt: 'Created'
         },
         references: {
-          pile: '{{n}} reference materials'
+          pile: '{{n}} reference materials',
+          historicalUnavailable: 'Historical reference unavailable'
         },
         role: {
           reference: 'Reference',
