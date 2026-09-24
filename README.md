@@ -135,8 +135,6 @@ src/main/
 
 加一个 Handler 只改自己 owner 下的三个文件（`shared/ipc/<owner>/types.ts` + `main/<owner>/ipc/<action>.ts` + `main/<owner>/ipc/index.ts`），不碰中央共享注册文件。
 
-> **Migration note:** 当前 `main/ipc/`、`main/settings/` 与 `main/i18n/` 是已接受架构决定落地前的 migration debt。Domain-first Main、Language Domain 合并、Channel rename 与新 glob 必须原子迁移，不长期保留两套结构或兼容 alias。
-
 ---
 
 ### Electron 预加载 (`apps/desktop/src/preload/`)
@@ -195,25 +193,20 @@ Feature 目录遵循以下受控演化规则；segment 词汇与 public interfac
 ```
 server/
 ├── cmd/server/
-│   └── main.go                   # 入口：显式调用各 module 的 Register()
+│   └── main.go                   # composition root
 ├── internal/                     # ★ 业务模块（每个业务 Module 一个目录）+ 跨 Module 共享子包
-│   ├── event/                    # 事件总线（types.go 定义事件类型，bus.go 定义接口）
+│   ├── auditlog/                 # 跨 Module 事务内 Audit Append
+│   ├── authz/                    # 统一路由授权 guard
+│   ├── event/                    # 跨 Module 事件类型与总线
+│   ├── migration/                # 启动时执行的版本化数据库迁移
 │   ├── creation/                 # AI Creation 复杂 Module — 完整 DDD 分层
-│   │   ├── domain/
-│   │   │   ├── entity.go         # 实体、聚合根
-│   │   │   ├── value.go          # 值对象
-│   │   │   └── repository.go     # Repository 接口（不是实现）
-│   │   ├── application/
-│   │   │   ├── service.go        # 应用服务 / 用例编排
-│   │   │   ├── command.go        # 命令（写操作）
-│   │   │   └── query.go          # 查询（读操作）
-│   │   ├── infrastructure/
-│   │   │   ├── postgres_repo.go  # Repository 实现
-│   │   │   └── adapter.go        # 外部服务适配器
-│   │   └── interface/
-│   │       └── http.go           # Register(r chi.Router, bus event.Bus)
-│   └── projmgmt/                 # 简单模块 — 单文件
-│       └── module.go             # handler + storage 内联
+│   │   ├── module.go             # Module 对外装配
+│   │   ├── domain/               # 实体、值对象与 Repository 接口
+│   │   ├── application/          # 用例编排
+│   │   ├── infrastructure/       # PostgreSQL 与外部服务适配
+│   │   ├── interface/http/       # HTTP handlers
+│   │   └── integrationtest/      # Module 公开 seam 测试
+│   └── identity/                 # Identity Module
 └── go.mod
 ```
 
@@ -241,7 +234,7 @@ server/
 contracts/
 ├── openapi.yaml             # API 总纲
 ├── identity.yaml            # Identity 可信命令 seam
-└── creation.yaml            # AI 创作可信命令 seam（正式开发时按需创建）
+└── creation.yaml            # AI 创作可信命令 seam
 ```
 
 每个 Server Module 维护自己业务 owner 的 API 契约，`openapi.yaml` 通过 `$ref` 引用各子契约。AI 创作只使用 `creation` contract owner，不按图片与视频拆分。
