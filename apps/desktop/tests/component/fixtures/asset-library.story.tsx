@@ -189,7 +189,8 @@ function createHarness(
   displayMode: DisplayMode,
   dense: boolean,
   unpublishableIds: readonly string[],
-  referenceState: 'complete' | 'partial' | 'none'
+  referenceState: 'complete' | 'partial' | 'none' | 'duplicate',
+  publishFailure: boolean
 ): {
   readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
   readonly controls: AssetLibraryTestControls
@@ -315,14 +316,18 @@ function createHarness(
                       },
                       detail.privateOrigin.specification.references[0]
                     ]
-                  : detail.privateOrigin.specification.references
+                  : referenceState === 'duplicate'
+                    ? Array(3).fill(detail.privateOrigin.specification.references[0])
+                    : detail.privateOrigin.specification.references
           },
           references:
             referenceState === 'none'
               ? []
               : referenceState === 'partial'
                 ? [detail.privateOrigin.references[0], detail.privateOrigin.references[0]]
-                : detail.privateOrigin.references
+                : referenceState === 'duplicate'
+                  ? Array(3).fill(detail.privateOrigin.references[0])
+                  : detail.privateOrigin.references
         }
         return {
           outcome: 'succeeded',
@@ -417,6 +422,9 @@ function createHarness(
       },
       publishAsset: async (_assetId, idempotencyKey) => {
         publishKeys.push(idempotencyKey)
+        if (publishFailure) {
+          return { outcome: 'request-rejected', code: 'asset_reference_unavailable' }
+        }
         activePublication = {
           id: 'publication-one',
           publishedAt: '2026-09-17T08:00:00Z',
@@ -498,7 +506,8 @@ export function AssetLibraryStory({
   displayMode = 'immediate',
   dense = false,
   unpublishableIds = NO_IDS,
-  referenceState = 'complete'
+  referenceState = 'complete',
+  publishFailure = false
 }: {
   readonly downloadMode?: 'immediate' | 'deferred' | 'sequenced' | 'cancelled' | 'failed'
   readonly visibility?: 'private' | 'public'
@@ -510,7 +519,8 @@ export function AssetLibraryStory({
   readonly displayMode?: DisplayMode
   readonly dense?: boolean
   readonly unpublishableIds?: readonly string[]
-  readonly referenceState?: 'complete' | 'partial' | 'none'
+  readonly referenceState?: 'complete' | 'partial' | 'none' | 'duplicate'
+  readonly publishFailure?: boolean
 }): React.JSX.Element {
   const harness = useMemo(
     () =>
@@ -525,7 +535,8 @@ export function AssetLibraryStory({
         displayMode,
         dense,
         unpublishableIds,
-        referenceState
+        referenceState,
+        publishFailure
       ),
     [
       append,
@@ -534,6 +545,7 @@ export function AssetLibraryStory({
       downloadMode,
       paginated,
       replacementRequired,
+      publishFailure,
       referenceState,
       unpublishableIds,
       staleOnReuse,

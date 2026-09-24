@@ -469,8 +469,14 @@ test('Asset Library keeps duplicate frozen positions around an unavailable histo
   await expect(references.nth(1)).toContainText('Video')
   await expect(references.nth(1)).not.toContainText('missing-material')
   await expect(references.nth(2)).toContainText('3. reference.png')
+  await expect(dialog.getByRole('button', { name: 'Publish to Inspiration' })).toBeDisabled()
+  await expect(dialog.getByRole('alert')).toContainText(
+    'historical reference materials are unavailable'
+  )
+  expect(await page.evaluate(() => window.__assetLibraryTest?.publishKeys())).toEqual([])
   await page.evaluate(() => window.__assetLibraryTest?.setLanguage('zh-CN'))
   await expect(references.nth(1)).toContainText('历史参考素材不可用')
+  await expect(dialog.getByRole('alert')).toContainText('历史参考素材不可用')
   await page.evaluate(() => window.__assetLibraryTest?.setLanguage('en'))
 })
 
@@ -481,6 +487,7 @@ test('Asset Library reserves the no-references copy for an empty frozen specific
   await mount(<AssetLibraryStory referenceState="none" />)
   await page.getByRole('button', { name: 'Open asset asset-one' }).click()
   await expect(page.getByRole('dialog')).toContainText('No reference materials were used')
+  await expect(page.getByRole('button', { name: 'Publish to Inspiration' })).toBeEnabled()
 })
 
 test('selecting the current sibling keeps its loaded detail visible', async ({ mount, page }) => {
@@ -559,6 +566,35 @@ test('publishing confirms the frozen facts and exposes withdrawal', async ({ mou
   expect(await page.evaluate(() => window.__assetLibraryTest?.withdraws())).toEqual([
     'publication-one'
   ])
+})
+
+test('publication confirmation counts every frozen position including duplicate materials', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory referenceState="duplicate" />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  page.once('dialog', async (confirmation) => {
+    expect(confirmation.message()).toContain('3 used reference')
+    await confirmation.dismiss()
+  })
+  await page.getByRole('button', { name: 'Publish to Inspiration' }).click()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.publishKeys())).toEqual([])
+})
+
+test('publication submit race gives the specific unavailable-reference reason', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory publishFailure />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await page.getByRole('button', { name: 'Publish to Inspiration' }).click()
+  await expect(page.getByRole('alert')).toContainText(
+    'historical reference material became unavailable'
+  )
+  await expect(page.getByRole('button', { name: 'Publish to Inspiration' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Withdraw publication' })).toHaveCount(0)
 })
 
 test('deleting an asset states the result removal and the surviving Publication', async ({
@@ -667,6 +703,22 @@ test('batch publish skips what the server would refuse and reports the skip', as
   await expect(
     page.getByRole('status').filter({ hasText: 'Published · 1 / 2 (1 not publishable, skipped)' })
   ).toBeVisible()
+  expect(await page.evaluate(() => window.__assetLibraryTest?.publishKeys())).toHaveLength(1)
+})
+
+test('batch publish keeps list eligibility and reports unavailable references from submit', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory referenceState="partial" publishFailure />)
+  await page.getByRole('button', { name: 'Batch actions' }).click()
+  await page.getByRole('checkbox', { name: 'Select asset asset-one' }).check()
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled()
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await page.getByRole('button', { name: 'Publish', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText(
+    'historical reference material became unavailable'
+  )
   expect(await page.evaluate(() => window.__assetLibraryTest?.publishKeys())).toHaveLength(1)
 })
 

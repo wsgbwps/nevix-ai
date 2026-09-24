@@ -5,6 +5,7 @@ import type {
   AssetPrivateOrigin,
   MediaAssetView
 } from '../api/asset-library-http'
+import { alignAssetReferences } from '../api/asset-library-http'
 import type { InspirationPorts } from '../api/inspiration-http'
 
 type AssetDetailPorts = AssetLibraryPorts &
@@ -33,7 +34,7 @@ export function useAssetDetail({
   readonly status: AssetDetailStatus
   readonly downloadStatus: AssetDownloadStatus
   readonly reuseFailed: boolean
-  readonly publicationStatus: 'idle' | 'running' | 'failed'
+  readonly publicationStatus: 'idle' | 'running' | 'failed' | 'reference-unavailable'
   readonly open: (assetId: string) => void
   readonly close: () => void
   readonly download: (asset: MediaAssetView) => Promise<void>
@@ -47,7 +48,9 @@ export function useAssetDetail({
   const [status, setStatus] = useState<AssetDetailStatus>('idle')
   const [downloadStatus, setDownloadStatus] = useState<AssetDownloadStatus>('idle')
   const [reuseFailed, setReuseFailed] = useState(false)
-  const [publicationStatus, setPublicationStatus] = useState<'idle' | 'running' | 'failed'>('idle')
+  const [publicationStatus, setPublicationStatus] = useState<
+    'idle' | 'running' | 'failed' | 'reference-unavailable'
+  >('idle')
   const downloadController = useRef<AbortController | null>(null)
   const assetIdRef = useRef<string | null>(null)
   const publishKeys = useRef(new Map<string, string>())
@@ -167,7 +170,11 @@ export function useAssetDetail({
         detail === null ||
         detail.privateOrigin === null ||
         !detail.asset.capabilities.canPublish ||
-        !confirmPublication(detail.privateOrigin.references.length)
+        alignAssetReferences(
+          detail.privateOrigin.specification,
+          detail.privateOrigin.references
+        ).some((reference) => reference === null) ||
+        !confirmPublication(detail.privateOrigin.specification.references.length)
       ) {
         return
       }
@@ -176,7 +183,15 @@ export function useAssetDetail({
       publishKeys.current.set(selectedId, idempotencyKey)
       setPublicationStatus('running')
       const result = await ports.publishAsset(selectedId, idempotencyKey)
-      if (result.outcome !== 'succeeded' || !(await refreshDetail(selectedId))) {
+      if (result.outcome !== 'succeeded') {
+        setPublicationStatus(
+          result.outcome === 'request-rejected' && result.code === 'asset_reference_unavailable'
+            ? 'reference-unavailable'
+            : 'failed'
+        )
+        return
+      }
+      if (!(await refreshDetail(selectedId))) {
         setPublicationStatus('failed')
         return
       }

@@ -90,6 +90,8 @@ export const creationTranslations = defineResourceTranslations({
         publishConfirm: '发布将冻结这个资产、完整生成规格和 {{count}} 个实际参考素材，是否继续？',
         withdrawConfirm: '撤回后不可恢复；之后可重新发布为一条新内容。是否继续？',
         publishFailed: '发布状态更新失败，请重试。',
+        publishUnavailableReferences: '部分历史参考素材不可用，无法发布此资产。',
+        publishReferenceUnavailable: '历史参考素材在提交前变得不可用，未为此资产创建发布内容。',
         delete: '删除',
         deleteConfirm:
           '删除这个资产？它的结果会从来源任务卡片上移除，删掉该任务的最后一张结果时整张卡片会消失。已发布的内容不会因此撤回。'
@@ -660,6 +662,10 @@ export const creationTranslations = defineResourceTranslations({
         withdrawConfirm:
           'Withdrawal is irreversible. You can publish it again later as a new item. Continue?',
         publishFailed: 'The publication state could not be updated. Try again.',
+        publishUnavailableReferences:
+          'Some historical reference materials are unavailable. This asset cannot be published.',
+        publishReferenceUnavailable:
+          'A historical reference material became unavailable before submission. No publication was created for this asset.',
         delete: 'Delete',
         deleteConfirm:
           'Delete this asset? Its result leaves the source task card, and deleting the last result of a task removes that card. An existing publication will not be withdrawn.'

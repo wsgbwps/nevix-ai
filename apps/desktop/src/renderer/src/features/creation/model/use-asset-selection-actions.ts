@@ -15,6 +15,7 @@ export type AssetBatchStatus =
       readonly action: AssetBatchAction
       readonly current: number
       readonly total: number
+      readonly code?: string
     }
   | {
       readonly kind: 'complete'
@@ -113,7 +114,8 @@ export function useAssetSelectionActions(
           kind: cancelled ? 'cancelled' : 'failed',
           action: batch.action,
           current: index + 1,
-          total: batch.total
+          total: batch.total,
+          ...(result.outcome === 'request-rejected' ? { code: result.code } : {})
         })
         return true
       }
@@ -176,8 +178,8 @@ export function useAssetSelectionActions(
       if (finished) onAssetsChanged()
     },
     publish: async () => {
-      // `canPublish` is exact: it already requires ownership, so an asset the
-      // server would refuse is never attempted, and no probe request is needed.
+      // List capability covers ownership and governance. The write transaction
+      // checks historical references, so a 409 can still stop this batch.
       const targets = live.filter((asset) => asset.capabilities.canPublish)
       const finished = await run({
         action: 'publish',
