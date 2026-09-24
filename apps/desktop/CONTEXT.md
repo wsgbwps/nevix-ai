@@ -89,6 +89,10 @@ _Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 
 User 向当前会话上传或经有效 Team Publication 复用、供生成引用的媒体记录（图片/视频/音频）；记录属于当前 User，做同款产生新的素材 id 但不复制底层媒体内容。它可从 Composer 独立移除；提交时冻结进 Generation Specification 的引用（素材 id、role、kind、claims 版本）拥有独立的历史展示生命周期，移除后不能进入新任务，但已有 TaskCard 仍可重新授权缩略图。它与 Asset Library 的 Media Asset 分属两个生命阶段。
 _Avoid_: 素材库, Attachment, 上传文件
 
+**Unavailable Historical Reference（历史参考素材不可用）**:
+Generation Specification 的某项冻结引用仍在，但对应 Reference Material 记录或 Generation Task 的历史保留关系无法确认时，该引用在历史视图中的状态；它不改变冻结意图，也不限制 User 凭独立权限读取仍有效的素材。
+_Avoid_: 未使用参考素材, 已删除参考素材
+
 **Reference Material Upload（参考素材上传）**:
 User 为当前 Creation Session 发起、由 Server 短期授权的一次对象存储直传；Renderer 只选择文件并展示进度/结果，Preload 取得但不回传真实路径，Electron Main 从磁盘流式 PUT。它在 finalize 成功前不是 Reference Material，失败、取消或过期不得进入素材列表或 Generation Specification。
 _Avoid_: Uploading Reference Material, Storage Grant, Temporary Reference Material
