@@ -428,9 +428,6 @@ function TaskReferencePile({
     references.length > 1
       ? Math.min(16, (pileMaxWidth - pileCardWidth) / (references.length - 1))
       : 0
-  const unavailablePositions = references.flatMap((_, position) =>
-    availability?.[position] === false ? [position] : []
-  )
   return (
     <div
       role="group"
@@ -448,10 +445,7 @@ function TaskReferencePile({
           }
         }
       }}
-      style={{
-        width:
-          unavailablePositions.length > 0 ? 230 : pileCardWidth + pitch * (references.length - 1)
-      }}
+      style={{ width: pileCardWidth + pitch * (references.length - 1) }}
     >
       <div aria-hidden style={{ height: pileCardHeight }} />
       {references.map((reference, position) => {
@@ -554,19 +548,6 @@ function TaskReferencePile({
           />
         </svg>
       </div>
-      {unavailablePositions.map((position) => {
-        const reference = references[position]
-        const role =
-          reference.role in roleKeys
-            ? String(t(roleKeys[reference.role as keyof typeof roleKeys]))
-            : reference.role
-        return (
-          <p key={position} className="text-muted-foreground mt-1 text-[10px] leading-3">
-            {position + 1} · {t(referenceKindKeys[reference.kind])} · {role} ·{' '}
-            {t('gallery.references.historicalUnavailable')}
-          </p>
-        )
-      })}
     </div>
   )
 }
