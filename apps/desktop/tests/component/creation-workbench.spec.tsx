@@ -1897,9 +1897,8 @@ test('a missing historical task reference keeps its frozen card without requesti
 
   const pile = page.getByTestId(`task-references-${task.id}`)
   await expect(pile).toHaveAttribute('aria-label', '1 reference materials')
-  await expect(
-    pile.locator('p').filter({ hasText: 'Historical reference unavailable' })
-  ).toBeVisible()
+  await expect(pile).toHaveCSS('width', '34px')
+  await expect(pile.locator('p')).toHaveCount(0)
   await expect(pile).toContainText('First frame')
   await expect(pile).toContainText('IMG')
   await pile.hover()
@@ -1907,7 +1906,7 @@ test('a missing historical task reference keeps its frozen card without requesti
   await expect(pile.locator('img')).toHaveCount(0)
 
   await page.evaluate(() => window.__creationDeckTest?.changeLanguage('zh-CN'))
-  await expect(pile.locator('p').filter({ hasText: '历史参考素材不可用' })).toBeVisible()
+  await expect(pile.locator('[data-reference-position="0"]')).toContainText('历史参考素材不可用')
   await page.evaluate(() => window.__creationDeckTest?.changeLanguage('en'))
 
   const detailReads = await page.evaluate(() => window.__creationDeckTest?.getTaskCalls() ?? [])
@@ -1920,9 +1919,10 @@ test('a missing historical task reference keeps its frozen card without requesti
   await expect
     .poll(() => page.evaluate(() => window.__creationDeckTest?.materialUrlCalls().length ?? 0))
     .toBe(1)
-  await expect(
-    pile.locator('p').filter({ hasText: 'Historical reference unavailable' })
-  ).toHaveCount(0)
+  await expect(pile.locator('[data-reference-position="0"]')).toHaveAttribute(
+    'title',
+    'poster.png · First frame'
+  )
   expect(await page.evaluate(() => window.__creationDeckTest?.getTaskCalls() ?? [])).toEqual(
     detailReads
   )
@@ -1971,11 +1971,14 @@ test('duplicate frozen IDs keep independent availability while a readable thumbn
   const pile = page.getByTestId(`task-references-${task.id}`)
   const frozenCards = pile.locator('[data-reference-position]')
   await expect(frozenCards).toHaveCount(2)
+  await expect(pile).toHaveCSS('width', '50px')
+  await expect(pile.locator('p')).toHaveCount(0)
   await expect(frozenCards.nth(0)).toContainText('Historical reference unavailable')
   await expect(frozenCards.nth(0)).toContainText('Reference')
-  await expect(
-    pile.locator('p').filter({ hasText: 'Historical reference unavailable' })
-  ).toContainText('1 · IMG · Reference')
+  await expect(frozenCards.nth(0)).toHaveAttribute(
+    'title',
+    '1 · IMG · Reference · Historical reference unavailable'
+  )
   await expect(frozenCards.nth(1)).toHaveAttribute('data-thumbnail-state', 'failed')
   await expect(frozenCards.nth(1)).toContainText('Load failed')
   await expect(frozenCards.nth(0).locator('button, img')).toHaveCount(0)
