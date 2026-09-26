@@ -314,6 +314,33 @@ test('the initial bottom follow survives a delayed virtualizer correction', asyn
   await expect(page.getByTestId('back-to-bottom')).toHaveCount(0)
 })
 
+test('scrolling back to the bottom dismisses the return button', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks: tallImageTasks('return') }} />)
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const scroller = await settledScroller(page)
+
+  await userScrollTo(scroller, 'top')
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (element) => element.scrollTop + element.clientHeight < element.scrollHeight - 120
+      )
+    )
+    .toBe(true)
+  await expect(page.getByTestId('back-to-bottom')).toBeVisible()
+  await expect(page.getByTestId('composer-params')).toBeHidden()
+
+  await scroller.evaluate((element) => element.scrollTo({ top: element.scrollHeight }))
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+      )
+    )
+    .toBe(true)
+  await expect(page.getByTestId('back-to-bottom')).toHaveCount(0)
+})
+
 test('workspace and session-list scrolling stay independent in the shell', async ({
   mount,
   page

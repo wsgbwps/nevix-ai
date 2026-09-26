@@ -270,7 +270,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                 userScrollIntentRef.current = false
                 userScrollDirectionRef.current = 'unknown'
                 if (readingHistoryRef.current) {
-                  if (!away && tookOver && direction !== 'up') {
+                  if (!away && direction !== 'up') {
                     readingHistoryRef.current = false
                     pinnedToBottomRef.current = true
                     setNewTaskWaiting(false)
