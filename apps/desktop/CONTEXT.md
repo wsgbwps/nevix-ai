@@ -109,6 +109,10 @@ _Avoid_: @文本, 素材名称, Reference Binding
 生成提交时冻结的完整生成意图；它承载提交时刻的真实意图，冻结后永不变更，与会话当前仍可编辑的 Draft 相对。
 _Avoid_: Draft, 任务参数（指 Specification 中的个别字段）
 
+**再次生成**:
+从一张终态 Generation Task 的冻结 Generation Specification 发起一张新任务；沿用原提示词、Generation Parameter 与 Reference Material 引用，不读取或改写当前 Draft，新任务仍接受当前准入校验。
+_Avoid_: 重试（继续原任务未完成的结果槽位）
+
 **Generation Parameter**:
 生成意图中除提示词与引用绑定外的参数字段族（媒体类型、模型、模式、比例、分辨率、数量、时长）；字段集合、wire 键名与各媒体适用性只有一份权威清单，编辑中 Draft、本地草稿记录、提交意图与冻结 Generation Specification 对它的表示一律源于该清单。
 _Avoid_: 任务参数（混淆字段族与 Specification 中的冻结取值）, 参数 schema, 字段配置表

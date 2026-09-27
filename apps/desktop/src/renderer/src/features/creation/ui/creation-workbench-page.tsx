@@ -15,6 +15,11 @@ import { isScrolledToBottom } from './use-composer-presence'
 // for the next older history page; one estimated card short of the edge keeps
 // the prepend ahead of the reader.
 const HISTORY_TRIGGER_PX = 240
+const submitFailureKeys = {
+  invalid_request: 'gallery.submitFailureCodes.invalidRequest',
+  capability_stale: 'gallery.submitFailureCodes.capabilityStale',
+  media_unavailable: 'gallery.submitFailureCodes.mediaUnavailable'
+} as const
 
 /**
  * The production Creation Workbench (issue #177): loading/empty/error stay
@@ -435,6 +440,9 @@ function WorkbenchNotices({
   readonly context: WorkbenchContextHandle
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
+  const errorKey = context.submitError
+    ? submitFailureKeys[context.submitError as keyof typeof submitFailureKeys]
+    : undefined
   return (
     <>
       <WorkbenchActionNotice context={context} />
@@ -444,7 +452,9 @@ function WorkbenchNotices({
           data-testid="gallery-submit-error"
           className="text-destructive mx-auto mb-2 max-w-[720px] text-[11px]"
         >
-          {t('gallery.submitFailed', { code: context.submitError })}
+          {t('gallery.submitFailed', {
+            code: errorKey ? t(errorKey) : context.submitError
+          })}
           <button
             type="button"
             onClick={context.dismissSubmitError}

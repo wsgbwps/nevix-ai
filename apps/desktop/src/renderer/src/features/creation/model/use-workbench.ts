@@ -5,11 +5,13 @@ import { manifestDefaultParameters } from '../api/generation-parameter'
 import type {
   CreationApiResult,
   CreationSessionView,
+  DraftReferenceRole,
   DraftReferenceView,
   ReferenceMaterialView
 } from '../api/go-creation-http'
 import type {
   GenerationIntent,
+  GenerationSpecificationView,
   GenerationTaskDetail,
   GenerationTaskView
 } from '../api/generation-task-http'
@@ -184,9 +186,9 @@ export interface WorkbenchGalleryHandle {
   confirmIndeterminateRedo: (taskId: string) => void
   indeterminateTaskId: string | null
   dismissIndeterminate: () => void
-  /** The regenerate affordance re-submits the composer's draft. */
-  submit: () => void
-  submitDisabled: boolean
+  /** Submits a new task from the card's frozen specification. */
+  regenerate: (taskId: string) => void
+  regenerateDisabled: boolean
   materials: readonly ReferenceMaterialView[]
   thumbnails: Readonly<Record<string, string>>
   thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
@@ -1078,7 +1080,27 @@ export function useCreationWorkbench(): {
     ]
   )
 
-  // The composer's submit circle and the gallery's regenerate gate on one verdict.
+  const regenerate = (taskId: string): void => {
+    const { tasks, taskDetails } = taskRefreshRef.current.snapshot
+    const task = tasks.find((entry) => entry.id === taskId)
+    if (!ports || !task || ctx.selectedId !== task.sessionId || actionBlocksSubmission) return
+    const detail = taskDetails[taskId]
+    const specification: GenerationSpecificationView | null = detail?.specification ?? task.snapshot
+    if (specification === null) return
+    setDismissalSkippedIn(null)
+    const intent: GenerationIntent = {
+      ...specification,
+      mediaType: (detail?.task ?? task).mediaType,
+      manifestVersion:
+        manifest?.manifestVersion ?? contextController?.manifestVersionForIntent() ?? 1,
+      references: specification.references.map(({ materialId, role }) => ({
+        materialId,
+        role: role as DraftReferenceRole
+      }))
+    }
+    void ports.actions.submit(task.sessionId, intent)
+  }
+
   const submitDisabled = submitBlocked !== null || actionBlocksSubmission
 
   return {
@@ -1176,8 +1198,8 @@ export function useCreationWorkbench(): {
       confirmIndeterminateRedo,
       indeterminateTaskId,
       dismissIndeterminate: () => setIndeterminateTaskId(null),
-      submit: submitCallback,
-      submitDisabled,
+      regenerate,
+      regenerateDisabled: actionBlocksSubmission,
       materials,
       thumbnails,
       thumbnailStates,
