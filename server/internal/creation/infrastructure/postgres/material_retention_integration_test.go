@@ -110,7 +110,7 @@ func TestFinalTaskReferenceReleaseSchedulesOnlyRemovedMaterialCleanup(t *testing
 		WHERE id = $1`, cleanupID).Scan(&cleanupAt); err != nil {
 		t.Fatalf("read scheduled cleanup time: %v", err)
 	}
-	due, err := uploads.LockDueCleanups(ctx, tx, cleanupAt, 10)
+	due, err := uploads.LockDueCleanups(ctx, tx, cleanupAt, 10, nil)
 	if err != nil || len(due) != 1 || due[0].ID != cleanupID || due[0].ObjectKey != materialID.String() {
 		t.Fatalf("final release must expose only its exact cleanup key: due=%+v err=%v", due, err)
 	}

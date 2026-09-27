@@ -27,11 +27,13 @@ type fakeDirectUploadStore struct {
 	objects             map[string][]byte
 	generatedObjects    map[string]generatedObject
 	info                map[string]creation.BlobInfo
+	headCalls           map[string]int
 	grants              map[string]fakeUploadGrant
 	nextGrant           int64
 	nextThumbnailGrant  int64
 	server              *httptest.Server
 	headError           error
+	headErrorKeys       map[string]error
 	headStarted         chan struct{}
 	releaseHead         chan struct{}
 	openReadError       error
@@ -43,6 +45,7 @@ type fakeDirectUploadStore struct {
 	deleteFailures      int
 	deleteFailureKeys   map[string]struct{}
 	deleteBlockingKeys  map[string]struct{}
+	deleteWaits         map[string]deleteWait
 	deletedKeys         []string
 	maxGeneratedRead    int
 }
@@ -52,15 +55,23 @@ type generatedObject struct {
 	fill byte
 }
 
+type deleteWait struct {
+	started chan struct{}
+	release chan struct{}
+}
+
 func newFakeDirectUploadStore(t *testing.T) *fakeDirectUploadStore {
 	t.Helper()
 	store := &fakeDirectUploadStore{
 		objects:            map[string][]byte{},
 		generatedObjects:   map[string]generatedObject{},
 		info:               map[string]creation.BlobInfo{},
+		headCalls:          map[string]int{},
+		headErrorKeys:      map[string]error{},
 		grants:             map[string]fakeUploadGrant{},
 		deleteFailureKeys:  map[string]struct{}{},
 		deleteBlockingKeys: map[string]struct{}{},
+		deleteWaits:        map[string]deleteWait{},
 	}
 	store.server = httptest.NewServer(http.HandlerFunc(store.serveUpload))
 	t.Cleanup(store.server.Close)
@@ -86,6 +97,12 @@ func (s *fakeDirectUploadStore) objectCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.objects) + len(s.generatedObjects)
+}
+
+func (s *fakeDirectUploadStore) headCountFor(key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.headCalls[key]
 }
 
 func (s *fakeDirectUploadStore) replaceUploadMetadata(rawURL, uploadID string) {
@@ -114,6 +131,12 @@ func (s *fakeDirectUploadStore) blockNextHead() (<-chan struct{}, chan<- struct{
 func (s *fakeDirectUploadStore) failNextHead(err error) {
 	s.mu.Lock()
 	s.headError = err
+	s.mu.Unlock()
+}
+
+func (s *fakeDirectUploadStore) failHeadFor(key string, err error) {
+	s.mu.Lock()
+	s.headErrorKeys[key] = err
 	s.mu.Unlock()
 }
 
@@ -167,6 +190,14 @@ func (s *fakeDirectUploadStore) blockDeleteFor(key string) {
 	s.mu.Lock()
 	s.deleteBlockingKeys[key] = struct{}{}
 	s.mu.Unlock()
+}
+
+func (s *fakeDirectUploadStore) waitOnNextDelete(key string) (<-chan struct{}, chan<- struct{}) {
+	wait := deleteWait{started: make(chan struct{}), release: make(chan struct{})}
+	s.mu.Lock()
+	s.deleteWaits[key] = wait
+	s.mu.Unlock()
+	return wait.started, wait.release
 }
 
 func (s *fakeDirectUploadStore) cleanupKeys() []string {
@@ -257,6 +288,12 @@ func (s *fakeDirectUploadStore) Head(ctx context.Context, key string) (creation.
 		return creation.BlobInfo{}, err
 	}
 	s.mu.Lock()
+	s.headCalls[key]++
+	if err := s.headErrorKeys[key]; err != nil {
+		delete(s.headErrorKeys, key)
+		s.mu.Unlock()
+		return creation.BlobInfo{}, err
+	}
 	if s.headError != nil {
 		err := s.headError
 		s.headError = nil
@@ -351,6 +388,8 @@ func (s *fakeDirectUploadStore) Delete(ctx context.Context, key string) error {
 	s.mu.Lock()
 	s.deletedKeys = append(s.deletedKeys, key)
 	_, blocked := s.deleteBlockingKeys[key]
+	wait, waiting := s.deleteWaits[key]
+	delete(s.deleteWaits, key)
 	if _, failed := s.deleteFailureKeys[key]; failed {
 		s.mu.Unlock()
 		return errors.New("injected exact delete failure")
@@ -364,6 +403,16 @@ func (s *fakeDirectUploadStore) Delete(ctx context.Context, key string) error {
 		s.mu.Unlock()
 		<-ctx.Done()
 		return ctx.Err()
+	}
+	if waiting {
+		s.mu.Unlock()
+		close(wait.started)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-wait.release:
+		}
+		s.mu.Lock()
 	}
 	delete(s.objects, key)
 	delete(s.generatedObjects, key)

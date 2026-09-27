@@ -49,6 +49,10 @@ type MaterialRepository interface {
 	// inside the caller's transaction; materials outside the session are
 	// absent, and admission treats absence as a rejection fact.
 	LoadMaterialsInSession(ctx context.Context, tx TxExecutor, owner, sessionID UUID, ids []UUID) ([]ReferenceMaterial, error)
+	ListLegacyRemoved(ctx context.Context, after *UUID, limit int) ([]ReferenceMaterial, error)
+	WithObjectLock(ctx context.Context, key string, work func() error) error
+	ConfirmLegacyObject(ctx context.Context, tx TxExecutor, id UUID) (bool, error)
+	ReleaseDismissedReferences(ctx context.Context, tx TxExecutor, limit int) (int64, error)
 }
 
 // ReferenceMaterialUploadRepository persists creator-scoped upload leases.
@@ -68,8 +72,10 @@ type ReferenceMaterialUploadRepository interface {
 	// cleanup dormant for retained material or due for an unretained removal.
 	RecordFinalizedMaterialCleanup(ctx context.Context, tx TxExecutor, cleanup *ReferenceMaterialUpload) error
 	TerminalizeExpiredOrInvalid(ctx context.Context, tx TxExecutor, now time.Time, limit int) error
-	LockDueCleanups(ctx context.Context, tx TxExecutor, now time.Time, limit int) ([]ReferenceMaterialUpload, error)
+	LockDueCleanups(ctx context.Context, tx TxExecutor, now time.Time, limit int, skipKeys []string) ([]ReferenceMaterialUpload, error)
 	MarkCleanupAttempt(ctx context.Context, tx TxExecutor, id UUID, nextAttemptAt time.Time) (ReferenceMaterialUploadCleanup, error)
+	LockCleanupClaim(ctx context.Context, tx TxExecutor, id UUID, attempt int) (bool, error)
+	ObjectRetained(ctx context.Context, tx TxExecutor, key string) (bool, error)
 	MarkCleanupConfirmed(ctx context.Context, tx TxExecutor, id UUID, attempt int, confirmedAt time.Time) error
 }
 

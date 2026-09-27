@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
@@ -126,6 +127,93 @@ func (r *MaterialRepository) ListBySession(ctx context.Context, owner, sessionID
 		return materials[i].CreatedAt, materials[i].ID
 	})
 	return truncatePage(materials, limit), next, nil
+}
+
+func (r *MaterialRepository) ListLegacyRemoved(ctx context.Context, after *domain.UUID, limit int) ([]domain.ReferenceMaterial, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+materialColumns+`
+		FROM creation_reference_materials m
+		JOIN creation_sessions s ON s.id = m.session_id
+		WHERE m.removed_at IS NOT NULL AND (
+			s.deleted_at IS NULL OR (m.legacy_object_verified_at IS NULL AND EXISTS (
+				SELECT 1 FROM creation_generation_task_references retained
+				JOIN creation_generation_tasks task ON task.id = retained.task_id
+				WHERE retained.material_id = m.id AND task.dismissed_at IS NULL
+			))
+		)
+		  AND ($1::uuid IS NULL OR m.id > $1)
+		ORDER BY m.id LIMIT $2`, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("creation: list legacy removed materials: %w", err)
+	}
+	defer rows.Close()
+	materials := make([]domain.ReferenceMaterial, 0, limit)
+	for rows.Next() {
+		material, err := scanMaterialRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		materials = append(materials, material)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("creation: list legacy removed material rows: %w", err)
+	}
+	return materials, nil
+}
+
+// Serialize recovery and cleanup for one object without holding a write
+// transaction across object storage I/O.
+func (r *MaterialRepository) WithObjectLock(ctx context.Context, key string, work func() error) error {
+	conn, err := pgx.ConnectConfig(ctx, r.pool.Config().ConnConfig.Copy())
+	if err != nil {
+		return fmt.Errorf("creation: connect object lock: %w", err)
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = conn.Close(closeCtx)
+	}()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 320))`, key); err != nil {
+		return fmt.Errorf("creation: lock object: %w", err)
+	}
+	return work()
+}
+
+func (r *MaterialRepository) ConfirmLegacyObject(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE creation_reference_materials m
+		SET removed_at = CASE WHEN s.deleted_at IS NULL THEN NULL ELSE m.removed_at END,
+		    legacy_object_verified_at = CASE WHEN s.deleted_at IS NULL THEN NULL ELSE clock_timestamp() END
+		FROM creation_sessions s
+		WHERE m.id = $1 AND m.removed_at IS NOT NULL
+		  AND s.id = m.session_id
+		  AND (s.deleted_at IS NULL OR (m.legacy_object_verified_at IS NULL AND EXISTS (
+			SELECT 1 FROM creation_generation_task_references retained
+			JOIN creation_generation_tasks task ON task.id = retained.task_id
+			WHERE retained.material_id = m.id AND task.dismissed_at IS NULL
+		  )))`, id)
+	if err != nil {
+		return false, fmt.Errorf("creation: confirm legacy material object: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r *MaterialRepository) ReleaseDismissedReferences(ctx context.Context, tx domain.TxExecutor, limit int) (int64, error) {
+	tag, err := tx.Exec(ctx, `
+		WITH stale AS (
+			SELECT retained.task_id, retained.material_id
+			FROM creation_generation_task_references retained
+			JOIN creation_generation_tasks task ON task.id = retained.task_id
+			WHERE task.dismissed_at IS NOT NULL
+			ORDER BY retained.material_id, retained.task_id LIMIT $1
+		)
+		DELETE FROM creation_generation_task_references retained
+		USING stale
+		WHERE retained.task_id = stale.task_id AND retained.material_id = stale.material_id`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("creation: release dismissed task references: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // Remove hides one active material from Composer and reports whether any

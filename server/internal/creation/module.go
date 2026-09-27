@@ -225,7 +225,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 		Now: now, Wait: deps.ReferencePreparationWait, Jitter: deps.ReferencePreparationJitter,
 	})
 	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, objectStorageService, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
-	uploadCleanup := application.NewReferenceMaterialUploadCleanupWorker(uploadRepos, objectStorageService, tx, now)
+	uploadCleanup := application.NewReferenceMaterialUploadCleanupWorker(uploadRepos, materialRepos, objectStorageService, tx, now)
 	return &Module{
 		sessions:      creationhttp.NewSessionHandler(sessionService),
 		materials:     creationhttp.NewMaterialHandler(materialService),

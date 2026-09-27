@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -16,10 +17,10 @@ const (
 )
 
 // ReferenceMaterialUploadCleanupWorker converges expired, ineligible, and
-// already-terminal upload authorities. PostgreSQL claims stay short; exact-key
-// provider deletes always run after commit.
+// already-terminal upload authorities and repairs old Composer removals.
 type ReferenceMaterialUploadCleanupWorker struct {
 	uploads   domain.ReferenceMaterialUploadRepository
+	materials domain.MaterialRepository
 	storage   *ObjectStorageConnectionService
 	runner    domain.WriteRunner
 	now       func() time.Time
@@ -28,6 +29,7 @@ type ReferenceMaterialUploadCleanupWorker struct {
 
 func NewReferenceMaterialUploadCleanupWorker(
 	uploads domain.ReferenceMaterialUploadRepository,
+	materials domain.MaterialRepository,
 	storage *ObjectStorageConnectionService,
 	runner domain.WriteRunner,
 	now func() time.Time,
@@ -37,6 +39,7 @@ func NewReferenceMaterialUploadCleanupWorker(
 	}
 	return &ReferenceMaterialUploadCleanupWorker{
 		uploads:   uploads,
+		materials: materials,
 		storage:   storage,
 		runner:    runner,
 		now:       now,
@@ -65,12 +68,29 @@ func (w *ReferenceMaterialUploadCleanupWorker) Run(ctx context.Context) error {
 
 func (w *ReferenceMaterialUploadCleanupWorker) runOnce(ctx context.Context) error {
 	now := w.now().UTC()
+	if err := w.runner.Run(ctx, func(scope domain.WriteScope) error {
+		return w.uploads.TerminalizeExpiredOrInvalid(ctx, scope.Tx(), now, referenceMaterialCleanupBatchSize)
+	}); err != nil {
+		return err
+	}
+	store, _, err := w.storage.ResolveStore(ctx)
+	if err != nil {
+		return nil
+	}
+	uncertainKeys, err := w.recoverLegacy(ctx, store)
+	if err != nil {
+		return err
+	}
+	if err := w.runner.Run(ctx, func(scope domain.WriteScope) error {
+		_, err := w.materials.ReleaseDismissedReferences(ctx, scope.Tx(), referenceMaterialCleanupBatchSize)
+		return err
+	}); err != nil {
+		return err
+	}
+	now = w.now().UTC()
 	claims := make([]domain.ReferenceMaterialUploadCleanup, 0, referenceMaterialCleanupBatchSize)
 	if err := w.runner.Run(ctx, func(scope domain.WriteScope) error {
-		if err := w.uploads.TerminalizeExpiredOrInvalid(ctx, scope.Tx(), now, referenceMaterialCleanupBatchSize); err != nil {
-			return err
-		}
-		due, err := w.uploads.LockDueCleanups(ctx, scope.Tx(), now, referenceMaterialCleanupBatchSize)
+		due, err := w.uploads.LockDueCleanups(ctx, scope.Tx(), now, referenceMaterialCleanupBatchSize, uncertainKeys)
 		if err != nil {
 			return err
 		}
@@ -86,12 +106,10 @@ func (w *ReferenceMaterialUploadCleanupWorker) runOnce(ctx context.Context) erro
 			claims = append(claims, claim)
 		}
 		return nil
-	}); err != nil || len(claims) == 0 {
+	}); err != nil {
 		return err
 	}
-
-	store, _, err := w.storage.ResolveStore(ctx)
-	if err != nil {
+	if len(claims) == 0 {
 		return nil
 	}
 	var wait sync.WaitGroup
@@ -115,22 +133,77 @@ func (w *ReferenceMaterialUploadCleanupWorker) runOnce(ctx context.Context) erro
 	return nil
 }
 
+func (w *ReferenceMaterialUploadCleanupWorker) recoverLegacy(ctx context.Context, store domain.ObjectStorageBlobStore) ([]string, error) {
+	// ponytail: scan all legacy rows before cleanup each poll; add a durable
+	// checkpoint if a large legacy dataset makes this sweep too slow.
+	var after *domain.UUID
+	uncertain := map[string]bool{}
+	for {
+		materials, err := w.materials.ListLegacyRemoved(ctx, after, referenceMaterialCleanupBatchSize)
+		if err != nil {
+			return nil, err
+		}
+		for _, material := range materials {
+			material := material
+			if err := w.materials.WithObjectLock(ctx, material.BlobKey, func() error {
+				info, err := store.Head(ctx, material.BlobKey)
+				if err != nil {
+					if !errors.Is(err, domain.ErrBlobNotFound) {
+						uncertain[material.BlobKey] = true
+					}
+					return nil
+				}
+				if info.ByteSize != material.ByteSize || info.ContentType != material.MimeType {
+					return nil
+				}
+				return w.runner.Run(ctx, func(scope domain.WriteScope) error {
+					_, err := w.materials.ConfirmLegacyObject(ctx, scope.Tx(), material.ID)
+					return err
+				})
+			}); err != nil {
+				return nil, err
+			}
+		}
+		if len(materials) < referenceMaterialCleanupBatchSize {
+			keys := make([]string, 0, len(uncertain))
+			for key := range uncertain {
+				keys = append(keys, key)
+			}
+			return keys, nil
+		}
+		last := materials[len(materials)-1].ID
+		after = &last
+	}
+}
+
 func (w *ReferenceMaterialUploadCleanupWorker) cleanClaim(ctx context.Context, store domain.ObjectStorageBlobStore, claim domain.ReferenceMaterialUploadCleanup) {
 	deleteCtx, cancel := context.WithTimeout(ctx, referenceMaterialCleanupTimeout)
 	defer cancel()
-	if err := store.Delete(deleteCtx, claim.ObjectKey); err != nil {
-		return
-	}
-	confirmedAt := w.now().UTC()
-	if confirmedAt.Before(claim.FinalizeDeadline) {
-		return
-	}
-	confirmCtx, cancelConfirm := context.WithTimeout(context.WithoutCancel(ctx), referenceMaterialCleanupTimeout)
-	defer cancelConfirm()
-	if err := w.runner.Run(confirmCtx, func(scope domain.WriteScope) error {
-		return w.uploads.MarkCleanupConfirmed(confirmCtx, scope.Tx(), claim.UploadID, claim.Attempt, confirmedAt)
+	if err := w.materials.WithObjectLock(deleteCtx, claim.ObjectKey, func() error {
+		eligible := false
+		if err := w.runner.Run(deleteCtx, func(scope domain.WriteScope) error {
+			current, err := w.uploads.LockCleanupClaim(deleteCtx, scope.Tx(), claim.UploadID, claim.Attempt)
+			if err != nil || !current {
+				return err
+			}
+			retained, err := w.uploads.ObjectRetained(deleteCtx, scope.Tx(), claim.ObjectKey)
+			eligible = !retained
+			return err
+		}); err != nil || !eligible {
+			return err
+		}
+		if err := store.Delete(deleteCtx, claim.ObjectKey); err != nil {
+			return err
+		}
+		confirmedAt := w.now().UTC()
+		if confirmedAt.Before(claim.FinalizeDeadline) {
+			return nil
+		}
+		return w.runner.Run(deleteCtx, func(scope domain.WriteScope) error {
+			return w.uploads.MarkCleanupConfirmed(deleteCtx, scope.Tx(), claim.UploadID, claim.Attempt, confirmedAt)
+		})
 	}); err != nil {
-		slog.Warn(OrphanBlobLogWarning, "code", "cleanup_confirmation_failed")
+		slog.Warn(OrphanBlobLogWarning, "code", "cleanup_failed")
 	}
 }
 

@@ -1,10 +1,12 @@
 package integrationtest
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *testing.T) {
@@ -80,8 +82,24 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 		return "", nil
 	}
 	updatedAt, availability := read()
-	if !reflect.DeepEqual(availability, []bool{true, true, true, true}) {
-		t.Fatalf("healthy availability=%v", availability)
+	if !reflect.DeepEqual(availability, []bool{false, true, true, false}) {
+		t.Fatalf("pre-recovery availability=%v", availability)
+	}
+	workerCtx, cancel := context.WithCancel(h.ctx)
+	done := make(chan error, 1)
+	go func() { done <- h.creation.RunWorkers(workerCtx) }()
+	defer func() { cancel(); <-done }()
+	deadline := time.Now().Add(5 * time.Second)
+	for countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_materials WHERE id = $1::uuid AND removed_at IS NULL`, available) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("legacy material was not restored")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if after, got := read(); !reflect.DeepEqual(got, []bool{true, true, true, true}) {
+		t.Fatalf("recovered availability=%v", got)
+	} else {
+		updatedAt = after
 	}
 	if _, err := h.ownerPool.Exec(h.ctx, `DELETE FROM creation_generation_task_references WHERE task_id = $1::uuid AND material_id IN ($2::uuid, $3::uuid)`, taskID, missingRow, missingRetention); err != nil {
 		t.Fatalf("remove retention: %v", err)

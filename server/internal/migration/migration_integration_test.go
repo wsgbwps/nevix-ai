@@ -63,7 +63,7 @@ func TestApplyCreatesBaselineAndGooseLedgerOnEmptyDatabase(t *testing.T) {
 		`has_table_privilege('identity_app', 'public.creation_generation_task_references', 'SELECT')`:                                                                                                          true,
 		`has_table_privilege('identity_app', 'public.creation_generation_task_references', 'INSERT')`:                                                                                                          true,
 		`has_table_privilege('identity_app', 'public.creation_generation_task_references', 'UPDATE')`:                                                                                                          false,
-		`has_table_privilege('identity_app', 'public.creation_generation_task_references', 'DELETE')`:                                                                                                          false,
+		`has_table_privilege('identity_app', 'public.creation_generation_task_references', 'DELETE')`:                                                                                                          true,
 		`has_function_privilege('identity_app', 'public.creation_release_removed_material_retention()', 'EXECUTE')`:                                                                                            true,
 		`EXISTS (SELECT FROM pg_proc, LATERAL aclexplode(proacl) acl WHERE oid = 'public.creation_release_removed_material_retention()'::regprocedure AND acl.grantee = 0 AND acl.privilege_type = 'EXECUTE')`: false,
 		`has_table_privilege('identity_app', 'public.users', 'SELECT')`:                                                                                                                                        true,

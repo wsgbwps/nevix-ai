@@ -225,20 +225,24 @@ func (r *ReferenceMaterialUploadRepository) TerminalizeExpiredOrInvalid(ctx cont
 	return nil
 }
 
-func (r *ReferenceMaterialUploadRepository) LockDueCleanups(ctx context.Context, tx domain.TxExecutor, now domain.Time, limit int) ([]domain.ReferenceMaterialUpload, error) {
+func (r *ReferenceMaterialUploadRepository) LockDueCleanups(ctx context.Context, tx domain.TxExecutor, now domain.Time, limit int, skipKeys []string) ([]domain.ReferenceMaterialUpload, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT `+referenceMaterialUploadColumns+`
 		FROM creation_reference_material_uploads u
 		WHERE u.status IN ('terminal', 'finalized') AND u.cleanup_confirmed_at IS NULL
 		  AND u.cleanup_next_attempt_at <= $1
+		  AND u.object_key <> ALL(COALESCE($3::text[], ARRAY[]::text[]))
 		  AND NOT EXISTS (
 			SELECT 1 FROM creation_reference_materials material
+			JOIN creation_sessions session ON session.id = material.session_id
 			WHERE material.blob_key = u.object_key AND material.removed_at IS NULL
+			  AND session.deleted_at IS NULL
 		  )
 		  AND NOT EXISTS (
 			SELECT 1 FROM creation_generation_task_references retained
 			JOIN creation_reference_materials material ON material.id = retained.material_id
-			WHERE material.blob_key = u.object_key
+			JOIN creation_generation_tasks task ON task.id = retained.task_id
+			WHERE material.blob_key = u.object_key AND task.dismissed_at IS NULL
 		  )
 		  AND NOT EXISTS (
 			SELECT 1 FROM creation_team_publication_references reference
@@ -248,7 +252,7 @@ func (r *ReferenceMaterialUploadRepository) LockDueCleanups(ctx context.Context,
 		  )
 		ORDER BY u.cleanup_next_attempt_at, u.id
 		FOR UPDATE SKIP LOCKED
-		LIMIT $2`, now, limit)
+		LIMIT $2`, now, limit, skipKeys)
 	if err != nil {
 		return nil, fmt.Errorf("creation: lock due reference material cleanup: %w", err)
 	}
@@ -284,6 +288,47 @@ func (r *ReferenceMaterialUploadRepository) MarkCleanupAttempt(ctx context.Conte
 		return domain.ReferenceMaterialUploadCleanup{}, fmt.Errorf("creation: claim reference material cleanup: %w", err)
 	}
 	return cleanup, nil
+}
+
+func (r *ReferenceMaterialUploadRepository) LockCleanupClaim(ctx context.Context, tx domain.TxExecutor, id domain.UUID, attempt int) (bool, error) {
+	var found int
+	err := tx.QueryRow(ctx, `
+		SELECT 1 FROM creation_reference_material_uploads
+		WHERE id = $1 AND cleanup_attempt_count = $2
+		  AND status IN ('terminal', 'finalized') AND cleanup_confirmed_at IS NULL
+		FOR UPDATE`, id, attempt).Scan(&found)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("creation: lock reference cleanup claim: %w", err)
+	}
+	return true, nil
+}
+
+func (r *ReferenceMaterialUploadRepository) ObjectRetained(ctx context.Context, tx domain.TxExecutor, key string) (bool, error) {
+	var retained bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM creation_reference_materials material
+			JOIN creation_sessions session ON session.id = material.session_id
+			WHERE material.blob_key = $1 AND material.removed_at IS NULL
+			  AND session.deleted_at IS NULL
+		) OR EXISTS (
+			SELECT 1 FROM creation_generation_task_references reference
+			JOIN creation_reference_materials material ON material.id = reference.material_id
+			JOIN creation_generation_tasks task ON task.id = reference.task_id
+			WHERE material.blob_key = $1 AND task.dismissed_at IS NULL
+		) OR EXISTS (
+			SELECT 1 FROM creation_team_publication_references reference
+			JOIN creation_team_publications publication ON publication.id = reference.publication_id
+			WHERE reference.blob_key = $1
+			  AND publication.withdrawn_at IS NULL AND publication.restricted_at IS NULL
+		)`, key).Scan(&retained)
+	if err != nil {
+		return false, fmt.Errorf("creation: inspect object retention: %w", err)
+	}
+	return retained, nil
 }
 
 func (r *ReferenceMaterialUploadRepository) MarkCleanupConfirmed(ctx context.Context, tx domain.TxExecutor, id domain.UUID, attempt int, confirmedAt domain.Time) error {
