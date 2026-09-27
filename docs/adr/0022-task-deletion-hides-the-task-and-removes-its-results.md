@@ -4,6 +4,8 @@
 
 已接受 — 2026-09-21。在 [ADR-0021](0021-asset-deletion-hides-task-results.md) 的可见性移除之外，新增任务级隐藏这一领域事实，并复用其既有的 Media Asset 逻辑删除机制；ADR-0021 的否决原样成立，不因本 ADR 修订。
 
+2026-09-27 修订：任务删除同时释放该任务的参考素材保留关系；结果对象仍按本 ADR 逻辑删除。参考素材的共享对象清理与历史读取按 [ADR-0024](0024-draft-reference-and-task-retention-lifetimes.md)。
+
 自包含实施规格见 [#280](https://github.com/wsgbwps/nevix-ai/issues/280)；本 ADR 不表示源码已经实现。
 
 ## 背景
@@ -14,7 +16,7 @@
 
 ## 决策
 
-**任务删除 = 任务隐藏（`creation_generation_tasks.dismissed_at`）+ 结果移除（既有 Media Asset `deleted_at` 逻辑删除）：一条 `DELETE /creation/tasks/{taskID}`、一次事务。**
+**任务删除 = 任务隐藏（`creation_generation_tasks.dismissed_at`）+ 结果移除（既有 Media Asset `deleted_at` 逻辑删除）+ 释放该任务的参考素材保留关系：一条 `DELETE /creation/tasks/{taskID}`、一次事务。**
 
 ### 任务隐藏是新的领域事实
 
@@ -28,11 +30,12 @@ ADR-0021 否决的是「只删任务级展示、保留槽位结果」——用�
 
 ### 可见行为
 
-- 被删任务不再出现在 `/creation/sessions/{sessionID}/tasks` 的任务列表；**任务详情仍可读**——`GET /creation/tasks/{taskID}` 照旧返回事实。隐藏的只是列表这个浏览面。
+- 被删任务不再出现在 `/creation/sessions/{sessionID}/tasks` 的任务列表；**任务详情仍可读**——`GET /creation/tasks/{taskID}` 照旧返回冻结事实，但该任务不再授权参考素材媒体读取。
 - 该任务尚未删除的全部 Media Asset 一并逻辑删除，随之离开 Asset Library。
 - **只有终态任务可删**（成功 / 失败 / 取消 / 未知结局）。运行中与排队中的卡保持现状。
 - **未知结局的任务可删**。代价是重做 / 重试入口随卡片一起消失；这是接受的取舍，不是遗漏。
 - **有效 Publication 不撤回**：发布生命周期独立于任务与资产，团队仍可在 Inspiration Page 看到并复用它。
+- **其他保留者不受影响**：删除任务 A 只释放 A 的参考素材关系；任务 B、有效素材记录与有效 Publication 继续保留同一底层对象。最后一个有效保留者消失后才进入参考素材对象清理。
 - 响应 `200` + 小响应体（非 204），携带被移除的槽位序号与跳过项；形状照 `deleteSession` 下移一层。
 
 ### 受限结果跳过，不阻断
@@ -41,7 +44,7 @@ ADR-0021 否决的是「只删任务级展示、保留槽位结果」——用�
 
 ### 不做什么
 
-- **不真删、不回收字节。** 删除是纯逻辑删除；存储占用不因任务删除下降。生成侧仍无表级 `DELETE` 授权：迁移只新增 `dismissed_at` 列与列级 `GRANT UPDATE (dismissed_at)`（照 `server/internal/migration/migrations/0021_asset_library.sql` 给 assets 加 `UPDATE (deleted_at)` 的手法），属 [ADR-0015](0015-single-tenant-user-system-and-go-authorization.md) 最小权限。
+- **不真删任务、槽位或结果对象。** 任务与 Media Asset 仍为逻辑删除，生成结果字节不因任务删除回收。参考素材关系须在同一事务中释放，底层参考素材对象仅在最后一个有效保留者消失后由既有 cleanup worker 清理。任务、槽位和资产表仍无表级 `DELETE` 授权；仅 task-to-material 关系表增加 `DELETE` 授权，Go 在删除事务中限定为当前任务，遵循 [ADR-0015](0015-single-tenant-user-system-and-go-authorization.md) 的最小权限。
 - **不改写终态、不销毁用量预留。** 槽位终态与用量凭证一律留在原处。
 - **不设 409。** 非终态目标与重复 DELETE 共用同一个 404——一个 guard、一条语句。客户端不会对这两种情况区别对待，两个 guard、两条语句换不来差别。
 - **不改治理计数。** `CountTasksCreatedSince` 不因隐藏而变：被删的任务确实消耗过配额，隐藏是可见性操作，不是配额回滚。别让后人"修"它。
@@ -50,6 +53,7 @@ ADR-0021 否决的是「只删任务级展示、保留槽位结果」——用�
 
 - **契约**：`contracts/creation.yaml` 的 `/creation/tasks/{taskID}` 增加 `delete`（`deleteGenerationTask`），返回 `TaskDeletionResult`（`removed_slot_indexes` + `skipped`，`skipped` 永不为 `null`）。不新增错误码，`ErrTaskNotFound` 沿用既有 404 映射。
 - **实现**：终态规则已在 `TaskIsTerminal`，repo 层 guard 是它的 SQL 孪生；任务行先于资产行加锁（creation 写方一律父先子后）。
+- **保留关系**：同一事务删除该任务的 task-to-material 关系，并按每个受影响的精确对象登记 cleanup fact；执行删除前 worker 再确认素材记录、其他未删除任务和有效 Publication 均不保留它。
 - **失效通知**：写事务内发一次 creation 失效事件（复用现有 hub），已打开的 Workbench 随之收敛。
 - **判据推进**：同一次写事务一并推进来源任务的 `updated_at`（[ADR-0016](0016-ai-creation-v1-trusted-seams.md) 的判据合同：每次可见详情变化都必须改变它）。
 
@@ -67,9 +71,9 @@ ADR-0021 否决的是「只删任务级展示、保留槽位结果」——用�
 - **跳过项的报告面在工作台范围**：卡片已经消失，报告挂不回卡上，因此是一条 `role="status"` 小字，存活到下一次任务操作或重新进入工作台。`already_removed` 不计入该行（后置条件已成立），只在 wire 上留痕。
 - **被跳过的受限结果按定义仍留在 Asset Library**：这是"任务走了、结果留下"的唯一一面，且只发生在限制仍 active 时。
 - **任务删除不撤回有效 Publication**：已发布作品在 Inspiration Page 照旧可见、可复用。Asset 与 Publication 生命周期互相独立，这是有意的，不是缺陷。
-- **任务详情仍可读**：直接取详情的追溯与审计读取不受隐藏影响；隐藏只作用于列表投影。
+- **任务详情仍可读**：直接取详情的追溯与审计读取不受隐藏影响；冻结规格保留，但已删除任务不再凭原保留关系取得参考媒体。
 - **未知结局任务可删的代价**：重做 / 重试入口随卡片消失，而它可能是拿回那次生成结果的唯一路径。已付费的未完成槽位随之失去入口——与 ADR-0021 删光最后一张资产同款取舍，有意为之。
 - **非终态目标与重复 DELETE 都回答 404**：客户端必须把重复删除读成"目标已消失"，而不是需要呈现的错误。
 - **响应丢失后的重试答 404**：桌面按失败处理，卡片留到下一次 reconcile 才消失。删除失败本身是静默的（与取消任务一致），卡片还在是唯一的反馈；要错误行是第二个决定。
 - **治理计数不因隐藏而变**（见「不做什么」）：`CountTasksCreatedSince` 是已消耗配额的事实，不是活动任务的计数。
-- 列级 `GRANT` 是一次授权变更，按 [`docs/agents/delivery.md`](../../docs/agents/delivery.md) 属高风险合并门，需要人在合并前批准。
+- task-to-material 关系表的 `DELETE` 授权是一次权限变更，按 [`docs/agents/delivery.md`](../../docs/agents/delivery.md) 属高风险合并门，需要人在合并前批准。

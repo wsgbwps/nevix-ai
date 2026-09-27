@@ -13,7 +13,7 @@ Server 中 canonical owner 名为 `creation`、与 Desktop AI Creation Domain �
 _Avoid_: Video Generation Module, Image Generation Module, Provider Module, videogen
 
 **Reference Material（参考素材）**:
-归当前 User 所有、供 Generation Specification 引用的 creator-private 媒体记录；它可由 Creator 上传并确认权利，也可从有效 Team Publication 创建而不复制已验证的不可变媒体对象。从 Composer 移除会停止列表与新任务准入；只有在其他 User 记录、Generation Task 或有效 Team Publication 都不再保留同一对象后才进入清理。它与 Provider 传输产生的临时副本彼此独立。
+归当前 User 所有、供 Generation Specification 引用的 creator-private 媒体记录；它可由 Creator 上传并确认权利，也可从有效 Team Publication 创建而不复制已验证的不可变媒体对象。从 Composer 移除仅解绑设备本地 Draft，不删除记录；每张任务独立冻结并保留其引用。只有有效会话中的素材记录、未删除任务的保留关系和有效 Team Publication 都不再引用同一对象后才进入清理。它与 Provider 传输产生的临时副本彼此独立。
 _Avoid_: Permanent Object, Provider Asset, Upload
 
 **Unavailable Historical Reference（历史参考素材不可用）**:

@@ -12,6 +12,7 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 > 2026-09-07：Generation Parameter 入册，命名生成意图的参数字段族及其单一权威清单，取代散落的「任务参数」说法。
 > 2026-09-20：结果移除入册，命名「删除 Media Asset 在来源 TaskCard 上的呈现」，与「删除任务结果」这一会被读成改写终态的说法区分（[ADR-0021](../../docs/adr/0021-asset-deletion-hides-task-results.md)，[#262](https://github.com/wsgbwps/nevix-ai/issues/262)）。
 > 2026-09-21：任务删除 / 任务隐藏入册，命名「隐藏一张终态 Generation Task 并移除其结果」这一条命令，与「结果移除」区分（[ADR-0022](../../docs/adr/0022-task-deletion-hides-the-task-and-removes-its-results.md)，[#280](https://github.com/wsgbwps/nevix-ai/issues/280)）。
+> 2026-09-27：参考素材从编辑器移除改为 Draft 解绑；任务各自保留冻结引用，任务删除释放自己的保留关系（[ADR-0024](../../docs/adr/0024-draft-reference-and-task-retention-lifetimes.md)）。
 
 **User**:
 使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
@@ -86,7 +87,7 @@ _Avoid_: Conversation List, Chat History, Workspace Sidebar
 _Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 服务端草稿
 
 **Reference Material**:
-User 向当前会话上传或经有效 Team Publication 复用、供生成引用的媒体记录（图片/视频/音频）；记录属于当前 User，做同款产生新的素材 id 但不复制底层媒体内容。它可从 Composer 独立移除；提交时冻结进 Generation Specification 的引用（素材 id、role、kind、claims 版本）拥有独立的历史展示生命周期，移除后不能进入新任务，但已有 TaskCard 仍可重新授权缩略图。它与 Asset Library 的 Media Asset 分属两个生命阶段。
+User 向当前会话上传或经有效 Team Publication 复用、供生成引用的媒体记录（图片/视频/音频）；记录属于当前 User，做同款产生新的素材 id 但不复制底层媒体内容。从 Composer 移除只解绑本地 Draft，不删除记录；提交时每张任务独立冻结并保留引用（素材 id、role、kind、claims 版本），“重新编辑”从该任务恢复。多张任务可共享同一底层文件；它与 Asset Library 的 Media Asset 分属两个生命阶段。
 _Avoid_: 素材库, Attachment, 上传文件
 
 **Unavailable Historical Reference（历史参考素材不可用）**:
@@ -146,7 +147,7 @@ _Avoid_: Media Asset Domain, Asset Workspace
 _Avoid_: 删除任务结果（会被读成改写终态）, 槽位回退, 结果隐藏
 
 **任务删除 / 任务隐藏**:
-User 删除一张终态 Generation Task（成功 / 失败 / 取消 / 未知结局）的单一命令：任务记下隐藏事实而不再出现在 Creation Workbench 的任务列表，同时把该任务尚未删除的全部 Media Asset 逻辑删除、离开 Asset Library。隐藏是粘性的——部分成功或结局未知的任务日后落地结果也不会让卡片回来；任务详情仍可读，有效 Publication 不撤回，字节不回收。受限（restricted）结果删不掉时跳过并在响应中报告，不阻断任务隐藏。
+User 删除一张终态 Generation Task（成功 / 失败 / 取消 / 未知结局）的单一命令：任务记下隐藏事实而不再出现在 Creation Workbench 的任务列表，同时把该任务尚未删除的全部 Media Asset 逻辑删除、离开 Asset Library，并释放该任务的参考素材保留关系。隐藏是粘性的——部分成功或结局未知的任务日后落地结果也不会让卡片回来；任务详情仍可读，有效 Publication 不撤回，生成结果字节不回收，参考素材文件仅在最后一个有效保留者消失后清理。受限（restricted）结果删不掉时跳过并在响应中报告，不阻断任务隐藏。
 _Avoid_: 删除任务结果, 归档, 会话删除（`deleteSession` 是另一条命令）
 
 **Authentication Domain**:
