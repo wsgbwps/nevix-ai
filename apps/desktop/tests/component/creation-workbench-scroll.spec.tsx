@@ -341,6 +341,48 @@ test('scrolling back to the bottom dismisses the return button', async ({ mount,
   await expect(page.getByTestId('back-to-bottom')).toHaveCount(0)
 })
 
+test('reference recovery notice stays clear of the return button', async ({ mount, page }) => {
+  const draft: LocalDraftRecord = {
+    prompt: 'missing reference',
+    promptDocument: { version: 1, nodes: [{ type: 'mention', materialId: 'missing-material' }] },
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'text-to-image',
+    ratio: '4:3',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: []
+  }
+  await mount(
+    <CreationWorkbenchRealShellStory
+      drafts={{ [scriptedSessionId]: draft }}
+      taskScript={{ tasks: tallImageTasks('recovery').slice(0, 2) }}
+    />
+  )
+  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+  const scroller = await settledScroller(page)
+  const recovery = page.getByRole('status').filter({
+    hasText: 'Unavailable references were removed and their mentions kept as text.'
+  })
+  await expect(recovery).toBeVisible()
+
+  await userScrollTo(scroller, 'top')
+  const pill = page.getByTestId('back-to-bottom')
+  await expect(pill).toBeVisible()
+  const [recoveryBox, pillBox] = await Promise.all([recovery.boundingBox(), pill.boundingBox()])
+  expect(recoveryBox).not.toBeNull()
+  expect(pillBox).not.toBeNull()
+  const overlapWidth =
+    Math.min(recoveryBox!.x + recoveryBox!.width, pillBox!.x + pillBox!.width) -
+    Math.max(recoveryBox!.x, pillBox!.x)
+  const overlapHeight =
+    Math.min(recoveryBox!.y + recoveryBox!.height, pillBox!.y + pillBox!.height) -
+    Math.max(recoveryBox!.y, pillBox!.y)
+  expect(Math.min(overlapWidth, overlapHeight)).toBeLessThanOrEqual(0)
+})
+
 test('workspace and session-list scrolling stay independent in the shell', async ({
   mount,
   page

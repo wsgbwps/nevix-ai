@@ -393,7 +393,7 @@ export function CreationComposer({
       {composer.referenceRecoveryShown && (
         <div
           role="status"
-          className="bg-card text-warning absolute right-0 bottom-full mb-2 rounded-lg border px-3 py-2 text-[11px] shadow-lg"
+          className={`bg-card text-warning absolute right-0 bottom-full rounded-lg border px-3 py-2 text-[11px] shadow-lg ${backToBottomVisible ? 'mb-12' : 'mb-2'}`}
         >
           <button type="button" onClick={composer.dismissReferenceRecovery}>
             {t('composer.mention.recovered')}
