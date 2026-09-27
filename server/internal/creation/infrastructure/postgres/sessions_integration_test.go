@@ -66,3 +66,44 @@ func TestSessionGetInTxLocksAgainstConcurrentSoftDelete(t *testing.T) {
 		t.Fatalf("soft delete after finalize lock released: %v", err)
 	}
 }
+
+func TestTaskAdmissionSessionLockPreventsConcurrentDeletion(t *testing.T) {
+	ownerURL, runtimeURL := requireIntegrationEnv(t)
+	ctx := context.Background()
+	if _, err := migration.Apply(ctx, ownerURL); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect owner pool: %v", err)
+	}
+	defer owner.Close()
+	runtime, err := pgxpool.New(ctx, runtimeURL)
+	if err != nil {
+		t.Fatalf("connect runtime pool: %v", err)
+	}
+	defer runtime.Close()
+	creator := fixtureUser(t, ownerURL)
+	sessionID := fixtureSession(t, ownerURL, owner, creator)
+	tx, err := runtime.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin admission: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := NewGenerationTaskRepository(runtime).LoadSessionForAdmission(ctx, tx, creator, sessionID); err != nil {
+		t.Fatalf("lock session for admission: %v", err)
+	}
+	deleter, err := owner.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire deleter: %v", err)
+	}
+	defer deleter.Release()
+	if _, err := deleter.Exec(ctx, `SET lock_timeout = '100ms'`); err != nil {
+		t.Fatalf("set lock timeout: %v", err)
+	}
+	_, err = deleter.Exec(ctx, `UPDATE creation_sessions SET deleted_at = now() WHERE id = $1`, sessionID)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+		t.Fatalf("deletion bypassed admission session lock: %v", err)
+	}
+}

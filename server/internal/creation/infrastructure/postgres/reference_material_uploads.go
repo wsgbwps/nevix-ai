@@ -341,12 +341,14 @@ func (r *ReferenceMaterialUploadRepository) MarkCleanupConfirmed(ctx context.Con
 			RETURNING object_key
 		)
 		DELETE FROM creation_reference_materials material
-		USING confirmed
-		WHERE material.blob_key = confirmed.object_key AND material.removed_at IS NOT NULL
+		USING confirmed, creation_sessions session
+		WHERE material.blob_key = confirmed.object_key AND session.id = material.session_id
+		  AND (material.removed_at IS NOT NULL OR session.deleted_at IS NOT NULL)
 		  AND NOT EXISTS (
 			SELECT 1 FROM creation_generation_task_references retained
 			JOIN creation_reference_materials source ON source.id = retained.material_id
-			WHERE source.blob_key = material.blob_key
+			JOIN creation_generation_tasks task ON task.id = retained.task_id
+			WHERE source.blob_key = material.blob_key AND task.dismissed_at IS NULL
 		  )
 		  AND NOT EXISTS (
 			SELECT 1 FROM creation_team_publication_references reference

@@ -180,7 +180,20 @@ func (r *MaterialRepository) WithObjectLock(ctx context.Context, key string, wor
 }
 
 func (r *MaterialRepository) ConfirmLegacyObject(ctx context.Context, tx domain.TxExecutor, id domain.UUID) (bool, error) {
-	tag, err := tx.Exec(ctx, `
+	// Keep session deletion behind recovery's material and cleanup-fact writes.
+	var found int
+	err := tx.QueryRow(ctx, `SELECT 1 FROM creation_sessions s
+		JOIN creation_reference_materials m ON m.session_id = s.id
+		WHERE m.id = $1 FOR SHARE OF s`, id).Scan(&found)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("creation: lock legacy material session: %w", err)
+	}
+	var key string
+	var restored bool
+	err = tx.QueryRow(ctx, `
 		UPDATE creation_reference_materials m
 		SET removed_at = CASE WHEN s.deleted_at IS NULL THEN NULL ELSE m.removed_at END,
 		    legacy_object_verified_at = CASE WHEN s.deleted_at IS NULL THEN NULL ELSE clock_timestamp() END
@@ -191,11 +204,22 @@ func (r *MaterialRepository) ConfirmLegacyObject(ctx context.Context, tx domain.
 			SELECT 1 FROM creation_generation_task_references retained
 			JOIN creation_generation_tasks task ON task.id = retained.task_id
 			WHERE retained.material_id = m.id AND task.dismissed_at IS NULL
-		  )))`, id)
+		  )))
+		RETURNING m.blob_key, m.removed_at IS NULL`, id).Scan(&key, &restored)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("creation: confirm legacy material object: %w", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	if restored {
+		if _, err := tx.Exec(ctx, `UPDATE creation_reference_material_uploads
+			SET cleanup_attempt_count = 0, cleanup_next_attempt_at = NULL
+			WHERE object_key = $1 AND status = 'finalized' AND cleanup_confirmed_at IS NULL`, key); err != nil {
+			return false, fmt.Errorf("creation: disarm recovered material cleanup: %w", err)
+		}
+	}
+	return true, nil
 }
 
 func (r *MaterialRepository) ReleaseDismissedReferences(ctx context.Context, tx domain.TxExecutor, limit int) (int64, error) {

@@ -134,9 +134,6 @@ func TestLegacyRemovedMaterialsRecoverOnlyWhenTheirObjectsExist(t *testing.T) {
 	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_materials WHERE id = $1::uuid AND blob_key = $2 AND claims_version = $3`, retained, retainedKey, retainedClaims) != 1 {
 		t.Fatal("recovery changed the material identity, rights claim, or object key")
 	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_material_uploads WHERE material_id = $1::uuid AND cleanup_attempt_count = 1`, unretained) != 1 {
-		t.Fatal("cleanup claimed the object before legacy recovery")
-	}
 	for _, key := range h.directStore.cleanupKeys() {
 		if key == unretainedKey {
 			t.Fatal("claimed cleanup deleted a recovered object")
@@ -539,8 +536,8 @@ func TestLegacyDismissedLastHolderArmsExactKeyCleanup(t *testing.T) {
 	if _, err := h.ownerPool.Exec(h.ctx, `UPDATE creation_sessions SET deleted_at = now() WHERE id = $1::uuid`, intent.SessionID); err != nil {
 		t.Fatal(err)
 	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_material_uploads WHERE material_id = $1::uuid AND cleanup_next_attempt_at IS NULL`, materialID) != 1 {
-		t.Fatal("fixture cleanup was already due")
+	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_material_uploads WHERE material_id = $1::uuid AND cleanup_next_attempt_at IS NOT NULL`, materialID) != 1 {
+		t.Fatal("session deletion did not schedule cleanup after its last effective holder disappeared")
 	}
 	workerCtx, cancel := context.WithCancel(h.ctx)
 	done := make(chan error, 1)

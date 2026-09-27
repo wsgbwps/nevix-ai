@@ -11,10 +11,18 @@ import (
 type dismissTaskRepoStub struct {
 	domain.GenerationTaskRepository
 	dismissed bool
+	released  *bool
 }
 
 func (r dismissTaskRepoStub) Dismiss(context.Context, domain.TxExecutor, domain.UUID, domain.UUID) (bool, error) {
 	return r.dismissed, nil
+}
+
+func (r dismissTaskRepoStub) ReleaseReferences(context.Context, domain.TxExecutor, domain.UUID) error {
+	if r.released != nil {
+		*r.released = true
+	}
+	return nil
 }
 
 // dismissalAssetRepoStub refuses exactly the ids its refused map names, the way
@@ -61,8 +69,9 @@ func TestTaskServiceDismissReportsResultsItCannotRemove(t *testing.T) {
 		},
 	}
 	sink := &recordingSink{}
+	released := false
 	service := &TaskService{
-		tasks:  dismissTaskRepoStub{dismissed: true},
+		tasks:  dismissTaskRepoStub{dismissed: true, released: &released},
 		assets: assets,
 		runner: assetRunnerStub{},
 		notify: sink,
@@ -82,6 +91,9 @@ func TestTaskServiceDismissReportsResultsItCannotRemove(t *testing.T) {
 	}
 	if len(assets.deleted) != 1 || assets.deleted[0] != removedID {
 		t.Fatalf("deleted = %v, want the one removable result", assets.deleted)
+	}
+	if !released {
+		t.Fatal("dismissal did not release its task references")
 	}
 	if len(sink.owners) != 1 || sink.owners[0] != owner {
 		t.Fatalf("dismiss published %v, want exactly the task owner %s", sink.owners, owner)

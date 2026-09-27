@@ -31,12 +31,12 @@ var nonTerminalTaskStatuses = []string{
 	string(domain.TaskPersisting), string(domain.TaskCancelling),
 }
 
-// LoadSessionForAdmission reads the active owned session on the admission
-// transaction so liveness and ownership share the caller's snapshot.
+// LoadSessionForAdmission locks the active owned session until admission
+// commits, so deletion cannot end its material hold before retention lands.
 func (r *GenerationTaskRepository) LoadSessionForAdmission(ctx context.Context, tx domain.TxExecutor, owner, sessionID domain.UUID) (domain.Session, error) {
 	row := tx.QueryRow(ctx,
 		`SELECT id, name, created_at, updated_at FROM creation_sessions
-		 WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL`,
+		 WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL FOR SHARE`,
 		sessionID, owner)
 	var s domain.Session
 	if err := row.Scan(&s.ID, &s.Name, &s.CreatedAt, &s.UpdatedAt); err != nil {
@@ -622,6 +622,13 @@ func (r *GenerationTaskRepository) Dismiss(ctx context.Context, tx domain.TxExec
 		return false, fmt.Errorf("creation: dismiss task: %w", err)
 	}
 	return tag == 1, nil
+}
+
+func (r *GenerationTaskRepository) ReleaseReferences(ctx context.Context, tx domain.TxExecutor, taskID domain.UUID) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM creation_generation_task_references WHERE task_id = $1`, taskID); err != nil {
+		return fmt.Errorf("creation: release dismissed task references: %w", err)
+	}
+	return nil
 }
 
 // TransitionJob performs one guarded job migration, binding the external

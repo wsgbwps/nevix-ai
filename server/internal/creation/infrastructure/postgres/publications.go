@@ -41,7 +41,22 @@ func (r *TeamPublicationRepository) Publish(ctx context.Context, tx domain.TxExe
 	var asset domain.MediaAsset
 	var media string
 	var specJSON []byte
+	// A dismissal locks the task before its assets and releases its references
+	// last. Lock that parent first so a publication snapshots a live relation.
+	var taskID domain.UUID
 	err := tx.QueryRow(ctx, `
+		SELECT task.id FROM creation_generation_tasks task
+		JOIN creation_media_assets source ON source.task_id = task.id
+		WHERE source.id = $1 AND source.owner_user_id = $2
+		  AND task.dismissed_at IS NULL
+		FOR SHARE OF task`, assetID, publisher).Scan(&taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.TeamPublication{}, false, domain.ErrAssetNotFound
+	}
+	if err != nil {
+		return domain.TeamPublication{}, false, fmt.Errorf("creation: lock source task for publication: %w", err)
+	}
+	err = tx.QueryRow(ctx, `
 		SELECT a.id, a.owner_user_id, u.display_name, a.task_id, a.slot_index,
 		       a.media_type, a.mime, a.blob_key, a.byte_size, a.checksum,
 		       a.width_px, a.height_px, a.duration_ms, a.created_at, t.specification

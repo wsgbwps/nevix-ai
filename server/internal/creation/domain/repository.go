@@ -141,9 +141,8 @@ type (
 // admission commits or rolls back together; queries are creator-scoped by their own SQL;
 // a guarded transition losing a race returns false, so callers can never fabricate state.
 type GenerationTaskRepository interface {
-	// LoadSessionForAdmission resolves the active owned session inside the
-	// admission transaction, so liveness and ownership share the freeze's
-	// snapshot.
+	// LoadSessionForAdmission locks the active owned session until admission
+	// commits, serializing task retention against session deletion.
 	LoadSessionForAdmission(ctx context.Context, tx TxExecutor, owner, sessionID UUID) (Session, error)
 	// FindByIdempotencyKey resolves a prior admitted task for the same
 	// creator-scoped key inside the admission transaction; ok is false when
@@ -198,11 +197,12 @@ type GenerationTaskRepository interface {
 	// and returns its current status; ok is false when the task is not the
 	// caller's at all.
 	RequestCancel(ctx context.Context, tx TxExecutor, owner, taskID UUID) (TaskStatus, bool, error)
-	// Dismiss marks one owned terminal task hidden (任务隐藏) and advances its
-	// updated_at criterion. ok is false when the task is not the caller's, is
-	// already dismissed, or still owes work — the durable twin of the domain's
-	// terminal rule.
+	// Dismiss hides one owned terminal task and advances updated_at. ok is false
+	// when the task is foreign, already dismissed, or still owes work.
 	Dismiss(ctx context.Context, tx TxExecutor, owner, taskID UUID) (bool, error)
+	// ReleaseReferences ends only this task's material holds after its result
+	// assets have been handled, in the same dismissal transaction.
+	ReleaseReferences(ctx context.Context, tx TxExecutor, taskID UUID) error
 	// TransitionJob performs one guarded job migration, optionally binding
 	// the external reference on first submission.
 	TransitionJob(ctx context.Context, tx TxExecutor, jobID UUID, from []JobStatus, to JobStatus, externalRef *string) (bool, error)

@@ -815,6 +815,150 @@ func embeddedMigrationsBefore(t *testing.T, versionLimit int64) fstest.MapFS {
 	return selected
 }
 
+func TestUpgradeBackfillsMissingReferenceMaterialCleanupFacts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	scratchURL := scratchDatabase(t, ctx, requireOwnerURL(t), "nevix_migration_material_cleanup_backfill")
+	if _, err := applyFS(ctx, scratchURL, embeddedMigrationsBefore(t, 28)); err != nil {
+		t.Fatalf("apply migrations through v27: %v", err)
+	}
+	db := openDB(t, ctx, scratchURL)
+	var ownerID, activeSessionID, deletedSessionID, taskID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.users (email, password_hash, display_name, role, status)
+		VALUES ('cleanup-backfill@nevix.test', 'seed-hash', 'cleanup-backfill', 'member', 'active')
+		RETURNING id`).Scan(&ownerID); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.creation_sessions (owner_user_id, name)
+		VALUES ($1, 'active') RETURNING id`, ownerID).Scan(&activeSessionID); err != nil {
+		t.Fatalf("seed active session: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.creation_sessions (owner_user_id, name, deleted_at)
+		VALUES ($1, 'deleted', now()) RETURNING id`, ownerID).Scan(&deletedSessionID); err != nil {
+		t.Fatalf("seed deleted session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO public.creation_reference_materials
+			(session_id, kind, file_name, mime_type, byte_size, checksum_sha256,
+			 blob_key, width_px, height_px, pixel_count)
+		VALUES
+			($1, 'image', 'active.png', 'image/png', 1, decode(repeat('00', 32), 'hex'), 'backfill/active', 1, 1, 1),
+			($2, 'image', 'orphan.png', 'image/png', 11534336, decode(repeat('00', 32), 'hex'), 'backfill/orphan', 1, 1, 1),
+			($2, 'image', 'task.png', 'image/png', 1, decode(repeat('00', 32), 'hex'), 'backfill/task', 1, 1, 1),
+			($2, 'image', 'pub.png', 'image/png', 1, decode(repeat('00', 32), 'hex'), 'backfill/pub', 1, 1, 1),
+			($1, 'image', 'shared.png', 'image/png', 1, decode(repeat('00', 32), 'hex'), 'backfill/shared', 1, 1, 1),
+			($2, 'image', 'shared.png', 'image/png', 1, decode(repeat('00', 32), 'hex'), 'backfill/shared', 1, 1, 1),
+			($1, 'image', 'existing.png', 'image/png', 1, decode(repeat('00', 32), 'hex'), 'backfill/existing', 1, 1, 1),
+			($2, 'image', 'existing-orphan.png', 'image/png', 1, decode(repeat('00', 32), 'hex'), 'backfill/existing-orphan', 1, 1, 1)`,
+		activeSessionID, deletedSessionID); err != nil {
+		t.Fatalf("seed materials: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.creation_generation_tasks
+			(session_id, owner_user_id, idempotency_key, payload_hash, media_type,
+			 specification, manifest_version, slot_count)
+		VALUES ($1, $2, 'backfill-task', 'seed-hash', 'image', '{}'::jsonb, 1, 1)
+		RETURNING id`, deletedSessionID, ownerID).Scan(&taskID); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO public.creation_generation_task_references (task_id, material_id)
+		SELECT $1, id FROM public.creation_reference_materials WHERE blob_key = 'backfill/task'`, taskID); err != nil {
+		t.Fatalf("retain task material: %v", err)
+	}
+	var assetID, publicationID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.creation_media_assets
+			(owner_user_id, task_id, slot_index, media_type, mime, blob_key, byte_size, checksum)
+		VALUES ($1, $2, 0, 'image', 'image/png', 'result/backfill-publication', 1,
+		        decode(repeat('00', 32), 'hex')) RETURNING id`, ownerID, taskID).Scan(&assetID); err != nil {
+		t.Fatalf("seed publication asset: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO public.creation_team_publications
+			(source_asset_id, publisher_user_id, publisher_display_name, idempotency_key,
+			 media_type, mime, blob_key, byte_size, checksum, specification)
+		VALUES ($1, $2, 'backfill', 'backfill-publication', 'image', 'image/png',
+		        'result/backfill-publication', 1, decode(repeat('00', 32), 'hex'), '{}'::jsonb)
+		RETURNING id`, assetID, ownerID).Scan(&publicationID); err != nil {
+		t.Fatalf("seed publication: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO public.creation_team_publication_references
+			(publication_id, position, role, kind, file_name, mime_type,
+			 byte_size, checksum_sha256, blob_key, width_px, height_px, pixel_count, claims_version)
+		VALUES ($1, 0, 'reference', 'image', 'pub.png', 'image/png', 1,
+		        decode(repeat('00', 32), 'hex'), 'backfill/pub', 1, 1, 1, 1)`, publicationID); err != nil {
+		t.Fatalf("retain publication material: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO public.creation_reference_material_uploads
+			(id, owner_user_id, session_id, material_id, object_key, file_name, declared_kind,
+			 declared_mime_type, declared_byte_size, claims_version, idempotency_key, payload_hash,
+			 connection_revision, put_deadline, finalize_deadline, status, created_at, finalized_at)
+		SELECT gen_random_uuid(), $1, session_id, id, blob_key, file_name, kind, mime_type, byte_size,
+		       claims_version, id::text, checksum_sha256, 1,
+		       now() - interval '31 minutes', now() - interval '1 minute', 'finalized',
+		       now() - interval '91 minutes', now()
+		FROM public.creation_reference_materials
+		WHERE blob_key IN ('backfill/existing', 'backfill/existing-orphan')`, ownerID); err != nil {
+		t.Fatalf("seed existing cleanup fact: %v", err)
+	}
+
+	if _, err := Apply(ctx, scratchURL); err != nil {
+		t.Fatalf("upgrade to v28: %v", err)
+	}
+	var total, due, keys int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE cleanup_next_attempt_at IS NOT NULL), count(DISTINCT object_key)
+		FROM public.creation_reference_material_uploads WHERE object_key LIKE 'backfill/%'`).Scan(&total, &due, &keys); err != nil {
+		t.Fatalf("read backfilled cleanup facts: %v", err)
+	}
+	if total != 7 || keys != 7 || due != 2 {
+		t.Fatalf("backfilled facts total=%d keys=%d due=%d, want 7/7/2", total, keys, due)
+	}
+	var orphanDue, taskDue, publicationDue, sharedDue, existingDue, existingOrphanDue bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT cleanup_next_attempt_at IS NOT NULL FROM public.creation_reference_material_uploads WHERE object_key = 'backfill/orphan'),
+			(SELECT cleanup_next_attempt_at IS NOT NULL FROM public.creation_reference_material_uploads WHERE object_key = 'backfill/task'),
+			(SELECT cleanup_next_attempt_at IS NOT NULL FROM public.creation_reference_material_uploads WHERE object_key = 'backfill/pub'),
+			(SELECT cleanup_next_attempt_at IS NOT NULL FROM public.creation_reference_material_uploads WHERE object_key = 'backfill/shared'),
+			(SELECT cleanup_next_attempt_at IS NOT NULL FROM public.creation_reference_material_uploads WHERE object_key = 'backfill/existing'),
+			(SELECT cleanup_next_attempt_at IS NOT NULL FROM public.creation_reference_material_uploads WHERE object_key = 'backfill/existing-orphan')`).Scan(&orphanDue, &taskDue, &publicationDue, &sharedDue, &existingDue, &existingOrphanDue); err != nil {
+		t.Fatalf("read exact backfill keys: %v", err)
+	}
+	if !orphanDue || taskDue || publicationDue || sharedDue || existingDue || !existingOrphanDue {
+		t.Fatalf("wrong due keys orphan=%t task=%t publication=%t shared=%t existing=%t existing-orphan=%t", orphanDue, taskDue, publicationDue, sharedDue, existingDue, existingOrphanDue)
+	}
+	var declaredSize int64
+	var idMatchesKey bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT declared_byte_size, id::text = idempotency_key
+		FROM public.creation_reference_material_uploads WHERE object_key = 'backfill/orphan'`).Scan(&declaredSize, &idMatchesKey); err != nil {
+		t.Fatalf("read synthetic cleanup facts: %v", err)
+	}
+	if declaredSize != 10485760 || !idMatchesKey {
+		t.Fatalf("invalid synthetic cleanup fact declared_size=%d idempotency_key_matches_id=%t", declaredSize, idMatchesKey)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM public.creation_generation_task_references WHERE task_id = $1`, taskID); err != nil {
+		t.Fatalf("release historical task: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE public.creation_team_publications SET withdrawn_at = now() WHERE id = $1`, publicationID); err != nil {
+		t.Fatalf("withdraw historical publication: %v", err)
+	}
+	var released int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM public.creation_reference_material_uploads
+		WHERE object_key IN ('backfill/task', 'backfill/pub')
+		  AND cleanup_next_attempt_at IS NOT NULL`).Scan(&released); err != nil || released != 2 {
+		t.Fatalf("historical holder release due=%d want=2 err=%v", released, err)
+	}
+}
+
 func TestUpgradeBackfillsExistingTaskReferenceRetention(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
