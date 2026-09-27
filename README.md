@@ -290,9 +290,5 @@ Server 集成测试：`./scripts/test-identity-integration.sh` 拉起一次性 p
 
 ## 分支与交付规范
 
-- 所有 tracked 改动都在短命任务分支完成并通过 PR 进入 `main`；保持线性、可独立回滚的历史，本地 hooks 禁止在 `main` 提交或直推
-- Agent 默认可完成可逆的实现、测试、本地提交、分支推送、开 PR、评审处理、等待 CI，以及低/中风险合并；用户的明确限制始终优先
-- 推送任务分支并开 PR（`gh pr create --fill --base main`），用 `gh pr checks --watch --fail-fast` 等待路径感知的 `CI gate`：Desktop 运行时改动跑 Windows source Native Smoke，Main/Preload/Shared、原生窗口/存储、打包与依赖改动再加 macOS；文档、`test-results/`、unit/component 不启动 Native Smoke
-- 认证、Session、连接/TLS、安全边界改动和发布前必须在本地 Mac 运行 `make test-e2e`，并在 PR 或发布记录中注明结果
-- 检查通过后，Agent 可 squash merge 低/中风险改动并删除分支；任何高风险外部或系统动作（包括合并高风险 PR）都在执行前请求批准
-- 高风险限定为破坏性或不可逆持久数据操作、生产部署/发布、密钥或权限/授权/安全边界变更、付费或周期性外部资源，以及破坏性公共契约变更；完整规则见 [`docs/agents/delivery.md`](docs/agents/delivery.md)
+- 所有 tracked 改动都在短命任务分支完成并通过 PR 进入 `main`；本地 hooks 禁止在 `main` 提交或直推。
+- Agent 在任务分支本地提交后报告结果并停下。仅在用户明确要求后推送和开 PR；合并也需用户明确要求。完整流程和风险门槛见 [`docs/agents/delivery.md`](docs/agents/delivery.md)。

@@ -7,11 +7,11 @@ protection, so agents also watch the PR checks before merging.
 
 ## Authority
 
-Agents may investigate, implement, test, commit locally, push the task branch,
-open or update its PR, address review, wait for CI, and merge low- or
-medium-risk work without another checkpoint. An explicit user instruction
-always narrows this default; for example, “do not push yet” stops the flow
-after the local commit.
+Agents may investigate, implement, test, review, and commit locally on a task
+branch. Stop after the local commit, report the result, and leave the branch
+unpushed for user review. Push the branch and open or update a PR only when the
+user explicitly asks. Opening a PR does not authorize merging it; merge only
+when the user explicitly asks.
 
 Human approval is required immediately before any high-risk external or system
 action, including merging a high-risk PR. High-risk work is limited to:
@@ -22,15 +22,17 @@ action, including merging a high-risk PR. High-risk work is limited to:
 - paid or recurring external resources; and
 - breaking public contracts.
 
-Agents still investigate, implement, test without changing high-risk external
-or system state, review, and prepare the PR before that approval point.
+Agents still investigate, implement, test, review, and prepare the local change
+before that approval point.
 
 ## Flow
 
 1. Work on one short-lived task branch. Keep the slice independently buildable
-   and revertible, then run the smallest checks that prove it.
-2. Commit, push the branch, and open a PR against `main` (`gh pr create --fill
-   --base main`). Describe shared-area changes with their impact and tests.
+   and revertible, run the smallest checks that prove it, then commit locally.
+   Stop and report the result for user review; leave the branch unpushed.
+2. When the user explicitly asks to publish the change, push the branch and
+   open or update a PR against `main` (`gh pr create --fill --base main`).
+   Describe shared-area changes with their impact and tests.
 3. Wait for the path-aware `CI gate` (`gh pr checks --watch --fail-fast`) and
    address failures or review findings. Desktop runtime changes run source
    Native Smoke on Windows; Main, Preload, Shared, native window/storage,
@@ -38,9 +40,9 @@ or system state, review, and prepare the PR before that approval point.
    Authentication, Session, connection/TLS, security-boundary changes, and
    release candidates also require `make test-e2e` on a local Mac, recorded in
    the PR or release notes.
-4. Apply the risk gate above. Merge low- and medium-risk work when its checks
-   and review pass; for high-risk work, pause immediately before its first
-   external or system action, including merge.
+4. When the user explicitly asks to merge, apply the risk gate above and
+   confirm the checks and review pass. For high-risk work, obtain approval
+   immediately before its first external or system action, including merge.
 5. Squash-merge and delete the branch (`gh pr merge --squash --delete-branch`).
    Each task lands as one commit on `main`; the PR page is its acceptance
    record.
