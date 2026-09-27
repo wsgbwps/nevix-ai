@@ -39,6 +39,7 @@ import {
   promptDocumentLength,
   promptMentionCandidates,
   removePromptMentions,
+  textPromptDocument,
   type PromptMentionCandidate,
   type PromptMentionKindLabels
 } from './prompt-document'
@@ -189,6 +190,8 @@ export interface WorkbenchGalleryHandle {
   /** Submits a new task from the card's frozen specification. */
   regenerate: (taskId: string) => void
   regenerateDisabled: boolean
+  /** Copies a task's frozen intent into the editable local draft. */
+  reeditTask: (taskId: string) => void
   materials: readonly ReferenceMaterialView[]
   thumbnails: Readonly<Record<string, string>>
   thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
@@ -1101,6 +1104,34 @@ export function useCreationWorkbench(): {
     void ports.actions.submit(task.sessionId, intent)
   }
 
+  const reeditTask = (taskId: string): void => {
+    const { tasks, taskDetails } = taskRefreshRef.current.snapshot
+    const task = tasks.find((entry) => entry.id === taskId)
+    const currentContext = contextController?.getSnapshot()
+    if (!task || currentContext?.selectedId !== task.sessionId || currentContext.restoring) return
+    const detail = taskDetails[taskId]
+    const specification = detail?.specification ?? task.snapshot
+    if (specification === null) return
+    const { prompt, references, ...parameters } = specification
+    const available = new Set(displayRef.current.getSnapshot().materials.map(({ id }) => id))
+    const restoredReferences = references
+      .filter(({ materialId }) => available.has(materialId))
+      .map(({ materialId, role }) => ({ materialId, role: role as DraftReferenceRole }))
+    patchDraft({
+      ...parameters,
+      mediaType: (detail?.task ?? task).mediaType,
+      promptDocument: textPromptDocument(prompt),
+      mode:
+        task.mediaType === 'image' &&
+        specification.mode === 'reference-image' &&
+        restoredReferences.length === 0
+          ? 'text-to-image'
+          : specification.mode,
+      references: restoredReferences
+    })
+    if (restoredReferences.length !== references.length) contextController?.noteReferenceRecovery()
+  }
+
   const submitDisabled = submitBlocked !== null || actionBlocksSubmission
 
   return {
@@ -1200,6 +1231,7 @@ export function useCreationWorkbench(): {
       dismissIndeterminate: () => setIndeterminateTaskId(null),
       regenerate,
       regenerateDisabled: actionBlocksSubmission,
+      reeditTask,
       materials,
       thumbnails,
       thumbnailStates,

@@ -416,6 +416,11 @@ export class WorkbenchContextController {
     this.#changed()
   }
 
+  noteReferenceRecovery(): void {
+    this.#referenceRecoveryShown = true
+    this.#changed()
+  }
+
   async #restoreSession(
     epoch: number,
     session: CreationSessionView,
