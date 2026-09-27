@@ -2561,6 +2561,119 @@ test('a policy-rejected task keeps editing paths but no identical quick retry', 
   )
 })
 
+test('regenerate submits the task specification with an empty composer draft', async ({
+  mount,
+  page
+}) => {
+  const specification = {
+    prompt: '原任务提示词',
+    model: 'doubao-seedream-5.0-pro',
+    mode: 'reference-image',
+    ratio: '4:3',
+    resolution: '2K',
+    quantity: 1,
+    durationSeconds: null,
+    references: [{ materialId: firstMaterialId, role: 'reference', kind: 'image' }] as const
+  }
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000regen',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: specification,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [{ index: 0, status: 'failed', failureReason: null, result: null }],
+    specification
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [task], submitDeferred: true }}
+      drafts={{ [scriptedSessionId]: null }}
+    />
+  )
+  await selectFirstSession(page)
+
+  await expect(page.getByTestId('composer-prompt')).toHaveText('')
+  const regenerate = page.getByTestId(`task-regenerate-${task.id}`)
+  await expect(regenerate).toBeEnabled()
+  await page.getByTestId('composer-prompt').fill('无关草稿提示词')
+  await regenerate.click()
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
+    .toHaveLength(1)
+  const [call] = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(call?.sessionId).toBe(scriptedSessionId)
+  expect(call?.idempotencyKey).not.toBe('')
+  expect(call?.intent).toEqual({
+    prompt: specification.prompt,
+    mediaType: 'image',
+    manifestVersion: 5,
+    model: specification.model,
+    mode: specification.mode,
+    ratio: specification.ratio,
+    resolution: specification.resolution,
+    quantity: specification.quantity,
+    durationSeconds: specification.durationSeconds,
+    references: [{ materialId: firstMaterialId, role: 'reference' }]
+  })
+  await expect(page.getByTestId('composer-prompt')).toHaveText('无关草稿提示词')
+  await expect(regenerate).toBeDisabled()
+  await page.evaluate(() => window.__creationDeckTest?.releaseSubmissions())
+  await expect(regenerate).toBeEnabled()
+  await expect(page.getByTestId('task-dddddddd-0000-4000-8000-000000000004')).toBeVisible()
+})
+
+test('regenerate stays clickable for an obsolete model and explains rejection', async ({
+  mount,
+  page
+}) => {
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000oldm',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: {
+      prompt: '原任务提示词',
+      model: 'removed-legacy-model',
+      mode: 'text-to-image',
+      ratio: '1:1',
+      resolution: '2K',
+      quantity: 1,
+      durationSeconds: null,
+      references: []
+    },
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [{ index: 0, status: 'failed', failureReason: null, result: null }]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [task], submitRejection: 'capability_stale' }}
+      drafts={{ [scriptedSessionId]: null }}
+    />
+  )
+  await selectFirstSession(page)
+
+  const regenerate = page.getByTestId(`task-regenerate-${task.id}`)
+  await expect(regenerate).toBeEnabled()
+  await regenerate.click()
+  await expect(page.getByTestId('gallery-submit-error')).toContainText(
+    'The selected model or parameters are no longer supported.'
+  )
+  const [call] = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(call?.intent.model).toBe('removed-legacy-model')
+})
+
 test('the new-conversation row enters the composer without creating a session', async ({
   mount,
   page

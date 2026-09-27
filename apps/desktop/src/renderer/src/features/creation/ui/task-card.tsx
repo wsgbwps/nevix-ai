@@ -262,8 +262,8 @@ export function TaskCard({
             <button
               type="button"
               data-testid={`task-regenerate-${snapshot.id}`}
-              onClick={gallery.submit}
-              disabled={gallery.submitDisabled}
+              onClick={() => gallery.regenerate(snapshot.id)}
+              disabled={spec === null || gallery.regenerateDisabled}
               className={`${quietButtonClass} disabled:opacity-50`}
             >
               <RefreshCwIcon className="size-3.5" aria-hidden />

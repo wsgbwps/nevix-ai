@@ -196,6 +196,11 @@ export const creationTranslations = defineResourceTranslations({
         resultAlt: '已验证的生成结果',
         taskLabel: '生成任务',
         submitFailed: '操作失败：{{code}}',
+        submitFailureCodes: {
+          invalidRequest: '参考素材可能已移除，或提交内容不合法；请重新编辑后再试。',
+          capabilityStale: '所选模型或参数已不受支持；请重新编辑后再试。',
+          mediaUnavailable: '当前生成能力不可用或能力清单已更新；请稍后重试。'
+        },
         detailStale: '详情未更新',
         listStale: '任务列表未更新',
         history: {
@@ -776,6 +781,14 @@ export const creationTranslations = defineResourceTranslations({
         resultAlt: 'Verified generation result',
         taskLabel: 'Generation task',
         submitFailed: 'Action failed: {{code}}',
+        submitFailureCodes: {
+          invalidRequest:
+            'A reference may have been removed or the request is invalid. Edit and try again.',
+          capabilityStale:
+            'The selected model or parameters are no longer supported. Edit and try again.',
+          mediaUnavailable:
+            'Generation is unavailable or the capability list changed. Try again later.'
+        },
         detailStale: 'Details not refreshed',
         listStale: 'Task list not refreshed',
         history: {
