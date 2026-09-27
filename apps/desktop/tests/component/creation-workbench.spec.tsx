@@ -1595,6 +1595,113 @@ test('a task card shows its frozen specification, never the live draft', async (
   await expect(menu).toContainText('frozen-at-submit prompt')
 })
 
+test('re-edit copies the task specification into the composer draft', async ({ mount, page }) => {
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000edit',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: {
+      prompt: 'Re-edit this image',
+      model: 'doubao-seedream-5.0',
+      mode: 'reference-image',
+      ratio: '9:16',
+      resolution: '3K',
+      quantity: 1,
+      durationSeconds: null,
+      references: [{ materialId: firstMaterialId, role: 'reference', kind: 'image' }]
+    },
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }]
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [task] }} />)
+  await selectFirstSession(page)
+  await expect(page.getByTestId('composer-prompt')).toHaveText('夏季跑鞋主图，暖光背景')
+
+  await page.getByTestId(`task-edit-${task.id}`).click()
+
+  await expect
+    .poll(async () => (await draftRecord(page, scriptedSessionId))?.prompt)
+    .toBe('Re-edit this image')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Re-edit this image')
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0')
+  await expect(page.getByTestId('composer-params')).toContainText('9:16')
+  await expect(page.getByTestId('composer-params')).toContainText('3K')
+  await expect(
+    page.getByTestId('reference-deck').getByRole('button', { name: 'poster.png', exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByTestId('reference-deck').getByRole('button', { name: 'banner.png', exact: true })
+  ).toHaveCount(0)
+  await expect
+    .poll(() => draftRecord(page, scriptedSessionId))
+    .toMatchObject({
+      prompt: 'Re-edit this image',
+      mediaType: 'image',
+      model: 'doubao-seedream-5.0',
+      mode: 'reference-image',
+      ratio: '9:16',
+      resolution: '3K',
+      quantity: 1,
+      references: [{ materialId: firstMaterialId, role: 'reference' }]
+    })
+})
+
+test('re-edit drops unavailable references and keeps the image draft usable', async ({
+  mount,
+  page
+}) => {
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-00000000gone',
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: {
+      prompt: 'Reuse the old look',
+      model: 'doubao-seedream-5.0-pro',
+      mode: 'reference-image',
+      ratio: '4:3',
+      resolution: '2K',
+      quantity: 1,
+      durationSeconds: null,
+      references: [{ materialId: firstMaterialId, role: 'reference', kind: 'image' }]
+    },
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [task] }}
+      drafts={{ [scriptedSessionId]: null }}
+      materials={{ [scriptedSessionId]: [] }}
+    />
+  )
+  await selectFirstSession(page)
+  await page.getByTestId(`task-edit-${task.id}`).click()
+
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Reuse the old look')
+  await expect(
+    page.getByText('Unavailable references were removed and their mentions kept as text.')
+  ).toBeVisible()
+  await expect
+    .poll(() => draftRecord(page, scriptedSessionId))
+    .toMatchObject({
+      mode: 'text-to-image',
+      references: []
+    })
+  await expect(page.getByTestId('composer-submit')).toBeEnabled()
+})
+
 test('a task card keeps its list snapshot hidden until the detail read settles', async ({
   mount,
   page

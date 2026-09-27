@@ -120,8 +120,6 @@ export function TaskCard({
     snapshot.status !== 'succeeded' &&
     snapshot.status !== 'cancelled' &&
     hasNoNonRetryableIncompleteSlots(detail)
-  // The composer is a fixed surface that owns the live draft; re-editing a
-  // task means editing that draft and regenerating.
   const focusComposerPrompt = (): void => {
     document.getElementById('composer-prompt')?.focus()
   }
@@ -241,8 +239,12 @@ export function TaskCard({
           <button
             type="button"
             data-testid={`task-edit-${snapshot.id}`}
-            onClick={focusComposerPrompt}
-            className={quietButtonClass}
+            onClick={() => {
+              gallery.reeditTask(snapshot.id)
+              focusComposerPrompt()
+            }}
+            disabled={spec === null}
+            className={`${quietButtonClass} disabled:opacity-50`}
           >
             <PencilLineIcon className="size-3.5" aria-hidden />
             {t('gallery.actions.reedit')}
