@@ -14,7 +14,8 @@ import {
   removeLocalDraftMaterial,
   replaceLocalDraftMaterial,
   setLocalDraftOperationNotice,
-  type LocalDraftOperationNotice
+  type LocalDraftOperationNotice,
+  type ReferenceBindingTarget
 } from './draft-store'
 import {
   listReferenceMaterialUploadRecoveries,
@@ -89,7 +90,8 @@ export interface WorkbenchActions {
     previousMaterialId: string,
     localId: string,
     file: File,
-    role: DraftReferenceRole
+    role: DraftReferenceRole,
+    target?: ReferenceBindingTarget
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly submit: (sessionId: string, intent: GenerationIntent) => Promise<WorkbenchActionResult>
   /** No-identity chain: materialize a session under `key`'s pending ownership,
@@ -1049,7 +1051,8 @@ export function createCreationRuntime(
     previousMaterialId,
     localId,
     file,
-    role
+    role,
+    target
   ) => {
     const key = materialKey(sessionId, localId)
     const previousKey = materialKey(sessionId, previousMaterialId)
@@ -1075,7 +1078,8 @@ export function createCreationRuntime(
         sessionId,
         previousMaterialId,
         result.value.id,
-        role
+        role,
+        target
       )
     }
     emit({ type: 'reconcile', sessionId })

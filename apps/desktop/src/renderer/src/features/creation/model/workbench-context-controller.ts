@@ -126,6 +126,7 @@ export interface WorkbenchContextSnapshot {
   readonly referenceRecoveryShown: boolean
   readonly pendingMaterialRemoval: {
     readonly materialId: string
+    readonly position: number
     readonly mentionCount: number
   } | null
   readonly materialUploadFailed: boolean
@@ -218,6 +219,9 @@ export class WorkbenchContextController {
   #pendingMaterialRemoval: WorkbenchContextSnapshot['pendingMaterialRemoval'] = null
   #materialUploadFailed = false
   #materialDropRejection: WorkbenchContextSnapshot['materialDropRejection'] = null
+  #taskMaterials: readonly ReferenceMaterialView[] = []
+  #taskReedit = false
+  #contextSwitchVersion = 0
   #snapshot: WorkbenchContextSnapshot = emptyWorkbenchContextSnapshot
 
   constructor(deps: WorkbenchContextDeps, options: WorkbenchContextOptions = {}) {
@@ -249,6 +253,10 @@ export class WorkbenchContextController {
     return this.#snapshot
   }
 
+  contextSwitchVersion(): number {
+    return this.#contextSwitchVersion
+  }
+
   /** The one switching ritual, its transition derived from the target kind:
    * `session` restores asynchronously, merges server facts, and reconciles
    * staged files; `pending`/`new` restore from the local record or seed
@@ -263,8 +271,11 @@ export class WorkbenchContextController {
       return
     }
     const epoch = ++this.#epoch
+    this.#contextSwitchVersion += 1
     this.#referenceRecoveryShown = false
     this.#pendingMaterialRemoval = null
+    this.#taskMaterials = []
+    this.#taskReedit = false
     this.#deps.display.reset()
     this.#composingNew = key.kind === 'new'
     this.#pendingKey = key.kind === 'pending' ? key.key : null
@@ -357,6 +368,21 @@ export class WorkbenchContextController {
     const key = this.#draftKey()
     if (key !== null) this.#writeThrough(key, value)
     this.#changed()
+  }
+
+  /** Keeps a fresh task GET's material facts with its Draft across a same-session reconcile. */
+  editTaskDraft(value: ComposerDraft, materials: readonly ReferenceMaterialView[]): void {
+    this.#taskReedit = true
+    this.#taskMaterials = [
+      ...new Map(materials.map((material) => [material.id, material])).values()
+    ]
+    const current = this.#deps.display.getSnapshot().materials
+    const taskIds = new Set(this.#taskMaterials.map((material) => material.id))
+    this.#deps.display.replaceMaterials([
+      ...current.filter((material) => !taskIds.has(material.id)),
+      ...this.#taskMaterials
+    ])
+    this.editDraft(value)
   }
 
   /** The submit path's synchronous ownership claim: the record lands under
@@ -484,7 +510,17 @@ export class WorkbenchContextController {
         !materialPage.value.materials.some((material) => material.id === recovery.id) &&
         !stagedViews.some((material) => material.id === recovery.id)
     )
-    const visibleMaterials = [...materialPage.value.materials, ...stagedViews, ...recoveryViews]
+    const listedIds = new Set(
+      [...materialPage.value.materials, ...stagedViews, ...recoveryViews].map(
+        (material) => material.id
+      )
+    )
+    const visibleMaterials = [
+      ...materialPage.value.materials,
+      ...stagedViews,
+      ...recoveryViews,
+      ...this.#taskMaterials.filter((material) => !listedIds.has(material.id))
+    ]
     this.#deps.display.replaceMaterials(visibleMaterials)
     // The editable draft is device-local state: restore this device's copy
     // and prune reference bindings whose materials no longer exist in the
@@ -565,6 +601,7 @@ export class WorkbenchContextController {
       references
     }
     if (
+      !this.#taskReedit &&
       stored.mediaType === 'image' &&
       references.length === 0 &&
       stored.mode === 'reference-image'

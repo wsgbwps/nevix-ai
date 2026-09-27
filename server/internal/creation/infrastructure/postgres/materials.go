@@ -73,6 +73,7 @@ func (r *MaterialRepository) GetForThumbnail(ctx context.Context, owner, id doma
 				FROM creation_generation_task_references retained
 				JOIN creation_generation_tasks task ON task.id = retained.task_id
 				WHERE retained.material_id = m.id AND task.owner_user_id = $1
+				  AND task.dismissed_at IS NULL
 			)
 		)`, owner, id)
 	return scanMaterial(row)
@@ -84,7 +85,8 @@ func (r *MaterialRepository) GetForTask(ctx context.Context, owner, taskID, mate
 		FROM creation_reference_materials m
 		JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $1
 		JOIN creation_generation_task_references retained ON retained.material_id = m.id
-		JOIN creation_generation_tasks task ON task.id = retained.task_id AND task.owner_user_id = $1
+		JOIN creation_generation_tasks task ON task.id = retained.task_id
+			AND task.owner_user_id = $1 AND task.dismissed_at IS NULL
 		WHERE task.id = $2 AND m.id = $3`, owner, taskID, materialID)
 	return scanMaterial(row)
 }

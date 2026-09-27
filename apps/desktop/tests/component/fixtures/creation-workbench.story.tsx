@@ -300,6 +300,8 @@ export interface DeckTestControls {
   /** Holds the next list response until releaseHeldListResponses runs. */
   holdNextListResponse(): void
   releaseHeldListResponses(): void
+  holdNextDetailResponse(): void
+  releaseHeldDetailResponses(): void
   /** Replaces one task by id without firing any SSE notification. */
   replaceTaskSilently(task: ScriptedTask): void
 }
@@ -361,17 +363,19 @@ export interface ScriptedTask extends GenerationTaskView {
   readonly detailTask?: GenerationTaskView
   /** The task's frozen specification; absent details render task-view facts only. */
   readonly specification?: GenerationTaskDetail['specification']
+  /** Current material facts in the task GET, aligned with frozen positions. */
+  readonly referenceMaterials?: GenerationTaskDetail['referenceMaterials']
 }
 
 function detailOf(task: ScriptedTask): GenerationTaskDetail {
-  const specification = task.specification
+  const specification = task.specification === undefined ? task.snapshot : task.specification
   return {
     task: task.detailTask ?? task,
     slots: task.slots,
     // The production parser constructs new wire-view objects per response.
     // Mirror that identity churn so lease regressions cannot hide in the adapter.
     specification:
-      specification === undefined
+      specification === null
         ? null
         : {
             ...specification,
@@ -500,6 +504,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     remainingDetailFailures: Map<string, number>
     listHolds: Array<Promise<void>>
     listHoldReleases: Array<() => void>
+    detailHolds: Array<Promise<void>>
+    detailHoldReleases: Array<() => void>
     submissionsByKey: Map<string, ScriptedTask>
     eventHandlers: {
       onInvalidation: () => void
@@ -519,6 +525,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     remainingDetailFailures: new Map(Object.entries(options.taskScript?.failDetailReads ?? {})),
     listHolds: [],
     listHoldReleases: [],
+    detailHolds: [],
+    detailHoldReleases: [],
     submissionsByKey: new Map(),
     eventHandlers: null
   }
@@ -664,6 +672,20 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       const releases = taskState.listHoldReleases.splice(0)
       taskState.listHolds.splice(0)
       for (const release of releases) release()
+    },
+    holdNextDetailResponse: () => {
+      let release: () => void = () => undefined
+      taskState.detailHolds.push(
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+      )
+      taskState.detailHoldReleases.push(release)
+    },
+    releaseHeldDetailResponses: () => {
+      const releases = taskState.detailHoldReleases.splice(0)
+      taskState.detailHolds.splice(0)
+      for (const release of releases) release()
     }
   }
 
@@ -764,6 +786,11 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
         kind: file.type.startsWith('audio/') ? 'audio' : 'image',
         fileName: file.name
       })
+      if (uploaded.kind === 'image') {
+        uploaded.widthPx = 1024
+        uploaded.heightPx = 768
+        uploaded.pixelCount = 1024 * 768
+      }
       if (uploaded.kind === 'audio') {
         uploaded.mimeType = file.name.endsWith('.wav')
           ? 'audio/wav'
@@ -912,6 +939,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     getTask: async (taskId) => {
       await taskDetailsReady
       taskState.getTaskCalls.push(taskId)
+      const holds = taskState.detailHolds.splice(0)
+      for (const held of holds) await held
       const remaining = taskState.remainingDetailFailures.get(taskId) ?? 0
       if (remaining > 0) {
         taskState.remainingDetailFailures.set(taskId, remaining - 1)
@@ -919,7 +948,17 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       }
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
-      return succeeded(detailOf(task))
+      const detail = detailOf(task)
+      return succeeded({
+        ...detail,
+        referenceMaterials:
+          task.referenceMaterials ??
+          detail.specification?.references.map(
+            ({ materialId }) =>
+              materials.get(task.sessionId)?.find((material) => material.id === materialId) ?? null
+          ) ??
+          []
+      })
     },
     cancelTask: async (taskId) => {
       taskState.cancelledIds.push(taskId)

@@ -415,13 +415,16 @@ type GenerationTask struct {
 	// ReferenceAvailability is a list-only read projection, ordered by Spec.References.
 	// It is not part of the frozen specification or task detail.
 	ReferenceAvailability []bool
-	Status                TaskStatus
-	SlotCount             int
-	TerminalCause         *TerminalCause
-	CancelRequested       bool
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	TerminalAt            *time.Time
+	// ReferenceMaterials is the current task-detail projection in frozen order;
+	// nil positions have no confirmed retained material.
+	ReferenceMaterials []*ReferenceMaterial
+	Status             TaskStatus
+	SlotCount          int
+	TerminalCause      *TerminalCause
+	CancelRequested    bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	TerminalAt         *time.Time
 }
 
 // GenerationSlot is one stable, ordered, non-reusable result position. The

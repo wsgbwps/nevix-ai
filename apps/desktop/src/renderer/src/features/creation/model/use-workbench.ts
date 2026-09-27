@@ -32,7 +32,12 @@ import {
   type DraftMediaType,
   type DraftStaleField
 } from './capability'
-import { PENDING_DRAFT_KEY_PREFIX, type LocalDraftOperationNotice } from './draft-store'
+import {
+  PENDING_DRAFT_KEY_PREFIX,
+  referenceBindingPosition,
+  referenceBindingTarget,
+  type LocalDraftOperationNotice
+} from './draft-store'
 import {
   countPromptMentions,
   expandPromptDocument,
@@ -142,11 +147,15 @@ export interface WorkbenchComposerHandle {
   /** Admits a dropped file batch against the mode's policy and adds what it accepts. */
   addMaterials: (files: readonly File[]) => void
   /** Swaps one bound card for a new file, keeping the deck position. */
-  replaceMaterial: (materialId: string, file: File) => void
+  replaceMaterial: (position: number, file: File) => void
   /** Converts a succeeded task result into a new Reference Material (ADR-0018). */
-  addResultAsMaterial: (payload: ResultDragPayload, targetMaterialId: string | null) => void
-  removeMaterial: (materialId: string) => void
-  pendingMaterialRemoval: { readonly materialId: string; readonly mentionCount: number } | null
+  addResultAsMaterial: (payload: ResultDragPayload, targetPosition: number | null) => void
+  removeMaterial: (position: number) => void
+  pendingMaterialRemoval: {
+    readonly materialId: string
+    readonly position: number
+    readonly mentionCount: number
+  } | null
   confirmMaterialRemoval: () => void
   dismissMaterialRemoval: () => void
   referenceRecoveryShown: boolean
@@ -191,7 +200,8 @@ export interface WorkbenchGalleryHandle {
   regenerate: (taskId: string) => void
   regenerateDisabled: boolean
   /** Copies a task's frozen intent into the editable local draft. */
-  reeditTask: (taskId: string) => void
+  reeditTask: (taskId: string) => Promise<boolean>
+  reeditAction: { readonly taskId: string; readonly status: 'loading' | 'failed' } | null
   materials: readonly ReferenceMaterialView[]
   thumbnails: Readonly<Record<string, string>>
   thumbnailStates: Readonly<Record<string, MaterialThumbnailState>>
@@ -221,6 +231,13 @@ export function useCreationWorkbench(): {
   const [manifest, setManifest] = useState<CapabilityManifest | null>(null)
   const [manifestStatus, setManifestStatus] = useState<ManifestStatus>('loading')
   const [indeterminateTaskId, setIndeterminateTaskId] = useState<string | null>(null)
+  const [reeditAction, setReeditAction] = useState<{
+    readonly contextKey: string
+    readonly contextSwitchVersion: number
+    readonly taskId: string
+    readonly status: 'loading' | 'failed'
+  } | null>(null)
+  const reeditRequestRef = useRef(0)
   // Keyed by the context it was reported in: the note belongs to one context's
   // deletion, so entering another context drops it without a state reset.
   const [dismissalSkippedIn, setDismissalSkippedIn] = useState<{
@@ -531,12 +548,17 @@ export function useCreationWorkbench(): {
   )
 
   const removeMaterialNow = useCallback(
-    async (materialId: string) => {
+    async (position: number) => {
       if (!ports) return
       contextController?.notePendingMaterialRemoval(null)
       const draft = currentDraft()
-      const remaining = draft.references.filter((entry) => entry.materialId !== materialId)
-      const promptDocument = removePromptMentions(draft.promptDocument, materialId)
+      const materialId = draft.references[position]?.materialId
+      if (materialId === undefined) return
+      const remaining = draft.references.filter((_, index) => index !== position)
+      const lastBinding = !remaining.some((entry) => entry.materialId === materialId)
+      const promptDocument = lastBinding
+        ? removePromptMentions(draft.promptDocument, materialId)
+        : draft.promptDocument
       if (draft.mediaType === 'image') {
         // The deck's emptiness flips the derived image mode back: an empty
         // reference-image draft could never satisfy its own minimum.
@@ -549,6 +571,7 @@ export function useCreationWorkbench(): {
       } else {
         patchDraft({ promptDocument, references: remaining })
       }
+      if (!lastBinding) return
       displayRef.current.forget(materialId)
       displayRef.current.dropPending(materialId)
       const sessionId = currentSelectedId()
@@ -560,22 +583,34 @@ export function useCreationWorkbench(): {
   )
 
   const requestMaterialRemoval = useCallback(
-    (materialId: string) => {
-      const mentionCount = countPromptMentions(currentDraft().promptDocument, materialId)
+    (position: number) => {
+      const draft = currentDraft()
+      const materialId = draft.references[position]?.materialId
+      if (materialId === undefined) return
+      const mentionedElsewhere = draft.references.some(
+        (reference, index) => index !== position && reference.materialId === materialId
+      )
+      const mentionCount = mentionedElsewhere
+        ? 0
+        : countPromptMentions(draft.promptDocument, materialId)
       if (mentionCount === 0) {
-        void removeMaterialNow(materialId)
+        void removeMaterialNow(position)
         return
       }
-      contextController?.notePendingMaterialRemoval({ materialId, mentionCount })
+      contextController?.notePendingMaterialRemoval({ materialId, position, mentionCount })
     },
     [contextController, currentDraft, removeMaterialNow]
   )
 
   const confirmMaterialRemoval = useCallback(() => {
     if (ctx.pendingMaterialRemoval !== null) {
-      void removeMaterialNow(ctx.pendingMaterialRemoval.materialId)
+      if (
+        currentDraft().references[ctx.pendingMaterialRemoval.position]?.materialId ===
+        ctx.pendingMaterialRemoval.materialId
+      )
+        void removeMaterialNow(ctx.pendingMaterialRemoval.position)
     }
-  }, [ctx.pendingMaterialRemoval, removeMaterialNow])
+  }, [ctx.pendingMaterialRemoval, currentDraft, removeMaterialNow])
 
   // The SSE stream only hints that server facts changed; the refresh module
   // owns when to read them, and it answers a lost stream with its own
@@ -836,23 +871,25 @@ export function useCreationWorkbench(): {
 
   /** Swaps one bound card for a new file at the same deck position. The new
    * upload happens before the old material retires, so a failed upload leaves
-   * the deck untouched. A material the prompt still mentions is never replaced
-   * (that needs the mention-confirm dialog) — such a drop appends instead. */
+   * the deck untouched. A mentioned material can be replaced only while another
+   * binding still keeps that mention valid. */
   const replaceMaterial = useCallback(
-    (materialId: string, file: File): void => {
+    (position: number, file: File): void => {
       if (!ports) return
       void (async () => {
         const draftNow = currentDraft()
-        const position = draftNow.references.findIndex(
-          (binding) => binding.materialId === materialId
-        )
+        const target = referenceBindingTarget(draftNow.references, position)
+        const materialId = target?.materialId
         const replaceable =
+          materialId !== undefined &&
           displayRef.current
             .getSnapshot()
             .materials.some((candidate) => candidate.id === materialId) &&
-          position >= 0 &&
-          countPromptMentions(draftNow.promptDocument, materialId) === 0
-        if (!replaceable) {
+          (draftNow.references.some(
+            (reference, index) => index !== position && reference.materialId === materialId
+          ) ||
+            countPromptMentions(draftNow.promptDocument, materialId) === 0)
+        if (!replaceable || target === null || materialId === undefined) {
           addMaterials([file])
           return
         }
@@ -861,18 +898,17 @@ export function useCreationWorkbench(): {
         const sessionIdAtStart = currentSelectedId()
         const replacementId =
           sessionIdAtStart !== null &&
+          !draftNow.references.some(
+            (reference, index) => index !== position && reference.materialId === materialId
+          ) &&
           ports.actions.canReselectMaterial(sessionIdAtStart, materialId)
             ? materialId
             : crypto.randomUUID()
         const pendingReplacement = displayRef.current.registerPending(replacementId, file)
-        const initialKept = draftNow.references.filter(
-          (binding) => binding.materialId !== materialId
-        )
-        const initialInsertAt = Math.min(position, initialKept.length)
         const fallbackRole = pendingReplacement.kind === 'image' ? 'reference' : 'omni'
         const initialRole =
           (draftNow.mediaType !== null
-            ? roleForPosition(draftNow.mediaType, draftNow.mode, initialInsertAt)
+            ? roleForPosition(draftNow.mediaType, draftNow.mode, position)
             : null) ?? fallbackRole
         const staged: StagedMaterial = {
           id: replacementId,
@@ -885,7 +921,8 @@ export function useCreationWorkbench(): {
                   materialId,
                   replacementId,
                   file,
-                  initialRole
+                  initialRole,
+                  target
                 )
               })
         }
@@ -916,30 +953,34 @@ export function useCreationWorkbench(): {
             displayRef.current.replaceMaterials([...currentMaterials, result.value])
           }
         }
-        displayRef.current.dropPending(materialId)
-        displayRef.current.forget(materialId)
         // Merge into the latest Draft, not the click-time snapshot: prompt,
         // parameter, and other reference edits remain authoritative while
         // the runtime finishes the upload.
         const latestDraft = currentDraft()
-        const latestPosition = latestDraft.references.findIndex(
-          (binding) => binding.materialId === materialId
+        if (target === null) return
+        const latestPosition = referenceBindingPosition(latestDraft.references, target)
+        if (
+          latestPosition < 0 ||
+          (latestDraft.mediaType === 'video' && latestPosition !== target.position)
         )
-        if (latestPosition < 0) return
-        const kept = latestDraft.references.filter((binding) => binding.materialId !== materialId)
-        const insertAt = Math.min(latestPosition, kept.length)
+          return
+        const kept = [...latestDraft.references]
         const role =
           (latestDraft.mediaType !== null
-            ? roleForPosition(latestDraft.mediaType, latestDraft.mode, insertAt)
+            ? roleForPosition(latestDraft.mediaType, latestDraft.mode, latestPosition)
             : null) ?? fallbackRole
-        kept.splice(insertAt, 0, { materialId: replacement.id, role })
+        kept[latestPosition] = { materialId: replacement.id, role }
         if (latestDraft.mediaType === 'image') {
           patchDraft({
             references: bindingsForMode('image', 'reference-image', kept),
             mode: 'reference-image'
           })
         } else {
-          patchDraft({ references: kept })
+          contextController?.editDraft({ ...latestDraft, references: kept })
+        }
+        if (!kept.some((reference) => reference.materialId === materialId)) {
+          displayRef.current.dropPending(materialId)
+          displayRef.current.forget(materialId)
         }
       })()
     },
@@ -957,8 +998,12 @@ export function useCreationWorkbench(): {
   /** A dragged result is copied by the creator-authorized Server command;
    * result bytes and Storage capabilities never enter the Renderer. */
   const addResultAsMaterial = useCallback(
-    (payload: ResultDragPayload, targetMaterialId: string | null): void => {
+    (payload: ResultDragPayload, targetPosition: number | null): void => {
       if (!ports) return
+      const target =
+        targetPosition === null
+          ? null
+          : referenceBindingTarget(currentDraft().references, targetPosition)
       void (async () => {
         const sessionId = currentSelectedId()
         if (sessionId === null) return
@@ -986,51 +1031,58 @@ export function useCreationWorkbench(): {
         }
         const created = result.value
         const draftAtResult = currentDraft()
-        const targetPosition =
-          targetMaterialId === null
-            ? -1
-            : draftAtResult.references.findIndex(
-                (binding) => binding.materialId === targetMaterialId
-              )
+        const targetMaterialId = target?.materialId ?? null
+        const resolvedPosition =
+          target === null ? -1 : referenceBindingPosition(draftAtResult.references, target)
+        if (
+          target !== null &&
+          (resolvedPosition < 0 ||
+            (draftAtResult.mediaType === 'video' && resolvedPosition !== target.position))
+        )
+          return
         const replaceable =
           targetMaterialId !== null &&
-          targetPosition >= 0 &&
           displayRef.current
             .getSnapshot()
             .materials.some((candidate) => candidate.id === targetMaterialId) &&
-          countPromptMentions(draftAtResult.promptDocument, targetMaterialId) === 0
+          (draftAtResult.references.some(
+            (reference, index) =>
+              index !== resolvedPosition && reference.materialId === targetMaterialId
+          ) ||
+            countPromptMentions(draftAtResult.promptDocument, targetMaterialId) === 0)
 
-        if (replaceable && targetMaterialId !== null) {
+        if (replaceable && targetMaterialId !== null && target !== null) {
           const fallbackRole = created.kind === 'image' ? 'reference' : 'omni'
-          displayRef.current.dropPending(targetMaterialId)
-          displayRef.current.forget(targetMaterialId)
           displayRef.current.replaceMaterials([
             ...displayRef.current
               .getSnapshot()
-              .materials.filter((material) => material.id !== targetMaterialId),
+              .materials.filter((material) => material.id !== created.id),
             created
           ])
           const latestDraft = currentDraft()
-          const latestPosition = latestDraft.references.findIndex(
-            (binding) => binding.materialId === targetMaterialId
+          const latestPosition = referenceBindingPosition(latestDraft.references, target)
+          if (
+            latestPosition < 0 ||
+            (latestDraft.mediaType === 'video' && latestPosition !== target.position)
           )
-          if (latestPosition < 0) return
-          const kept = latestDraft.references.filter(
-            (binding) => binding.materialId !== targetMaterialId
-          )
-          const insertAt = Math.min(latestPosition, kept.length)
+            return
+          const kept = [...latestDraft.references]
           const role =
             (latestDraft.mediaType !== null
-              ? roleForPosition(latestDraft.mediaType, latestDraft.mode, insertAt)
+              ? roleForPosition(latestDraft.mediaType, latestDraft.mode, latestPosition)
               : null) ?? fallbackRole
-          kept.splice(insertAt, 0, { materialId: created.id, role })
+          kept[latestPosition] = { materialId: created.id, role }
           if (latestDraft.mediaType === 'image') {
             patchDraft({
               references: bindingsForMode('image', 'reference-image', kept),
               mode: 'reference-image'
             })
           } else {
-            patchDraft({ references: kept })
+            contextController?.editDraft({ ...latestDraft, references: kept })
+          }
+          if (!kept.some((reference) => reference.materialId === targetMaterialId)) {
+            displayRef.current.dropPending(targetMaterialId)
+            displayRef.current.forget(targetMaterialId)
           }
           return
         }
@@ -1096,32 +1148,69 @@ export function useCreationWorkbench(): {
     void ports.actions.submit(task.sessionId, intent)
   }
 
-  const reeditTask = (taskId: string): void => {
-    const { tasks, taskDetails } = taskRefreshRef.current.snapshot
+  const reeditTask = async (taskId: string): Promise<boolean> => {
+    const { tasks } = taskRefreshRef.current.snapshot
     const task = tasks.find((entry) => entry.id === taskId)
-    const currentContext = contextController?.getSnapshot()
-    if (!task || currentContext?.selectedId !== task.sessionId || currentContext.restoring) return
-    const detail = taskDetails[taskId]
-    const specification = detail?.specification ?? task.snapshot
-    if (specification === null) return
+    const controller = contextController
+    const currentContext = controller?.getSnapshot()
+    if (
+      !ports ||
+      !task ||
+      !controller ||
+      currentContext?.selectedId !== task.sessionId ||
+      currentContext.restoring
+    )
+      return false
+    const contextKey = currentContext.contextKey
+    const contextSwitchVersion = controller.contextSwitchVersion()
+    const request = ++reeditRequestRef.current
+    setReeditAction({ contextKey, contextSwitchVersion, taskId, status: 'loading' })
+    const result = await ports.getTask(taskId).catch(() => null)
+    if (
+      !mountedRef.current ||
+      request !== reeditRequestRef.current ||
+      contextSwitchVersion !== controller.contextSwitchVersion() ||
+      controller.getSnapshot().contextKey !== contextKey ||
+      controller.getSnapshot().selectedId !== task.sessionId
+    )
+      return false
+    const detail = result?.outcome === 'succeeded' ? result.value : null
+    const specification = detail?.specification
+    const projected = detail?.referenceMaterials
+    if (
+      detail?.task.id !== taskId ||
+      detail.task.sessionId !== task.sessionId ||
+      !specification ||
+      !projected ||
+      projected.length !== specification.references.length ||
+      projected.some(
+        (material, index) =>
+          material !== null &&
+          (material.id !== specification.references[index].materialId ||
+            material.kind !== specification.references[index].kind)
+      )
+    ) {
+      setReeditAction({ contextKey, contextSwitchVersion, taskId, status: 'failed' })
+      return false
+    }
     const { prompt, references, ...parameters } = specification
-    const available = new Set(displayRef.current.getSnapshot().materials.map(({ id }) => id))
     const restoredReferences = references
-      .filter(({ materialId }) => available.has(materialId))
+      .filter((_, index) => projected[index] !== null)
       .map(({ materialId, role }) => ({ materialId, role: role as DraftReferenceRole }))
-    patchDraft({
-      ...parameters,
-      mediaType: (detail?.task ?? task).mediaType,
-      promptDocument: textPromptDocument(prompt),
-      mode:
-        task.mediaType === 'image' &&
-        specification.mode === 'reference-image' &&
-        restoredReferences.length === 0
-          ? 'text-to-image'
-          : specification.mode,
-      references: restoredReferences
-    })
-    if (restoredReferences.length !== references.length) contextController?.noteReferenceRecovery()
+    controller.editTaskDraft(
+      {
+        ...controller.getSnapshot().draft,
+        ...parameters,
+        mediaType: detail.task.mediaType,
+        promptDocument: textPromptDocument(prompt),
+        references: restoredReferences
+      },
+      projected.filter((material): material is ReferenceMaterialView => material !== null)
+    )
+    if (restoredReferences.length !== references.length) controller.noteReferenceRecovery()
+    else controller.dismissReferenceRecovery()
+    setReeditAction(null)
+    return true
   }
 
   const submitDisabled = submitBlocked !== null || actionBlocksSubmission
@@ -1224,6 +1313,11 @@ export function useCreationWorkbench(): {
       regenerate,
       regenerateDisabled: actionBlocksSubmission,
       reeditTask,
+      reeditAction:
+        reeditAction?.contextKey === ctx.contextKey &&
+        reeditAction.contextSwitchVersion === contextController?.contextSwitchVersion()
+          ? reeditAction
+          : null,
       materials,
       thumbnails,
       thumbnailStates,

@@ -34,6 +34,10 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	if status, body := h.submitTask(t, token, "availability-without-references", plain); status != http.StatusCreated {
 		t.Fatalf("submit plain task: status=%d body=%s", status, body)
 	}
+	// An old Composer removal hid the row, but this task still retains it.
+	if _, err := h.ownerPool.Exec(h.ctx, `UPDATE creation_reference_materials SET removed_at = now() WHERE id = $1::uuid`, available); err != nil {
+		t.Fatalf("hide historically retained material: %v", err)
+	}
 	path := "/creation/sessions/" + intent.SessionID + "/tasks?limit=20"
 	read := func() (string, []bool) {
 		t.Helper()
@@ -92,6 +96,7 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	if status != http.StatusOK {
 		t.Fatalf("task detail status=%d body=%s", status, body)
 	}
+	assertContractResponse(t, http.MethodGet, "/creation/tasks/"+taskID, status, body)
 	var detail map[string]json.RawMessage
 	if err := json.Unmarshal(body, &detail); err != nil {
 		t.Fatalf("decode detail: %v", err)
@@ -103,6 +108,22 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	if _, ok := detailTask["reference_availability"]; ok {
 		t.Fatalf("availability leaked into detail: %s", body)
 	}
+	var projection struct {
+		ReferenceMaterials []*struct {
+			ID       string `json:"id"`
+			FileName string `json:"file_name"`
+			Kind     string `json:"kind"`
+		} `json:"reference_materials"`
+	}
+	if err := json.Unmarshal(body, &projection); err != nil || projection.ReferenceMaterials == nil || len(projection.ReferenceMaterials) != 4 {
+		t.Fatalf("detail must project four frozen positions: %s (decode error=%v)", body, err)
+	}
+	if projection.ReferenceMaterials[0] == nil || projection.ReferenceMaterials[0].ID != available ||
+		projection.ReferenceMaterials[0].FileName != "available.png" || projection.ReferenceMaterials[0].Kind != "image" ||
+		projection.ReferenceMaterials[1] != nil || projection.ReferenceMaterials[2] != nil ||
+		projection.ReferenceMaterials[3] == nil || projection.ReferenceMaterials[3].ID != available {
+		t.Fatalf("detail projected wrong current materials: %+v", projection.ReferenceMaterials)
+	}
 	view := decodeTaskView(t, body)
 	if view.Task.UpdatedAt != updatedAt || view.Specification == nil || len(view.Specification.References) != 4 ||
 		view.Specification.References[0].MaterialID != available ||
@@ -113,6 +134,9 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	}
 	if status, _ := h.doRequest(t, http.MethodGet, "/creation/materials/"+missingRetention+"/preview-url", token, nil); status != http.StatusOK {
 		t.Fatalf("independent material access status=%d", status)
+	}
+	if status, _ := h.doRequest(t, http.MethodGet, "/creation/materials/"+available+"/thumbnail-url", token, nil); status != http.StatusOK {
+		t.Fatalf("historically retained thumbnail status=%d", status)
 	}
 	if status, body := h.doRequest(t, http.MethodGet, path, foreign, nil); status != http.StatusOK {
 		t.Fatalf("foreign list status=%d body=%s", status, body)
@@ -132,5 +156,48 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	}
 	if after, got := read(); after != updatedAt || !reflect.DeepEqual(got, []bool{true, false, true, true}) {
 		t.Fatalf("reloaded availability after restore: updated_at=%q availability=%v", after, got)
+	}
+}
+
+func TestDismissedTaskCannotProjectOrAuthorizeStaleRetainedMaterial(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	token := h.loginToken(t, creator, harnessPassword)
+	intent := h.imageTaskIntent(t, token, "Dismissed reference", 1)
+	retained := h.uploadImage(t, token, intent.SessionID, "retained.png")
+	independent := h.uploadImage(t, token, intent.SessionID, "independent.png")
+	intent.Mode = "reference-image"
+	intent.References = []any{map[string]any{"material_id": retained, "role": "reference"}}
+	status, body := h.submitTask(t, token, "dismissed-reference-projection", intent)
+	if status != http.StatusCreated {
+		t.Fatalf("submit referenced task: status=%d body=%s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+	h.awaitTaskTerminal(t, token, taskID)
+	if status, body := h.dismissTask(t, token, taskID); status != http.StatusOK {
+		t.Fatalf("dismiss task: status=%d body=%s", status, body)
+	}
+	// Simulate a stale historical relation, with no independent live material grant.
+	if _, err := h.ownerPool.Exec(h.ctx, `UPDATE creation_reference_materials SET removed_at = now() WHERE id = $1::uuid`, retained); err != nil {
+		t.Fatalf("hide retained material: %v", err)
+	}
+	if _, err := h.ownerPool.Exec(h.ctx, `INSERT INTO creation_generation_task_references (task_id, material_id) VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING`, taskID, retained); err != nil {
+		t.Fatalf("restore stale relation: %v", err)
+	}
+	status, body = h.doRequest(t, http.MethodGet, "/creation/tasks/"+taskID, token, nil)
+	if status != http.StatusOK {
+		t.Fatalf("dismissed task detail: status=%d body=%s", status, body)
+	}
+	assertContractResponse(t, http.MethodGet, "/creation/tasks/"+taskID, status, body)
+	var detail struct {
+		ReferenceMaterials []json.RawMessage `json:"reference_materials"`
+	}
+	if err := json.Unmarshal(body, &detail); err != nil || len(detail.ReferenceMaterials) != 1 || string(detail.ReferenceMaterials[0]) != "null" {
+		t.Fatalf("dismissed detail must retain frozen position without material: %s (decode error=%v)", body, err)
+	}
+	if status, _ := h.doRequest(t, http.MethodGet, "/creation/materials/"+retained+"/thumbnail-url", token, nil); status != http.StatusNotFound {
+		t.Fatalf("dismissed task still authorized retained thumbnail: %d", status)
+	}
+	if status, _ := h.doRequest(t, http.MethodGet, "/creation/materials/"+independent+"/thumbnail-url", token, nil); status != http.StatusOK {
+		t.Fatalf("independently active material became unreadable: %d", status)
 	}
 }

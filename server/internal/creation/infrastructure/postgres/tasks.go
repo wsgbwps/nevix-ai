@@ -349,7 +349,42 @@ func (r *GenerationTaskRepository) GetForOwner(ctx context.Context, owner, taskI
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	task, slots, _, err := readTaskWithSlotsAndJob(ctx, tx, owner, taskID, false)
-	return task, slots, err
+	if err != nil {
+		return task, slots, err
+	}
+	task.ReferenceMaterials = make([]*domain.ReferenceMaterial, len(task.Spec.References))
+	if len(task.Spec.References) == 0 {
+		return task, slots, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT `+materialColumns+`
+		FROM creation_generation_task_references retained
+		JOIN creation_generation_tasks task ON task.id = retained.task_id
+			AND task.owner_user_id = $2 AND task.dismissed_at IS NULL
+		JOIN creation_reference_materials m ON m.id = retained.material_id
+		JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $2
+		WHERE retained.task_id = $1`, taskID, owner)
+	if err != nil {
+		return domain.GenerationTask{}, nil, fmt.Errorf("creation: read task reference materials: %w", err)
+	}
+	defer rows.Close()
+	byID := make(map[domain.UUID]domain.ReferenceMaterial)
+	for rows.Next() {
+		material, err := scanMaterialRows(rows)
+		if err != nil {
+			return domain.GenerationTask{}, nil, err
+		}
+		byID[material.ID] = material
+	}
+	if err := rows.Err(); err != nil {
+		return domain.GenerationTask{}, nil, fmt.Errorf("creation: read task reference materials rows: %w", err)
+	}
+	for position, reference := range task.Spec.References {
+		if material, ok := byID[reference.MaterialID]; ok {
+			task.ReferenceMaterials[position] = &material
+		}
+	}
+	return task, slots, nil
 }
 
 // GetForWorker resolves task, slots, and the active job for the queue

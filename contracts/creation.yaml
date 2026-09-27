@@ -1146,6 +1146,8 @@ paths:
       summary: 查看 Generation Task 详情（creator-private）
       description: |-
         返回任务、全部 slot 的派生/终态、以及创建者私有的冻结 Generation Specification。
+        GET 详情另返回按冻结引用位置对应的当前 reference_materials：可用项含素材元数据，
+        缺少素材记录或该任务保留关系的项为 null；已删除任务的历史规格仍可读，但全部素材项为 null。
         其他 Member 的任务与不存在完全一致地 404。
       security:
         - bearerAuth: []
@@ -4260,6 +4262,16 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/GenerationSpecification"
+        reference_materials:
+          type: array
+          description: |-
+            仅 GET 任务详情返回；与 specification.references 按冻结位置一一对应。
+            非 null 表示该任务当前仍保留此素材，含编辑器所需元数据；null 表示历史引用不可用。
+            当前投影不属于冻结规格，也不以当前 Draft 或会话素材列表作判据。
+          items:
+            nullable: true
+            allOf:
+              - $ref: "#/components/schemas/ReferenceMaterial"
     GenerationSpecification:
       type: object
       description: 准入时冻结的实际生成意图；视频保留归一化模式、原始比例、单条数量及已验收时长。
