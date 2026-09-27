@@ -181,7 +181,7 @@ assert_creation_integration_executed() {
     TestCredentialFailureAfterPreparationCleansBeforeHoldAndCancel
     TestReferencePreparationCleanupErrorsRemainSanitized
     TestDownloadServesRangeAndChecksumHeaders
-    TestDeleteMaterialRemovesRowAndBlobCleanupSchedules
+    TestLegacyDeleteMaterialIsAuthenticatedNoOp
     TestContractErrorEnvelopeShapeOnEveryCreationErrorPath
     TestProviderConnectionPermissionMatrix
     TestConfigureProviderConnectionLifecycle

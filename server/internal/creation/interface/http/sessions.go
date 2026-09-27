@@ -221,16 +221,9 @@ func (h *MaterialHandler) ListMaterials(w http.ResponseWriter, r *http.Request) 
 	encodeJSON(w, http.StatusOK, listMaterialsResponse{Materials: items, NextCursor: cursorToken(next)})
 }
 
-// DeleteMaterial answers DELETE /creation/materials/{materialID} with 204.
+// DeleteMaterial drains retries from older Desktops without removing the material.
+// The route remains behind RequireActiveUser but is absent from the current API.
 func (h *MaterialHandler) DeleteMaterial(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathUUID(w, r, "materialID")
-	if !ok {
-		return
-	}
-	if err := h.materials.Delete(r.Context(), creatorID(w, r), id); err != nil {
-		fail(w, r, err)
-		return
-	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

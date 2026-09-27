@@ -552,10 +552,9 @@ export function useCreationWorkbench(): {
       displayRef.current.forget(materialId)
       displayRef.current.dropPending(materialId)
       const sessionId = currentSelectedId()
-      // A locally-held new-session file never reached the server, so only its
-      // local records die. Existing-session files may still be uploading, so the
-      // runtime resolves their real identity before retiring the material.
-      if (sessionId !== null) await ports.actions.deleteMaterial(sessionId, materialId)
+      // A finalized material stays in the session; only an unfinished upload
+      // needs cancellation after its Draft binding is removed.
+      if (sessionId !== null) await ports.actions.unbindMaterial(sessionId, materialId)
     },
     [bindingsForMode, contextController, currentDraft, currentSelectedId, patchDraft, ports]
   )
@@ -890,8 +889,7 @@ export function useCreationWorkbench(): {
                 )
               })
         }
-        // The old binding retires only after the runtime confirms the new
-        // material and finishes the original context's delete action.
+        // Keep the old binding until the new material is ready.
         let replacement = staged
         if (staged.completion !== undefined) {
           const result = await staged.completion
@@ -922,7 +920,7 @@ export function useCreationWorkbench(): {
         displayRef.current.forget(materialId)
         // Merge into the latest Draft, not the click-time snapshot: prompt,
         // parameter, and other reference edits remain authoritative while
-        // the runtime finishes the upload/delete action.
+        // the runtime finishes the upload.
         const latestDraft = currentDraft()
         const latestPosition = latestDraft.references.findIndex(
           (binding) => binding.materialId === materialId
@@ -1004,12 +1002,6 @@ export function useCreationWorkbench(): {
 
         if (replaceable && targetMaterialId !== null) {
           const fallbackRole = created.kind === 'image' ? 'reference' : 'omni'
-          const deletion = await ports.actions.deleteMaterial(sessionId, targetMaterialId)
-          if (!mountedRef.current || currentSelectedId() !== sessionId) return
-          if (deletion.outcome !== 'succeeded') {
-            contextController?.noteMaterialUploadFailed(true)
-            return
-          }
           displayRef.current.dropPending(targetMaterialId)
           displayRef.current.forget(targetMaterialId)
           displayRef.current.replaceMaterials([

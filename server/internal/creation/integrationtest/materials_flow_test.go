@@ -2,7 +2,6 @@ package integrationtest
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -377,77 +376,64 @@ func TestPreviewURLAuthorizesCreatorForEveryKind(t *testing.T) {
 	})
 }
 
-func TestDeleteMaterialRemovesRowAndBlobCleanupSchedules(t *testing.T) {
-	h := newHarness(t)
-	h.ensureAccounts(t)
-	token := h.loginToken(t, creatorEmail, harnessPassword)
-	session := h.createSession(t, token, sessionName("delete-material"))
-	status, body := h.doUpload(t, "POST", "/creation/sessions/"+session.ID+"/materials", token, "bye.png", pngBytes(t))
+func TestLegacyDeleteMaterialIsAuthenticatedNoOp(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{})
+	token := h.loginToken(t, creator, harnessPassword)
+	otherToken := h.loginToken(t, otherCreatorEmail, harnessPassword)
+	session := h.createSession(t, token, sessionName("legacy-delete-material"))
+	status, body := h.doUpload(t, http.MethodPost, "/creation/sessions/"+session.ID+"/materials", token, "retained.png", pngBytes(t))
 	view := mustUpload(t, status, body)
-	h.directStore.failDeletes(1)
 
-	if status, body := h.doRequest(t, "DELETE", "/creation/materials/"+view.ID, token, nil); status != http.StatusNoContent {
-		t.Fatalf("delete material: %d %s", status, body)
-	}
-	assertContractResponse(t, "DELETE", "/creation/materials/"+view.ID, http.StatusNoContent, nil)
-	if status, body := h.doRequest(t, "DELETE", "/creation/materials/"+view.ID, token, nil); status != http.StatusNotFound {
-		t.Fatalf("repeat delete: %d %s", status, body)
-	}
-	var count int
+	var objectKey string
 	if err := h.ownerPool.QueryRow(h.ctx,
-		`SELECT count(*) FROM creation_reference_materials WHERE id = $1::uuid AND removed_at IS NULL`, view.ID).Scan(&count); err != nil {
-		t.Fatalf("count rows: %v", err)
+		`SELECT blob_key FROM creation_reference_materials WHERE id = $1::uuid`, view.ID,
+	).Scan(&objectKey); err != nil {
+		t.Fatalf("read material key: %v", err)
 	}
-	if count != 0 {
-		t.Fatal("removed material remains active")
+	cleanupFactsBefore := countRows(t, h.ownerPool, `
+		SELECT count(*) FROM creation_reference_material_uploads WHERE material_id = $1::uuid`, view.ID)
+	for _, tc := range []struct {
+		id, token string
+		want      int
+	}{
+		{view.ID, "", http.StatusUnauthorized},
+		{view.ID, token, http.StatusNoContent},
+		{view.ID, token, http.StatusNoContent},
+		{view.ID, otherToken, http.StatusNoContent},
+		{"not-a-uuid", token, http.StatusNoContent},
+	} {
+		if status, body := h.doRequest(t, http.MethodDelete, "/creation/materials/"+tc.id, tc.token, nil); status != tc.want {
+			t.Fatalf("legacy delete %q: status=%d body=%s", tc.id, status, body)
+		}
 	}
-	var uploadID, objectKey, uploadStatus string
-	var cleanupAttempt int
-	var cleanupDue bool
-	if err := h.ownerPool.QueryRow(h.ctx, `
-		SELECT id, object_key, status, cleanup_attempt_count,
-		       cleanup_next_attempt_at IS NOT NULL AND cleanup_confirmed_at IS NULL
-		FROM creation_reference_material_uploads WHERE material_id = $1::uuid`, view.ID).Scan(
-		&uploadID, &objectKey, &uploadStatus, &cleanupAttempt, &cleanupDue,
-	); err != nil {
-		t.Fatalf("read durable material cleanup: %v", err)
+	if got := countRows(t, h.ownerPool, `
+		SELECT count(*) FROM creation_reference_materials
+		WHERE id = $1::uuid AND removed_at IS NULL`, view.ID); got != 1 {
+		t.Fatalf("legacy delete changed material availability: %d", got)
 	}
-	if uploadStatus != "finalized" || cleanupAttempt != 1 || !cleanupDue {
-		t.Fatalf("durable material cleanup status=%s attempt=%d due=%t", uploadStatus, cleanupAttempt, cleanupDue)
+	if got := countRows(t, h.ownerPool, `
+		SELECT count(*) FROM creation_reference_material_uploads WHERE material_id = $1::uuid`, view.ID); got != cleanupFactsBefore {
+		t.Fatalf("legacy delete changed cleanup fact count: before=%d after=%d", cleanupFactsBefore, got)
 	}
 	if _, err := h.directStore.Head(h.ctx, objectKey); err != nil {
-		t.Fatalf("failed immediate delete did not leave its test object: %v", err)
+		t.Fatalf("legacy delete removed material object: %v", err)
 	}
-	if _, err := h.ownerPool.Exec(h.ctx, `
-		UPDATE creation_reference_material_uploads
-		SET created_at = now() - interval '91 minutes',
-		    put_deadline = now() - interval '31 minutes',
-		    finalize_deadline = now() - interval '1 minute',
-		    cleanup_next_attempt_at = now() - interval '1 minute'
-		WHERE id = $1::uuid`, uploadID); err != nil {
-		t.Fatalf("make finalized cleanup due: %v", err)
+	status, body = h.doRequest(t, http.MethodGet, "/creation/sessions/"+session.ID+"/materials", token, nil)
+	if status != http.StatusOK {
+		t.Fatalf("list materials after legacy delete: status=%d body=%s", status, body)
 	}
-	workerCtx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- h.creation.RunWorkers(workerCtx) }()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := h.ownerPool.QueryRow(h.ctx, `
-			SELECT cleanup_confirmed_at IS NOT NULL
-			FROM creation_reference_material_uploads WHERE id = $1::uuid`, uploadID).Scan(&cleanupDue); err == nil && cleanupDue {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	var listing materialList
+	mustDecode(t, body, &listing)
+	if len(listing.Materials) != 1 || listing.Materials[0].ID != view.ID {
+		t.Fatalf("legacy delete changed material listing: %+v", listing.Materials)
 	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("stop finalized cleanup worker: %v", err)
-	}
-	if !cleanupDue {
-		t.Fatal("finalized material cleanup did not survive the failed immediate delete")
-	}
-	if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_materials WHERE id = $1::uuid`, view.ID); got != 0 {
-		t.Fatal("removed material metadata survived confirmed object cleanup")
+	intent := h.buildTaskIntent(t, token, session.ID, taskIntent{
+		MediaType: "image", Model: "doubao-seedream-5.0-pro", Mode: "reference-image",
+		Ratio: "1:1", Resolution: "2K", Quantity: 1, Prompt: "旧版删除后重用",
+		References: []any{map[string]any{"material_id": view.ID, "role": "reference"}},
+	})
+	if status, body := h.submitTask(t, token, "legacy-delete-material-reuse", intent); status != http.StatusCreated {
+		t.Fatalf("reuse material after legacy delete: status=%d body=%s", status, body)
 	}
 }
 

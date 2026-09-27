@@ -55,6 +55,10 @@ func TestReferenceMaterialUploadContractSurface(t *testing.T) {
 	if _, hasLegacyMultipart := materials["post"]; hasLegacyMultipart {
 		t.Fatal("legacy multipart material upload must not remain in the public contract")
 	}
+	material := resolvePointer(t, moduleFile(t, "creation.yaml"), "/paths/~1creation~1materials~1{materialID}")
+	if _, hasDelete := material["delete"]; hasDelete {
+		t.Fatal("legacy material DELETE must not remain in the public contract")
+	}
 
 	upload := resolvePointer(t, moduleFile(t, "creation.yaml"), "/components/schemas/ReferenceMaterialUpload")
 	properties, _ := upload["properties"].(map[string]any)

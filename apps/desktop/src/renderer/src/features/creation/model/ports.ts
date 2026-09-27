@@ -109,7 +109,6 @@ export interface CreationWorkspacePorts extends AssetLibraryPorts, InspirationPo
     sessionId: string,
     input: CreateMaterialFromResultInput
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
-  readonly deleteMaterial: (materialId: string) => Promise<CreationApiResult<void>>
   /** Fetches one owned image material's short-lived presigned thumbnail URL
    * (ADR-0014 renderer display grant). */
   readonly loadThumbnailUrl: (materialId: string) => Promise<CreationApiResult<DisplayUrlView>>
@@ -302,8 +301,6 @@ export function createCreationWorkspacePorts(
     },
     createMaterialFromResult: (sessionId, input) =>
       withToken((client, token) => client.createMaterialFromResult(token, sessionId, input)),
-    deleteMaterial: (materialId) =>
-      withToken((client, token) => client.deleteMaterial(token, materialId)),
     loadThumbnailUrl: (materialId) =>
       withToken((client, token) => client.loadMaterialThumbnailUrl(token, materialId)),
     loadPreviewUrl: (materialId) =>

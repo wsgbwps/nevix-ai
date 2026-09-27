@@ -80,6 +80,39 @@ test('a recreated navigation provider starts with no selected Workbench Context'
   )
 })
 
+test('an unbound reference stays out of the Draft after session switch and restart', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchRestartStory />)
+  await selectSession(page, 'Spring campaign')
+  const poster = page.getByRole('button', { name: 'poster.png', exact: true })
+  await poster.focus()
+  await page.keyboard.press('Delete')
+  await expect(poster).toHaveCount(0)
+  expect(
+    await page.evaluate(() =>
+      window.__creationDeckTest?.materialIds('aaaaaaaa-0000-4000-8000-000000000001')
+    )
+  ).toContain(firstMaterialId)
+
+  await selectSession(page, 'Untitled creation')
+  await selectSession(page, 'Spring campaign')
+  await expect(poster).toHaveCount(0)
+  await page.getByRole('button', { name: 'Restart app' }).click()
+  await selectSession(page, 'Spring campaign')
+  await expect(poster).toHaveCount(0)
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          window.__creationDeckTest?.draftRecord('aaaaaaaa-0000-4000-8000-000000000001')
+            ?.references ?? []
+      )
+    )
+    .toEqual([{ materialId: secondMaterialId, role: 'reference' }])
+})
+
 test('an accepted response loss resumes the exact frozen submission', async ({ mount, page }) => {
   await mount(
     <CreationWorkbenchStory taskScript={{ submitOutcomes: ['accepted-response-lost'] }} />
@@ -301,34 +334,45 @@ test('an existing-session replacement finishes its original context while Settin
   await page.getByRole('button', { name: 'Open settings' }).click()
   await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
   await expect
-    .poll(async () => page.evaluate(() => window.__creationDeckTest?.deleteMaterialCalls() ?? []))
-    .toEqual([firstMaterialId])
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          window.__creationDeckTest?.draftRecord('aaaaaaaa-0000-4000-8000-000000000001')
+            ?.references ?? []
+      )
+    )
+    .toEqual([
+      { materialId: uploadedMaterialId, role: 'reference' },
+      { materialId: secondMaterialId, role: 'reference' }
+    ])
 
   await page.getByRole('button', { name: 'Back to creation' }).click()
   await expect(page.getByTestId('composer')).toBeVisible()
   await expect(page.getByRole('button', { name: 'replacement.png', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'poster.png', exact: true })).toHaveCount(0)
+  expect(
+    await page.evaluate(() =>
+      window.__creationDeckTest?.materialIds('aaaaaaaa-0000-4000-8000-000000000001')
+    )
+  ).toContain(firstMaterialId)
 })
 
-test('a slow replacement merges with reference edits made while DELETE is pending', async ({
+test('a slow replacement merges with reference edits made while upload is pending', async ({
   mount,
   page
 }) => {
-  await mount(<CreationWorkbenchStory deleteMaterialDeferred />)
+  await mount(<CreationWorkbenchStory uploadDeferred />)
   await selectSession(page, 'Spring campaign')
 
   await replaceByDrop(page, firstMaterialId, 'replacement.png')
   await expect
-    .poll(async () => page.evaluate(() => window.__creationDeckTest?.deleteMaterialCalls() ?? []))
-    .toEqual([firstMaterialId])
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? []))
+    .toHaveLength(1)
 
   await page.getByRole('button', { name: 'banner.png', exact: true }).focus()
   await page.getByRole('button', { name: 'Remove banner.png', exact: true }).click()
-  await expect
-    .poll(async () => page.evaluate(() => window.__creationDeckTest?.deleteMaterialCalls() ?? []))
-    .toEqual([firstMaterialId, secondMaterialId])
 
-  await page.evaluate(() => window.__creationDeckTest?.releaseMaterialDeletes())
+  await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
   await expect
     .poll(async () =>
       page.evaluate(

@@ -67,8 +67,6 @@ export interface DisplayUrlView {
   readonly expiresAt: string
 }
 
-const materialDeleteTimeoutMs = 30_000
-
 /**
  * Every trusted-command failure the Workbench can observe. Clients branch on
  * the contract's `error` code only; an unmapped answer stays generic so an
@@ -247,7 +245,6 @@ export function createCreationClient(serverUrl: string): {
     sessionId: string,
     input: CreateMaterialFromResultInput
   ): Promise<CreationApiResult<ReferenceMaterialView>>
-  deleteMaterial(token: string, materialId: string): Promise<CreationApiResult<void>>
   /** Fetches one owned image material's short-lived presigned thumbnail URL. */
   loadMaterialThumbnailUrl(
     token: string,
@@ -438,25 +435,6 @@ export function createCreationClient(serverUrl: string): {
       if (result.outcome !== 'succeeded') return result
       const material = parseMaterial(result.payload)
       return material ? { outcome: 'succeeded', value: material } : { outcome: 'network-failure' }
-    },
-    deleteMaterial: async (token, materialId) => {
-      const url = new URL(`/creation/materials/${encodeURIComponent(materialId)}`, serverUrl)
-      let response: Response
-      try {
-        response = await fetch(url, {
-          method: 'DELETE',
-          redirect: 'error',
-          signal: AbortSignal.timeout(materialDeleteTimeoutMs),
-          headers: { Authorization: `Bearer ${token}` }
-        })
-      } catch {
-        return { outcome: 'network-failure' }
-      }
-      if (response.ok) return { outcome: 'succeeded', value: undefined }
-      if (response.status === 401) return { outcome: 'unauthorized' }
-      if (response.status === 403) return { outcome: 'forbidden' }
-      if (response.status === 404) return { outcome: 'request-rejected', code: 'not_found' }
-      return { outcome: 'network-failure' }
     },
     loadMaterialThumbnailUrl: (token, materialId) =>
       fetchDisplayUrl(serverUrl, token, `/creation/materials/${materialId}/thumbnail-url`),

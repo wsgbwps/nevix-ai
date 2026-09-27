@@ -381,8 +381,8 @@ paths:
         （宽 ≤320、WebP）的预签名 HTTPS GET URL；Renderer 直接放入 <img> 加载。URL 只读、
         不可列举、不暴露 AK/SK，签发时的归属校验是唯一授权点，TTL 过期即失效并需重新
         获取。非 image、他人或不存在 id 一律 404（猜测无信息泄漏）；素材本体的认证下载
-        仍走 GET /creation/materials/{materialID}。从 Composer 移除后，若仍由同一创建者的
-        既有任务保留，冻结 TaskCard 可继续凭素材 id 获取新的 resize URL，无需当前素材列表。
+        仍走 GET /creation/materials/{materialID}。同一创建者的既有任务保留的历史素材，
+        冻结 TaskCard 可继续凭素材 id 获取新的 resize URL。
       security:
         - bearerAuth: []
       parameters:
@@ -497,27 +497,6 @@ paths:
           $ref: "#/components/responses/NotFound"
         "416":
           $ref: "#/components/responses/RangeNotSatisfiable"
-        "500":
-          $ref: "#/components/responses/InternalError"
-    delete:
-      operationId: deleteReferenceMaterial
-      summary: 从 Composer 移除当前创建者的 Reference Material
-      description: |-
-        仅创建者可移除；移除后不再出现在会话素材列表，也不能用于新的任务准入。
-        已有任务的冻结引用继续保留素材事实及精确 blob，可凭 id 重新获取缩略图 URL。
-        素材已移除且最后一个任务保留关系结束后，才进入持久化精确 key 清理。
-        他人或已移除素材回答 404。
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/materialID"
-      responses:
-        "204":
-          description: 素材已从 Composer 移除；无任务保留时开始精确 blob 清理。
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /creation/provider-connection:

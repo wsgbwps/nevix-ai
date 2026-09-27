@@ -241,7 +241,7 @@ const activeManifest: CapabilityManifest = {
 export interface DeckTestControls {
   /** Reads this device's local draft record for one session key ('new' for composing). */
   draftRecord(key: string): LocalDraftRecord | null
-  deleteMaterialCalls(): string[]
+  materialIds(sessionId: string): string[]
   materialUrlCalls(): ReadonlyArray<{ materialId: string }>
   resultBlobTransfers(): ReadonlyArray<{ taskId: string; slotIndex: number }>
   resultReuseCalls(): ReadonlyArray<{
@@ -252,7 +252,6 @@ export interface DeckTestControls {
   }>
   releaseMaterialUrls(): void
   releaseResultBlobs(): void
-  releaseMaterialDeletes(): void
   releaseSessionDeletes(): void
   deferNextMaterialList(): void
   materialListCalls(): number
@@ -418,7 +417,6 @@ interface RuntimeOptions {
   /** Overrides the scripted image URL so tests can control its network load. */
   readonly materialImageUrl?: string
   readonly materialImageUrls?: readonly string[]
-  readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
   readonly uploadOutcome?:
@@ -445,10 +443,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     if (record === null) removeLocalDraft(localStorage, storyUserId, key)
     else writeLocalDraft(localStorage, storyUserId, key, record)
   }
-  const deletedIds: string[] = []
   const materialUrlCalls: Array<{ materialId: string }> = []
   const materialUrlReleases = new Set<() => void>()
-  const materialDeleteReleases = new Set<() => void>()
   const sessionDeleteReleases = new Set<() => void>()
   const uploadReleases = new Set<() => void>()
   const submissionReleases = new Set<() => void>()
@@ -582,7 +578,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
 
   window.__creationDeckTest = {
     draftRecord: (key) => readLocalDraft(localStorage, storyUserId, key),
-    deleteMaterialCalls: () => deletedIds,
+    materialIds: (sessionId) => (materials.get(sessionId) ?? []).map((material) => material.id),
     materialUrlCalls: () => materialUrlCalls,
     resultBlobTransfers: () => resultBlobTransfers,
     resultReuseCalls: () => resultReuseCalls,
@@ -594,7 +590,6 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       for (const release of resultBlobReleases) release()
       resultBlobReleases.clear()
     },
-    releaseMaterialDeletes: () => releaseAll(materialDeleteReleases),
     releaseSessionDeletes: () => releaseAll(sessionDeleteReleases),
     deferNextMaterialList: () => {
       deferNextMaterialList = true
@@ -823,17 +818,6 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       materials.set(sessionId, [...(materials.get(sessionId) ?? []), withFacts])
       return succeeded(withFacts)
     },
-    deleteMaterial: async (materialId) => {
-      deletedIds.push(materialId)
-      if (options.deleteMaterialDeferred) await waitForRelease(materialDeleteReleases)
-      for (const [sessionId, list] of materials) {
-        materials.set(
-          sessionId,
-          list.filter((entry) => entry.id !== materialId)
-        )
-      }
-      return succeeded(undefined)
-    },
     loadThumbnailUrl: (materialId) => scriptedMaterialUrl(materialId),
     loadPreviewUrl: (materialId) => scriptedMaterialUrl(materialId),
     loadCapabilityManifest: async () => {
@@ -1035,7 +1019,6 @@ interface StoryOptions {
   readonly materialUrlDeferred?: boolean
   readonly materialImageUrl?: string
   readonly materialImageUrls?: readonly string[]
-  readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
   readonly uploadOutcome?:
@@ -1063,7 +1046,6 @@ function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
     materialUrlDeferred: options.materialUrlDeferred,
     materialImageUrl: options.materialImageUrl,
     materialImageUrls: options.materialImageUrls,
-    deleteMaterialDeferred: options.deleteMaterialDeferred,
     deleteSessionDeferred: options.deleteSessionDeferred,
     uploadDeferred: options.uploadDeferred,
     uploadOutcome: options.uploadOutcome,
@@ -1214,7 +1196,7 @@ export function CreationWorkbenchRestartStory(options: StoryOptions = {}): React
       <button type="button" onClick={() => setRun((current) => current + 1)}>
         Restart app
       </button>
-      <RuntimeWorkbenchScope key={run} options={options}>
+      <RuntimeWorkbenchScope key={run} options={run === 0 ? options : { ...options, drafts: {} }}>
         <NavigationStorySurface />
       </RuntimeWorkbenchScope>
     </I18nextProvider>

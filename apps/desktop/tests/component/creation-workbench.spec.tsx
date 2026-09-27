@@ -92,8 +92,8 @@ function draftRecord(page: Page, key: string): Promise<LocalDraftRecord | null> 
   )
 }
 
-function deleteMaterialCalls(page: Page): Promise<string[]> {
-  return page.evaluate(() => window.__creationDeckTest?.deleteMaterialCalls() ?? [])
+function materialIds(page: Page, sessionId: string): Promise<string[]> {
+  return page.evaluate((id) => window.__creationDeckTest?.materialIds(id) ?? [], sessionId)
 }
 
 async function selectFirstSession(page: Page): Promise<void> {
@@ -345,11 +345,11 @@ test('removing a mentioned material confirms the count and cannot be undone in t
   await page.keyboard.press('Delete')
   const dialog = page.getByRole('dialog', { name: 'Remove reference material?' })
   await expect(dialog).toContainText('2 mention(s)')
-  expect(await deleteMaterialCalls(page)).toEqual([])
 
   await dialog.getByRole('button', { name: 'Remove', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Image 1' })).toHaveCount(0)
-  await expect.poll(() => deleteMaterialCalls(page)).toEqual([firstMaterialId])
+  await expect(page.getByRole('button', { name: 'poster.png', exact: true })).toHaveCount(0)
+  expect(await materialIds(page, scriptedSessionId)).toContain(firstMaterialId)
   await expect
     .poll(async () => (await draftRecord(page, scriptedSessionId))?.promptDocument)
     .toEqual({ version: 1, nodes: [{ type: 'text', text: 'ABC' }] })
@@ -932,11 +932,12 @@ test('the reference deck expands on focus with full keyboard equivalence', async
   await page.keyboard.press('ArrowRight')
   await expect(secondCard).toBeFocused()
 
-  // Delete removes the focused card through the trusted material command.
+  // Delete removes the focused card from the local Draft.
   await page.keyboard.press('Delete')
-  await expect
-    .poll(() => deleteMaterialCalls(page))
-    .toContain('dddddddd-0000-4000-8000-000000000004')
+  await expect(secondCard).toHaveCount(0)
+  expect(await materialIds(page, scriptedSessionId)).toContain(
+    'dddddddd-0000-4000-8000-000000000004'
+  )
 })
 
 test('the expanded deck overlays in place instead of squeezing the prompt', async ({
@@ -2167,7 +2168,7 @@ test('a task reference reauthorizes by frozen ID after Composer deletion and Wor
   await composerCard.focus()
   await page.keyboard.press('Delete')
   await expect(composerCard).toHaveCount(0)
-  await expect.poll(() => deleteMaterialCalls(page)).toEqual([firstMaterialId])
+  expect(await materialIds(page, scriptedSessionId)).toContain(firstMaterialId)
 
   // Navigation destroys the Workbench hook and its display controller, not just its render.
   await page.getByRole('button', { name: 'Open settings', exact: true }).click()
@@ -2186,7 +2187,7 @@ test('a task reference reauthorizes by frozen ID after Composer deletion and Wor
   await expect(composerCard).toHaveCount(0)
 
   await pile.locator('img').evaluate((image) => image.dispatchEvent(new Event('error')))
-  const retry = pile.getByRole('button', { name: 'Retry thumbnail for Reference', exact: true })
+  const retry = pile.getByRole('button', { name: 'Retry thumbnail for poster.png', exact: true })
   await retry.focus()
   await page.keyboard.press('Enter')
   await expect

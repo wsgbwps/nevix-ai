@@ -105,9 +105,19 @@ func TestSessionSurfaceHasNoStoredDraft(t *testing.T) {
 	}
 }
 
+// A legacy removed_at row remains readable through its task retention relation.
+func (h *harness) markLegacyMaterialRemoved(t *testing.T, materialID string) {
+	t.Helper()
+	result, err := h.ownerPool.Exec(h.ctx,
+		`UPDATE creation_reference_materials SET removed_at = now() WHERE id = $1::uuid`, materialID)
+	if err != nil || result.RowsAffected() != 1 {
+		t.Fatalf("mark legacy material removed: rows=%d err=%v", result.RowsAffected(), err)
+	}
+}
+
 // Composer removal and frozen task references have independent lifecycles:
-// removal hides the material from future admission while the owning task can
-// keep refreshing its short-lived thumbnail grant from the retained identity.
+// legacy removal hides the material from future admission while the owning task
+// can keep refreshing its short-lived thumbnail grant from the retained identity.
 func TestRemovedMaterialRemainsAvailableToItsFrozenTask(t *testing.T) {
 	var clock atomic.Int64
 	clock.Store(time.Now().UnixNano())
@@ -151,9 +161,7 @@ func TestRemovedMaterialRemainsAvailableToItsFrozenTask(t *testing.T) {
 		t.Fatalf("read retained object key: %v", err)
 	}
 
-	if status, body := h.doRequest(t, "DELETE", "/creation/materials/"+materialID, token, nil); status != http.StatusNoContent {
-		t.Fatalf("delete material: status=%d body=%s", status, body)
-	}
+	h.markLegacyMaterialRemoved(t, materialID)
 	status, body = h.doRequest(t, http.MethodGet, "/creation/sessions/"+session.ID+"/materials", token, nil)
 	if status != http.StatusOK {
 		t.Fatalf("list materials after removal: status=%d body=%s", status, body)
@@ -208,9 +216,7 @@ func TestAdmittedTaskUsesItsReferenceAfterComposerRemoval(t *testing.T) {
 		t.Fatalf("submit retaining task: status=%d body=%s", status, body)
 	}
 	taskID := decodeTaskView(t, body).Task.ID
-	if status, body := h.doRequest(t, http.MethodDelete, "/creation/materials/"+materialID, token, nil); status != http.StatusNoContent {
-		t.Fatalf("remove Composer material: status=%d body=%s", status, body)
-	}
+	h.markLegacyMaterialRemoved(t, materialID)
 
 	workerCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

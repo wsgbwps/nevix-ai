@@ -77,10 +77,6 @@ async function settleFrames(page: Page): Promise<void> {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))))
 }
 
-function deleteMaterialCalls(page: Page): Promise<string[]> {
-  return page.evaluate(() => window.__creationDeckTest?.deleteMaterialCalls() ?? [])
-}
-
 async function selectFirstSession(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
   await expect(page.getByTestId('composer')).toBeVisible()
@@ -302,10 +298,12 @@ test('a single file dropped on one card replaces it in place', async ({ mount, p
     { name: 'swap.png', type: 'image/png' }
   ])
 
-  // Replace = upload the new card, then delete the old one; deck size holds.
+  // Replace = upload the new card, then swap only the Draft binding; deck size holds.
   await expect.poll(() => uploadCalls(page)).toHaveLength(1)
   expect((await uploadCalls(page))[0]?.name).toBe('swap.png')
-  await expect.poll(() => deleteMaterialCalls(page)).toEqual([firstMaterialId])
+  expect(
+    await page.evaluate((id) => window.__creationDeckTest?.materialIds(id) ?? [], scriptedSessionId)
+  ).toContain(firstMaterialId)
   await expect(cards).toHaveCount(2)
   const swapped = page.locator('[data-testid="deck-strip"] [aria-label="swap.png"]')
   await expect(swapped).toHaveCount(1)
@@ -351,7 +349,6 @@ test('a card the prompt still mentions never gets replaced; the drop appends', a
   ])
 
   await expect.poll(() => uploadCalls(page)).toHaveLength(1)
-  await expect.poll(() => deleteMaterialCalls(page), { timeout: 500 }).toHaveLength(0)
   await expect(cards).toHaveCount(2)
 })
 

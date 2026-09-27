@@ -21,12 +21,7 @@ import {
   putReferenceMaterialUploadRecovery,
   removeReferenceMaterialUploadRecovery
 } from './reference-material-upload-recovery'
-import {
-  listReferenceMaterialDeleteRecoveries,
-  putReferenceMaterialDeleteRecovery,
-  removeReferenceMaterialDeleteRecovery,
-  type ReferenceMaterialDeleteRecovery
-} from './reference-material-delete-recovery'
+import { clearReferenceMaterialDeleteRecoveries } from './reference-material-delete-recovery'
 import type { CreationWorkspacePorts } from './ports'
 import type { CreationReferenceMaterialUploadRecovery } from '../../../../../shared/ipc/creation/types'
 import type { AssetPrivateOrigin } from '../api/asset-library-http'
@@ -111,7 +106,7 @@ export interface WorkbenchActions {
   readonly recoverMaterialUploads: () => Promise<void>
   readonly acknowledgeFailure: (sessionId: string) => void
   readonly stopTracking: (sessionId: string) => void
-  readonly deleteMaterial: (
+  readonly unbindMaterial: (
     sessionId: string,
     materialId: string
   ) => Promise<CreationApiResult<void>>
@@ -159,12 +154,6 @@ interface SubmissionChain {
   sessionCreationSent: boolean
 }
 
-interface DeferredMaterialDelete {
-  readonly materialId: string
-  readonly execute: (sessionId: string, materialId: string) => Promise<CreationApiResult<void>>
-  readonly resolve: (result: CreationApiResult<void>) => void
-}
-
 interface DeferredSessionDelete {
   readonly resolve: (result: CreationApiResult<void>) => void
 }
@@ -194,10 +183,8 @@ export function createCreationRuntime(
   const recoveredMaterialObservationFloors = new Map<string, number>()
   const materialObservationEpochs = new Map<string, number>()
   const recoveryControllers = new Map<string, AbortController>()
-  const recoveryDeleting = new Set<string>()
+  const recoveryCancelling = new Set<string>()
   const reselectionAllowed = new Set<string>()
-  const materialDeletePending = new Map<string, ReferenceMaterialDeleteRecovery>()
-  const materialDeleteRuns = new Map<string, Promise<CreationApiResult<void>>>()
   const chains = new Map<string, SubmissionChain>()
   const settledStates = new Map<string, WorkbenchActionState>()
   // Entries persisted by an earlier authenticated use period survive a reload.
@@ -208,7 +195,6 @@ export function createCreationRuntime(
     string,
     Extract<WorkbenchActionState, { readonly status: 'failed' }>
   >()
-  const deferredMaterialDeletes = new Map<string, DeferredMaterialDelete[]>()
   const deferredSessionDeletes = new Map<string, DeferredSessionDelete[]>()
   const eventSubscriptions = new Set<() => void>()
   let generation = 0
@@ -238,16 +224,14 @@ export function createCreationRuntime(
       reselectionAllowed.has(key) &&
       !pendingMaterials.has(key) &&
       !recoveryControllers.has(key) &&
-      !recoveryDeleting.has(key)
+      !recoveryCancelling.has(key)
     )
   }
   if (storage !== undefined) {
     for (const recovery of listReferenceMaterialUploadRecoveries(storage, userId, recoveryScope)) {
       recoveryPending.set(materialKey(recovery.sessionId, recovery.idempotencyKey), recovery)
     }
-    for (const recovery of listReferenceMaterialDeleteRecoveries(storage, userId, recoveryScope)) {
-      materialDeletePending.set(materialKey(recovery.sessionId, recovery.materialId), recovery)
-    }
+    clearReferenceMaterialDeleteRecoveries(storage, userId, recoveryScope)
   }
   const emit = (event: CreationRuntimeEvent): void => {
     for (const listener of listeners) listener(event)
@@ -348,10 +332,8 @@ export function createCreationRuntime(
     recoveredMaterialObservationFloors.clear()
     materialObservationEpochs.clear()
     recoveryControllers.clear()
-    recoveryDeleting.clear()
+    recoveryCancelling.clear()
     reselectionAllowed.clear()
-    materialDeletePending.clear()
-    materialDeleteRuns.clear()
     for (const unsubscribe of eventSubscriptions) {
       try {
         unsubscribe()
@@ -360,13 +342,9 @@ export function createCreationRuntime(
       }
     }
     eventSubscriptions.clear()
-    for (const deletes of deferredMaterialDeletes.values()) {
-      for (const deletion of deletes) deletion.resolve({ outcome: 'unauthorized' })
-    }
     for (const deletes of deferredSessionDeletes.values()) {
       for (const deletion of deletes) deletion.resolve({ outcome: 'unauthorized' })
     }
-    deferredMaterialDeletes.clear()
     deferredSessionDeletes.clear()
     for (const listener of listeners) listener({ type: 'changed', sessionId: '' })
   }
@@ -414,7 +392,6 @@ export function createCreationRuntime(
     recoverMaterialUpload: guardResult(ports.recoverMaterialUpload),
     abortMaterialUpload: guardResult(ports.abortMaterialUpload),
     createMaterialFromResult: guardResult(ports.createMaterialFromResult),
-    deleteMaterial: guardResult(ports.deleteMaterial),
     loadCapabilityManifest: guardResult(ports.loadCapabilityManifest),
     submitTask: guardResult(ports.submitTask),
     listTasks: guardResult(ports.listTasks),
@@ -506,7 +483,7 @@ export function createCreationRuntime(
           if (
             retired ||
             materialGenerations.get(key) !== materialGeneration ||
-            recoveryDeleting.has(key)
+            recoveryCancelling.has(key)
           ) {
             return
           }
@@ -552,7 +529,7 @@ export function createCreationRuntime(
         if (completed !== undefined) {
           // The Go material identity now carries the action; release the
           // potentially large File while retaining the settled Promise for
-          // identity deduplication and delayed deletion.
+          // identity deduplication.
           pendingMaterials.set(key, { ...completed, file: null, state: 'succeeded' })
         }
         if (storage !== undefined) {
@@ -644,7 +621,7 @@ export function createCreationRuntime(
       if (retired) return
       const key = materialKey(recovery.sessionId, recovery.idempotencyKey)
       const currentRecovery = recoveryPending.get(key)
-      if (currentRecovery === undefined || recoveryDeleting.has(key)) continue
+      if (currentRecovery === undefined || recoveryCancelling.has(key)) continue
       const controller = new AbortController()
       recoveryControllers.set(key, controller)
       const result = await guardedPorts
@@ -654,7 +631,7 @@ export function createCreationRuntime(
           if (recoveryControllers.get(key) === controller) recoveryControllers.delete(key)
         })
       if (retired) return
-      if (recoveryPending.get(key) !== currentRecovery || recoveryDeleting.has(key)) continue
+      if (recoveryPending.get(key) !== currentRecovery || recoveryCancelling.has(key)) continue
       if (result.outcome === 'succeeded') {
         resolvedMaterialIds.set(key, result.value.id)
         recoveryPending.delete(key)
@@ -707,23 +684,11 @@ export function createCreationRuntime(
     }
   }
 
-  const driveMaterialDeleteRecovery = async (): Promise<void> => {
-    for (const recovery of materialDeletePending.values()) {
-      if (retired) return
-      const result = await runDurableMaterialDelete(recovery.sessionId, recovery.materialId)
-      if (!retired && result.outcome === 'succeeded') {
-        emit({ type: 'reconcile', sessionId: recovery.sessionId })
-      }
-    }
-  }
-
   const recoverMaterialUploads = (): Promise<void> => {
     if (recoveryRun !== null) return recoveryRun
-    const run = Promise.all([driveMaterialDeleteRecovery(), driveMaterialUploadRecovery()])
-      .then(() => undefined)
-      .finally(() => {
-        if (recoveryRun === run) recoveryRun = null
-      })
+    const run = driveMaterialUploadRecovery().finally(() => {
+      if (recoveryRun === run) recoveryRun = null
+    })
     recoveryRun = run
     return run
   }
@@ -742,73 +707,6 @@ export function createCreationRuntime(
     changed(sessionId)
   }
 
-  const runMaterialDelete = async (materialId: string): Promise<CreationApiResult<void>> => {
-    if (retired) return { outcome: 'unauthorized' }
-    const result = await ports
-      .deleteMaterial(materialId)
-      .catch(() => ({ outcome: 'network-failure' }) as const)
-    return retired ? { outcome: 'unauthorized' } : normalizeFailure(result)
-  }
-
-  const runDurableMaterialDelete = (
-    sessionId: string,
-    materialId: string
-  ): Promise<CreationApiResult<void>> => {
-    if (retired) return Promise.resolve({ outcome: 'unauthorized' })
-    const key = materialKey(sessionId, materialId)
-    const existing = materialDeleteRuns.get(key)
-    if (existing !== undefined) return existing
-    const recovery = { sessionId, materialId }
-    materialDeletePending.set(key, recovery)
-    if (storage !== undefined) {
-      putReferenceMaterialDeleteRecovery(storage, userId, recoveryScope, recovery)
-    }
-    const run = runMaterialDelete(materialId)
-      .then((result) => {
-        if (
-          result.outcome === 'succeeded' ||
-          (result.outcome === 'request-rejected' && result.code === 'not_found')
-        ) {
-          materialDeletePending.delete(key)
-          if (storage !== undefined) {
-            removeReferenceMaterialDeleteRecovery(storage, userId, recoveryScope, materialId)
-          }
-          return { outcome: 'succeeded', value: undefined } as const
-        }
-        return result
-      })
-      .finally(() => {
-        if (materialDeleteRuns.get(key) === run) materialDeleteRuns.delete(key)
-      })
-    materialDeleteRuns.set(key, run)
-    return run
-  }
-
-  const runMaterialDeleteForSession = async (
-    sessionId: string,
-    materialId: string
-  ): Promise<CreationApiResult<void>> => {
-    if (retired) return { outcome: 'unauthorized' }
-    const key = materialKey(sessionId, materialId)
-    const finishDelete = async (targetId: string): Promise<CreationApiResult<void>> => {
-      const result = await runDurableMaterialDelete(sessionId, targetId)
-      if (result.outcome === 'succeeded') materialFailures.delete(key)
-      return result
-    }
-    const resolved = resolvedMaterialIds.get(key)
-    if (resolved !== undefined) return finishDelete(resolved)
-    const pending = pendingMaterials.get(key)
-    if (pending === undefined) return finishDelete(materialId)
-    // Local tracking may stop while this deletion is queued. The public
-    // Promise then retires, but cleanup still needs the raw Go identity so a
-    // material that was accepted meanwhile does not become orphaned.
-    const result = await pending.wirePromise
-    if (retired) return { outcome: 'unauthorized' }
-    if (result.outcome === 'unauthorized') return normalizeFailure(result)
-    if (result.outcome === 'succeeded') return finishDelete(result.value.id)
-    return result
-  }
-
   const runSessionDelete = async (sessionId: string): Promise<CreationApiResult<void>> => {
     if (retired) return { outcome: 'unauthorized' }
     const result = normalizeFailure(
@@ -824,13 +722,8 @@ export function createCreationRuntime(
     return result
   }
 
-  const flushDeletes = (sessionId: string): void => {
+  const flushSessionDeletes = (sessionId: string): void => {
     if (retired || chains.has(sessionId)) return
-    const materialDeletes = deferredMaterialDeletes.get(sessionId) ?? []
-    deferredMaterialDeletes.delete(sessionId)
-    for (const deletion of materialDeletes) {
-      void deletion.execute(sessionId, deletion.materialId).then(deletion.resolve)
-    }
     const sessionDeletes = deferredSessionDeletes.get(sessionId) ?? []
     deferredSessionDeletes.delete(sessionId)
     for (const deletion of sessionDeletes) {
@@ -845,7 +738,7 @@ export function createCreationRuntime(
     syncNotice(sessionId)
     changed(sessionId)
     emit({ type: 'reconcile', sessionId })
-    flushDeletes(sessionId)
+    flushSessionDeletes(sessionId)
     return 'accepted'
   }
 
@@ -876,7 +769,7 @@ export function createCreationRuntime(
     })
     syncNotice(sessionId)
     changed(sessionId)
-    flushDeletes(sessionId)
+    flushSessionDeletes(sessionId)
     return 'failed'
   }
 
@@ -908,7 +801,7 @@ export function createCreationRuntime(
     settledStates.set(sessionId, { status: 'failed', code })
     syncNotice(sessionId)
     changed(sessionId)
-    flushDeletes(sessionId)
+    flushSessionDeletes(sessionId)
     return 'failed'
   }
 
@@ -970,9 +863,8 @@ export function createCreationRuntime(
     return sendSubmission(sessionId, chain)
   }
 
-  /** Rekeys chain, draft record, list entry, and deferred deletions onto the
-   * session identity in one synchronous step — no write can land under the
-   * pending key afterwards. Queued deletions keep local ids until flush. */
+  /** Rekeys chain and draft ownership onto the session identity in one
+   * synchronous step — no write can land under the pending key afterwards. */
   const materializeChain = (pendingKey: string, session: CreationSessionView): void => {
     const chain = chains.get(pendingKey)
     if (chain === undefined) return
@@ -982,14 +874,6 @@ export function createCreationRuntime(
     if (settled !== undefined) {
       settledStates.delete(pendingKey)
       settledStates.set(session.id, settled)
-    }
-    const deferredDeletes = deferredMaterialDeletes.get(pendingKey)
-    if (deferredDeletes !== undefined) {
-      deferredMaterialDeletes.delete(pendingKey)
-      deferredMaterialDeletes.set(session.id, [
-        ...(deferredMaterialDeletes.get(session.id) ?? []),
-        ...deferredDeletes
-      ])
     }
     pendingDraftKeys.delete(pendingKey)
     if (storage !== undefined) {
@@ -1086,54 +970,58 @@ export function createCreationRuntime(
     return sendSubmission(session.id, chain)
   }
 
-  const requestMaterialDelete = (
-    sessionId: string,
-    materialId: string,
-    execute: (
-      sessionId: string,
-      materialId: string
-    ) => Promise<CreationApiResult<void>> = runMaterialDeleteForSession
-  ): Promise<CreationApiResult<void>> => {
+  const unbindMaterial: WorkbenchActions['unbindMaterial'] = async (sessionId, materialId) => {
+    if (retired) return { outcome: 'unauthorized' }
+    const key = materialKey(sessionId, materialId)
+    const resolvedId = resolvedMaterialIds.get(key)
+    if (storage !== undefined) {
+      removeLocalDraftMaterial(storage, userId, sessionId, materialId)
+      if (resolvedId !== undefined) {
+        removeLocalDraftMaterial(storage, userId, sessionId, resolvedId)
+      }
+    }
     const chain = chains.get(sessionId)
     const retained = chain?.frozenIntent.references.some(
       (reference) =>
         reference.materialId === materialId ||
         resolvedMaterialIds.get(materialKey(sessionId, reference.materialId)) === materialId
     )
-    if (!retained) return execute(sessionId, materialId)
-    return new Promise((resolve) => {
-      const queued = deferredMaterialDeletes.get(sessionId) ?? []
-      queued.push({ materialId, execute, resolve })
-      deferredMaterialDeletes.set(sessionId, queued)
-    })
-  }
+    // The accepted task must keep its frozen input, including a pending upload.
+    if (retained) {
+      emit({ type: 'reconcile', sessionId })
+      return { outcome: 'succeeded', value: undefined }
+    }
 
-  const deleteMaterial: WorkbenchActions['deleteMaterial'] = async (sessionId, materialId) => {
-    if (retired) return { outcome: 'unauthorized' }
-    const key = materialKey(sessionId, materialId)
     const pending = pendingMaterials.get(key)
     pending?.controller.abort()
     const recovery = recoveryPending.get(key)
-    if (recovery !== undefined) {
-      // Explicit deletion owns this key from here. Fence the active upload's
-      // late completion before aborting either IPC operation.
-      materialGenerations.delete(key)
-      pendingMaterials.delete(key)
-      ambiguousMaterials.delete(key)
-      materialFailures.delete(key)
-      recoveryPending.delete(key)
-      reselectionAllowed.delete(key)
+    materialGenerations.delete(key)
+    pendingMaterials.delete(key)
+    ambiguousMaterials.delete(key)
+    materialFailures.delete(key)
+    recoveryPending.delete(key)
+    reselectionAllowed.delete(key)
+    clearRecoveredMaterial(key)
+    resolvedMaterialIds.delete(key)
+    // A recovered material can be addressed by its real ID while its
+    // temporary view still uses the upload's local ID.
+    for (const [aliasKey, resolved] of resolvedMaterialIds) {
+      if (!aliasKey.startsWith(`${sessionId}:`) || resolved !== materialId) continue
+      pendingMaterials.get(aliasKey)?.controller.abort()
+      pendingMaterials.delete(aliasKey)
+      materialGenerations.delete(aliasKey)
+      clearRecoveredMaterial(aliasKey)
+      resolvedMaterialIds.delete(aliasKey)
       if (storage !== undefined) {
-        removeReferenceMaterialUploadRecovery(
-          storage,
-          userId,
-          recoveryScope,
-          recovery.idempotencyKey
-        )
-        removeLocalDraftMaterial(storage, userId, sessionId, recovery.idempotencyKey)
+        removeLocalDraftMaterial(storage, userId, sessionId, aliasKey.slice(sessionId.length + 1))
       }
-      syncNotice(sessionId)
-      recoveryDeleting.add(key)
+    }
+    if (recovery !== undefined && storage !== undefined) {
+      removeReferenceMaterialUploadRecovery(storage, userId, recoveryScope, recovery.idempotencyKey)
+    }
+    syncNotice(sessionId)
+    if (recovery !== undefined) {
+      recoveryCancelling.add(key)
       recoveryControllers.get(key)?.abort()
       const controller = new AbortController()
       recoveryControllers.set(key, controller)
@@ -1143,46 +1031,17 @@ export function createCreationRuntime(
         .finally(() => {
           if (recoveryControllers.get(key) === controller) recoveryControllers.delete(key)
         })
+      recoveryCancelling.delete(key)
       if (retired) return { outcome: 'unauthorized' }
+      // A concurrent finalize can return a material here. The Draft is
+      // unbound, but the finalized server record remains available.
       if (aborted.outcome !== 'succeeded') {
-        recoveryDeleting.delete(key)
-        clearRecoveredMaterial(key)
-        resolvedMaterialIds.delete(key)
         emit({ type: 'reconcile', sessionId })
         return aborted
       }
-      if (aborted.value !== null) {
-        resolvedMaterialIds.set(key, aborted.value.id)
-        recordRecoveredMaterial(key, sessionId, aborted.value)
-        const deletion = await runDurableMaterialDelete(sessionId, aborted.value.id)
-        if (deletion.outcome !== 'succeeded') {
-          recoveryDeleting.delete(key)
-          emit({ type: 'reconcile', sessionId })
-          return deletion
-        }
-      }
-      recoveryDeleting.delete(key)
-      clearRecoveredMaterial(key)
-      resolvedMaterialIds.delete(key)
-      if (storage !== undefined && aborted.value !== null) {
-        removeLocalDraftMaterial(storage, userId, sessionId, aborted.value.id)
-      }
-      emit({ type: 'reconcile', sessionId })
-      return { outcome: 'succeeded', value: undefined }
     }
-    const result = await runMaterialDeleteForSession(sessionId, materialId)
-    if (result.outcome === 'succeeded') {
-      clearRecoveredMaterial(key)
-      resolvedMaterialIds.delete(key)
-      for (const [recoveryKey, recovered] of recoveredMaterials) {
-        if (recoveryKey.startsWith(`${sessionId}:`) && recovered.id === materialId) {
-          clearRecoveredMaterial(recoveryKey)
-          resolvedMaterialIds.delete(recoveryKey)
-        }
-      }
-    }
-    if (!retired) emit({ type: 'reconcile', sessionId })
-    return result
+    emit({ type: 'reconcile', sessionId })
+    return { outcome: 'succeeded', value: undefined }
   }
 
   const replaceMaterial: WorkbenchActions['replaceMaterial'] = async (
@@ -1210,24 +1069,6 @@ export function createCreationRuntime(
       return result
     }
     if (storage !== undefined) {
-      replaceLocalDraftMaterial(
-        storage,
-        userId,
-        sessionId,
-        previousMaterialId,
-        result.value.id,
-        role
-      )
-    }
-    const deletion = await requestMaterialDelete(sessionId, previousMaterialId)
-    if (retired || deletion.outcome === 'unauthorized') return { outcome: 'unauthorized' }
-    if (resolvedMaterialIds.get(key) !== result.value.id) {
-      return { outcome: 'request-rejected', code: 'action-retired' }
-    }
-    if (storage !== undefined) {
-      // The display may have written later prompt/parameter/reference edits
-      // while DELETE was pending. Reapply only the identity replacement to
-      // that newest record so the action cannot overwrite those edits.
       replaceLocalDraftMaterial(
         storage,
         userId,
@@ -1381,7 +1222,7 @@ export function createCreationRuntime(
         recoveryPending.delete(key)
         recoveryControllers.get(key)?.abort()
         recoveryControllers.delete(key)
-        recoveryDeleting.delete(key)
+        recoveryCancelling.delete(key)
         reselectionAllowed.delete(key)
       }
       for (const key of [...recoveredMaterials.keys()]) {
@@ -1403,9 +1244,7 @@ export function createCreationRuntime(
         }
       }
       syncNotice(sessionId)
-      // Deferred deletions synchronously capture the old Promise or resolved
-      // identity before the runtime releases its references below.
-      flushDeletes(sessionId)
+      flushSessionDeletes(sessionId)
       for (const key of [...pendingMaterials.keys()]) {
         if (key.startsWith(`${sessionId}:`)) {
           pendingMaterials.delete(key)
@@ -1418,8 +1257,7 @@ export function createCreationRuntime(
       materialObservationEpochs.delete(sessionId)
       changed(sessionId)
     },
-    deleteMaterial: (sessionId, materialId) =>
-      requestMaterialDelete(sessionId, materialId, deleteMaterial),
+    unbindMaterial,
     deleteSession: (sessionId) => {
       if (!chains.has(sessionId)) return runSessionDelete(sessionId)
       return new Promise((resolve) => {
