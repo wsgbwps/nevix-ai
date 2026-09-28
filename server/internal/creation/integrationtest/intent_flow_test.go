@@ -105,20 +105,9 @@ func TestSessionSurfaceHasNoStoredDraft(t *testing.T) {
 	}
 }
 
-// A legacy removed_at row remains readable through its task retention relation.
-func (h *harness) markLegacyMaterialRemoved(t *testing.T, materialID string) {
-	t.Helper()
-	result, err := h.ownerPool.Exec(h.ctx,
-		`UPDATE creation_reference_materials SET removed_at = now() WHERE id = $1::uuid`, materialID)
-	if err != nil || result.RowsAffected() != 1 {
-		t.Fatalf("mark legacy material removed: rows=%d err=%v", result.RowsAffected(), err)
-	}
-}
-
-// Composer removal and frozen task references have independent lifecycles:
-// legacy removal hides the material from future admission while the owning task
-// can keep refreshing its short-lived thumbnail grant from the retained identity.
-func TestRemovedMaterialRemainsAvailableToItsFrozenTask(t *testing.T) {
+// Session deletion releases the active material grant while the owning task
+// can keep refreshing its short-lived thumbnail grant.
+func TestDeletedSessionMaterialRemainsAvailableToItsFrozenTask(t *testing.T) {
 	var clock atomic.Int64
 	clock.Store(time.Now().UnixNano())
 	now := func() time.Time { return time.Unix(0, clock.Load()) }
@@ -161,20 +150,8 @@ func TestRemovedMaterialRemainsAvailableToItsFrozenTask(t *testing.T) {
 		t.Fatalf("read retained object key: %v", err)
 	}
 
-	h.markLegacyMaterialRemoved(t, materialID)
-	status, body = h.doRequest(t, http.MethodGet, "/creation/sessions/"+session.ID+"/materials", token, nil)
-	if status != http.StatusOK {
-		t.Fatalf("list materials after removal: status=%d body=%s", status, body)
-	}
-	var listing materialList
-	mustDecode(t, body, &listing)
-	if len(listing.Materials) != 0 {
-		t.Fatalf("removed material remains in Composer listing: %+v", listing.Materials)
-	}
-	if status, body := h.submitTask(t, token, "removed-reference-key", intent); status != http.StatusBadRequest {
-		t.Fatalf("removed reference must be invalid_request, got %d: %s", status, body)
-	} else {
-		assertErrorCode(t, body, "invalid_request")
+	if status, body := h.doRequest(t, http.MethodDelete, "/creation/sessions/"+session.ID, token, nil); status != http.StatusNoContent {
+		t.Fatalf("delete retaining task session: status=%d body=%s", status, body)
 	}
 	clock.Store(firstURL.ExpiresAt.Add(time.Minute).UnixNano())
 	secondURL := authorize()
@@ -189,18 +166,15 @@ func TestRemovedMaterialRemainsAvailableToItsFrozenTask(t *testing.T) {
 	}
 	for _, suffix := range []string{"", "/preview-url"} {
 		if status, body := h.doRequest(t, http.MethodGet, "/creation/materials/"+materialID+suffix, token, nil); status != http.StatusNotFound {
-			t.Fatalf("removed material became active-readable at %s: status=%d body=%s", suffix, status, body)
+			t.Fatalf("deleted session material became active-readable at %s: status=%d body=%s", suffix, status, body)
 		}
-	}
-	if status, body := h.doRequest(t, http.MethodDelete, "/creation/sessions/"+session.ID, token, nil); status != http.StatusNoContent {
-		t.Fatalf("delete retaining task session: status=%d body=%s", status, body)
 	}
 	if grant := authorize(); grant.URL == secondURL.URL {
 		t.Fatal("session removal prevented a fresh task reference grant")
 	}
 }
 
-func TestAdmittedTaskUsesItsReferenceAfterComposerRemoval(t *testing.T) {
+func TestAdmittedTaskUsesItsReferenceAfterSessionDeletion(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{})
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1})
@@ -216,7 +190,9 @@ func TestAdmittedTaskUsesItsReferenceAfterComposerRemoval(t *testing.T) {
 		t.Fatalf("submit retaining task: status=%d body=%s", status, body)
 	}
 	taskID := decodeTaskView(t, body).Task.ID
-	h.markLegacyMaterialRemoved(t, materialID)
+	if status, body := h.doRequest(t, http.MethodDelete, "/creation/sessions/"+session.ID, token, nil); status != http.StatusNoContent {
+		t.Fatalf("delete task session: status=%d body=%s", status, body)
+	}
 
 	workerCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -227,7 +203,7 @@ func TestAdmittedTaskUsesItsReferenceAfterComposerRemoval(t *testing.T) {
 		t.Fatalf("stop worker: %v", err)
 	}
 	if view.Task.Status != "succeeded" {
-		t.Fatalf("Composer removal changed an admitted task: status=%s slots=%s", view.Task.Status, slotVerdicts(view))
+		t.Fatalf("session deletion changed an admitted task: status=%s slots=%s", view.Task.Status, slotVerdicts(view))
 	}
 	if call := h.kapon.generation.lastImageCall(); call == nil || call.images != 1 {
 		t.Fatalf("worker lost the frozen reference: %+v", call)

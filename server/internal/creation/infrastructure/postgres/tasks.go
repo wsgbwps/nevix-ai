@@ -312,7 +312,7 @@ func (r *GenerationTaskRepository) ListBySession(ctx context.Context, owner, ses
 		SELECT retained.task_id, retained.material_id
 		FROM creation_generation_task_references retained
 		JOIN creation_reference_materials material ON material.id = retained.material_id
-			AND (material.removed_at IS NULL OR material.legacy_object_verified_at IS NOT NULL)
+			AND material.removed_at IS NULL
 		WHERE retained.task_id = ANY($1::uuid[])`, ids)
 	if err != nil {
 		return nil, nil, fmt.Errorf("creation: list task reference availability: %w", err)
@@ -363,7 +363,7 @@ func (r *GenerationTaskRepository) GetForOwner(ctx context.Context, owner, taskI
 		JOIN creation_generation_tasks task ON task.id = retained.task_id
 			AND task.owner_user_id = $2 AND task.dismissed_at IS NULL
 		JOIN creation_reference_materials m ON m.id = retained.material_id
-			AND (m.removed_at IS NULL OR m.legacy_object_verified_at IS NOT NULL)
+			AND m.removed_at IS NULL
 		JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $2
 		WHERE retained.task_id = $1`, taskID, owner)
 	if err != nil {

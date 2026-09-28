@@ -117,7 +117,7 @@ func (r *TeamPublicationRepository) Publish(ctx context.Context, tx domain.TxExe
 			FROM creation_reference_materials m
 			JOIN creation_generation_task_references retained ON retained.material_id = m.id
 			WHERE retained.task_id = $1 AND m.id = $2
-			  AND (m.removed_at IS NULL OR m.legacy_object_verified_at IS NOT NULL)`, asset.TaskID, reference.MaterialID).Scan(
+			  AND m.removed_at IS NULL`, asset.TaskID, reference.MaterialID).Scan(
 			&material.ID, &material.SessionID, &kind, &material.FileName, &material.MimeType,
 			&material.ByteSize, &material.ChecksumSHA256, &material.BlobKey, &material.WidthPx,
 			&material.HeightPx, &material.PixelCount, &material.DurationMS, &material.ClaimsVersion,
@@ -488,7 +488,7 @@ func (r *TeamPublicationRepository) listAdminAssetReferences(ctx context.Context
 			FROM creation_reference_materials m
 			JOIN creation_generation_task_references retained ON retained.material_id = m.id
 			WHERE retained.task_id = $1 AND m.id = $2
-			  AND (m.removed_at IS NULL OR m.legacy_object_verified_at IS NOT NULL)`, taskID, frozen.MaterialID).Scan(
+			  AND m.removed_at IS NULL`, taskID, frozen.MaterialID).Scan(
 			&reference.ID, &kind, &reference.FileName, &reference.MimeType, &reference.ByteSize,
 			&reference.ChecksumSHA256, &reference.BlobKey, &reference.WidthPx, &reference.HeightPx,
 			&reference.PixelCount, &reference.DurationMS, &reference.ClaimsVersion,

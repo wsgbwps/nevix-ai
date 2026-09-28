@@ -34,25 +34,19 @@ type MaterialRepository interface {
 	// GetForRead resolves one material for its creator through an active
 	// session; every failure shape collapses into ErrMaterialNotFound.
 	GetForRead(ctx context.Context, owner, id UUID) (ReferenceMaterial, error)
-	// GetForThumbnail resolves active material or a removed material retained
-	// by one of the same creator's immutable tasks.
+	// GetForThumbnail resolves active material or one retained by the same
+	// creator's immutable task after session deletion.
 	GetForThumbnail(ctx context.Context, owner, id UUID) (ReferenceMaterial, error)
 	// GetForTask resolves only an exact frozen reference retained by this
-	// creator's admitted task, independently of Composer/session removal.
+	// creator's admitted task, independently of Draft unbinding or session deletion.
 	GetForTask(ctx context.Context, owner, taskID, materialID UUID) (ReferenceMaterial, error)
 	GetForReadInTx(ctx context.Context, tx TxExecutor, owner, id UUID) (ReferenceMaterial, error)
 	ListBySession(ctx context.Context, owner, sessionID UUID, cursor *CompoundCursor, limit int) ([]ReferenceMaterial, *CompoundCursor, error)
-	// Remove hides an active material from Composer and future admission. The
-	// retained result reports whether a task still owns its blob lifecycle.
-	Remove(ctx context.Context, tx TxExecutor, owner, id UUID) (material ReferenceMaterial, retained bool, err error)
 	// LoadMaterialsInSession resolves the requested materials with full facts
 	// inside the caller's transaction; materials outside the session are
 	// absent, and admission treats absence as a rejection fact.
 	LoadMaterialsInSession(ctx context.Context, tx TxExecutor, owner, sessionID UUID, ids []UUID) ([]ReferenceMaterial, error)
-	ListLegacyRemoved(ctx context.Context, after *UUID, limit int) ([]ReferenceMaterial, error)
 	WithObjectLock(ctx context.Context, key string, work func() error) error
-	ConfirmLegacyObject(ctx context.Context, tx TxExecutor, id UUID) (bool, error)
-	ReleaseDismissedReferences(ctx context.Context, tx TxExecutor, limit int) (int64, error)
 }
 
 // ReferenceMaterialUploadRepository persists creator-scoped upload leases.
@@ -72,7 +66,7 @@ type ReferenceMaterialUploadRepository interface {
 	// cleanup dormant for retained material or due for an unretained removal.
 	RecordFinalizedMaterialCleanup(ctx context.Context, tx TxExecutor, cleanup *ReferenceMaterialUpload) error
 	TerminalizeExpiredOrInvalid(ctx context.Context, tx TxExecutor, now time.Time, limit int) error
-	LockDueCleanups(ctx context.Context, tx TxExecutor, now time.Time, limit int, skipKeys []string) ([]ReferenceMaterialUpload, error)
+	LockDueCleanups(ctx context.Context, tx TxExecutor, now time.Time, limit int) ([]ReferenceMaterialUpload, error)
 	MarkCleanupAttempt(ctx context.Context, tx TxExecutor, id UUID, nextAttemptAt time.Time) (ReferenceMaterialUploadCleanup, error)
 	LockCleanupClaim(ctx context.Context, tx TxExecutor, id UUID, attempt int) (bool, error)
 	ObjectRetained(ctx context.Context, tx TxExecutor, key string) (bool, error)

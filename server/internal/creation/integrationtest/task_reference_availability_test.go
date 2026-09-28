@@ -1,12 +1,10 @@
 package integrationtest
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
 	"testing"
-	"time"
 )
 
 func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *testing.T) {
@@ -36,7 +34,7 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	if status, body := h.submitTask(t, token, "availability-without-references", plain); status != http.StatusCreated {
 		t.Fatalf("submit plain task: status=%d body=%s", status, body)
 	}
-	// An old Composer removal hid the row, but this task still retains it.
+	// A development-era removed row remains unavailable even if the task retains it.
 	if _, err := h.ownerPool.Exec(h.ctx, `UPDATE creation_reference_materials SET removed_at = now() WHERE id = $1::uuid`, available); err != nil {
 		t.Fatalf("hide historically retained material: %v", err)
 	}
@@ -83,23 +81,7 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	}
 	updatedAt, availability := read()
 	if !reflect.DeepEqual(availability, []bool{false, true, true, false}) {
-		t.Fatalf("pre-recovery availability=%v", availability)
-	}
-	workerCtx, cancel := context.WithCancel(h.ctx)
-	done := make(chan error, 1)
-	go func() { done <- h.creation.RunWorkers(workerCtx) }()
-	defer func() { cancel(); <-done }()
-	deadline := time.Now().Add(5 * time.Second)
-	for countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_materials WHERE id = $1::uuid AND removed_at IS NULL`, available) != 1 {
-		if time.Now().After(deadline) {
-			t.Fatal("legacy material was not restored")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if after, got := read(); !reflect.DeepEqual(got, []bool{true, true, true, true}) {
-		t.Fatalf("recovered availability=%v", got)
-	} else {
-		updatedAt = after
+		t.Fatalf("removed reference availability=%v", availability)
 	}
 	if _, err := h.ownerPool.Exec(h.ctx, `DELETE FROM creation_generation_task_references WHERE task_id = $1::uuid AND material_id IN ($2::uuid, $3::uuid)`, taskID, missingRow, missingRetention); err != nil {
 		t.Fatalf("remove retention: %v", err)
@@ -107,7 +89,7 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	if _, err := h.ownerPool.Exec(h.ctx, `DELETE FROM creation_reference_materials WHERE id = $1::uuid`, missingRow); err != nil {
 		t.Fatalf("remove material row: %v", err)
 	}
-	if after, got := read(); after != updatedAt || !reflect.DeepEqual(got, []bool{true, false, false, true}) {
+	if after, got := read(); after != updatedAt || !reflect.DeepEqual(got, []bool{false, false, false, false}) {
 		t.Fatalf("same updated_at must permit changed availability: before=%q after=%q availability=%v", updatedAt, after, got)
 	}
 	status, body = h.doRequest(t, http.MethodGet, "/creation/tasks/"+taskID, token, nil)
@@ -136,10 +118,8 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	if err := json.Unmarshal(body, &projection); err != nil || projection.ReferenceMaterials == nil || len(projection.ReferenceMaterials) != 4 {
 		t.Fatalf("detail must project four frozen positions: %s (decode error=%v)", body, err)
 	}
-	if projection.ReferenceMaterials[0] == nil || projection.ReferenceMaterials[0].ID != available ||
-		projection.ReferenceMaterials[0].FileName != "available.png" || projection.ReferenceMaterials[0].Kind != "image" ||
-		projection.ReferenceMaterials[1] != nil || projection.ReferenceMaterials[2] != nil ||
-		projection.ReferenceMaterials[3] == nil || projection.ReferenceMaterials[3].ID != available {
+	if projection.ReferenceMaterials[0] != nil || projection.ReferenceMaterials[1] != nil ||
+		projection.ReferenceMaterials[2] != nil || projection.ReferenceMaterials[3] != nil {
 		t.Fatalf("detail projected wrong current materials: %+v", projection.ReferenceMaterials)
 	}
 	view := decodeTaskView(t, body)
@@ -153,8 +133,8 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	if status, _ := h.doRequest(t, http.MethodGet, "/creation/materials/"+missingRetention+"/preview-url", token, nil); status != http.StatusOK {
 		t.Fatalf("independent material access status=%d", status)
 	}
-	if status, _ := h.doRequest(t, http.MethodGet, "/creation/materials/"+available+"/thumbnail-url", token, nil); status != http.StatusOK {
-		t.Fatalf("historically retained thumbnail status=%d", status)
+	if status, _ := h.doRequest(t, http.MethodGet, "/creation/materials/"+available+"/thumbnail-url", token, nil); status != http.StatusNotFound {
+		t.Fatalf("removed thumbnail status=%d", status)
 	}
 	if status, body := h.doRequest(t, http.MethodGet, path, foreign, nil); status != http.StatusOK {
 		t.Fatalf("foreign list status=%d body=%s", status, body)
@@ -172,7 +152,7 @@ func TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition(t *test
 	if _, err := h.ownerPool.Exec(h.ctx, `INSERT INTO creation_generation_task_references (task_id, material_id) VALUES ($1::uuid, $2::uuid)`, taskID, missingRetention); err != nil {
 		t.Fatalf("restore retention: %v", err)
 	}
-	if after, got := read(); after != updatedAt || !reflect.DeepEqual(got, []bool{true, false, true, true}) {
+	if after, got := read(); after != updatedAt || !reflect.DeepEqual(got, []bool{false, false, true, false}) {
 		t.Fatalf("reloaded availability after restore: updated_at=%q availability=%v", after, got)
 	}
 }

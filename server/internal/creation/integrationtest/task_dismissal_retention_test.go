@@ -28,17 +28,41 @@ func awaitMaterialCleanup(t *testing.T, h *harness, materialID, key string) {
 	workerCtx, cancel := context.WithCancel(h.ctx)
 	done := make(chan error, 1)
 	go func() { done <- h.creation.RunWorkers(workerCtx) }()
-	defer func() { cancel(); <-done }()
-	deadline := time.Now().Add(5 * time.Second)
+	workerFinished := false
+	defer func() {
+		cancel()
+		if !workerFinished {
+			<-done
+		}
+	}()
+	// One cleanup attempt can hold the object lock for up to 30 seconds.
+	deadline := time.Now().Add(35 * time.Second)
+	var headErr error
 	for time.Now().Before(deadline) {
-		_, err := h.directStore.Head(h.ctx, key)
-		if errors.Is(err, creation.ErrBlobNotFound) && countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_material_uploads
+		_, headErr = h.directStore.Head(h.ctx, key)
+		if errors.Is(headErr, creation.ErrBlobNotFound) && countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_material_uploads
 			WHERE material_id = $1::uuid AND cleanup_attempt_count > 0`, materialID) == 1 {
 			return
 		}
+		select {
+		case err := <-done:
+			workerFinished = true
+			t.Fatalf("cleanup worker stopped before exact-key cleanup: %v", err)
+		default:
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("last holder did not cause exact-key cleanup for material %s", materialID)
+	var status string
+	var attempts int
+	var nextAttempt, confirmed *time.Time
+	err := h.ownerPool.QueryRow(h.ctx, `SELECT status, cleanup_attempt_count, cleanup_next_attempt_at, cleanup_confirmed_at
+		FROM creation_reference_material_uploads WHERE material_id = $1::uuid`, materialID).Scan(&status, &attempts, &nextAttempt, &confirmed)
+	deleted := false
+	for _, attempted := range h.directStore.cleanupKeys() {
+		deleted = deleted || attempted == key
+	}
+	t.Fatalf("last holder did not cause exact-key cleanup for material %s: head=%v status=%s attempts=%d next=%v confirmed=%v delete_attempted=%t fact=%v",
+		materialID, headErr, status, attempts, nextAttempt, confirmed, deleted, err)
 }
 
 func TestDismissingSharedReferenceReleasesOnlyItsTaskAndCleansTheLastHolder(t *testing.T) {

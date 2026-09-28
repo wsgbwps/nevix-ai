@@ -221,12 +221,6 @@ func (h *MaterialHandler) ListMaterials(w http.ResponseWriter, r *http.Request) 
 	encodeJSON(w, http.StatusOK, listMaterialsResponse{Materials: items, NextCursor: cursorToken(next)})
 }
 
-// DeleteMaterial drains retries from older Desktops without removing the material.
-// The route remains behind RequireActiveUser but is absent from the current API.
-func (h *MaterialHandler) DeleteMaterial(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // --- shared helpers -------------------------------------------------------
 
 // creatorID extracts the authenticated principal's user id; the guard has

@@ -105,7 +105,7 @@ Session 认证与 Reauthentication Proof 归 Identity（[ADR-0015](0015-single-t
 
 - Generation Task 准入在创建不可变 Generation Specification 的同一短事务内，为其中每个素材 identity 写入权威 task-to-material 保留关系；不在读取时扫描 JSONB 推断对象生命周期，也不复制或持久化 signed URL。
 - 既有任务的 Provider Reference Preparation 与“重新编辑”按该任务自身的冻结引用和保留关系读取素材事实，不依赖 Draft 或会话素材列表；Draft 解绑不能撤销已准入任务的输入。
-- 从 Composer 移除参考图只解绑设备本地 Draft，不调用 `DELETE /creation/materials/{materialID}`，素材记录仍可供同一 User 的后续任务复用。旧 DELETE 路由仅作无删除副作用的升级兼容入口；历史 `removed_at` 的修复及未来独立素材删除的边界见 [ADR-0024](0024-draft-reference-and-task-retention-lifetimes.md)。
+- 从 Composer 移除参考图只解绑设备本地 Draft，不调用 `DELETE /creation/materials/{materialID}`，素材记录仍可供同一 User 的后续任务复用。开发期旧 DELETE 路由与历史 `removed_at` 自动修复已退场；未来独立素材删除的边界见 [ADR-0024](0024-draft-reference-and-task-retention-lifetimes.md)。
 - material-id 显示 seam 可授权三类精确读取：当前 User 的活跃素材或其历史任务保留素材；Admin 经指定成功 Media Asset 查看该 Generation Specification 实际引用的素材；active User 查看有效 Team Publication 的素材快照。授权只覆盖被证明的记录和用途，不授予同 Session、同任务或同 object key 邻接内容的访问权。
 - 发布在同一事务中为实际使用的每个 Reference Material 固定不可变对象引用、顺序、角色与声明版本；Create Similar 在 Publication 仍有效时为当前 User 新建独立素材记录并引用相同对象，不复制文件。撤回立即阻止新的 Publication 读取和复用，但既有 User-owned 记录与任务保留关系继续授权和保留对象。
 - Reference Material 对象仅在没有有效会话中的 User-owned 素材记录、未删除任务的保留关系或有效 Team Publication 再引用时才可物理清理；Create Similar 已创建的素材记录与普通上传记录使用同一判断。任务删除只释放该任务的关系，会话删除解除其素材记录的保留资格。触发变更须在同一数据库事务中按精确对象登记 cleanup fact，既有 worker 重检全部保留者后才删除精确 key；不建立通用 blob registry、跨业务引用计数服务，也不以单条关系的删除推断对象已失去全部引用（[ADR-0024](0024-draft-reference-and-task-retention-lifetimes.md)）。

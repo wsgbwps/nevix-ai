@@ -225,13 +225,12 @@ func (r *ReferenceMaterialUploadRepository) TerminalizeExpiredOrInvalid(ctx cont
 	return nil
 }
 
-func (r *ReferenceMaterialUploadRepository) LockDueCleanups(ctx context.Context, tx domain.TxExecutor, now domain.Time, limit int, skipKeys []string) ([]domain.ReferenceMaterialUpload, error) {
+func (r *ReferenceMaterialUploadRepository) LockDueCleanups(ctx context.Context, tx domain.TxExecutor, now domain.Time, limit int) ([]domain.ReferenceMaterialUpload, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT `+referenceMaterialUploadColumns+`
 		FROM creation_reference_material_uploads u
 		WHERE u.status IN ('terminal', 'finalized') AND u.cleanup_confirmed_at IS NULL
 		  AND u.cleanup_next_attempt_at <= $1
-		  AND u.object_key <> ALL(COALESCE($3::text[], ARRAY[]::text[]))
 		  AND NOT EXISTS (
 			SELECT 1 FROM creation_reference_materials material
 			JOIN creation_sessions session ON session.id = material.session_id
@@ -252,7 +251,7 @@ func (r *ReferenceMaterialUploadRepository) LockDueCleanups(ctx context.Context,
 		  )
 		ORDER BY u.cleanup_next_attempt_at, u.id
 		FOR UPDATE SKIP LOCKED
-		LIMIT $2`, now, limit, skipKeys)
+		LIMIT $2`, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("creation: lock due reference material cleanup: %w", err)
 	}

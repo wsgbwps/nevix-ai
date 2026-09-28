@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -17,7 +16,7 @@ const (
 )
 
 // ReferenceMaterialUploadCleanupWorker converges expired, ineligible, and
-// already-terminal upload authorities and repairs old Composer removals.
+// already-terminal upload authorities.
 type ReferenceMaterialUploadCleanupWorker struct {
 	uploads   domain.ReferenceMaterialUploadRepository
 	materials domain.MaterialRepository
@@ -77,20 +76,10 @@ func (w *ReferenceMaterialUploadCleanupWorker) runOnce(ctx context.Context) erro
 	if err != nil {
 		return nil
 	}
-	uncertainKeys, err := w.recoverLegacy(ctx, store)
-	if err != nil {
-		return err
-	}
-	if err := w.runner.Run(ctx, func(scope domain.WriteScope) error {
-		_, err := w.materials.ReleaseDismissedReferences(ctx, scope.Tx(), referenceMaterialCleanupBatchSize)
-		return err
-	}); err != nil {
-		return err
-	}
 	now = w.now().UTC()
 	claims := make([]domain.ReferenceMaterialUploadCleanup, 0, referenceMaterialCleanupBatchSize)
 	if err := w.runner.Run(ctx, func(scope domain.WriteScope) error {
-		due, err := w.uploads.LockDueCleanups(ctx, scope.Tx(), now, referenceMaterialCleanupBatchSize, uncertainKeys)
+		due, err := w.uploads.LockDueCleanups(ctx, scope.Tx(), now, referenceMaterialCleanupBatchSize)
 		if err != nil {
 			return err
 		}
@@ -131,49 +120,6 @@ func (w *ReferenceMaterialUploadCleanupWorker) runOnce(ctx context.Context) erro
 	}
 	wait.Wait()
 	return nil
-}
-
-func (w *ReferenceMaterialUploadCleanupWorker) recoverLegacy(ctx context.Context, store domain.ObjectStorageBlobStore) ([]string, error) {
-	// ponytail: scan all legacy rows before cleanup each poll; add a durable
-	// checkpoint if a large legacy dataset makes this sweep too slow.
-	var after *domain.UUID
-	uncertain := map[string]bool{}
-	for {
-		materials, err := w.materials.ListLegacyRemoved(ctx, after, referenceMaterialCleanupBatchSize)
-		if err != nil {
-			return nil, err
-		}
-		for _, material := range materials {
-			material := material
-			if err := w.materials.WithObjectLock(ctx, material.BlobKey, func() error {
-				info, err := store.Head(ctx, material.BlobKey)
-				if err != nil {
-					if !errors.Is(err, domain.ErrBlobNotFound) {
-						uncertain[material.BlobKey] = true
-					}
-					return nil
-				}
-				if info.ByteSize != material.ByteSize || info.ContentType != material.MimeType {
-					return nil
-				}
-				return w.runner.Run(ctx, func(scope domain.WriteScope) error {
-					_, err := w.materials.ConfirmLegacyObject(ctx, scope.Tx(), material.ID)
-					return err
-				})
-			}); err != nil {
-				return nil, err
-			}
-		}
-		if len(materials) < referenceMaterialCleanupBatchSize {
-			keys := make([]string, 0, len(uncertain))
-			for key := range uncertain {
-				keys = append(keys, key)
-			}
-			return keys, nil
-		}
-		last := materials[len(materials)-1].ID
-		after = &last
-	}
 }
 
 func (w *ReferenceMaterialUploadCleanupWorker) cleanClaim(ctx context.Context, store domain.ObjectStorageBlobStore, claim domain.ReferenceMaterialUploadCleanup) {

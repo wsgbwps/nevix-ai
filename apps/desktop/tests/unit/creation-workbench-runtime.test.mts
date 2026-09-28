@@ -355,20 +355,6 @@ test('unbinding a recovery placeholder fences recovery and clears its local bind
   )
 })
 
-test('runtime startup discards legacy delete retries without calling the server', async () => {
-  const storage = fakeStorage()
-  storage.setItem(
-    'nevix:creation:reference-material-delete:user-1:https%3A%2F%2Fserver.example:old',
-    '{broken'
-  )
-  const runtime = createCreationRuntime({}, 'user-1', {
-    storage,
-    recoveryScope: 'https://server.example'
-  })
-  await runtime.actions.recoverMaterialUploads()
-  assert.equal(storage.length, 0)
-})
-
 test('failed upload abort never restores a removed Draft binding', async () => {
   const storage = fakeStorage()
   const active = deferred<CreationApiResult<ReferenceMaterialView>>()

@@ -250,11 +250,11 @@ func TestObjectStorageLocationFreezeIsPermanentButAllowsRotation(t *testing.T) {
 	status, body = h.doUpload(t, http.MethodPost, "/creation/sessions/"+session.ID+"/materials", member, "freeze.png", pngBytes(t))
 	material := mustUpload(t, status, body)
 	status, body = h.doRequest(t, http.MethodDelete, "/creation/materials/"+material.ID, member, nil)
-	if status != http.StatusNoContent {
-		t.Fatalf("legacy delete freeze material: status=%d body=%s", status, body)
+	if status != http.StatusMethodNotAllowed {
+		t.Fatalf("retired material delete route: status=%d body=%s", status, body)
 	}
 	if snapshot := h.objectStorageSnapshot(t); !snapshot.frozen {
-		t.Fatalf("location latch cleared after legacy material delete: %+v", snapshot)
+		t.Fatalf("location latch cleared after retired material delete: %+v", snapshot)
 	}
 
 	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/object-storage-connection", admin, map[string]any{

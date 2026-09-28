@@ -15,9 +15,6 @@ registerHooks({
 
 const { listReferenceMaterialUploadRecoveries, putReferenceMaterialUploadRecovery } =
   await import('../../src/renderer/src/features/creation/model/reference-material-upload-recovery.ts')
-const { clearReferenceMaterialDeleteRecoveries } =
-  await import('../../src/renderer/src/features/creation/model/reference-material-delete-recovery.ts')
-
 function fakeStorage(): Storage {
   const entries = new Map<string, string>()
   return {
@@ -112,23 +109,4 @@ test('a provisional recovery may omit server-issued facts but not declared facts
       }
     ]
   )
-})
-
-test('legacy delete retries are cleared in the current user/server scope, even when malformed', () => {
-  const storage = fakeStorage()
-  const prefix = 'nevix:creation:reference-material-delete:'
-  storage.setItem(prefix + 'user-1:https%3A%2F%2Fserver.example:one', '{broken')
-  storage.setItem(prefix + 'user-1:https%3A%2F%2Fserver.example:two', '{}')
-  storage.setItem(prefix + 'user-2:https%3A%2F%2Fserver.example:three', '{}')
-  storage.setItem(prefix + 'user-1:https%3A%2F%2Fother.example:four', '{}')
-  storage.setItem('unrelated', 'keep')
-
-  clearReferenceMaterialDeleteRecoveries(storage, 'user-1', 'https://server.example')
-
-  assert.equal(storage.length, 3)
-  assert.equal(storage.getItem(prefix + 'user-1:https%3A%2F%2Fserver.example:one'), null)
-  assert.equal(storage.getItem(prefix + 'user-1:https%3A%2F%2Fserver.example:two'), null)
-  assert.equal(storage.getItem(prefix + 'user-2:https%3A%2F%2Fserver.example:three'), '{}')
-  assert.equal(storage.getItem(prefix + 'user-1:https%3A%2F%2Fother.example:four'), '{}')
-  assert.equal(storage.getItem('unrelated'), 'keep')
 })

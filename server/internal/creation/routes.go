@@ -23,7 +23,6 @@ func (m *Module) routes() []creationhttp.Route {
 		{Method: "GET", Path: "/creation/materials/{materialID}/thumbnail-url", Handler: m.materials.GetMaterialThumbnailURL},
 		{Method: "GET", Path: "/creation/materials/{materialID}/preview-url", Handler: m.materials.GetMaterialPreviewURL},
 		{Method: "GET", Path: "/creation/materials/{materialID}", Handler: m.materials.DownloadMaterial},
-		{Method: "DELETE", Path: "/creation/materials/{materialID}", Handler: m.materials.DeleteMaterial},
 		{Method: "GET", Path: "/creation/provider-connection", Guard: creationhttp.GuardAdmin, Handler: m.connection.GetConnection},
 		{Method: "POST", Path: "/creation/provider-connection", Guard: creationhttp.GuardAdmin, Handler: m.connection.Configure},
 		{Method: "PUT", Path: "/creation/provider-connection/credential", Guard: creationhttp.GuardAdmin, Handler: m.connection.ReplaceCredential},

@@ -376,67 +376,6 @@ func TestPreviewURLAuthorizesCreatorForEveryKind(t *testing.T) {
 	})
 }
 
-func TestLegacyDeleteMaterialIsAuthenticatedNoOp(t *testing.T) {
-	h, _, creator := readyTaskHarness(t, harnessOptions{})
-	token := h.loginToken(t, creator, harnessPassword)
-	otherToken := h.loginToken(t, otherCreatorEmail, harnessPassword)
-	session := h.createSession(t, token, sessionName("legacy-delete-material"))
-	status, body := h.doUpload(t, http.MethodPost, "/creation/sessions/"+session.ID+"/materials", token, "retained.png", pngBytes(t))
-	view := mustUpload(t, status, body)
-
-	var objectKey string
-	if err := h.ownerPool.QueryRow(h.ctx,
-		`SELECT blob_key FROM creation_reference_materials WHERE id = $1::uuid`, view.ID,
-	).Scan(&objectKey); err != nil {
-		t.Fatalf("read material key: %v", err)
-	}
-	cleanupFactsBefore := countRows(t, h.ownerPool, `
-		SELECT count(*) FROM creation_reference_material_uploads WHERE material_id = $1::uuid`, view.ID)
-	for _, tc := range []struct {
-		id, token string
-		want      int
-	}{
-		{view.ID, "", http.StatusUnauthorized},
-		{view.ID, token, http.StatusNoContent},
-		{view.ID, token, http.StatusNoContent},
-		{view.ID, otherToken, http.StatusNoContent},
-		{"not-a-uuid", token, http.StatusNoContent},
-	} {
-		if status, body := h.doRequest(t, http.MethodDelete, "/creation/materials/"+tc.id, tc.token, nil); status != tc.want {
-			t.Fatalf("legacy delete %q: status=%d body=%s", tc.id, status, body)
-		}
-	}
-	if got := countRows(t, h.ownerPool, `
-		SELECT count(*) FROM creation_reference_materials
-		WHERE id = $1::uuid AND removed_at IS NULL`, view.ID); got != 1 {
-		t.Fatalf("legacy delete changed material availability: %d", got)
-	}
-	if got := countRows(t, h.ownerPool, `
-		SELECT count(*) FROM creation_reference_material_uploads WHERE material_id = $1::uuid`, view.ID); got != cleanupFactsBefore {
-		t.Fatalf("legacy delete changed cleanup fact count: before=%d after=%d", cleanupFactsBefore, got)
-	}
-	if _, err := h.directStore.Head(h.ctx, objectKey); err != nil {
-		t.Fatalf("legacy delete removed material object: %v", err)
-	}
-	status, body = h.doRequest(t, http.MethodGet, "/creation/sessions/"+session.ID+"/materials", token, nil)
-	if status != http.StatusOK {
-		t.Fatalf("list materials after legacy delete: status=%d body=%s", status, body)
-	}
-	var listing materialList
-	mustDecode(t, body, &listing)
-	if len(listing.Materials) != 1 || listing.Materials[0].ID != view.ID {
-		t.Fatalf("legacy delete changed material listing: %+v", listing.Materials)
-	}
-	intent := h.buildTaskIntent(t, token, session.ID, taskIntent{
-		MediaType: "image", Model: "doubao-seedream-5.0-pro", Mode: "reference-image",
-		Ratio: "1:1", Resolution: "2K", Quantity: 1, Prompt: "旧版删除后重用",
-		References: []any{map[string]any{"material_id": view.ID, "role": "reference"}},
-	})
-	if status, body := h.submitTask(t, token, "legacy-delete-material-reuse", intent); status != http.StatusCreated {
-		t.Fatalf("reuse material after legacy delete: status=%d body=%s", status, body)
-	}
-}
-
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

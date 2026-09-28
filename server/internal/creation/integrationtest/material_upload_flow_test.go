@@ -447,16 +447,16 @@ func TestSuccessfulGenerationResultBecomesIndependentReferenceMaterialInsideServ
 	).Scan(&objectKey); err != nil {
 		t.Fatalf("read converted material key: %v", err)
 	}
-	if status, body := h.doRequest(t, http.MethodDelete, "/creation/materials/"+material.ID, creator, nil); status != http.StatusNoContent {
-		t.Fatalf("legacy delete converted material: status=%d body=%s", status, body)
+	if status, body := h.doRequest(t, http.MethodDelete, "/creation/materials/"+material.ID, creator, nil); status != http.StatusMethodNotAllowed {
+		t.Fatalf("retired material delete route: status=%d body=%s", status, body)
 	}
 	if got := countRows(t, h.ownerPool, `
 		SELECT count(*) FROM creation_reference_materials
 		WHERE id = $1::uuid AND removed_at IS NULL`, material.ID); got != 1 {
-		t.Fatalf("legacy delete removed converted material: %d", got)
+		t.Fatalf("retired delete route changed converted material: %d", got)
 	}
 	if _, err := h.directStore.Head(h.ctx, objectKey); err != nil {
-		t.Fatalf("legacy delete removed converted object: %v", err)
+		t.Fatalf("retired delete route removed converted object: %v", err)
 	}
 }
 

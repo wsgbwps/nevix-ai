@@ -22,7 +22,6 @@ import {
   putReferenceMaterialUploadRecovery,
   removeReferenceMaterialUploadRecovery
 } from './reference-material-upload-recovery'
-import { clearReferenceMaterialDeleteRecoveries } from './reference-material-delete-recovery'
 import type { CreationWorkspacePorts } from './ports'
 import type { CreationReferenceMaterialUploadRecovery } from '../../../../../shared/ipc/creation/types'
 import type { AssetPrivateOrigin } from '../api/asset-library-http'
@@ -233,7 +232,6 @@ export function createCreationRuntime(
     for (const recovery of listReferenceMaterialUploadRecoveries(storage, userId, recoveryScope)) {
       recoveryPending.set(materialKey(recovery.sessionId, recovery.idempotencyKey), recovery)
     }
-    clearReferenceMaterialDeleteRecoveries(storage, userId, recoveryScope)
   }
   const emit = (event: CreationRuntimeEvent): void => {
     for (const listener of listeners) listener(event)

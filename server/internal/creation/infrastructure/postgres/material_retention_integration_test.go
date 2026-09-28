@@ -14,7 +14,7 @@ import (
 	"github.com/nevix-ai/server/internal/migration"
 )
 
-func TestFinalTaskReferenceReleaseSchedulesOnlyRemovedMaterialCleanup(t *testing.T) {
+func TestFinalTaskReferenceReleaseSchedulesRemovedMaterialCleanup(t *testing.T) {
 	ownerURL, runtimeURL := requireIntegrationEnv(t)
 	ctx := context.Background()
 	if _, err := migration.Apply(ctx, ownerURL); err != nil {
@@ -66,16 +66,8 @@ func TestFinalTaskReferenceReleaseSchedulesOnlyRemovedMaterialCleanup(t *testing
 		VALUES ($1, $3), ($2, $3), ($1, $4)`, first, second, materialID, otherMaterialID); err != nil {
 		t.Fatalf("retain shared material: %v", err)
 	}
-	tx, err := runtime.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin removal: %v", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, retained, err := NewMaterialRepository(runtime).Remove(ctx, tx, creator, materialID); err != nil || !retained {
-		t.Fatalf("remove retained material: retained=%t err=%v", retained, err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatalf("commit removal: %v", err)
+	if _, err := owner.Exec(ctx, `UPDATE creation_reference_materials SET removed_at = now() WHERE id = $1`, materialID); err != nil {
+		t.Fatalf("seed removed material: %v", err)
 	}
 	for i, taskID := range []domain.UUID{first, second} {
 		// Physical task deletion also cascades through this relation trigger.
@@ -99,7 +91,7 @@ func TestFinalTaskReferenceReleaseSchedulesOnlyRemovedMaterialCleanup(t *testing
 		WHERE id = $1`, otherCleanupID).Scan(&unrelatedDue); err != nil || unrelatedDue {
 		t.Fatalf("final release affected another object: due=%t err=%v", unrelatedDue, err)
 	}
-	tx, err = runtime.Begin(ctx)
+	tx, err := runtime.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin due cleanup: %v", err)
 	}
@@ -111,7 +103,7 @@ func TestFinalTaskReferenceReleaseSchedulesOnlyRemovedMaterialCleanup(t *testing
 		WHERE id = $1`, cleanupID).Scan(&cleanupAt); err != nil {
 		t.Fatalf("read scheduled cleanup time: %v", err)
 	}
-	due, err := uploads.LockDueCleanups(ctx, tx, cleanupAt, 10, nil)
+	due, err := uploads.LockDueCleanups(ctx, tx, cleanupAt, 10)
 	if err != nil || len(due) != 1 || due[0].ID != cleanupID || due[0].ObjectKey != materialID.String() {
 		t.Fatalf("final release must expose only its exact cleanup key: due=%+v err=%v", due, err)
 	}
@@ -377,75 +369,6 @@ func TestTaskReferenceReleaseFailureRollsBackDismissal(t *testing.T) {
 	if err := owner.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM creation_generation_task_references
 		WHERE task_id = $1 AND material_id = $2)`, taskID, materialID).Scan(&retained); err != nil || !retained {
 		t.Fatalf("failed release lost retention: retained=%t err=%v", retained, err)
-	}
-}
-
-func TestLegacyMaterialRecoveryDisarmsScheduledCleanup(t *testing.T) {
-	ownerURL, runtimeURL := requireIntegrationEnv(t)
-	ctx := context.Background()
-	if _, err := migration.Apply(ctx, ownerURL); err != nil {
-		t.Fatalf("apply migrations: %v", err)
-	}
-	owner, err := pgxpool.New(ctx, ownerURL)
-	if err != nil {
-		t.Fatalf("connect owner pool: %v", err)
-	}
-	defer owner.Close()
-	runtime, err := pgxpool.New(ctx, runtimeURL)
-	if err != nil {
-		t.Fatalf("connect runtime pool: %v", err)
-	}
-	defer runtime.Close()
-	creator := fixtureUser(t, ownerURL)
-	sessionID := fixtureSession(t, ownerURL, owner, creator)
-	materialID := fixtureRetainedMaterial(t, owner, sessionID)
-	cleanupID := domain.NewUUID()
-	if _, err := owner.Exec(ctx, `INSERT INTO creation_reference_material_uploads
-		(id, owner_user_id, session_id, material_id, object_key, file_name,
-		 declared_kind, declared_mime_type, declared_byte_size, claims_version,
-		 idempotency_key, payload_hash, connection_revision, put_deadline,
-		 finalize_deadline, status, created_at, finalized_at,
-		 cleanup_attempt_count, cleanup_next_attempt_at)
-		SELECT $1, $2, $3, id, blob_key, file_name, kind, mime_type, byte_size,
-		       claims_version, $1::uuid::text, checksum_sha256, 1,
-		       now() - interval '31 minutes', now() - interval '1 minute',
-		       'finalized', now() - interval '91 minutes', now(),
-		       1, now() - interval '1 minute'
-		FROM creation_reference_materials WHERE id = $4`, cleanupID, creator, sessionID, materialID); err != nil {
-		t.Fatalf("seed cleanup fact: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanup, err := pgxpool.New(context.Background(), ownerURL)
-		if err != nil {
-			t.Errorf("connect cleanup pool: %v", err)
-			return
-		}
-		defer cleanup.Close()
-		if _, err := cleanup.Exec(context.Background(), `DELETE FROM creation_reference_material_uploads WHERE id = $1`, cleanupID); err != nil {
-			t.Errorf("delete cleanup fact: %v", err)
-		}
-	})
-	if _, err := owner.Exec(ctx, `UPDATE creation_reference_materials SET removed_at = now() WHERE id = $1`, materialID); err != nil {
-		t.Fatalf("mark legacy removal: %v", err)
-	}
-	tx, err := runtime.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin recovery: %v", err)
-	}
-	defer tx.Rollback(ctx)
-	if restored, err := NewMaterialRepository(runtime).ConfirmLegacyObject(ctx, tx, materialID); err != nil || !restored {
-		t.Fatalf("restore legacy material: restored=%t err=%v", restored, err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatalf("commit recovery: %v", err)
-	}
-	var active, due bool
-	if err := owner.QueryRow(ctx, `SELECT removed_at IS NULL FROM creation_reference_materials WHERE id = $1`, materialID).Scan(&active); err != nil || !active {
-		t.Fatalf("legacy material not restored: active=%t err=%v", active, err)
-	}
-	if err := owner.QueryRow(ctx, `SELECT cleanup_next_attempt_at IS NOT NULL
-		FROM creation_reference_material_uploads WHERE id = $1`, cleanupID).Scan(&due); err != nil || due {
-		t.Fatalf("restored material still has due cleanup: due=%t err=%v", due, err)
 	}
 }
 
