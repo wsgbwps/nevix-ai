@@ -567,7 +567,7 @@ test('a new task follows at the bottom but preserves an older reading position',
   // Read the whole session history upward before pinning the older anchor:
   // the reading-position contract must hold over the fully paged-in set.
   await loadFullHistory(page, scroller, tasks.length + 1)
-  await page.getByTestId('back-to-bottom').click()
+  await userScrollTo(scroller, 'bottom')
   await expect
     .poll(async () =>
       scroller.evaluate(

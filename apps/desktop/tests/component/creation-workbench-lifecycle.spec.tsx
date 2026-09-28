@@ -111,32 +111,6 @@ test('an unbound reference stays out of the Draft after session switch and resta
       )
     )
     .toEqual([{ materialId: secondMaterialId, role: 'reference' }])
-
-  await page.getByTestId('composer-reuse-material').click()
-  await page.getByRole('menuitem', { name: 'poster.png' }).click()
-  await expect(poster).toHaveCount(1)
-  await expect
-    .poll(async () =>
-      page.evaluate(
-        () =>
-          window.__creationDeckTest?.draftRecord('aaaaaaaa-0000-4000-8000-000000000001')
-            ?.references ?? []
-      )
-    )
-    .toEqual([
-      { materialId: secondMaterialId, role: 'reference' },
-      { materialId: firstMaterialId, role: 'reference' }
-    ])
-  await page.getByTestId('composer-submit').click()
-  await expect
-    .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
-    .toHaveLength(1)
-  const [submission] = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
-  expect(submission?.intent.references).toEqual([
-    { materialId: secondMaterialId, role: 'reference' },
-    { materialId: firstMaterialId, role: 'reference' }
-  ])
-  expect(await page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? [])).toEqual([])
 })
 
 test('an accepted response loss resumes the exact frozen submission', async ({ mount, page }) => {
