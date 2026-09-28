@@ -1,4 +1,5 @@
 import type {
+  GenerationTaskStatus,
   SlotActionSuggestion,
   SlotFailureDiagnosticSource,
   SlotFailureReason
@@ -6,7 +7,21 @@ import type {
 
 // Dynamic verdict vocabularies resolve through explicit key maps — the same
 // shape the composer uses for wire codes.
-const statusKeys = {
+const taskStatusKeys = {
+  queued: 'gallery.status.queued',
+  submitting: 'gallery.status.submitting',
+  processing: 'gallery.status.processing',
+  persisting: 'gallery.status.persisting',
+  cancelling: 'gallery.status.cancelling',
+  succeeded: 'gallery.status.succeeded',
+  partially_succeeded: 'gallery.status.partially_succeeded',
+  failed: 'gallery.status.failed',
+  cancelled: 'gallery.status.cancelled',
+  timed_out: 'gallery.status.timed_out'
+} as const satisfies Record<GenerationTaskStatus, string>
+
+const slotStatusKeys = {
+  loading: 'gallery.media.loading',
   queued: 'gallery.status.queued',
   generating: 'gallery.status.generating',
   persisting: 'gallery.status.persisting',
@@ -16,7 +31,8 @@ const statusKeys = {
   failed: 'gallery.status.failed',
   cancelled: 'gallery.status.cancelled',
   timed_out: 'gallery.status.timed_out',
-  indeterminate: 'gallery.status.indeterminate'
+  indeterminate: 'gallery.status.indeterminate',
+  unknown: 'gallery.status.unknown'
 } as const
 
 const reasonKeys = {
@@ -31,8 +47,18 @@ const reasonKeys = {
   internal_error: 'gallery.reasons.internal_error'
 } as const
 
-export function statusKey(status: string): (typeof statusKeys)[keyof typeof statusKeys] {
-  return status in statusKeys ? statusKeys[status as keyof typeof statusKeys] : statusKeys.failed
+export function taskStatusKey(
+  status: GenerationTaskStatus
+): (typeof taskStatusKeys)[GenerationTaskStatus] {
+  return taskStatusKeys[status]
+}
+
+export function slotStatusKey(
+  status: string
+): (typeof slotStatusKeys)[keyof typeof slotStatusKeys] {
+  return status in slotStatusKeys
+    ? slotStatusKeys[status as keyof typeof slotStatusKeys]
+    : slotStatusKeys.unknown
 }
 
 export function reasonKey(reason: SlotFailureReason): (typeof reasonKeys)[keyof typeof reasonKeys] {

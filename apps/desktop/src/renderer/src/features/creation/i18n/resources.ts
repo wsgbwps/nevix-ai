@@ -210,6 +210,8 @@ export const creationTranslations = defineResourceTranslations({
         },
         status: {
           queued: '排队中',
+          submitting: '提交中',
+          processing: '处理中',
           generating: '生成中',
           persisting: '转存中',
           cancelling: '取消中',
@@ -218,7 +220,8 @@ export const creationTranslations = defineResourceTranslations({
           failed: '失败',
           cancelled: '已取消',
           timed_out: '已超时',
-          indeterminate: '结果未知'
+          indeterminate: '结果未知',
+          unknown: '状态未知'
         },
         reasons: {
           invalid_input: '输入不合法',
@@ -799,6 +802,8 @@ export const creationTranslations = defineResourceTranslations({
         },
         status: {
           queued: 'Queued',
+          submitting: 'Submitting',
+          processing: 'Processing',
           generating: 'Generating',
           persisting: 'Persisting',
           cancelling: 'Cancelling',
@@ -807,7 +812,8 @@ export const creationTranslations = defineResourceTranslations({
           failed: 'Failed',
           cancelled: 'Cancelled',
           timed_out: 'Timed out',
-          indeterminate: 'Outcome unknown'
+          indeterminate: 'Outcome unknown',
+          unknown: 'Unknown status'
         },
         reasons: {
           invalid_input: 'Invalid input',

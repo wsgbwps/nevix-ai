@@ -776,6 +776,27 @@ test('requestOlderTasks pages history in 20s until exhaustion, reading only fres
   )
 })
 
+test('fallback polling retries a failed detail from a loaded older page', async () => {
+  const h = await harness({ A: historyTasks(25) })
+  h.controller.enter('A')
+  h.flush()
+  await settle()
+
+  h.failDetailNext('t01', 1)
+  h.controller.requestOlderTasks()
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().staleTaskIds.has('t01'), true)
+  assert.equal(h.timers.repeatingCount, 1)
+
+  h.timers.advance(5_000)
+  h.flush()
+  await settle()
+  assert.equal(h.snapshot().staleTaskIds.has('t01'), false)
+  assert.equal(h.getTaskCalls.filter((id) => id === 't01').length, 2)
+  assert.equal(h.timers.repeatingCount, 0)
+})
+
 test('a failed older-page read keeps loaded pages, stays retryable, and retries', async () => {
   const h = await harness({ A: historyTasks(45) })
   h.controller.enter('A')
