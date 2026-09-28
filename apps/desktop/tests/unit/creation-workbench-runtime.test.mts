@@ -248,6 +248,11 @@ test('terminal restart recovery removes the old binding so a fresh selection get
     status: 'failed',
     code: 'upload_requires_new_key'
   })
+  assert.deepEqual(runtime.actions.snapshot(sessionA, 'image'), {
+    status: 'failed',
+    code: 'upload_requires_new_key'
+  })
+  assert.deepEqual(runtime.actions.snapshot(sessionA, 'video'), { status: 'idle' })
   assert.deepEqual(
     listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
     []
@@ -2098,9 +2103,14 @@ test('an unconfirmed upload after materialization holds the chain under the sess
   const file = (): File => new File(['shoe'], 'shoe.png', { type: 'image/png' })
 
   assert.equal(
-    await runtime.actions.submitNewDraft(pendingKey, plainIntent('draft A'), [
-      { localId: localMaterial, file: file() }
-    ]),
+    await runtime.actions.submitNewDraft(
+      pendingKey,
+      {
+        ...plainIntent('draft A'),
+        references: [{ materialId: localMaterial, role: 'reference' }]
+      },
+      [{ localId: localMaterial, file: file() }]
+    ),
     'unconfirmed'
   )
   assert.deepEqual(runtime.actions.pendingDrafts(), [])

@@ -8,11 +8,13 @@
 
 2026-09-17 修订：Official Template 与 Official Selection 退出当前产品范围，不保留入口、schema 或实现骨架；Inspiration Page 收敛为按角色投影的单一 Discovery。未来若重启官方内容，须以新 ticket 和新设计重新引入。
 
+2026-09-28 术语修订：图片与视频称为 Media Type，与视频内部的生成 Mode 区分；不改变统一 `creation` owner。
+
 ## 背景与决策
 
 AI 创作 V1 的灵感复用、图片与视频生成、创作会话、媒体资产、Team Publication 和 AI Provider Connection 共同组成一条业务闭环。按媒体类型或页面拆分 `video-generation`、`image-editing`、`media` 或 `inspiration` owner 会把一个闭环变成跨 Feature/Module 编排；独立生命周期改由聚合边界表达，不作为拆 Domain 的充分理由。
 
-因此 AI 创作使用唯一 canonical owner `creation`：Desktop 是一个 AI Creation Domain/Feature，Server 是一个复杂 AI Creation Module，可信 OpenAPI seam 也归 `creation`。图片与视频是生成模式，Inspiration Page、Creation Workbench 和 Asset Library 是同一 Feature 的页面；只在实际需要时创建对应 seam，当前不为 AI 创作预建 Electron Main/IPC owner。
+因此 AI 创作使用唯一 canonical owner `creation`：Desktop 是一个 AI Creation Domain/Feature，Server 是一个复杂 AI Creation Module，可信 OpenAPI seam 也归 `creation`。图片与视频是 Media Type，Inspiration Page、Creation Workbench 和 Asset Library 是同一 Feature 的页面；只在实际需要时创建对应 seam，当前不为 AI 创作预建 Electron Main/IPC owner。
 
 ## 后果
 

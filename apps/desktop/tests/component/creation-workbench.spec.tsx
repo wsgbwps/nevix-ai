@@ -155,6 +155,132 @@ test('selecting a session recovers its stored draft verbatim', async ({ mount, p
   await expect(page.getByTestId('composer-params').getByText('2', { exact: true })).toBeVisible()
 })
 
+test('switching media keeps each prompt in its own device-local draft', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await page.getByRole('button', { name: 'Untitled creation', exact: true }).click()
+  await expect(page.getByTestId('composer-media')).toContainText('Image generation')
+  await page.getByTestId('composer-prompt').fill('image idea')
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('')
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedance-2-5')
+  await page.getByTestId('composer-prompt').fill('video idea')
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('image idea')
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-pro')
+  await page.getByTestId('composer-prompt').focus()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('')
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('video idea')
+  await page.getByTestId('composer-prompt').focus()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('')
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await page.getByTestId('composer-prompt').focus()
+  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('image idea')
+})
+
+test('a hidden video reference never blocks the image draft submission', async ({
+  mount,
+  page
+}) => {
+  const videoId = '12121212-0000-4000-8000-000000000012'
+  const video = scriptedMaterial(videoId, 'video', 'walkthrough.mp4')
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{
+        [scriptedSessionId]: { ...videoMentionDraft(videoId), mode: 'first-last-frame' }
+      }}
+      materials={{ [scriptedSessionId]: [video] }}
+    />
+  )
+  await selectFirstSession(page)
+  await expect(page.getByTestId('composer-deck-stale')).toBeVisible()
+  await expect(page.getByTestId('composer-submit')).toBeDisabled()
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await expect(page.getByTestId('reference-deck').getByText('walkthrough.mp4')).toHaveCount(0)
+  await expect(page.getByTestId('composer-deck-stale')).toHaveCount(0)
+  await page.getByTestId('composer-prompt').fill('a clean product image')
+  await expect(page.getByTestId('composer-submit')).toBeEnabled()
+  await page.getByTestId('composer-submit').click()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
+    .toHaveLength(1)
+  const [call] = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(call?.intent).toMatchObject({
+    mediaType: 'image',
+    prompt: 'a clean product image',
+    references: []
+  })
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByRole('button', { name: 'Video 1' })).toBeVisible()
+  await expect(page.getByTestId('composer-deck-stale')).toBeVisible()
+})
+
+test('removing a shared material from image keeps its video binding', async ({ mount, page }) => {
+  const imageDraft: LocalDraftRecord = {
+    ...staleDraft,
+    prompt: '',
+    promptDocument: { version: 1, nodes: [{ type: 'text', text: '' }] },
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    ratio: '4:3',
+    references: [{ materialId: firstMaterialId, role: 'reference' }]
+  }
+  const videoDraft: LocalDraftRecord = {
+    ...videoMentionDraft(firstMaterialId),
+    mode: 'first-last-frame',
+    references: [{ materialId: firstMaterialId, role: 'first_frame' }]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{
+        [scriptedSessionId]: {
+          activeMediaType: 'image',
+          drafts: { image: imageDraft, video: videoDraft }
+        }
+      }}
+      materials={{
+        [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'shared.png')]
+      }}
+    />
+  )
+  await selectFirstSession(page)
+  const sharedCard = page
+    .getByTestId('reference-deck')
+    .getByRole('button', { name: 'shared.png', exact: true })
+  await sharedCard.focus()
+  await page.keyboard.press('Delete')
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (key) => window.__creationDeckTest?.draftRecord(key)?.references,
+        scriptedSessionId
+      )
+    )
+    .toEqual([])
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(
+    page.getByTestId('reference-deck').getByRole('button', { name: 'First frame · shared.png' })
+  ).toBeVisible()
+  const stored = await draftRecord(page, scriptedSessionId)
+  expect(stored?.references).toEqual([{ materialId: firstMaterialId, role: 'first_frame' }])
+  expect(await materialIds(page, scriptedSessionId)).toContain(firstMaterialId)
+})
+
 test('manifest defaults persist locally with the version delivered in the same response', async ({
   mount,
   page
@@ -798,6 +924,70 @@ test('Publication reuse adopts the server Session with remapped references and s
       model: 'removed-legacy-model',
       references: [{ materialId, role: 'reference' }]
     })
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('')
+  await expect(
+    page.getByTestId('reference-deck').locator(`[data-material-id="${materialId}"]`)
+  ).toHaveCount(0)
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Preserved Publication intent')
+  await expect(page.locator(`[data-material-id="${materialId}"]`)).toBeVisible()
+})
+
+test('Asset similar selects only its media draft and leaves the other draft editable', async ({
+  mount,
+  page
+}) => {
+  const videoDraft: LocalDraftRecord = {
+    prompt: 'Keep my video idea',
+    promptDocument: { version: 1, nodes: [{ type: 'text', text: 'Keep my video idea' }] },
+    mediaType: 'video',
+    model: 'doubao-seedance-2-5',
+    mode: 'first-last-frame',
+    manifestVersion: 5,
+    ratio: null,
+    resolution: '720p',
+    quantity: 1,
+    durationSeconds: 5,
+    references: []
+  }
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{ new: videoDraft }}
+      assetSimilar={{
+        sessionId: 'private-session',
+        sessionName: 'Private source',
+        taskId: 'private-task',
+        slotIndex: 0,
+        specification: {
+          schemaVersion: 1,
+          mediaType: 'image',
+          prompt: 'Reused image intent',
+          model: 'doubao-seedream-5.0-pro',
+          mode: 'text-to-image',
+          manifestVersion: 5,
+          ratio: '4:3',
+          resolution: '2K',
+          quantity: 2,
+          durationSeconds: null,
+          references: []
+        },
+        references: []
+      }}
+    />
+  )
+
+  await expect(page.getByTestId('composer-media')).toContainText('Image generation')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Reused image intent')
+  await expect(page.getByTestId('composer-params')).toContainText('4:3')
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Keep my video idea')
+  await expect(page.getByTestId('composer-params')).toContainText('720p')
+  await expect.poll(() => draftRecord(page, 'new')).toMatchObject(videoDraft)
 })
 
 test('the model menu lists only manifest candidates plus the stale note', async ({
@@ -1653,6 +1843,155 @@ test('re-edit copies the task specification into the composer draft', async ({ m
     })
 })
 
+test('re-editing each media task replaces only its Draft across a session reconcile', async ({
+  mount,
+  page
+}) => {
+  const imageHistory = {
+    ...scriptedMaterial('eeeeeeee-0000-4000-8000-000000000011', 'image', 'old-image.png'),
+    widthPx: 1024,
+    heightPx: 768,
+    pixelCount: 1024 * 768
+  }
+  const videoHistory = {
+    ...scriptedMaterial('eeeeeeee-0000-4000-8000-000000000012', 'image', 'old-frame.png'),
+    widthPx: 1024,
+    heightPx: 768,
+    pixelCount: 1024 * 768
+  }
+  const secondMaterialId = 'dddddddd-0000-4000-8000-000000000004'
+  const imageDraft: LocalDraftRecord = {
+    ...staleDraft,
+    prompt: 'Image 1',
+    promptDocument: { version: 1, nodes: [{ type: 'mention', materialId: firstMaterialId }] },
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    ratio: '4:3',
+    quantity: 1
+  }
+  const videoDraft: LocalDraftRecord = {
+    ...videoMentionDraft(secondMaterialId),
+    prompt: 'Image 1',
+    mode: 'first-frame',
+    references: [{ materialId: secondMaterialId, role: 'first_frame' }]
+  }
+  const taskBase = {
+    sessionId: scriptedSessionId,
+    status: 'succeeded',
+    slotCount: 1,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-08-29T09:00:00Z',
+    updatedAt: '2026-08-29T09:01:00Z',
+    terminalAt: '2026-08-29T09:01:00Z',
+    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }]
+  } as const
+  const imageTask: ScriptedTask = {
+    ...taskBase,
+    id: 'dddddddd-0000-4000-8000-00000000e101',
+    mediaType: 'image',
+    snapshot: {
+      prompt: 'Frozen image',
+      model: 'doubao-seedream-5.0',
+      mode: 'reference-image',
+      ratio: '9:16',
+      resolution: '3K',
+      quantity: 1,
+      durationSeconds: null,
+      references: [{ materialId: imageHistory.id, role: 'reference', kind: 'image' }]
+    },
+    referenceMaterials: [imageHistory]
+  }
+  const videoTask: ScriptedTask = {
+    ...taskBase,
+    id: 'dddddddd-0000-4000-8000-00000000e102',
+    mediaType: 'video',
+    snapshot: {
+      prompt: 'Frozen video',
+      model: 'doubao-seedance-2-5',
+      mode: 'first-frame',
+      ratio: 'adaptive',
+      resolution: '720p',
+      quantity: 1,
+      durationSeconds: 10,
+      references: [{ materialId: videoHistory.id, role: 'first_frame', kind: 'image' }]
+    },
+    referenceMaterials: [videoHistory]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{
+        [scriptedSessionId]: {
+          activeMediaType: 'video',
+          drafts: { image: imageDraft, video: videoDraft }
+        }
+      }}
+      materials={{
+        [scriptedSessionId]: [
+          scriptedMaterial(firstMaterialId, 'image', 'poster.png'),
+          scriptedMaterial(secondMaterialId, 'image', 'banner.png')
+        ]
+      }}
+      taskScript={{ tasks: [imageTask, videoTask] }}
+    />
+  )
+  await selectFirstSession(page)
+  await page.getByTestId(`task-edit-${imageTask.id}`).click()
+  await expect(page.getByTestId('composer-media')).toContainText('Image generation')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Frozen image')
+  await expect(page.getByTestId('composer-params')).toContainText('9:16')
+  await expect(
+    page.getByTestId('reference-deck').locator(`[data-material-id="${imageHistory.id}"]`)
+  ).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Image 1' })).toHaveCount(0)
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByRole('button', { name: 'Image 1' })).toBeVisible()
+  await expect(
+    page.getByTestId('reference-deck').locator(`[data-material-id="${secondMaterialId}"]`)
+  ).toHaveCount(1)
+  await expect(page.getByTestId('composer-params')).toContainText('720p')
+  await expect.poll(() => draftRecord(page, scriptedSessionId)).toMatchObject(videoDraft)
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await page.getByTestId(`task-edit-${videoTask.id}`).click()
+  await expect(page.getByTestId('composer-media')).toContainText('Video generation')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Frozen video')
+  await expect(
+    page.getByTestId('reference-deck').locator(`[data-material-id="${videoHistory.id}"]`)
+  ).toHaveCount(1)
+  await expect
+    .poll(() => draftRecord(page, scriptedSessionId))
+    .toMatchObject({ durationSeconds: 10, references: [{ materialId: videoHistory.id }] })
+  await expect(page.getByTestId('composer-submit')).toBeEnabled()
+  await page.getByTestId('composer-submit').click()
+  await expect
+    .poll(() => page.evaluate(() => window.__creationDeckTest?.taskCalls().length ?? 0))
+    .toBe(1)
+  await expect
+    .poll(() => page.evaluate(() => window.__creationDeckTest?.materialListCalls() ?? 0))
+    .toBeGreaterThan(1)
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Frozen image')
+  await expect(
+    page.getByTestId('reference-deck').locator(`[data-material-id="${imageHistory.id}"]`)
+  ).toHaveCount(1)
+  await expect
+    .poll(() => draftRecord(page, scriptedSessionId))
+    .toMatchObject({
+      prompt: 'Frozen image',
+      promptDocument: { version: 1, nodes: [{ type: 'text', text: 'Frozen image' }] },
+      model: 'doubao-seedream-5.0',
+      ratio: '9:16',
+      resolution: '3K',
+      references: [{ materialId: imageHistory.id, role: 'reference' }]
+    })
+})
+
 test('re-edit warns for unavailable references and preserves the frozen image mode', async ({
   mount,
   page
@@ -1678,13 +2017,27 @@ test('re-edit warns for unavailable references and preserves the frozen image mo
     createdAt: '2026-08-29T09:00:00Z',
     updatedAt: '2026-08-29T09:01:00Z',
     terminalAt: '2026-08-29T09:01:00Z',
-    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }]
+    slots: [{ index: 0, status: 'succeeded', failureReason: null, result: null }],
+    referenceMaterials: [null]
+  }
+  const videoDraft = {
+    ...videoMentionDraft(firstMaterialId),
+    prompt: 'Image 1',
+    mode: 'first-frame',
+    references: [{ materialId: firstMaterialId, role: 'first_frame' as const }]
   }
   await mount(
     <CreationWorkbenchStory
       taskScript={{ tasks: [task] }}
-      drafts={{ [scriptedSessionId]: null }}
-      materials={{ [scriptedSessionId]: [] }}
+      drafts={{
+        [scriptedSessionId]: {
+          activeMediaType: 'video',
+          drafts: { image: { ...staleDraft, references: [] }, video: videoDraft }
+        }
+      }}
+      materials={{
+        [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]
+      }}
     />
   )
   await selectFirstSession(page)
@@ -1701,6 +2054,12 @@ test('re-edit warns for unavailable references and preserves the frozen image mo
       references: []
     })
   await expect(page.getByTestId('composer-submit')).toBeDisabled()
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByRole('button', { name: 'Image 1' })).toBeVisible()
+  await expect.poll(() => draftRecord(page, scriptedSessionId)).toMatchObject(videoDraft)
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
   await page.evaluate((updated) => window.__creationDeckTest?.replaceTaskSilently(updated), {
     ...task,
     referenceMaterials: [scriptedMaterial(firstMaterialId, 'image', 'poster.png')]

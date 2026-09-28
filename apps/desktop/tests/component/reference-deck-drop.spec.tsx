@@ -450,6 +450,77 @@ test('a dragged slot result uses the server conversion command under its downloa
   await expect(page.locator('[data-testid="deck-strip"] [data-material-id]')).toHaveCount(3)
 })
 
+test('a result drop finishes in its source Draft after switching media', async ({
+  mount,
+  page
+}) => {
+  const taskId = 'eeeeeeee-0000-4000-8000-00000000000e'
+  await mount(
+    <CreationWorkbenchStory
+      uploadDeferred
+      taskScript={{
+        tasks: [
+          {
+            id: taskId,
+            sessionId: scriptedSessionId,
+            status: 'succeeded',
+            mediaType: 'image',
+            slotCount: 1,
+            snapshot: null,
+            cancelRequested: false,
+            terminalCause: null,
+            terminalAt: null,
+            createdAt: '2026-08-23T08:00:00Z',
+            updatedAt: '2026-08-23T08:00:05Z',
+            slots: [
+              {
+                index: 0,
+                status: 'succeeded',
+                failureReason: null,
+                result: {
+                  mimeType: 'image/png',
+                  byteSize: 64,
+                  checksumSha256: 'bb'.repeat(32),
+                  widthPx: 48,
+                  heightPx: 64,
+                  durationMs: null
+                }
+              }
+            ]
+          }
+        ]
+      }}
+    />
+  )
+  await selectFirstSession(page)
+  await dropOn(page, '[data-testid="reference-deck"]', [], {
+    type: 'application/x-nevix-creation-result',
+    data: JSON.stringify({ taskId, slotIndex: 0, mediaType: 'image' })
+  })
+  await expect.poll(() => resultReuseCalls(page)).toHaveLength(1)
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
+  await expect(page.locator('[data-testid="deck-strip"] [data-material-id]')).toHaveCount(0)
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (key) => window.__creationDeckTest?.draftRecord(key)?.references,
+        scriptedSessionId
+      )
+    )
+    .toHaveLength(3)
+  const stored = await page.evaluate(
+    (key) => window.__creationDeckTest?.draftRecord(key),
+    scriptedSessionId
+  )
+  expect(stored?.references.at(-1)?.materialId).toBe('ffffffff-0000-4000-8000-000000000006')
+  await expect(page.locator('[data-testid="deck-strip"] [data-material-id]')).toHaveCount(3)
+})
+
 test('a kind-denied slot result is refused before any conversion command', async ({
   mount,
   page

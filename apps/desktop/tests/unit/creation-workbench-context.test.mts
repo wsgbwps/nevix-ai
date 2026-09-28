@@ -19,6 +19,8 @@ const { readLocalDraft, writeLocalDraft, remapLocalDraftMaterial } =
   await import('../../src/renderer/src/features/creation/model/draft-store.ts')
 const { textPromptDocument } =
   await import('../../src/renderer/src/features/creation/model/prompt-document.ts')
+const { GENERATION_PARAMETERS } =
+  await import('../../src/renderer/src/features/creation/api/generation-parameter.ts')
 import type { WorkbenchContextDeps } from '../../src/renderer/src/features/creation/model/workbench-context-controller.ts'
 import type { LocalDraftRecord } from '../../src/renderer/src/features/creation/model/draft-store.ts'
 import type { CapabilityManifest } from '../../src/renderer/src/features/creation/api/capability-manifest-http.ts'
@@ -589,6 +591,23 @@ test('manifest adoption invariant: an unentered workbench never adopts defaults'
   // Entering the composing start afterwards seeds from the known manifest.
   controller.enterContext({ kind: 'new' })
   assert.equal(controller.getSnapshot().draft.model, 'm-1')
+})
+
+test('manifest defaults leave a draft with any generation parameter untouched', () => {
+  for (const field of GENERATION_PARAMETERS) {
+    if (field.id === 'mediaType') continue
+    const { controller } = harness()
+    controller.enterContext({ kind: 'new' })
+    const edited = {
+      ...controller.getSnapshot().draft,
+      [field.id]: field.kind === 'number' ? 7 : 'chosen'
+    }
+    controller.editDraft(edited)
+
+    controller.noteManifest(seedManifest)
+
+    assert.deepEqual(controller.getSnapshot().draft, edited, field.id)
+  }
 })
 
 test('a manifest landing mid-restore never clobbers the record about to restore', async () => {

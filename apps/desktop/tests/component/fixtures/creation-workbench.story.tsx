@@ -16,7 +16,10 @@ import type {
   CreationSessionView,
   ReferenceMaterialView
 } from '../../../src/renderer/src/features/creation/api/go-creation-http'
-import type { LocalDraftRecord } from '../../../src/renderer/src/features/creation/model/draft-store'
+import type {
+  LocalDraftRecord,
+  LocalWorkbenchDraftRecord
+} from '../../../src/renderer/src/features/creation/model/draft-store'
 import type {
   CapabilityManifest,
   CapabilityModel,
@@ -29,10 +32,12 @@ import type {
   TaskListPageRequest
 } from '../../../src/renderer/src/features/creation/api/generation-task-http'
 import type { PublicationSimilarResult } from '../../../src/renderer/src/features/creation/api/inspiration-http'
+import type { AssetPrivateOrigin } from '../../../src/renderer/src/features/creation/api/asset-library-http'
 import {
   readLocalDraft,
   removeLocalDraft,
-  writeLocalDraft
+  writeLocalDraft,
+  writeWorkbenchDraft
 } from '../../../src/renderer/src/features/creation/model/draft-store'
 
 /**
@@ -412,7 +417,7 @@ interface RuntimeOptions {
   readonly manifestDeferred?: boolean
   readonly sessions: readonly CreationSessionView[]
   /** Seeds the device-local draft store (ADR-0017); null entries clear a key. */
-  readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
+  readonly drafts?: Readonly<Record<string, LocalDraftRecord | LocalWorkbenchDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
   /** Number of initial display-URL authorizations that should fail. */
   readonly materialUrlFailures?: number
@@ -445,6 +450,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
   let serverSessions = [...options.sessions]
   for (const [key, record] of Object.entries(options.drafts ?? {})) {
     if (record === null) removeLocalDraft(localStorage, storyUserId, key)
+    else if ('drafts' in record) writeWorkbenchDraft(localStorage, storyUserId, key, record)
     else writeLocalDraft(localStorage, storyUserId, key, record)
   }
   const materialUrlCalls: Array<{ materialId: string }> = []
@@ -817,6 +823,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     },
     createMaterialFromResult: async (sessionId, input) => {
       resultReuseCalls.push({ sessionId, ...input })
+      if (options.uploadDeferred) await waitForRelease(uploadReleases)
       uploadSequence += 1
       const task = taskState.tasks.find((candidate) => candidate.id === input.taskId)
       const source = task?.slots.find((slot) => slot.index === input.slotIndex)?.result
@@ -1052,7 +1059,7 @@ interface StoryOptions {
   readonly manifest?: CapabilityManifest | null
   readonly manifestFails?: boolean
   readonly manifestDeferred?: boolean
-  readonly drafts?: Readonly<Record<string, LocalDraftRecord | null>>
+  readonly drafts?: Readonly<Record<string, LocalDraftRecord | LocalWorkbenchDraftRecord | null>>
   readonly materials?: Readonly<Record<string, readonly ReferenceMaterialView[]>>
   readonly materialUrlFailures?: number
   readonly materialUrlDeferred?: boolean
@@ -1071,6 +1078,7 @@ interface StoryOptions {
   readonly sessions?: readonly CreationSessionView[]
   readonly taskScript?: TaskScript
   readonly publicationSimilar?: PublicationSimilarResult
+  readonly assetSimilar?: AssetPrivateOrigin
 }
 
 function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
@@ -1126,8 +1134,22 @@ export function RuntimeWorkbenchScope({
   readonly children: React.ReactNode
 }): React.JSX.Element {
   const [runtime] = useState(() => installWorkbenchRuntime(resolvedRuntimeOptions(options)))
-  const [ready, setReady] = useState(options.publicationSimilar === undefined)
+  const [ready, setReady] = useState(
+    options.publicationSimilar === undefined && options.assetSimilar === undefined
+  )
   useEffect(() => {
+    const assetSimilar = options.assetSimilar
+    if (assetSimilar) {
+      let active = true
+      void Promise.resolve().then(() => {
+        if (!active) return
+        runtime.actions.prepareSimilarDraft(assetSimilar)
+        setReady(true)
+      })
+      return () => {
+        active = false
+      }
+    }
     if (!options.publicationSimilar) return
     let active = true
     void runtime.actions.preparePublicationSimilar('publication-story').then(() => {
@@ -1136,7 +1158,7 @@ export function RuntimeWorkbenchScope({
     return () => {
       active = false
     }
-  }, [options.publicationSimilar, runtime])
+  }, [options.assetSimilar, options.publicationSimilar, runtime])
   if (!ready) return <p role="status">Preparing Publication reuse</p>
   return (
     <CreationRuntimeContext.Provider value={runtime}>

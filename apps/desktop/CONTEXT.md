@@ -13,6 +13,7 @@ Electron 桌面客户端，采用 Feature-Sliced Design 组织渲染进程，IPC
 > 2026-09-20：结果移除入册，命名「删除 Media Asset 在来源 TaskCard 上的呈现」，与「删除任务结果」这一会被读成改写终态的说法区分（[ADR-0021](../../docs/adr/0021-asset-deletion-hides-task-results.md)，[#262](https://github.com/wsgbwps/nevix-ai/issues/262)）。
 > 2026-09-21：任务删除 / 任务隐藏入册，命名「隐藏一张终态 Generation Task 并移除其结果」这一条命令，与「结果移除」区分（[ADR-0022](../../docs/adr/0022-task-deletion-hides-the-task-and-removes-its-results.md)，[#280](https://github.com/wsgbwps/nevix-ai/issues/280)）。
 > 2026-09-27：参考素材从编辑器移除改为 Draft 解绑；任务各自保留冻结引用，任务删除释放自己的保留关系（[ADR-0024](../../docs/adr/0024-draft-reference-and-task-retention-lifetimes.md)）。
+> 2026-09-28：同一 Workbench Context 的图片与视频 Draft 各自独立；以 Media Type 命名图片/视频选择，避免与视频内部 Mode 混淆。
 
 **User**:
 使用产品的自然人；由 Admin 建号并持 email + 密码登录，业务身份独立于登录凭据。
@@ -82,12 +83,16 @@ _Avoid_: Conversation, Chat, Workspace
 App Shell 中全局呈现 Creation Session、临时提交项与新建入口的导航面；它允许 User 进入和管理创作上下文，但不拥有 Creation Workbench 的任务展示或媒体资源生命周期。
 _Avoid_: Conversation List, Chat History, Workspace Sidebar
 
+**Media Type（生成媒体类型）**:
+生成意图选择的图片或视频种类；在同一 Workbench Context 中决定当前编辑哪份 Draft，与视频内部的生成 Mode 区分。
+_Avoid_: 图片模式、视频模式（与 Mode 混淆）
+
 **Draft**:
-创作台中 User 正在编辑、仅留存于当前设备的生成意图；它随写随存于本设备，多设备互不相通，可以任意修改，尚未对任何生成结果负责，提交时才冻结为 Generation Specification。
+创作台中 User 正在编辑、仅留存于当前设备的生成意图；同一 Workbench Context 中图片与视频各有独立 Draft，分别保留提示词、Reference Mention、Reference Material 绑定与 Generation Parameter。它随写随存于本设备，多设备互不相通，可以任意修改，尚未对任何生成结果负责，提交时才冻结为 Generation Specification。
 _Avoid_: Prompt（仅指 Draft 中的提示词字段）, Specification, 快照, 服务端草稿
 
 **Reference Material**:
-User 向当前会话上传或经有效 Team Publication 复用、供生成引用的媒体记录（图片/视频/音频）；记录属于当前 User，做同款产生新的素材 id 但不复制底层媒体内容。从 Composer 移除只解绑本地 Draft，不删除记录；提交时每张任务独立冻结并保留引用（素材 id、role、kind、claims 版本），“重新编辑”从该任务恢复。多张任务可共享同一底层文件；它与 Asset Library 的 Media Asset 分属两个生命阶段。
+User 向当前会话上传或经有效 Team Publication 复用、供生成引用的媒体记录（图片/视频/音频）；记录属于当前 User，做同款产生新的素材 id 但不复制底层媒体内容。从 Composer 移除只解绑当前 Media Type 的 Draft，不删除记录或另一 Media Type 的绑定；提交时每张任务独立冻结并保留引用（素材 id、role、kind、claims 版本），“重新编辑”从该任务恢复。多张任务可共享同一底层文件；它与 Asset Library 的 Media Asset 分属两个生命阶段。
 _Avoid_: 素材库, Attachment, 上传文件
 
 **Unavailable Historical Reference（历史参考素材不可用）**:
@@ -131,7 +136,7 @@ _Avoid_: 编辑态, 默认态
 _Avoid_: 折叠态（与素材堆自身的收拢牌堆撞词）, 最小化
 
 **Workbench Context**:
-Creation Workbench 当前呈现的创作上下文，取值为一个已有 Creation Session、一个仅存本地的待定 Draft、一个尚未提交的新建起点或空白未激活态；进入或离开任一上下文时，任务视图、显示资源与 Draft 编辑状态作为整体一致迁移，切换仪式对所有入口相同。
+Creation Workbench 当前呈现的创作上下文，取值为一个已有 Creation Session、一个仅存本地的待定新创作、一个尚未提交的新建起点或空白未激活态；每个可编辑上下文包含图片与视频 Draft 及当前 Media Type，进入或离开时与任务视图、显示资源作为整体一致迁移，切换仪式对所有入口相同。
 _Avoid_: surface, 视图状态, workspace state
 
 **Reading Anchor**:
