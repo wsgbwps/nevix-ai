@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { CapabilityManifest } from '../api/capability-manifest-http'
-import { manifestDefaultParameters } from '../api/generation-parameter'
 import type {
   CreationApiResult,
   CreationSessionView,
@@ -278,7 +277,7 @@ export function useCreationWorkbench(): {
       getSessionDetail: (sessionId) => ports.getSessionDetail(sessionId),
       listMaterials: (sessionId, cursor) => ports.listMaterials(sessionId, cursor),
       actions: {
-        snapshot: (key) => ports.actions.snapshot(key),
+        snapshot: (key, media) => ports.actions.snapshot(key, media),
         stagedMaterials: (key) => ports.actions.stagedMaterials(key),
         recoveryMaterials: (key) => ports.actions.recoveryMaterials(key),
         beginMaterialsObservation: (key) => ports.actions.beginMaterialsObservation(key),
@@ -286,7 +285,7 @@ export function useCreationWorkbench(): {
           ports.actions.observeMaterials(key, materialIds, observation),
         resolvedMaterialId: (sessionId, localId) =>
           ports.actions.resolvedMaterialId(sessionId, localId),
-        acknowledgeFailure: (key) => ports.actions.acknowledgeFailure(key)
+        acknowledgeFailure: (key, media) => ports.actions.acknowledgeFailure(key, media)
       },
       display: {
         reset: () => displayRef.current.reset(),
@@ -390,6 +389,12 @@ export function useCreationWorkbench(): {
     [contextController]
   )
 
+  const draftFor = useCallback(
+    (media: DraftMediaType): ComposerDraft =>
+      contextController?.draftFor(media) ?? emptyComposerDraft(),
+    [contextController]
+  )
+
   /** Same-tick-fresh surface read: which session the workbench presents. */
   const currentSelectedId = useCallback(
     (): string | null => contextController?.getSnapshot().selectedId ?? null,
@@ -425,23 +430,9 @@ export function useCreationWorkbench(): {
 
   const setMediaType = useCallback(
     (media: DraftMediaType) => {
-      if (!ports) return
-      const capability = mediaCapability(manifest, media)
-      const published = capability?.available ? capability : null
-      const model = (published?.models ?? [])[0]
-      patchDraft({
-        mediaType: media,
-        model: model?.model ?? null,
-        mode: published
-          ? media === 'video' && published.modes?.some((mode) => mode.id === 'first-last-frame')
-            ? 'first-last-frame'
-            : ((published.modes ?? [])[0]?.id ?? null)
-          : null,
-        resolution: model?.defaultResolution ?? null,
-        ...manifestDefaultParameters(published)
-      })
+      contextController?.selectMediaType(media)
     },
-    [manifest, patchDraft, ports]
+    [contextController]
   )
 
   // A creator-initiated model switch keeps the selected resolution only when
@@ -503,7 +494,7 @@ export function useCreationWorkbench(): {
    * route navigation only drops their display resources. New-session files
    * remain device-local until that later context materializes (ADR-0017). */
   const stageMaterialFile = useCallback(
-    (file: File): StagedMaterial | null => {
+    (file: File, media: DraftMediaType): StagedMaterial | null => {
       if (!ports) return null
       const id = crypto.randomUUID()
       const material = displayRef.current.registerPending(id, file)
@@ -512,23 +503,22 @@ export function useCreationWorkbench(): {
       return {
         id,
         kind: material.kind,
-        completion: ports.actions.stageMaterial(sessionId, id, file)
+        completion: ports.actions.stageMaterial(sessionId, id, file, media)
       }
     },
     [currentSelectedId, ports]
   )
 
   const addMaterial = useCallback(
-    async (file: File) => {
+    async (file: File, media: DraftMediaType) => {
       if (!ports) return
-      contextController?.noteMaterialUploadFailed(false)
-      contextController?.noteMaterialDropRejection(null)
-      const staged = stageMaterialFile(file)
+      contextController?.noteMaterialUploadFailed(false, media)
+      contextController?.noteMaterialDropRejection(null, media)
+      const staged = stageMaterialFile(file, media)
       if (staged === null) return
       // The structural fallback keeps every kind submittable: images take the
       // image role, anything else binds as omni (which accepts all kinds).
-      const draft = currentDraft()
-      const media = draft.mediaType
+      const draft = draftFor(media)
       const derived =
         media === null ? null : roleForPosition(media, draft.mode, draft.references.length)
       const role = derived ?? (staged.kind === 'image' ? 'reference' : 'omni')
@@ -536,15 +526,16 @@ export function useCreationWorkbench(): {
       const nextReferences = [...draft.references, binding]
       if (media === 'image') {
         // The image composer has no mode picker, so its deck determines the mode.
-        patchDraft({
+        contextController?.editDraftFor(media, {
+          ...draft,
           references: bindingsForMode(media, 'reference-image', nextReferences),
           mode: 'reference-image'
         })
       } else {
-        patchDraft({ references: nextReferences })
+        contextController?.editDraftFor(media, { ...draft, references: nextReferences })
       }
     },
-    [bindingsForMode, contextController, currentDraft, patchDraft, ports, stageMaterialFile]
+    [bindingsForMode, contextController, draftFor, ports, stageMaterialFile]
   )
 
   const removeMaterialNow = useCallback(
@@ -572,12 +563,19 @@ export function useCreationWorkbench(): {
         patchDraft({ promptDocument, references: remaining })
       }
       if (!lastBinding) return
+      const media = draft.mediaType ?? 'image'
+      if (
+        contextController
+          ?.draftFor(media === 'image' ? 'video' : 'image')
+          .references.some((reference) => reference.materialId === materialId)
+      )
+        return
       displayRef.current.forget(materialId)
       displayRef.current.dropPending(materialId)
       const sessionId = currentSelectedId()
       // A finalized material stays in the session; only an unfinished upload
       // needs cancellation after its Draft binding is removed.
-      if (sessionId !== null) await ports.actions.unbindMaterial(sessionId, materialId)
+      if (sessionId !== null) await ports.actions.unbindMaterial(sessionId, materialId, media)
     },
     [bindingsForMode, contextController, currentDraft, currentSelectedId, patchDraft, ports]
   )
@@ -812,14 +810,15 @@ export function useCreationWorkbench(): {
   const addMaterials = useCallback(
     (files: readonly File[]): void => {
       if (!ports || files.length === 0) return
+      const media = currentDraft().mediaType ?? 'image'
       void (async () => {
-        const remaining = Math.max(0, deckCap - currentDraft().references.length)
-        const video = currentDraft().mediaType === 'video'
+        const remaining = Math.max(0, deckCap - draftFor(media).references.length)
+        const video = media === 'video'
         const plan = planFileDrop(files, allowedKinds, video ? files.length : remaining)
         let added = 0
         let rejectedEnvelope = 0
         for (const file of plan.accepted) {
-          const draftNow = currentDraft()
+          const draftNow = draftFor(media)
           if (video && draftNow.references.length >= deckCap) {
             rejectedEnvelope += 1
             continue
@@ -856,17 +855,17 @@ export function useCreationWorkbench(): {
               continue
             }
           }
-          await addMaterial(file)
+          await addMaterial(file, media)
           added += 1
           if (!mountedRef.current) return
         }
         const rejected = plan.rejectedKind + plan.rejectedCap + rejectedEnvelope
         if (rejected > 0) {
-          contextController?.noteMaterialDropRejection({ added, rejected })
+          contextController?.noteMaterialDropRejection({ added, rejected }, media)
         }
       })()
     },
-    [addMaterial, allowedKinds, contextController, currentDraft, deckCap, manifest, ports]
+    [addMaterial, allowedKinds, contextController, currentDraft, deckCap, draftFor, manifest, ports]
   )
 
   /** Swaps one bound card for a new file at the same deck position. The new
@@ -878,6 +877,7 @@ export function useCreationWorkbench(): {
       if (!ports) return
       void (async () => {
         const draftNow = currentDraft()
+        const sourceMedia = draftNow.mediaType ?? 'image'
         const target = referenceBindingTarget(draftNow.references, position)
         const materialId = target?.materialId
         const replaceable =
@@ -893,8 +893,8 @@ export function useCreationWorkbench(): {
           addMaterials([file])
           return
         }
-        contextController?.noteMaterialUploadFailed(false)
-        contextController?.noteMaterialDropRejection(null)
+        contextController?.noteMaterialUploadFailed(false, sourceMedia)
+        contextController?.noteMaterialDropRejection(null, sourceMedia)
         const sessionIdAtStart = currentSelectedId()
         const replacementId =
           sessionIdAtStart !== null &&
@@ -922,7 +922,8 @@ export function useCreationWorkbench(): {
                   replacementId,
                   file,
                   initialRole,
-                  target
+                  target,
+                  sourceMedia
                 )
               })
         }
@@ -956,7 +957,7 @@ export function useCreationWorkbench(): {
         // Merge into the latest Draft, not the click-time snapshot: prompt,
         // parameter, and other reference edits remain authoritative while
         // the runtime finishes the upload.
-        const latestDraft = currentDraft()
+        const latestDraft = draftFor(sourceMedia)
         if (target === null) return
         const latestPosition = referenceBindingPosition(latestDraft.references, target)
         if (
@@ -971,14 +972,20 @@ export function useCreationWorkbench(): {
             : null) ?? fallbackRole
         kept[latestPosition] = { materialId: replacement.id, role }
         if (latestDraft.mediaType === 'image') {
-          patchDraft({
+          contextController?.editDraftFor(sourceMedia, {
+            ...latestDraft,
             references: bindingsForMode('image', 'reference-image', kept),
             mode: 'reference-image'
           })
         } else {
-          contextController?.editDraft({ ...latestDraft, references: kept })
+          contextController?.editDraftFor(sourceMedia, { ...latestDraft, references: kept })
         }
-        if (!kept.some((reference) => reference.materialId === materialId)) {
+        if (
+          !kept.some((reference) => reference.materialId === materialId) &&
+          !draftFor(sourceMedia === 'image' ? 'video' : 'image').references.some(
+            (reference) => reference.materialId === materialId
+          )
+        ) {
           displayRef.current.dropPending(materialId)
           displayRef.current.forget(materialId)
         }
@@ -990,7 +997,7 @@ export function useCreationWorkbench(): {
       contextController,
       currentDraft,
       currentSelectedId,
-      patchDraft,
+      draftFor,
       ports
     ]
   )
@@ -1000,15 +1007,16 @@ export function useCreationWorkbench(): {
   const addResultAsMaterial = useCallback(
     (payload: ResultDragPayload, targetPosition: number | null): void => {
       if (!ports) return
+      const sourceMedia = currentDraft().mediaType ?? 'image'
       const target =
         targetPosition === null
           ? null
-          : referenceBindingTarget(currentDraft().references, targetPosition)
+          : referenceBindingTarget(draftFor(sourceMedia).references, targetPosition)
       void (async () => {
         const sessionId = currentSelectedId()
         if (sessionId === null) return
-        contextController?.noteMaterialUploadFailed(false)
-        contextController?.noteMaterialDropRejection(null)
+        contextController?.noteMaterialUploadFailed(false, sourceMedia)
+        contextController?.noteMaterialDropRejection(null, sourceMedia)
         const resultFacts = taskDetails[payload.taskId]?.slots.find(
           (slot) => slot.index === payload.slotIndex
         )?.result
@@ -1026,11 +1034,11 @@ export function useCreationWorkbench(): {
           .catch(() => ({ outcome: 'network-failure' }) as const)
         if (!mountedRef.current || currentSelectedId() !== sessionId) return
         if (result.outcome !== 'succeeded') {
-          contextController?.noteMaterialUploadFailed(true)
+          contextController?.noteMaterialUploadFailed(true, sourceMedia)
           return
         }
         const created = result.value
-        const draftAtResult = currentDraft()
+        const draftAtResult = draftFor(sourceMedia)
         const targetMaterialId = target?.materialId ?? null
         const resolvedPosition =
           target === null ? -1 : referenceBindingPosition(draftAtResult.references, target)
@@ -1059,7 +1067,7 @@ export function useCreationWorkbench(): {
               .materials.filter((material) => material.id !== created.id),
             created
           ])
-          const latestDraft = currentDraft()
+          const latestDraft = draftFor(sourceMedia)
           const latestPosition = referenceBindingPosition(latestDraft.references, target)
           if (
             latestPosition < 0 ||
@@ -1073,14 +1081,20 @@ export function useCreationWorkbench(): {
               : null) ?? fallbackRole
           kept[latestPosition] = { materialId: created.id, role }
           if (latestDraft.mediaType === 'image') {
-            patchDraft({
+            contextController?.editDraftFor(sourceMedia, {
+              ...latestDraft,
               references: bindingsForMode('image', 'reference-image', kept),
               mode: 'reference-image'
             })
           } else {
-            contextController?.editDraft({ ...latestDraft, references: kept })
+            contextController?.editDraftFor(sourceMedia, { ...latestDraft, references: kept })
           }
-          if (!kept.some((reference) => reference.materialId === targetMaterialId)) {
+          if (
+            !kept.some((reference) => reference.materialId === targetMaterialId) &&
+            !draftFor(sourceMedia === 'image' ? 'video' : 'image').references.some(
+              (reference) => reference.materialId === targetMaterialId
+            )
+          ) {
             displayRef.current.dropPending(targetMaterialId)
             displayRef.current.forget(targetMaterialId)
           }
@@ -1093,7 +1107,7 @@ export function useCreationWorkbench(): {
             .materials.filter((material) => material.id !== created.id),
           created
         ])
-        const latestDraft = currentDraft()
+        const latestDraft = draftFor(sourceMedia)
         const role =
           (latestDraft.mediaType !== null
             ? roleForPosition(
@@ -1107,12 +1121,13 @@ export function useCreationWorkbench(): {
           { materialId: created.id, role }
         ] satisfies DraftReferenceView[]
         if (latestDraft.mediaType === 'image') {
-          patchDraft({
+          contextController?.editDraftFor(sourceMedia, {
+            ...latestDraft,
             references: bindingsForMode('image', 'reference-image', references),
             mode: 'reference-image'
           })
         } else {
-          patchDraft({ references })
+          contextController?.editDraftFor(sourceMedia, { ...latestDraft, references })
         }
       })()
     },
@@ -1121,7 +1136,7 @@ export function useCreationWorkbench(): {
       contextController,
       currentDraft,
       currentSelectedId,
-      patchDraft,
+      draftFor,
       ports,
       taskDetails
     ]
@@ -1291,7 +1306,7 @@ export function useCreationWorkbench(): {
       materialUploadFailed: ctx.materialUploadFailed,
       materialDropRejection: ctx.materialDropRejection,
       loadMaterialPreviewSource: display.loadMaterialPreviewSource,
-      documentKey: `${ports?.userId ?? ''}:${ctx.contextKey}`
+      documentKey: `${ports?.userId ?? ''}:${ctx.contextKey}:${ctx.draft.mediaType ?? 'image'}`
     },
     gallery: {
       tasks,

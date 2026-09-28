@@ -248,6 +248,11 @@ test('terminal restart recovery removes the old binding so a fresh selection get
     status: 'failed',
     code: 'upload_requires_new_key'
   })
+  assert.deepEqual(runtime.actions.snapshot(sessionA, 'image'), {
+    status: 'failed',
+    code: 'upload_requires_new_key'
+  })
+  assert.deepEqual(runtime.actions.snapshot(sessionA, 'video'), { status: 'idle' })
   assert.deepEqual(
     listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
     []

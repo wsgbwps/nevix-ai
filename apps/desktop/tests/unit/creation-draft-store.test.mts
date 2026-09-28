@@ -16,10 +16,15 @@ registerHooks({
 const {
   readLocalDraft,
   writeLocalDraft,
+  readWorkbenchDraft,
+  writeWorkbenchDraft,
   removeLocalDraft,
   setLocalDraftOperationNotice,
   listPendingLocalDraftKeys,
-  moveLocalDraft
+  moveLocalDraft,
+  remapLocalDraftMaterial,
+  removeLocalDraftMaterial,
+  replaceLocalDraftMaterial
 } = await import('../../src/renderer/src/features/creation/model/draft-store.ts')
 
 /** Minimal in-memory Storage stand-in; production passes window.localStorage. */
@@ -66,6 +71,47 @@ test('a written draft round-trips verbatim under its session key', () => {
   assert.deepEqual(
     readLocalDraft(storage, 'user-1', 'aaaaaaaa-0000-4000-8000-000000000001'),
     record
+  )
+})
+
+test('image and video drafts round-trip independently with the active selection and context notice', () => {
+  const storage = fakeStorage()
+  const video = {
+    ...record,
+    prompt: '视频提示',
+    promptDocument: {
+      version: 1 as const,
+      nodes: [{ type: 'text' as const, text: '视频提示' }]
+    },
+    mediaType: 'video' as const,
+    model: 'video-model',
+    references: [{ materialId: 'video-material', role: 'first_frame' as const }]
+  }
+  const workbench = {
+    activeMediaType: 'video' as const,
+    drafts: { image: record, video },
+    operationNotice: {
+      sessionUnconfirmed: true,
+      submissionUnconfirmed: false,
+      materialFileNames: []
+    }
+  }
+
+  assert.equal(writeWorkbenchDraft(storage, 'user-1', 'new', workbench), true)
+  assert.deepEqual(readWorkbenchDraft(storage, 'user-1', 'new'), workbench)
+  assert.deepEqual(readLocalDraft(storage, 'user-1', 'new'), {
+    ...video,
+    operationNotice: workbench.operationNotice
+  })
+  writeLocalDraft(storage, 'user-1', 'new', { ...record, prompt: '修改图片' })
+  assert.equal(readWorkbenchDraft(storage, 'user-1', 'new')?.drafts.video.prompt, '视频提示')
+  assert.equal(readWorkbenchDraft(storage, 'user-1', 'new')?.drafts.image.prompt, '修改图片')
+  const beforeMove = readWorkbenchDraft(storage, 'user-1', 'new')
+  moveLocalDraft(storage, 'user-1', 'new', 'pending:11111111-1111-4111-8111-111111111111')
+  assert.equal(readWorkbenchDraft(storage, 'user-1', 'new'), null)
+  assert.deepEqual(
+    readWorkbenchDraft(storage, 'user-1', 'pending:11111111-1111-4111-8111-111111111111'),
+    beforeMove
   )
 })
 
@@ -147,12 +193,155 @@ test('a pre-mention draft migrates its fallback prompt without inferring identit
   )
 })
 
+test('a flat draft migrates all content to its media slot, or image when media was unset', () => {
+  for (const mediaType of ['video', null] as const) {
+    const storage = fakeStorage()
+    const key = 'nevix:creation:draft:user-1:new'
+    const legacy = {
+      prompt: record.prompt,
+      prompt_document: record.promptDocument,
+      media_type: mediaType,
+      manifest_version: record.manifestVersion,
+      model: record.model,
+      mode: record.mode,
+      ratio: record.ratio,
+      resolution: record.resolution,
+      quantity: record.quantity,
+      duration_seconds: record.durationSeconds,
+      references: record.references.map(({ materialId, role }) => ({
+        material_id: materialId,
+        role
+      })),
+      operation_notice: {
+        kind: 'unconfirmed-writes',
+        session_unconfirmed: true,
+        submission_unconfirmed: false,
+        material_file_names: []
+      }
+    }
+    storage.setItem(key, JSON.stringify(legacy))
+
+    const migrated = readWorkbenchDraft(storage, 'user-1', 'new')
+    const target = mediaType ?? 'image'
+    const other = target === 'image' ? 'video' : 'image'
+    assert.equal(migrated?.activeMediaType, target)
+    assert.deepEqual(migrated?.drafts[target], { ...record, mediaType: target })
+    assert.equal(migrated?.drafts[other].prompt, '')
+    assert.deepEqual(migrated?.drafts[other].references, [])
+    assert.deepEqual(migrated?.operationNotice, {
+      sessionUnconfirmed: true,
+      submissionUnconfirmed: false,
+      materialFileNames: []
+    })
+    assert.equal(storage.getItem(key), JSON.stringify(legacy))
+  }
+})
+
+test('failed migration write keeps the original flat record, and failed move keeps its source', () => {
+  const storage = fakeStorage()
+  const from = 'pending:11111111-1111-4111-8111-111111111111'
+  const sourceKey = `nevix:creation:draft:user-1:${from}`
+  const legacy = {
+    prompt: record.prompt,
+    prompt_document: record.promptDocument,
+    media_type: 'image',
+    manifest_version: record.manifestVersion,
+    model: record.model,
+    mode: record.mode,
+    ratio: record.ratio,
+    resolution: record.resolution,
+    quantity: record.quantity,
+    duration_seconds: record.durationSeconds,
+    references: record.references.map(({ materialId, role }) => ({ material_id: materialId, role }))
+  }
+  storage.setItem(sourceKey, JSON.stringify(legacy))
+  const failingStorage = {
+    ...storage,
+    setItem() {
+      throw new Error('storage full')
+    }
+  } as Storage
+
+  const migrated = readWorkbenchDraft(failingStorage, 'user-1', from)
+  assert.ok(migrated)
+  assert.equal(writeWorkbenchDraft(failingStorage, 'user-1', from, migrated), false)
+  assert.equal(storage.getItem(sourceKey), JSON.stringify(legacy))
+  moveLocalDraft(failingStorage, 'user-1', from, 'session')
+  assert.equal(storage.getItem(sourceKey), JSON.stringify(legacy))
+  assert.equal(storage.getItem('nevix:creation:draft:user-1:session'), null)
+})
+
+test('material identity changes target their source media without switching the active draft', () => {
+  const storage = fakeStorage()
+  const shared = 'cccccccc-0000-4000-8000-000000000003'
+  const video = {
+    ...record,
+    mediaType: 'video' as const,
+    references: [{ materialId: shared, role: 'first_frame' as const }]
+  }
+  writeWorkbenchDraft(storage, 'user-1', 'new', {
+    activeMediaType: 'image',
+    drafts: { image: record, video }
+  })
+
+  remapLocalDraftMaterial(storage, 'user-1', 'new', shared, 'uploaded-video', 'video')
+  assert.equal(readWorkbenchDraft(storage, 'user-1', 'new')?.activeMediaType, 'image')
+  assert.deepEqual(readWorkbenchDraft(storage, 'user-1', 'new')?.drafts.image, record)
+  assert.deepEqual(readWorkbenchDraft(storage, 'user-1', 'new')?.drafts.video.references, [
+    { materialId: 'uploaded-video', role: 'first_frame' }
+  ])
+  assert.deepEqual(
+    readWorkbenchDraft(storage, 'user-1', 'new')?.drafts.video.promptDocument.nodes[1],
+    {
+      type: 'mention',
+      materialId: 'uploaded-video'
+    }
+  )
+
+  replaceLocalDraftMaterial(
+    storage,
+    'user-1',
+    'new',
+    'uploaded-video',
+    'replacement',
+    'first_frame',
+    undefined,
+    'video'
+  )
+  removeLocalDraftMaterial(storage, 'user-1', 'new', 'replacement', 'video')
+  assert.deepEqual(readWorkbenchDraft(storage, 'user-1', 'new')?.drafts.video.references, [])
+  assert.deepEqual(readWorkbenchDraft(storage, 'user-1', 'new')?.drafts.image, record)
+})
+
+test('recovery remaps an identity in a hidden draft when source media is unknown', () => {
+  const storage = fakeStorage()
+  const localId = 'local-video'
+  const video = {
+    ...record,
+    mediaType: 'video' as const,
+    references: [{ materialId: localId, role: 'first_frame' as const }],
+    promptDocument: {
+      version: 1 as const,
+      nodes: [{ type: 'mention' as const, materialId: localId }]
+    }
+  }
+  writeWorkbenchDraft(storage, 'user-1', 'new', {
+    activeMediaType: 'image',
+    drafts: { image: record, video }
+  })
+  remapLocalDraftMaterial(storage, 'user-1', 'new', localId, 'remote-video')
+  assert.deepEqual(readWorkbenchDraft(storage, 'user-1', 'new')?.drafts.image, record)
+  assert.deepEqual(readWorkbenchDraft(storage, 'user-1', 'new')?.drafts.video.references, [
+    { materialId: 'remote-video', role: 'first_frame' }
+  ])
+})
+
 test('an invalid prompt document preserves the valid fallback and the rest of the draft', () => {
   const storage = fakeStorage()
   writeLocalDraft(storage, 'user-1', 'new', record)
   const key = 'nevix:creation:draft:user-1:new'
   const stored = JSON.parse(storage.getItem(key) ?? '{}')
-  stored.prompt_document = {
+  stored.drafts.image.prompt_document = {
     version: 1,
     nodes: [{ type: 'mention', label: '图片 1' }]
   }

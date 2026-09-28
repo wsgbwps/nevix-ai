@@ -9,6 +9,7 @@ import type { GenerationIntent, TaskSubmitInput } from '../api/generation-task-h
 import {
   listPendingLocalDraftKeys,
   moveLocalDraft,
+  readWorkbenchDraft,
   remapLocalDraftMaterial,
   removeLocalDraft,
   removeLocalDraftMaterial,
@@ -27,6 +28,7 @@ import type { CreationReferenceMaterialUploadRecovery } from '../../../../../sha
 import type { AssetPrivateOrigin } from '../api/asset-library-http'
 import { prepareAssetSimilarDraft, type AssetSimilarDraftResult } from './asset-similar-draft'
 import { writePublicationSimilarDraft } from './publication-similar-draft'
+import type { DraftMediaType } from './capability'
 
 export type WorkbenchActionState =
   | { readonly status: 'idle' }
@@ -67,7 +69,7 @@ export interface WorkbenchActions {
     publicationId: string
   ) => Promise<'prepared' | 'failed' | 'unavailable'>
   readonly consumePreparedSimilarSession: () => CreationSessionView | null
-  readonly snapshot: (sessionId: string) => WorkbenchActionState
+  readonly snapshot: (sessionId: string, mediaType?: DraftMediaType) => WorkbenchActionState
   readonly subscribe: (listener: (event: CreationRuntimeEvent) => void) => () => void
   readonly stagedMaterials: (sessionId: string) => readonly StagedMaterialFile[]
   readonly recoveryMaterials: (sessionId: string) => readonly ReferenceMaterialView[]
@@ -82,7 +84,8 @@ export interface WorkbenchActions {
   readonly stageMaterial: (
     sessionId: string,
     localId: string,
-    file: File
+    file: File,
+    mediaType: DraftMediaType
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly replaceMaterial: (
     sessionId: string,
@@ -90,7 +93,8 @@ export interface WorkbenchActions {
     localId: string,
     file: File,
     role: DraftReferenceRole,
-    target?: ReferenceBindingTarget
+    target?: ReferenceBindingTarget,
+    mediaType?: DraftMediaType
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly submit: (sessionId: string, intent: GenerationIntent) => Promise<WorkbenchActionResult>
   /** No-identity chain: materialize a session under `key`'s pending ownership,
@@ -105,11 +109,12 @@ export interface WorkbenchActions {
   readonly pendingDrafts: () => readonly string[]
   readonly resumeSubmission: (sessionId: string) => Promise<WorkbenchActionResult>
   readonly recoverMaterialUploads: () => Promise<void>
-  readonly acknowledgeFailure: (sessionId: string) => void
+  readonly acknowledgeFailure: (sessionId: string, mediaType?: DraftMediaType) => void
   readonly stopTracking: (sessionId: string) => void
   readonly unbindMaterial: (
     sessionId: string,
-    materialId: string
+    materialId: string,
+    mediaType: DraftMediaType
   ) => Promise<CreationApiResult<void>>
   readonly deleteSession: (sessionId: string) => Promise<CreationApiResult<void>>
 }
@@ -194,7 +199,9 @@ export function createCreationRuntime(
   )
   const materialFailures = new Map<
     string,
-    Extract<WorkbenchActionState, { readonly status: 'failed' }>
+    Extract<WorkbenchActionState, { readonly status: 'failed' }> & {
+      readonly mediaType?: DraftMediaType
+    }
   >()
   const deferredSessionDeletes = new Map<string, DeferredSessionDelete[]>()
   const eventSubscriptions = new Set<() => void>()
@@ -206,6 +213,13 @@ export function createCreationRuntime(
   const publicationSimilarKeys = new Map<string, string>()
 
   const materialKey = (sessionId: string, localId: string): string => `${sessionId}:${localId}`
+  const mediaForDraftMaterial = (sessionId: string, localId: string): DraftMediaType => {
+    const record = storage === undefined ? null : readWorkbenchDraft(storage, userId, sessionId)
+    if (record === null) return 'image'
+    const image = record.drafts.image.references.some((entry) => entry.materialId === localId)
+    const video = record.drafts.video.references.some((entry) => entry.materialId === localId)
+    return image === video ? record.activeMediaType : image ? 'image' : 'video'
+  }
   const clearRecoveredMaterial = (key: string): void => {
     recoveredMaterials.delete(key)
     recoveredMaterialObservationFloors.delete(key)
@@ -279,20 +293,23 @@ export function createCreationRuntime(
   }
 
   const materialFailureFor = (
-    sessionId: string
+    sessionId: string,
+    mediaType?: DraftMediaType
   ): Extract<WorkbenchActionState, { readonly status: 'failed' }> | undefined => {
     const prefix = `${sessionId}:`
     let latest: Extract<WorkbenchActionState, { readonly status: 'failed' }> | undefined
     for (const [key, failure] of materialFailures) {
-      if (key.startsWith(prefix)) latest = failure
+      if (key.startsWith(prefix) && (mediaType === undefined || failure.mediaType === mediaType))
+        latest = failure
     }
-    return latest
+    return latest === undefined ? undefined : { status: 'failed', code: latest.code }
   }
 
-  const clearMaterialFailures = (sessionId: string): void => {
+  const clearMaterialFailures = (sessionId: string, mediaType?: DraftMediaType): void => {
     const prefix = `${sessionId}:`
-    for (const key of materialFailures.keys()) {
-      if (key.startsWith(prefix)) materialFailures.delete(key)
+    for (const [key, failure] of materialFailures) {
+      if (key.startsWith(prefix) && (mediaType === undefined || failure.mediaType === mediaType))
+        materialFailures.delete(key)
     }
   }
 
@@ -433,7 +450,8 @@ export function createCreationRuntime(
     sessionId: string,
     localId: string,
     file: File,
-    reconcileOnSuccess: boolean
+    reconcileOnSuccess: boolean,
+    mediaType?: DraftMediaType
   ): Promise<CreationApiResult<ReferenceMaterialView>> => {
     if (retired) return Promise.resolve({ outcome: 'unauthorized' })
     const key = materialKey(sessionId, localId)
@@ -533,7 +551,7 @@ export function createCreationRuntime(
           pendingMaterials.set(key, { ...completed, file: null, state: 'succeeded' })
         }
         if (storage !== undefined) {
-          remapLocalDraftMaterial(storage, userId, sessionId, localId, result.value.id)
+          remapLocalDraftMaterial(storage, userId, sessionId, localId, result.value.id, mediaType)
           removeReferenceMaterialUploadRecovery(storage, userId, recoveryScope, localId)
         }
         materialFailures.delete(key)
@@ -566,9 +584,13 @@ export function createCreationRuntime(
         reselectionAllowed.delete(key)
         if (storage !== undefined) {
           removeReferenceMaterialUploadRecovery(storage, userId, recoveryScope, localId)
-          removeLocalDraftMaterial(storage, userId, sessionId, localId)
+          removeLocalDraftMaterial(storage, userId, sessionId, localId, mediaType)
         }
-        materialFailures.set(key, { status: 'failed', code: 'upload_requires_new_key' })
+        materialFailures.set(key, {
+          status: 'failed',
+          code: 'upload_requires_new_key',
+          ...(mediaType === undefined ? {} : { mediaType })
+        })
         syncNotice(sessionId)
         changed(sessionId)
         emit({ type: 'reconcile', sessionId })
@@ -580,7 +602,11 @@ export function createCreationRuntime(
         pendingMaterials.delete(key)
         ambiguousMaterials.delete(key)
         reselectionAllowed.add(key)
-        materialFailures.set(key, { status: 'failed', code: result.code })
+        materialFailures.set(key, {
+          status: 'failed',
+          code: result.code,
+          ...(mediaType === undefined ? {} : { mediaType })
+        })
         syncNotice(sessionId)
         changed(sessionId)
       } else {
@@ -590,7 +616,8 @@ export function createCreationRuntime(
         settlePreLeaseRecovery()
         materialFailures.set(key, {
           status: 'failed',
-          code: result.outcome === 'request-rejected' ? result.code : result.outcome
+          code: result.outcome === 'request-rejected' ? result.code : result.outcome,
+          ...(mediaType === undefined ? {} : { mediaType })
         })
         syncNotice(sessionId)
         changed(sessionId)
@@ -611,8 +638,8 @@ export function createCreationRuntime(
     return promise
   }
 
-  const stageMaterial: WorkbenchActions['stageMaterial'] = (sessionId, localId, file) =>
-    stageMaterialFor(sessionId, localId, file, true)
+  const stageMaterial: WorkbenchActions['stageMaterial'] = (sessionId, localId, file, mediaType) =>
+    stageMaterialFor(sessionId, localId, file, true, mediaType)
 
   const driveMaterialUploadRecovery = async (): Promise<void> => {
     if (retired || storage === undefined) return
@@ -655,6 +682,7 @@ export function createCreationRuntime(
         continue
       }
       if (result.outcome === 'request-rejected' && result.code === 'upload_terminal') {
+        const mediaType = mediaForDraftMaterial(recovery.sessionId, recovery.idempotencyKey)
         recoveryPending.delete(key)
         clearRecoveredMaterial(key)
         reselectionAllowed.delete(key)
@@ -667,7 +695,8 @@ export function createCreationRuntime(
         )
         materialFailures.set(key, {
           status: 'failed',
-          code: 'upload_requires_new_key'
+          code: 'upload_requires_new_key',
+          mediaType
         })
         emit({ type: 'reconcile', sessionId: recovery.sessionId })
         continue
@@ -954,7 +983,13 @@ export function createCreationRuntime(
       if (!currentChain(session.id, chain)) return 'retired'
       const held = chain.heldFiles.shift()
       if (held === undefined) break
-      const result = await stageMaterialFor(session.id, held.localId, held.file, true)
+      const result = await stageMaterialFor(
+        session.id,
+        held.localId,
+        held.file,
+        true,
+        chain.frozenIntent.mediaType ?? undefined
+      )
       if (!currentChain(session.id, chain)) return 'retired'
       if (result.outcome !== 'succeeded') {
         return settleStagedMaterial(session.id, chain, result)
@@ -970,14 +1005,18 @@ export function createCreationRuntime(
     return sendSubmission(session.id, chain)
   }
 
-  const unbindMaterial: WorkbenchActions['unbindMaterial'] = async (sessionId, materialId) => {
+  const unbindMaterial: WorkbenchActions['unbindMaterial'] = async (
+    sessionId,
+    materialId,
+    mediaType
+  ) => {
     if (retired) return { outcome: 'unauthorized' }
     const key = materialKey(sessionId, materialId)
     const resolvedId = resolvedMaterialIds.get(key)
     if (storage !== undefined) {
-      removeLocalDraftMaterial(storage, userId, sessionId, materialId)
+      removeLocalDraftMaterial(storage, userId, sessionId, materialId, mediaType)
       if (resolvedId !== undefined) {
-        removeLocalDraftMaterial(storage, userId, sessionId, resolvedId)
+        removeLocalDraftMaterial(storage, userId, sessionId, resolvedId, mediaType)
       }
     }
     const chain = chains.get(sessionId)
@@ -1013,7 +1052,13 @@ export function createCreationRuntime(
       clearRecoveredMaterial(aliasKey)
       resolvedMaterialIds.delete(aliasKey)
       if (storage !== undefined) {
-        removeLocalDraftMaterial(storage, userId, sessionId, aliasKey.slice(sessionId.length + 1))
+        removeLocalDraftMaterial(
+          storage,
+          userId,
+          sessionId,
+          aliasKey.slice(sessionId.length + 1),
+          mediaType
+        )
       }
     }
     if (recovery !== undefined && storage !== undefined) {
@@ -1050,7 +1095,8 @@ export function createCreationRuntime(
     localId,
     file,
     role,
-    target
+    target,
+    mediaType
   ) => {
     const key = materialKey(sessionId, localId)
     const previousKey = materialKey(sessionId, previousMaterialId)
@@ -1059,7 +1105,7 @@ export function createCreationRuntime(
     if (recoveryPending.has(previousKey) && !continuingRecovery) {
       return { outcome: 'request-rejected', code: 'upload_reselection_not_ready' }
     }
-    const result = await stageMaterialFor(sessionId, localId, file, false)
+    const result = await stageMaterialFor(sessionId, localId, file, false, mediaType)
     if (result.outcome !== 'succeeded') return result
     if (retired) return { outcome: 'unauthorized' }
     if (resolvedMaterialIds.get(key) !== result.value.id) {
@@ -1077,7 +1123,8 @@ export function createCreationRuntime(
         previousMaterialId,
         result.value.id,
         role,
-        target
+        target,
+        mediaType
       )
     }
     emit({ type: 'reconcile', sessionId })
@@ -1113,12 +1160,12 @@ export function createCreationRuntime(
       similarSessionPrepared = null
       return session
     },
-    snapshot: (sessionId) =>
+    snapshot: (sessionId, mediaType) =>
       retired
         ? { status: 'retired' }
         : (chains.get(sessionId)?.state ??
           settledStates.get(sessionId) ??
-          materialFailureFor(sessionId) ??
+          materialFailureFor(sessionId, mediaType) ??
           (materialFileNamesFor(sessionId, false).length > 0
             ? { status: 'material-unconfirmed' }
             : idleState)),
@@ -1206,10 +1253,10 @@ export function createCreationRuntime(
       return sendSubmission(sessionId, chain)
     },
     recoverMaterialUploads,
-    acknowledgeFailure: (sessionId) => {
+    acknowledgeFailure: (sessionId, mediaType) => {
       if (retired) return
       settledStates.delete(sessionId)
-      clearMaterialFailures(sessionId)
+      clearMaterialFailures(sessionId, mediaType)
       changed(sessionId)
     },
     stopTracking: (sessionId) => {

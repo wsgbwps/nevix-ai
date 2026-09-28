@@ -8,14 +8,17 @@
 
 import type { DraftReferenceRole, DraftReferenceView } from '../api/go-creation-http'
 import {
+  emptyGenerationParameters,
   generationParameterWireValues,
   parseGenerationParameterValues,
+  type DraftMediaType,
   type GenerationParameterValues
 } from '../api/generation-parameter'
 import {
   parsePromptDocument,
   remapPromptMentions,
   removePromptMentions,
+  textPromptDocument,
   type PromptDocument
 } from './prompt-document'
 
@@ -27,6 +30,12 @@ export interface LocalDraftRecord extends GenerationParameterValues {
   readonly promptDocument: PromptDocument
   readonly manifestVersion: number
   readonly references: DraftReferenceView[]
+  readonly operationNotice?: LocalDraftOperationNotice
+}
+
+export interface LocalWorkbenchDraftRecord {
+  readonly activeMediaType: DraftMediaType
+  readonly drafts: Record<DraftMediaType, LocalDraftRecord>
   readonly operationNotice?: LocalDraftOperationNotice
 }
 
@@ -95,12 +104,13 @@ export function readLocalDraft(
   userId: string,
   key: string
 ): LocalDraftRecord | null {
-  const raw = storage.getItem(storageKey(userId, key))
-  if (raw === null) return null
-  try {
-    return parseLocalDraftRecord(JSON.parse(raw))
-  } catch {
-    return null
+  const workbench = readWorkbenchDraft(storage, userId, key)
+  if (workbench === null) return null
+  return {
+    ...workbench.drafts[workbench.activeMediaType],
+    ...(workbench.operationNotice === undefined
+      ? {}
+      : { operationNotice: workbench.operationNotice })
   }
 }
 
@@ -110,34 +120,138 @@ export function writeLocalDraft(
   key: string,
   record: LocalDraftRecord
 ): boolean {
+  const existing = readWorkbenchDraft(storage, userId, key)
+  const mediaType = record.mediaType ?? existing?.activeMediaType ?? 'image'
+  return writeWorkbenchDraft(storage, userId, key, {
+    activeMediaType: mediaType,
+    drafts: {
+      image: existing?.drafts.image ?? emptyDraft('image'),
+      video: existing?.drafts.video ?? emptyDraft('video'),
+      [mediaType]: { ...record, mediaType }
+    },
+    ...(record.operationNotice === undefined
+      ? existing?.operationNotice === undefined
+        ? {}
+        : { operationNotice: existing.operationNotice }
+      : { operationNotice: record.operationNotice })
+  })
+}
+
+export function readWorkbenchDraft(
+  storage: Storage,
+  userId: string,
+  key: string
+): LocalWorkbenchDraftRecord | null {
+  try {
+    const raw = storage.getItem(storageKey(userId, key))
+    return raw === null ? null : parseWorkbenchDraft(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+export function writeWorkbenchDraft(
+  storage: Storage,
+  userId: string,
+  key: string,
+  record: LocalWorkbenchDraftRecord
+): boolean {
   try {
     storage.setItem(
       storageKey(userId, key),
       JSON.stringify({
-        prompt: record.prompt,
-        prompt_document: record.promptDocument,
-        ...generationParameterWireValues(record),
-        manifest_version: record.manifestVersion,
-        references: record.references.map((reference) => ({
-          material_id: reference.materialId,
-          role: reference.role
-        })),
+        active_media_type: record.activeMediaType,
+        drafts: {
+          image: draftWireRecord(record.drafts.image, 'image'),
+          video: draftWireRecord(record.drafts.video, 'video')
+        },
         ...(record.operationNotice === undefined
           ? {}
-          : {
-              operation_notice: {
-                kind: 'unconfirmed-writes',
-                session_unconfirmed: record.operationNotice.sessionUnconfirmed,
-                submission_unconfirmed: record.operationNotice.submissionUnconfirmed,
-                material_file_names: record.operationNotice.materialFileNames
-              }
-            })
+          : { operation_notice: noticeWireRecord(record.operationNotice) })
       })
     )
     return true
   } catch {
     // Editing stays usable when the device-local store is full or unavailable.
     return false
+  }
+}
+
+function emptyDraft(mediaType: DraftMediaType): LocalDraftRecord {
+  return {
+    prompt: '',
+    promptDocument: textPromptDocument(''),
+    ...emptyGenerationParameters(),
+    mediaType,
+    manifestVersion: 1,
+    references: []
+  }
+}
+
+function draftWireRecord(
+  record: LocalDraftRecord,
+  mediaType: DraftMediaType
+): Record<string, unknown> {
+  return {
+    prompt: record.prompt,
+    prompt_document: record.promptDocument,
+    ...generationParameterWireValues(record),
+    media_type: mediaType,
+    manifest_version: record.manifestVersion,
+    references: record.references.map((reference) => ({
+      material_id: reference.materialId,
+      role: reference.role
+    }))
+  }
+}
+
+function noticeWireRecord(notice: LocalDraftOperationNotice): Record<string, unknown> {
+  return {
+    kind: 'unconfirmed-writes',
+    session_unconfirmed: notice.sessionUnconfirmed,
+    submission_unconfirmed: notice.submissionUnconfirmed,
+    material_file_names: notice.materialFileNames
+  }
+}
+
+function parseWorkbenchDraft(payload: unknown): LocalWorkbenchDraftRecord | null {
+  if (!isRecord(payload)) return null
+  if (!('drafts' in payload)) {
+    const legacy = parseLocalDraftRecord(payload)
+    if (legacy === null) return null
+    const mediaType = legacy.mediaType ?? 'image'
+    const { operationNotice, ...draft } = legacy
+    return {
+      activeMediaType: mediaType,
+      drafts: {
+        image: mediaType === 'image' ? { ...draft, mediaType } : emptyDraft('image'),
+        video: mediaType === 'video' ? { ...draft, mediaType } : emptyDraft('video')
+      },
+      ...(operationNotice === undefined ? {} : { operationNotice })
+    }
+  }
+  if (
+    (payload.active_media_type !== 'image' && payload.active_media_type !== 'video') ||
+    !isRecord(payload.drafts)
+  )
+    return null
+  const image = parseLocalDraftRecord(payload.drafts.image)
+  const video = parseLocalDraftRecord(payload.drafts.video)
+  const operationNotice = parseOperationNotice(payload.operation_notice)
+  if (
+    image === null ||
+    image.mediaType !== 'image' ||
+    image.operationNotice !== undefined ||
+    video === null ||
+    video.mediaType !== 'video' ||
+    video.operationNotice !== undefined ||
+    operationNotice === null
+  )
+    return null
+  return {
+    activeMediaType: payload.active_media_type,
+    drafts: { image, video },
+    ...(operationNotice === undefined ? {} : { operationNotice })
   }
 }
 
@@ -257,13 +371,13 @@ export function listPendingLocalDraftKeys(storage: Storage, userId: string): str
   return keys
 }
 
-/** Re-homes one draft record synchronously: no await between read, write,
+/** Re-homes both drafts synchronously: no await between read, write,
  * and remove. */
 export function moveLocalDraft(storage: Storage, userId: string, from: string, to: string): void {
-  const record = readLocalDraft(storage, userId, from)
+  if (from === to) return
+  const record = readWorkbenchDraft(storage, userId, from)
   if (record === null) return
-  writeLocalDraft(storage, userId, to, record)
-  removeLocalDraft(storage, userId, from)
+  if (writeWorkbenchDraft(storage, userId, to, record)) removeLocalDraft(storage, userId, from)
 }
 
 export function setLocalDraftOperationNotice(
@@ -272,11 +386,12 @@ export function setLocalDraftOperationNotice(
   key: string,
   notice: LocalDraftOperationNotice | null
 ): void {
-  const record = readLocalDraft(storage, userId, key)
+  const record = readWorkbenchDraft(storage, userId, key)
   if (record === null) return
-  writeLocalDraft(storage, userId, key, {
-    ...record,
-    operationNotice: notice ?? undefined
+  writeWorkbenchDraft(storage, userId, key, {
+    activeMediaType: record.activeMediaType,
+    drafts: record.drafts,
+    ...(notice === null ? {} : { operationNotice: notice })
   })
 }
 
@@ -285,33 +400,56 @@ export function remapLocalDraftMaterial(
   userId: string,
   key: string,
   localId: string,
-  materialId: string
+  materialId: string,
+  mediaType?: DraftMediaType
 ): void {
-  const record = readLocalDraft(storage, userId, key)
-  if (record === null) return
+  const workbench = readWorkbenchDraft(storage, userId, key)
+  if (workbench === null) return
   const idMap = new Map([[localId, materialId]])
-  writeLocalDraft(storage, userId, key, {
-    ...record,
-    promptDocument: remapPromptMentions(record.promptDocument, idMap),
-    references: record.references.map((reference) =>
-      reference.materialId === localId ? { ...reference, materialId } : reference
-    )
-  })
+  const drafts = { ...workbench.drafts }
+  for (const slot of mediaType === undefined ? (['image', 'video'] as const) : [mediaType]) {
+    const record = drafts[slot]
+    if (!containsMaterial(record, localId)) continue
+    drafts[slot] = {
+      ...record,
+      promptDocument: remapPromptMentions(record.promptDocument, idMap),
+      references: record.references.map((reference) =>
+        reference.materialId === localId ? { ...reference, materialId } : reference
+      )
+    }
+  }
+  writeWorkbenchDraft(storage, userId, key, { ...workbench, drafts })
 }
 
 export function removeLocalDraftMaterial(
   storage: Storage,
   userId: string,
   key: string,
-  materialId: string
+  materialId: string,
+  mediaType?: DraftMediaType
 ): void {
-  const record = readLocalDraft(storage, userId, key)
-  if (record === null) return
-  writeLocalDraft(storage, userId, key, {
-    ...record,
-    promptDocument: removePromptMentions(record.promptDocument, materialId),
-    references: record.references.filter((reference) => reference.materialId !== materialId)
-  })
+  const workbench = readWorkbenchDraft(storage, userId, key)
+  if (workbench === null) return
+  const drafts = { ...workbench.drafts }
+  for (const slot of mediaType === undefined ? (['image', 'video'] as const) : [mediaType]) {
+    const record = drafts[slot]
+    if (!containsMaterial(record, materialId)) continue
+    drafts[slot] = {
+      ...record,
+      promptDocument: removePromptMentions(record.promptDocument, materialId),
+      references: record.references.filter((reference) => reference.materialId !== materialId)
+    }
+  }
+  writeWorkbenchDraft(storage, userId, key, { ...workbench, drafts })
+}
+
+function containsMaterial(record: LocalDraftRecord, materialId: string): boolean {
+  return (
+    record.references.some((reference) => reference.materialId === materialId) ||
+    record.promptDocument.nodes.some(
+      (node) => node.type === 'mention' && node.materialId === materialId
+    )
+  )
 }
 
 export function replaceLocalDraftMaterial(
@@ -321,10 +459,13 @@ export function replaceLocalDraftMaterial(
   previousMaterialId: string,
   materialId: string,
   role: DraftReferenceRole,
-  target?: ReferenceBindingTarget
+  target?: ReferenceBindingTarget,
+  mediaType?: DraftMediaType
 ): void {
-  const record = readLocalDraft(storage, userId, key)
-  if (record === null) return
+  const workbench = readWorkbenchDraft(storage, userId, key)
+  if (workbench === null) return
+  const slot = mediaType ?? workbench.activeMediaType
+  const record = workbench.drafts[slot]
   const position = target === undefined ? -1 : referenceBindingPosition(record.references, target)
   if (
     (target !== undefined &&
@@ -334,15 +475,22 @@ export function replaceLocalDraftMaterial(
     return
   const stillBound = target !== undefined && target.count > 1
   const idMap = new Map([[previousMaterialId, materialId]])
-  writeLocalDraft(storage, userId, key, {
-    ...record,
-    promptDocument: stillBound
-      ? record.promptDocument
-      : remapPromptMentions(record.promptDocument, idMap),
-    references: record.references.map((reference, index) =>
-      reference.materialId === previousMaterialId && (target === undefined || index === position)
-        ? { materialId, role }
-        : reference
-    )
+  writeWorkbenchDraft(storage, userId, key, {
+    ...workbench,
+    drafts: {
+      ...workbench.drafts,
+      [slot]: {
+        ...record,
+        promptDocument: stillBound
+          ? record.promptDocument
+          : remapPromptMentions(record.promptDocument, idMap),
+        references: record.references.map((reference, index) =>
+          reference.materialId === previousMaterialId &&
+          (target === undefined || index === position)
+            ? { materialId, role }
+            : reference
+        )
+      }
+    }
   })
 }

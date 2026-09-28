@@ -22,14 +22,16 @@ import type {
 } from '../api/go-creation-http'
 import { mediaCapability, type DraftMediaType } from './capability'
 import {
-  readLocalDraft,
+  readWorkbenchDraft,
   removeLocalDraft,
-  writeLocalDraft,
+  writeWorkbenchDraft,
   type LocalDraftOperationNotice,
-  type LocalDraftRecord
+  type LocalDraftRecord,
+  type LocalWorkbenchDraftRecord
 } from './draft-store'
 import {
   expandPromptDocument,
+  normalizePromptDocument,
   promptMentionCandidates,
   prunePromptMentions,
   textPromptDocument,
@@ -60,6 +62,24 @@ export const emptyComposerDraft = (): ComposerDraft => ({
   references: []
 })
 
+const emptyMediaDraft = (media: DraftMediaType): ComposerDraft => ({
+  ...emptyComposerDraft(),
+  mediaType: media
+})
+
+function isUntouchedDraft(draft: ComposerDraft): boolean {
+  return (
+    draft.promptDocument.nodes.every((node) => node.type === 'text' && node.text === '') &&
+    draft.references.length === 0 &&
+    draft.model === null &&
+    draft.mode === null &&
+    draft.ratio === null &&
+    draft.resolution === null &&
+    draft.quantity === null &&
+    draft.durationSeconds === null
+  )
+}
+
 /** The display-resource seam the switching ritual drives: the one
  * context-switch reset plus the staged-file reconciliation reads. */
 export interface WorkbenchContextDisplaySeam {
@@ -82,13 +102,13 @@ export interface WorkbenchContextTasksSeam {
 /** The runtime action seam this module reads; every other command stays
  * with the workbench hook. */
 export interface WorkbenchContextActionsSeam {
-  snapshot(key: string): WorkbenchActionState
+  snapshot(key: string, mediaType?: DraftMediaType): WorkbenchActionState
   stagedMaterials(key: string): readonly StagedMaterialFile[]
   recoveryMaterials?(key: string): readonly ReferenceMaterialView[]
   beginMaterialsObservation?(key: string): number
   observeMaterials?(key: string, materialIds: readonly string[], observation: number): void
   resolvedMaterialId(sessionId: string, localId: string): string | null
-  acknowledgeFailure(key: string): void
+  acknowledgeFailure(key: string, mediaType?: DraftMediaType): void
 }
 
 /** The read and orchestration seams this module consumes; no submit,
@@ -160,22 +180,19 @@ interface WorkbenchContextOptions {
 type ContextActionEvent = Extract<CreationRuntimeEvent, { type: 'changed' | 'reconcile' }>
 
 /** The manifest-seeded draft a brand-new empty context starts from. */
-function manifestDefaultDraft(value: CapabilityManifest): ComposerDraft | null {
-  const media: DraftMediaType | null = value.image.available
-    ? 'image'
-    : value.video.available
-      ? 'video'
-      : null
-  if (media === null) return null
+function manifestDefaultDraft(value: CapabilityManifest, media: DraftMediaType): ComposerDraft {
   const capability = mediaCapability(value, media)
-  if (capability === null || !capability.available) return null
+  if (capability === null || !capability.available) return emptyMediaDraft(media)
   const first = (capability.modes ?? [])[0]
   const model = (capability.models ?? [])[0]
   return {
     promptDocument: textPromptDocument(''),
     mediaType: media,
     model: model?.model ?? null,
-    mode: first ? first.id : null,
+    mode:
+      media === 'video' && capability.modes?.some((mode) => mode.id === 'first-last-frame')
+        ? 'first-last-frame'
+        : (first?.id ?? null),
     resolution: model?.defaultResolution ?? null,
     ...manifestDefaultParameters(capability),
     references: []
@@ -207,18 +224,28 @@ export class WorkbenchContextController {
   #selected: CreationSessionView | null = null
   #composingNew = false
   #pendingKey: string | null = null
-  #draft: ComposerDraft = emptyComposerDraft()
+  #activeMediaType: DraftMediaType = 'image'
+  #drafts: Record<DraftMediaType, ComposerDraft> = {
+    image: emptyMediaDraft('image'),
+    video: emptyMediaDraft('video')
+  }
   #operationNotice: LocalDraftOperationNotice | null = null
   #manifest: CapabilityManifest | null = null
   #seenManifestVersion: number | null = null
-  #recordManifestVersion: number | null = null
+  #recordManifestVersions: Record<DraftMediaType, number | null> = {
+    image: null,
+    video: null
+  }
   #mentionLabels: PromptMentionKindLabels = defaultMentionLabels
   #actionState: WorkbenchActionState = { status: 'idle' }
   #submitError: string | null = null
-  #referenceRecoveryShown = false
+  #referenceRecoveryShown: Record<DraftMediaType, boolean> = { image: false, video: false }
   #pendingMaterialRemoval: WorkbenchContextSnapshot['pendingMaterialRemoval'] = null
-  #materialUploadFailed = false
-  #materialDropRejection: WorkbenchContextSnapshot['materialDropRejection'] = null
+  #materialUploadFailed: Record<DraftMediaType, boolean> = { image: false, video: false }
+  #materialDropRejection: Record<
+    DraftMediaType,
+    WorkbenchContextSnapshot['materialDropRejection']
+  > = { image: null, video: null }
   #taskMaterials: readonly ReferenceMaterialView[] = []
   #taskReedit = false
   #contextSwitchVersion = 0
@@ -253,6 +280,23 @@ export class WorkbenchContextController {
     return this.#snapshot
   }
 
+  draftFor(media: DraftMediaType): ComposerDraft {
+    return this.#drafts[media]
+  }
+
+  selectMediaType(media: DraftMediaType): void {
+    if (this.#activeMediaType === media) return
+    if (this.#manifest !== null && isUntouchedDraft(this.#drafts[media])) {
+      this.#drafts[media] = manifestDefaultDraft(this.#manifest, media)
+    }
+    this.#activeMediaType = media
+    this.#pendingMaterialRemoval = null
+    this.#deriveActionState()
+    const key = this.#draftKey()
+    if (key !== null) this.#writeThrough(key)
+    this.#changed()
+  }
+
   contextSwitchVersion(): number {
     return this.#contextSwitchVersion
   }
@@ -272,7 +316,7 @@ export class WorkbenchContextController {
     }
     const epoch = ++this.#epoch
     this.#contextSwitchVersion += 1
-    this.#referenceRecoveryShown = false
+    this.#referenceRecoveryShown = { image: false, video: false }
     this.#pendingMaterialRemoval = null
     this.#taskMaterials = []
     this.#taskReedit = false
@@ -284,7 +328,7 @@ export class WorkbenchContextController {
       case 'session': {
         // A real display switch must not expose facts or editable state
         // from the prior context while this session restores.
-        this.#applyDraft(null, null, null, true)
+        this.#applyWorkbench(null, true)
         this.#deriveActionState()
         this.#restoring = true
         void this.#restoreSession(epoch, key.session, 'enter')
@@ -316,7 +360,7 @@ export class WorkbenchContextController {
         break
       }
       case 'inactive': {
-        this.#applyDraft(null, null, null, true)
+        this.#applyWorkbench(null, true)
         this.#deriveActionState()
         this.#deps.tasks.leave()
         break
@@ -342,6 +386,7 @@ export class WorkbenchContextController {
     if (event.sessionId !== '' && event.sessionId !== key) return
     this.#deriveActionState()
     this.#syncOperationNotice(key)
+    if (event.type === 'reconcile' && !this.#restoreWindow) this.#syncStoredMaterials(key)
     this.#changed()
     if (this.#actionState.status === 'retired') {
       this.#deps.tasks.leave()
@@ -364,9 +409,13 @@ export class WorkbenchContextController {
   /** Applies a creator edit and persists it under the composing surface's
    * draft key (`pending:<uuid>`, else `new`, else the session; ADR-0017). */
   editDraft(value: ComposerDraft): void {
-    this.#draft = value
+    this.editDraftFor(this.#activeMediaType, value)
+  }
+
+  editDraftFor(media: DraftMediaType, value: ComposerDraft): void {
+    this.#drafts[media] = { ...value, mediaType: media }
     const key = this.#draftKey()
-    if (key !== null) this.#writeThrough(key, value)
+    if (key !== null) this.#writeThrough(key)
     this.#changed()
   }
 
@@ -382,16 +431,21 @@ export class WorkbenchContextController {
       ...current.filter((material) => !taskIds.has(material.id)),
       ...this.#taskMaterials
     ])
+    this.selectMediaType(value.mediaType ?? 'image')
     this.editDraft(value)
   }
 
   /** The submit path's synchronous ownership claim: the record lands under
    * the pending key and the composing key dies before any await. */
   claimPendingDraft(key: string, frozen: ComposerDraft): void {
+    const from = this.#draftKey()
+    this.#drafts[this.#activeMediaType] = frozen
+    // Write the whole context before retiring the reusable `new` slot.
+    const moved = this.#storage === undefined || this.#writeThrough(key)
     this.#composingNew = false
     this.#pendingKey = key
-    this.#writeThrough(key, frozen)
-    if (this.#storage !== undefined) removeLocalDraft(this.#storage, this.#deps.userId, 'new')
+    if (moved && this.#storage !== undefined && from === 'new')
+      removeLocalDraft(this.#storage, this.#deps.userId, 'new')
     this.#deriveActionState()
     this.#changed()
   }
@@ -400,7 +454,7 @@ export class WorkbenchContextController {
    * the composer last saw, else the restored record's own, else the
    * contract floor. */
   manifestVersionForIntent(): number {
-    return this.#seenManifestVersion ?? this.#recordManifestVersion ?? 1
+    return this.#seenManifestVersion ?? this.#recordManifestVersions[this.#activeMediaType] ?? 1
   }
 
   /** A language change re-mirrors the localized prompt expansion into the
@@ -410,25 +464,28 @@ export class WorkbenchContextController {
     this.#mentionLabels = labels
     if (this.#restoreWindow) return
     const key = this.#draftKey()
-    if (key !== null) this.#writeThrough(key, this.#draft)
+    if (key !== null) this.#writeThrough(key)
   }
 
   /** Clears the current context's action failure: the acknowledged state
    * re-derives submitError to null. */
   acknowledgeActionFailure(): void {
     const key = this.#actionKey()
-    if (key !== null) this.#deps.actions.acknowledgeFailure(key)
+    if (key !== null) this.#deps.actions.acknowledgeFailure(key, this.#activeMediaType)
     this.#deriveActionState()
     this.#changed()
   }
 
-  noteMaterialUploadFailed(failed: boolean): void {
-    this.#materialUploadFailed = failed
+  noteMaterialUploadFailed(failed: boolean, media = this.#activeMediaType): void {
+    this.#materialUploadFailed[media] = failed
     this.#changed()
   }
 
-  noteMaterialDropRejection(rejection: WorkbenchContextSnapshot['materialDropRejection']): void {
-    this.#materialDropRejection = rejection
+  noteMaterialDropRejection(
+    rejection: WorkbenchContextSnapshot['materialDropRejection'],
+    media = this.#activeMediaType
+  ): void {
+    this.#materialDropRejection[media] = rejection
     this.#changed()
   }
 
@@ -438,12 +495,12 @@ export class WorkbenchContextController {
   }
 
   dismissReferenceRecovery(): void {
-    this.#referenceRecoveryShown = false
+    this.#referenceRecoveryShown[this.#activeMediaType] = false
     this.#changed()
   }
 
   noteReferenceRecovery(): void {
-    this.#referenceRecoveryShown = true
+    this.#referenceRecoveryShown[this.#activeMediaType] = true
     this.#changed()
   }
 
@@ -527,26 +584,13 @@ export class WorkbenchContextController {
     // session (deleted from another surface — nothing rewrote them here).
     const stored = this.#readDraft(session.id)
     if (stored === null) {
-      this.#applyDraft(
-        this.#manifest === null ? null : manifestDefaultDraft(this.#manifest),
-        null,
-        null,
-        mode === 'enter'
-      )
+      this.#applyWorkbench(null, mode === 'enter')
     } else {
       const known = new Set(visibleMaterials.map((material) => material.id))
-      const value = this.#restoreStoredDraft(stored, known)
-      this.#applyDraft(
-        value,
-        stored.manifestVersion,
-        stored.operationNotice ?? null,
-        mode === 'enter'
-      )
-      this.#writeThrough(session.id, value)
-      if (this.#seenManifestVersion === null) {
-        this.#seenManifestVersion = stored.manifestVersion
-      }
+      this.#applyWorkbench(stored, mode === 'enter', known)
+      this.#writeThrough(session.id)
     }
+    this.#deriveActionState()
     this.#changed()
   }
 
@@ -555,20 +599,12 @@ export class WorkbenchContextController {
   #restoreLocalContext(key: string, stagedIds: ReadonlySet<string>): void {
     const stored = this.#readDraft(key)
     if (stored === null) {
-      this.#applyDraft(
-        this.#manifest === null ? null : manifestDefaultDraft(this.#manifest),
-        null,
-        null,
-        true
-      )
+      this.#applyWorkbench(null, true)
     } else {
-      const value = this.#restoreStoredDraft(stored, stagedIds)
-      this.#applyDraft(value, stored.manifestVersion, stored.operationNotice ?? null, true)
-      this.#writeThrough(key, value)
-      if (this.#seenManifestVersion === null) {
-        this.#seenManifestVersion = stored.manifestVersion
-      }
+      this.#applyWorkbench(stored, true, stagedIds)
+      this.#writeThrough(key)
     }
+    this.#deriveActionState()
     this.#restoreWindow = false
     this.#restoring = false
   }
@@ -578,7 +614,8 @@ export class WorkbenchContextController {
    * material disappears, so nothing is guessed at. */
   #restoreStoredDraft(
     stored: LocalDraftRecord,
-    knownMaterialIds: ReadonlySet<string>
+    knownMaterialIds: ReadonlySet<string>,
+    media: DraftMediaType
   ): ComposerDraft {
     const references = stored.references.filter((reference) =>
       knownMaterialIds.has(reference.materialId)
@@ -588,7 +625,7 @@ export class WorkbenchContextController {
       references.length !== stored.references.length ||
       JSON.stringify(prunedPromptDocument) !== JSON.stringify(stored.promptDocument)
     const promptDocument = recovered ? textPromptDocument(stored.prompt) : prunedPromptDocument
-    if (recovered) this.#referenceRecoveryShown = true
+    if (recovered) this.#referenceRecoveryShown[media] = true
     let value: ComposerDraft = {
       promptDocument,
       mediaType: stored.mediaType,
@@ -618,62 +655,128 @@ export class WorkbenchContextController {
    * the optimistic empty a context switch shows while its record restores. */
   #adoptManifestDefaults(): void {
     if (!this.#contextEntered() || this.#restoreWindow) return
-    if (JSON.stringify(this.#draft) !== JSON.stringify(emptyComposerDraft())) return
-    const seeded = this.#manifest === null ? null : manifestDefaultDraft(this.#manifest)
-    if (seeded !== null) this.editDraft(seeded)
+    if (this.#manifest === null) return
+    const media = this.#activeMediaType
+    if (isUntouchedDraft(this.#drafts[media])) {
+      const seeded = manifestDefaultDraft(this.#manifest, media)
+      if (JSON.stringify(seeded) === JSON.stringify(this.#drafts[media])) return
+      this.#drafts[media] = seeded
+      const key = this.#draftKey()
+      if (key !== null) this.#writeThrough(key)
+      this.#changed()
+    }
   }
 
   #contextEntered(): boolean {
     return this.#selected !== null || this.#composingNew || this.#pendingKey !== null
   }
 
-  #applyDraft(
-    stored: ComposerDraft | null,
-    manifestVersion: number | null,
-    nextOperationNotice: LocalDraftOperationNotice | null,
-    resetTransient: boolean
+  #applyWorkbench(
+    stored: LocalWorkbenchDraftRecord | null,
+    resetTransient: boolean,
+    knownMaterialIds: ReadonlySet<string> = new Set()
   ): void {
-    this.#recordManifestVersion = manifestVersion
-    this.#operationNotice = nextOperationNotice
-    this.#draft = stored ?? emptyComposerDraft()
+    this.#activeMediaType = stored?.activeMediaType ?? 'image'
+    this.#recordManifestVersions = {
+      image: stored?.drafts.image.manifestVersion ?? null,
+      video: stored?.drafts.video.manifestVersion ?? null
+    }
+    this.#operationNotice = stored?.operationNotice ?? null
+    this.#drafts = {
+      image:
+        stored === null
+          ? this.#manifest === null
+            ? emptyMediaDraft('image')
+            : manifestDefaultDraft(this.#manifest, 'image')
+          : this.#restoreStoredDraft(stored.drafts.image, knownMaterialIds, 'image'),
+      video:
+        stored === null
+          ? emptyMediaDraft('video')
+          : this.#restoreStoredDraft(stored.drafts.video, knownMaterialIds, 'video')
+    }
     if (resetTransient) {
-      this.#materialUploadFailed = false
+      this.#materialUploadFailed = { image: false, video: false }
       // A surface switch must not carry the previous surface's drop summary.
-      this.#materialDropRejection = null
+      this.#materialDropRejection = { image: null, video: null }
     }
   }
 
-  #writeThrough(key: string, value: ComposerDraft): void {
-    if (this.#storage === undefined) return
-    const candidates = promptMentionCandidates(
-      value.references,
-      this.#deps.display.getSnapshot().materials,
-      this.#mentionLabels
-    )
-    const record: LocalDraftRecord = {
-      ...value,
-      prompt: expandPromptDocument(value.promptDocument, candidates),
-      manifestVersion: this.manifestVersionForIntent(),
+  #writeThrough(key: string): boolean {
+    if (this.#storage === undefined) return false
+    const materials = this.#deps.display.getSnapshot().materials
+    const recordFor = (media: DraftMediaType): LocalDraftRecord => {
+      const value = this.#drafts[media]
+      const candidates = promptMentionCandidates(value.references, materials, this.#mentionLabels)
+      return {
+        ...value,
+        prompt: expandPromptDocument(value.promptDocument, candidates),
+        manifestVersion:
+          (media === this.#activeMediaType ? this.#seenManifestVersion : null) ??
+          this.#recordManifestVersions[media] ??
+          1
+      }
+    }
+    const written = writeWorkbenchDraft(this.#storage, this.#deps.userId, key, {
+      activeMediaType: this.#activeMediaType,
+      drafts: { image: recordFor('image'), video: recordFor('video') },
       ...(this.#operationNotice === null ? {} : { operationNotice: this.#operationNotice })
+    })
+    if (written && this.#seenManifestVersion !== null) {
+      this.#recordManifestVersions[this.#activeMediaType] = this.#seenManifestVersion
     }
-    writeLocalDraft(this.#storage, this.#deps.userId, key, record)
+    return written
   }
 
-  #readDraft(key: string): LocalDraftRecord | null {
+  #readDraft(key: string): LocalWorkbenchDraftRecord | null {
     return this.#storage === undefined
       ? null
-      : readLocalDraft(this.#storage, this.#deps.userId, key)
+      : readWorkbenchDraft(this.#storage, this.#deps.userId, key)
   }
 
   #deriveActionState(): void {
     const key = this.#actionKey()
-    this.#actionState = key === null ? { status: 'idle' } : this.#deps.actions.snapshot(key)
+    this.#actionState =
+      key === null ? { status: 'idle' } : this.#deps.actions.snapshot(key, this.#activeMediaType)
     this.#submitError = this.#actionState.status === 'failed' ? this.#actionState.code : null
   }
 
   #syncOperationNotice(key: string): void {
     const stored = this.#readDraft(key)
     this.#operationNotice = stored?.operationNotice ?? null
+  }
+
+  /** Runtime material writes land in the local store before `reconcile` fires.
+   * Pull hidden identity changes in before another edit can overwrite them;
+   * the visible Draft waits for the display alias in #restoreSession. */
+  #syncStoredMaterials(key: string): void {
+    const stored = this.#readDraft(key)
+    if (stored === null) return
+    for (const media of ['image', 'video'] as const) {
+      // The visible card's identity changes in #restoreSession, together with
+      // its display alias. Eagerly swapping that Draft can remount the card.
+      if (media === this.#activeMediaType) continue
+      const source = stored.drafts[media]
+      const current = this.#drafts[media]
+      if (
+        JSON.stringify(source.references) === JSON.stringify(current.references) &&
+        JSON.stringify(normalizePromptDocument(source.promptDocument)) ===
+          JSON.stringify(normalizePromptDocument(current.promptDocument))
+      )
+        continue
+      for (const reference of current.references) {
+        const resolvedId = this.#deps.actions.resolvedMaterialId(key, reference.materialId)
+        if (
+          resolvedId !== null &&
+          source.references.some((entry) => entry.materialId === resolvedId)
+        )
+          this.#deps.display.transferPending(reference.materialId, resolvedId)
+      }
+      this.#drafts[media] = {
+        ...current,
+        references: source.references,
+        promptDocument: source.promptDocument
+      }
+    }
   }
 
   /** A restore continues only when its epoch is still current, the
@@ -712,14 +815,14 @@ export class WorkbenchContextController {
       restoring: this.#restoring,
       contextKey: this.#contextKeyValue(),
       actionKey: this.#actionKey(),
-      draft: this.#draft,
+      draft: this.#drafts[this.#activeMediaType],
       actionState: this.#actionState,
       submitError: this.#submitError,
       operationNotice: this.#operationNotice,
-      referenceRecoveryShown: this.#referenceRecoveryShown,
+      referenceRecoveryShown: this.#referenceRecoveryShown[this.#activeMediaType],
       pendingMaterialRemoval: this.#pendingMaterialRemoval,
-      materialUploadFailed: this.#materialUploadFailed,
-      materialDropRejection: this.#materialDropRejection
+      materialUploadFailed: this.#materialUploadFailed[this.#activeMediaType],
+      materialDropRejection: this.#materialDropRejection[this.#activeMediaType]
     }
     for (const notify of [...this.#listeners]) notify()
   }

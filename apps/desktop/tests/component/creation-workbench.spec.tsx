@@ -155,6 +155,124 @@ test('selecting a session recovers its stored draft verbatim', async ({ mount, p
   await expect(page.getByTestId('composer-params').getByText('2', { exact: true })).toBeVisible()
 })
 
+test('switching media keeps each prompt in its own device-local draft', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await page.getByRole('button', { name: 'Untitled creation', exact: true }).click()
+  await expect(page.getByTestId('composer-media')).toContainText('Image generation')
+  await page.getByTestId('composer-prompt').fill('image idea')
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('')
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedance-2-5')
+  await page.getByTestId('composer-prompt').fill('video idea')
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('image idea')
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-pro')
+  await page.getByTestId('composer-prompt').focus()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('image idea')
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('video idea')
+})
+
+test('a hidden video reference never blocks the image draft submission', async ({
+  mount,
+  page
+}) => {
+  const videoId = '12121212-0000-4000-8000-000000000012'
+  const video = scriptedMaterial(videoId, 'video', 'walkthrough.mp4')
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{
+        [scriptedSessionId]: { ...videoMentionDraft(videoId), mode: 'first-last-frame' }
+      }}
+      materials={{ [scriptedSessionId]: [video] }}
+    />
+  )
+  await selectFirstSession(page)
+  await expect(page.getByTestId('composer-deck-stale')).toBeVisible()
+  await expect(page.getByTestId('composer-submit')).toBeDisabled()
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await expect(page.getByTestId('reference-deck').getByText('walkthrough.mp4')).toHaveCount(0)
+  await expect(page.getByTestId('composer-deck-stale')).toHaveCount(0)
+  await page.getByTestId('composer-prompt').fill('a clean product image')
+  await expect(page.getByTestId('composer-submit')).toBeEnabled()
+  await page.getByTestId('composer-submit').click()
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
+    .toHaveLength(1)
+  const [call] = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(call?.intent).toMatchObject({
+    mediaType: 'image',
+    prompt: 'a clean product image',
+    references: []
+  })
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByRole('button', { name: 'Video 1' })).toBeVisible()
+  await expect(page.getByTestId('composer-deck-stale')).toBeVisible()
+})
+
+test('removing a shared material from image keeps its video binding', async ({ mount, page }) => {
+  const imageDraft: LocalDraftRecord = {
+    ...staleDraft,
+    prompt: '',
+    promptDocument: { version: 1, nodes: [{ type: 'text', text: '' }] },
+    manifestVersion: 5,
+    model: 'doubao-seedream-5.0-pro',
+    ratio: '4:3',
+    references: [{ materialId: firstMaterialId, role: 'reference' }]
+  }
+  const videoDraft: LocalDraftRecord = {
+    ...videoMentionDraft(firstMaterialId),
+    mode: 'first-last-frame',
+    references: [{ materialId: firstMaterialId, role: 'first_frame' }]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{
+        [scriptedSessionId]: {
+          activeMediaType: 'image',
+          drafts: { image: imageDraft, video: videoDraft }
+        }
+      }}
+      materials={{
+        [scriptedSessionId]: [scriptedMaterial(firstMaterialId, 'image', 'shared.png')]
+      }}
+    />
+  )
+  await selectFirstSession(page)
+  const sharedCard = page
+    .getByTestId('reference-deck')
+    .getByRole('button', { name: 'shared.png', exact: true })
+  await sharedCard.focus()
+  await page.keyboard.press('Delete')
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (key) => window.__creationDeckTest?.draftRecord(key)?.references,
+        scriptedSessionId
+      )
+    )
+    .toEqual([])
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(
+    page.getByTestId('reference-deck').getByRole('button', { name: 'First frame · shared.png' })
+  ).toBeVisible()
+  const stored = await draftRecord(page, scriptedSessionId)
+  expect(stored?.references).toEqual([{ materialId: firstMaterialId, role: 'first_frame' }])
+  expect(await materialIds(page, scriptedSessionId)).toContain(firstMaterialId)
+})
+
 test('manifest defaults persist locally with the version delivered in the same response', async ({
   mount,
   page

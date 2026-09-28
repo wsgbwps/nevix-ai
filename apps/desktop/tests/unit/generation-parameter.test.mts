@@ -217,7 +217,7 @@ test('a stored record older than a parameter field survives the reload', () => {
   )
   const oldest = readLocalDraft(storage, 'user-1', 'aaaaaaaa-0000-4000-8000-000000000001')
   assert.notEqual(oldest, null)
-  assert.deepEqual(oldest?.mediaType, null)
+  assert.deepEqual(oldest?.mediaType, 'image')
   assert.deepEqual(oldest?.quantity, null)
 
   // A pre-video record: only duration_seconds absent.

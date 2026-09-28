@@ -29,6 +29,123 @@ async function replaceByDrop(page: Page, materialId: string, name: string): Prom
   )
 }
 
+async function selectMedia(
+  page: Page,
+  name: 'Image generation' | 'Video generation'
+): Promise<void> {
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name }).click()
+}
+
+test('both media drafts and the selected editor survive navigation and app restart', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchRestartStory />)
+  await selectSession(page, 'Spring campaign')
+  await page.getByTestId('composer-prompt').fill('image version')
+  await selectMedia(page, 'Video generation')
+  await page.getByTestId('composer-prompt').fill('video version')
+
+  await selectSession(page, 'Untitled creation')
+  await selectSession(page, 'Spring campaign')
+  await expect(page.getByTestId('composer-media')).toContainText('Video generation')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('video version')
+
+  await page.getByRole('button', { name: 'Restart app' }).click()
+  await selectSession(page, 'Spring campaign')
+  await expect(page.getByTestId('composer-media')).toContainText('Video generation')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('video version')
+  await selectMedia(page, 'Image generation')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('image version')
+})
+
+test('an upload finishing after a media switch updates its source draft', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory uploadDeferred />)
+  await selectSession(page, 'Spring campaign')
+  await selectMedia(page, 'Video generation')
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByLabel('Add reference material').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({
+    name: 'video-frame.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('png')
+  })
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? []))
+    .toHaveLength(1)
+  await selectMedia(page, 'Image generation')
+  await expect(page.getByRole('button', { name: /video-frame\.png/ })).toHaveCount(0)
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
+  await expect(page.getByRole('button', { name: /video-frame\.png/ })).toHaveCount(0)
+  await selectMedia(page, 'Video generation')
+  await expect(page.getByRole('button', { name: /First frame.*video-frame\.png/ })).toBeVisible()
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          window.__creationDeckTest?.draftRecord('aaaaaaaa-0000-4000-8000-000000000001')
+            ?.references ?? []
+      )
+    )
+    .toEqual([{ materialId: uploadedMaterialId, role: 'first_frame' }])
+})
+
+test('a replacement finishing after a media switch leaves the other draft alone', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory uploadDeferred />)
+  await selectSession(page, 'Spring campaign')
+  await replaceByDrop(page, firstMaterialId, 'replacement.png')
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? []))
+    .toHaveLength(1)
+  await selectMedia(page, 'Video generation')
+  await page.getByTestId('composer-prompt').fill('video remains separate')
+
+  await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
+  await expect(page.getByTestId('composer-prompt')).toHaveText('video remains separate')
+  await expect(page.getByRole('button', { name: /replacement\.png/ })).toHaveCount(0)
+  await selectMedia(page, 'Image generation')
+  await expect(page.getByRole('button', { name: 'replacement.png', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'poster.png', exact: true })).toHaveCount(0)
+})
+
+test('an upload failure after switching media appears only in its source draft', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory uploadDeferred uploadOutcome="request-rejected" />)
+  await selectSession(page, 'Spring campaign')
+  await selectMedia(page, 'Video generation')
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByLabel('Add reference material').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({
+    name: 'failed-frame.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('png')
+  })
+  await expect
+    .poll(async () => page.evaluate(() => window.__creationDeckTest?.uploadCalls() ?? []))
+    .toHaveLength(1)
+  await selectMedia(page, 'Image generation')
+  await page.evaluate(() => window.__creationDeckTest?.releaseUploads())
+  await expect(page.getByTestId('gallery-submit-error')).toHaveCount(0)
+  await selectMedia(page, 'Video generation')
+  await expect(page.getByTestId('gallery-submit-error')).toContainText('material_too_large')
+  await page.getByTestId('session-new').click()
+  await selectSession(page, 'Spring campaign')
+  await expect(page.getByTestId('composer-media')).toContainText('Video generation')
+  await expect(page.getByTestId('gallery-submit-error')).toContainText('material_too_large')
+})
+
 test('an existing-session submission continues while Settings unmounts the workbench', async ({
   mount,
   page
