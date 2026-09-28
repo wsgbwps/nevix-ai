@@ -32,6 +32,7 @@ import type {
   TaskListPageRequest
 } from '../../../src/renderer/src/features/creation/api/generation-task-http'
 import type { PublicationSimilarResult } from '../../../src/renderer/src/features/creation/api/inspiration-http'
+import type { AssetPrivateOrigin } from '../../../src/renderer/src/features/creation/api/asset-library-http'
 import {
   readLocalDraft,
   removeLocalDraft,
@@ -1077,6 +1078,7 @@ interface StoryOptions {
   readonly sessions?: readonly CreationSessionView[]
   readonly taskScript?: TaskScript
   readonly publicationSimilar?: PublicationSimilarResult
+  readonly assetSimilar?: AssetPrivateOrigin
 }
 
 function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
@@ -1132,8 +1134,22 @@ export function RuntimeWorkbenchScope({
   readonly children: React.ReactNode
 }): React.JSX.Element {
   const [runtime] = useState(() => installWorkbenchRuntime(resolvedRuntimeOptions(options)))
-  const [ready, setReady] = useState(options.publicationSimilar === undefined)
+  const [ready, setReady] = useState(
+    options.publicationSimilar === undefined && options.assetSimilar === undefined
+  )
   useEffect(() => {
+    const assetSimilar = options.assetSimilar
+    if (assetSimilar) {
+      let active = true
+      void Promise.resolve().then(() => {
+        if (!active) return
+        runtime.actions.prepareSimilarDraft(assetSimilar)
+        setReady(true)
+      })
+      return () => {
+        active = false
+      }
+    }
     if (!options.publicationSimilar) return
     let active = true
     void runtime.actions.preparePublicationSimilar('publication-story').then(() => {
@@ -1142,7 +1158,7 @@ export function RuntimeWorkbenchScope({
     return () => {
       active = false
     }
-  }, [options.publicationSimilar, runtime])
+  }, [options.assetSimilar, options.publicationSimilar, runtime])
   if (!ready) return <p role="status">Preparing Publication reuse</p>
   return (
     <CreationRuntimeContext.Provider value={runtime}>

@@ -916,6 +916,70 @@ test('Publication reuse adopts the server Session with remapped references and s
       model: 'removed-legacy-model',
       references: [{ materialId, role: 'reference' }]
     })
+
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('')
+  await expect(
+    page.getByTestId('reference-deck').locator(`[data-material-id="${materialId}"]`)
+  ).toHaveCount(0)
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Image generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Preserved Publication intent')
+  await expect(page.locator(`[data-material-id="${materialId}"]`)).toBeVisible()
+})
+
+test('Asset similar selects only its media draft and leaves the other draft editable', async ({
+  mount,
+  page
+}) => {
+  const videoDraft: LocalDraftRecord = {
+    prompt: 'Keep my video idea',
+    promptDocument: { version: 1, nodes: [{ type: 'text', text: 'Keep my video idea' }] },
+    mediaType: 'video',
+    model: 'doubao-seedance-2-5',
+    mode: 'first-last-frame',
+    manifestVersion: 5,
+    ratio: null,
+    resolution: '720p',
+    quantity: 1,
+    durationSeconds: 5,
+    references: []
+  }
+  await mount(
+    <CreationWorkbenchStory
+      drafts={{ new: videoDraft }}
+      assetSimilar={{
+        sessionId: 'private-session',
+        sessionName: 'Private source',
+        taskId: 'private-task',
+        slotIndex: 0,
+        specification: {
+          schemaVersion: 1,
+          mediaType: 'image',
+          prompt: 'Reused image intent',
+          model: 'doubao-seedream-5.0-pro',
+          mode: 'text-to-image',
+          manifestVersion: 5,
+          ratio: '4:3',
+          resolution: '2K',
+          quantity: 2,
+          durationSeconds: null,
+          references: []
+        },
+        references: []
+      }}
+    />
+  )
+
+  await expect(page.getByTestId('composer-media')).toContainText('Image generation')
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Reused image intent')
+  await expect(page.getByTestId('composer-params')).toContainText('4:3')
+  await page.getByTestId('composer-media').click()
+  await page.getByRole('menuitem', { name: 'Video generation' }).click()
+  await expect(page.getByTestId('composer-prompt')).toHaveText('Keep my video idea')
+  await expect(page.getByTestId('composer-params')).toContainText('720p')
+  await expect.poll(() => draftRecord(page, 'new')).toMatchObject(videoDraft)
 })
 
 test('the model menu lists only manifest candidates plus the stale note', async ({

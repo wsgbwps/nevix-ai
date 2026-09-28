@@ -15,7 +15,7 @@ registerHooks({
 
 const { writePublicationSimilarDraft } =
   await import('../../src/renderer/src/features/creation/model/publication-similar-draft.ts')
-const { readLocalDraft } =
+const { readLocalDraft, readWorkbenchDraft } =
   await import('../../src/renderer/src/features/creation/model/draft-store.ts')
 
 function storage(): Storage {
@@ -57,6 +57,12 @@ const result = {
         role: 'reference' as const,
         kind: 'image' as const,
         claimsVersion: 3
+      },
+      {
+        materialId: 'remapped-material-two',
+        role: 'reference' as const,
+        kind: 'image' as const,
+        claimsVersion: 3
       }
     ]
   },
@@ -78,8 +84,15 @@ test('Publication reuse writes the server intent under its durable Session ident
     resolution: 'old-resolution',
     quantity: 2,
     durationSeconds: null,
-    references: [{ materialId: 'remapped-material', role: 'reference' }]
+    references: [
+      { materialId: 'remapped-material', role: 'reference' },
+      { materialId: 'remapped-material-two', role: 'reference' }
+    ]
   })
+  const workbench = readWorkbenchDraft(local, 'user-one', 'server-session')
+  assert.equal(workbench?.activeMediaType, 'image')
+  assert.equal(workbench?.drafts.video.prompt, '')
+  assert.deepEqual(workbench?.drafts.video.references, [])
 })
 
 test('Publication reuse reports a local persistence failure without changing identity', () => {

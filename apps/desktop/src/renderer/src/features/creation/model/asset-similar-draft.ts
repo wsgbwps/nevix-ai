@@ -1,5 +1,6 @@
 import type { AssetPrivateOrigin } from '../api/asset-library-http'
-import { readLocalDraft, writeLocalDraft } from './draft-store'
+import { GENERATION_PARAMETERS } from '../api/generation-parameter'
+import { readWorkbenchDraft, writeLocalDraft } from './draft-store'
 import { textPromptDocument } from './prompt-document'
 
 export type AssetSimilarDraftResult = 'prepared' | 'replacement-required' | 'unavailable'
@@ -10,10 +11,18 @@ export function prepareAssetSimilarDraft(
   origin: AssetPrivateOrigin,
   replaceExisting = false
 ): AssetSimilarDraftResult {
-  if (!replaceExisting && readLocalDraft(storage, userId, 'new') !== null) {
+  const specification = origin.specification
+  const current = readWorkbenchDraft(storage, userId, 'new')?.drafts[specification.mediaType]
+  if (
+    !replaceExisting &&
+    current !== undefined &&
+    (current.prompt.trim() !== '' ||
+      current.promptDocument.nodes.some((node) => node.type === 'mention') ||
+      current.references.length > 0 ||
+      GENERATION_PARAMETERS.some(({ id }) => id !== 'mediaType' && current[id] !== null))
+  ) {
     return 'replacement-required'
   }
-  const specification = origin.specification
   const persisted = writeLocalDraft(storage, userId, 'new', {
     prompt: specification.prompt,
     promptDocument: textPromptDocument(specification.prompt),
