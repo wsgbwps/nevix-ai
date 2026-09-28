@@ -67,6 +67,19 @@ test('unfinished slot motion pauses for reduced motion while its status stays vi
   await expect
     .poll(() => activity.evaluate((element) => getComputedStyle(element, '::after').animationName))
     .toBe('none')
-  await expect(activity).toHaveCSS('height', '2px')
+  const slot = page.getByTestId(`slot-${running.id}-0`)
+  await expect
+    .poll(async () => {
+      const [activityBox, slotBox] = await Promise.all([activity.boundingBox(), slot.boundingBox()])
+      return activityBox && slotBox
+        ? {
+            x: Math.round(activityBox.x - slotBox.x),
+            y: Math.round(activityBox.y - slotBox.y),
+            width: Math.round((100 * activityBox.width) / slotBox.width),
+            height: Math.round((100 * activityBox.height) / slotBox.height)
+          }
+        : null
+    })
+    .toEqual({ x: 0, y: 0, width: 100, height: 100 })
   await expect(page.getByTestId(`slot-${running.id}-0`)).toContainText('Generating')
 })

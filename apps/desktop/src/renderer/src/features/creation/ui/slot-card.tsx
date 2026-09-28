@@ -199,15 +199,11 @@ export function SlotCard({
           </span>
         </>
       ) : (
-        <span className="absolute inset-0 flex overflow-y-auto p-2">
-          {active && (
-            <span
-              aria-hidden
-              data-testid={`slot-activity-${taskId}-${slot.index}`}
-              className="skeleton-shimmer bg-foreground/10 absolute inset-x-0 top-0 h-0.5 overflow-hidden"
-            />
-          )}
-          <span className="text-muted-foreground my-auto w-full text-center text-[10px] leading-4">
+        <span
+          data-testid={active ? `slot-activity-${taskId}-${slot.index}` : undefined}
+          className={`absolute inset-0 flex overflow-y-auto p-2 ${active ? 'skeleton-shimmer bg-foreground/[0.06]' : ''}`}
+        >
+          <span className="text-muted-foreground relative z-10 my-auto w-full text-center text-[10px] leading-4">
             {t(slotStatusKey(slot.status))}
             {slot.failureReason !== null && (
               <span className="block">{t(reasonKey(slot.failureReason))}</span>
