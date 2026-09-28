@@ -2380,7 +2380,7 @@ test('a task read settling after a context switch cannot replace another Draft',
   await expect(page.getByTestId('composer-prompt')).toHaveText('夏季跑鞋主图，暖光背景')
 })
 
-test('a task card keeps its list snapshot hidden until the detail read settles', async ({
+test('a task card shows its frozen list summary before the detail read settles', async ({
   mount,
   page
 }) => {
@@ -2413,21 +2413,28 @@ test('a task card keeps its list snapshot hidden until the detail read settles',
   await selectFirstSession(page)
 
   const card = page.getByTestId(`task-${frozen.id}`)
-  const content = page.getByTestId(`task-content-${frozen.id}`)
-  await expect(page.getByTestId(`task-skeleton-${frozen.id}`)).toHaveCount(1)
-  await expect(content).toHaveClass(/invisible/)
+  await expect(page.getByTestId(`task-content-${frozen.id}`)).not.toHaveClass(/invisible/)
+  await expect(card.getByText('snapshot-at-submit prompt').first()).toBeVisible()
+  await expect(card).toContainText('snapshot-model')
+  await expect(card).toContainText('Processing')
+  await expect(page.getByTestId(`slot-${frozen.id}-0`)).toBeVisible()
+  await expect
+    .poll(() =>
+      page
+        .getByTestId(`slot-${frozen.id}-0`)
+        .evaluate((element) => Number.parseFloat(getComputedStyle(element).aspectRatio))
+    )
+    .toBeCloseTo(4 / 3, 4)
 
   await page.evaluate(() => window.__creationDeckTest?.releaseTaskDetails())
-  await expect(page.getByTestId(`task-skeleton-${frozen.id}`)).toHaveCount(0)
-  await expect(content).not.toHaveClass(/invisible/)
-  // Detail has no specification, so the revealed header still comes from
+  // Detail has no specification, so the header still comes from
   // the list response's frozen snapshot rather than the live composer.
   await expect(card).toContainText('snapshot-at-submit prompt')
   await expect(card).toContainText('snapshot-model')
   await expect(card).toContainText('4:3')
 })
 
-test('a task card reveals atomically after its detail and result media settle', async ({
+test('task summary, detail, reference, and result media reveal in their own regions', async ({
   mount,
   page
 }) => {
@@ -2495,13 +2502,10 @@ test('a task card reveals atomically after its detail and result media settle', 
   await selectFirstSession(page)
 
   const card = page.getByTestId(`task-${task.id}`)
-  const skeleton = page.getByTestId(`task-skeleton-${task.id}`)
   const content = page.getByTestId(`task-content-${task.id}`)
-  await expect(skeleton).toHaveCount(1)
-  await expect(skeleton.locator('[data-task-skeleton-part="heading"]')).toHaveCount(1)
-  await expect(skeleton.locator('[data-task-skeleton-part="media"]')).toHaveCount(task.slotCount)
-  await expect(skeleton.locator('[data-slot="skeleton"]').first()).toHaveClass(/skeleton-shimmer/)
-  await expect(content).toHaveClass(/invisible/)
+  await expect(content).not.toHaveClass(/invisible/)
+  await expect(card.getByText('atomic task card').first()).toBeVisible()
+  await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute('data-slot-status', 'loading')
 
   await page.evaluate(() => window.__creationDeckTest?.releaseTaskDetails())
   await expect
@@ -2509,7 +2513,11 @@ test('a task card reveals atomically after its detail and result media settle', 
       page.evaluate(() => window.__creationDeckTest?.resultBlobTransfers().length ?? 0)
     )
     .toBe(1)
-  await expect(skeleton).toHaveCount(1)
+  const slot = page.getByTestId(`slot-${task.id}-0`)
+  await expect(slot).toHaveAttribute('data-slot-status', 'succeeded')
+  await expect(slot).toHaveAttribute('data-media-state', 'loading')
+  await expect(slot.locator('[data-slot="skeleton"]')).toHaveCount(1)
+  await expect(card.getByText('atomic task card').first()).toBeVisible()
 
   releaseReference()
   await expect
@@ -2522,17 +2530,16 @@ test('a task card reveals atomically after its detail and result media settle', 
         )
     )
     .toBe(true)
-  await expect(skeleton).toHaveCount(1)
+  await expect(slot).toHaveAttribute('data-media-state', 'loading')
 
   await page.evaluate(() => window.__creationDeckTest?.releaseResultBlobs())
-  await expect(skeleton).toHaveCount(0)
-  await expect(content).not.toHaveClass(/invisible/)
+  await expect(slot).toHaveAttribute('data-media-state', 'ready')
   await expect(card.locator('img')).toHaveCount(2)
   await expect(card.locator('img').nth(0)).toBeVisible()
   await expect(card.locator('img').nth(1)).toBeVisible()
 })
 
-test('a task skeleton uses settled video dimensions when its specification has no ratio', async ({
+test('a result slot uses settled video dimensions when its specification has no ratio', async ({
   mount,
   page
 }) => {
@@ -2583,13 +2590,11 @@ test('a task skeleton uses settled video dimensions when its specification has n
   )
   await selectFirstSession(page)
 
-  const skeleton = page
-    .getByTestId(`task-skeleton-${task.id}`)
-    .locator('[data-task-skeleton-part="media"]')
-  await expect(skeleton).toHaveCount(1)
+  const slot = page.getByTestId(`slot-${task.id}-0`)
+  await expect(slot).toHaveAttribute('data-slot-status', 'succeeded')
   await expect
     .poll(() =>
-      skeleton.evaluate((element) => Number.parseFloat((element as HTMLElement).style.aspectRatio))
+      slot.evaluate((element) => Number.parseFloat((element as HTMLElement).style.aspectRatio))
     )
     .toBeCloseTo(1920 / 1080, 4)
 })
@@ -3041,7 +3046,8 @@ test('a task whose detail carries no specification shows task-view facts only', 
   // no prompt paragraph and no draft mirror.
   const card = page.getByTestId(`task-${bare.id}`)
   await expect(card).toBeVisible()
-  await expect(card).toContainText('Generating')
+  await expect(card.locator('span.font-medium').first()).toHaveText('Processing')
+  await expect(page.getByTestId(`slot-${bare.id}-0`)).toContainText('Generating')
   await expect(card).not.toContainText('夏季跑鞋主图，暖光背景')
   await expect(page.getByTestId(`slot-${bare.id}-0`)).toBeVisible()
 })
@@ -3224,6 +3230,7 @@ test('a deleted result leaves no card cell, no media, and no placeholder', async
   await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute('data-media-state', 'ready')
   await expect(page.getByTestId(`slot-${task.id}-2`)).toHaveAttribute('data-media-state', 'ready')
   await expect(page.getByTestId(`slot-${task.id}-3`)).toHaveAttribute('data-slot-status', 'failed')
+  await expect(page.locator(`[data-testid^="slot-activity-${task.id}-"]`)).toHaveCount(0)
   await expect(page.getByTestId(`slot-${task.id}-1`)).toHaveCount(0)
   expect(
     await page.evaluate(

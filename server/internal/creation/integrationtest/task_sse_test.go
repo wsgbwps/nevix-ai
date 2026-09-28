@@ -152,6 +152,45 @@ func TestSSEInvalidationIsCommitScopedAndCreatorScoped(t *testing.T) {
 	}
 }
 
+func TestSubmitMarkerInvalidatesOwnerStream(t *testing.T) {
+	h, _, creator := readyTaskHarness(t, harnessOptions{})
+	token := h.loginToken(t, creator, harnessPassword)
+	lines := make(chan sseLine, 32)
+	go readStreamLines(h.openEventStream(t, token), lines)
+	entered, release := blockImageSubmitAfterMarker(t, h)
+
+	draft := h.imageTaskIntent(t, token, "等待供应商响应", 1)
+	status, body := h.submitTask(t, token, "sse-submit-marker", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	if !awaitInvalidation(t, lines, 10*time.Second) {
+		t.Fatal("task admission did not invalidate the owner's stream")
+	}
+	taskID := decodeTaskView(t, body).Task.ID
+	if _, _, task := h.getTask(t, token, taskID); task.Task.Status != "queued" {
+		t.Fatalf("task before worker = %s, want queued", task.Task.Status)
+	}
+
+	h.startWorkers(t)
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("provider call never crossed the committed submit marker")
+	}
+	if !awaitInvalidation(t, lines, 2*time.Second) {
+		t.Fatal("queued → submitting must invalidate the owner's stream")
+	}
+	if _, _, task := h.getTask(t, token, taskID); task.Task.Status != "submitting" {
+		t.Fatalf("task after marker = %s, want submitting", task.Task.Status)
+	}
+	if awaitInvalidation(t, lines, 200*time.Millisecond) {
+		t.Fatal("one submit marker emitted a duplicate invalidation")
+	}
+	release()
+	h.awaitTaskTerminal(t, token, taskID)
+}
+
 func TestSessionRevocationDisconnectsOnlyThatSessionsStream(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	firstToken := h.loginToken(t, creator, harnessPassword)

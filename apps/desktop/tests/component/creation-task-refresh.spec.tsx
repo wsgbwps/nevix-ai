@@ -111,6 +111,8 @@ test('a failed detail read keeps the last consistent card and marks it unrefresh
     'data-slot-status',
     'generating'
   )
+  const activity = page.getByTestId(`slot-activity-${task.id}-0`)
+  await expect(activity).toHaveCount(1)
 
   // The task settled on the server, but its detail read fails: the card keeps
   // the last consistent copy and says so.
@@ -120,6 +122,7 @@ test('a failed detail read keeps the last consistent card and marks it unrefresh
     window.__creationDeckTest?.updateTask(updated as never)
   }, settled as never)
   await expect(page.getByTestId(`task-detail-stale-${task.id}`)).toBeVisible()
+  await expect(activity).toHaveCount(0)
   await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute(
     'data-slot-status',
     'generating'
@@ -130,6 +133,7 @@ test('a failed detail read keeps the last consistent card and marks it unrefresh
     window.__creationDeckTest?.fireInvalidation()
   })
   await expect(page.getByTestId(`task-detail-stale-${task.id}`)).toHaveCount(0)
+  await expect(activity).toHaveCount(0)
   await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute(
     'data-slot-status',
     'succeeded'
@@ -152,9 +156,42 @@ test('a new task whose detail fails shows placeholders marked unrefreshed, not t
     controls?.pushTask(task as never)
   }, fresh as never)
   await expect(page.getByTestId(`task-${fresh.id}`)).toBeVisible()
-  await expect(page.getByTestId(`slot-${fresh.id}-0`)).toHaveAttribute('data-slot-status', 'queued')
+  await expect(page.getByTestId(`slot-${fresh.id}-0`)).toHaveAttribute(
+    'data-slot-status',
+    'generating'
+  )
   await expect(page.getByTestId(`task-detail-stale-${fresh.id}`)).toBeVisible()
   await expect(emptyNote).toHaveCount(0)
+})
+
+test('task and slot labels stay distinct while submitting', async ({ mount, page }) => {
+  const task: ScriptedTask = {
+    ...runningTask('dddddddd-0000-4000-8000-00000000e002', '2026-09-01T09:00:05Z'),
+    status: 'submitting'
+  }
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [task] }} />)
+  await selectFirstSession(page)
+
+  await expect(page.getByTestId(`task-${task.id}`)).toHaveAttribute('aria-label', 'Submitting')
+  await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute('aria-label', 'Generating')
+})
+
+test('a terminal task with unavailable detail does not invent slot verdicts', async ({
+  mount,
+  page
+}) => {
+  const task = settledTask('dddddddd-0000-4000-8000-00000000e003', '2026-09-01T09:00:05Z')
+  await mount(
+    <CreationWorkbenchStory taskScript={{ tasks: [task], failDetailReads: { [task.id]: 1 } }} />
+  )
+  await selectFirstSession(page)
+
+  await expect(page.getByTestId(`task-detail-stale-${task.id}`)).toBeVisible()
+  await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute(
+    'aria-label',
+    'Unknown status'
+  )
+  await expect(page.getByTestId(`slot-activity-${task.id}-0`)).toHaveCount(0)
 })
 
 test('A → B → A: the first entry late response never writes into the later context', async ({
@@ -231,10 +268,12 @@ test('a failed list read keeps loaded tasks visible with the unrefreshed note', 
   mount,
   page
 }) => {
-  const task = settledTask('dddddddd-0000-4000-8000-00000000h001', '2026-09-01T09:00:01Z')
+  const task = runningTask('dddddddd-0000-4000-8000-00000000h001', '2026-09-01T09:00:01Z')
   await mount(<CreationWorkbenchStory taskScript={{ tasks: [task] }} />)
   await selectFirstSession(page)
   await expect(page.getByTestId(`task-${task.id}`)).toBeVisible()
+  const activity = page.getByTestId(`slot-activity-${task.id}-0`)
+  await expect(activity).toHaveCount(1)
 
   await page.evaluate(() => {
     const controls = window.__creationDeckTest
@@ -243,10 +282,41 @@ test('a failed list read keeps loaded tasks visible with the unrefreshed note', 
   })
   await expect(page.getByTestId('task-list-stale')).toBeVisible()
   await expect(page.getByTestId(`task-${task.id}`)).toBeVisible()
+  await expect(activity).toHaveCount(0)
 
   await page.evaluate(() => {
     window.__creationDeckTest?.fireInvalidation()
   })
   await expect(page.getByTestId('task-list-stale')).toHaveCount(0)
   await expect(page.getByTestId(`task-${task.id}`)).toBeVisible()
+  await expect(activity).toHaveCount(1)
+})
+
+test('fallback polling retries a terminal task whose detail read failed', async ({
+  mount,
+  page
+}) => {
+  await page.clock.install()
+  const task = runningTask('dddddddd-0000-4000-8000-00000000h002', '2026-09-01T09:00:01Z')
+  await mount(<CreationWorkbenchStory taskScript={{ tasks: [task] }} />)
+  await selectFirstSession(page)
+  await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute(
+    'data-slot-status',
+    'generating'
+  )
+
+  await page.evaluate(
+    (updated) => {
+      window.__creationDeckTest?.failDetailReads((updated as { id: string }).id, 1)
+      window.__creationDeckTest?.updateTask(updated as never)
+    },
+    settledTask(task.id, '2026-09-01T09:00:09Z') as never
+  )
+  await expect(page.getByTestId(`task-detail-stale-${task.id}`)).toBeVisible()
+  await page.clock.fastForward(5_000)
+  await expect(page.getByTestId(`task-detail-stale-${task.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`slot-${task.id}-0`)).toHaveAttribute(
+    'data-slot-status',
+    'succeeded'
+  )
 })

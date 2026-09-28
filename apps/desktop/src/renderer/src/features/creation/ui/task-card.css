@@ -1,0 +1,4 @@
+.creation-task-card[data-activity-paused='true'] .skeleton-shimmer::after,
+.creation-task-card [data-slot-status='succeeded'] .skeleton-shimmer::after {
+  animation: none;
+}

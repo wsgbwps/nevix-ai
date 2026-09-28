@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   BanIcon,
@@ -16,7 +16,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '../../../components/ui/dropdown-menu'
-import { Skeleton } from '../../../components/ui/skeleton'
 import { isTerminalTaskStatus } from '../api/generation-task-http'
 import type {
   GenerationSlotView,
@@ -28,9 +27,10 @@ import type {
 import type { ReferenceMaterialView } from '../api/go-creation-http'
 import type { MaterialThumbnailState, WorkbenchGalleryHandle } from '../model/use-workbench'
 import { modeLabelKey } from '../i18n/mode-keys'
-import { statusKey } from '../i18n/gallery-keys'
+import { taskStatusKey } from '../i18n/gallery-keys'
 import { ImageWithSkeleton } from './media-with-skeleton'
 import { SlotCard } from './slot-card'
+import './task-card.css'
 
 const mediaKeys = {
   image: 'composer.media.image',
@@ -92,27 +92,14 @@ export function TaskCard({
   const detail = gallery.taskDetails[task.id]
   const snapshot = detail?.task ?? task
   const spec = detail?.specification ?? task.snapshot ?? null
-  // A removed result leaves no cell: a placeholder tile would invent a state
-  // to interpret, and its media would never settle (ADR-0021).
+  const detailStale = gallery.taskDetailStaleIds.has(task.id)
+  // A removed result leaves no cell: a placeholder would invent a result (ADR-0021).
   const slots =
     detail?.slots.filter((slot) => slot.resultDeleted !== true) ??
-    placeholderSlots(snapshot.slotCount)
-  const [settledMediaKeys, setSettledMediaKeys] = useState<ReadonlySet<string>>(() => new Set())
-  const markMediaSettled = useCallback((key: string): void => {
-    setSettledMediaKeys((current) => {
-      if (current.has(key)) return current
-      const next = new Set(current)
-      next.add(key)
-      return next
-    })
-  }, [])
-  const resultMediaKeys = slots.flatMap((slot) =>
-    slot.status === 'succeeded' ? [taskResultMediaKey(snapshot.id, slot)] : []
-  )
-  const cardSettled =
-    (detail !== undefined || gallery.taskDetailStaleIds.has(task.id)) &&
-    resultMediaKeys.every((key) => settledMediaKeys.has(key))
+    placeholderSlots(snapshot.slotCount, snapshot.status, detailStale)
   const terminal = isTerminalTaskStatus(snapshot.status)
+  const pauseSlotActivity =
+    gallery.taskListStale || detailStale || terminal || isTerminalTaskStatus(task.status)
   const indeterminate = snapshot.terminalCause !== null
   const retryUncompleted =
     terminal &&
@@ -125,39 +112,12 @@ export function TaskCard({
   }
   return (
     <section
-      aria-label={String(t(statusKey(snapshot.status)))}
-      aria-busy={!cardSettled}
+      aria-label={String(t(taskStatusKey(snapshot.status)))}
       data-testid={`task-${snapshot.id}`}
-      className="relative"
+      data-activity-paused={pauseSlotActivity}
+      className="creation-task-card relative"
     >
-      {!cardSettled && (
-        <>
-          <div
-            aria-hidden
-            data-testid={`task-skeleton-${snapshot.id}`}
-            className="bg-background absolute inset-0 z-20 flex flex-col gap-2.5"
-          >
-            <Skeleton data-task-skeleton-part="heading" className="h-5 w-52 shrink-0" />
-            <div className={galleryGridClass}>
-              {slots.map((slot) => (
-                <Skeleton
-                  key={slot.index}
-                  data-task-skeleton-part="media"
-                  className="w-full rounded-lg"
-                  style={{ aspectRatio: String(slotAspectRatio(slot, spec?.ratio ?? null)) }}
-                />
-              ))}
-            </div>
-          </div>
-          <span role="status" className="sr-only">
-            {t('gallery.media.loading')}
-          </span>
-        </>
-      )}
-      <div
-        data-testid={`task-content-${snapshot.id}`}
-        className={`flex flex-col gap-2.5 ${cardSettled ? '' : 'invisible'}`}
-      >
+      <div data-testid={`task-content-${snapshot.id}`} className="flex flex-col gap-2.5">
         <div className="flex items-start gap-2.5">
           {spec !== null && spec.references.length > 0 && (
             <TaskReferencePile
@@ -189,7 +149,7 @@ export function TaskCard({
             )}
             <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[10px]">
               <span className="text-foreground/70 font-medium">
-                {t(statusKey(snapshot.status))}
+                {t(taskStatusKey(snapshot.status))}
               </span>
               {gallery.taskDetailStaleIds.has(snapshot.id) && (
                 // This task's latest detail read failed; the card keeps its
@@ -219,21 +179,17 @@ export function TaskCard({
           </div>
         </div>
         <div className={galleryGridClass}>
-          {slots.map((slot) => {
-            const mediaKey = taskResultMediaKey(snapshot.id, slot)
-            return (
-              <SlotCard
-                key={slot.index}
-                acquireResultBlobUrl={gallery.acquireResultBlobUrl}
-                taskId={snapshot.id}
-                slot={slot}
-                mediaType={snapshot.mediaType}
-                aspectRatio={slotAspectRatio(slot, spec?.ratio ?? null)}
-                mediaKey={mediaKey}
-                onMediaSettled={markMediaSettled}
-              />
-            )
-          })}
+          {slots.map((slot) => (
+            <SlotCard
+              key={slot.index}
+              acquireResultBlobUrl={gallery.acquireResultBlobUrl}
+              taskId={snapshot.id}
+              slot={slot}
+              mediaType={snapshot.mediaType}
+              aspectRatio={slotAspectRatio(slot, spec?.ratio ?? null)}
+              pauseActivity={pauseSlotActivity}
+            />
+          ))}
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -653,17 +609,24 @@ function DetailRow({
   )
 }
 
-function placeholderSlots(count: number): GenerationSlotView[] {
+function placeholderSlots(
+  count: number,
+  taskStatus: GenerationTaskView['status'],
+  stale: boolean
+): GenerationSlotView[] {
+  const status = isTerminalTaskStatus(taskStatus)
+    ? stale
+      ? 'unknown'
+      : 'loading'
+    : taskStatus === 'submitting' || taskStatus === 'processing'
+      ? 'generating'
+      : taskStatus
   return Array.from({ length: count }, (_, index) => ({
     index,
-    status: 'queued',
+    status,
     failureReason: null,
     result: null
   }))
-}
-
-function taskResultMediaKey(taskId: string, slot: GenerationSlotView): string {
-  return `result:${taskId}:${slot.index}:${slot.result?.checksumSha256 ?? ''}`
 }
 
 function hasNoNonRetryableIncompleteSlots(detail: GenerationTaskDetail | undefined): boolean {

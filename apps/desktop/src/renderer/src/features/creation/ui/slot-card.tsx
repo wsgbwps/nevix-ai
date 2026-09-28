@@ -10,7 +10,7 @@ import {
   encodeResultDrag,
   endResultDrag
 } from '../model/reference-drop'
-import { actionKey, diagnosticSourceKey, reasonKey, statusKey } from '../i18n/gallery-keys'
+import { actionKey, diagnosticSourceKey, reasonKey, slotStatusKey } from '../i18n/gallery-keys'
 import { Skeleton } from '../../../components/ui/skeleton'
 import { ImageWithSkeleton, VideoWithSkeleton } from './media-with-skeleton'
 
@@ -20,8 +20,7 @@ export function SlotCard({
   slot,
   mediaType,
   aspectRatio,
-  mediaKey,
-  onMediaSettled
+  pauseActivity
 }: {
   readonly acquireResultBlobUrl: (
     taskId: string,
@@ -31,8 +30,7 @@ export function SlotCard({
   readonly slot: GenerationSlotView
   readonly mediaType: 'image' | 'video'
   readonly aspectRatio: number
-  readonly mediaKey: string
-  readonly onMediaSettled: (mediaKey: string) => void
+  readonly pauseActivity: boolean
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const [mediaAttempt, setMediaAttempt] = useState(0)
@@ -42,6 +40,12 @@ export function SlotCard({
     | { readonly status: 'ready'; readonly url: string }
   >({ status: 'unloaded', url: null })
   const succeeded = slot.status === 'succeeded'
+  const active =
+    !pauseActivity &&
+    (slot.status === 'queued' ||
+      slot.status === 'generating' ||
+      slot.status === 'persisting' ||
+      slot.status === 'cancelling')
 
   // A mounted slot leases its URL. Virtualization can then unmount old cards
   // and let the byte-budgeted cache evict them without revoking a URL that is
@@ -61,7 +65,6 @@ export function SlotCard({
         }
         if (lease === null) {
           setMedia({ status: 'failed', url: null })
-          onMediaSettled(mediaKey)
           return
         }
         release = lease.release
@@ -70,23 +73,13 @@ export function SlotCard({
       .catch(() => {
         if (active) {
           setMedia({ status: 'failed', url: null })
-          onMediaSettled(mediaKey)
         }
       })
     return () => {
       active = false
       release?.()
     }
-  }, [
-    acquireResultBlobUrl,
-    mediaAttempt,
-    mediaKey,
-    mediaType,
-    onMediaSettled,
-    slot.index,
-    succeeded,
-    taskId
-  ])
+  }, [acquireResultBlobUrl, mediaAttempt, mediaType, slot.index, succeeded, taskId])
 
   const download = (): void => {
     void acquireResultBlobUrl(taskId, slot.index)
@@ -147,7 +140,7 @@ export function SlotCard({
       data-slot-status={slot.status}
       data-media-state={succeeded ? media.status : undefined}
       role={succeeded ? undefined : 'status'}
-      aria-label={String(t(statusKey(slot.status)))}
+      aria-label={String(t(slotStatusKey(slot.status)))}
       draggable={succeeded}
       onDragStart={(event) => {
         if (succeeded) dragStart(event)
@@ -166,11 +159,9 @@ export function SlotCard({
             className="size-full object-cover"
             onLoad={() => {
               setMedia({ status: 'ready', url: mediaUrl })
-              onMediaSettled(mediaKey)
             }}
             onError={() => {
               setMedia({ status: 'failed', url: null })
-              onMediaSettled(mediaKey)
             }}
           />
         ) : (
@@ -181,11 +172,9 @@ export function SlotCard({
             className="size-full object-cover"
             onLoadedData={() => {
               setMedia({ status: 'ready', url: mediaUrl })
-              onMediaSettled(mediaKey)
             }}
             onError={() => {
               setMedia({ status: 'failed', url: null })
-              onMediaSettled(mediaKey)
             }}
           />
         )
@@ -211,8 +200,15 @@ export function SlotCard({
         </>
       ) : (
         <span className="absolute inset-0 flex overflow-y-auto p-2">
+          {active && (
+            <span
+              aria-hidden
+              data-testid={`slot-activity-${taskId}-${slot.index}`}
+              className="skeleton-shimmer bg-foreground/10 absolute inset-x-0 top-0 h-0.5 overflow-hidden"
+            />
+          )}
           <span className="text-muted-foreground my-auto w-full text-center text-[10px] leading-4">
-            {t(statusKey(slot.status))}
+            {t(slotStatusKey(slot.status))}
             {slot.failureReason !== null && (
               <span className="block">{t(reasonKey(slot.failureReason))}</span>
             )}

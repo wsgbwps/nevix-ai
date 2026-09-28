@@ -57,7 +57,8 @@ func (a verdictApplier) applySubmitMarker(ctx context.Context, sc domain.WriteSc
 	if action != domain.ActionSubmit {
 		return 0, false, nil
 	}
-	if freshTask.Status != verdict.TaskTo {
+	taskChanged := freshTask.Status != verdict.TaskTo
+	if taskChanged {
 		if !domain.TaskCanTransition(freshTask.Status, verdict.TaskTo) {
 			return 0, false, nil
 		}
@@ -78,6 +79,9 @@ func (a verdictApplier) applySubmitMarker(ctx context.Context, sc domain.WriteSc
 		// A partial marker would make the next pass misclassify an unstarted
 		// call as indeterminate: roll the whole marker back.
 		return 0, false, errors.New("creation: provider job submit marker lost")
+	}
+	if taskChanged {
+		notifyOwner(sc, a.notify, freshTask.OwnerID)
 	}
 	return attempts, true, nil
 }

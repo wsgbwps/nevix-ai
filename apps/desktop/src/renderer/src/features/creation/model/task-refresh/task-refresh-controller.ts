@@ -340,11 +340,12 @@ export class TaskRefreshController {
       ? this.mergeHistoryPage(page)
       : this.mergeWindow(page)
     this.commit()
-    // Incremental detail reads: only tasks the page just delivered with a fresh
-    // criterion are re-read (new, changed per ADR-0016's `updatedAt`, or
-    // previously failed). Each read commits on its own, never blocking others.
+    // Re-read new or changed page details and retry failed details already
+    // loaded from older pages. Each read commits independently.
     const reads: Promise<void>[] = []
-    for (const summary of fresh) {
+    const freshIds = new Set(fresh.map((task) => task.id))
+    for (const summary of this.summaries) {
+      if (!freshIds.has(summary.id) && (history || !this.failedDetailIds.has(summary.id))) continue
       if (!this.needsDetailRead(summary)) continue
       round.pendingDetails.add(summary.id)
       reads.push(this.readDetail(round, summary.id))
@@ -482,13 +483,15 @@ export class TaskRefreshController {
 
   private reconcilePollGate(): void {
     // The fallback poll runs only while the stream is down AND the displayed
-    // session itself holds in-progress tasks; a healthy stream is purely
-    // event-driven and a quiet session never polls.
+    // session holds in-progress tasks or a failed read needs another try.
+    // A healthy stream remains event-driven.
     const shouldPoll =
       !this.suspended &&
       this.enteredSessionId !== null &&
       !this.streamLive &&
-      this.snapshot.tasks.some((task) => !isTerminalTaskStatus(task.status))
+      (this.snapshot.tasks.some((task) => !isTerminalTaskStatus(task.status)) ||
+        this.listFailedFlag ||
+        this.failedDetailIds.size > 0)
     if (shouldPoll && this.pollHandle === null) {
       this.pollHandle = this.timers.setRepeating(() => {
         this.requestRound('window')
