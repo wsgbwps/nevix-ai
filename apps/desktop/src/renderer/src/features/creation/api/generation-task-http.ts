@@ -4,8 +4,13 @@
  * read as a success; the SSE stream is a fetch-stream with the bearer in the header (never the URL)
  * and no Last-Event-ID — a lost stream is answered by a refetch.
  */
-import type { CreationApiResult, DraftReferenceView, MaterialKind } from './go-creation-http'
-import { request } from './go-creation-http'
+import type {
+  CreationApiResult,
+  DraftReferenceView,
+  MaterialKind,
+  ReferenceMaterialView
+} from './go-creation-http'
+import { parseMaterial, request } from './go-creation-http'
 import {
   GENERATION_PARAMETER_WIRE_KEYS,
   generationParameterWireValues,
@@ -136,6 +141,8 @@ export interface GenerationTaskDetail {
   readonly task: GenerationTaskView
   readonly slots: readonly GenerationSlotView[]
   readonly specification: GenerationSpecificationView | null
+  /** Current task-scoped facts, aligned with frozen reference positions. */
+  readonly referenceMaterials?: readonly (ReferenceMaterialView | null)[]
 }
 
 export interface TaskPage {
@@ -454,7 +461,27 @@ function parseTaskDetail(payload: unknown): GenerationTaskDetail | null {
     if (slot === null) return null
     slots.push(slot)
   }
-  return { task, slots, specification }
+  const rawMaterials = payload['reference_materials']
+  if (rawMaterials === undefined) return { task, slots, specification }
+  if (!Array.isArray(rawMaterials) || rawMaterials.length !== specification?.references.length)
+    return null
+  const referenceMaterials: (ReferenceMaterialView | null)[] = []
+  for (const [index, entry] of rawMaterials.entries()) {
+    if (entry === null) {
+      referenceMaterials.push(null)
+      continue
+    }
+    const material = parseMaterial(entry)
+    const reference = specification.references[index]
+    if (
+      material === null ||
+      material.id !== reference.materialId ||
+      material.kind !== reference.kind
+    )
+      return null
+    referenceMaterials.push(material)
+  }
+  return { task, slots, specification, referenceMaterials }
 }
 
 function parseTaskPage(payload: unknown): TaskPage | null {

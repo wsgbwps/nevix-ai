@@ -35,12 +35,12 @@ const pileRotations = [2, -4, 5, -5]
 type DragState = {
   readonly verdict: 'idle' | 'invite' | 'deny'
   /** The card a single admissible payload would replace; null means append. */
-  readonly targetId: string | null
+  readonly targetPosition: number | null
   /** True while a single payload hovers the add entry (the append target). */
   readonly appendAim: boolean
 }
 
-const idleDrag: DragState = { verdict: 'idle', targetId: null, appendAim: false }
+const idleDrag: DragState = { verdict: 'idle', targetPosition: null, appendAim: false }
 
 /** A drag hovering the deck, as readable during dragover (files expose only
  * item types; the internal result drag is identified by its module record). */
@@ -96,28 +96,28 @@ export function ReferenceDeck({
   /** External file drop: appends every admitted file in drop order. */
   readonly onAddFiles: (files: readonly File[]) => void
   /** Single-payload drop on one card: swaps that material, keeping position. */
-  readonly onReplace: (materialId: string, file: File) => void
+  readonly onReplace: (position: number, file: File) => void
   /** Result-card drop: promotes the slot output to a new material. */
-  readonly onDropResult: (payload: ResultDragPayload, targetMaterialId: string | null) => void
-  /** Materials the prompt's mentions still name; they are never replace targets. */
+  readonly onDropResult: (payload: ResultDragPayload, targetPosition: number | null) => void
+  /** Mentioned materials can be replaced only while another binding keeps the mention valid. */
   readonly mentionedMaterialIds: ReadonlySet<string>
   /** Fires when a drag enters the deck, so the composer can pin its full form. */
   readonly onDragHover: () => void
-  readonly onRemove: (materialId: string) => void
+  readonly onRemove: (position: number) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const cardRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  const cardRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
   const sectionRef = useRef<HTMLElement>(null)
-  const [focusedId, setFocusedId] = useState<string | null>(null)
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [focusedPosition, setFocusedPosition] = useState<number | null>(null)
+  const [hoveredPosition, setHoveredPosition] = useState<number | null>(null)
   const [pileHovered, setPileHovered] = useState(false)
   const [drag, setDrag] = useState<DragState>(idleDrag)
 
   const dragInvite = drag.verdict === 'invite'
   // Any recognized drag hover spreads the fan — a denied payload sees the
   // same geometry, with the cursor and the still add entry as its signals.
-  const expanded = pileHovered || focusedId !== null || drag.verdict !== 'idle'
+  const expanded = pileHovered || focusedPosition !== null || drag.verdict !== 'idle'
   const fanPitch = compact ? 25 : 40
   const isAppendAim = drag.appendAim
 
@@ -132,6 +132,10 @@ export function ReferenceDeck({
   )
   const visible = useMemo(
     () => bindings.filter((binding) => byId.has(binding.materialId)),
+    [bindings, byId]
+  )
+  const visibleIndexes = useMemo(
+    () => bindings.flatMap((binding, index) => (byId.has(binding.materialId) ? [index] : [])),
     [bindings, byId]
   )
   const thumbnailMaterialIdsKey = JSON.stringify(
@@ -192,20 +196,20 @@ export function ReferenceDeck({
     )
     .join(',')
 
-  function moveFocus(current: string | null, direction: -1 | 1): void {
+  function moveFocus(current: number | null, direction: -1 | 1): void {
     if (visible.length === 0) return
-    const index = current === null ? -1 : visible.findIndex((b) => b.materialId === current)
+    const index = current === null ? -1 : visibleIndexes.indexOf(current)
     const nextIndex =
       index < 0
         ? direction > 0
           ? 0
           : visible.length - 1
         : Math.min(visible.length - 1, Math.max(0, index + direction))
-    const next = visible[nextIndex]
-    setFocusedId(next.materialId)
+    const next = visibleIndexes[nextIndex]
+    setFocusedPosition(next)
     // Keyboard equivalence means real DOM focus moves with the arrows; a
     // state-only move would leave Delete acting on the previous card.
-    cardRefs.current.get(next.materialId)?.focus()
+    cardRefs.current.get(next)?.focus()
   }
 
   // Opening on pointerdown (click then covers only keyboard activation,
@@ -222,12 +226,20 @@ export function ReferenceDeck({
   // ---- Drop surface -----------------------------------------------------
 
   /** The card a drop would replace, when the pointer sits on one that is
-   * eligible (single payload, not named by a prompt mention). */
-  function replaceTargetFrom(event: React.DragEvent<HTMLElement>): string | null {
-    const card = (event.target as Element | null)?.closest?.('[data-material-id]')
+   * eligible (single payload, with any prompt mention still bound). */
+  function replaceTargetFrom(event: React.DragEvent<HTMLElement>): number | null {
+    const card = (event.target as Element | null)?.closest?.('[data-binding-position]')
     if (!(card instanceof Element) || !event.currentTarget.contains(card)) return null
-    const materialId = card.getAttribute('data-material-id')
-    return materialId !== null && !mentionedMaterialIds.has(materialId) ? materialId : null
+    const position = Number(card.getAttribute('data-binding-position'))
+    const materialId = bindings[position]?.materialId
+    const stillBound = bindings.some(
+      (binding, index) => index !== position && binding.materialId === materialId
+    )
+    return Number.isInteger(position) &&
+      materialId &&
+      (stillBound || !mentionedMaterialIds.has(materialId))
+      ? position
+      : null
   }
 
   /** Whether the pointer sits on the add entry — the append drop target. */
@@ -251,15 +263,18 @@ export function ReferenceDeck({
     return null
   }
 
-  function dragOverVerdict(payload: HoverPayload, targetId: string | null): 'invite' | 'deny' {
+  function dragOverVerdict(
+    payload: HoverPayload,
+    targetPosition: number | null
+  ): 'invite' | 'deny' {
     const remaining = cap - visible.length
     if (payload.kind === 'result') {
       const kindOk = allowedKinds.includes(payload.payload.mediaType)
-      return kindOk && (targetId !== null || remaining > 0) ? 'invite' : 'deny'
+      return kindOk && (targetPosition !== null || remaining > 0) ? 'invite' : 'deny'
     }
     // For a replace aim the capacity is irrelevant (a swap never grows the
     // deck), so admission is judged with an unbounded remainder.
-    if (targetId !== null) {
+    if (targetPosition !== null) {
       return dropWouldAdmit(payload.itemTypes, allowedKinds, Number.MAX_SAFE_INTEGER)
         ? 'invite'
         : 'deny'
@@ -272,18 +287,19 @@ export function ReferenceDeck({
     if (payload === null) return // Unrecognized drag: never droppable here.
     event.preventDefault()
     const single = payload.kind === 'result' || payload.itemTypes.length === 1
-    const targetId = single ? replaceTargetFrom(event) : null
-    const verdict = dragOverVerdict(payload, targetId)
+    const targetPosition = single ? replaceTargetFrom(event) : null
+    const verdict = dragOverVerdict(payload, targetPosition)
     // Only an admitted payload pops the add entry; a denied one keeps it
     // still so the cursor stays the sole deny signal.
-    const appendAim = single && verdict === 'invite' && targetId === null && overAppendEntry(event)
+    const appendAim =
+      single && verdict === 'invite' && targetPosition === null && overAppendEntry(event)
     event.dataTransfer.dropEffect = verdict === 'invite' ? 'copy' : 'none'
     setDrag((current) =>
       current.verdict === verdict &&
-      current.targetId === targetId &&
+      current.targetPosition === targetPosition &&
       current.appendAim === appendAim
         ? current
-        : { verdict, targetId, appendAim }
+        : { verdict, targetPosition, appendAim }
     )
   }
 
@@ -314,14 +330,14 @@ export function ReferenceDeck({
       // Admission is judged before requesting server-side promotion, so a
       // denied result never starts a mutation (ADR-0018).
       const kindOk = allowedKinds.includes(payload.mediaType)
-      const targetId = replaceTargetFrom(event)
-      const replaceId = targetId !== null && kindOk ? targetId : null
+      const targetPosition = replaceTargetFrom(event)
+      const replacePosition = targetPosition !== null && kindOk ? targetPosition : null
       const appendOk = kindOk && cap - visible.length > 0
-      if (replaceId === null && !appendOk) {
+      if (replacePosition === null && !appendOk) {
         shakeDeck()
         return
       }
-      onDropResult(payload, replaceId)
+      onDropResult(payload, replacePosition)
       return
     }
     if (!dataTransfer.types.includes('Files')) return
@@ -330,12 +346,12 @@ export function ReferenceDeck({
     const files = Array.from(dataTransfer.files).filter((file) => file.type !== '' || file.size > 0)
     if (files.length === 0) return
     if (files.length === 1) {
-      const targetId = replaceTargetFrom(event)
+      const targetPosition = replaceTargetFrom(event)
       if (
-        targetId !== null &&
+        targetPosition !== null &&
         dropWouldAdmit([files[0].type], allowedKinds, Number.MAX_SAFE_INTEGER)
       ) {
-        onReplace(targetId, files[0])
+        onReplace(targetPosition, files[0])
         return
       }
     }
@@ -354,7 +370,7 @@ export function ReferenceDeck({
 
   const cardFace = 'size-full overflow-hidden border border-foreground/20 bg-muted shadow-sm'
   const dropTileLabel =
-    drag.targetId !== null
+    drag.targetPosition !== null
       ? String(t('composer.deck.dropReplace'))
       : String(t('composer.deck.dropInvite'))
 
@@ -407,35 +423,37 @@ export function ReferenceDeck({
           onMouseEnter={() => setPileHovered(true)}
           onMouseLeave={(event) => {
             setPileHovered(false)
-            setHoveredId(null)
+            setHoveredPosition(null)
             if (event.currentTarget.querySelector(':focus-visible') === null) {
-              setFocusedId(null)
+              setFocusedPosition(null)
             }
           }}
           onFocus={() => setPileHovered(true)}
           onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
               setPileHovered(false)
-              setFocusedId(null)
+              setFocusedPosition(null)
             }
           }}
         >
           {visible.map((binding, position) => {
             const material = byId.get(binding.materialId)
             if (material === undefined) return null
+            const bindingPosition = visibleIndexes[position]
             const depth = visible.length - position - 1
             const isTop = depth === 0
-            const isFocused = focusedId === material.id
+            const isFocused = focusedPosition === bindingPosition
             // Keyboard equivalence: the remove entry is reachable exactly when
             // its card holds focus; the pointer equivalent is card hover.
-            const showRemove = expanded && (hoveredId === material.id || isFocused)
-            const isDragTarget = drag.targetId === material.id
+            const showRemove = expanded && (hoveredPosition === bindingPosition || isFocused)
+            const isDragTarget = drag.targetPosition === bindingPosition
             const progress = uploadProgress[material.id]
             return (
               <div
-                key={cardKeyAliases[material.id] ?? material.id}
+                key={`${cardKeyAliases[material.id] ?? material.id}:${position}`}
                 role="listitem"
                 data-material-id={material.id}
+                data-binding-position={bindingPosition}
                 data-thumbnail-state={
                   material.kind === 'image'
                     ? (thumbnailStates[material.id] ?? 'unloaded')
@@ -443,7 +461,7 @@ export function ReferenceDeck({
                 }
                 className="absolute inset-0 transition-[transform,opacity] duration-200 ease-out"
                 style={{
-                  zIndex: hoveredId === material.id ? 40 : 20 - depth,
+                  zIndex: hoveredPosition === bindingPosition ? 40 : 20 - depth,
                   opacity: expanded ? 1 : 1 - depth * 0.16,
                   // Fan x follows deck position (oldest left, newest beside
                   // the add entry); depth still keys the pile pose and z-order.
@@ -452,12 +470,12 @@ export function ReferenceDeck({
                     : `translate(${depth * 3}px, ${depth * -2}px) rotate(${pileRotations[depth % pileRotations.length]}deg) scale(${1 - depth * 0.025})`
                 }}
                 onMouseEnter={() => {
-                  setHoveredId(material.id)
+                  setHoveredPosition(bindingPosition)
                   if (material.kind === 'image' && thumbnails[material.id] === undefined) {
                     onRequestThumbnail(material.id)
                   }
                 }}
-                onMouseLeave={() => setHoveredId(null)}
+                onMouseLeave={() => setHoveredPosition(null)}
               >
                 <button
                   type="button"
@@ -468,11 +486,11 @@ export function ReferenceDeck({
                       : material.fileName
                   }
                   ref={(node) => {
-                    if (node) cardRefs.current.set(material.id, node)
-                    else cardRefs.current.delete(material.id)
+                    if (node) cardRefs.current.set(bindingPosition, node)
+                    else cardRefs.current.delete(bindingPosition)
                   }}
                   onFocus={() => {
-                    setFocusedId(material.id)
+                    setFocusedPosition(bindingPosition)
                     if (material.kind === 'image' && thumbnails[material.id] === undefined) {
                       onRequestThumbnail(material.id)
                     }
@@ -481,16 +499,16 @@ export function ReferenceDeck({
                     switch (event.key) {
                       case 'ArrowRight':
                         event.preventDefault()
-                        moveFocus(material.id, 1)
+                        moveFocus(bindingPosition, 1)
                         break
                       case 'ArrowLeft':
                         event.preventDefault()
-                        moveFocus(material.id, -1)
+                        moveFocus(bindingPosition, -1)
                         break
                       case 'Delete':
                       case 'Backspace':
                         event.preventDefault()
-                        onRemove(material.id)
+                        onRemove(bindingPosition)
                         break
                       default:
                         return
@@ -555,8 +573,8 @@ export function ReferenceDeck({
                   aria-label={t('composer.deck.remove', { name: material.fileName })}
                   title={t('composer.deck.remove', { name: material.fileName })}
                   tabIndex={isFocused ? 0 : -1}
-                  onFocus={() => setFocusedId(material.id)}
-                  onClick={() => onRemove(material.id)}
+                  onFocus={() => setFocusedPosition(bindingPosition)}
+                  onClick={() => onRemove(bindingPosition)}
                   className={cn(
                     'border-foreground/10 bg-input text-foreground absolute grid place-items-center rounded-full border shadow-md transition-[opacity,transform] duration-[180ms] ease-out outline-none focus-visible:ring-2 focus-visible:ring-sky-400/50',
                     compact ? '-top-[5px] -right-[5px] size-[17.5px]' : '-top-2 -right-2 size-7',

@@ -29,8 +29,6 @@ const { readLocalDraft, writeLocalDraft } =
   await import('../../src/renderer/src/features/creation/model/draft-store.ts')
 const { listReferenceMaterialUploadRecoveries, putReferenceMaterialUploadRecovery } =
   await import('../../src/renderer/src/features/creation/model/reference-material-upload-recovery.ts')
-const { listReferenceMaterialDeleteRecoveries, putReferenceMaterialDeleteRecovery } =
-  await import('../../src/renderer/src/features/creation/model/reference-material-delete-recovery.ts')
 
 const sessionA = 'aaaaaaaa-0000-4000-8000-000000000001'
 const localMaterial = 'local-material-1'
@@ -297,7 +295,7 @@ test('retiring the authenticated runtime cancels an in-flight restart recovery',
   assert.deepEqual(runtime.actions.snapshot(sessionA), { status: 'retired' })
 })
 
-test('removing a recovery placeholder fences the in-flight recovery and clears its facts', async () => {
+test('unbinding a recovery placeholder fences recovery and clears its local binding', async () => {
   const storage = fakeStorage()
   writeLocalDraft(storage, 'user-1', sessionA, {
     ...plainIntent('remove recovering upload'),
@@ -315,9 +313,8 @@ test('removing a recovery placeholder fences the in-flight recovery and clears i
     putExpiresAt: '2026-09-09T09:00:00Z',
     finalizeExpiresAt: '2026-09-09T09:30:00Z'
   })
-  let cancelled = false
-  const serverDeletes: string[] = []
-  const uploadAborts: string[] = []
+  let recoveryCancelled = false
+  let abortCalls = 0
   const runtime = createCreationRuntime(
     {
       recoverMaterialUpload: async (_recovery, signal) =>
@@ -325,19 +322,15 @@ test('removing a recovery placeholder fences the in-flight recovery and clears i
           signal?.addEventListener(
             'abort',
             () => {
-              cancelled = true
+              recoveryCancelled = true
               resolve({ outcome: 'request-rejected', code: 'upload_cancelled' })
             },
             { once: true }
           )
         }),
-      abortMaterialUpload: async (recovery) => {
-        uploadAborts.push(recovery.uploadId ?? '')
-        return { outcome: 'succeeded', value: null }
-      },
-      deleteMaterial: async (materialId) => {
-        serverDeletes.push(materialId)
-        return { outcome: 'succeeded', value: undefined }
+      abortMaterialUpload: async () => {
+        abortCalls += 1
+        return { outcome: 'succeeded', value: uploadedMaterial() }
       }
     },
     'user-1',
@@ -346,15 +339,14 @@ test('removing a recovery placeholder fences the in-flight recovery and clears i
   const recovery = runtime.actions.recoverMaterialUploads()
   await Promise.resolve()
 
-  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+  assert.deepEqual(await runtime.actions.unbindMaterial(sessionA, localMaterial), {
     outcome: 'succeeded',
     value: undefined
   })
   await recovery
 
-  assert.equal(cancelled, true)
-  assert.deepEqual(uploadAborts, ['upload-1'])
-  assert.deepEqual(serverDeletes, [])
+  assert.equal(recoveryCancelled, true)
+  assert.equal(abortCalls, 1)
   assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
   assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [])
   assert.deepEqual(
@@ -363,149 +355,14 @@ test('removing a recovery placeholder fences the in-flight recovery and clears i
   )
 })
 
-test('removing a recovery placeholder deletes a material finalized by the abort race', async () => {
-  const storage = fakeStorage()
-  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
-    uploadId: 'upload-1',
-    idempotencyKey: localMaterial,
-    sessionId: sessionA,
-    fileName: 'shoe.png',
-    declaredKind: 'image',
-    declaredMimeType: 'image/png',
-    declaredByteSize: 4,
-    putExpiresAt: '2026-09-09T09:00:00Z',
-    finalizeExpiresAt: '2026-09-09T09:30:00Z'
-  })
-  const serverDeletes: string[] = []
-  const runtime = createCreationRuntime(
-    {
-      recoverMaterialUpload: async (_recovery, signal) =>
-        new Promise((resolve) => {
-          signal?.addEventListener(
-            'abort',
-            () => resolve({ outcome: 'request-rejected', code: 'upload_cancelled' }),
-            { once: true }
-          )
-        }),
-      abortMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }),
-      deleteMaterial: async (materialId) => {
-        serverDeletes.push(materialId)
-        return { outcome: 'succeeded', value: undefined }
-      }
-    },
-    'user-1',
-    { storage, recoveryScope: 'https://server.example' }
-  )
-  const recovery = runtime.actions.recoverMaterialUploads()
-  await Promise.resolve()
-
-  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
-    outcome: 'succeeded',
-    value: undefined
-  })
-  await recovery
-
-  assert.deepEqual(serverDeletes, [realMaterial])
-  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
-  assert.deepEqual(
-    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
-    []
-  )
-})
-
-test('a finalized-race delete intent survives an unconfirmed request and restart', async () => {
-  const storage = fakeStorage()
-  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
-    uploadId: 'upload-1',
-    idempotencyKey: localMaterial,
-    sessionId: sessionA,
-    fileName: 'shoe.png',
-    declaredKind: 'image',
-    declaredMimeType: 'image/png',
-    declaredByteSize: 4,
-    putExpiresAt: '2026-09-09T09:00:00Z',
-    finalizeExpiresAt: '2026-09-09T09:30:00Z'
-  })
-  const runtime = createCreationRuntime(
-    {
-      abortMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }),
-      deleteMaterial: async () => ({ outcome: 'network-failure' })
-    },
-    'user-1',
-    { storage, recoveryScope: 'https://server.example' }
-  )
-
-  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
-    outcome: 'network-failure'
-  })
-  assert.deepEqual(
-    listReferenceMaterialDeleteRecoveries(storage, 'user-1', 'https://server.example'),
-    [{ sessionId: sessionA, materialId: realMaterial }]
-  )
-
-  const retried: string[] = []
-  const nextLogin = createCreationRuntime(
-    {
-      deleteMaterial: async (materialId) => {
-        retried.push(materialId)
-        return { outcome: 'request-rejected', code: 'not_found' }
-      }
-    },
-    'user-1',
-    { storage, recoveryScope: 'https://server.example' }
-  )
-  await nextLogin.actions.recoverMaterialUploads()
-
-  assert.deepEqual(retried, [realMaterial])
-  assert.deepEqual(
-    listReferenceMaterialDeleteRecoveries(storage, 'user-1', 'https://server.example'),
-    []
-  )
-})
-
-test('a pending delete replay does not block an unrelated upload recovery', async () => {
-  const storage = fakeStorage()
-  putReferenceMaterialDeleteRecovery(storage, 'user-1', 'https://server.example', {
-    sessionId: sessionA,
-    materialId: realMaterial
-  })
-  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
-    uploadId: 'upload-2',
-    idempotencyKey: 'local-material-2',
-    sessionId: sessionA,
-    fileName: 'other.png',
-    declaredKind: 'image',
-    declaredMimeType: 'image/png',
-    declaredByteSize: 4,
-    putExpiresAt: '2026-09-09T09:00:00Z',
-    finalizeExpiresAt: '2026-09-09T09:30:00Z'
-  })
-  const deletion = deferred<CreationApiResult<void>>()
-  let recoverCalls = 0
-  const runtime = createCreationRuntime(
-    {
-      deleteMaterial: async () => deletion.promise,
-      recoverMaterialUpload: async () => {
-        recoverCalls += 1
-        return { outcome: 'network-failure' }
-      }
-    },
-    'user-1',
-    { storage, recoveryScope: 'https://server.example' }
-  )
-
-  const recovery = runtime.actions.recoverMaterialUploads()
-  await Promise.resolve()
-  assert.equal(recoverCalls, 1)
-
-  deletion.resolve({ outcome: 'network-failure' })
-  await recovery
-})
-
-test('a failed durable abort cannot be reversed into finalize recovery after cancellation', async () => {
+test('failed upload abort never restores a removed Draft binding', async () => {
   const storage = fakeStorage()
   const active = deferred<CreationApiResult<ReferenceMaterialView>>()
-  let cancelled = false
+  writeLocalDraft(storage, 'user-1', sessionA, {
+    ...plainIntent('remove upload'),
+    promptDocument: { version: 1, nodes: [{ type: 'mention', materialId: localMaterial }] },
+    references: [{ materialId: localMaterial, role: 'reference' }]
+  })
   const runtime = createCreationRuntime(
     {
       uploadMaterial: async (_sessionId, _file, options) => {
@@ -520,9 +377,6 @@ test('a failed durable abort cannot be reversed into finalize recovery after can
           putExpiresAt: '2026-09-09T09:00:00Z',
           finalizeExpiresAt: '2026-09-09T09:30:00Z'
         })
-        options?.signal?.addEventListener('abort', () => {
-          cancelled = true
-        })
         return active.promise
       },
       abortMaterialUpload: async () => ({ outcome: 'network-failure' as const })
@@ -535,107 +389,12 @@ test('a failed durable abort cannot be reversed into finalize recovery after can
     localMaterial,
     new File(['shoe'], 'shoe.png', { type: 'image/png' })
   )
-  await Promise.resolve()
-
-  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+  assert.deepEqual(await runtime.actions.unbindMaterial(sessionA, localMaterial), {
     outcome: 'network-failure'
   })
-  assert.equal(cancelled, true)
-
-  active.resolve({ outcome: 'request-rejected', code: 'upload_cancelled' })
+  active.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
   assert.deepEqual(await staged, { outcome: 'request-rejected', code: 'action-retired' })
-  assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
-  assert.deepEqual(
-    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
-    []
-  )
-})
-
-test('an unauthorized durable abort cannot finalize after the next login', async () => {
-  const storage = fakeStorage()
-  putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
-    uploadId: 'upload-1',
-    idempotencyKey: localMaterial,
-    sessionId: sessionA,
-    fileName: 'shoe.png',
-    declaredKind: 'image',
-    declaredMimeType: 'image/png',
-    declaredByteSize: 4,
-    putExpiresAt: '2026-09-09T09:00:00Z',
-    finalizeExpiresAt: '2026-09-09T09:30:00Z'
-  })
-  const runtime = createCreationRuntime(
-    {
-      abortMaterialUpload: async () => ({ outcome: 'unauthorized' })
-    },
-    'user-1',
-    { storage, recoveryScope: 'https://server.example' }
-  )
-
-  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
-    outcome: 'unauthorized'
-  })
-  assert.deepEqual(
-    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
-    []
-  )
-
-  let recoverCalls = 0
-  const nextLogin = createCreationRuntime(
-    {
-      recoverMaterialUpload: async () => {
-        recoverCalls += 1
-        return { outcome: 'network-failure' }
-      }
-    },
-    'user-1',
-    { storage, recoveryScope: 'https://server.example' }
-  )
-  await nextLogin.actions.recoverMaterialUploads()
-  assert.equal(recoverCalls, 0)
-})
-
-test('a lease event arriving after durable deletion cannot revive the recovery fact', async () => {
-  const storage = fakeStorage()
-  const active = deferred<CreationApiResult<ReferenceMaterialView>>()
-  let emitLateLease = (): void => undefined
-  const runtime = createCreationRuntime(
-    {
-      uploadMaterial: async (_sessionId, _file, options) => {
-        emitLateLease = () =>
-          options?.onLease?.({
-            uploadId: 'upload-1',
-            idempotencyKey: localMaterial,
-            sessionId: sessionA,
-            fileName: 'shoe.png',
-            declaredKind: 'image',
-            declaredMimeType: 'image/png',
-            declaredByteSize: 4,
-            putExpiresAt: '2026-09-09T09:00:00Z',
-            finalizeExpiresAt: '2026-09-09T09:30:00Z'
-          })
-        return active.promise
-      },
-      abortMaterialUpload: async () => ({ outcome: 'succeeded', value: null })
-    },
-    'user-1',
-    { storage, recoveryScope: 'https://server.example' }
-  )
-  const staged = runtime.actions.stageMaterial(
-    sessionA,
-    localMaterial,
-    new File(['shoe'], 'shoe.png', { type: 'image/png' })
-  )
-  await Promise.resolve()
-
-  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
-    outcome: 'succeeded',
-    value: undefined
-  })
-  emitLateLease()
-  active.resolve({ outcome: 'request-rejected', code: 'upload_cancelled' })
-  await staged
-
+  assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [])
   assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
   assert.deepEqual(
     listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
@@ -684,7 +443,7 @@ test('recovery skips a queued fact removed while an earlier status request is pe
   assert.deepEqual(calls, [sessionA])
 })
 
-test('recovery does not start while durable deletion owns the upload key', async () => {
+test('recovery does not start while upload cancellation owns its key', async () => {
   const storage = fakeStorage()
   putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
     uploadId: 'upload-1',
@@ -710,17 +469,15 @@ test('recovery does not start while durable deletion owns the upload key', async
     'user-1',
     { storage, recoveryScope: 'https://server.example' }
   )
-  const deletion = runtime.actions.deleteMaterial(sessionA, localMaterial)
+  const unbinding = runtime.actions.unbindMaterial(sessionA, localMaterial)
   await Promise.resolve()
-
   await runtime.actions.recoverMaterialUploads()
   assert.equal(recoverCalls, 0)
-
   abort.resolve({ outcome: 'succeeded', value: null })
-  assert.deepEqual(await deletion, { outcome: 'succeeded', value: undefined })
+  assert.deepEqual(await unbinding, { outcome: 'succeeded', value: undefined })
 })
 
-test('deleting a recovered material also removes its temporary recovery view', async () => {
+test('unbinding a recovered material clears its temporary view and identity bridge', async () => {
   const storage = fakeStorage()
   putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
     uploadId: 'upload-1',
@@ -733,30 +490,21 @@ test('deleting a recovered material also removes its temporary recovery view', a
     putExpiresAt: '2026-09-09T09:00:00Z',
     finalizeExpiresAt: '2026-09-09T09:30:00Z'
   })
-  const serverDeletes: string[] = []
   const runtime = createCreationRuntime(
-    {
-      recoverMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }),
-      deleteMaterial: async (materialId) => {
-        serverDeletes.push(materialId)
-        return { outcome: 'succeeded', value: undefined }
-      }
-    },
+    { recoverMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }) },
     'user-1',
     { storage, recoveryScope: 'https://server.example' }
   )
   await runtime.actions.recoverMaterialUploads()
-
-  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, realMaterial), {
+  assert.deepEqual(await runtime.actions.unbindMaterial(sessionA, localMaterial), {
     outcome: 'succeeded',
     value: undefined
   })
-
-  assert.deepEqual(serverDeletes, [realMaterial])
   assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
+  assert.equal(runtime.actions.resolvedMaterialId(sessionA, localMaterial), null)
 })
 
-test('deleting a recovered placeholder clears its local-to-server identity bridge', async () => {
+test('unbinding a recovered material by real ID clears its local alias', async () => {
   const storage = fakeStorage()
   putReferenceMaterialUploadRecovery(storage, 'user-1', 'https://server.example', {
     uploadId: 'upload-1',
@@ -769,26 +517,16 @@ test('deleting a recovered placeholder clears its local-to-server identity bridg
     putExpiresAt: '2026-09-09T09:00:00Z',
     finalizeExpiresAt: '2026-09-09T09:30:00Z'
   })
-  const serverDeletes: string[] = []
   const runtime = createCreationRuntime(
-    {
-      recoverMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }),
-      deleteMaterial: async (materialId) => {
-        serverDeletes.push(materialId)
-        return { outcome: 'succeeded', value: undefined }
-      }
-    },
+    { recoverMaterialUpload: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }) },
     'user-1',
     { storage, recoveryScope: 'https://server.example' }
   )
   await runtime.actions.recoverMaterialUploads()
-
-  assert.deepEqual(await runtime.actions.deleteMaterial(sessionA, localMaterial), {
+  assert.deepEqual(await runtime.actions.unbindMaterial(sessionA, realMaterial), {
     outcome: 'succeeded',
     value: undefined
   })
-
-  assert.deepEqual(serverDeletes, [realMaterial])
   assert.deepEqual(runtime.actions.recoveryMaterials(sessionA), [])
   assert.equal(runtime.actions.resolvedMaterialId(sessionA, localMaterial), null)
 })
@@ -967,16 +705,11 @@ test('a random replacement id cannot bypass a pending upload recovery gate', asy
     finalizeExpiresAt: '2026-09-09T09:30:00Z'
   })
   let uploadCalls = 0
-  let deleteCalls = 0
   const runtime = createCreationRuntime(
     {
       uploadMaterial: async () => {
         uploadCalls += 1
         return { outcome: 'succeeded', value: uploadedMaterial() }
-      },
-      deleteMaterial: async () => {
-        deleteCalls += 1
-        return { outcome: 'succeeded', value: undefined }
       }
     },
     'user-1',
@@ -994,7 +727,6 @@ test('a random replacement id cannot bypass a pending upload recovery gate', asy
     { outcome: 'request-rejected', code: 'upload_reselection_not_ready' }
   )
   assert.equal(uploadCalls, 0)
-  assert.equal(deleteCalls, 0)
 })
 
 test('file reselection continues the same recoverable upload key without deleting its result', async () => {
@@ -1015,7 +747,6 @@ test('file reselection continues the same recoverable upload key without deletin
     putExpiresAt: '2026-09-09T09:00:00Z',
     finalizeExpiresAt: '2026-09-09T09:30:00Z'
   })
-  const serverDeletes: string[] = []
   const runtime = createCreationRuntime(
     {
       recoverMaterialUpload: async () => ({
@@ -1025,10 +756,6 @@ test('file reselection continues the same recoverable upload key without deletin
       uploadMaterial: async (_sessionId, _file, options) => {
         assert.equal(options?.idempotencyKey, localMaterial)
         return { outcome: 'succeeded', value: uploadedMaterial() }
-      },
-      deleteMaterial: async (materialId) => {
-        serverDeletes.push(materialId)
-        return { outcome: 'succeeded', value: undefined }
       }
     },
     'user-1',
@@ -1049,7 +776,6 @@ test('file reselection continues the same recoverable upload key without deletin
     { outcome: 'succeeded', value: uploadedMaterial() }
   )
 
-  assert.deepEqual(serverDeletes, [])
   assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [
     { materialId: realMaterial, role: 'reference' }
   ])
@@ -1116,7 +842,6 @@ test('status recovery unlocks same-key reselection after an active unconfirmed u
     finalizeExpiresAt: '2026-09-09T09:30:00Z'
   })
   let uploads = 0
-  const serverDeletes: string[] = []
   const runtime = createCreationRuntime(
     {
       uploadMaterial: async (_sessionId, _file, options) => {
@@ -1129,11 +854,7 @@ test('status recovery unlocks same-key reselection after an active unconfirmed u
       recoverMaterialUpload: async () => ({
         outcome: 'request-rejected' as const,
         code: 'upload_requires_reselection'
-      }),
-      deleteMaterial: async (materialId) => {
-        serverDeletes.push(materialId)
-        return { outcome: 'succeeded', value: undefined }
-      }
+      })
     },
     'user-1',
     { storage, recoveryScope: 'https://server.example' }
@@ -1160,7 +881,6 @@ test('status recovery unlocks same-key reselection after an active unconfirmed u
   )
 
   assert.equal(uploads, 2)
-  assert.deepEqual(serverDeletes, [])
 })
 
 const plainIntent = (prompt: string): GenerationIntent => ({
@@ -1734,280 +1454,133 @@ test('an ambiguous upload stays recoverable while confirmed unauthorized retires
   )
 })
 
-test('material and session deletion wait for the submission that retains them', async (t) => {
-  await t.test('material', async () => {
-    const accepted = deferred<unknown>()
-    const deletedResult = deferred<unknown>()
-    const deleted: string[] = []
-    const reconciled: string[] = []
-    const runtime = createCreationRuntime(
-      {
-        submitTask: async () => accepted.promise,
-        deleteMaterial: async (materialId: string) => {
-          deleted.push(materialId)
-          return deletedResult.promise
-        }
-      },
-      'user-1'
-    )
-    runtime.actions.subscribe((event) => {
-      if (event.type === 'reconcile') reconciled.push(event.sessionId)
-    })
-    const submission = runtime.actions.submit(sessionA, {
-      ...plainIntent('retain material'),
-      references: [{ materialId: realMaterial, role: 'reference' }]
-    })
-    const removal = runtime.actions.deleteMaterial(sessionA, realMaterial)
-
-    await Promise.resolve()
-    assert.deepEqual(deleted, [])
-    accepted.resolve(acceptedTask(sessionA, 'task-a'))
-    assert.equal(await submission, 'accepted')
-    assert.deepEqual(reconciled, [sessionA])
-    deletedResult.resolve({ outcome: 'succeeded', value: undefined })
-    assert.equal((await removal).outcome, 'succeeded')
-    assert.deepEqual(deleted, [realMaterial])
-    assert.deepEqual(reconciled, [sessionA, sessionA])
+test('unbinding a finalized material is local while an in-flight task keeps its frozen reference', async () => {
+  const storage = fakeStorage()
+  writeLocalDraft(storage, 'user-1', sessionA, {
+    ...plainIntent('retain material'),
+    references: [{ materialId: realMaterial, role: 'reference' }]
   })
-
-  await t.test('material selected before its upload received a real identity', async () => {
-    const upload = deferred<unknown>()
-    const accepted = deferred<unknown>()
-    const deleted: string[] = []
-    const runtime = createCreationRuntime(
-      {
-        uploadMaterial: async () => upload.promise,
-        submitTask: async () => accepted.promise,
-        deleteMaterial: async (materialId: string) => {
-          deleted.push(materialId)
-          return { outcome: 'succeeded', value: undefined }
-        }
-      },
-      'user-1'
-    )
-    void runtime.actions.stageMaterial(
-      sessionA,
-      localMaterial,
-      new File(['shoe'], 'shoe.png', { type: 'image/png' })
-    )
-    const submission = runtime.actions.submit(sessionA, {
-      ...plainIntent('retain pending material'),
-      references: [{ materialId: localMaterial, role: 'reference' }]
-    })
-    const removal = runtime.actions.deleteMaterial(sessionA, localMaterial)
-
-    upload.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
-    await Promise.resolve()
-    assert.deepEqual(deleted, [])
-    accepted.resolve(acceptedTask(sessionA, 'task-a'))
-    assert.equal(await submission, 'accepted')
-    assert.equal((await removal).outcome, 'succeeded')
-    assert.deepEqual(deleted, [realMaterial])
-  })
-
-  await t.test(
-    'stopping tracking still deletes a retained upload after it gains identity',
-    async () => {
-      const upload = deferred<unknown>()
-      const deleted: string[] = []
-      const reconciled: string[] = []
-      const runtime = createCreationRuntime(
-        {
-          uploadMaterial: async () => upload.promise,
-          abortMaterialUpload: async () => ({
-            outcome: 'succeeded',
-            value: uploadedMaterial()
-          }),
-          deleteMaterial: async (materialId: string) => {
-            deleted.push(materialId)
-            return { outcome: 'succeeded', value: undefined }
-          }
-        },
-        'user-1'
-      )
-      runtime.actions.subscribe((event) => {
-        if (event.type === 'reconcile') reconciled.push(event.sessionId)
-      })
-      const staged = runtime.actions.stageMaterial(
-        sessionA,
-        localMaterial,
-        new File(['shoe'], 'shoe.png', { type: 'image/png' })
-      )
-      const submission = runtime.actions.submit(sessionA, {
-        ...plainIntent('retain pending material'),
-        references: [{ materialId: localMaterial, role: 'reference' }]
-      })
-      const removal = runtime.actions.deleteMaterial(sessionA, localMaterial)
-
-      runtime.actions.stopTracking(sessionA)
-      upload.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
-
-      assert.notEqual((await staged).outcome, 'succeeded')
-      assert.equal(await submission, 'retired')
-      assert.equal((await removal).outcome, 'succeeded')
-      assert.deepEqual(deleted, [realMaterial])
-      assert.ok(reconciled.includes(sessionA))
-    }
+  const accepted = deferred<CreationApiResult<GenerationTaskDetail>>()
+  let submitted: GenerationIntent['references'] = []
+  const runtime = createCreationRuntime(
+    {
+      submitTask: async (_sessionId, input) => {
+        submitted = input.intent.references
+        return accepted.promise
+      }
+    },
+    'user-1',
+    { storage }
   )
+  const submission = runtime.actions.submit(sessionA, {
+    ...plainIntent('retain material'),
+    references: [{ materialId: realMaterial, role: 'reference' }]
+  })
+  assert.deepEqual(await runtime.actions.unbindMaterial(sessionA, realMaterial), {
+    outcome: 'succeeded',
+    value: undefined
+  })
+  assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [])
+  assert.deepEqual(submitted, [{ materialId: realMaterial, role: 'reference' }])
+  accepted.resolve(acceptedTask(sessionA, 'task-a'))
+  assert.equal(await submission, 'accepted')
+})
 
-  await t.test('material removed while its upload is pending reconciles after DELETE', async () => {
-    const upload = deferred<unknown>()
-    const deletedResult = deferred<unknown>()
-    const deleted: string[] = []
-    const reconciled: string[] = []
-    let uploadSignal: AbortSignal | undefined
-    const runtime = createCreationRuntime(
-      {
-        uploadMaterial: async (_sessionId, _file, options) => {
-          uploadSignal = options?.signal
-          return upload.promise
-        },
-        abortMaterialUpload: async () => ({
-          outcome: 'succeeded',
-          value: uploadedMaterial()
+test('unbinding a pending frozen upload leaves it available to the submission', async () => {
+  const upload = deferred<CreationApiResult<ReferenceMaterialView>>()
+  const accepted = deferred<CreationApiResult<GenerationTaskDetail>>()
+  let signal: AbortSignal | undefined
+  let submitted: GenerationIntent['references'] = []
+  const runtime = createCreationRuntime(
+    {
+      uploadMaterial: async (_sessionId, _file, options) => {
+        signal = options?.signal
+        return upload.promise
+      },
+      submitTask: async (_sessionId, input) => {
+        submitted = input.intent.references
+        return accepted.promise
+      }
+    },
+    'user-1'
+  )
+  const staged = runtime.actions.stageMaterial(
+    sessionA,
+    localMaterial,
+    new File(['shoe'], 'shoe.png', { type: 'image/png' })
+  )
+  const submission = runtime.actions.submit(sessionA, {
+    ...plainIntent('retain pending material'),
+    references: [{ materialId: localMaterial, role: 'reference' }]
+  })
+  assert.deepEqual(await runtime.actions.unbindMaterial(sessionA, localMaterial), {
+    outcome: 'succeeded',
+    value: undefined
+  })
+  assert.equal(signal?.aborted, false)
+  upload.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
+  assert.equal((await staged).outcome, 'succeeded')
+  await Promise.resolve()
+  assert.deepEqual(submitted, [{ materialId: realMaterial, role: 'reference' }])
+  accepted.resolve(acceptedTask(sessionA, 'task-a'))
+  assert.equal(await submission, 'accepted')
+})
+
+test('unbinding an unfinished upload cancels it without leaving a failure notice', async () => {
+  const storage = fakeStorage()
+  const runtime = createCreationRuntime(
+    {
+      uploadMaterial: async (_sessionId, _file, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener(
+            'abort',
+            () => resolve({ outcome: 'request-rejected' as const, code: 'upload_cancelled' }),
+            { once: true }
+          )
         }),
-        deleteMaterial: async (materialId: string) => {
-          deleted.push(materialId)
-          return deletedResult.promise
-        }
-      },
-      'user-1'
-    )
-    runtime.actions.subscribe((event) => {
-      if (event.type === 'reconcile') reconciled.push(event.sessionId)
-    })
-    const staged = runtime.actions.stageMaterial(
-      sessionA,
-      localMaterial,
-      new File(['shoe'], 'shoe.png', { type: 'image/png' })
-    )
-    const removal = runtime.actions.deleteMaterial(sessionA, localMaterial)
-
-    assert.equal(uploadSignal?.aborted, true)
-
-    upload.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
-    assert.deepEqual(await staged, { outcome: 'request-rejected', code: 'action-retired' })
-
-    deletedResult.resolve({ outcome: 'succeeded', value: undefined })
-    assert.equal((await removal).outcome, 'succeeded')
-    assert.deepEqual(deleted, [realMaterial])
-    assert.deepEqual(reconciled, [sessionA])
-  })
-
-  await t.test(
-    'cancelling a pending upload for removal does not leave a failure notice',
-    async () => {
-      const storage = fakeStorage()
-      const deleted: string[] = []
-      const runtime = createCreationRuntime(
-        {
-          uploadMaterial: async (_sessionId, _file, options) =>
-            new Promise((resolve) => {
-              options?.signal?.addEventListener(
-                'abort',
-                () =>
-                  resolve({
-                    outcome: 'request-rejected' as const,
-                    code: 'upload_cancelled'
-                  }),
-                { once: true }
-              )
-            }),
-          abortMaterialUpload: async () => ({ outcome: 'succeeded', value: null }),
-          deleteMaterial: async (materialId: string) => {
-            deleted.push(materialId)
-            return { outcome: 'succeeded', value: undefined }
-          }
-        },
-        'user-1',
-        { storage, recoveryScope: 'https://server.example' }
-      )
-      const staged = runtime.actions.stageMaterial(
-        sessionA,
-        localMaterial,
-        new File(['shoe'], 'shoe.png', { type: 'image/png' })
-      )
-
-      const removal = runtime.actions.deleteMaterial(sessionA, localMaterial)
-
-      assert.deepEqual(await staged, {
-        outcome: 'request-rejected',
-        code: 'action-retired'
-      })
-      assert.deepEqual(await removal, {
-        outcome: 'succeeded',
-        value: undefined
-      })
-      assert.deepEqual(runtime.actions.snapshot(sessionA), { status: 'idle' })
-      assert.deepEqual(deleted, [])
-      assert.deepEqual(
-        listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
-        []
-      )
-    }
+      abortMaterialUpload: async () => ({ outcome: 'succeeded', value: null })
+    },
+    'user-1',
+    { storage, recoveryScope: 'https://server.example' }
   )
-
-  await t.test('material addressed by its resolved identity', async () => {
-    const accepted = deferred<unknown>()
-    const deleted: string[] = []
-    const runtime = createCreationRuntime(
-      {
-        uploadMaterial: async () => ({ outcome: 'succeeded', value: uploadedMaterial() }),
-        submitTask: async () => accepted.promise,
-        deleteMaterial: async (materialId: string) => {
-          deleted.push(materialId)
-          return { outcome: 'succeeded', value: undefined }
-        }
-      },
-      'user-1'
-    )
-    await runtime.actions.stageMaterial(
-      sessionA,
-      localMaterial,
-      new File(['shoe'], 'shoe.png', { type: 'image/png' })
-    )
-    const submission = runtime.actions.submit(sessionA, {
-      ...plainIntent('retain resolved material'),
-      references: [{ materialId: localMaterial, role: 'reference' }]
-    })
-    const removal = runtime.actions.deleteMaterial(sessionA, realMaterial)
-
-    await Promise.resolve()
-    assert.deepEqual(deleted, [])
-    accepted.resolve(acceptedTask(sessionA, 'task-a'))
-    assert.equal(await submission, 'accepted')
-    assert.equal((await removal).outcome, 'succeeded')
-    assert.deepEqual(deleted, [realMaterial])
+  const staged = runtime.actions.stageMaterial(
+    sessionA,
+    localMaterial,
+    new File(['shoe'], 'shoe.png', { type: 'image/png' })
+  )
+  assert.deepEqual(await runtime.actions.unbindMaterial(sessionA, localMaterial), {
+    outcome: 'succeeded',
+    value: undefined
   })
+  assert.deepEqual(await staged, { outcome: 'request-rejected', code: 'action-retired' })
+  assert.deepEqual(runtime.actions.snapshot(sessionA), { status: 'idle' })
+  assert.deepEqual(
+    listReferenceMaterialUploadRecoveries(storage, 'user-1', 'https://server.example'),
+    []
+  )
+})
 
-  await t.test('session', async () => {
-    const accepted = deferred<unknown>()
-    const deleted: string[] = []
-    const reconciled: string[] = []
-    const runtime = createCreationRuntime(
-      {
-        submitTask: async () => accepted.promise,
-        deleteSession: async (sessionId: string) => {
-          deleted.push(sessionId)
-          return { outcome: 'succeeded', value: undefined }
-        }
-      },
-      'user-1'
-    )
-    runtime.actions.subscribe((event) => {
-      if (event.type === 'sessions-reconcile') reconciled.push(event.sessionId)
-    })
-    const submission = runtime.actions.submit(sessionA, plainIntent('retain session'))
-    const removal = runtime.actions.deleteSession(sessionA)
-
-    await Promise.resolve()
-    assert.deepEqual(deleted, [])
-    accepted.resolve(acceptedTask(sessionA, 'task-a'))
-    assert.equal(await submission, 'accepted')
-    assert.equal((await removal).outcome, 'succeeded')
-    assert.deepEqual(deleted, [sessionA])
-    assert.deepEqual(reconciled, [sessionA])
-  })
+test('session deletion still waits for the submission that retains it', async () => {
+  const accepted = deferred<CreationApiResult<GenerationTaskDetail>>()
+  const deleted: string[] = []
+  const runtime = createCreationRuntime(
+    {
+      submitTask: async () => accepted.promise,
+      deleteSession: async (sessionId: string) => {
+        deleted.push(sessionId)
+        return { outcome: 'succeeded', value: undefined }
+      }
+    },
+    'user-1'
+  )
+  const submission = runtime.actions.submit(sessionA, plainIntent('retain session'))
+  const removal = runtime.actions.deleteSession(sessionA)
+  await Promise.resolve()
+  assert.deepEqual(deleted, [])
+  accepted.resolve(acceptedTask(sessionA, 'task-a'))
+  assert.equal(await submission, 'accepted')
+  assert.equal((await removal).outcome, 'succeeded')
+  assert.deepEqual(deleted, [sessionA])
 })
 
 test('a runtime-owned replacement commits to its original context after display navigation', async () => {
@@ -2019,15 +1592,10 @@ test('a runtime-owned replacement commits to its original context after display 
     references: [{ materialId: 'old-material', role: 'reference' }]
   })
   const upload = deferred<unknown>()
-  const deleted: string[] = []
   const reconciled: string[] = []
   const runtime = createCreationRuntime(
     {
-      uploadMaterial: async () => upload.promise,
-      deleteMaterial: async (materialId: string) => {
-        deleted.push(materialId)
-        return { outcome: 'succeeded', value: undefined }
-      }
+      uploadMaterial: async () => upload.promise
     },
     'user-1',
     { storage }
@@ -2052,11 +1620,10 @@ test('a runtime-owned replacement commits to its original context after display 
   assert.deepEqual(readLocalDraft(storage, 'user-1', sessionA)?.references, [
     { materialId: realMaterial, role: 'reference' }
   ])
-  assert.deepEqual(deleted, ['old-material'])
   assert.deepEqual(reconciled, [sessionA])
 })
 
-test('a replacement merges into the latest draft after a slow material delete', async () => {
+test('a replacement merges into the latest draft after a slow upload', async () => {
   const storage = fakeStorage()
   const original = {
     ...plainIntent('original prompt'),
@@ -2068,21 +1635,10 @@ test('a replacement merges into the latest draft after a slow material delete', 
     references: [{ materialId: 'old-material', role: 'reference' as const }]
   }
   writeLocalDraft(storage, 'user-1', sessionA, original)
-  const upload = deferred<unknown>()
-  const deletedResult = deferred<unknown>()
-  let deleteCalls = 0
-  const runtime = createCreationRuntime(
-    {
-      uploadMaterial: async () => upload.promise,
-      deleteMaterial: async () => {
-        deleteCalls += 1
-        return deletedResult.promise
-      }
-    },
-    'user-1',
-    { storage }
-  )
-
+  const upload = deferred<CreationApiResult<ReferenceMaterialView>>()
+  const runtime = createCreationRuntime({ uploadMaterial: async () => upload.promise }, 'user-1', {
+    storage
+  })
   const replacement = runtime.actions.replaceMaterial(
     sessionA,
     'old-material',
@@ -2090,25 +1646,19 @@ test('a replacement merges into the latest draft after a slow material delete', 
     new File(['shoe'], 'shoe.png', { type: 'image/png' }),
     'reference'
   )
-  upload.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
-  for (let attempt = 0; attempt < 5 && deleteCalls === 0; attempt += 1) {
-    await Promise.resolve()
-  }
-  assert.equal(deleteCalls, 1)
-
   writeLocalDraft(storage, 'user-1', sessionA, {
     ...original,
-    prompt: 'edited while delete was pending',
+    prompt: 'edited while upload was pending',
     promptDocument: {
       version: 1,
-      nodes: [{ type: 'text', text: 'edited while delete was pending' }]
+      nodes: [{ type: 'text', text: 'edited while upload was pending' }]
     }
   })
-  deletedResult.resolve({ outcome: 'succeeded', value: undefined })
+  upload.resolve({ outcome: 'succeeded', value: uploadedMaterial() })
   assert.equal((await replacement).outcome, 'succeeded')
 
   const latest = readLocalDraft(storage, 'user-1', sessionA)
-  assert.equal(latest?.prompt, 'edited while delete was pending')
+  assert.equal(latest?.prompt, 'edited while upload was pending')
   assert.deepEqual(latest?.references, [{ materialId: realMaterial, role: 'reference' }])
 })
 

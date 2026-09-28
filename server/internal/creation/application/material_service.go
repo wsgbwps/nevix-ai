@@ -559,7 +559,7 @@ func (s *MaterialService) CreateFromResult(ctx context.Context, owner, sessionID
 	if *slot.ResultByteSize < 1 || *slot.ResultByteSize > domain.VideoMaxBytes {
 		return domain.ReferenceMaterial{}, domain.ErrTooLarge
 	}
-	store, _, err := s.storage.ResolveStore(ctx)
+	store, connection, err := s.storage.ResolveStore(ctx)
 	if err != nil {
 		return domain.ReferenceMaterial{}, err
 	}
@@ -594,11 +594,27 @@ func (s *MaterialService) CreateFromResult(ctx context.Context, owner, sessionID
 		cleanup()
 		return domain.ReferenceMaterial{}, domain.ErrUnreadableMedia
 	}
+	now := s.now().UTC()
+	cleanupID := domain.NewUUID()
+	cleanupFact := domain.ReferenceMaterialUpload{
+		ID: cleanupID, OwnerID: owner, SessionID: sessionID,
+		MaterialID: materialID, ObjectKey: objectKey, FileName: fileName,
+		DeclaredKind: material.Kind, DeclaredMIMEType: material.MimeType,
+		DeclaredByteSize: material.ByteSize, ClaimsVersion: material.ClaimsVersion,
+		IdempotencyKey: cleanupID.String(), PayloadHash: material.ChecksumSHA256,
+		ConnectionRevision: connection.Revision,
+		PutDeadline:        now.Add(domain.ReferenceMaterialPutLifetime),
+		FinalizeDeadline:   now.Add(domain.ReferenceMaterialFinalizeLifetime),
+		Status:             domain.ReferenceMaterialUploadFinalized, CreatedAt: now, FinalizedAt: &now,
+	}
 	err = s.runner.Run(ctx, func(scope domain.WriteScope) error {
 		if _, err := s.sessions.GetInTx(ctx, scope.Tx(), owner, sessionID); err != nil {
 			return err
 		}
-		return s.repos.Insert(ctx, scope.Tx(), &material)
+		if err := s.repos.Insert(ctx, scope.Tx(), &material); err != nil {
+			return err
+		}
+		return s.uploads.RecordFinalizedMaterialCleanup(ctx, scope.Tx(), &cleanupFact)
 	})
 	if err != nil {
 		cleanup()
@@ -744,57 +760,4 @@ const OrphanBlobLogWarning = "creation: orphan blob cleanup failed"
 // object details or failing an already-committed removal.
 func orphanLog(_ error) {
 	slog.Warn(OrphanBlobLogWarning, "code", "object_storage_unavailable")
-}
-
-// Delete removes a material from Composer. A frozen task reference retains its
-// exact object; otherwise the existing durable cleanup path starts after commit.
-func (s *MaterialService) Delete(ctx context.Context, owner, id domain.UUID) error {
-	if _, err := s.repos.GetForRead(ctx, owner, id); err != nil {
-		return err
-	}
-	store, connection, err := s.storage.ResolveStore(ctx)
-	if err != nil {
-		return err
-	}
-	now := s.now().UTC()
-	createdAt := now.Add(-domain.ReferenceMaterialFinalizeLifetime)
-	finalizedAt := now
-	cleanupNextAttemptAt := now.Add(time.Minute)
-	return s.runner.Run(ctx, func(scope domain.WriteScope) error {
-		material, retained, err := s.repos.Remove(ctx, scope.Tx(), owner, id)
-		if err != nil {
-			return err
-		}
-		cleanupID := domain.NewUUID()
-		// Result-derived materials need the same cleanup fact direct uploads already own.
-		cleanup := domain.ReferenceMaterialUpload{
-			ID: cleanupID, OwnerID: owner, SessionID: material.SessionID,
-			MaterialID: material.ID, ObjectKey: material.BlobKey, FileName: material.FileName,
-			DeclaredKind: material.Kind, DeclaredMIMEType: material.MimeType,
-			DeclaredByteSize: material.ByteSize, ClaimsVersion: material.ClaimsVersion,
-			IdempotencyKey: "material-cleanup-" + cleanupID.String(),
-			PayloadHash:    material.ChecksumSHA256, ConnectionRevision: connection.Revision,
-			PutDeadline:      createdAt.Add(domain.ReferenceMaterialPutLifetime),
-			FinalizeDeadline: now, Status: domain.ReferenceMaterialUploadFinalized,
-			CreatedAt: createdAt, FinalizedAt: &finalizedAt,
-		}
-		if !retained {
-			cleanup.CleanupAttemptCount = 1
-			cleanup.CleanupNextAttemptAt = &cleanupNextAttemptAt
-		}
-		if err := s.uploads.RecordFinalizedMaterialCleanup(ctx, scope.Tx(), &cleanup); err != nil {
-			return err
-		}
-		if retained {
-			return nil
-		}
-		scope.AfterCommit(func() {
-			deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), referenceMaterialImmediateCleanupTimeout)
-			defer cancel()
-			if delErr := store.Delete(deleteCtx, material.BlobKey); delErr != nil {
-				orphanLog(delErr)
-			}
-		})
-		return nil
-	})
 }

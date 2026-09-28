@@ -175,24 +175,28 @@ func newHarnessWithOptions(t *testing.T, opts harnessOptions) *harness {
 			t.Fatalf("construct creation module: %v", err)
 		}
 		creationModule.Register(r, bus)
-		if opts.runWorkers {
-			workerCtx, cancelWorker := context.WithCancel(ctx)
-			workersDone := make(chan struct{})
-			go func() {
-				defer close(workersDone)
-				_ = creationModule.RunWorkers(workerCtx)
-			}()
-			t.Cleanup(func() {
-				cancelWorker()
-				<-workersDone
-			})
-		}
 	})
 
 	h := &harness{t: t, ctx: ctx, ownerPool: ownerPool, runtimePool: runtimePool, secretsDir: secretsDir, kapon: kapon, identity: identityModule, creation: creationModule, directStore: directStore, referenceTransport: referenceTransport}
 	h.startServer(router)
 	t.Cleanup(h.closeServer)
+	if opts.runWorkers {
+		h.startWorkers(t)
+	}
 	return h
+}
+
+func (h *harness) startWorkers(t *testing.T) {
+	workerCtx, cancelWorker := context.WithCancel(h.ctx)
+	workersDone := make(chan struct{})
+	go func() {
+		defer close(workersDone)
+		_ = h.creation.RunWorkers(workerCtx)
+	}()
+	t.Cleanup(func() {
+		cancelWorker()
+		<-workersDone
+	})
 }
 
 // startServer binds the mounted modules to one httptest server, mirroring

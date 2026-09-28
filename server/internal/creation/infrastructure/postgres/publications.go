@@ -41,7 +41,22 @@ func (r *TeamPublicationRepository) Publish(ctx context.Context, tx domain.TxExe
 	var asset domain.MediaAsset
 	var media string
 	var specJSON []byte
+	// A dismissal locks the task before its assets and releases its references
+	// last. Lock that parent first so a publication snapshots a live relation.
+	var taskID domain.UUID
 	err := tx.QueryRow(ctx, `
+		SELECT task.id FROM creation_generation_tasks task
+		JOIN creation_media_assets source ON source.task_id = task.id
+		WHERE source.id = $1 AND source.owner_user_id = $2
+		  AND task.dismissed_at IS NULL
+		FOR SHARE OF task`, assetID, publisher).Scan(&taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.TeamPublication{}, false, domain.ErrAssetNotFound
+	}
+	if err != nil {
+		return domain.TeamPublication{}, false, fmt.Errorf("creation: lock source task for publication: %w", err)
+	}
+	err = tx.QueryRow(ctx, `
 		SELECT a.id, a.owner_user_id, u.display_name, a.task_id, a.slot_index,
 		       a.media_type, a.mime, a.blob_key, a.byte_size, a.checksum,
 		       a.width_px, a.height_px, a.duration_ms, a.created_at, t.specification
@@ -101,7 +116,8 @@ func (r *TeamPublicationRepository) Publish(ctx context.Context, tx domain.TxExe
 			       m.duration_ms, m.claims_version, m.created_at
 			FROM creation_reference_materials m
 			JOIN creation_generation_task_references retained ON retained.material_id = m.id
-			WHERE retained.task_id = $1 AND m.id = $2`, asset.TaskID, reference.MaterialID).Scan(
+			WHERE retained.task_id = $1 AND m.id = $2
+			  AND m.removed_at IS NULL`, asset.TaskID, reference.MaterialID).Scan(
 			&material.ID, &material.SessionID, &kind, &material.FileName, &material.MimeType,
 			&material.ByteSize, &material.ChecksumSHA256, &material.BlobKey, &material.WidthPx,
 			&material.HeightPx, &material.PixelCount, &material.DurationMS, &material.ClaimsVersion,
@@ -471,7 +487,8 @@ func (r *TeamPublicationRepository) listAdminAssetReferences(ctx context.Context
 			       m.blob_key, m.width_px, m.height_px, m.pixel_count, m.duration_ms, m.claims_version
 			FROM creation_reference_materials m
 			JOIN creation_generation_task_references retained ON retained.material_id = m.id
-			WHERE retained.task_id = $1 AND m.id = $2`, taskID, frozen.MaterialID).Scan(
+			WHERE retained.task_id = $1 AND m.id = $2
+			  AND m.removed_at IS NULL`, taskID, frozen.MaterialID).Scan(
 			&reference.ID, &kind, &reference.FileName, &reference.MimeType, &reference.ByteSize,
 			&reference.ChecksumSHA256, &reference.BlobKey, &reference.WidthPx, &reference.HeightPx,
 			&reference.PixelCount, &reference.DurationMS, &reference.ClaimsVersion,

@@ -241,7 +241,7 @@ const activeManifest: CapabilityManifest = {
 export interface DeckTestControls {
   /** Reads this device's local draft record for one session key ('new' for composing). */
   draftRecord(key: string): LocalDraftRecord | null
-  deleteMaterialCalls(): string[]
+  materialIds(sessionId: string): string[]
   materialUrlCalls(): ReadonlyArray<{ materialId: string }>
   resultBlobTransfers(): ReadonlyArray<{ taskId: string; slotIndex: number }>
   resultReuseCalls(): ReadonlyArray<{
@@ -252,7 +252,6 @@ export interface DeckTestControls {
   }>
   releaseMaterialUrls(): void
   releaseResultBlobs(): void
-  releaseMaterialDeletes(): void
   releaseSessionDeletes(): void
   deferNextMaterialList(): void
   materialListCalls(): number
@@ -301,6 +300,8 @@ export interface DeckTestControls {
   /** Holds the next list response until releaseHeldListResponses runs. */
   holdNextListResponse(): void
   releaseHeldListResponses(): void
+  holdNextDetailResponse(): void
+  releaseHeldDetailResponses(): void
   /** Replaces one task by id without firing any SSE notification. */
   replaceTaskSilently(task: ScriptedTask): void
 }
@@ -362,17 +363,19 @@ export interface ScriptedTask extends GenerationTaskView {
   readonly detailTask?: GenerationTaskView
   /** The task's frozen specification; absent details render task-view facts only. */
   readonly specification?: GenerationTaskDetail['specification']
+  /** Current material facts in the task GET, aligned with frozen positions. */
+  readonly referenceMaterials?: GenerationTaskDetail['referenceMaterials']
 }
 
 function detailOf(task: ScriptedTask): GenerationTaskDetail {
-  const specification = task.specification
+  const specification = task.specification === undefined ? task.snapshot : task.specification
   return {
     task: task.detailTask ?? task,
     slots: task.slots,
     // The production parser constructs new wire-view objects per response.
     // Mirror that identity churn so lease regressions cannot hide in the adapter.
     specification:
-      specification === undefined
+      specification === null
         ? null
         : {
             ...specification,
@@ -418,7 +421,6 @@ interface RuntimeOptions {
   /** Overrides the scripted image URL so tests can control its network load. */
   readonly materialImageUrl?: string
   readonly materialImageUrls?: readonly string[]
-  readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
   readonly uploadOutcome?:
@@ -445,10 +447,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     if (record === null) removeLocalDraft(localStorage, storyUserId, key)
     else writeLocalDraft(localStorage, storyUserId, key, record)
   }
-  const deletedIds: string[] = []
   const materialUrlCalls: Array<{ materialId: string }> = []
   const materialUrlReleases = new Set<() => void>()
-  const materialDeleteReleases = new Set<() => void>()
   const sessionDeleteReleases = new Set<() => void>()
   const uploadReleases = new Set<() => void>()
   const submissionReleases = new Set<() => void>()
@@ -504,6 +504,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     remainingDetailFailures: Map<string, number>
     listHolds: Array<Promise<void>>
     listHoldReleases: Array<() => void>
+    detailHolds: Array<Promise<void>>
+    detailHoldReleases: Array<() => void>
     submissionsByKey: Map<string, ScriptedTask>
     eventHandlers: {
       onInvalidation: () => void
@@ -523,6 +525,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     remainingDetailFailures: new Map(Object.entries(options.taskScript?.failDetailReads ?? {})),
     listHolds: [],
     listHoldReleases: [],
+    detailHolds: [],
+    detailHoldReleases: [],
     submissionsByKey: new Map(),
     eventHandlers: null
   }
@@ -582,7 +586,7 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
 
   window.__creationDeckTest = {
     draftRecord: (key) => readLocalDraft(localStorage, storyUserId, key),
-    deleteMaterialCalls: () => deletedIds,
+    materialIds: (sessionId) => (materials.get(sessionId) ?? []).map((material) => material.id),
     materialUrlCalls: () => materialUrlCalls,
     resultBlobTransfers: () => resultBlobTransfers,
     resultReuseCalls: () => resultReuseCalls,
@@ -594,7 +598,6 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       for (const release of resultBlobReleases) release()
       resultBlobReleases.clear()
     },
-    releaseMaterialDeletes: () => releaseAll(materialDeleteReleases),
     releaseSessionDeletes: () => releaseAll(sessionDeleteReleases),
     deferNextMaterialList: () => {
       deferNextMaterialList = true
@@ -668,6 +671,20 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     releaseHeldListResponses: () => {
       const releases = taskState.listHoldReleases.splice(0)
       taskState.listHolds.splice(0)
+      for (const release of releases) release()
+    },
+    holdNextDetailResponse: () => {
+      let release: () => void = () => undefined
+      taskState.detailHolds.push(
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+      )
+      taskState.detailHoldReleases.push(release)
+    },
+    releaseHeldDetailResponses: () => {
+      const releases = taskState.detailHoldReleases.splice(0)
+      taskState.detailHolds.splice(0)
       for (const release of releases) release()
     }
   }
@@ -769,6 +786,11 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
         kind: file.type.startsWith('audio/') ? 'audio' : 'image',
         fileName: file.name
       })
+      if (uploaded.kind === 'image') {
+        uploaded.widthPx = 1024
+        uploaded.heightPx = 768
+        uploaded.pixelCount = 1024 * 768
+      }
       if (uploaded.kind === 'audio') {
         uploaded.mimeType = file.name.endsWith('.wav')
           ? 'audio/wav'
@@ -822,17 +844,6 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       }
       materials.set(sessionId, [...(materials.get(sessionId) ?? []), withFacts])
       return succeeded(withFacts)
-    },
-    deleteMaterial: async (materialId) => {
-      deletedIds.push(materialId)
-      if (options.deleteMaterialDeferred) await waitForRelease(materialDeleteReleases)
-      for (const [sessionId, list] of materials) {
-        materials.set(
-          sessionId,
-          list.filter((entry) => entry.id !== materialId)
-        )
-      }
-      return succeeded(undefined)
     },
     loadThumbnailUrl: (materialId) => scriptedMaterialUrl(materialId),
     loadPreviewUrl: (materialId) => scriptedMaterialUrl(materialId),
@@ -928,6 +939,8 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     getTask: async (taskId) => {
       await taskDetailsReady
       taskState.getTaskCalls.push(taskId)
+      const holds = taskState.detailHolds.splice(0)
+      for (const held of holds) await held
       const remaining = taskState.remainingDetailFailures.get(taskId) ?? 0
       if (remaining > 0) {
         taskState.remainingDetailFailures.set(taskId, remaining - 1)
@@ -935,7 +948,17 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
       }
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
-      return succeeded(detailOf(task))
+      const detail = detailOf(task)
+      return succeeded({
+        ...detail,
+        referenceMaterials:
+          task.referenceMaterials ??
+          detail.specification?.references.map(
+            ({ materialId }) =>
+              materials.get(task.sessionId)?.find((material) => material.id === materialId) ?? null
+          ) ??
+          []
+      })
     },
     cancelTask: async (taskId) => {
       taskState.cancelledIds.push(taskId)
@@ -1035,7 +1058,6 @@ interface StoryOptions {
   readonly materialUrlDeferred?: boolean
   readonly materialImageUrl?: string
   readonly materialImageUrls?: readonly string[]
-  readonly deleteMaterialDeferred?: boolean
   readonly deleteSessionDeferred?: boolean
   readonly uploadDeferred?: boolean
   readonly uploadOutcome?:
@@ -1063,7 +1085,6 @@ function resolvedRuntimeOptions(options: StoryOptions): RuntimeOptions {
     materialUrlDeferred: options.materialUrlDeferred,
     materialImageUrl: options.materialImageUrl,
     materialImageUrls: options.materialImageUrls,
-    deleteMaterialDeferred: options.deleteMaterialDeferred,
     deleteSessionDeferred: options.deleteSessionDeferred,
     uploadDeferred: options.uploadDeferred,
     uploadOutcome: options.uploadOutcome,
@@ -1214,7 +1235,7 @@ export function CreationWorkbenchRestartStory(options: StoryOptions = {}): React
       <button type="button" onClick={() => setRun((current) => current + 1)}>
         Restart app
       </button>
-      <RuntimeWorkbenchScope key={run} options={options}>
+      <RuntimeWorkbenchScope key={run} options={run === 0 ? options : { ...options, drafts: {} }}>
         <NavigationStorySurface />
       </RuntimeWorkbenchScope>
     </I18nextProvider>

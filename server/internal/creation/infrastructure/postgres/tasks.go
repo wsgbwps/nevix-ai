@@ -31,12 +31,12 @@ var nonTerminalTaskStatuses = []string{
 	string(domain.TaskPersisting), string(domain.TaskCancelling),
 }
 
-// LoadSessionForAdmission reads the active owned session on the admission
-// transaction so liveness and ownership share the caller's snapshot.
+// LoadSessionForAdmission locks the active owned session until admission
+// commits, so deletion cannot end its material hold before retention lands.
 func (r *GenerationTaskRepository) LoadSessionForAdmission(ctx context.Context, tx domain.TxExecutor, owner, sessionID domain.UUID) (domain.Session, error) {
 	row := tx.QueryRow(ctx,
 		`SELECT id, name, created_at, updated_at FROM creation_sessions
-		 WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL`,
+		 WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL FOR SHARE`,
 		sessionID, owner)
 	var s domain.Session
 	if err := row.Scan(&s.ID, &s.Name, &s.CreatedAt, &s.UpdatedAt); err != nil {
@@ -312,6 +312,7 @@ func (r *GenerationTaskRepository) ListBySession(ctx context.Context, owner, ses
 		SELECT retained.task_id, retained.material_id
 		FROM creation_generation_task_references retained
 		JOIN creation_reference_materials material ON material.id = retained.material_id
+			AND material.removed_at IS NULL
 		WHERE retained.task_id = ANY($1::uuid[])`, ids)
 	if err != nil {
 		return nil, nil, fmt.Errorf("creation: list task reference availability: %w", err)
@@ -349,7 +350,43 @@ func (r *GenerationTaskRepository) GetForOwner(ctx context.Context, owner, taskI
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	task, slots, _, err := readTaskWithSlotsAndJob(ctx, tx, owner, taskID, false)
-	return task, slots, err
+	if err != nil {
+		return task, slots, err
+	}
+	task.ReferenceMaterials = make([]*domain.ReferenceMaterial, len(task.Spec.References))
+	if len(task.Spec.References) == 0 {
+		return task, slots, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT `+materialColumns+`
+		FROM creation_generation_task_references retained
+		JOIN creation_generation_tasks task ON task.id = retained.task_id
+			AND task.owner_user_id = $2 AND task.dismissed_at IS NULL
+		JOIN creation_reference_materials m ON m.id = retained.material_id
+			AND m.removed_at IS NULL
+		JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $2
+		WHERE retained.task_id = $1`, taskID, owner)
+	if err != nil {
+		return domain.GenerationTask{}, nil, fmt.Errorf("creation: read task reference materials: %w", err)
+	}
+	defer rows.Close()
+	byID := make(map[domain.UUID]domain.ReferenceMaterial)
+	for rows.Next() {
+		material, err := scanMaterialRows(rows)
+		if err != nil {
+			return domain.GenerationTask{}, nil, err
+		}
+		byID[material.ID] = material
+	}
+	if err := rows.Err(); err != nil {
+		return domain.GenerationTask{}, nil, fmt.Errorf("creation: read task reference materials rows: %w", err)
+	}
+	for position, reference := range task.Spec.References {
+		if material, ok := byID[reference.MaterialID]; ok {
+			task.ReferenceMaterials[position] = &material
+		}
+	}
+	return task, slots, nil
 }
 
 // GetForWorker resolves task, slots, and the active job for the queue
@@ -585,6 +622,13 @@ func (r *GenerationTaskRepository) Dismiss(ctx context.Context, tx domain.TxExec
 		return false, fmt.Errorf("creation: dismiss task: %w", err)
 	}
 	return tag == 1, nil
+}
+
+func (r *GenerationTaskRepository) ReleaseReferences(ctx context.Context, tx domain.TxExecutor, taskID domain.UUID) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM creation_generation_task_references WHERE task_id = $1`, taskID); err != nil {
+		return fmt.Errorf("creation: release dismissed task references: %w", err)
+	}
+	return nil
 }
 
 // TransitionJob performs one guarded job migration, binding the external

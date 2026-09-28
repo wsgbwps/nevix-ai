@@ -221,19 +221,6 @@ func (h *MaterialHandler) ListMaterials(w http.ResponseWriter, r *http.Request) 
 	encodeJSON(w, http.StatusOK, listMaterialsResponse{Materials: items, NextCursor: cursorToken(next)})
 }
 
-// DeleteMaterial answers DELETE /creation/materials/{materialID} with 204.
-func (h *MaterialHandler) DeleteMaterial(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathUUID(w, r, "materialID")
-	if !ok {
-		return
-	}
-	if err := h.materials.Delete(r.Context(), creatorID(w, r), id); err != nil {
-		fail(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // --- shared helpers -------------------------------------------------------
 
 // creatorID extracts the authenticated principal's user id; the guard has

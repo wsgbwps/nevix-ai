@@ -283,6 +283,61 @@ test('the frozen specification rides the detail into the gallery view', async ()
   })
 })
 
+test('task detail parses aligned material facts and unavailable positions', async () => {
+  const client = createGenerationTaskClient(serverUrl)
+  const materialId = 'cccccccc-0000-4000-8000-000000000003'
+  const material = {
+    id: materialId,
+    kind: 'image',
+    file_name: 'historical.png',
+    mime_type: 'image/png',
+    byte_size: 1024,
+    width_px: 1024,
+    height_px: 768,
+    pixel_count: 786432,
+    duration_ms: null,
+    checksum_sha256: 'aa'.repeat(32),
+    claims_version: 1,
+    created_at: '2026-09-01T02:00:00Z'
+  }
+  const specification = {
+    ...frozenSpecification,
+    references: [...frozenSpecification.references, { ...frozenSpecification.references[0] }]
+  }
+  const payload = {
+    ...specDetail(specification),
+    reference_materials: [material, null]
+  }
+  const detail = await withFetch(payload, () => client.getTask('token', 'task'))
+  assert.equal(detail.outcome, 'succeeded')
+  if (detail.outcome !== 'succeeded') return
+  assert.deepEqual(detail.value.referenceMaterials, [
+    {
+      id: materialId,
+      kind: 'image',
+      fileName: 'historical.png',
+      mimeType: 'image/png',
+      byteSize: 1024,
+      widthPx: 1024,
+      heightPx: 768,
+      pixelCount: 786432,
+      durationMs: null,
+      checksumSha256: 'aa'.repeat(32),
+      claimsVersion: 1,
+      createdAt: '2026-09-01T02:00:00Z'
+    },
+    null
+  ])
+  for (const invalid of [[material], [{ ...material, id: 'wrong' }, null]]) {
+    assert.deepEqual(
+      await withFetch({ ...payload, reference_materials: invalid }, () =>
+        client.getTask('token', 'task')
+      ),
+      { outcome: 'network-failure' }
+    )
+  }
+})
+
 test('a detail without a specification keeps parsing with a null freeze', async () => {
   const client = createGenerationTaskClient(serverUrl)
   for (const payload of [specDetail(undefined), specDetail(null)]) {

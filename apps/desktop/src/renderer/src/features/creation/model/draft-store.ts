@@ -30,6 +30,46 @@ export interface LocalDraftRecord extends GenerationParameterValues {
   readonly operationNotice?: LocalDraftOperationNotice
 }
 
+/** Identifies one repeated binding while unrelated positions may move during an upload. */
+export interface ReferenceBindingTarget {
+  readonly materialId: string
+  readonly position: number
+  readonly occurrence: number
+  readonly count: number
+  readonly role: DraftReferenceRole
+}
+
+export function referenceBindingTarget(
+  references: readonly DraftReferenceView[],
+  position: number
+): ReferenceBindingTarget | null {
+  const reference = references[position]
+  if (!reference) return null
+  const matching = references
+    .map((entry, index) => (entry.materialId === reference.materialId ? index : -1))
+    .filter((index) => index >= 0)
+  return {
+    materialId: reference.materialId,
+    position,
+    occurrence: matching.indexOf(position),
+    count: matching.length,
+    role: reference.role
+  }
+}
+
+export function referenceBindingPosition(
+  references: readonly DraftReferenceView[],
+  target: ReferenceBindingTarget
+): number {
+  const matching = references
+    .map((entry, index) => (entry.materialId === target.materialId ? index : -1))
+    .filter((index) => index >= 0)
+  const position = matching[target.occurrence]
+  return matching.length === target.count && references[position]?.role === target.role
+    ? position
+    : -1
+}
+
 export interface LocalDraftOperationNotice {
   /** A session-materialization request may have been sent but its outcome is unknown. */
   readonly sessionUnconfirmed: boolean
@@ -280,17 +320,29 @@ export function replaceLocalDraftMaterial(
   key: string,
   previousMaterialId: string,
   materialId: string,
-  role: DraftReferenceRole
+  role: DraftReferenceRole,
+  target?: ReferenceBindingTarget
 ): void {
   const record = readLocalDraft(storage, userId, key)
   if (record === null) return
-  if (!record.references.some((reference) => reference.materialId === previousMaterialId)) return
+  const position = target === undefined ? -1 : referenceBindingPosition(record.references, target)
+  if (
+    (target !== undefined &&
+      (position < 0 || (record.mediaType === 'video' && position !== target.position))) ||
+    !record.references.some((reference) => reference.materialId === previousMaterialId)
+  )
+    return
+  const stillBound = target !== undefined && target.count > 1
   const idMap = new Map([[previousMaterialId, materialId]])
   writeLocalDraft(storage, userId, key, {
     ...record,
-    promptDocument: remapPromptMentions(record.promptDocument, idMap),
-    references: record.references.map((reference) =>
-      reference.materialId === previousMaterialId ? { materialId, role } : reference
+    promptDocument: stillBound
+      ? record.promptDocument
+      : remapPromptMentions(record.promptDocument, idMap),
+    references: record.references.map((reference, index) =>
+      reference.materialId === previousMaterialId && (target === undefined || index === position)
+        ? { materialId, role }
+        : reference
     )
   })
 }

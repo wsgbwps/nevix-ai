@@ -261,6 +261,7 @@ export const creationTranslations = defineResourceTranslations({
           retryUncompleted: '只重试未完成项',
           download: '下载',
           reedit: '重新编辑',
+          reeditFailed: '无法读取任务当前详情，请重试。',
           more: '更多操作',
           delete: '删除任务'
         },
@@ -849,6 +850,7 @@ export const creationTranslations = defineResourceTranslations({
           retryUncompleted: 'Retry uncompleted',
           download: 'Download',
           reedit: 'Re-edit',
+          reeditFailed: 'Could not read the current task details. Try again.',
           more: 'More actions',
           delete: 'Delete task'
         },

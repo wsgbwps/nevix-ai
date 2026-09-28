@@ -2,7 +2,7 @@
 
 ## 状态
 
-已接受 — 2026-09-27。修订 [ADR-0016](0016-ai-creation-v1-trusted-seams.md) 中“从 Composer 移除即删除素材”的决定，以及 [ADR-0022](0022-task-deletion-hides-the-task-and-removes-its-results.md) 中“任务删除不释放参考素材”的决定；[ADR-0023](0023-unavailable-historical-creation-references.md) 对真正缺失的历史引用仍适用。本 ADR 是实施合同，不表示源码已经完成迁移。
+已接受 — 2026-09-27；2026-09-28 修订开发期旧数据兼容范围。修订 [ADR-0016](0016-ai-creation-v1-trusted-seams.md) 中“从 Composer 移除即删除素材”的决定，以及 [ADR-0022](0022-task-deletion-hides-the-task-and-removes-its-results.md) 中“任务删除不释放参考素材”的决定；[ADR-0023](0023-unavailable-historical-creation-references.md) 的不可用引用交互仍适用。
 
 ## 背景
 
@@ -10,14 +10,14 @@
 
 ## 决策
 
-- **Draft 解绑不是素材删除。** Reference Material 是当前 User 在 Creation Session 中可被多个 Generation Task 复用的记录；Draft 的引用只是本设备正在编辑的绑定。编辑器移除或替换一张卡，只更新 Draft 引用及其 Reference Mention，不调用 `DELETE /creation/materials/{materialID}`，不改变素材记录或已准入任务。尚未 finalize 的上传仍可取消。新 Desktop 移除删除调用并清空旧版持久删除重试；Server 在先于 Desktop 升级和修复旧数据时，须把旧 DELETE 路由改成无删除副作用的兼容 `204`，让在途重试安全结束。新契约不再提供单条素材删除操作；未来若要提供，需另定独立用户动作。
+- **Draft 解绑不是素材删除。** Reference Material 是当前 User 在 Creation Session 中可被多个 Generation Task 复用的记录；Draft 的引用只是本设备正在编辑的绑定。编辑器移除或替换一张卡，只更新 Draft 引用及其 Reference Mention，不调用 `DELETE /creation/materials/{materialID}`，不改变素材记录或已准入任务。尚未 finalize 的上传仍可取消。开发期旧 DELETE 路由与 Desktop 的持久删除重试退场；新契约不提供单条素材删除操作。未来若要提供，需另定独立用户动作。
 - **任务独立冻结与恢复。** 每张任务在准入事务中冻结有序 Generation Specification，并写自己的 task-to-material 保留关系。多张任务可引用同一个 material ID 和不可变对象，无需复制文件。TaskCard 与“重新编辑”以被选任务的冻结引用和其保留关系为准；Go 对精确任务、Creator 和每项素材重新授权并提供编辑器所需的素材事实，Desktop 不以当前 Draft 或会话素材列表作为可用性判据。重复 ID 的不同冻结位置、顺序与 role 原样保留；冻结 prompt 仍按普通文本恢复，不反推 Reference Mention。真正缺失的记录或任务保留关系遵循 ADR-0023 的不可用状态，不凭缩略图猜测可用性。
 - **删除任务只释放自己的保留关系。** ADR-0022 的任务隐藏、结果移除、终态与用量事实保持；同一写事务另释放该任务的 task-to-material 关系，不改其他任务的冻结规格或保留关系。已隐藏任务的详情仍返回历史规格，但不再凭该任务授权参考媒体；素材拥有者若另有有效素材记录，仍可凭独立权限读取。结果对象、有效 Team Publication 与受限结果的各自生命周期不由这次关系释放改写。
 - **最后一个保留者决定物理清理。** 未删除会话中的有效 User-owned Reference Material 记录、未删除任务的保留关系、有效 Team Publication 的素材快照分别保留共享对象。Draft 仅在设备本地，不能作为服务端清理判据；所以移除 Draft 绑定或只删除任务 A 都不能清理仍被素材记录或任务 B 引用的文件。会话删除解除其素材记录的保留资格，任务删除解除该任务的保留关系。每次可能移除最后一个保留者的写事务都按精确 object key 确认其他保留者并登记持久 cleanup fact；现有 worker 执行前再次确认，才删除对象。不引入通用 blob registry 或只靠计数器决定删除。
-- **兼容修复旧 `removed_at`。** 旧版编辑器造成的移除不被解释为用户明确要求删除历史素材。Server 升级版在接受旧版请求前必须使 DELETE 路由无删除副作用；对仍属有效会话且底层对象确实可用的旧记录恢复可复用状态，保持原 material ID、权利声明与对象 key，不要求它已有任务保留关系；随后释放已隐藏任务遗留的保留关系。对象已清理或无法确认可用的记录不盲目恢复；其冻结任务引用继续按 ADR-0023 显示真实缺口。修复需可重试、幂等，并与新任务准入和对象清理串行化。
+- **开发期旧数据不自动修复。** 产品尚未上线，旧版编辑器写入的 `removed_at` 记录不再自动恢复，已隐藏任务的旧保留关系也不由 worker 扫描修复。旧任务的不可用引用按 ADR-0023 显示；需要保留旧数据时另作一次性迁移。现行任务删除在写事务中同步释放自己的保留关系。
 
 ## 取舍与后果
 
 - 当前素材记录仍有效时，即使所有任务都已删除，底层文件也会继续保留：设备本地 Draft 可能仍引用它。将来若要单条素材删除，需独立定义用户动作及其与多设备 Draft、历史任务的关系。
 - ADR-0022 原有“不回收字节”只继续约束生成结果对象；参考素材对象在最后一个有效保留者消失后可以清理。被删除任务的直接详情保留冻结文字事实，但不保证其原参考图仍可预览。
-- 实施涉及 Desktop Draft/牌堆、任务范围的素材读取契约、Go 授权与任务删除事务、清理判据、旧数据修复和持久删除重试的退场；先完成这些合同，再把“重新编辑”改为任务来源。共享对象的其他持有者必须在每条删除路径的测试中得到保护。
+- 实施涉及 Desktop Draft/牌堆、任务范围的素材读取契约、Go 授权与任务删除事务、清理判据。共享对象的其他持有者必须在每条删除路径的测试中得到保护。旧迁移保留为已执行的历史记录，但运行时不再提供开发期旧数据恢复。

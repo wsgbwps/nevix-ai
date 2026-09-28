@@ -446,7 +446,8 @@ func TestReferenceMaterialCleanupFailureDoesNotBlockAnotherClaim(t *testing.T) {
 		WHERE id = ANY($1::uuid[]) AND cleanup_confirmed_at IS NULL`, ids).Scan(&failedAttempts, &retryDelay); err != nil {
 		t.Fatalf("read failed cleanup retry: %v", err)
 	}
-	if failedAttempts != 1 || retryDelay < 59 || retryDelay > 61 {
+	// terminal_at precedes the worker's failed delete; allow that test setup time.
+	if failedAttempts != 1 || retryDelay < 59 || retryDelay > 66 {
 		t.Fatalf("failed cleanup attempt=%d delay=%.3fs, want attempt 1 and 60s", failedAttempts, retryDelay)
 	}
 }

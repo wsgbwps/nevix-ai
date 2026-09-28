@@ -9,7 +9,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
 postgres_image="postgres:17.5-alpine"
-minio_image="quay.io/minio/minio:RELEASE.2024-06-13T22-53-53Z"
+minio_image="bitnamilegacy/minio:2024.6.13@sha256:aa1752895e6d2b420e394d55241d5b2c948960715db0a50bb648f430e447e645"
 postgres_host_port=54391
 s3_host_port=9001
 postgres_container="nevix-creation-test-pg"
@@ -133,7 +133,7 @@ docker run --rm -d \
   -e "MINIO_ROOT_USER=nevix-creation-test" \
   -e "MINIO_ROOT_PASSWORD=$s3_secret" \
   -p "127.0.0.1:$s3_host_port:9000" \
-  "$minio_image" server /data >/dev/null
+  "$minio_image" minio server /bitnami/minio/data >/dev/null
 
 wait_for_minio() {
   local attempt
@@ -181,7 +181,8 @@ assert_creation_integration_executed() {
     TestCredentialFailureAfterPreparationCleansBeforeHoldAndCancel
     TestReferencePreparationCleanupErrorsRemainSanitized
     TestDownloadServesRangeAndChecksumHeaders
-    TestDeleteMaterialRemovesRowAndBlobCleanupSchedules
+    TestDeletedSessionMaterialRemainsAvailableToItsFrozenTask
+    TestTaskListProjectsHistoricalReferenceAvailabilityByFrozenPosition
     TestContractErrorEnvelopeShapeOnEveryCreationErrorPath
     TestProviderConnectionPermissionMatrix
     TestConfigureProviderConnectionLifecycle

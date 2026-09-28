@@ -50,6 +50,45 @@ export interface ReferenceMaterialView {
   readonly createdAt: string
 }
 
+/** Shared strict parser for session materials and task-scoped material facts. */
+export function parseMaterial(entry: unknown): ReferenceMaterialView | null {
+  const id = readStringField(entry, 'id')
+  const kindRaw = readStringField(entry, 'kind')
+  const kind = kindRaw === 'image' || kindRaw === 'video' || kindRaw === 'audio' ? kindRaw : null
+  const fileName = readStringField(entry, 'file_name')
+  const mimeType = readStringField(entry, 'mime_type')
+  if (!id || !kind || fileName === null || !mimeType) return null
+
+  let byteSize: number | null = null
+  if (
+    typeof entry === 'object' &&
+    entry !== null &&
+    typeof (entry as Record<string, unknown>).byte_size === 'number'
+  ) {
+    byteSize = (entry as Record<string, unknown>).byte_size as number
+  }
+  const checksum = readStringField(entry, 'checksum_sha256')
+  const createdAt = readStringField(entry, 'created_at')
+  if (byteSize === null || !checksum || !createdAt) return null
+
+  const claimsVersionRaw = readNumberOrNullField(entry, 'claims_version')
+  if (claimsVersionRaw === null) return null
+  return {
+    id,
+    kind,
+    fileName,
+    mimeType,
+    byteSize,
+    widthPx: readNumberOrNullField(entry, 'width_px'),
+    heightPx: readNumberOrNullField(entry, 'height_px'),
+    pixelCount: readNumberOrNullField(entry, 'pixel_count'),
+    durationMs: readNumberOrNullField(entry, 'duration_ms'),
+    checksumSha256: checksum,
+    claimsVersion: claimsVersionRaw,
+    createdAt
+  }
+}
+
 export interface MaterialPage {
   readonly materials: readonly ReferenceMaterialView[]
   readonly nextCursor: string | null
@@ -66,8 +105,6 @@ export interface DisplayUrlView {
   readonly url: string
   readonly expiresAt: string
 }
-
-const materialDeleteTimeoutMs = 30_000
 
 /**
  * Every trusted-command failure the Workbench can observe. Clients branch on
@@ -247,7 +284,6 @@ export function createCreationClient(serverUrl: string): {
     sessionId: string,
     input: CreateMaterialFromResultInput
   ): Promise<CreationApiResult<ReferenceMaterialView>>
-  deleteMaterial(token: string, materialId: string): Promise<CreationApiResult<void>>
   /** Fetches one owned image material's short-lived presigned thumbnail URL. */
   loadMaterialThumbnailUrl(
     token: string,
@@ -310,44 +346,6 @@ export function createCreationClient(serverUrl: string): {
     if (typeof payload !== 'object' || payload === null) return null
     const value = (payload as Record<string, unknown>).next_cursor
     return typeof value === 'string' ? value : null
-  }
-
-  function parseMaterial(entry: unknown): ReferenceMaterialView | null {
-    const id = readStringField(entry, 'id')
-    const kindRaw = readStringField(entry, 'kind')
-    const kind = kindRaw === 'image' || kindRaw === 'video' || kindRaw === 'audio' ? kindRaw : null
-    const fileName = readStringField(entry, 'file_name')
-    const mimeType = readStringField(entry, 'mime_type')
-    if (!id || !kind || fileName === null || !mimeType) return null
-
-    let byteSize: number | null = null
-    if (
-      typeof entry === 'object' &&
-      entry !== null &&
-      typeof (entry as Record<string, unknown>).byte_size === 'number'
-    ) {
-      byteSize = (entry as Record<string, unknown>).byte_size as number
-    }
-    const checksum = readStringField(entry, 'checksum_sha256')
-    const createdAt = readStringField(entry, 'created_at')
-    if (byteSize === null || !checksum || !createdAt) return null
-
-    const claimsVersionRaw = readNumberOrNullField(entry, 'claims_version')
-    if (claimsVersionRaw === null) return null
-    return {
-      id,
-      kind,
-      fileName,
-      mimeType,
-      byteSize,
-      widthPx: readNumberOrNullField(entry, 'width_px'),
-      heightPx: readNumberOrNullField(entry, 'height_px'),
-      pixelCount: readNumberOrNullField(entry, 'pixel_count'),
-      durationMs: readNumberOrNullField(entry, 'duration_ms'),
-      checksumSha256: checksum,
-      claimsVersion: claimsVersionRaw,
-      createdAt
-    }
   }
 
   return {
@@ -438,25 +436,6 @@ export function createCreationClient(serverUrl: string): {
       if (result.outcome !== 'succeeded') return result
       const material = parseMaterial(result.payload)
       return material ? { outcome: 'succeeded', value: material } : { outcome: 'network-failure' }
-    },
-    deleteMaterial: async (token, materialId) => {
-      const url = new URL(`/creation/materials/${encodeURIComponent(materialId)}`, serverUrl)
-      let response: Response
-      try {
-        response = await fetch(url, {
-          method: 'DELETE',
-          redirect: 'error',
-          signal: AbortSignal.timeout(materialDeleteTimeoutMs),
-          headers: { Authorization: `Bearer ${token}` }
-        })
-      } catch {
-        return { outcome: 'network-failure' }
-      }
-      if (response.ok) return { outcome: 'succeeded', value: undefined }
-      if (response.status === 401) return { outcome: 'unauthorized' }
-      if (response.status === 403) return { outcome: 'forbidden' }
-      if (response.status === 404) return { outcome: 'request-rejected', code: 'not_found' }
-      return { outcome: 'network-failure' }
     },
     loadMaterialThumbnailUrl: (token, materialId) =>
       fetchDisplayUrl(serverUrl, token, `/creation/materials/${materialId}/thumbnail-url`),

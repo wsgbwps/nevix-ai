@@ -6,7 +6,7 @@ import (
 )
 
 func TestPublicationRejectsUnavailableHistoricalReferences(t *testing.T) {
-	h, _, creatorEmailAddress := readyTaskHarness(t, harnessOptions{runWorkers: true})
+	h, admin, creatorEmailAddress := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	creator := h.loginToken(t, creatorEmailAddress, harnessPassword)
 	other := h.loginToken(t, otherCreatorEmail, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1})
@@ -49,9 +49,11 @@ func TestPublicationRejectsUnavailableHistoricalReferences(t *testing.T) {
 	for _, scenario := range []struct {
 		name              string
 		deleteMaterialRow bool
+		legacyMissing     bool
 	}{
-		{"missing-material-row", true},
-		{"missing-task-retention", false},
+		{"missing-material-row", true, false},
+		{"missing-task-retention", false, false},
+		{"legacy-missing-object", false, true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			assetID, taskID, missing := formAsset("publication-" + scenario.name)
@@ -66,7 +68,18 @@ func TestPublicationRejectsUnavailableHistoricalReferences(t *testing.T) {
 			if status, body := h.doRequest(t, http.MethodPost, path, other, map[string]any{"idempotency_key": "foreign-" + scenario.name}); status != http.StatusNotFound {
 				t.Fatalf("foreign publish status=%d body=%s", status, body)
 			}
-			if _, err := h.ownerPool.Exec(h.ctx, `DELETE FROM creation_generation_task_references WHERE task_id = $1::uuid AND material_id = $2::uuid`, taskID, missing); err != nil {
+			if scenario.legacyMissing {
+				var key string
+				if err := h.ownerPool.QueryRow(h.ctx, `SELECT blob_key FROM creation_reference_materials WHERE id = $1::uuid`, missing).Scan(&key); err != nil {
+					t.Fatalf("read legacy object key: %v", err)
+				}
+				if err := h.directStore.Delete(h.ctx, key); err != nil {
+					t.Fatalf("remove legacy object: %v", err)
+				}
+				if _, err := h.ownerPool.Exec(h.ctx, `UPDATE creation_reference_materials SET removed_at = now() WHERE id = $1::uuid`, missing); err != nil {
+					t.Fatalf("mark legacy material removed: %v", err)
+				}
+			} else if _, err := h.ownerPool.Exec(h.ctx, `DELETE FROM creation_generation_task_references WHERE task_id = $1::uuid AND material_id = $2::uuid`, taskID, missing); err != nil {
 				t.Fatalf("remove task retention: %v", err)
 			}
 			if scenario.deleteMaterialRow {
@@ -84,6 +97,31 @@ func TestPublicationRejectsUnavailableHistoricalReferences(t *testing.T) {
 			mustDecode(t, body, &afterConflict)
 			if status != http.StatusOK || afterConflict.Asset.Publication != nil {
 				t.Fatalf("publication formed after conflict status=%d body=%s", status, body)
+			}
+			if scenario.legacyMissing {
+				var detail struct {
+					PrivateOrigin struct {
+						Specification struct {
+							References []any `json:"references"`
+						} `json:"specification"`
+						References []any `json:"references"`
+					} `json:"private_origin"`
+				}
+				mustDecode(t, body, &detail)
+				if len(detail.PrivateOrigin.Specification.References) != 2 || len(detail.PrivateOrigin.References) != 1 {
+					t.Fatalf("legacy gap missing from creator asset detail: %s", body)
+				}
+				status, body = h.doRequest(t, http.MethodGet, "/creation/inspiration/assets/"+assetID, admin, nil)
+				if status != http.StatusOK {
+					t.Fatalf("admin asset detail: %d %s", status, body)
+				}
+				var adminDetail struct {
+					References []any `json:"references"`
+				}
+				mustDecode(t, body, &adminDetail)
+				if len(adminDetail.References) != 1 {
+					t.Fatalf("legacy gap missing from admin asset detail: %s", body)
+				}
 			}
 			if scenario.deleteMaterialRow {
 				if status, body := h.doRequest(t, http.MethodDelete, "/creation/assets/"+assetID, creator, nil); status != http.StatusNoContent {

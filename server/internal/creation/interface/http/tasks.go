@@ -151,7 +151,16 @@ func (h *GenerationTaskHandler) GetTask(w http.ResponseWriter, r *http.Request) 
 		fail(w, r, err)
 		return
 	}
-	encodeJSON(w, http.StatusOK, toTaskDetail(task, slots))
+	detail := toTaskDetail(task, slots)
+	materials := make([]*materialResource, len(task.ReferenceMaterials))
+	for i, material := range task.ReferenceMaterials {
+		if material != nil {
+			resource := toMaterialResource(*material)
+			materials[i] = &resource
+		}
+	}
+	detail.ReferenceMaterials = &materials
+	encodeJSON(w, http.StatusOK, detail)
 }
 
 // CancelTask answers POST /creation/tasks/{taskID}/cancel; repeated cancels
@@ -399,9 +408,10 @@ func toTaskDeletionResource(result application.DismissalResult) taskDeletionReso
 }
 
 type generationTaskDetailResource struct {
-	Task          generationTaskResource   `json:"task"`
-	Slots         []generationSlotResource `json:"slots"`
-	Specification *generationSpecResource  `json:"specification"`
+	Task               generationTaskResource   `json:"task"`
+	Slots              []generationSlotResource `json:"slots"`
+	Specification      *generationSpecResource  `json:"specification"`
+	ReferenceMaterials *[]*materialResource     `json:"reference_materials,omitempty"`
 }
 
 type generationSpecResource struct {

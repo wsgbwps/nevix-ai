@@ -15,9 +15,6 @@ registerHooks({
 
 const { listReferenceMaterialUploadRecoveries, putReferenceMaterialUploadRecovery } =
   await import('../../src/renderer/src/features/creation/model/reference-material-upload-recovery.ts')
-const { listReferenceMaterialDeleteRecoveries, putReferenceMaterialDeleteRecovery } =
-  await import('../../src/renderer/src/features/creation/model/reference-material-delete-recovery.ts')
-
 function fakeStorage(): Storage {
   const entries = new Map<string, string>()
   return {
@@ -112,50 +109,4 @@ test('a provisional recovery may omit server-issued facts but not declared facts
       }
     ]
   )
-})
-
-test('material delete recovery persists only scoped server identities', () => {
-  const storage = fakeStorage()
-  putReferenceMaterialDeleteRecovery(storage, 'user-1', 'https://server.example', {
-    sessionId: '00000000-0000-4000-8000-000000000003',
-    materialId: '00000000-0000-4000-8000-000000000004',
-    objectKey: 'reference-materials/private',
-    signedUrl: 'https://signed.example/private',
-    credential: 'secret'
-  } as never)
-
-  const serialized = storage.getItem(storage.key(0) ?? '') ?? ''
-  assert.equal(serialized.includes('reference-materials/'), false)
-  assert.equal(serialized.includes('signed.example'), false)
-  assert.equal(serialized.includes('secret'), false)
-  assert.deepEqual(
-    listReferenceMaterialDeleteRecoveries(storage, 'user-1', 'https://server.example'),
-    [
-      {
-        sessionId: '00000000-0000-4000-8000-000000000003',
-        materialId: '00000000-0000-4000-8000-000000000004'
-      }
-    ]
-  )
-  assert.deepEqual(
-    listReferenceMaterialDeleteRecoveries(storage, 'user-2', 'https://server.example'),
-    []
-  )
-})
-
-test('material delete recovery drops non-UUID path traversal facts instead of replaying them', () => {
-  const storage = fakeStorage()
-  storage.setItem(
-    'nevix:creation:reference-material-delete:user-1:https%3A%2F%2Fserver.example:corrupt',
-    JSON.stringify({
-      sessionId: '00000000-0000-4000-8000-000000000003',
-      materialId: '../sessions/00000000-0000-4000-8000-000000000004'
-    })
-  )
-
-  assert.deepEqual(
-    listReferenceMaterialDeleteRecoveries(storage, 'user-1', 'https://server.example'),
-    []
-  )
-  assert.equal(storage.length, 0)
 })

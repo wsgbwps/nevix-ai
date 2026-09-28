@@ -34,21 +34,19 @@ type MaterialRepository interface {
 	// GetForRead resolves one material for its creator through an active
 	// session; every failure shape collapses into ErrMaterialNotFound.
 	GetForRead(ctx context.Context, owner, id UUID) (ReferenceMaterial, error)
-	// GetForThumbnail resolves active material or a removed material retained
-	// by one of the same creator's immutable tasks.
+	// GetForThumbnail resolves active material or one retained by the same
+	// creator's immutable task after session deletion.
 	GetForThumbnail(ctx context.Context, owner, id UUID) (ReferenceMaterial, error)
 	// GetForTask resolves only an exact frozen reference retained by this
-	// creator's admitted task, independently of Composer/session removal.
+	// creator's admitted task, independently of Draft unbinding or session deletion.
 	GetForTask(ctx context.Context, owner, taskID, materialID UUID) (ReferenceMaterial, error)
 	GetForReadInTx(ctx context.Context, tx TxExecutor, owner, id UUID) (ReferenceMaterial, error)
 	ListBySession(ctx context.Context, owner, sessionID UUID, cursor *CompoundCursor, limit int) ([]ReferenceMaterial, *CompoundCursor, error)
-	// Remove hides an active material from Composer and future admission. The
-	// retained result reports whether a task still owns its blob lifecycle.
-	Remove(ctx context.Context, tx TxExecutor, owner, id UUID) (material ReferenceMaterial, retained bool, err error)
 	// LoadMaterialsInSession resolves the requested materials with full facts
 	// inside the caller's transaction; materials outside the session are
 	// absent, and admission treats absence as a rejection fact.
 	LoadMaterialsInSession(ctx context.Context, tx TxExecutor, owner, sessionID UUID, ids []UUID) ([]ReferenceMaterial, error)
+	WithObjectLock(ctx context.Context, key string, work func() error) error
 }
 
 // ReferenceMaterialUploadRepository persists creator-scoped upload leases.
@@ -70,6 +68,8 @@ type ReferenceMaterialUploadRepository interface {
 	TerminalizeExpiredOrInvalid(ctx context.Context, tx TxExecutor, now time.Time, limit int) error
 	LockDueCleanups(ctx context.Context, tx TxExecutor, now time.Time, limit int) ([]ReferenceMaterialUpload, error)
 	MarkCleanupAttempt(ctx context.Context, tx TxExecutor, id UUID, nextAttemptAt time.Time) (ReferenceMaterialUploadCleanup, error)
+	LockCleanupClaim(ctx context.Context, tx TxExecutor, id UUID, attempt int) (bool, error)
+	ObjectRetained(ctx context.Context, tx TxExecutor, key string) (bool, error)
 	MarkCleanupConfirmed(ctx context.Context, tx TxExecutor, id UUID, attempt int, confirmedAt time.Time) error
 }
 
@@ -135,9 +135,8 @@ type (
 // admission commits or rolls back together; queries are creator-scoped by their own SQL;
 // a guarded transition losing a race returns false, so callers can never fabricate state.
 type GenerationTaskRepository interface {
-	// LoadSessionForAdmission resolves the active owned session inside the
-	// admission transaction, so liveness and ownership share the freeze's
-	// snapshot.
+	// LoadSessionForAdmission locks the active owned session until admission
+	// commits, serializing task retention against session deletion.
 	LoadSessionForAdmission(ctx context.Context, tx TxExecutor, owner, sessionID UUID) (Session, error)
 	// FindByIdempotencyKey resolves a prior admitted task for the same
 	// creator-scoped key inside the admission transaction; ok is false when
@@ -192,11 +191,12 @@ type GenerationTaskRepository interface {
 	// and returns its current status; ok is false when the task is not the
 	// caller's at all.
 	RequestCancel(ctx context.Context, tx TxExecutor, owner, taskID UUID) (TaskStatus, bool, error)
-	// Dismiss marks one owned terminal task hidden (任务隐藏) and advances its
-	// updated_at criterion. ok is false when the task is not the caller's, is
-	// already dismissed, or still owes work — the durable twin of the domain's
-	// terminal rule.
+	// Dismiss hides one owned terminal task and advances updated_at. ok is false
+	// when the task is foreign, already dismissed, or still owes work.
 	Dismiss(ctx context.Context, tx TxExecutor, owner, taskID UUID) (bool, error)
+	// ReleaseReferences ends only this task's material holds after its result
+	// assets have been handled, in the same dismissal transaction.
+	ReleaseReferences(ctx context.Context, tx TxExecutor, taskID UUID) error
 	// TransitionJob performs one guarded job migration, optionally binding
 	// the external reference on first submission.
 	TransitionJob(ctx context.Context, tx TxExecutor, jobID UUID, from []JobStatus, to JobStatus, externalRef *string) (bool, error)

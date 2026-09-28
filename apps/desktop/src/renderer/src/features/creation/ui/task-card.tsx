@@ -240,15 +240,42 @@ export function TaskCard({
             type="button"
             data-testid={`task-edit-${snapshot.id}`}
             onClick={() => {
-              gallery.reeditTask(snapshot.id)
-              focusComposerPrompt()
+              void gallery.reeditTask(snapshot.id).then((restored) => {
+                if (restored) focusComposerPrompt()
+              })
             }}
-            disabled={spec === null}
+            disabled={
+              spec === null ||
+              (gallery.reeditAction?.taskId === snapshot.id &&
+                gallery.reeditAction.status === 'loading')
+            }
             className={`${quietButtonClass} disabled:opacity-50`}
           >
             <PencilLineIcon className="size-3.5" aria-hidden />
             {t('gallery.actions.reedit')}
           </button>
+          {gallery.reeditAction?.taskId === snapshot.id &&
+            gallery.reeditAction.status === 'failed' && (
+              <span
+                role="alert"
+                data-testid={`task-edit-error-${snapshot.id}`}
+                className="text-destructive text-xs"
+              >
+                {t('gallery.actions.reeditFailed')}
+                <button
+                  type="button"
+                  data-testid={`task-edit-retry-${snapshot.id}`}
+                  onClick={() => {
+                    void gallery.reeditTask(snapshot.id).then((restored) => {
+                      if (restored) focusComposerPrompt()
+                    })
+                  }}
+                  className="ml-2 underline"
+                >
+                  {t('state.retry')}
+                </button>
+              </span>
+            )}
           {!terminal && (
             <button
               type="button"

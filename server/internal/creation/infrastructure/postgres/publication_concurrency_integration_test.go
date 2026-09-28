@@ -226,10 +226,9 @@ func TestPublicationProjectionAndFinalRetention(t *testing.T) {
 			publication := publishFixture(t, ctx, repo, runner, fixture.creator, fixture.assetID, "publish-retention-"+transition)
 			cleanupID := seedFinalizedUpload(t, ctx, owner, fixture)
 			if err := runner.Run(ctx, func(scope domain.WriteScope) error {
-				_, _, err := NewMaterialRepository(runtime).Remove(ctx, scope.Tx(), fixture.creator, fixture.materialID)
-				return err
+				return NewSessionRepository(runtime).Delete(ctx, scope.Tx(), fixture.creator, fixture.sessionID)
 			}); err != nil {
-				t.Fatalf("remove source material: %v", err)
+				t.Fatalf("delete source session: %v", err)
 			}
 			if _, err := owner.Exec(ctx, `DELETE FROM creation_generation_task_references WHERE task_id = $1 AND material_id = $2`, fixture.taskID, fixture.materialID); err != nil {
 				t.Fatalf("release task material retention: %v", err)

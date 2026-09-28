@@ -432,8 +432,8 @@ type DismissalSkip struct {
 }
 
 // Dismiss hides one terminal owned task and removes its results in one
-// transaction: 任务隐藏 plus 结果移除, mirroring deleteSession one level down. What a
-// restriction refuses is reported in the result, never fatal.
+// transaction: 任务隐藏, reference release, and 结果移除. What a restriction
+// refuses is reported in the result, never fatal.
 func (s *TaskService) Dismiss(ctx context.Context, owner, taskID domain.UUID) (DismissalResult, error) {
 	var result DismissalResult
 	err := s.runner.Run(ctx, func(sc domain.WriteScope) error {
@@ -469,6 +469,9 @@ func (s *TaskService) Dismiss(ctx context.Context, owner, taskID domain.UUID) (D
 				continue
 			}
 			result.RemovedSlotIndexes = append(result.RemovedSlotIndexes, asset.SlotIndex)
+		}
+		if err := s.tasks.ReleaseReferences(ctx, sc.Tx(), taskID); err != nil {
+			return err
 		}
 		notifyOwner(sc, s.notify, owner)
 		return nil

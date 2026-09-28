@@ -447,61 +447,16 @@ func TestSuccessfulGenerationResultBecomesIndependentReferenceMaterialInsideServ
 	).Scan(&objectKey); err != nil {
 		t.Fatalf("read converted material key: %v", err)
 	}
-	png := pngBytes(t)
-	status, body, _ = h.createMaterialUpload(t, creator, draft.SessionID, uploadCreateInput(
-		"material-delete-"+material.ID,
-		"collision.png", "image", "image/png", int64(len(png)),
-	))
-	if status != http.StatusCreated {
-		t.Fatalf("pre-create public idempotency collision: status=%d body=%s", status, body)
+	if status, body := h.doRequest(t, http.MethodDelete, "/creation/materials/"+material.ID, creator, nil); status != http.StatusMethodNotAllowed {
+		t.Fatalf("retired material delete route: status=%d body=%s", status, body)
 	}
-	h.directStore.failDeletes(1)
-	if status, body := h.doRequest(t, http.MethodDelete, "/creation/materials/"+material.ID, creator, nil); status != http.StatusNoContent {
-		t.Fatalf("delete converted material: status=%d body=%s", status, body)
-	}
-	var cleanupID string
-	var cleanupDue bool
-	if err := h.ownerPool.QueryRow(h.ctx, `
-		SELECT id, cleanup_next_attempt_at IS NOT NULL AND cleanup_confirmed_at IS NULL
-		FROM creation_reference_material_uploads
-		WHERE material_id = $1::uuid AND object_key = $2`, material.ID, objectKey,
-	).Scan(&cleanupID, &cleanupDue); err != nil {
-		t.Fatalf("read converted material cleanup: %v", err)
-	}
-	if !cleanupDue {
-		t.Fatal("converted material delete did not persist cleanup after provider failure")
+	if got := countRows(t, h.ownerPool, `
+		SELECT count(*) FROM creation_reference_materials
+		WHERE id = $1::uuid AND removed_at IS NULL`, material.ID); got != 1 {
+		t.Fatalf("retired delete route changed converted material: %d", got)
 	}
 	if _, err := h.directStore.Head(h.ctx, objectKey); err != nil {
-		t.Fatalf("failed immediate converted-material delete did not leave test object: %v", err)
-	}
-	if _, err := h.ownerPool.Exec(h.ctx, `
-		UPDATE creation_reference_material_uploads
-		SET cleanup_next_attempt_at = now() - interval '1 minute'
-		WHERE id = $1::uuid`, cleanupID); err != nil {
-		t.Fatalf("make converted material cleanup due: %v", err)
-	}
-	workerCtx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- h.creation.RunWorkers(workerCtx) }()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := h.ownerPool.QueryRow(h.ctx, `
-			SELECT cleanup_confirmed_at IS NOT NULL
-			FROM creation_reference_material_uploads WHERE id = $1::uuid`, cleanupID,
-		).Scan(&cleanupDue); err == nil && cleanupDue {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("stop converted material cleanup worker: %v", err)
-	}
-	if !cleanupDue {
-		t.Fatal("converted material cleanup worker did not confirm deletion")
-	}
-	if _, err := h.directStore.Head(h.ctx, objectKey); err == nil {
-		t.Fatal("converted material object survived durable cleanup")
+		t.Fatalf("retired delete route removed converted object: %v", err)
 	}
 }
 

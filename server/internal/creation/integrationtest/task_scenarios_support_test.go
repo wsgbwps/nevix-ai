@@ -16,6 +16,8 @@ import (
 // commands against test-only dependencies.
 func readyTaskHarness(t *testing.T, opts harnessOptions) (*harness, string, string) {
 	t.Helper()
+	runWorkers := opts.runWorkers
+	opts.runWorkers = false
 	h := newHarnessWithOptions(t, opts)
 	h.ensureAccounts(t)
 	adminToken := h.loginToken(t, harnessAdminEmail, harnessAdminPassword)
@@ -38,6 +40,9 @@ func readyTaskHarness(t *testing.T, opts harnessOptions) (*harness, string, stri
 	status, body = h.createObjectStorageConnection(t, adminToken)
 	if status != http.StatusCreated {
 		t.Fatalf("configure Object Storage connection: status=%d body=%s", status, body)
+	}
+	if runWorkers {
+		h.startWorkers(t)
 	}
 	return h, adminToken, creatorEmail
 }

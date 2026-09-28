@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
@@ -58,21 +59,21 @@ func (r *MaterialRepository) GetForRead(ctx context.Context, owner, id domain.UU
 	return scanMaterial(row)
 }
 
-// GetForThumbnail admits a removed material only through an explicit retained
-// task owned by the same creator. A deleted session does not release an
-// immutable task's retention fact.
+// GetForThumbnail admits a material through its active session or an explicit
+// retained task owned by the same creator after session deletion.
 func (r *MaterialRepository) GetForThumbnail(ctx context.Context, owner, id domain.UUID) (domain.ReferenceMaterial, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT `+materialColumns+`
 		FROM creation_reference_materials m
 		JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $1
-		WHERE m.id = $2 AND (
-			(m.removed_at IS NULL AND s.deleted_at IS NULL)
+		WHERE m.id = $2 AND m.removed_at IS NULL AND (
+			s.deleted_at IS NULL
 			OR EXISTS (
 				SELECT 1
 				FROM creation_generation_task_references retained
 				JOIN creation_generation_tasks task ON task.id = retained.task_id
 				WHERE retained.material_id = m.id AND task.owner_user_id = $1
+				  AND task.dismissed_at IS NULL
 			)
 		)`, owner, id)
 	return scanMaterial(row)
@@ -84,8 +85,9 @@ func (r *MaterialRepository) GetForTask(ctx context.Context, owner, taskID, mate
 		FROM creation_reference_materials m
 		JOIN creation_sessions s ON s.id = m.session_id AND s.owner_user_id = $1
 		JOIN creation_generation_task_references retained ON retained.material_id = m.id
-		JOIN creation_generation_tasks task ON task.id = retained.task_id AND task.owner_user_id = $1
-		WHERE task.id = $2 AND m.id = $3`, owner, taskID, materialID)
+		JOIN creation_generation_tasks task ON task.id = retained.task_id
+			AND task.owner_user_id = $1 AND task.dismissed_at IS NULL
+		WHERE task.id = $2 AND m.id = $3 AND m.removed_at IS NULL`, owner, taskID, materialID)
 	return scanMaterial(row)
 }
 
@@ -126,39 +128,21 @@ func (r *MaterialRepository) ListBySession(ctx context.Context, owner, sessionID
 	return truncatePage(materials, limit), next, nil
 }
 
-// Remove hides one active material from Composer and reports whether any
-// material, task, or active publication still retains its immutable object.
-func (r *MaterialRepository) Remove(ctx context.Context, tx domain.TxExecutor, owner, id domain.UUID) (domain.ReferenceMaterial, bool, error) {
-	material, err := scanMaterial(tx.QueryRow(ctx, `
-		UPDATE creation_reference_materials m
-		SET removed_at = clock_timestamp()
-		FROM creation_sessions s
-		WHERE s.id = m.session_id AND s.owner_user_id = $1 AND s.deleted_at IS NULL
-		  AND m.id = $2 AND m.removed_at IS NULL
-		RETURNING `+materialColumns, owner, id))
+// Serialize object cleanup without holding a write transaction across storage I/O.
+func (r *MaterialRepository) WithObjectLock(ctx context.Context, key string, work func() error) error {
+	conn, err := pgx.ConnectConfig(ctx, r.pool.Config().ConnConfig.Copy())
 	if err != nil {
-		return domain.ReferenceMaterial{}, false, err
+		return fmt.Errorf("creation: connect object lock: %w", err)
 	}
-	// Read after acquiring the material lock so a just-committed admission or
-	// final task release is visible in this statement's fresh snapshot.
-	var retained bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM creation_reference_materials alias
-			WHERE alias.blob_key = $1 AND alias.removed_at IS NULL
-		) OR EXISTS (
-			SELECT 1 FROM creation_generation_task_references retained
-			JOIN creation_reference_materials source ON source.id = retained.material_id
-			WHERE source.blob_key = $1
-		) OR EXISTS (
-			SELECT 1 FROM creation_team_publication_references reference
-			JOIN creation_team_publications publication ON publication.id = reference.publication_id
-			WHERE reference.blob_key = $1
-			  AND publication.withdrawn_at IS NULL AND publication.restricted_at IS NULL
-		)`, material.BlobKey).Scan(&retained); err != nil {
-		return domain.ReferenceMaterial{}, false, fmt.Errorf("creation: read material retention: %w", err)
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = conn.Close(closeCtx)
+	}()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 320))`, key); err != nil {
+		return fmt.Errorf("creation: lock object: %w", err)
 	}
-	return material, retained, nil
+	return work()
 }
 
 func scanMaterial(row rowScanner) (domain.ReferenceMaterial, error) {
