@@ -8,6 +8,7 @@
  */
 import type { CapabilityManifest } from '../api/capability-manifest-http'
 import {
+  GENERATION_PARAMETERS,
   emptyGenerationParameters,
   manifestDefaultParameters,
   type GenerationParameterValues
@@ -71,12 +72,7 @@ function isUntouchedDraft(draft: ComposerDraft): boolean {
   return (
     draft.promptDocument.nodes.every((node) => node.type === 'text' && node.text === '') &&
     draft.references.length === 0 &&
-    draft.model === null &&
-    draft.mode === null &&
-    draft.ratio === null &&
-    draft.resolution === null &&
-    draft.quantity === null &&
-    draft.durationSeconds === null
+    GENERATION_PARAMETERS.every(({ id }) => id === 'mediaType' || draft[id] === null)
   )
 }
 

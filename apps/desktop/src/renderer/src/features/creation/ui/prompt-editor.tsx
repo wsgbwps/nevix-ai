@@ -3,7 +3,11 @@ import { createPortal } from 'react-dom'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary'
-import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin'
+import {
+  createEmptyHistoryState,
+  HistoryPlugin,
+  type HistoryState
+} from '@lexical/react/LexicalHistoryPlugin'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { PlainTextPlugin } from '@lexical/react/LexicalPlainTextPlugin'
 import {
@@ -26,6 +30,7 @@ import {
   CUT_COMMAND,
   CUT_TAG,
   DecoratorNode,
+  HISTORY_MERGE_TAG,
   HISTORY_PUSH_TAG,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
@@ -94,6 +99,16 @@ export function PromptEditor({
   onMentionHover
 }: PromptEditorProps): React.JSX.Element {
   const initialDocument = useRef(document)
+  const historyContextKey = documentKey.replace(/:(?:image|video)$/, '')
+  const histories = useMemo<{ contextKey: string; image: HistoryState; video: HistoryState }>(
+    () => ({
+      contextKey: historyContextKey,
+      image: createEmptyHistoryState(),
+      video: createEmptyHistoryState()
+    }),
+    [historyContextKey]
+  )
+  const history = documentKey.endsWith(':video') ? histories.video : histories.image
   const config = useMemo(
     () => ({
       namespace: 'creation-prompt',
@@ -134,8 +149,13 @@ export function PromptEditor({
             }
             ErrorBoundary={LexicalErrorBoundary}
           />
-          <HistoryPlugin />
-          <DocumentPlugin document={document} documentKey={documentKey} onChange={onChange} />
+          <HistoryPlugin externalHistoryState={history} />
+          <DocumentPlugin
+            document={document}
+            documentKey={documentKey}
+            history={history}
+            onChange={onChange}
+          />
           <MentionTypeaheadPlugin
             candidates={candidates}
             maxChars={maxChars}
@@ -155,10 +175,12 @@ const EXTERNAL_DOCUMENT_TAG = 'prompt-editor-external-document'
 function DocumentPlugin({
   document,
   documentKey,
+  history,
   onChange
 }: {
   readonly document: PromptDocument
   readonly documentKey: string
+  readonly history: HistoryState
   readonly onChange: (document: PromptDocument) => void
 }): null {
   const [editor] = useLexicalComposerContext()
@@ -186,14 +208,35 @@ function DocumentPlugin({
       .read(() => documentSignature(readEditorDocument()))
     const keyChanged = previousDocumentKey.current !== documentKey
     previousDocumentKey.current = documentKey
-    if (!keyChanged && desiredSignature === lastEmitted.current) return
-    if (!keyChanged && desiredSignature === actualSignature) return
+    const seedHistory = (): void => {
+      // The first user edit needs the untouched document as its undo baseline.
+      if (history.current === null)
+        editor.update(() => $getRoot().markDirty(), {
+          tag: [EXTERNAL_DOCUMENT_TAG, HISTORY_MERGE_TAG]
+        })
+    }
+    if (!keyChanged && desiredSignature === lastEmitted.current) {
+      seedHistory()
+      return
+    }
+    if (!keyChanged && desiredSignature === actualSignature) {
+      seedHistory()
+      return
+    }
+    const preserveHistory =
+      keyChanged &&
+      (history.current === null ||
+        history.current.editorState.read(() => documentSignature(readEditorDocument())) ===
+          desiredSignature)
     editor.update(() => replaceEditorDocument(normalized), {
-      tag: EXTERNAL_DOCUMENT_TAG,
-      onUpdate: () => editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined)
+      tag: preserveHistory ? [EXTERNAL_DOCUMENT_TAG, HISTORY_MERGE_TAG] : EXTERNAL_DOCUMENT_TAG,
+      onUpdate: () => {
+        if (!preserveHistory) editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined)
+        seedHistory()
+      }
     })
     lastEmitted.current = desiredSignature
-  }, [document, documentKey, editor])
+  }, [document, documentKey, editor, history])
   return null
 }
 

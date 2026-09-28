@@ -395,6 +395,21 @@ export function useCreationWorkbench(): {
     [contextController]
   )
 
+  const releaseMaterialIfUnbound = useCallback(
+    (materialId: string): boolean => {
+      if (
+        (['image', 'video'] as const).some((media) =>
+          draftFor(media).references.some((reference) => reference.materialId === materialId)
+        )
+      )
+        return false
+      displayRef.current.forget(materialId)
+      displayRef.current.dropPending(materialId)
+      return true
+    },
+    [draftFor]
+  )
+
   /** Same-tick-fresh surface read: which session the workbench presents. */
   const currentSelectedId = useCallback(
     (): string | null => contextController?.getSnapshot().selectedId ?? null,
@@ -567,22 +582,22 @@ export function useCreationWorkbench(): {
       } else {
         patchDraft({ promptDocument, references: remaining })
       }
-      if (!lastBinding) return
+      if (!lastBinding || !releaseMaterialIfUnbound(materialId)) return
       const media = draft.mediaType ?? 'image'
-      if (
-        contextController
-          ?.draftFor(media === 'image' ? 'video' : 'image')
-          .references.some((reference) => reference.materialId === materialId)
-      )
-        return
-      displayRef.current.forget(materialId)
-      displayRef.current.dropPending(materialId)
       const sessionId = currentSelectedId()
       // A finalized material stays in the session; only an unfinished upload
       // needs cancellation after its Draft binding is removed.
       if (sessionId !== null) await ports.actions.unbindMaterial(sessionId, materialId, media)
     },
-    [bindingsForMode, contextController, currentDraft, currentSelectedId, patchDraft, ports]
+    [
+      bindingsForMode,
+      contextController,
+      currentDraft,
+      currentSelectedId,
+      patchDraft,
+      ports,
+      releaseMaterialIfUnbound
+    ]
   )
 
   const requestMaterialRemoval = useCallback(
@@ -993,15 +1008,7 @@ export function useCreationWorkbench(): {
         } else {
           contextController?.editDraftFor(sourceMedia, { ...latestDraft, references: kept })
         }
-        if (
-          !kept.some((reference) => reference.materialId === materialId) &&
-          !draftFor(sourceMedia === 'image' ? 'video' : 'image').references.some(
-            (reference) => reference.materialId === materialId
-          )
-        ) {
-          displayRef.current.dropPending(materialId)
-          displayRef.current.forget(materialId)
-        }
+        releaseMaterialIfUnbound(materialId)
       })()
     },
     [
@@ -1011,7 +1018,8 @@ export function useCreationWorkbench(): {
       currentDraft,
       currentSelectedId,
       draftFor,
-      ports
+      ports,
+      releaseMaterialIfUnbound
     ]
   )
 
@@ -1102,15 +1110,7 @@ export function useCreationWorkbench(): {
           } else {
             contextController?.editDraftFor(sourceMedia, { ...latestDraft, references: kept })
           }
-          if (
-            !kept.some((reference) => reference.materialId === targetMaterialId) &&
-            !draftFor(sourceMedia === 'image' ? 'video' : 'image').references.some(
-              (reference) => reference.materialId === targetMaterialId
-            )
-          ) {
-            displayRef.current.dropPending(targetMaterialId)
-            displayRef.current.forget(targetMaterialId)
-          }
+          releaseMaterialIfUnbound(targetMaterialId)
           return
         }
 
@@ -1151,6 +1151,7 @@ export function useCreationWorkbench(): {
       currentSelectedId,
       draftFor,
       ports,
+      releaseMaterialIfUnbound,
       taskDetails
     ]
   )

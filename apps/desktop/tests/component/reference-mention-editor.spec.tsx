@@ -429,6 +429,46 @@ test('external prune and document-key replacement reset editor history', async (
   await expect(chip).toHaveCount(0)
 })
 
+test('a hidden document changed externally drops only its stale undo history', async ({
+  mount,
+  page
+}) => {
+  await mount(<ReferenceMentionEditorStory />)
+  const editor = page.getByRole('combobox', { name: 'Prompt' })
+  await page.evaluate(() =>
+    window.__referenceMentionEditorTest?.setExternalDocument(
+      { version: 1, nodes: [{ type: 'text', text: '' }] },
+      'context:image'
+    )
+  )
+  await editor.fill('image idea')
+  await page.evaluate(() =>
+    window.__referenceMentionEditorTest?.setExternalDocument(
+      { version: 1, nodes: [{ type: 'text', text: '' }] },
+      'context:video'
+    )
+  )
+  await expect(editor).toHaveText('')
+  await editor.fill('video idea')
+  await page.evaluate(() =>
+    window.__referenceMentionEditorTest?.setExternalDocument(
+      { version: 1, nodes: [{ type: 'text', text: 'updated image' }] },
+      'context:image'
+    )
+  )
+  await expect(editor).toHaveText('updated image')
+  await editor.focus()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(editor).toHaveText('updated image')
+  await page.evaluate(() =>
+    window.__referenceMentionEditorTest?.setExternalDocument(
+      { version: 1, nodes: [{ type: 'text', text: 'video idea' }] },
+      'context:video'
+    )
+  )
+  await expect(editor).toHaveText('video idea')
+})
+
 test('clipboard preserves a user-authored zero-width space', async ({ mount, page }) => {
   await mount(<ReferenceMentionEditorStory />)
   const editor = page.getByRole('combobox', { name: 'Prompt' })
