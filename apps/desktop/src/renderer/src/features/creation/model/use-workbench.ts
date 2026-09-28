@@ -1227,7 +1227,6 @@ export function useCreationWorkbench(): {
       .map(({ materialId, role }) => ({ materialId, role: role as DraftReferenceRole }))
     controller.editTaskDraft(
       {
-        ...controller.getSnapshot().draft,
         ...parameters,
         mediaType: detail.task.mediaType,
         promptDocument: textPromptDocument(prompt),

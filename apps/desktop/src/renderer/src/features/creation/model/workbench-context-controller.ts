@@ -423,7 +423,9 @@ export class WorkbenchContextController {
   editTaskDraft(value: ComposerDraft, materials: readonly ReferenceMaterialView[]): void {
     this.#taskReedit = true
     this.#taskMaterials = [
-      ...new Map(materials.map((material) => [material.id, material])).values()
+      ...new Map(
+        [...this.#taskMaterials, ...materials].map((material) => [material.id, material])
+      ).values()
     ]
     const current = this.#deps.display.getSnapshot().materials
     const taskIds = new Set(this.#taskMaterials.map((material) => material.id))
