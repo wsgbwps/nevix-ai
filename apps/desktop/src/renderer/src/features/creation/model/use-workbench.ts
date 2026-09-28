@@ -57,7 +57,7 @@ import {
   type ComposerDraft,
   type WorkbenchContextDeps
 } from './workbench-context-controller'
-import type { WorkbenchActionState } from './workbench-runtime'
+import type { StagedMaterialFile, WorkbenchActionState } from './workbench-runtime'
 import { useCreationSessionNavigation } from './creation-session-navigation-context'
 import type {
   MaterialPreviewSource,
@@ -499,14 +499,19 @@ export function useCreationWorkbench(): {
       const id = crypto.randomUUID()
       const material = displayRef.current.registerPending(id, file)
       const sessionId = currentSelectedId()
-      if (sessionId === null) return { id, kind: material.kind }
+      if (sessionId === null) {
+        const pendingKey = contextController?.getSnapshot().pendingKey
+        if (pendingKey !== null && pendingKey !== undefined)
+          ports.actions.holdPendingMaterial(pendingKey, id, file, media)
+        return { id, kind: material.kind }
+      }
       return {
         id,
         kind: material.kind,
         completion: ports.actions.stageMaterial(sessionId, id, file, media)
       }
     },
-    [currentSelectedId, ports]
+    [contextController, currentSelectedId, ports]
   )
 
   const addMaterial = useCallback(
@@ -658,19 +663,27 @@ export function useCreationWorkbench(): {
       return
     }
     const key = pendingKey ?? `${PENDING_DRAFT_KEY_PREFIX}${crypto.randomUUID()}`
-    // Frozen reference order, then deck leftovers: identity binding must not
-    // depend on upload completion order.
+    // Frozen reference order first; the other Draft's files upload after the
+    // session exists without becoming prerequisites for this task.
     const filesById = new Map(displayRef.current.pendingFiles())
-    const files: Array<{ localId: string; file: File }> = []
+    const files: StagedMaterialFile[] = []
     const boundIds = new Set<string>()
     for (const reference of frozenDraft.references) {
       const entry = filesById.get(reference.materialId)
       if (entry === undefined) continue
-      files.push({ localId: reference.materialId, file: entry.file })
+      files.push({
+        localId: reference.materialId,
+        file: entry.file,
+        mediaType: frozenDraft.mediaType ?? 'image'
+      })
       boundIds.add(reference.materialId)
     }
-    for (const [localId, entry] of filesById) {
-      if (!boundIds.has(localId)) files.push({ localId, file: entry.file })
+    const otherMedia = frozenDraft.mediaType === 'video' ? 'image' : 'video'
+    for (const reference of contextController.draftFor(otherMedia).references) {
+      const entry = filesById.get(reference.materialId)
+      if (entry === undefined || boundIds.has(reference.materialId)) continue
+      files.push({ localId: reference.materialId, file: entry.file, mediaType: otherMedia })
+      boundIds.add(reference.materialId)
     }
     if (pendingKey === null) contextController.claimPendingDraft(key, frozenDraft)
     else contextController.editDraft(frozenDraft)

@@ -98,13 +98,19 @@ export interface WorkbenchActions {
   ) => Promise<CreationApiResult<ReferenceMaterialView>>
   readonly submit: (sessionId: string, intent: GenerationIntent) => Promise<WorkbenchActionResult>
   /** No-identity chain: materialize a session under `key`'s pending ownership,
-   * upload `files` in the given order, submit the frozen intent, rekey onto the
-   * created session. The synchronous prefix completes before the first await. */
+   * upload the frozen task's files in order, and start other Draft files
+   * independently. The synchronous prefix completes before the first await. */
   readonly submitNewDraft: (
     key: string,
     intent: GenerationIntent,
     files: readonly StagedMaterialFile[]
   ) => Promise<WorkbenchActionResult>
+  readonly holdPendingMaterial: (
+    key: string,
+    localId: string,
+    file: File,
+    mediaType: DraftMediaType
+  ) => void
   /** Temporary session-list entries, persisted ones included. */
   readonly pendingDrafts: () => readonly string[]
   readonly resumeSubmission: (sessionId: string) => Promise<WorkbenchActionResult>
@@ -122,6 +128,7 @@ export interface WorkbenchActions {
 export interface StagedMaterialFile {
   readonly localId: string
   readonly file: File
+  readonly mediaType?: DraftMediaType
 }
 
 export type CreationRuntime = CreationWorkspacePorts & {
@@ -139,6 +146,7 @@ interface RuntimeOptions {
 interface PendingMaterial {
   readonly generation: number
   readonly sessionId: string
+  readonly mediaType?: DraftMediaType
   readonly fileName: string
   readonly file: File | null
   readonly wirePromise: Promise<CreationApiResult<ReferenceMaterialView>>
@@ -255,16 +263,31 @@ export function createCreationRuntime(
     if (storage !== undefined) setLocalDraftOperationNotice(storage, userId, sessionId, notice)
   }
 
-  const materialFileNamesFor = (sessionId: string, includeSent: boolean): string[] => {
+  const materialFileNamesFor = (
+    sessionId: string,
+    includeSent: boolean,
+    mediaType?: DraftMediaType
+  ): string[] => {
     const names: string[] = []
     for (const [key, material] of pendingMaterials) {
       if (material.sessionId !== sessionId) continue
+      if (
+        mediaType !== undefined &&
+        (material.mediaType ??
+          mediaForDraftMaterial(sessionId, key.slice(sessionId.length + 1))) !== mediaType
+      )
+        continue
       if (ambiguousMaterials.has(key) || (includeSent && material.state === 'uploading')) {
         names.push(material.fileName)
       }
     }
     for (const [key, recovery] of recoveryPending) {
-      if (key.startsWith(`${sessionId}:`)) names.push(recovery.fileName)
+      if (
+        key.startsWith(`${sessionId}:`) &&
+        (mediaType === undefined ||
+          mediaForDraftMaterial(sessionId, recovery.idempotencyKey) === mediaType)
+      )
+        names.push(recovery.fileName)
     }
     return [...new Set(names)]
   }
@@ -628,6 +651,7 @@ export function createCreationRuntime(
     pendingMaterials.set(key, {
       generation: materialGeneration,
       sessionId,
+      mediaType,
       fileName: file.name,
       file,
       wirePromise,
@@ -928,7 +952,7 @@ export function createCreationRuntime(
       frozenIntent: freezeIntent(intent),
       idempotencyKey: createId(),
       state: { status: 'preparing' },
-      heldFiles: files.map((held) => ({ localId: held.localId, file: held.file })),
+      heldFiles: files.map((held) => ({ ...held })),
       sessionCreationSent: false
     }
     chains.set(pendingKey, chain)
@@ -976,20 +1000,36 @@ export function createCreationRuntime(
     }
     materializeChain(pendingKey, session)
 
-    // Sequential in frozen order; each file stays held until it stages so
-    // stagedMaterials keeps showing the rest, and a stop between awaits
-    // cannot start the next upload.
-    while (chain.heldFiles.length > 0) {
-      if (!currentChain(session.id, chain)) return 'retired'
-      const held = chain.heldFiles.shift()
-      if (held === undefined) break
-      const result = await stageMaterialFor(
+    // The frozen task waits for only its own files. Other files start after
+    // session creation and settle through their source Draft independently.
+    const requiredIds = new Set(
+      chain.frozenIntent.references.map((reference) => reference.materialId)
+    )
+    const backgroundFiles = chain.heldFiles.filter((held) => !requiredIds.has(held.localId))
+    chain.heldFiles = chain.heldFiles.filter((held) => requiredIds.has(held.localId))
+    const upload = (held: StagedMaterialFile): Promise<CreationApiResult<ReferenceMaterialView>> =>
+      stageMaterialFor(
         session.id,
         held.localId,
         held.file,
         true,
-        chain.frozenIntent.mediaType ?? undefined
+        held.mediaType ?? mediaForDraftMaterial(session.id, held.localId)
       )
+    const firstRequired = chain.heldFiles.shift()
+    const firstUpload = firstRequired === undefined ? null : upload(firstRequired)
+    for (const held of backgroundFiles) void upload(held)
+    if (firstUpload !== null) {
+      const result = await firstUpload
+      if (!currentChain(session.id, chain)) return 'retired'
+      if (result.outcome !== 'succeeded') return settleStagedMaterial(session.id, chain, result)
+    }
+    // Keep later required files held until their upload starts, preserving
+    // their frozen order and their cards across navigation.
+    while (chain.heldFiles.length > 0) {
+      if (!currentChain(session.id, chain)) return 'retired'
+      const held = chain.heldFiles.shift()
+      if (held === undefined) break
+      const result = await upload(held)
       if (!currentChain(session.id, chain)) return 'retired'
       if (result.outcome !== 'succeeded') {
         return settleStagedMaterial(session.id, chain, result)
@@ -1166,7 +1206,7 @@ export function createCreationRuntime(
         : (chains.get(sessionId)?.state ??
           settledStates.get(sessionId) ??
           materialFailureFor(sessionId, mediaType) ??
-          (materialFileNamesFor(sessionId, false).length > 0
+          (materialFileNamesFor(sessionId, false, mediaType).length > 0
             ? { status: 'material-unconfirmed' }
             : idleState)),
     subscribe: (listener) => {
@@ -1244,6 +1284,11 @@ export function createCreationRuntime(
     replaceMaterial,
     submit,
     submitNewDraft,
+    holdPendingMaterial: (key, localId, file, mediaType) => {
+      const chain = chains.get(key)
+      if (retired || chain === undefined) return
+      chain.heldFiles.push({ localId, file, mediaType })
+    },
     pendingDrafts: () => [...pendingDraftKeys],
     resumeSubmission: (sessionId) => {
       const chain = chains.get(sessionId)

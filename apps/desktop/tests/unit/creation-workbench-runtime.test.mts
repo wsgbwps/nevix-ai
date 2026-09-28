@@ -2103,9 +2103,14 @@ test('an unconfirmed upload after materialization holds the chain under the sess
   const file = (): File => new File(['shoe'], 'shoe.png', { type: 'image/png' })
 
   assert.equal(
-    await runtime.actions.submitNewDraft(pendingKey, plainIntent('draft A'), [
-      { localId: localMaterial, file: file() }
-    ]),
+    await runtime.actions.submitNewDraft(
+      pendingKey,
+      {
+        ...plainIntent('draft A'),
+        references: [{ materialId: localMaterial, role: 'reference' }]
+      },
+      [{ localId: localMaterial, file: file() }]
+    ),
     'unconfirmed'
   )
   assert.deepEqual(runtime.actions.pendingDrafts(), [])
