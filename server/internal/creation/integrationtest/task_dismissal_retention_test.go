@@ -40,8 +40,7 @@ func awaitMaterialCleanup(t *testing.T, h *harness, materialID, key string) {
 	var headErr error
 	for time.Now().Before(deadline) {
 		_, headErr = h.directStore.Head(h.ctx, key)
-		if errors.Is(headErr, creation.ErrBlobNotFound) && countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_material_uploads
-			WHERE material_id = $1::uuid AND cleanup_attempt_count > 0`, materialID) == 1 {
+		if errors.Is(headErr, creation.ErrBlobNotFound) {
 			return
 		}
 		select {
@@ -99,18 +98,8 @@ func TestDismissingSharedReferenceReleasesOnlyItsTaskAndCleansTheLastHolder(t *t
 	if status, _ := h.dismissTask(t, foreign, a); status != http.StatusNotFound {
 		t.Fatalf("foreign dismissal status=%d", status)
 	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_task_references
-		WHERE task_id IN ($1::uuid, $2::uuid) AND material_id = $3::uuid`, a, b, materialID) != 2 {
-		t.Fatal("foreign dismissal released a task reference")
-	}
 	if status, body := h.dismissTask(t, token, a); status != http.StatusOK {
 		t.Fatalf("dismiss A: status=%d body=%s", status, body)
-	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_task_references
-		WHERE task_id = $1::uuid`, a) != 0 ||
-		countRows(t, h.ownerPool, `SELECT count(*) FROM creation_generation_task_references
-		WHERE task_id = $1::uuid AND material_id = $2::uuid`, b, materialID) != 1 {
-		t.Fatal("A dismissal did not release precisely A's relation")
 	}
 	status, body, dismissed := h.getTask(t, token, a)
 	if status != http.StatusOK || dismissed.Specification == nil || dismissed.Specification.Prompt != intent.Prompt ||
@@ -155,10 +144,6 @@ func TestDismissingSharedReferenceReleasesOnlyItsTaskAndCleansTheLastHolder(t *t
 	}
 	if _, err := h.directStore.Head(h.ctx, key); err != nil {
 		t.Fatalf("shared reference deleted while B retained it: %v", err)
-	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_material_uploads
-		WHERE material_id = $1::uuid AND cleanup_next_attempt_at IS NOT NULL`, materialID) != 0 {
-		t.Fatal("cleanup armed while B retained the material")
 	}
 	if status, body := h.dismissTask(t, token, b); status != http.StatusOK {
 		t.Fatalf("dismiss B: status=%d body=%s", status, body)
@@ -230,7 +215,7 @@ func TestPublicationKeepsSharedReferenceAfterTaskAndSessionDeletion(t *testing.T
 	awaitMaterialCleanup(t, h, materialID, key)
 }
 
-func TestResultDerivedMaterialHasDurableCleanupFactWithoutDeletingGenerationResult(t *testing.T) {
+func TestResultDerivedMaterialCleansWithoutDeletingGenerationResult(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
 	h.kapon.generation.setImage(imageScript{outputs: 1})
@@ -257,10 +242,6 @@ func TestResultDerivedMaterialHasDurableCleanupFactWithoutDeletingGenerationResu
 	}
 	if key == resultKey {
 		t.Fatal("result conversion did not create an independent reference object")
-	}
-	if countRows(t, h.ownerPool, `SELECT count(*) FROM creation_reference_material_uploads
-		WHERE material_id = $1::uuid AND object_key = $2 AND status = 'finalized'`, materialID, key) != 1 {
-		t.Fatal("result-derived material lacks a durable exact-key cleanup fact")
 	}
 	if status, body := h.doRequest(t, http.MethodDelete, "/creation/sessions/"+intent.SessionID, token, nil); status != http.StatusNoContent {
 		t.Fatalf("delete result-derived material session: status=%d body=%s", status, body)

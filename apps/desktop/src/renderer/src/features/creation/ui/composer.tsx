@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger
 } from '../../../components/ui/dropdown-menu'
 import type { CapabilityMediaMode, CapabilityReason } from '../api/capability-manifest-http'
+import type { ReferenceMaterialView } from '../api/go-creation-http'
 import {
   mediaCapability,
   modeCandidates,
@@ -357,6 +358,9 @@ export function CreationComposer({
             {media === 'video' && controls && <ModeMenu composer={composer} />}
             {media !== null && controls && <ParamsMenu composer={composer} />}
             {controls && <DurationMenu composer={composer} />}
+            {composer.canReuseSessionMaterials && (
+              <ExistingMaterialsMenu key={composer.documentKey} composer={composer} />
+            )}
             {/* Reserves the absolute submit circle's slot so the longest
                 capability pill never underlaps it. */}
             <div className="ml-auto size-8 shrink-0" aria-hidden />
@@ -442,6 +446,88 @@ export function CreationComposer({
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+function ExistingMaterialsMenu({
+  composer
+}: {
+  composer: WorkbenchComposerHandle
+}): React.JSX.Element {
+  const { t } = useTranslation('creation')
+  const [list, setList] = useState<
+    { sessionId: string; materials: readonly ReferenceMaterialView[] } | 'loading' | 'failed' | null
+  >(null)
+  const request = useRef(0)
+  useEffect(
+    () => () => {
+      request.current += 1
+    },
+    []
+  )
+
+  function load(): void {
+    const current = ++request.current
+    setList('loading')
+    void composer.listReusableMaterials().then((result) => {
+      if (request.current === current) setList(result ?? 'failed')
+    })
+  }
+
+  return (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) load()
+      }}
+    >
+      <DropdownMenuTrigger
+        data-testid="composer-reuse-material"
+        disabled={
+          composer.draft.references.length >= composer.deckCap || composer.allowedKinds.length === 0
+        }
+        className={controlClass}
+      >
+        <Link2Icon className="size-3.5" aria-hidden />
+        {t('composer.deck.reuse')}
+        <ChevronDownIcon className="size-3" aria-hidden />
+      </DropdownMenuTrigger>
+      <ComposerMenuContent
+        side="top"
+        sideOffset={10}
+        align="start"
+        className="max-h-64 w-56 shadow-2xl"
+      >
+        {list === 'loading' || list === null ? (
+          <DropdownMenuLabel className={menuLabelClass}>
+            {t('composer.deck.reuseLoading')}
+          </DropdownMenuLabel>
+        ) : list === 'failed' ? (
+          <DropdownMenuItem
+            className={menuItemClass}
+            onSelect={(event) => {
+              event.preventDefault()
+              load()
+            }}
+          >
+            {t('composer.deck.reuseRetry')}
+          </DropdownMenuItem>
+        ) : list.materials.length === 0 ? (
+          <DropdownMenuLabel className={menuLabelClass}>
+            {t('composer.deck.reuseEmpty')}
+          </DropdownMenuLabel>
+        ) : (
+          list.materials.map((material) => (
+            <DropdownMenuItem
+              key={material.id}
+              className={menuItemClass}
+              onSelect={() => composer.bindExistingMaterial(list.sessionId, material)}
+            >
+              <span className="truncate">{material.fileName}</span>
+            </DropdownMenuItem>
+          ))
+        )}
+      </ComposerMenuContent>
+    </DropdownMenu>
   )
 }
 

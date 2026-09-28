@@ -146,6 +146,13 @@ export interface WorkbenchComposerHandle {
   mentionedMaterialIds: ReadonlySet<string>
   /** Admits a dropped file batch against the mode's policy and adds what it accepts. */
   addMaterials: (files: readonly File[]) => void
+  /** Lists reusable materials from the current session, excluding task-only history. */
+  listReusableMaterials: () => Promise<{
+    sessionId: string
+    materials: readonly ReferenceMaterialView[]
+  } | null>
+  bindExistingMaterial: (sessionId: string, material: ReferenceMaterialView) => void
+  canReuseSessionMaterials: boolean
   /** Swaps one bound card for a new file, keeping the deck position. */
   replaceMaterial: (position: number, file: File) => void
   /** Converts a succeeded task result into a new Reference Material (ADR-0018). */
@@ -518,6 +525,26 @@ export function useCreationWorkbench(): {
     [currentSelectedId, ports]
   )
 
+  const appendMaterialBinding = useCallback(
+    (material: Pick<ReferenceMaterialView, 'id' | 'kind'>) => {
+      const draft = currentDraft()
+      const media = draft.mediaType
+      const derived =
+        media === null ? null : roleForPosition(media, draft.mode, draft.references.length)
+      const role = derived ?? (material.kind === 'image' ? 'reference' : 'omni')
+      const references = [...draft.references, { materialId: material.id, role }]
+      if (media === 'image') {
+        patchDraft({
+          references: bindingsForMode(media, 'reference-image', references),
+          mode: 'reference-image'
+        })
+      } else {
+        patchDraft({ references })
+      }
+    },
+    [bindingsForMode, currentDraft, patchDraft]
+  )
+
   const addMaterial = useCallback(
     async (file: File) => {
       if (!ports) return
@@ -525,26 +552,61 @@ export function useCreationWorkbench(): {
       contextController?.noteMaterialDropRejection(null)
       const staged = stageMaterialFile(file)
       if (staged === null) return
-      // The structural fallback keeps every kind submittable: images take the
-      // image role, anything else binds as omni (which accepts all kinds).
-      const draft = currentDraft()
-      const media = draft.mediaType
-      const derived =
-        media === null ? null : roleForPosition(media, draft.mode, draft.references.length)
-      const role = derived ?? (staged.kind === 'image' ? 'reference' : 'omni')
-      const binding: DraftReferenceView = { materialId: staged.id, role }
-      const nextReferences = [...draft.references, binding]
-      if (media === 'image') {
-        // The image composer has no mode picker, so its deck determines the mode.
-        patchDraft({
-          references: bindingsForMode(media, 'reference-image', nextReferences),
-          mode: 'reference-image'
-        })
-      } else {
-        patchDraft({ references: nextReferences })
-      }
+      appendMaterialBinding(staged)
     },
-    [bindingsForMode, contextController, currentDraft, patchDraft, ports, stageMaterialFile]
+    [appendMaterialBinding, contextController, ports, stageMaterialFile]
+  )
+
+  const canBindExistingMaterial = useCallback(
+    (material: ReferenceMaterialView): boolean => {
+      const draft = currentDraft()
+      if (
+        draft.mediaType === null ||
+        draft.references.length >=
+          referenceCap(manifest, draft.mediaType, draft.model, draft.mode) ||
+        draft.references.some((reference) => reference.materialId === material.id) ||
+        !allowedReferenceKinds(manifest, draft.mediaType, draft.mode).includes(material.kind)
+      )
+        return false
+      if (draft.mediaType === 'image') return true
+      const role = roleForPosition('video', draft.mode, draft.references.length)
+      if (role === null || !roleAcceptsKind(role, material.kind)) return false
+      const policy = composerReferencePolicy(manifest, draft.mediaType, draft.mode)
+      if (policy === null) return true
+      const used = draft.references.filter((reference) =>
+        displayRef.current
+          .getSnapshot()
+          .materials.some(
+            (entry) => entry.id === reference.materialId && entry.kind === material.kind
+          )
+      ).length
+      return (
+        used < (policy[material.kind]?.count.max ?? 0) &&
+        materialFitsReferenceEnvelope(material, policy)
+      )
+    },
+    [currentDraft, manifest]
+  )
+
+  const listReusableMaterials = useCallback(async () => {
+    const sessionId = currentSelectedId()
+    if (!ports || sessionId === null) return null
+    const result = await ports.listMaterials(sessionId).catch(() => null)
+    if (!mountedRef.current || currentSelectedId() !== sessionId || result?.outcome !== 'succeeded')
+      return null
+    return { sessionId, materials: result.value.materials.filter(canBindExistingMaterial) }
+  }, [canBindExistingMaterial, currentSelectedId, ports])
+
+  const bindExistingMaterial = useCallback(
+    (sessionId: string, material: ReferenceMaterialView) => {
+      if (currentSelectedId() !== sessionId || !canBindExistingMaterial(material)) return
+      const current = displayRef.current.getSnapshot().materials
+      if (!current.some((entry) => entry.id === material.id)) {
+        displayRef.current.replaceMaterials([...current, material])
+      }
+      appendMaterialBinding(material)
+    },
+    [appendMaterialBinding, canBindExistingMaterial, currentSelectedId]
   )
 
   const removeMaterialNow = useCallback(
@@ -1280,6 +1342,9 @@ export function useCreationWorkbench(): {
       reportMaterialThumbnailFailure: display.reportThumbnailFailure,
       mentionedMaterialIds,
       addMaterials,
+      listReusableMaterials,
+      bindExistingMaterial,
+      canReuseSessionMaterials: ctx.selectedId !== null,
       replaceMaterial,
       addResultAsMaterial,
       removeMaterial: requestMaterialRemoval,
