@@ -86,7 +86,7 @@ func NewGenerationsClient(baseURL string, references domain.ReferenceTransportRe
 		baseURL:         strings.TrimRight(baseURL, "/"),
 		http:            &http.Client{},
 		references:      references,
-		submitTimeout:   30 * time.Second,
+		submitTimeout:   time.Minute,
 		pollTimeout:     15 * time.Second,
 		cancelTimeout:   15 * time.Second,
 		referenceNow:    time.Now,

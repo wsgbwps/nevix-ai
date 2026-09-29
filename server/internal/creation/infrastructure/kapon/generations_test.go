@@ -616,10 +616,10 @@ func TestSuccessfulSubmitWithoutOutputIdentityKeepsDiagnostic(t *testing.T) {
 	}
 }
 
-func TestSubmitUsesIndependentThirtySecondDeadline(t *testing.T) {
+func TestSubmitUsesIndependentOneMinuteDeadline(t *testing.T) {
 	client := NewGenerationsClient("https://models.kapon.test", nil)
-	if client.submitTimeout != 30*time.Second {
-		t.Fatalf("submit timeout = %s, want 30s", client.submitTimeout)
+	if client.submitTimeout != time.Minute {
+		t.Fatalf("submit timeout = %s, want 1m", client.submitTimeout)
 	}
 }
 
