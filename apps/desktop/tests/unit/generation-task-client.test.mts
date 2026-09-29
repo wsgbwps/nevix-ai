@@ -472,6 +472,7 @@ test('submitTask posts the idempotency key with the full generation intent', asy
         mode: 'reference-image',
         ratio: '4:5',
         resolution: '2K',
+        quality: null,
         quantity: 2,
         durationSeconds: null,
         references: [

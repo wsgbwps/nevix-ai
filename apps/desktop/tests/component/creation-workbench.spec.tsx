@@ -1083,6 +1083,9 @@ test('Gemini-only ratios appear for Gemini and reset on a deliberate switch to D
 test('GPT quality is model-scoped, persisted, and submitted', async ({ mount, page }) => {
   await mount(<CreationWorkbenchStory />)
   await selectFirstSession(page)
+  await page.getByTestId('composer-params').click()
+  await page.getByRole('menu').getByRole('button', { name: '1:1', exact: true }).click()
+  await page.keyboard.press('Escape')
   await page.getByTestId('composer-model').click()
   await page.getByRole('menuitem', { name: 'gpt-image-2.5-flare' }).click()
   await expect(page.getByTestId('composer-params')).toContainText('1:1')
@@ -1123,6 +1126,20 @@ test('GPT quality is model-scoped, persisted, and submitted', async ({ mount, pa
   await page.getByTestId('composer-params').click()
   await expect(page.getByRole('menu').getByText('Quality')).toHaveCount(0)
   await expect.poll(async () => (await draftRecord(page, scriptedSessionId))?.quality).toBeNull()
+})
+
+test('switching to GPT keeps a ratio supported by both image models', async ({ mount, page }) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  await page.getByTestId('composer-params').click()
+  await page.getByRole('menu').getByRole('button', { name: '16:9', exact: true }).click()
+  await page.keyboard.press('Escape')
+
+  await page.getByTestId('composer-model').click()
+  await page.getByRole('menuitem', { name: 'gpt-image-2.5-flare' }).click()
+  await expect(page.getByTestId('composer-params')).toContainText('16:9')
+  await expect.poll(async () => (await draftRecord(page, scriptedSessionId))?.ratio).toBe('16:9')
 })
 
 test('the size row follows the selected ratio and resolution', async ({ mount, page }) => {
@@ -3481,6 +3498,7 @@ test('regenerate submits the task specification with an empty composer draft', a
     mode: specification.mode,
     ratio: specification.ratio,
     resolution: specification.resolution,
+    quality: null,
     quantity: specification.quantity,
     durationSeconds: specification.durationSeconds,
     references: [{ materialId: firstMaterialId, role: 'reference' }]

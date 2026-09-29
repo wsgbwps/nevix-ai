@@ -14,6 +14,7 @@ import type {
   GenerationTaskDetail,
   GenerationTaskView
 } from '../api/generation-task-http'
+import { manifestDefaultParameters } from '../api/generation-parameter'
 import type { ResultBlobUrlLease } from '../lib/result-blob-cache'
 import { resultFilename } from '../lib/result-filename'
 import { planFileDrop, type ResultDragPayload } from './reference-drop'
@@ -24,6 +25,7 @@ import {
   mediaCapability,
   normalizedVideoMode,
   publishedModel,
+  qualityCandidates,
   referenceCap,
   resolutionCandidates,
   roleAcceptsKind,
@@ -462,19 +464,20 @@ export function useCreationWorkbench(): {
         return
       }
       const entry = publishedModel(manifest, draft.mediaType, model)
+      const qualities = qualityCandidates(manifest, draft.mediaType, model)
       const enteringQualityModel =
-        !!entry?.qualities?.length &&
-        !publishedModel(manifest, draft.mediaType, draft.model ?? '')?.qualities?.length
-      const ratio = enteringQualityModel
-        ? (mediaCapability(manifest, 'image')?.defaults?.ratio ?? null)
-        : draft.mediaType === 'image' &&
-            entry !== null &&
-            draft.ratio !== null &&
-            !entry.ratios?.includes(draft.ratio)
-          ? (mediaCapability(manifest, 'image')?.defaults?.ratio ?? null)
+        qualities.length > 0 &&
+        qualityCandidates(manifest, draft.mediaType, draft.model).length === 0
+      const defaults = manifestDefaultParameters(mediaCapability(manifest, draft.mediaType), entry)
+      const ratio =
+        draft.mediaType === 'image' &&
+        entry !== null &&
+        draft.ratio !== null &&
+        !entry.ratios?.includes(draft.ratio)
+          ? defaults.ratio
           : draft.ratio
       const resolutions =
-        draft.mediaType === 'image' && entry?.qualities
+        draft.mediaType === 'image' && qualities.length > 0
           ? resolutionCandidates(manifest, 'image', model, ratio)
           : (entry?.resolutions ?? [])
       const resolution =
@@ -483,9 +486,7 @@ export function useCreationWorkbench(): {
           : entry?.defaultResolution && resolutions.includes(entry.defaultResolution)
             ? entry.defaultResolution
             : (resolutions[0] ?? null)
-      const quality = entry?.qualities?.includes(draft.quality ?? '')
-        ? draft.quality
-        : (entry?.defaultQuality ?? null)
+      const quality = qualities.includes(draft.quality ?? '') ? draft.quality : defaults.quality
       patchDraft({ model, resolution, ratio, quality })
     },
     [currentDraft, manifest, patchDraft]
@@ -1186,6 +1187,7 @@ export function useCreationWorkbench(): {
     setDismissalSkippedIn(null)
     const intent: GenerationIntent = {
       ...specification,
+      quality: specification.quality ?? null,
       mediaType: (detail?.task ?? task).mediaType,
       manifestVersion:
         manifest?.manifestVersion ?? contextController?.manifestVersionForIntent() ?? 1,
@@ -1249,6 +1251,7 @@ export function useCreationWorkbench(): {
     controller.editTaskDraft(
       {
         ...parameters,
+        quality: specification.quality ?? null,
         mediaType: detail.task.mediaType,
         promptDocument: textPromptDocument(prompt),
         references: restoredReferences

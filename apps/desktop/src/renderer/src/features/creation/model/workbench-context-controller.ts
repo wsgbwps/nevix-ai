@@ -190,8 +190,7 @@ function manifestDefaultDraft(value: CapabilityManifest, media: DraftMediaType):
         ? 'first-last-frame'
         : (first?.id ?? null),
     resolution: model?.defaultResolution ?? null,
-    quality: model?.defaultQuality ?? null,
-    ...manifestDefaultParameters(capability),
+    ...manifestDefaultParameters(capability, model ?? null),
     references: []
   }
 }

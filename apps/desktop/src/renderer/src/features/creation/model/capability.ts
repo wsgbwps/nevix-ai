@@ -18,6 +18,7 @@ import type {
   ReferenceMaterialView
 } from '../api/go-creation-http'
 import {
+  modelParameterCandidates,
   publishedParameterRules,
   type DraftMediaType,
   type GenerationParameterId,
@@ -201,7 +202,10 @@ export function qualityCandidates(
   media: DraftMediaType,
   model: string | null
 ): readonly string[] {
-  return model === null ? [] : (publishedModel(manifest, media, model)?.qualities ?? [])
+  return modelParameterCandidates(
+    model === null ? null : publishedModel(manifest, media, model),
+    'quality'
+  )
 }
 
 /** Image ratios belong to the selected model; video keeps media-level ratios. */
@@ -351,9 +355,9 @@ export function staleDraftFields(
     stale.add('references')
     return stale
   }
-  // A field the media does not publish gets no verdict here — the admission
-  // freeze judges its value server-side.
-  for (const rule of publishedParameterRules(capability)) {
+  // Absent media fields get no verdict; an absent model field rejects a stale value.
+  const modelView = draft.model === null ? null : publishedModel(manifest, media, draft.model)
+  for (const rule of publishedParameterRules(capability, modelView)) {
     if (media === 'image' && rule.id === 'ratio') continue
     const value = draft[rule.id]
     if (value == null ? !rule.mayStayUnset : !rule.candidates.includes(value)) {
@@ -379,15 +383,6 @@ export function staleDraftFields(
   ) {
     stale.add('resolution')
   }
-  const qualities = qualityCandidates(manifest, media, draft.model)
-  if (
-    qualities.length > 0
-      ? draft.quality == null || !qualities.includes(draft.quality)
-      : draft.quality != null
-  ) {
-    stale.add('quality')
-  }
-
   const bounds = modeReferenceBounds(manifest, media, mode)
   if (bounds === null) {
     stale.add('references')

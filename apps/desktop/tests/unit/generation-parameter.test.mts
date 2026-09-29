@@ -122,13 +122,16 @@ const manifest: CapabilityManifest = {
 test('published rules follow manifest presence, not a media split', () => {
   assert.deepEqual(
     publishedParameterRules(imageCapability).map((rule) => rule.id),
-    ['ratio', 'quantity']
+    ['ratio', 'quality', 'quantity']
   )
   assert.deepEqual(
     publishedParameterRules(videoCapability).map((rule) => rule.id),
-    ['durationSeconds']
+    ['quality', 'durationSeconds']
   )
-  assert.deepEqual(publishedParameterRules({ available: true, reason: null, action: null }), [])
+  assert.deepEqual(
+    publishedParameterRules({ available: true, reason: null, action: null }).map((rule) => rule.id),
+    ['quality']
+  )
 })
 
 test('stale verdicts: unset tolerance and candidate membership per field', () => {
@@ -235,6 +238,20 @@ test('quality and sparse ratio tiers follow the selected model', () => {
     'max'
   ])
   assert.deepEqual(qualityCandidates(gpt, 'image', 'doubao-seedream-5.0-pro'), [])
+  assert.deepEqual(
+    publishedParameterRules(gpt.image, gpt.image.models?.at(-1) ?? null).find(
+      (rule) => rule.id === 'quality'
+    ),
+    {
+      id: 'quality',
+      candidates: ['low', 'medium', 'high', 'xhigh', 'max'],
+      mayStayUnset: false
+    }
+  )
+  assert.equal(
+    manifestDefaultParameters(gpt.image, gpt.image.models?.at(-1) ?? null).quality,
+    'high'
+  )
   assert.deepEqual(resolutionCandidates(gpt, 'image', 'gpt-image-2.5-flare', '16:9'), ['4K'])
   assert.deepEqual(resolutionCandidates(gpt, 'image', 'doubao-seedream-5.0-pro', '4:3'), [
     '2K',
@@ -254,22 +271,34 @@ test('quality and sparse ratio tiers follow the selected model', () => {
   assert.equal(staleDraftFields(gpt, draft).has('quality'), false)
   assert.equal(staleDraftFields(gpt, { ...draft, quality: null }).has('quality'), true)
   assert.equal(staleDraftFields(gpt, { ...draft, quality: 'auto' }).has('quality'), true)
+  assert.equal(
+    staleDraftFields(gpt, {
+      ...draft,
+      model: 'doubao-seedream-5.0-pro',
+      ratio: '1:1',
+      resolution: '2K'
+    }).has('quality'),
+    true
+  )
   assert.equal(staleDraftFields(gpt, { ...draft, resolution: '2K' }).has('resolution'), true)
 })
 
 test('manifest defaults adopt per the inventory, nulling when unpublished', () => {
   assert.deepEqual(manifestDefaultParameters(imageCapability), {
     ratio: '4:3',
+    quality: null,
     quantity: 2,
     durationSeconds: null
   })
   assert.deepEqual(manifestDefaultParameters(videoCapability), {
     ratio: null,
+    quality: null,
     quantity: null,
     durationSeconds: 5
   })
   assert.deepEqual(manifestDefaultParameters(null), {
     ratio: null,
+    quality: null,
     quantity: null,
     durationSeconds: null
   })

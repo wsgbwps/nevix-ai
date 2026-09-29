@@ -1,6 +1,6 @@
 /** The Generation Parameter field inventory (Desktop ADR-0006). */
 
-import type { CapabilityMedia } from './capability-manifest-http'
+import type { CapabilityMedia, CapabilityModel } from './capability-manifest-http'
 
 /** The composer's target media (the contracts media_type closed set). */
 export type DraftMediaType = 'image' | 'video'
@@ -11,7 +11,7 @@ export interface GenerationParameterValues {
   readonly mode: string | null
   readonly ratio: string | null
   readonly resolution: string | null
-  readonly quality?: string | null
+  readonly quality: string | null
   readonly quantity: number | null
   readonly durationSeconds: number | null
 }
@@ -24,8 +24,11 @@ export interface GenerationParameterField {
   readonly kind: 'string' | 'number'
   /** Absent means the media offers no menu and no stale verdict for the field. */
   readonly manifestKey?: 'ratios' | 'quantities' | 'durations'
+  /** Candidate key on the selected model. */
+  readonly modelManifestKey?: 'qualities'
   /** The CapabilityDefaults key adopting the manifest default. */
   readonly defaultKey?: 'ratio' | 'quantity' | 'duration'
+  readonly modelDefaultKey?: 'defaultQuality'
   /** May stay unset within a publishing media; the vendor default applies. */
   readonly mayStayUnset?: true
 }
@@ -43,7 +46,13 @@ const FIELD_INVENTORY = [
     mayStayUnset: true
   },
   { id: 'resolution', wireKey: 'resolution', kind: 'string' },
-  { id: 'quality', wireKey: 'quality', kind: 'string' },
+  {
+    id: 'quality',
+    wireKey: 'quality',
+    kind: 'string',
+    modelManifestKey: 'qualities',
+    modelDefaultKey: 'defaultQuality'
+  },
   {
     id: 'quantity',
     wireKey: 'quantity',
@@ -115,20 +124,28 @@ export function parseGenerationParameterValues(
 }
 
 /** Published defaults by parameter id; unpublished ones (or a null capability) read as null. */
-export function manifestDefaultParameters(capability: CapabilityMedia | null): {
+export function manifestDefaultParameters(
+  capability: CapabilityMedia | null,
+  model: CapabilityModel | null = null
+): {
   readonly ratio: string | null
+  readonly quality: string | null
   readonly quantity: number | null
   readonly durationSeconds: number | null
 } {
   const defaults = {
     ratio: null as string | null,
+    quality: null as string | null,
     quantity: null as number | null,
     durationSeconds: null as number | null
   }
   const sink = defaults as Record<GenerationParameterId, string | number | null>
   for (const field of GENERATION_PARAMETERS) {
-    if (field.defaultKey === undefined) continue
-    sink[field.id] = capability?.defaults?.[field.defaultKey] ?? null
+    if (field.defaultKey !== undefined) {
+      sink[field.id] = capability?.defaults?.[field.defaultKey] ?? null
+    } else if (field.modelDefaultKey !== undefined) {
+      sink[field.id] = model?.[field.modelDefaultKey] ?? null
+    }
   }
   return defaults
 }
@@ -147,15 +164,34 @@ export interface PublishedParameterRule {
   readonly mayStayUnset: boolean
 }
 
+export function modelParameterCandidates(
+  model: CapabilityModel | null,
+  id: GenerationParameterId
+): readonly string[] {
+  const field = GENERATION_PARAMETERS.find((candidate) => candidate.id === id)
+  return field?.modelManifestKey === undefined ? [] : (model?.[field.modelManifestKey] ?? [])
+}
+
 export function publishedParameterRules(
-  capability: CapabilityMedia
+  capability: CapabilityMedia,
+  model: CapabilityModel | null = null
 ): readonly PublishedParameterRule[] {
   const rules: PublishedParameterRule[] = []
   for (const field of GENERATION_PARAMETERS) {
-    if (field.manifestKey === undefined) continue
-    const candidates = capability[field.manifestKey]
+    const candidates =
+      field.manifestKey !== undefined
+        ? capability[field.manifestKey]
+        : field.modelManifestKey !== undefined
+          ? modelParameterCandidates(model, field.id)
+          : undefined
     if (candidates === undefined) continue
-    rules.push({ id: field.id, candidates, mayStayUnset: field.mayStayUnset === true })
+    rules.push({
+      id: field.id,
+      candidates,
+      mayStayUnset:
+        field.mayStayUnset === true ||
+        (field.modelManifestKey !== undefined && candidates.length === 0)
+    })
   }
   return rules
 }
