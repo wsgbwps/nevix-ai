@@ -149,6 +149,24 @@ const nidSizes = imageModelSizes(['2K', '3K', '4K'], {
   '4K': { '4:3': [4704, 3520], '9:16': [3040, 5504] }
 })
 
+const imageRatios = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9']
+const geminiRatios = [
+  '1:1',
+  '1:4',
+  '1:8',
+  '2:3',
+  '3:2',
+  '3:4',
+  '4:1',
+  '4:3',
+  '4:5',
+  '5:4',
+  '8:1',
+  '9:16',
+  '16:9',
+  '21:9'
+]
+
 /** The V1 manifest as the server publishes it with both media active. */
 const activeManifest: CapabilityManifest = {
   schemaVersion: 2,
@@ -161,6 +179,7 @@ const activeManifest: CapabilityManifest = {
     models: [
       {
         model: 'doubao-seedream-5.0-pro',
+        ratios: imageRatios,
         resolutions: ['1K', '1.5K', '2K'],
         defaultResolution: '2K',
         maxReferenceImages: 10,
@@ -168,10 +187,17 @@ const activeManifest: CapabilityManifest = {
       },
       {
         model: 'doubao-seedream-5.0',
+        ratios: imageRatios,
         resolutions: ['2K', '3K', '4K'],
         defaultResolution: '2K',
         maxReferenceImages: 14,
         sizes: nidSizes
+      },
+      {
+        model: 'gemini-3.1-flash-image',
+        ratios: geminiRatios,
+        resolutions: ['1K'],
+        defaultResolution: '1K'
       }
     ],
     modes: [
@@ -181,7 +207,7 @@ const activeManifest: CapabilityManifest = {
         referenceMaterial: { total: { min: 1, max: 14 }, image: imageEnvelope(1, 14) }
       }
     ],
-    ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+    ratios: imageRatios,
     quantities: [1, 2, 3, 4],
     defaults: { ratio: '1:1', quantity: 1 },
     prompt: { minChars: 1, maxChars: 2000 }

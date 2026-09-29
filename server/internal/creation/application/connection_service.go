@@ -343,8 +343,7 @@ func (s *ConnectionService) Recheck(ctx context.Context, principal authz.Princip
 		}
 		return s.recordTransientCheck(ctx, principal, connection)
 	}
-	// A valid token that sees neither allowlisted model is still a valid
-	// credential with both media independently unavailable.
+	// The fixed-route check returns media availability for a valid key.
 	image, video := result.MediaCapabilities()
 	credentialState := domain.CredentialStateValid
 	checkedAt := time.Now().UTC()

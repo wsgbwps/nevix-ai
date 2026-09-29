@@ -35,6 +35,7 @@ import {
   modeCandidates,
   modelCandidates,
   publishedSize,
+  ratioCandidates,
   resolutionCandidates,
   videoComposerMode,
   type DraftMediaType
@@ -648,9 +649,10 @@ function ParamsMenu({
     media === 'video' &&
     videoComposerMode(draft.mode) === 'first-last-frame' &&
     draft.references.length > 0
+  const publishedRatios = ratioCandidates(manifest, media, draft.model)
   const ratios = frameReferences
-    ? (capability.ratios ?? []).filter((ratio) => ratio === 'adaptive')
-    : (capability.ratios ?? [])
+    ? publishedRatios.filter((ratio) => ratio === 'adaptive')
+    : publishedRatios
   // Resolution tiers are model-scoped: the selected model's own published
   // tiers, empty while the draft's model is stale so only the stale note
   // shows.
@@ -697,6 +699,7 @@ function ParamsMenu({
               {staleRatio !== null && <StaleRow value={staleRatio} />}
               <OptionStrip
                 items={ratios}
+                maxColumns={8}
                 isSelected={(ratio) => ratio === draft.ratio}
                 layout="h-[52px] flex-col gap-2.5"
                 onSelect={(ratio) => composer.patchDraft({ ratio })}
@@ -890,12 +893,14 @@ function paramOptionClass(selected: boolean, layout: string): string {
 // `layout` carries the cell's height and font size, `render` its content.
 function OptionStrip<T extends string | number>({
   items,
+  maxColumns,
   isSelected,
   layout,
   onSelect,
   render
 }: {
   readonly items: readonly T[]
+  readonly maxColumns?: number
   readonly isSelected: (item: T) => boolean
   readonly layout: string
   readonly onSelect: (item: T) => void
@@ -904,7 +909,9 @@ function OptionStrip<T extends string | number>({
   return (
     <div
       className="bg-accent/60 grid gap-1 rounded-xl p-1"
-      style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+      style={{
+        gridTemplateColumns: `repeat(${Math.min(items.length, maxColumns ?? items.length)}, minmax(0, 1fr))`
+      }}
     >
       {items.map((item) => {
         const selected = isSelected(item)

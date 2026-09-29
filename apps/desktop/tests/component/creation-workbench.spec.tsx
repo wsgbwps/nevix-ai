@@ -1054,6 +1054,32 @@ test('the resolution tiers follow the selected image model', async ({ mount, pag
   await expect(params.getByTestId('composer-params-size')).toContainText('1728')
 })
 
+test('Gemini-only ratios appear for Gemini and reset on a deliberate switch to Doubao', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory />)
+  await selectFirstSession(page)
+
+  await page.getByTestId('composer-params').click()
+  await expect(page.getByRole('menu').getByRole('button', { name: '1:8' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  await page.getByTestId('composer-model').click()
+  await page.getByRole('menuitem', { name: 'gemini-3.1-flash-image' }).click()
+  await expect(page.getByTestId('composer-params')).toContainText('1K')
+  await page.getByTestId('composer-params').click()
+  await page.getByRole('menu').getByRole('button', { name: '1:8' }).click()
+  await expect(page.getByTestId('composer-params')).toContainText('1:8')
+  await page.keyboard.press('Escape')
+
+  await page.getByTestId('composer-model').click()
+  await page.getByRole('menuitem', { name: 'doubao-seedream-5.0-pro' }).click()
+  await expect(page.getByTestId('composer-params')).toContainText('1:1')
+  await expect(page.getByTestId('composer-params')).toContainText('1K')
+  expect((await draftRecord(page, scriptedSessionId))?.ratio).toBe('1:1')
+})
+
 test('the size row follows the selected ratio and resolution', async ({ mount, page }) => {
   await mount(<CreationWorkbenchStory />)
   await selectFirstSession(page)

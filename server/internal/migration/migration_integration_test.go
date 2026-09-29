@@ -635,7 +635,7 @@ func TestUpgradeAddsProviderRouteFailureConstraint(t *testing.T) {
 	}
 }
 
-func TestUpgradeRequiresImageRecheckForSeedreamPro(t *testing.T) {
+func TestUpgradeValidProviderKeyNeedsNoModelRecheck(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	ownerURL := requireOwnerURL(t)
@@ -659,7 +659,7 @@ func TestUpgradeRequiresImageRecheckForSeedreamPro(t *testing.T) {
 		 (admin_state, credential_state, image_capability, video_capability,
 		  envelope_version, credential_key_id, credential_nonce, credential_ciphertext,
 		  last_checked_at, last_check_outcome, created_by_user_id)
-		 VALUES ('enabled', 'valid', 'available', 'available', 1, 'seed-key',
+		 VALUES ('enabled', 'valid', 'available', 'unavailable', 1, 'seed-key',
 		         decode('00', 'hex'), decode('01', 'hex'), now(), 'completed', $1)
 		 RETURNING id`, userID,
 	).Scan(&connectionID); err != nil {
@@ -668,14 +668,15 @@ func TestUpgradeRequiresImageRecheckForSeedreamPro(t *testing.T) {
 
 	applied, err := Apply(ctx, scratchURL)
 	if err != nil {
-		t.Fatalf("upgrade through Seedream Pro recheck migration: %v", err)
+		t.Fatalf("upgrade through Key-only capability migration: %v", err)
 	}
-	foundV12 := false
+	foundV12, foundV29 := false, false
 	for _, result := range applied {
 		foundV12 = foundV12 || result.Source.Version == 12
+		foundV29 = foundV29 || result.Source.Version == 29
 	}
-	if !foundV12 {
-		t.Fatalf("upgrade did not apply migration 12: %+v", applied)
+	if !foundV12 || !foundV29 {
+		t.Fatalf("upgrade did not apply migrations 12 and 29: %+v", applied)
 	}
 
 	var imageCapability, videoCapability string
@@ -686,11 +687,11 @@ func TestUpgradeRequiresImageRecheckForSeedreamPro(t *testing.T) {
 	).Scan(&imageCapability, &videoCapability, &checkedAt, &outcome); err != nil {
 		t.Fatalf("read upgraded provider connection: %v", err)
 	}
-	if imageCapability != "checking" || videoCapability != "available" {
-		t.Fatalf("upgraded capabilities = image %s, video %s; want checking, available", imageCapability, videoCapability)
+	if imageCapability != "available" || videoCapability != "available" {
+		t.Fatalf("upgraded capabilities = image %s, video %s; want available, available", imageCapability, videoCapability)
 	}
 	if checkedAt != nil || outcome != nil {
-		t.Fatalf("old Lite catalog verdict survived Pro upgrade: checked_at=%v outcome=%v", checkedAt, outcome)
+		t.Fatalf("Key-only upgrade must not invent a recheck: checked_at=%v outcome=%v", checkedAt, outcome)
 	}
 }
 

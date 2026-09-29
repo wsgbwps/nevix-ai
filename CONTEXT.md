@@ -68,11 +68,11 @@ Deployment Instance 为 AI Creation 配置并启用的已审核 AI 供应商接�
 _Avoid_: Provider, Provider Adapter, Provider Credential, Default Provider Connection, Integration Domain
 
 **AI Provider Connection Check**:
-Admin 创建或替换 AI Provider Connection 凭据时执行的低副作用检查；V1 只通过 Kapon Cloud `/v1/models` 确认 Token 有效性和固定图片、视频模型的可见性，不生成真实媒体，不以第一笔用户任务作为连接激活门槛。
+Admin 创建或替换 AI Provider Connection 凭据时执行的低副作用检查；只确认 Key 有效性，不把供应商返回的模型列表当作可用能力，不生成真实媒体，也不以第一笔用户任务作为连接激活门槛。
 _Avoid_: Connection Smoke Test, First-Generation Activation
 
 **AI Provider Media Capability**:
-AI Provider Connection 对图片或视频一种媒体及其固定模型的独立检查结果，为检查中、可用或不可用；固定模型不可见只使对应媒体不可用，不否定另一种媒体已检查的能力。
+AI Provider Connection 对图片或视频一种媒体的凭据检查结论，为检查中、可用或不可用；有效 Key 对两种媒体得出相同结论，具体模型由 Capability Manifest 决定，连接的管理状态另行限制提交。
 _Avoid_: Default Connection, Provider Health, Media Provider
 
 **AI Provider Capability Manifest**:

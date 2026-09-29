@@ -189,6 +189,19 @@ export function resolutionCandidates(
   return publishedModel(manifest, media, model)?.resolutions ?? []
 }
 
+/** Image ratios belong to the selected model; video keeps media-level ratios. */
+export function ratioCandidates(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType,
+  model: string | null
+): readonly string[] {
+  if (media === 'image') {
+    return model === null ? [] : (publishedModel(manifest, media, model)?.ratios ?? [])
+  }
+  const capability = mediaCapability(manifest, media)
+  return capability?.available ? (capability.ratios ?? []) : []
+}
+
 /**
  * The vendor pixel size the server submits for this exact (model, ratio, resolution) selection —
  * the manifest publishes the table the adapter resolves. `null` while any dimension is stale or
@@ -326,10 +339,18 @@ export function staleDraftFields(
   // A field the media does not publish gets no verdict here — the admission
   // freeze judges its value server-side.
   for (const rule of publishedParameterRules(capability)) {
+    if (media === 'image' && rule.id === 'ratio') continue
     const value = draft[rule.id]
     if (value === null ? !rule.mayStayUnset : !rule.candidates.includes(value)) {
       stale.add(rule.id)
     }
+  }
+  if (
+    media === 'image' &&
+    draft.ratio !== null &&
+    !ratioCandidates(manifest, media, draft.model).includes(draft.ratio)
+  ) {
+    stale.add('ratio')
   }
   if (
     media === 'video' &&

@@ -355,8 +355,7 @@ func TestReplaceCandidateFailureKeepsOldCredentialAndSuccessSwitchesIndependentl
 		t.Fatal("rejected candidate rewrote the stored envelope")
 	}
 
-	// A candidate that sees only the image model still switches: image
-	// available, video independently unavailable.
+	// A valid Key switches even when the provider catalog omits a code-versioned model.
 	h.kapon.setModels(true, false)
 	h.kapon.acceptKey(providerKeyTwo)
 	status, body = h.doSecureRequest(t, http.MethodPut, "/creation/provider-connection/credential", admin, map[string]string{
@@ -367,22 +366,21 @@ func TestReplaceCandidateFailureKeepsOldCredentialAndSuccessSwitchesIndependentl
 	}
 	assertContractResponse(t, http.MethodPut, "/creation/provider-connection/credential", status, body)
 	view := decodeConnectionView(t, body)
-	if view.CredentialState != "valid" || view.ImageCapability != "available" || view.VideoCapability != "unavailable" {
-		t.Fatalf("partial-visibility replace states: %+v", view)
+	if view.CredentialState != "valid" || view.ImageCapability != "available" || view.VideoCapability != "available" {
+		t.Fatalf("Key-only replace states: %+v", view)
 	}
 	row, _ = h.activeConnectionRow(t)
 	if bytes.Equal(oldCiphertext, row.ciphertext) {
 		t.Fatal("successful replace kept the old envelope")
 	}
 
-	// The member surface reflects the independent degradation without any
-	// provider internals.
+	// The member surface follows the Key verdict without exposing provider internals.
 	status, body = h.doRequest(t, http.MethodGet, "/creation/media-capabilities", h.loginToken(t, creatorEmail, harnessPassword), nil)
 	if status != http.StatusOK {
 		t.Fatalf("member capabilities: status=%d body=%s", status, body)
 	}
-	if reason := extractNested(t, body, "video", "reason"); reason != "model_unavailable" {
-		t.Fatalf("video member reason after partial replace: %q", reason)
+	if reason := extractNested(t, body, "video", "reason"); reason != "" {
+		t.Fatalf("video member reason after valid Key: %q", reason)
 	}
 	if reason := extractNested(t, body, "image", "reason"); reason != "" {
 		t.Fatalf("image member reason after available: %q", reason)

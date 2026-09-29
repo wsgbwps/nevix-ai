@@ -547,7 +547,7 @@ func freezeSpecification(intent *domain.GenerationIntent, manifest domain.Capabi
 		References:      make([]domain.SpecificationReference, 0, len(intent.References)),
 	}
 	if media == domain.DraftMediaImage {
-		if !valueInList(mediaView.Ratios, intent.Ratio) {
+		if !valueInList(modelView.Ratios, intent.Ratio) {
 			return nil, domain.ErrCapabilityStale
 		}
 		if intent.Quantity == nil || !intInList(mediaView.Quantities, *intent.Quantity) {

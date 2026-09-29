@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// The tolerance is only defensible if every published size lands in its own
-// ratio's bounds and nobody else's: one shape, one row, no exceptions.
+// The tolerance is only defensible when each published pixel shape lands in
+// one ratio row. Gemini 21:9/512 is the documented 792x168 exception.
 func TestRatioBoundsSeparatesEveryPublishedImageSize(t *testing.T) {
 	ratios := AssetFacets(MediaImage).Ratios
 	if len(ratios) == 0 {
@@ -14,7 +14,7 @@ func TestRatioBoundsSeparatesEveryPublishedImageSize(t *testing.T) {
 	}
 	checked := 0
 	for _, model := range AcceptedImageModels() {
-		for _, ratio := range ratios {
+		for _, ratio := range model.Ratios {
 			for _, resolution := range model.Resolutions {
 				size, ok := ImageSizeFor(model.Model, ratio, resolution)
 				if !ok {
@@ -28,6 +28,12 @@ func TestRatioBoundsSeparatesEveryPublishedImageSize(t *testing.T) {
 					if shape >= lo && shape <= hi {
 						matched = append(matched, candidate)
 					}
+				}
+				if model.Model == GeminiModelID && ratio == "21:9" && resolution == "512" {
+					if len(matched) != 0 {
+						t.Fatalf("documented Gemini 21:9/512 anomaly unexpectedly matched %v", matched)
+					}
+					continue
 				}
 				if len(matched) != 1 || matched[0] != ratio {
 					t.Fatalf("%s %s %s is %dx%d (shape %.4f), matched %v, want [%s]",
@@ -51,6 +57,9 @@ func TestAssetFacetsPublishesFilterableValuesOnly(t *testing.T) {
 	}
 	if !containsString(image.Modes, ModeTextToImage) || !containsString(video.Modes, ModeFirstLastFrame) {
 		t.Fatalf("modes missing: image=%v video=%v", image.Modes, video.Modes)
+	}
+	if !containsString(image.Ratios, "1:8") || !containsString(image.Ratios, "8:1") || !containsString(image.Resolutions, "512") {
+		t.Fatalf("Gemini facets missing: %+v", image)
 	}
 	if containsString(image.Resolutions, "1080p") || containsString(video.Resolutions, "2K") {
 		t.Fatalf("resolutions crossed medias: image=%v video=%v", image.Resolutions, video.Resolutions)

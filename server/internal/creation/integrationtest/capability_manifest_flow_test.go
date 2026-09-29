@@ -28,6 +28,7 @@ type manifestMedia struct {
 	Action    string `json:"action"`
 	Models    []struct {
 		Model             string   `json:"model"`
+		Ratios            []string `json:"ratios"`
 		Resolutions       []string `json:"resolutions"`
 		DefaultResolution string   `json:"default_resolution"`
 		Sizes             []struct {
@@ -91,7 +92,7 @@ func TestCapabilityManifestWithoutConnectionIsUnavailable(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("manifest must answer 200, got %d: %s", status, body)
 	}
-	if payload.SchemaVersion != 2 || payload.ManifestVersion != 6 {
+	if payload.SchemaVersion != 3 || payload.ManifestVersion != 7 {
 		t.Fatalf("manifest must publish its schema and content versions: %+v", payload)
 	}
 	for media, view := range map[string]manifestMedia{"image": payload.Image, "video": payload.Video} {
@@ -139,6 +140,7 @@ func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
 		model             string
 		resolutions       []string
 		defaultResolution string
+		ratios            int
 		pixelSizes        int
 	}
 	expectations := []struct {
@@ -148,11 +150,12 @@ func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
 		modes  []string
 	}{
 		{"image", payload.Image, []expectedModelSpec{
-			{"doubao-seedream-5.0-pro", []string{"1K", "1.5K", "2K"}, "2K", 24},
-			{"doubao-seedream-5.0", []string{"2K", "3K", "4K"}, "2K", 24},
+			{"doubao-seedream-5.0-pro", []string{"1K", "1.5K", "2K"}, "2K", 8, 24},
+			{"doubao-seedream-5.0", []string{"2K", "3K", "4K"}, "2K", 8, 24},
+			{"gemini-3.1-flash-image", []string{"512", "1K", "2K", "4K"}, "1K", 14, 56},
 		}, []string{"text-to-image", "reference-image"}},
 		{"video", payload.Video, []expectedModelSpec{
-			{"doubao-seedance-2-5", []string{"480p", "720p", "1080p"}, "720p", 0},
+			{"doubao-seedance-2-5", []string{"480p", "720p", "1080p"}, "720p", 0, 0},
 		}, []string{"text-to-video", "first-frame", "first-last-frame", "omni-reference"}},
 	}
 	for _, want := range expectations {
@@ -173,6 +176,9 @@ func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
 			}
 			if gotModel.DefaultResolution != wantModel.defaultResolution {
 				t.Fatalf("%s %s default resolution = %q, want %q", want.media, gotModel.Model, gotModel.DefaultResolution, wantModel.defaultResolution)
+			}
+			if len(gotModel.Ratios) != wantModel.ratios {
+				t.Fatalf("%s %s ratios = %v, want %d", want.media, gotModel.Model, gotModel.Ratios, wantModel.ratios)
 			}
 			if wantModel.pixelSizes == 0 {
 				if gotModel.Sizes != nil {
@@ -222,9 +228,8 @@ func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
 	assertContractResponse(t, "GET", "/creation/capability-manifest", memberStatus, memberBody)
 }
 
-// TestCapabilityManifestIndependentMediaDegradation: one model disappearing
-// degrades only its own media in the manifest after an admin recheck.
-func TestCapabilityManifestIndependentMediaDegradation(t *testing.T) {
+// Model-list changes cannot hide code-versioned capabilities while the Key is valid.
+func TestCapabilityManifestIgnoresProviderModelList(t *testing.T) {
 	h := newHarness(t)
 	h.ensureAccounts(t)
 	h.resetProviderConnections(t)
@@ -236,22 +241,15 @@ func TestCapabilityManifestIndependentMediaDegradation(t *testing.T) {
 		t.Fatalf("configure connection: status=%d body=%s", status, body)
 	}
 
-	// The video model vanishes from the catalog; a recheck records the new
-	// fact and the manifest must stop publishing video while image holds.
-	h.kapon.setModels(true, false)
+	// The catalog may be empty without narrowing the code-versioned manifest.
+	h.kapon.setModels(false, false)
 	if status, body := h.doSecureRequest(t, "POST", "/creation/provider-connection/recheck", adminToken, nil); status != http.StatusOK {
 		t.Fatalf("recheck: status=%d body=%s", status, body)
 	}
 
 	_, _, payload := h.getManifest(t, adminToken)
-	if !payload.Image.Available {
-		t.Fatalf("image must stay available, got %+v", payload.Image)
-	}
-	if payload.Video.Available || payload.Video.Reason != "model_unavailable" || payload.Video.Action != "contact_admin" {
-		t.Fatalf("video must degrade to model_unavailable/contact_admin, got %+v", payload.Video)
-	}
-	if payload.Video.Models != nil || payload.Video.Modes != nil {
-		t.Fatalf("degraded video must not publish values: %+v", payload.Video)
+	if !payload.Image.Available || !payload.Video.Available || len(payload.Image.Models) != 3 || len(payload.Video.Models) != 1 {
+		t.Fatalf("valid Key must keep all versioned models available: image=%+v video=%+v", payload.Image, payload.Video)
 	}
 }
 

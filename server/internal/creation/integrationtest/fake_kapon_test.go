@@ -9,7 +9,7 @@ import (
 
 // fakeKapon stands in for the reviewed Kapon route in automated tests: it answers GET
 // /v1/models for accepted bearer keys and can be scripted per scenario (token rejection,
-// partial model visibility, temporary upstream pressure). No production token ever appears —
+// catalog changes, temporary upstream pressure). No production token ever appears —
 // only locally minted fixtures (spec #150: automation never uses production credentials).
 type fakeKapon struct {
 	server *httptest.Server
@@ -63,7 +63,7 @@ func (f *fakeKapon) forceStatus(status int) {
 	f.forcedStatus = status
 }
 
-// setModels toggles each allowlisted model's visibility.
+// setModels toggles catalog entries; valid Keys remain capable even when empty.
 func (f *fakeKapon) setModels(image, video bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

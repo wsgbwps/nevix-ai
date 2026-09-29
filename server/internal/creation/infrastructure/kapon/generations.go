@@ -279,24 +279,46 @@ func (c *GenerationsClient) Submit(ctx context.Context, credential string, req d
 }
 
 func (c *GenerationsClient) submitImage(ctx context.Context, credential string, req domain.PreparedSubmitRequest) (domain.SubmitOutcome, error) {
-	size, err := imageSize(req)
-	if err != nil {
-		return domain.SubmitOutcome{}, err
-	}
-	// Kapon has no image batch parameter, so each requested output needs its own call.
-	body := map[string]any{
-		"model":           imageWireModel(req.Model),
-		"prompt":          req.Prompt,
-		"size":            size,
-		"response_format": "url",
-		"watermark":       false,
-	}
-	if len(req.References) > 0 {
-		images := make([]string, 0, len(req.References))
-		for _, reference := range req.References {
-			images = append(images, reference.URL)
+	// Each provider request creates one image; quantity still fans out below.
+	path := "/v1/images/generations"
+	var body map[string]any
+	if req.Model == domain.GeminiModelID {
+		if req.Ratio == nil || req.Resolution == nil {
+			return domain.SubmitOutcome{}, &domain.ProviderRejectedError{Reason: domain.ReasonInternalError}
 		}
-		body["image"] = images
+		body = map[string]any{
+			"model": req.Model, "prompt": req.Prompt, "size": *req.Resolution,
+			"aspect_ratio": *req.Ratio, "response_format": "url",
+		}
+		if len(req.References) == 0 {
+			body["n"] = 1
+		} else {
+			path = "/v1/images/edits"
+			images := make([]map[string]any, 0, len(req.References))
+			for _, reference := range req.References {
+				images = append(images, map[string]any{"image_url": reference.URL})
+			}
+			body["images"] = images
+		}
+	} else {
+		size, err := imageSize(req)
+		if err != nil {
+			return domain.SubmitOutcome{}, err
+		}
+		body = map[string]any{
+			"model":           imageWireModel(req.Model),
+			"prompt":          req.Prompt,
+			"size":            size,
+			"response_format": "url",
+			"watermark":       false,
+		}
+		if len(req.References) > 0 {
+			images := make([]string, 0, len(req.References))
+			for _, reference := range req.References {
+				images = append(images, reference.URL)
+			}
+			body["image"] = images
+		}
 	}
 	quantity := req.Quantity
 	if quantity < 1 {
@@ -316,7 +338,7 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 					URL string `json:"url"`
 				} `json:"data"`
 			}
-			errs[slot] = classifySubmitError(c.call(callCtx, credential, http.MethodPost, "/v1/images/generations", body, &parsed))
+			errs[slot] = classifySubmitError(c.call(callCtx, credential, http.MethodPost, path, body, &parsed))
 			if errs[slot] != nil {
 				return
 			}

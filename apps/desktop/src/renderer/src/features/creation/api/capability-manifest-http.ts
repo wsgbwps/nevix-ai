@@ -88,6 +88,8 @@ export interface CapabilitySize {
  */
 export interface CapabilityModel {
   readonly model: string
+  /** Required for image models; video keeps its media-level ratios. */
+  readonly ratios?: readonly string[]
   readonly resolutions: readonly string[]
   readonly defaultResolution: string
   readonly maxReferenceImages?: number
@@ -198,8 +200,8 @@ export function parseCapabilityManifest(payload: unknown): CapabilityManifest | 
   if (typeof payload !== 'object' || payload === null) return null
   const schemaVersion = readNumber(payload, 'schema_version')
   const manifestVersion = readNumber(payload, 'manifest_version')
-  const image = parseMedia((payload as Record<string, unknown>).image)
-  const video = parseMedia((payload as Record<string, unknown>).video)
+  const image = parseMedia((payload as Record<string, unknown>).image, 'image')
+  const video = parseMedia((payload as Record<string, unknown>).video, 'video')
   if (
     schemaVersion === null ||
     manifestVersion === null ||
@@ -212,7 +214,7 @@ export function parseCapabilityManifest(payload: unknown): CapabilityManifest | 
   return { schemaVersion, manifestVersion, image, video }
 }
 
-function parseMedia(entry: unknown): CapabilityMedia | null {
+function parseMedia(entry: unknown, media: 'image' | 'video'): CapabilityMedia | null {
   const available = readBoolean(entry, 'available')
   if (available === null) return null
   const reason = readEnum(entry, 'reason', CAPABILITY_REASONS)
@@ -228,7 +230,7 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
   const ratios = readStringList(entry, 'ratios')
   if (ratios === MALFORMED_LIST) return null
 
-  const models = parseModels(entry, ratios)
+  const models = parseModels(entry, media, ratios)
   if (models === null) return null
 
   const modes: CapabilityMode[] = []
@@ -289,11 +291,12 @@ function parseMedia(entry: unknown): CapabilityMedia | null {
   }
 }
 
-// parseModels reads the model list with its per-model resolution tiers. A
+// parseModels reads the model list with its per-model ratios and resolution tiers. A
 // default outside the entry's own tiers fails closed: the composer may only
 // ever seed resolutions the model itself publishes.
 function parseModels(
   entry: unknown,
+  media: 'image' | 'video',
   ratios: readonly string[] | undefined
 ): CapabilityModel[] | null {
   const raw = readObjectField(entry, 'models')
@@ -301,10 +304,13 @@ function parseModels(
   const models: CapabilityModel[] = []
   for (const item of raw) {
     const model = readString(item, 'model')
+    const modelRatios = readStringList(item, 'ratios')
     const resolutions = readStringList(item, 'resolutions')
     const defaultResolution = readString(item, 'default_resolution')
     if (
       model === null ||
+      modelRatios === MALFORMED_LIST ||
+      (media === 'image' && (modelRatios === undefined || modelRatios.length === 0)) ||
       resolutions === undefined ||
       resolutions === MALFORMED_LIST ||
       resolutions.length === 0 ||
@@ -313,7 +319,7 @@ function parseModels(
     ) {
       return null
     }
-    const sizes = parseSizes(item, resolutions, ratios)
+    const sizes = parseSizes(item, resolutions, modelRatios ?? ratios)
     if (sizes === MALFORMED_LIST) return null
     let maxReferenceImages: number | undefined
     if (hasField(item, 'max_reference_images')) {
@@ -323,6 +329,7 @@ function parseModels(
     }
     models.push({
       model,
+      ...(modelRatios !== undefined ? { ratios: modelRatios } : {}),
       resolutions,
       defaultResolution,
       ...(maxReferenceImages !== undefined ? { maxReferenceImages } : {}),
@@ -335,7 +342,7 @@ function parseModels(
 
 // parseSizes reads one model's published pixel sizes — display metadata for the
 // exact size the server submits. Every entry must sit inside the model's tiers
-// and the media's ratios, so an out-of-set size cannot impersonate a capability.
+// and the model's ratios, so an out-of-set size cannot impersonate a capability.
 function parseSizes(
   item: unknown,
   resolutions: readonly string[],

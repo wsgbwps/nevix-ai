@@ -82,6 +82,11 @@ func AssetFacets(media MediaType) AssetFacetVocabulary {
 	models, modes, ratios := imageModels, imageModes, imageRatios
 	if media == MediaVideo {
 		models, modes, ratios = videoModels, videoModes, videoRatios
+	} else {
+		ratios = nil
+		for _, model := range models {
+			ratios = unionValues(ratios, model.Ratios)
+		}
 	}
 	resolutions := make([]string, 0, len(models))
 	for _, model := range models {
@@ -135,9 +140,9 @@ func unionValues(first, second []string) []string {
 
 // RatioShapeTolerance is the relative margin on either side of a canonical ratio: a
 // shape is that ratio while it stays within ±3% of it. Calibrated from the published
-// size table: the largest gap between a label and its pixels is 1.84% (base 4K 16:9 is
-// 5504x3040, i.e. 172:95) and the closest adjacent pair is 4:3 -> 3:2 at 12.5%, so 3%
-// clears the deviation with room to spare and can never sort one shape into two rows.
+// size table: aside from the documented Gemini 21:9/512 anomaly, the largest gap between
+// a label and its pixels is 1.84% (base 4K 16:9 is 5504x3040). The closest adjacent
+// ratios, 3:4 and 4:5, still have non-overlapping 3% bands.
 const RatioShapeTolerance = 0.03
 
 // RatioBounds returns the pixel-shape interval (width/height) that counts as

@@ -2,13 +2,13 @@ package domain
 
 import "testing"
 
-// The pixel size table is the vendor 豆包生图 contract (OpenAPI x-size-map) shared by the
+// The pixel size table is the Apifox vendor contract shared by the
 // manifest's sizes, the Kapon adapter's wire size, and the Workbench display. These tests
 // pin its completeness against the accepted cross product, so a new model, tier, or
 // ratio immediately demands its size entry.
 func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 	for _, model := range AcceptedImageModels() {
-		for _, ratio := range AcceptedImageRatios() {
+		for _, ratio := range model.Ratios {
 			for _, resolution := range model.Resolutions {
 				size, ok := ImageSizeFor(model.Model, ratio, resolution)
 				if !ok {
@@ -19,6 +19,15 @@ func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestGeminiImageSizePinsDocumentedEdge(t *testing.T) {
+	if size, ok := ImageSizeFor(GeminiModelID, "21:9", "512"); !ok || size != (ImageSize{792, 168}) {
+		t.Fatalf("Gemini 21:9 512 must retain the published 792x168 anomaly, got %+v (ok=%v)", size, ok)
+	}
+	if _, ok := ImageSizeFor(ImageModelID, "1:8", "1K"); ok {
+		t.Fatal("Gemini-only ratio must not resolve for Seedream")
 	}
 }
 

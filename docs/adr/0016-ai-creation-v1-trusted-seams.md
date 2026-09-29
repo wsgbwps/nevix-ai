@@ -152,7 +152,7 @@ Identity 在 Session 吊销事务成功提交后，通过共享 Domain Event（`
 ### Capability Manifest 与 Provider 验证
 
 - AI Provider Capability Manifest 是随 Nevix 代码发布的版本化合同：模型、模式、参数与参考素材限制只有在开发者确认供应商合同并更新实现、契约和测试后才进入版本。Desktop 镜像允许值，Server 仍执行权威准入校验。
-- 实例运行时只把 AI Provider Connection Check 作为媒体可用性输入：Token、固定模型可见性或管理状态不满足时，仅对应 Creation 媒体 fail closed；这些事实不影响 Server 启动和其他业务。
+- 实例运行时只把 AI Provider Connection Check 作为媒体可用性输入；其 Key 验证与模型清单的责任按 [ADR-0025](0025-provider-key-check-and-model-scoped-image-capabilities.md) 执行。这些事实不影响 Server 启动和其他业务。
 - fake adapter 与契约测试进入普通 CI。首次正式发布、固定模型变化或供应商合同变化时，开发者按发布 checklist 人工执行真实 Kapon generation smoke，并把结果记入 release checklist 或 issue；该记录不是部署资产，不进入 Server 配置，不控制 Capability Manifest，也不要求重启 Server 激活。
 - 用户真实生成失败只使对应 Generation Task/Result Slot 进入明确失败或重试语义；不得因为外部 Provider 一次失败而终止 Server 进程。
 
