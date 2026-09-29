@@ -29,16 +29,8 @@ func TestCheckAcceptsKeyWithoutInspectingModels(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"object":"list","data":[{"id":"unrelated-model"}]}`))
 	})
-	result, err := client.Check(context.Background(), "valid-key")
-	if err != nil {
+	if err := client.Check(context.Background(), "valid-key"); err != nil {
 		t.Fatalf("check: %v", err)
-	}
-	if !result.ImageAvailable || !result.VideoAvailable {
-		t.Fatalf("valid key must allow both media: %+v", result)
-	}
-	image, video := result.MediaCapabilities()
-	if image != domain.MediaCapabilityAvailable || video != domain.MediaCapabilityAvailable {
-		t.Fatalf("capabilities: %s %s", image, video)
 	}
 }
 
@@ -46,16 +38,8 @@ func TestCheckIgnoresCatalogBody(t *testing.T) {
 	client := newCatalogClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`not json`))
 	})
-	result, err := client.Check(context.Background(), "valid-key")
-	if err != nil {
+	if err := client.Check(context.Background(), "valid-key"); err != nil {
 		t.Fatalf("check: %v", err)
-	}
-	if !result.ImageAvailable || !result.VideoAvailable {
-		t.Fatalf("HTTP 200 must allow both media regardless of body: %+v", result)
-	}
-	image, video := result.MediaCapabilities()
-	if image != domain.MediaCapabilityAvailable || video != domain.MediaCapabilityAvailable {
-		t.Fatalf("capabilities: %s %s", image, video)
 	}
 }
 
@@ -76,7 +60,7 @@ func TestCheckMapsProviderVerdicts(t *testing.T) {
 			client := newCatalogClient(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(testCase.status)
 			})
-			if _, err := client.Check(context.Background(), "any"); !errors.Is(err, testCase.wantErr) {
+			if err := client.Check(context.Background(), "any"); !errors.Is(err, testCase.wantErr) {
 				t.Fatalf("error = %v, want %v", err, testCase.wantErr)
 			}
 		})
@@ -89,7 +73,7 @@ func TestCheckTransportFailureIsTransient(t *testing.T) {
 	client := newCatalogClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		panic("connection torn down")
 	})
-	if _, err := client.Check(context.Background(), "any"); !errors.Is(err, domain.ErrCheckTemporarilyUnavailable) {
+	if err := client.Check(context.Background(), "any"); !errors.Is(err, domain.ErrCheckTemporarilyUnavailable) {
 		t.Fatalf("transport error = %v, want transient", err)
 	}
 }

@@ -58,29 +58,29 @@ func ValidateBaseURL(raw string) error {
 }
 
 // Check treats HTTP 200 as a valid key, independent of catalog contents.
-func (c *ModelsCheckClient) Check(ctx context.Context, candidateKey string) (domain.ProviderCheckResult, error) {
+func (c *ModelsCheckClient) Check(ctx context.Context, candidateKey string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/models", nil)
 	if err != nil {
-		return domain.ProviderCheckResult{}, fmt.Errorf("kapon: build models request: %w", err)
+		return fmt.Errorf("kapon: build models request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+candidateKey)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return domain.ProviderCheckResult{}, domain.ErrCheckTemporarilyUnavailable
+		return domain.ErrCheckTemporarilyUnavailable
 	}
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusOK:
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return domain.ProviderCheckResult{}, domain.ErrCandidateCredentialInvalid
+		return domain.ErrCandidateCredentialInvalid
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-		return domain.ProviderCheckResult{}, domain.ErrCheckTemporarilyUnavailable
+		return domain.ErrCheckTemporarilyUnavailable
 	default:
 		// Other statuses do not prove that the candidate credential is invalid.
-		return domain.ProviderCheckResult{}, domain.ErrCheckTemporarilyUnavailable
+		return domain.ErrCheckTemporarilyUnavailable
 	}
 
-	return domain.ProviderCheckResult{ImageAvailable: true, VideoAvailable: true}, nil
+	return nil
 }

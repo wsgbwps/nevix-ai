@@ -106,8 +106,7 @@ func (s *ConnectionService) Configure(ctx context.Context, principal authz.Princ
 	if err != nil {
 		return domain.ProviderConnection{}, fmt.Errorf("creation: establish provider credential master key: %w", err)
 	}
-	result, err := s.checkCandidate(ctx, candidateKey)
-	if err != nil {
+	if err := s.checker.Check(ctx, candidateKey); err != nil {
 		return domain.ProviderConnection{}, err
 	}
 	creatorID, err := domain.ParseUUID(principal.UserID)
@@ -119,15 +118,14 @@ func (s *ConnectionService) Configure(ctx context.Context, principal authz.Princ
 	if err != nil {
 		return domain.ProviderConnection{}, err
 	}
-	image, video := result.MediaCapabilities()
 	checkedAt := time.Now().UTC()
 	completed := domain.CheckOutcomeCompleted
 	connection := domain.ProviderConnection{
 		ID:               connectionID,
 		AdminState:       domain.AdminStateEnabled,
 		CredentialState:  domain.CredentialStateValid,
-		ImageCapability:  image,
-		VideoCapability:  video,
+		ImageCapability:  domain.MediaCapabilityAvailable,
+		VideoCapability:  domain.MediaCapabilityAvailable,
 		Envelope:         &envelope,
 		LastCheckedAt:    &checkedAt,
 		LastCheckOutcome: &completed,
@@ -171,8 +169,7 @@ func (s *ConnectionService) Replace(ctx context.Context, principal authz.Princip
 	if err != nil {
 		return domain.ProviderConnection{}, err
 	}
-	result, err := s.checkCandidate(ctx, candidateKey)
-	if err != nil {
+	if err := s.checker.Check(ctx, candidateKey); err != nil {
 		return domain.ProviderConnection{}, err
 	}
 	key, err := s.credentialKeyForReplacement(ctx)
@@ -183,16 +180,15 @@ func (s *ConnectionService) Replace(ctx context.Context, principal authz.Princip
 	if err != nil {
 		return domain.ProviderConnection{}, err
 	}
-	image, video := result.MediaCapabilities()
 	checkedAt := time.Now().UTC()
 	err = s.runner.Run(ctx, func(sc domain.WriteScope) error {
 		if err := s.connections.ReplaceCredential(ctx, sc.Tx(), connection.ID, &envelope,
-			domain.CredentialStateValid, image, video, checkedAt, domain.CheckOutcomeCompleted); err != nil {
+			domain.CredentialStateValid, domain.MediaCapabilityAvailable, domain.MediaCapabilityAvailable, checkedAt, domain.CheckOutcomeCompleted); err != nil {
 			return err
 		}
 		return appendConnectionAudit(ctx, sc.Tx(), principal, auditlog.ProviderConnectionReplaced, &domain.ProviderConnection{
 			ID: connection.ID, AdminState: connection.AdminState,
-			CredentialState: domain.CredentialStateValid, ImageCapability: image, VideoCapability: video,
+			CredentialState: domain.CredentialStateValid, ImageCapability: domain.MediaCapabilityAvailable, VideoCapability: domain.MediaCapabilityAvailable,
 		})
 	})
 	if err != nil {
@@ -330,7 +326,7 @@ func (s *ConnectionService) Recheck(ctx context.Context, principal authz.Princip
 	if err != nil {
 		return s.failClosed(ctx, principal, connection, "credential_unavailable")
 	}
-	result, checkErr := s.checker.Check(ctx, string(candidate))
+	checkErr := s.checker.Check(ctx, string(candidate))
 	// The decrypted key's useful life ends with the check.
 	for i := range candidate {
 		candidate[i] = 0
@@ -343,30 +339,22 @@ func (s *ConnectionService) Recheck(ctx context.Context, principal authz.Princip
 		}
 		return s.recordTransientCheck(ctx, principal, connection)
 	}
-	// The fixed-route check returns media availability for a valid key.
-	image, video := result.MediaCapabilities()
+	// A valid key makes both media available; models come from the manifest.
 	credentialState := domain.CredentialStateValid
 	checkedAt := time.Now().UTC()
 	err = s.runner.Run(ctx, func(sc domain.WriteScope) error {
-		if err := s.connections.SetCheckResult(ctx, sc.Tx(), connection.ID, credentialState, image, video, checkedAt, domain.CheckOutcomeCompleted); err != nil {
+		if err := s.connections.SetCheckResult(ctx, sc.Tx(), connection.ID, credentialState, domain.MediaCapabilityAvailable, domain.MediaCapabilityAvailable, checkedAt, domain.CheckOutcomeCompleted); err != nil {
 			return err
 		}
 		return appendConnectionAudit(ctx, sc.Tx(), principal, auditlog.ProviderConnectionChecked, &domain.ProviderConnection{
 			ID: connection.ID, AdminState: connection.AdminState,
-			CredentialState: credentialState, ImageCapability: image, VideoCapability: video,
+			CredentialState: credentialState, ImageCapability: domain.MediaCapabilityAvailable, VideoCapability: domain.MediaCapabilityAvailable,
 		})
 	})
 	if err != nil {
 		return domain.ProviderConnection{}, err
 	}
 	return s.connections.GetActive(ctx)
-}
-
-// checkCandidate runs one candidate key against the fixed provider route.
-// The adapter already speaks the domain's verdicts (candidate invalid or
-// transient); the candidate's plaintext never leaves this frame's paths.
-func (s *ConnectionService) checkCandidate(ctx context.Context, candidateKey string) (domain.ProviderCheckResult, error) {
-	return s.checker.Check(ctx, candidateKey)
 }
 
 // recordDefinitiveInvalid persists the definitive token-rejected verdict:
