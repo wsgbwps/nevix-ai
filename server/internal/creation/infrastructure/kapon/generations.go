@@ -375,16 +375,23 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 		if err == nil && len(urls[slot]) == 0 {
 			return domain.SubmitOutcome{}, missingOutputIndeterminate()
 		}
+		if err == nil {
+			successful++
+		}
 	}
 	var retryable error
 	for _, err := range errs {
 		if err == nil {
-			successful++
 			continue
 		}
 		if domain.IsSubmitRetryable(err) {
 			retryable = err
 			continue
+		}
+		if successful > 0 && domain.ClassifyFailureReason(err) == domain.ReasonProviderRouteUnavailable {
+			return domain.SubmitOutcome{}, domain.WithFailureDiagnostic(
+				domain.ErrSubmitIndeterminate, domain.FailureDiagnosticOf(err),
+			)
 		}
 		return domain.SubmitOutcome{}, err
 	}
@@ -545,9 +552,9 @@ var (
 	errTransportLost = errors.New("kapon: transport lost")
 )
 
-// safeSubmitRejectionCode is Kapon's explicit no-route rejection: no model
-// group accepted the request, so 429/503 responses carrying it created no job.
-const safeSubmitRejectionCode = "MODEL_GROUP_ALL_UNAVAILABLE"
+// modelRouteUnavailableCode is Kapon's explicit no-route rejection: no model
+// group accepted the request, so the task can fail with the provider diagnosis.
+const modelRouteUnavailableCode = "MODEL_GROUP_ALL_UNAVAILABLE"
 
 // classifySubmitError tightens the generic HTTP classification for the
 // side-effecting Submit operation. A status class alone never proves that no
@@ -565,15 +572,11 @@ func classifySubmitError(err error) error {
 	if errors.Is(err, errTransportLost) {
 		return domain.WithFailureDiagnostic(domain.ErrSubmitIndeterminate, diagnostic)
 	}
-	if diagnostic != nil && diagnostic.Code == safeSubmitRejectionCode &&
+	if diagnostic != nil && diagnostic.Code == modelRouteUnavailableCode &&
 		diagnostic.HTTPStatus != nil &&
 		(*diagnostic.HTTPStatus == http.StatusTooManyRequests || *diagnostic.HTTPStatus == http.StatusServiceUnavailable) {
-		pressure := domain.SubmitRetryBackoff
-		if domain.IsProviderUnavailable(err) {
-			pressure = domain.SubmitRetryCooldown
-		}
-		return domain.WithFailureDiagnostic(&domain.SubmitRetryableError{
-			Reason: domain.ReasonProviderRouteUnavailable, Pressure: pressure, RetryAfter: domain.RetryAfterOf(err),
+		return domain.WithFailureDiagnostic(&domain.ProviderRejectedError{
+			Reason: domain.ReasonProviderRouteUnavailable,
 		}, diagnostic)
 	}
 	if domain.IsRateLimited(err) {
@@ -686,7 +689,7 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 			diagnostic,
 		)
 	case resp.StatusCode >= 500:
-		if providerFailure.Code == safeSubmitRejectionCode {
+		if providerFailure.Code == modelRouteUnavailableCode {
 			return domain.WithFailureDiagnostic(
 				&domain.ProviderUnavailableError{Reason: domain.ReasonProviderRouteUnavailable},
 				diagnostic,

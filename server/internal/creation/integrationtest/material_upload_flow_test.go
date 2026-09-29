@@ -480,10 +480,7 @@ func TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage(t *t
 		}
 		return nil
 	}
-	one := 1
-	h.kapon.generation.setImage(imageScript{
-		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE", retryAfterSeconds: &one,
-	})
+	h.kapon.generation.setImage(imageScript{outputs: 1})
 	draft := h.buildTaskIntent(t, creator, session.ID, taskIntent{
 		SessionID: session.ID, MediaType: "image", Model: "doubao-seedream-5.0-pro",
 		Mode: "reference-image", Ratio: "1:1", Resolution: "2K", Quantity: 1,
@@ -497,20 +494,6 @@ func TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage(t *t
 		t.Fatalf("submit task with uploaded reference: status=%d body=%s", status, body)
 	}
 	taskID := decodeTaskView(t, body).Task.ID
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if got := countRows(t, h.ownerPool, `
-			SELECT count(*) FROM creation_provider_jobs
-			WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 1
-		`, taskID); got == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("safe rejection was never persisted before retry")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	h.kapon.generation.setImage(imageScript{outputs: 1})
 	task := h.awaitTaskTerminal(t, creator, taskID)
 	if task.Task.Status != "succeeded" {
 		t.Fatalf("task using uploaded reference did not succeed: %+v", task)
@@ -542,7 +525,7 @@ func TestUploadedReferenceMaterialFeedsTheGenerationWorkerFromObjectStorage(t *t
 	}
 	if got := countRows(t, h.ownerPool, `
 		SELECT count(*) FROM creation_provider_jobs
-		WHERE id = $1::uuid AND status = 'completed' AND submit_attempts = 2
+		WHERE id = $1::uuid AND status = 'completed' AND submit_attempts = 1
 	`, records[0].jobID.String()); got != 1 {
 		t.Fatalf("prepared job did not persist the expected submit result: %d", got)
 	}

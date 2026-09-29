@@ -412,8 +412,7 @@ func TestGeminiReferenceDiagnosticRedactsNestedURLs(t *testing.T) {
 }
 
 // TestImageSubmitClassifiedErrors pins the conservative submit contract:
-// only an exact safe rejection is retryable; ordinary 429/4xx are explicit
-// failures, while generic 5xx and lost responses are indeterminate.
+// explicit provider rejections fail, while generic 5xx and lost responses are indeterminate.
 func TestImageSubmitClassifiedErrors(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -439,11 +438,9 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 			}
 		}, nil},
 		{"model route unavailable", http.StatusServiceUnavailable, `{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE","type":"model_routing_error","message":"provider-private-detail","request_id":"kapon-private-request-id","arbitrary_secret":"must-not-cross"}}`, func(t *testing.T, err error) {
-			if !domain.IsSubmitRetryable(err) {
-				t.Fatalf("the exact no-route rejection must be safely retryable, got %v", err)
-			}
-			if got := domain.SubmitRetryPressureOf(err); got != domain.SubmitRetryCooldown {
-				t.Fatalf("model-route 503 pressure = %v, want cooldown", got)
+			var rejected *domain.ProviderRejectedError
+			if !errors.As(err, &rejected) || rejected.Reason != domain.ReasonProviderRouteUnavailable || domain.IsSubmitRetryable(err) {
+				t.Fatalf("model-route 503 must fail without retry, got %v", err)
 			}
 			if got := domain.ClassifyFailureReason(err); got != domain.ReasonProviderRouteUnavailable {
 				t.Fatalf("model-route 503 reason = %s, want provider_route_unavailable", got)
@@ -464,11 +461,9 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 			}
 		}, nil},
 		{"model route rate limited", http.StatusTooManyRequests, `{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE"}}`, func(t *testing.T, err error) {
-			if !domain.IsSubmitRetryable(err) {
-				t.Fatalf("the exact no-route rejection must be safely retryable, got %v", err)
-			}
-			if got := domain.SubmitRetryPressureOf(err); got != domain.SubmitRetryBackoff {
-				t.Fatalf("model-route 429 pressure = %v, want backoff", got)
+			var rejected *domain.ProviderRejectedError
+			if !errors.As(err, &rejected) || rejected.Reason != domain.ReasonProviderRouteUnavailable || domain.IsSubmitRetryable(err) {
+				t.Fatalf("model-route 429 must fail without retry, got %v", err)
 			}
 		}, retryAfter(7 * time.Second)},
 		{"unrecognized route error", http.StatusServiceUnavailable, `{"error":{"code":"MODEL_GROUP_SOME_UNAVAILABLE","type":"model_routing_error","message":"provider-private-detail","request_id":"kapon-private-request-id"}}`, func(t *testing.T, err error) {
@@ -551,6 +546,29 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 	_, err := client.Submit(context.Background(), "k", req)
 	if !domain.IsSubmitIndeterminate(err) {
 		t.Fatalf("lost synchronous answer must be indeterminate, got %v", err)
+	}
+}
+
+func TestImageModelRouteErrorFailsImmediately(t *testing.T) {
+	for _, model := range []string{domain.GeminiModelID, domain.GPTFlareModelID, domain.GPTSunburstModelID} {
+		t.Run(model, func(t *testing.T) {
+			client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte(`{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE","message":"All channels unavailable","type":"model_routing_error","request_id":"request-1"}}`))
+			})
+			ratio, resolution, quality := "1:1", "1K", "high"
+			_, err := client.Submit(context.Background(), "credential", domain.PreparedSubmitRequest{
+				Media: domain.MediaImage, Model: model, Prompt: "image", Quantity: 1,
+				Ratio: &ratio, Resolution: &resolution, Quality: &quality,
+			})
+			var rejected *domain.ProviderRejectedError
+			if !errors.As(err, &rejected) || rejected.Reason != domain.ReasonProviderRouteUnavailable || domain.IsSubmitRetryable(err) {
+				t.Fatalf("model route failure must terminate without retry, got %v", err)
+			}
+			if diagnostic := domain.FailureDiagnosticOf(err); diagnostic == nil || diagnostic.Code != "MODEL_GROUP_ALL_UNAVAILABLE" || diagnostic.RequestID == nil || *diagnostic.RequestID != "request-1" {
+				t.Fatalf("model route failure lost provider diagnosis: %+v", diagnostic)
+			}
+		})
 	}
 }
 
@@ -690,7 +708,7 @@ func TestImageFanoutPartialDeliveryIsIndeterminate(t *testing.T) {
 		Ratio: &ratio, Resolution: &resolution,
 	})
 	if !domain.IsSubmitIndeterminate(err) || calls.Load() != 2 {
-		t.Fatalf("partial fan-out delivery error=%v calls=%d, want indeterminate/2", err, calls.Load())
+		t.Fatalf("partial fan-out route rejection error=%v calls=%d, want indeterminate/2", err, calls.Load())
 	}
 }
 
