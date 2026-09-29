@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -284,14 +285,36 @@ func TestGeminiImageSubmitWireContract(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			var calls atomic.Int32
 			client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost || r.URL.Path != testCase.path || r.Header.Get("Authorization") != "Bearer gemini-key" || r.Header.Get("Content-Type") != "application/json" {
+				if r.Method != http.MethodPost || r.URL.Path != testCase.path || r.Header.Get("Authorization") != "Bearer gemini-key" {
 					t.Errorf("request route or headers: %s %s %+v", r.Method, r.URL.Path, r.Header)
 				}
 				var body map[string]any
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-					t.Errorf("decode request: %v", err)
-					w.WriteHeader(http.StatusBadRequest)
-					return
+				mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+				if err != nil {
+					t.Errorf("parse content type: %v", err)
+				}
+				if len(testCase.references) == 0 {
+					if mediaType != "application/json" {
+						t.Errorf("text-to-image content type: %s", mediaType)
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode request: %v", err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+				} else {
+					if mediaType != "multipart/form-data" {
+						t.Errorf("edit content type: %s", mediaType)
+					}
+					if err := r.ParseMultipartForm(1 << 20); err != nil {
+						t.Errorf("parse edit form: %v", err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					body = map[string]any{}
+					for _, key := range []string{"model", "prompt", "size", "aspect_ratio", "response_format"} {
+						body[key] = r.FormValue(key)
+					}
 				}
 				if body["model"] != domain.GeminiModelID || body["prompt"] != "生成商品主图" || body["size"] != "2K" || body["aspect_ratio"] != "16:9" || body["response_format"] != "url" {
 					t.Errorf("Gemini request fields: %+v", body)
@@ -304,14 +327,13 @@ func TestGeminiImageSubmitWireContract(t *testing.T) {
 						t.Errorf("text-to-image request must have n=1 and no edit fields: %+v", body)
 					}
 				} else {
-					images, ok := body["images"].([]any)
-					if !ok || len(body) != 6 || len(images) != len(testCase.references) {
-						t.Errorf("reference request shape: %+v", body)
+					images := r.MultipartForm.Value["image_urls[]"]
+					if len(r.MultipartForm.Value) != 6 || len(r.MultipartForm.File) != 0 || len(images) != len(testCase.references) {
+						t.Errorf("reference request shape: %+v", r.MultipartForm)
 					} else {
-						for i, raw := range images {
-							image, ok := raw.(map[string]any)
-							if !ok || len(image) != 1 || image["image_url"] != testCase.references[i].URL {
-								t.Errorf("reference %d order or shape: %+v", i, raw)
+						for i, imageURL := range images {
+							if imageURL != testCase.references[i].URL {
+								t.Errorf("reference %d order: %s", i, imageURL)
 							}
 						}
 					}
@@ -338,7 +360,7 @@ func TestGeminiImageSubmitWireContract(t *testing.T) {
 func TestGeminiReferenceDiagnosticRedactsNestedURLs(t *testing.T) {
 	const referenceURL = "https://objects.example/private-reference.png"
 	if summary := redactedRequestSummary(map[string]any{
-		"images": []map[string]any{{"image_url": referenceURL}},
+		"image_urls[]": []string{referenceURL},
 	}); strings.Contains(summary, referenceURL) {
 		t.Fatalf("request summary leaked nested reference URL: %s", summary)
 	}
