@@ -3,6 +3,7 @@ package kapon
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/nevix-ai/server/internal/creation/domain"
@@ -84,7 +86,7 @@ func NewGenerationsClient(baseURL string, references domain.ReferenceTransportRe
 		baseURL:         strings.TrimRight(baseURL, "/"),
 		http:            &http.Client{},
 		references:      references,
-		submitTimeout:   30 * time.Second,
+		submitTimeout:   time.Minute,
 		pollTimeout:     15 * time.Second,
 		cancelTimeout:   15 * time.Second,
 		referenceNow:    time.Now,
@@ -628,16 +630,39 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	resp, err := c.http.Do(req)
 	if err != nil {
+		cause := "network request failed"
+		var dnsErr *net.DNSError
+		var timeoutErr net.Error
+		var certificateErr *tls.CertificateVerificationError
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			cause = "request timed out"
+		case errors.Is(err, context.Canceled):
+			cause = "request was canceled"
+		case errors.As(err, &dnsErr):
+			cause = "DNS lookup failed"
+			if dnsErr.IsTimeout {
+				cause = "DNS lookup timed out"
+			}
+		case errors.As(err, &timeoutErr) && timeoutErr.Timeout():
+			cause = "request timed out"
+		case errors.As(err, &certificateErr):
+			cause = "TLS certificate verification failed"
+		case errors.Is(err, syscall.ECONNREFUSED):
+			cause = "connection was refused"
+		case errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE), errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, net.ErrClosed):
+			cause = "connection closed unexpectedly"
+		}
 		summary := redactedRequestSummary(body)
 		if summary != "" {
 			slog.Warn("creation: kapon request lost before a response",
-				"method", method, "path", path, "host", c.baseURL, "request", summary,
+				"method", method, "path", path, "host", c.baseURL, "cause", cause, "request", summary,
 			)
 		}
 		diagnostic := domain.NewFailureDiagnostic(
 			domain.DiagnosticSourceProvider,
 			"transport_error",
-			"Kapon request failed before a response was received"+shapeSuffix(summary, c.baseURL),
+			"Kapon "+cause+" before a response was received"+shapeSuffix(summary, c.baseURL),
 			nil, "", "",
 		)
 		if !gotConnection.Load() {

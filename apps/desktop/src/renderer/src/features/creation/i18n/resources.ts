@@ -251,7 +251,7 @@ export const creationTranslations = defineResourceTranslations({
         },
         diagnostic: {
           sources: {
-            provider: 'Kapon 响应',
+            provider: 'Kapon 调用',
             output_transfer: '结果下载',
             storage: '结果存储',
             media_probe: '媒体校验'
@@ -844,7 +844,7 @@ export const creationTranslations = defineResourceTranslations({
         },
         diagnostic: {
           sources: {
-            provider: 'Kapon response',
+            provider: 'Kapon call',
             output_transfer: 'Result download',
             storage: 'Result storage',
             media_probe: 'Media verification'

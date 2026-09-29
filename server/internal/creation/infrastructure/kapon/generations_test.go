@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -615,10 +616,10 @@ func TestSuccessfulSubmitWithoutOutputIdentityKeepsDiagnostic(t *testing.T) {
 	}
 }
 
-func TestSubmitUsesIndependentThirtySecondDeadline(t *testing.T) {
+func TestSubmitUsesIndependentOneMinuteDeadline(t *testing.T) {
 	client := NewGenerationsClient("https://models.kapon.test", nil)
-	if client.submitTimeout != 30*time.Second {
-		t.Fatalf("submit timeout = %s, want 30s", client.submitTimeout)
+	if client.submitTimeout != time.Minute {
+		t.Fatalf("submit timeout = %s, want 1m", client.submitTimeout)
 	}
 }
 
@@ -637,6 +638,58 @@ func TestSubmitDeadlineAfterDeliveryIsIndeterminate(t *testing.T) {
 	})
 	if !domain.IsSubmitIndeterminate(err) || calls.Load() != 1 {
 		t.Fatalf("delivered timeout error=%v calls=%d, want indeterminate/1", err, calls.Load())
+	}
+}
+
+func TestGeminiReferenceTransportDiagnostic(t *testing.T) {
+	ratio, resolution := "9:16", "512"
+	request := domain.PreparedSubmitRequest{
+		Media: domain.MediaImage, Model: domain.GeminiModelID,
+		Ratio: &ratio, Resolution: &resolution,
+		References: []domain.GatewayReference{{URL: "https://objects.example/private-reference.png", ExpiresAt: time.Now().Add(time.Hour)}},
+	}
+	t.Run("timeout after delivery", func(t *testing.T) {
+		client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/images/edits" {
+				t.Errorf("path = %s", r.URL.Path)
+			}
+			time.Sleep(100 * time.Millisecond)
+			w.Write([]byte(`{"data":[{"url":"https://cdn.example/late.png"}]}`))
+		})
+		client.submitTimeout = 20 * time.Millisecond
+		_, err := client.Submit(context.Background(), "", request)
+		if !domain.IsSubmitIndeterminate(err) {
+			t.Fatalf("delivered timeout must remain indeterminate, got %v", err)
+		}
+		diagnostic := domain.FailureDiagnosticOf(err)
+		if diagnostic == nil || diagnostic.Code != "transport_error" || !strings.Contains(diagnostic.Message, "timed out") {
+			t.Fatalf("timeout cause missing from diagnostic: %+v", diagnostic)
+		}
+	})
+	for _, testCase := range []struct {
+		name  string
+		err   error
+		cause string
+	}{
+		{"DNS failure before delivery", &net.DNSError{Err: "private diagnostic detail", Name: "private.example"}, "DNS lookup failed"},
+		{"DNS timeout before delivery", &net.DNSError{Err: "private diagnostic detail", IsTimeout: true}, "DNS lookup timed out"},
+		{"DNS deadline before delivery", &net.DNSError{Err: "private diagnostic detail", UnwrapErr: context.DeadlineExceeded}, "request timed out"},
+		{"DNS cancellation before delivery", &net.DNSError{Err: "private diagnostic detail", UnwrapErr: context.Canceled}, "request was canceled"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := NewGenerationsClient("https://models.kapon.test", nil)
+			client.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return nil, testCase.err
+			})
+			_, err := client.Submit(context.Background(), "", request)
+			if !domain.IsSubmitRetryable(err) {
+				t.Fatalf("unsent DNS failure must remain retryable, got %v", err)
+			}
+			diagnostic := domain.FailureDiagnosticOf(err)
+			if diagnostic == nil || diagnostic.Code != "transport_error" || !strings.Contains(diagnostic.Message, testCase.cause) || strings.Contains(diagnostic.Message, "private") {
+				t.Fatalf("safe DNS cause missing from diagnostic: %+v", diagnostic)
+			}
+		})
 	}
 }
 
