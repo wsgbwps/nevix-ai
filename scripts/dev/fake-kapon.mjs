@@ -76,7 +76,7 @@ createServer(async (req, res) => {
     )
     return
   }
-  if (req.method === 'POST' && req.url === '/v1/images/generations') {
+  if (req.method === 'POST' && ['/v1/images/generations', '/v1/images/edits'].includes(req.url)) {
     if (!authorized(req)) {
       res.statusCode = 401
       res.end('{}')

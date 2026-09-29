@@ -149,7 +149,49 @@ const nidSizes = imageModelSizes(['2K', '3K', '4K'], {
   '4K': { '4:3': [4704, 3520], '9:16': [3040, 5504] }
 })
 
+const gptSizes = imageModelSizes(['1K', '2K', '4K'], {
+  '1K': {
+    '1:1': [1024, 1024],
+    '4:3': [1152, 864],
+    '3:4': [864, 1152],
+    '16:9': [1280, 720],
+    '9:16': [720, 1280],
+    '3:2': [1248, 832],
+    '2:3': [832, 1248],
+    '21:9': [1680, 720]
+  },
+  '2K': {
+    '1:1': [2048, 2048],
+    '4:3': [2304, 1728],
+    '3:4': [1728, 2304],
+    '16:9': [2560, 1440],
+    '9:16': [1440, 2560],
+    '3:2': [2496, 1664],
+    '2:3': [1664, 2496],
+    '21:9': [3024, 1296]
+  },
+  '4K': {
+    '1:1': [2880, 2880],
+    '4:3': [3264, 2448],
+    '3:4': [2448, 3264],
+    '16:9': [3840, 2160],
+    '9:16': [2160, 3840],
+    '3:2': [3504, 2336],
+    '2:3': [2336, 3504],
+    '21:9': [3696, 1584]
+  }
+})
+
 const imageRatios = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9']
+const gptModel = {
+  ratios: imageRatios,
+  resolutions: ['1K', '2K', '4K'],
+  defaultResolution: '1K',
+  qualities: ['low', 'medium', 'high', 'xhigh', 'max'],
+  defaultQuality: 'high',
+  maxReferenceImages: 14,
+  sizes: gptSizes
+}
 const geminiRatios = [
   '1:1',
   '1:4',
@@ -198,6 +240,14 @@ const activeManifest: CapabilityManifest = {
         ratios: geminiRatios,
         resolutions: ['1K'],
         defaultResolution: '1K'
+      },
+      {
+        model: 'gpt-image-2.5-flare',
+        ...gptModel
+      },
+      {
+        model: 'gpt-image-2.5-sunburst',
+        ...gptModel
       }
     ],
     modes: [

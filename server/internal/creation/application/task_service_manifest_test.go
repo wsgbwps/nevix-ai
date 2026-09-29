@@ -28,3 +28,39 @@ func TestFreezeSpecificationUsesImageModelRatios(t *testing.T) {
 		t.Fatalf("Seedream must reject Gemini-only ratio, got %v", err)
 	}
 }
+
+func TestFreezeSpecificationValidatesModelQuality(t *testing.T) {
+	manifest := domain.DeriveCapabilityManifest(&domain.ProviderConnection{
+		AdminState: domain.AdminStateEnabled, CredentialState: domain.CredentialStateValid,
+		ImageCapability: domain.MediaCapabilityAvailable, VideoCapability: domain.MediaCapabilityAvailable,
+	})
+	media := domain.DraftMediaImage
+	model, mode, ratio, resolution, quantity := domain.GPTFlareModelID, domain.ModeTextToImage, "1:1", "1K", 1
+	intent := &domain.GenerationIntent{
+		Prompt: "image", MediaType: &media, ManifestVersion: manifest.ManifestVersion,
+		Model: &model, Mode: &mode, Ratio: &ratio, Resolution: &resolution, Quantity: &quantity,
+	}
+	spec, err := freezeSpecification(intent, manifest)
+	if err != nil || spec.SchemaVersion != 2 || spec.Quality == nil || *spec.Quality != "high" {
+		t.Fatalf("omitted GPT quality must freeze high: spec=%+v err=%v", spec, err)
+	}
+	quality := "max"
+	intent.Quality = &quality
+	spec, err = freezeSpecification(intent, manifest)
+	if err != nil || spec.Quality == nil || *spec.Quality != "max" {
+		t.Fatalf("chosen GPT quality must freeze: spec=%+v err=%v", spec, err)
+	}
+	for _, invalid := range []string{"auto", "ultra", ""} {
+		intent.Quality = &invalid
+		if _, err := freezeSpecification(intent, manifest); !errors.Is(err, domain.ErrCapabilityStale) {
+			t.Fatalf("GPT quality %q must fail, got %v", invalid, err)
+		}
+	}
+	quality = "high"
+	model = domain.ImageModelID
+	resolution = "2K"
+	intent.Quality = &quality
+	if _, err := freezeSpecification(intent, manifest); !errors.Is(err, domain.ErrCapabilityStale) {
+		t.Fatalf("non-GPT quality must fail, got %v", err)
+	}
+}

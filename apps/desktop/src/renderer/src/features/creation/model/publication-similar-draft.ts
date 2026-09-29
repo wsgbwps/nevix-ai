@@ -17,6 +17,7 @@ export function writePublicationSimilarDraft(
     manifestVersion: specification.manifestVersion,
     ratio: specification.ratio,
     resolution: specification.resolution,
+    quality: specification.quality ?? null,
     quantity: specification.quantity,
     durationSeconds: specification.durationSeconds,
     references: specification.references.map(({ materialId, role }) => ({ materialId, role }))

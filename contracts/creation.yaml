@@ -2811,6 +2811,11 @@ components:
           type: string
           nullable: true
           maxLength: 16
+        quality:
+          type: string
+          nullable: true
+          enum: [low, medium, high, xhigh, max]
+          description: 仅支持质量选项的图片模型可提交；所选值必须属于该模型的 qualities。其他模型省略或提交 null。
         quantity:
           type: integer
           nullable: true
@@ -3414,8 +3419,8 @@ components:
         schema_version:
           type: integer
           enum:
-            - 3
-          description: 载荷形状版本；字段结构变化时递增。v3：图片模型独立发布可提交比例。
+            - 4
+          description: 载荷形状版本；字段结构变化时递增。v4：模型可选发布 qualities 与 default_quality。
         manifest_version:
           type: integer
           description: 能力内容版本；源代码中的能力集合变化（扩张或移除）时递增。
@@ -3529,7 +3534,7 @@ components:
         - model
         - resolutions
         - default_resolution
-      description: 一个版本化 allowlist 模型及其分辨率档位；图片模型还发布自身的比例、参考图上限及各「档位×比例」对应的像素尺寸，视频模型不发布这些图片字段。
+      description: 一个版本化 allowlist 模型及其分辨率档位；图片模型还发布自身的比例、参考图上限及各「档位×比例」对应的像素尺寸。GPT 图片模型另发布质量选项和默认值，视频模型不发布这些图片字段。
       properties:
         model:
           type: string
@@ -3542,6 +3547,16 @@ components:
         default_resolution:
           type: string
           description: 该模型的推荐默认档；必属本条目 resolutions。
+        qualities:
+          type: array
+          description: 该模型可提交的质量选项；仅 GPT 图片模型发布，其他模型省略。
+          items:
+            type: string
+            enum: [low, medium, high, xhigh, max]
+        default_quality:
+          type: string
+          description: 该模型推荐的默认质量；存在时必属 qualities。仅 GPT 图片模型发布。
+          enum: [low, medium, high, xhigh, max]
         ratios:
           type: array
           description: 该图片模型可提交的比例（固定顺序）；仅图片模型发布，视频模型省略。
@@ -4309,6 +4324,7 @@ components:
       properties:
         schema_version:
           type: integer
+          description: 冻结规格结构版本。v1 为旧任务，v2 可冻结模型专属质量。
         media_type:
           type: string
           enum: [image, video]
@@ -4328,6 +4344,11 @@ components:
         resolution:
           type: string
           nullable: true
+        quality:
+          type: string
+          nullable: true
+          description: 准入时冻结的质量；仅 GPT 图片模型非 null，其他模型为 null。
+          enum: [low, medium, high, xhigh, max]
         quantity:
           type: integer
           description: 视频恒为 1；未完成项重试产生新任务并保持原任务不变。

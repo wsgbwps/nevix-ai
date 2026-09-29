@@ -354,6 +354,12 @@ function DetailFacts({
           <dd>{specification.ratio || '—'}</dd>
           <dt className="text-muted-foreground">{t('composer.params.resolution')}</dt>
           <dd>{specification.resolution || '—'}</dd>
+          {specification.quality != null && (
+            <>
+              <dt className="text-muted-foreground">{t('composer.params.quality')}</dt>
+              <dd>{specification.quality}</dd>
+            </>
+          )}
           <dt className="text-muted-foreground">{t('gallery.details.quantity')}</dt>
           <dd>{specification.quantity}</dd>
           <dt className="text-muted-foreground">{t('gallery.details.duration')}</dt>

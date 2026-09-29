@@ -11,6 +11,7 @@ export interface GenerationParameterValues {
   readonly mode: string | null
   readonly ratio: string | null
   readonly resolution: string | null
+  readonly quality?: string | null
   readonly quantity: number | null
   readonly durationSeconds: number | null
 }
@@ -42,6 +43,7 @@ const FIELD_INVENTORY = [
     mayStayUnset: true
   },
   { id: 'resolution', wireKey: 'resolution', kind: 'string' },
+  { id: 'quality', wireKey: 'quality', kind: 'string' },
   {
     id: 'quantity',
     wireKey: 'quantity',
@@ -79,7 +81,7 @@ export function generationParameterWireValues(values: GenerationParameterValues)
 } {
   const wire: Record<string, string | number | null> = {}
   for (const field of GENERATION_PARAMETERS) {
-    wire[field.wireKey] = values[field.id]
+    wire[field.wireKey] = values[field.id] ?? null
   }
   return wire
 }

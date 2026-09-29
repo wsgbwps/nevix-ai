@@ -120,7 +120,7 @@ _Avoid_: Draft, 任务参数（指 Specification 中的个别字段）
 _Avoid_: 重试（继续原任务未完成的结果槽位）
 
 **Generation Parameter**:
-生成意图中除提示词与引用绑定外的参数字段族（媒体类型、模型、模式、比例、分辨率、数量、时长）；字段集合、wire 键名与各媒体适用性只有一份权威清单，编辑中 Draft、本地草稿记录、提交意图与冻结 Generation Specification 对它的表示一律源于该清单。
+生成意图中除提示词与引用绑定外的参数字段族（媒体类型、模型、模式、比例、分辨率、质量、数量、时长）；字段集合、wire 键名与各媒体适用性只有一份权威清单，编辑中 Draft、本地草稿记录、提交意图与冻结 Generation Specification 对它的表示一律源于该清单。
 _Avoid_: 任务参数（混淆字段族与 Specification 中的冻结取值）, 参数 schema, 字段配置表
 
 **Creation Workbench**:

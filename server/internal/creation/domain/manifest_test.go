@@ -141,11 +141,20 @@ func TestDeriveCapabilityManifestPublishesStaticContract(t *testing.T) {
 		size.Width != 1536 || size.Height != 12288 {
 		t.Fatalf("Gemini 1:8 4K must publish 1536x12288, got %+v", size)
 	}
-	if len(manifest.Image.Models) != 3 ||
+	if len(manifest.Image.Models) != 5 ||
 		!reflect.DeepEqual(manifest.Image.Models[2].Ratios, geminiImageRatios) ||
 		manifest.Image.Models[2].DefaultResolution != "1K" ||
 		manifest.Image.Models[2].MaxReferenceImages == nil || *manifest.Image.Models[2].MaxReferenceImages != 14 {
 		t.Fatalf("Gemini model contract drifted: %+v", manifest.Image.Models)
+	}
+	for _, model := range manifest.Image.Models {
+		if model.Model == GPTFlareModelID || model.Model == GPTSunburstModelID {
+			if !reflect.DeepEqual(model.Qualities, []string{"low", "medium", "high", "xhigh", "max"}) || model.DefaultQuality != "high" || model.DefaultResolution != "1K" {
+				t.Fatalf("GPT quality/default contract drifted: %+v", model)
+			}
+		} else if len(model.Qualities) != 0 || model.DefaultQuality != "" {
+			t.Fatalf("non-GPT model must not publish quality: %+v", model)
+		}
 	}
 
 	assertAvailableShape(t, string(MediaVideo), manifest.Video)
@@ -162,10 +171,11 @@ func TestDeriveCapabilityManifestPublishesStaticContract(t *testing.T) {
 	manifest.Image.Models[0].Resolutions[0] = "mutated"
 	manifest.Image.Models[0].Ratios[0] = "mutated"
 	manifest.Image.Models[0].Sizes[0].Width = -1
+	manifest.Image.Models[3].Qualities[0] = "mutated"
 	manifest.Image.Ratios[0] = "mutated"
 	fresh := DeriveCapabilityManifest(availableConnection())
 	if fresh.Image.Models[0].Resolutions[0] == "mutated" || fresh.Image.Models[0].Ratios[0] == "mutated" || fresh.Image.Ratios[0] == "mutated" ||
-		fresh.Image.Models[0].Sizes[0].Width == -1 {
+		fresh.Image.Models[0].Sizes[0].Width == -1 || fresh.Image.Models[3].Qualities[0] == "mutated" {
 		t.Fatal("a returned manifest must not alias the source-controlled contract")
 	}
 }
@@ -184,6 +194,8 @@ func expectedPublishedModels(media string) []CapabilityModelView {
 			Ratios:             append([]string(nil), model.Ratios...),
 			Resolutions:        append([]string(nil), model.Resolutions...),
 			DefaultResolution:  model.DefaultResolution,
+			Qualities:          append([]string(nil), model.Qualities...),
+			DefaultQuality:     model.DefaultQuality,
 			MaxReferenceImages: model.MaxReferenceImages,
 			Sizes:              modelSizes(media, model),
 		}

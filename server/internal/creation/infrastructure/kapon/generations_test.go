@@ -44,7 +44,7 @@ type imageSizeCase struct {
 	resolution string
 }
 
-// acceptedCrossProduct derives the Doubao pixel-size combinations from the manifest.
+// acceptedCrossProduct derives pixel-size combinations from the manifest.
 var acceptedCrossProduct = buildAcceptedCrossProduct()
 
 func buildAcceptedCrossProduct() []imageSizeCase {
@@ -62,9 +62,8 @@ func buildAcceptedCrossProduct() []imageSizeCase {
 	return cases
 }
 
-// TestImageSizeTableCoversAcceptedCrossProduct: Doubao requires the pixel size ("宽x高"), and
-// the tables are per model — overlapping tier labels resolve to different pixels (2K at 16:9
-// is 2816x1584 on pro but 2848x1600 on n). Unknown triples fail closed.
+// TestImageSizeTableCoversAcceptedCrossProduct: image adapters require the pixel size
+// ("宽x高"). The tables are per model, and unknown triples fail closed.
 func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 	for _, combo := range acceptedCrossProduct {
 		model, ratio, resolution := combo.model, combo.ratio, combo.resolution
@@ -266,6 +265,54 @@ func TestImageSubmitWireContract(t *testing.T) {
 	}
 	if len(urls) != 2 || !urls["https://cdn.example/spec-out-0.png"] || !urls["https://cdn.example/spec-out-1.png"] {
 		t.Fatalf("each sub-request's answer must become one output: %+v", outcome)
+	}
+}
+
+func TestGPTImageSubmitWireContract(t *testing.T) {
+	for _, model := range []string{domain.GPTFlareModelID, domain.GPTSunburstModelID} {
+		for _, withReference := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/reference=%v", model, withReference), func(t *testing.T) {
+				var calls atomic.Int32
+				client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode GPT request: %v", err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					wantPath := "/v1/images/generations"
+					wantFields := 6
+					if withReference {
+						wantPath = "/v1/images/edits"
+						wantFields++
+						images, ok := body["images"].([]any)
+						if !ok || len(images) != 1 || images[0].(map[string]any)["image_url"] != "https://objects.example/reference" {
+							t.Errorf("GPT references: %+v", body["images"])
+						}
+					}
+					if r.URL.Path != wantPath || r.Header.Get("Authorization") != "Bearer credential" ||
+						len(body) != wantFields || body["model"] != model || body["prompt"] != "image" ||
+						body["size"] != "3840x2160" || body["response_format"] != "url" ||
+						body["output_format"] != "png" || body["quality"] != "max" {
+						t.Errorf("GPT request: path=%s body=%+v", r.URL.Path, body)
+					}
+					index := calls.Add(1)
+					fmt.Fprintf(w, `{"data":[{"url":"https://cdn.example/gpt-%d.png"}]}`, index)
+				})
+				ratio, resolution, quality := "16:9", "4K", "max"
+				req := domain.PreparedSubmitRequest{
+					Media: domain.MediaImage, Model: model, Prompt: "image", Quantity: 2,
+					Ratio: &ratio, Resolution: &resolution, Quality: &quality,
+				}
+				if withReference {
+					req.References = []domain.GatewayReference{{URL: "https://objects.example/reference", ExpiresAt: time.Now().Add(time.Hour)}}
+				}
+				outcome, err := client.Submit(context.Background(), "credential", req)
+				if err != nil || calls.Load() != 2 || len(outcome.Outputs) != 2 {
+					t.Fatalf("GPT single-image fan-out: calls=%d outcome=%+v err=%v", calls.Load(), outcome, err)
+				}
+			})
+		}
 	}
 }
 

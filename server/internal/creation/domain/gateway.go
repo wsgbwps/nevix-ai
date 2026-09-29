@@ -167,6 +167,7 @@ type SubmitRequest struct {
 	Quantity   int
 	Ratio      *string
 	Resolution *string
+	Quality    *string
 	DurationS  *int
 	References []ReferenceSource
 }
@@ -182,6 +183,7 @@ type PreparedSubmitRequest struct {
 	Quantity   int
 	Ratio      *string
 	Resolution *string
+	Quality    *string
 	DurationS  *int
 	References []GatewayReference
 }

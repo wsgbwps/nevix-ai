@@ -354,6 +354,7 @@ func specificationFitsManifest(spec domain.GenerationSpecification, manifest dom
 	intent := &domain.GenerationIntent{
 		Prompt: spec.Prompt, MediaType: &media, ManifestVersion: spec.ManifestVersion,
 		Model: &model, Mode: &mode, Ratio: spec.Ratio, Resolution: spec.Resolution,
+		Quality:  spec.Quality,
 		Quantity: &quantity, DurationSeconds: spec.DurationSeconds,
 	}
 	for _, reference := range spec.References {

@@ -112,7 +112,7 @@ var _ domain.ProviderGateway = (*GenerationsClient)(nil)
 func (c *GenerationsClient) PrepareReferences(ctx context.Context, providerJobID domain.UUID, req domain.SubmitRequest) (domain.PreparedSubmitRequest, error) {
 	prepared := domain.PreparedSubmitRequest{
 		Media: req.Media, Model: req.Model, Mode: req.Mode, Prompt: req.Prompt,
-		Quantity: req.Quantity, Ratio: req.Ratio, Resolution: req.Resolution, DurationS: req.DurationS,
+		Quantity: req.Quantity, Ratio: req.Ratio, Resolution: req.Resolution, Quality: req.Quality, DurationS: req.DurationS,
 		References: make([]domain.GatewayReference, 0, len(req.References)),
 	}
 	if c.references == nil {
@@ -293,6 +293,23 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 		if len(req.References) == 0 {
 			body["n"] = 1
 		} else {
+			path = "/v1/images/edits"
+			images := make([]map[string]any, 0, len(req.References))
+			for _, reference := range req.References {
+				images = append(images, map[string]any{"image_url": reference.URL})
+			}
+			body["images"] = images
+		}
+	} else if req.Model == domain.GPTFlareModelID || req.Model == domain.GPTSunburstModelID {
+		size, err := imageSize(req)
+		if err != nil || req.Quality == nil {
+			return domain.SubmitOutcome{}, &domain.ProviderRejectedError{Reason: domain.ReasonInternalError}
+		}
+		body = map[string]any{
+			"model": req.Model, "prompt": req.Prompt, "size": size,
+			"response_format": "url", "output_format": "png", "quality": *req.Quality,
+		}
+		if len(req.References) > 0 {
 			path = "/v1/images/edits"
 			images := make([]map[string]any, 0, len(req.References))
 			for _, reference := range req.References {

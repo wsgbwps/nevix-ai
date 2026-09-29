@@ -25,7 +25,7 @@ const {
   publishedParameterRules,
   GENERATION_PARAMETER_WIRE_KEYS
 } = await import('../../src/renderer/src/features/creation/api/generation-parameter.ts')
-const { staleDraftFields } =
+const { staleDraftFields, qualityCandidates, resolutionCandidates } =
   await import('../../src/renderer/src/features/creation/model/capability.ts')
 const { readLocalDraft } =
   await import('../../src/renderer/src/features/creation/model/draft-store.ts')
@@ -36,6 +36,7 @@ const fullValues = {
   mode: 'first-last-frame',
   ratio: '16:9',
   resolution: '1080p',
+  quality: null,
   quantity: null,
   durationSeconds: 10
 } as const
@@ -48,6 +49,7 @@ test('a full parameter set round-trips through its wire projection', () => {
     mode: 'first-last-frame',
     ratio: '16:9',
     resolution: '1080p',
+    quality: null,
     quantity: null,
     duration_seconds: 10
   })
@@ -74,6 +76,7 @@ test('a present value of the wrong shape rejects the whole set', () => {
   assert.equal(parseGenerationParameterValues({ ...good, ratio: 21 }), null)
   assert.equal(parseGenerationParameterValues({ ...good, media_type: 'gif' }), null)
   assert.equal(parseGenerationParameterValues({ ...good, duration_seconds: Number.NaN }), null)
+  assert.equal(parseGenerationParameterValues({ ...good, quality: 10 }), null)
 })
 
 const imageCapability: CapabilityMedia = {
@@ -202,6 +205,58 @@ test('stale verdicts: unset tolerance and candidate membership per field', () =>
   assert.equal(bareVerdicts.has('quantity'), false)
 })
 
+test('quality and sparse ratio tiers follow the selected model', () => {
+  const gpt: CapabilityManifest = {
+    ...manifest,
+    image: {
+      ...imageCapability,
+      models: [
+        ...(imageCapability.models ?? []),
+        {
+          model: 'gpt-image-2.5-flare',
+          ratios: ['1:1', '16:9'],
+          resolutions: ['1K', '2K', '4K'],
+          defaultResolution: '1K',
+          qualities: ['low', 'medium', 'high', 'xhigh', 'max'],
+          defaultQuality: 'high',
+          sizes: [
+            { ratio: '1:1', resolution: '1K', width: 1024, height: 1024 },
+            { ratio: '16:9', resolution: '4K', width: 3840, height: 2160 }
+          ]
+        }
+      ]
+    }
+  }
+  assert.deepEqual(qualityCandidates(gpt, 'image', 'gpt-image-2.5-flare'), [
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+    'max'
+  ])
+  assert.deepEqual(qualityCandidates(gpt, 'image', 'doubao-seedream-5.0-pro'), [])
+  assert.deepEqual(resolutionCandidates(gpt, 'image', 'gpt-image-2.5-flare', '16:9'), ['4K'])
+  assert.deepEqual(resolutionCandidates(gpt, 'image', 'doubao-seedream-5.0-pro', '4:3'), [
+    '2K',
+    '4K'
+  ])
+  const draft = {
+    mediaType: 'image',
+    model: 'gpt-image-2.5-flare',
+    mode: 'text-to-image',
+    ratio: '16:9',
+    resolution: '4K',
+    quality: 'high',
+    quantity: 2,
+    durationSeconds: null,
+    references: []
+  } as const
+  assert.equal(staleDraftFields(gpt, draft).has('quality'), false)
+  assert.equal(staleDraftFields(gpt, { ...draft, quality: null }).has('quality'), true)
+  assert.equal(staleDraftFields(gpt, { ...draft, quality: 'auto' }).has('quality'), true)
+  assert.equal(staleDraftFields(gpt, { ...draft, resolution: '2K' }).has('resolution'), true)
+})
+
 test('manifest defaults adopt per the inventory, nulling when unpublished', () => {
   assert.deepEqual(manifestDefaultParameters(imageCapability), {
     ratio: '4:3',
@@ -244,6 +299,7 @@ test('a stored record older than a parameter field survives the reload', () => {
   assert.notEqual(oldest, null)
   assert.deepEqual(oldest?.mediaType, 'image')
   assert.deepEqual(oldest?.quantity, null)
+  assert.deepEqual(oldest?.quality, null)
 
   // A pre-video record: only duration_seconds absent.
   storage.setItem(
@@ -265,6 +321,7 @@ test('a stored record older than a parameter field survives the reload', () => {
   assert.notEqual(preVideo, null)
   assert.deepEqual(preVideo?.durationSeconds, null)
   assert.deepEqual(preVideo?.ratio, '4:3')
+  assert.deepEqual(preVideo?.quality, null)
 })
 
 test('every inventory wire key is unique and snake_case', () => {

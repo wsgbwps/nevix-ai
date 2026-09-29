@@ -132,6 +132,7 @@ export interface GenerationSpecificationView {
   readonly mode: string
   readonly ratio: string | null
   readonly resolution: string | null
+  readonly quality?: string | null
   readonly quantity: number
   readonly durationSeconds: number | null
   readonly references: readonly GenerationSpecificationReferenceView[]
@@ -414,6 +415,8 @@ function parseSpecification(raw: unknown): GenerationSpecificationView | null {
   if (nullableNum(raw, 'schema_version') == null) return null
   if (nullableNum(raw, 'manifest_version') == null) return null
   const quantity = nullableNum(raw, wireKeys.quantity)
+  const quality = nullableStr(raw, wireKeys.quality)
+  if (quality === undefined && wireKeys.quality in raw) return null
   if (quantity === null || quantity === undefined || quantity < 1) return null
   const references = raw['references']
   if (!Array.isArray(references)) return null
@@ -438,6 +441,7 @@ function parseSpecification(raw: unknown): GenerationSpecificationView | null {
     mode,
     ratio: nullableStr(raw, wireKeys.ratio) ?? null,
     resolution: nullableStr(raw, wireKeys.resolution) ?? null,
+    quality: quality ?? null,
     durationSeconds: nullableNum(raw, wireKeys.durationSeconds) ?? null,
     quantity,
     references: parsedReferences

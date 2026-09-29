@@ -82,6 +82,7 @@ export interface AssetGenerationSpecification {
   readonly manifestVersion: number
   readonly ratio: string | null
   readonly resolution: string | null
+  readonly quality?: string | null
   readonly quantity: number
   readonly durationSeconds: number | null
   readonly references: readonly AssetSpecificationReference[]
@@ -348,6 +349,7 @@ export function parseSpecification(value: unknown): AssetGenerationSpecification
   const manifestVersion = numberField(value, 'manifest_version')
   const ratio = nullableStringField(value, 'ratio')
   const resolution = nullableStringField(value, 'resolution')
+  const quality = nullableStringField(value, 'quality')
   const quantity = numberField(value, 'quantity')
   const durationSeconds = nullableNumberField(value, 'duration_seconds')
   if (source === null || !Array.isArray(source['references'])) return null
@@ -381,6 +383,7 @@ export function parseSpecification(value: unknown): AssetGenerationSpecification
     manifestVersion === null ||
     ratio === undefined ||
     resolution === undefined ||
+    (quality === undefined && 'quality' in source) ||
     quantity === null ||
     durationSeconds === undefined
   ) {
@@ -395,6 +398,7 @@ export function parseSpecification(value: unknown): AssetGenerationSpecification
     manifestVersion,
     ratio,
     resolution,
+    quality: quality ?? null,
     quantity,
     durationSeconds,
     references

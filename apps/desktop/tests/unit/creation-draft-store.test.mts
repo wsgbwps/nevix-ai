@@ -56,6 +56,7 @@ const record = {
   mode: 'reference-image',
   ratio: '4:3',
   resolution: '2K',
+  quality: null,
   quantity: 2,
   durationSeconds: null,
   references: [
@@ -226,6 +227,8 @@ test('a flat draft migrates all content to its media slot, or image when media w
     const other = target === 'image' ? 'video' : 'image'
     assert.equal(migrated?.activeMediaType, target)
     assert.deepEqual(migrated?.drafts[target], { ...record, mediaType: target })
+    // The old flat record has no quality key; migration keeps the draft and reads it as null.
+    assert.equal(migrated?.drafts[target].quality, null)
     assert.equal(migrated?.drafts[other].prompt, '')
     assert.deepEqual(migrated?.drafts[other].references, [])
     assert.deepEqual(migrated?.operationNotice, {

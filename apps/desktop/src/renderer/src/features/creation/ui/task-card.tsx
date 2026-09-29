@@ -567,6 +567,9 @@ function TaskDetailsMenu({
             )}
             <DetailRow label={t('gallery.details.mode')} value={t(modeLabelKey(spec.mode))} />
             <DetailRow label={t('gallery.details.quantity')} value={String(spec.quantity)} />
+            {spec.quality != null && (
+              <DetailRow label={t('composer.params.quality')} value={spec.quality} />
+            )}
             {spec.durationSeconds !== null && (
               <DetailRow
                 label={t('gallery.details.duration')}

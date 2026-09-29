@@ -275,6 +275,7 @@ test('the frozen specification rides the detail into the gallery view', async ()
     mode: 'reference-image',
     ratio: '7:3',
     resolution: '2K',
+    quality: null,
     quantity: 2,
     durationSeconds: null,
     references: [
@@ -407,6 +408,7 @@ test('the frozen snapshot rides list summaries into the gallery view', async () 
     mode: 'reference-image',
     ratio: '7:3',
     resolution: '2K',
+    quality: null,
     quantity: 2,
     durationSeconds: null,
     references: [
@@ -496,6 +498,7 @@ test('submitTask posts the idempotency key with the full generation intent', asy
     mode: 'reference-image',
     ratio: '4:5',
     resolution: '2K',
+    quality: null,
     quantity: 2,
     duration_seconds: null,
     references: [

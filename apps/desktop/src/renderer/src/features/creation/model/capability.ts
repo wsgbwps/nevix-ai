@@ -183,10 +183,25 @@ export function publishedModel(
 export function resolutionCandidates(
   manifest: CapabilityManifest | null,
   media: DraftMediaType,
-  model: string | null
+  model: string | null,
+  ratio?: string | null
 ): readonly string[] {
   if (model === null) return []
-  return publishedModel(manifest, media, model)?.resolutions ?? []
+  const entry = publishedModel(manifest, media, model)
+  if (!entry) return []
+  return ratio != null && entry.qualities
+    ? entry.resolutions.filter((resolution) =>
+        entry.sizes?.some((size) => size.ratio === ratio && size.resolution === resolution)
+      )
+    : entry.resolutions
+}
+
+export function qualityCandidates(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType,
+  model: string | null
+): readonly string[] {
+  return model === null ? [] : (publishedModel(manifest, media, model)?.qualities ?? [])
 }
 
 /** Image ratios belong to the selected model; video keeps media-level ratios. */
@@ -341,7 +356,7 @@ export function staleDraftFields(
   for (const rule of publishedParameterRules(capability)) {
     if (media === 'image' && rule.id === 'ratio') continue
     const value = draft[rule.id]
-    if (value === null ? !rule.mayStayUnset : !rule.candidates.includes(value)) {
+    if (value == null ? !rule.mayStayUnset : !rule.candidates.includes(value)) {
       stale.add(rule.id)
     }
   }
@@ -360,9 +375,17 @@ export function staleDraftFields(
     stale.add('ratio')
   if (
     draft.resolution === null ||
-    !resolutionCandidates(manifest, media, draft.model).includes(draft.resolution)
+    !resolutionCandidates(manifest, media, draft.model, draft.ratio).includes(draft.resolution)
   ) {
     stale.add('resolution')
+  }
+  const qualities = qualityCandidates(manifest, media, draft.model)
+  if (
+    qualities.length > 0
+      ? draft.quality == null || !qualities.includes(draft.quality)
+      : draft.quality != null
+  ) {
+    stale.add('quality')
   }
 
   const bounds = modeReferenceBounds(manifest, media, mode)

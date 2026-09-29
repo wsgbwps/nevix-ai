@@ -25,6 +25,7 @@ import {
   normalizedVideoMode,
   publishedModel,
   referenceCap,
+  resolutionCandidates,
   roleAcceptsKind,
   roleForPosition,
   staleDraftFields,
@@ -461,19 +462,31 @@ export function useCreationWorkbench(): {
         return
       }
       const entry = publishedModel(manifest, draft.mediaType, model)
-      const current = draft.resolution
-      const resolution =
-        entry !== null && current !== null && entry.resolutions.includes(current)
-          ? current
-          : (entry?.defaultResolution ?? null)
-      const ratio =
-        draft.mediaType === 'image' &&
-        entry !== null &&
-        draft.ratio !== null &&
-        !entry.ratios?.includes(draft.ratio)
+      const enteringQualityModel =
+        !!entry?.qualities?.length &&
+        !publishedModel(manifest, draft.mediaType, draft.model ?? '')?.qualities?.length
+      const ratio = enteringQualityModel
+        ? (mediaCapability(manifest, 'image')?.defaults?.ratio ?? null)
+        : draft.mediaType === 'image' &&
+            entry !== null &&
+            draft.ratio !== null &&
+            !entry.ratios?.includes(draft.ratio)
           ? (mediaCapability(manifest, 'image')?.defaults?.ratio ?? null)
           : draft.ratio
-      patchDraft({ model, resolution, ratio })
+      const resolutions =
+        draft.mediaType === 'image' && entry?.qualities
+          ? resolutionCandidates(manifest, 'image', model, ratio)
+          : (entry?.resolutions ?? [])
+      const resolution =
+        !enteringQualityModel && draft.resolution !== null && resolutions.includes(draft.resolution)
+          ? draft.resolution
+          : entry?.defaultResolution && resolutions.includes(entry.defaultResolution)
+            ? entry.defaultResolution
+            : (resolutions[0] ?? null)
+      const quality = entry?.qualities?.includes(draft.quality ?? '')
+        ? draft.quality
+        : (entry?.defaultQuality ?? null)
+      patchDraft({ model, resolution, ratio, quality })
     },
     [currentDraft, manifest, patchDraft]
   )

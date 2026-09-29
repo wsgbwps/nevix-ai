@@ -220,6 +220,7 @@ func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteSco
 	if _, err := freezeSpecification(&domain.GenerationIntent{
 		Prompt: spec.Prompt, MediaType: &draftMedia, ManifestVersion: manifest.ManifestVersion,
 		Model: &spec.Model, Mode: &spec.Mode, Ratio: spec.Ratio, Resolution: spec.Resolution,
+		Quality:  spec.Quality,
 		Quantity: &spec.Quantity, DurationSeconds: spec.DurationSeconds, References: refs,
 	}, manifest); err != nil {
 		return nil, err
@@ -555,8 +556,23 @@ func freezeSpecification(intent *domain.GenerationIntent, manifest domain.Capabi
 		}
 		spec.Ratio = intent.Ratio
 		spec.Resolution = intent.Resolution
+		if len(modelView.Qualities) > 0 {
+			quality := modelView.DefaultQuality
+			if intent.Quality != nil {
+				quality = *intent.Quality
+			}
+			if !valueInList(modelView.Qualities, &quality) {
+				return nil, domain.ErrCapabilityStale
+			}
+			spec.Quality = &quality
+		} else if intent.Quality != nil {
+			return nil, domain.ErrCapabilityStale
+		}
 		spec.Quantity = *intent.Quantity
 	} else {
+		if intent.Quality != nil {
+			return nil, domain.ErrCapabilityStale
+		}
 		if !valueInList(mediaView.Ratios, intent.Ratio) ||
 			intent.DurationSeconds == nil || !intInList(mediaView.Durations, *intent.DurationSeconds) ||
 			(intent.Quantity != nil && *intent.Quantity != 1) {

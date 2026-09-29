@@ -82,6 +82,7 @@ test('Publication reuse writes the server intent under its durable Session ident
     manifestVersion: 2,
     ratio: 'deprecated-ratio',
     resolution: 'old-resolution',
+    quality: null,
     quantity: 2,
     durationSeconds: null,
     references: [
