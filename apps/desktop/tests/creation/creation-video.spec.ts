@@ -37,10 +37,14 @@ test(
         await launched.page.getByTestId('session-new').click()
         const workbench = launched.page.getByTestId('creation-workbench')
         await expect(workbench).toBeVisible()
-        await workbench.getByTestId('composer-prompt').fill('秋季商品运镜，保留场景声音')
         await workbench.getByTestId('composer-media').click()
         await launched.page.getByRole('menuitem', { name: '视频生成' }).click()
+        await expect(workbench.getByTestId('composer-media')).toContainText('视频生成')
         await expect(workbench.getByTestId('composer-mode')).toContainText('首尾帧')
+        await workbench.getByTestId('composer-prompt').fill('秋季商品运镜，保留场景声音')
+        await expect(workbench.getByTestId('composer-prompt')).toHaveText(
+          '秋季商品运镜，保留场景声音'
+        )
         await launched.electronApp.evaluate(({ session }, dir) => {
           session.defaultSession.on('will-download', (_event, item) =>
             item.setSavePath(`${dir}/result.mp4`)
