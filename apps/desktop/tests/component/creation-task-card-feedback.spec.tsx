@@ -57,6 +57,9 @@ test('unfinished slot motion pauses for reduced motion while its status stays vi
   await expect
     .poll(() => activity.evaluate((element) => getComputedStyle(element, '::after').animationName))
     .toBe('skeleton-shimmer')
+  await expect
+    .poll(() => activity.evaluate((element) => getComputedStyle(element).overflowX))
+    .toBe('hidden')
   await expect(mediaSkeleton).toHaveCount(1)
   await expect
     .poll(() =>
