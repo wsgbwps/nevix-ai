@@ -15,11 +15,9 @@ type imageSizeKey struct {
 	resolution string
 }
 
-// imageSizes pins the Kapon wire pixel size for every (model, ratio, resolution) pair,
-// transcribed from the vendor 豆包生图 OpenAPI x-size-map. The table is per model — pro
-// publishes 1K/1.5K/2K and base 2K/3K/4K, and an overlapping tier label resolves to
-// different pixels (2K at 16:9 is 2816x1584 on pro but 2848x1600 on base) — so the key
-// never drops the model. The manifest publishes the same table as display sizes.
+// imageSizes pins the Kapon wire pixel size for every (model, ratio, resolution) pair.
+// Seedream and Gemini sizes follow their vendor tables; GPT sizes are the accepted
+// product presets. The manifest publishes this same table as display sizes.
 var imageSizes = map[imageSizeKey]ImageSize{
 	// doubao-seedream-5.0-pro
 	{ImageModelID, "1:1", "1K"}:    {1024, 1024},
@@ -72,6 +70,33 @@ var imageSizes = map[imageSizeKey]ImageSize{
 	{ImageModelBaseID, "21:9", "2K"}: {3136, 1344},
 	{ImageModelBaseID, "21:9", "3K"}: {4704, 2016},
 	{ImageModelBaseID, "21:9", "4K"}: {6240, 2656},
+
+	// GPT image models share these product presets. Every size fits Kapon's
+	// 3840-side, 16-pixel, 3:1, and 655360–8294400-pixel bounds.
+	{GPTFlareModelID, "1:1", "1K"}:  {1024, 1024},
+	{GPTFlareModelID, "1:1", "2K"}:  {2048, 2048},
+	{GPTFlareModelID, "1:1", "4K"}:  {2880, 2880},
+	{GPTFlareModelID, "4:3", "1K"}:  {1152, 864},
+	{GPTFlareModelID, "4:3", "2K"}:  {2304, 1728},
+	{GPTFlareModelID, "4:3", "4K"}:  {3264, 2448},
+	{GPTFlareModelID, "3:4", "1K"}:  {864, 1152},
+	{GPTFlareModelID, "3:4", "2K"}:  {1728, 2304},
+	{GPTFlareModelID, "3:4", "4K"}:  {2448, 3264},
+	{GPTFlareModelID, "16:9", "1K"}: {1280, 720},
+	{GPTFlareModelID, "16:9", "2K"}: {2560, 1440},
+	{GPTFlareModelID, "16:9", "4K"}: {3840, 2160},
+	{GPTFlareModelID, "9:16", "1K"}: {720, 1280},
+	{GPTFlareModelID, "9:16", "2K"}: {1440, 2560},
+	{GPTFlareModelID, "9:16", "4K"}: {2160, 3840},
+	{GPTFlareModelID, "3:2", "1K"}:  {1248, 832},
+	{GPTFlareModelID, "3:2", "2K"}:  {2496, 1664},
+	{GPTFlareModelID, "3:2", "4K"}:  {3504, 2336},
+	{GPTFlareModelID, "2:3", "1K"}:  {832, 1248},
+	{GPTFlareModelID, "2:3", "2K"}:  {1664, 2496},
+	{GPTFlareModelID, "2:3", "4K"}:  {2336, 3504},
+	{GPTFlareModelID, "21:9", "1K"}: {1680, 720},
+	{GPTFlareModelID, "21:9", "2K"}: {3024, 1296},
+	{GPTFlareModelID, "21:9", "4K"}: {3696, 1584},
 
 	// gemini-3.1-flash-image (Apifox Gemini image dimensions)
 	{GeminiModelID, "1:1", "512"}:  {512, 512},
@@ -136,6 +161,9 @@ var imageSizes = map[imageSizeKey]ImageSize{
 // pixel size. A missing combination is an internal contract violation at the call sites,
 // never a silent downgrade — the completeness invariant is pinned by the domain tests.
 func ImageSizeFor(model, ratio, resolution string) (ImageSize, bool) {
+	if model == GPTSunburstModelID {
+		model = GPTFlareModelID
+	}
 	size, ok := imageSizes[imageSizeKey{model: model, ratio: ratio, resolution: resolution}]
 	return size, ok
 }

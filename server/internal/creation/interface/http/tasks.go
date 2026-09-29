@@ -39,6 +39,7 @@ type taskSubmitRequest struct {
 	Mode            *string                   `json:"mode"`
 	Ratio           *string                   `json:"ratio"`
 	Resolution      *string                   `json:"resolution"`
+	Quality         *string                   `json:"quality"`
 	Quantity        *int                      `json:"quantity"`
 	DurationSeconds *int                      `json:"duration_seconds"`
 	References      []submitReferenceResource `json:"references"`
@@ -69,6 +70,7 @@ func (h *GenerationTaskHandler) SubmitTask(w http.ResponseWriter, r *http.Reques
 		Mode:            req.Mode,
 		Ratio:           req.Ratio,
 		Resolution:      req.Resolution,
+		Quality:         req.Quality,
 		Quantity:        req.Quantity,
 		DurationSeconds: req.DurationSeconds,
 		References:      make([]domain.DraftReference, 0, len(req.References)),
@@ -423,6 +425,7 @@ type generationSpecResource struct {
 	ManifestVersion int                       `json:"manifest_version"`
 	Ratio           *string                   `json:"ratio"`
 	Resolution      *string                   `json:"resolution"`
+	Quality         *string                   `json:"quality"`
 	Quantity        int                       `json:"quantity"`
 	DurationSeconds *int                      `json:"duration_seconds"`
 	References      []generationSpecReference `json:"references"`
@@ -456,6 +459,7 @@ func toSpecResource(task domain.GenerationTask) *generationSpecResource {
 		ManifestVersion: task.Spec.ManifestVersion,
 		Ratio:           task.Spec.Ratio,
 		Resolution:      task.Spec.Resolution,
+		Quality:         task.Spec.Quality,
 		Quantity:        task.Spec.Quantity,
 		DurationSeconds: task.Spec.DurationSeconds,
 		References:      refs,

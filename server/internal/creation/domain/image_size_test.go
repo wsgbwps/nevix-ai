@@ -62,3 +62,28 @@ func TestImageSizeTablePinTheVendorExamples(t *testing.T) {
 		t.Fatalf("pro 9:16 1K = %+v (ok=%v), want 800x1424", vertical, ok)
 	}
 }
+
+func TestGPTImageSizesFitAcceptedBounds(t *testing.T) {
+	for _, model := range []string{GPTFlareModelID, GPTSunburstModelID} {
+		for _, ratio := range imageRatios {
+			for _, tier := range []string{"1K", "2K", "4K"} {
+				size, ok := ImageSizeFor(model, ratio, tier)
+				if !ok || size.Width > 3840 || size.Height > 3840 ||
+					size.Width%16 != 0 || size.Height%16 != 0 ||
+					size.Width > 3*size.Height || size.Height > 3*size.Width ||
+					size.Width*size.Height < 655360 || size.Width*size.Height > 8294400 {
+					t.Fatalf("%s %s %s has invalid size %+v (ok=%v)", model, ratio, tier, size, ok)
+				}
+			}
+		}
+	}
+	for ratio, want := range map[string]ImageSize{
+		"1:1": {2880, 2880}, "4:3": {3264, 2448}, "3:4": {2448, 3264},
+		"16:9": {3840, 2160}, "9:16": {2160, 3840}, "3:2": {3504, 2336},
+		"2:3": {2336, 3504}, "21:9": {3696, 1584},
+	} {
+		if size, ok := ImageSizeFor(GPTFlareModelID, ratio, "4K"); !ok || size != want {
+			t.Fatalf("GPT 4K %s = %+v (ok=%v), want %+v", ratio, size, ok, want)
+		}
+	}
+}

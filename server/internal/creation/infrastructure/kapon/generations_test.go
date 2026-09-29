@@ -44,7 +44,7 @@ type imageSizeCase struct {
 	resolution string
 }
 
-// acceptedCrossProduct derives the Doubao pixel-size combinations from the manifest.
+// acceptedCrossProduct derives pixel-size combinations from the manifest.
 var acceptedCrossProduct = buildAcceptedCrossProduct()
 
 func buildAcceptedCrossProduct() []imageSizeCase {
@@ -62,9 +62,8 @@ func buildAcceptedCrossProduct() []imageSizeCase {
 	return cases
 }
 
-// TestImageSizeTableCoversAcceptedCrossProduct: Doubao requires the pixel size ("宽x高"), and
-// the tables are per model — overlapping tier labels resolve to different pixels (2K at 16:9
-// is 2816x1584 on pro but 2848x1600 on n). Unknown triples fail closed.
+// TestImageSizeTableCoversAcceptedCrossProduct: image adapters require the pixel size
+// ("宽x高"). The tables are per model, and unknown triples fail closed.
 func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
 	for _, combo := range acceptedCrossProduct {
 		model, ratio, resolution := combo.model, combo.ratio, combo.resolution
@@ -269,6 +268,54 @@ func TestImageSubmitWireContract(t *testing.T) {
 	}
 }
 
+func TestGPTImageSubmitWireContract(t *testing.T) {
+	for _, model := range []string{domain.GPTFlareModelID, domain.GPTSunburstModelID} {
+		for _, withReference := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/reference=%v", model, withReference), func(t *testing.T) {
+				var calls atomic.Int32
+				client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode GPT request: %v", err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					wantPath := "/v1/images/generations"
+					wantFields := 6
+					if withReference {
+						wantPath = "/v1/images/edits"
+						wantFields++
+						images, ok := body["images"].([]any)
+						if !ok || len(images) != 1 || images[0].(map[string]any)["image_url"] != "https://objects.example/reference" {
+							t.Errorf("GPT references: %+v", body["images"])
+						}
+					}
+					if r.URL.Path != wantPath || r.Header.Get("Authorization") != "Bearer credential" ||
+						len(body) != wantFields || body["model"] != model || body["prompt"] != "image" ||
+						body["size"] != "3840x2160" || body["response_format"] != "url" ||
+						body["output_format"] != "png" || body["quality"] != "max" {
+						t.Errorf("GPT request: path=%s body=%+v", r.URL.Path, body)
+					}
+					index := calls.Add(1)
+					fmt.Fprintf(w, `{"data":[{"url":"https://cdn.example/gpt-%d.png"}]}`, index)
+				})
+				ratio, resolution, quality := "16:9", "4K", "max"
+				req := domain.PreparedSubmitRequest{
+					Media: domain.MediaImage, Model: model, Prompt: "image", Quantity: 2,
+					Ratio: &ratio, Resolution: &resolution, Quality: &quality,
+				}
+				if withReference {
+					req.References = []domain.GatewayReference{{URL: "https://objects.example/reference", ExpiresAt: time.Now().Add(time.Hour)}}
+				}
+				outcome, err := client.Submit(context.Background(), "credential", req)
+				if err != nil || calls.Load() != 2 || len(outcome.Outputs) != 2 {
+					t.Fatalf("GPT single-image fan-out: calls=%d outcome=%+v err=%v", calls.Load(), outcome, err)
+				}
+			})
+		}
+	}
+}
+
 func TestGeminiImageSubmitWireContract(t *testing.T) {
 	for _, testCase := range []struct {
 		name       string
@@ -365,8 +412,7 @@ func TestGeminiReferenceDiagnosticRedactsNestedURLs(t *testing.T) {
 }
 
 // TestImageSubmitClassifiedErrors pins the conservative submit contract:
-// only an exact safe rejection is retryable; ordinary 429/4xx are explicit
-// failures, while generic 5xx and lost responses are indeterminate.
+// explicit provider rejections fail, while generic 5xx and lost responses are indeterminate.
 func TestImageSubmitClassifiedErrors(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -392,11 +438,9 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 			}
 		}, nil},
 		{"model route unavailable", http.StatusServiceUnavailable, `{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE","type":"model_routing_error","message":"provider-private-detail","request_id":"kapon-private-request-id","arbitrary_secret":"must-not-cross"}}`, func(t *testing.T, err error) {
-			if !domain.IsSubmitRetryable(err) {
-				t.Fatalf("the exact no-route rejection must be safely retryable, got %v", err)
-			}
-			if got := domain.SubmitRetryPressureOf(err); got != domain.SubmitRetryCooldown {
-				t.Fatalf("model-route 503 pressure = %v, want cooldown", got)
+			var rejected *domain.ProviderRejectedError
+			if !errors.As(err, &rejected) || rejected.Reason != domain.ReasonProviderRouteUnavailable || domain.IsSubmitRetryable(err) {
+				t.Fatalf("model-route 503 must fail without retry, got %v", err)
 			}
 			if got := domain.ClassifyFailureReason(err); got != domain.ReasonProviderRouteUnavailable {
 				t.Fatalf("model-route 503 reason = %s, want provider_route_unavailable", got)
@@ -417,11 +461,9 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 			}
 		}, nil},
 		{"model route rate limited", http.StatusTooManyRequests, `{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE"}}`, func(t *testing.T, err error) {
-			if !domain.IsSubmitRetryable(err) {
-				t.Fatalf("the exact no-route rejection must be safely retryable, got %v", err)
-			}
-			if got := domain.SubmitRetryPressureOf(err); got != domain.SubmitRetryBackoff {
-				t.Fatalf("model-route 429 pressure = %v, want backoff", got)
+			var rejected *domain.ProviderRejectedError
+			if !errors.As(err, &rejected) || rejected.Reason != domain.ReasonProviderRouteUnavailable || domain.IsSubmitRetryable(err) {
+				t.Fatalf("model-route 429 must fail without retry, got %v", err)
 			}
 		}, retryAfter(7 * time.Second)},
 		{"unrecognized route error", http.StatusServiceUnavailable, `{"error":{"code":"MODEL_GROUP_SOME_UNAVAILABLE","type":"model_routing_error","message":"provider-private-detail","request_id":"kapon-private-request-id"}}`, func(t *testing.T, err error) {
@@ -504,6 +546,29 @@ func TestImageSubmitClassifiedErrors(t *testing.T) {
 	_, err := client.Submit(context.Background(), "k", req)
 	if !domain.IsSubmitIndeterminate(err) {
 		t.Fatalf("lost synchronous answer must be indeterminate, got %v", err)
+	}
+}
+
+func TestImageModelRouteErrorFailsImmediately(t *testing.T) {
+	for _, model := range []string{domain.GeminiModelID, domain.GPTFlareModelID, domain.GPTSunburstModelID} {
+		t.Run(model, func(t *testing.T) {
+			client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte(`{"error":{"code":"MODEL_GROUP_ALL_UNAVAILABLE","message":"All channels unavailable","type":"model_routing_error","request_id":"request-1"}}`))
+			})
+			ratio, resolution, quality := "1:1", "1K", "high"
+			_, err := client.Submit(context.Background(), "credential", domain.PreparedSubmitRequest{
+				Media: domain.MediaImage, Model: model, Prompt: "image", Quantity: 1,
+				Ratio: &ratio, Resolution: &resolution, Quality: &quality,
+			})
+			var rejected *domain.ProviderRejectedError
+			if !errors.As(err, &rejected) || rejected.Reason != domain.ReasonProviderRouteUnavailable || domain.IsSubmitRetryable(err) {
+				t.Fatalf("model route failure must terminate without retry, got %v", err)
+			}
+			if diagnostic := domain.FailureDiagnosticOf(err); diagnostic == nil || diagnostic.Code != "MODEL_GROUP_ALL_UNAVAILABLE" || diagnostic.RequestID == nil || *diagnostic.RequestID != "request-1" {
+				t.Fatalf("model route failure lost provider diagnosis: %+v", diagnostic)
+			}
+		})
 	}
 }
 
@@ -643,7 +708,7 @@ func TestImageFanoutPartialDeliveryIsIndeterminate(t *testing.T) {
 		Ratio: &ratio, Resolution: &resolution,
 	})
 	if !domain.IsSubmitIndeterminate(err) || calls.Load() != 2 {
-		t.Fatalf("partial fan-out delivery error=%v calls=%d, want indeterminate/2", err, calls.Load())
+		t.Fatalf("partial fan-out route rejection error=%v calls=%d, want indeterminate/2", err, calls.Load())
 	}
 }
 

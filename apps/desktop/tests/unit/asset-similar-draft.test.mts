@@ -100,6 +100,7 @@ test('create similar writes only the safe generation intent into the new local d
     manifestVersion: 4,
     ratio: '3:2',
     resolution: '2K',
+    quality: null,
     quantity: 2,
     durationSeconds: null,
     references: []
@@ -133,6 +134,7 @@ test('create similar replaces only its image draft without confirming video cont
     manifestVersion: 5,
     ratio: null,
     resolution: '720p',
+    quality: null,
     quantity: 1,
     durationSeconds: 5,
     references: [{ materialId: 'video-material', role: 'omni' as const }]
@@ -182,6 +184,7 @@ test('video similar preserves an existing image draft and activates video', () =
     manifestVersion: 4,
     ratio: '1:1',
     resolution: '2K',
+    quality: null,
     quantity: 1,
     durationSeconds: null,
     references: []

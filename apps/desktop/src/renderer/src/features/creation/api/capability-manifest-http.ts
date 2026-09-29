@@ -92,6 +92,8 @@ export interface CapabilityModel {
   readonly ratios?: readonly string[]
   readonly resolutions: readonly string[]
   readonly defaultResolution: string
+  readonly qualities?: readonly string[]
+  readonly defaultQuality?: string
   readonly maxReferenceImages?: number
   readonly sizes?: readonly CapabilitySize[]
 }
@@ -307,6 +309,8 @@ function parseModels(
     const modelRatios = readStringList(item, 'ratios')
     const resolutions = readStringList(item, 'resolutions')
     const defaultResolution = readString(item, 'default_resolution')
+    const qualities = readStringList(item, 'qualities')
+    const defaultQuality = readString(item, 'default_quality')
     if (
       model === null ||
       modelRatios === MALFORMED_LIST ||
@@ -315,7 +319,11 @@ function parseModels(
       resolutions === MALFORMED_LIST ||
       resolutions.length === 0 ||
       defaultResolution === null ||
-      !resolutions.includes(defaultResolution)
+      !resolutions.includes(defaultResolution) ||
+      qualities === MALFORMED_LIST ||
+      (qualities === undefined
+        ? hasField(item, 'default_quality')
+        : qualities.length === 0 || defaultQuality === null || !qualities.includes(defaultQuality))
     ) {
       return null
     }
@@ -332,6 +340,7 @@ function parseModels(
       ...(modelRatios !== undefined ? { ratios: modelRatios } : {}),
       resolutions,
       defaultResolution,
+      ...(qualities !== undefined ? { qualities, defaultQuality: defaultQuality! } : {}),
       ...(maxReferenceImages !== undefined ? { maxReferenceImages } : {}),
       ...(sizes !== undefined ? { sizes } : {})
     })

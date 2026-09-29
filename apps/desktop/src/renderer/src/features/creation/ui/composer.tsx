@@ -35,6 +35,7 @@ import {
   modeCandidates,
   modelCandidates,
   publishedSize,
+  qualityCandidates,
   ratioCandidates,
   resolutionCandidates,
   videoComposerMode,
@@ -656,7 +657,8 @@ function ParamsMenu({
   // Resolution tiers are model-scoped: the selected model's own published
   // tiers, empty while the draft's model is stale so only the stale note
   // shows.
-  const resolutions = resolutionCandidates(manifest, media, draft.model)
+  const resolutions = resolutionCandidates(manifest, media, draft.model, draft.ratio)
+  const qualities = qualityCandidates(manifest, media, draft.model)
   const quantities = capability.quantities ?? []
   // The exact pixel size the server will submit for this selection; hidden
   // while any dimension is stale or the combination is unpublished.
@@ -664,7 +666,9 @@ function ParamsMenu({
   const staleRatio = staleFields.has('ratio') ? draft.ratio : null
   const staleResolution = staleFields.has('resolution') ? draft.resolution : null
   const staleQuantity = staleFields.has('quantity') ? draft.quantity : null
-  const staleParams = staleRatio !== null || staleResolution !== null || staleQuantity !== null
+  const qualityStale = staleFields.has('quality')
+  const staleParams =
+    staleRatio !== null || staleResolution !== null || staleQuantity !== null || qualityStale
 
   return (
     <DropdownMenu>
@@ -685,6 +689,12 @@ function ParamsMenu({
             <span>{draft.quantity}</span>
           </>
         )}
+        {qualities.length > 0 && draft.quality != null && (
+          <>
+            <Separator />
+            <span>{draft.quality}</span>
+          </>
+        )}
         {staleParams && <TriangleAlertIcon className="size-3 shrink-0" aria-hidden />}
       </DropdownMenuTrigger>
       <ComposerMenuContent
@@ -702,7 +712,15 @@ function ParamsMenu({
                 maxColumns={8}
                 isSelected={(ratio) => ratio === draft.ratio}
                 layout="h-[52px] flex-col gap-2.5"
-                onSelect={(ratio) => composer.patchDraft({ ratio })}
+                onSelect={(ratio) => {
+                  const tiers = resolutionCandidates(manifest, media, draft.model, ratio)
+                  composer.patchDraft({
+                    ratio,
+                    resolution: tiers.includes(draft.resolution ?? '')
+                      ? draft.resolution
+                      : (tiers[0] ?? null)
+                  })
+                }}
                 render={(ratio) => (
                   <>
                     {/* Fixed-height slot: every glyph shares one band so the
@@ -739,6 +757,18 @@ function ParamsMenu({
                 layout="h-9 text-[13px]"
                 onSelect={(quantity) => composer.patchDraft({ quantity })}
                 render={(quantity) => quantity}
+              />
+            </ParamGroup>
+          )}
+          {qualities.length > 0 && (
+            <ParamGroup label={t('composer.params.quality')}>
+              {qualityStale && <StaleRow value={draft.quality ?? '—'} />}
+              <OptionStrip
+                items={qualities}
+                isSelected={(quality) => quality === draft.quality}
+                layout="h-10 text-[13px]"
+                onSelect={(quality) => composer.patchDraft({ quality })}
+                render={(quality) => quality}
               />
             </ParamGroup>
           )}

@@ -190,7 +190,7 @@ function manifestDefaultDraft(value: CapabilityManifest, media: DraftMediaType):
         ? 'first-last-frame'
         : (first?.id ?? null),
     resolution: model?.defaultResolution ?? null,
-    ...manifestDefaultParameters(capability),
+    ...manifestDefaultParameters(capability, model ?? null),
     references: []
   }
 }
@@ -631,6 +631,7 @@ export class WorkbenchContextController {
       mode: stored.mode,
       ratio: stored.ratio,
       resolution: stored.resolution,
+      quality: stored.quality ?? null,
       quantity: stored.quantity,
       durationSeconds: stored.durationSeconds,
       references

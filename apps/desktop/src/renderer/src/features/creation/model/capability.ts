@@ -18,6 +18,7 @@ import type {
   ReferenceMaterialView
 } from '../api/go-creation-http'
 import {
+  modelParameterCandidates,
   publishedParameterRules,
   type DraftMediaType,
   type GenerationParameterId,
@@ -183,10 +184,28 @@ export function publishedModel(
 export function resolutionCandidates(
   manifest: CapabilityManifest | null,
   media: DraftMediaType,
-  model: string | null
+  model: string | null,
+  ratio?: string | null
 ): readonly string[] {
   if (model === null) return []
-  return publishedModel(manifest, media, model)?.resolutions ?? []
+  const entry = publishedModel(manifest, media, model)
+  if (!entry) return []
+  return ratio != null && entry.qualities
+    ? entry.resolutions.filter((resolution) =>
+        entry.sizes?.some((size) => size.ratio === ratio && size.resolution === resolution)
+      )
+    : entry.resolutions
+}
+
+export function qualityCandidates(
+  manifest: CapabilityManifest | null,
+  media: DraftMediaType,
+  model: string | null
+): readonly string[] {
+  return modelParameterCandidates(
+    model === null ? null : publishedModel(manifest, media, model),
+    'quality'
+  )
 }
 
 /** Image ratios belong to the selected model; video keeps media-level ratios. */
@@ -336,12 +355,12 @@ export function staleDraftFields(
     stale.add('references')
     return stale
   }
-  // A field the media does not publish gets no verdict here — the admission
-  // freeze judges its value server-side.
-  for (const rule of publishedParameterRules(capability)) {
+  // Absent media fields get no verdict; an absent model field rejects a stale value.
+  const modelView = draft.model === null ? null : publishedModel(manifest, media, draft.model)
+  for (const rule of publishedParameterRules(capability, modelView)) {
     if (media === 'image' && rule.id === 'ratio') continue
     const value = draft[rule.id]
-    if (value === null ? !rule.mayStayUnset : !rule.candidates.includes(value)) {
+    if (value == null ? !rule.mayStayUnset : !rule.candidates.includes(value)) {
       stale.add(rule.id)
     }
   }
@@ -360,11 +379,10 @@ export function staleDraftFields(
     stale.add('ratio')
   if (
     draft.resolution === null ||
-    !resolutionCandidates(manifest, media, draft.model).includes(draft.resolution)
+    !resolutionCandidates(manifest, media, draft.model, draft.ratio).includes(draft.resolution)
   ) {
     stale.add('resolution')
   }
-
   const bounds = modeReferenceBounds(manifest, media, mode)
   if (bounds === null) {
     stale.add('references')

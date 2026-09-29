@@ -362,13 +362,14 @@ type GenerationSpecification struct {
 	ManifestVersion int                      `json:"manifest_version"`
 	Ratio           *string                  `json:"ratio,omitempty"`
 	Resolution      *string                  `json:"resolution,omitempty"`
+	Quality         *string                  `json:"quality,omitempty"`
 	Quantity        int                      `json:"quantity"`
 	DurationSeconds *int                     `json:"duration_seconds,omitempty"`
 	References      []SpecificationReference `json:"references"`
 }
 
-// SpecificationSpecificationSchemaVersion is the stored spec shape version.
-const SpecificationSchemaVersion = 1
+// SpecificationSchemaVersion is the stored spec shape version.
+const SpecificationSchemaVersion = 2
 
 // SpecificationReference freezes one reference material's identity, role,
 // verified kind, and the claims version the material carried at admission.

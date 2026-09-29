@@ -83,6 +83,7 @@ type GenerationIntent struct {
 	Mode            *string
 	Ratio           *string
 	Resolution      *string
+	Quality         *string
 	Quantity        *int
 	DurationSeconds *int
 	References      []DraftReference
@@ -105,7 +106,8 @@ func (i *GenerationIntent) Validate() error {
 	// identity — so aliased pointers cannot swap one field's limit for
 	// another's and turn a 400 into a database-check 500.
 	if overLimit(i.Model, DraftModelMaxChars) || overLimit(i.Mode, DraftModeMaxChars) ||
-		overLimit(i.Ratio, DraftValueMaxChars) || overLimit(i.Resolution, DraftValueMaxChars) {
+		overLimit(i.Ratio, DraftValueMaxChars) || overLimit(i.Resolution, DraftValueMaxChars) ||
+		overLimit(i.Quality, DraftValueMaxChars) {
 		return ErrInvalidIntent
 	}
 	if i.Quantity != nil && (*i.Quantity < 1 || *i.Quantity > 4) {

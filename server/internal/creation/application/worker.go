@@ -359,6 +359,7 @@ func (w *TaskWorker) buildSubmitRequest(ctx context.Context, task domain.Generat
 		Quantity:   task.Spec.Quantity,
 		Ratio:      task.Spec.Ratio,
 		Resolution: task.Spec.Resolution,
+		Quality:    task.Spec.Quality,
 		DurationS:  task.Spec.DurationSeconds,
 		References: make([]domain.ReferenceSource, 0, len(task.Spec.References)),
 	}

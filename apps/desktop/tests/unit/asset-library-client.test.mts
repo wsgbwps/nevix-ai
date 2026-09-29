@@ -216,6 +216,7 @@ test('asset detail exposes private origin only when the server supplies it', asy
         manifestVersion: 7,
         ratio: '3:2',
         resolution: '2K',
+        quality: null,
         quantity: 1,
         durationSeconds: null,
         references: [

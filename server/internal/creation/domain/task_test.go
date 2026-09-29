@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -205,12 +206,28 @@ func TestSpecificationCanonicalPayloadIsStable(t *testing.T) {
 	if base.PayloadHash() == changedPrompt.PayloadHash() {
 		t.Fatal("a different prompt must change the payload hash")
 	}
+	changedQuality := base
+	changedQuality.Quality = ptr("max")
+	if base.PayloadHash() == changedQuality.PayloadHash() {
+		t.Fatal("a different quality must change the payload hash")
+	}
 	reordered := base
 	reordered.References = []SpecificationReference{{MaterialID: UUID{0x01}, Role: RoleReference, Kind: KindImage, ClaimsVersion: 1}}
 	referenceOrder := base
 	referenceOrder.References = []SpecificationReference{{MaterialID: UUID{0x02}, Role: RoleReference, Kind: KindImage, ClaimsVersion: 1}}
 	if reordered.PayloadHash() == referenceOrder.PayloadHash() {
 		t.Fatal("reference order is part of the frozen intent")
+	}
+}
+
+func TestLegacySpecificationWithoutQualityStillDecodes(t *testing.T) {
+	const stored = `{"schema_version":1,"media_type":"image","prompt":"legacy","model":"doubao-seedream-5.0-pro","mode":"text-to-image","manifest_version":7,"ratio":"1:1","resolution":"2K","quantity":1,"references":[]}`
+	var spec GenerationSpecification
+	if err := json.Unmarshal([]byte(stored), &spec); err != nil {
+		t.Fatal(err)
+	}
+	if spec.SchemaVersion != 1 || spec.Quality != nil || spec.Model != ImageModelID || spec.Quantity != 1 {
+		t.Fatalf("legacy specification changed while decoding: %+v", spec)
 	}
 }
 

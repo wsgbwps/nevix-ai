@@ -7,18 +7,20 @@ package domain
 
 // ManifestSchemaVersion is the wire payload's shape version
 // (contracts/creation.yaml CapabilityManifest.schema_version).
-const ManifestSchemaVersion = 3
+const ManifestSchemaVersion = 4
 
 // ManifestVersion changes whenever the accepted capability set changes.
-const ManifestVersion = 7
+const ManifestVersion = 8
 
 // The V1 allowlisted models (spec #150). The manifest and Kapon adapter share
 // these IDs; the connection check only validates the Provider Key (ADR-0025).
 const (
-	ImageModelID     = "doubao-seedream-5.0-pro"
-	ImageModelBaseID = "doubao-seedream-5.0"
-	GeminiModelID    = "gemini-3.1-flash-image"
-	VideoModelID     = "doubao-seedance-2-5"
+	ImageModelID       = "doubao-seedream-5.0-pro"
+	ImageModelBaseID   = "doubao-seedream-5.0"
+	GeminiModelID      = "gemini-3.1-flash-image"
+	GPTFlareModelID    = "gpt-image-2.5-flare"
+	GPTSunburstModelID = "gpt-image-2.5-sunburst"
+	VideoModelID       = "doubao-seedance-2-5"
 )
 
 // Prompt length envelope shared by both media (spec 图片/视频合同).
@@ -45,13 +47,16 @@ var (
 	imageRatios       = []string{"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"}
 	geminiImageRatios = []string{"1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"}
 	// Image models publish their own ratios, resolution tiers, and reference ceilings.
-	// The two Seedream size tables and Gemini table come from the Apifox contracts.
+	// Seedream and Gemini sizes follow Apifox; GPT uses the accepted product presets.
 	imageModels = []CapabilityModelView{
 		{Model: ImageModelID, Ratios: imageRatios, Resolutions: []string{"1K", "1.5K", "2K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(10)},
 		{Model: ImageModelBaseID, Ratios: imageRatios, Resolutions: []string{"2K", "3K", "4K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(14)},
 		{Model: GeminiModelID, Ratios: geminiImageRatios, Resolutions: []string{"512", "1K", "2K", "4K"}, DefaultResolution: "1K", MaxReferenceImages: ptr(14)},
+		{Model: GPTFlareModelID, Ratios: imageRatios, Resolutions: []string{"1K", "2K", "4K"}, DefaultResolution: "1K", MaxReferenceImages: ptr(14), Qualities: gptImageQualities, DefaultQuality: "high"},
+		{Model: GPTSunburstModelID, Ratios: imageRatios, Resolutions: []string{"1K", "2K", "4K"}, DefaultResolution: "1K", MaxReferenceImages: ptr(14), Qualities: gptImageQualities, DefaultQuality: "high"},
 	}
-	imageQuantities = []int{1, 2, 3, 4}
+	gptImageQualities = []string{"low", "medium", "high", "xhigh", "max"}
+	imageQuantities   = []int{1, 2, 3, 4}
 
 	videoModes  = []string{ModeTextToVideo, ModeFirstFrame, ModeFirstLastFrame, ModeOmniReference}
 	videoModels = []CapabilityModelView{
@@ -111,6 +116,8 @@ type (
 		Ratios             []string             `json:"ratios,omitempty"`
 		Resolutions        []string             `json:"resolutions"`
 		DefaultResolution  string               `json:"default_resolution"`
+		Qualities          []string             `json:"qualities,omitempty"`
+		DefaultQuality     string               `json:"default_quality,omitempty"`
 		MaxReferenceImages *int                 `json:"max_reference_images,omitempty"`
 		Sizes              []CapabilitySizeView `json:"sizes,omitempty"`
 	}
@@ -342,6 +349,8 @@ func deriveAvailableMedia(media string, models []CapabilityModelView, modes []st
 			Ratios:             append([]string(nil), model.Ratios...),
 			Resolutions:        append([]string(nil), model.Resolutions...),
 			DefaultResolution:  model.DefaultResolution,
+			Qualities:          append([]string(nil), model.Qualities...),
+			DefaultQuality:     model.DefaultQuality,
 			MaxReferenceImages: model.MaxReferenceImages,
 			Sizes:              modelSizes(media, model),
 		})

@@ -155,6 +155,12 @@ export function AssetDetailDialog({
                       <dd>{detail.privateOrigin.specification.ratio || '—'}</dd>
                       <dt className="text-muted-foreground">{t('composer.params.resolution')}</dt>
                       <dd>{detail.privateOrigin.specification.resolution || '—'}</dd>
+                      {detail.privateOrigin.specification.quality != null && (
+                        <>
+                          <dt className="text-muted-foreground">{t('composer.params.quality')}</dt>
+                          <dd>{detail.privateOrigin.specification.quality}</dd>
+                        </>
+                      )}
                       <dt className="text-muted-foreground">{t('gallery.details.quantity')}</dt>
                       <dd>{detail.privateOrigin.specification.quantity}</dd>
                       <dt className="text-muted-foreground">{t('gallery.details.duration')}</dt>

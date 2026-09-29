@@ -336,6 +336,34 @@ describe('capability manifest client', () => {
     )
   })
 
+  it('requires a published default whenever a model offers quality', () => {
+    const gpt = {
+      ...availableImage.models[0],
+      model: 'gpt-image-2.5-flare',
+      qualities: ['low', 'medium', 'high', 'xhigh', 'max'],
+      default_quality: 'high'
+    }
+    const payload = {
+      schema_version: 1,
+      manifest_version: 2,
+      image: { ...availableImage, models: [...availableImage.models, gpt] },
+      video: pendingVideo
+    }
+    assert.deepEqual(parseCapabilityManifest(payload)?.image.models?.[2].qualities, gpt.qualities)
+    assert.equal(parseCapabilityManifest(payload)?.image.models?.[2].defaultQuality, 'high')
+    for (const invalid of [
+      { ...gpt, default_quality: 'auto' },
+      { ...gpt, default_quality: undefined },
+      { ...gpt, qualities: [] },
+      { ...gpt, qualities: 'high' }
+    ]) {
+      assert.equal(
+        parseCapabilityManifest({ ...payload, image: { ...availableImage, models: [invalid] } }),
+        null
+      )
+    }
+  })
+
   it('maps stable failures without inventing verdicts', async () => {
     await withFetch(
       () => Promise.resolve(jsonResponse({ error: 'unauthorized', message: 'no' }, 401)),

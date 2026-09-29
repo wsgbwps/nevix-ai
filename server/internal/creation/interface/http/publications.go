@@ -89,6 +89,7 @@ type generationSpecificationResource struct {
 	ManifestVersion int                              `json:"manifest_version"`
 	Ratio           *string                          `json:"ratio"`
 	Resolution      *string                          `json:"resolution"`
+	Quality         *string                          `json:"quality"`
 	Quantity        int                              `json:"quantity"`
 	DurationSeconds *int                             `json:"duration_seconds"`
 	References      []specificationReferenceResource `json:"references"`
@@ -462,7 +463,7 @@ func toGenerationSpecificationResource(spec domain.GenerationSpecification) gene
 	return generationSpecificationResource{
 		SchemaVersion: spec.SchemaVersion, MediaType: string(spec.MediaType), Prompt: spec.Prompt,
 		Model: spec.Model, Mode: spec.Mode, ManifestVersion: spec.ManifestVersion,
-		Ratio: spec.Ratio, Resolution: spec.Resolution, Quantity: spec.Quantity,
+		Ratio: spec.Ratio, Resolution: spec.Resolution, Quality: spec.Quality, Quantity: spec.Quantity,
 		DurationSeconds: spec.DurationSeconds, References: references,
 	}
 }

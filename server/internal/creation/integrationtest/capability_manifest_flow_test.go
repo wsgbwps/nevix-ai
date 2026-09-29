@@ -31,6 +31,8 @@ type manifestMedia struct {
 		Ratios            []string `json:"ratios"`
 		Resolutions       []string `json:"resolutions"`
 		DefaultResolution string   `json:"default_resolution"`
+		Qualities         []string `json:"qualities"`
+		DefaultQuality    string   `json:"default_quality"`
 		Sizes             []struct {
 			Resolution string `json:"resolution"`
 			Ratio      string `json:"ratio"`
@@ -92,7 +94,7 @@ func TestCapabilityManifestWithoutConnectionIsUnavailable(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("manifest must answer 200, got %d: %s", status, body)
 	}
-	if payload.SchemaVersion != 3 || payload.ManifestVersion != 7 {
+	if payload.SchemaVersion != 4 || payload.ManifestVersion != 8 {
 		t.Fatalf("manifest must publish its schema and content versions: %+v", payload)
 	}
 	for media, view := range map[string]manifestMedia{"image": payload.Image, "video": payload.Video} {
@@ -153,6 +155,8 @@ func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
 			{"doubao-seedream-5.0-pro", []string{"1K", "1.5K", "2K"}, "2K", 8, 24},
 			{"doubao-seedream-5.0", []string{"2K", "3K", "4K"}, "2K", 8, 24},
 			{"gemini-3.1-flash-image", []string{"512", "1K", "2K", "4K"}, "1K", 14, 56},
+			{"gpt-image-2.5-flare", []string{"1K", "2K", "4K"}, "1K", 8, 24},
+			{"gpt-image-2.5-sunburst", []string{"1K", "2K", "4K"}, "1K", 8, 24},
 		}, []string{"text-to-image", "reference-image"}},
 		{"video", payload.Video, []expectedModelSpec{
 			{"doubao-seedance-2-5", []string{"480p", "720p", "1080p"}, "720p", 0, 0},
@@ -176,6 +180,13 @@ func TestCapabilityManifestActivatesWithConnection(t *testing.T) {
 			}
 			if gotModel.DefaultResolution != wantModel.defaultResolution {
 				t.Fatalf("%s %s default resolution = %q, want %q", want.media, gotModel.Model, gotModel.DefaultResolution, wantModel.defaultResolution)
+			}
+			if strings.HasPrefix(gotModel.Model, "gpt-image-2.5-") {
+				if strings.Join(gotModel.Qualities, ",") != "low,medium,high,xhigh,max" || gotModel.DefaultQuality != "high" {
+					t.Fatalf("%s quality = %v/%q", gotModel.Model, gotModel.Qualities, gotModel.DefaultQuality)
+				}
+			} else if gotModel.Qualities != nil || gotModel.DefaultQuality != "" {
+				t.Fatalf("%s must not publish quality", gotModel.Model)
 			}
 			if len(gotModel.Ratios) != wantModel.ratios {
 				t.Fatalf("%s %s ratios = %v, want %d", want.media, gotModel.Model, gotModel.Ratios, wantModel.ratios)
@@ -248,7 +259,7 @@ func TestCapabilityManifestIgnoresProviderModelList(t *testing.T) {
 	}
 
 	_, _, payload := h.getManifest(t, adminToken)
-	if !payload.Image.Available || !payload.Video.Available || len(payload.Image.Models) != 3 || len(payload.Video.Models) != 1 {
+	if !payload.Image.Available || !payload.Video.Available || len(payload.Image.Models) != 5 || len(payload.Video.Models) != 1 {
 		t.Fatalf("valid Key must keep all versioned models available: image=%+v video=%+v", payload.Image, payload.Video)
 	}
 }

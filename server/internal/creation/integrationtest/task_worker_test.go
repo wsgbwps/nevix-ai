@@ -341,48 +341,6 @@ func TestCancelConvergesBestEffort(t *testing.T) {
 	}
 }
 
-// TestCancelOfReflessSubmitConverges: a cancel requested while the job is held submitting
-// without an external identity (transient-rejection backoff) converges cancelled — the
-// cancelling path never touches a missing external ref.
-func TestCancelOfReflessSubmitConverges(t *testing.T) {
-	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
-	token := h.loginToken(t, creator, harnessPassword)
-	h.kapon.generation.setImage(imageScript{
-		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE",
-	})
-
-	draft := h.imageTaskIntent(t, token, "取消未受理提交", 1)
-	status, body := h.submitTask(t, token, "cancel-refless", draft)
-	if status != http.StatusCreated {
-		t.Fatalf("submit: %d %s", status, body)
-	}
-	view := decodeTaskView(t, body)
-
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if got := countRows(t, h.ownerPool, `SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'submitting' AND external_ref IS NULL AND last_outcome = 'transient_rejected'`, view.Task.ID); got == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("job never entered the ref-less submitting hold")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	if status, body = h.doRequest(t, "POST", "/creation/tasks/"+view.Task.ID+"/cancel", token, nil); status != http.StatusOK {
-		t.Fatalf("cancel: %d %s", status, body)
-	}
-	converged := h.awaitTaskTerminal(t, token, view.Task.ID)
-	if converged.Task.Status != "cancelled" {
-		t.Fatalf("a submit that never obtained an external identity must cancel, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
-	}
-	for _, slot := range converged.Slots {
-		if slot.Status != "cancelled" {
-			t.Fatalf("every slot must end cancelled: %s", slotVerdicts(converged))
-		}
-	}
-}
-
 // TestIndeterminateSubmitNeverAutoRetries: a lost submit outcome ends the
 // job indeterminate, the task failed with the indeterminate cause, and no
 // new provider request is ever guessed.
@@ -597,10 +555,7 @@ func TestProvider402PersistsCreditBlock(t *testing.T) {
 	}
 }
 
-// TestProviderSafeRejectionBacksOffBounded: a provider response carrying the
-// exact safe-rejection code keeps the job submitting, then converges when the
-// provider recovers. The 429 status alone is not the safety proof.
-func TestProviderSafeRejectionBacksOffBounded(t *testing.T) {
+func TestProviderRoute429FailsWithoutRetry(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
 	one := 1
@@ -608,30 +563,17 @@ func TestProviderSafeRejectionBacksOffBounded(t *testing.T) {
 		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE", retryAfterSeconds: &one,
 	})
 
-	draft := h.imageTaskIntent(t, token, "限速退避", 1)
+	draft := h.imageTaskIntent(t, token, "渠道不可用", 1)
 	status, body := h.submitTask(t, token, "rate-1", draft)
 	if status != http.StatusCreated {
 		t.Fatalf("submit: %d %s", status, body)
 	}
-	view := decodeTaskView(t, body)
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if got := countRows(t, h.ownerPool, `
-			SELECT count(*) FROM creation_provider_jobs
-			WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 1
-		`, view.Task.ID); got == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("safe rejection was never persisted before retry")
-		}
-		time.Sleep(20 * time.Millisecond)
+	view := h.awaitTaskTerminal(t, token, decodeTaskView(t, body).Task.ID)
+	if view.Task.Status != "failed" || len(view.Slots) != 1 || view.Slots[0].FailureReason == nil || *view.Slots[0].FailureReason != "provider_route_unavailable" {
+		t.Fatalf("model-route 429 must fail immediately: %s (%s)", view.Task.Status, slotVerdicts(view))
 	}
-	// Recovery: the provider opens and the same task converges.
-	h.kapon.generation.setImage(imageScript{outputs: 1})
-	converged := h.awaitTaskTerminal(t, token, view.Task.ID)
-	if converged.Task.Status != "succeeded" {
-		t.Fatalf("recovered provider must converge the task, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
+	if got := h.kapon.generation.imageRequests(); got != 1 {
+		t.Fatalf("model-route 429 retried %d times", got)
 	}
 }
 
@@ -811,68 +753,27 @@ func TestCompletedJobSurvivesCredentialUnavailability(t *testing.T) {
 	}
 }
 
-// TestTransientRejectionAttemptLimitConverges: the provider's four-step transient-submit ladder
-// is also the durable call budget. Once spent, the task exposes a retryable terminal verdict
-// instead of silently waiting on the queue-wide 240-attempt allowance (issue #160 field
-// report: last_outcome=transient_rejected, no error).
-func TestTransientRejectionAttemptLimitConverges(t *testing.T) {
+func TestModelRoute503FailsImmediatelyWithDiagnostic(t *testing.T) {
 	h, _, creator := readyTaskHarness(t, harnessOptions{runWorkers: true})
 	token := h.loginToken(t, creator, harnessPassword)
-	one := 1
-	h.kapon.generation.setImage(imageScript{
-		status: http.StatusTooManyRequests, code: "MODEL_GROUP_ALL_UNAVAILABLE", retryAfterSeconds: &one,
-	})
-
-	draft := h.imageTaskIntent(t, token, "预算耗尽", 1)
-	status, body := h.submitTask(t, token, "exhaust-1", draft)
-	if status != http.StatusCreated {
-		t.Fatalf("submit: %d %s", status, body)
-	}
-	taskID := decodeTaskView(t, body).Task.ID
-
-	// Wait for exactly one provider call, then inflate the unrelated queue
-	// claim count. A correct implementation still permits three more submit
-	// calls because submit_attempts is the durable budget owner.
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if got := countRows(t, h.ownerPool,
-			`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 1`, taskID); got == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the first transient rejection was never recorded")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if _, err := h.ownerPool.Exec(h.ctx,
-		`UPDATE creation_generation_queue SET attempts = 200 WHERE task_id = $1::uuid`, taskID); err != nil {
-		t.Fatalf("inflate the independent queue-claim budget: %v", err)
-	}
-	// Keep the first three waits fast, then make the limiting answer match
-	// the real Kapon response observed for issue #160. The worker must retain
-	// retry semantics while preserving the allowlisted terminal diagnosis.
-	deadline = time.Now().Add(10 * time.Second)
-	for {
-		if got := countRows(t, h.ownerPool,
-			`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND last_outcome = 'transient_rejected' AND submit_attempts = 3`, taskID); got == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the third transient rejection was never recorded")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 	h.kapon.generation.setImage(imageScript{
 		status: http.StatusServiceUnavailable, code: "MODEL_GROUP_ALL_UNAVAILABLE",
 	})
 
+	draft := h.imageTaskIntent(t, token, "Gemini 渠道不可用", 1)
+	draft.Model, draft.Resolution = "gemini-3.1-flash-image", "1K"
+	status, body := h.submitTask(t, token, "route-unavailable-1", draft)
+	if status != http.StatusCreated {
+		t.Fatalf("submit: %d %s", status, body)
+	}
+	taskID := decodeTaskView(t, body).Task.ID
 	converged := h.awaitTaskTerminal(t, token, taskID)
 	if converged.Task.Status != "failed" {
-		t.Fatalf("exhausted transient retries must converge failed, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
+		t.Fatalf("model-route 503 must converge failed, got %s (%s)", converged.Task.Status, slotVerdicts(converged))
 	}
 	for _, slot := range converged.Slots {
 		if slot.Status != "failed" || slot.FailureReason == nil || *slot.FailureReason != "provider_route_unavailable" {
-			t.Fatalf("the limiting model-route 503 must retain its stable diagnosis: %s", slotVerdicts(converged))
+			t.Fatalf("model-route 503 must retain its stable diagnosis: %s", slotVerdicts(converged))
 		}
 		diagnostic := slot.FailureDiagnostic
 		// The gateway appends the redacted request shape and host route to the
@@ -897,18 +798,18 @@ func TestTransientRejectionAttemptLimitConverges(t *testing.T) {
 	}
 	if got := countRows(t, h.ownerPool,
 		`SELECT count(*) FROM creation_generation_reservations WHERE task_id = $1::uuid AND released_at IS NOT NULL`, taskID); got != 1 {
-		t.Fatal("exhaustion must release the reservation exactly once")
+		t.Fatal("rejection must release the reservation exactly once")
 	}
-	if got := h.kapon.generation.imageRequests(); got != 4 {
-		t.Fatalf("the four-step transient-submit budget must make 4 provider calls, got %d", got)
+	if got := h.kapon.generation.imageRequests(); got != 1 {
+		t.Fatalf("model-route 503 must make one provider call, got %d", got)
 	}
 	if got := countRows(t, h.ownerPool,
-		`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'failed' AND submit_attempts = 4 AND last_outcome IS NULL`, taskID); got != 1 {
-		t.Fatal("the limiting rejection and terminal provider-job verdict must commit together")
+		`SELECT count(*) FROM creation_provider_jobs WHERE task_id = $1::uuid AND status = 'failed' AND submit_attempts = 1 AND last_outcome IS NULL`, taskID); got != 1 {
+		t.Fatal("rejection and terminal provider-job verdict must commit together")
 	}
 	if got := countRows(t, h.ownerPool,
 		`SELECT count(*) FROM creation_generation_queue WHERE task_id = $1::uuid AND attempts >= max_attempts`, taskID); got != 1 {
-		t.Fatal("the exhausted queue item must stay retired (attempts saturated)")
+		t.Fatal("the failed queue item must stay retired")
 	}
 }
 
