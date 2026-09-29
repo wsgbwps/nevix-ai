@@ -173,14 +173,17 @@ Nevix 备份范围仅包括 PostgreSQL、Creation Credential Master Key 与 TLS 
 ## 7. AI Creation 发布前 smoke
 
 Capability Manifest 随 Nevix 代码版本发布；部署方无需复制能力证据或重启激活。
-实例 Admin 只需在产品内配置 AI Provider Connection，Connection Check 会确认
-Token 与固定模型是否可见，并独立控制图片、视频的运行时可用性。
+实例 Admin 只需在产品内配置 AI Provider Connection，Connection Check 只确认
+Key 有效；可提交模型由版本化 Capability Manifest 决定，不读取供应商模型列表。
 
 Nevix 开发者在首次正式发布、固定模型变化或供应商合同变化时执行一次轻量检查：
 
 1. 确认 fake adapter 与契约测试通过。
 2. 使用受控测试实例和真实 Kapon 凭据，走产品路径提交受影响媒体的最短生成，确认
    提交、异步查询、结果转存和媒体读取成功。
+   Gemini 3.1 Flash Image 首次发布须分别验证文生图与参考图生图，并确认
+   `response_format=url` 的结果 URL 能转存及读取；网关若未配置可返回 URL 的存储，
+   先修复网关配置再发布。
 3. 将结果记入 release checklist 或对应 issue。失败时停止本次发布并修复；检查结果
    不作为部署文件，也不影响已部署 Server 启动。
 

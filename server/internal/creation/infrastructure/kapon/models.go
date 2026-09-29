@@ -3,7 +3,6 @@ package kapon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -16,14 +15,9 @@ import (
 // DefaultBaseURL is used when KAPON_BASE_URL is unset.
 const DefaultBaseURL = "https://models.kapon.cloud"
 
-const (
-	ImageModel = domain.ImageModelID
-	VideoModel = domain.VideoModelID
-)
-
 const checkTimeout = 10 * time.Second
 
-// ModelsCheckClient checks model visibility with a candidate credential.
+// ModelsCheckClient checks a candidate credential against Kapon's fixed route.
 type ModelsCheckClient struct {
 	baseURL string
 	http    *http.Client
@@ -63,47 +57,30 @@ func ValidateBaseURL(raw string) error {
 	}
 }
 
-// Check returns the image and video models visible to a candidate credential.
-func (c *ModelsCheckClient) Check(ctx context.Context, candidateKey string) (domain.ProviderCheckResult, error) {
+// Check treats HTTP 200 as a valid key, independent of catalog contents.
+func (c *ModelsCheckClient) Check(ctx context.Context, candidateKey string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/models", nil)
 	if err != nil {
-		return domain.ProviderCheckResult{}, fmt.Errorf("kapon: build models request: %w", err)
+		return fmt.Errorf("kapon: build models request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+candidateKey)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return domain.ProviderCheckResult{}, domain.ErrCheckTemporarilyUnavailable
+		return domain.ErrCheckTemporarilyUnavailable
 	}
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusOK:
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return domain.ProviderCheckResult{}, domain.ErrCandidateCredentialInvalid
+		return domain.ErrCandidateCredentialInvalid
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-		return domain.ProviderCheckResult{}, domain.ErrCheckTemporarilyUnavailable
+		return domain.ErrCheckTemporarilyUnavailable
 	default:
 		// Other statuses do not prove that the candidate credential is invalid.
-		return domain.ProviderCheckResult{}, domain.ErrCheckTemporarilyUnavailable
+		return domain.ErrCheckTemporarilyUnavailable
 	}
 
-	var catalog struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(nil, resp.Body, 1<<20)).Decode(&catalog); err != nil {
-		return domain.ProviderCheckResult{}, domain.ErrCheckTemporarilyUnavailable
-	}
-	visibility := domain.ProviderCheckResult{}
-	for _, model := range catalog.Data {
-		switch model.ID {
-		case ImageModel:
-			visibility.ImageAvailable = true
-		case VideoModel:
-			visibility.VideoAvailable = true
-		}
-	}
-	return visibility, nil
+	return nil
 }

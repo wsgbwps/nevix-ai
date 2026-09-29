@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -44,14 +45,15 @@ type imageSizeCase struct {
 	resolution string
 }
 
-// acceptedCrossProduct derives the manifest's accepted image values from the domain itself,
-// so a model, ratio, or tier added there makes this conformance test demand a mapping entry
-// (the adapter table cannot drift silently).
+// acceptedCrossProduct derives the Doubao pixel-size combinations from the manifest.
 var acceptedCrossProduct = buildAcceptedCrossProduct()
 
 func buildAcceptedCrossProduct() []imageSizeCase {
 	cases := make([]imageSizeCase, 0)
 	for _, model := range domain.AcceptedImageModels() {
+		if model.Model == domain.GeminiModelID {
+			continue
+		}
 		for _, ratio := range domain.AcceptedImageRatios() {
 			for _, resolution := range model.Resolutions {
 				cases = append(cases, imageSizeCase{model: model.Model, ratio: ratio, resolution: resolution})
@@ -61,7 +63,7 @@ func buildAcceptedCrossProduct() []imageSizeCase {
 	return cases
 }
 
-// TestImageSizeTableCoversAcceptedCrossProduct: Kapon requires the pixel size ("宽x高"), and
+// TestImageSizeTableCoversAcceptedCrossProduct: Doubao requires the pixel size ("宽x高"), and
 // the tables are per model — overlapping tier labels resolve to different pixels (2K at 16:9
 // is 2816x1584 on pro but 2848x1600 on n). Unknown triples fail closed.
 func TestImageSizeTableCoversAcceptedCrossProduct(t *testing.T) {
@@ -134,11 +136,14 @@ var documentedImageRequestKeys = map[string]bool{
 // specFaithfulImageVendor stands in for the vendor endpoint with its documented contract
 // enforced: a body key outside the schema (such as the undocumented batch field, which the
 // provider answers with invalid_request_error), or a size outside the model's x-size-map
-// enum, is rejected exactly like the real route. Each accepted model answers under its
+// enum, is rejected exactly like the real route. Each accepted Doubao model answers under its
 // manifest alias AND its mapped versioned backend id.
 func specFaithfulImageVendor(t *testing.T, onRequest func(seq int, auth string, body map[string]any)) *GenerationsClient {
 	specSizes := map[string]map[string]bool{}
 	for _, model := range domain.AcceptedImageModels() {
+		if model.Model == domain.GeminiModelID {
+			continue
+		}
 		sizes := map[string]bool{}
 		for _, ratio := range domain.AcceptedImageRatios() {
 			for _, resolution := range model.Resolutions {
@@ -262,6 +267,119 @@ func TestImageSubmitWireContract(t *testing.T) {
 	}
 	if len(urls) != 2 || !urls["https://cdn.example/spec-out-0.png"] || !urls["https://cdn.example/spec-out-1.png"] {
 		t.Fatalf("each sub-request's answer must become one output: %+v", outcome)
+	}
+}
+
+func TestGeminiImageSubmitWireContract(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		references []domain.GatewayReference
+		path       string
+	}{
+		{"text to image", nil, "/v1/images/generations"},
+		{"reference image", []domain.GatewayReference{
+			{URL: "https://objects.example/first.png", ExpiresAt: time.Now().Add(time.Hour)},
+			{URL: "https://objects.example/second.png", ExpiresAt: time.Now().Add(time.Hour)},
+		}, "/v1/images/edits"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var calls atomic.Int32
+			client := newGenerationsClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != testCase.path || r.Header.Get("Authorization") != "Bearer gemini-key" {
+					t.Errorf("request route or headers: %s %s %+v", r.Method, r.URL.Path, r.Header)
+				}
+				var body map[string]any
+				mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+				if err != nil {
+					t.Errorf("parse content type: %v", err)
+				}
+				if len(testCase.references) == 0 {
+					if mediaType != "application/json" {
+						t.Errorf("text-to-image content type: %s", mediaType)
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode request: %v", err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+				} else {
+					if mediaType != "multipart/form-data" {
+						t.Errorf("edit content type: %s", mediaType)
+					}
+					if err := r.ParseMultipartForm(1 << 20); err != nil {
+						t.Errorf("parse edit form: %v", err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					body = map[string]any{}
+					for _, key := range []string{"model", "prompt", "size", "aspect_ratio", "response_format"} {
+						body[key] = r.FormValue(key)
+					}
+				}
+				if body["model"] != domain.GeminiModelID || body["prompt"] != "生成商品主图" || body["size"] != "2K" || body["aspect_ratio"] != "16:9" || body["response_format"] != "url" {
+					t.Errorf("Gemini request fields: %+v", body)
+				}
+				if _, ok := body["watermark"]; ok {
+					t.Errorf("Doubao-only watermark leaked into Gemini request: %+v", body)
+				}
+				if len(testCase.references) == 0 {
+					if len(body) != 6 || body["n"] != float64(1) {
+						t.Errorf("text-to-image request must have n=1 and no edit fields: %+v", body)
+					}
+				} else {
+					images := r.MultipartForm.Value["image_urls[]"]
+					if len(r.MultipartForm.Value) != 6 || len(r.MultipartForm.File) != 0 || len(images) != len(testCase.references) {
+						t.Errorf("reference request shape: %+v", r.MultipartForm)
+					} else {
+						for i, imageURL := range images {
+							if imageURL != testCase.references[i].URL {
+								t.Errorf("reference %d order: %s", i, imageURL)
+							}
+						}
+					}
+				}
+				index := calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"created":1700000000,"data":[{"url":"https://cdn.example/gemini-%d.png"}]}`, index)
+			})
+			ratio, resolution := "16:9", "2K"
+			outcome, err := client.Submit(context.Background(), "gemini-key", domain.PreparedSubmitRequest{
+				Media: domain.MediaImage, Model: domain.GeminiModelID, Prompt: "生成商品主图",
+				Quantity: 2, Ratio: &ratio, Resolution: &resolution, References: testCase.references,
+			})
+			if err != nil {
+				t.Fatalf("Gemini submit: %v", err)
+			}
+			if calls.Load() != 2 || len(outcome.Outputs) != 2 || outcome.Outputs[0].URL == outcome.Outputs[1].URL {
+				t.Fatalf("two calls must yield two URL outputs: calls=%d outcome=%+v", calls.Load(), outcome)
+			}
+		})
+	}
+}
+
+func TestGeminiReferenceDiagnosticRedactsNestedURLs(t *testing.T) {
+	const referenceURL = "https://objects.example/private-reference.png"
+	if summary := redactedRequestSummary(map[string]any{
+		"image_urls[]": []string{referenceURL},
+	}); strings.Contains(summary, referenceURL) {
+		t.Fatalf("request summary leaked nested reference URL: %s", summary)
+	}
+	client := newGenerationsClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, `{"error":{"code":"invalid_request_error","message":"could not fetch %s"}}`, referenceURL)
+	})
+	ratio, resolution := "1:1", "1K"
+	_, err := client.Submit(context.Background(), "gemini-key", domain.PreparedSubmitRequest{
+		Media: domain.MediaImage, Model: domain.GeminiModelID, Prompt: "private prompt",
+		Quantity: 1, Ratio: &ratio, Resolution: &resolution,
+		References: []domain.GatewayReference{{URL: referenceURL, ExpiresAt: time.Now().Add(time.Hour)}},
+	})
+	if err == nil {
+		t.Fatal("provider rejection expected")
+	}
+	diagnostic := domain.FailureDiagnosticOf(err)
+	if diagnostic == nil || strings.Contains(fmt.Sprintf("%+v", diagnostic), referenceURL) || strings.Contains(fmt.Sprintf("%+v", diagnostic), "private prompt") {
+		t.Fatalf("diagnostic leaked creator input: %+v", diagnostic)
 	}
 }
 

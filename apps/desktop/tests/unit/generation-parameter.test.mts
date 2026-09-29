@@ -81,7 +81,18 @@ const imageCapability: CapabilityMedia = {
   reason: null,
   action: null,
   models: [
-    { model: 'doubao-seedream-5.0-pro', resolutions: ['2K', '4K'], defaultResolution: '2K' }
+    {
+      model: 'doubao-seedream-5.0-pro',
+      ratios: ['1:1', '4:3', '16:9'],
+      resolutions: ['2K', '4K'],
+      defaultResolution: '2K'
+    },
+    {
+      model: 'gemini-3.1-flash-image',
+      ratios: ['1:1', '1:8'],
+      resolutions: ['1K'],
+      defaultResolution: '1K'
+    }
   ],
   modes: [{ id: 'text-to-image', referenceMaterial: { total: { min: 0, max: 4 } } }],
   ratios: ['1:1', '4:3', '16:9'],
@@ -131,6 +142,20 @@ test('stale verdicts: unset tolerance and candidate membership per field', () =>
   )
   assert.equal(
     staleDraftFields(manifest, { ...base, ratio: '9:21', quantity: 2 }).has('ratio'),
+    true
+  )
+  assert.equal(
+    staleDraftFields(manifest, {
+      ...base,
+      model: 'gemini-3.1-flash-image',
+      resolution: '1K',
+      ratio: '1:8',
+      quantity: 2
+    }).has('ratio'),
+    false
+  )
+  assert.equal(
+    staleDraftFields(manifest, { ...base, ratio: '1:8', quantity: 2 }).has('ratio'),
     true
   )
   assert.equal(

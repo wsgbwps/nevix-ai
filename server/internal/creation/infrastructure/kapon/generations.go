@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"math/rand/v2"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -279,24 +280,46 @@ func (c *GenerationsClient) Submit(ctx context.Context, credential string, req d
 }
 
 func (c *GenerationsClient) submitImage(ctx context.Context, credential string, req domain.PreparedSubmitRequest) (domain.SubmitOutcome, error) {
-	size, err := imageSize(req)
-	if err != nil {
-		return domain.SubmitOutcome{}, err
-	}
-	// Kapon has no image batch parameter, so each requested output needs its own call.
-	body := map[string]any{
-		"model":           imageWireModel(req.Model),
-		"prompt":          req.Prompt,
-		"size":            size,
-		"response_format": "url",
-		"watermark":       false,
-	}
-	if len(req.References) > 0 {
-		images := make([]string, 0, len(req.References))
-		for _, reference := range req.References {
-			images = append(images, reference.URL)
+	// Each provider request creates one image; quantity still fans out below.
+	path := "/v1/images/generations"
+	var body map[string]any
+	if req.Model == domain.GeminiModelID {
+		if req.Ratio == nil || req.Resolution == nil {
+			return domain.SubmitOutcome{}, &domain.ProviderRejectedError{Reason: domain.ReasonInternalError}
 		}
-		body["image"] = images
+		body = map[string]any{
+			"model": req.Model, "prompt": req.Prompt, "size": *req.Resolution,
+			"aspect_ratio": *req.Ratio, "response_format": "url",
+		}
+		if len(req.References) == 0 {
+			body["n"] = 1
+		} else {
+			path = "/v1/images/edits"
+			images := make([]string, 0, len(req.References))
+			for _, reference := range req.References {
+				images = append(images, reference.URL)
+			}
+			body["image_urls[]"] = images
+		}
+	} else {
+		size, err := imageSize(req)
+		if err != nil {
+			return domain.SubmitOutcome{}, err
+		}
+		body = map[string]any{
+			"model":           imageWireModel(req.Model),
+			"prompt":          req.Prompt,
+			"size":            size,
+			"response_format": "url",
+			"watermark":       false,
+		}
+		if len(req.References) > 0 {
+			images := make([]string, 0, len(req.References))
+			for _, reference := range req.References {
+				images = append(images, reference.URL)
+			}
+			body["image"] = images
+		}
 	}
 	quantity := req.Quantity
 	if quantity < 1 {
@@ -316,7 +339,7 @@ func (c *GenerationsClient) submitImage(ctx context.Context, credential string, 
 					URL string `json:"url"`
 				} `json:"data"`
 			}
-			errs[slot] = classifySubmitError(c.call(callCtx, credential, http.MethodPost, "/v1/images/generations", body, &parsed))
+			errs[slot] = classifySubmitError(c.call(callCtx, credential, http.MethodPost, path, body, &parsed))
 			if errs[slot] != nil {
 				return
 			}
@@ -556,12 +579,34 @@ func classifySubmitError(err error) error {
 // call maps one authenticated provider round trip onto the domain error taxonomy.
 func (c *GenerationsClient) call(ctx context.Context, credential, method, path string, body any, decode any) error {
 	var reader io.Reader
+	contentType := "application/json"
 	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("kapon: encode request: %w", err)
+		if path == "/v1/images/edits" {
+			var encoded bytes.Buffer
+			writer := multipart.NewWriter(&encoded)
+			fields := body.(map[string]any)
+			for _, key := range []string{"model", "prompt", "size", "aspect_ratio", "response_format"} {
+				if err := writer.WriteField(key, fields[key].(string)); err != nil {
+					return fmt.Errorf("kapon: encode edit request: %w", err)
+				}
+			}
+			for _, imageURL := range fields["image_urls[]"].([]string) {
+				if err := writer.WriteField("image_urls[]", imageURL); err != nil {
+					return fmt.Errorf("kapon: encode edit request: %w", err)
+				}
+			}
+			if err := writer.Close(); err != nil {
+				return fmt.Errorf("kapon: encode edit request: %w", err)
+			}
+			reader = &encoded
+			contentType = writer.FormDataContentType()
+		} else {
+			encoded, err := json.Marshal(body)
+			if err != nil {
+				return fmt.Errorf("kapon: encode request: %w", err)
+			}
+			reader = bytes.NewReader(encoded)
 		}
-		reader = bytes.NewReader(encoded)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
@@ -573,7 +618,7 @@ func (c *GenerationsClient) call(ctx context.Context, credential, method, path s
 		)
 		return domain.WithFailureDiagnostic(fmt.Errorf("kapon: build request: %w", err), diagnostic)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 	if credential != "" {
 		req.Header.Set("Authorization", "Bearer "+credential)
@@ -862,7 +907,7 @@ func providerDiagnosticRedactions(credential string, body any) []string {
 
 func providerDiagnosticSensitiveKey(key string) bool {
 	switch key {
-	case "prompt", "image", "text", "image_url", "url":
+	case "prompt", "image", "text", "image_url", "image_urls[]", "url":
 		return true
 	default:
 		return false

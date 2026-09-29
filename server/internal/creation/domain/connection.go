@@ -116,29 +116,11 @@ func ValidAdminState(v string) bool {
 	return v == string(AdminStateEnabled) || v == string(AdminStatePaused)
 }
 
-// ProviderCheckResult is one completed connection check's model-visibility
-// verdict. Each media degrades independently.
-type ProviderCheckResult struct {
-	ImageAvailable bool
-	VideoAvailable bool
-}
-
-// MediaCapabilities maps the verdict onto the independent per-media states.
-func (r ProviderCheckResult) MediaCapabilities() (image, video MediaCapability) {
-	toCapability := func(visible bool) MediaCapability {
-		if visible {
-			return MediaCapabilityAvailable
-		}
-		return MediaCapabilityUnavailable
-	}
-	return toCapability(r.ImageAvailable), toCapability(r.VideoAvailable)
-}
-
 // ProviderCheckClient is the port for the instance-level connection check: one low-side-effect call
-// against the fixed provider route that decides token validity and allowlisted-model visibility. The
+// against the fixed provider route that decides token validity. The
 // candidate key exists only for the call's duration.
 type ProviderCheckClient interface {
-	Check(ctx context.Context, candidateKey string) (ProviderCheckResult, error)
+	Check(ctx context.Context, candidateKey string) error
 }
 
 // CredentialKey is one master key: the AES-256 material plus the ID the

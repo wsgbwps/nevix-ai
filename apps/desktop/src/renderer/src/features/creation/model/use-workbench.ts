@@ -466,7 +466,14 @@ export function useCreationWorkbench(): {
         entry !== null && current !== null && entry.resolutions.includes(current)
           ? current
           : (entry?.defaultResolution ?? null)
-      patchDraft({ model, resolution })
+      const ratio =
+        draft.mediaType === 'image' &&
+        entry !== null &&
+        draft.ratio !== null &&
+        !entry.ratios?.includes(draft.ratio)
+          ? (mediaCapability(manifest, 'image')?.defaults?.ratio ?? null)
+          : draft.ratio
+      patchDraft({ model, resolution, ratio })
     },
     [currentDraft, manifest, patchDraft]
   )

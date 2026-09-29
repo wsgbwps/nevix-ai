@@ -7,17 +7,17 @@ package domain
 
 // ManifestSchemaVersion is the wire payload's shape version
 // (contracts/creation.yaml CapabilityManifest.schema_version).
-const ManifestSchemaVersion = 2
+const ManifestSchemaVersion = 3
 
 // ManifestVersion changes whenever the accepted capability set changes.
-const ManifestVersion = 6
+const ManifestVersion = 7
 
-// The V1 allowlisted models (spec #150). Declared here because the manifest
-// publishes them; the Kapon adapter reuses these constants so the catalog
-// check, the manifest, and the wire size table can never drift apart.
+// The V1 allowlisted models (spec #150). The manifest and Kapon adapter share
+// these IDs; the connection check only validates the Provider Key (ADR-0025).
 const (
 	ImageModelID     = "doubao-seedream-5.0-pro"
 	ImageModelBaseID = "doubao-seedream-5.0"
+	GeminiModelID    = "gemini-3.1-flash-image"
 	VideoModelID     = "doubao-seedance-2-5"
 )
 
@@ -41,15 +41,15 @@ const (
 // order — fixed, so one manifest version always serializes the same sequence. Image
 // resolution tiers are model-scoped because the vendor size table differs per model.
 var (
-	imageModes  = []string{ModeTextToImage, ModeReferenceImage}
-	imageRatios = []string{"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"}
-	// imageModels declares the accepted image models and their resolution tiers (Kapon
-	// size contract, apifox 2026-09): pro covers 1K/1.5K/2K, base covers 2K/3K/4K, and the
-	// tier labels overlap but the pixel sizes differ. MaxReferenceImages is the vendor's
-	// per-model reference ceiling (user-confirmed 2026-09-01): pro 10, base 14.
+	imageModes        = []string{ModeTextToImage, ModeReferenceImage}
+	imageRatios       = []string{"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"}
+	geminiImageRatios = []string{"1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"}
+	// Image models publish their own ratios, resolution tiers, and reference ceilings.
+	// The two Seedream size tables and Gemini table come from the Apifox contracts.
 	imageModels = []CapabilityModelView{
-		{Model: ImageModelID, Resolutions: []string{"1K", "1.5K", "2K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(10)},
-		{Model: ImageModelBaseID, Resolutions: []string{"2K", "3K", "4K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(14)},
+		{Model: ImageModelID, Ratios: imageRatios, Resolutions: []string{"1K", "1.5K", "2K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(10)},
+		{Model: ImageModelBaseID, Ratios: imageRatios, Resolutions: []string{"2K", "3K", "4K"}, DefaultResolution: "2K", MaxReferenceImages: ptr(14)},
+		{Model: GeminiModelID, Ratios: geminiImageRatios, Resolutions: []string{"512", "1K", "2K", "4K"}, DefaultResolution: "1K", MaxReferenceImages: ptr(14)},
 	}
 	imageQuantities = []int{1, 2, 3, 4}
 
@@ -104,11 +104,11 @@ type (
 		Prompt            *PromptEnvelopeView      `json:"prompt,omitempty"`
 		ReferenceMaterial *ReferenceMaterialPolicy `json:"reference_material,omitempty"`
 	}
-	// CapabilityModelView is one allowlisted model and the resolution tiers it publishes: image
-	// media carries two models with disjoint tier sets plus the pixel size of every published
-	// (tier, ratio) and the model's reference-image ceiling; video carries one model and neither.
+	// CapabilityModelView is one allowlisted model and the resolution tiers it publishes.
+	// Image models also carry their ratios, pixel sizes, and reference-image ceiling.
 	CapabilityModelView struct {
 		Model              string               `json:"model"`
+		Ratios             []string             `json:"ratios,omitempty"`
 		Resolutions        []string             `json:"resolutions"`
 		DefaultResolution  string               `json:"default_resolution"`
 		MaxReferenceImages *int                 `json:"max_reference_images,omitempty"`
@@ -339,6 +339,7 @@ func deriveAvailableMedia(media string, models []CapabilityModelView, modes []st
 	for _, model := range models {
 		view.Models = append(view.Models, CapabilityModelView{
 			Model:              model.Model,
+			Ratios:             append([]string(nil), model.Ratios...),
 			Resolutions:        append([]string(nil), model.Resolutions...),
 			DefaultResolution:  model.DefaultResolution,
 			MaxReferenceImages: model.MaxReferenceImages,
@@ -375,9 +376,9 @@ func modelSizes(media string, model CapabilityModelView) []CapabilitySizeView {
 	if media != string(MediaImage) {
 		return nil
 	}
-	sizes := make([]CapabilitySizeView, 0, len(model.Resolutions)*len(imageRatios))
+	sizes := make([]CapabilitySizeView, 0, len(model.Resolutions)*len(model.Ratios))
 	for _, resolution := range model.Resolutions {
-		for _, ratio := range imageRatios {
+		for _, ratio := range model.Ratios {
 			size, ok := ImageSizeFor(model.Model, ratio, resolution)
 			if !ok {
 				continue

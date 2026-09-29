@@ -47,6 +47,7 @@ const availableImage = {
   models: [
     {
       model: 'doubao-seedream-5.0-pro',
+      ratios: ['1:1', '4:3'],
       resolutions: ['1K', '1.5K', '2K'],
       default_resolution: '2K',
       max_reference_images: 10,
@@ -57,6 +58,7 @@ const availableImage = {
     },
     {
       model: 'doubao-seedream-5.0',
+      ratios: ['1:1', '4:3'],
       resolutions: ['2K', '3K', '4K'],
       default_resolution: '2K'
     }
@@ -188,6 +190,7 @@ describe('capability manifest client', () => {
           ['doubao-seedream-5.0-pro', 'doubao-seedream-5.0']
         )
         assert.deepEqual(result.value.image.models?.[0].resolutions, ['1K', '1.5K', '2K'])
+        assert.deepEqual(result.value.image.models?.[0].ratios, ['1:1', '4:3'])
         assert.equal(result.value.image.models?.[0].defaultResolution, '2K')
         // The published pixel sizes arrive verbatim; a model without them
         // (video) simply carries no sizes.
@@ -292,6 +295,45 @@ describe('capability manifest client', () => {
     })
     assert.equal(parseCapabilityManifest(proWithBadCeiling('ten')), null)
     assert.equal(parseCapabilityManifest(proWithBadCeiling(0)), null)
+    const badModelRatios = (ratios: unknown): unknown => ({
+      schema_version: 1,
+      manifest_version: 1,
+      image: {
+        ...availableImage,
+        models: [{ ...availableImage.models[0], ratios }]
+      },
+      video: pendingVideo
+    })
+    assert.equal(parseCapabilityManifest(badModelRatios(undefined)), null)
+    assert.equal(parseCapabilityManifest(badModelRatios([])), null)
+    assert.equal(parseCapabilityManifest(badModelRatios('all')), null)
+  })
+
+  it('accepts a model-only image ratio and validates sizes against that model', () => {
+    const gemini = {
+      model: 'gemini-3.1-flash-image',
+      ratios: ['1:1', '1:8'],
+      resolutions: ['1K'],
+      default_resolution: '1K',
+      sizes: [{ resolution: '1K', ratio: '1:8', width: 256, height: 2048 }]
+    }
+    const payload = {
+      schema_version: 1,
+      manifest_version: 2,
+      image: { ...availableImage, models: [...availableImage.models, gemini] },
+      video: pendingVideo
+    }
+    assert.deepEqual(parseCapabilityManifest(payload)?.image.models?.[2].ratios, ['1:1', '1:8'])
+    assert.equal(
+      parseCapabilityManifest({
+        ...payload,
+        image: {
+          ...payload.image,
+          models: [{ ...gemini, sizes: [{ ...gemini.sizes[0], ratio: '4:3' }] }]
+        }
+      }),
+      null
+    )
   })
 
   it('maps stable failures without inventing verdicts', async () => {
@@ -359,6 +401,7 @@ describe('capability manifest client', () => {
           models: [
             {
               model: 'doubao-seedream-5.0-pro',
+              ratios: ['1:1', '4:3'],
               resolutions: ['1K', '1.5K', '2K'],
               default_resolution: '4K'
             }
@@ -387,6 +430,7 @@ describe('capability manifest client', () => {
             models: [
               {
                 model: 'doubao-seedream-5.0-pro',
+                ratios: ['1:1', '4:3'],
                 resolutions: ['1K', '1.5K', '2K'],
                 default_resolution: '2K',
                 sizes: [sizes]
