@@ -201,7 +201,7 @@ export function SlotCard({
       ) : (
         <span
           data-testid={active ? `slot-activity-${taskId}-${slot.index}` : undefined}
-          className={`absolute inset-0 flex overflow-y-auto p-2 ${active ? 'skeleton-shimmer bg-foreground/[0.06]' : ''}`}
+          className={`absolute inset-0 flex overflow-x-hidden overflow-y-auto p-2 ${active ? 'skeleton-shimmer bg-foreground/6' : ''}`}
         >
           <span className="text-muted-foreground relative z-10 my-auto w-full text-center text-[10px] leading-4">
             {t(slotStatusKey(slot.status))}
