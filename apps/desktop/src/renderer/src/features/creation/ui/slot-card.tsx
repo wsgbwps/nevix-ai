@@ -177,7 +177,7 @@ export function SlotCard({
       }}
       onDragEnd={dragEnd}
       style={{ aspectRatio: String(aspectRatio) }}
-      className="bg-foreground/[0.04] focus-visible:ring-ring relative overflow-hidden rounded-lg outline-none focus-visible:ring-2"
+      className={`bg-foreground/[0.04] focus-visible:ring-ring relative overflow-hidden rounded-lg outline-none focus-visible:ring-2 ${succeeded && onPreview !== undefined ? 'cursor-pointer' : ''}`}
     >
       {succeeded && mediaUrl !== null ? (
         mediaType === 'image' ? (
