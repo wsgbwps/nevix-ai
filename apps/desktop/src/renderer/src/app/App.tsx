@@ -6,6 +6,7 @@ import { CreationRuntimeProvider, CreationSessionNavigationProvider } from '../f
 import { ServerConnectionStateContext } from './connection-state'
 import { OrdinaryCloseProvider } from './ordinary-close'
 import { routeTree } from './routeTree.gen'
+import { Scrollbars } from './scrollbars'
 
 function App(): React.JSX.Element {
   const connection = useServerConnection()
@@ -18,6 +19,7 @@ function App(): React.JSX.Element {
 
   return (
     <OrdinaryCloseProvider>
+      <Scrollbars />
       <ServerConnectionStateContext.Provider value={connection}>
         {/* The one renderer-document Authentication runtime: dormant until a
             server URL exists, then permanently bound to it. App pages consume

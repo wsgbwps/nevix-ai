@@ -11,6 +11,93 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@property --scrollbar-opacity {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* Keep the native gutter fixed; only the painted thumb grows on hover. */
+* {
+  --scrollbar-opacity: 0;
+  --scrollbar-thumb-size: 4px;
+  --scrollbar-thumb-color: rgb(
+    from var(--foreground) r g b / calc(var(--scrollbar-opacity) * 0.18)
+  );
+}
+
+[data-scrollbar] {
+  transition: --scrollbar-opacity 180ms ease;
+}
+
+[data-scrollbar-visible] {
+  --scrollbar-opacity: 1;
+}
+
+[data-scrollbar-hovered] {
+  --scrollbar-thumb-size: 6px;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 0;
+  border-radius: 3px;
+  background-image: linear-gradient(var(--scrollbar-thumb-color), var(--scrollbar-thumb-color));
+  background-size: var(--scrollbar-thumb-size) 100%;
+  background-position: right;
+  background-repeat: no-repeat;
+}
+
+*::-webkit-scrollbar-thumb:horizontal {
+  background-size: 100% var(--scrollbar-thumb-size);
+  background-position: bottom;
+}
+
+/* Native scrollbar drags can consume pointer events before the document sees them. */
+*::-webkit-scrollbar-thumb:active {
+  background-image: linear-gradient(
+    rgb(from var(--foreground) r g b / 0.24),
+    rgb(from var(--foreground) r g b / 0.24)
+  );
+  background-size: 100% 100%;
+}
+
+/* Radix injects its viewport hiding rules after this stylesheet. */
+[data-radix-select-viewport] {
+  scrollbar-width: auto !important;
+}
+
+[data-radix-select-viewport]::-webkit-scrollbar {
+  display: block !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-scrollbar] {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  *::-webkit-scrollbar-thumb {
+    background: CanvasText;
+  }
+}
+
 /* One side measure for every page surface: the ceiling holds at a maximized
    window, the floor arrives a fifth of the width narrower, and 5/16 is the
    slope those two ends describe. Flat on either side of that range. */

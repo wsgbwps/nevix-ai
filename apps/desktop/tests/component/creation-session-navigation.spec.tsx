@@ -5,6 +5,15 @@ import type { CreationSessionView } from '../src/renderer/src/features/creation/
 
 const springSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'
 
+test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } })
+
+const railSessions: CreationSessionView[] = Array.from({ length: 40 }, (_, index) => ({
+  id: `session-${index}`,
+  name: `Session ${index}`,
+  createdAt: '2026-09-19T00:00:00.000Z',
+  updatedAt: '2026-09-19T00:00:00.000Z'
+}))
+
 test('the session group collapses without hiding the new draft action', async ({ mount, page }) => {
   await page.evaluate(() => {
     localStorage.removeItem('sidebar_state')
@@ -48,23 +57,14 @@ test('the icon rail keeps the sessions after the group was collapsed', async ({ 
   await expect(page.getByTestId(`session-identity-${springSessionId}`)).toBeVisible()
 })
 
-test('collapsed session controls stay aligned without a visible scrollbar', async ({
+test('collapsed session controls stay aligned with the unified thin scrollbar', async ({
   mount,
   page
 }) => {
   await page.evaluate(() => {
     localStorage.removeItem('sidebar_state')
   })
-  const sessions = Array.from(
-    { length: 40 },
-    (_, index): CreationSessionView => ({
-      id: `session-${index}`,
-      name: `Session ${index}`,
-      createdAt: '2026-09-19T00:00:00.000Z',
-      updatedAt: '2026-09-19T00:00:00.000Z'
-    })
-  )
-  await mount(<CreationWorkbenchRealShellStory sessions={sessions} />)
+  await mount(<CreationWorkbenchRealShellStory sessions={railSessions} />)
 
   const newDraft = page.getByTestId('session-new')
   await collapseSidebarRail(page)
@@ -96,12 +96,41 @@ test('collapsed session controls stay aligned without a visible scrollbar', asyn
     .toBe(true)
 
   const listGeometry = await page.getByTestId('session-list').evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,
-    scrollbarWidth: getComputedStyle(element).scrollbarWidth
+    scrollbarWidth: getComputedStyle(element).scrollbarWidth,
+    nativeScrollbarWidth: getComputedStyle(element, '::-webkit-scrollbar').width
   }))
   expect(listGeometry.scrollHeight).toBeGreaterThan(listGeometry.clientHeight)
-  expect.soft(listGeometry.scrollbarWidth).toBe('none')
+  expect(listGeometry.scrollWidth).toBe(listGeometry.clientWidth)
+  expect.soft(listGeometry.scrollbarWidth).toBe('auto')
+  expect(listGeometry.nativeScrollbarWidth).toBe('6px')
+})
+
+test('the collapsed session scrollbar stays above the sidebar rail for hover and native drag', async ({
+  mount,
+  page
+}) => {
+  await page.evaluate(() => localStorage.removeItem('sidebar_state'))
+  await mount(<CreationWorkbenchRealShellStory sessions={railSessions} />)
+  await collapseSidebarRail(page)
+  const list = page.getByTestId('session-list')
+  const box = (await list.boundingBox())!
+  await page.mouse.move(box.x + box.width - 3, box.y + 20)
+  await expect
+    .poll(() =>
+      list.evaluate((element) =>
+        Number(getComputedStyle(element).getPropertyValue('--scrollbar-opacity'))
+      )
+    )
+    .toBe(1)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width - 3, box.y + 120, { steps: 5 })
+  await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  await page.mouse.up()
+  await expect(page.locator('[data-slot="sidebar"]')).toHaveAttribute('data-state', 'collapsed')
 })
 
 test('the global session navigation keeps its compact controls and sidebar state', async ({

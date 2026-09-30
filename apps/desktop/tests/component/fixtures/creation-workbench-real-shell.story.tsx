@@ -1,6 +1,7 @@
 import { HomeIcon, ImagesIcon } from 'lucide-react'
 import { I18nextProvider } from 'react-i18next'
 import '../../../src/renderer/src/app/globals.css'
+import { Scrollbars } from '../../../src/renderer/src/app/scrollbars'
 import { SidebarBrand } from '../../../src/renderer/src/app/shell/sidebar-brand'
 import {
   Sidebar,
@@ -12,6 +13,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
+  SidebarRail,
   SidebarSeparator
 } from '../../../src/renderer/src/components/ui/sidebar'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
@@ -27,12 +29,13 @@ import { RuntimeWorkbenchScope, type StoryOptions } from './creation-workbench.s
  * stylesheet — it imports app/globals.css so Tailwind applies, so keep it out of specs
  * that must stay CSS-less (CT ships no CSS). The sidebar chrome below mirrors
  * app/shell/app-shell.tsx and must change with it (the AppShell is not CT-mountable: auth
- * providers). Footer and rail stay out — the footer needs the auth session, and a second
- * `Toggle sidebar` control would make the story's own toggle ambiguous by role and name.
+ * providers). The footer stays out because it needs the auth session; the rail has a
+ * distinct accessible label so the brand toggle remains unambiguous in these tests.
  */
 export function CreationWorkbenchRealShellStory(options: StoryOptions = {}): React.JSX.Element {
   return (
     <I18nextProvider i18n={testI18n}>
+      <Scrollbars />
       <RuntimeWorkbenchScope options={options}>
         <TooltipProvider delayDuration={0}>
           <SidebarProvider className="h-svh">
@@ -60,6 +63,7 @@ export function CreationWorkbenchRealShellStory(options: StoryOptions = {}): Rea
                 <SidebarSeparator />
                 <CreationSessionNavigationSidebar onOpenCreation={() => undefined} />
               </SidebarContent>
+              <SidebarRail aria-label="Sidebar edge toggle" />
             </Sidebar>
             <SidebarInset>
               <div className="flex flex-1 flex-col overflow-auto" data-testid="shell-content">
