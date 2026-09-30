@@ -295,10 +295,11 @@ export function CreationSessionNavigationSidebar({
         >
           <SquarePenIcon />
         </SidebarGroupAction>
-        <CollapsibleContent className="min-h-0 flex-1 overflow-hidden">
+        <CollapsibleContent className="min-h-0 flex-1 overflow-hidden group-data-[collapsible=icon]:-mr-2">
           <SidebarGroupContent className="flex h-full min-h-0 flex-col">
+            {/* Keep the native scrollbar above the overlapping sidebar toggle rail. */}
             <div
-              className="min-h-0 flex-1 scrollbar-none overflow-y-auto py-1 [&::-webkit-scrollbar]:hidden"
+              className="relative z-30 min-h-0 flex-1 overflow-y-auto py-1"
               data-testid="session-list"
             >
               {navigation.sessions.length === 0 &&
