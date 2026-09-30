@@ -108,15 +108,13 @@ test(
           await admin.electronApp.close()
         }
 
-        const otherResult = dialog
-          .getByRole('button', { name: /^结果 / })
-          .and(launched.page.locator('[data-variant="outline"]'))
-        const otherResultName = await otherResult.textContent()
+        const otherResult = dialog.getByRole('button', { name: /^结果 /, pressed: false })
+        const otherResultName = await otherResult.getAttribute('aria-label')
         expect(otherResultName).not.toBeNull()
         await otherResult.click()
         await expect(
           dialog.getByRole('button', { name: otherResultName ?? '', exact: true })
-        ).toHaveAttribute('data-variant', 'secondary')
+        ).toHaveAttribute('aria-pressed', 'true')
 
         await launched.electronApp.evaluate(({ session }, dir) => {
           session.defaultSession.removeAllListeners('will-download')
@@ -200,7 +198,9 @@ test(
           await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(1)
           await relaunched.page.getByRole('button', { name: /^打开灵感 / }).click()
           const memberSafetyDetail = relaunched.page.getByRole('dialog')
-          await expect(memberSafetyDetail.getByRole('region', { name: /安全限制/ })).toHaveCount(0)
+          await expect(memberSafetyDetail.getByRole('button', { name: /限制/ })).toHaveCount(0)
+          await memberSafetyDetail.getByRole('button', { name: '详细信息', exact: true }).click()
+          await expect(memberSafetyDetail.getByText(/^(资产|发布)安全限制$/)).toHaveCount(0)
           await relaunched.page.keyboard.press('Escape')
 
           const safetyAdmin = await launchTestApp({
@@ -254,16 +254,21 @@ test(
 
             await safetyAdmin.page.getByRole('button', { name: /^打开灵感 / }).click()
             const safetyDetail = safetyAdmin.page.getByRole('dialog')
-            const assetRestriction = safetyDetail.getByRole('region', {
-              name: '资产安全限制'
-            })
-            const publicationRestriction = safetyDetail.getByRole('region', {
-              name: '发布安全限制'
-            })
-            await expect(assetRestriction.getByRole('button', { name: '限制资产' })).toBeVisible()
             await expect(
-              publicationRestriction.getByRole('button', { name: '限制发布' })
+              safetyDetail.getByRole('button', { name: '限制资产', exact: true })
             ).toBeVisible()
+            await expect(
+              safetyDetail.getByRole('button', { name: '限制发布', exact: true })
+            ).toBeVisible()
+            await safetyDetail.getByRole('button', { name: '详细信息', exact: true }).click()
+            const assetState = safetyDetail
+              .getByText('资产安全限制', { exact: true })
+              .locator('+ dd')
+            const publicationState = safetyDetail
+              .getByText('发布安全限制', { exact: true })
+              .locator('+ dd')
+            await expect(assetState).toHaveText('未限制')
+            await expect(publicationState).toHaveText('未限制')
 
             const restrictionSamples: number[] = []
             for (let sample = 0; sample < 20; sample += 1) {
@@ -272,24 +277,19 @@ test(
               const settledName = restricting ? '解除资产限制' : '限制资产'
               safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
               const startedAt = Date.now()
-              await assetRestriction.getByRole('button', { name: actionName }).click()
-              await expect(
-                assetRestriction.getByRole('button', { name: settledName })
-              ).toBeVisible()
+              await safetyDetail.getByRole('button', { name: actionName }).click()
+              await expect(safetyDetail.getByRole('button', { name: settledName })).toBeVisible()
               restrictionSamples.push(Date.now() - startedAt)
             }
             expect(percentile95(restrictionSamples)).toBeLessThan(2_000)
             safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
-            await assetRestriction.getByRole('button', { name: '限制资产' }).click()
+            await safetyDetail.getByRole('button', { name: '限制资产' }).click()
             await expect(
               safetyDetail.getByRole('status').filter({ hasText: '资产限制已生效' })
             ).toBeVisible()
-            await expect(
-              assetRestriction.getByRole('button', { name: '解除资产限制' })
-            ).toBeVisible()
-            await expect(
-              publicationRestriction.getByRole('button', { name: '限制发布' })
-            ).toBeVisible()
+            await expect(assetState).toHaveText('限制中')
+            await expect(safetyDetail.getByRole('button', { name: '解除资产限制' })).toBeVisible()
+            await expect(safetyDetail.getByRole('button', { name: '限制发布' })).toBeVisible()
 
             const convergenceStartedAt = Date.now()
             await relaunched.page.getByRole('link', { name: '资产' }).first().click()
@@ -300,10 +300,11 @@ test(
             expect(Date.now() - convergenceStartedAt).toBeLessThan(10_000)
 
             safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
-            await assetRestriction.getByRole('button', { name: '解除资产限制' }).click()
+            await safetyDetail.getByRole('button', { name: '解除资产限制' }).click()
             await expect(
               safetyDetail.getByRole('status').filter({ hasText: '资产限制已解除' })
             ).toBeVisible()
+            await expect(assetState).toHaveText('已解除')
 
             const publishRemainingAsset = async (): Promise<string> => {
               await relaunched.page.getByRole('link', { name: '资产' }).first().click()
@@ -327,12 +328,10 @@ test(
             await safetyAdmin.page.getByRole('link', { name: '灵感' }).click()
             await expect(safetyAdmin.page.getByTestId('inspiration-card')).toHaveCount(1)
             await safetyAdmin.page.getByRole('button', { name: /^打开灵感 / }).click()
-            await expect(
-              publicationRestriction.getByRole('button', { name: '限制发布' })
-            ).toBeVisible()
+            await expect(safetyDetail.getByRole('button', { name: '限制发布' })).toBeVisible()
 
             safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
-            await publicationRestriction.getByRole('button', { name: '限制发布' }).click()
+            await safetyDetail.getByRole('button', { name: '限制发布' }).click()
             await expect(
               safetyDetail.getByRole('status').filter({ hasText: '发布限制已生效' })
             ).toBeVisible()
@@ -348,7 +347,7 @@ test(
             await expect(relaunched.page.getByTestId('inspiration-card')).toHaveCount(0)
 
             safetyAdmin.page.once('dialog', (confirmation) => void confirmation.accept())
-            await publicationRestriction.getByRole('button', { name: '解除发布限制' }).click()
+            await safetyDetail.getByRole('button', { name: '解除发布限制' }).click()
             await expect(
               safetyDetail.getByRole('status').filter({ hasText: '发布限制已解除' })
             ).toBeVisible()

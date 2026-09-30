@@ -190,7 +190,8 @@ function createHarness(
   dense: boolean,
   unpublishableIds: readonly string[],
   referenceState: 'complete' | 'partial' | 'none' | 'duplicate',
-  publishFailure: boolean
+  publishFailure: boolean,
+  publishedWithoutOrigin: boolean
 ): {
   readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
   readonly controls: AssetLibraryTestControls
@@ -234,7 +235,14 @@ function createHarness(
     readonly publishedAt: string
     readonly restricted: boolean
     readonly restrictionState: null
-  } | null = null
+  } | null = publishedWithoutOrigin
+    ? {
+        id: 'publication-one',
+        publishedAt: '2026-09-17T08:00:00Z',
+        restricted: false,
+        restrictionState: null
+      }
+    : null
   return {
     ports: {
       listAssets: async (request) => {
@@ -298,37 +306,40 @@ function createHarness(
             canPublish: activePublication === null
           }
         }
-        const origin = detail.privateOrigin && {
-          ...detail.privateOrigin,
-          specification: {
-            ...detail.privateOrigin.specification,
-            references:
-              referenceState === 'none'
-                ? []
-                : referenceState === 'partial'
-                  ? [
-                      detail.privateOrigin.specification.references[0],
-                      {
-                        materialId: 'missing-material',
-                        role: 'first_frame' as const,
-                        kind: 'video' as const,
-                        claimsVersion: 2
-                      },
-                      detail.privateOrigin.specification.references[0]
-                    ]
-                  : referenceState === 'duplicate'
-                    ? Array(3).fill(detail.privateOrigin.specification.references[0])
-                    : detail.privateOrigin.specification.references
-          },
-          references:
-            referenceState === 'none'
-              ? []
-              : referenceState === 'partial'
-                ? [detail.privateOrigin.references[0], detail.privateOrigin.references[0]]
-                : referenceState === 'duplicate'
-                  ? Array(3).fill(detail.privateOrigin.references[0])
-                  : detail.privateOrigin.references
-        }
+        const origin =
+          !publishedWithoutOrigin && detail.privateOrigin
+            ? {
+                ...detail.privateOrigin,
+                specification: {
+                  ...detail.privateOrigin.specification,
+                  references:
+                    referenceState === 'none'
+                      ? []
+                      : referenceState === 'partial'
+                        ? [
+                            detail.privateOrigin.specification.references[0],
+                            {
+                              materialId: 'missing-material',
+                              role: 'first_frame' as const,
+                              kind: 'video' as const,
+                              claimsVersion: 2
+                            },
+                            detail.privateOrigin.specification.references[0]
+                          ]
+                        : referenceState === 'duplicate'
+                          ? Array(3).fill(detail.privateOrigin.specification.references[0])
+                          : detail.privateOrigin.specification.references
+                },
+                references:
+                  referenceState === 'none'
+                    ? []
+                    : referenceState === 'partial'
+                      ? [detail.privateOrigin.references[0], detail.privateOrigin.references[0]]
+                      : referenceState === 'duplicate'
+                        ? Array(3).fill(detail.privateOrigin.references[0])
+                        : detail.privateOrigin.references
+              }
+            : null
         return {
           outcome: 'succeeded',
           value:
@@ -507,7 +518,8 @@ export function AssetLibraryStory({
   dense = false,
   unpublishableIds = NO_IDS,
   referenceState = 'complete',
-  publishFailure = false
+  publishFailure = false,
+  publishedWithoutOrigin = false
 }: {
   readonly downloadMode?: 'immediate' | 'deferred' | 'sequenced' | 'cancelled' | 'failed'
   readonly visibility?: 'private' | 'public'
@@ -521,6 +533,7 @@ export function AssetLibraryStory({
   readonly unpublishableIds?: readonly string[]
   readonly referenceState?: 'complete' | 'partial' | 'none' | 'duplicate'
   readonly publishFailure?: boolean
+  readonly publishedWithoutOrigin?: boolean
 }): React.JSX.Element {
   const harness = useMemo(
     () =>
@@ -536,7 +549,8 @@ export function AssetLibraryStory({
         dense,
         unpublishableIds,
         referenceState,
-        publishFailure
+        publishFailure,
+        publishedWithoutOrigin
       ),
     [
       append,
@@ -546,6 +560,7 @@ export function AssetLibraryStory({
       paginated,
       replacementRequired,
       publishFailure,
+      publishedWithoutOrigin,
       referenceState,
       unpublishableIds,
       staleOnReuse,
@@ -596,6 +611,7 @@ export function AssetLibraryStory({
               <AssetLibraryPage
                 ports={harness.ports}
                 onCreateSimilar={harness.controls.recordReuse}
+                loadReferencePreview={async () => ({ url: grantedUrl })}
               />
             </div>
           </SidebarInset>

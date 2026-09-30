@@ -15,10 +15,13 @@ for (const viewport of [
     await mount(<InspirationStory state="admin" />)
     await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
     const dialog = page.getByRole('dialog')
-    await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toContainText('Active')
-    await expect(dialog.getByRole('region', { name: 'Publication restriction' })).toContainText(
+    await dialog.getByRole('button', { name: 'Details', exact: true }).click()
+    await expect(dialog.getByText('Asset restriction', { exact: true }).locator('+ dd')).toHaveText(
       'Active'
     )
+    await expect(
+      dialog.getByText('Publication restriction', { exact: true }).locator('+ dd')
+    ).toHaveText('Active')
     const media = dialog.locator('img').first()
     await expect(media).toBeVisible()
     await expect

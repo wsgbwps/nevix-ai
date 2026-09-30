@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ImageIcon, SparklesIcon, VideoIcon } from 'lucide-react'
 import { Skeleton } from '../../../components/ui/skeleton'
@@ -8,6 +8,7 @@ import type { TaskHistoryStatus } from '../model/task-refresh/task-refresh-contr
 import { textPromptDocument } from '../model/prompt-document'
 import { CreationComposer, EXPANDED_MAX_WIDTH } from './composer'
 import { ResultGallery } from './result-gallery'
+import { WorkbenchResultPreview } from './workbench-result-preview'
 import { galleryGridClass } from './task-card'
 import { isScrolledToBottom } from './use-composer-presence'
 
@@ -32,9 +33,24 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [showBackToBottom, setShowBackToBottom] = useState(false)
   const [newTaskWaiting, setNewTaskWaiting] = useState(false)
+  const [previewSelection, setPreviewSelection] = useState<{
+    readonly contextKey: string
+    readonly taskId: string
+    readonly slotIndex: number
+  } | null>(null)
   const newestTaskId = gallery.tasks[0]?.id ?? null
   // The controller's authoritative context key doubles as the gallery remount key.
   const workspaceKey = context.contextKey
+  const preview = previewSelection?.contextKey === workspaceKey ? previewSelection : null
+  const previewDetail = preview === null ? undefined : gallery.taskDetails[preview.taskId]
+  const previewAvailable =
+    preview !== null &&
+    previewDetail?.slots.some(
+      (slot) =>
+        slot.index === preview.slotIndex &&
+        slot.status === 'succeeded' &&
+        slot.resultDeleted !== true
+    ) === true
   const returningRef = useRef(false)
   const followingBottomRef = useRef(false)
   const userScrollIntentRef = useRef(false)
@@ -75,6 +91,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
       pinnedToBottomRef.current = true
       setNewTaskWaiting(false)
       setShowBackToBottom(false)
+      setPreviewSelection(null)
     }
     if (newestTaskId === null) {
       lastNewestTaskIdRef.current = null
@@ -110,6 +127,24 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
     setShowBackToBottom(false)
     scroller.scrollTo({ top: scroller.scrollHeight })
   }
+  const closePreview = useCallback((): void => {
+    setPreviewSelection(null)
+    const scroller = scrollRef.current
+    if (scroller === null) return
+    const away = !isScrolledToBottom(scroller)
+    readingHistoryRef.current = away
+    pinnedToBottomRef.current = !away
+    followingBottomRef.current = false
+    setShowBackToBottom(away)
+    if (!away) setNewTaskWaiting(false)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (preview === null || previewAvailable) return
+    // Restore scroll bookkeeping after the refreshed gallery has its new layout.
+    const frame = requestAnimationFrame(closePreview)
+    return () => cancelAnimationFrame(frame)
+  }, [closePreview, preview, previewAvailable])
 
   // Composing and pending drafts own the workspace like a selected session —
   // neither exists on the server yet.
@@ -187,7 +222,10 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
   if (!context.ports) return null
 
   return (
-    <section className="flex min-h-0 flex-1 overflow-hidden" data-testid="creation-workbench">
+    <section
+      className="relative flex min-h-0 flex-1 overflow-hidden"
+      data-testid="creation-workbench"
+    >
       <main aria-label={t('workspace.label')} className="relative min-w-0 flex-1 overflow-hidden">
         {workspaceActive ? (
           <>
@@ -257,6 +295,7 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
               onScroll={() => {
                 const scroller = scrollRef.current
                 if (scroller === null) return
+                if (preview !== null) return
                 const { taskHistory, loadOlderTasks } = gallery
                 // Only the reader pulls older history; a mounting gallery
                 // reports a transient near-top offset of its own.
@@ -359,7 +398,17 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
                       onRetry={gallery.loadOlderTasks}
                     />
                   )}
-                  <ResultGallery key={workspaceKey} gallery={gallery} scrollerRef={scrollRef} />
+                  <ResultGallery
+                    key={workspaceKey}
+                    gallery={gallery}
+                    scrollerRef={scrollRef}
+                    onPreview={(taskId, slotIndex) => {
+                      readingHistoryRef.current = true
+                      pinnedToBottomRef.current = false
+                      followingBottomRef.current = false
+                      setPreviewSelection({ contextKey: workspaceKey, taskId, slotIndex })
+                    }}
+                  />
                 </div>
               )}
             </div>
@@ -377,6 +426,19 @@ export function CreationWorkbenchPage(): React.JSX.Element | null {
           <EmptyWorkspace />
         )}
       </main>
+      {previewAvailable && preview !== null && previewDetail !== undefined && (
+        <WorkbenchResultPreview
+          key={`${workspaceKey}-${preview.taskId}`}
+          detail={previewDetail}
+          slotIndex={preview.slotIndex}
+          title={context.selected?.name || String(t('sessions.unnamed'))}
+          gallery={gallery}
+          loadMaterialPreviewSource={composer.loadMaterialPreviewSource}
+          notices={<WorkbenchNotices context={context} />}
+          onSelectSlot={(slotIndex) => setPreviewSelection({ ...preview, slotIndex })}
+          onClose={closePreview}
+        />
+      )}
     </section>
   )
 }

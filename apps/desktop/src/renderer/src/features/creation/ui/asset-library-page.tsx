@@ -17,6 +17,9 @@ import { LoadMoreSentinel } from './load-more-sentinel'
 export interface AssetLibraryPageProps {
   readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
   readonly onCreateSimilar: PrepareAssetSimilar
+  readonly loadReferencePreview?: (
+    materialId: string
+  ) => Promise<{ readonly url: string; readonly release?: () => void } | null>
 }
 
 interface ActionFit {
@@ -86,7 +89,8 @@ function dayKey(value: string): string {
 
 export function AssetLibraryPage({
   ports,
-  onCreateSimilar
+  onCreateSimilar,
+  loadReferencePreview
 }: AssetLibraryPageProps): React.JSX.Element {
   const { t, i18n } = useTranslation('creation')
   const [filters, setFilters] = useState(initialFilters)
@@ -329,6 +333,7 @@ export function AssetLibraryPage({
         onWithdraw={() => void detail.withdraw(() => window.confirm(t('assets.withdrawConfirm')))}
         onDelete={() => void detail.remove(() => window.confirm(t('assets.deleteConfirm')))}
         onAssetUnavailable={list.refresh}
+        loadReferencePreview={loadReferencePreview}
       />
     </section>
   )

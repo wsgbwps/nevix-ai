@@ -9,6 +9,11 @@ import type {
   InspirationPorts,
   PublicationView
 } from '../../../src/renderer/src/features/creation/api/inspiration-http'
+import type {
+  AssetDetailView,
+  AssetLibraryPorts
+} from '../../../src/renderer/src/features/creation/api/asset-library-http'
+import type { CreationWorkspacePorts } from '../../../src/renderer/src/features/creation/model/ports'
 import { testI18n } from './creation-workbench-i18n'
 
 const imageBlob = new Blob(
@@ -150,6 +155,7 @@ interface InspirationControls {
   previewCalls(): readonly string[]
   safetyCalls(): readonly string[]
   releaseSafety(): void
+  ownReads(): readonly string[]
 }
 
 type InspirationStoryState =
@@ -166,6 +172,8 @@ type InspirationStoryState =
   | 'admin-deleted-publication'
   | 'admin-safety-delayed'
   | 'admin-safety-failed'
+  | 'own'
+  | 'own-source-unavailable'
 
 function isVideo(item: InspirationItem): boolean {
   return (item.type === 'publication' ? item.publication : item.asset).mediaType === 'video'
@@ -183,7 +191,9 @@ function createHarness(
 ): {
   readonly ports: InspirationPorts
   readonly controls: InspirationControls
+  readonly ownAssetPorts: AssetLibraryPorts & Pick<CreationWorkspacePorts, 'loadPreviewUrl'>
 } {
+  const ownReads: string[] = []
   const listCalls: InspirationPageRequest[] = []
   const similarCalls: string[] = []
   const withdraws: string[] = []
@@ -481,7 +491,60 @@ function createHarness(
             }
       }
     },
+    ownAssetPorts: {
+      listAssets: async () => ({ outcome: 'request-rejected', code: 'not_used' }),
+      getAsset: async (assetId) => {
+        ownReads.push(assetId)
+        if (state === 'own-source-unavailable')
+          return { outcome: 'request-rejected', code: 'not_found' }
+        const asset = {
+          ...adminAsset.asset,
+          id: assetId,
+          creator: publicationItem.publication.publisher,
+          restricted: false,
+          restrictionState: null,
+          publication: null,
+          capabilities: {
+            canDelete: true,
+            canPublish: true,
+            canCreateSimilar: true,
+            canRestrict: false,
+            canRelease: false
+          }
+        }
+        const value: AssetDetailView = {
+          asset,
+          siblings: [
+            { ...asset, id: 'source-1' },
+            { ...asset, id: 'own-sibling' }
+          ],
+          privateOrigin: {
+            sessionId: 'own-session',
+            sessionName: 'Own editorial task',
+            taskId: 'own-task',
+            slotIndex: assetId === 'source-1' ? 1 : 2,
+            specification,
+            references: [reference]
+          }
+        }
+        return { outcome: 'succeeded', value }
+      },
+      loadAssetDisplay: async (assetId, purpose) => {
+        displayCalls.push({ id: assetId, purpose })
+        return { outcome: 'succeeded', value: { url: grantedUrl, expiresAt: grantedExpiry } }
+      },
+      downloadAssetContent: async (assetId) => {
+        contentCalls.push(assetId)
+        return { outcome: 'succeeded', value: imageBlob }
+      },
+      deleteAsset: async () => ({ outcome: 'request-rejected', code: 'not_used' }),
+      loadPreviewUrl: async (referenceId) => {
+        previewCalls.push(referenceId)
+        return { outcome: 'succeeded', value: { url: grantedUrl, expiresAt: grantedExpiry } }
+      }
+    },
     controls: {
+      ownReads: () => ownReads,
       listCalls: () => listCalls,
       displayCalls: () => displayCalls,
       contentCalls: () => contentCalls,
@@ -518,6 +581,12 @@ export function InspirationStory({
       <div className="bg-background text-foreground flex h-screen min-h-0">
         <InspirationPage
           ports={harness.ports}
+          ownAssetPorts={harness.ownAssetPorts}
+          currentUserId={
+            state === 'own' || state === 'own-source-unavailable'
+              ? 'publisher-one'
+              : 'signed-in-user'
+          }
           onCreateSimilar={async (publicationId) => {
             harness.controls.recordSimilar(publicationId)
             return 'prepared'

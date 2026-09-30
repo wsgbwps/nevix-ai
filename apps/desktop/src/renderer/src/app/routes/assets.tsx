@@ -14,6 +14,10 @@ function AssetsRoute(): React.JSX.Element | null {
     <AppShell>
       <AssetLibraryPage
         ports={runtime}
+        loadReferencePreview={async (materialId) => {
+          const result = await runtime.loadPreviewUrl(materialId)
+          return result.outcome === 'succeeded' ? result.value : null
+        }}
         onCreateSimilar={(origin, replaceExisting) => {
           const result = runtime.actions.prepareSimilarDraft(origin, replaceExisting)
           if (result === 'prepared') void navigate({ to: '/creation' })

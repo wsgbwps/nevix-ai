@@ -11,10 +11,12 @@ import { TaskCard } from './task-card'
  */
 export function ResultGallery({
   gallery,
-  scrollerRef
+  scrollerRef,
+  onPreview
 }: {
   readonly gallery: WorkbenchGalleryHandle
   readonly scrollerRef: React.RefObject<HTMLDivElement | null>
+  readonly onPreview?: (taskId: string, slotIndex: number) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const { tasks, dismissalSkipped } = gallery
@@ -84,7 +86,7 @@ export function ResultGallery({
             className="absolute top-0 left-0 w-full"
             style={{ transform: `translateY(${virtualItem.start - scrollMargin}px)` }}
           >
-            <TaskCard gallery={gallery} task={task} />
+            <TaskCard gallery={gallery} task={task} onPreview={onPreview} />
           </div>
         )
       })}

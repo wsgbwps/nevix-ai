@@ -83,10 +83,12 @@ function slotAspectRatio(slot: GenerationSlotView, fallbackRatio: string | null)
  */
 export function TaskCard({
   gallery,
-  task
+  task,
+  onPreview
 }: {
   readonly gallery: WorkbenchGalleryHandle
   readonly task: GenerationTaskView
+  readonly onPreview?: (taskId: string, slotIndex: number) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const detail = gallery.taskDetails[task.id]
@@ -188,6 +190,7 @@ export function TaskCard({
               mediaType={snapshot.mediaType}
               aspectRatio={slotAspectRatio(slot, spec?.ratio ?? null)}
               pauseActivity={pauseSlotActivity}
+              onPreview={onPreview}
             />
           ))}
         </div>

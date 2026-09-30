@@ -242,7 +242,10 @@ test('a wall video plays on hover, resets on leave, and opens its detail on clic
 
   await page.mouse.move(0, 0)
   await open.click()
-  await expect(page.getByRole('dialog').getByLabel('Asset asset-two')).toHaveAttribute('controls')
+  await expect(page.getByRole('dialog').locator('video[controls]')).toHaveAttribute(
+    'aria-label',
+    'Asset asset-two'
+  )
 })
 
 test('a wall video keeps its placeholder until a frame exists', async ({ mount, page }) => {
@@ -393,8 +396,11 @@ test('an expired video grant reauthorizes once, then offers manual retry', async
   await mount(<AssetLibraryStory />)
   await page.getByRole('button', { name: 'Open asset asset-two' }).click()
   const dialog = page.getByRole('dialog')
-  const video = dialog.locator('video')
+  const video = dialog.locator('video[controls]')
   await expect(video).toBeVisible()
+  await expect(
+    dialog.getByRole('button', { name: 'Result 2', exact: true }).locator('video')
+  ).toBeVisible()
   const displayCount = async (): Promise<number> =>
     (await page.evaluate(
       () =>
@@ -430,6 +436,13 @@ test('a gone asset shows the generic unavailable state and refreshes the list', 
     .toBeGreaterThan(1)
 })
 
+test('owned reference materials open a deliberate media preview', async ({ mount, page }) => {
+  await mount(<AssetLibraryStory />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await page.getByRole('button', { name: 'Reference material (1)', exact: true }).hover()
+  await expect(page.getByRole('img', { name: 'reference.png', exact: true })).toBeVisible()
+})
+
 test('detail switches siblings and exposes the full publish confirmation facts', async ({
   mount,
   page
@@ -439,6 +452,7 @@ test('detail switches siblings and exposes the full publish confirmation facts',
   await expect(page.getByRole('dialog')).toContainText('A quiet launch scene')
   await expect(page.getByRole('button', { name: 'Create similar' })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Publish to Inspiration' })).toBeEnabled()
+  await page.getByRole('button', { name: 'Details', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('Specification version1')
   await expect(page.getByRole('dialog')).toContainText('Capability manifest version4')
   await expect(page.getByRole('dialog')).toContainText('reference.png · Reference · Image')
@@ -460,6 +474,7 @@ test('Asset Library keeps duplicate frozen positions around an unavailable histo
   await mount(<AssetLibraryStory referenceState="partial" />)
   await page.getByRole('button', { name: 'Open asset asset-one' }).click()
   const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
   const references = dialog.getByRole('listitem')
   await expect(dialog).toContainText('Used reference materials (3)')
   await expect(references).toHaveCount(3)
@@ -486,6 +501,7 @@ test('Asset Library reserves the no-references copy for an empty frozen specific
 }) => {
   await mount(<AssetLibraryStory referenceState="none" />)
   await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  await page.getByRole('button', { name: 'Details', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('No reference materials were used')
   await expect(page.getByRole('button', { name: 'Publish to Inspiration' })).toBeEnabled()
 })
@@ -543,9 +559,27 @@ test('private origin and destructive actions stay gated by server capabilities',
   await page.getByRole('button', { name: 'Open asset asset-one' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).not.toContainText('A quiet launch scene')
-  await expect(dialog.getByRole('button', { name: 'Create similar' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Create similar' })).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: 'Delete' })).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: 'Publish to Inspiration' })).toHaveCount(0)
+})
+
+test('a published asset can still be withdrawn when its generation origin is unavailable', async ({
+  mount,
+  page
+}) => {
+  await mount(<AssetLibraryStory publishedWithoutOrigin />)
+  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).not.toContainText('A quiet launch scene')
+  const withdraw = dialog.getByRole('button', { name: 'Withdraw publication', exact: true })
+  await expect(withdraw).toBeVisible()
+  page.once('dialog', (confirmation) => void confirmation.accept())
+  await withdraw.click()
+  await expect(withdraw).toHaveCount(0)
+  expect(await page.evaluate(() => window.__assetLibraryTest?.withdraws())).toEqual([
+    'publication-one'
+  ])
 })
 
 test('publishing confirms the frozen facts and exposes withdrawal', async ({ mount, page }) => {

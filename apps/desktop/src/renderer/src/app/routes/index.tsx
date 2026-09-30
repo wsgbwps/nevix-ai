@@ -14,6 +14,8 @@ function InspirationRoute(): React.JSX.Element | null {
     <AppShell>
       <InspirationPage
         ports={runtime}
+        ownAssetPorts={runtime}
+        currentUserId={runtime.userId}
         onCreateSimilar={async (publicationId) => {
           const result = await runtime.actions.preparePublicationSimilar(publicationId)
           if (result === 'prepared') void navigate({ to: '/creation' })

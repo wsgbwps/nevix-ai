@@ -147,6 +147,10 @@ _Avoid_: scroll restore, 滚动位置记忆
 AI Creation Domain 拥有的个人媒体资产浏览与复用页面，只展示当前 User 自己的生成历史与 Media Asset；媒体资产的独立生命周期不使该页面成为独立 Domain，不与 renderer 静态 assets 混同。
 _Avoid_: Media Asset Domain, Asset Workspace
 
+**Asset Detail Preview（资产详情预览）**:
+AI Creation Domain 中从 Inspiration Page、Asset Library 或 Creation Workbench 打开生成媒体的统一详情视图，呈现成品及当前 User 有权读取的生成来源与可用操作。Reference Material 是其中的生成输入，与被预览的生成成品区分。
+_Avoid_: 资产弹窗、任务详情（Generation Task 还包含状态与失败结果）、参考素材详情
+
 **结果移除**:
 逻辑删除 Media Asset 后在来源 TaskCard 上的呈现：该槽位不再展示结果，任务的 `succeeded` 终态、成功计数与用量事实一律不变，字节仍与已删除 Asset 共享；当任务曾形成的全部 Media Asset 都被逻辑删除时，整个任务不再出现在 Creation Workbench。它是一次可见性操作，不回收字节、不改写终态。它与「任务删除」是两回事：它由资产库的删除动作触发，「任务删除」则是隐藏任务并移除其结果的那条命令。
 _Avoid_: 删除任务结果（会被读成改写终态）, 槽位回退, 结果隐藏

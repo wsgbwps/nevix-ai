@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { DownloadIcon, WandSparklesIcon } from 'lucide-react'
-import { Button } from '../../../components/ui/button'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from '../../../components/ui/dialog'
+  DownloadIcon,
+  ShieldCheckIcon,
+  ShieldOffIcon,
+  Undo2Icon,
+  WandSparklesIcon
+} from 'lucide-react'
+import { Button } from '../../../components/ui/button'
+import { AssetDetailPreview, AssetPreviewAction } from './asset-detail-preview'
 import type {
   InspirationDetailView,
   InspirationItem,
@@ -18,9 +17,11 @@ import type {
 } from '../api/inspiration-http'
 import {
   alignAssetReferences,
-  type MediaAssetView,
-  type RestrictionState
+  type AssetDetailView,
+  type AssetLibraryPorts,
+  type MediaAssetView
 } from '../api/asset-library-http'
+import type { CreationWorkspacePorts } from '../model/ports'
 import { useInspiration, type InspirationFilters } from '../model/use-inspiration'
 import { AssetMedia, type MediaPreviewView } from './asset-media'
 import { LoadMoreSentinel } from './load-more-sentinel'
@@ -34,6 +35,8 @@ const columnHeightTolerance = 12
 
 export interface InspirationPageProps {
   readonly ports: InspirationPorts
+  readonly ownAssetPorts?: AssetLibraryPorts & Pick<CreationWorkspacePorts, 'loadPreviewUrl'>
+  readonly currentUserId?: string
   readonly onCreateSimilar: (
     publicationId: string
   ) => Promise<'prepared' | 'failed' | 'unavailable'>
@@ -172,7 +175,6 @@ function InspirationCard({
 
 function RestrictionControl({
   kind,
-  state,
   canRestrict,
   canRelease,
   running,
@@ -180,7 +182,6 @@ function RestrictionControl({
   onRelease
 }: {
   readonly kind: 'asset' | 'publication'
-  readonly state: RestrictionState
   readonly canRestrict: boolean
   readonly canRelease: boolean
   readonly running: boolean
@@ -190,33 +191,23 @@ function RestrictionControl({
   const { t } = useTranslation('creation')
   if (!canRestrict && !canRelease) return null
   return (
-    <section
-      aria-label={t(`inspiration.restriction.${kind}.label`)}
-      className="min-w-[12rem] rounded-md border p-2 text-xs"
-    >
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h3 className="font-medium">{t(`inspiration.restriction.${kind}.label`)}</h3>
-        <span className="text-muted-foreground">
-          {t(`inspiration.restriction.state.${state ?? 'none'}`)}
-        </span>
-      </div>
+    <>
       {canRestrict ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="destructive"
+        <AssetPreviewAction
+          icon={<ShieldOffIcon />}
+          destructive
           disabled={running}
           onClick={onRestrict}
         >
           {t(`inspiration.restriction.${kind}.restrict`)}
-        </Button>
+        </AssetPreviewAction>
       ) : null}
       {canRelease ? (
-        <Button type="button" size="sm" variant="outline" disabled={running} onClick={onRelease}>
+        <AssetPreviewAction icon={<ShieldCheckIcon />} disabled={running} onClick={onRelease}>
           {t(`inspiration.restriction.${kind}.release`)}
-        </Button>
+        </AssetPreviewAction>
       ) : null}
-    </section>
+    </>
   )
 }
 
@@ -291,171 +282,9 @@ function InspirationWall({
   )
 }
 
-function DetailFacts({
-  detail,
-  item,
-  ports
-}: {
-  readonly detail: InspirationDetailView
-  readonly item: InspirationItem
-  readonly ports: InspirationPorts
-}): React.JSX.Element {
-  const { t } = useTranslation('creation')
-  const specification = detail.specification
-  const alignedReferences = alignAssetReferences(specification, detail.references)
-  const [previews, setPreviews] = useState<ReadonlyMap<string, string>>(new Map())
-  const refreshedPreviews = useRef(new Set<string>())
-  const [previewFailed, setPreviewFailed] = useState<string | null>(null)
-  const authorizePreview = (referenceId: string): void => {
-    setPreviewFailed(null)
-    void ports.loadInspirationReferencePreview(item, referenceId).then((result) => {
-      if (result.outcome !== 'succeeded') {
-        setPreviews((current) => {
-          const next = new Map(current)
-          next.delete(referenceId)
-          return next
-        })
-        setPreviewFailed(referenceId)
-        return
-      }
-      setPreviews((current) => new Map(current).set(referenceId, result.value.url))
-    })
-  }
-  const refreshPreview = (referenceId: string): void => {
-    if (refreshedPreviews.current.has(referenceId)) {
-      setPreviews((current) => {
-        const next = new Map(current)
-        next.delete(referenceId)
-        return next
-      })
-      setPreviewFailed(referenceId)
-      return
-    }
-    refreshedPreviews.current.add(referenceId)
-    authorizePreview(referenceId)
-  }
-  return (
-    <div className="space-y-4 text-xs">
-      <section className="space-y-2">
-        <h3 className="font-medium">{t('inspiration.specification')}</h3>
-        <p className="whitespace-pre-wrap">{specification.prompt}</p>
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
-          <dt className="text-muted-foreground">{t('inspiration.schemaVersion')}</dt>
-          <dd>{specification.schemaVersion}</dd>
-          <dt className="text-muted-foreground">{t('assets.details.type')}</dt>
-          <dd>{t(`assets.media.${specification.mediaType}`)}</dd>
-          <dt className="text-muted-foreground">{t('gallery.details.mode')}</dt>
-          <dd>{specification.mode}</dd>
-          <dt className="text-muted-foreground">{t('composer.model.label')}</dt>
-          <dd className="truncate">{specification.model}</dd>
-          <dt className="text-muted-foreground">{t('inspiration.manifestVersion')}</dt>
-          <dd>{specification.manifestVersion}</dd>
-          <dt className="text-muted-foreground">{t('composer.params.ratio')}</dt>
-          <dd>{specification.ratio || '—'}</dd>
-          <dt className="text-muted-foreground">{t('composer.params.resolution')}</dt>
-          <dd>{specification.resolution || '—'}</dd>
-          {specification.quality != null && (
-            <>
-              <dt className="text-muted-foreground">{t('composer.params.quality')}</dt>
-              <dd>{specification.quality}</dd>
-            </>
-          )}
-          <dt className="text-muted-foreground">{t('gallery.details.quantity')}</dt>
-          <dd>{specification.quantity}</dd>
-          <dt className="text-muted-foreground">{t('gallery.details.duration')}</dt>
-          <dd>
-            {specification.durationSeconds === null
-              ? '—'
-              : t('assets.details.seconds', { n: specification.durationSeconds })}
-          </dd>
-        </dl>
-      </section>
-      <section className="space-y-2 border-t pt-4">
-        <h3 className="font-medium">
-          {t('inspiration.references')} ({specification.references.length})
-        </h3>
-        {specification.references.length === 0 ? (
-          <p className="text-muted-foreground">{t('inspiration.noReferences')}</p>
-        ) : (
-          <ol className="space-y-2">
-            {specification.references.map((frozen, index) => {
-              const reference = alignedReferences[index]
-              return (
-                <li key={`${index}:${frozen.materialId}`} className="rounded-md border p-2">
-                  <p className="truncate font-medium">
-                    {index + 1}. {reference?.fileName ?? t('inspiration.unavailableReference')}
-                  </p>
-                  <p className="text-muted-foreground">
-                    {t(
-                      `gallery.role.${frozen.role === 'first_frame' ? 'firstFrame' : frozen.role === 'last_frame' ? 'lastFrame' : frozen.role}`
-                    )}
-                    {' · '}
-                    {t(`composer.mention.kind.${frozen.kind}`)}
-                    {reference ? (
-                      <> · {t('inspiration.claimsVersion', { version: frozen.claimsVersion })}</>
-                    ) : null}
-                  </p>
-                  {reference ? (
-                    <>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="mt-1"
-                        onClick={() => {
-                          refreshedPreviews.current.delete(reference.id)
-                          authorizePreview(reference.id)
-                        }}
-                      >
-                        {t('inspiration.previewReference')}
-                      </Button>
-                      {previews.get(reference.id) ? (
-                        reference.kind === 'image' ? (
-                          <img
-                            src={previews.get(reference.id)}
-                            alt={reference.fileName}
-                            className="mt-2 max-h-40 w-full rounded object-contain"
-                            onError={() => refreshPreview(reference.id)}
-                            onLoad={() => refreshedPreviews.current.delete(reference.id)}
-                          />
-                        ) : reference.kind === 'video' ? (
-                          <video
-                            src={previews.get(reference.id)}
-                            aria-label={reference.fileName}
-                            controls
-                            className="mt-2 max-h-40 w-full"
-                            onError={() => refreshPreview(reference.id)}
-                            onLoadedData={() => refreshedPreviews.current.delete(reference.id)}
-                          />
-                        ) : (
-                          <audio
-                            src={previews.get(reference.id)}
-                            aria-label={reference.fileName}
-                            controls
-                            className="mt-2 w-full"
-                            onError={() => refreshPreview(reference.id)}
-                            onLoadedData={() => refreshedPreviews.current.delete(reference.id)}
-                          />
-                        )
-                      ) : null}
-                      {previewFailed === reference.id ? (
-                        <p className="text-destructive mt-1" role="alert">
-                          {t('inspiration.previewFailed')}
-                        </p>
-                      ) : null}
-                    </>
-                  ) : null}
-                </li>
-              )
-            })}
-          </ol>
-        )}
-      </section>
-    </div>
-  )
-}
-
 function InspirationDetail({
+  ownAssetPorts,
+  currentUserId,
   item,
   detail,
   status,
@@ -469,6 +298,8 @@ function InspirationDetail({
   onRestriction,
   onUnavailable
 }: {
+  readonly ownAssetPorts: InspirationPageProps['ownAssetPorts']
+  readonly currentUserId: InspirationPageProps['currentUserId']
   readonly item: InspirationItem | null
   readonly detail: InspirationDetailView | null
   readonly status: 'idle' | 'loading' | 'failed'
@@ -484,106 +315,274 @@ function InspirationDetail({
   readonly onUnavailable: () => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
-  const media = item ? itemMedia(item) : null
-  const contentPort = useMemo(() => (item ? mediaPort(ports, item) : null), [item, ports])
-  const publication = item ? publicationFor(item, detail) : null
-  const asset: MediaAssetView | null = detail?.type === 'asset' ? detail.asset : null
+  const [ownSelectedId, setOwnSelectedId] = useState<string | null>(null)
+  const [ownRead, setOwnRead] = useState<{ id: string; detail: AssetDetailView | null } | null>(
+    null
+  )
+  const [ownDownloadStatus, setOwnDownloadStatus] = useState<'idle' | 'running' | 'failed'>('idle')
+  const ownDownloadEpoch = useRef(0)
+  const sourceId = item?.type === 'publication' ? item.publication.sourceAssetId : item?.asset.id
+  const requestedOwnId = ownSelectedId ?? sourceId
+  const ownDetail = ownRead && ownRead.id === requestedOwnId ? ownRead.detail : null
+  useEffect(() => {
+    const creatorId =
+      item?.type === 'publication' ? item.publication.publisher.id : item?.asset.creator.id
+    if (!requestedOwnId || !ownAssetPorts || !currentUserId || creatorId !== currentUserId) return
+    let active = true
+    void ownAssetPorts
+      .getAsset(requestedOwnId)
+      .then((result) => {
+        if (!active) return
+        setOwnRead({
+          id: requestedOwnId,
+          detail:
+            result.outcome === 'succeeded' &&
+            result.value.asset.id === requestedOwnId &&
+            result.value.asset.creator.id === currentUserId &&
+            result.value.privateOrigin !== null
+              ? result.value
+              : null
+        })
+      })
+      .catch(() => {
+        if (active) setOwnRead({ id: requestedOwnId, detail: null })
+      })
+    return () => {
+      active = false
+    }
+  }, [currentUserId, item, ownAssetPorts, requestedOwnId])
+  const ownAsset = ownSelectedId ? ownDetail?.asset : null
+  const media = ownSelectedId ? (ownAsset ?? null) : item ? itemMedia(item) : null
+  const contentPort = useMemo(
+    () => (ownSelectedId ? (ownAssetPorts ?? null) : item ? mediaPort(ports, item) : null),
+    [item, ownAssetPorts, ownSelectedId, ports]
+  )
+  const publication = item && !ownSelectedId ? publicationFor(item, detail) : null
+  const asset: MediaAssetView | null =
+    !ownSelectedId && detail?.type === 'asset' ? detail.asset : null
+  const origin = ownDetail?.privateOrigin
+  const specification = ownSelectedId ? origin?.specification : detail?.specification
+  const references = useMemo(
+    () =>
+      specification
+        ? alignAssetReferences(
+            specification,
+            ownSelectedId ? (origin?.references ?? []) : (detail?.references ?? [])
+          )
+        : [],
+    [detail?.references, origin?.references, ownSelectedId, specification]
+  )
+  const loadReferencePreview = useCallback(
+    async (referenceId: string) => {
+      const result =
+        ownSelectedId && ownAssetPorts
+          ? await ownAssetPorts.loadPreviewUrl(referenceId)
+          : item
+            ? await ports.loadInspirationReferencePreview(item, referenceId)
+            : null
+      return result?.outcome === 'succeeded' ? result.value : null
+    },
+    [item, ownAssetPorts, ownSelectedId, ports]
+  )
   const running = actionStatus === 'running'
+  const ownStatus =
+    ownRead && ownRead.id === requestedOwnId ? (ownRead.detail ? 'ready' : 'failed') : 'loading'
+  const siblings =
+    ownDetail?.siblings.filter((sibling) => sibling.creator.id === currentUserId) ?? []
+  const actionMessageText = ownSelectedId
+    ? ownDownloadStatus === 'failed'
+      ? t('assets.downloadStatus.failed')
+      : ownDownloadStatus === 'running'
+        ? t('assets.downloadStatus.running')
+        : null
+    : actionMessage
   return (
-    <Dialog open={item !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="h-[calc(100svh-2rem)] max-h-[52rem] overflow-hidden p-0 sm:max-w-[min(76rem,calc(100%-2rem))]">
-        <DialogHeader className="sr-only">
-          <DialogTitle>{t('inspiration.detailTitle')}</DialogTitle>
-          <DialogDescription>{t('inspiration.detailDescription')}</DialogDescription>
-        </DialogHeader>
-        {status === 'loading' ? (
-          <p className="p-8" role="status">
-            {t('inspiration.loadingDetail')}
-          </p>
-        ) : status === 'failed' || !detail || !item || !media || !contentPort ? (
-          <p className="p-8" role="alert">
-            {t('inspiration.detailFailed')}
-          </p>
-        ) : (
-          <div className="grid size-full min-h-0 min-[800px]:grid-cols-[minmax(0,1fr)_22.5rem]">
-            <div className="bg-muted grid min-h-56 min-w-0 place-items-center overflow-hidden p-4">
-              <AssetMedia asset={media} ports={contentPort} detail onUnavailable={onUnavailable} />
-            </div>
-            <div className="flex min-h-0 min-w-0 flex-col border-t min-[800px]:border-t-0 min-[800px]:border-l">
-              <div className="min-h-0 flex-1 overflow-y-auto p-5">
-                <DetailFacts
-                  key={`${item.type}:${itemId(item)}`}
-                  detail={detail}
-                  item={item}
-                  ports={ports}
-                />
-              </div>
-              <DialogFooter className="flex-row flex-wrap justify-start border-t p-4 sm:justify-start">
-                <Button type="button" variant="outline" onClick={onDownload}>
-                  <DownloadIcon aria-hidden />
-                  {t('assets.download')}
-                </Button>
-                {publication?.capabilities.canCreateSimilar ? (
-                  <Button type="button" disabled={running} onClick={onCreateSimilar}>
-                    <WandSparklesIcon aria-hidden />
-                    {t('assets.createSimilar')}
-                  </Button>
-                ) : null}
-                {publication?.capabilities.canWithdraw ? (
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    disabled={running}
-                    onClick={onWithdraw}
-                  >
-                    {t('inspiration.withdraw')}
-                  </Button>
-                ) : null}
-                {asset ? (
-                  <RestrictionControl
-                    kind="asset"
-                    state={asset.restrictionState}
-                    canRestrict={asset.capabilities.canRestrict}
-                    canRelease={asset.capabilities.canRelease}
-                    running={running}
-                    onRestrict={() => onRestriction('asset', 'restrict')}
-                    onRelease={() => onRestriction('asset', 'release')}
-                  />
-                ) : null}
-                {publication ? (
-                  <RestrictionControl
-                    kind="publication"
-                    state={publication.restrictionState}
-                    canRestrict={publication.capabilities.canRestrict}
-                    canRelease={publication.capabilities.canRelease}
-                    running={running}
-                    onRestrict={() => onRestriction('publication', 'restrict')}
-                    onRelease={() => onRestriction('publication', 'release')}
-                  />
-                ) : null}
-                {actionMessage ? (
-                  <p
-                    className={
-                      actionStatus === 'failed'
-                        ? 'text-destructive basis-full text-xs'
-                        : 'text-muted-foreground basis-full text-xs'
-                    }
-                    role={actionStatus === 'failed' ? 'alert' : 'status'}
-                  >
-                    {actionMessage}
-                  </p>
-                ) : null}
-              </DialogFooter>
-            </div>
+    <AssetDetailPreview
+      open={item !== null}
+      title={t('inspiration.detailTitle')}
+      description={t('inspiration.detailDescription')}
+      onClose={onClose}
+      status={
+        ownSelectedId
+          ? ownStatus
+          : status === 'loading'
+            ? 'loading'
+            : status === 'failed' || !detail
+              ? 'failed'
+              : 'ready'
+      }
+      media={
+        media && contentPort ? (
+          <AssetMedia asset={media} ports={contentPort} detail onUnavailable={onUnavailable} />
+        ) : null
+      }
+      specification={specification}
+      references={references}
+      loadReferencePreview={loadReferencePreview}
+      results={
+        ownAssetPorts
+          ? siblings.map((sibling, index) => ({
+              id: sibling.id,
+              label: t('assets.result', { n: index + 1 }),
+              media: <AssetMedia asset={sibling} ports={ownAssetPorts} />
+            }))
+          : []
+      }
+      selectedResultId={requestedOwnId}
+      onSelectResult={(id) => {
+        ownDownloadEpoch.current += 1
+        setOwnSelectedId(id === sourceId ? null : id)
+        setOwnDownloadStatus('idle')
+      }}
+      headerActions={
+        item ? (
+          <div className="min-w-0">
+            <p className="truncate text-xs font-medium">
+              {ownAsset?.creator.displayName ?? itemCreator(item)}
+            </p>
+            <p className="text-muted-foreground mt-1 text-[10px]">
+              {new Date(ownAsset?.createdAt ?? itemDate(item)).toLocaleString()}
+            </p>
           </div>
-        )}
-      </DialogContent>
-    </Dialog>
+        ) : null
+      }
+      metadata={
+        media ? (
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[10px]">
+            <dt className="text-muted-foreground">{t('assets.details.type')}</dt>
+            <dd>{t(`assets.media.${media.mediaType}`)}</dd>
+            <dt className="text-muted-foreground">{t('assets.details.size')}</dt>
+            <dd>{Math.ceil(media.byteSize / 1024)} KB</dd>
+            <dt className="text-muted-foreground">{t('assets.details.dimensions')}</dt>
+            <dd>
+              {media.widthPx && media.heightPx ? `${media.widthPx} × ${media.heightPx}` : '—'}
+            </dd>
+            {asset && (asset.capabilities.canRestrict || asset.capabilities.canRelease) && (
+              <>
+                <dt className="text-muted-foreground">
+                  {t('inspiration.restriction.asset.label')}
+                </dt>
+                <dd>{t(`inspiration.restriction.state.${asset.restrictionState ?? 'none'}`)}</dd>
+              </>
+            )}
+            {publication &&
+              (publication.capabilities.canRestrict || publication.capabilities.canRelease) && (
+                <>
+                  <dt className="text-muted-foreground">
+                    {t('inspiration.restriction.publication.label')}
+                  </dt>
+                  <dd>
+                    {t(`inspiration.restriction.state.${publication.restrictionState ?? 'none'}`)}
+                  </dd>
+                </>
+              )}
+          </dl>
+        ) : null
+      }
+      actions={
+        detail ? (
+          <>
+            <AssetPreviewAction
+              icon={<DownloadIcon />}
+              disabled={ownDownloadStatus === 'running' || (!!ownSelectedId && !ownAsset)}
+              onClick={
+                ownAsset && ownAssetPorts
+                  ? () => {
+                      const epoch = ++ownDownloadEpoch.current
+                      setOwnDownloadStatus('running')
+                      void ownAssetPorts
+                        .downloadAssetContent(ownAsset.id, ownAsset.checksumSha256, {
+                          expectedByteSize: ownAsset.byteSize
+                        })
+                        .then((result) => {
+                          if (result.outcome !== 'succeeded') {
+                            if (ownDownloadEpoch.current === epoch) setOwnDownloadStatus('failed')
+                            return
+                          }
+                          saveBlob({ type: 'asset', asset: ownAsset }, result.value)
+                          if (ownDownloadEpoch.current === epoch) setOwnDownloadStatus('idle')
+                        })
+                        .catch(() => {
+                          if (ownDownloadEpoch.current === epoch) setOwnDownloadStatus('failed')
+                        })
+                    }
+                  : onDownload
+              }
+            >
+              {t('assets.download')}
+            </AssetPreviewAction>
+            {publication?.capabilities.canCreateSimilar ? (
+              <AssetPreviewAction
+                icon={<WandSparklesIcon />}
+                disabled={running}
+                onClick={onCreateSimilar}
+              >
+                {t('assets.createSimilar')}
+              </AssetPreviewAction>
+            ) : null}
+            {publication?.capabilities.canWithdraw ? (
+              <AssetPreviewAction
+                icon={<Undo2Icon />}
+                destructive
+                disabled={running}
+                onClick={onWithdraw}
+              >
+                {t('inspiration.withdraw')}
+              </AssetPreviewAction>
+            ) : null}
+            {asset ? (
+              <RestrictionControl
+                kind="asset"
+                canRestrict={asset.capabilities.canRestrict}
+                canRelease={asset.capabilities.canRelease}
+                running={running}
+                onRestrict={() => onRestriction('asset', 'restrict')}
+                onRelease={() => onRestriction('asset', 'release')}
+              />
+            ) : null}
+            {publication ? (
+              <RestrictionControl
+                kind="publication"
+                canRestrict={publication.capabilities.canRestrict}
+                canRelease={publication.capabilities.canRelease}
+                running={running}
+                onRestrict={() => onRestriction('publication', 'restrict')}
+                onRelease={() => onRestriction('publication', 'release')}
+              />
+            ) : null}
+          </>
+        ) : null
+      }
+      messages={
+        actionMessageText ? (
+          <p
+            className={
+              actionStatus === 'failed'
+                ? 'text-destructive text-xs'
+                : 'text-muted-foreground text-xs'
+            }
+            role={
+              ownSelectedId
+                ? ownDownloadStatus === 'failed'
+                  ? 'alert'
+                  : 'status'
+                : actionStatus === 'failed'
+                  ? 'alert'
+                  : 'status'
+            }
+          >
+            {actionMessageText}
+          </p>
+        ) : null
+      }
+    />
   )
 }
 
 export function InspirationPage({
   ports,
+  ownAssetPorts,
+  currentUserId,
   onCreateSimilar
 }: InspirationPageProps): React.JSX.Element {
   const { t } = useTranslation('creation')
@@ -698,6 +697,9 @@ export function InspirationPage({
         )}
       </div>
       <InspirationDetail
+        key={selected ? `${selected.type}:${itemId(selected)}` : 'closed'}
+        ownAssetPorts={ownAssetPorts}
+        currentUserId={currentUserId}
         item={selected}
         detail={detail}
         status={detailStatus}

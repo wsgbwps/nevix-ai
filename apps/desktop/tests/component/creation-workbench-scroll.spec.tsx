@@ -986,3 +986,41 @@ test('a small upward wheel gesture holds the reading anchor while one older page
   expect(report.countsSeen).toEqual([40])
   expect(historyPages).toBe(1)
 })
+
+for (const invalidation of ['deleted result', 'removed task'] as const) {
+  test(`an invalidated preview retires after a ${invalidation} and history stays usable`, async ({
+    mount,
+    page
+  }) => {
+    const tasks = manyMixedTasks(31, 'preview-retirement')
+    const selected = tasks.at(-1)!
+    await mount(<CreationWorkbenchRealShellStory taskScript={{ tasks }} />)
+    await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
+    const scroller = await settledScroller(page)
+    await page.getByTestId(`slot-${selected.id}-0`).click()
+    const preview = page.getByTestId('asset-detail-preview')
+    await expect(preview).toBeVisible()
+    await page.evaluate(
+      ({ task, invalidation }) => {
+        if (invalidation === 'removed task') window.__creationDeckTest?.removeTask(task.id)
+        else
+          window.__creationDeckTest?.updateTask({
+            ...task,
+            updatedAt: '2026-09-30T10:00:00Z',
+            slots: task.slots.map((slot) => ({ ...slot, resultDeleted: true }))
+          })
+      },
+      { task: selected, invalidation }
+    )
+    await expect(preview).toHaveCount(0)
+    await scroller.hover()
+    await page.mouse.wheel(0, -100_000)
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.__creationDeckTest?.listTaskPages().some((request) => request.cursor !== null)
+        )
+      )
+      .toBe(true)
+  })
+}

@@ -35,32 +35,58 @@ test('only server-authorized admin detail exposes keyboard-operable safety contr
   mount,
   page
 }) => {
+  await page.setViewportSize({ width: 960, height: 800 })
   await mount(<InspirationStory state="admin" />)
   await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
   const dialog = page.getByRole('dialog')
-  const assetRestriction = dialog.getByRole('region', { name: 'Asset restriction' })
-  const publicationRestriction = dialog.getByRole('region', {
-    name: 'Publication restriction'
-  })
-  await expect(assetRestriction).toContainText('Active')
-  await expect(publicationRestriction).toContainText('Active')
+  await page.evaluate(() => window.__inspirationTest?.setLanguage('zh-CN'))
+  const buttons = ['下载', '撤回', '解除资产限制', '解除发布限制'].map((name) =>
+    dialog.getByRole('button', { name, exact: true })
+  )
+  const [download, withdraw, assetRelease, publicationRelease] = await Promise.all(
+    buttons.map(async (button) => {
+      await expect(button).toBeVisible()
+      const box = await button.boundingBox()
+      expect(box).not.toBeNull()
+      return box!
+    })
+  )
+  expect(withdraw.y).toBeCloseTo(download.y, 0)
+  expect(withdraw.x).toBeGreaterThan(download.x)
+  expect(assetRelease.y).toBeGreaterThan(download.y)
+  expect(publicationRelease.y).toBeCloseTo(assetRelease.y, 0)
+  expect(assetRelease.x).toBeCloseTo(download.x, 0)
+  expect(publicationRelease.x).toBeCloseTo(withdraw.x, 0)
+  expect(assetRelease.width).toBeCloseTo(download.width, 0)
+  expect(publicationRelease.width).toBeCloseTo(download.width, 0)
+  expect(assetRelease.height).toBeCloseTo(download.height, 0)
+  expect(publicationRelease.height).toBeCloseTo(download.height, 0)
+  await page.evaluate(() => document.documentElement.classList.add('dark'))
+  await page.screenshot({ path: '../../.scratch/inspiration-actions-960-dark.png' })
+  await page.evaluate(() => window.__inspirationTest?.setLanguage('en'))
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
+  const assetState = dialog.getByText('Asset restriction', { exact: true }).locator('+ dd')
+  const publicationState = dialog
+    .getByText('Publication restriction', { exact: true })
+    .locator('+ dd')
+  await expect(assetState).toHaveText('Active')
+  await expect(publicationState).toHaveText('Active')
 
   page.once('dialog', (confirmation) => void confirmation.accept())
-  const releaseAsset = assetRestriction.getByRole('button', {
-    name: 'Release asset restriction'
+  const releaseAsset = dialog.getByRole('button', {
+    name: 'Release asset restriction',
+    exact: true
   })
   await releaseAsset.focus()
   await page.keyboard.press('Enter')
-  await expect(assetRestriction).toContainText('Released')
+  await expect(assetState).toHaveText('Released')
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Asset restriction released.' })
   ).toBeVisible()
 
   page.once('dialog', (confirmation) => void confirmation.accept())
-  await publicationRestriction
-    .getByRole('button', { name: 'Release publication restriction' })
-    .click()
-  await expect(publicationRestriction).toContainText('Released')
+  await dialog.getByRole('button', { name: 'Release publication restriction', exact: true }).click()
+  await expect(publicationState).toHaveText('Released')
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Publication restriction released.' })
   ).toBeVisible()
@@ -75,7 +101,78 @@ test('member detail has no safety command entry points', async ({ mount, page })
   await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('button', { name: /restriction/i })).toHaveCount(0)
-  await expect(dialog.getByRole('region', { name: /restriction/i })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
+  await expect(dialog.getByText(/^(Asset|Publication) restriction$/)).toHaveCount(0)
+})
+
+test('publication preview fills the viewport and returns focus to its opener', async ({
+  mount,
+  page
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mount(<InspirationStory />)
+  const opener = page.getByRole('button', { name: 'Open inspiration publication-1' })
+  await opener.click()
+  const preview = page.getByRole('dialog')
+  await expect(preview).toBeVisible()
+  expect(await preview.boundingBox()).toEqual({ x: 0, y: 0, width: 1280, height: 800 })
+  await page.keyboard.press('Escape')
+  await expect(preview).toHaveCount(0)
+  await expect(opener).toBeFocused()
+})
+
+test('an owned publication shows same-task results under independent creator grants', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory state="own" />)
+  await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
+  const preview = page.getByRole('dialog')
+  await expect(
+    preview.getByRole('group', { name: 'Results from the same task' }).getByRole('button')
+  ).toHaveCount(2)
+  await expect(preview).toContainText('A precise editorial launch scene')
+  await expect(preview).toContainText('archived-model')
+  await preview.getByRole('button', { name: 'Result 2', exact: true }).click()
+  await expect(
+    preview
+      .getByRole('region', { name: 'Asset media' })
+      .getByRole('img', { name: 'Asset own-sibling' })
+  ).toBeVisible()
+  await expect(preview.getByRole('button', { name: 'Create similar', exact: true })).toHaveCount(0)
+  await expect(
+    preview.getByRole('button', { name: 'Withdraw publication', exact: true })
+  ).toHaveCount(0)
+  await preview.getByRole('button', { name: 'Download', exact: true }).click()
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.contentCalls()))
+    .toEqual(['own-sibling'])
+  await page.keyboard.press('Escape')
+  await expect(preview).toHaveCount(0)
+})
+
+test('other members retain publication detail without source-task reads', async ({
+  mount,
+  page
+}) => {
+  await mount(<InspirationStory />)
+  await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
+  const preview = page.getByRole('dialog')
+  await expect(preview).toContainText('A precise editorial launch scene')
+  await expect(preview.getByRole('group', { name: 'Results from the same task' })).toHaveCount(0)
+  expect(await page.evaluate(() => window.__inspirationTest?.ownReads())).toEqual([])
+})
+
+test('a deleted source never blocks its still-readable publication', async ({ mount, page }) => {
+  await mount(<InspirationStory state="own-source-unavailable" />)
+  await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
+  const preview = page.getByRole('dialog')
+  await expect(preview).toContainText('A precise editorial launch scene')
+  await expect
+    .poll(() => page.evaluate(() => window.__inspirationTest?.ownReads()))
+    .toEqual(['source-1'])
+  await expect(preview.getByRole('group', { name: 'Results from the same task' })).toHaveCount(0)
+  await expect(preview.getByRole('button', { name: 'Create similar', exact: true })).toBeEnabled()
 })
 
 test('failed safety commands retain state and announce recovery feedback', async ({
@@ -88,7 +185,10 @@ test('failed safety commands retain state and announce recovery feedback', async
   page.once('dialog', (confirmation) => void confirmation.accept())
   await dialog.getByRole('button', { name: 'Release asset restriction' }).click()
   await expect(dialog.getByRole('alert')).toContainText('The restriction could not be updated.')
-  await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toContainText('Active')
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
+  await expect(dialog.getByText('Asset restriction', { exact: true }).locator('+ dd')).toHaveText(
+    'Active'
+  )
 })
 
 test('a completed safety command cannot overwrite a newly opened detail', async ({
@@ -109,7 +209,11 @@ test('a completed safety command cannot overwrite a newly opened detail', async 
   await page.evaluate(() => window.__inspirationTest?.releaseSafety())
 
   await expect(dialog).toContainText('A precise editorial launch scene')
-  await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toHaveCount(0)
+  await expect(
+    dialog.getByRole('button', { name: 'Release asset restriction', exact: true })
+  ).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
+  await expect(dialog.getByText('Asset restriction', { exact: true })).toHaveCount(0)
   await expect
     .poll(() => page.evaluate(() => window.__inspirationTest?.listCalls().length ?? 0))
     .toBeGreaterThan(listCallsBeforeCompletion)
@@ -122,10 +226,9 @@ test('releasing a deleted-source publication removes its historical detail', asy
   await mount(<InspirationStory state="admin-deleted-publication" />)
   await page.getByRole('button', { name: 'Open inspiration deleted-publication' }).click()
   const dialog = page.getByRole('dialog')
-  const restriction = dialog.getByRole('region', { name: 'Publication restriction' })
 
   page.once('dialog', (confirmation) => void confirmation.accept())
-  await restriction.getByRole('button', { name: 'Release publication restriction' }).click()
+  await dialog.getByRole('button', { name: 'Release publication restriction', exact: true }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByTestId('inspiration-card')).toHaveCount(0)
 })
@@ -454,11 +557,14 @@ test('immersive detail shows full intent and uses a Publication for create simil
   const dialog = page.getByRole('dialog')
   await expect(dialog).toContainText('A precise editorial launch scene')
   await expect(dialog).toContainText('archived-model')
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
   await expect(dialog).toContainText('Specification version1')
   await expect(dialog).toContainText('Capability manifest version2')
   await expect(dialog).toContainText('product-reference.png')
-  await dialog.getByRole('button', { name: 'Preview' }).click()
-  await expect(dialog.getByRole('img', { name: 'product-reference.png' })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Reference material (1)', exact: true }).focus()
+  await expect(
+    page.getByTestId('asset-reference-preview').getByRole('img', { name: 'product-reference.png' })
+  ).toBeVisible()
   expect(await page.evaluate(() => window.__inspirationTest?.previewCalls())).toEqual([
     'reference-one'
   ])
@@ -475,6 +581,7 @@ test('admin detail preserves frozen positions and isolates an unavailable histor
   await mount(<InspirationStory state="admin-partial" />)
   await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
   const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
   const references = dialog.getByRole('listitem')
   await expect(dialog).toContainText('Used reference materials (4)')
   await expect(references).toHaveCount(4)
@@ -485,9 +592,14 @@ test('admin detail preserves frozen positions and isolates an unavailable histor
   await expect(references.nth(1).getByRole('button', { name: 'Preview' })).toHaveCount(0)
   await expect(references.nth(2)).toContainText('3. third-reference.png')
   await expect(references.nth(3)).toContainText('4. product-reference.png')
-  await references.nth(2).getByRole('button', { name: 'Preview' }).click()
-  await expect(references.nth(2).getByRole('img', { name: 'third-reference.png' })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Reference material (4)', exact: true }).focus()
+  const referencePreview = page.getByTestId('asset-reference-preview')
+  await referencePreview.getByRole('button', { name: 'Next reference', exact: true }).click()
+  await expect(referencePreview).toContainText('Historical reference material unavailable')
+  await referencePreview.getByRole('button', { name: 'Next reference', exact: true }).click()
+  await expect(referencePreview.getByRole('img', { name: 'third-reference.png' })).toBeVisible()
   expect(await page.evaluate(() => window.__inspirationTest?.previewCalls())).toEqual([
+    'reference-one',
     'reference-three'
   ])
   await page.evaluate(() => window.__inspirationTest?.setLanguage('zh-CN'))
@@ -502,6 +614,7 @@ test('admin detail says no references only for an empty frozen specification', a
 }) => {
   await mount(<InspirationStory state="admin-no-references" />)
   await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Details', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('No reference materials were used')
 })
 
@@ -512,13 +625,16 @@ test('an expired signed reference preview is authorized once more on element err
   await mount(<InspirationStory state="preview-refresh" />)
   await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
   const dialog = page.getByRole('dialog')
-  await dialog.getByRole('button', { name: 'Preview' }).click()
-  await expect(dialog.getByRole('img', { name: 'product-reference.png' })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Reference material (1)', exact: true }).focus()
+  await expect(
+    page.getByTestId('asset-reference-preview').getByRole('img', { name: 'product-reference.png' })
+  ).toBeVisible()
   await expect
     .poll(() => page.evaluate(() => window.__inspirationTest?.previewCalls()))
     .toEqual(['reference-one', 'reference-one'])
 
-  await dialog
+  await page
+    .getByTestId('asset-reference-preview')
     .getByRole('img', { name: 'product-reference.png' })
     .evaluate((image) => image.dispatchEvent(new Event('error')))
   await expect
@@ -530,9 +646,13 @@ test('a failed signed-preview refresh stops after one automatic retry', async ({
   await mount(<InspirationStory state="preview-refresh-failed" />)
   await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
   const dialog = page.getByRole('dialog')
-  await dialog.getByRole('button', { name: 'Preview' }).click()
-  await expect(dialog.getByRole('alert')).toContainText('could not be loaded')
-  await expect(dialog.getByRole('img', { name: 'product-reference.png' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Reference material (1)', exact: true }).focus()
+  await expect(page.getByTestId('asset-reference-preview').getByRole('alert')).toContainText(
+    'could not be loaded'
+  )
+  await expect(
+    page.getByTestId('asset-reference-preview').getByRole('img', { name: 'product-reference.png' })
+  ).toHaveCount(0)
   expect(await page.evaluate(() => window.__inspirationTest?.previewCalls())).toEqual([
     'reference-one',
     'reference-one'
