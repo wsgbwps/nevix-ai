@@ -35,32 +35,58 @@ test('only server-authorized admin detail exposes keyboard-operable safety contr
   mount,
   page
 }) => {
+  await page.setViewportSize({ width: 960, height: 800 })
   await mount(<InspirationStory state="admin" />)
   await page.getByRole('button', { name: 'Open inspiration admin-asset' }).click()
   const dialog = page.getByRole('dialog')
-  const assetRestriction = dialog.getByRole('region', { name: 'Asset restriction' })
-  const publicationRestriction = dialog.getByRole('region', {
-    name: 'Publication restriction'
-  })
-  await expect(assetRestriction).toContainText('Active')
-  await expect(publicationRestriction).toContainText('Active')
+  await page.evaluate(() => window.__inspirationTest?.setLanguage('zh-CN'))
+  const buttons = ['下载', '撤回', '解除资产限制', '解除发布限制'].map((name) =>
+    dialog.getByRole('button', { name, exact: true })
+  )
+  const [download, withdraw, assetRelease, publicationRelease] = await Promise.all(
+    buttons.map(async (button) => {
+      await expect(button).toBeVisible()
+      const box = await button.boundingBox()
+      expect(box).not.toBeNull()
+      return box!
+    })
+  )
+  expect(withdraw.y).toBeCloseTo(download.y, 0)
+  expect(withdraw.x).toBeGreaterThan(download.x)
+  expect(assetRelease.y).toBeGreaterThan(download.y)
+  expect(publicationRelease.y).toBeCloseTo(assetRelease.y, 0)
+  expect(assetRelease.x).toBeCloseTo(download.x, 0)
+  expect(publicationRelease.x).toBeCloseTo(withdraw.x, 0)
+  expect(assetRelease.width).toBeCloseTo(download.width, 0)
+  expect(publicationRelease.width).toBeCloseTo(download.width, 0)
+  expect(assetRelease.height).toBeCloseTo(download.height, 0)
+  expect(publicationRelease.height).toBeCloseTo(download.height, 0)
+  await page.evaluate(() => document.documentElement.classList.add('dark'))
+  await page.screenshot({ path: '../../.scratch/inspiration-actions-960-dark.png' })
+  await page.evaluate(() => window.__inspirationTest?.setLanguage('en'))
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
+  const assetState = dialog.getByText('Asset restriction', { exact: true }).locator('+ dd')
+  const publicationState = dialog
+    .getByText('Publication restriction', { exact: true })
+    .locator('+ dd')
+  await expect(assetState).toHaveText('Active')
+  await expect(publicationState).toHaveText('Active')
 
   page.once('dialog', (confirmation) => void confirmation.accept())
-  const releaseAsset = assetRestriction.getByRole('button', {
-    name: 'Release asset restriction'
+  const releaseAsset = dialog.getByRole('button', {
+    name: 'Release asset restriction',
+    exact: true
   })
   await releaseAsset.focus()
   await page.keyboard.press('Enter')
-  await expect(assetRestriction).toContainText('Released')
+  await expect(assetState).toHaveText('Released')
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Asset restriction released.' })
   ).toBeVisible()
 
   page.once('dialog', (confirmation) => void confirmation.accept())
-  await publicationRestriction
-    .getByRole('button', { name: 'Release publication restriction' })
-    .click()
-  await expect(publicationRestriction).toContainText('Released')
+  await dialog.getByRole('button', { name: 'Release publication restriction', exact: true }).click()
+  await expect(publicationState).toHaveText('Released')
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Publication restriction released.' })
   ).toBeVisible()
@@ -75,7 +101,8 @@ test('member detail has no safety command entry points', async ({ mount, page })
   await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('button', { name: /restriction/i })).toHaveCount(0)
-  await expect(dialog.getByRole('region', { name: /restriction/i })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
+  await expect(dialog.getByText(/^(Asset|Publication) restriction$/)).toHaveCount(0)
 })
 
 test('publication preview fills the viewport and returns focus to its opener', async ({
@@ -158,7 +185,10 @@ test('failed safety commands retain state and announce recovery feedback', async
   page.once('dialog', (confirmation) => void confirmation.accept())
   await dialog.getByRole('button', { name: 'Release asset restriction' }).click()
   await expect(dialog.getByRole('alert')).toContainText('The restriction could not be updated.')
-  await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toContainText('Active')
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
+  await expect(dialog.getByText('Asset restriction', { exact: true }).locator('+ dd')).toHaveText(
+    'Active'
+  )
 })
 
 test('a completed safety command cannot overwrite a newly opened detail', async ({
@@ -179,7 +209,11 @@ test('a completed safety command cannot overwrite a newly opened detail', async 
   await page.evaluate(() => window.__inspirationTest?.releaseSafety())
 
   await expect(dialog).toContainText('A precise editorial launch scene')
-  await expect(dialog.getByRole('region', { name: 'Asset restriction' })).toHaveCount(0)
+  await expect(
+    dialog.getByRole('button', { name: 'Release asset restriction', exact: true })
+  ).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Details', exact: true }).click()
+  await expect(dialog.getByText('Asset restriction', { exact: true })).toHaveCount(0)
   await expect
     .poll(() => page.evaluate(() => window.__inspirationTest?.listCalls().length ?? 0))
     .toBeGreaterThan(listCallsBeforeCompletion)
@@ -192,10 +226,9 @@ test('releasing a deleted-source publication removes its historical detail', asy
   await mount(<InspirationStory state="admin-deleted-publication" />)
   await page.getByRole('button', { name: 'Open inspiration deleted-publication' }).click()
   const dialog = page.getByRole('dialog')
-  const restriction = dialog.getByRole('region', { name: 'Publication restriction' })
 
   page.once('dialog', (confirmation) => void confirmation.accept())
-  await restriction.getByRole('button', { name: 'Release publication restriction' }).click()
+  await dialog.getByRole('button', { name: 'Release publication restriction', exact: true }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByTestId('inspiration-card')).toHaveCount(0)
 })

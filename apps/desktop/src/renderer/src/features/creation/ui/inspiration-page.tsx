@@ -19,8 +19,7 @@ import {
   alignAssetReferences,
   type AssetDetailView,
   type AssetLibraryPorts,
-  type MediaAssetView,
-  type RestrictionState
+  type MediaAssetView
 } from '../api/asset-library-http'
 import type { CreationWorkspacePorts } from '../model/ports'
 import { useInspiration, type InspirationFilters } from '../model/use-inspiration'
@@ -176,7 +175,6 @@ function InspirationCard({
 
 function RestrictionControl({
   kind,
-  state,
   canRestrict,
   canRelease,
   running,
@@ -184,7 +182,6 @@ function RestrictionControl({
   onRelease
 }: {
   readonly kind: 'asset' | 'publication'
-  readonly state: RestrictionState
   readonly canRestrict: boolean
   readonly canRelease: boolean
   readonly running: boolean
@@ -194,16 +191,7 @@ function RestrictionControl({
   const { t } = useTranslation('creation')
   if (!canRestrict && !canRelease) return null
   return (
-    <section
-      aria-label={t(`inspiration.restriction.${kind}.label`)}
-      className="col-span-full grid grid-cols-3 gap-2 border-t pt-3 text-xs"
-    >
-      <div className="col-span-full flex items-center justify-between gap-3">
-        <h3 className="font-medium">{t(`inspiration.restriction.${kind}.label`)}</h3>
-        <span className="text-muted-foreground">
-          {t(`inspiration.restriction.state.${state ?? 'none'}`)}
-        </span>
-      </div>
+    <>
       {canRestrict ? (
         <AssetPreviewAction
           icon={<ShieldOffIcon />}
@@ -219,7 +207,7 @@ function RestrictionControl({
           {t(`inspiration.restriction.${kind}.release`)}
         </AssetPreviewAction>
       ) : null}
-    </section>
+    </>
   )
 }
 
@@ -469,6 +457,25 @@ function InspirationDetail({
             <dd>
               {media.widthPx && media.heightPx ? `${media.widthPx} × ${media.heightPx}` : '—'}
             </dd>
+            {asset && (asset.capabilities.canRestrict || asset.capabilities.canRelease) && (
+              <>
+                <dt className="text-muted-foreground">
+                  {t('inspiration.restriction.asset.label')}
+                </dt>
+                <dd>{t(`inspiration.restriction.state.${asset.restrictionState ?? 'none'}`)}</dd>
+              </>
+            )}
+            {publication &&
+              (publication.capabilities.canRestrict || publication.capabilities.canRelease) && (
+                <>
+                  <dt className="text-muted-foreground">
+                    {t('inspiration.restriction.publication.label')}
+                  </dt>
+                  <dd>
+                    {t(`inspiration.restriction.state.${publication.restrictionState ?? 'none'}`)}
+                  </dd>
+                </>
+              )}
           </dl>
         ) : null
       }
@@ -526,7 +533,6 @@ function InspirationDetail({
             {asset ? (
               <RestrictionControl
                 kind="asset"
-                state={asset.restrictionState}
                 canRestrict={asset.capabilities.canRestrict}
                 canRelease={asset.capabilities.canRelease}
                 running={running}
@@ -537,7 +543,6 @@ function InspirationDetail({
             {publication ? (
               <RestrictionControl
                 kind="publication"
-                state={publication.restrictionState}
                 canRestrict={publication.capabilities.canRestrict}
                 canRelease={publication.capabilities.canRelease}
                 running={running}
