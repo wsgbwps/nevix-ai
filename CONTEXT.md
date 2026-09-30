@@ -17,6 +17,14 @@ _Avoid_: required checks、required status checks、分支保护
 年订阅的离线授权凭证，界定客户、到期日与席位上限；仅由 Server 校验，Desktop 不感知。
 _Avoid_: entitlement, activation, license key（指实现时）
 
+**Desktop Update（桌面更新）**:
+当前设备上 Nevix 桌面客户端的版本变更，由 User 确认安装；它不改变所连接的 Deployment Instance 的版本。
+_Avoid_: 实例升级、后端更新（指桌面版本变更时）
+
+**Deployment Upgrade（实例升级）**:
+客户运维者对一套 Deployment Instance 执行的后端版本变更；发现可用版本或向 Admin 展示通知不代表已执行升级。
+_Avoid_: 桌面更新、自动升级（仅指检测更新时）
+
 ## AI 创作
 
 **Deployment Instance**:
