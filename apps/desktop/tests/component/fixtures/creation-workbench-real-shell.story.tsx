@@ -63,7 +63,7 @@ export function CreationWorkbenchRealShellStory(options: StoryOptions = {}): Rea
             </Sidebar>
             <SidebarInset>
               <div className="flex flex-1 flex-col overflow-auto" data-testid="shell-content">
-                <CreationWorkbenchPage />
+                <CreationWorkbenchPage initialTaskId={options.initialTaskId} />
               </div>
             </SidebarInset>
           </SidebarProvider>

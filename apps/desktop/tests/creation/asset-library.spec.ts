@@ -108,15 +108,13 @@ test(
           await admin.electronApp.close()
         }
 
-        const otherResult = dialog
-          .getByRole('button', { name: /^结果 / })
-          .and(launched.page.locator('[data-variant="outline"]'))
-        const otherResultName = await otherResult.textContent()
+        const otherResult = dialog.getByRole('button', { name: /^结果 /, pressed: false })
+        const otherResultName = await otherResult.getAttribute('aria-label')
         expect(otherResultName).not.toBeNull()
         await otherResult.click()
         await expect(
           dialog.getByRole('button', { name: otherResultName ?? '', exact: true })
-        ).toHaveAttribute('data-variant', 'secondary')
+        ).toHaveAttribute('aria-pressed', 'true')
 
         await launched.electronApp.evaluate(({ session }, dir) => {
           session.defaultSession.removeAllListeners('will-download')

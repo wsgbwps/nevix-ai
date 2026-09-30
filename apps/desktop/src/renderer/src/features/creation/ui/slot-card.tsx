@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { DownloadIcon } from 'lucide-react'
+import { DownloadIcon, Maximize2Icon } from 'lucide-react'
 import type { GenerationSlotView } from '../api/generation-task-http'
 import type { ResultBlobUrlLease } from '../lib/result-blob-cache'
 import { slotResultFilename } from '../lib/result-filename'
@@ -20,7 +20,8 @@ export function SlotCard({
   slot,
   mediaType,
   aspectRatio,
-  pauseActivity
+  pauseActivity,
+  onPreview
 }: {
   readonly acquireResultBlobUrl: (
     taskId: string,
@@ -31,6 +32,7 @@ export function SlotCard({
   readonly mediaType: 'image' | 'video'
   readonly aspectRatio: number
   readonly pauseActivity: boolean
+  readonly onPreview?: (taskId: string, slotIndex: number) => void
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const [mediaAttempt, setMediaAttempt] = useState(0)
@@ -101,7 +103,9 @@ export function SlotCard({
   // the payload through dragover's protected mode. The native ghost would be the
   // whole gallery cell, so a 48x64 offscreen twin keeps the drop target visible.
   const ghostRef = useRef<HTMLDivElement | null>(null)
+  const draggedRef = useRef(false)
   const dragStart = (event: React.DragEvent<HTMLDivElement>): void => {
+    draggedRef.current = true
     const payload = { taskId, slotIndex: slot.index, mediaType }
     beginResultDrag(payload)
     event.dataTransfer.setData(RESULT_DRAG_MIME, encodeResultDrag(payload))
@@ -142,13 +146,38 @@ export function SlotCard({
       role={succeeded ? undefined : 'status'}
       aria-label={String(t(slotStatusKey(slot.status)))}
       draggable={succeeded}
+      tabIndex={succeeded && onPreview !== undefined ? 0 : undefined}
+      onPointerDown={() => {
+        draggedRef.current = false
+      }}
+      onClick={(event) => {
+        if (
+          !succeeded ||
+          draggedRef.current ||
+          (event.target instanceof Element && event.target.closest('button, video') !== null)
+        ) {
+          return
+        }
+        event.currentTarget.focus({ preventScroll: true })
+        onPreview?.(taskId, slot.index)
+      }}
+      onKeyDown={(event) => {
+        if (
+          succeeded &&
+          event.target === event.currentTarget &&
+          (event.key === 'Enter' || event.key === ' ')
+        ) {
+          event.preventDefault()
+          onPreview?.(taskId, slot.index)
+        }
+      }}
       onDragStart={(event) => {
         if (succeeded) dragStart(event)
         else event.preventDefault()
       }}
       onDragEnd={dragEnd}
       style={{ aspectRatio: String(aspectRatio) }}
-      className="bg-foreground/[0.04] relative overflow-hidden rounded-lg"
+      className="bg-foreground/[0.04] focus-visible:ring-ring relative overflow-hidden rounded-lg outline-none focus-visible:ring-2"
     >
       {succeeded && mediaUrl !== null ? (
         mediaType === 'image' ? (
@@ -250,16 +279,28 @@ export function SlotCard({
         </span>
       )}
       {succeeded && (
-        <button
-          type="button"
-          data-testid={`slot-download-${taskId}-${slot.index}`}
-          aria-label={String(t('gallery.actions.download'))}
-          title={slotResultFilename(taskId, slot.index, mediaType, slot.result)}
-          onClick={download}
-          className="absolute right-1 bottom-1 z-10 grid size-6 place-items-center rounded-md border border-white/25 bg-black/50 text-white outline-none hover:bg-black/65 focus-visible:ring-2 focus-visible:ring-sky-400/70"
-        >
-          <DownloadIcon className="size-3" aria-hidden />
-        </button>
+        <>
+          {onPreview !== undefined && mediaType === 'video' && (
+            <button
+              type="button"
+              aria-label={String(t('preview.openResult'))}
+              onClick={() => onPreview(taskId, slot.index)}
+              className="absolute top-1 right-1 z-10 grid size-6 place-items-center rounded-md border border-white/25 bg-black/50 text-white outline-none hover:bg-black/65 focus-visible:ring-2 focus-visible:ring-sky-400/70"
+            >
+              <Maximize2Icon className="size-3" aria-hidden />
+            </button>
+          )}
+          <button
+            type="button"
+            data-testid={`slot-download-${taskId}-${slot.index}`}
+            aria-label={String(t('gallery.actions.download'))}
+            title={slotResultFilename(taskId, slot.index, mediaType, slot.result)}
+            onClick={download}
+            className="absolute right-1 bottom-1 z-10 grid size-6 place-items-center rounded-md border border-white/25 bg-black/50 text-white outline-none hover:bg-black/65 focus-visible:ring-2 focus-visible:ring-sky-400/70"
+          >
+            <DownloadIcon className="size-3" aria-hidden />
+          </button>
+        </>
       )}
     </div>
   )

@@ -6,6 +6,27 @@ import {
 export const creationTranslations = defineResourceTranslations({
   'zh-CN': {
     creation: {
+      preview: {
+        openResult: '打开资产详情',
+        media: '资产画面',
+        information: '资产信息和操作',
+        actions: '资产操作',
+        close: '关闭资产详情',
+        back: '返回',
+        previous: '上一张',
+        next: '下一张',
+        prompt: '提示词',
+        copyPrompt: '复制提示词',
+        expandPrompt: '展开提示词',
+        collapsePrompt: '收起提示词',
+        copied: '提示词已复制',
+        copyFailed: '提示词复制失败',
+        details: '详细信息',
+        references: '参考素材（{{count}}）',
+        referenceCount: '参考素材 {{index}}/{{total}}',
+        previousReference: '上一项参考素材',
+        nextReference: '下一项参考素材'
+      },
       assets: {
         title: '资产',
         loading: '正在读取资产…',
@@ -585,6 +606,27 @@ export const creationTranslations = defineResourceTranslations({
   },
   en: {
     creation: {
+      preview: {
+        openResult: 'Open asset details',
+        media: 'Asset media',
+        information: 'Asset information and actions',
+        actions: 'Asset actions',
+        close: 'Close asset details',
+        back: 'Back',
+        previous: 'Previous result',
+        next: 'Next result',
+        prompt: 'Prompt',
+        copyPrompt: 'Copy prompt',
+        expandPrompt: 'Expand prompt',
+        collapsePrompt: 'Collapse prompt',
+        copied: 'Prompt copied',
+        copyFailed: 'Could not copy the prompt',
+        details: 'Details',
+        references: 'Reference material ({{count}})',
+        referenceCount: 'Reference material {{index}}/{{total}}',
+        previousReference: 'Previous reference',
+        nextReference: 'Next reference'
+      },
       assets: {
         title: 'Assets',
         loading: 'Loading assets…',
