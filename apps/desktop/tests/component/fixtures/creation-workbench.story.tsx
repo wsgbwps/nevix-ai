@@ -1132,7 +1132,6 @@ function Frame({
 
 interface StoryOptions {
   readonly height?: number
-  readonly initialTaskId?: string
   readonly manifest?: CapabilityManifest | null
   readonly manifestFails?: boolean
   readonly manifestDeferred?: boolean
@@ -1256,16 +1255,12 @@ function StorySidebar({
   )
 }
 
-function WorkbenchWithNavigation({
-  initialTaskId
-}: {
-  readonly initialTaskId?: string
-}): React.JSX.Element {
+function WorkbenchWithNavigation(): React.JSX.Element {
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarProvider className="min-h-0 flex-1">
         <StorySidebar />
-        <CreationWorkbenchPage initialTaskId={initialTaskId} />
+        <CreationWorkbenchPage />
       </SidebarProvider>
     </TooltipProvider>
   )
@@ -1274,7 +1269,7 @@ function WorkbenchWithNavigation({
 function RuntimeWorkbenchPage({ options }: { readonly options: StoryOptions }): React.JSX.Element {
   return (
     <RuntimeWorkbenchScope options={options}>
-      <CreationWorkbenchPage initialTaskId={options.initialTaskId} />
+      <CreationWorkbenchPage />
     </RuntimeWorkbenchScope>
   )
 }
@@ -1284,7 +1279,7 @@ export function CreationWorkbenchStory(options: StoryOptions = {}): React.JSX.El
   return (
     <Frame height={options.height}>
       <RuntimeWorkbenchScope options={options}>
-        <WorkbenchWithNavigation initialTaskId={options.initialTaskId} />
+        <WorkbenchWithNavigation />
       </RuntimeWorkbenchScope>
     </Frame>
   )

@@ -19,7 +19,6 @@ import {
   alignAssetReferences,
   type AssetDetailView,
   type AssetLibraryPorts,
-  type AssetPrivateOrigin,
   type MediaAssetView,
   type RestrictionState
 } from '../api/asset-library-http'
@@ -39,7 +38,6 @@ export interface InspirationPageProps {
   readonly ports: InspirationPorts
   readonly ownAssetPorts?: AssetLibraryPorts & Pick<CreationWorkspacePorts, 'loadPreviewUrl'>
   readonly currentUserId?: string
-  readonly onOpenSource?: (origin: AssetPrivateOrigin) => void
   readonly onCreateSimilar: (
     publicationId: string
   ) => Promise<'prepared' | 'failed' | 'unavailable'>
@@ -299,7 +297,6 @@ function InspirationWall({
 function InspirationDetail({
   ownAssetPorts,
   currentUserId,
-  onOpenSource,
   item,
   detail,
   status,
@@ -315,7 +312,6 @@ function InspirationDetail({
 }: {
   readonly ownAssetPorts: InspirationPageProps['ownAssetPorts']
   readonly currentUserId: InspirationPageProps['currentUserId']
-  readonly onOpenSource: InspirationPageProps['onOpenSource']
   readonly item: InspirationItem | null
   readonly detail: InspirationDetailView | null
   readonly status: 'idle' | 'loading' | 'failed'
@@ -435,20 +431,6 @@ function InspirationDetail({
       specification={specification}
       references={references}
       loadReferencePreview={loadReferencePreview}
-      origin={
-        origin
-          ? {
-              taskId: origin.taskId,
-              name: origin.sessionName ?? origin.taskId,
-              onOpen: onOpenSource
-                ? () => {
-                    onClose()
-                    onOpenSource(origin)
-                  }
-                : undefined
-            }
-          : null
-      }
       results={
         ownAssetPorts
           ? siblings.map((sibling, index) => ({
@@ -596,7 +578,6 @@ export function InspirationPage({
   ports,
   ownAssetPorts,
   currentUserId,
-  onOpenSource,
   onCreateSimilar
 }: InspirationPageProps): React.JSX.Element {
   const { t } = useTranslation('creation')
@@ -714,7 +695,6 @@ export function InspirationPage({
         key={selected ? `${selected.type}:${itemId(selected)}` : 'closed'}
         ownAssetPorts={ownAssetPorts}
         currentUserId={currentUserId}
-        onOpenSource={onOpenSource}
         item={selected}
         detail={detail}
         status={detailStatus}

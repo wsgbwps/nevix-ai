@@ -1,14 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Dialog as DialogPrimitive, HoverCard } from 'radix-ui'
-import {
-  ArrowLeftIcon,
-  ArrowUpRightIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  InfoIcon
-} from 'lucide-react'
+import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, InfoIcon } from 'lucide-react'
 import type {
   AssetGenerationSpecification,
   AssetSpecificationReference
@@ -49,11 +42,6 @@ export interface AssetDetailPreviewProps {
   readonly references?: readonly (AssetPreviewReference | null)[]
   readonly loadReferencePreview?: (id: string) => Promise<AssetReferencePreviewSource | null>
   readonly referenceThumbnails?: Readonly<Record<string, string>>
-  readonly origin?: {
-    readonly taskId: string
-    readonly name: string
-    readonly onOpen?: () => void
-  } | null
   readonly metadata?: React.ReactNode
   readonly headerActions?: React.ReactNode
   readonly actions?: React.ReactNode
@@ -99,7 +87,6 @@ export function AssetDetailPreview({
   references = EMPTY_REFERENCES,
   loadReferencePreview,
   referenceThumbnails,
-  origin,
   metadata,
   headerActions,
   actions,
@@ -296,30 +283,6 @@ export function AssetDetailPreview({
                 ))}
               </div>
             )}
-            {origin && (
-              <div className="mb-[17px]">
-                {origin.onOpen ? (
-                  <button
-                    type="button"
-                    aria-label={origin.name}
-                    onClick={origin.onOpen}
-                    className="bg-muted hover:bg-accent focus-visible:ring-ring flex w-full items-center gap-2 rounded-[9px] border px-3 py-2.5 text-left outline-none focus-visible:ring-2"
-                  >
-                    <ArrowUpRightIcon className="text-primary size-4 shrink-0" aria-hidden />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{origin.name}</span>
-                      <span className="text-muted-foreground mt-0.5 block truncate font-mono text-[10px]">
-                        {origin.taskId}
-                      </span>
-                    </span>
-                  </button>
-                ) : (
-                  <p className="text-muted-foreground truncate">
-                    {origin.name} · {origin.taskId}
-                  </p>
-                )}
-              </div>
-            )}
             {specification && (
               <>
                 <section className="mb-[17px]">
@@ -502,11 +465,11 @@ export function AssetDetailPreview({
           </div>
           {(actions || messages) && (
             <footer
-              className="shrink-0 border-t px-3.5 pt-3 pb-2 max-[720px]:max-h-[140px] max-[720px]:overflow-auto"
+              className="shrink-0 px-4 pt-3 pb-4 max-[720px]:max-h-[140px] max-[720px]:overflow-auto"
               aria-label={t('preview.actions')}
             >
               {actions && (
-                <div className="bg-muted grid grid-cols-2 gap-0.5 rounded-[10px] p-1.5">
+                <div className="bg-foreground/[0.06] dark:bg-foreground/[0.08] grid auto-rows-fr grid-cols-2 gap-1 rounded-xl p-1.5 [&_button]:min-h-10 [&_button]:gap-2.5 [&_button]:rounded-lg [&_button]:px-3 [&_button]:py-2 [&_button]:text-xs [&_button>svg]:size-4">
                   {actions}
                 </div>
               )}

@@ -11,8 +11,7 @@ import type {
 } from '../../../src/renderer/src/features/creation/api/inspiration-http'
 import type {
   AssetDetailView,
-  AssetLibraryPorts,
-  AssetPrivateOrigin
+  AssetLibraryPorts
 } from '../../../src/renderer/src/features/creation/api/asset-library-http'
 import type { CreationWorkspacePorts } from '../../../src/renderer/src/features/creation/model/ports'
 import { testI18n } from './creation-workbench-i18n'
@@ -157,8 +156,6 @@ interface InspirationControls {
   safetyCalls(): readonly string[]
   releaseSafety(): void
   ownReads(): readonly string[]
-  originVisits(): readonly string[]
-  recordOriginVisit(origin: AssetPrivateOrigin): void
 }
 
 type InspirationStoryState =
@@ -197,7 +194,6 @@ function createHarness(
   readonly ownAssetPorts: AssetLibraryPorts & Pick<CreationWorkspacePorts, 'loadPreviewUrl'>
 } {
   const ownReads: string[] = []
-  const originVisits: string[] = []
   const listCalls: InspirationPageRequest[] = []
   const similarCalls: string[] = []
   const withdraws: string[] = []
@@ -549,8 +545,6 @@ function createHarness(
     },
     controls: {
       ownReads: () => ownReads,
-      originVisits: () => originVisits,
-      recordOriginVisit: (origin) => originVisits.push(origin.taskId),
       listCalls: () => listCalls,
       displayCalls: () => displayCalls,
       contentCalls: () => contentCalls,
@@ -593,7 +587,6 @@ export function InspirationStory({
               ? 'publisher-one'
               : 'signed-in-user'
           }
-          onOpenSource={(origin) => harness.controls.recordOriginVisit(origin)}
           onCreateSimilar={async (publicationId) => {
             harness.controls.recordSimilar(publicationId)
             return 'prepared'

@@ -4,7 +4,6 @@ import {
   alignAssetReferences,
   type AssetDetailView,
   type AssetLibraryPorts,
-  type AssetPrivateOrigin,
   type MediaAssetView
 } from '../api/asset-library-http'
 import type { AssetDetailStatus, AssetDownloadStatus } from '../model/use-asset-detail'
@@ -27,7 +26,6 @@ export function AssetDetailDialog({
   onWithdraw,
   onDelete,
   onAssetUnavailable,
-  onOpenOrigin,
   loadReferencePreview
 }: {
   readonly assetId: string | null
@@ -45,7 +43,6 @@ export function AssetDetailDialog({
   readonly onWithdraw: () => void
   readonly onDelete: () => void
   readonly onAssetUnavailable: () => void
-  readonly onOpenOrigin?: (origin: AssetPrivateOrigin) => void
   readonly loadReferencePreview?: (
     materialId: string
   ) => Promise<{ readonly url: string; readonly release?: () => void } | null>
@@ -91,15 +88,6 @@ export function AssetDetailDialog({
             onUnavailable={onAssetUnavailable}
           />
         ) : null
-      }
-      origin={
-        origin
-          ? {
-              taskId: origin.taskId,
-              name: origin.sessionName || t('assets.origin.session'),
-              onOpen: onOpenOrigin ? () => onOpenOrigin(origin) : undefined
-            }
-          : null
       }
       results={
         origin && detail

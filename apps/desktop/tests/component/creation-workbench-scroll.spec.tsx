@@ -14,20 +14,6 @@ import type { LocalDraftRecord } from '../src/renderer/src/features/creation/mod
 
 const scriptedSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'
 
-test('opening a source task locates it beyond the latest history page', async ({ mount, page }) => {
-  const tasks = manyMixedTasks(28, 'preview-source')
-  await mount(
-    <CreationWorkbenchRealShellStory taskScript={{ tasks }} initialTaskId={tasks[0].id} />
-  )
-  await page.getByRole('button', { name: 'Spring campaign', exact: true }).click()
-
-  await expect(page.getByTestId(`task-${tasks[0].id}`)).toBeInViewport({
-    ratio: 0.15,
-    timeout: 4000
-  })
-  await expect(page.getByTestId('task-history-end')).toBeVisible()
-})
-
 // Three tall succeeded tasks under one session — enough gallery height to
 // overflow the workspace scroller. Shared by the scroll and presence specs.
 function tallImageTasks(tag: string): ScriptedTask[] {

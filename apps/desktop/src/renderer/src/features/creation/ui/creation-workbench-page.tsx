@@ -26,11 +26,7 @@ const submitFailureKeys = {
  * The production Creation Workbench (issue #177): loading/empty/error stay
  * explicit, so cached data can never masquerade as authoritative server facts.
  */
-export function CreationWorkbenchPage({
-  initialTaskId
-}: {
-  readonly initialTaskId?: string
-} = {}): React.JSX.Element | null {
+export function CreationWorkbenchPage(): React.JSX.Element | null {
   const { context, composer, gallery } = useCreationWorkbench()
   const navigation = useCreationSessionNavigation()
   const { t } = useTranslation('creation')
@@ -42,13 +38,6 @@ export function CreationWorkbenchPage({
     readonly taskId: string
     readonly slotIndex: number
   } | null>(null)
-  const [taskToLocate, setTaskToLocate] = useState<{
-    readonly contextKey: string
-    readonly taskId: string
-  } | null>(null)
-  const consumedInitialTaskRef = useRef<string | undefined>(undefined)
-  const stoppedLocateRef = useRef<string | null>(null)
-  const finishLocate = useCallback(() => setTaskToLocate(null), [])
   const newestTaskId = gallery.tasks[0]?.id ?? null
   // The controller's authoritative context key doubles as the gallery remount key.
   const workspaceKey = context.contextKey
@@ -62,8 +51,6 @@ export function CreationWorkbenchPage({
         slot.status === 'succeeded' &&
         slot.resultDeleted !== true
     ) === true
-  const locateTaskId = taskToLocate?.contextKey === workspaceKey ? taskToLocate.taskId : null
-  const { tasks, taskHistory, taskListLoading, loadOlderTasks } = gallery
   const returningRef = useRef(false)
   const followingBottomRef = useRef(false)
   const userScrollIntentRef = useRef(false)
@@ -105,8 +92,6 @@ export function CreationWorkbenchPage({
       setNewTaskWaiting(false)
       setShowBackToBottom(false)
       setPreviewSelection(null)
-      setTaskToLocate(null)
-      stoppedLocateRef.current = null
     }
     if (newestTaskId === null) {
       lastNewestTaskIdRef.current = null
@@ -167,33 +152,6 @@ export function CreationWorkbenchPage({
     context.selected !== null || context.composingNew || context.pendingKey !== null
   const pendingWorkspaceTitle =
     navigation?.pendingDrafts.find((entry) => entry.key === context.pendingKey)?.title ?? ''
-
-  useEffect(() => {
-    if (
-      initialTaskId === undefined ||
-      consumedInitialTaskRef.current === initialTaskId ||
-      !workspaceActive ||
-      context.restoring ||
-      gallery.taskListLoading
-    )
-      return
-    consumedInitialTaskRef.current = initialTaskId
-    readingHistoryRef.current = true
-    pinnedToBottomRef.current = false
-    followingBottomRef.current = false
-    setTaskToLocate({ contextKey: workspaceKey, taskId: initialTaskId })
-  }, [context.restoring, gallery.taskListLoading, initialTaskId, workspaceActive, workspaceKey])
-
-  useEffect(() => {
-    if (locateTaskId === null || taskListLoading || stoppedLocateRef.current === locateTaskId)
-      return
-    if (tasks.some((task) => task.id === locateTaskId)) return
-    if (taskHistory.failed || !taskHistory.hasMore) {
-      stoppedLocateRef.current = locateTaskId
-    } else if (!taskHistory.loading) {
-      loadOlderTasks()
-    }
-  }, [loadOlderTasks, taskHistory, taskListLoading, tasks, locateTaskId])
 
   // Virtual rows and result media can establish their real height after the
   // task-id effect's first scroll. Continue following those measurements only
@@ -444,8 +402,6 @@ export function CreationWorkbenchPage({
                     key={workspaceKey}
                     gallery={gallery}
                     scrollerRef={scrollRef}
-                    locateTaskId={locateTaskId}
-                    onLocated={finishLocate}
                     onPreview={(taskId, slotIndex) => {
                       readingHistoryRef.current = true
                       pinnedToBottomRef.current = false
@@ -481,13 +437,6 @@ export function CreationWorkbenchPage({
           notices={<WorkbenchNotices context={context} />}
           onSelectSlot={(slotIndex) => setPreviewSelection({ ...preview, slotIndex })}
           onClose={closePreview}
-          onOpenTask={() => {
-            readingHistoryRef.current = true
-            pinnedToBottomRef.current = false
-            followingBottomRef.current = false
-            setTaskToLocate({ contextKey: workspaceKey, taskId: preview.taskId })
-            setPreviewSelection(null)
-          }}
         />
       )}
     </section>

@@ -1,5 +1,4 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useRef } from 'react'
-import { useCreationRuntime } from './runtime-context'
+import { createContext, useContext } from 'react'
 import {
   type CreationSessionNavigationController,
   type CreationSessionNavigationSnapshot
@@ -21,39 +20,4 @@ export const CreationSessionNavigationContext = createContext<CreationSessionNav
 
 export function useCreationSessionNavigation(): CreationSessionNavigation | null {
   return useContext(CreationSessionNavigationContext)
-}
-
-export function useOpenCreationSession(): ((sessionId: string) => Promise<boolean>) | undefined {
-  const runtime = useCreationRuntime()
-  const navigation = useCreationSessionNavigation()
-  const activeRuntime = useRef(runtime)
-  const readEpoch = useRef(0)
-  useLayoutEffect(() => {
-    activeRuntime.current = runtime
-    return () => {
-      activeRuntime.current = null
-      readEpoch.current += 1
-    }
-  }, [runtime])
-  const open = useCallback(
-    async (sessionId: string): Promise<boolean> => {
-      if (!runtime || !navigation || activeRuntime.current !== runtime) return false
-      const epoch = ++readEpoch.current
-      try {
-        const result = await runtime.getSessionDetail(sessionId)
-        if (
-          activeRuntime.current !== runtime ||
-          readEpoch.current !== epoch ||
-          result.outcome !== 'succeeded'
-        )
-          return false
-        navigation.adoptSession(result.value)
-        return true
-      } catch {
-        return false
-      }
-    },
-    [navigation, runtime]
-  )
-  return runtime && navigation ? open : undefined
 }

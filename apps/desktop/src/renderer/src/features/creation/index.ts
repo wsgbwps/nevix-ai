@@ -15,7 +15,6 @@ export { CreationRuntimeContext, useCreationRuntime } from './model/runtime-cont
 export type { CreationRuntime } from './model/runtime-context'
 export { CreationRuntimeProvider } from './model/runtime-provider'
 export { CreationSessionNavigationProvider } from './model/creation-session-navigation-provider'
-export { useOpenCreationSession } from './model/creation-session-navigation-context'
 export { CreationSessionNavigationSidebar } from './ui/creation-session-navigation-sidebar'
 export { createCreationWorkspacePorts, type CreationWorkspacePorts } from './model/ports'
 export { createCreationRuntime } from './model/workbench-runtime'

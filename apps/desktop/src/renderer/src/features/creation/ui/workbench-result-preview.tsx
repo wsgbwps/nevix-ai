@@ -17,8 +17,7 @@ export function WorkbenchResultPreview({
   loadMaterialPreviewSource,
   notices,
   onSelectSlot,
-  onClose,
-  onOpenTask
+  onClose
 }: {
   readonly detail: GenerationTaskDetail
   readonly slotIndex: number
@@ -28,7 +27,6 @@ export function WorkbenchResultPreview({
   readonly notices?: React.ReactNode
   readonly onSelectSlot: (index: number) => void
   readonly onClose: () => void
-  readonly onOpenTask: () => void
 }): React.JSX.Element | null {
   const { t } = useTranslation('creation')
   const task = detail.task
@@ -95,7 +93,6 @@ export function WorkbenchResultPreview({
       references={references}
       loadReferencePreview={loadReferencePreview}
       referenceThumbnails={gallery.thumbnails}
-      origin={{ taskId: task.id, name: title, onOpen: onOpenTask }}
       selectedResultId={String(selected.index)}
       onSelectResult={(id) => onSelectSlot(Number(id))}
       results={slots.map((slot) => ({

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useLayoutEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { WorkbenchGalleryHandle } from '../model/use-workbench'
 import { useReadingAnchor } from './use-reading-anchor'
@@ -12,20 +12,15 @@ import { TaskCard } from './task-card'
 export function ResultGallery({
   gallery,
   scrollerRef,
-  onPreview,
-  onLocated,
-  locateTaskId = null
+  onPreview
 }: {
   readonly gallery: WorkbenchGalleryHandle
   readonly scrollerRef: React.RefObject<HTMLDivElement | null>
   readonly onPreview?: (taskId: string, slotIndex: number) => void
-  readonly onLocated?: () => void
-  readonly locateTaskId?: string | null
 }): React.JSX.Element {
   const { t } = useTranslation('creation')
   const { tasks, dismissalSkipped } = gallery
   const orderedTasks = useMemo(() => [...tasks].reverse(), [tasks])
-  const locatedTaskRef = useRef<string | null>(null)
   // A failed list read keeps every loaded task and only adds the note.
   const staleNote = gallery.taskListStale ? (
     <p className="text-warning/80 text-xs" role="status" data-testid="task-list-stale">
@@ -56,29 +51,6 @@ export function ResultGallery({
   useLayoutEffect(() => {
     remeasure()
   }, [dismissalSkipped, remeasure, taskHistory.failed, taskHistory.hasMore, taskHistory.loading])
-
-  useLayoutEffect(() => {
-    if (locateTaskId === null) {
-      locatedTaskRef.current = null
-      return
-    }
-    if (locatedTaskRef.current === locateTaskId) return
-    const index = orderedTasks.findIndex((task) => task.id === locateTaskId)
-    if (index === -1) return
-    virtualizer.scrollToIndex(index, { align: 'start' })
-    const frame = requestAnimationFrame(() => {
-      const row = [
-        ...(galleryRef.current?.querySelectorAll<HTMLElement>('[data-task-id]') ?? [])
-      ].find((element) => element.dataset.taskId === locateTaskId)
-      const scroller = scrollerRef.current
-      if (row === undefined || scroller === null) return
-      locatedTaskRef.current = locateTaskId
-      scroller.scrollTop +=
-        row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16
-      onLocated?.()
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [galleryRef, locateTaskId, onLocated, orderedTasks, scrollerRef, virtualizer])
 
   if (tasks.length === 0) {
     return (

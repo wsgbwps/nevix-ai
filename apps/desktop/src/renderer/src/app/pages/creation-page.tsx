@@ -1,5 +1,4 @@
 import { CreationWorkbenchPage, useCreationRuntime } from '../../features/creation'
-import { useRouterState } from '@tanstack/react-router'
 import { AppShell } from '../shell/app-shell'
 
 /**
@@ -8,7 +7,6 @@ import { AppShell } from '../shell/app-shell'
  */
 export function CreationPage(): React.JSX.Element | null {
   const runtime = useCreationRuntime()
-  const hash = useRouterState({ select: (state) => state.location.hash })
   if (runtime === null) {
     // The root route navigates to the matching boundary surface; render nothing here.
     return null
@@ -16,7 +14,7 @@ export function CreationPage(): React.JSX.Element | null {
 
   return (
     <AppShell>
-      <CreationWorkbenchPage initialTaskId={hash.startsWith('task-') ? hash.slice(5) : undefined} />
+      <CreationWorkbenchPage />
     </AppShell>
   )
 }

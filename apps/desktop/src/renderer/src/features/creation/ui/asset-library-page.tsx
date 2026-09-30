@@ -4,11 +4,7 @@ import { DownloadIcon, ListChecksIcon, Trash2Icon, UploadIcon, XIcon } from 'luc
 import type { LucideIcon } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui/tooltip'
-import type {
-  AssetLibraryPorts,
-  AssetPrivateOrigin,
-  MediaAssetView
-} from '../api/asset-library-http'
+import type { AssetLibraryPorts, MediaAssetView } from '../api/asset-library-http'
 import type { InspirationPorts } from '../api/inspiration-http'
 import { useAssetDetail, type PrepareAssetSimilar } from '../model/use-asset-detail'
 import { isoDay, useAssetList, type AssetFilters } from '../model/use-asset-list'
@@ -21,7 +17,6 @@ import { LoadMoreSentinel } from './load-more-sentinel'
 export interface AssetLibraryPageProps {
   readonly ports: AssetLibraryPorts & Pick<InspirationPorts, 'publishAsset' | 'withdrawPublication'>
   readonly onCreateSimilar: PrepareAssetSimilar
-  readonly onOpenOrigin?: (origin: AssetPrivateOrigin) => void
   readonly loadReferencePreview?: (
     materialId: string
   ) => Promise<{ readonly url: string; readonly release?: () => void } | null>
@@ -95,7 +90,6 @@ function dayKey(value: string): string {
 export function AssetLibraryPage({
   ports,
   onCreateSimilar,
-  onOpenOrigin,
   loadReferencePreview
 }: AssetLibraryPageProps): React.JSX.Element {
   const { t, i18n } = useTranslation('creation')
@@ -339,7 +333,6 @@ export function AssetLibraryPage({
         onWithdraw={() => void detail.withdraw(() => window.confirm(t('assets.withdrawConfirm')))}
         onDelete={() => void detail.remove(() => window.confirm(t('assets.deleteConfirm')))}
         onAssetUnavailable={list.refresh}
-        onOpenOrigin={onOpenOrigin}
         loadReferencePreview={loadReferencePreview}
       />
     </section>

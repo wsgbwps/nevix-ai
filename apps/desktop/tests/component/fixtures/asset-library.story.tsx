@@ -1,5 +1,5 @@
 import '../../../src/renderer/src/app/globals.css'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { ImagesIcon } from 'lucide-react'
 import { testI18n } from './creation-workbench-i18n'
@@ -568,7 +568,6 @@ export function AssetLibraryStory({
       visibility
     ]
   )
-  const [openedOrigin, setOpenedOrigin] = useState<AssetPrivateOrigin | null>(null)
   useEffect(() => {
     // A spec cannot import `testI18n` itself — it awaits at module scope — so the
     // switch has to come through here.
@@ -609,16 +608,11 @@ export function AssetLibraryStory({
           </Sidebar>
           <SidebarInset>
             <div className="flex flex-1 flex-col overflow-auto">
-              {openedOrigin === null ? (
-                <AssetLibraryPage
-                  ports={harness.ports}
-                  onCreateSimilar={harness.controls.recordReuse}
-                  onOpenOrigin={setOpenedOrigin}
-                  loadReferencePreview={async () => ({ url: grantedUrl })}
-                />
-              ) : (
-                <h1>{`Creation task ${openedOrigin.taskId} in ${openedOrigin.sessionName}`}</h1>
-              )}
+              <AssetLibraryPage
+                ports={harness.ports}
+                onCreateSimilar={harness.controls.recordReuse}
+                loadReferencePreview={async () => ({ url: grantedUrl })}
+              />
             </div>
           </SidebarInset>
         </SidebarProvider>

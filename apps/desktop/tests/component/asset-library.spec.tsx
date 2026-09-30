@@ -443,19 +443,6 @@ test('owned reference materials open a deliberate media preview', async ({ mount
   await expect(page.getByRole('img', { name: 'reference.png', exact: true })).toBeVisible()
 })
 
-test('the owned source task opens its original creation session and retires the preview', async ({
-  mount,
-  page
-}) => {
-  await mount(<AssetLibraryStory />)
-  await page.getByRole('button', { name: 'Open asset asset-one' }).click()
-  await page.getByRole('button', { name: 'Launch', exact: true }).click()
-  await expect(
-    page.getByRole('heading', { name: 'Creation task task-one in Launch' })
-  ).toBeVisible()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-})
-
 test('detail switches siblings and exposes the full publish confirmation facts', async ({
   mount,
   page

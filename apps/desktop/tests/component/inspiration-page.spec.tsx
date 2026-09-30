@@ -94,7 +94,7 @@ test('publication preview fills the viewport and returns focus to its opener', a
   await expect(opener).toBeFocused()
 })
 
-test('an owned publication shows its task and siblings under independent creator grants', async ({
+test('an owned publication shows same-task results under independent creator grants', async ({
   mount,
   page
 }) => {
@@ -102,8 +102,10 @@ test('an owned publication shows its task and siblings under independent creator
   await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
   const preview = page.getByRole('dialog')
   await expect(
-    preview.getByRole('button', { name: 'Own editorial task', exact: true })
-  ).toBeVisible()
+    preview.getByRole('group', { name: 'Results from the same task' }).getByRole('button')
+  ).toHaveCount(2)
+  await expect(preview).toContainText('A precise editorial launch scene')
+  await expect(preview).toContainText('archived-model')
   await preview.getByRole('button', { name: 'Result 2', exact: true }).click()
   await expect(
     preview
@@ -118,9 +120,8 @@ test('an owned publication shows its task and siblings under independent creator
   await expect
     .poll(() => page.evaluate(() => window.__inspirationTest?.contentCalls()))
     .toEqual(['own-sibling'])
-  await preview.getByRole('button', { name: 'Own editorial task', exact: true }).click()
+  await page.keyboard.press('Escape')
   await expect(preview).toHaveCount(0)
-  expect(await page.evaluate(() => window.__inspirationTest?.originVisits())).toEqual(['own-task'])
 })
 
 test('other members retain publication detail without source-task reads', async ({
@@ -131,9 +132,7 @@ test('other members retain publication detail without source-task reads', async 
   await page.getByRole('button', { name: 'Open inspiration publication-1' }).click()
   const preview = page.getByRole('dialog')
   await expect(preview).toContainText('A precise editorial launch scene')
-  await expect(
-    preview.getByRole('button', { name: 'Own editorial task', exact: true })
-  ).toHaveCount(0)
+  await expect(preview.getByRole('group', { name: 'Results from the same task' })).toHaveCount(0)
   expect(await page.evaluate(() => window.__inspirationTest?.ownReads())).toEqual([])
 })
 
@@ -145,9 +144,7 @@ test('a deleted source never blocks its still-readable publication', async ({ mo
   await expect
     .poll(() => page.evaluate(() => window.__inspirationTest?.ownReads()))
     .toEqual(['source-1'])
-  await expect(
-    preview.getByRole('button', { name: 'Own editorial task', exact: true })
-  ).toHaveCount(0)
+  await expect(preview.getByRole('group', { name: 'Results from the same task' })).toHaveCount(0)
   await expect(preview.getByRole('button', { name: 'Create similar', exact: true })).toBeEnabled()
 })
 
