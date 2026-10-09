@@ -8,6 +8,7 @@ build/
 *.tsbuildinfo
 !apps/desktop/build/
 apps/desktop/build/*
+!apps/desktop/build/entitlements.mac.plist
 !apps/desktop/build/locales/
 !apps/desktop/build/locales/**
 

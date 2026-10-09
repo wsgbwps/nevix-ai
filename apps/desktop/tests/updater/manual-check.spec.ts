@@ -19,7 +19,7 @@ test('@native-smoke system menu manual check visibly defers an unknown instance'
         }
         const item = Menu.getApplicationMenu()
           ?.items.flatMap((root) => root.submenu?.items ?? [])
-          .find((item) => item.label === 'Check for Updates…')
+          .find((item) => ['Check for Updates…', '检查更新…'].includes(item.label))
         if (!item) throw new Error('Missing native update menu')
         item.click()
       })
@@ -29,8 +29,8 @@ test('@native-smoke system menu manual check visibly defers an unknown instance'
             () => (globalThis as { __updateMessage?: string }).__updateMessage
           )
         )
-        .toBe(
-          'The running Server version could not be verified. Update deferred. Check your server connection.'
+        .toMatch(
+          /^(The running Server version could not be verified\. Update deferred\. Check your server connection\.|无法确认当前 Server 的运行版本，更新已暂缓。请检查服务器连接。)$/
         )
       await expect(launched.page.locator('#server-connection-url')).toBeVisible()
     } finally {

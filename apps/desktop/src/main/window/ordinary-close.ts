@@ -27,7 +27,8 @@ interface PendingInstallation {
   readonly window: OrdinaryCloseWindow
   readonly requestId: string
   readonly deadline: number
-  readonly validate: () => Promise<void>
+  readonly validate: (signal: AbortSignal) => Promise<void>
+  readonly controller: AbortController
   readonly install: () => void
   readonly resolve: (installed: boolean) => void
   readonly timeout: ReturnType<typeof setTimeout>
@@ -52,7 +53,7 @@ export interface OrdinaryCloseCoordinator {
   readonly rendererUnavailable: (window: OrdinaryCloseWindow) => void
   readonly requestUpdateInstallation: (
     window: OrdinaryCloseWindow,
-    validate: () => Promise<void>,
+    validate: (signal: AbortSignal) => Promise<void>,
     install: () => void
   ) => Promise<boolean>
   readonly cancelUpdateInstallation: () => void
@@ -70,13 +71,14 @@ export function createOrdinaryCloseCoordinator({
   function cancelUpdateInstallation(): void {
     if (!installation) return
     clearTimeout(installation.timeout)
+    installation.controller.abort()
     installation.resolve(false)
     installation = undefined
   }
 
   function requestUpdateInstallation(
     window: OrdinaryCloseWindow,
-    validate: () => Promise<void>,
+    validate: (signal: AbortSignal) => Promise<void>,
     install: () => void
   ): Promise<boolean> {
     cancelUpdateInstallation()
@@ -90,6 +92,7 @@ export function createOrdinaryCloseCoordinator({
         window,
         requestId,
         validate,
+        controller: new AbortController(),
         install,
         resolve,
         timeout,
@@ -185,7 +188,7 @@ export function createOrdinaryCloseCoordinator({
         return
       }
       pending.deciding = true
-      void pending.validate().then(
+      void pending.validate(pending.controller.signal).then(
         () => {
           if (installation !== pending) return
           if (

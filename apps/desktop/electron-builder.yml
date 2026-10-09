@@ -38,7 +38,9 @@ mac:
       arch: [arm64]
     - target: zip
       arch: [arm64]
+  entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  hardenedRuntime: true
   extendInfo:
     NSCameraUsageDescription: Nevix AI requests access to your camera.
     NSMicrophoneUsageDescription: Nevix AI requests access to your microphone.

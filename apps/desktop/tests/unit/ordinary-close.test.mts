@@ -416,3 +416,32 @@ for (const reason of [
     assert.equal(installs, 0)
   })
 }
+
+test('cancel during approved preparation aborts its work and never grants a close bypass', async () => {
+  const { coordinator } = setup()
+  const window = new FakeWindow()
+  coordinator.protect(window)
+  let signal: AbortSignal | undefined
+  let finish: (() => void) | undefined
+  let installs = 0
+  const result = coordinator.requestUpdateInstallation(
+    window,
+    (approvalSignal) => {
+      signal = approvalSignal
+      return new Promise<void>((resolve) => {
+        finish = resolve
+      })
+    },
+    () => {
+      installs++
+    }
+  )
+  coordinator.decide(window, { requestId: 'request-1', decision: 'allow' })
+  assert.equal(signal?.aborted, false)
+  coordinator.cancelUpdateInstallation()
+  assert.equal(signal?.aborted, true)
+  finish?.()
+  assert.equal(await result, false)
+  assert.equal(installs, 0)
+  assert.equal(window.requestClose().defaultPrevented, true)
+})

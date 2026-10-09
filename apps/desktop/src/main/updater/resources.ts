@@ -9,6 +9,7 @@ export const updateTranslations = defineResourceTranslations({
     desktopUpgrade: '当前 Desktop 低于此实例要求，请升级至 {{minimum}} 或更新版本。',
     unavailable: '无法确认当前 Server 的运行版本，更新已暂缓。请检查服务器连接。',
     failed: '检查更新失败。请稍后重试，当前应用可以继续使用。',
+    restart: 'Mac 更新准备失败或超时。请先正常退出并重新打开应用，再检查更新；当前版本仍可使用。',
     trust: '发行信任尚未配置，无法验证官方更新。',
     ready: '更新 {{version}} 已下载，可以安装。',
     installDetail: '安装前将完成当前窗口的退出准备，然后重启应用。',
@@ -26,6 +27,8 @@ export const updateTranslations = defineResourceTranslations({
     unavailable:
       'The running Server version could not be verified. Update deferred. Check your server connection.',
     failed: 'Update check failed. Try again later; the current app remains available.',
+    restart:
+      'Mac update preparation failed or timed out. Quit and reopen the app before checking again; the current version remains available.',
     trust: 'Release trust is not configured. Official updates cannot be verified.',
     ready: 'Update {{version}} is downloaded and ready to install.',
     installDetail: 'Complete the current window’s exit preparation, then restart the app.',

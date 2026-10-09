@@ -1,6 +1,7 @@
 import {
   AppUpdater,
   NsisUpdater,
+  MacUpdater,
   Provider,
   type UpdateInfo,
   type ResolvedUpdateFileInfo
@@ -9,6 +10,49 @@ import type { ProviderRuntimeOptions } from 'electron-updater/out/providers/Prov
 import { assertUpdaterDescription, verifyArtifact } from './release-artifact'
 import { downloadReleaseArtifact } from './download'
 import type { Release } from './release-trust'
+import { autoUpdater as nativeUpdater } from 'electron'
+
+let nativeStagingFailed = false
+export class NativeUpdateStagingFailure extends Error {}
+
+// Squirrel staging happens after Window allow, before granting the one close bypass.
+export async function stageNativeUpdate(
+  update: DownloadedUpdate,
+  signal: AbortSignal
+): Promise<void> {
+  signal.throwIfAborted()
+  if (!(update.updater instanceof MacUpdater)) return
+  if (nativeStagingFailed)
+    throw new NativeUpdateStagingFailure('Restart required after native update staging failure')
+  await verifyArtifact(update.release, update.path)
+  signal.throwIfAborted()
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = (): void => {
+      clearTimeout(timeout)
+      nativeUpdater.removeListener('update-downloaded', ready)
+      nativeUpdater.removeListener('error', failed)
+    }
+    const ready = (): void => {
+      cleanup()
+      if (signal.aborted) reject(signal.reason)
+      else resolve()
+    }
+    const failed = (error: Error): void => {
+      cleanup()
+      // Native checks cannot be cancelled; do not consume a late result in another attempt.
+      nativeStagingFailed = true
+      reject(new NativeUpdateStagingFailure(error.message))
+    }
+    const timeout = setTimeout(() => failed(new Error('Native update staging timed out')), 45000)
+    nativeUpdater.once('update-downloaded', ready)
+    nativeUpdater.once('error', failed)
+    try {
+      nativeUpdater.checkForUpdates()
+    } catch (error) {
+      failed(error as Error)
+    }
+  })
+}
 
 export function configureSignedUpdater(updater: AppUpdater, release: Release): void {
   updater.autoDownload = false
@@ -56,8 +100,16 @@ export function configureSignedUpdater(updater: AppUpdater, release: Release): v
   }
   updater.setFeedURL({ provider: 'custom', updateProvider: SignedProvider })
 }
-export function createWindowsUpdater(release: Release): AppUpdater {
-  const updater = new NsisUpdater()
+export function createDesktopUpdater(release: Release): AppUpdater {
+  if (release.platform === 'darwin' && nativeStagingFailed)
+    throw new NativeUpdateStagingFailure('Restart required after native update staging failure')
+  const updater =
+    release.platform === 'win32' && release.arch === 'x64'
+      ? new NsisUpdater()
+      : release.platform === 'darwin' && release.arch === 'arm64'
+        ? new MacUpdater()
+        : undefined
+  if (!updater) throw new Error('Unsupported Desktop update platform')
   configureSignedUpdater(updater, release)
   return updater
 }
@@ -68,7 +120,7 @@ export interface DownloadedUpdate {
 }
 export async function downloadTrustedUpdate(
   release: Release,
-  createUpdater: (release: Release) => AppUpdater = createWindowsUpdater
+  createUpdater: (release: Release) => AppUpdater = createDesktopUpdater
 ): Promise<DownloadedUpdate> {
   const bound = Object.freeze({ ...release })
   const updater = createUpdater(bound)
