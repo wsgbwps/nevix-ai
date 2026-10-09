@@ -150,6 +150,7 @@ export function classifyPaths(paths) {
         "README.md",
         "skills-lock.json",
         "scripts/.gitkeep",
+        "scripts/instance-backup-and-restore.md",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
         "scripts/tests/deploy-stack.test.mjs",

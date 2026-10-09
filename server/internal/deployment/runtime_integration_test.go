@@ -115,6 +115,7 @@ func TestOfflineFirstInstallWithRealImages(t *testing.T) {
 			t.Fatalf("unexpected published port: %s", b)
 		}
 	}
+	exerciseCompleteInstanceBackup(t, dir, bundle, manifest, key, claim.SessionToken, invoke, docker)
 	// Immutable runtime references cannot silently pull when a required local image disappears.
 	invoke("down")
 	var images []struct {

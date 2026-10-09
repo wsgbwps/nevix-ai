@@ -13,6 +13,9 @@ import (
 
 // Run is the operator command boundary. The caller supplies its compiled publisher anchor.
 func Run(args []string, publicKey string) error {
+	if len(args) > 0 && (args[0] == "backup" || args[0] == "verify-backup" || args[0] == "restore") {
+		return backupCommand(args, publicKey)
+	}
 	if len(args) > 0 && args[0] == "pack" {
 		return pack(args[1:])
 	}

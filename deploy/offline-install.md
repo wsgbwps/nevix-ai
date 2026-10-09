@@ -63,3 +63,7 @@ Docker registry 访问。builder 只从 `git archive HEAD deploy server` 提取 
 输入、按固定 digest 拉取上游，并构建明确版本的 Server/证书工具；闭集归档不含
 源码/build context、真实 `.env`、签名私钥、客户数据库、TLS 私钥或主密钥。
 完整归档生成后，由 stable 发布流程签名 URL、大小与 SHA-512；builder 不签名。
+
+完整实例保护、隔离验证与明确恢复命令见
+[`instance-backup-and-restore`](../scripts/instance-backup-and-restore.md)。原始签名包/清单
+必须随版本保留，实例备份含客户秘密，不能放进公开成品仓库。
