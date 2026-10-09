@@ -472,6 +472,7 @@ export interface TaskScript {
   readonly resultBlobFailures?: number
   /** When set, submitTask rejects with this stable code. */
   readonly submitRejection?: string
+  readonly retryRejection?: string
   /** Number of initial task-list reads that fail with a network failure. */
   readonly failListReads?: number
   /** Task ids whose first count detail reads fail with a network failure. */
@@ -1068,6 +1069,9 @@ function installWorkbenchRuntime(options: RuntimeOptions): CreationRuntime {
     },
     retryTask: async (taskId, idempotencyKey) => {
       taskState.retryCalls.push({ taskId, idempotencyKey })
+      if (options.taskScript?.retryRejection !== undefined) {
+        return { outcome: 'request-rejected', code: options.taskScript.retryRejection }
+      }
       const task = taskState.tasks.find((entry) => entry.id === taskId)
       if (!task) return { outcome: 'request-rejected', code: 'not_found' }
       const retried: ScriptedTask = {

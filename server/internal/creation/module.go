@@ -153,6 +153,7 @@ func (f ObjectStorageVerifier) Verify(ctx context.Context, candidate domain.Obje
 
 // Module is the Creation Module's composition surface.
 type Module struct {
+	maintenance   *creationhttp.MaintenanceHandler
 	sessions      *creationhttp.SessionHandler
 	materials     *creationhttp.MaterialHandler
 	connection    *creationhttp.ProviderConnectionHandler
@@ -227,6 +228,7 @@ func NewModule(ctx context.Context, pool *pgxpool.Pool, cfg Config, deps Deps) (
 	worker := application.NewTaskWorker(taskRepos, materialRepos, connectionRepos, connectionService, objectStorageService, media.Prober{}, gateway, assetRepos, hub, tx, workerLeaseOwner())
 	uploadCleanup := application.NewReferenceMaterialUploadCleanupWorker(uploadRepos, materialRepos, objectStorageService, tx, now)
 	return &Module{
+		maintenance:   creationhttp.NewMaintenanceHandler(application.NewMaintenanceService(postgres.NewMaintenanceRepository(pool), tx)),
 		sessions:      creationhttp.NewSessionHandler(sessionService),
 		materials:     creationhttp.NewMaterialHandler(materialService),
 		connection:    creationhttp.NewProviderConnectionHandler(connectionService),

@@ -246,6 +246,10 @@ export function useCreationWorkbench(): {
     readonly contextKey: string
     readonly skipped: number
   } | null>(null)
+  const [retryMaintenanceIn, setRetryMaintenanceIn] = useState<{
+    readonly contextKey: string
+    readonly contextSwitchVersion: number
+  } | null>(null)
   // The Generation Task refresh module (ADR-0005); business actions only ask
   // it to reconcile after they complete.
   const taskRefresh = useTaskRefreshModule(ports)
@@ -769,18 +773,31 @@ export function useCreationWorkbench(): {
 
   const retryTaskById = useCallback(
     (taskId: string) => {
+      const contextKey = contextController?.getSnapshot().contextKey
+      const contextSwitchVersion = contextController?.contextSwitchVersion()
       setDismissalSkippedIn(null)
+      setRetryMaintenanceIn(null)
       void ports
         ?.retryTask(taskId, crypto.randomUUID())
         .then((result) => {
           if (result.outcome === 'succeeded') {
             setIndeterminateTaskId(null)
             taskRefreshRef.current.requestReconcile()
+          } else if (
+            result.outcome === 'request-rejected' &&
+            result.code === 'creation_maintenance' &&
+            mountedRef.current &&
+            contextKey !== undefined &&
+            contextSwitchVersion !== undefined &&
+            contextController?.getSnapshot().contextKey === contextKey &&
+            contextController.contextSwitchVersion() === contextSwitchVersion
+          ) {
+            setRetryMaintenanceIn({ contextKey, contextSwitchVersion })
           }
         })
         .catch(() => undefined)
     },
-    [ports]
+    [contextController, ports]
   )
 
   const confirmIndeterminateRedo = useCallback(
@@ -1297,8 +1314,14 @@ export function useCreationWorkbench(): {
           .recoverMaterialUploads()
           .finally(() => contextController?.reconcileCurrentContext())
       },
-      submitError: ctx.submitError,
+      submitError:
+        ctx.submitError ??
+        (retryMaintenanceIn?.contextKey === ctx.contextKey &&
+        retryMaintenanceIn.contextSwitchVersion === contextController?.contextSwitchVersion()
+          ? 'creation_maintenance'
+          : null),
       dismissSubmitError: () => {
+        setRetryMaintenanceIn(null)
         contextController?.acknowledgeActionFailure()
       }
     },

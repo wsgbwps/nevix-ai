@@ -53,14 +53,16 @@ const (
 	CodeUploadSizeMismatch  = "material_upload_size_mismatch"
 	CodeUploadMetaMismatch  = "material_upload_metadata_mismatch"
 
-	CodeIdempotencyConflict       = "idempotency_payload_conflict"
-	CodeAssetReferenceUnavailable = "asset_reference_unavailable"
-	CodeIntentNotReady            = "intent_not_ready"
-	CodeCapabilityStale           = "capability_stale"
-	CodeMediaUnavailable          = "media_unavailable"
-	CodeTaskNotTerminal           = "task_not_terminal"
-	CodeNoIncompleteSlots         = "no_incomplete_slots"
-	CodeTaskRetryNotAllowed       = "task_retry_not_allowed"
+	CodeIdempotencyConflict         = "idempotency_payload_conflict"
+	CodeAssetReferenceUnavailable   = "asset_reference_unavailable"
+	CodeIntentNotReady              = "intent_not_ready"
+	CodeCapabilityStale             = "capability_stale"
+	CodeMediaUnavailable            = "media_unavailable"
+	CodeTaskNotTerminal             = "task_not_terminal"
+	CodeNoIncompleteSlots           = "no_incomplete_slots"
+	CodeTaskRetryNotAllowed         = "task_retry_not_allowed"
+	CodeCreationMaintenance         = "creation_maintenance"
+	CodeMaintenanceRevisionConflict = "maintenance_revision_conflict"
 
 	CodeNotConfigured                   = "provider_connection_not_configured"
 	CodeConnectionExists                = "provider_connection_exists"
@@ -86,6 +88,10 @@ const (
 // to the logged 500 fallback.
 func MapError(err error) *Error {
 	switch {
+	case isError(err, domain.ErrCreationMaintenance):
+		return &Error{Status: http.StatusServiceUnavailable, Code: CodeCreationMaintenance, Message: "New generation tasks are paused for maintenance."}
+	case isError(err, domain.ErrMaintenanceRevisionConflict):
+		return &Error{Status: http.StatusConflict, Code: CodeMaintenanceRevisionConflict, Message: "Maintenance ownership or revision changed."}
 	case err == nil:
 		return nil
 	case isError(err, domain.ErrSessionNotFound), isError(err, domain.ErrMaterialNotFound),

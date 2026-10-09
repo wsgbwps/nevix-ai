@@ -19,7 +19,8 @@ const HISTORY_TRIGGER_PX = 240
 const submitFailureKeys = {
   invalid_request: 'gallery.submitFailureCodes.invalidRequest',
   capability_stale: 'gallery.submitFailureCodes.capabilityStale',
-  media_unavailable: 'gallery.submitFailureCodes.mediaUnavailable'
+  media_unavailable: 'gallery.submitFailureCodes.mediaUnavailable',
+  creation_maintenance: 'gallery.submitFailureCodes.creationMaintenance'
 } as const
 
 /**

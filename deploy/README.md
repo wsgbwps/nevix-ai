@@ -9,9 +9,10 @@
 本栈面向**固定公网 IP** 的单租户部署。Go、PostgreSQL 与管理端口
 只存在于 Docker internal network，宿主机唯一发布端口是 nginx 的 443；对象数据位于
 客户 IT 预置的唯一私有阿里云 OSS bucket，并通过 Server 推导的官方公网 endpoint
-访问，不作为 Compose service 或本地 volume 交付。所有上游镜像按 digest 钉扎。V1
-分发渠道即本仓库检出（镜像由部署机本地构建），正式镜像分发渠道推迟到打包分发
-阶段（ADR-0013）。
+访问，不作为 Compose service 或本地 volume 交付。所有上游镜像按 digest 钉扎。正式客户交付使用签名完整 Linux x64 归档，按
+[离线安装手册](offline-install.md) 验证、导入和安装；客户无需源码或公共 registry。
+本目录的 `docker-compose.yml` 保留厂商开发构建入口，正式运行资产是
+`runtime-compose.template.yaml` 经受信工具填入实际不可变镜像 ID 的结果（ADR-0026）。
 
 ## 1. 前置条件
 
@@ -26,7 +27,7 @@
 - 规划 pgdata（数据库）、tls（证书私钥，极小）与 secrets（Creation Credential
   Master Key，极小）三个本地持久化卷；对象数据不进入本地 volume。
 
-## 2. 首次部署
+## 2. 厂商源码开发启动（客户首次安装见离线安装手册）
 
 ```bash
 cd deploy
