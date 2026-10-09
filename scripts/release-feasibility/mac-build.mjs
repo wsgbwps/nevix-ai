@@ -16,7 +16,10 @@ import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 const repository = resolve(import.meta.dirname, "../..");
-const root = join(repository, ".scratch/340-release-feasibility/mac");
+const root = join(
+  repository,
+  ".scratch/340-release-feasibility/mac-library-validation",
+);
 const require = createRequire(join(repository, "apps/desktop/package.json"));
 
 if (process.argv[2] === "serve") {
@@ -25,7 +28,9 @@ if (process.argv[2] === "serve") {
       1,
     );
     if (
-      !/^latest-mac\.yml$|^Nevix-Experiment-0\.1\.34[12]-arm64\.zip$/.test(file)
+      !/^latest-mac\.yml$|^Nevix-Experiment-0\.1\.34[23]-arm64\.(?:zip|dmg)$/.test(
+        file,
+      )
     ) {
       response.writeHead(404).end();
       return;
@@ -63,6 +68,34 @@ if (process.argv[2] === "serve") {
   assert.equal(require("electron-builder/package.json").version, "26.15.3");
   assert.equal(require("electron/package.json").version, "39.8.10");
   await mkdir(root, { recursive: true });
+  const originalEntitlements = join(
+    repository,
+    "apps/desktop/build/entitlements.mac.plist",
+  );
+  const entitlements = join(root, "entitlements.EXPERIMENTAL.plist");
+  const readEntitlements = (file) =>
+    JSON.parse(
+      execFileSync("plutil", ["-convert", "json", "-o", "-", file], {
+        encoding: "utf8",
+      }),
+    );
+  const originalValues = readEntitlements(originalEntitlements);
+  assert.deepEqual(originalValues, {
+    "com.apple.security.cs.allow-jit": true,
+    "com.apple.security.cs.allow-unsigned-executable-memory": true,
+    "com.apple.security.cs.allow-dyld-environment-variables": true,
+  });
+  await copyFile(originalEntitlements, entitlements);
+  execFileSync("/usr/libexec/PlistBuddy", [
+    "-c",
+    "Add :com.apple.security.cs.disable-library-validation bool true",
+    entitlements,
+  ]);
+  assert.deepEqual(readEntitlements(entitlements), {
+    ...originalValues,
+    "com.apple.security.cs.disable-library-validation": true,
+  });
+  assert.deepEqual(readEntitlements(originalEntitlements), originalValues);
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   await writeFile(
     join(root, "release-public.pem"),
@@ -83,7 +116,7 @@ if (process.argv[2] === "serve") {
       ...original,
       keychain,
     ]);
-    for (const version of ["0.1.340", "0.1.341"]) {
+    for (const version of ["0.1.342", "0.1.343"]) {
       const project = join(root, version);
       await mkdir(project, { recursive: true });
       await writeFile(
@@ -172,10 +205,7 @@ if (process.argv[2] === "serve") {
               identityValidation: false,
               preAutoEntitlements: false,
               optionsForFile: () => ({
-                entitlements: join(
-                  repository,
-                  "apps/desktop/build/entitlements.mac.plist",
-                ),
+                entitlements,
                 hardenedRuntime: true,
                 timestamp: "none",
               }),
@@ -200,14 +230,14 @@ if (process.argv[2] === "serve") {
     ]);
   }
   await mkdir(join(root, "feed"), { recursive: true });
-  const filename = "Nevix-Experiment-0.1.341-arm64.zip";
+  const filename = "Nevix-Experiment-0.1.343-arm64.zip";
   await copyFile(
-    join(root, "0.1.341/dist", filename),
+    join(root, "0.1.343/dist", filename),
     join(root, "feed", filename),
   );
   const bytes = await readFile(join(root, "feed", filename));
   const payload = {
-    version: "0.1.341",
+    version: "0.1.343",
     channel: "stable",
     platform: "darwin",
     arch: "arm64",
@@ -238,7 +268,7 @@ if (process.argv[2] === "serve") {
     }),
   );
   assert.ok(
-    (await readdir(join(root, "0.1.340/dist"))).some((file) =>
+    (await readdir(join(root, "0.1.342/dist"))).some((file) =>
       file.endsWith(".dmg"),
     ),
   );

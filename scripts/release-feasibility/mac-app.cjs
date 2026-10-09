@@ -1,4 +1,4 @@
-// Experiment only: the packaged config confines state to this lab's scratch directory.
+// Experiment only: app/updater state is in scratch; native ShipIt uses a bundle-ID cache.
 const {
   app,
   BrowserWindow,
@@ -104,7 +104,7 @@ app.whenReady().then(async () => {
     report(`Squirrel 拒绝: ${error.message}`),
   );
   try {
-    if (app.getVersion() === "0.1.341") {
+    if (app.getVersion() === "0.1.343") {
       report(`已运行实验预期新版 ${app.getVersion()}`);
       return;
     }

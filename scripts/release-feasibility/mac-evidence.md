@@ -2,6 +2,8 @@
 
 **结果：FAIL / 阻断。不得据此接受 ADR-0026 或开始正式 updater 实现。**
 
+这是原 0.1.340/341 基线记录；后续获批的单 entitlement 实验见 [新实验证据](mac-library-validation-evidence.md)。下列复查命令描述当时版本，需使用本分支 `a47eb143` 的历史脚本；当前入口已改为新的隔离根和版本，不能用它覆盖原失败包。
+
 2026-10-09，在 macOS 26.6.2 (25G83)、Darwin 25.6.0、Apple Silicon arm64 上，使用项目锁定 Electron 39.8.10、electron-builder 26.15.3，以及仅在隔离实验中安装的 electron-updater 6.8.9。实验应用 `Nevix Release Experiment` 使用稳定 App ID `com.nevix.ai`，版本 `0.1.340` 与 `0.1.341`，不修改正式产品目前的 `com.electron.app` 打包配置。
 
 两个版本使用同一 RSA-2048 自签身份 `Nevix Release Experiment ONLY`，证书 SHA1 `6DF93BC868293C3E87E488E0B5B4EEFFDAAFD3A5`。私钥与临时 keychain 不进版本控制、不上传；未使用 Developer ID、ad-hoc 身份或生产发布密钥。Ed25519 发行私钥仅在构建进程内生成，用于签署本次 ZIP 的确切描述，不写入磁盘。更新源为本机 `http://127.0.0.1:13400/`，只在实验显式允许 loopback HTTP。
