@@ -316,9 +316,9 @@ func exerciseCompleteInstanceBackup(t *testing.T, dir, bundle, manifest, key, to
 	if status != 200 {
 		t.Fatalf("post backup business write: HTTP %d (response body withheld)", status)
 	}
-	status, _ = request("POST", "/identity/auth/logout", token, nil)
-	if status != 204 {
-		t.Fatalf("original session revoke %d", status)
+	status, b = request("POST", "/identity/auth/logout", token, map[string]string{})
+	if status != http.StatusOK || !bytes.Contains(b, []byte(`"status":"logged_out"`)) {
+		t.Fatalf("original session revoke: HTTP %d (response body withheld)", status)
 	}
 	status, b = request("POST", "/identity/auth/login", "", map[string]string{"email": "offline345@example.com", "password": "fixturePassword345!"})
 	var newer struct {
