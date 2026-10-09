@@ -339,3 +339,19 @@ func copyVolumeSnapshot(image, volume, stage, prefix string, optional bool) erro
 	}
 	return nil
 }
+
+// Both bytes and the newly created directory entry must survive a crash before replacement.
+func finishBackupArchive(f *os.File) error {
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	d, err := os.Open(filepath.Dir(f.Name()))
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}

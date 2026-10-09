@@ -215,7 +215,10 @@ func validateCurrentRuntime(o backupOptions, r verifiedRuntime) (string, error) 
 	if strings.TrimSpace(string(b)) != r.manifest.Version {
 		return "", errors.New("original release bundle must match installed current version")
 	}
-	current := filepath.Join(o.directory, "releases", r.manifest.Version)
+	return validateInstalledRuntime(o.directory, r)
+}
+func validateInstalledRuntime(directory string, r verifiedRuntime) (string, error) {
+	current := filepath.Join(directory, "releases", r.manifest.Version)
 	want, err := os.ReadFile(filepath.Join(r.directory, "compose.yaml"))
 	if err != nil {
 		return "", err
@@ -234,7 +237,7 @@ func validateCurrentRuntime(o backupOptions, r verifiedRuntime) (string, error) 
 			return "", errors.New("installed runtime config differs from verified release")
 		}
 	}
-	if err = checkBackupConfig(o.directory, current); err != nil {
+	if err = checkBackupConfig(directory, current); err != nil {
 		return "", err
 	}
 	return current, nil
@@ -313,13 +316,21 @@ func createBackup(o backupOptions, r verifiedRuntime) (retErr error) {
 		if e != nil {
 			return e
 		}
-		if e = rehearseBackup(stage, checked, r, o.client, nil); e != nil {
+		var baseline snapshotViews
+		if e = rehearseBackupSnapshot(stage, checked, r, o.client, nil, &baseline); e != nil {
 			return fmt.Errorf("backup is not proven recoverable: %w", e)
+		}
+		checked.Views = baseline.Configuration
+		if e = writeBackupMetadata(stage, checked); e != nil {
+			return e
+		}
+		if _, _, e = validateBackupStage(stage, r); e != nil {
+			return e
 		}
 		if e = archiveBackup(out, stage); e != nil {
 			return e
 		}
-		if e = out.Sync(); e != nil {
+		if e = finishBackupArchive(out); e != nil {
 			return e
 		}
 		accepted = true

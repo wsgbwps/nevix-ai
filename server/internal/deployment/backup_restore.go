@@ -67,7 +67,13 @@ func scratchRuntime(stage string, r verifiedRuntime, project string) (string, er
 	}
 	return directory, nil
 }
-func rehearseBackup(stage string, m backupMetadata, r verifiedRuntime, c *maintenanceClient, credentials []byte) (retErr error) {
+
+type snapshotViews struct{ Configuration, History map[string]publicView }
+
+func rehearseBackup(stage string, m backupMetadata, r verifiedRuntime, c *maintenanceClient, credentials []byte) error {
+	return rehearseBackupSnapshot(stage, m, r, c, credentials, nil)
+}
+func rehearseBackupSnapshot(stage string, m backupMetadata, r verifiedRuntime, c *maintenanceClient, credentials []byte, views *snapshotViews) (retErr error) {
 	id, err := operationID()
 	if err != nil {
 		return err
@@ -125,7 +131,22 @@ func rehearseBackup(stage string, m backupMetadata, r verifiedRuntime, c *mainte
 			return err
 		}
 	}
-	return verifyRestoredPublicState(&proof, m, r)
+	if views == nil {
+		return verifyRestoredPublicState(&proof, m, r)
+	}
+	if err = verifyRunningRelease(&proof, r); err != nil {
+		return err
+	}
+	state, err := proof.snapshot()
+	if err != nil || !reflect.DeepEqual(state, m.Maintenance) {
+		return errors.New("restored snapshot maintenance/task state differs from owned pause")
+	}
+	views.Configuration, err = captureViews(&proof)
+	if err != nil {
+		return err
+	}
+	views.History, err = captureUpgradeHistory(&proof)
+	return err
 }
 func restoreDatabase(directory, current, project, stage string) error {
 	for _, args := range [][]string{{"exec", "-T", "postgres", "dropdb", "-U", "postgres", "--maintenance-db=template1", "--force", "--if-exists", "postgres"}, {"exec", "-T", "postgres", "createdb", "-U", "postgres", "--maintenance-db=template1", "--template=template0", "postgres"}} {
@@ -279,7 +300,10 @@ func waitRunningRelease(c *maintenanceClient, r verifiedRuntime, timeout time.Du
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
-			return fmt.Errorf("running Server HTTPS version unavailable (HTTP %d): %w", status, err)
+			if err != nil {
+				return fmt.Errorf("running Server HTTPS version unavailable (HTTP %d): %w", status, err)
+			}
+			return fmt.Errorf("running Server HTTPS version unavailable (HTTP %d)", status)
 		}
 		var v struct {
 			Service    string `json:"service"`

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,6 +52,11 @@ func upgradeCommand(args []string, key string) (retErr error) {
 	if f.NArg() != 0 || o.directory == "" || o.bundle == "" || o.manifest == "" || (o.command == "upgrade" && (o.output == "" || *candidateBundle == "" || *candidateManifest == "")) || *token == "" || o.timeout <= 0 {
 		return errors.New("existing directory, original and candidate bundle/manifest, new backup, private Admin token and customer TLS pin required")
 	}
+	if o.command == "upgrade" {
+		if err := outsideInstanceBackup(o.directory, o.output); err != nil {
+			return err
+		}
+	}
 	c, err := newMaintenanceClient(*base, *pin, *token)
 	if err != nil {
 		return err
@@ -58,7 +64,7 @@ func upgradeCommand(args []string, key string) (retErr error) {
 	o.client = c
 	defer c.client.CloseIdleConnections()
 	if o.command == "recover-upgrade" {
-		return recoverUpgrade(o, key)
+		return recoverUpgrade(o, key, *candidateBundle, *candidateManifest)
 	}
 	candidate, cleanup, err := verifiedRuntimeArchive(*candidateBundle, *candidateManifest, key)
 	if err != nil {
@@ -194,10 +200,6 @@ func upgradeCommand(args []string, key string) (retErr error) {
 	if err = writeUpgradeJournal(o.directory, j); err != nil {
 		return err
 	}
-	history, err := captureUpgradeHistory(c)
-	if err != nil {
-		return err
-	}
 	views, err := captureViews(c)
 	if err != nil {
 		return err
@@ -225,13 +227,21 @@ func upgradeCommand(args []string, key string) (retErr error) {
 	if err != nil {
 		return err
 	}
-	if err = rehearseBackup(stage, meta, original, c, nil); err != nil {
+	var baseline snapshotViews
+	if err = rehearseBackupSnapshot(stage, meta, original, c, nil, &baseline); err != nil {
 		return fmt.Errorf("backup is not proven recoverable: %w", err)
+	}
+	meta.Views = baseline.Configuration
+	if err = writeBackupMetadata(stage, meta); err != nil {
+		return err
+	}
+	if _, meta, err = validateBackupStage(stage, original); err != nil {
+		return err
 	}
 	if err = archiveBackup(out, stage); err != nil {
 		return err
 	}
-	if err = out.Sync(); err != nil {
+	if err = finishBackupArchive(out); err != nil {
 		return err
 	}
 	accepted = true
@@ -261,7 +271,7 @@ func upgradeCommand(args []string, key string) (retErr error) {
 		return errors.New("candidate maintenance/drained task state differs from owned backup")
 	}
 	retainedHistory, err := captureUpgradeHistory(c)
-	if err != nil || !reflect.DeepEqual(history, retainedHistory) {
+	if err != nil || !reflect.DeepEqual(baseline.History, retainedHistory) {
 		return errors.New("candidate public User/Creation history differs from source snapshot")
 	}
 	retained, err := captureViews(c)
@@ -294,14 +304,19 @@ func upgradeCommand(args []string, key string) (retErr error) {
 	if err = replacePrivateFile(o.directory, "current", []byte(candidate.manifest.Version+"\n")); err != nil {
 		return err
 	}
+	j.Phase = "resume-intent"
+	if err = writeUpgradeJournal(o.directory, j); err != nil {
+		return err
+	}
 	if err = c.resume(pause); err != nil {
 		return errors.New("candidate verified but owned admission resume failed; journal retained")
 	}
 	j.Phase = "complete"
 	if err = writeUpgradeJournal(o.directory, j); err != nil {
-		fmt.Println("Upgrade succeeded; could not mark operation journal complete; retain it for operator inspection")
-	} else if err = os.Remove(filepath.Join(o.directory, "upgrade.json")); err != nil {
-		fmt.Println("Upgrade succeeded; completed operation journal retained for operator inspection")
+		return fmt.Errorf("admission resume completed but journal durability failed; reconcile non-destructively using recover-upgrade: %w", err)
+	}
+	if err = removeUpgradeJournal(o.directory); err != nil {
+		return err
 	}
 	fmt.Println("upgraded verified Nevix", original.manifest.Version, "to", candidate.manifest.Version, "; recoverable private backup retained at", backupPath)
 	return nil
@@ -390,7 +405,7 @@ func readUpgradeJournal(directory string) (upgradeJournal, error) {
 	}
 	return j, nil
 }
-func recoverUpgrade(o backupOptions, key string) error {
+func recoverUpgrade(o backupOptions, key, candidateBundle, candidateManifest string) error {
 	r, cleanup, err := verifiedBackupRuntime(o.bundle, o.manifest, key)
 	if err != nil {
 		return err
@@ -410,6 +425,12 @@ func recoverUpgrade(o backupOptions, key string) error {
 	j, err := readUpgradeJournal(o.directory)
 	if err != nil {
 		return err
+	}
+	if j.OriginalVersion != r.manifest.Version {
+		return errors.New("original release differs from operation journal")
+	}
+	if j.Phase == "verified" || j.Phase == "resume-intent" || j.Phase == "complete" {
+		return reconcileVerifiedUpgrade(o, key, j, candidateBundle, candidateManifest)
 	}
 	if j.OriginalVersion != r.manifest.Version || (j.Phase != "pause-intent" && j.Phase != "paused") {
 		return errors.New("replacement may have started; recover-upgrade refuses image-only rollback; explicitly restore the retained backup and original bundle")
@@ -467,4 +488,129 @@ func captureUpgradeHistory(c *maintenanceClient) (map[string]publicView, error) 
 		views[path] = publicView{status, hashBytes(canonical)}
 	}
 	return views, nil
+}
+
+func outsideInstanceBackup(directory, backup string) error {
+	instance, err := filepath.Abs(directory)
+	if err != nil {
+		return err
+	}
+	instance, err = filepath.EvalSymlinks(instance)
+	if err != nil {
+		return err
+	}
+	path, err := filepath.Abs(backup)
+	if err != nil {
+		return err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(instance, filepath.Join(parent, filepath.Base(path)))
+	if err != nil {
+		return err
+	}
+	if relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return errors.New("backup must be outside instance directory, including aliases")
+	}
+	return nil
+}
+
+func removeUpgradeJournal(directory string) error {
+	if err := os.Remove(filepath.Join(directory, "upgrade.json")); err != nil {
+		return err
+	}
+	d, err := os.Open(directory)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+func reconcileVerifiedUpgrade(o backupOptions, key string, j upgradeJournal, bundle, manifest string) (retErr error) {
+	if bundle == "" || manifest == "" {
+		return errors.New("verified upgrade reconciliation requires its signed candidate --bundle and --manifest")
+	}
+	candidate, cleanup, err := verifiedBackupRuntime(bundle, manifest, key)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if candidate.manifest.Version != j.CandidateVersion {
+		return errors.New("candidate differs from verified upgrade journal")
+	}
+	current, err := validateInstalledRuntime(o.directory, candidate)
+	if err != nil {
+		return err
+	}
+	pointer, err := os.ReadFile(filepath.Join(o.directory, "current"))
+	if err != nil {
+		return err
+	}
+	if v := strings.TrimSpace(string(pointer)); v != j.CandidateVersion && v != j.OriginalVersion {
+		return errors.New("installed current pointer changed since upgrade")
+	}
+	// A durable verified/resume-intent phase proves replacement validation finished. Reconcile
+	// that exact transition without restoring old data or discarding legitimate post-resume writes.
+	defer func() {
+		if retErr != nil {
+			_, e := invokeCompose(o.directory, current, "nevix", "stop", "server", "nginx")
+			retErr = errors.Join(retErr, fmt.Errorf("verified upgrade reconciliation failed; Server/edge stopped, journal retained (stop result: %v)", e))
+		}
+	}()
+	if _, err = invokeCompose(o.directory, current, "nevix", "up", "--detach", "--no-deps", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "180", "server"); err != nil {
+		return err
+	}
+	if _, err = invokeCompose(o.directory, current, "nevix", "up", "--detach", "--no-deps", "--no-build", "--pull", "never", "nginx"); err != nil {
+		return err
+	}
+	if _, err = invokeCompose(o.directory, current, "nevix", "restart", "nginx"); err != nil {
+		return err
+	}
+	if err = waitRunningRelease(o.client, candidate, 20*time.Second); err != nil {
+		return err
+	}
+	state, err := o.client.snapshot()
+	if err != nil {
+		return err
+	}
+	if state.Owner == nil || *state.Owner != j.Owner || (state.Paused && state.Revision != j.Revision) || (!state.Paused && state.Revision != j.Revision+1) {
+		return errors.New("verified upgrade maintenance belongs to another transition")
+	}
+	stage, err := os.MkdirTemp("", "nevix-upgrade-reconcile-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+	if err = copyVolumeSnapshot(candidate.identities["cert-init"], "nevix_secrets", stage, "secrets", true); err != nil {
+		return err
+	}
+	if err = verifyRestoredCredentials(o.directory, current, "nevix", stage); err != nil {
+		return err
+	}
+	if err = replacePrivateFile(o.directory, "current", []byte(j.CandidateVersion+"\n")); err != nil {
+		return err
+	}
+	if state.Paused {
+		if !state.Drained || state.NonTerminal != 0 {
+			return errors.New("verified upgrade unexpectedly has nonterminal tasks while paused")
+		}
+		j.Phase = "resume-intent"
+		if err = writeUpgradeJournal(o.directory, j); err != nil {
+			return err
+		}
+		if err = o.client.resume(state); err != nil {
+			return err
+		}
+	}
+	j.Phase = "complete"
+	if err = writeUpgradeJournal(o.directory, j); err != nil {
+		return err
+	}
+	if err = removeUpgradeJournal(o.directory); err != nil {
+		return err
+	}
+	fmt.Println("reconciled verified Nevix", j.CandidateVersion, "upgrade without database restore; current business writes retained")
+	return nil
 }
