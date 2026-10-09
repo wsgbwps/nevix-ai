@@ -92,6 +92,51 @@ function draftRecord(page: Page, key: string): Promise<LocalDraftRecord | null> 
   )
 }
 
+test('maintenance retry rejection uses the existing localized notice and stays in its context', async ({
+  mount,
+  page
+}) => {
+  const task: ScriptedTask = {
+    id: 'dddddddd-0000-4000-8000-000000003346',
+    sessionId: scriptedSessionId,
+    status: 'failed',
+    mediaType: 'image',
+    slotCount: 1,
+    snapshot: null,
+    cancelRequested: false,
+    terminalCause: null,
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-01T00:00:00Z',
+    terminalAt: '2026-09-01T00:00:00Z',
+    slots: [
+      {
+        index: 0,
+        status: 'failed',
+        failureReason: 'temporarily_unavailable',
+        retryable: true,
+        result: null
+      }
+    ]
+  }
+  await mount(
+    <CreationWorkbenchStory
+      taskScript={{ tasks: [task], retryRejection: 'creation_maintenance' }}
+    />
+  )
+  await selectFirstSession(page)
+  await page.getByTestId(`task-more-${task.id}`).click()
+  await page.getByTestId(`task-retry-${task.id}`).click()
+  await expect(page.getByTestId('gallery-submit-error')).toContainText(
+    'The instance is under maintenance.'
+  )
+  await page.evaluate(() => window.__creationDeckTest?.changeLanguage('zh-CN'))
+  await expect(page.getByTestId('gallery-submit-error')).toContainText('实例正在维护')
+  await page.getByTestId('session-new').click()
+  await expect(page.getByTestId('gallery-submit-error')).toHaveCount(0)
+  await selectFirstSession(page)
+  await expect(page.getByTestId('gallery-submit-error')).toHaveCount(0)
+})
+
 function materialIds(page: Page, sessionId: string): Promise<string[]> {
   return page.evaluate((id) => window.__creationDeckTest?.materialIds(id) ?? [], sessionId)
 }

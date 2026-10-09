@@ -34,6 +34,8 @@ export const AUDIT_ACTION_KEYS = [
   'object_storage_connection_credential_rotated',
   'object_storage_connection_deleted',
   'object_storage_connection_credential_recovered',
+  'creation_maintenance_paused',
+  'creation_maintenance_resumed',
   'media_asset_restricted',
   'media_asset_restriction_released',
   'team_publication_restricted',
