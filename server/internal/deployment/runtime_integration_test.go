@@ -101,7 +101,7 @@ func TestOfflineFirstInstallWithRealImages(t *testing.T) {
 	if json.Unmarshal(edge("/identity/setup/status", ""), &status) != nil || !status.Initialized {
 		t.Fatal("PostgreSQL user did not survive restart")
 	}
-	b = edge("/identity/login", `{"email":"offline345@example.com","password":"fixturePassword345!"}`)
+	b = edge("/identity/auth/login", `{"email":"offline345@example.com","password":"fixturePassword345!"}`)
 	if json.Unmarshal(b, &claim) != nil || claim.SessionToken == "" || claim.User.Role != "admin" {
 		t.Fatal("login after restart failed")
 	}
