@@ -72,3 +72,5 @@
 精确字节与版本合同见 [release-v1](../../contracts/release-v1.md)。Main updater 独占官方源、验签与原生交互，Window 独占用户退出准备；Release Module 拥有运行版本及 Admin 发行提示，不获安装权限。Creation Module 拥有持久任务准入暂停与排空事实。运维工具通过受 Admin 授权的维护 HTTP seam 请求这些事实，不得直接写业务表；运行 credential 不取得 DDL 权限，迁移继续独立 DDL credential、锁和 up-only。后续维护命令实现前不得用 Docker socket/匿名 HTTP 绕过授权。
 
 运维可信验证/维护客户端以 Linux amd64 Go 二进制交付，源入口放 `server/cmd/` 以复用 `internal/release`，发布/运行资产仍归 `deploy/` 与 `scripts/`，客户主机仅需 Docker/Compose，不额外要求 Node/Go/Python/OpenSSL。Creation 暂停与排空成功后停止 Server，再一致备份数据库、主密钥、TLS 与配置；停机是本版认可的维护形态。
+
+运维命令入口固定为 `server/cmd/nevix-deploy`；其具体归档验证、镜像导入与 Compose 调用放 `server/internal/deployment`，这是 `deploy/` 的 Go 运维实现责任，不是新的业务 Module，也不装入运行中的 Server。验签复用 `internal/release`，业务维护只经 Admin HTTP 合同，Server 不取得 Docker socket。

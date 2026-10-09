@@ -1,0 +1,120 @@
+# Signed runtime template; nevix-deploy fills verified local immutable IDs.
+name: nevix
+
+services:
+  cert-init:
+    platform: linux/amd64
+    pull_policy: never
+    image: @CERT_INIT_IMAGE@
+    environment:
+      NEVIX_PUBLIC_IP: ${NEVIX_PUBLIC_IP:?set the deployment's fixed public IP in deploy/.env}
+      CERT_FORCE_NEW: ${CERT_FORCE_NEW:-false}
+    volumes:
+      - tls:/etc/nginx/tls
+    networks:
+      - internal
+    restart: "no"
+
+  # Daily loop keeping the <90-day certificate expiry warning visible in
+  # operations logs; same image as cert-init, read-only view of the volume.
+  cert-watch:
+    platform: linux/amd64
+    pull_policy: never
+    image: @CERT_INIT_IMAGE@
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+    environment:
+      CERT_MODE: watch
+    volumes:
+      - tls:/etc/nginx/tls:ro
+    networks:
+      - internal
+    restart: unless-stopped
+
+  postgres:
+    platform: linux/amd64
+    pull_policy: never
+    image: @POSTGRES_IMAGE@
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set the PostgreSQL superuser password in deploy/.env}
+      NEVIX_IDENTITY_APP_PASSWORD: ${NEVIX_IDENTITY_APP_PASSWORD:?set the identity_app password in deploy/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # First-boot provisioning of the identity_app credential; the migrations
+      # create the role without a password, deployment owns credentials.
+      - ./postgres/init-identity-app.sh:/docker-entrypoint-initdb.d/00-init-identity-app.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks:
+      - internal
+    restart: unless-stopped
+
+  server:
+    platform: linux/amd64
+    pull_policy: never
+    image: @SERVER_IMAGE@
+    environment:
+      DATABASE_URL: postgresql://identity_app:${NEVIX_IDENTITY_APP_PASSWORD:?}@postgres:5432/postgres?sslmode=disable
+      MIGRATION_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/postgres?sslmode=disable
+      NEVIX_SETUP_CODE_REQUIRED: ${NEVIX_SETUP_CODE_REQUIRED:-true}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-null}
+      # Creation Credential Master Key (ADR-0016 local AEAD):
+      # the out-of-database secrets volume; 0700/0600 discipline is enforced
+      # by the server, and the volume belongs in the documented backup set
+      # together with pgdata and tls materials (ADR-0013).
+      NEVIX_CREATION_SECRETS_DIR: /var/lib/nevix/secrets
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - secrets:/var/lib/nevix/secrets
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - internal
+    restart: unless-stopped
+
+  nginx:
+    platform: linux/amd64
+    pull_policy: never
+    image: @NGINX_IMAGE@
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - tls:/etc/nginx/tls:ro
+    networks:
+      - internal
+    restart: unless-stopped
+    # Hardened edge: read-only root filesystem with only the cache and pid
+    # directories writable (nginx still starts its master as root because it
+    # binds the privileged 443).
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: nevix_pgdata
+  tls:
+    name: nevix_tls
+  secrets:
+    name: nevix_secrets
