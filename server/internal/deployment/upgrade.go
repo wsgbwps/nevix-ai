@@ -316,7 +316,7 @@ func upgradeCommand(args []string, key string) (retErr error) {
 		return fmt.Errorf("admission resume completed but journal durability failed; reconcile non-destructively using recover-upgrade: %w", err)
 	}
 	if err = removeUpgradeJournal(o.directory); err != nil {
-		return err
+		fmt.Println("Verified upgrade completed; journal cleanup failed; an absent or completed journal is safe for this exact resumed transition")
 	}
 	fmt.Println("upgraded verified Nevix", original.manifest.Version, "to", candidate.manifest.Version, "; recoverable private backup retained at", backupPath)
 	return nil
@@ -507,6 +507,22 @@ func outsideInstanceBackup(directory, backup string) error {
 	if err != nil {
 		return err
 	}
+	instanceInfo, err := os.Stat(instance)
+	if err != nil {
+		return err
+	}
+	for ancestor := parent; ; ancestor = filepath.Dir(ancestor) {
+		info, e := os.Stat(ancestor)
+		if e != nil {
+			return e
+		}
+		if os.SameFile(instanceInfo, info) {
+			return errors.New("backup must be outside instance directory, including filesystem aliases")
+		}
+		if filepath.Dir(ancestor) == ancestor {
+			break
+		}
+	}
 	relative, err := filepath.Rel(instance, filepath.Join(parent, filepath.Base(path)))
 	if err != nil {
 		return err
@@ -609,7 +625,7 @@ func reconcileVerifiedUpgrade(o backupOptions, key string, j upgradeJournal, bun
 		return err
 	}
 	if err = removeUpgradeJournal(o.directory); err != nil {
-		return err
+		fmt.Println("Verified upgrade completed; journal cleanup failed; an absent or completed journal is safe for this exact resumed transition")
 	}
 	fmt.Println("reconciled verified Nevix", j.CandidateVersion, "upgrade without database restore; current business writes retained")
 	return nil

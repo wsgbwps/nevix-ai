@@ -211,8 +211,8 @@ func exerciseCompleteInstanceBackup(t *testing.T, dir, bundle, manifest, key, to
 			wrongPin[i] = strings.Repeat("a", 64)
 		}
 	}
-	if err := deployment.Run(wrongPin, key); err == nil {
-		t.Fatal("changed customer TLS pin accepted")
+	if err := deployment.Run(wrongPin, key); err == nil || !strings.Contains(err.Error(), "tls-pin") {
+		t.Fatalf("changed customer TLS pin must identify trust failure without private transport bytes: %v", err)
 	}
 	assertOpen()
 	if err := os.WriteFile(tokenFile, []byte("invalid-session"), 0600); err != nil {

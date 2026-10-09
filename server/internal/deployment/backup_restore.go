@@ -57,7 +57,8 @@ func scratchRuntime(stage string, r verifiedRuntime, project string) (string, er
 	if err != nil {
 		return fail(err)
 	}
-	text := strings.ReplaceAll(string(b), `"443:443"`, `"127.0.0.1::443"`)
+	// Internal-only bridges do not publish host ports; native Linux can dial their private IP.
+	text := strings.ReplaceAll(string(b), "    ports:\n      - \"443:443\"\n", "")
 	for _, suffix := range []string{"pgdata", "tls", "secrets"} {
 		text = strings.ReplaceAll(text, "name: nevix_"+suffix, "name: "+project+"_"+suffix)
 	}
@@ -108,14 +109,25 @@ func rehearseBackupSnapshot(stage string, m backupMetadata, r verifiedRuntime, c
 	if _, err = invokeCompose(directory, directory, project, "up", "--detach", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "180"); err != nil {
 		return errors.New("isolated restored Server/TLS startup failed")
 	}
-	port, err := invokeCompose(directory, directory, project, "port", "nginx", "443")
+	container, err := invokeCompose(directory, directory, project, "ps", "--quiet", "nginx")
 	if err != nil {
 		return err
 	}
-	address := strings.TrimSpace(string(port))
-	if _, _, err = net.SplitHostPort(address); err != nil {
-		return errors.New("isolated proof has no loopback HTTPS port")
+	networks, err := docker("inspect", "--format", "{{json .NetworkSettings.Networks}}", strings.TrimSpace(string(container)))
+	if err != nil {
+		return err
 	}
+	var endpoints map[string]struct {
+		IPAddress string `json:"IPAddress"`
+	}
+	if json.Unmarshal(networks, &endpoints) != nil || len(endpoints) != 1 {
+		return errors.New("isolated proof must have only its owned internal network")
+	}
+	ip := net.ParseIP(endpoints[project+"_internal"].IPAddress)
+	if ip == nil || !ip.IsPrivate() {
+		return errors.New("isolated proof has no private address on its owned internal network")
+	}
+	address := net.JoinHostPort(ip.String(), "443")
 	proof := *c
 	transport := c.client.Transport.(*http.Transport).Clone()
 	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {

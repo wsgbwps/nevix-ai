@@ -3,7 +3,9 @@ package deployment_test
 import (
 	"github.com/nevix-ai/server/internal/deployment"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -47,5 +49,35 @@ func TestUpgradeRejectsBackupInsideInstanceIncludingAliasesBeforeMutation(t *tes
 		if err != nil || len(entries) != 0 {
 			t.Fatal("unsafe backup path mutated instance")
 		}
+	}
+}
+
+// The privileged bind mount exists only inside a fresh private mount namespace in native CI.
+func TestUpgradeRejectsBindMountedBackupAlias(t *testing.T) {
+	if instance := os.Getenv("NEVIX_DEPLOY_BIND_INSTANCE"); instance != "" {
+		alias := os.Getenv("NEVIX_DEPLOY_BIND_ALIAS")
+		err := deployment.Run([]string{"upgrade", "--directory", instance, "--original-bundle", "missing.tar.gz", "--original-manifest", "missing.json", "--bundle", "missing.tar.gz", "--manifest", "missing.json", "--backup", filepath.Join(alias, "upgrade.json"), "--token-file", "missing.session"}, "")
+		if err == nil || !strings.Contains(err.Error(), "backup must be outside instance") {
+			t.Fatalf("bind-mounted alias accepted before mutation: %v", err)
+		}
+		entries, err := os.ReadDir(instance)
+		if err != nil || len(entries) != 0 {
+			t.Fatal("bind-mounted backup rejection mutated instance")
+		}
+		return
+	}
+	if os.Getenv("NEVIX_DEPLOY_INTEGRATION_REQUESTED") != "1" {
+		t.Skip("native isolated mount namespace required")
+	}
+	instance, alias := t.TempDir(), t.TempDir()
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `mount --bind "$1" "$2"; exec setpriv --reuid "$3" --regid "$4" --init-groups "$5" -test.run '^TestUpgradeRejectsBindMountedBackupAlias$' -test.v -test.count=1`
+	cmd := exec.Command("sudo", "--preserve-env=NEVIX_DEPLOY_BIND_INSTANCE,NEVIX_DEPLOY_BIND_ALIAS", "unshare", "--mount", "--propagation", "private", "sh", "-ec", script, "bind-alias", instance, alias, strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid()), binary)
+	cmd.Env = append(os.Environ(), "NEVIX_DEPLOY_BIND_INSTANCE="+instance, "NEVIX_DEPLOY_BIND_ALIAS="+alias)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("isolated native bind alias regression: %v %s", err, out)
 	}
 }

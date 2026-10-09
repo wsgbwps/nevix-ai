@@ -94,3 +94,8 @@ Server/edge，整体恢复数据库及角色密码、主密钥、TLS/.env，运�
 密文；随后验证未配置密钥、完整备份、损坏密钥失败恢复准入、其他维护 owner 保持、
 历史 session 吊销后重新认证、无确认不破坏业务，以及明确恢复后数据/TLS/配置一致。
 实际平台结果记录在 `deploy/runtime-evidence.md`；尚未通过的 CI 不算交付验收。
+
+隔离 proof 不发布端口；Linux 运维进程通过其唯一 internal bridge 的 Nginx 私有 IP 验收，
+HTTPS URL 的原客户主机名、证书指纹和有效期仍严格核对。Docker normal internal bridge 的
+宿主可达形状见[官方说明](https://docs.docker.com/engine/network/port-publishing/#gateway-modes)，
+不是关闭网络隔离或跳过证书检查。传输错误只报告固定类别，不输出私密 subprocess/HTTP 字节。

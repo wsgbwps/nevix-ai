@@ -39,6 +39,7 @@ func TestOfflineFirstInstallWithRealImages(t *testing.T) {
 	if b := docker("image", "ls", "--quiet"); len(bytes.TrimSpace(b)) != 0 {
 		t.Fatalf("acceptance daemon must have an empty image cache, actual image IDs: %s", b)
 	}
+	TestUpgradeRejectsBindMountedBackupAlias(t)
 	t.Logf("Docker %s Compose %s", docker("version", "--format", "{{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}"), docker("compose", "version", "--short"))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

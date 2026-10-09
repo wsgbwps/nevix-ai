@@ -11,11 +11,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"time"
+)
+
+var (
+	errCustomerPin             = errors.New("customer TLS fingerprint changed")
+	errCustomerHostname        = errors.New("customer TLS hostname mismatch")
+	errCustomerCertificateTime = errors.New("customer TLS certificate expired or not yet valid")
 )
 
 type maintenanceSnapshot struct {
@@ -70,14 +78,14 @@ func newMaintenanceClient(base, pin, tokenFile string) (*maintenanceClient, erro
 		cert := cs.PeerCertificates[0]
 		sum := sha256.Sum256(cert.Raw)
 		if hex.EncodeToString(sum[:]) != pin {
-			return errors.New("customer TLS fingerprint changed")
+			return errCustomerPin
 		}
 		if err := cert.VerifyHostname(u.Hostname()); err != nil {
-			return errors.New("customer TLS hostname mismatch")
+			return errCustomerHostname
 		}
 		now := time.Now()
 		if now.Before(cert.NotBefore) || !now.Before(cert.NotAfter) {
-			return errors.New("customer TLS certificate expired or not yet valid")
+			return errCustomerCertificateTime
 		}
 		return nil
 	}}}
@@ -101,7 +109,25 @@ func (c *maintenanceClient) request(method, path string, body any) ([]byte, int,
 	req.Header.Set("Content-Type", "application/json")
 	res, err := c.client.Do(req)
 	if err != nil {
-		return nil, 0, errors.New("customer HTTPS request failed (check TLS pin, endpoint and connectivity)")
+		category := "transport"
+		switch {
+		case errors.Is(err, errCustomerPin):
+			category = "tls-pin"
+		case errors.Is(err, errCustomerHostname):
+			category = "tls-hostname"
+		case errors.Is(err, errCustomerCertificateTime):
+			category = "tls-validity"
+		case errors.Is(err, syscall.ECONNREFUSED):
+			category = "connection-refused"
+		case errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH):
+			category = "route-unreachable"
+		default:
+			var networkError net.Error
+			if errors.As(err, &networkError) && networkError.Timeout() {
+				category = "timeout"
+			}
+		}
+		return nil, 0, fmt.Errorf("customer HTTPS request failed (%s); private transport details withheld", category)
 	}
 	defer res.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(res.Body, 2<<20+1))
