@@ -117,6 +117,9 @@ func rehearseBackup(stage string, m backupMetadata, r verifiedRuntime, c *mainte
 	}
 	proof.client = &http.Client{Transport: transport, Timeout: c.client.Timeout, CheckRedirect: c.client.CheckRedirect}
 	defer proof.client.CloseIdleConnections()
+	if err = waitRunningRelease(&proof, r, 20*time.Second); err != nil {
+		return fmt.Errorf("isolated restored HTTPS readiness failed: %w", err)
+	}
 	if len(credentials) > 0 {
 		if err = proof.authenticate(credentials); err != nil {
 			return err
