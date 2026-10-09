@@ -32,7 +32,7 @@ func TestOfflineFirstInstallWithRealImages(t *testing.T) {
 		cmd.Stderr = &stderr
 		b, err := cmd.Output()
 		if err != nil {
-			t.Fatalf("docker %s: %v %s", args[0], err, stderr.Bytes())
+			t.Fatalf("docker %s: %v (private subprocess output withheld)", args[0], err)
 		}
 		return b
 	}
@@ -87,7 +87,7 @@ func TestOfflineFirstInstallWithRealImages(t *testing.T) {
 	}
 	b := edge("/identity/setup/initialize", `{"email":"offline345@example.com","password":"fixturePassword345!"}`)
 	if json.Unmarshal(b, &claim) != nil || claim.SessionToken == "" || claim.User.Role != "admin" {
-		t.Fatalf("first claim through public HTTPS contract failed: %s", b)
+		t.Fatal("first claim through public HTTPS contract failed (response body withheld)")
 	}
 	b = invoke("exec", "-T", "cert-watch", "sh", "-c", "openssl s_client -connect nginx:443 -alpn h2 </dev/null 2>&1")
 	if !bytes.Contains(b, []byte("ALPN protocol: h2")) {

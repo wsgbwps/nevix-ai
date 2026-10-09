@@ -201,7 +201,7 @@ func exerciseCompleteInstanceBackup(t *testing.T, dir, bundle, manifest, key, to
 		t.Helper()
 		status, b := request("GET", "/creation/maintenance", token, nil)
 		if status != 200 || !bytes.Contains(b, []byte(`"paused":false`)) {
-			t.Fatalf("backup did not recover own admission: %d %s", status, b)
+			t.Fatalf("backup did not recover own admission:: HTTP %d (response body withheld)", status)
 		}
 	}
 	// Trust and authorization failures must leave the existing business instance open.
@@ -255,19 +255,21 @@ func exerciseCompleteInstanceBackup(t *testing.T, dir, bundle, manifest, key, to
 	docker("cp", filepath.Join(fixture, "provider.pem"), serverID+":/etc/ssl/certs/isolated-provider-fixture.pem")
 	status, b := request("POST", "/identity/admin/reauth/proofs", token, map[string]string{"action": "provider_connection.create", "password": "fixturePassword345!"})
 	var proof struct {
-		Proof string `json:"proof"`
+		Proof     string    `json:"proof"`
+		Action    string    `json:"action"`
+		ExpiresAt time.Time `json:"expires_at"`
 	}
-	if status != 201 || json.Unmarshal(b, &proof) != nil || proof.Proof == "" {
-		t.Fatalf("real reauth: %d %s", status, b)
+	if status != http.StatusOK || json.Unmarshal(b, &proof) != nil || proof.Proof == "" || proof.Action != "provider_connection.create" || !proof.ExpiresAt.After(time.Now()) {
+		t.Fatalf("real reauth:: HTTP %d (response body withheld)", status)
 	}
 	status, b = request("POST", "/creation/provider-connection", token, map[string]string{"proof": proof.Proof, "provider_key": "fixture-provider-key-347"})
 	if status != 201 {
-		t.Fatalf("real encrypted provider configure: %d %s", status, b)
+		t.Fatalf("real encrypted provider configure:: HTTP %d (response body withheld)", status)
 	}
 	before := invoke("exec", "-T", "cert-watch", "openssl", "x509", "-in", "/etc/nginx/tls/server.pem", "-noout", "-fingerprint", "-sha256")
 	status, b = request("PATCH", "/identity/users/me", token, map[string]string{"display_name": "Backed up business identity"})
 	if status != 200 {
-		t.Fatalf("business fixture %d %s", status, b)
+		t.Fatalf("business fixture: HTTP %d (response body withheld)", status)
 	}
 	output := filepath.Join(private, "complete.tar.gz")
 	if err = deployment.Run(backupArgs(output), key); err != nil {
@@ -312,7 +314,7 @@ func exerciseCompleteInstanceBackup(t *testing.T, dir, bundle, manifest, key, to
 	// New writes and sessions disappear on explicit restore; recovery authenticates a fresh session.
 	status, b = request("PATCH", "/identity/users/me", token, map[string]string{"display_name": "Post-backup write to discard"})
 	if status != 200 {
-		t.Fatalf("post backup business write %d %s", status, b)
+		t.Fatalf("post backup business write: HTTP %d (response body withheld)", status)
 	}
 	status, _ = request("POST", "/identity/auth/logout", token, nil)
 	if status != 204 {

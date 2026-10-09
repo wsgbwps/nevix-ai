@@ -73,7 +73,7 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 		Token string `json:"token"`
 	}
 	if status != 200 || json.Unmarshal(b, &session) != nil || session.Token == "" {
-		t.Fatalf("upgrade real login %d %s", status, b)
+		t.Fatalf("upgrade real login: HTTP %d (response body withheld)", status)
 	}
 	token := session.Token
 	private := t.TempDir()
@@ -119,11 +119,11 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 		t.Helper()
 		s, data := request("GET", "/creation/maintenance", token, nil)
 		if s != 200 || !bytes.Contains(data, []byte(`"paused":false`)) {
-			t.Fatalf("pre-replacement failure did not recover owned pause: %d %s", s, data)
+			t.Fatalf("pre-replacement failure did not recover owned pause:: HTTP %d (response body withheld)", s)
 		}
 		s, data = request("GET", "/release/version", token, nil)
 		if s != 200 || !bytes.Contains(data, []byte(`"version":"`+version+`"`)) {
-			t.Fatalf("source release changed before replacement: %d %s", s, data)
+			t.Fatalf("source release changed before replacement:: HTTP %d (response body withheld)", s)
 		}
 	}
 	// Real private key damage aborts backup before replacement; source runtime must resume.
@@ -160,14 +160,16 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	invoke("restart", "nginx")
 	status, b = request("POST", "/identity/admin/reauth/proofs", token, map[string]string{"action": "object_storage_connection.create", "password": "fixturePassword345!"})
 	var proof struct {
-		Proof string `json:"proof"`
+		Proof     string    `json:"proof"`
+		Action    string    `json:"action"`
+		ExpiresAt time.Time `json:"expires_at"`
 	}
-	if status != 201 || json.Unmarshal(b, &proof) != nil {
-		t.Fatalf("storage reauth %d %s", status, b)
+	if status != http.StatusOK || json.Unmarshal(b, &proof) != nil || proof.Proof == "" || proof.Action != "object_storage_connection.create" || !proof.ExpiresAt.After(time.Now()) {
+		t.Fatalf("storage reauth: HTTP %d (response body withheld)", status)
 	}
 	status, b = request("POST", "/creation/object-storage-connection", token, map[string]string{"proof": proof.Proof, "provider": "oss", "region": "cn-hangzhou", "bucket": "nevix-upgrade", "access_key_id": "fixture-access-key-348", "secret_access_key": "fixture-secret-key-348"})
 	if status != 201 {
-		t.Fatalf("real OSS adapter against isolated HTTPS collaborator %d %s", status, b)
+		t.Fatalf("real OSS adapter against isolated HTTPS collaborator: HTTP %d (response body withheld)", status)
 	}
 	submit := func(idempotency string) (string, string) {
 		t.Helper()
@@ -176,7 +178,7 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 			ID string `json:"id"`
 		}
 		if status != 201 || json.Unmarshal(b, &s) != nil {
-			t.Fatalf("session %d %s", status, b)
+			t.Fatalf("session: HTTP %d (response body withheld)", status)
 		}
 		status, b = request("GET", "/creation/capability-manifest", token, nil)
 		var manifest struct {
@@ -193,7 +195,7 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 			} `json:"task"`
 		}
 		if status != 201 || json.Unmarshal(b, &task) != nil || task.Task.ID == "" {
-			t.Fatalf("real task admission %d %s", status, b)
+			t.Fatalf("real task admission: HTTP %d (response body withheld)", status)
 		}
 		return s.ID, task.Task.ID
 	}
@@ -218,7 +220,7 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 				return
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("actual worker did not drain terminal task: %d %s", status, b)
+				t.Fatalf("actual worker did not drain terminal task:: HTTP %d (response body withheld)", status)
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -322,7 +324,7 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	}
 	status, b = request("PATCH", "/identity/users/me", token, map[string]string{"display_name": "Valid rename at snapshot boundary"})
 	if status != 200 {
-		t.Fatalf("allowed pre-stop rename %d %s", status, b)
+		t.Fatalf("allowed pre-stop rename: HTTP %d (response body withheld)", status)
 	}
 	if e = os.Remove(stopBlock); e != nil {
 		t.Fatal(e)
@@ -333,7 +335,7 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	assertOpenOld("1.2.4")
 	status, b = request("GET", "/creation/tasks/"+task, token, nil)
 	if status != 200 || !bytes.Contains(b, []byte("Queued before upgrade")) {
-		t.Fatalf("historical task lost across real migration: %d %s", status, b)
+		t.Fatalf("historical task lost across real migration:: HTTP %d (response body withheld)", status)
 	}
 
 	// Reproduce a crash after resume committed but before journal completion. Legitimate
