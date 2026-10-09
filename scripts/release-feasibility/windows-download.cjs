@@ -14,6 +14,10 @@ const runtime = path.join(scratch, "windows-runtime");
 app.setPath("userData", path.join(runtime, "userData"));
 
 async function main() {
+  if (process.platform === "win32") {
+    process.env.LOCALAPPDATA = path.join(runtime, "cache-home");
+    await fs.mkdir(process.env.LOCALAPPDATA, { recursive: true });
+  }
   const { verifyRelease, assertUpdaterDescription, verifyArtifact } =
     await import(pathToFileURL(path.join(__dirname, "release-trust.mjs")));
   const { NsisUpdater } = require(
@@ -108,16 +112,19 @@ async function main() {
       result.updateInfo.files.map((info) => ({ url: new URL(info.url), info })),
     );
   }
-  const cache = path.join(runtime, "cache");
+  const cache =
+    process.platform === "win32"
+      ? path.join(process.env.LOCALAPPDATA, "updater")
+      : path.join(runtime, "cache");
   await fs.mkdir(runtime, { recursive: true });
   await fs.rm(cache, { recursive: true, force: true });
   await fs.writeFile(
     path.join(runtime, "dev-app-update.yml"),
     JSON.stringify({
-      updaterCacheDirName: path.relative(
-        path.join(os.homedir(), "Library/Caches"),
-        cache,
-      ),
+      updaterCacheDirName:
+        process.platform === "win32"
+          ? "updater"
+          : path.relative(path.join(os.homedir(), "Library/Caches"), cache),
     }),
   );
   function newUpdater() {
@@ -260,7 +267,7 @@ async function main() {
         sha512: trusted.sha512,
       },
       windowsInstallation:
-        "NOT TESTED: no Windows host; quitAndInstall/install never called",
+        "NOT TESTED by this download experiment: quitAndInstall/install never called",
       ordinaryQuit:
         "autoInstallOnAppQuit=false on every updater; app exits normally without an install action",
     };

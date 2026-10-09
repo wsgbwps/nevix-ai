@@ -75,10 +75,12 @@ apps/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron .sc
 
 ## Windows runner 实验待执行
 
-已准备 `.github/workflows/release-feasibility.yml` 的 Windows job（手动 `workflow_dispatch`，以及仅 `task/340-release-feasibility` 分支且实验路径变化时的 push）。它使用 `windows-latest` x64、现有 pnpm 11.21.0 frozen lockfile、锁定 builder 26.15.3 / Electron 39.8.10；updater 6.8.9 仅进入 scratch 实验包。没有生产签名秘密、Release 发布或 CNB 写入；仅上传本仓库 Actions 的实验日志与 NSIS 包，保留 7 天。整 job 25 分钟上限。**尚未推送、dispatch 或运行，不能视为 Windows 安装已经通过。**
+已准备 `.github/workflows/release-feasibility.yml` 的 Windows job（手动 `workflow_dispatch`，以及仅 `task/340-release-feasibility` 分支且实验路径变化时的 push）。它使用 `windows-latest` x64、现有 pnpm 11.21.0 frozen lockfile、锁定 builder 26.15.3 / Electron 39.8.10；updater 6.8.9 仅进入 scratch 实验包。没有生产签名秘密、Release 发布或 CNB 写入；仅上传本仓库 Actions 的实验日志与 NSIS 包，保留 7 天。整 job 25 分钟上限。**首次 Windows run 在实验 runner 的 npm 命令引号处理处失败，尚未进入 NSIS 安装；这不是 Windows 发行方案不可行的证据。已改为 Node 直接执行 npm-cli.js 的数组参数，等待重新运行，不能视为 Windows 安装已经通过。**
 
 `windows-installed.cjs` 由 Node 构建两个 `com.nevix.ai` 实验版本 `1.0.0`/`1.0.1`（产品名称 `Nevix Release Experiment`），首次以 NSIS 安装进 runner workspace 的 `.scratch/340-release-feasibility/windows-installed/installed/`。实验 userData、updater 缓存与日志均隔离到同一 scratch 范围；Main 在载入 updater 前只修改本进程 `LOCALAPPDATA` 为 `root/cache-home`，并使用固定 `updaterCacheDirName=updater`，避免 Windows runner 的 C:/D: 跨盘相对路径失效，不修改系统环境变量；关闭桌面/开始菜单快捷方式，`runAfterFinish=false`。没有购买 Authenticode，也不读取生产私钥。
 
 安装后的 Main 读取 loopback 签名清单，并通过真实公开 updater 检测/下载、签名描述绑定、下载后/安装前真实缓存字节检查。脚本依次断言首次安装版本为旧版；下载后普通退出、选择稍后、重启仍为旧版；只有明确 `approved` 实验场景才调用 `quitAndInstall(true,true)`，等待真正的 NSIS 替换并由安装后可执行文件重新启动，最终读取真实 `app.getVersion()` 为新版。approved 场景代表受控自动化批准，不声称已经测试真实 User 原生确认及生产 Window 保存/上传 readiness。
 
 本机仅完成脚本语法校验。Windows 运行结果将产生 `windows-installed/result.json`，包含各阶段真实执行路径、版本、平台、发行身份和 HTTP 请求记录；失败时保留 `runtime-error.json` 与构建产物。静默 CI 安装不能验收 SmartScreen 交互或企业设备政策，仍应在交付设备抽查。
+
+Windows job 现在先由真实 `electron.exe` 运行同一 `windows-download.cjs` 的 10 项安全边界检查，再执行真实 NSIS 安装序列。runner 断言报告 host 必须为 `win32/x64` 且全部 10 项完成；只运行 Mac host 的结果不能替代该记录。下载实验本身永不调用安装入口，使用无执行能力的文本 `.exe` fixture；只有随后 `windows-installed.cjs` 的独立批准场景使用真实 NSIS 包。Windows 下载实验的缓存同样通过进程内 `LOCALAPPDATA=windows-runtime/cache-home` 和固定 `updater` 子目录保持同盘隔离；Mac 下载实验仍使用真实 `~/Library/Caches` 相对路径指向 scratch。workflow 另上传 `windows-runtime/result.json`，与安装结果分别留证。

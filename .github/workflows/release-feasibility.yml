@@ -38,6 +38,7 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
           path: |
+            .scratch/340-release-feasibility/windows-runtime/result.json
             .scratch/340-release-feasibility/windows-installed/*.json
             .scratch/340-release-feasibility/windows-installed/artifacts/*.exe
             .scratch/340-release-feasibility/windows-installed/artifacts/*.yml

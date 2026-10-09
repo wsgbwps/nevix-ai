@@ -166,6 +166,45 @@ async function runLab() {
     }
     throw new Error(`Timed out awaiting ${file}`);
   }
+  const npmCli = path.join(
+    path.dirname(process.execPath),
+    "node_modules/npm/bin/npm-cli.js",
+  );
+  await fs.access(npmCli);
+  const scratch = path.dirname(root);
+  const lab = path.join(scratch, "lab");
+  const downloadRuntime = path.join(scratch, "windows-runtime");
+  await fs.mkdir(lab, { recursive: true });
+  await fs.mkdir(path.join(downloadRuntime, "userData"), { recursive: true });
+  await fs.writeFile(
+    path.join(downloadRuntime, "package.json"),
+    JSON.stringify({
+      name: "nevix-windows-download-experiment",
+      version: "1.0.0",
+      main: path.join(__dirname, "windows-download.cjs"),
+    }),
+  );
+  await fs.rm(path.join(downloadRuntime, "result.json"), { force: true });
+  await run(process.execPath, [
+    npmCli,
+    "install",
+    "--prefix",
+    lab,
+    "--no-audit",
+    "--no-fund",
+    "electron-updater@6.8.9",
+  ]);
+  await run(
+    path.join(repo, "apps/desktop/node_modules/electron/dist/electron.exe"),
+    [downloadRuntime],
+  );
+  const downloadReport = JSON.parse(
+    await fs.readFile(path.join(downloadRuntime, "result.json"), "utf8"),
+  );
+  assert.equal(downloadReport.host.platform, "win32");
+  assert.equal(downloadReport.host.arch, "x64");
+  assert.equal(downloadReport.checks.length, 10);
+
   const keys = generateKeyPairSync("ed25519");
   const publicKey = keys.publicKey.export({ type: "spki", format: "pem" });
   await fs.copyFile(__filename, path.join(packageDir, "windows-installed.cjs"));
@@ -226,12 +265,13 @@ async function runLab() {
       }),
     );
     if (version === "1.0.0") {
-      // npm.cmd needs cmd.exe on Windows; all arguments here are fixed lab paths.
-      await run("cmd.exe", [
-        "/d",
-        "/s",
-        "/c",
-        `npm install --prefix "${packageDir}" --no-audit --no-fund`,
+      await run(process.execPath, [
+        npmCli,
+        "install",
+        "--prefix",
+        packageDir,
+        "--no-audit",
+        "--no-fund",
       ]);
     }
     await run(process.execPath, [
@@ -332,6 +372,7 @@ async function runLab() {
         arch: process.arch,
         os: require("node:os").release(),
       },
+      downloadSafetyChecks: downloadReport.checks,
       results,
       requests,
       signedRelease: release,
