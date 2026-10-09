@@ -172,10 +172,13 @@ func (s *TaskService) Submit(ctx context.Context, cmd SubmitCommand) (Submission
 	return result, nil
 }
 
-// admitSpecification runs the shared admission tail for fresh submissions and retries: availability,
+// admitSpecification runs the shared admission tail for fresh submissions and retries: maintenance, availability,
 // fixed-order governance, the attempt fact, then the atomic creation of specification, task, slots,
 // job, queue item, and reservation.
 func (s *TaskService) admitSpecification(ctx context.Context, sc domain.WriteScope, owner, sessionID domain.UUID, spec *domain.GenerationSpecification, idempotencyKey string) (*domain.GenerationTask, error) {
+	if err := s.tasks.RequireAdmissionOpen(ctx, sc.Tx()); err != nil {
+		return nil, err
+	}
 	// Reference identity/role/kind facts are re-verified inside the
 	// transaction: a material deleted between draft save and admission
 	// fails the whole admission instead of freezing a dangling reference.

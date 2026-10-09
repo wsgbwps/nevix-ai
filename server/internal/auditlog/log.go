@@ -93,6 +93,8 @@ const (
 	// The generation task kernel (issue #159): governance limit changes and
 	// the persistent provider credit block carry scope/target metadata only
 	// — never prompts, task payloads, or provider errors.
+	CreationMaintenancePaused   Action = "creation_maintenance_paused"
+	CreationMaintenanceResumed  Action = "creation_maintenance_resumed"
 	GenerationGovernanceUpdated Action = "generation_governance_updated"
 	ProviderCreditBlocked       Action = "provider_credit_blocked"
 	ProviderCreditCleared       Action = "provider_credit_cleared"
@@ -104,6 +106,8 @@ const (
 )
 
 var validActions = map[Action]struct{}{
+	CreationMaintenancePaused:          {},
+	CreationMaintenanceResumed:         {},
 	InstanceClaimed:                    {},
 	SessionCreated:                     {},
 	SessionRevoked:                     {},

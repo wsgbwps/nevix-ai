@@ -8,6 +8,115 @@
 # Electron Main 从本地文件原生流式直传；finalize 与下载仍经 Go 权威校验/授权。Renderer 不接触
 # 本地路径、文件字节、签名 URL/headers 或 Storage 凭据。
 paths:
+  /creation/maintenance:
+    get:
+      operationId: getCreationMaintenance
+      summary: Admin Creation maintenance admission fence
+      description: |-
+        Requires a real active Admin session and proven HTTPS. Creation persists this state across
+        Module restarts. Pause waits for earlier admissions to commit; existing workers continue.
+        Drain counts durable nonterminal tasks, never queue emptiness. drained is true only while
+        paused with zero nonterminal tasks. Other business writes remain possible: stop Server
+        before taking a consistent database and volume backup.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Coherent maintenance and task drain snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreationMaintenance"
+        "400":
+          $ref: "#/components/responses/CreationMaintenanceBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CreationMaintenanceForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/maintenance/pause:
+    post:
+      operationId: pauseCreationAdmission
+      summary: Admin Creation maintenance admission fence
+      description: |-
+        Requires a real active Admin session and proven HTTPS. Creation persists this state across
+        Module restarts. Pause waits for earlier admissions to commit; existing workers continue.
+        Drain counts durable nonterminal tasks, never queue emptiness. drained is true only while
+        paused with zero nonterminal tasks. Other business writes remain possible: stop Server
+        before taking a consistent database and volume backup.
+        owner_token is an operator-generated operation UUID, not a credential. Read the current
+        revision before pausing. Only the matching owner and paused revision can resume. Exact
+        transition retries (same owner and expected_revision) are idempotent, including after a
+        lost response. A pre-existing pause or stale revision returns 409; never clear another
+        operation's pause. No automatic expiry or startup resume exists. A drain timeout must abort
+        replacement and resume only this operation's pause via this authenticated seam.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreationMaintenanceCommand"
+      responses:
+        "200":
+          description: Coherent maintenance and task drain snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreationMaintenance"
+        "400":
+          $ref: "#/components/responses/CreationMaintenanceBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CreationMaintenanceForbidden"
+        "409":
+          $ref: "#/components/responses/CreationMaintenanceConflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /creation/maintenance/resume:
+    post:
+      operationId: resumeCreationAdmission
+      summary: Admin Creation maintenance admission fence
+      description: |-
+        Requires a real active Admin session and proven HTTPS. Creation persists this state across
+        Module restarts. Pause waits for earlier admissions to commit; existing workers continue.
+        Drain counts durable nonterminal tasks, never queue emptiness. drained is true only while
+        paused with zero nonterminal tasks. Other business writes remain possible: stop Server
+        before taking a consistent database and volume backup.
+        owner_token is an operator-generated operation UUID, not a credential. Read the current
+        revision before pausing. Only the matching owner and paused revision can resume. Exact
+        transition retries (same owner and expected_revision) are idempotent, including after a
+        lost response. A pre-existing pause or stale revision returns 409; never clear another
+        operation's pause. No automatic expiry or startup resume exists. A drain timeout must abort
+        replacement and resume only this operation's pause via this authenticated seam.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreationMaintenanceCommand"
+      responses:
+        "200":
+          description: Coherent maintenance and task drain snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreationMaintenance"
+        "400":
+          $ref: "#/components/responses/CreationMaintenanceBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CreationMaintenanceForbidden"
+        "409":
+          $ref: "#/components/responses/CreationMaintenanceConflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /creation/sessions:
     post:
       operationId: createSession
@@ -1110,6 +1219,8 @@ paths:
           $ref: "#/components/responses/TaskIntentRejected"
         "429":
           $ref: "#/components/responses/TaskGovernanceRateLimited"
+        "503":
+          $ref: "#/components/responses/CreationMaintenanceUnavailable"
         "500":
           $ref: "#/components/responses/InternalError"
     get:
@@ -1253,6 +1364,8 @@ paths:
           $ref: "#/components/responses/TaskIntentRejected"
         "429":
           $ref: "#/components/responses/TaskGovernanceRateLimited"
+        "503":
+          $ref: "#/components/responses/CreationMaintenanceUnavailable"
         "500":
           $ref: "#/components/responses/InternalError"
   /creation/tasks/{taskID}/slots/{slotIndex}/result:
@@ -2260,6 +2373,50 @@ components:
         type: string
         format: uuid
   responses:
+    CreationMaintenanceBadRequest:
+      description: Invalid command or HTTPS not proven.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum: [invalid_request, secure_transport_required]
+    CreationMaintenanceForbidden:
+      description: Active Admin required with initial password change completed.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum: [forbidden, password_change_required]
+    CreationMaintenanceConflict:
+      description: Another operation owns the pause or the expected revision changed.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum: [maintenance_revision_conflict]
+    CreationMaintenanceUnavailable:
+      description: Fresh task admission paused or current storage unavailable; replay retains its existing contract.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error:
+                    enum: [creation_maintenance, object_storage_unavailable]
     BadRequest:
       description: 请求不合法 —— invalid_request 指请求体不是约定形状的 JSON 或字段边界违规；invalid_cursor 指 cursor 不是合法的复合分页令牌。
       content:
@@ -2703,7 +2860,7 @@ components:
                     enum:
                       - idempotency_payload_conflict
     TaskRetryConflict:
-      description: 重试条件不满足 —— 任务未终态、没有未完成槽位，或未完成槽位需先修改请求或由管理员处置。
+      description: 重试条件不满足或幂等键冲突 —— 任务未终态、没有未完成槽位，或未完成槽位需先修改请求或由管理员处置。
       content:
         application/json:
           schema:
@@ -2716,6 +2873,7 @@ components:
                       - task_not_terminal
                       - no_incomplete_slots
                       - task_retry_not_allowed
+                      - idempotency_payload_conflict
     TaskIntentRejected:
       description: 意图载荷拒绝 —— 结构不完整/非法的意图、意图值超出当前 manifest，或目标媒体当前不可用；不创建 Task。
       content:
@@ -2744,6 +2902,39 @@ components:
                     enum:
                       - internal_error
   schemas:
+    CreationMaintenanceCommand:
+      type: object
+      required: [owner_token, expected_revision]
+      properties:
+        owner_token:
+          type: string
+          format: uuid
+          description: Nonzero operation UUID; authorization remains the Admin session.
+        expected_revision:
+          type: integer
+          format: int64
+          minimum: 0
+    CreationMaintenance:
+      type: object
+      required: [paused, owner_token, revision, non_terminal_tasks, drained]
+      properties:
+        paused:
+          type: boolean
+        owner_token:
+          type: [string, "null"]
+          format: uuid
+          description: Current or last operation identity, retained after resume for idempotent retries.
+        revision:
+          type: integer
+          format: int64
+          minimum: 0
+        non_terminal_tasks:
+          type: integer
+          format: int64
+          minimum: 0
+        drained:
+          type: boolean
+          description: True only when paused and non_terminal_tasks equals zero.
     Error:
       $ref: "./openapi.yaml#/components/schemas/Error"
     CreationSession:

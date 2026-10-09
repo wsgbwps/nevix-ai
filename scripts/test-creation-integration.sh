@@ -197,6 +197,11 @@ assert_creation_integration_executed() {
     TestConnectionCanaryExercisesRequiredOperationsAndCleansUp
     TestStreamSmokeParallelFileFlows
     TestAssetLibraryQueryPlanAtFiftyThousandRows
+    TestCreationMaintenancePreservesAdmissionAndDrainContracts
+    TestCreationMaintenanceAuthorizationOwnershipAndRestart
+    TestCreationMaintenanceSerializesConcurrentAdmission
+    TestCreationMaintenanceWaitsForAdmissionCommit
+    TestCreationMaintenanceRetryKeepsReplayAndResumes
     TestTaskAdmissionAtomicityAndIdempotency
     TestTaskAdmissionRequiresObjectStorageBeforeProviderWork
     TestGenerationTaskDetailUsesOneSnapshot

@@ -9,6 +9,9 @@ import (
 // member capability route stays active-user wide (spec #150 / ADR-0016).
 func (m *Module) routes() []creationhttp.Route {
 	return []creationhttp.Route{
+		{Method: "GET", Path: "/creation/maintenance", Guard: creationhttp.GuardAdmin, Handler: m.maintenance.Get},
+		{Method: "POST", Path: "/creation/maintenance/pause", Guard: creationhttp.GuardAdmin, Handler: m.maintenance.Pause},
+		{Method: "POST", Path: "/creation/maintenance/resume", Guard: creationhttp.GuardAdmin, Handler: m.maintenance.Resume},
 		{Method: "POST", Path: "/creation/sessions", Handler: m.sessions.CreateSession},
 		{Method: "GET", Path: "/creation/sessions", Handler: m.sessions.ListSessions},
 		{Method: "GET", Path: "/creation/sessions/{sessionID}", Handler: m.sessions.GetSession},

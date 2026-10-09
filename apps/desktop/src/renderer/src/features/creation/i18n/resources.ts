@@ -220,7 +220,8 @@ export const creationTranslations = defineResourceTranslations({
         submitFailureCodes: {
           invalidRequest: '参考素材可能已移除，或提交内容不合法；请重新编辑后再试。',
           capabilityStale: '所选模型或参数已不受支持；请重新编辑后再试。',
-          mediaUnavailable: '当前生成能力不可用或能力清单已更新；请稍后重试。'
+          mediaUnavailable: '当前生成能力不可用或能力清单已更新；请稍后重试。',
+          creationMaintenance: '实例正在维护，暂时无法提交或重试生成任务；请稍后重试。'
         },
         detailStale: '详情未更新',
         listStale: '任务列表未更新',
@@ -834,7 +835,9 @@ export const creationTranslations = defineResourceTranslations({
           capabilityStale:
             'The selected model or parameters are no longer supported. Edit and try again.',
           mediaUnavailable:
-            'Generation is unavailable or the capability list changed. Try again later.'
+            'Generation is unavailable or the capability list changed. Try again later.',
+          creationMaintenance:
+            'The instance is under maintenance. Try submitting or retrying generation later.'
         },
         detailStale: 'Details not refreshed',
         listStale: 'Task list not refreshed',

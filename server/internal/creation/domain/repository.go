@@ -135,6 +135,8 @@ type (
 // admission commits or rolls back together; queries are creator-scoped by their own SQL;
 // a guarded transition losing a race returns false, so callers can never fabricate state.
 type GenerationTaskRepository interface {
+	// RequireAdmissionOpen fences fresh admission against maintenance through transaction commit.
+	RequireAdmissionOpen(ctx context.Context, tx TxExecutor) error
 	// LoadSessionForAdmission locks the active owned session until admission
 	// commits, serializing task retention against session deletion.
 	LoadSessionForAdmission(ctx context.Context, tx TxExecutor, owner, sessionID UUID) (Session, error)
