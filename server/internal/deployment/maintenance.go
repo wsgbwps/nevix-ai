@@ -146,6 +146,9 @@ func operationID() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 func (c *maintenanceClient) pauseAndDrain(timeout time.Duration) (maintenanceSnapshot, error) {
+	return c.pauseAndDrainJournal(timeout, nil)
+}
+func (c *maintenanceClient) pauseAndDrainJournal(timeout time.Duration, intent func(string, int64) error) (maintenanceSnapshot, error) {
 	before, err := c.snapshot()
 	if err != nil {
 		return before, err
@@ -156,6 +159,11 @@ func (c *maintenanceClient) pauseAndDrain(timeout time.Duration) (maintenanceSna
 	owner, err := operationID()
 	if err != nil {
 		return before, err
+	}
+	if intent != nil {
+		if err = intent(owner, before.Revision); err != nil {
+			return maintenanceSnapshot{}, err
+		}
 	}
 	s, err := c.transition("pause", owner, before.Revision)
 	if err != nil { // Lost-response recovery may identify only this operation, never another owner's pause.

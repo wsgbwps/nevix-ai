@@ -335,6 +335,7 @@ test("deploy runtime assets run the inline harness and native Server runtime tes
       "deploy/runtime-compose.template.yaml",
       "deploy/scripts/build-bundle.sh",
       "deploy/scripts/test-offline-runtime.sh",
+      "deploy/scripts/build-upgrade-fixtures.sh",
       "deploy/nginx/nginx.conf",
       "deploy/cert-init/cert-init.sh",
       "deploy/README.md",

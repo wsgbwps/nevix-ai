@@ -341,7 +341,7 @@ func restoreBackup(o backupOptions, r verifiedRuntime, stage string, m backupMet
 		if e != nil {
 			return e
 		}
-		if e = os.WriteFile(filepath.Join(o.directory, ".env"), b, 0600); e != nil {
+		if e = replacePrivateFile(o.directory, ".env", b); e != nil {
 			return e
 		}
 		clear(b)
@@ -363,7 +363,7 @@ func restoreBackup(o backupOptions, r verifiedRuntime, stage string, m backupMet
 	if err != nil {
 		return err
 	}
-	if err = os.WriteFile(filepath.Join(o.directory, ".env"), env, 0600); err != nil {
+	if err = replacePrivateFile(o.directory, ".env", env); err != nil {
 		return err
 	}
 	clear(env)
@@ -391,11 +391,19 @@ func restoreBackup(o backupOptions, r verifiedRuntime, stage string, m backupMet
 	if err = verifyRestoredPublicState(o.client, m, r); err != nil {
 		return err
 	}
-	if err = os.WriteFile(filepath.Join(o.directory, "current"), []byte(m.Version+"\n"), 0600); err != nil {
+	if err = replacePrivateFile(o.directory, "current", []byte(m.Version+"\n")); err != nil {
 		return err
 	}
 	if err = o.client.resume(m.Maintenance); err != nil {
 		return errors.New("restored instance remains paused; original Admin session/maintenance resume must succeed")
+	}
+	if j, e := readUpgradeJournal(o.directory); e == nil && j.OriginalVersion == m.Version {
+		backupPath, _ := filepath.Abs(o.backup)
+		if backupPath == j.Backup {
+			if e = os.Remove(filepath.Join(o.directory, "upgrade.json")); e != nil {
+				return e
+			}
+		}
 	}
 	fmt.Println("restored verified complete Nevix", m.Version, "instance; post-backup writes were discarded; OSS objects were untouched")
 	return nil

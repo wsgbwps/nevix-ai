@@ -30,6 +30,7 @@ type verifiedRuntime struct {
 	manifest   release.Manifest
 	inventory  inventory
 	identities map[string]string
+	envelope   []byte
 }
 
 func backupCommand(args []string, key string) error {
@@ -54,6 +55,14 @@ func backupCommand(args []string, key string) error {
 	}
 	if f.NArg() != 0 || o.directory == "" || o.bundle == "" || o.manifest == "" || (o.command == "backup" && o.output == "") || (o.command != "backup" && o.backup == "") || o.timeout <= 0 {
 		return errors.New("directory, original bundle/manifest, private Admin session, TLS pin and backup/output required")
+	}
+	if o.command == "restore" {
+		if err := os.MkdirAll(o.directory, 0700); err != nil {
+			return err
+		}
+		if err := validatePrivateDestination(o.directory, ".env"); err != nil {
+			return err
+		}
 	}
 	c, err := newMaintenanceClient(*base, *pin, *token)
 	if err != nil {
@@ -106,7 +115,10 @@ func backupCommand(args []string, key string) error {
 	return restoreBackup(o, runtime, stage, meta)
 }
 func lockInstance(directory string) (*os.File, error) {
-	f, err := os.OpenFile(filepath.Join(directory, ".operation.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err := privateInstanceDirectory(directory); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(directory, ".operation.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -117,15 +129,40 @@ func lockInstance(directory string) (*os.File, error) {
 	return f, nil
 }
 func verifiedBackupRuntime(bundle, manifest, key string) (verifiedRuntime, func(), error) {
+	r, cleanup, err := verifiedRuntimeArchive(bundle, manifest, key)
+	if err != nil {
+		return r, cleanup, err
+	}
+	r.identities, err = inspectImages(r.inventory)
+	if err == nil {
+		var compose []byte
+		compose, err = renderCompose(r.directory, r.identities)
+		if err == nil {
+			err = os.WriteFile(filepath.Join(r.directory, "compose.yaml"), compose, 0600)
+		}
+	}
+	if err != nil {
+		cleanup()
+		return r, func() {}, err
+	}
+	return r, cleanup, nil
+}
+func verifiedRuntimeArchive(bundle, manifest, key string) (verifiedRuntime, func(), error) {
 	var r verifiedRuntime
 	cleanup := func() {}
-	b, err := os.ReadFile(manifest)
+	f, err := os.Open(manifest)
+	if err != nil {
+		return r, cleanup, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, 64<<10+1))
 	if err != nil {
 		return r, cleanup, err
 	}
 	if len(b) > 64<<10 {
 		return r, cleanup, errors.New("release manifest too large")
 	}
+	r.envelope = b
 	r.manifest, err = release.Verify(b, key, "linux", "amd64")
 	if err != nil {
 		return r, cleanup, fmt.Errorf("verify signed release: %w", err)
@@ -149,17 +186,6 @@ func verifiedBackupRuntime(bundle, manifest, key string) (verifiedRuntime, func(
 		return fail(err)
 	}
 	if err = validateImageArchive(filepath.Join(r.directory, "images.tar"), r.inventory); err != nil {
-		return fail(err)
-	}
-	r.identities, err = inspectImages(r.inventory)
-	if err != nil {
-		return fail(err)
-	}
-	compose, err := renderCompose(r.directory, r.identities)
-	if err != nil {
-		return fail(err)
-	}
-	if err = os.WriteFile(filepath.Join(r.directory, "compose.yaml"), compose, 0600); err != nil {
 		return fail(err)
 	}
 	return r, cleanup, nil

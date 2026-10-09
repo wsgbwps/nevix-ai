@@ -12,12 +12,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +31,87 @@ func TestDeploymentProviderFixture(t *testing.T) {
 	if os.Getenv("NEVIX_DEPLOY_PROVIDER_FIXTURE") != "1" {
 		t.Skip("test-only provider subprocess")
 	}
+	http.HandleFunc("/v1/images/generations", func(w http.ResponseWriter, r *http.Request) {
+		for {
+			if _, e := os.Stat("/fixture/block-generation"); os.IsNotExist(e) {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		io.WriteString(w, `{"error":{"message":"controlled terminal provider refusal","type":"invalid_request_error"}}`)
+	})
+	var mu sync.Mutex
+	type object struct {
+		data                  []byte
+		contentType, uploadID string
+	}
+	objects := map[string]object{}
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "nevix-upgrade.oss-cn-hangzhou.aliyuncs.com" {
+			w.WriteHeader(404)
+			return
+		}
+		w.Header().Set("x-oss-request-id", "isolated-upgrade-fixture")
+		if r.Header.Get("Authorization") == "" && r.URL.Query().Get("x-oss-signature") == "" {
+			w.WriteHeader(403)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		value, exists := objects[r.URL.Path]
+		switch r.Method {
+		case "PUT":
+			if exists {
+				w.WriteHeader(409)
+				io.WriteString(w, `<Error><Code>FileAlreadyExists</Code><Message>exists</Message></Error>`)
+				return
+			}
+			data, e := io.ReadAll(r.Body)
+			if e != nil {
+				w.WriteHeader(500)
+				return
+			}
+			objects[r.URL.Path] = object{data, r.Header.Get("Content-Type"), r.Header.Get("x-oss-meta-upload-id")}
+			w.Header().Set("ETag", `"fixture-etag"`)
+			w.WriteHeader(200)
+		case "DELETE":
+			delete(objects, r.URL.Path)
+			w.WriteHeader(204)
+		case "GET", "HEAD":
+			if !exists {
+				w.WriteHeader(404)
+				io.WriteString(w, `<Error><Code>NoSuchKey</Code><Message>missing</Message></Error>`)
+				return
+			}
+			w.Header().Set("Content-Type", value.contentType)
+			w.Header().Set("x-oss-meta-upload-id", value.uploadID)
+			w.Header().Set("ETag", `"fixture-etag"`)
+			w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
+			data := value.data
+			if r.Header.Get("Range") != "" {
+				var lo, hi int
+				fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &lo, &hi)
+				if lo < 0 || hi >= len(data) || hi < lo {
+					w.WriteHeader(416)
+					return
+				}
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", lo, hi, len(data)))
+				data = data[lo : hi+1]
+				w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+				w.WriteHeader(206)
+			} else {
+				w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+				w.WriteHeader(200)
+			}
+			if r.Method != "HEAD" {
+				w.Write(data)
+			}
+		default:
+			w.WriteHeader(405)
+		}
+	})
 	http.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer fixture-provider-key-347" {
 			w.WriteHeader(401)
@@ -46,7 +130,7 @@ func providerCertificate(t *testing.T) ([]byte, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cert := &x509.Certificate{SerialNumber: big.NewInt(347), Subject: pkix.Name{CommonName: "isolated provider fixture"}, DNSNames: []string{"models.kapon.cloud"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	cert := &x509.Certificate{SerialNumber: big.NewInt(347), Subject: pkix.Name{CommonName: "isolated provider fixture"}, DNSNames: []string{"models.kapon.cloud", "nevix-upgrade.oss-cn-hangzhou.aliyuncs.com"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
