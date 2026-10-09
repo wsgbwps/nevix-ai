@@ -234,7 +234,11 @@ func exerciseCompleteInstanceBackup(t *testing.T, dir, bundle, manifest, key, to
 	fixture := t.TempDir()
 	providerCert, providerKey := providerCertificate(t)
 	for name, b := range map[string][]byte{"provider.pem": providerCert, "provider.key": providerKey} {
-		if err := os.WriteFile(filepath.Join(fixture, name), b, 0600); err != nil {
+		mode := os.FileMode(0600)
+		if name == "provider.pem" {
+			mode = 0644
+		} // Public CA must be readable by the unprivileged Server.
+		if err := os.WriteFile(filepath.Join(fixture, name), b, mode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -253,6 +257,11 @@ func exerciseCompleteInstanceBackup(t *testing.T, dir, bundle, manifest, key, to
 	defer docker("rm", "--force", "nevix-provider-fixture-347")
 	serverID := strings.TrimSpace(string(invoke("ps", "--quiet", "server")))
 	docker("cp", filepath.Join(fixture, "provider.pem"), serverID+":/etc/ssl/certs/isolated-provider-fixture.pem")
+	invoke("exec", "-T", "server", "test", "-r", "/etc/ssl/certs/isolated-provider-fixture.pem")
+	// Install the public CA before a fresh process loads system roots, including
+	// a future configured Release startup probe. Private fixture key stays 0600.
+	invoke("restart", "server")
+	invoke("up", "--detach", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "180")
 	status, b := request("POST", "/identity/admin/reauth/proofs", token, map[string]string{"action": "provider_connection.create", "password": "fixturePassword345!"})
 	var proof struct {
 		Proof     string    `json:"proof"`
@@ -343,6 +352,8 @@ func exerciseCompleteInstanceBackup(t *testing.T, dir, bundle, manifest, key, to
 	if err = deployment.Run(restoreArgs, key); err != nil {
 		t.Fatal("explicit complete restore:", err)
 	}
+	// Restored-container checks read retained Identity/admission state only.
+	// The subsequent upgrade fixture installs its own CA before any SDK call.
 	after := invoke("exec", "-T", "cert-watch", "openssl", "x509", "-in", "/etc/nginx/tls/server.pem", "-noout", "-fingerprint", "-sha256")
 	if !bytes.Equal(before, after) {
 		t.Fatal("restore changed customer TLS identity")
@@ -360,4 +371,21 @@ func exerciseCompleteInstanceBackup(t *testing.T, dir, bundle, manifest, key, to
 		t.Fatal("verified restore did not resume admission")
 	}
 	t.Log("complete-instance-restore sentinel: real Admin HTTPS, encrypted provider/master-key AEAD, logical PG restore, private config/TLS, old-session independence, explicit postbackup data loss, owned-pause failure recovery")
+}
+
+// Only canonical public codes can leave a failed credential-command response.
+// Unknown JSON (including tokens/proofs) is never interpolated into test logs.
+func fixtureCreationErrorCode(body []byte) string {
+	var response struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &response) != nil {
+		return "not-json"
+	}
+	switch response.Error {
+	case "provider_check_temporarily_unavailable", "provider_credential_invalid", "object_storage_unavailable", "internal_error", "invalid_request", "unauthorized", "forbidden", "password_change_required", "reauth_proof_invalid", "reauth_proof_expired", "reauth_proof_action_mismatch", "reauth_proof_already_consumed", "secure_transport_required":
+		return response.Error
+	default:
+		return "unrecognized"
+	}
 }

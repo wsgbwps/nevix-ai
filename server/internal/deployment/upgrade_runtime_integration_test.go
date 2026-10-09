@@ -137,7 +137,13 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	fixture := t.TempDir()
 	providerCert, providerKey := providerCertificate(t)
 	for name, data := range map[string][]byte{"provider.pem": providerCert, "provider.key": providerKey} {
-		os.WriteFile(filepath.Join(fixture, name), data, 0600)
+		mode := os.FileMode(0600)
+		if name == "provider.pem" {
+			mode = 0644
+		} // Public CA, separate from the 0600 private key.
+		if err := os.WriteFile(filepath.Join(fixture, name), data, mode); err != nil {
+			t.Fatal(err)
+		}
 	}
 	binary, e := os.Executable()
 	if e != nil {
@@ -153,6 +159,7 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	trustProvider := func() {
 		id := strings.TrimSpace(string(invoke("ps", "--quiet", "server")))
 		docker("cp", filepath.Join(fixture, "provider.pem"), id+":/etc/ssl/certs/isolated-provider-fixture.pem")
+		invoke("exec", "-T", "server", "test", "-r", "/etc/ssl/certs/isolated-provider-fixture.pem")
 	}
 	trustProvider()
 	invoke("restart", "server")
@@ -169,7 +176,7 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	}
 	status, b = request("POST", "/creation/object-storage-connection", token, map[string]string{"proof": proof.Proof, "provider": "oss", "region": "cn-hangzhou", "bucket": "nevix-upgrade", "access_key_id": "fixture-access-key-348", "secret_access_key": "fixture-secret-key-348"})
 	if status != 201 {
-		t.Fatalf("real OSS adapter against isolated HTTPS collaborator: HTTP %d (response body withheld)", status)
+		t.Fatalf("real OSS adapter against isolated HTTPS collaborator: HTTP %d code=%s (response body withheld)", status, fixtureCreationErrorCode(b))
 	}
 	submit := func(idempotency string) (string, string) {
 		t.Helper()
@@ -332,6 +339,9 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	if e = <-done; e != nil {
 		t.Fatal("complete real upgrade:", e)
 	}
+	// Every real Provider/OSS SDK call and held task finishes on the original
+	// Server before replacement. The candidate/restore checks below observe
+	// retained state and AEAD recovery; they issue no new collaborator request.
 	assertOpenOld("1.2.4")
 	status, b = request("GET", "/creation/tasks/"+task, token, nil)
 	if status != 200 || !bytes.Contains(b, []byte("Queued before upgrade")) {
