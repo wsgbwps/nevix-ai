@@ -10,9 +10,23 @@ scratch=$(mktemp -d)
 store=${NEVIX_DEPLOY_TEST_STORE:-containerd}
 if [[ $store != classic && $store != containerd ]]; then echo 'store must be classic or containerd' >&2; exit 1; fi
 cleanup() {
+  # This socket is created only after vendor export; never fall back to the host daemon.
+  if [[ -S $scratch/docker.sock ]]; then
+    containers=$(env -u DOCKER_CONTEXT DOCKER_HOST="unix://$scratch/docker.sock" docker ps --all --quiet 2>/dev/null || true)
+    if [[ -n $containers ]]; then
+      env -u DOCKER_CONTEXT DOCKER_HOST="unix://$scratch/docker.sock" docker rm --force $containers >/dev/null 2>&1 || true
+    fi
+  fi
   if [[ -f $scratch/docker.pid ]]; then sudo kill "$(cat "$scratch/docker.pid")" 2>/dev/null || true; fi
-  if [[ -f $scratch/containerd.pid ]]; then sudo kill "$(cat "$scratch/containerd.pid")" 2>/dev/null || true; fi
   if [[ -n ${daemon_pid:-} ]]; then wait "$daemon_pid" 2>/dev/null || true; fi
+  if [[ -f $scratch/containerd.pid ]]; then
+    private_containerd_pid=$(cat "$scratch/containerd.pid")
+    sudo kill "$private_containerd_pid" 2>/dev/null || true
+    for attempt in $(seq 1 60); do
+      if ! sudo kill -0 "$private_containerd_pid" 2>/dev/null; then break; fi
+      sleep 0.1
+    done
+  fi
   sudo rm -rf "$scratch"
 }
 trap cleanup EXIT
@@ -48,4 +62,9 @@ done
 docker info >/dev/null
 export NEVIX_DEPLOY_ISOLATED_DAEMON=1 NEVIX_DEPLOY_INTEGRATION_REQUESTED=1
 export NEVIX_DEPLOY_RUNTIME_BUNDLE="$scratch/runtime.tar.gz"
-(cd "$repo/server" && go test ./internal/deployment -run '^TestOfflineFirstInstallWithRealImages$' -v -count=1)
+(cd "$repo/server" && CGO_ENABLED=0 go test -c ./internal/deployment -o "$scratch/deployment.test")
+# The real CLI HTTP client must share the daemon's otherwise isolated network namespace.
+sudo --preserve-env=DOCKER_HOST,NEVIX_DEPLOY_ISOLATED_DAEMON,NEVIX_DEPLOY_INTEGRATION_REQUESTED,NEVIX_DEPLOY_RUNTIME_BUNDLE \
+  nsenter --net --target "$(cat "$scratch/docker.pid")" \
+  setpriv --reuid "$(id -u)" --regid "$(id -g)" --init-groups \
+  "$scratch/deployment.test" -test.run '^TestOfflineFirstInstallWithRealImages$' -test.v -test.count=1
