@@ -74,6 +74,7 @@ export async function trustServerCertificate(
   if (write !== 'persisted') return { outcome: 'unavailable' }
 
   runtime.certificatePins = pins
+  connectionChangedHandler?.()
   return { outcome: 'trusted' }
 }
 

@@ -305,3 +305,114 @@ test('a destroyed owning window cannot decide a pending request', () => {
     /live owning window/
   )
 })
+
+test('update installation needs a fresh owning Window allow and installs only once', async () => {
+  const { coordinator, requests } = setup()
+  const window = new FakeWindow()
+  coordinator.protect(window)
+  let installs = 0
+  const result = coordinator.requestUpdateInstallation(
+    window,
+    async () => undefined,
+    () => installs++
+  )
+  assert.equal(installs, 0)
+  assert.equal(requests.at(-1)?.requestId, 'request-1')
+  coordinator.decide(window, { requestId: 'request-1', decision: 'allow' })
+  assert.equal(await result, true)
+  assert.equal(installs, 1)
+  assert.throws(() => coordinator.decide(window, { requestId: 'request-1', decision: 'allow' }))
+  assert.equal(window.requestClose().defaultPrevented, false)
+  assert.equal(installs, 1)
+})
+
+for (const reason of [
+  'cancel',
+  'not-ready',
+  'unavailable',
+  'wrong-request',
+  'wrong-window',
+  'expired',
+  'quit',
+  'close',
+  'validation-failed',
+  'install-failed',
+  'unavailable-during-validation'
+] as const) {
+  test(`update ${reason} clears the installation action and preserves later ordinary close`, async () => {
+    let requestId = 0,
+      installs = 0,
+      finishValidation: (() => void) | undefined
+    const coordinator = createOrdinaryCloseCoordinator({
+      createRequestId: () => `request-${++requestId}`,
+      quitApplication: () => undefined,
+      requestDecision: () => reason !== 'not-ready'
+    })
+    const owner = new FakeWindow()
+    coordinator.protect(owner)
+    const validate =
+      reason === 'validation-failed'
+        ? async () => {
+            throw new Error('Disconnected Server')
+          }
+        : reason === 'unavailable-during-validation'
+          ? () =>
+              new Promise<void>((resolve) => {
+                finishValidation = resolve
+              })
+          : async () => undefined
+    const result = coordinator.requestUpdateInstallation(owner, validate, () => {
+      if (reason === 'install-failed') throw new Error('Invalid cached bytes')
+      installs++
+    })
+    switch (reason) {
+      case 'not-ready':
+        break
+      case 'cancel':
+        coordinator.decide(owner, { requestId: 'request-1', decision: 'cancel' })
+        break
+      case 'unavailable':
+        coordinator.rendererUnavailable(owner)
+        break
+      case 'wrong-request':
+        assert.throws(() => coordinator.decide(owner, { requestId: 'old', decision: 'allow' }))
+        break
+      case 'wrong-window':
+        assert.throws(() =>
+          coordinator.decide(new FakeWindow(), { requestId: 'request-1', decision: 'allow' })
+        )
+        break
+      case 'expired': {
+        const now = Date.now
+        Date.now = () => now() + 60001
+        try {
+          assert.throws(() =>
+            coordinator.decide(owner, { requestId: 'request-1', decision: 'allow' })
+          )
+        } finally {
+          Date.now = now
+        }
+        break
+      }
+      case 'quit':
+        coordinator.requestApplicationQuit()
+        break
+      case 'close':
+        owner.requestClose()
+        coordinator.decide(owner, { requestId: 'request-2', decision: 'cancel' })
+        break
+      default:
+        coordinator.decide(owner, { requestId: 'request-1', decision: 'allow' })
+        if (reason === 'unavailable-during-validation') {
+          coordinator.rendererUnavailable(owner)
+          finishValidation?.()
+        }
+    }
+    assert.equal(await result, false)
+    assert.equal(installs, 0)
+    assert.throws(() => coordinator.decide(owner, { requestId: 'request-1', decision: 'allow' }))
+    assert.equal(owner.requestClose().defaultPrevented, reason !== 'not-ready')
+    if (reason !== 'not-ready') coordinator.rendererUnavailable(owner)
+    assert.equal(installs, 0)
+  })
+}

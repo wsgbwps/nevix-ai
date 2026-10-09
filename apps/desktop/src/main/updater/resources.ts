@@ -10,6 +10,10 @@ export const updateTranslations = defineResourceTranslations({
     unavailable: '无法确认当前 Server 的运行版本，更新已暂缓。请检查服务器连接。',
     failed: '检查更新失败。请稍后重试，当前应用可以继续使用。',
     trust: '发行信任尚未配置，无法验证官方更新。',
+    ready: '更新 {{version}} 已下载，可以安装。',
+    installDetail: '安装前将完成当前窗口的退出准备，然后重启应用。',
+    install: '安装并重启',
+    later: '稍后',
     ok: '确定'
   },
   en: {
@@ -23,6 +27,10 @@ export const updateTranslations = defineResourceTranslations({
       'The running Server version could not be verified. Update deferred. Check your server connection.',
     failed: 'Update check failed. Try again later; the current app remains available.',
     trust: 'Release trust is not configured. Official updates cannot be verified.',
+    ready: 'Update {{version}} is downloaded and ready to install.',
+    installDetail: 'Complete the current window’s exit preparation, then restart the app.',
+    install: 'Install and Restart',
+    later: 'Later',
     ok: 'OK'
   }
 })

@@ -149,8 +149,6 @@ export async function checkForRelease(context: UpdateCheckContext): Promise<Upda
     return { outcome: 'server-unavailable' }
   }
   try {
-    if (compareVersions(context.currentVersion, server.min_desktop_version) < 0)
-      return { outcome: 'desktop-upgrade-required', minimum: server.min_desktop_version }
     if (!context.publicKeyPem) return { outcome: 'trust-unconfigured' }
     const release = verifyRelease(
       await context.readRelease(),
@@ -160,7 +158,10 @@ export async function checkForRelease(context: UpdateCheckContext): Promise<Upda
     )
     if (context.platform === 'darwin' && !new URL(release.url).pathname.endsWith('.zip'))
       throw new Error('Wrong update artifact')
-    if (compareVersions(release.version, context.currentVersion) <= 0) return { outcome: 'current' }
+    if (compareVersions(release.version, context.currentVersion) <= 0)
+      return compareVersions(context.currentVersion, server.min_desktop_version) < 0
+        ? { outcome: 'desktop-upgrade-required', minimum: server.min_desktop_version }
+        : { outcome: 'current' }
     if (compareVersions(server.version, release.min_server_version) < 0)
       return { outcome: 'server-upgrade-required', minimum: release.min_server_version }
     if (compareVersions(release.version, server.min_desktop_version) < 0)
@@ -169,4 +170,26 @@ export async function checkForRelease(context: UpdateCheckContext): Promise<Upda
   } catch {
     return { outcome: 'failed' }
   }
+}
+
+export function assertCompatibleServer(
+  release: Release,
+  currentVersion: string,
+  connectionIdentity: string,
+  server: {
+    readonly service: string
+    readonly version: string
+    readonly min_desktop_version: string
+    readonly connectionIdentity: string
+  }
+): void {
+  if (
+    !connectionIdentity ||
+    server.connectionIdentity !== connectionIdentity ||
+    server.service !== 'nevix-server' ||
+    compareVersions(release.version, currentVersion) <= 0 ||
+    compareVersions(server.version, release.min_server_version) < 0 ||
+    compareVersions(release.version, server.min_desktop_version) < 0
+  )
+    throw new Error('Current Server is not compatible with this update')
 }

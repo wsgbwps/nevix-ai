@@ -50,4 +50,5 @@ dmg:
 npmRebuild: false
 publish:
   provider: generic
-  url: https://example.com/auto-updates
+  url: https://cnb.cool/nevix.ai/nevix-releases/-/git/raw/main/stable/
+  useMultipleRangeRequest: false

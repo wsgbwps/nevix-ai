@@ -5,6 +5,7 @@ import { probeServerConnection } from './probe'
 export interface ServerVersion {
   readonly service: 'nevix-server'
   readonly serverUrl: string
+  readonly connectionIdentity: string
   readonly version: string
   readonly min_desktop_version: string
 }
@@ -47,5 +48,16 @@ export async function readCurrentServerVersion(): Promise<ServerVersion> {
     typeof record.min_desktop_version !== 'string'
   )
     throw new Error('Unknown server version')
-  return { ...record, serverUrl: url } as unknown as ServerVersion
+  return {
+    ...record,
+    serverUrl: url,
+    connectionIdentity: currentServerConnectionIdentity()
+  } as unknown as ServerVersion
+}
+
+export function currentServerConnectionIdentity(): string {
+  const url = currentServerConnectionUrl()
+  return url
+    ? JSON.stringify([url, currentCertificatePins().get(new URL(url).hostname) ?? null])
+    : ''
 }

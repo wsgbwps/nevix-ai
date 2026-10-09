@@ -1,0 +1,57 @@
+name: Installed Desktop update
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/desktop/src/main/updater/**
+      - apps/desktop/src/main/window/**
+      - apps/desktop/src/main/connection/**
+      - apps/desktop/scripts/run-installed-update.mjs
+      - apps/desktop/tests/updater/installed-fixture.ts
+      - apps/desktop/package.json
+      - pnpm-lock.yaml
+      - .github/workflows/desktop-update-install.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installed-desktop-update-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Installed NSIS update (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node apps/desktop/scripts/run-installed-update.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installed-windows-update
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            .scratch/342-windows-updates/result.json
+            .scratch/342-windows-updates/initial.json
+            .scratch/342-windows-updates/ordinary.json
+            .scratch/342-windows-updates/later.json
+            .scratch/342-windows-updates/cancel.json
+            .scratch/342-windows-updates/not-ready.json
+            .scratch/342-windows-updates/unavailable.json
+            .scratch/342-windows-updates/wrong-request.json
+            .scratch/342-windows-updates/server-unavailable.json
+            .scratch/342-windows-updates/replaced-cache.json
+            .scratch/342-windows-updates/approved.json

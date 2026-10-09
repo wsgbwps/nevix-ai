@@ -1,4 +1,4 @@
-import { decideOrdinaryClose } from '../ordinary-close-runtime'
+import { decideOrdinaryClose, cancelUpdateInstallation } from '../ordinary-close-runtime'
 import { requireTrustedTopLevelRendererSender } from '../trusted-renderer-sender'
 import { parseOrdinaryCloseDecision } from './ordinary-close-contract'
 
@@ -10,5 +10,10 @@ export function decideOrdinaryCloseHandler(
     event,
     'Ordinary close decisions are available only to the trusted renderer'
   )
-  decideOrdinaryClose(ownerWindow, parseOrdinaryCloseDecision(request))
+  try {
+    decideOrdinaryClose(ownerWindow, parseOrdinaryCloseDecision(request))
+  } catch (error) {
+    cancelUpdateInstallation()
+    throw error
+  }
 }

@@ -125,3 +125,45 @@ test('signed ambiguous artifact URLs are rejected just like Go', () => {
     assert.throws(() => verifyRelease(envelope, key, 'win32', 'x64'))
   }
 })
+
+import { assertCompatibleServer } from '../../src/main/updater/release-trust.ts'
+test('a candidate is rechecked against the same current Server and its runtime minimum', () => {
+  const release = verifyRelease(vector.envelope, vector.publicKey, 'win32', 'x64')
+  const server = {
+    service: 'nevix-server',
+    version: '1.0.0',
+    min_desktop_version: '1.0.0',
+    connectionIdentity: 'instance-A'
+  }
+  assertCompatibleServer(release, '1.0.0', 'instance-A', server)
+  for (const change of [
+    { connectionIdentity: 'instance-B' },
+    { version: '0.9.0' },
+    { min_desktop_version: '1.0.2' },
+    { service: 'other' },
+    { version: 'development' }
+  ])
+    assert.throws(() =>
+      assertCompatibleServer(release, '1.0.0', 'instance-A', { ...server, ...change })
+    )
+})
+
+test('an outdated installed Desktop can still obtain a compatible signed newer Desktop', async () => {
+  assert.equal(
+    (
+      await checkForRelease({
+        currentVersion: '1.0.0',
+        platform: 'win32',
+        arch: 'x64',
+        publicKeyPem: vector.publicKey,
+        readRelease: async () => vector.envelope,
+        readServer: async () => ({
+          service: 'nevix-server',
+          version: '1.0.0',
+          min_desktop_version: '1.0.1'
+        })
+      })
+    ).outcome,
+    'available'
+  )
+})

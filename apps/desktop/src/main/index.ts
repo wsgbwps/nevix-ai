@@ -2,7 +2,11 @@ import { app, BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { initializeConnectionRuntime, setServerConnectionChangedHandler } from './connection'
 import { initializeMainI18n } from './language'
-import { checkInstalledDesktopCompatibility } from './updater'
+import {
+  checkInstalledDesktopCompatibility,
+  initializeUpdater,
+  invalidateUpdateInstallation
+} from './updater'
 import { createWindow } from './window/main-window'
 import {
   markOrdinaryCloseRendererUnavailable,
@@ -26,6 +30,7 @@ app.whenReady().then(async () => {
   await initializeMainI18n()
   await initializeConnectionRuntime()
   setServerConnectionChangedHandler(() => {
+    invalidateUpdateInstallation()
     void checkInstalledDesktopCompatibility()
   })
 
@@ -39,6 +44,7 @@ app.whenReady().then(async () => {
 
   createWindow(markOrdinaryCloseRendererUnavailable)
   void checkInstalledDesktopCompatibility()
+  void initializeUpdater()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

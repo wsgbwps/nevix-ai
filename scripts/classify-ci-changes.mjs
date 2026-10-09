@@ -159,6 +159,7 @@ export function classifyPaths(paths) {
       isOneOf(path, [
         ".github/workflows/ci-gate.yml",
         ".github/workflows/release-feasibility.yml",
+        ".github/workflows/desktop-update-install.yml",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
         // Remove these two historical paths after their deletion commit lands on main.

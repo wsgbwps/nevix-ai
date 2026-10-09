@@ -323,7 +323,7 @@ test("delivery-harness changes run only the inline harness tests", () => {
     ]),
     { harness: true },
   );
-  assert.deepEqual(selected([".github/workflows/ci-gate.yml"]), {
+  assert.deepEqual(selected([".github/workflows/ci-gate.yml", ".github/workflows/desktop-update-install.yml"]), {
     harness: true,
   });
 });

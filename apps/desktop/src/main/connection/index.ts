@@ -17,4 +17,8 @@ export async function initializeConnectionRuntime(): Promise<void> {
   await readServerConnection()
 }
 
-export { readCurrentServerVersion, type ServerVersion } from './server-version'
+export {
+  readCurrentServerVersion,
+  currentServerConnectionIdentity,
+  type ServerVersion
+} from './server-version'
