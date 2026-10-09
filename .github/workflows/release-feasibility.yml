@@ -34,7 +34,7 @@ jobs:
       - name: Build the complete Desktop for CNB artifact review
         run: pnpm --filter @nevix/desktop build
       - run: node --test scripts/release-feasibility/desktop-artifact.test.mjs
-      - run: node scripts/release-feasibility/desktop-artifact.mjs
+      - run: pnpm --filter @nevix/desktop exec node ../../scripts/release-feasibility/desktop-artifact.mjs
       - run: pnpm --filter @nevix/desktop test:native:packaged
       - uses: actions/upload-artifact@v4
         with:
