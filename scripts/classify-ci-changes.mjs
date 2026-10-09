@@ -90,7 +90,8 @@ export function classifyPaths(paths) {
     // 正式运行配置/工具还需 Server CI 的原生离线首次安装。
     if (startsWith(path, "deploy")) {
       checks.add("harness");
-      if (!path.endsWith(".md")) checks.add("server");
+      if (!path.endsWith(".md") && !path.startsWith("deploy/publish-stable"))
+        checks.add("server");
     }
 
     // contracts 的自动门禁由 Server CI 拥有；跨层验收留给本地 Full E2E。
@@ -164,6 +165,7 @@ export function classifyPaths(paths) {
       isOneOf(path, [
         ".github/workflows/ci-gate.yml",
         ".github/workflows/release-feasibility.yml",
+        ".github/workflows/stable-release.yml",
         ".github/workflows/desktop-update-install.yml",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",

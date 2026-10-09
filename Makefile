@@ -102,7 +102,7 @@ test-offline-runtime:
 	./deploy/scripts/test-offline-runtime.sh
 
 harness-test:
-	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/deploy-stack.test.mjs scripts/release-feasibility/release-trust.test.mjs
+	node --experimental-strip-types --test deploy/publish-stable.test.mjs .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/deploy-stack.test.mjs scripts/release-feasibility/release-trust.test.mjs
 
 setup:
 	pnpm install
