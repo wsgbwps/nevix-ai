@@ -132,6 +132,8 @@ assert_identity_integration_executed() {
   local test_name
   local -a representative_tests=(
     TestOpenClaimStatusAndSilentConstruction
+    TestReleaseChecksRequireRealActiveAdmin
+    TestReleaseSignedSourceWithRealIdentity
     TestLoginIssuesOpaqueSessionStoredOnlyAsHash
     TestLoginRejectsBadCredentialsUniformly
     TestLoginAnswersDisabledAccountWithAccountDisabled
@@ -276,7 +278,7 @@ set +e
 # migration engine, and the package-local tests all ride one PostgreSQL
 # stack. -p 1 serializes packages because they share one database whose
 # state the tests reset between cases.
-go test -C server -race -count=1 -p 1 -v ./internal/identity/... ./internal/auditlog/... ./internal/migration/... | tee "$identity_test_log"
+go test -C server -race -count=1 -p 1 -v ./internal/identity/... ./internal/auditlog/... ./internal/migration/... ./internal/release/... | tee "$identity_test_log"
 test_status="${PIPESTATUS[0]}"
 set -e
 if [[ "$test_status" -ne 0 ]]; then

@@ -66,6 +66,10 @@ test('invalid or absent Settings state safely defaults to Profile without a sour
 test('Admin-only sections resolve to Profile for sessions without the Admin role', () => {
   assert.equal(isAdminSettingsSection('users'), true)
   assert.equal(isAdminSettingsSection('audit'), true)
+  assert.equal(isAdminSettingsSection('release'), true)
+  const releaseEntry = readSettingsEntry({ settings: { section: 'release' } })
+  assert.equal(resolveSettingsSection(releaseEntry, false), 'profile')
+  assert.equal(resolveSettingsSection(releaseEntry, true), 'release')
   assert.equal(isAdminSettingsSection('profile'), false)
 
   const usersEntry = readSettingsEntry({ settings: { section: 'users' } })

@@ -18,6 +18,10 @@ paths:
     $ref: "./creation.yaml#/paths/~1creation~1maintenance~1pause"
   /creation/maintenance/resume:
     $ref: "./creation.yaml#/paths/~1creation~1maintenance~1resume"
+  /release/status:
+    $ref: "./release.yaml#/paths/~1release~1status"
+  /release/check:
+    $ref: "./release.yaml#/paths/~1release~1check"
   /release/version:
     get:
       summary: Running Server release identity and Desktop compatibility
