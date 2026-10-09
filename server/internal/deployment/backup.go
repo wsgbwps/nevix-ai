@@ -273,8 +273,14 @@ func createBackup(o backupOptions, r verifiedRuntime) (retErr error) {
 					return
 				}
 			}
+			if stopped {
+				if e := waitRunningRelease(o.client, r, 20*time.Second); e != nil {
+					retErr = errors.Join(retErr, fmt.Errorf("old Server/edge HTTPS readiness failed; maintenance retained: %w", e))
+					return
+				}
+			}
 			if e := o.client.resume(pause); e != nil {
-				retErr = errors.Join(retErr, errors.New("owned maintenance could not resume; instance remains paused; retry this operation's owner/revision explicitly"))
+				retErr = errors.Join(retErr, fmt.Errorf("owned maintenance could not resume; instance remains paused; retry this operation's owner/revision explicitly: %w", e))
 			}
 		}()
 		if err != nil {

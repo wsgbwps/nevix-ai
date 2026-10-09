@@ -172,7 +172,7 @@ func upgradeCommand(args []string, key string) (retErr error) {
 					retErr = errors.Join(retErr, e)
 					return
 				}
-				if e := verifyRunningRelease(c, original); e != nil {
+				if e := waitRunningRelease(c, original, 20*time.Second); e != nil {
 					retErr = errors.Join(retErr, e)
 					return
 				}
@@ -253,7 +253,7 @@ func upgradeCommand(args []string, key string) (retErr error) {
 	if _, err = invokeCompose(o.directory, candidate.directory, "nevix", "restart", "nginx"); err != nil {
 		return err
 	}
-	if err = verifyRunningRelease(c, candidate); err != nil {
+	if err = waitRunningRelease(c, candidate, 20*time.Second); err != nil {
 		return err
 	}
 	s, err := c.snapshot()
@@ -424,7 +424,7 @@ func recoverUpgrade(o backupOptions, key string) error {
 	if _, err = invokeCompose(o.directory, current, "nevix", "restart", "nginx"); err != nil {
 		return err
 	}
-	if err = verifyRunningRelease(o.client, r); err != nil {
+	if err = waitRunningRelease(o.client, r, 20*time.Second); err != nil {
 		return err
 	}
 	s, err := o.client.snapshot()

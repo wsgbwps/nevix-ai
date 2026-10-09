@@ -281,7 +281,7 @@ func copyVolumeSnapshot(image, volume, stage, prefix string, optional bool) erro
 	// Fixed names and tar regular-file checks keep links/devices out of the backup.
 	script := "cd /volume; test -f server.pem && test -f server.key; tar -cf - server.pem server.key"
 	if optional {
-		script = "cd /volume; if test -e provider-credential-master.key; then test \"$(stat -c %a .)\" = 700; test $(ls -A . | wc -l) -eq 1; test -f provider-credential-master.key && test ! -L provider-credential-master.key && test \"$(stat -c %a provider-credential-master.key)\" = 600; tar -cf - provider-credential-master.key; else test -z \"$(ls -A .)\"; tar -cf - --files-from /dev/null; fi"
+		script = "cd /volume; if test -e provider-credential-master.key; then test \"$(stat -c %a .)\" = 700; test $(ls -A . | wc -l) -eq 1; test -f provider-credential-master.key && test ! -L provider-credential-master.key && test \"$(stat -c %a provider-credential-master.key)\" = 600; tar -cf - provider-credential-master.key; else test -z \"$(ls -A .)\"; fi"
 	}
 	cmd := exec.Command("docker", "run", "--rm", "--pull", "never", "--network", "none", "--mount", "type=volume,source="+volume+",target=/volume,readonly", "--entrypoint", "sh", image, "-ec", script)
 	stdout, err := cmd.StdoutPipe()
@@ -326,7 +326,7 @@ func copyVolumeSnapshot(image, volume, stage, prefix string, optional bool) erro
 		count++
 	}
 	if err = cmd.Wait(); err != nil {
-		return errors.New("private volume snapshot failed (permissions/material may be damaged)")
+		return fmt.Errorf("%s private volume snapshot command failed (%v); private stderr withheld", prefix, err)
 	}
 	if optional && count == 0 {
 		if err = os.MkdirAll(filepath.Join(stage, prefix), 0700); err != nil {

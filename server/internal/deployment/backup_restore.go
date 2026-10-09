@@ -262,19 +262,32 @@ func verifyRestoredCredentials(directory, current, project, stage string) error 
 	return nil
 }
 func verifyRunningRelease(c *maintenanceClient, r verifiedRuntime) error {
-	b, status, err := c.request("GET", "/release/version", nil)
-	if err != nil || status != 200 {
-		return errors.New("restored running version unavailable")
+	return waitRunningRelease(c, r, 0)
+}
+func waitRunningRelease(c *maintenanceClient, r verifiedRuntime, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	// Container restart acknowledges process creation, not HTTPS listener readiness.
+	// Retry only bounded read-only reachability/edge-unavailable outcomes, never maintenance mutations.
+	for {
+		c.client.CloseIdleConnections()
+		b, status, err := c.request("GET", "/release/version", nil)
+		if err != nil || status != 200 {
+			if timeout > 0 && (status == 0 || status == 502 || status == 503) && time.Now().Before(deadline) {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			return fmt.Errorf("running Server HTTPS version unavailable (HTTP %d): %w", status, err)
+		}
+		var v struct {
+			Service    string `json:"service"`
+			Version    string `json:"version"`
+			MinDesktop string `json:"min_desktop_version"`
+		}
+		if json.Unmarshal(b, &v) != nil || v.Service != "nevix-server" || v.Version != r.manifest.Version || v.MinDesktop != r.manifest.MinDesktopVersion {
+			return errors.New("running version differs from verified release")
+		}
+		return nil
 	}
-	var v struct {
-		Service    string `json:"service"`
-		Version    string `json:"version"`
-		MinDesktop string `json:"min_desktop_version"`
-	}
-	if json.Unmarshal(b, &v) != nil || v.Service != "nevix-server" || v.Version != r.manifest.Version || v.MinDesktop != r.manifest.MinDesktopVersion {
-		return errors.New("restored running version differs from backup release")
-	}
-	return nil
 }
 func verifyRestoredPublicState(c *maintenanceClient, m backupMetadata, r verifiedRuntime) error {
 	if err := verifyRunningRelease(c, r); err != nil {
@@ -383,6 +396,9 @@ func restoreBackup(o backupOptions, r verifiedRuntime, stage string, m backupMet
 		return errors.New("restored Server startup failed; database was restored, switching images is not a rollback")
 	}
 	if _, err = invokeCompose(o.directory, current, "nevix", "restart", "nginx"); err != nil {
+		return err
+	}
+	if err = waitRunningRelease(o.client, r, 20*time.Second); err != nil {
 		return err
 	}
 	if err = o.client.authenticate(o.credentials); err != nil {
