@@ -9,7 +9,12 @@ import {
   cancelUpdateInstallation,
   requestUpdateInstallation
 } from '../window/ordinary-close-runtime'
-import { downloadTrustedUpdate, type DownloadedUpdate } from './signed-provider'
+import {
+  downloadTrustedUpdate,
+  stageNativeUpdate,
+  NativeUpdateStagingFailure,
+  type DownloadedUpdate
+} from './signed-provider'
 import { verifyArtifact, verifyArtifactSync } from './release-artifact'
 let operation: Promise<void> = Promise.resolve()
 let generation = 0
@@ -71,7 +76,7 @@ async function check(manual: boolean): Promise<void> {
       readServer: readCurrentServerVersion
     })
     if (token !== generation) return
-    if (result.outcome !== 'available' || process.platform !== 'win32') {
+    if (result.outcome !== 'available') {
       if (manual) await showResult(result)
       return
     }
@@ -106,8 +111,12 @@ async function check(manual: boolean): Promise<void> {
       })
       notification.show()
     }
-  } catch {
-    if (manual && token === generation) await showResult({ outcome: 'failed' })
+  } catch (error) {
+    if (manual && token === generation)
+      await showResult(
+        { outcome: 'failed' },
+        error instanceof NativeUpdateStagingFailure ? 'restart' : 'failed'
+      )
   }
 }
 async function offerInstallation(
@@ -137,9 +146,11 @@ async function offerInstallation(
     return
   }
   let validationFailed = false
+  let restartRequired = false
+  let nativeStaging: Promise<void> | undefined
   await requestUpdateInstallation(
     window,
-    async () => {
+    async (signal) => {
       try {
         assertCompatibleServer(
           update.release,
@@ -148,8 +159,22 @@ async function offerInstallation(
           await readCurrentServerVersion()
         )
         if (token !== generation) throw new Error('Update installation cancelled')
+        if (update.release.platform === 'darwin') {
+          nativeStaging = stageNativeUpdate(update, signal)
+          await nativeStaging
+          assertCompatibleServer(
+            update.release,
+            app.getVersion(),
+            update.connectionIdentity,
+            await readCurrentServerVersion()
+          )
+          if (token !== generation) throw new Error('Update installation cancelled')
+        }
       } catch (error) {
-        validationFailed = true
+        if (!signal.aborted) {
+          validationFailed = true
+          restartRequired = error instanceof NativeUpdateStagingFailure
+        }
         throw error
       }
     },
@@ -165,9 +190,15 @@ async function offerInstallation(
       }
     }
   )
-  if (validationFailed && token === generation) await showResult({ outcome: 'failed' })
+  // Cancellation clears Window's action immediately; keep the singleton feed serialized until drained.
+  await nativeStaging?.catch(() => undefined)
+  if (validationFailed && token === generation)
+    await showResult({ outcome: 'failed' }, restartRequired ? 'restart' : 'failed')
 }
-async function showResult(result: UpdateCheckResult): Promise<void> {
+async function showResult(
+  result: UpdateCheckResult,
+  failureMessage: 'failed' | 'restart' = 'failed'
+): Promise<void> {
   const message =
     result.outcome === 'current'
       ? text('current')
@@ -181,7 +212,7 @@ async function showResult(result: UpdateCheckResult): Promise<void> {
               ? text('unavailable')
               : result.outcome === 'trust-unconfigured'
                 ? text('trust')
-                : text('failed')
+                : text(failureMessage)
   await dialog.showMessageBox({
     type: result.outcome === 'failed' ? 'warning' : 'info',
     title: text('title'),

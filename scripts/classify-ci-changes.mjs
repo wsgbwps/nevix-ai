@@ -87,8 +87,11 @@ export function classifyPaths(paths) {
 
     // deploy 交付资产（公网 Compose/Nginx/证书生命周期）由 harness 内联的
     // deploy-stack 结构测试验证：端口暴露、摘要钉扎、TLS 与流式合同。
-    // 不改产品运行时代码，无需产品套件。
-    if (startsWith(path, "deploy")) checks.add("harness");
+    // 正式运行配置/工具还需 Server CI 的原生离线首次安装。
+    if (startsWith(path, "deploy")) {
+      checks.add("harness");
+      if (!path.endsWith(".md")) checks.add("server");
+    }
 
     // contracts 的自动门禁由 Server CI 拥有；跨层验收留给本地 Full E2E。
     if (startsWith(path, "contracts")) checks.add("server");

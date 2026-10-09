@@ -43,7 +43,7 @@ export function ordinaryCloseRendererUnavailable(window: BrowserWindow): void {
 
 export function requestUpdateInstallation(
   window: BrowserWindow,
-  validate: () => Promise<void>,
+  validate: (signal: AbortSignal) => Promise<void>,
   install: () => void
 ): Promise<boolean> {
   return requireCoordinator().requestUpdateInstallation(window, validate, install)

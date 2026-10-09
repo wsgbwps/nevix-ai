@@ -1,0 +1,39 @@
+# #343 integrated Mac update: prepared, pending signing approval
+
+The actual Desktop now selects MacUpdater for `darwin/arm64` and reuses the Windows Main signed-source, full-download, native confirmation and Window readiness implementation. DMG is first installation; the signed Desktop candidate is the ZIP. Other Mac architectures are rejected. Neither background download nor ordinary quit/relaunch invokes native Squirrel; explicit installation does.
+
+This is **preparation**, not installed-update acceptance. The [#340 experiment](mac-library-validation-evidence.md) used a separate tiny app and deleted its identities. It does not satisfy this integrated Desktop gate. On 2026-10-09 no usable signing identity was known, and the official Ed25519 anchor remained empty. No production key, keychain/search-list/trust change or signed integrated app was created by #343.
+
+## Reviewable signing change
+
+`apps/desktop/build/entitlements.mac.plist` now tracks the previous three JIT/DYLD entitlements and the ADR-0026 `disable-library-validation` exception. Main and Helpers retain hardened runtime. This permits libraries signed by other teams, or unsigned libraries, and reduces protection against dynamic-library injection; the existing DYLD environment entitlement makes that tradeoff relevant. Ed25519 protects update provenance, not runtime library loading. There is no notarization or Developer ID claim. Enterprise policy may prevent first launch even when a personal device permits it.
+
+The formal build entry is:
+
+```sh
+pnpm --filter @nevix/desktop build:mac:release
+```
+
+It requires `NEVIX_MAC_SIGNING_KEYCHAIN` pointing to an **already prepared/unlocked protected keychain** and `NEVIX_MAC_SIGNING_SHA1` containing the fixed leaf certificate's 40-character fingerprint. These are paths/public identifiers, not passwords. Missing inputs fail; the entry never falls back to unsigned/ad-hoc signing. It does not create/import/unlock keychains, change search lists or grant trust. It uses installed builder 26.15.3, updater 6.8.9 and the proven `afterPack`/`signAsync(identityValidation:false)` route to select the pinned free identity. `identityValidation:false` permits the deliberately self-signed certificate; strict `codesign` checks still require the exact App ID and leaf hash. The extracted public certificate fingerprint is independently checked before DMG/ZIP creation. Automatic publishing is disabled.
+
+Identity initialization, private password entry, encrypted PKCS#12/offline backup and restoration testing belong to the root signing plan. Do not run the formal signer before the immediately applicable approval required by `docs/agents/delivery.md`. Earlier experiment approval does not cover it.
+
+## Exact installed exercise after approval
+
+1. Record the integration commit, macOS/hardware and Electron/builder/updater versions. Inventory existing installed `com.nevix.ai` bundles and native updater cache read-only; do not replace an unrelated app/cache. Build the actual integrated Desktop at two increasing stable versions from isolated candidate checkouts. Both must use the same approved certificate/fingerprint/entitlements and App ID `com.nevix.ai`.
+2. In those candidate checkouts only, pin a controlled test Ed25519 public anchor and a dedicated HTTPS test manifest path. Record this candidate-only difference. Use a reviewed CNB test release/channel or another approved system-trusted HTTPS source; never silently weaken TLS or update the public stable pointer. Test private Ed25519 material stays in memory or outside source under the approved signing plan. Both signed descriptors bind real ZIP URL, exact size/digest and current Server compatibility. The customer Server remains an independently configured HTTPS/TOFU instance.
+3. Download the old real DMG through the browser, preserve its genuine quarantine and record the source/size/digest. Use Finder to install the real app into the explicitly reviewed isolated installation directory. Record Gatekeeper rejection and the user's actual system-provided “Open Anyway” approval. Never remove quarantine, disable Gatekeeper/SIP or add certificate trust to manufacture this result.
+4. Launch that installed Desktop, connect to the controlled compatible Server, and observe its native update entry/download notification. Verify exact ZIP/cache bytes. Choose Later, ordinary quit and relaunch: installed version stays old. Repeat with no renderer readiness, renderer loss, canceled Settings/save failure and upload exit not ready; installation must never occur. The shared Window rejection matrix also covers expired/wrong-owner/repeated decisions.
+5. Replace cached ZIP bytes after download and request installation: the fresh byte check rejects. Switch current Server identity or compatibility after download and request installation: fresh compatibility validation rejects. Restore the original verified descriptor/cache and instance. A different-certificate candidate must pass publisher integrity but fail native Squirrel signature continuity.
+6. With the correct candidate, approve the native installation prompt and complete the fresh Window save/discard/upload readiness decision. Only its single valid allow may trigger Squirrel. Confirm replacement and a real new-version boot from the **same installed path**, strict signature, the exact pinned leaf, and retained customer/local state.
+7. Record the resulting evidence in `scripts/release-feasibility/mac-integrated-evidence.md`: all versions/paths/manifest and artifact hashes, signing requirement, entitlement checks, actual UI outcomes and restart result. Redact private material. Clean only exercise-owned apps/downloads/test release data; preserve the approved stable identity and its verified offline backup.
+
+Native Smoke and local Mac E2E remain separate regressions; source/ad-hoc/unsigned packaged success proves neither Gatekeeper first installation nor Squirrel signature continuity. A complete signed candidate and real installed exercise are mandatory before marking #343 accepted.
+
+## Current checks
+
+The new public library download seam test compiles the real signed provider into a disposable Electron test process. It exercises MacUpdater 6.8.9, verifies the actual returned cache path/bytes, confirms zero native checks during full ZIP download and native staging only after explicit approval. Native check transport is intercepted: it never stages/installs a signed app and is not the installed acceptance above. Existing Window tests cover the deny/unavailable/expired/wrong decision matrix. Signing input checks verify missing/ad-hoc/malformed identities fail without invoking a signer.
+
+Exact pinned upstream API: [MacUpdater at builder 26.15.3](https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.3/packages/electron-updater/src/MacUpdater.ts). `autoInstallOnAppQuit=false` avoids native staging during download. `AppUpdater.executeDownload` returns the cache path after `MacUpdater.updateDownloaded` resolves; its internal empty array is not the public download result.
+
+Mac native staging runs in Window validation after its valid allow, with cancellation represented by an AbortSignal. The close bypass is granted only after staging completes and compatibility is rechecked. Cancellation drains the in-flight native check before another Main operation can switch its singleton feed; no install occurs. Native errors or a 45-second staging timeout require an application restart and prevent further Mac staging/feed replacement in that process, so a late event cannot authorize another attempt. Window approval separately expires after 60 seconds. The public library probe covers cancellation/draining, signature errors and a controlled-clock timeout without actually invoking Squirrel transport.

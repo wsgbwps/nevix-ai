@@ -42,3 +42,34 @@ jobs:
       # MinIO are test-only, never production runtime options; zero skips.
       - name: Creation integration (real PostgreSQL + test-only MinIO)
         run: ./scripts/test-creation-integration.sh
+
+  offline-runtime:
+    name: Offline Linux x64 (${{ matrix.store }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        store: [classic, containerd]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Use OCI image store for vendor export
+        run: |
+          curl --fail --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/docker.tgz" https://download.docker.com/linux/static/stable/x86_64/docker-29.4.0.tgz
+          tar -xzf "$RUNNER_TEMP/docker.tgz" -C "$RUNNER_TEMP"
+          sudo systemctl stop docker.socket docker containerd
+          sudo install -m 0755 "$RUNNER_TEMP"/docker/* /usr/bin/
+          sudo mkdir -p /etc/docker
+          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start containerd docker
+          test "$(docker version --format '{{.Server.Version}}')" = 29.4.0
+          docker version
+          docker compose version
+      - name: First install from empty cache with registry networking absent
+        env:
+          NEVIX_DEPLOY_TEST_STORE: ${{ matrix.store }}
+        run: make test-offline-runtime

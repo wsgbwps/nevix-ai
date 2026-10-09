@@ -188,6 +188,9 @@ Feature 目录遵循以下受控演化规则；segment 词汇与 public interfac
 
 ### Go 后端 (`server/`)
 
+`server/cmd/nevix-deploy` 与 `server/internal/deployment` 是 `deploy/` 的 Go 运维工具实现；不装入运行中的 Server，不拥有业务 Module 或 Docker socket API。
+
+
 按复杂度分层，详见 [ADR-0003](docs/adr/0003-complexity-driven-ddd-layering.md)。
 
 ```

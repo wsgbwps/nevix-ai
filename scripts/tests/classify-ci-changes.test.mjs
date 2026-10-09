@@ -328,16 +328,19 @@ test("delivery-harness changes run only the inline harness tests", () => {
   });
 });
 
-test("deploy delivery assets run only the inline harness tests", () => {
+test("deploy runtime assets run the inline harness and native Server runtime tests", () => {
   assert.deepEqual(
     selected([
       "deploy/docker-compose.yml",
+      "deploy/runtime-compose.template.yaml",
+      "deploy/scripts/build-bundle.sh",
+      "deploy/scripts/test-offline-runtime.sh",
       "deploy/nginx/nginx.conf",
       "deploy/cert-init/cert-init.sh",
       "deploy/README.md",
       "scripts/tests/deploy-stack.test.mjs",
     ]),
-    { harness: true },
+    { server: true, harness: true },
   );
 });
 
