@@ -31,6 +31,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node --test scripts/release-feasibility/release-trust.test.mjs
       - run: node scripts/release-feasibility/windows-installed.cjs
+      - name: Build the complete Desktop for CNB artifact review
+        run: pnpm --filter @nevix/desktop build
+      - run: pnpm --filter @nevix/desktop exec electron-builder --win --x64 --publish never
+      - run: pnpm --filter @nevix/desktop test:native:packaged
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cnb-desktop-review-windows
+          retention-days: 7
+          if-no-files-found: error
+          path: apps/desktop/dist/Nevix-AI-0.1.0-setup.exe
       - uses: actions/upload-artifact@v4
         if: always()
         with:
