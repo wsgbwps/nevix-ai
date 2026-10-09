@@ -31,6 +31,7 @@ cleanup() {
 }
 trap cleanup EXIT
 "$repo/deploy/scripts/build-bundle.sh" 1.2.3 1.0.0 1.0.0 "$scratch/runtime.tar.gz"
+"$repo/deploy/scripts/build-upgrade-fixtures.sh" "$scratch"
 printf '{}\n' > "$scratch/daemon.json"
 feature=false
 if [[ $store == containerd ]]; then feature=true; fi
@@ -66,9 +67,10 @@ done
 docker info >/dev/null
 export NEVIX_DEPLOY_ISOLATED_DAEMON=1 NEVIX_DEPLOY_INTEGRATION_REQUESTED=1
 export NEVIX_DEPLOY_RUNTIME_BUNDLE="$scratch/runtime.tar.gz"
+export NEVIX_DEPLOY_UPGRADE_FIXTURES="$scratch"
 (cd "$repo/server" && CGO_ENABLED=0 go test -c ./internal/deployment -o "$scratch/deployment.test")
 # The real CLI HTTP client must share the daemon's otherwise isolated network namespace.
-sudo --preserve-env=DOCKER_CONFIG,DOCKER_HOST,NEVIX_DEPLOY_ISOLATED_DAEMON,NEVIX_DEPLOY_INTEGRATION_REQUESTED,NEVIX_DEPLOY_RUNTIME_BUNDLE \
+sudo --preserve-env=DOCKER_CONFIG,DOCKER_HOST,NEVIX_DEPLOY_ISOLATED_DAEMON,NEVIX_DEPLOY_INTEGRATION_REQUESTED,NEVIX_DEPLOY_RUNTIME_BUNDLE,NEVIX_DEPLOY_UPGRADE_FIXTURES \
   nsenter --net --target "$(cat "$scratch/docker.pid")" \
   setpriv --reuid "$(id -u)" --regid "$(id -g)" --init-groups \
   "$scratch/deployment.test" -test.run '^TestOfflineFirstInstallWithRealImages$' -test.v -test.count=1

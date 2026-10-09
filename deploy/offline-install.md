@@ -67,3 +67,6 @@ Docker registry 访问。builder 只从 `git archive HEAD deploy server` 提取 
 完整实例保护、隔离验证与明确恢复命令见
 [`instance-backup-and-restore`](../scripts/instance-backup-and-restore.md)。原始签名包/清单
 必须随版本保留，实例备份含客户秘密，不能放进公开成品仓库。
+
+后续更新使用[Deployment Upgrade](../scripts/instance-upgrade.md)；不要重跑空实例 install，
+不要将旧镜像当作数据库回滚。

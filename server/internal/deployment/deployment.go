@@ -13,6 +13,9 @@ import (
 
 // Run is the operator command boundary. The caller supplies its compiled publisher anchor.
 func Run(args []string, publicKey string) error {
+	if len(args) > 0 && (args[0] == "upgrade" || args[0] == "recover-upgrade") {
+		return upgradeCommand(args, publicKey)
+	}
 	if len(args) > 0 && (args[0] == "backup" || args[0] == "verify-backup" || args[0] == "restore") {
 		return backupCommand(args, publicKey)
 	}
@@ -20,7 +23,7 @@ func Run(args []string, publicKey string) error {
 		return pack(args[1:])
 	}
 	if len(args) == 0 {
-		return errors.New("usage: nevix-deploy verify|import|install --manifest FILE --bundle FILE --directory DIR")
+		return errors.New("usage: nevix-deploy verify|import|install|backup|verify-backup|restore|upgrade|recover-upgrade (see operator manuals)")
 	}
 	if args[0] != "verify" && args[0] != "import" && args[0] != "install" {
 		return errors.New("unknown command")

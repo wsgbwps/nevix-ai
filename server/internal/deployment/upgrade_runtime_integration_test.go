@@ -1,0 +1,296 @@
+package deployment_test
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/sha512"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/nevix-ai/server/internal/deployment"
+	"github.com/nevix-ai/server/internal/release"
+)
+
+func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, docker func(...string) []byte) {
+	t.Helper()
+	fixtures := os.Getenv("NEVIX_DEPLOY_UPGRADE_FIXTURES")
+	if fixtures == "" {
+		t.Fatal("native signed upgrade fixtures required")
+	}
+	cert := invoke("exec", "-T", "cert-watch", "cat", "/etc/nginx/tls/server.pem")
+	block, _ := pem.Decode(cert)
+	if block == nil {
+		t.Fatal("customer cert")
+	}
+	pin := sha256.Sum256(block.Bytes)
+	fingerprint := hex.EncodeToString(pin[:])
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(cert)
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}}, Timeout: 15 * time.Second}
+	defer client.CloseIdleConnections()
+	request := func(method, path, token string, body any) (int, []byte) {
+		t.Helper()
+		var reader io.Reader
+		if body != nil {
+			b, _ := json.Marshal(body)
+			reader = bytes.NewReader(b)
+		}
+		r, e := http.NewRequest(method, "https://127.0.0.1"+path, reader)
+		if e != nil {
+			t.Fatal(e)
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Authorization", "Bearer "+token)
+		res, e := client.Do(r)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer res.Body.Close()
+		b, e := io.ReadAll(res.Body)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return res.StatusCode, b
+	}
+	status, b := request("POST", "/identity/auth/login", "", map[string]string{"email": "offline345@example.com", "password": "fixturePassword345!"})
+	var session struct {
+		Token string `json:"token"`
+	}
+	if status != 200 || json.Unmarshal(b, &session) != nil || session.Token == "" {
+		t.Fatalf("upgrade real login %d %s", status, b)
+	}
+	token := session.Token
+	private := t.TempDir()
+	tokenFile := filepath.Join(private, "session")
+	os.WriteFile(tokenFile, []byte(token), 0600)
+	credentials := filepath.Join(private, "credentials.json")
+	os.WriteFile(credentials, []byte(`{"email":"offline345@example.com","password":"fixturePassword345!"}`), 0600)
+	pub, priv, e := ed25519.GenerateKey(rand.Reader)
+	if e != nil {
+		t.Fatal(e)
+	}
+	der, e := x509.MarshalPKIXPublicKey(pub)
+	if e != nil {
+		t.Fatal(e)
+	}
+	key := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+	sign := func(bundle, version string) string {
+		t.Helper()
+		data, e := os.ReadFile(bundle)
+		if e != nil {
+			t.Fatal(e)
+		}
+		sum := sha512.Sum512(data)
+		payload, e := json.Marshal(release.Manifest{Version: version, Channel: "stable", Platform: "linux", Arch: "amd64", MinServerVersion: "1.0.0", MinDesktopVersion: "1.0.0", URL: "https://example.com/" + version + ".tar.gz", Size: int64(len(data)), SHA512: base64.StdEncoding.EncodeToString(sum[:])})
+		if e != nil {
+			t.Fatal(e)
+		}
+		envelope, _ := json.Marshal(map[string]string{"format": "nevix-release-v1", "payload": base64.StdEncoding.EncodeToString(payload), "signature": base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))})
+		path := filepath.Join(private, version+".json")
+		if e = os.WriteFile(path, envelope, 0600); e != nil {
+			t.Fatal(e)
+		}
+		return path
+	}
+	originalManifest := sign(originalBundle, "1.2.3")
+	successBundle := filepath.Join(fixtures, "success.tar.gz")
+	successManifest := sign(successBundle, "1.2.4")
+	base := []string{"--directory", dir, "--server-url", "https://127.0.0.1", "--tls-fingerprint", fingerprint, "--token-file", tokenFile}
+	args := func(candidate, manifest, original, oldManifest, output string) []string {
+		return append(append([]string{"upgrade"}, base...), "--bundle", candidate, "--manifest", manifest, "--original-bundle", original, "--original-manifest", oldManifest, "--backup", output)
+	}
+	assertOpenOld := func(version string) {
+		t.Helper()
+		s, data := request("GET", "/creation/maintenance", token, nil)
+		if s != 200 || !bytes.Contains(data, []byte(`"paused":false`)) {
+			t.Fatalf("pre-replacement failure did not recover owned pause: %d %s", s, data)
+		}
+		s, data = request("GET", "/release/version", token, nil)
+		if s != 200 || !bytes.Contains(data, []byte(`"version":"`+version+`"`)) {
+			t.Fatalf("source release changed before replacement: %d %s", s, data)
+		}
+	}
+	// Real private key damage aborts backup before replacement; source runtime must resume.
+	invoke("exec", "-T", "--user", "root", "server", "chmod", "0644", "/var/lib/nevix/secrets/provider-credential-master.key")
+	if e = deployment.Run(args(successBundle, successManifest, originalBundle, originalManifest, filepath.Join(private, "damaged-key.tar.gz")), key); e == nil {
+		t.Fatal("upgrade with unrecoverable private key accepted")
+	}
+	assertOpenOld("1.2.3")
+	invoke("exec", "-T", "--user", "root", "server", "chmod", "0600", "/var/lib/nevix/secrets/provider-credential-master.key")
+	// Provider and OSS are external HTTPS collaborators, never production overrides.
+	fixture := t.TempDir()
+	providerCert, providerKey := providerCertificate(t)
+	for name, data := range map[string][]byte{"provider.pem": providerCert, "provider.key": providerKey} {
+		os.WriteFile(filepath.Join(fixture, name), data, 0600)
+	}
+	binary, e := os.Executable()
+	if e != nil {
+		t.Fatal(e)
+	}
+	data, e := os.ReadFile(binary)
+	if e != nil {
+		t.Fatal(e)
+	}
+	os.WriteFile(filepath.Join(fixture, "deployment.test"), data, 0755)
+	docker("run", "--detach", "--name", "nevix-provider-fixture-348", "--pull", "never", "--network", "nevix_internal", "--network-alias", "models.kapon.cloud", "--network-alias", "nevix-upgrade.oss-cn-hangzhou.aliyuncs.com", "--mount", "type=bind,source="+fixture+",target=/fixture,readonly", "--env", "NEVIX_DEPLOY_PROVIDER_FIXTURE=1", "--entrypoint", "/fixture/deployment.test", "nevix-bundle-cert-init:1.2.3", "-test.run=^TestDeploymentProviderFixture$")
+	defer docker("rm", "--force", "nevix-provider-fixture-348")
+	trustProvider := func() {
+		id := strings.TrimSpace(string(invoke("ps", "--quiet", "server")))
+		docker("cp", filepath.Join(fixture, "provider.pem"), id+":/etc/ssl/certs/isolated-provider-fixture.pem")
+	}
+	trustProvider()
+	invoke("restart", "server")
+	invoke("up", "--detach", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "180")
+	invoke("restart", "nginx")
+	status, b = request("POST", "/identity/admin/reauth/proofs", token, map[string]string{"action": "object_storage_connection.create", "password": "fixturePassword345!"})
+	var proof struct {
+		Proof string `json:"proof"`
+	}
+	if status != 201 || json.Unmarshal(b, &proof) != nil {
+		t.Fatalf("storage reauth %d %s", status, b)
+	}
+	status, b = request("POST", "/creation/object-storage-connection", token, map[string]string{"proof": proof.Proof, "provider": "oss", "region": "cn-hangzhou", "bucket": "nevix-upgrade", "access_key_id": "fixture-access-key-348", "secret_access_key": "fixture-secret-key-348"})
+	if status != 201 {
+		t.Fatalf("real OSS adapter against isolated HTTPS collaborator %d %s", status, b)
+	}
+	submit := func(idempotency string) (string, string) {
+		t.Helper()
+		status, b = request("POST", "/creation/sessions", token, map[string]string{"name": "Retained upgrade task"})
+		var s struct {
+			ID string `json:"id"`
+		}
+		if status != 201 || json.Unmarshal(b, &s) != nil {
+			t.Fatalf("session %d %s", status, b)
+		}
+		status, b = request("GET", "/creation/capability-manifest", token, nil)
+		var manifest struct {
+			Version int `json:"manifest_version"`
+		}
+		if status != 200 || json.Unmarshal(b, &manifest) != nil {
+			t.Fatal("manifest")
+		}
+		os.WriteFile(filepath.Join(fixture, "block-generation"), nil, 0600)
+		status, b = request("POST", "/creation/sessions/"+s.ID+"/tasks", token, map[string]any{"idempotency_key": idempotency, "manifest_version": manifest.Version, "media_type": "image", "model": "doubao-seedream-5.0-pro", "mode": "text-to-image", "prompt": "Queued before upgrade", "ratio": "1:1", "resolution": "2K", "quantity": 1, "references": []any{}})
+		var task struct {
+			Task struct {
+				ID string `json:"id"`
+			} `json:"task"`
+		}
+		if status != 201 || json.Unmarshal(b, &task) != nil || task.Task.ID == "" {
+			t.Fatalf("real task admission %d %s", status, b)
+		}
+		return s.ID, task.Task.ID
+	}
+	_, task := submit("timeout-348")
+	timeoutArgs := append(args(successBundle, successManifest, originalBundle, originalManifest, filepath.Join(private, "timeout.tar.gz")), "--drain-timeout", "500ms")
+	if e = deployment.Run(timeoutArgs, key); e == nil || !strings.Contains(e.Error(), "drain timed out") {
+		t.Fatalf("real nonterminal task timeout before replacement: %v", e)
+	}
+	assertOpenOld("1.2.3")
+	os.Remove(filepath.Join(fixture, "block-generation"))
+	awaitTerminal := func(task string) {
+		t.Helper()
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			status, b = request("GET", "/creation/tasks/"+task, token, nil)
+			var v struct {
+				Task struct {
+					Status string `json:"status"`
+				} `json:"task"`
+			}
+			if status == 200 && json.Unmarshal(b, &v) == nil && (v.Task.Status == "failed" || v.Task.Status == "succeeded" || v.Task.Status == "cancelled") {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("actual worker did not drain terminal task: %d %s", status, b)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	awaitTerminal(task)
+	_, task = submit("drain-348")
+	successfulBackup := filepath.Join(private, "upgrade-1.2.3.tar.gz")
+	done := make(chan error, 1)
+	go func() {
+		done <- deployment.Run(args(successBundle, successManifest, originalBundle, originalManifest, successfulBackup), key)
+	}()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		status, b = request("GET", "/creation/maintenance", token, nil)
+		if status == 200 && bytes.Contains(b, []byte(`"paused":true`)) && bytes.Contains(b, []byte(`"non_terminal_tasks":1`)) {
+			break
+		}
+		select {
+		case e := <-done:
+			t.Fatalf("upgrade skipped real pending task drain: %v", e)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("owned pause with pending task not observed")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	os.Remove(filepath.Join(fixture, "block-generation"))
+	if e = <-done; e != nil {
+		t.Fatal("complete real upgrade:", e)
+	}
+	assertOpenOld("1.2.4")
+	status, b = request("GET", "/creation/tasks/"+task, token, nil)
+	if status != 200 || !bytes.Contains(b, []byte("Queued before upgrade")) {
+		t.Fatalf("historical task lost across real migration: %d %s", status, b)
+	}
+	// External release faults exercise actual Goose failure and actual Docker health outcome.
+	for _, fault := range []struct{ name, version string }{{"migration-failure", "1.2.5"}, {"health-failure", "1.2.6"}} {
+		bundle := filepath.Join(fixtures, fault.name+".tar.gz")
+		manifest := sign(bundle, fault.version)
+		backup := filepath.Join(private, fault.name+".backup.tar.gz")
+		if e = deployment.Run(args(bundle, manifest, successBundle, successManifest, backup), key); e == nil || !strings.Contains(e.Error(), "replacement failed") {
+			t.Fatalf("actual %s failure accepted: %v", fault.name, e)
+		}
+		if st, e := os.Stat(backup); e != nil || st.Mode().Perm() != 0600 {
+			t.Fatal("postreplacement failure lost private proven backup")
+		}
+		if b = invoke("ps", "--status", "running", "--quiet", "server"); len(bytes.TrimSpace(b)) != 0 {
+			t.Fatal("failed replacement Server automatically reopened")
+		}
+		if b = invoke("ps", "--status", "running", "--quiet", "nginx"); len(bytes.TrimSpace(b)) != 0 {
+			t.Fatal("failed replacement edge automatically reopened")
+		}
+		if fault.name == "health-failure" {
+			id := strings.TrimSpace(string(invoke("ps", "--all", "--quiet", "server")))
+			state := docker("inspect", id, "--format", "{{.State.Health.Status}}")
+			if strings.TrimSpace(string(state)) != "unhealthy" {
+				t.Fatalf("health failure was not actual Docker unhealthy outcome: %s", state)
+			}
+		}
+		logs := invoke("logs", "--no-color", "server")
+		if fault.name == "migration-failure" && !bytes.Contains(logs, []byte("division by zero")) {
+			t.Fatal("migration failure was not actual PostgreSQL Goose failure")
+		}
+		restore := append([]string{"restore", "--directory", dir, "--bundle", successBundle, "--manifest", successManifest, "--backup", backup, "--server-url", "https://127.0.0.1", "--tls-fingerprint", fingerprint, "--credentials-file", credentials}, "--confirm", "RESTORE-LOSE-POST-BACKUP-WRITES")
+		if e = deployment.Run(restore, key); e != nil {
+			t.Fatalf("explicit consistent recovery after %s: %v", fault.name, e)
+		}
+		status, b = request("POST", "/identity/auth/login", "", map[string]string{"email": "offline345@example.com", "password": "fixturePassword345!"})
+		if status != 200 || json.Unmarshal(b, &session) != nil {
+			t.Fatal("restored fresh Admin login")
+		}
+		token = session.Token
+		os.WriteFile(tokenFile, []byte(token), 0600)
+		assertOpenOld("1.2.4")
+	}
+	t.Log("instance-upgrade sentinel: real signed old/new images, supplied pinned Admin HTTPS, queued-task timeout/drain, recoverable complete backup, actual additive Goose migration, retained history/config/TLS/master-key/encrypted credentials, actual failing SQL/health, stopped persistent maintenance, explicit consistent restore")
+}
