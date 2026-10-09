@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { X509Certificate } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -17,11 +17,31 @@ export function signingInputs(environment) {
   return { identity: identity.toUpperCase(), keychain: resolve(keychain) }
 }
 
+export async function assertSigningKeychainListed(keychain, searchList) {
+  const listed = searchList
+    .split('\n')
+    .map((line) => line.trim().replace(/^"|"$/g, ''))
+    .filter(Boolean)
+  const resolved = await Promise.all(
+    listed.map((path) => realpath(path).catch(() => resolve(path)))
+  )
+  assert.ok(
+    resolved.includes(await realpath(keychain).catch(() => resolve(keychain))),
+    'Signing keychain must already be in the user keychain search list; configure it explicitly before signing'
+  )
+}
+
 async function main() {
   assert.equal(process.platform, 'darwin', 'Mac release signing requires macOS')
   assert.equal(process.arch, 'arm64', 'Only Apple Silicon is supported')
   const { identity, keychain } = signingInputs(process.env)
   assert.ok((await stat(keychain)).isFile(), 'Signing keychain must already exist')
+  await assertSigningKeychainListed(
+    keychain,
+    execFileSync('security', ['list-keychains', '-d', 'user'], {
+      encoding: 'utf8'
+    })
+  )
   const identities = execFileSync('security', ['find-identity', '-p', 'codesigning', keychain], {
     encoding: 'utf8'
   })

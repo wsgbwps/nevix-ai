@@ -32,6 +32,34 @@ test('Apple Silicon full ZIP download leaves native staging off until explicit i
       timeout: 25000
     })
     expect(stdout).toContain('Mac signed-provider download/native staging boundary passed')
+    const lifecycleProbe = await promisify(execFile)(
+      testRequire('electron'),
+      [root, '--probe-retry-lifecycle'],
+      { timeout: 25000 }
+    )
+    expect(lifecycleProbe.stdout).toContain(
+      'Mac retries reuse one listener set without abandoned native proxies'
+    )
+    const transportProbe = await promisify(execFile)(
+      testRequire('electron'),
+      [root, '--probe-native-transport'],
+      { timeout: 25000 }
+    )
+    expect(transportProbe.stdout).toContain('Mac verified complete native transport installs once')
+    const swappedProbe = await promisify(execFile)(
+      testRequire('electron'),
+      [root, '--probe-swapped-transport'],
+      { timeout: 25000 }
+    )
+    expect(swappedProbe.stdout).toContain(
+      'Mac swapped/restored cache cannot complete native transport'
+    )
+    const staleProbe = await promisify(execFile)(
+      testRequire('electron'),
+      [root, '--probe-stale-native-event'],
+      { timeout: 25000 }
+    )
+    expect(staleProbe.stdout).toContain('Mac stale native completion cannot authorize a candidate')
     const timeoutProbe = await promisify(execFile)(
       testRequire('electron'),
       [root, '--probe-stage-timeout'],
