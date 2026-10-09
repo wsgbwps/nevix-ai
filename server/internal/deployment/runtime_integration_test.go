@@ -28,14 +28,16 @@ func TestOfflineFirstInstallWithRealImages(t *testing.T) {
 	docker := func(args ...string) []byte {
 		t.Helper()
 		cmd := exec.Command("docker", args...)
-		b, err := cmd.CombinedOutput()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		b, err := cmd.Output()
 		if err != nil {
-			t.Fatalf("docker %s: %v %s", args[0], err, b)
+			t.Fatalf("docker %s: %v %s", args[0], err, stderr.Bytes())
 		}
 		return b
 	}
 	if b := docker("image", "ls", "--quiet"); len(bytes.TrimSpace(b)) != 0 {
-		t.Fatal("acceptance daemon must have an empty image cache")
+		t.Fatalf("acceptance daemon must have an empty image cache, actual image IDs: %s", b)
 	}
 	t.Logf("Docker %s Compose %s", docker("version", "--format", "{{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}"), docker("compose", "version", "--short"))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

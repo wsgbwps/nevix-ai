@@ -54,6 +54,10 @@ sudo unshare --net bash -c '
 daemon_pid=$!
 unset DOCKER_CONTEXT
 export DOCKER_HOST="unix://$scratch/docker.sock"
+# sudo retains its root HOME after dropping uid; avoid an unreadable inherited client config.
+export DOCKER_CONFIG="$scratch/docker-client"
+mkdir -m 0700 "$DOCKER_CONFIG"
+printf '{}\n' > "$DOCKER_CONFIG/config.json"
 for attempt in $(seq 1 60); do
   if docker info >/dev/null 2>&1; then break; fi
   if ! kill -0 "$daemon_pid" 2>/dev/null; then cat "$scratch/daemon.log" >&2; exit 1; fi
@@ -64,7 +68,7 @@ export NEVIX_DEPLOY_ISOLATED_DAEMON=1 NEVIX_DEPLOY_INTEGRATION_REQUESTED=1
 export NEVIX_DEPLOY_RUNTIME_BUNDLE="$scratch/runtime.tar.gz"
 (cd "$repo/server" && CGO_ENABLED=0 go test -c ./internal/deployment -o "$scratch/deployment.test")
 # The real CLI HTTP client must share the daemon's otherwise isolated network namespace.
-sudo --preserve-env=DOCKER_HOST,NEVIX_DEPLOY_ISOLATED_DAEMON,NEVIX_DEPLOY_INTEGRATION_REQUESTED,NEVIX_DEPLOY_RUNTIME_BUNDLE \
+sudo --preserve-env=DOCKER_CONFIG,DOCKER_HOST,NEVIX_DEPLOY_ISOLATED_DAEMON,NEVIX_DEPLOY_INTEGRATION_REQUESTED,NEVIX_DEPLOY_RUNTIME_BUNDLE \
   nsenter --net --target "$(cat "$scratch/docker.pid")" \
   setpriv --reuid "$(id -u)" --regid "$(id -g)" --init-groups \
   "$scratch/deployment.test" -test.run '^TestOfflineFirstInstallWithRealImages$' -test.v -test.count=1
