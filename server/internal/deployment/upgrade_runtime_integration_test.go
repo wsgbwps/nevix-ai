@@ -77,7 +77,12 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 		t.Fatalf("upgrade real login: HTTP %d (response body withheld)", status)
 	}
 	token := session.Token
-	private := t.TempDir()
+	// testing.TempDir children use 0777 before umask; custody must be
+	// established explicitly with the same 0700 policy as a customer backup.
+	private := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(private, 0700); err != nil {
+		t.Fatal(err)
+	}
 	tokenFile := filepath.Join(private, "session")
 	os.WriteFile(tokenFile, []byte(token), 0600)
 	credentials := filepath.Join(private, "credentials.json")
@@ -129,8 +134,8 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	}
 	// Real private key damage aborts backup before replacement; source runtime must resume.
 	invoke("exec", "-T", "--user", "root", "server", "chmod", "0644", "/var/lib/nevix/secrets/provider-credential-master.key")
-	if e = deployment.Run(args(successBundle, successManifest, originalBundle, originalManifest, filepath.Join(private, "damaged-key.tar.gz")), key); e == nil {
-		t.Fatal("upgrade with unrecoverable private key accepted")
+	if e = deployment.Run(args(successBundle, successManifest, originalBundle, originalManifest, filepath.Join(private, "damaged-key.tar.gz")), key); e == nil || !strings.Contains(e.Error(), "secrets private volume snapshot command failed") {
+		t.Fatal("damaged-key upgrade must fail during the real private volume snapshot (private error withheld)")
 	}
 	assertOpenOld("1.2.3")
 	invoke("exec", "-T", "--user", "root", "server", "chmod", "0600", "/var/lib/nevix/secrets/provider-credential-master.key")
