@@ -11,6 +11,7 @@ store=${NEVIX_DEPLOY_TEST_STORE:-containerd}
 if [[ $store != classic && $store != containerd ]]; then echo 'store must be classic or containerd' >&2; exit 1; fi
 cleanup() {
   if [[ -f $scratch/docker.pid ]]; then sudo kill "$(cat "$scratch/docker.pid")" 2>/dev/null || true; fi
+  if [[ -f $scratch/containerd.pid ]]; then sudo kill "$(cat "$scratch/containerd.pid")" 2>/dev/null || true; fi
   if [[ -n ${daemon_pid:-} ]]; then wait "$daemon_pid" 2>/dev/null || true; fi
   sudo rm -rf "$scratch"
 }
@@ -20,10 +21,21 @@ printf '{}\n' > "$scratch/daemon.json"
 feature=false
 if [[ $store == containerd ]]; then feature=true; fi
 # No veth or outgoing route: the daemon and containers cannot reach any registry.
-sudo unshare --net bash -c 'ip link set lo up; exec dockerd "$@"' bash \
+sudo unshare --net bash -c '
+  ip link set lo up
+  scratch=$1; shift
+  containerd --root "$scratch/containerd-root" --state "$scratch/containerd-state" --address "$scratch/containerd.sock" > "$scratch/containerd.log" 2>&1 &
+  echo $! > "$scratch/containerd.pid"
+  for attempt in $(seq 1 60); do
+    [[ -S $scratch/containerd.sock ]] && break
+    sleep 1
+  done
+  exec dockerd "$@"
+' bash "$scratch" \
   --config-file "$scratch/daemon.json" --host "unix://$scratch/docker.sock" \
   --group "$(id -gn)" --data-root "$scratch/data" --exec-root "$scratch/exec" \
   --pidfile "$scratch/docker.pid" --bridge none --iptables=false --ip-masq=false \
+  --containerd "$scratch/containerd.sock" --containerd-namespace nevix-runtime --containerd-plugins-namespace nevix-runtime-plugins \
   --feature "containerd-snapshotter=$feature" > "$scratch/daemon.log" 2>&1 &
 daemon_pid=$!
 unset DOCKER_CONTEXT
