@@ -108,6 +108,7 @@ export function classifyPaths(paths) {
     // sidecar 拉起），不进生产、不触产品运行时，与 Makefile 同类只跑
     // harness 内联自检。
     if (startsWith(path, "scripts/dev")) checks.add("harness");
+    if (startsWith(path, "scripts/release-feasibility")) checks.add("harness");
 
     if (
       isOneOf(path, ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"])
@@ -157,6 +158,7 @@ export function classifyPaths(paths) {
     if (
       isOneOf(path, [
         ".github/workflows/ci-gate.yml",
+        ".github/workflows/release-feasibility.yml",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
         // Remove these two historical paths after their deletion commit lands on main.

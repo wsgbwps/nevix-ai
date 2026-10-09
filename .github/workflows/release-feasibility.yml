@@ -1,0 +1,43 @@
+name: Release feasibility experiment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [task/340-release-feasibility]
+    paths:
+      - scripts/release-feasibility/**
+      - .github/workflows/release-feasibility.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-feasibility-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-installed:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node --test scripts/release-feasibility/release-trust.test.mjs
+      - run: node scripts/release-feasibility/windows-installed.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-release-feasibility
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            .scratch/340-release-feasibility/windows-installed/*.json
+            .scratch/340-release-feasibility/windows-installed/artifacts/*.exe
+            .scratch/340-release-feasibility/windows-installed/artifacts/*.yml

@@ -1,0 +1,20 @@
+{
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA78z6Hx20eOu+GeQmt3r04kmo4s9QBe0O8FmsamnzFiQ=\n-----END PUBLIC KEY-----\n",
+  "artifactBase64": "TmV2aXggcmVsZWFzZSBmZWFzaWJpbGl0eSBmaXh0dXJlCg==",
+  "release": {
+    "version": "1.0.1",
+    "channel": "stable",
+    "platform": "win32",
+    "arch": "x64",
+    "min_server_version": "1.0.0",
+    "min_desktop_version": "1.0.0",
+    "url": "https://example.invalid/nevix-1.0.1.exe",
+    "size": 34,
+    "sha512": "a3OnBVIeLfk38jUFYgOHPeSD/aVgGEiHtLvGq3kHPUHGVFCPpeRsV3qQ5PkttlINVF0x1ZEb2JkEsWm2qzrkAA=="
+  },
+  "envelope": {
+    "format": "nevix-release-v1",
+    "payload": "eyJ2ZXJzaW9uIjoiMS4wLjEiLCJjaGFubmVsIjoic3RhYmxlIiwicGxhdGZvcm0iOiJ3aW4zMiIsImFyY2giOiJ4NjQiLCJtaW5fc2VydmVyX3ZlcnNpb24iOiIxLjAuMCIsIm1pbl9kZXNrdG9wX3ZlcnNpb24iOiIxLjAuMCIsInVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL25ldml4LTEuMC4xLmV4ZSIsInNpemUiOjM0LCJzaGE1MTIiOiJhM09uQlZJZUxmazM4alVGWWdPSFBlU0QvYVZnR0VpSHRMdkdxM2tIUFVIR1ZGQ1BwZVJzVjNxUTVQa3R0bElOVkYweDFaRWIySmtFc1dtMnF6cmtBQT09In0=",
+    "signature": "0JYu7E4z1pzNdynfZb1f9NXyNF7tzXAnC3PDQrbeJyxVDIeQ8Ty23PfB4BouFVL+bDr7Rc2ceDHN6g3n8aJVCQ=="
+  }
+}

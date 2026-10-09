@@ -243,8 +243,14 @@ test("release tooling exposes only the OSS smoke entry point", () => {
 
   assert.match(makefile, /^test-creation-oss-smoke:/m);
   assert.doesNotMatch(makefile, /test-creation-cos-smoke/);
-  assert.equal(existsSync(join(REPOSITORY, "scripts/test-creation-oss-smoke.sh")), true);
-  assert.equal(existsSync(join(REPOSITORY, "scripts/test-creation-cos-smoke.sh")), false);
+  assert.equal(
+    existsSync(join(REPOSITORY, "scripts/test-creation-oss-smoke.sh")),
+    true,
+  );
+  assert.equal(
+    existsSync(join(REPOSITORY, "scripts/test-creation-cos-smoke.sh")),
+    false,
+  );
 });
 
 test("ordinary Server CI never requests real cloud credentials or smoke runs", () => {
@@ -335,6 +341,16 @@ test("deploy delivery assets run only the inline harness tests", () => {
   );
 });
 
+test("release feasibility experiments are classified and run the inline harness tests", () => {
+  const paths = [
+    "scripts/release-feasibility/release-trust.mjs",
+    "scripts/release-feasibility/mac-evidence.md",
+    ".github/workflows/release-feasibility.yml",
+  ];
+  assert.deepEqual(selected(paths), { harness: true });
+  assert.deepEqual(classifyPaths(paths).unknownPaths, []);
+});
+
 test("local dev tooling under scripts/dev runs only the inline harness tests", () => {
   assert.deepEqual(
     selected([
@@ -380,18 +396,15 @@ test("deleted Server files still run Server CI", (t) => {
 });
 
 test("deleting a retired smoke script runs only the delivery harness", (t) => {
-  assert.deepEqual(
-    classifyDeletion(t, "scripts/test-creation-cos-smoke.sh"),
-    {
-      paths: ["scripts/test-creation-cos-smoke.sh"],
-      desktop: false,
-      server: false,
-      windows_native: false,
-      macos_native: false,
-      harness: true,
-      unknownPaths: [],
-    },
-  );
+  assert.deepEqual(classifyDeletion(t, "scripts/test-creation-cos-smoke.sh"), {
+    paths: ["scripts/test-creation-cos-smoke.sh"],
+    desktop: false,
+    server: false,
+    windows_native: false,
+    macos_native: false,
+    harness: true,
+    unknownPaths: [],
+  });
 });
 
 test("deleting another unclassified path fails closed", (t) => {
@@ -439,7 +452,10 @@ test("local and Codex hooks block every direct main update", () => {
   assert.match(preCommit, /branch.*main[\s\S]*BLOCKED/);
   assert.match(prePush, /remote_ref.*refs\/heads\/main[\s\S]*BLOCKED/);
   assert.doesNotMatch(prePush, /grep -qvE|fast.lane|快道/i);
-  assert.match(agentCommand, /branch.*main.*git\[\[:space:\]\]\+commit.*BLOCKED/);
+  assert.match(
+    agentCommand,
+    /branch.*main.*git\[\[:space:\]\]\+commit.*BLOCKED/,
+  );
   assert.match(agentCommand, /git\[\[:space:\]\]\+push.*main.*BLOCKED/);
   assert.doesNotMatch(agentCommand, /ALLOW|fast.lane|快道/i);
 });

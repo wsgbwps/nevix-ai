@@ -99,7 +99,7 @@ test-creation-oss-smoke:
 	./scripts/test-creation-oss-smoke.sh
 
 harness-test:
-	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/deploy-stack.test.mjs
+	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/deploy-stack.test.mjs scripts/release-feasibility/release-trust.test.mjs
 
 setup:
 	pnpm install
