@@ -13,6 +13,8 @@ apps/desktop/build/*
 
 # Electron
 release/
+!server/internal/release/
+!server/internal/release/**
 
 # Go
 server/server

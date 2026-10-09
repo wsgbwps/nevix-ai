@@ -1,4 +1,5 @@
 import { Menu, type BrowserWindow, type EditFlags, type MenuItemConstructorOptions } from 'electron'
+import { updateMenuItem } from '../updater'
 import { getNativeEditMenuLabels, type NativeEditMenuLabels } from '../language'
 
 function nativeEditItems(
@@ -26,6 +27,7 @@ function installNativeEditAccelerators(): void {
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
+        { role: 'appMenu', submenu: [updateMenuItem(), { type: 'separator' }, { role: 'quit' }] },
         { label: getNativeEditMenuLabels().menu, submenu: nativeEditItems() }
       ])
     )
@@ -36,7 +38,9 @@ function installNativeEditAccelerators(): void {
     .filter((item) => item.type !== 'separator')
     .map((item) => ({ ...item, visible: false }))
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate(hiddenEditItems))
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([...hiddenEditItems, { label: 'Nevix AI', submenu: [updateMenuItem()] }])
+  )
 }
 
 export function enableNativeEditing(window: BrowserWindow): void {

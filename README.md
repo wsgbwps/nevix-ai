@@ -16,7 +16,7 @@ AI 媒体创作 SaaS 桌面应用。
 | 后端 | Go — API 服务 / Agent 编排 |
 | Monorepo | Turborepo + pnpm Workspaces |
 | 打包 | electron-builder |
-| 自动更新 | 暂无（分发与更新机制推迟至打包分发阶段，见 [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md)） |
+| 自动更新 | Main 拥有官方签名 stable 检查与原生入口，按 ADR-0026 分片实施；正式发行另需验收 |
 
 ## 目录结构
 

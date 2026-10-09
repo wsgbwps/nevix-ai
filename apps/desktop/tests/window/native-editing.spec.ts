@@ -64,7 +64,7 @@ async function pasteInto(
   await page.keyboard.press(`${editModifier}+V`)
 }
 
-test('@native-smoke the app exposes only managed hidden native edit accelerators', async () => {
+test('@native-smoke the app keeps managed native edit accelerators alongside its update menu', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'nevix-native-editing-menu-'))
 
   try {
@@ -89,6 +89,15 @@ test('@native-smoke the app exposes only managed hidden native edit accelerators
         // Edit submenu or Cmd+X/C/V never fire.
         expect(applicationMenuItems).toEqual([
           {
+            role: 'appmenu',
+            visible: true,
+            submenu: [
+              { role: null, visible: true },
+              { role: null, visible: true },
+              { role: 'quit', visible: true }
+            ]
+          },
+          {
             role: null,
             visible: true,
             submenu: [
@@ -110,7 +119,8 @@ test('@native-smoke the app exposes only managed hidden native edit accelerators
           { role: 'copy', visible: false, submenu: null },
           { role: 'paste', visible: false, submenu: null },
           { role: 'delete', visible: false, submenu: null },
-          { role: 'selectall', visible: false, submenu: null }
+          { role: 'selectall', visible: false, submenu: null },
+          { role: null, visible: true, submenu: [{ role: null, visible: true }] }
         ])
       }
     } finally {

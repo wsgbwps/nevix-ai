@@ -24,6 +24,7 @@ import (
 	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity"
 	"github.com/nevix-ai/server/internal/migration"
+	"github.com/nevix-ai/server/internal/release"
 )
 
 func main() {
@@ -33,6 +34,9 @@ func main() {
 }
 
 func run() error {
+	if err := release.ValidateBuildIdentity(); err != nil {
+		return fmt.Errorf("invalid compiled release identity: %w", err)
+	}
 	// Module configuration loads before the database pool opens, so a
 	// misconfigured process fails before touching infrastructure.
 	identityConfig, err := identity.LoadConfig(os.LookupEnv)
@@ -91,6 +95,7 @@ func run() error {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
 	router.Use(middleware.Logger)
+	release.RegisterVersion(router)
 	// The service field is the identity the Desktop connection probe checks
 	// (#153): an HTTP endpoint that answers anything else is not this server.
 	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {

@@ -12,6 +12,28 @@ info:
     - **演进纪律**：只增不改 —— 新增命令加路径、响应只加字段，不改既有字段与错误码语义；不引入 /v1 版本前缀，直到出现真实的 breaking 需求。
     - **漂移防线**：响应级对照校验已作为测试断言落地：server 集成测试将其观察到的受信命令 HTTP 响应与本文件逐条对照 —— 状态码必须有文档条目、响应体必须含文档要求的必填字段、error 机器码必须属于该状态码文档化的枚举。
 paths:
+  /release/version:
+    get:
+      summary: Running Server release identity and Desktop compatibility
+      operationId: getReleaseVersion
+      security: []
+      responses:
+        "200":
+          description: Compiled running identity; development version is unknown for compatibility.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [service, version, min_desktop_version]
+                properties:
+                  service:
+                    type: string
+                    const: nevix-server
+                  version:
+                    type: string
+                  min_desktop_version:
+                    type: string
   /health:
     get:
       summary: 实例健康与身份自述

@@ -1,5 +1,7 @@
 # ADR-0013: 私有化交付总纲——从云端 SaaS 转向 B 端单租户 Docker 交付
 
+2026-10-09：[ADR-0026](0026-networked-release-and-private-deployment-updates.md)取代零外联、禁止 updater 与客户现场编译分发；其余可信数据面与单租户约束有效。
+
 ## 状态
 
 已接受 — 2026-08-22

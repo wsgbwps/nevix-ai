@@ -10,7 +10,8 @@ const nativeSmokeSpecs = [
   'tests/startup/renderer-readiness.spec.ts',
   'tests/window/native-editing.spec.ts',
   'tests/window/window-state.spec.ts',
-  'tests/auth/native-secure-persistence.spec.ts'
+  'tests/auth/native-secure-persistence.spec.ts',
+  'tests/updater/manual-check.spec.ts'
 ]
 
 async function filesBelow(directory) {

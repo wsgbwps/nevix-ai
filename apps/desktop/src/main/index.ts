@@ -1,7 +1,8 @@
 import { app, BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
-import { initializeConnectionRuntime } from './connection'
+import { initializeConnectionRuntime, setServerConnectionChangedHandler } from './connection'
 import { initializeMainI18n } from './language'
+import { checkInstalledDesktopCompatibility } from './updater'
 import { createWindow } from './window/main-window'
 import {
   markOrdinaryCloseRendererUnavailable,
@@ -24,6 +25,9 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.nevix.ai')
   await initializeMainI18n()
   await initializeConnectionRuntime()
+  setServerConnectionChangedHandler(() => {
+    void checkInstalledDesktopCompatibility()
+  })
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -34,6 +38,7 @@ app.whenReady().then(async () => {
   }
 
   createWindow(markOrdinaryCloseRendererUnavailable)
+  void checkInstalledDesktopCompatibility()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

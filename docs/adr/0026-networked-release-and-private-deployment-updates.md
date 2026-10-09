@@ -2,7 +2,9 @@
 
 ## 状态
 
-方案已收敛，待整案确认 — 2026-09-30。产品选择已由用户逐项确认；下列实现方案仍待整案确认与本地可行性验证，尚未授权实现或正式发布。接受后将取代 [ADR-0013](0013-onprem-single-tenant-delivery.md) 中基于 air-gap 的不引入 updater 与 Desktop 零外联约束，以及旧的客户现场编译分发形态；不改变 Go 唯一可信业务数据面的职责。
+已接受 — 2026-10-09，实施 #339/#341。#340 的 [CNB 实测](../../scripts/release-feasibility/cnb-publication-evidence.md)与 [Mac library-validation 实测](../../scripts/release-feasibility/mac-library-validation-evidence.md)通过，用户授权实施整案。接受的是下述架构，实际正式发布仍受 delivery 授权门及最终制品验收约束。
+
+本 ADR 取代 ADR-0013 的 Desktop 零外联、禁止 updater 与客户现场编译决定；Go 仍是唯一可信业务数据面。Mac 接受 `com.apple.security.cs.disable-library-validation=true` 的保护减弱，以稳定自签身份保留 hardened runtime 与 Squirrel 签名连续性；Ed25519 不抵消该保护减弱。生产签名身份、公钥与写入凭据须另行受控配置，不复用已清理实验身份。当前 GitHub 源码仓库实际公开，目标私有策略尚未落实；正式发行前必须核验，不能宣称已私有。
 
 ## 已确认
 
@@ -14,12 +16,12 @@
 - 正式发布声明 Desktop 所需最低 Server 版本与 Server 所需最低 Desktop 版本。最新版 Desktop 与当前 Server 不兼容时不自动下载，保持当前版本并提示 Admin 先升级 Server；兼容版本正常后台下载。安装前再次核对兼容性；此原则不代表承诺永久兼容任意历史版本。
 - 允许计划维护停机。升级前暂停新任务、等待运行中任务结束、备份数据库与主密钥/TLS 材料，再替换镜像并验收健康状态；等待超时或备份失败则中止。迁移继续 up-only，回退旧镜像不等于回滚数据库。
 - 只有正式版本标签（如 `v1.0.1`）触发客户发布；普通代码 push 不更新客户。CI 检查、构建、签名、制品上传全部成功后才更新公开版本清单，避免引用尚未就绪的制品。
-- 发布安装包与后端制品允许公开下载，源码继续私有；下载不携带客户数据或凭据。使用权限继续遵循合同与既定 License 决策，不以制品保密代替业务授权。
+- 发布安装包与后端制品允许公开下载，源码目标私有；下载不携带客户数据或凭据。使用权限继续遵循合同与既定 License 决策，不以制品保密代替业务授权。
 - 尚未向客户分发过安装包，属于首次正式发布，无既有安装身份迁移负担。
 - 暂不采用付费发布托管或付费镜像仓库，未来有需要再迁移；香港 OSS + ACR 企业版候选未获采用。发布格式与更新协议应便于迁移，不预先实现多供应商抽象或双写分发。
 - 厂商目前没有自有域名或香港主机，不能将“复用现有香港静态主机”作为当前可用方案，也不能声称已具备由厂商完全控制的稳定域名入口。
 - 客户内网与香港云部署沿用固定 IP、自签 HTTPS 与首次指纹核对；官方更新源使用系统受信 HTTPS，与客户 Server URL 的证书信任分开。
-- 源码与日常开发继续在 GitHub 私有仓库。腾讯 CNB 单独建立公开成品分发仓库，只存放发布说明、桌面安装包、更新清单与后端制品；GitHub Actions 完成构建后上传 CNB，不镜像或迁移源码。
+- 源码与日常开发的目标是在 GitHub 私有仓库；当前仓库公开，正式发行前落实。腾讯 CNB 单独建立公开成品分发仓库，只存放发布说明、桌面安装包、更新清单与后端制品；GitHub Actions 完成构建后上传 CNB，不镜像或迁移源码。
 - CNB 先使用免费额度，不绑定付费预算。厂商保留每次发布的本地制品副本并维护后续迁移路径；CNB 的免费额度、账户和仓库限制不是永久可用性保证。
 - macOS 首次安装接受 User 在系统设置中明确放行；自动更新采用免费签名方向，不以购买 Apple Developer 会员作为首版前置条件。必须先验证稳定自签身份在本项目 Squirrel 链路的真实旧版本到新版本更新；若不可用，重新确认替代方案，不能默默降级为手动安装或绕过验证。
 - Windows 首版采用 NSIS，不购买代码签名证书，接受部分设备可能出现 SmartScreen 提示；清单与安装包仍须以免费发布签名证明来源与完整性。不能把没有系统提示作为验收保证，也不能把 Ed25519 发布签名称为 Windows Authenticode。
@@ -27,7 +29,7 @@
 - Desktop 首版更新入口采用系统菜单“检查更新”、下载完成通知与原生安装确认框。暂不新增设置页更新面板、进度与版本记录，也不为此新增 updater typed IPC owner。
 - Desktop 启动后及每 12 小时检查，Server 启动后及每天检查，均支持手动检查。后台失败安静重试、手动失败明确告知，不影响已有业务；无法确认当前 Server 兼容性时暂缓 Desktop 自动下载与安装。
 
-## 拟采用的实现方案（待整案确认与验证）
+## 决策与实施合同
 
 - 固定 Desktop App ID 为已有 Main 使用的 `com.nevix.ai`，同步打包身份。Windows 产出 x64 NSIS，macOS 产出 arm64 DMG（首次安装）与 ZIP（自动更新）。复用现有 electron-builder v26，安装对应版本 electron-updater；不依赖尚未发布的新版签名功能。
 - 发布渠道先只提供 stable。CNB 主站公开 raw 路径提供签名版本清单，制品指向不可变版本 Release 附件。客户端不调用需认证的 CNB OpenAPI，不持有 CNB token。
@@ -40,7 +42,7 @@
 - 发布与部署资产继续归 `deploy/`，备份/恢复工具归 `scripts/`，Main updater 归 Desktop 平台责任；CI 放现有 `.github/workflows/`。不新建顶层 source owner、不迁移 GitHub 私有源码。第一步只验证 Mac 免费签名与 CNB 实际更新链路，通过后再实现完整功能。
 - 后续迁移存储商先保留 CNB 旧入口并发布迁移版本，迁移清单与制品持续使用受信签名；Mac 更换签名身份可能还需桥接版本。旧源失效时不能自动救回尚未迁移客户端，本地备份提供人工安装/部署恢复。签名私钥保持厂商受控且有安全离线备份，不进入 CNB、客户实例或安装包；原始发布制品与清单单独保留本地备份。
 
-## 实现前的验证约束
+## 发行验收约束
 
 - 客户端与客户 Server 不持有 CNB token。CNB 主站公开 raw 文件可作为清单入口；实测公开仓库 OpenAPI latest 查询仍要求认证，因此不能将这个 API 当作匿名客户端更新入口。CI 可使用厂商写入凭据上传附件。
 - 拟采用的“Release 附件先就绪、公开渠道清单后更新”须通过失败中断与并发发布检查；验收确认前不将其视为已经实现的发布协议。
@@ -64,3 +66,9 @@
 - [腾讯云备案场景](https://cloud.tencent.com/document/product/243/19630)：香港服务器与大陆域名服务的备案条件不同；HTTPS、私有部署或端口号不单独构成备案豁免依据。
 - [HTTP/2 标准](https://www.rfc-editor.org/rfc/rfc9113.html#section-1)：HTTP/2 不处理 TCP 队头阻塞。
 - [Docker Compose 生产部署](https://docs.docker.com/compose/how-tos/production/)：现有 Compose 可承担容器替换，不需要先引入独立部署平台。
+
+## 授权与合同 seam
+
+精确字节与版本合同见 [release-v1](../../contracts/release-v1.md)。Main updater 独占官方源、验签与原生交互，Window 独占用户退出准备；Release Module 拥有运行版本及 Admin 发行提示，不获安装权限。Creation Module 拥有持久任务准入暂停与排空事实。运维工具通过受 Admin 授权的维护 HTTP seam 请求这些事实，不得直接写业务表；运行 credential 不取得 DDL 权限，迁移继续独立 DDL credential、锁和 up-only。后续维护命令实现前不得用 Docker socket/匿名 HTTP 绕过授权。
+
+运维可信验证/维护客户端以 Linux amd64 Go 二进制交付，源入口放 `server/cmd/` 以复用 `internal/release`，发布/运行资产仍归 `deploy/` 与 `scripts/`，客户主机仅需 Docker/Compose，不额外要求 Node/Go/Python/OpenSSL。Creation 暂停与排空成功后停止 Server，再一致备份数据库、主密钥、TLS 与配置；停机是本版认可的维护形态。

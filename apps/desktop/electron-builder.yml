@@ -1,4 +1,4 @@
-appId: com.electron.app
+appId: com.nevix.ai
 productName: Nevix AI
 directories:
   buildResources: build
@@ -20,6 +20,9 @@ extraResources:
 asarUnpack:
   - resources/**
 win:
+  target:
+    - target: nsis
+      arch: [x64]
   executableName: Nevix AI
 nsis:
   artifactName: Nevix-AI-${version}-setup.${ext}
@@ -30,6 +33,11 @@ nsis:
     - en_US
     - zh_CN
 mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     NSCameraUsageDescription: Nevix AI requests access to your camera.

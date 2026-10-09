@@ -3,7 +3,7 @@ import { readServerConnection } from './connection-store'
 import { registerPinnedCertificateVerification } from './certificate-verify'
 import { registerRendererCspInjection } from './renderer-csp-injection'
 
-export { currentServerConnectionUrl } from './connection-store'
+export { currentServerConnectionUrl, setServerConnectionChangedHandler } from './connection-store'
 
 /**
  * Public interface of the connection Domain: boots the persisted server
@@ -16,3 +16,5 @@ export async function initializeConnectionRuntime(): Promise<void> {
   registerRendererCspInjection(session.defaultSession)
   await readServerConnection()
 }
+
+export { readCurrentServerVersion, type ServerVersion } from './server-version'

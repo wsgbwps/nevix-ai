@@ -24,6 +24,11 @@ interface ConnectionRuntime {
 }
 
 const runtime: ConnectionRuntime = { url: undefined, certificatePins: new Map() }
+let connectionChangedHandler: (() => void) | undefined
+
+export function setServerConnectionChangedHandler(handler: () => void): void {
+  connectionChangedHandler = handler
+}
 
 export function currentServerConnectionUrl(): string | undefined {
   return runtime.url
@@ -48,6 +53,7 @@ export async function saveServerConnectionUrl(url: string): Promise<ServerConnec
   if (write !== 'persisted') return { outcome: 'unavailable' }
 
   runtime.url = canonicalUrl
+  connectionChangedHandler?.()
   return { outcome: 'saved' }
 }
 
