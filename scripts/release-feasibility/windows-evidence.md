@@ -1,8 +1,8 @@
 # #340 Windows 发行验签实验
 
-结论：Node 标准密码库发行合同及真实 `NsisUpdater` 检测/下载边界通过本地实验。**Windows NSIS 安装验收未完成**，不能据此通过 #340 的整体可行性门或进入正式实现。
+结论：发行签名合同、真实 Windows `NsisUpdater` 下载边界及 NSIS 旧版 → 新版安装通过实验。GitHub [Windows run 37900053906](https://github.com/wsgbwps/nevix-ai/actions/runs/37900053906) 在提交 `83c2513d5926c65a2ccaed2ba91f8552a1ee8d89` 全部通过；#340 整体仍因 Mac 失败与 CNB 实际制品证据缺失而不能进入正式实现。
 
-本次 host 为 macOS 26.6.2 / Darwin 25.6.0 / arm64。Electron 39.8.10、electron-builder 26.15.3 保持项目基线；electron-updater 6.8.9 仅安装到 `.scratch/340-release-feasibility/lab/`。运行时间 2026-10-09。没有 Windows 真机，没有有效 NSIS 安装包，也没有调用 `install`、`quitAndInstall` 或启动 `.exe`。报告中的 `.exe` 是 39 字节无执行能力的无系统签名文本 fixture。
+初轮下载实验 host 为 macOS 26.6.2 / Darwin 25.6.0 / arm64。Electron 39.8.10、electron-builder 26.15.3 保持项目基线；electron-updater 6.8.9 仅安装到 `.scratch/340-release-feasibility/lab/`。运行时间 2026-10-09。初轮报告中的 `.exe` 是 39 字节无执行能力的无系统签名文本 fixture，未调用安装入口。后续 GitHub Windows x64 runner 使用真实 NSIS 包，见下方安装证据。
 
 ## 实验合同与公开向量
 
@@ -71,16 +71,32 @@ apps/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron .sc
 
 结果：Node 行为测试 6/6，通过；Electron runtime self-check 10/10，通过，正常 `app.quit()` 结束。脚本只验证退出默认安装关闭的配置与库公开下载行为，不能替代 Windows 上普通退出、稍后、批准退出及真实 NSIS 安装成功的最终验收。
 
-没有使用 `verifyUpdateCodeSignature` 回调作为 Ed25519 门：6.8.9 在缺少 `publisherName` 时跳过系统签名回调，源码依据为该版本 `NsisUpdater.verifySignature`。外层发行签名与真实字节校验独立执行；Ed25519 不等于 Authenticode，不消除 SmartScreen。实际 Windows x64 NSIS 旧版 → 新版、安装前临近调用时的真实缓存不可变保障及企业策略/SmartScreen 仍需 Windows 真机补证。
+没有使用 `verifyUpdateCodeSignature` 回调作为 Ed25519 门：6.8.9 在缺少 `publisherName` 时跳过系统签名回调，源码依据为该版本 `NsisUpdater.verifySignature`。外层发行签名与真实字节校验独立执行；Ed25519 不等于 Authenticode，不消除 SmartScreen。后续 Windows x64 runner 已补充真实 NSIS 旧版 → 新版证据。校验与安装调用间的原子性保障、企业策略/SmartScreen 交互仍不在本实验内，正式实现需按独立 ticket 验收。
 
-## Windows runner 实验待执行
+## Windows runner 实测结果
 
-已准备 `.github/workflows/release-feasibility.yml` 的 Windows job（手动 `workflow_dispatch`，以及仅 `task/340-release-feasibility` 分支且实验路径变化时的 push）。它使用 `windows-latest` x64、现有 pnpm 11.21.0 frozen lockfile、锁定 builder 26.15.3 / Electron 39.8.10；updater 6.8.9 仅进入 scratch 实验包。没有生产签名秘密、Release 发布或 CNB 写入；仅上传本仓库 Actions 的实验日志与 NSIS 包，保留 7 天。整 job 25 分钟上限。**首次 Windows run 在实验 runner 的 npm 命令引号处理处失败，尚未进入 NSIS 安装；这不是 Windows 发行方案不可行的证据。已改为 Node 直接执行 npm-cli.js 的数组参数，等待重新运行，不能视为 Windows 安装已经通过。**
+已准备 `.github/workflows/release-feasibility.yml` 的 Windows job（手动 `workflow_dispatch`，以及仅 `task/340-release-feasibility` 分支且实验路径变化时的 push）。它使用 `windows-latest` x64、现有 pnpm 11.21.0 frozen lockfile、锁定 builder 26.15.3 / Electron 39.8.10；updater 6.8.9 仅进入 scratch 实验包。没有生产签名秘密、Release 发布或 CNB 写入；仅上传本仓库 Actions 的实验日志与 NSIS 包，保留 7 天。整 job 25 分钟上限。首次 [run 37899396752](https://github.com/wsgbwps/nevix-ai/actions/runs/37899396752) 在 npm 命令引号处理处失败，未进入 NSIS 安装。改为 Node 直接执行 npm-cli.js 的数组参数后，第二轮全部成功：Windows Server 2025，`win32/x64`，OS `10.0.26100`，2026-10-09 07:37–07:40 UTC。
 
 `windows-installed.cjs` 由 Node 构建两个 `com.nevix.ai` 实验版本 `1.0.0`/`1.0.1`（产品名称 `Nevix Release Experiment`），首次以 NSIS 安装进 runner workspace 的 `.scratch/340-release-feasibility/windows-installed/installed/`。实验 userData、updater 缓存与日志均隔离到同一 scratch 范围；Main 在载入 updater 前只修改本进程 `LOCALAPPDATA` 为 `root/cache-home`，并使用固定 `updaterCacheDirName=updater`，避免 Windows runner 的 C:/D: 跨盘相对路径失效，不修改系统环境变量；关闭桌面/开始菜单快捷方式，`runAfterFinish=false`。没有购买 Authenticode，也不读取生产私钥。
 
 安装后的 Main 读取 loopback 签名清单，并通过真实公开 updater 检测/下载、签名描述绑定、下载后/安装前真实缓存字节检查。脚本依次断言首次安装版本为旧版；下载后普通退出、选择稍后、重启仍为旧版；只有明确 `approved` 实验场景才调用 `quitAndInstall(true,true)`，等待真正的 NSIS 替换并由安装后可执行文件重新启动，最终读取真实 `app.getVersion()` 为新版。approved 场景代表受控自动化批准，不声称已经测试真实 User 原生确认及生产 Window 保存/上传 readiness。
 
-本机仅完成脚本语法校验。Windows 运行结果将产生 `windows-installed/result.json`，包含各阶段真实执行路径、版本、平台、发行身份和 HTTP 请求记录；失败时保留 `runtime-error.json` 与构建产物。静默 CI 安装不能验收 SmartScreen 交互或企业设备政策，仍应在交付设备抽查。
+已取得 `windows-installed/result.json`，包含各阶段真实执行路径、版本、平台、发行身份和 HTTP 请求记录；失败时保留 `runtime-error.json` 与构建产物。静默 CI 安装不能验收 SmartScreen 交互或企业设备政策，仍应在交付设备抽查。
 
 Windows job 现在先由真实 `electron.exe` 运行同一 `windows-download.cjs` 的 10 项安全边界检查，再执行真实 NSIS 安装序列。runner 断言报告 host 必须为 `win32/x64` 且全部 10 项完成；只运行 Mac host 的结果不能替代该记录。下载实验本身永不调用安装入口，使用无执行能力的文本 `.exe` fixture；只有随后 `windows-installed.cjs` 的独立批准场景使用真实 NSIS 包。Windows 下载实验的缓存同样通过进程内 `LOCALAPPDATA=windows-runtime/cache-home` 和固定 `updater` 子目录保持同盘隔离；Mac 下载实验仍使用真实 `~/Library/Caches` 相对路径指向 scratch。workflow 另上传 `windows-runtime/result.json`，与安装结果分别留证。
+
+| 安装序列                                              | 实际启动版本 | 结果                               |
+| ----------------------------------------------------- | ------------ | ---------------------------------- |
+| NSIS 安装旧版并首次启动                               | 1.0.0        | 通过                               |
+| 下载后普通退出，再启动                                | 1.0.0        | 通过；`autoInstallOnAppQuit=false` |
+| 下载后选择稍后，再启动                                | 1.0.0        | 通过；`autoInstallOnAppQuit=false` |
+| 下载后 `app.relaunch()`                               | 1.0.0        | 通过；无批准安装                   |
+| 明确 approved，`quitAndInstall(true,true)` 后自动启动 | 1.0.1        | 通过；真实 NSIS 替换               |
+
+七次启动均来自同一 `windows-installed/installed/Nevix Release Experiment.exe`，由真实 `app.getVersion()` 读取版本；不是启动 build 输出目录的新版替代安装。Windows 下载安全 self-check 为 10/10，Node 信任测试为 6/6。新 NSIS 包 `nevix-lab-1.0.1.exe` 大小 `93817294` 字节，SHA-512（base64）为 `HxI2w3fP0GBUSk1Dl83xypL9CVNstDcbI8bxhmzfUHg9l+4LKIyMEfsYWKNsKvEKFN6JnINcF0mBQ6BTgBozcw==`，与实际验签描述一致。
+
+[原始 Actions artifact](https://github.com/wsgbwps/nevix-ai/actions/runs/37900053906/artifacts/11602016983) 保留 7 天，zip 大小 `282534538` 字节，Actions 上传 SHA-256 `1b354c2ffa17247d62aa511babcb6d839b037c589e1b814c9aaee374a5089522`。内含下载/安装两个独立报告、场景记录及两个实验 NSIS 包，不含实验私钥；私钥只在 Node 驱动内存中生成。公开向量留在仓库供长期复查；本机原始日志及下载副本在 `.scratch/340-release-feasibility/windows-run-2.log`、`windows-ci-37900053906/`。报告的 loopback 端口只对该次 runner 有效。
+
+专门 QA 独立下载并核对新包大小/SHA-512 与报告一致。旧包大小 `188705385` 字节、SHA-256 `91877587784dd4134cbb187608a9f930422a965186d8287e59ab5273921144cb`；新包 SHA-256 `48e9fd0e7783cc907cba5f731e8bd5e7eb9fe0ef9315080781faa85e997933ad`。两个 PE Security directory 均为 `(0,0)`，确认没有 Authenticode 证书。QA 只读解包 NSIS 内嵌归档与 app.asar，未执行 exe；未发现私钥 PEM、敏感扩展文件或 JSON 秘密字段，临时解包目录已删除。
+
+此结果证明 #340 的实验发行信任与无系统证书 NSIS 路径可行；它没有测试生产 renderer 的原生批准、保存/上传 readiness、真实客户数据或企业设备策略。SmartScreen 可能提示，实验不将 Ed25519 当作系统发行者认证。正式 updater 与 Server 发行实现未在本分支增加。
