@@ -2,6 +2,7 @@ package deployment_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -165,6 +166,42 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	invoke("restart", "server")
 	invoke("up", "--detach", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "180")
 	invoke("restart", "nginx")
+	// A Docker restart acknowledgement does not establish fresh HTTPS readiness.
+	// Discard connections to the old edge and retry only this anonymous read;
+	// the following proof-issuance command is sent exactly once.
+	edgeDeadline := time.Now().Add(20 * time.Second)
+	edgeCtx, edgeCancel := context.WithDeadline(context.Background(), edgeDeadline)
+	defer edgeCancel()
+	for {
+		client.CloseIdleConnections()
+		probe, err := http.NewRequestWithContext(edgeCtx, http.MethodGet, "https://127.0.0.1/release/version", nil)
+		if err != nil {
+			t.Fatal("fixture readiness request construction failed")
+		}
+		res, err := client.Do(probe)
+		status := 0
+		var data []byte
+		if err == nil {
+			status = res.StatusCode
+			data, err = io.ReadAll(io.LimitReader(res.Body, 64*1024+1))
+			res.Body.Close()
+		}
+		if err == nil && status == http.StatusOK {
+			var running struct {
+				Service string `json:"service"`
+				Version string `json:"version"`
+			}
+			if len(data) > 64*1024 || json.Unmarshal(data, &running) != nil || running.Service != "nevix-server" || running.Version != "1.2.3" {
+				t.Fatal("restarted fixture HTTPS returned a different release identity")
+			}
+			break
+		}
+		if (status != 0 && status != http.StatusBadGateway && status != http.StatusServiceUnavailable) || time.Now().After(edgeDeadline) {
+			t.Fatalf("restarted fixture HTTPS release read unavailable: HTTP %d (private transport and response bytes withheld)", status)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	edgeCancel()
 	status, b = request("POST", "/identity/admin/reauth/proofs", token, map[string]string{"action": "object_storage_connection.create", "password": "fixturePassword345!"})
 	var proof struct {
 		Proof     string    `json:"proof"`
