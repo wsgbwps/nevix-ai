@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -31,7 +32,14 @@ func TestDeploymentProviderFixture(t *testing.T) {
 	if os.Getenv("NEVIX_DEPLOY_PROVIDER_FIXTURE") != "1" {
 		t.Skip("test-only provider subprocess")
 	}
-	http.HandleFunc("/v1/images/generations", func(w http.ResponseWriter, r *http.Request) {
+	if err := http.ListenAndServeTLS(":443", "/fixture/provider.pem", "/fixture/provider.key", newDeploymentProviderFixtureHandler()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newDeploymentProviderFixtureHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/images/generations", func(w http.ResponseWriter, r *http.Request) {
 		for {
 			if _, e := os.Stat("/fixture/block-generation"); os.IsNotExist(e) {
 				break
@@ -48,7 +56,7 @@ func TestDeploymentProviderFixture(t *testing.T) {
 		contentType, uploadID string
 	}
 	objects := map[string]object{}
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Host != "nevix-upgrade.oss-cn-hangzhou.aliyuncs.com" {
 			w.WriteHeader(404)
 			return
@@ -81,8 +89,14 @@ func TestDeploymentProviderFixture(t *testing.T) {
 			w.WriteHeader(204)
 		case "GET", "HEAD":
 			if !exists {
+				missing := `<Error><Code>NoSuchKey</Code><Message>missing</Message></Error>`
+				// Real HEAD transport drops the body. OSS SDK v2 reads the
+				// base64 XML error header to distinguish NoSuchKey from other 404s.
+				if r.Method == http.MethodHead {
+					w.Header().Set("X-Oss-Err", base64.StdEncoding.EncodeToString([]byte(missing)))
+				}
 				w.WriteHeader(404)
-				io.WriteString(w, `<Error><Code>NoSuchKey</Code><Message>missing</Message></Error>`)
+				io.WriteString(w, missing)
 				return
 			}
 			w.Header().Set("Content-Type", value.contentType)
@@ -112,7 +126,7 @@ func TestDeploymentProviderFixture(t *testing.T) {
 			w.WriteHeader(405)
 		}
 	})
-	http.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer fixture-provider-key-347" {
 			w.WriteHeader(401)
 			return
@@ -120,10 +134,9 @@ func TestDeploymentProviderFixture(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"data":[]}`)
 	})
-	if err := http.ListenAndServeTLS(":443", "/fixture/provider.pem", "/fixture/provider.key", nil); err != nil {
-		t.Fatal(err)
-	}
+	return mux
 }
+
 func providerCertificate(t *testing.T) ([]byte, []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
