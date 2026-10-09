@@ -156,3 +156,5 @@ Publisher 自己的匿名双次 full GET、HEAD、Range 和 raw read 是厂商�
 Developer ID 或新证书时必须单独实测签名桥接，不能跳过 Squirrel requirement。
 旧源已失效时无法自动救回没迁移客户端，只能从厂商保留的离线制品人工安装/部署。
 当前隔离 publisher 测试验证受信入口保留和异 key 拒绝；真实桥接跨平台安装仍在表中。
+
+The stable tag workflow checks out the exact tag commit for the delivery harness, complete Desktop CI (including both native smoke platforms) and complete Server CI (including both isolated Linux image stores). All formal artifact builds and signing await these gates. Linux bundle export uses the pinned Docker 29.4 OCI image store. Independent Desktop tag runs cannot cancel the stable workflow’s reusable checks.

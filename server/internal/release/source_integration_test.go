@@ -41,9 +41,9 @@ func (p publisherTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return p.transport.RoundTrip(copy)
 }
 
-// The production Module has no key/source override. Only this isolated publisher
-// fixture replaces its HTTPS transport and compiled trust input for acceptance.
-func TestReleaseSignedSourceWithRealIdentity(t *testing.T) {
+// Package-local source adapter test: the isolated publisher replaces private
+// trust and transport inputs. Public Module wiring is tested in integrationtest.
+func TestSignedSourceAdapterWithRealIdentity(t *testing.T) {
 	ownerURL, runtimeURL := os.Getenv("NEVIX_DATABASE_URL"), os.Getenv("NEVIX_IDENTITY_DATABASE_URL")
 	if ownerURL == "" || runtimeURL == "" {
 		if os.Getenv("NEVIX_IDENTITY_INTEGRATION_REQUESTED") == "1" {
@@ -113,11 +113,14 @@ func TestReleaseSignedSourceWithRealIdentity(t *testing.T) {
 	}))
 	defer publisher.Close()
 	target, _ := url.Parse(publisher.URL)
-	module := NewModule(identityModule.SessionAuthenticator(), []string{"https://app.nevix.test"})
+	module, err := NewModule(identityModule.SessionAuthenticator(), Config{CORSAllowedOrigins: []string{"https://app.nevix.test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	module.publicKey = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
 	module.status.Version, module.status.MinDesktopVersion = "2.0.0", "1.0.0"
 	module.client.Transport = publisherTransport{target, publisher.Client().Transport}
-	router.Group(func(r chi.Router) { module.Register(r) })
+	router.Group(func(r chi.Router) { module.Register(r, event.NewInMemoryBus()) })
 	request := func(method, path string) releaseStatus {
 		t.Helper()
 		req := httptest.NewRequest(method, path, nil)

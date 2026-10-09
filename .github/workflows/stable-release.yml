@@ -19,6 +19,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -34,12 +36,38 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - run: node --experimental-strip-types --test deploy/publish-stable.test.mjs
 
-  windows:
+  harness:
     needs: identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: make harness-test
+
+  desktop-checks:
+    needs: identity
+    uses: ./.github/workflows/desktop-ci.yml
+    with:
+      windows_native: true
+      macos_native: true
+
+  server-checks:
+    needs: identity
+    uses: ./.github/workflows/server-ci.yml
+
+  windows:
+    needs: [identity, harness, desktop-checks, server-checks]
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.21.0
@@ -58,7 +86,7 @@ jobs:
           retention-days: 7
 
   mac:
-    needs: identity
+    needs: [identity, harness, desktop-checks, server-checks]
     # Dedicated vendor Apple Silicon runner must be provisioned before an approved stable tag.
     # No ephemeral identity or automatic keychain/system setup.
     runs-on: [self-hosted, macOS, ARM64, nevix-release]
@@ -68,6 +96,8 @@ jobs:
       NEVIX_MAC_SIGNING_KEYCHAIN: ${{ vars.NEVIX_MAC_SIGNING_KEYCHAIN }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.21.0
@@ -93,14 +123,28 @@ jobs:
           retention-days: 7
 
   server:
-    needs: identity
+    needs: [identity, harness, desktop-checks, server-checks]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
+      - name: Use OCI image store for vendor export
+        run: |
+          curl --fail --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/docker.tgz" https://download.docker.com/linux/static/stable/x86_64/docker-29.4.0.tgz
+          tar -xzf "$RUNNER_TEMP/docker.tgz" -C "$RUNNER_TEMP"
+          sudo systemctl stop docker.socket docker containerd
+          sudo install -m 0755 "$RUNNER_TEMP"/docker/* /usr/bin/
+          sudo mkdir -p /etc/docker
+          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start containerd docker
+          test "$(docker version --format '{{.Server.Version}}')" = 29.4.0
+          docker version
+          docker compose version
       - env:
           VERSION: ${{ needs.identity.outputs.version }}
           MIN_DESKTOP_VERSION: ${{ vars.NEVIX_MIN_DESKTOP_VERSION }}
@@ -117,13 +161,16 @@ jobs:
           retention-days: 7
 
   sign:
-    needs: [identity, windows, mac, server]
+    needs:
+      [identity, harness, desktop-checks, server-checks, windows, mac, server]
     # Provisioning this dedicated vendor runner and key is a pending prerequisite.
     # The owner approves the exact source tag before triggering this signing action.
     runs-on: [self-hosted, macOS, ARM64, nevix-release]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22

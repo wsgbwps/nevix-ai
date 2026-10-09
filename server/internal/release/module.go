@@ -8,8 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"fmt"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/nevix-ai/server/internal/authz"
+	"github.com/nevix-ai/server/internal/event"
 )
 
 const officialManifestURL = "https://cnb.cool/nevix.ai/nevix-releases/-/git/raw/main/stable/linux-amd64.json"
@@ -40,21 +43,48 @@ type Module struct {
 	status    releaseStatus
 }
 
-func NewModule(sessions authz.SessionAuthenticator, origins []string) *Module {
+func NewModule(sessions authz.SessionAuthenticator, cfg Config) (*Module, error) {
+	if err := validateBuildIdentity(); err != nil {
+		return nil, fmt.Errorf("release: invalid compiled identity: %w", err)
+	}
 	return &Module{
-		guard: authz.NewGuard(sessions), origins: append([]string(nil), origins...), publicKey: PublicKeyPEM,
+		guard: authz.NewGuard(sessions), origins: append([]string(nil), cfg.CORSAllowedOrigins...), publicKey: PublicKeyPEM,
 		client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		checks: make(chan struct{}, 1),
 		status: releaseStatus{Version: Version, MinDesktopVersion: MinDesktopVersion, Outcome: "not-checked"},
+	}, nil
+}
+
+type route struct {
+	method, path string
+	handler      http.HandlerFunc
+	admin        bool
+}
+
+// routes is the owner for command registration, preflight and allowed methods.
+func (m *Module) routes() []route {
+	return []route{
+		{http.MethodGet, "/release/version", m.writeVersion, false},
+		{http.MethodGet, "/release/status", func(w http.ResponseWriter, r *http.Request) { m.writeStatus(w, m.snapshot()) }, true},
+		{http.MethodPost, "/release/check", func(w http.ResponseWriter, r *http.Request) { m.writeStatus(w, m.check(r.Context())) }, true},
 	}
 }
 
-func (m *Module) Register(r chi.Router) {
-	r.Use(m.cors)
-	r.With(m.guard.RequireAdmin, rejectPendingPasswordChange).Get("/release/status", func(w http.ResponseWriter, r *http.Request) { m.writeStatus(w, m.snapshot()) })
-	r.With(m.guard.RequireAdmin, rejectPendingPasswordChange).Post("/release/check", func(w http.ResponseWriter, r *http.Request) { m.writeStatus(w, m.check(r.Context())) })
-	r.Options("/release/status", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	r.Options("/release/check", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+func (m *Module) Register(r chi.Router, _ event.Bus) {
+	routes := m.routes()
+	methods := make(map[string]string, len(routes))
+	for _, route := range routes {
+		methods[route.path] = route.method
+	}
+	r.Use(m.cors(methods))
+	for _, route := range routes {
+		commandRouter := r
+		if route.admin {
+			commandRouter = r.With(m.guard.RequireAdmin, rejectPendingPasswordChange)
+		}
+		commandRouter.MethodFunc(route.method, route.path, route.handler)
+		r.Options(route.path, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	}
 }
 
 func rejectPendingPasswordChange(next http.Handler) http.Handler {
@@ -146,22 +176,21 @@ func (m *Module) writeStatus(w http.ResponseWriter, status releaseStatus) {
 	_ = json.NewEncoder(w).Encode(status)
 }
 
-func (m *Module) cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		for _, allowed := range m.origins {
-			if origin != "" && origin == allowed {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Add("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-				method := "GET"
-				if r.URL.Path == "/release/check" {
-					method = "POST"
+func (m *Module) cors(methods map[string]string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			for _, allowed := range m.origins {
+				if origin != "" && origin == allowed {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Add("Vary", "Origin")
+					w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+					method := methods[r.URL.Path]
+					w.Header().Set("Access-Control-Allow-Methods", method+", OPTIONS")
+					break
 				}
-				w.Header().Set("Access-Control-Allow-Methods", method+", OPTIONS")
-				break
 			}
-		}
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }

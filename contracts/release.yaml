@@ -1,5 +1,27 @@
 # Admin presentation only; installation remains a customer operator action.
 paths:
+  /release/version:
+    get:
+      summary: Running Server release identity and Desktop compatibility
+      operationId: getReleaseVersion
+      security: []
+      responses:
+        "200":
+          description: Compiled running identity; development version is unknown for compatibility.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [service, version, min_desktop_version]
+                properties:
+                  service:
+                    type: string
+                    const: nevix-server
+                  version:
+                    type: string
+                  min_desktop_version:
+                    type: string
   /release/status:
     get:
       operationId: getServerReleaseStatus

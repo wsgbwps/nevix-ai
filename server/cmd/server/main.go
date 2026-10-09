@@ -34,11 +34,12 @@ func main() {
 }
 
 func run() error {
-	if err := release.ValidateBuildIdentity(); err != nil {
-		return fmt.Errorf("invalid compiled release identity: %w", err)
-	}
 	// Module configuration loads before the database pool opens, so a
 	// misconfigured process fails before touching infrastructure.
+	releaseConfig, err := release.LoadConfig(os.LookupEnv)
+	if err != nil {
+		return err
+	}
 	identityConfig, err := identity.LoadConfig(os.LookupEnv)
 	if err != nil {
 		return err
@@ -87,7 +88,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	releaseModule := release.NewModule(identityModule.SessionAuthenticator(), identityConfig.CORSAllowedOrigins)
+	releaseModule, err := release.NewModule(identityModule.SessionAuthenticator(), releaseConfig)
+	if err != nil {
+		return err
+	}
 	workerDone := make(chan error, 3)
 	go func() { workerDone <- identityModule.RunWorkers(ctx) }()
 	go func() { workerDone <- creationModule.RunWorkers(ctx) }()
@@ -97,7 +101,6 @@ func run() error {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
 	router.Use(middleware.Logger)
-	release.RegisterVersion(router)
 	// The service field is the identity the Desktop connection probe checks
 	// (#153): an HTTP endpoint that answers anything else is not this server.
 	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +116,7 @@ func run() error {
 		creationModule.Register(r, bus)
 	})
 	router.Group(func(r chi.Router) {
-		releaseModule.Register(r)
+		releaseModule.Register(r, bus)
 	})
 	server := &http.Server{Addr: ":8080", Handler: router}
 	serverDone := make(chan error, 1)

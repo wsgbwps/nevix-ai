@@ -4,7 +4,7 @@ on:
   workflow_call:
 
 concurrency:
-  group: server-ci-${{ github.ref }}
+  group: server-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
@@ -53,6 +55,8 @@ jobs:
         store: [classic, containerd]
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod

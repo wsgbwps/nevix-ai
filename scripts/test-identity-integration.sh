@@ -133,7 +133,7 @@ assert_identity_integration_executed() {
   local -a representative_tests=(
     TestOpenClaimStatusAndSilentConstruction
     TestReleaseChecksRequireRealActiveAdmin
-    TestReleaseSignedSourceWithRealIdentity
+    TestSignedSourceAdapterWithRealIdentity
     TestLoginIssuesOpaqueSessionStoredOnlyAsHash
     TestLoginRejectsBadCredentialsUniformly
     TestLoginAnswersDisabledAccountWithAccountDisabled

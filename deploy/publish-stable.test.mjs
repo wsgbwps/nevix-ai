@@ -522,6 +522,40 @@ test("private Free delivery builds stable tags but cannot automatically publish 
     workflow,
     /workflow_dispatch|branches:|NEVIX_CNB_TOKEN|NEVIX_RELEASE_KEY_ENCRYPTED_BASE64|publish-stable\.mjs publish|environment:/,
   );
+  for (const job of ["windows", "mac", "server", "sign"]) {
+    const section = workflow
+      .split(`\n  ${job}:\n`)[1]
+      ?.split(/\n  [a-z-]+:\n/)[0];
+    assert.ok(section, `Missing ${job} job`);
+    const needs =
+      section
+        .match(/needs:\s*\[([^\]]+)\]/)?.[1]
+        .split(",")
+        .map((x) => x.trim()) ?? [];
+    for (const gate of [
+      "identity",
+      "harness",
+      "desktop-checks",
+      "server-checks",
+    ]) {
+      assert.ok(
+        needs.includes(gate),
+        `${job} must await ${gate} at the release SHA`,
+      );
+    }
+  }
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/desktop-ci\.yml/);
+  assert.match(workflow, /windows_native: true/);
+  assert.match(workflow, /macos_native: true/);
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/server-ci\.yml/);
+  assert.match(workflow, /run: make harness-test/);
+  assert.match(workflow, /docker-29\.4\.0\.tgz/);
+  assert.match(workflow, /containerd-snapshotter.*true/);
+  const checkouts = workflow.match(/uses: actions\/checkout@v6/g) ?? [];
+  assert.equal(
+    (workflow.match(/ref: \$\{\{ github\.sha \}\}/g) ?? []).length,
+    checkouts.length,
+  );
   assert.match(workflow, /electron-builder --win nsis --x64 --publish never/);
   assert.match(workflow, /self-hosted, macOS, ARM64, nevix-release/);
   assert.match(workflow, /publish-stable\.mjs prepare signing-input\.json/);

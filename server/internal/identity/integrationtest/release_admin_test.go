@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/release"
 )
 
@@ -21,7 +22,11 @@ func TestReleaseChecksRequireRealActiveAdmin(t *testing.T) {
 	_, _, member := doLogin(t, identityRouter, "member@release.test", "member-password-1")
 	_, _, pending := doLogin(t, identityRouter, "pending@release.test", "pending-password-1")
 	router := chi.NewRouter()
-	router.Group(func(r chi.Router) { release.NewModule(m.SessionAuthenticator(), h.cfg.CORSAllowedOrigins).Register(r) })
+	releaseModule, err := release.NewModule(m.SessionAuthenticator(), release.Config{CORSAllowedOrigins: h.cfg.CORSAllowedOrigins})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.Group(func(r chi.Router) { releaseModule.Register(r, event.NewInMemoryBus()) })
 	for _, command := range []struct{ method, path string }{{"GET", "/release/status"}, {"POST", "/release/check"}} {
 		for _, caller := range []struct {
 			token  string
