@@ -18,6 +18,10 @@ test("actual Desktop archive accepts compiled files and refuses internal source,
     const app = join(root, "app");
     await mkdir(join(app, "out/main"), { recursive: true });
     await writeFile(join(app, "out/main/index.js"), "console.log('compiled')");
+    await writeFile(
+      join(app, "out/main/map-parser.js"),
+      'const pattern = /^[@#]\\s+sourceMappingURL=data:(?:application|text)\\/json/;\nconst prefix = "//# sourceMappingURL=data:application/json;base64,";',
+    );
     await writeFile(join(app, "package.json"), '{"version":"0.1.0"}');
     const archive = join(root, "app.asar");
     await createPackage(app, archive);
@@ -32,6 +36,22 @@ test("actual Desktop archive accepts compiled files and refuses internal source,
       [
         "out/main/inline.js",
         "//# sourceMappingURL=data:application/json;base64,e30=",
+      ],
+      [
+        "out/main/inline-css.js",
+        "/*# sourceMappingURL=data:application/json;base64,e30= */",
+      ],
+      [
+        "out/main/trailing.js",
+        "console.log('compiled'); //# sourceMappingURL=data:application/json;base64,e30=",
+      ],
+      [
+        "out/main/percent.js",
+        "//# sourceMappingURL=data:application/json,%7B%22version%22%3A3%7D",
+      ],
+      [
+        "out/main/raw-map.js",
+        '//# sourceMappingURL=data:application/json,{"version":3}',
       ],
       [
         "out/main/leak.js",

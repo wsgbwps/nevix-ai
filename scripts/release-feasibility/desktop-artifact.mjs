@@ -30,8 +30,11 @@ export function assertPublicDesktopArchive(archive) {
     assert.ok(!info.link, `Unexpected artifact link: ${file}`);
     if (info.files) continue;
     const bytes = asar.extractFile(archive, nativeFile);
+    // Inspect actual map directives, not code that parses or generates map URLs.
     assert.ok(
-      !/sourceMappingURL=\s*data:/.test(bytes.toString("utf8")),
+      !/(?:\/\/|\/\*)[#@][ \t]*sourceMappingURL=[ \t]*data:(?:application|text)\/json[^,\r\n]*,(?:[A-Za-z0-9+/=]{4,}|%[A-Fa-f0-9]{2}|\{)/.test(
+        bytes.toString("utf8"),
+      ),
       `Inline source map in artifact: ${file}`,
     );
     assert.ok(
@@ -66,6 +69,10 @@ if (
         "!**/*.{map,ts,tsx,mts,cts,p12,pfx,pem,key}",
         "!**/.env*",
         "!**/.git/**",
+        "!**/README*.md",
+        // Bundled UI does not use this CLI help example containing PEM text.
+        "!**/node_modules/@dotenvx/dotenvx/src/cli/examples.js",
+        "!**/node_modules/source-map/dist/source-map.debug.js",
       ],
       afterPack: ({ appOutDir }) => {
         const files = assertPublicDesktopArchive(
