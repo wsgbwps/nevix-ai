@@ -1,14 +1,13 @@
 package integrationtest
 
 import (
+	"context"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
-
-	"context"
-	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/nevix-ai/server/internal/authz"
@@ -108,6 +107,28 @@ func TestReleaseConfigRequiresExactOrigins(t *testing.T) {
 	for _, raw := range []string{"", "*", "https://app.nevix.test,", "https://app.nevix.test,*"} {
 		if _, err := release.LoadConfig(func(string) (string, bool) { return raw, raw != "" }); err == nil {
 			t.Fatalf("unsafe origins accepted: %q", raw)
+		}
+	}
+}
+
+type pendingAdmin struct{}
+
+func (pendingAdmin) Authenticate(*http.Request) (authz.Principal, error) {
+	return authz.Principal{Role: "admin", MustChangePassword: true}, nil
+}
+
+func TestReleaseRequiresCompletedInitialPasswordChange(t *testing.T) {
+	router := chi.NewRouter()
+	module, err := release.NewModule(pendingAdmin{}, release.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.Group(func(r chi.Router) { module.Register(r, event.NewInMemoryBus()) })
+	for _, command := range []struct{ method, path string }{{"GET", "/release/status"}, {"POST", "/release/check"}} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(command.method, command.path, nil))
+		if response.Code != 403 {
+			t.Fatalf("%s may bypass initial password change: %d", command.path, response.Code)
 		}
 	}
 }
