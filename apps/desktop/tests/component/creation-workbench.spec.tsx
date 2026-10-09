@@ -47,6 +47,28 @@ const staleDraft: LocalDraftRecord = {
 const scriptedSessionId = 'aaaaaaaa-0000-4000-8000-000000000001'
 const firstMaterialId = 'cccccccc-0000-4000-8000-000000000003'
 
+test('typing a fresh draft before capabilities arrive adopts its missing defaults', async ({
+  mount,
+  page
+}) => {
+  await mount(<CreationWorkbenchStory manifestDeferred />)
+  await page.getByTestId('session-new').click()
+  await page.getByTestId('composer-prompt').fill('asset library generation')
+  await page.evaluate(() => window.__creationDeckTest?.releaseManifest())
+  await expect(page.getByTestId('composer-submit')).toBeEnabled()
+  await expect(page.getByTestId('composer-model')).toContainText('doubao-seedream-5.0-pro')
+  await page.getByTestId('composer-params').click()
+  await page.getByRole('menu').getByRole('button', { name: '2', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await page.getByTestId('composer-submit').click()
+  await expect
+    .poll(() => page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? []))
+    .toHaveLength(1)
+  const [call] = await page.evaluate(() => window.__creationDeckTest?.taskCalls() ?? [])
+  expect(call?.intent.quantity).toBe(2)
+  expect(call?.intent.prompt).toBe('asset library generation')
+})
+
 function scriptedMaterial(
   id: string,
   kind: ReferenceMaterialView['kind'],
