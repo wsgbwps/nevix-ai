@@ -196,10 +196,16 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 			}
 			break
 		}
-		if (status != 0 && status != http.StatusBadGateway && status != http.StatusServiceUnavailable) || time.Now().After(edgeDeadline) {
+		if (err == nil && status != 0 && status != http.StatusBadGateway && status != http.StatusServiceUnavailable) || edgeCtx.Err() != nil {
 			t.Fatalf("restarted fixture HTTPS release read unavailable: HTTP %d (private transport and response bytes withheld)", status)
 		}
-		time.Sleep(100 * time.Millisecond)
+		retry := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-edgeCtx.Done():
+			retry.Stop()
+			t.Fatal("restarted fixture HTTPS release read deadline elapsed (private transport and response bytes withheld)")
+		case <-retry.C:
+		}
 	}
 	edgeCancel()
 	status, b = request("POST", "/identity/admin/reauth/proofs", token, map[string]string{"action": "object_storage_connection.create", "password": "fixturePassword345!"})
