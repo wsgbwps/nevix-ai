@@ -22,6 +22,7 @@ import {
 import { LanguageModeSettings } from '../../features/language'
 import { ProfileSettings } from '../../features/profile'
 import { ServerConnectionSettings } from '../../features/connection'
+import { ServerReleaseSettings } from '../../features/release'
 import {
   AuditLogSettings,
   JoinCodesSettings,
@@ -57,7 +58,8 @@ const SETTINGS_SECTION_REGISTRY: Record<SettingsSection, SettingsContribution> =
   connection: CLEAN_LEAVE_SEMANTICS,
   aiCreation: CLEAN_LEAVE_SEMANTICS,
   users: CLEAN_LEAVE_SEMANTICS,
-  audit: CLEAN_LEAVE_SEMANTICS
+  audit: CLEAN_LEAVE_SEMANTICS,
+  release: CLEAN_LEAVE_SEMANTICS
 }
 
 // The exact-action ids the AI Creation Settings commands request, mapped onto
@@ -277,6 +279,15 @@ export function SettingsPage(): React.JSX.Element | null {
         </div>
       </>
     ),
+    release: () => (
+      <div className="bg-card rounded-lg border">
+        <ServerReleaseSettings
+          key={`${connection.url ?? ''}:${session.user.id}`}
+          getSession={session.acquireSession}
+          serverUrl={connection.url ?? ''}
+        />
+      </div>
+    ),
     audit: () => (
       <div className="bg-card rounded-lg border">
         <AuditLogSettings
@@ -377,6 +388,16 @@ export function SettingsPage(): React.JSX.Element | null {
                 >
                   <ScrollTextIcon className="size-4" />
                   {t('settings.audit')}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={coordinator.section === 'release'}
+                  disabled={coordinator.navigationDisabled}
+                  onClick={() => coordinator.switchSection('release')}
+                  className="text-sidebar-foreground hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium"
+                >
+                  <ServerIcon className="size-4" />
+                  {t('settings.release')}
                 </button>
               </div>
             ) : null}

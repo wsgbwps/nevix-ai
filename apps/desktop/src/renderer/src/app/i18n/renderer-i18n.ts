@@ -8,6 +8,7 @@ import { connectionResources } from '../../features/connection'
 import { languageResources } from '../../features/language'
 import { profileResources } from '../../features/profile'
 import { userManagementResources } from '../../features/user-management'
+import { releaseResources } from '../../features/release'
 import { appResources } from '.'
 
 export const rendererI18n: I18n = i18next.createInstance()
@@ -20,6 +21,7 @@ export const rendererResources = {
     ...languageResources['zh-CN'],
     ...profileResources['zh-CN'],
     ...userManagementResources['zh-CN'],
+    ...releaseResources['zh-CN'],
     ...creationResources['zh-CN']
   },
   en: {
@@ -29,6 +31,7 @@ export const rendererResources = {
     ...languageResources.en,
     ...profileResources.en,
     ...userManagementResources.en,
+    ...releaseResources.en,
     ...creationResources['en']
   }
 } as const

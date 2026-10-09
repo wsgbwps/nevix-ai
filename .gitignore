@@ -51,3 +51,5 @@ test-results/
 
 .data/
 .scratch/
+# Release Admin Renderer Feature is source, not generated artifacts.
+!/apps/desktop/src/renderer/src/features/release/

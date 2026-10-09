@@ -87,9 +87,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	workerDone := make(chan error, 2)
+	releaseModule := release.NewModule(identityModule.SessionAuthenticator(), identityConfig.CORSAllowedOrigins)
+	workerDone := make(chan error, 3)
 	go func() { workerDone <- identityModule.RunWorkers(ctx) }()
 	go func() { workerDone <- creationModule.RunWorkers(ctx) }()
+	go func() { workerDone <- releaseModule.RunWorkers(ctx) }()
 
 	bus := event.NewInMemoryBus()
 	router := chi.NewRouter()
@@ -109,6 +111,9 @@ func run() error {
 	})
 	router.Group(func(r chi.Router) {
 		creationModule.Register(r, bus)
+	})
+	router.Group(func(r chi.Router) {
+		releaseModule.Register(r)
 	})
 	server := &http.Server{Addr: ":8080", Handler: router}
 	serverDone := make(chan error, 1)
