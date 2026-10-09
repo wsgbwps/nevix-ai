@@ -28,11 +28,11 @@
 等待已有 queued/running 任务结束。既有维护不会被接管。任务清空后停止 Server，防止用户、
 上传或配置写入破坏一致性；执行完整逻辑数据库/角色密码、主密钥、TLS 和配置快照，并在
 独立隔离 project/卷中真实恢复、解密全部 provider/storage 凭据、验收原版本与业务配置。
-只有完整可恢复证明和私密归档落盘成功才进入替换。
+只有完整可恢复证明、归档 fsync、成功关闭及备份父目录 fsync 都成功才进入替换。备份必须放在实例目录外，路径别名也不得指向实例内部。
 
 替换只更新 Server 和边缘 Nginx，保留原 PostgreSQL/cert 容器、卷和客户配置。Server 继续
 使用独立 DDL 凭据、现有 Goose 会话锁和 up-only 迁移，不给 runtime 角色 DDL。候选必须
-通过真实 Docker health、HTTPS 运行版本、维护/任务排空事实、公开业务配置、原始 `.env`、
+通过真实 Docker health、HTTPS 运行版本、维护/任务排空事实、由一致备份的隔离恢复实例产生的公开业务配置/User与Creation历史基线、原始 `.env`、
 凭据解密、TLS/主密钥字节一致性验收，随后才恢复自己拥有的任务准入。原发行包、版本目录
 和完整私密备份保留；没有自动容器更新，也没有远程 Admin 安装按钮。
 
@@ -55,7 +55,7 @@
   --token-file /secure/current-admin.session
 ```
 
-只要 phase 已进入 `replacing` 或 `verified`，替换可能已经执行了迁移。任何迁移、健康、
+phase 为 `replacing` 时，替换可能已经执行了迁移且尚未完成验收。任何迁移、健康、
 业务验收或恢复准入失败都会停止 Server/edge并保留维护事实/journal/备份，不自动
 `pg_restore`、不执行 Goose down、也不把换回旧镜像当成数据库回滚。以 journal 的原版本
 与 backup 路径执行[完整恢复](instance-backup-and-restore.md)；先 `verify-backup`，再由
@@ -64,7 +64,25 @@
 不依赖旧 session，不从数据库伪造 Admin。只有完整恢复验收和准入恢复后才清理匹配的
 upgrade journal。所有 Admin 失联时没有离线授权旁路。
 
-成功恢复后的运行版本仍为原版本。修正问题后再升级；不要用同一归档路径覆盖旧备份。
+phase 为 `verified`、`resume-intent` 或 `complete` 表示候选完整验收已完成；恢复准入前先
+持久记录 `resume-intent`。如果响应丢失、进程被杀或完成 journal 写入失败，Server/edge
+保持关闭或等待核对；不要恢复旧数据库来处理 journal。通过同一 `recover-upgrade` 命令额外
+提供候选 `--bundle` 和 `--manifest`，工具核对签名候选、实际运行版本/健康、当前凭据解密，
+只恢复完全匹配 journal 的暂停 owner/revision，或识别其已完成的 revision+1 开放状态。
+它保留合法的准入后业务写入，不重复 resume，不执行 SQL restore；完成 journal 无法可靠落盘
+仍报错并保持关闭，绝不把记录失败当成成功。
+
+```sh
+./nevix-deploy recover-upgrade --directory /opt/nevix \
+  --original-bundle /secure/releases/nevix-1.0.0-linux-amd64.tar.gz \
+  --original-manifest /secure/releases/nevix-1.0.0-linux-amd64.json \
+  --bundle /secure/releases/nevix-1.0.1-linux-amd64.tar.gz \
+  --manifest /secure/releases/nevix-1.0.1-linux-amd64.json \
+  --server-url https://203.0.113.10 --tls-fingerprint <独立核对的SHA256> \
+  --token-file /secure/current-admin.session
+```
+
+明确数据库恢复后的运行版本仍为原版本；仅核对已验收的准入恢复 journal 则保留候选版本。修正问题后再升级；不要用同一归档路径覆盖旧备份。
 备份本身没有密码加密，必须放在客户加密存储或受控离线介质，不得上传 CNB/GitHub。
 
 ## 验收

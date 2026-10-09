@@ -12,10 +12,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +224,64 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 		}
 	}
 	awaitTerminal(task)
+
+	// Renaming the already-open backup parent before finalization must abort before replacement.
+	_, task = submit("backup-parent-durability-348")
+	backupDir := filepath.Join(private, "archive-parent")
+	if e = os.Mkdir(backupDir, 0700); e != nil {
+		t.Fatal(e)
+	}
+	parentFailure := make(chan error, 1)
+	go func() {
+		parentFailure <- deployment.Run(args(successBundle, successManifest, originalBundle, originalManifest, filepath.Join(backupDir, "backup.tar.gz")), key)
+	}()
+	parentDeadline := time.Now().Add(30 * time.Second)
+	for {
+		status, b = request("GET", "/creation/maintenance", token, nil)
+		if status == 200 && bytes.Contains(b, []byte(`"paused":true`)) {
+			break
+		}
+		select {
+		case e := <-parentFailure:
+			t.Fatalf("backup-parent fixture finished too early: %v", e)
+		default:
+		}
+		if time.Now().After(parentDeadline) {
+			t.Fatal("backup-parent pause not observed")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if e = os.Rename(backupDir, backupDir+"-renamed"); e != nil {
+		t.Fatal(e)
+	}
+	os.Remove(filepath.Join(fixture, "block-generation"))
+	if e = <-parentFailure; e == nil {
+		t.Fatal("backup directory entry was not proven durable before replacement")
+	}
+	assertOpenOld("1.2.3")
+	awaitTerminal(task)
+	// A transparent external Docker wrapper fences the real stop call, permitting one valid
+	// public rename after initial drain/capture and before the actual snapshot boundary.
+	realDocker, e := exec.LookPath("docker")
+	if e != nil {
+		t.Fatal(e)
+	}
+	wrapperDir := t.TempDir()
+	stopReady := filepath.Join(private, "stop-ready")
+	stopBlock := filepath.Join(private, "stop-block")
+	script := fmt.Sprintf("#!/usr/bin/env bash\nset -eu\ncase \"$*\" in *' stop --timeout 60 server') if test -f %q; then touch %q; while test -f %q; do sleep 0.02; done; fi;; esac\nexec %q \"$@\"\n", stopBlock, stopReady, stopBlock, realDocker)
+	if e = os.WriteFile(filepath.Join(wrapperDir, "docker"), []byte(script), 0700); e != nil {
+		t.Fatal(e)
+	}
+	oldPath := os.Getenv("PATH")
+	if e = os.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+oldPath); e != nil {
+		t.Fatal(e)
+	}
+	defer os.Setenv("PATH", oldPath)
+	if e = os.WriteFile(stopBlock, nil, 0600); e != nil {
+		t.Fatal(e)
+	}
+	defer os.Remove(stopBlock)
 	_, task = submit("drain-348")
 	successfulBackup := filepath.Join(private, "upgrade-1.2.3.tar.gz")
 	done := make(chan error, 1)
@@ -244,6 +305,28 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 		time.Sleep(100 * time.Millisecond)
 	}
 	os.Remove(filepath.Join(fixture, "block-generation"))
+	stopDeadline := time.Now().Add(30 * time.Second)
+	for {
+		if _, e := os.Stat(stopReady); e == nil {
+			break
+		}
+		select {
+		case e := <-done:
+			t.Fatalf("upgrade finished before fenced snapshot stop: %v", e)
+		default:
+		}
+		if time.Now().After(stopDeadline) {
+			t.Fatal("snapshot stop fence not reached")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	status, b = request("PATCH", "/identity/users/me", token, map[string]string{"display_name": "Valid rename at snapshot boundary"})
+	if status != 200 {
+		t.Fatalf("allowed pre-stop rename %d %s", status, b)
+	}
+	if e = os.Remove(stopBlock); e != nil {
+		t.Fatal(e)
+	}
 	if e = <-done; e != nil {
 		t.Fatal("complete real upgrade:", e)
 	}
@@ -251,6 +334,47 @@ func exerciseInstanceUpgrade(t *testing.T, dir, originalBundle string, invoke, d
 	status, b = request("GET", "/creation/tasks/"+task, token, nil)
 	if status != 200 || !bytes.Contains(b, []byte("Queued before upgrade")) {
 		t.Fatalf("historical task lost across real migration: %d %s", status, b)
+	}
+
+	// Reproduce a crash after resume committed but before journal completion. Legitimate
+	// post-resume business writes and admission facts must survive non-destructive reconciliation.
+	status, b = request("GET", "/creation/maintenance", token, nil)
+	var resumed struct {
+		Owner    string `json:"owner_token"`
+		Revision int64  `json:"revision"`
+	}
+	if status != 200 || json.Unmarshal(b, &resumed) != nil || resumed.Owner == "" {
+		t.Fatal("actual completed maintenance transition")
+	}
+	var beforeResume map[string]any
+	if json.Unmarshal(b, &beforeResume) != nil {
+		t.Fatal("resumed snapshot")
+	}
+	status, b = request("PATCH", "/identity/users/me", token, map[string]string{"display_name": "Legitimate post-resume business write"})
+	if status != 200 {
+		t.Fatal("post-resume business write")
+	}
+	for _, phase := range []string{"verified", "resume-intent", "complete"} {
+		journal, _ := json.Marshal(map[string]any{"format": "nevix-upgrade-v1", "original_version": "1.2.3", "candidate_version": "1.2.4", "backup": successfulBackup, "phase": phase, "owner_token": resumed.Owner, "expected_revision": resumed.Revision - 1})
+		if e = os.WriteFile(filepath.Join(dir, "upgrade.json"), journal, 0600); e != nil {
+			t.Fatal(e)
+		}
+		recoverArgs := append(append([]string{"recover-upgrade"}, base...), "--original-bundle", originalBundle, "--original-manifest", originalManifest, "--bundle", successBundle, "--manifest", successManifest)
+		if e = deployment.Run(recoverArgs, key); e != nil {
+			t.Fatalf("non-destructive %s resume reconciliation: %v", phase, e)
+		}
+		status, b = request("GET", "/identity/users/me", token, nil)
+		if status != 200 || !bytes.Contains(b, []byte("Legitimate post-resume business write")) {
+			t.Fatal("resume recovery discarded valid business writes")
+		}
+		status, b = request("GET", "/creation/maintenance", token, nil)
+		var afterResume map[string]any
+		if status != 200 || json.Unmarshal(b, &afterResume) != nil || !reflect.DeepEqual(beforeResume, afterResume) {
+			t.Fatal("resume reconciliation repeated or replaced maintenance transition")
+		}
+		if _, e = os.Stat(filepath.Join(dir, "upgrade.json")); !os.IsNotExist(e) {
+			t.Fatal("completed reconciliation journal retained")
+		}
 	}
 	// External release faults exercise actual Goose failure and actual Docker health outcome.
 	for _, fault := range []struct{ name, version string }{{"migration-failure", "1.2.5"}, {"health-failure", "1.2.6"}} {
