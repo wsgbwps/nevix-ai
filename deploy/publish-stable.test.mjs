@@ -244,6 +244,46 @@ test("publisher needs no private-source attestation and advances stable only aft
   assert.equal(f.calls.filter((x) => x.method === "PUT").length, 4);
 });
 
+test("owner-approved offline restore skip is recorded without claiming verification", async (t) => {
+  const f = await fixture(t);
+  f.plan.attestation.offline_key_restore_verified = false;
+  f.plan.attestation.offline_key_restore_skipped_by_owner = true;
+  const result = await publishStable(f.plan, {
+    publicKey: f.publicKey,
+    transport: f.transport,
+    channel: f.channel,
+    token: "vendor-only",
+  });
+  assert.equal(result.commit, git(f.remote, ["rev-parse", "main"]));
+  assert.equal(f.plan.attestation.offline_key_restore_verified, false);
+});
+
+test("missing, malformed or contradictory restore decisions stop before external writes", async (t) => {
+  const f = await fixture(t);
+  for (const [verified, skipped] of [
+    [false, undefined],
+    [undefined, true],
+    ["true", undefined],
+    [false, "true"],
+    [true, true],
+    [true, "false"],
+  ]) {
+    f.plan.attestation.offline_key_restore_verified = verified;
+    f.plan.attestation.offline_key_restore_skipped_by_owner = skipped;
+    await assert.rejects(
+      publishStable(f.plan, {
+        publicKey: f.publicKey,
+        transport: f.transport,
+        channel: f.channel,
+        token: "vendor-only",
+      }),
+      /Offline key restore/,
+    );
+    assert.equal(f.calls.length, 0);
+    assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
+  }
+});
+
 test("post-publication raw redirects are refused and require exact commit reconciliation", async (t) => {
   const f = await fixture(t);
   const transport = async (url, options) =>

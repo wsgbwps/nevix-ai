@@ -28,8 +28,9 @@ stable 清单和逐版本清单，独立 clone，没有 product checkout 的 Git
 
 1. 创建 Ed25519 密钥并加密保存；将同一个公共 PEM 提交、review 后编译进 Desktop
    `RELEASE_PUBLIC_KEY_PEM` 和 Go `release.PublicKeyPEM`（运维工具复用 Go）。CLI 检查
-   两侧完全一致，不接受 env/source/实验 key fallback。恢复离线加密备份并在隔离环境
-   验证签名，厂商保留每次真实二进制和清单的本地副本。
+   两侧完全一致，不接受 env/source/实验 key fallback。记录离线加密备份及隔离恢复
+   验证；owner 明确批准跳过恢复时按后文如实记录。厂商保留每次真实二进制和清单
+   的本地副本。
 2. 保留固定 Mac 自签证书和私钥。配置厂商 Apple Silicon `nevix-release` self-hosted
    runner，其专用受保护 keychain 已解锁、已在 user search list；固定证书 SHA1。发行
    专用签名 runner 不接收 PR/fork 或其他未经批准的代码；只运行当次批准的正式标签。
@@ -119,7 +120,8 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
   },
   "no_paid_binding": true,
   "github_zero_cost_stop": true,
-  "offline_key_restore_verified": true,
+  "offline_key_restore_verified": false,
+  "offline_key_restore_skipped_by_owner": true,
   "local_artifacts_retained": true,
   "final_platform_acceptance": true,
   "three_carriers_verified": true,
@@ -129,6 +131,11 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
 ```
 
 时间必须是发布前 24 小时内，version 和每份实际 SHA512 完全匹配；缺项拒绝。
+离线恢复须如实记录：已验证时 `offline_key_restore_verified: true`，skip 字段省略或为
+false；owner 明确批准跳过时，须同时填写 verified 为 false、
+`offline_key_restore_skipped_by_owner: true`，并在 evidence 中引用其决定及已确认的备份。
+缺失、非布尔值或两项同时为 true 均拒绝。skip 不表示已验证恢复，也不代替其他验收
+或当次发行授权；密钥丢失后的备份可恢复性仍未经验证。
 以下证据由 owner review，不把布尔 JSON 当成自动检测的事实：
 
 | 要求                | 最终真实证据                                                                                                              | 当前状态                                           |
@@ -136,7 +143,7 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
 | 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                             | 本机材料已验证，公钥已固定；备份由 owner 确认，恢复验证按 owner 要求跳过；CI 接入待配置 |
 | 公开源码/免费额度   | GitHub 源码保持公开；实际 Actions runner 免费额度、存储/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录 | owner 已接受公开 GitHub + CNB 成品方案；最终发行仍需当日额度证据                     |
 | Windows 完整客户端  | 真实旧 NSIS 到新 NSIS，同路径重启，Settings 状态保存/丢弃/取消、普通退出不安装、错误清单/架构/缓存                        | isolated Main/Window NSIS 已过；最终全客户端待验收 |
-| Mac 完整签名客户端  | 旧/新 com.nevix.ai、相同 certificate requirement、首次放行、真实 Squirrel 更新及相同退出门                                | 库/源码门已过；最终签名实机待验收                  |
+| Mac 完整签名客户端  | 旧/新 com.nevix.ai、相同 certificate requirement、首次放行、真实 Squirrel 更新及相同退出门                                | [完整隔离签名安装/升级已过](../scripts/release-feasibility/mac-integrated-evidence.md)；最终发行字节待验收 |
 | Server 实例         | 原生 Linux x64 空库且无网络 pull，真实排队任务排空，业务/角色/客户配置/TLS/key 保留；备份、迁移、健康失败与完整恢复       | 见当前 CI/native receipts；最终发行包需重新核对    |
 | 两侧兼容            | 最新不兼容保留 Desktop；Server 先升级，再下载/安装兼容 Desktop；不可达/未知 Server 不安装                                 | 单元/E2E 基础证据；最终跨版本待验收                |
 | 大陆三网            | 电信/联通/移动各记录时间、网络、无代理、四清单+四完整文件、size/hash、TLS、redirect、HEAD/GET/Range、失败后从稳定入口重试 | 全部最终制品待三网验收；#340 单网豁免不适用        |
@@ -147,6 +154,26 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
 验收仓库/版本附件；该远端演练本身也要授权，不能先写客户 stable 来取得前置证明。
 Publisher 自己的匿名双次 full GET、HEAD、Range 和 raw read 是厂商当前网络补充检查，
 不代替三网、签名平台、完整实例的验收。
+
+2026-10-10 #349 本地续验：真实已安装 Mac `0.1.343 → 0.1.344` 的更新及状态保留
+见上表证据，升级后完整 Native Smoke 6/6 通过；这两版来自 `365869e0`，使用正式
+Mac 证书和隔离测试 Ed25519/feed/profile，不能替代最终 stable 字节。
+本地候选四份 DMG/ZIP 保留在
+`.scratch/343-integrated-mac-20261010/{old,new}/apps/desktop/dist/`，对应摘要已记录；
+尚无同一最终版号的 NSIS、DMG、ZIP、完整 Linux x64 包与生产签名清单发行副本。
+只读核对时本地 HEAD 为 `a3b1c8f0`，远端草稿 PR #351 为 `365869e0`，没有 `v*`
+标签、GitHub Release 或已注册 self-hosted runner。当前 owner 只能使用一种网络，
+尚无最终相同字节的大陆三网证明。
+本次本地续验 `make check` 通过（463 Desktop 单元、36 架构检查及 Go vet/test），
+发行/交付 harness 89/89、Mac 签名输入检查 3/3 通过；owner skip 的正向和拒绝用例
+先复现旧门冲突，再通过修正后的真实 publisher seam。以上是本地准备验证，
+不能作为尚未固定的最终发行 source commit 的 CI/平台验收回执。
+
+因此 #349 保持未完成：先固定最终版号/source commit、授权专用 runner/Secrets 和
+标签签名，保留四制品与清单的本地发行副本；再完成 Windows/Mac/Linux 最终包、
+Server 先升级再 Desktop 更新、真实跨源桥接及三网验收，核对该 source 的 gate/review。
+正式发行当日还须核实免费额度、未绑定付费和零成本停止，并取得当次发布批准。
+本次安装验收和 owner 的恢复验证 skip 均不授权上述外部/系统动作；未发布或合并。
 
 2026-10-10 签名材料：Ed25519 SPKI DER SHA256 `b4ef59eec33aca90f220418df0ee8922e424d0bac82730ddcb89b2b934dcfe6d`；固定 Mac 证书 SHA1 `3AFD38605AD783F0AF4FCA20AD8654EF6005EB12`，有效期至 2027-10-10 03:23:05 UTC。Desktop、Go Server 与运维工具使用相同内置公钥；测试身份不作为生产信任根。离线恢复未验证，不得填写 `offline_key_restore_verified: true`。
 

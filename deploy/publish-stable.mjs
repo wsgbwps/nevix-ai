@@ -49,7 +49,6 @@ const fields = [
 const attested = [
   "no_paid_binding",
   "github_zero_cost_stop",
-  "offline_key_restore_verified",
   "local_artifacts_retained",
   "final_platform_acceptance",
   "three_carriers_verified",
@@ -59,6 +58,14 @@ function checkAttestation(value) {
   assert.ok(
     value && attested.every((name) => value[name] === true),
     "Release prerequisites require explicit owner attestation",
+  );
+  assert.ok(
+    (value.offline_key_restore_verified === true &&
+      (value.offline_key_restore_skipped_by_owner === undefined ||
+        value.offline_key_restore_skipped_by_owner === false)) ||
+      (value.offline_key_restore_verified === false &&
+        value.offline_key_restore_skipped_by_owner === true),
+    "Offline key restore requires verification or explicit owner-approved skip",
   );
   const age = Date.now() - Date.parse(value.checked_at);
   assert.ok(

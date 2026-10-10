@@ -1,4 +1,7 @@
-# #343 integrated Mac update: prepared, pending signing approval
+# #343 integrated Mac update: original proposal
+
+Completed 2026-10-10: see [the integrated installed evidence](mac-integrated-evidence.md).
+The signing approval and acceptance status below describe the original preparation stage.
 
 The actual Desktop now selects MacUpdater for `darwin/arm64` and reuses the Windows Main signed-source, full-download, native confirmation and Window readiness implementation. DMG is first installation; the signed Desktop candidate is the ZIP. Other Mac architectures are rejected. Neither background download nor ordinary quit/relaunch invokes native Squirrel; explicit installation does.
 
