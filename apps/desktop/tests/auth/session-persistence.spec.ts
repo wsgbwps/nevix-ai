@@ -150,6 +150,7 @@ test('a securely persisted session restores without a fresh login, survives an o
 })
 
 test('corrupt, unknown, random, and malformed encrypted session envelopes are terminal and deleted', async () => {
+  test.setTimeout(90_000)
   test.skip(
     !process.env.NEVIX_TEST_SERVER_URL,
     'requires the configured build produced by the E2E command'

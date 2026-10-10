@@ -8,11 +8,14 @@ build/
 *.tsbuildinfo
 !apps/desktop/build/
 apps/desktop/build/*
+!apps/desktop/build/entitlements.mac.plist
 !apps/desktop/build/locales/
 !apps/desktop/build/locales/**
 
 # Electron
 release/
+!server/internal/release/
+!server/internal/release/**
 
 # Go
 server/server
@@ -48,3 +51,5 @@ test-results/
 
 .data/
 .scratch/
+# Release Admin Renderer Feature is source, not generated artifacts.
+!/apps/desktop/src/renderer/src/features/release/

@@ -4,13 +4,14 @@ export const SETTINGS_SECTIONS = [
   'connection',
   'aiCreation',
   'users',
-  'audit'
+  'audit',
+  'release'
 ] as const
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
 /** Sections the Settings Page offers only to an Admin session (ADR-0015 visibility). */
-export const ADMIN_SETTINGS_SECTIONS: readonly SettingsSection[] = ['users', 'audit']
+export const ADMIN_SETTINGS_SECTIONS: readonly SettingsSection[] = ['users', 'audit', 'release']
 
 export function isAdminSettingsSection(section: SettingsSection): boolean {
   return ADMIN_SETTINGS_SECTIONS.includes(section)

@@ -1,0 +1,146 @@
+# Admin presentation only; installation remains a customer operator action.
+paths:
+  /release/version:
+    get:
+      summary: Running Server release identity and Desktop compatibility
+      operationId: getReleaseVersion
+      security: []
+      responses:
+        "200":
+          description: Compiled running identity; development version is unknown for compatibility.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [service, version, min_desktop_version]
+                properties:
+                  service:
+                    type: string
+                    const: nevix-server
+                  version:
+                    type: string
+                  min_desktop_version:
+                    type: string
+  /release/status:
+    get:
+      operationId: getServerReleaseStatus
+      summary: Read the last signed Server release check
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current compiled identity and last check; no installation authority.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseStatus"
+        "401":
+          description: Missing, invalid, expired or revoked active session.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: {type: string, enum: [unauthorized]}
+                  message: {type: string}
+        "403":
+          description: An active Admin who completed the initial password change is required.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: {type: string, enum: [forbidden, password_change_required]}
+                  message: {type: string}
+        "500":
+          description: Identity could not resolve the session.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: {type: string, enum: [internal_error]}
+                  message: {type: string}
+  /release/check:
+    post:
+      operationId: checkServerRelease
+      summary: Check the fixed anonymous official source for a signed Server release
+      description: |-
+        Active Admin only. No request body, customer credentials, Docker socket or installation.
+        Checks are serialized, deadline bounded, and return source failure as a visible 200 outcome.
+        The fixed system-trusted HTTPS manifest read refuses redirects and is bounded to 64 KiB.
+        A failed check clears the candidate. It cannot affect existing business operations.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Completed check including explicit source/trust failure outcomes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseStatus"
+        "401":
+          description: Missing, invalid, expired or revoked active session.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: {type: string, enum: [unauthorized]}
+                  message: {type: string}
+        "403":
+          description: An active Admin who completed the initial password change is required.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: {type: string, enum: [forbidden, password_change_required]}
+                  message: {type: string}
+        "500":
+          description: Identity could not resolve the session.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: {type: string, enum: [internal_error]}
+                  message: {type: string}
+components:
+  schemas:
+    ReleaseStatus:
+      type: object
+      additionalProperties: false
+      required: [version, min_desktop_version, outcome, checked_at, candidate]
+      properties:
+        version:
+          type: string
+          description: Real compiled running version; development means unknown.
+        min_desktop_version:
+          type: string
+        outcome:
+          type: string
+          enum: [not-checked, trust-unconfigured, unknown-version, current, available, incompatible, network-failure, invalid-release]
+        checked_at:
+          type: [string, "null"]
+          format: date-time
+        candidate:
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [version, min_server_version, min_desktop_version, compatible]
+              properties:
+                version: {type: string}
+                min_server_version: {type: string}
+                min_desktop_version: {type: string}
+                compatible:
+                  type: boolean
+                  description: Running Server version meets the signed minimum source version.

@@ -87,8 +87,12 @@ export function classifyPaths(paths) {
 
     // deploy 交付资产（公网 Compose/Nginx/证书生命周期）由 harness 内联的
     // deploy-stack 结构测试验证：端口暴露、摘要钉扎、TLS 与流式合同。
-    // 不改产品运行时代码，无需产品套件。
-    if (startsWith(path, "deploy")) checks.add("harness");
+    // 正式运行配置/工具还需 Server CI 的原生离线首次安装。
+    if (startsWith(path, "deploy")) {
+      checks.add("harness");
+      if (!path.endsWith(".md") && !path.startsWith("deploy/publish-stable"))
+        checks.add("server");
+    }
 
     // contracts 的自动门禁由 Server CI 拥有；跨层验收留给本地 Full E2E。
     if (startsWith(path, "contracts")) checks.add("server");
@@ -108,6 +112,7 @@ export function classifyPaths(paths) {
     // sidecar 拉起），不进生产、不触产品运行时，与 Makefile 同类只跑
     // harness 内联自检。
     if (startsWith(path, "scripts/dev")) checks.add("harness");
+    if (startsWith(path, "scripts/release-feasibility")) checks.add("harness");
 
     if (
       isOneOf(path, ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"])
@@ -146,6 +151,8 @@ export function classifyPaths(paths) {
         "README.md",
         "skills-lock.json",
         "scripts/.gitkeep",
+        "scripts/instance-backup-and-restore.md",
+        "scripts/instance-upgrade.md",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
         "scripts/tests/deploy-stack.test.mjs",
@@ -157,6 +164,9 @@ export function classifyPaths(paths) {
     if (
       isOneOf(path, [
         ".github/workflows/ci-gate.yml",
+        ".github/workflows/release-feasibility.yml",
+        ".github/workflows/stable-release.yml",
+        ".github/workflows/desktop-update-install.yml",
         "scripts/classify-ci-changes.mjs",
         "scripts/tests/classify-ci-changes.test.mjs",
         // Remove these two historical paths after their deletion commit lands on main.

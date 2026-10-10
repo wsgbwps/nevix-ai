@@ -2,7 +2,19 @@
 
 ## 状态
 
-方案已收敛，待整案确认 — 2026-09-30。产品选择已由用户逐项确认；下列实现方案仍待整案确认与本地可行性验证，尚未授权实现或正式发布。接受后将取代 [ADR-0013](0013-onprem-single-tenant-delivery.md) 中基于 air-gap 的不引入 updater 与 Desktop 零外联约束，以及旧的客户现场编译分发形态；不改变 Go 唯一可信业务数据面的职责。
+已接受 — 2026-10-09，实施 #339/#341。#340 的 [CNB 实测](../../scripts/release-feasibility/cnb-publication-evidence.md)与 [Mac library-validation 实测](../../scripts/release-feasibility/mac-library-validation-evidence.md)通过，用户授权实施整案。接受的是下述架构，实际正式发布仍受 delivery 授权门及最终制品验收约束。
+
+2026-10-10 已接受调整：原决定要求 GitHub 源码私有；用户确认 GitHub 源码仓库保持公开，正式成品与签名更新清单仍由独立 CNB 成品仓库分发，移除正式发行的源码私有前置条件。源码可见性不承担签名信任职责；签名私钥与写入凭据仍须保密。本次授权仅修改、实现与验证，不授权正式发布或合并 PR。
+
+2026-10-10 后续授权与签名责任调整：用户批准继续实施并委托选择正式版号，首版候选采用 `1.0.1`。公开个人仓库不接入持有厂商签名身份的 self-hosted runner 或签名 Secrets；GitHub hosted CI 在同一精确标签提交上完成完整 Desktop/Server gates，并构建 Windows 与 Linux 制品。厂商在受控本地 Mac 的干净同标签 checkout，使用已固定身份构建、签名 DMG/ZIP；完整 gates 通过后，本地 publisher 的 `prepare` 使用既有受信 Ed25519 密钥为同源四份制品签名。CI 不访问签名 keychain、私钥、密码或 CNB token，也不自动发布 CNB。原文专用 runner 签名决定由本调整替代；最终制品验收和当次发布门仍适用。
+
+2026-10-10 候选更新：最初选择的 `v1.0.0` 在正式包验收中因 canonical ASAR 包含 `@babel/code-frame/lib/index.js.map` 被拒绝，未发布。其标签保留原提交，不移动或覆盖；修复使用新的 `v1.0.1`，重新构建、签名和验收。Desktop 最低运行 Server 仍为 `1.0.0`，Linux 最低来源 Server 及配对最低 Desktop 仍为 `0.1.0`。更换候选版本不表示最终平台、桥接、三网或发布门已通过。
+
+同日 owner 收窄 #349 收尾范围：使用现有 Docker 与原生 Linux CI 验证后端部署、运行、升级及数据保留，Mac 完成真实安装升级，不再搭建 Linux 虚拟机。三网和真实跨源桥接分别移至 #352、#353，不阻塞本次收尾；如实记录环境分离与未验证项目。此验收范围调整不改变信任责任或自动放宽客户 stable 的生产发布门，关闭 issue 也不等于发布或合并 PR。
+
+2026-10-10 真实 CNB 更新演练的后续 owner 决定：用户选择普通启动客户端访问公开 CNB stable 的真实更新路径，并明确批准沿用 #349 已通过的 Mac/Linux 最小验收准备发布，接受三网、真实跨源桥接、最终 Windows 完整安装及其他未覆盖案例的风险。此决定取代前述“收尾范围不调整发布门”的默认限制：发布器允许完整平台、三网、桥接各自以 verification=false 加对应显式 owner-approved skip 及当次 evidence 表达；未验证不记为通过。既有离线密钥恢复 skip 同理。已通过的 Mac/Linux 范围和所有缺口须列入发布记录，跳过范围不得默认启用或写入客户信任合同。生产公钥、Mac 身份、正式四制品字节/签名/兼容性、零成本及新鲜额度、不可覆盖和渠道 FF 保护继续强制。当次 CNB 清理、Release 上传及 stable 推进仍需对具体结果即时批准；本决定不授权 PR 合并，不移动 v1.0.1，也不要求重建已验收制品。
+
+本 ADR 取代 ADR-0013 的 Desktop 零外联、禁止 updater 与客户现场编译决定；Go 仍是唯一可信业务数据面。Mac 接受 `com.apple.security.cs.disable-library-validation=true` 的保护减弱，以稳定自签身份保留 hardened runtime 与 Squirrel 签名连续性；Ed25519 不抵消该保护减弱。生产签名身份、公钥与写入凭据须另行受控配置，不复用已清理实验身份。
 
 ## 已确认
 
@@ -13,13 +25,13 @@
 - 继续使用现有 HTTPS 与边缘 HTTP/2 部署形状，首版不引入 HTTP/3。HTTP/2 不等于消除 TCP 队头阻塞，也不自动保证所有客户端请求或代理上游均使用 HTTP/2。
 - 正式发布声明 Desktop 所需最低 Server 版本与 Server 所需最低 Desktop 版本。最新版 Desktop 与当前 Server 不兼容时不自动下载，保持当前版本并提示 Admin 先升级 Server；兼容版本正常后台下载。安装前再次核对兼容性；此原则不代表承诺永久兼容任意历史版本。
 - 允许计划维护停机。升级前暂停新任务、等待运行中任务结束、备份数据库与主密钥/TLS 材料，再替换镜像并验收健康状态；等待超时或备份失败则中止。迁移继续 up-only，回退旧镜像不等于回滚数据库。
-- 只有正式版本标签（如 `v1.0.1`）触发客户发布；普通代码 push 不更新客户。CI 检查、构建、签名、制品上传全部成功后才更新公开版本清单，避免引用尚未就绪的制品。
-- 发布安装包与后端制品允许公开下载，源码继续私有；下载不携带客户数据或凭据。使用权限继续遵循合同与既定 License 决策，不以制品保密代替业务授权。
+- 只有正式版本标签（如 `v1.0.1`）进入发行流程；普通代码 push 不更新客户。CI 检查、构建、本地签名、制品上传全部成功后才更新公开版本清单，避免引用尚未就绪的制品。
+- GitHub 源码及 CNB 发布安装包与后端制品允许公开访问；下载不携带客户数据或凭据。使用权限继续遵循合同与既定 License 决策，不以源码或制品保密代替业务授权。
 - 尚未向客户分发过安装包，属于首次正式发布，无既有安装身份迁移负担。
 - 暂不采用付费发布托管或付费镜像仓库，未来有需要再迁移；香港 OSS + ACR 企业版候选未获采用。发布格式与更新协议应便于迁移，不预先实现多供应商抽象或双写分发。
 - 厂商目前没有自有域名或香港主机，不能将“复用现有香港静态主机”作为当前可用方案，也不能声称已具备由厂商完全控制的稳定域名入口。
 - 客户内网与香港云部署沿用固定 IP、自签 HTTPS 与首次指纹核对；官方更新源使用系统受信 HTTPS，与客户 Server URL 的证书信任分开。
-- 源码与日常开发继续在 GitHub 私有仓库。腾讯 CNB 单独建立公开成品分发仓库，只存放发布说明、桌面安装包、更新清单与后端制品；GitHub Actions 完成构建后上传 CNB，不镜像或迁移源码。
+- 源码与日常开发保留在 GitHub 公开仓库；正式发行不要求改为私有。腾讯 CNB 单独建立公开成品分发仓库，只存放发布说明、桌面安装包、更新清单与后端制品；GitHub Actions 完成 gates 与 Windows/Linux 构建、厂商完成同源本地 Mac 构建与四制品清单签名后，经当次人工批准由受控本地 publisher 上传 CNB，不镜像或迁移源码。
 - CNB 先使用免费额度，不绑定付费预算。厂商保留每次发布的本地制品副本并维护后续迁移路径；CNB 的免费额度、账户和仓库限制不是永久可用性保证。
 - macOS 首次安装接受 User 在系统设置中明确放行；自动更新采用免费签名方向，不以购买 Apple Developer 会员作为首版前置条件。必须先验证稳定自签身份在本项目 Squirrel 链路的真实旧版本到新版本更新；若不可用，重新确认替代方案，不能默默降级为手动安装或绕过验证。
 - Windows 首版采用 NSIS，不购买代码签名证书，接受部分设备可能出现 SmartScreen 提示；清单与安装包仍须以免费发布签名证明来源与完整性。不能把没有系统提示作为验收保证，也不能把 Ed25519 发布签名称为 Windows Authenticode。
@@ -27,7 +39,7 @@
 - Desktop 首版更新入口采用系统菜单“检查更新”、下载完成通知与原生安装确认框。暂不新增设置页更新面板、进度与版本记录，也不为此新增 updater typed IPC owner。
 - Desktop 启动后及每 12 小时检查，Server 启动后及每天检查，均支持手动检查。后台失败安静重试、手动失败明确告知，不影响已有业务；无法确认当前 Server 兼容性时暂缓 Desktop 自动下载与安装。
 
-## 拟采用的实现方案（待整案确认与验证）
+## 决策与实施合同
 
 - 固定 Desktop App ID 为已有 Main 使用的 `com.nevix.ai`，同步打包身份。Windows 产出 x64 NSIS，macOS 产出 arm64 DMG（首次安装）与 ZIP（自动更新）。复用现有 electron-builder v26，安装对应版本 electron-updater；不依赖尚未发布的新版签名功能。
 - 发布渠道先只提供 stable。CNB 主站公开 raw 路径提供签名版本清单，制品指向不可变版本 Release 附件。客户端不调用需认证的 CNB OpenAPI，不持有 CNB token。
@@ -36,13 +48,13 @@
 - 检查、下载与安装操作串行。缓存安装包不是受信事实；每次准备安装都须验签与校验，不允许退出钩子、重启、旧缓存或并发检查绕过验证。原生 updater 的 install 调用必须发生在 User 确认且既有 Window 保存/丢弃与上传退出准备完成之后；由 Window lifecycle 复用现有退出 continuation，批准后仅执行一次安装 action，普通退出继续调用 `app.quit()`。取消或 renderer 失联时清除待安装 action；当前 `requestApplicationQuit()` 返回 void 不是批准事实。updater 不解释 renderer 业务状态，也不新增 typed IPC。
 - Go 公布运行版本与 `min_desktop_version`，发布清单声明候选 Desktop 的最低 Server 版本。Desktop 在启动/连接与安装前比对；最新版不兼容时继续使用当前版本并提示先升级 Server。Server 的发布检测与 Admin 提示采用简单 release 责任范围，不增加 Docker socket、远程执行或安装权限；任务暂停/排空事实仍由 owning Creation Module 负责，升级脚本不得直写业务表。
 - 后端制品用 Docker 镜像归档交付，包含 Nevix server、证书工具与固定来源的 Nginx/Postgres；Compose 不含客户 build 步骤，显式禁止缺镜像时自动公网拉取。保留上游来源 digest 与实际镜像身份的验证；不能假定 `docker load` 一定保留 registry RepoDigest，发行 Compose 的身份引用须在支持的 Docker Engine 上实际验收。固定 `nevix` project 与持久卷名称，不覆盖客户配置、不随应用更新升级 PostgreSQL 大版本。
-- 正式发布 CI 按版本串行：检查与构建 → 签名 → 创建 draft Release → 上传并确认完整附件 → 转为正式 Release → 验收匿名可读 → 最后一次 commit 更新公开渠道清单。禁用正式制品覆盖，附件显式永久保留；失败不推进渠道指针，也不让较旧构建后完成时覆盖新指针。这是发现新版本的可见性门，不是 CNB 多资源原子事务。
-- 发布与部署资产继续归 `deploy/`，备份/恢复工具归 `scripts/`，Main updater 归 Desktop 平台责任；CI 放现有 `.github/workflows/`。不新建顶层 source owner、不迁移 GitHub 私有源码。第一步只验证 Mac 免费签名与 CNB 实际更新链路，通过后再实现完整功能。
+- 正式标签须先人工批准 source commit 和签名动作；hosted CI 按版本串行执行 gates 与 Windows/Linux 构建，本地厂商按同一精确标签完成 Mac 构建与清单签名，没有自动 CNB publish job。最终制品验收并取得当次发布批准后，受控本地 publisher 执行：创建 draft Release → 上传并确认完整附件 → 转为正式 Release → 验收匿名可读 → 最后一次 commit 更新公开渠道清单。公开 GitHub 仓库可支持 environment 保护，但当前流程不依赖尚未配置的环境审批。禁用正式制品覆盖，附件显式永久保留；失败不推进渠道指针，也不让较旧构建后完成时覆盖新指针。这是发现新版本的可见性门，不是 CNB 多资源原子事务。
+- 发布与部署资产继续归 `deploy/`，备份/恢复工具归 `scripts/`，Main updater 归 Desktop 平台责任；CI 放现有 `.github/workflows/`。不新建顶层 source owner、不将 GitHub 源码镜像到 CNB。第一步只验证 Mac 免费签名与 CNB 实际更新链路，通过后再实现完整功能。
 - 后续迁移存储商先保留 CNB 旧入口并发布迁移版本，迁移清单与制品持续使用受信签名；Mac 更换签名身份可能还需桥接版本。旧源失效时不能自动救回尚未迁移客户端，本地备份提供人工安装/部署恢复。签名私钥保持厂商受控且有安全离线备份，不进入 CNB、客户实例或安装包；原始发布制品与清单单独保留本地备份。
 
-## 实现前的验证约束
+## 发行验收约束
 
-- 客户端与客户 Server 不持有 CNB token。CNB 主站公开 raw 文件可作为清单入口；实测公开仓库 OpenAPI latest 查询仍要求认证，因此不能将这个 API 当作匿名客户端更新入口。CI 可使用厂商写入凭据上传附件。
+- 客户端与客户 Server 不持有 CNB token。CNB 主站公开 raw 文件可作为清单入口；实测公开仓库 OpenAPI latest 查询仍要求认证，因此不能将这个 API 当作匿名客户端更新入口。厂商受控本地 publisher 仅在当次批准后使用写入凭据上传附件。
 - 拟采用的“Release 附件先就绪、公开渠道清单后更新”须通过失败中断与并发发布检查；验收确认前不将其视为已经实现的发布协议。
 - 当前 builder 26.15.3 对应 updater 6.8.9 不具备新版文档中的 Ed25519 清单验签功能。免费签名方案必须在可信调用边界验证发布者签名与制品身份；只在 YAML 增加 signature 字段或依靠随包提供的 checksum 都不构成验签。发布私钥不得进入 CNB 成品、客户端或客户 Server。
 - CNB 已有公开附件的匿名 HEAD、单段 Range 与跨 asset 主机重定向获得可用实测，但多段 Range 未表现为 multipart。实际 Nevix 安装包和完整后端包仍须验收；首版先完整下载，不将差量下载作为发布前置或承诺。大陆三网验收覆盖匿名清单、完整安装包/镜像包、失败重试与 TLS 验证，不能据较小样例承诺实际性能。
@@ -64,3 +76,11 @@
 - [腾讯云备案场景](https://cloud.tencent.com/document/product/243/19630)：香港服务器与大陆域名服务的备案条件不同；HTTPS、私有部署或端口号不单独构成备案豁免依据。
 - [HTTP/2 标准](https://www.rfc-editor.org/rfc/rfc9113.html#section-1)：HTTP/2 不处理 TCP 队头阻塞。
 - [Docker Compose 生产部署](https://docs.docker.com/compose/how-tos/production/)：现有 Compose 可承担容器替换，不需要先引入独立部署平台。
+
+## 授权与合同 seam
+
+精确字节与版本合同见 [release-v1](../../contracts/release-v1.md)。Main updater 独占官方源、验签与原生交互，Window 独占用户退出准备；Release Module 拥有运行版本及 Admin 发行提示，不获安装权限。Creation Module 拥有持久任务准入暂停与排空事实。运维工具通过受 Admin 授权的维护 HTTP seam 请求这些事实，不得直接写业务表；运行 credential 不取得 DDL 权限，迁移继续独立 DDL credential、锁和 up-only。后续维护命令实现前不得用 Docker socket/匿名 HTTP 绕过授权。
+
+运维可信验证/维护客户端以 Linux amd64 Go 二进制交付，源入口放 `server/cmd/` 以复用 `internal/release`，发布/运行资产仍归 `deploy/` 与 `scripts/`，客户主机仅需 Docker/Compose，不额外要求 Node/Go/Python/OpenSSL。Creation 暂停与排空成功后停止 Server，再一致备份数据库、主密钥、TLS 与配置；停机是本版认可的维护形态。
+
+运维命令入口固定为 `server/cmd/nevix-deploy`；其具体归档验证、镜像导入与 Compose 调用放 `server/internal/deployment`，这是 `deploy/` 的 Go 运维实现责任，不是新的业务 Module，也不装入运行中的 Server。验签复用 `internal/release`，业务维护只经 Admin HTTP 合同，Server 不取得 Docker socket。

@@ -191,6 +191,22 @@ test("the strict compose parser reads the delivery file", () => {
   assert.equal(services.server.build.context, "../server");
 });
 
+test("signed runtime Compose retains the stack contract and forbids customer build/pull", () => {
+  const runtime = parseCompose(readDeploy("runtime-compose.template.yaml").replace(/@[A-Z_]+_IMAGE@/g, "sha256:" + "a".repeat(64)));
+  assert.equal(runtime.name, "nevix");
+  assert.deepEqual(Object.keys(runtime.services).sort(), Object.keys(services).sort());
+  for (const [name, service] of Object.entries(runtime.services)) {
+    assert.equal(service.build, undefined);
+    assert.equal(service.pull_policy, "never");
+    assert.equal(service.platform, "linux/amd64");
+    assert.match(service.image, /^sha256:[a-f0-9]{64}$/);
+    for (const field of ["environment", "volumes", "networks", "depends_on", "healthcheck", "restart", "ports", "read_only", "tmpfs"]) {
+      assert.deepEqual(service[field], services[name][field], `${name}.${field} must retain the development stack contract`);
+    }
+  }
+  for (const name of ["pgdata", "tls", "secrets"]) assert.equal(runtime.volumes[name].name, `nevix_${name}`);
+});
+
 test("only nginx publishes a host port, and it is 443", () => {
   for (const name of nonEdgeServices) {
     assert.equal(

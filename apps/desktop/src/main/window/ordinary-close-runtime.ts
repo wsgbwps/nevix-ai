@@ -40,3 +40,15 @@ export function decideOrdinaryClose(window: BrowserWindow, request: OrdinaryClos
 export function ordinaryCloseRendererUnavailable(window: BrowserWindow): void {
   requireCoordinator().rendererUnavailable(window)
 }
+
+export function requestUpdateInstallation(
+  window: BrowserWindow,
+  validate: (signal: AbortSignal) => Promise<void>,
+  install: () => void
+): Promise<boolean> {
+  return requireCoordinator().requestUpdateInstallation(window, validate, install)
+}
+
+export function cancelUpdateInstallation(): void {
+  requireCoordinator().cancelUpdateInstallation()
+}

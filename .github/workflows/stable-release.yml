@@ -1,0 +1,145 @@
+name: Stable release hosted build for vendor review
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nevix-stable-publication
+  cancel-in-progress: false
+
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          export VERSION="${TAG#v}"
+          node -e 'const fs=require("node:fs"); fs.writeFileSync("identity.json",JSON.stringify({version:process.env.VERSION}),{mode:0o600})'
+          node --experimental-strip-types deploy/publish-stable.mjs identity identity.json
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - run: node --experimental-strip-types --test deploy/publish-stable.test.mjs
+
+  harness:
+    needs: identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: make harness-test
+
+  desktop-checks:
+    needs: identity
+    uses: ./.github/workflows/desktop-ci.yml
+    with:
+      windows_native: true
+      macos_native: true
+
+  server-checks:
+    needs: identity
+    uses: ./.github/workflows/server-ci.yml
+
+  windows:
+    needs: [identity, harness, desktop-checks, server-checks]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nevix/desktop build
+      - run: pnpm --filter @nevix/desktop exec electron-builder --win nsis --x64 --publish never
+      - name: Verify the final public Desktop archive before upload
+        run: node --input-type=module -e 'import { assertPublicDesktopArchive } from "./scripts/release-feasibility/desktop-artifact.mjs"; console.log("Public Desktop archive entries:", assertPublicDesktopArchive("apps/desktop/dist/win-unpacked/resources/app.asar"))'
+      - name: Record the exact final Windows identity
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import {createHash} from "node:crypto"; const sha=p=>createHash("sha256").update(fs.readFileSync(p)).digest("hex"); const version=JSON.parse(fs.readFileSync("apps/desktop/package.json")).version; fs.writeFileSync("apps/desktop/dist/windows-identity.json",JSON.stringify({source_commit:process.env.GITHUB_SHA,version,installer_sha256:sha(`apps/desktop/dist/Nevix-AI-${version}-setup.exe`),asar_sha256:sha("apps/desktop/dist/win-unpacked/resources/app.asar")}))'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stable-windows
+          path: |
+            apps/desktop/dist/Nevix-AI-${{ needs.identity.outputs.version }}-setup.exe
+            apps/desktop/dist/windows-identity.json
+          if-no-files-found: error
+          retention-days: 7
+
+  server:
+    needs: [identity, harness, desktop-checks, server-checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+      - name: Use OCI image store for vendor export
+        run: |
+          curl --fail --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/docker.tgz" https://download.docker.com/linux/static/stable/x86_64/docker-29.4.0.tgz
+          tar -xzf "$RUNNER_TEMP/docker.tgz" -C "$RUNNER_TEMP"
+          sudo systemctl stop docker.socket docker containerd
+          sudo install -m 0755 "$RUNNER_TEMP"/docker/* /usr/bin/
+          sudo mkdir -p /etc/docker
+          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start containerd docker
+          test "$(docker version --format '{{.Server.Version}}')" = 29.4.0
+          docker version
+          docker compose version
+      - env:
+          VERSION: ${{ needs.identity.outputs.version }}
+          MIN_DESKTOP_VERSION: ${{ vars.NEVIX_MIN_DESKTOP_VERSION }}
+          MIN_SOURCE_SERVER_VERSION: ${{ vars.NEVIX_MIN_SOURCE_SERVER_VERSION }}
+        run: |
+          set -euo pipefail
+          mkdir artifacts
+          bash deploy/scripts/build-bundle.sh "$VERSION" "$MIN_DESKTOP_VERSION" "$MIN_SOURCE_SERVER_VERSION" "artifacts/Nevix-server-$VERSION-linux-amd64.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stable-server
+          path: artifacts/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/checkout@v6
+        if: needs.identity.outputs.version == '1.0.1'
+        with:
+          ref: 277b17138af8f6b9ca4dcdfca2cb4a8f32eac654
+          path: .scratch/release-baseline
+      - name: Build the full controlled 0.1.0 Linux baseline
+        if: needs.identity.outputs.version == '1.0.1'
+        run: bash .scratch/release-baseline/deploy/scripts/build-bundle.sh 0.1.0 0.1.0 0.1.0 "$PWD/artifacts/Nevix-server-0.1.0-linux-amd64.tar.gz"
+      - uses: actions/upload-artifact@v4
+        if: needs.identity.outputs.version == '1.0.1'
+        with:
+          name: stable-server-baseline
+          path: artifacts/Nevix-server-0.1.0-linux-amd64.tar.gz
+          if-no-files-found: error
+          retention-days: 7

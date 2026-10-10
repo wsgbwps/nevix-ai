@@ -68,9 +68,8 @@ const emptyMediaDraft = (media: DraftMediaType): ComposerDraft => ({
   mediaType: media
 })
 
-function isUntouchedDraft(draft: ComposerDraft): boolean {
+function hasNoGenerationChoices(draft: ComposerDraft): boolean {
   return (
-    draft.promptDocument.nodes.every((node) => node.type === 'text' && node.text === '') &&
     draft.references.length === 0 &&
     GENERATION_PARAMETERS.every(({ id }) => id === 'mediaType' || draft[id] === null)
   )
@@ -282,8 +281,11 @@ export class WorkbenchContextController {
 
   selectMediaType(media: DraftMediaType): void {
     if (this.#activeMediaType === media) return
-    if (this.#manifest !== null && isUntouchedDraft(this.#drafts[media])) {
-      this.#drafts[media] = manifestDefaultDraft(this.#manifest, media)
+    if (this.#manifest !== null && hasNoGenerationChoices(this.#drafts[media])) {
+      this.#drafts[media] = {
+        ...manifestDefaultDraft(this.#manifest, media),
+        promptDocument: this.#drafts[media].promptDocument
+      }
     }
     this.#activeMediaType = media
     this.#pendingMaterialRemoval = null
@@ -394,7 +396,7 @@ export class WorkbenchContextController {
     }
   }
 
-  /** Records the loaded manifest and lets it seed an untouched context
+  /** Records the loaded manifest and lets it seed unselected generation choices
    * exactly once; an unavailable manifest degrades nothing here. */
   noteManifest(manifest: CapabilityManifest): void {
     this.#manifest = manifest
@@ -649,15 +651,18 @@ export class WorkbenchContextController {
     return value
   }
 
-  /** Manifest adoption invariant: the manifest seeds defaults only into an
-   * entered context's untouched empty draft — never an unentered workbench, nor
+  /** Manifest adoption invariant: the manifest seeds only unselected generation choices,
+   * preserving typed prompts — never an unentered workbench, nor
    * the optimistic empty a context switch shows while its record restores. */
   #adoptManifestDefaults(): void {
     if (!this.#contextEntered() || this.#restoreWindow) return
     if (this.#manifest === null) return
     const media = this.#activeMediaType
-    if (isUntouchedDraft(this.#drafts[media])) {
-      const seeded = manifestDefaultDraft(this.#manifest, media)
+    if (hasNoGenerationChoices(this.#drafts[media])) {
+      const seeded = {
+        ...manifestDefaultDraft(this.#manifest, media),
+        promptDocument: this.#drafts[media].promptDocument
+      }
       if (JSON.stringify(seeded) === JSON.stringify(this.#drafts[media])) return
       this.#drafts[media] = seeded
       const key = this.#draftKey()

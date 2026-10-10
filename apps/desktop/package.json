@@ -1,6 +1,6 @@
 {
   "name": "@nevix/desktop",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "description": "Nevix AI Desktop Application",
   "main": "./out/main/index.js",
   "author": "Nevix AI",
@@ -29,7 +29,8 @@
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac && npm run verify:package-localization",
-    "verify:package-localization": "node scripts/verify-packaged-localized-surfaces.mjs"
+    "verify:package-localization": "node scripts/verify-packaged-localized-surfaces.mjs",
+    "build:mac:release": "npm run build && node scripts/build-mac-release.mjs && npm run verify:package-localization"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -41,6 +42,7 @@
     "@tanstack/react-virtual": "3.14.10",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "electron-updater": "6.8.9",
     "gsap": "^3.15.0",
     "i18next": "^26.3.6",
     "lexical": "0.49.0",

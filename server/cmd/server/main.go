@@ -24,6 +24,7 @@ import (
 	"github.com/nevix-ai/server/internal/event"
 	"github.com/nevix-ai/server/internal/identity"
 	"github.com/nevix-ai/server/internal/migration"
+	"github.com/nevix-ai/server/internal/release"
 )
 
 func main() {
@@ -35,6 +36,10 @@ func main() {
 func run() error {
 	// Module configuration loads before the database pool opens, so a
 	// misconfigured process fails before touching infrastructure.
+	releaseConfig, err := release.LoadConfig(os.LookupEnv)
+	if err != nil {
+		return err
+	}
 	identityConfig, err := identity.LoadConfig(os.LookupEnv)
 	if err != nil {
 		return err
@@ -83,9 +88,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	workerDone := make(chan error, 2)
+	releaseModule, err := release.NewModule(identityModule.SessionAuthenticator(), releaseConfig)
+	if err != nil {
+		return err
+	}
+	workerDone := make(chan error, 3)
 	go func() { workerDone <- identityModule.RunWorkers(ctx) }()
 	go func() { workerDone <- creationModule.RunWorkers(ctx) }()
+	go func() { workerDone <- releaseModule.RunWorkers(ctx) }()
 
 	bus := event.NewInMemoryBus()
 	router := chi.NewRouter()
@@ -104,6 +114,9 @@ func run() error {
 	})
 	router.Group(func(r chi.Router) {
 		creationModule.Register(r, bus)
+	})
+	router.Group(func(r chi.Router) {
+		releaseModule.Register(r, bus)
 	})
 	server := &http.Server{Addr: ":8080", Handler: router}
 	serverDone := make(chan error, 1)

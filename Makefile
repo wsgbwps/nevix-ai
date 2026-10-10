@@ -1,4 +1,4 @@
-.PHONY: dev build lint check server postgres postgres-down docker-ready test-e2e test-e2e-smoke test-identity-integration test-creation-integration test-creation-oss-smoke harness-test setup
+.PHONY: dev build lint check server postgres postgres-down docker-ready test-e2e test-e2e-smoke test-identity-integration test-creation-integration test-creation-oss-smoke test-offline-runtime harness-test setup
 
 dev:
 	pnpm dev
@@ -98,8 +98,12 @@ test-creation-integration: docker-ready
 test-creation-oss-smoke:
 	./scripts/test-creation-oss-smoke.sh
 
+test-offline-runtime:
+	./deploy/scripts/test-offline-runtime.sh
+
 harness-test:
-	node --test .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/deploy-stack.test.mjs
+	node --experimental-strip-types --test deploy/publish-stable.test.mjs .agents/skills/code-review/tests/review-lifecycle.test.mjs scripts/tests/classify-ci-changes.test.mjs scripts/tests/deploy-stack.test.mjs scripts/release-feasibility/release-trust.test.mjs scripts/release-feasibility/installed-desktop-controller.test.mjs
+	bash deploy/scripts/test-final-offline-runtime.sh --self-check
 
 setup:
 	pnpm install

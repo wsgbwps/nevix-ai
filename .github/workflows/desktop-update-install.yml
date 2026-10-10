@@ -1,0 +1,163 @@
+name: Installed Desktop update
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/desktop/src/main/updater/**
+      - apps/desktop/src/main/window/**
+      - apps/desktop/src/main/connection/**
+      - apps/desktop/scripts/run-installed-update.mjs
+      - apps/desktop/tests/updater/installed-fixture.ts
+      - apps/desktop/package.json
+      - pnpm-lock.yaml
+      - .github/workflows/desktop-update-install.yml
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [fixture, final]
+        default: fixture
+      build_run_id:
+        description: Successful same-source stable build run (final mode)
+        type: string
+      linux_envelope:
+        description: Public production-signed final Linux JSON (final mode)
+        type: string
+      old_linux_envelope:
+        description: Public production-signed controlled 0.1.0 Linux baseline JSON
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installed-desktop-update-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Installed NSIS update (Windows)
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'fixture'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node apps/desktop/scripts/run-installed-update.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installed-windows-update
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            .scratch/342-windows-updates/result.json
+            .scratch/342-windows-updates/initial.json
+            .scratch/342-windows-updates/ordinary.json
+            .scratch/342-windows-updates/later.json
+            .scratch/342-windows-updates/cancel.json
+            .scratch/342-windows-updates/not-ready.json
+            .scratch/342-windows-updates/unavailable.json
+            .scratch/342-windows-updates/wrong-request.json
+            .scratch/342-windows-updates/server-unavailable.json
+            .scratch/342-windows-updates/replaced-cache.json
+            .scratch/342-windows-updates/approved.json
+
+  final-identity:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'final'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run_id: ${{ steps.identity.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN: ${{ inputs.build_run_id }}
+        run: |
+          node --input-type=module - <<'JS'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import {execFileSync} from 'node:child_process';
+          assert.match(process.env.BUILD_RUN,/^[1-9][0-9]*$/);
+          const run=JSON.parse(execFileSync('gh',['api',`repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.BUILD_RUN}`],{encoding:'utf8'}));
+          assert.equal(run.status,'completed'); assert.equal(run.conclusion,'success');
+          assert.equal(run.head_sha,process.env.GITHUB_SHA);
+          assert.equal(run.event,'push');
+          assert.equal(run.path.split('@')[0],'.github/workflows/stable-release.yml');
+          const version=JSON.parse(fs.readFileSync('apps/desktop/package.json')).version;
+          assert.equal(version,'1.0.1');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`run_id=${process.env.BUILD_RUN}\n`);
+          JS
+
+  final-linux:
+    needs: final-identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        store: [classic, containerd]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-server
+          path: .scratch/final-inputs/new
+          run-id: ${{ needs.final-identity.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-server-baseline
+          path: .scratch/final-inputs/old
+          run-id: ${{ needs.final-identity.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Install the supported native Docker toolchain
+        run: |
+          curl --fail --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/docker.tgz" https://download.docker.com/linux/static/stable/x86_64/docker-29.4.0.tgz
+          tar -xzf "$RUNNER_TEMP/docker.tgz" -C "$RUNNER_TEMP"
+          sudo systemctl stop docker.socket docker containerd
+          sudo install -m 0755 "$RUNNER_TEMP"/docker/* /usr/bin/
+          [[ $(docker --version) == 'Docker version 29.4.0,'* ]]
+      - name: Verify, install and upgrade the exact signed Linux bundles
+        env:
+          PUBLIC_ENVELOPE: ${{ inputs.linux_envelope }}
+          OLD_PUBLIC_ENVELOPE: ${{ inputs.old_linux_envelope }}
+          NEVIX_DEPLOY_TEST_STORE: ${{ matrix.store }}
+        run: |
+          set -euo pipefail
+          node --input-type=module -e 'import fs from "node:fs"; for(const [name,key] of [["linux-amd64","PUBLIC_ENVELOPE"],["old-linux-amd64","OLD_PUBLIC_ENVELOPE"]]) fs.writeFileSync(`.scratch/final-inputs/${name}.json`,JSON.stringify(JSON.parse(process.env[key])),{mode:0o600})'
+          (cd server && CGO_ENABLED=0 go build -trimpath -o ../.scratch/final-inputs/nevix-deploy ./cmd/nevix-deploy)
+          CLI_SHA256=$(sha256sum .scratch/final-inputs/nevix-deploy | cut -d ' ' -f 1)
+          bash deploy/scripts/test-final-offline-runtime.sh --self-check
+          bash deploy/scripts/test-final-offline-runtime.sh "$PWD/.scratch/final-inputs/nevix-deploy" "$CLI_SHA256" "$PWD/.scratch/final-inputs/old/Nevix-server-0.1.0-linux-amd64.tar.gz" "$PWD/.scratch/final-inputs/old-linux-amd64.json" 0.1.0 277b17138af8f6b9ca4dcdfca2cb4a8f32eac654 "$PWD/.scratch/final-inputs/new/Nevix-server-1.0.1-linux-amd64.tar.gz" "$PWD/.scratch/final-inputs/linux-amd64.json" 1.0.1 "$GITHUB_SHA" "$PWD/.scratch/final-inputs/linux-amd64-${NEVIX_DEPLOY_TEST_STORE}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: final-linux-acceptance-${{ matrix.store }}
+          path: .scratch/final-inputs/linux-amd64-${{ matrix.store }}.json
+          if-no-files-found: warn
+          retention-days: 7

@@ -29,6 +29,7 @@ export const appTranslations = defineResourceTranslations({
       administration: '管理',
       users: '用户管理',
       audit: '审计日志',
+      release: '服务器更新',
       discard: {
         title: '丢弃未保存的更改？',
         description: '离开当前设置将丢弃你的草稿。',
@@ -62,6 +63,7 @@ export const appTranslations = defineResourceTranslations({
       administration: 'Administration',
       users: 'User management',
       audit: 'Audit log',
+      release: 'Server updates',
       discard: {
         title: 'Discard unsaved changes?',
         description: 'Leaving these settings will discard your draft.',

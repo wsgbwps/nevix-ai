@@ -16,7 +16,7 @@ AI 媒体创作 SaaS 桌面应用。
 | 后端 | Go — API 服务 / Agent 编排 |
 | Monorepo | Turborepo + pnpm Workspaces |
 | 打包 | electron-builder |
-| 自动更新 | 暂无（分发与更新机制推迟至打包分发阶段，见 [ADR-0013](docs/adr/0013-onprem-single-tenant-delivery.md)） |
+| 自动更新 | Main 拥有官方签名 stable 检查与原生入口，按 ADR-0026 分片实施；正式发行另需验收 |
 
 ## 目录结构
 
@@ -187,6 +187,9 @@ Feature 目录遵循以下受控演化规则；segment 词汇与 public interfac
 ---
 
 ### Go 后端 (`server/`)
+
+`server/cmd/nevix-deploy` 与 `server/internal/deployment` 是 `deploy/` 的 Go 运维工具实现；不装入运行中的 Server，不拥有业务 Module 或 Docker socket API。
+
 
 按复杂度分层，详见 [ADR-0003](docs/adr/0003-complexity-driven-ddd-layering.md)。
 
