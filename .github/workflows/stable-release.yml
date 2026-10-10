@@ -1,4 +1,4 @@
-name: Stable release build and signing for vendor review
+name: Stable release hosted build for vendor review
 
 on:
   push:
@@ -84,43 +84,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  mac:
-    needs: [identity, harness, desktop-checks, server-checks]
-    # Dedicated vendor Apple Silicon runner must be provisioned before an approved stable tag.
-    # No ephemeral identity or automatic keychain/system setup.
-    runs-on: [self-hosted, macOS, ARM64, nevix-release]
-    timeout-minutes: 30
-    env:
-      NEVIX_MAC_SIGNING_SHA1: ${{ vars.NEVIX_MAC_SIGNING_SHA1 }}
-      NEVIX_MAC_SIGNING_KEYCHAIN: ${{ vars.NEVIX_MAC_SIGNING_KEYCHAIN }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.21.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @nevix/desktop build:mac:release
-      - name: Collect the exact signed DMG and ZIP
-        env:
-          VERSION: ${{ needs.identity.outputs.version }}
-        run: |
-          set -euo pipefail
-          mkdir artifacts
-          cp "apps/desktop/dist/Nevix-AI-$VERSION.dmg" "artifacts/Nevix-AI-$VERSION.dmg"
-          node -e 'const fs=require("node:fs"); const files=fs.readdirSync("apps/desktop/dist").filter(x=>x.endsWith(".zip")); if(files.length!==1) throw Error("Expected one arm64 ZIP"); fs.copyFileSync("apps/desktop/dist/"+files[0],"artifacts/Nevix-AI-"+process.env.VERSION+"-arm64.zip")'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: stable-mac
-          path: artifacts/*
-          if-no-files-found: error
-          retention-days: 7
-
   server:
     needs: [identity, harness, desktop-checks, server-checks]
     runs-on: ubuntu-latest
@@ -147,57 +110,14 @@ jobs:
       - env:
           VERSION: ${{ needs.identity.outputs.version }}
           MIN_DESKTOP_VERSION: ${{ vars.NEVIX_MIN_DESKTOP_VERSION }}
-          MIN_SERVER_VERSION: ${{ vars.NEVIX_MIN_SERVER_VERSION }}
+          MIN_SOURCE_SERVER_VERSION: ${{ vars.NEVIX_MIN_SOURCE_SERVER_VERSION }}
         run: |
           set -euo pipefail
           mkdir artifacts
-          bash deploy/scripts/build-bundle.sh "$VERSION" "$MIN_DESKTOP_VERSION" "$MIN_SERVER_VERSION" "artifacts/Nevix-server-$VERSION-linux-amd64.tar.gz"
+          bash deploy/scripts/build-bundle.sh "$VERSION" "$MIN_DESKTOP_VERSION" "$MIN_SOURCE_SERVER_VERSION" "artifacts/Nevix-server-$VERSION-linux-amd64.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
           name: stable-server
           path: artifacts/*.tar.gz
-          if-no-files-found: error
-          retention-days: 7
-
-  sign:
-    needs:
-      [identity, harness, desktop-checks, server-checks, windows, mac, server]
-    # Provisioning this dedicated vendor runner and key is a pending prerequisite.
-    # The owner approves the exact source tag before triggering this signing action.
-    runs-on: [self-hosted, macOS, ARM64, nevix-release]
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: stable-*
-          path: artifacts
-          merge-multiple: true
-      - name: Sign exact four artifacts with the preprovisioned vendor encrypted key
-        env:
-          VERSION: ${{ needs.identity.outputs.version }}
-          MIN_DESKTOP_VERSION: ${{ vars.NEVIX_MIN_DESKTOP_VERSION }}
-          MIN_SERVER_VERSION: ${{ vars.NEVIX_MIN_SERVER_VERSION }}
-          NEVIX_RELEASE_PRIVATE_KEY_FILE: ${{ vars.NEVIX_RELEASE_PRIVATE_KEY_FILE }}
-          NEVIX_RELEASE_KEY_PASSPHRASE: ${{ secrets.NEVIX_RELEASE_KEY_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          umask 077
-          trap 'rm -f signing-input.json' EXIT
-          node --input-type=module -e '
-            import fs from "node:fs";
-            const v=process.env.VERSION;
-            const artifacts={"win32-x64":`artifacts/Nevix-AI-${v}-setup.exe`,"darwin-arm64":`artifacts/Nevix-AI-${v}-arm64.zip`,"darwin-arm64-dmg":`artifacts/Nevix-AI-${v}.dmg`,"linux-amd64":`artifacts/Nevix-server-${v}-linux-amd64.tar.gz`};
-            fs.writeFileSync("signing-input.json",JSON.stringify({version:v,min_server_version:process.env.MIN_SERVER_VERSION,min_desktop_version:process.env.MIN_DESKTOP_VERSION,artifacts,private_key_file:process.env.NEVIX_RELEASE_PRIVATE_KEY_FILE,output_directory:"signed"}),{mode:0o600});'
-          node --experimental-strip-types deploy/publish-stable.mjs prepare signing-input.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: stable-signed
-          path: signed/*
           if-no-files-found: error
           retention-days: 7

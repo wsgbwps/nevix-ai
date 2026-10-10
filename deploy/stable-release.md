@@ -8,8 +8,9 @@
 仍指旧版本；最后 push 的应答或 CDN 校验失败可能已经发布，必须先核对确切 commit。
 不自动删除、不覆盖、不把失败理解成数据库或远端回滚。
 
-当前上线状态：**代码与隔离协议演练可审查，正式发行尚未授权/验收**。生产公钥已固定，
-CI 签名接入与最终制品验收仍待完成。2026-10-10 用户已确认 GitHub 源码保持公开，
+当前上线状态：**用户已批准继续实施，正式发行最终验收仍待完成**。首个正式版本选定
+`1.0.0`；生产公钥与本地 Mac 签名身份已固定，hosted CI 构建与受控本地签名按下文执行。
+2026-10-10 用户已确认 GitHub 源码保持公开，
 正式成品和签名更新清单仍发布到 CNB；源码私有不再是发行前置条件。#340 的临时身份
 和附件只证明早期可行性，不能填本表的最终证据。
 
@@ -31,36 +32,33 @@ stable 清单和逐版本清单，独立 clone，没有 product checkout 的 Git
    两侧完全一致，不接受 env/source/实验 key fallback。记录离线加密备份及隔离恢复
    验证；owner 明确批准跳过恢复时按后文如实记录。厂商保留每次真实二进制和清单
    的本地副本。
-2. 保留固定 Mac 自签证书和私钥。配置厂商 Apple Silicon `nevix-release` self-hosted
-   runner，其专用受保护 keychain 已解锁、已在 user search list；固定证书 SHA1。发行
-   专用签名 runner 不接收 PR/fork 或其他未经批准的代码；只运行当次批准的正式标签。
-   脚本不创建证书、不改搜索列表、信任、Gatekeeper 或 SIP。参见
+2. 保留固定 Mac 自签证书和私钥，仅在厂商本地 Apple Silicon Mac 已准备、解锁且
+   已在 user search list 的受保护 keychain 中使用，固定证书 SHA1。脚本不创建证书、
+   不改搜索列表、信任、Gatekeeper 或 SIP。不把该身份接入公开仓库 self-hosted runner；
+   本地只运行已批准、干净的精确正式标签 checkout。参见
    [Mac 完整客户端方案](../scripts/release-feasibility/mac-integrated-proposal.md)。
    固定 App ID `com.nevix.ai`；自签不是 Developer ID、公证或无提示安装保证。
-3. GitHub 源码保持公开；检查实际 Actions runner 的免费额度、存储和零成本
+3. GitHub 源码保持公开；检查实际 hosted Actions runner 的免费额度、存储和零成本
    停止策略，不以源码可见性决定是否允许发行。CNB organization 不绑定付费预算；
    仅用真实 whole-org FREE 额度，不使用含优惠/付费的 `total`。配额读取无法预留额度，
    同 organization 的其他使用者仍可能竞争；超限停止，不自动买、不清历史版本。
-4. GitHub 公开仓库支持 environment 保护规则与 secrets，参见
-   [当前 GitHub 官方说明](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
-   （2026-10-10 核对）。当前仍保留人工批准正式标签和当次本地发布的纪律，不新增
-   environment 配置或声称已有环境审批门。本 workflow 做 tag 构建并在专用厂商 runner
-   用预配置受保护的加密 Ed25519 key 签四份清单，**没有 CNB publish job**。
-   正式 tag 创建前人工批准 source commit 和
-   签名动作；专用 runner 与 CI 签名接入尚未配置。厂商已在本机生成并验证签名材料；
-   私钥文件不上传 GitHub/CNB。普通 repository secret 可存解密 passphrase；
-   签名私钥、密码、CNB token 不得进入源码、日志、artifacts 或成品仓库。
-   下载对应 run 的四份文件及 stable-signed、retain 本地副本，验收并取得当次人工审批
-   后，使用同一个 publisher 的厂商受控本地 `publish`。不要另加自动 CNB publish job。
-5. repo vars：`NEVIX_MAC_SIGNING_SHA1`、`NEVIX_MAC_SIGNING_KEYCHAIN`（厂商 self-hosted
-   runner 中已受保护的身份路径，不含密码）；`NEVIX_MIN_SERVER_VERSION`、
-   `NEVIX_MIN_DESKTOP_VERSION`、`NEVIX_RELEASE_PRIVATE_KEY_FILE`（专用 runner 的 repo
-   外部 0600 加密 PEM 路径）。repository secret：`NEVIX_RELEASE_KEY_PASSPHRASE`。
-   创建正式 tag 将触发 Mac 原生签名和 Ed25519 签名，tag 动作本身须审批。
-6. Ed25519 加密 PKCS#8 PEM 只在厂商受控 signer（专用 self-hosted runner 或本地）环境。
-   `NEVIX_CNB_TOKEN` 只在人工批准后的厂商本地 publisher 环境。CNB token 仅此 release repo 的 repo-release:rw、
-   repo-code:rw，加 root organization `group-resource:r` 读取配额，不授支付写权限。
-   下述 attestation 写入本地 plan，不把 token/密码放 JSON。
+4. 正式 tag 创建前人工批准 source commit 和本地签名动作。workflow 只在 GitHub hosted
+   runner 执行完整 gates 与 Windows/Linux 构建，**没有 Mac/Ed25519 signing 或 CNB publish
+   job**，无需签名 Secrets、私钥路径或厂商 keychain；不依赖 environment 审批配置。
+   gates 全部通过后，下载对应 run 的 stable-windows、stable-server；在同标签的干净
+   本地 checkout 构建和签名 Mac DMG/ZIP，然后本地 `prepare` 签四份清单。保留全部
+   精确字节及来源证据，验收并取得当次人工审批后，受控本地 `publish` 上传 CNB。
+5. CI repo vars 只需公开兼容值：`NEVIX_MIN_DESKTOP_VERSION` 和
+   `NEVIX_MIN_SOURCE_SERVER_VERSION`。首版分别为 `0.1.0`、`0.1.0`。后者是 Linux
+   升级允许的最低来源 Server，不能以 Desktop 候选的最低运行 Server 替代。
+   Desktop 的 `min_server_version` 在本地准备输入中声明，首版为 `1.0.0`；三个 Desktop
+   清单须一致。四份清单的 `min_desktop_version` 须一致且等于后端编译声明。
+6. Ed25519 加密 PKCS#8 PEM、解密 passphrase 和 Mac 签名身份只在厂商受控本地环境。
+   本地 `NEVIX_MAC_SIGNING_SHA1`、`NEVIX_MAC_SIGNING_KEYCHAIN` 是固定证书指纹与
+   已准备的 keychain 路径，不配置为 GitHub vars。`NEVIX_CNB_TOKEN` 只在人工批准后的
+   厂商本地 publisher 环境。CNB token 仅此 release repo 的 repo-release:rw、repo-code:rw，
+   加 root organization `group-resource:r` 读取配额，不授支付写权限。下述 attestation
+   写入本地 plan，不把 token/密码放 JSON；签名材料不得进入源码、日志、artifacts 或成品。
 
 CNB metadata API 仍要求厂商 Bearer；临时 upload/confirmation URL 只在内存中，PUT
 不携带 Bearer。显式 `overwrite:false`、upload ttl=0、confirmation ttl=0；只有成功确认
@@ -72,30 +70,66 @@ CNB metadata API 仍要求厂商 Bearer；临时 upload/confirmation URL 只在�
 需要厂商 Node 22（`--experimental-strip-types`）、Git 和已完成构建的四份文件；客户
 实例仅需要 Docker/Compose，不需要 Node。`prepare` 只写本地全新目录、不访问网络：
 
+先核对该 tag run 的全部 gates、run ID 和 `headSha`；本地创建干净的精确标签 checkout。
+下面在 repo root 执行；`RELEASE_SOURCE_SHA` 必须填该 run 的实际 source SHA：
+
 ```sh
 umask 077
-# 在受控目录创建 0600 signing-input.json；密码只经受保护环境输入。
+RELEASE_TAG=v1.0.0
+RELEASE_SOURCE_SHA='<reviewed-tag-run-head-sha>'
+RELEASE_BUILD_RUN='<successful-stable-workflow-run-id>'
+test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$RELEASE_SOURCE_SHA"
+git worktree add --detach .scratch/stable-1.0.0 "$RELEASE_TAG"
+cd .scratch/stable-1.0.0
+test -z "$(git status --porcelain)"
+test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+pnpm install --frozen-lockfile
+# NEVIX_MAC_SIGNING_SHA1/KEYCHAIN 只经本地受控环境提供已有身份。
+pnpm --filter @nevix/desktop build:mac:release
+mkdir artifacts
+gh run download "$RELEASE_BUILD_RUN" --name stable-windows --dir artifacts
+gh run download "$RELEASE_BUILD_RUN" --name stable-server --dir artifacts
+cp apps/desktop/dist/Nevix-AI-1.0.0.dmg artifacts/Nevix-AI-1.0.0.dmg
+# 确认构建仅产出一个 arm64 ZIP，按发布名复制精确字节。
+node --input-type=module -e 'import fs from "node:fs"; const files=fs.readdirSync("apps/desktop/dist").filter(x=>x.endsWith(".zip")); if(files.length!==1) throw Error("Expected one arm64 ZIP"); fs.copyFileSync("apps/desktop/dist/"+files[0],"artifacts/Nevix-AI-1.0.0-arm64.zip")'
+test -z "$(git status --porcelain --untracked-files=no)"
+# 在受控目录按下例创建 0600 signing-input.json；密码只经受保护环境输入。
 node --experimental-strip-types deploy/publish-stable.mjs prepare signing-input.json
 # review 四份清单、精确二进制 hash、全部证据及下面的 attestation。
-chmod 600 signed/plan.json # downloaded Actions artifact permissions are not preserved
-# 在正式发布即刻取得授权后，才运行此行：
+# 在最终验收完成且正式发布即刻获得授权后，才运行此行：
 node --experimental-strip-types deploy/publish-stable.mjs publish signed/plan.json
 ```
 
-从已审 source commit 的 tag workflow run 下载四个 artifacts（stable-windows、stable-mac、
-stable-server、stable-signed），二进制合并到厂商本地 `artifacts/`，signed 文件放 `signed/`，
-保留原文件；不要用其它 run 或重打包样例。Actions 已签时无需重新 prepare；若人工本地
-重新签名，仍只能用同一个 prepare 命令、同一受信 key 和已审同一字节。
-记录 run ID、source SHA 及每份摘要。运行 `prepare` 后，edit 0600 `signed/plan.json` 添加
-经 owner 审查的 attestation。确认本地签名制品和最终平台/三网证据完成后才申请当次
-publish 授权；审批并非环境布尔配置可以自动替代。
+保留原始 hosted artifacts、Mac 构建文件和本地 `signed/`；不要用其它 run、源码提交或
+重打包样例。记录 run ID、tag/source SHA、Mac 固定证书指纹及每份摘要。`prepare` 后
+编辑 0600 `signed/plan.json` 添加经 owner 审查的 attestation，完成本地签名制品、最终
+平台/三网证据后才申请当次 publish 授权；审批不是环境布尔配置。
 
-`signing-input.json` 字段：`version`、`min_server_version`、`min_desktop_version`、
-`private_key_file`（0600 加密 PEM）、`output_directory`（必须不存在）、`artifacts`
-（keys 恰好四个 target：win32-x64、darwin-arm64、darwin-arm64-dmg、linux-amd64，
-values 为本地文件路径）。设置保护环境 `NEVIX_RELEASE_KEY_PASSPHRASE`，签完清除。
-`publish` 的 `NEVIX_CNB_TOKEN` 只在受控环境中；Git 使用临时 askpass 文件，token 不进
-URL/argv/config/log。输入 plan.json 必须是 0600 普通文件；保留在厂商本地归档。
+`signing-input.json` 必填字段如下（路径替换为实际受控路径）：
+
+```json
+{
+  "version": "1.0.0",
+  "min_server_version": "1.0.0",
+  "min_source_server_version": "0.1.0",
+  "min_desktop_version": "0.1.0",
+  "private_key_file": "<outside-repo-0600-encrypted-pkcs8-pem>",
+  "output_directory": "signed",
+  "artifacts": {
+    "win32-x64": "artifacts/Nevix-AI-1.0.0-setup.exe",
+    "darwin-arm64": "artifacts/Nevix-AI-1.0.0-arm64.zip",
+    "darwin-arm64-dmg": "artifacts/Nevix-AI-1.0.0.dmg",
+    "linux-amd64": "artifacts/Nevix-server-1.0.0-linux-amd64.tar.gz"
+  }
+}
+```
+
+`output_directory` 必须不存在。`min_server_version` 只用于三个 Desktop 清单；
+`min_source_server_version` 独立写入 Linux 清单的 `min_server_version`，含义是允许
+升级的最低来源 Server。两者均严格验证稳定版本，缺失即拒绝。设置受保护环境
+`NEVIX_RELEASE_KEY_PASSPHRASE`，签完清除。`publish` 的 `NEVIX_CNB_TOKEN` 只在
+受控环境中；Git 使用临时 askpass 文件，token 不进 URL/argv/config/log。输入 plan.json
+必须是 0600 普通文件；保留在厂商本地归档。
 
 publisher 不支持盲目重试同 tag；tag/Release 已存在即停止，人工检查已有 draft、附件、
 永久确认回执和 signed hashes，重新 review 恢复步骤。最后 push 前 fsync 记录预期新 commit/原 parent，网络失联也可核对；每次成功确认 fsync 写私有
@@ -140,7 +174,7 @@ false；owner 明确批准跳过时，须同时填写 verified 为 false、
 
 | 要求                | 最终真实证据                                                                                                              | 当前状态                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                             | 本机材料已验证，公钥已固定；备份由 owner 确认，恢复验证按 owner 要求跳过；CI 接入待配置 |
+| 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                             | 本机材料已验证，公钥已固定；备份由 owner 确认，恢复验证按 owner 要求跳过；仅本地签名 |
 | 公开源码/免费额度   | GitHub 源码保持公开；实际 Actions runner 免费额度、存储/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录 | owner 已接受公开 GitHub + CNB 成品方案；最终发行仍需当日额度证据                     |
 | Windows 完整客户端  | 真实旧 NSIS 到新 NSIS，同路径重启，Settings 状态保存/丢弃/取消、普通退出不安装、错误清单/架构/缓存                        | isolated Main/Window NSIS 已过；最终全客户端待验收 |
 | Mac 完整签名客户端  | 旧/新 com.nevix.ai、相同 certificate requirement、首次放行、真实 Squirrel 更新及相同退出门                                | [完整隔离签名安装/升级已过](../scripts/release-feasibility/mac-integrated-evidence.md)；最终发行字节待验收 |
@@ -169,11 +203,13 @@ Mac 证书和隔离测试 Ed25519/feed/profile，不能替代最终 stable 字�
 先复现旧门冲突，再通过修正后的真实 publisher seam。以上是本地准备验证，
 不能作为尚未固定的最终发行 source commit 的 CI/平台验收回执。
 
-因此 #349 保持未完成：先固定最终版号/source commit、授权专用 runner/Secrets 和
-标签签名，保留四制品与清单的本地发行副本；再完成 Windows/Mac/Linux 最终包、
-Server 先升级再 Desktop 更新、真实跨源桥接及三网验收，核对该 source 的 gate/review。
-正式发行当日还须核实免费额度、未绑定付费和零成本停止，并取得当次发布批准。
-本次安装验收和 owner 的恢复验证 skip 均不授权上述外部/系统动作；未发布或合并。
+上述记录反映 2026-10-10 本地安装续验时的旧 source 状态。最新授权已允许继续实施
+正式 tag 构建与受控本地签名，首版选定 `1.0.0`；不再接入专用 runner/Secrets。
+#349 下一步是固定已审 source commit，完成同源 hosted Windows/Linux 构建、本地
+Mac 签名与四制品清单，保留本地发行副本；再完成 Windows/Mac/Linux 最终包、Server
+先升级再 Desktop 更新、真实跨源桥接及三网验收，核对该 source 的 gate/review。
+正式发行当日仍须核实免费额度、未绑定付费和零成本停止，并取得即时 publish 批准。
+安装续验和恢复验证 skip 不替代最终验收；上述历史续验未发布或合并。
 
 2026-10-10 签名材料：Ed25519 SPKI DER SHA256 `b4ef59eec33aca90f220418df0ee8922e424d0bac82730ddcb89b2b934dcfe6d`；固定 Mac 证书 SHA1 `3AFD38605AD783F0AF4FCA20AD8654EF6005EB12`，有效期至 2027-10-10 03:23:05 UTC。Desktop、Go Server 与运维工具使用相同内置公钥；测试身份不作为生产信任根。离线恢复未验证，不得填写 `offline_key_restore_verified: true`。
 
@@ -188,4 +224,11 @@ Developer ID 或新证书时必须单独实测签名桥接，不能跳过 Squirr
 旧源已失效时无法自动救回没迁移客户端，只能从厂商保留的离线制品人工安装/部署。
 当前隔离 publisher 测试验证受信入口保留和异 key 拒绝；真实桥接跨平台安装仍在表中。
 
-The stable tag workflow checks out the exact tag commit for the delivery harness, complete Desktop CI (including both native smoke platforms) and complete Server CI (including both isolated Linux image stores). All formal artifact builds and signing await these gates. Linux bundle export uses the pinned Docker 29.4 OCI image store. The stable workflow is the sole tag entry; Desktop CI remains callable by PR checks and manual dispatch.
+2026-10-10 后续授权：owner 已批准继续实施并委托选择正式版号，首版使用 `1.0.0`。
+公开个人仓库采用 hosted CI 完整 gates 与同源 Windows/Linux 构建、厂商本地干净 tag
+checkout 的 Mac 固定身份构建，以及本地四制品 Ed25519 `prepare`，替代上面历史记录中的
+专用 runner/Secrets 接入前置条件。这避免把现有厂商 keychain 与签名密钥接入公开 CI。
+最终相同字节的四制品、跨版本升级、真实跨源桥接和三网证据仍须实际完成，不将此授权
+记录当作验收证明。
+
+The stable tag workflow checks out the exact tag commit for the delivery harness, complete Desktop CI (including both native smoke platforms) and complete Server CI (including both isolated Linux image stores). Hosted Windows and Linux artifact builds await all gates; the vendor waits for those gates before local Mac and envelope signing at the same tag. Linux bundle export uses the pinned Docker 29.4 OCI image store and the independent minimum source Server version. The stable workflow is the sole tag entry and has no signing keys, self-hosted jobs or automatic publishing; Desktop CI remains callable by PR checks and manual dispatch.

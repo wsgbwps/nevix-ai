@@ -140,14 +140,18 @@ async function artifacts(plan, publicKey) {
     "Duplicate asset names",
   );
   assert.equal(
+    new Set(result.map((x) => x.description.min_desktop_version)).size,
+    1,
+    "Release minimum Desktop declarations disagree",
+  );
+  assert.equal(
     new Set(
-      result.map(
-        (x) =>
-          `${x.description.min_server_version}/${x.description.min_desktop_version}`,
-      ),
+      result
+        .filter((x) => x.description.platform !== "linux")
+        .map((x) => x.description.min_server_version),
     ).size,
     1,
-    "Release compatibility declarations disagree",
+    "Desktop minimum Server declarations disagree",
   );
   return result;
 }
@@ -682,6 +686,81 @@ async function privateInput(path) {
   assert.ok(info.size <= 65536, "Oversized secret input");
   return readFile(path, "utf8");
 }
+export async function prepareStable(input, { publicKey, passphrase }) {
+  compareVersions(input.version, "0.0.0");
+  compareVersions(input.min_server_version, "0.0.0");
+  compareVersions(input.min_source_server_version, "0.0.0");
+  compareVersions(input.min_desktop_version, "0.0.0");
+  const encryptedKey = await privateInput(input.private_key_file);
+  assert.ok(
+    encryptedKey.startsWith("-----BEGIN ENCRYPTED PRIVATE KEY-----"),
+    "Use encrypted PKCS#8 signing material",
+  );
+  const key = createPrivateKey({
+    key: encryptedKey,
+    passphrase,
+  });
+  assert.equal(key.asymmetricKeyType, "ed25519");
+  assert.equal(
+    createPublicKey(key)
+      .export({ type: "spki", format: "pem" })
+      .toString()
+      .trim(),
+    publicKey.trim(),
+    "Private key does not match compiled trust",
+  );
+  const plan = {
+    version: input.version,
+    artifacts: [],
+    attestation: input.attestation,
+  };
+  for (const [name, platform, arch] of targets) {
+    const artifactPath = input.artifacts[name],
+      hashes = await hashFile(artifactPath);
+    const payload = {
+      version: input.version,
+      channel: "stable",
+      platform,
+      arch,
+      min_server_version:
+        platform === "linux"
+          ? input.min_source_server_version
+          : input.min_server_version,
+      min_desktop_version: input.min_desktop_version,
+      url: `${web}/releases/download/v${input.version}/${basename(artifactPath)}`,
+      size: hashes.size,
+      sha512: hashes.sha512,
+    };
+    assert.deepEqual(Object.keys(payload), fields);
+    const bytes = Buffer.from(JSON.stringify(payload));
+    plan.artifacts.push({
+      name,
+      path: artifactPath,
+      envelope: JSON.stringify({
+        format: "nevix-release-v1",
+        payload: bytes.toString("base64"),
+        signature: sign(null, bytes, key).toString("base64"),
+      }),
+    });
+  }
+  await artifacts(plan, publicKey);
+  await mkdir(input.output_directory, { mode: 0o700 });
+  await writeFile(
+    join(input.output_directory, "plan.json"),
+    JSON.stringify(plan),
+    { flag: "wx", mode: 0o600 },
+  );
+  for (const item of plan.artifacts)
+    await writeFile(
+      join(input.output_directory, `${item.name}.json`),
+      item.envelope,
+      { flag: "wx", mode: 0o600 },
+    );
+  console.log(
+    "Prepared four signed envelopes; no remote writes. Retain exact local artifacts and plan.",
+  );
+}
+
 async function main() {
   const [command, path] = process.argv.slice(2);
   assert.ok(
@@ -714,74 +793,10 @@ async function main() {
     return;
   }
   if (command === "prepare") {
-    compareVersions(input.version, "0.0.0");
-    compareVersions(input.min_server_version, "0.0.0");
-    compareVersions(input.min_desktop_version, "0.0.0");
-    const encryptedKey = await privateInput(input.private_key_file);
-    assert.ok(
-      encryptedKey.startsWith("-----BEGIN ENCRYPTED PRIVATE KEY-----"),
-      "Use encrypted PKCS#8 signing material",
-    );
-    const key = createPrivateKey({
-      key: encryptedKey,
+    await prepareStable(input, {
+      publicKey,
       passphrase: process.env.NEVIX_RELEASE_KEY_PASSPHRASE,
     });
-    assert.equal(key.asymmetricKeyType, "ed25519");
-    assert.equal(
-      createPublicKey(key)
-        .export({ type: "spki", format: "pem" })
-        .toString()
-        .trim(),
-      publicKey.trim(),
-      "Private key does not match compiled trust",
-    );
-    const plan = {
-      version: input.version,
-      artifacts: [],
-      attestation: input.attestation,
-    };
-    for (const [name, platform, arch] of targets) {
-      const artifactPath = input.artifacts[name],
-        hashes = await hashFile(artifactPath);
-      const payload = {
-        version: input.version,
-        channel: "stable",
-        platform,
-        arch,
-        min_server_version: input.min_server_version,
-        min_desktop_version: input.min_desktop_version,
-        url: `${web}/releases/download/v${input.version}/${basename(artifactPath)}`,
-        size: hashes.size,
-        sha512: hashes.sha512,
-      };
-      assert.deepEqual(Object.keys(payload), fields);
-      const bytes = Buffer.from(JSON.stringify(payload));
-      plan.artifacts.push({
-        name,
-        path: artifactPath,
-        envelope: JSON.stringify({
-          format: "nevix-release-v1",
-          payload: bytes.toString("base64"),
-          signature: sign(null, bytes, key).toString("base64"),
-        }),
-      });
-    }
-    await artifacts(plan, publicKey);
-    await mkdir(input.output_directory, { mode: 0o700 });
-    await writeFile(
-      join(input.output_directory, "plan.json"),
-      JSON.stringify(plan),
-      { flag: "wx", mode: 0o600 },
-    );
-    for (const item of plan.artifacts)
-      await writeFile(
-        join(input.output_directory, `${item.name}.json`),
-        item.envelope,
-        { flag: "wx", mode: 0o600 },
-      );
-    console.log(
-      "Prepared four signed envelopes; no remote writes. Retain exact local artifacts and plan.",
-    );
     return;
   }
   checkAttestation(input.attestation);

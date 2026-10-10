@@ -353,7 +353,7 @@ test(
       )
       await rm(recordPath, { force: true })
       await mkdir(recordPath)
-      await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).uncheck()
+      await launched.page.getByRole('checkbox', { name: 'Remember sign-in address' }).click()
 
       await expect(
         launched.page.getByRole('checkbox', { name: 'Remember sign-in address' })

@@ -13,7 +13,12 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
-import { publishStable, GitChannel, targets } from "./publish-stable.mjs";
+import {
+  prepareStable,
+  publishStable,
+  GitChannel,
+  targets,
+} from "./publish-stable.mjs";
 
 const git = (cwd, args) =>
   execFileSync("git", args, {
@@ -52,7 +57,7 @@ async function fixture(t) {
       channel: "stable",
       platform,
       arch,
-      min_server_version: "1.0.0",
+      min_server_version: platform === "linux" ? "0.1.0" : "1.0.0",
       min_desktop_version: "1.0.0",
       url: `https://cnb.cool/nevix.ai/nevix-releases/-/releases/download/v1.2.3/${path.split("/").at(-1)}`,
       size: bytes.length,
@@ -225,7 +230,7 @@ async function fixture(t) {
   };
 }
 
-test("publisher needs no private-source attestation and advances stable only after permanent anonymous acceptance", async (t) => {
+test("publisher accepts independent Linux source minimum and advances stable only after permanent anonymous acceptance", async (t) => {
   const f = await fixture(t);
   const result = await publishStable(f.plan, {
     publicKey: f.publicKey,
@@ -242,6 +247,101 @@ test("publisher needs no private-source attestation and advances stable only aft
       artifact.envelope,
     );
   assert.equal(f.calls.filter((x) => x.method === "PUT").length, 4);
+});
+
+for (const [target, field, expected] of [
+  ["linux-amd64", "min_desktop_version", /minimum Desktop/],
+  ["darwin-arm64-dmg", "min_desktop_version", /minimum Desktop/],
+  ["darwin-arm64", "min_server_version", /minimum Server/],
+]) {
+  test(`inconsistent ${target} ${field} stops before external writes`, async (t) => {
+    const f = await fixture(t);
+    const artifact = f.plan.artifacts.find((x) => x.name === target);
+    const value = JSON.parse(artifact.envelope);
+    const payload = JSON.parse(Buffer.from(value.payload, "base64"));
+    payload[field] = "0.2.0";
+    const bytes = Buffer.from(JSON.stringify(payload));
+    artifact.envelope = JSON.stringify({
+      format: value.format,
+      payload: bytes.toString("base64"),
+      signature: sign(null, bytes, f.signingKey).toString("base64"),
+    });
+    await assert.rejects(
+      publishStable(f.plan, {
+        publicKey: f.publicKey,
+        transport: f.transport,
+        channel: f.channel,
+        token: "vendor",
+      }),
+      expected,
+    );
+    assert.equal(f.calls.length, 0);
+    assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
+  });
+}
+
+test("prepare signs independent Linux source minimum and rejects missing or invalid source before writes", async (t) => {
+  const f = await fixture(t);
+  const passphrase = "ephemeral fixture password";
+  const privateKeyFile = join(f.dir, "fixture.pem"),
+    output = join(f.dir, "signed");
+  await writeFile(
+    privateKeyFile,
+    f.signingKey.export({
+      format: "pem",
+      type: "pkcs8",
+      cipher: "aes-256-cbc",
+      passphrase,
+    }),
+    { mode: 0o600 },
+  );
+  const input = {
+    version: "1.2.3",
+    min_server_version: "1.0.0",
+    min_source_server_version: "0.1.0",
+    min_desktop_version: "1.0.0",
+    private_key_file: privateKeyFile,
+    artifacts: Object.fromEntries(
+      f.plan.artifacts.map((x) => [x.name, x.path]),
+    ),
+    output_directory: output,
+  };
+  for (const minimum of [
+    undefined,
+    "development",
+    "01.0.0",
+    "2147483648.0.0",
+  ]) {
+    await assert.rejects(
+      prepareStable(
+        { ...input, min_source_server_version: minimum },
+        { publicKey: f.publicKey, passphrase },
+      ),
+      /Unknown stable version|Invalid stable version/,
+    );
+    await assert.rejects(readFile(join(output, "plan.json")), {
+      code: "ENOENT",
+    });
+  }
+  await prepareStable(input, { publicKey: f.publicKey, passphrase });
+  const plan = JSON.parse(await readFile(join(output, "plan.json"), "utf8"));
+  for (const artifact of plan.artifacts) {
+    assert.equal(
+      artifact.envelope,
+      f.plan.artifacts.find((x) => x.name === artifact.name).envelope,
+    );
+    assert.equal(
+      await readFile(join(output, `${artifact.name}.json`), "utf8"),
+      artifact.envelope,
+    );
+  }
+  plan.attestation = f.plan.attestation;
+  await publishStable(plan, {
+    publicKey: f.publicKey,
+    transport: f.transport,
+    channel: f.channel,
+    token: "vendor",
+  });
 });
 
 test("owner-approved offline restore skip is recorded without claiming verification", async (t) => {
@@ -567,13 +667,14 @@ test("public-source delivery builds stable tags but cannot automatically publish
   assert.match(workflow, /push:\s*tags: \[["']v\*["']\]/);
   assert.doesNotMatch(
     workflow,
-    /workflow_dispatch|branches:|NEVIX_CNB_TOKEN|NEVIX_RELEASE_KEY_ENCRYPTED_BASE64|publish-stable\.mjs publish|environment:/,
+    /workflow_dispatch|branches:|self-hosted|secrets\.|NEVIX_MAC_SIGNING|NEVIX_RELEASE_PRIVATE_KEY|NEVIX_RELEASE_KEY_PASSPHRASE|NEVIX_CNB_TOKEN|publish-stable\.mjs (?:prepare|publish)|environment:|\n  (?:mac|sign|publish):/,
   );
-  for (const job of ["windows", "mac", "server", "sign"]) {
+  for (const job of ["windows", "server"]) {
     const section = workflow
       .split(`\n  ${job}:\n`)[1]
       ?.split(/\n  [a-z-]+:\n/)[0];
     assert.ok(section, `Missing ${job} job`);
+    assert.match(section, /runs-on: (?:windows|ubuntu)-latest/);
     const needs =
       section
         .match(/needs:\s*\[([^\]]+)\]/)?.[1]
@@ -604,15 +705,13 @@ test("public-source delivery builds stable tags but cannot automatically publish
     checkouts.length,
   );
   assert.match(workflow, /electron-builder --win nsis --x64 --publish never/);
-  assert.match(workflow, /self-hosted, macOS, ARM64, nevix-release/);
-  assert.match(workflow, /publish-stable\.mjs prepare signing-input\.json/);
   assert.match(
     workflow,
-    /NEVIX_RELEASE_PRIVATE_KEY_FILE:.*vars\.NEVIX_RELEASE_PRIVATE_KEY_FILE/,
+    /MIN_SOURCE_SERVER_VERSION:.*vars\.NEVIX_MIN_SOURCE_SERVER_VERSION/,
   );
   assert.match(
     workflow,
-    /NEVIX_RELEASE_KEY_PASSPHRASE:.*secrets\.NEVIX_RELEASE_KEY_PASSPHRASE/,
+    /build-bundle\.sh "\$VERSION" "\$MIN_DESKTOP_VERSION" "\$MIN_SOURCE_SERVER_VERSION"/,
   );
   assert.doesNotMatch(
     workflow,
