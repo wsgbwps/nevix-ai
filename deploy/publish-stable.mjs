@@ -375,6 +375,17 @@ export async function publishStable(
       "Channel parent changed since owner review",
     );
   }
+  const resume = plan.resume_empty_draft_release_id;
+  if (resume !== undefined) {
+    assert.ok(
+      typeof resume === "string" && /^[A-Za-z0-9_-]+$/.test(resume),
+      "Invalid empty draft resume ID",
+    );
+    assert.ok(
+      plan.expected_channel_parent !== undefined,
+      "Empty draft resume requires an explicit reviewed channel parent",
+    );
+  }
   const prior = targets.map(([name, platform, arch]) => {
     const bytes = snapshot.read(`stable/${name}.json`);
     return bytes === undefined
@@ -445,32 +456,51 @@ export async function publishStable(
     );
   }
   const tag = `v${plan.version}`;
-  await request(`/git/tags/${tag}`, "GET", undefined, 404);
-  await request(`/releases/tags/${tag}`, "GET", undefined, 404);
-  const created = JSON.parse(
-    await bounded(
-      await request(
-        "/releases",
-        "POST",
-        {
-          tag_name: tag,
-          target_commitish: snapshot.old,
-          name: tag,
-          body: `Nevix ${tag}; four reviewed binaries. Vendor source remains separate.`,
-          draft: true,
-          prerelease: false,
-          make_latest: "false",
-        },
-        201,
+  const expectedBody = `Nevix ${tag}; four reviewed binaries. Vendor source remains separate.`;
+  let id = resume;
+  const checkpoint = (stage, status = "started", asset) =>
+    onReceipt({
+      version: plan.version,
+      release: id,
+      stage,
+      status,
+      expected_parent: snapshot.old,
+      ...(asset ? { asset } : {}),
+    });
+  if (resume === undefined) {
+    await request(`/git/tags/${tag}`, "GET", undefined, 404);
+    await request(`/releases/tags/${tag}`, "GET", undefined, 404);
+    await checkpoint("release-create-requested");
+    const created = JSON.parse(
+      await bounded(
+        await request(
+          "/releases",
+          "POST",
+          {
+            tag_name: tag,
+            target_commitish: snapshot.old,
+            name: tag,
+            body: expectedBody,
+            draft: true,
+            prerelease: false,
+            make_latest: "false",
+          },
+          201,
+        ),
       ),
-    ),
-  );
-  assert.match(created.id ?? "", /^[A-Za-z0-9_-]+$/, "Invalid release ID");
-  const id = created.id;
-  const inspect = async (draft, complete) => {
-    const value = JSON.parse(await bounded(await request(`/releases/${id}`)));
+    );
+    assert.match(created.id ?? "", /^[A-Za-z0-9_-]+$/, "Invalid release ID");
+    id = created.id;
+    await checkpoint("release-created", 201);
+  } else {
+    await checkpoint("release-resume-requested");
+  }
+  const inspect = async (draft, complete, path = `/releases/${id}`) => {
+    const value = JSON.parse(await bounded(await request(path)));
     assert.equal(value.id, id);
     assert.equal(value.tag_name, tag);
+    assert.equal(value.name, tag);
+    assert.equal(value.body, expectedBody);
     assert.equal(value.tag_commitish, snapshot.old);
     assert.equal(value.draft, draft);
     assert.equal(value.prerelease, false);
@@ -492,6 +522,7 @@ export async function publishStable(
       }
   };
   await inspect(true, false);
+  if (resume !== undefined) await inspect(true, false, `/releases/tags/${tag}`);
   const resolved = JSON.parse(await bounded(await request(`/git/tags/${tag}`)));
   assert.equal(resolved.name, tag);
   assert.equal(
@@ -499,6 +530,7 @@ export async function publishStable(
     snapshot.old,
     "Release tag target changed",
   );
+  if (resume !== undefined) await checkpoint("release-resumed", 200);
   const receipts = [];
   for (const item of items) {
     const fresh = await hashFile(item.path);
@@ -507,6 +539,7 @@ export async function publishStable(
       { size: item.size, sha512: item.sha512, sha256: item.sha256 },
       "Artifact changed before upload",
     );
+    await checkpoint("asset-upload-url-requested", "started", item.file);
     const upload = JSON.parse(
       await bounded(
         await request(
@@ -517,14 +550,30 @@ export async function publishStable(
         ),
       ),
     );
+    await checkpoint("asset-upload-url-received", 201, item.file);
     const confirmation = new URL(upload.verify_url);
     assert.equal(confirmation.origin, "https://api.cnb.cool");
     const prefix = `/${repo}/-/releases/${id}/asset-upload-confirmation/`;
+    const tail = confirmation.pathname.slice(prefix.length).split("/");
     assert.ok(
       confirmation.pathname.startsWith(prefix) &&
-        confirmation.pathname.slice(prefix.length).split("/").length === 2 &&
-        decodeURIComponent(confirmation.pathname.split("/").at(-1)) ===
-          item.file,
+        tail.length === 2 &&
+        /^[A-Za-z0-9_.~-]+$/.test(tail[0]) &&
+        ![".", ".."].includes(tail[0]),
+      "Cross-scope confirmation refused",
+    );
+    const storage = decodeURIComponent(tail[1]).split("/");
+    assert.ok(
+      storage[0] === "" &&
+        storage
+          .slice(1)
+          .every(
+            (part) =>
+              part &&
+              ![".", ".."].includes(part) &&
+              !/[\\\u0000-\u001f\u007f-\u009f]/.test(part),
+          ) &&
+        storage.at(-1) === item.file,
       "Cross-scope confirmation refused",
     );
     assert.ok(
@@ -536,6 +585,7 @@ export async function publishStable(
       "Expired upload URL",
     );
     confirmation.searchParams.set("ttl", "0");
+    await checkpoint("asset-upload-requested", "started", item.file);
     const response = await checkedFetch(transport, upload.upload_url, {
       method: "PUT",
       headers: {
@@ -547,6 +597,8 @@ export async function publishStable(
     });
     assert.ok([200, 201, 204].includes(response.status), "Asset upload failed");
     await response.body?.cancel();
+    await checkpoint("asset-uploaded", response.status, item.file);
+    await checkpoint("asset-confirmation-requested", "started", item.file);
     await request(confirmation.href, "POST");
     receipts.push({
       release: id,
@@ -565,11 +617,13 @@ export async function publishStable(
   }
   await inspect(true, true);
   checkAttestation(plan.attestation);
+  await checkpoint("release-finalize-requested");
   await request(`/releases/${id}`, "PATCH", {
     draft: false,
     prerelease: false,
     make_latest: "false",
   });
+  await checkpoint("release-finalized", 200);
   await inspect(false, true);
   for (const item of items) {
     const head = await checkedFetch(transport, item.description.url, {
@@ -643,6 +697,7 @@ export async function publishStable(
     expected_parent: snapshot.old,
     receipts,
   });
+  await checkpoint("channel-advance-requested");
   const commit = await channel.advance(
     snapshot.old,
     items,

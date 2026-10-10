@@ -121,15 +121,15 @@ async function fixture(t) {
       });
     if (path.endsWith("/charge/volume"))
       return json({ object_in_byte: 0, git_in_byte: 0 });
-    if (
-      (path.includes("/git/tags/") && !releases.id) ||
-      path.includes("/releases/tags/")
-    )
-      return json({}, 404);
+    if (path.includes("/git/tags/") && !releases.id) return json({}, 404);
+    if (path.includes("/releases/tags/"))
+      return json(releases, releases.id ? 200 : 404);
     if (method === "POST" && path.endsWith("/releases")) {
       Object.assign(releases, {
         id: "r1",
         tag_name: "v1.2.3",
+        name: body.name,
+        body: body.body,
         tag_commitish: old,
         draft: true,
         prerelease: false,
@@ -148,7 +148,7 @@ async function fixture(t) {
       return json(
         {
           upload_url: `https://asset.cnb.cool/${body.asset_name}`,
-          verify_url: `https://api.cnb.cool/nevix.ai/nevix-releases/-/releases/r1/asset-upload-confirmation/token/${body.asset_name}`,
+          verify_url: `https://api.cnb.cool/nevix.ai/nevix-releases/-/releases/r1/asset-upload-confirmation/token/${encodeURIComponent(`/opaque/a/b/c/d/e/${body.asset_name}`)}`,
           expires_in_sec: 60,
         },
         201,
@@ -217,6 +217,7 @@ async function fixture(t) {
     transport,
     channel,
     calls,
+    releases,
     remote,
     old,
     channelDir,
@@ -247,6 +248,283 @@ test("publisher accepts independent Linux source minimum and advances stable onl
       artifact.envelope,
     );
   assert.equal(f.calls.filter((x) => x.method === "PUT").length, 4);
+});
+
+test("explicit exact empty draft resumes without creating or overwriting a release", async (t) => {
+  const f = await fixture(t);
+  Object.assign(f.releases, {
+    id: "r1",
+    tag_name: "v1.2.3",
+    name: "v1.2.3",
+    body: "Nevix v1.2.3; four reviewed binaries. Vendor source remains separate.",
+    tag_commitish: f.old,
+    draft: true,
+    prerelease: false,
+    is_latest: false,
+    assets: [],
+  });
+  f.plan.expected_channel_parent = f.old;
+  f.plan.resume_empty_draft_release_id = "r1";
+  const checkpoints = [];
+  const result = await publishStable(f.plan, {
+    publicKey: f.publicKey,
+    transport: f.transport,
+    channel: f.channel,
+    token: "vendor-only",
+    onReceipt: async (value) => {
+      if (value.stage === "release-resumed") {
+        assert.ok(f.calls.every((x) => x.method === "GET"));
+        assert.ok(f.calls.some((x) => x.url.includes("/releases/tags/")));
+        assert.ok(f.calls.some((x) => x.url.includes("/git/tags/")));
+      }
+      checkpoints.push(value);
+    },
+  });
+  assert.equal(result.commit, git(f.remote, ["rev-parse", "main"]));
+  assert.ok(
+    !f.calls.some((x) => x.method === "POST" && x.url.endsWith("/releases")),
+  );
+  assert.ok(
+    checkpoints.some(
+      (x) =>
+        x.stage === "release-resumed" &&
+        x.release === "r1" &&
+        x.expected_parent === f.old,
+    ),
+  );
+  for (const stage of [
+    "asset-upload-url-requested",
+    "asset-upload-url-received",
+    "asset-upload-requested",
+    "asset-uploaded",
+    "asset-confirmation-requested",
+    "release-finalize-requested",
+    "release-finalized",
+    "channel-advance-requested",
+  ])
+    assert.ok(
+      checkpoints.some((x) => x.stage === stage && x.status !== undefined),
+    );
+  assert.ok(!JSON.stringify(checkpoints).includes("https://"));
+});
+
+test("empty draft resume rejects missing parent, malformed ID and any nonempty or changed state", async (t) => {
+  const f = await fixture(t);
+  const empty = {
+    id: "r1",
+    tag_name: "v1.2.3",
+    name: "v1.2.3",
+    body: "Nevix v1.2.3; four reviewed binaries. Vendor source remains separate.",
+    tag_commitish: f.old,
+    draft: true,
+    prerelease: false,
+    is_latest: false,
+    assets: [],
+  };
+  Object.assign(f.releases, empty);
+  for (const [parent, id] of [
+    [undefined, "r1"],
+    [f.old, ""],
+    [f.old, null],
+    [f.old, "../r1"],
+  ]) {
+    f.plan.expected_channel_parent = parent;
+    f.plan.resume_empty_draft_release_id = id;
+    await assert.rejects(
+      publishStable(f.plan, {
+        publicKey: f.publicKey,
+        transport: f.transport,
+        channel: f.channel,
+        token: "vendor",
+      }),
+    );
+    assert.equal(f.calls.length, 0);
+  }
+  f.plan.expected_channel_parent = f.old;
+  f.plan.resume_empty_draft_release_id = "r1";
+  for (const change of [
+    { id: "other" },
+    { draft: false },
+    { assets: [{}] },
+    { assets: null },
+    { prerelease: true },
+    { is_latest: true },
+    { tag_name: "v1.2.4" },
+    { name: "unreviewed" },
+    { body: "unreviewed" },
+    { tag_commitish: "0".repeat(40) },
+    "by-tag-id",
+    "git-tag-target",
+  ]) {
+    Object.assign(f.releases, empty, typeof change === "object" ? change : {});
+    f.calls.length = 0;
+    const transport = async (url, options) => {
+      const response = await f.transport(url, options);
+      if (change === "by-tag-id" && url.includes("/releases/tags/"))
+        return Response.json({ ...empty, id: "other" });
+      if (change === "git-tag-target" && url.includes("/git/tags/"))
+        return Response.json({
+          name: "v1.2.3",
+          commit: { sha: "0".repeat(40) },
+        });
+      return response;
+    };
+    await assert.rejects(
+      publishStable(f.plan, {
+        publicKey: f.publicKey,
+        transport,
+        channel: f.channel,
+        token: "vendor",
+      }),
+    );
+    assert.ok(f.calls.every((x) => x.method === "GET"));
+    assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
+  }
+  Object.assign(f.releases, empty);
+  delete f.plan.resume_empty_draft_release_id;
+  f.calls.length = 0;
+  await assert.rejects(
+    publishStable(f.plan, {
+      publicKey: f.publicKey,
+      transport: f.transport,
+      channel: f.channel,
+      token: "vendor",
+    }),
+  );
+  assert.ok(f.calls.every((x) => x.method === "GET"));
+  assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
+});
+
+test("creation and phase checkpoints survive failure before the first asset receipt", async (t) => {
+  const f = await fixture(t);
+  f.setFail("GET /nevix.ai/nevix-releases/-/releases/r1");
+  const checkpoints = [];
+  await assert.rejects(
+    publishStable(f.plan, {
+      publicKey: f.publicKey,
+      transport: f.transport,
+      channel: f.channel,
+      token: "vendor",
+      onReceipt: async (value) => checkpoints.push(value),
+    }),
+    /Release transport failed/,
+  );
+  assert.equal(checkpoints[0]?.stage, "release-create-requested");
+  assert.ok(
+    checkpoints.some(
+      (x) =>
+        x.stage === "release-created" && x.release === "r1" && x.status === 201,
+    ),
+  );
+  assert.ok(!JSON.stringify(checkpoints).includes("https://"));
+  assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
+});
+
+for (const correctBasename of [true, false]) {
+  test(`CNB encoded storage-key confirmation ${correctBasename ? "accepts exact" : "rejects wrong"} basename`, async (t) => {
+    const f = await fixture(t);
+    const transport = async (url, options) => {
+      const response = await f.transport(url, options);
+      if (!url.endsWith("/asset-upload-url")) return response;
+      const value = await response.json();
+      const confirmation = new URL(value.verify_url);
+      const segments = confirmation.pathname.split("/");
+      const file = correctBasename
+        ? JSON.parse(options.body).asset_name
+        : "wrong.zip";
+      segments[segments.length - 1] = encodeURIComponent(
+        `/opaque/a/b/c/d/e/${file}`,
+      );
+      confirmation.pathname = segments.join("/");
+      value.verify_url = confirmation.href;
+      return Response.json(value, { status: 201 });
+    };
+    const publication = publishStable(f.plan, {
+      publicKey: f.publicKey,
+      transport,
+      channel: f.channel,
+      token: "vendor",
+    });
+    if (correctBasename) {
+      const result = await publication;
+      assert.equal(result.commit, git(f.remote, ["rev-parse", "main"]));
+      assert.equal(f.calls.filter((x) => x.method === "PUT").length, 4);
+      assert.ok(
+        f.calls
+          .filter((x) => x.url.includes("/asset-upload-confirmation/"))
+          .every((x) => x.url.includes("%2Fopaque%2F")),
+      );
+    } else {
+      await assert.rejects(publication, /Cross-scope confirmation/);
+      assert.ok(!f.calls.some((x) => x.method === "PUT"));
+      assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
+    }
+  });
+}
+
+test("unsafe confirmation token or decoded storage components stop before upload", async (t) => {
+  const f = await fixture(t);
+  for (const unsafe of [
+    "token-dot",
+    "token-dotdot",
+    "token-encoding",
+    "token-empty",
+    "token-extra",
+    "double-leading",
+    "empty-component",
+    "dot",
+    "dotdot",
+    "backslash",
+    "control",
+    "delete-control",
+    "trailing",
+    "relative",
+    "bare",
+  ]) {
+    for (const key of Object.keys(f.releases)) delete f.releases[key];
+    f.calls.length = 0;
+    const transport = async (url, options) => {
+      const response = await f.transport(url, options);
+      if (!url.endsWith("/asset-upload-url")) return response;
+      const value = await response.json();
+      const file = JSON.parse(options.body).asset_name;
+      const storage =
+        {
+          "double-leading": `//opaque/${file}`,
+          "empty-component": `/opaque//${file}`,
+          dot: `/opaque/./${file}`,
+          dotdot: `/opaque/../${file}`,
+          backslash: `/opaque\\part/${file}`,
+          control: `/opaque/${String.fromCharCode(1)}/${file}`,
+          "delete-control": `/opaque/${String.fromCharCode(127)}/${file}`,
+          trailing: `/opaque/${file}/`,
+          relative: `opaque/${file}`,
+          bare: file,
+        }[unsafe] ?? `/opaque/${file}`;
+      const token =
+        {
+          "token-dot": ".",
+          "token-dotdot": "..",
+          "token-encoding": "%25",
+          "token-empty": "",
+          "token-extra": "token/extra",
+        }[unsafe] ?? "token";
+      value.verify_url = `https://api.cnb.cool/nevix.ai/nevix-releases/-/releases/r1/asset-upload-confirmation/${token}/${encodeURIComponent(storage)}`;
+      return Response.json(value, { status: 201 });
+    };
+    await assert.rejects(
+      publishStable(f.plan, {
+        publicKey: f.publicKey,
+        transport,
+        channel: f.channel,
+        token: "vendor",
+      }),
+      /Cross-scope confirmation/,
+      `Unsafe confirmation case: ${unsafe}`,
+    );
+    assert.ok(!f.calls.some((x) => x.method === "PUT"));
+    assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
+  }
 });
 
 test("matching reviewed channel parent permits publication", async (t) => {

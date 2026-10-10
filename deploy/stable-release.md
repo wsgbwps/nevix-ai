@@ -174,11 +174,24 @@ attestation，四制品与 envelope 保持原字节，先核对工具的编译�
 40 位 commit SHA）；snapshot 不匹配即在任何 CNB API 请求前停止，未填时保持旧调用兼容。
 
 publisher 不支持盲目重试同 tag；tag/Release 已存在即停止，人工检查已有 draft、附件、
-永久确认回执和 signed hashes，重新 review 恢复步骤。最后 push 前 fsync 记录预期新 commit/原 parent，网络失联也可核对；每次成功确认 fsync 写私有
+永久确认回执和 signed hashes，重新 review 恢复步骤。唯一恢复入口是 plan 显式填写
+`resume_empty_draft_release_id`，同时固定 `expected_channel_parent`：按 ID 与 tag 两次
+读取必须确认同一指定 ID、draft=true、空 assets、prerelease=false、is_latest=false、
+tag_commitish 与实际 Git tag 都指向该已审 parent，才可上传。部分上传、公开 Release 或
+标题/说明等任一已审状态变化均拒绝；不覆盖、删除或移动 tag。创建/恢复和各写入阶段会先 fsync 写入
+固定脱敏 stage/status，创建 ID 校验后立即记录 `release-created`，恢复校验后记录
+`release-resumed`；不记录临时 URL 或凭据。最后 push 前 fsync 记录预期新 commit/原 parent，网络失联也可核对；每次成功确认 fsync 写私有
 `plan.json.journal.jsonl`；成功另存无秘密 receipt。既有 journal 不覆盖。遇到 push
 应答不明先 `git ls-remote` 核对：预期新 SHA 表示已发布，原 SHA 表示未发布，其他 SHA
 表示另一 job 已改渠道，必须重新完整审查。旧 job 的 ordinary FF push 不可能替换新
 sibling commit；equal/older numeric stable version 在 draft 前拒绝。
+
+CNB confirmation 的最后一段是编码后的存储对象路径；只解码一次，要求恰一个前导
+`/`，其余组件非空、非 `.`/`..`、无反斜杠或控制字符，basename 与制品文件名相同。
+前一段须为安全 opaque token，非 `.`/`..`。不把对象 key 作为本地路径或解码后重建
+请求 URL。API origin、固定 Release 前缀、严格两段、无 URL 凭据/hash 与正数过期
+时间仍强制；永久附件的名称、size、
+SHA256 和公开下载 URL 仍逐项核对，随后匿名下载检查实际 SHA512。
 
 ## 发行前验收记录（全部必填）
 
