@@ -107,11 +107,10 @@ try {
         enforce: 'pre',
         transform(source, id) {
           if (!id.endsWith('/src/main/updater/official-source.ts')) return
+          const anchor = /export const RELEASE_PUBLIC_KEY_PEM = (?:'[^']*'|`[^`]*`)/
+          assert.match(source, anchor, 'Fixture must replace the compiled release anchor')
           return source
-            .replace(
-              "export const RELEASE_PUBLIC_KEY_PEM = ''",
-              `export const RELEASE_PUBLIC_KEY_PEM = ${JSON.stringify(publicKey)}`
-            )
+            .replace(anchor, `export const RELEASE_PUBLIC_KEY_PEM = ${JSON.stringify(publicKey)}`)
             .replace(
               /'https:\/\/cnb\.cool\/nevix\.ai\/nevix-releases\/-\/git\/raw\/main\/stable\/'/,
               JSON.stringify(`${base}stable/`)

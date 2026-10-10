@@ -10,8 +10,10 @@ import (
 var Version = "development"
 var MinDesktopVersion = "0.1.0"
 
-// PublicKeyPEM is provisioned and reviewed before formal release; empty fails closed.
-const PublicKeyPEM = ""
+// PublicKeyPEM pins the vendor Ed25519 release identity, shared by Desktop and operator tools.
+const PublicKeyPEM = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEABVTDGM49ggkKRezISrltAil5Tgl7VqPnOG+Qe5hFdAg=
+-----END PUBLIC KEY-----`
 
 func (m *Module) writeVersion(w http.ResponseWriter, _ *http.Request) {
 	status := m.snapshot()

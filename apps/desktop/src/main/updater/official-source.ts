@@ -1,4 +1,6 @@
-export const RELEASE_PUBLIC_KEY_PEM = ''
+export const RELEASE_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEABVTDGM49ggkKRezISrltAil5Tgl7VqPnOG+Qe5hFdAg=
+-----END PUBLIC KEY-----`
 export const OFFICIAL_RELEASE_BASE_URL =
   'https://cnb.cool/nevix.ai/nevix-releases/-/git/raw/main/stable/'
 export async function readOfficialRelease(

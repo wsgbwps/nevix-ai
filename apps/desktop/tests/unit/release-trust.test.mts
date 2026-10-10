@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { verifyRelease } from '../../src/main/updater/release-trust.ts'
+import { RELEASE_PUBLIC_KEY_PEM } from '../../src/main/updater/official-source.ts'
 const vector = JSON.parse(
   await readFile(
     new URL('../../../../scripts/release-feasibility/vectors.json', import.meta.url),
@@ -10,6 +11,7 @@ const vector = JSON.parse(
 )
 test('a publisher signed candidate binds its exact platform and artifact', () => {
   assert.equal(verifyRelease(vector.envelope, vector.publicKey, 'win32', 'x64').version, '1.0.1')
+  assert.throws(() => verifyRelease(vector.envelope, RELEASE_PUBLIC_KEY_PEM, 'win32', 'x64'))
   assert.throws(() => verifyRelease(vector.envelope, vector.publicKey, 'darwin', 'arm64'))
   assert.throws(() =>
     verifyRelease(

@@ -104,7 +104,7 @@ async function main() {
         const certificateDir = await mkdtemp(join(tmpdir(), 'nevix-mac-public-cert-'))
         try {
           const prefix = join(certificateDir, 'certificate')
-          execFileSync('codesign', ['--display', '--extract-certificates', prefix, appPath], {
+          execFileSync('codesign', ['--display', `--extract-certificates=${prefix}`, appPath], {
             stdio: 'inherit'
           })
           const certificate = new X509Certificate(await readFile(`${prefix}0`))

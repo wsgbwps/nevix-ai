@@ -44,7 +44,7 @@ stable 清单和逐版本清单，独立 clone，没有 product checkout 的 Git
    因此本 workflow 做 tag 构建并在专用厂商 runner 用预配置受保护的加密 Ed25519 key
    签四份清单，**没有 CNB publish job**。正式 tag 创建前人工批准 source commit 和
    签名动作；这项审批靠 delivery 纪律，不声称免费私库提供受保护环境审批。runner
-   与生产 key 尚未配置，本次没有安装/改系统。私钥文件不上传 GitHub/CNB；GitHub Free
+   专用 runner 与 CI 签名接入尚未配置。厂商已在本机生成并验证签名材料；私钥文件不上传 GitHub/CNB。GitHub Free
    支持普通 repository secret，可存解密 passphrase，不需付费 environment secret。
    下载对应 run 的四份文件及 stable-signed、retain 本地副本，验收并取得当次人工审批
    后，使用同一个 publisher 的厂商受控本地 `publish`。不要另加自动 CNB publish job。
@@ -131,8 +131,8 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
 
 | 要求                | 最终真实证据                                                                                                              | 当前状态                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                             | 待配置/授权                                        |
-| 私有源码/免费额度   | GitHub privacy、免费 Actions 剩余额度/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录              | 待落实；不宣称源码已私有                           |
+| 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                             | 本机材料已验证，公钥已固定；备份由 owner 确认，恢复验证按 owner 要求跳过；CI 接入待配置 |
+| 私有源码/免费额度   | GitHub privacy、免费 Actions 剩余额度/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录              | owner 选择保留公开，本次仅代码接入；正式发行会拒绝公开源码                           |
 | Windows 完整客户端  | 真实旧 NSIS 到新 NSIS，同路径重启，Settings 状态保存/丢弃/取消、普通退出不安装、错误清单/架构/缓存                        | isolated Main/Window NSIS 已过；最终全客户端待验收 |
 | Mac 完整签名客户端  | 旧/新 com.nevix.ai、相同 certificate requirement、首次放行、真实 Squirrel 更新及相同退出门                                | 库/源码门已过；最终签名实机待验收                  |
 | Server 实例         | 原生 Linux x64 空库且无网络 pull，真实排队任务排空，业务/角色/客户配置/TLS/key 保留；备份、迁移、健康失败与完整恢复       | 见当前 CI/native receipts；最终发行包需重新核对    |
@@ -145,6 +145,8 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
 验收仓库/版本附件；该远端演练本身也要授权，不能先写客户 stable 来取得前置证明。
 Publisher 自己的匿名双次 full GET、HEAD、Range 和 raw read 是厂商当前网络补充检查，
 不代替三网、签名平台、完整实例的验收。
+
+2026-10-10 签名材料：Ed25519 SPKI DER SHA256 `b4ef59eec33aca90f220418df0ee8922e424d0bac82730ddcb89b2b934dcfe6d`；固定 Mac 证书 SHA1 `3AFD38605AD783F0AF4FCA20AD8654EF6005EB12`，有效期至 2027-10-10 03:23:05 UTC。Desktop、Go Server 与运维工具使用相同内置公钥；测试身份不作为生产信任根。离线恢复未验证，不得填写 `offline_key_restore_verified: true`。
 
 ## 旧/新源迁移演练与恢复限制
 
