@@ -47,7 +47,6 @@ const fields = [
   "sha512",
 ];
 const attested = [
-  "source_private",
   "no_paid_binding",
   "github_zero_cost_stop",
   "offline_key_restore_verified",
@@ -703,11 +702,6 @@ async function main() {
       process.env.GITHUB_REF,
       `refs/tags/v${input.version}`,
       "Only an exact stable tag may build a release",
-    );
-    assert.equal(
-      process.env.GITHUB_REPOSITORY_PRIVATE,
-      "true",
-      "Source must be private before formal release",
     );
     console.log("Stable identity and compiled anchors verified.");
     return;

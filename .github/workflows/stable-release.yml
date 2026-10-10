@@ -27,7 +27,6 @@ jobs:
       - id: version
         env:
           TAG: ${{ github.ref_name }}
-          GITHUB_REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           set -euo pipefail
           export VERSION="${TAG#v}"

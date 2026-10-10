@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  writeFile,
+  readFile,
+  rm,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
@@ -74,7 +82,6 @@ async function fixture(t) {
         ]),
       ),
       checked_at: new Date().toISOString(),
-      source_private: true,
       no_paid_binding: true,
       github_zero_cost_stop: true,
       offline_key_restore_verified: true,
@@ -218,7 +225,7 @@ async function fixture(t) {
   };
 }
 
-test("publisher exposes four complete targets and advances stable once only after permanent anonymous acceptance", async (t) => {
+test("publisher needs no private-source attestation and advances stable only after permanent anonymous acceptance", async (t) => {
   const f = await fixture(t);
   const result = await publishStable(f.plan, {
     publicKey: f.publicKey,
@@ -512,7 +519,7 @@ test("an isolated trusted bridge keeps the old entry usable while a migrated cli
   );
 });
 
-test("private Free delivery builds stable tags but cannot automatically publish or access publication secrets", async () => {
+test("public-source delivery builds stable tags but cannot automatically publish or access publication secrets", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/stable-release.yml", import.meta.url),
     "utf8",
@@ -570,6 +577,58 @@ test("private Free delivery builds stable tags but cannot automatically publish 
   assert.doesNotMatch(
     workflow,
     /path:.*(?:signing-key|private_key|signing-input)/,
+  );
+});
+
+test("public-source stable identity accepts a matching tag but refuses branches and version mismatches", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nevix-public-identity-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const desktop = JSON.parse(
+    await readFile(
+      new URL("../apps/desktop/package.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const input = join(dir, "identity.json");
+  await writeFile(input, JSON.stringify({ version: desktop.version }), {
+    mode: 0o600,
+  });
+  const args = [
+    "--experimental-strip-types",
+    fileURLToPath(new URL("./publish-stable.mjs", import.meta.url)),
+    "identity",
+    input,
+  ];
+  const env = {
+    ...process.env,
+    GITHUB_REF: `refs/tags/v${desktop.version}`,
+    GITHUB_REPOSITORY_PRIVATE: "false",
+  };
+  assert.match(
+    execFileSync(process.execPath, args, {
+      env,
+      encoding: "utf8",
+      stdio: "pipe",
+    }),
+    /Stable identity and compiled anchors verified/,
+  );
+  assert.throws(() =>
+    execFileSync(process.execPath, args, {
+      env: { ...env, GITHUB_REF: "refs/heads/main" },
+      stdio: "pipe",
+    }),
+  );
+  await writeFile(input, JSON.stringify({ version: "99.0.0" }));
+  assert.throws(() =>
+    execFileSync(process.execPath, args, {
+      env: { ...env, GITHUB_REF: "refs/tags/v99.0.0" },
+      stdio: "pipe",
+    }),
+  );
+  await writeFile(input, JSON.stringify({ version: desktop.version }));
+  await chmod(input, 0o644);
+  assert.throws(() =>
+    execFileSync(process.execPath, args, { env, stdio: "pipe" }),
   );
 });
 

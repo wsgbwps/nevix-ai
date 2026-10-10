@@ -8,8 +8,10 @@
 仍指旧版本；最后 push 的应答或 CDN 校验失败可能已经发布，必须先核对确切 commit。
 不自动删除、不覆盖、不把失败理解成数据库或远端回滚。
 
-当前上线状态：**代码与隔离协议演练可审查，正式发行尚未授权/验收**。生产公钥仍为空，
-CLI 明确拒绝发行。#340 的临时身份和附件只证明早期可行性，不能填本表的最终证据。
+当前上线状态：**代码与隔离协议演练可审查，正式发行尚未授权/验收**。生产公钥已固定，
+CI 签名接入与最终制品验收仍待完成。2026-10-10 用户已确认 GitHub 源码保持公开，
+正式成品和签名更新清单仍发布到 CNB；源码私有不再是发行前置条件。#340 的临时身份
+和附件只证明早期可行性，不能填本表的最终证据。
 
 ## 固定输入与首次配置
 
@@ -30,22 +32,23 @@ stable 清单和逐版本清单，独立 clone，没有 product checkout 的 Git
    验证签名，厂商保留每次真实二进制和清单的本地副本。
 2. 保留固定 Mac 自签证书和私钥。配置厂商 Apple Silicon `nevix-release` self-hosted
    runner，其专用受保护 keychain 已解锁、已在 user search list；固定证书 SHA1。发行
+   专用签名 runner 不接收 PR/fork 或其他未经批准的代码；只运行当次批准的正式标签。
    脚本不创建证书、不改搜索列表、信任、Gatekeeper 或 SIP。参见
    [Mac 完整客户端方案](../scripts/release-feasibility/mac-integrated-proposal.md)。
    固定 App ID `com.nevix.ai`；自签不是 Developer ID、公证或无提示安装保证。
-3. GitHub 源码现为公开；获授权后落实私有策略，检查 Actions 免费分钟/存储和零成本
-   停止策略。身份检查拒绝公开 source repository。CNB organization 不绑定付费预算；
+3. GitHub 源码保持公开；检查实际 Actions runner 的免费额度、存储和零成本
+   停止策略，不以源码可见性决定是否允许发行。CNB organization 不绑定付费预算；
    仅用真实 whole-org FREE 额度，不使用含优惠/付费的 `total`。配额读取无法预留额度，
    同 organization 的其他使用者仍可能竞争；超限停止，不自动买、不清历史版本。
-4. GitHub Free 私库没有 required environment reviewer，而且 private environment secrets
-   需要付费计划，不能把 environment 名称当成正式审批门。
+4. GitHub 公开仓库支持 environment 保护规则与 secrets，参见
    [当前 GitHub 官方说明](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
-   （2026-10-09 核对）要求 Free/Pro/Team 的 required reviewer 仅用于 public repo。
-   因此本 workflow 做 tag 构建并在专用厂商 runner 用预配置受保护的加密 Ed25519 key
-   签四份清单，**没有 CNB publish job**。正式 tag 创建前人工批准 source commit 和
-   签名动作；这项审批靠 delivery 纪律，不声称免费私库提供受保护环境审批。runner
-   专用 runner 与 CI 签名接入尚未配置。厂商已在本机生成并验证签名材料；私钥文件不上传 GitHub/CNB。GitHub Free
-   支持普通 repository secret，可存解密 passphrase，不需付费 environment secret。
+   （2026-10-10 核对）。当前仍保留人工批准正式标签和当次本地发布的纪律，不新增
+   environment 配置或声称已有环境审批门。本 workflow 做 tag 构建并在专用厂商 runner
+   用预配置受保护的加密 Ed25519 key 签四份清单，**没有 CNB publish job**。
+   正式 tag 创建前人工批准 source commit 和
+   签名动作；专用 runner 与 CI 签名接入尚未配置。厂商已在本机生成并验证签名材料；
+   私钥文件不上传 GitHub/CNB。普通 repository secret 可存解密 passphrase；
+   签名私钥、密码、CNB token 不得进入源码、日志、artifacts 或成品仓库。
    下载对应 run 的四份文件及 stable-signed、retain 本地副本，验收并取得当次人工审批
    后，使用同一个 publisher 的厂商受控本地 `publish`。不要另加自动 CNB publish job。
 5. repo vars：`NEVIX_MAC_SIGNING_SHA1`、`NEVIX_MAC_SIGNING_KEYCHAIN`（厂商 self-hosted
@@ -114,7 +117,6 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
     "darwin-arm64-dmg": "<final DMG SHA512 base64>",
     "linux-amd64": "<final full bundle SHA512 base64>"
   },
-  "source_private": true,
   "no_paid_binding": true,
   "github_zero_cost_stop": true,
   "offline_key_restore_verified": true,
@@ -132,7 +134,7 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
 | 要求                | 最终真实证据                                                                                                              | 当前状态                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
 | 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                             | 本机材料已验证，公钥已固定；备份由 owner 确认，恢复验证按 owner 要求跳过；CI 接入待配置 |
-| 私有源码/免费额度   | GitHub privacy、免费 Actions 剩余额度/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录              | owner 选择保留公开，本次仅代码接入；正式发行会拒绝公开源码                           |
+| 公开源码/免费额度   | GitHub 源码保持公开；实际 Actions runner 免费额度、存储/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录 | owner 已接受公开 GitHub + CNB 成品方案；最终发行仍需当日额度证据                     |
 | Windows 完整客户端  | 真实旧 NSIS 到新 NSIS，同路径重启，Settings 状态保存/丢弃/取消、普通退出不安装、错误清单/架构/缓存                        | isolated Main/Window NSIS 已过；最终全客户端待验收 |
 | Mac 完整签名客户端  | 旧/新 com.nevix.ai、相同 certificate requirement、首次放行、真实 Squirrel 更新及相同退出门                                | 库/源码门已过；最终签名实机待验收                  |
 | Server 实例         | 原生 Linux x64 空库且无网络 pull，真实排队任务排空，业务/角色/客户配置/TLS/key 保留；备份、迁移、健康失败与完整恢复       | 见当前 CI/native receipts；最终发行包需重新核对    |
