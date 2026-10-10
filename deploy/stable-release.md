@@ -8,8 +8,10 @@
 仍指旧版本；最后 push 的应答或 CDN 校验失败可能已经发布，必须先核对确切 commit。
 不自动删除、不覆盖、不把失败理解成数据库或远端回滚。
 
-当前上线状态：**用户已批准继续实施，正式发行最终验收仍待完成**。首个正式版本选定
-`1.0.1`；生产公钥与本地 Mac 签名身份已固定，hosted CI 构建与受控本地签名按下文执行。
+当前上线状态：**用户已批准沿用 #349 已通过的 Mac/Linux 最小验收准备真实 CNB 发布，
+尚未发布**。首个正式版本选定 `1.0.1`；生产公钥与本地 Mac 签名身份已固定。
+完整平台、三网和真实跨源桥接仍未验证，按下文记录显式 owner skip；当次远端清理、
+Release 上传与 stable 推进仍须对具体结果即时批准。
 原 `v1.0.0` 候选在正式包验收中因 canonical ASAR 含
 `@babel/code-frame/lib/index.js.map` 被拒绝，未发布；既有标签保持原提交，不移动或覆盖。
 修复后的制品重新使用 `v1.0.1` 构建、签名并验收，不继承旧候选的最终字节验收结论。
@@ -20,6 +22,11 @@
 2026-10-10 用户已确认 GitHub 源码保持公开，
 正式成品和签名更新清单仍发布到 CNB；源码私有不再是发行前置条件。#340 的临时身份
 和附件只证明早期可行性，不能填本表的最终证据。
+
+本次保留已验收的 `v1.0.1` 四制品及签名，source 固定为
+`d7d1e6ed018614c682143d761330e7889b540364`，不移动 tag 或重建、重签二进制。
+后续 publisher 验收政策提交可以不同于制品 source；执行工具的 Desktop/Go 编译信任根
+仍须与制品的生产公钥一致，plan 的版本和四份实际摘要仍须完全匹配。
 
 ## 固定输入与首次配置
 
@@ -103,9 +110,13 @@ test -z "$(git status --porcelain --untracked-files=no)"
 # 在受控目录按下例创建 0600 signing-input.json；密码只经受保护环境输入。
 node --experimental-strip-types deploy/publish-stable.mjs prepare signing-input.json
 # review 四份清单、精确二进制 hash、全部证据及下面的 attestation。
-# 在最终验收完成且正式发布即刻获得授权后，才运行此行：
+# 在已验证/显式 owner skip 证据审查完成且正式发布即刻获得授权后，才运行此行：
 node --experimental-strip-types deploy/publish-stable.mjs publish signed/plan.json
 ```
+
+本次 `1.0.1` 制品与清单已保留，不重复上述构建或 `prepare`。在包含已审 publisher
+政策的 checkout 中运行 `publish`，输入既有私有 `plan.json` 的绝对路径；只更新当次
+attestation，四制品与 envelope 保持原字节，先核对工具的编译公钥一致。
 
 ### 完整制品的原生验收
 
@@ -126,12 +137,13 @@ node --experimental-strip-types deploy/publish-stable.mjs publish signed/plan.js
 
 大陆三网移至 [#352](https://github.com/wsgbwps/nevix-ai/issues/352)，真实跨源桥接移至
 [#353](https://github.com/wsgbwps/nevix-ai/issues/353)，不阻塞 #349 本次最小范围收尾。
-未验证项目保持未验证；关闭 #349 不表示已发布客户 stable 或已满足 publisher 的生产发布门。
+未验证项目保持未验证；关闭 #349 不表示已发布客户 stable。后续真实 CNB 更新授权
+已允许按 ADR-0026 的显式 owner skip 规则准备发行，不默认跳过这些验收。
 
 保留原始 hosted artifacts、Mac 构建文件和本地 `signed/`；不要用其它 run、源码提交或
 重打包样例。记录 run ID、tag/source SHA、Mac 固定证书指纹及每份摘要。`prepare` 后
-编辑 0600 `signed/plan.json` 添加经 owner 审查的 attestation，完成本地签名制品、最终
-平台/三网证据后才申请当次 publish 授权；审批不是环境布尔配置。
+编辑 0600 `signed/plan.json` 添加经 owner 审查的 attestation，记录已通过的范围、
+未验证项目及当次显式跳过决定后才申请 publish 授权；审批不是环境布尔配置。
 
 `signing-input.json` 必填字段如下（路径替换为实际受控路径）：
 
@@ -172,8 +184,8 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
 
 ```json
 {
-  "version": "1.2.3",
-  "checked_at": "2026-10-09T00:00:00Z",
+  "version": "1.0.1",
+  "checked_at": "2026-10-10T00:00:00Z",
   "sha512": {
     "win32-x64": "<final NSIS SHA512 base64>",
     "darwin-arm64": "<final ZIP SHA512 base64>",
@@ -185,32 +197,48 @@ plan 的 `attestation` 示例（实际摘要不得使用示例占位）：
   "offline_key_restore_verified": false,
   "offline_key_restore_skipped_by_owner": true,
   "local_artifacts_retained": true,
-  "final_platform_acceptance": true,
-  "three_carriers_verified": true,
-  "bridge_verified": true,
-  "evidence": "<reviewed issue/checklist with exact source commit, run IDs and approval>"
+  "final_platform_acceptance": false,
+  "final_platform_acceptance_skipped_by_owner": true,
+  "three_carriers_verified": false,
+  "three_carriers_skipped_by_owner": true,
+  "bridge_verified": false,
+  "bridge_skipped_by_owner": true,
+  "evidence": "<reviewed #349 record: exact source/hashes, Mac/Linux covered cases, all missing cases, explicit owner acceptance and current quota evidence>"
 }
 ```
 
 时间必须是发布前 24 小时内，version 和每份实际 SHA512 完全匹配；缺项拒绝。
-离线恢复须如实记录：已验证时 `offline_key_restore_verified: true`，skip 字段省略或为
-false；owner 明确批准跳过时，须同时填写 verified 为 false、
-`offline_key_restore_skipped_by_owner: true`，并在 evidence 中引用其决定及已确认的备份。
-缺失、非布尔值或两项同时为 true 均拒绝。skip 不表示已验证恢复，也不代替其他验收
-或当次发行授权；密钥丢失后的备份可恢复性仍未经验证。
+离线恢复、完整平台、三网和桥接分别使用示例中的 verified/acceptance 与对应
+`*_skipped_by_owner` 对。已验证时前者为 true，skip 字段省略或为 false；owner 明确
+批准跳过时，须同时填写前者为 false、skip 为 true，并在 evidence 中引用当次决定、
+已通过范围和全部缺口。缺失、非布尔值或两项同时为 true 均拒绝。
+skip 不表示已验证，也不代替当次发行授权。离线恢复另须引用 owner 确认的备份，
+密钥丢失后的备份可恢复性仍未经验证。`no_paid_binding`、`github_zero_cost_stop`、
+`local_artifacts_retained` 始终须为 true；新鲜证据、精确版本/摘要与验签要求不变。
 以下证据由 owner review，不把布尔 JSON 当成自动检测的事实：
 
-| 要求                | 最终真实证据                                                                                                                   | 当前状态                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                                  | 本机材料已验证，公钥已固定；备份由 owner 确认，恢复验证按 owner 要求跳过；仅本地签名                       |
-| 公开源码/免费额度   | GitHub 源码保持公开；实际 Actions runner 免费额度、存储/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录 | owner 已接受公开 GitHub + CNB 成品方案；最终发行仍需当日额度证据                                           |
-| Windows 完整客户端  | 真实旧 NSIS 到新 NSIS，同路径重启，Settings 状态保存/丢弃/取消、普通退出不安装、错误清单/架构/缓存                             | isolated Main/Window NSIS 已过；最终全客户端待验收                                                         |
-| Mac 完整签名客户端  | 旧/新 com.nevix.ai、相同 certificate requirement、首次放行、真实 Squirrel 更新及相同退出门                                     | [完整隔离签名安装/升级已过](../scripts/release-feasibility/mac-integrated-evidence.md)；最终发行字节待验收 |
-| Server 实例         | 原生 Linux x64 空库且无网络 pull，真实排队任务排空，业务/角色/客户配置/TLS/key 保留；备份、迁移、健康失败与完整恢复            | 见当前 CI/native receipts；最终发行包需重新核对                                                            |
-| 两侧兼容            | 最新不兼容保留 Desktop；Server 先升级，再下载/安装兼容 Desktop；不可达/未知 Server 不安装                                      | 单元/E2E 基础证据；最终跨版本待验收                                                                        |
-| 大陆三网            | 电信/联通/移动各记录时间、网络、无代理、四清单+四完整文件、size/hash、TLS、redirect、HEAD/GET/Range、失败后从稳定入口重试      | 全部最终制品待三网验收；#340 单网豁免不适用                                                                |
-| 桥接迁移            | 两个隔离 source，旧入口保留的受信 bridge、新客户端新入口；未迁移旧客户端仍更新；同 Mac 身份或真实签名桥接                      | 协议隔离验证；真实平台桥接待验收                                                                           |
-| 本仓库 gate/review  | 同一 source commit 的 make check/harness、真库/native/E2E 和两轴 review 全绿                                                   | 整合 PR 记录；最终标签需对应已审 commit                                                                    |
+| 要求                | 最终真实证据                                                                                                                   | 当前状态                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                                  | 本机材料已验证，公钥已固定；备份由 owner 确认，恢复验证按 owner 要求跳过；仅本地签名            |
+| 公开源码/免费额度   | GitHub 源码保持公开；实际 Actions runner 免费额度、存储/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录 | owner 已接受公开 GitHub + CNB 成品方案；最终发行仍需当日额度证据                                |
+| Windows 完整客户端  | 真实旧 NSIS 到新 NSIS，同路径重启，Settings 状态保存/丢弃/取消、普通退出不安装、错误清单/架构/缓存                             | isolated Main/Window NSIS 已过；最终全客户端未验证，owner 接受本次缺口                          |
+| Mac 完整签名客户端  | 旧/新 com.nevix.ai、相同 certificate requirement、首次放行、真实 Squirrel 更新及相同退出门                                     | 正式 1.0.1 五项安装/升级案例已过；本地 Docker Go/TLS 与两 URL 透明映射，联网 Session 恢复未验证 |
+| Server 实例         | 原生 Linux x64 空库且无网络 pull，真实排队任务排空，业务/角色/客户配置/TLS/key 保留；备份、迁移、健康失败与完整恢复            | 正式字节 classic/containerd 原生 CI covered-cases 已过；五项 missing_cases 未验证，owner 接受   |
+| 两侧兼容            | 最新不兼容保留 Desktop；Server 先升级，再下载/安装兼容 Desktop；不可达/未知 Server 不安装                                      | 单元/E2E 基础证据；最终跨版本待验收                                                             |
+| 大陆三网            | 电信/联通/移动各记录时间、网络、无代理、四清单+四完整文件、size/hash、TLS、redirect、HEAD/GET/Range、失败后从稳定入口重试      | 未验证，owner 明确接受本次跳过；继续跟踪 #352                                                   |
+| 桥接迁移            | 两个隔离 source，旧入口保留的受信 bridge、新客户端新入口；未迁移旧客户端仍更新；同 Mac 身份或真实签名桥接                      | 真实平台桥接未验证，owner 明确接受本次跳过；继续跟踪 #353                                       |
+| 本仓库 gate/review  | 同一 source commit 的 make check/harness、真库/native/E2E 和两轴 review 全绿                                                   | 整合 PR 记录；最终标签需对应已审 commit                                                         |
+
+2026-10-10 当前正式字节证据见 [#349](https://github.com/wsgbwps/nevix-ai/issues/349) 和
+[Linux final CI 38049116975](https://github.com/wsgbwps/nevix-ai/actions/runs/38049116975)。
+Mac 本地 sanitized 回执为 `.scratch/349-formal-1.0.1/mac-case-summary.json` 与
+`mac-natural-restart-receipt.json`：五项无 retry 通过，真实 Squirrel 安装后自然重启并
+保留连接、加密 Session/记住邮箱字节、窗口与 marker；清理后后端已停止，联网 Session
+恢复未验证。Mac 的 Node-fetch 两 URL 映射不作为 CNB、三网或桥接证据。
+Linux 两种原生 image store 验证同一正式包的安装、升级、状态保留和备份失败保护；
+missing_cases 为排队任务 drain 超时/fencing、候选迁移失败、候选健康失败、两侧版本窗拒绝、
+加密 provider/object-storage credential 保留。上述缺口和完整 Windows 安装均保持未验证，
+不将部分成功填写为 `final_platform_acceptance: true`。
 
 实际三网验证要针对将发布的同一字节。stable 未推进前，可以使用获明确授权的隔离
 验收仓库/版本附件；该远端演练本身也要授权，不能先写客户 stable 来取得前置证明。
@@ -231,9 +259,9 @@ Mac 证书和隔离测试 Ed25519/feed/profile，不能替代最终 stable 字�
 先复现旧门冲突，再通过修正后的真实 publisher seam。以上是本地准备验证，
 不能作为尚未固定的最终发行 source commit 的 CI/平台验收回执。
 
-上述记录反映 2026-10-10 本地安装续验时的旧 source 状态。最新授权已允许继续实施
+上述历史记录反映 2026-10-10 本地安装续验时的旧 source 状态。当时授权已允许继续实施
 正式 tag 构建与受控本地签名，首版选定 `1.0.1`；不再接入专用 runner/Secrets。
-#349 下一步是固定已审 source commit，完成同源 hosted Windows/Linux 构建、本地
+当时 #349 下一步是固定已审 source commit，完成同源 hosted Windows/Linux 构建、本地
 Mac 签名与四制品清单，保留本地发行副本；再完成现有 Docker/原生 Linux CI 的后端
 部署、运行、升级及数据保留与 Mac 真实安装升级，核对该 source 的 gate/review。
 三网和跨源桥接分别跟踪 #352、#353，不阻塞本次 #349 收尾。
@@ -257,7 +285,7 @@ Developer ID 或新证书时必须单独实测签名桥接，不能跳过 Squirr
 公开个人仓库采用 hosted CI 完整 gates 与同源 Windows/Linux 构建、厂商本地干净 tag
 checkout 的 Mac 固定身份构建，以及本地四制品 Ed25519 `prepare`，替代上面历史记录中的
 专用 runner/Secrets 接入前置条件。这避免把现有厂商 keychain 与签名密钥接入公开 CI。
-最终相同字节的四制品、跨版本升级、真实跨源桥接和三网证据仍须实际完成，不将此授权
-记录当作验收证明。
+当时要求最终四制品、跨版本升级、真实跨源桥接和三网证据实际完成。后续真实 CNB
+更新决定按 ADR-0026 和上表允许当次显式跳过未验证范围；任一授权记录都不是验收证明。
 
 The stable tag workflow checks out the exact tag commit for the delivery harness, complete Desktop CI (including both native smoke platforms) and complete Server CI (including both isolated Linux image stores). Hosted Windows and Linux artifact builds await all gates; the vendor waits for those gates before local Mac and envelope signing at the same tag. Linux bundle export uses the pinned Docker 29.4 OCI image store and the independent minimum source Server version. The stable workflow is the sole tag entry and has no signing keys, self-hosted jobs or automatic publishing; Desktop CI remains callable by PR checks and manual dispatch.

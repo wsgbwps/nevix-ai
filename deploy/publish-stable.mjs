@@ -50,23 +50,37 @@ const attested = [
   "no_paid_binding",
   "github_zero_cost_stop",
   "local_artifacts_retained",
-  "final_platform_acceptance",
-  "three_carriers_verified",
-  "bridge_verified",
 ];
 function checkAttestation(value) {
   assert.ok(
     value && attested.every((name) => value[name] === true),
     "Release prerequisites require explicit owner attestation",
   );
-  assert.ok(
-    (value.offline_key_restore_verified === true &&
-      (value.offline_key_restore_skipped_by_owner === undefined ||
-        value.offline_key_restore_skipped_by_owner === false)) ||
-      (value.offline_key_restore_verified === false &&
-        value.offline_key_restore_skipped_by_owner === true),
-    "Offline key restore requires verification or explicit owner-approved skip",
-  );
+  for (const [verified, skipped, label] of [
+    [
+      "offline_key_restore_verified",
+      "offline_key_restore_skipped_by_owner",
+      "Offline key restore",
+    ],
+    [
+      "final_platform_acceptance",
+      "final_platform_acceptance_skipped_by_owner",
+      "Final platform acceptance",
+    ],
+    [
+      "three_carriers_verified",
+      "three_carriers_skipped_by_owner",
+      "Three carriers",
+    ],
+    ["bridge_verified", "bridge_skipped_by_owner", "Bridge"],
+  ]) {
+    assert.ok(
+      (value[verified] === true &&
+        (value[skipped] === undefined || value[skipped] === false)) ||
+        (value[verified] === false && value[skipped] === true),
+      `${label} requires verification or explicit owner-approved skip`,
+    );
+  }
   const age = Date.now() - Date.parse(value.checked_at);
   assert.ok(
     Number.isFinite(age) &&

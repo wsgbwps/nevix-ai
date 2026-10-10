@@ -344,10 +344,31 @@ test("prepare signs independent Linux source minimum and rejects missing or inva
   });
 });
 
-test("owner-approved offline restore skip is recorded without claiming verification", async (t) => {
+const acceptanceDecisions = [
+  [
+    "offline_key_restore_verified",
+    "offline_key_restore_skipped_by_owner",
+    /Offline key restore/,
+  ],
+  [
+    "final_platform_acceptance",
+    "final_platform_acceptance_skipped_by_owner",
+    /Final platform acceptance/,
+  ],
+  [
+    "three_carriers_verified",
+    "three_carriers_skipped_by_owner",
+    /Three carriers/,
+  ],
+  ["bridge_verified", "bridge_skipped_by_owner", /Bridge/],
+];
+
+test("owner-approved acceptance skips are recorded without claiming verification", async (t) => {
   const f = await fixture(t);
-  f.plan.attestation.offline_key_restore_verified = false;
-  f.plan.attestation.offline_key_restore_skipped_by_owner = true;
+  for (const [verified, skipped] of acceptanceDecisions) {
+    f.plan.attestation[verified] = false;
+    f.plan.attestation[skipped] = true;
+  }
   const result = await publishStable(f.plan, {
     publicKey: f.publicKey,
     transport: f.transport,
@@ -355,21 +376,79 @@ test("owner-approved offline restore skip is recorded without claiming verificat
     token: "vendor-only",
   });
   assert.equal(result.commit, git(f.remote, ["rev-parse", "main"]));
-  assert.equal(f.plan.attestation.offline_key_restore_verified, false);
+  for (const [verified, skipped] of acceptanceDecisions) {
+    assert.equal(f.plan.attestation[verified], false);
+    assert.equal(f.plan.attestation[skipped], true);
+  }
 });
 
-test("missing, malformed or contradictory restore decisions stop before external writes", async (t) => {
+test("verified acceptance permits explicit non-skip decisions", async (t) => {
   const f = await fixture(t);
-  for (const [verified, skipped] of [
-    [false, undefined],
-    [undefined, true],
-    ["true", undefined],
-    [false, "true"],
-    [true, true],
-    [true, "false"],
+  for (const [, skipped] of acceptanceDecisions)
+    f.plan.attestation[skipped] = false;
+  const result = await publishStable(f.plan, {
+    publicKey: f.publicKey,
+    transport: f.transport,
+    channel: f.channel,
+    token: "vendor-only",
+  });
+  assert.equal(result.commit, git(f.remote, ["rev-parse", "main"]));
+});
+
+for (const [verifiedField, skippedField, expected] of acceptanceDecisions) {
+  test(`missing, malformed or contradictory ${verifiedField} decisions stop before external writes`, async (t) => {
+    const f = await fixture(t);
+    for (const [verified, skipped] of [
+      [undefined, undefined],
+      [false, undefined],
+      [false, false],
+      [undefined, true],
+      ["true", undefined],
+      [null, true],
+      [1, true],
+      [false, "true"],
+      [false, 1],
+      [true, true],
+      [true, "false"],
+      [true, null],
+    ]) {
+      f.plan.attestation[verifiedField] = verified;
+      f.plan.attestation[skippedField] = skipped;
+      await assert.rejects(
+        publishStable(f.plan, {
+          publicKey: f.publicKey,
+          transport: f.transport,
+          channel: f.channel,
+          token: "vendor-only",
+        }),
+        expected,
+      );
+      assert.equal(f.calls.length, 0);
+      assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
+    }
+  });
+}
+
+test("owner skips preserve mandatory prerequisites and fresh exact-artifact approval", async (t) => {
+  const f = await fixture(t);
+  for (const [verified, skipped] of acceptanceDecisions) {
+    f.plan.attestation[verified] = false;
+    f.plan.attestation[skipped] = true;
+  }
+  const approved = f.plan.attestation;
+  for (const [change, expected] of [
+    [{ no_paid_binding: false }, /attestation/],
+    [{ github_zero_cost_stop: undefined }, /attestation/],
+    [{ local_artifacts_retained: "true" }, /attestation/],
+    [
+      { checked_at: new Date(Date.now() - 25 * 3600000).toISOString() },
+      /fresh reviewed evidence/,
+    ],
+    [{ evidence: " " }, /fresh reviewed evidence/],
+    [{ version: "9.9.9" }, /Approval version/],
+    [{ sha512: {} }, /Approval artifact digest/],
   ]) {
-    f.plan.attestation.offline_key_restore_verified = verified;
-    f.plan.attestation.offline_key_restore_skipped_by_owner = skipped;
+    f.plan.attestation = { ...approved, ...change };
     await assert.rejects(
       publishStable(f.plan, {
         publicKey: f.publicKey,
@@ -377,7 +456,7 @@ test("missing, malformed or contradictory restore decisions stop before external
         channel: f.channel,
         token: "vendor-only",
       }),
-      /Offline key restore/,
+      expected,
     );
     assert.equal(f.calls.length, 0);
     assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
