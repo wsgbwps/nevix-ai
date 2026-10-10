@@ -3,6 +3,15 @@ productName: Nevix AI
 directories:
   buildResources: build
 files:
+  - 'out/**/*'
+  - 'package.json'
+  - 'resources/icon.png'
+  - '!**/*.{map,ts,tsx,mts,cts,p12,pfx,pem,key}'
+  - '!**/.env*'
+  - '!**/.git/**'
+  - '!**/README*.md'
+  - '!**/node_modules/@dotenvx/dotenvx/src/cli/examples.js'
+  - '!**/node_modules/source-map/dist/source-map.debug.js'
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'

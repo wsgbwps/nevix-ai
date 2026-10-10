@@ -700,9 +700,23 @@ test("public-source delivery builds stable tags but cannot automatically publish
   assert.match(workflow, /docker-29\.4\.0\.tgz/);
   assert.match(workflow, /containerd-snapshotter.*true/);
   const checkouts = workflow.match(/uses: actions\/checkout@v6/g) ?? [];
+  const baselines =
+    workflow.match(
+      /uses: actions\/checkout@v6\n\s+if: needs\.identity\.outputs\.version == '1\.0\.1'\n\s+with:\n\s+ref: 277b17138af8f6b9ca4dcdfca2cb4a8f32eac654\n\s+path: \.scratch\/release-baseline/g,
+    ) ?? [];
+  assert.equal(
+    baselines.length,
+    1,
+    "Only the controlled old Linux test baseline may use another SHA",
+  );
+  assert.match(
+    workflow,
+    /name: Build the full controlled 0\.1\.0 Linux baseline/,
+  );
+  assert.doesNotMatch(workflow, /stable-windows-baseline|Windows baseline/);
   assert.equal(
     (workflow.match(/ref: \$\{\{ github\.sha \}\}/g) ?? []).length,
-    checkouts.length,
+    checkouts.length - baselines.length,
   );
   assert.match(workflow, /electron-builder --win nsis --x64 --publish never/);
   assert.match(

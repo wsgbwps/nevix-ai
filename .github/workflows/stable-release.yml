@@ -77,10 +77,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @nevix/desktop build
       - run: pnpm --filter @nevix/desktop exec electron-builder --win nsis --x64 --publish never
+      - name: Verify the final public Desktop archive before upload
+        run: node --input-type=module -e 'import { assertPublicDesktopArchive } from "./scripts/release-feasibility/desktop-artifact.mjs"; console.log("Public Desktop archive entries:", assertPublicDesktopArchive("apps/desktop/dist/win-unpacked/resources/app.asar"))'
+      - name: Record the exact final Windows identity
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import {createHash} from "node:crypto"; const sha=p=>createHash("sha256").update(fs.readFileSync(p)).digest("hex"); const version=JSON.parse(fs.readFileSync("apps/desktop/package.json")).version; fs.writeFileSync("apps/desktop/dist/windows-identity.json",JSON.stringify({source_commit:process.env.GITHUB_SHA,version,installer_sha256:sha(`apps/desktop/dist/Nevix-AI-${version}-setup.exe`),asar_sha256:sha("apps/desktop/dist/win-unpacked/resources/app.asar")}))'
       - uses: actions/upload-artifact@v4
         with:
           name: stable-windows
-          path: apps/desktop/dist/Nevix-AI-${{ needs.identity.outputs.version }}-setup.exe
+          path: |
+            apps/desktop/dist/Nevix-AI-${{ needs.identity.outputs.version }}-setup.exe
+            apps/desktop/dist/windows-identity.json
           if-no-files-found: error
           retention-days: 7
 
@@ -119,5 +126,20 @@ jobs:
         with:
           name: stable-server
           path: artifacts/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/checkout@v6
+        if: needs.identity.outputs.version == '1.0.1'
+        with:
+          ref: 277b17138af8f6b9ca4dcdfca2cb4a8f32eac654
+          path: .scratch/release-baseline
+      - name: Build the full controlled 0.1.0 Linux baseline
+        if: needs.identity.outputs.version == '1.0.1'
+        run: bash .scratch/release-baseline/deploy/scripts/build-bundle.sh 0.1.0 0.1.0 0.1.0 "$PWD/artifacts/Nevix-server-0.1.0-linux-amd64.tar.gz"
+      - uses: actions/upload-artifact@v4
+        if: needs.identity.outputs.version == '1.0.1'
+        with:
+          name: stable-server-baseline
+          path: artifacts/Nevix-server-0.1.0-linux-amd64.tar.gz
           if-no-files-found: error
           retention-days: 7

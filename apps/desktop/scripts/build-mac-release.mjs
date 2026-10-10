@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { assertPublicDesktopArchive } from '../../../scripts/release-feasibility/desktop-artifact.mjs'
 
 /* eslint-disable @typescript-eslint/explicit-function-return-type -- Node CLI. */
 
@@ -78,6 +79,7 @@ async function main() {
       mac: { identity: null, notarize: false },
       afterPack: async ({ appOutDir }) => {
         const appPath = join(appOutDir, 'Nevix AI.app')
+        assertPublicDesktopArchive(join(appPath, 'Contents/Resources/app.asar'))
         // v26 cannot discover a free self-signed identity; pin it explicitly, without trust changes.
         await signAsync({
           app: appPath,

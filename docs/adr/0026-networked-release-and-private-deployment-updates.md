@@ -6,7 +6,11 @@
 
 2026-10-10 已接受调整：原决定要求 GitHub 源码私有；用户确认 GitHub 源码仓库保持公开，正式成品与签名更新清单仍由独立 CNB 成品仓库分发，移除正式发行的源码私有前置条件。源码可见性不承担签名信任职责；签名私钥与写入凭据仍须保密。本次授权仅修改、实现与验证，不授权正式发布或合并 PR。
 
-2026-10-10 后续授权与签名责任调整：用户批准继续实施并委托选择正式版号，首版采用 `1.0.0`。公开个人仓库不接入持有厂商签名身份的 self-hosted runner 或签名 Secrets；GitHub hosted CI 在同一精确标签提交上完成完整 Desktop/Server gates，并构建 Windows 与 Linux 制品。厂商在受控本地 Mac 的干净同标签 checkout，使用已固定身份构建、签名 DMG/ZIP；完整 gates 通过后，本地 publisher 的 `prepare` 使用既有受信 Ed25519 密钥为同源四份制品签名。CI 不访问签名 keychain、私钥、密码或 CNB token，也不自动发布 CNB。原文专用 runner 签名决定由本调整替代；最终制品验收和当次发布门仍适用。
+2026-10-10 后续授权与签名责任调整：用户批准继续实施并委托选择正式版号，首版候选采用 `1.0.1`。公开个人仓库不接入持有厂商签名身份的 self-hosted runner 或签名 Secrets；GitHub hosted CI 在同一精确标签提交上完成完整 Desktop/Server gates，并构建 Windows 与 Linux 制品。厂商在受控本地 Mac 的干净同标签 checkout，使用已固定身份构建、签名 DMG/ZIP；完整 gates 通过后，本地 publisher 的 `prepare` 使用既有受信 Ed25519 密钥为同源四份制品签名。CI 不访问签名 keychain、私钥、密码或 CNB token，也不自动发布 CNB。原文专用 runner 签名决定由本调整替代；最终制品验收和当次发布门仍适用。
+
+2026-10-10 候选更新：最初选择的 `v1.0.0` 在正式包验收中因 canonical ASAR 包含 `@babel/code-frame/lib/index.js.map` 被拒绝，未发布。其标签保留原提交，不移动或覆盖；修复使用新的 `v1.0.1`，重新构建、签名和验收。Desktop 最低运行 Server 仍为 `1.0.0`，Linux 最低来源 Server 及配对最低 Desktop 仍为 `0.1.0`。更换候选版本不表示最终平台、桥接、三网或发布门已通过。
+
+同日 owner 收窄 #349 收尾范围：使用现有 Docker 与原生 Linux CI 验证后端部署、运行、升级及数据保留，Mac 完成真实安装升级，不再搭建 Linux 虚拟机。三网和真实跨源桥接分别移至 #352、#353，不阻塞本次收尾；如实记录环境分离与未验证项目。此验收范围调整不改变信任责任或自动放宽客户 stable 的生产发布门，关闭 issue 也不等于发布或合并 PR。
 
 本 ADR 取代 ADR-0013 的 Desktop 零外联、禁止 updater 与客户现场编译决定；Go 仍是唯一可信业务数据面。Mac 接受 `com.apple.security.cs.disable-library-validation=true` 的保护减弱，以稳定自签身份保留 hardened runtime 与 Squirrel 签名连续性；Ed25519 不抵消该保护减弱。生产签名身份、公钥与写入凭据须另行受控配置，不复用已清理实验身份。
 

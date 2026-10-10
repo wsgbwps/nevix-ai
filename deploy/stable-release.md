@@ -9,7 +9,14 @@
 不自动删除、不覆盖、不把失败理解成数据库或远端回滚。
 
 当前上线状态：**用户已批准继续实施，正式发行最终验收仍待完成**。首个正式版本选定
-`1.0.0`；生产公钥与本地 Mac 签名身份已固定，hosted CI 构建与受控本地签名按下文执行。
+`1.0.1`；生产公钥与本地 Mac 签名身份已固定，hosted CI 构建与受控本地签名按下文执行。
+原 `v1.0.0` 候选在正式包验收中因 canonical ASAR 含
+`@babel/code-frame/lib/index.js.map` 被拒绝，未发布；既有标签保持原提交，不移动或覆盖。
+修复后的制品重新使用 `v1.0.1` 构建、签名并验收，不继承旧候选的最终字节验收结论。
+本次 hosted 构建另保留 `stable-server-baseline` 测试附件：运行源码固定为
+`277b17138af8f6b9ca4dcdfca2cb4a8f32eac654` 的完整 Linux `0.1.0`。本机 Mac 旧测试基线
+使用同一旧运行源码和当前 canonical 打包白名单。这些不是已发布的客户历史版本，
+也不属于最终四制品；不新增 Windows 旧基线构建。
 2026-10-10 用户已确认 GitHub 源码保持公开，
 正式成品和签名更新清单仍发布到 CNB；源码私有不再是发行前置条件。#340 的临时身份
 和附件只证明早期可行性，不能填本表的最终证据。
@@ -75,12 +82,12 @@ CNB metadata API 仍要求厂商 Bearer；临时 upload/confirmation URL 只在�
 
 ```sh
 umask 077
-RELEASE_TAG=v1.0.0
+RELEASE_TAG=v1.0.1
 RELEASE_SOURCE_SHA='<reviewed-tag-run-head-sha>'
 RELEASE_BUILD_RUN='<successful-stable-workflow-run-id>'
 test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$RELEASE_SOURCE_SHA"
-git worktree add --detach .scratch/stable-1.0.0 "$RELEASE_TAG"
-cd .scratch/stable-1.0.0
+git worktree add --detach .scratch/stable-1.0.1 "$RELEASE_TAG"
+cd .scratch/stable-1.0.1
 test -z "$(git status --porcelain)"
 test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
 pnpm install --frozen-lockfile
@@ -89,9 +96,9 @@ pnpm --filter @nevix/desktop build:mac:release
 mkdir artifacts
 gh run download "$RELEASE_BUILD_RUN" --name stable-windows --dir artifacts
 gh run download "$RELEASE_BUILD_RUN" --name stable-server --dir artifacts
-cp apps/desktop/dist/Nevix-AI-1.0.0.dmg artifacts/Nevix-AI-1.0.0.dmg
+cp apps/desktop/dist/Nevix-AI-1.0.1.dmg artifacts/Nevix-AI-1.0.1.dmg
 # 确认构建仅产出一个 arm64 ZIP，按发布名复制精确字节。
-node --input-type=module -e 'import fs from "node:fs"; const files=fs.readdirSync("apps/desktop/dist").filter(x=>x.endsWith(".zip")); if(files.length!==1) throw Error("Expected one arm64 ZIP"); fs.copyFileSync("apps/desktop/dist/"+files[0],"artifacts/Nevix-AI-1.0.0-arm64.zip")'
+node --input-type=module -e 'import fs from "node:fs"; const files=fs.readdirSync("apps/desktop/dist").filter(x=>x.endsWith(".zip")); if(files.length!==1) throw Error("Expected one arm64 ZIP"); fs.copyFileSync("apps/desktop/dist/"+files[0],"artifacts/Nevix-AI-1.0.1-arm64.zip")'
 test -z "$(git status --porcelain --untracked-files=no)"
 # 在受控目录按下例创建 0600 signing-input.json；密码只经受保护环境输入。
 node --experimental-strip-types deploy/publish-stable.mjs prepare signing-input.json
@@ -99,6 +106,27 @@ node --experimental-strip-types deploy/publish-stable.mjs prepare signing-input.
 # 在最终验收完成且正式发布即刻获得授权后，才运行此行：
 node --experimental-strip-types deploy/publish-stable.mjs publish signed/plan.json
 ```
+
+### 完整制品的原生验收
+
+四份清单准备后，在同一 `v1.0.1` ref 手动运行 `Installed Desktop update`，选择
+`mode=final`，传入成功的 stable build run ID，以及公开生产签名 Linux、
+旧 Linux 基线 envelope JSON。不要传私钥、密码、token 或客户资料。
+工作流拒绝不同 source SHA、未成功或非 stable 构建；下载该 run 的原始完整后端包，
+使用只读 Actions 权限，不向 CNB 写入。旧 Linux 基线也必须经厂商本机签名，不能替换公钥。
+
+- [Linux driver](scripts/final-offline-runtime.md)在原生 x64 的 classic/containerd
+  两种隔离 daemon 中使用正式 CLI 验签、导入、安装与升级同一完整包，保留真实账号、Session、
+  客户配置与卷。receipt 的 `missing_cases` 仍须逐项验收，不能把 covered-cases 成功当作全部通过。
+
+按 owner 对 #349 的最新范围要求，后端用现有 Docker 回归与原生 Linux CI 验证部署、运行、
+升级和数据保留；Mac 另行完成真实安装升级，不搭建 Linux 虚拟机，也不将两个环境合并声称
+同一台实例的端到端证明。本机 Docker 服务端是 arm64，正式 CLI 要求 linux/amd64，
+不得为本机测试放宽生产检查。完整 Windows 安装仍如实区分既有 NSIS fixture 证据。
+
+大陆三网移至 [#352](https://github.com/wsgbwps/nevix-ai/issues/352)，真实跨源桥接移至
+[#353](https://github.com/wsgbwps/nevix-ai/issues/353)，不阻塞 #349 本次最小范围收尾。
+未验证项目保持未验证；关闭 #349 不表示已发布客户 stable 或已满足 publisher 的生产发布门。
 
 保留原始 hosted artifacts、Mac 构建文件和本地 `signed/`；不要用其它 run、源码提交或
 重打包样例。记录 run ID、tag/source SHA、Mac 固定证书指纹及每份摘要。`prepare` 后
@@ -109,17 +137,17 @@ node --experimental-strip-types deploy/publish-stable.mjs publish signed/plan.js
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "min_server_version": "1.0.0",
   "min_source_server_version": "0.1.0",
   "min_desktop_version": "0.1.0",
   "private_key_file": "<outside-repo-0600-encrypted-pkcs8-pem>",
   "output_directory": "signed",
   "artifacts": {
-    "win32-x64": "artifacts/Nevix-AI-1.0.0-setup.exe",
-    "darwin-arm64": "artifacts/Nevix-AI-1.0.0-arm64.zip",
-    "darwin-arm64-dmg": "artifacts/Nevix-AI-1.0.0.dmg",
-    "linux-amd64": "artifacts/Nevix-server-1.0.0-linux-amd64.tar.gz"
+    "win32-x64": "artifacts/Nevix-AI-1.0.1-setup.exe",
+    "darwin-arm64": "artifacts/Nevix-AI-1.0.1-arm64.zip",
+    "darwin-arm64-dmg": "artifacts/Nevix-AI-1.0.1.dmg",
+    "linux-amd64": "artifacts/Nevix-server-1.0.1-linux-amd64.tar.gz"
   }
 }
 ```
@@ -172,17 +200,17 @@ false；owner 明确批准跳过时，须同时填写 verified 为 false、
 或当次发行授权；密钥丢失后的备份可恢复性仍未经验证。
 以下证据由 owner review，不把布尔 JSON 当成自动检测的事实：
 
-| 要求                | 最终真实证据                                                                                                              | 当前状态                                           |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                             | 本机材料已验证，公钥已固定；备份由 owner 确认，恢复验证按 owner 要求跳过；仅本地签名 |
-| 公开源码/免费额度   | GitHub 源码保持公开；实际 Actions runner 免费额度、存储/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录 | owner 已接受公开 GitHub + CNB 成品方案；最终发行仍需当日额度证据                     |
-| Windows 完整客户端  | 真实旧 NSIS 到新 NSIS，同路径重启，Settings 状态保存/丢弃/取消、普通退出不安装、错误清单/架构/缓存                        | isolated Main/Window NSIS 已过；最终全客户端待验收 |
-| Mac 完整签名客户端  | 旧/新 com.nevix.ai、相同 certificate requirement、首次放行、真实 Squirrel 更新及相同退出门                                | [完整隔离签名安装/升级已过](../scripts/release-feasibility/mac-integrated-evidence.md)；最终发行字节待验收 |
-| Server 实例         | 原生 Linux x64 空库且无网络 pull，真实排队任务排空，业务/角色/客户配置/TLS/key 保留；备份、迁移、健康失败与完整恢复       | 见当前 CI/native receipts；最终发行包需重新核对    |
-| 两侧兼容            | 最新不兼容保留 Desktop；Server 先升级，再下载/安装兼容 Desktop；不可达/未知 Server 不安装                                 | 单元/E2E 基础证据；最终跨版本待验收                |
-| 大陆三网            | 电信/联通/移动各记录时间、网络、无代理、四清单+四完整文件、size/hash、TLS、redirect、HEAD/GET/Range、失败后从稳定入口重试 | 全部最终制品待三网验收；#340 单网豁免不适用        |
-| 桥接迁移            | 两个隔离 source，旧入口保留的受信 bridge、新客户端新入口；未迁移旧客户端仍更新；同 Mac 身份或真实签名桥接                 | 协议隔离验证；真实平台桥接待验收                   |
-| 本仓库 gate/review  | 同一 source commit 的 make check/harness、真库/native/E2E 和两轴 review 全绿                                              | 整合 PR 记录；最终标签需对应已审 commit            |
+| 要求                | 最终真实证据                                                                                                                   | 当前状态                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| 密钥和固定 Mac 证书 | 公钥指纹、证书 SHA1、离线恢复证明；不记录秘密                                                                                  | 本机材料已验证，公钥已固定；备份由 owner 确认，恢复验证按 owner 要求跳过；仅本地签名                       |
+| 公开源码/免费额度   | GitHub 源码保持公开；实际 Actions runner 免费额度、存储/零成本停止；CNB whole-org quota/volume、未绑定付费的当日 UI owner 记录 | owner 已接受公开 GitHub + CNB 成品方案；最终发行仍需当日额度证据                                           |
+| Windows 完整客户端  | 真实旧 NSIS 到新 NSIS，同路径重启，Settings 状态保存/丢弃/取消、普通退出不安装、错误清单/架构/缓存                             | isolated Main/Window NSIS 已过；最终全客户端待验收                                                         |
+| Mac 完整签名客户端  | 旧/新 com.nevix.ai、相同 certificate requirement、首次放行、真实 Squirrel 更新及相同退出门                                     | [完整隔离签名安装/升级已过](../scripts/release-feasibility/mac-integrated-evidence.md)；最终发行字节待验收 |
+| Server 实例         | 原生 Linux x64 空库且无网络 pull，真实排队任务排空，业务/角色/客户配置/TLS/key 保留；备份、迁移、健康失败与完整恢复            | 见当前 CI/native receipts；最终发行包需重新核对                                                            |
+| 两侧兼容            | 最新不兼容保留 Desktop；Server 先升级，再下载/安装兼容 Desktop；不可达/未知 Server 不安装                                      | 单元/E2E 基础证据；最终跨版本待验收                                                                        |
+| 大陆三网            | 电信/联通/移动各记录时间、网络、无代理、四清单+四完整文件、size/hash、TLS、redirect、HEAD/GET/Range、失败后从稳定入口重试      | 全部最终制品待三网验收；#340 单网豁免不适用                                                                |
+| 桥接迁移            | 两个隔离 source，旧入口保留的受信 bridge、新客户端新入口；未迁移旧客户端仍更新；同 Mac 身份或真实签名桥接                      | 协议隔离验证；真实平台桥接待验收                                                                           |
+| 本仓库 gate/review  | 同一 source commit 的 make check/harness、真库/native/E2E 和两轴 review 全绿                                                   | 整合 PR 记录；最终标签需对应已审 commit                                                                    |
 
 实际三网验证要针对将发布的同一字节。stable 未推进前，可以使用获明确授权的隔离
 验收仓库/版本附件；该远端演练本身也要授权，不能先写客户 stable 来取得前置证明。
@@ -204,10 +232,11 @@ Mac 证书和隔离测试 Ed25519/feed/profile，不能替代最终 stable 字�
 不能作为尚未固定的最终发行 source commit 的 CI/平台验收回执。
 
 上述记录反映 2026-10-10 本地安装续验时的旧 source 状态。最新授权已允许继续实施
-正式 tag 构建与受控本地签名，首版选定 `1.0.0`；不再接入专用 runner/Secrets。
+正式 tag 构建与受控本地签名，首版选定 `1.0.1`；不再接入专用 runner/Secrets。
 #349 下一步是固定已审 source commit，完成同源 hosted Windows/Linux 构建、本地
-Mac 签名与四制品清单，保留本地发行副本；再完成 Windows/Mac/Linux 最终包、Server
-先升级再 Desktop 更新、真实跨源桥接及三网验收，核对该 source 的 gate/review。
+Mac 签名与四制品清单，保留本地发行副本；再完成现有 Docker/原生 Linux CI 的后端
+部署、运行、升级及数据保留与 Mac 真实安装升级，核对该 source 的 gate/review。
+三网和跨源桥接分别跟踪 #352、#353，不阻塞本次 #349 收尾。
 正式发行当日仍须核实免费额度、未绑定付费和零成本停止，并取得即时 publish 批准。
 安装续验和恢复验证 skip 不替代最终验收；上述历史续验未发布或合并。
 
@@ -224,7 +253,7 @@ Developer ID 或新证书时必须单独实测签名桥接，不能跳过 Squirr
 旧源已失效时无法自动救回没迁移客户端，只能从厂商保留的离线制品人工安装/部署。
 当前隔离 publisher 测试验证受信入口保留和异 key 拒绝；真实桥接跨平台安装仍在表中。
 
-2026-10-10 后续授权：owner 已批准继续实施并委托选择正式版号，首版使用 `1.0.0`。
+2026-10-10 后续授权：owner 已批准继续实施并委托选择正式版号，首版使用 `1.0.1`。
 公开个人仓库采用 hosted CI 完整 gates 与同源 Windows/Linux 构建、厂商本地干净 tag
 checkout 的 Mac 固定身份构建，以及本地四制品 Ed25519 `prepare`，替代上面历史记录中的
 专用 runner/Secrets 接入前置条件。这避免把现有厂商 keychain 与签名密钥接入公开 CI。
