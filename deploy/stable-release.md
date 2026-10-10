@@ -170,6 +170,8 @@ attestation，四制品与 envelope 保持原字节，先核对工具的编译�
 `NEVIX_RELEASE_KEY_PASSPHRASE`，签完清除。`publish` 的 `NEVIX_CNB_TOKEN` 只在
 受控环境中；Git 使用临时 askpass 文件，token 不进 URL/argv/config/log。输入 plan.json
 必须是 0600 普通文件；保留在厂商本地归档。
+当次发布 plan 可用 `expected_channel_parent` 固定 owner 已审查的渠道 parent（小写
+40 位 commit SHA）；snapshot 不匹配即在任何 CNB API 请求前停止，未填时保持旧调用兼容。
 
 publisher 不支持盲目重试同 tag；tag/Release 已存在即停止，人工检查已有 draft、附件、
 永久确认回执和 signed hashes，重新 review 恢复步骤。最后 push 前 fsync 记录预期新 commit/原 parent，网络失联也可核对；每次成功确认 fsync 写私有

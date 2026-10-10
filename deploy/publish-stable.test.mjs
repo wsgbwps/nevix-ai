@@ -249,6 +249,45 @@ test("publisher accepts independent Linux source minimum and advances stable onl
   assert.equal(f.calls.filter((x) => x.method === "PUT").length, 4);
 });
 
+test("matching reviewed channel parent permits publication", async (t) => {
+  const f = await fixture(t);
+  f.plan.expected_channel_parent = f.old;
+  const result = await publishStable(f.plan, {
+    publicKey: f.publicKey,
+    transport: f.transport,
+    channel: f.channel,
+    token: "vendor-only",
+  });
+  assert.equal(result.commit, git(f.remote, ["rev-parse", "main"]));
+  assert.equal(git(f.remote, ["rev-parse", "main^"]), f.old);
+});
+
+test("changed or malformed reviewed channel parent stops before API requests", async (t) => {
+  const f = await fixture(t);
+  for (const parent of [
+    "0".repeat(40),
+    "A".repeat(40),
+    "g".repeat(40),
+    f.old.slice(1),
+    `${f.old}0`,
+    null,
+    1,
+  ]) {
+    f.plan.expected_channel_parent = parent;
+    await assert.rejects(
+      publishStable(f.plan, {
+        publicKey: f.publicKey,
+        transport: f.transport,
+        channel: f.channel,
+        token: "vendor-only",
+      }),
+      /[Cc]hannel parent/,
+    );
+    assert.equal(f.calls.length, 0);
+    assert.equal(git(f.remote, ["rev-parse", "main"]), f.old);
+  }
+});
+
 for (const [target, field, expected] of [
   ["linux-amd64", "min_desktop_version", /minimum Desktop/],
   ["darwin-arm64-dmg", "min_desktop_version", /minimum Desktop/],

@@ -363,6 +363,18 @@ export async function publishStable(
     "Valid controlled vendor token required",
   );
   const snapshot = channel.snapshot();
+  if (plan.expected_channel_parent !== undefined) {
+    assert.ok(
+      typeof plan.expected_channel_parent === "string" &&
+        /^[a-f0-9]{40}$/.test(plan.expected_channel_parent),
+      "Expected channel parent must be a lowercase 40-character commit SHA",
+    );
+    assert.equal(
+      snapshot.old,
+      plan.expected_channel_parent,
+      "Channel parent changed since owner review",
+    );
+  }
   const prior = targets.map(([name, platform, arch]) => {
     const bytes = snapshot.read(`stable/${name}.json`);
     return bytes === undefined
