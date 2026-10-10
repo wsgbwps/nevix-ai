@@ -93,8 +93,7 @@ async function main() {
             '--verify',
             '--deep',
             '--strict',
-            '-R',
-            `identifier "com.nevix.ai" and certificate leaf = H"${identity}"`,
+            `-R=identifier "com.nevix.ai" and certificate leaf = H"${identity}"`,
             appPath
           ],
           {
